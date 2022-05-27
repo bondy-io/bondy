@@ -43,13 +43,13 @@
     opts                    ::  key_value:t(),
     socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
     idle_timeout            ::  pos_integer(),
-    ping_retry              ::  maybe(bondy_retry:t()),
-    ping_tref               ::  maybe(timer:ref()),
-    ping_sent               ::  maybe({Ref :: timer:ref(), Data :: binary()}),
+    ping_retry              ::  optional(bondy_retry:t()),
+    ping_tref               ::  optional(timer:ref()),
+    ping_sent               ::  optional({Ref :: timer:ref(), Data :: binary()}),
     sessions = #{}          ::  #{id() => bondy_bridge_relay_session:t()},
     sessions_by_uri = #{}   ::  #{uri() => id()},
     registrations = #{}     ::  reg_indx(),
-    session                 ::  maybe(map()),
+    session                 ::  optional(map()),
     auth_realm              ::  binary(),
     start_ts                ::  pos_integer()
 }).

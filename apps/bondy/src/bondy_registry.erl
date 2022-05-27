@@ -379,7 +379,7 @@ remove(Type, EntryId, Ctxt) ->
     bondy_registry_entry:entry_type(),
     id(),
     bondy_context:t(),
-    maybe(task())) -> ok.
+    optional(task())) -> ok.
 
 remove(Type, EntryId, Ctxt, Task)
 when Task == undefined orelse is_function(Task, 1)->

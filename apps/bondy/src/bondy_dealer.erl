@@ -307,7 +307,7 @@
 
 -type invoke_opts() :: #{
     error_formatter :=
-        maybe(fun((Reason :: any()) -> maybe(wamp_error()))),
+        optional(fun((Reason :: any()) -> optional(wamp_error()))),
     call_opts       := map()
 }.
 
@@ -1100,7 +1100,7 @@ args_to_list(M) when is_map(M) ->
 
 
 %% @private
--spec format_error(any(), map()) -> maybe(wamp_error()).
+-spec format_error(any(), map()) -> optional(wamp_error()).
 
 format_error(_, undefined) ->
     undefined;

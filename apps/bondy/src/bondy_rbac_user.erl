@@ -166,7 +166,7 @@
     groups              :=  [binary()],
     password            =>  bondy_password:future() | bondy_password:t(),
     authorized_keys     =>  [binary()],
-    sso_realm_uri       =>  maybe(uri()),
+    sso_realm_uri       =>  optional(uri()),
     meta                =>  #{binary() => any()},
     %% Transient, will not be stored
     password_opts       =>  bondy_password:opts()
@@ -181,7 +181,7 @@
     has_password        :=  boolean(),
     has_authorized_keys :=  boolean(),
     authorized_keys     =>  [binary()],
-    sso_realm_uri       =>  maybe(uri()),
+    sso_realm_uri       =>  optional(uri()),
     meta                =>  #{binary() => any()}
 }.
 

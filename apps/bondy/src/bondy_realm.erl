@@ -614,14 +614,14 @@
     uri                             ::  uri(),
     description                     ::  binary(),
     is_prototype = false            ::  boolean(),
-    prototype_uri                   ::  maybe(uri()),
+    prototype_uri                   ::  optional(uri()),
     is_sso_realm = false            ::  boolean(),
     %% TODO change sso_realm_uri to allowed_sso_realms
-    sso_realm_uri                   ::  maybe(uri()),
-    allow_connections               ::  maybe(boolean()),
-    authmethods                     ::  maybe([binary()]),
-    security_enabled                ::  maybe(boolean()),
-    password_opts                   ::  maybe(bondy_password:opts()),
+    sso_realm_uri                   ::  optional(uri()),
+    allow_connections               ::  optional(boolean()),
+    authmethods                     ::  optional([binary()]),
+    security_enabled                ::  optional(boolean()),
+    password_opts                   ::  optional(bondy_password:opts()),
     private_keys = #{}              ::  keymap(),
     public_keys = #{}               ::  keymap(),
     encryption_keys = #{}           ::  keymap(),
@@ -635,7 +635,7 @@
 -type external()                    ::  #{
     uri                     :=  uri(),
     is_prototype            :=  boolean(),
-    prototype_uri           :=  maybe(uri()),
+    prototype_uri           :=  optional(uri()),
     description             :=  binary(),
     authmethods             :=  [binary()],
     is_sso_realm            :=  boolean(),
@@ -751,7 +751,7 @@ is_prototype(Uri) when is_binary(Uri) ->
 %% returns `undefined'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec prototype_uri(Realm :: t() | uri()) -> maybe(uri()).
+-spec prototype_uri(Realm :: t() | uri()) -> optional(uri()).
 
 prototype_uri(#realm{prototype_uri = Val}) ->
     Val;
@@ -818,7 +818,7 @@ is_value_inherited(Uri, Property) when is_binary(Uri) ->
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--spec sso_realm_uri(Realm :: t() | uri()) -> maybe(uri()).
+-spec sso_realm_uri(Realm :: t() | uri()) -> optional(uri()).
 
 sso_realm_uri(#realm{sso_realm_uri = undefined, prototype_uri = undefined}) ->
     undefined;
@@ -1036,7 +1036,7 @@ disable_security(Uri) when is_binary(Uri) ->
 %% to this realm. If the options have not been defined returns atom `undefined'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec password_opts(t() | uri()) -> maybe(bondy_password:opts()).
+-spec password_opts(t() | uri()) -> optional(bondy_password:opts()).
 
 password_opts(#realm{password_opts = undefined, prototype_uri = undefined}) ->
     true;
@@ -2290,7 +2290,7 @@ when is_tuple(Term), element(1, Term) == realm, tuple_size(Term) == 13 ->
     %%     [5] security_enabled = true  ::  boolean(),
     %%     [6] is_sso_realm = false     ::  boolean(),
     %%     [7] allow_connections = true ::  boolean(),
-    %%     [8] sso_realm_uri            ::  maybe(uri()),
+    %%     [8] sso_realm_uri            ::  optional(uri()),
     %%     [9] private_keys = #{}       ::  keyset(),
     %%     [10] public_keys = #{}        ::  keyset(),
     %%     [11] password_opts            ::  bondy_password:opts() | undefined,

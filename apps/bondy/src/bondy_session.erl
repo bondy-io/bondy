@@ -55,18 +55,18 @@
     realm_uri                       ::  uri(),
     ref                             ::  bondy_ref:t(),
     %% The {IP, Port} of the client
-    peer                            ::  maybe(peer()),
+    peer                            ::  optional(peer()),
     %% User-Agent HTTP header or WAMP equivalent
     agent                           ::  binary(),
     %% Peer WAMP Roles played by peer
-    roles                           ::  maybe(map()),
+    roles                           ::  optional(map()),
     %% WAMP Auth
     security_enabled = true         ::  boolean(),
-    is_anonymous = false            ::  boolean(),    authid                          ::  maybe(binary()),
-    authrole                        ::  maybe(binary()),
+    is_anonymous = false            ::  boolean(),    authid                          ::  optional(binary()),
+    authrole                        ::  optional(binary()),
     authroles = []                  ::  [binary()],
-    authmethod                      ::  maybe(binary()),
-    rbac_context                    ::  maybe(bondy_rbac:context()),
+    authmethod                      ::  optional(binary()),
+    rbac_context                    ::  optional(bondy_rbac:context()),
     %% Expiration and Limits
     created                         ::  pos_integer(),
     expires_in                      ::  pos_integer() | infinity,
@@ -440,7 +440,7 @@ ref(Id) when is_binary(Id) ->
 %% identified by Id runs on.
 %% @end
 %% -----------------------------------------------------------------------------
--spec pid(t_or_id()) -> maybe(pid()).
+-spec pid(t_or_id()) -> optional(pid()).
 
 pid(#session{ref = Ref}) ->
     bondy_ref:pid(Ref);

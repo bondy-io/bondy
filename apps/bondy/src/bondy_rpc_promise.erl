@@ -36,13 +36,13 @@
     key                     ::  key(),
     %% We have the procedure so that we can reference it when performing
     %% authorization of user requests like CANCEL.
-    procedure_uri           ::  maybe(uri()),
+    procedure_uri           ::  optional(uri()),
     callee                  ::  bondy_ref:t(),
     caller                  ::  bondy_ref:t(),
-    via                     ::  maybe(queue:queue(bondy_ref:t())),
-    timeout                 ::  maybe(timeout()),
+    via                     ::  optional(queue:queue(bondy_ref:t())),
+    timeout                 ::  optional(timeout()),
     timestamp               ::  pos_integer(),
-    info                    ::  maybe(map())
+    info                    ::  optional(map())
 }).
 
 %% Wilcards are allowed only when key is used as pattern.
@@ -59,8 +59,8 @@
     caller_session_id       ::  wildcard(bondy_session_id:t()),
     call_id                 ::  wildcard(id()),
     callee_session_id       ::  wildcard(bondy_session_id:t()),
-    invocation_id           ::  wildcard(maybe(id())),
-    expiry                  ::  wildcard(maybe(timeout()))
+    invocation_id           ::  wildcard(optional(id())),
+    expiry                  ::  wildcard(optional(timeout()))
 }).
 
 
@@ -305,7 +305,7 @@ realm_uri(#bondy_rpc_promise{key = Key}) ->
 %% @doc Returns the invocation request identifier
 %% @end
 %% -----------------------------------------------------------------------------
--spec invocation_id(t()) -> maybe(id()).
+-spec invocation_id(t()) -> optional(id()).
 
 invocation_id(#bondy_rpc_promise{key = Key}) ->
     Key#bondy_rpc_promise_key.invocation_id.
@@ -315,7 +315,7 @@ invocation_id(#bondy_rpc_promise{key = Key}) ->
 %% @doc Returns the call request identifier
 %% @end
 %% -----------------------------------------------------------------------------
--spec call_id(t()) -> maybe(id()).
+-spec call_id(t()) -> optional(id()).
 
 call_id(#bondy_rpc_promise{key = Key}) ->
     Key#bondy_rpc_promise_key.call_id.
@@ -326,7 +326,7 @@ call_id(#bondy_rpc_promise{key = Key}) ->
 %% promise.
 %% @end
 %% -----------------------------------------------------------------------------
--spec callee(t()) -> maybe(bondy_ref:t()).
+-spec callee(t()) -> optional(bondy_ref:t()).
 
 callee(#bondy_rpc_promise{callee = Val}) ->
     Val.
@@ -358,7 +358,7 @@ via(#bondy_rpc_promise{via = Val}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec procedure_uri(t()) -> maybe(uri()).
+-spec procedure_uri(t()) -> optional(uri()).
 
 procedure_uri(#bondy_rpc_promise{procedure_uri = Val}) ->
     Val.
@@ -368,7 +368,7 @@ procedure_uri(#bondy_rpc_promise{procedure_uri = Val}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec timeout(t()) -> maybe(timeout()).
+-spec timeout(t()) -> optional(timeout()).
 
 timeout(#bondy_rpc_promise{timeout = Val}) ->
     Val.
@@ -408,7 +408,7 @@ get(Key, #bondy_rpc_promise{info = Info}, Default) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec expiry(t()) -> maybe(timeout()).
+-spec expiry(t()) -> optional(timeout()).
 
 expiry(#bondy_rpc_promise{key = Key}) ->
     Key#bondy_rpc_promise_key.expiry.

@@ -30,7 +30,7 @@
 -type send_opts()       ::  #{
     from := bondy_ref:t(),
     realm_uri := uri(),
-    via => maybe(queue:queue())
+    via => optional(queue:queue())
 }.
 
 -type wamp_error_map() ::  #{
@@ -206,7 +206,7 @@ prepare_send(Ref, Opts) ->
 %% -----------------------------------------------------------------------------
 -spec prepare_send(
     To :: bondy_ref:t(),
-    Origin :: maybe(bondy_ref:client() | bondy_ref:internal()),
+    Origin :: optional(bondy_ref:client() | bondy_ref:internal()),
     Opts :: map()) -> {bondy_ref:t(), map()}.
 
 prepare_send(undefined, Ref, Opts) ->

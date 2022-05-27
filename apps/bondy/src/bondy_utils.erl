@@ -287,7 +287,7 @@ session_id_to_uri_part(SessionId) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec external_session_id(maybe(bondy_session_id:t())) -> maybe(id()).
+-spec external_session_id(optional(bondy_session_id:t())) -> optional(id()).
 
 external_session_id(Term) when is_binary(Term) ->
     bondy_session_id:to_external(Term);

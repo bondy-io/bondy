@@ -46,7 +46,7 @@
 -record(bondy_ref, {
     type                ::  wildcard(ref_type()),
     nodestring          ::  wildcard(nodestring()),
-    session_id          ::  wildcard(maybe(bondy_session_id:t())),
+    session_id          ::  wildcard(optional(bondy_session_id:t())),
     target              ::  wildcard(target())
 }).
 
@@ -136,7 +136,7 @@ new(Type, Target) ->
 -spec new(
     Type :: ref_type(),
     Target :: pid() | mf() | name(),
-    SessionId :: maybe(bondy_session_id:t())) -> t().
+    SessionId :: optional(bondy_session_id:t())) -> t().
 
 new(Type, Target, SessionId) ->
     Nodestring = bondy_config:nodestring(),
@@ -150,7 +150,7 @@ new(Type, Target, SessionId) ->
 -spec new(
     Type :: ref_type(),
     Target :: pid() | mf() | name(),
-    SessionId :: maybe(bondy_session_id:t()),
+    SessionId :: optional(bondy_session_id:t()),
     Node :: node() | nodestring()) -> t() | no_return().
 
 new(Type, Target, SessionId, Node) when is_atom(Node) ->
@@ -184,7 +184,7 @@ new(Type, Target0, SessionId, Nodestring) when is_binary(Nodestring) ->
 -spec pattern(
     Type :: wildcard(ref_type()),
     Target :: wildcard(pid() | mf() | name()),
-    SessionId :: wildcard(maybe(bondy_session_id:t())),
+    SessionId :: wildcard(optional(bondy_session_id:t())),
     Node :: wildcard(node() | nodestring())) -> t() | no_return().
 
 
@@ -270,7 +270,7 @@ node(#bondy_ref{nodestring = Val}) ->
 %% @doc Returns the session identifier of the reference or the atom `undefined'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec session_id(t()) -> maybe(bondy_session_id:t()).
+-spec session_id(t()) -> optional(bondy_session_id:t()).
 
 session_id(#bondy_ref{session_id = Val}) ->
     Val.
@@ -404,7 +404,7 @@ target_type(#bondy_ref{target = '_'}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec name(t()) -> maybe(binary()).
+-spec name(t()) -> optional(binary()).
 
 name(#bondy_ref{target = {name, Val}}) ->
     Val;
@@ -421,7 +421,7 @@ name(#bondy_ref{}) ->
 %% created (this is because we are using Partisan and not Distributed Erlang).
 %% @end
 %% -----------------------------------------------------------------------------
--spec pid(t()) -> maybe(pid()) | no_return().
+-spec pid(t()) -> optional(pid()) | no_return().
 
 pid(#bondy_ref{target = {pid, Bin}} = Ref) ->
     %% Pids can only be used on the node where they were created (this is
@@ -445,7 +445,7 @@ pid(#bondy_ref{}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec callback(t()) -> maybe(mf()).
+-spec callback(t()) -> optional(mf()).
 
 callback(#bondy_ref{target = {callback, Val}}) ->
     Val;
