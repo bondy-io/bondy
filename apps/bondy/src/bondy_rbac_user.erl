@@ -23,16 +23,18 @@
 %% (password or authorized keys) and metadata determined by the client
 %% applications. Users can be assigned group memberships.
 %%
-%%
-
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_rbac_user).
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_plum_db.hrl").
 
--define(TYPE, user).
+-define(ALIAS_TYPE, alias).
+-define(IS_ALIAS(X), ?ALIAS_TYPE =:= map_get(type, X)).
+-define(USER_TYPE, user).
+-define(IS_USER(X), ?USER_TYPE =:= map_get(type, X)).
 -define(VERSION, <<"1.1">>).
 -define(PLUMDB_PREFIX(RealmUri), {?PLUM_DB_USER_TAB, RealmUri}).
 
@@ -48,13 +50,6 @@
         required => true,
         datatype => binary,
         validator => fun bondy_data_validators:strict_username/1
-    },
-    <<"aliases">> => #{
-        alias => aliases,
-        key => aliases,
-        required => false,
-        datatype => {list, binary},
-        validator => fun bondy_data_validators:aliases/1
     },
     <<"password">> => #{
         alias => password,
@@ -151,16 +146,18 @@
     }
 }).
 
-
--define(ANONYMOUS, type_and_version(#{
+%% The anonymous user object (a constant)
+-define(ANONYMOUS, #{
+    type => ?USER_TYPE,
+    version => ?VERSION,
     username => anonymous,
     groups => [anonymous],
     meta => #{}
-})).
+}).
 
 
 -type t()       ::  #{
-    type                :=  ?TYPE,
+    type                :=  ?USER_TYPE,
     version             :=  binary(),
     username            :=  username(),
     groups              :=  [binary()],
@@ -172,9 +169,15 @@
     password_opts       =>  bondy_password:opts()
 }.
 
+% -type alias()    ::  #{
+%     type                :=  ?ALIAS_TYPE,
+%     alias               :=  username(),
+%     username            :=  username()
+% }.
+
 
 -type external() ::  #{
-    type                :=  ?TYPE,
+    type                :=  ?USER_TYPE,
     version             :=  binary(),
     username            :=  username(),
     groups              :=  [binary()],
@@ -214,6 +217,7 @@
 
 
 -export([add/2]).
+-export([add_alias/3]).
 -export([add_group/3]).
 -export([add_groups/3]).
 -export([add_or_update/2]).
@@ -245,6 +249,7 @@
 -export([normalise_username/1]).
 -export([password/1]).
 -export([remove/2]).
+-export([remove_alias/3]).
 -export([remove_group/3]).
 -export([remove_groups/3]).
 -export([resolve/1]).
@@ -279,7 +284,7 @@ new(Data) ->
 -spec new(Data :: map(), Opts :: new_opts()) -> User :: t().
 
 new(Data, Opts) ->
-    User = type_and_version(maps_utils:validate(Data, ?VALIDATOR)),
+    User = type_and_version(?USER_TYPE, maps_utils:validate(Data, ?VALIDATOR)),
     maybe_apply_password(User, Opts).
 
 
@@ -287,14 +292,14 @@ new(Data, Opts) ->
 %% @doc Returns the group names the user's username.
 %% @end
 %% -----------------------------------------------------------------------------
-username(#{type := ?TYPE, username := Val}) -> Val.
+username(#{type := ?USER_TYPE, username := Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns the group names the user `User' is member of.
 %% @end
 %% -----------------------------------------------------------------------------
-groups(#{type := ?TYPE, groups := Val}) -> Val.
+groups(#{type := ?USER_TYPE, groups := Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -304,7 +309,7 @@ groups(#{type := ?TYPE, groups := Val}) -> Val.
 %% -----------------------------------------------------------------------------
 -spec is_member(Name0 :: bondy_rbac_group:name(), User :: t()) -> boolean().
 
-is_member(Name0, #{type := ?TYPE, groups := Val}) ->
+is_member(Name0, #{type := ?USER_TYPE, groups := Val}) ->
     Name = bondy_rbac_group:normalise_name(Name0),
     Name == all orelse lists:member(Name, Val).
 
@@ -316,10 +321,10 @@ is_member(Name0, #{type := ?TYPE, groups := Val}) ->
 %% -----------------------------------------------------------------------------
 -spec is_sso_user(User :: t()) -> boolean().
 
-is_sso_user(#{type := ?TYPE, sso_realm_uri := Val}) when is_binary(Val) ->
+is_sso_user(#{type := ?USER_TYPE, sso_realm_uri := Val}) when is_binary(Val) ->
     true;
 
-is_sso_user(#{type := ?TYPE}) ->
+is_sso_user(#{type := ?USER_TYPE}) ->
     false.
 
 
@@ -328,12 +333,13 @@ is_sso_user(#{type := ?TYPE}) ->
 %% user. Otherwise, returns `undefined'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec sso_realm_uri(User :: t()) -> maybe(uri()).
+-spec sso_realm_uri(User :: t()) -> optional(uri()).
 
-sso_realm_uri(#{type := ?TYPE, sso_realm_uri := Val}) when is_binary(Val) ->
+sso_realm_uri(#{type := ?USER_TYPE, sso_realm_uri := Val})
+when is_binary(Val) ->
     Val;
 
-sso_realm_uri(#{type := ?TYPE}) ->
+sso_realm_uri(#{type := ?USER_TYPE}) ->
     undefined.
 
 
@@ -345,10 +351,10 @@ sso_realm_uri(#{type := ?TYPE}) ->
 %% -----------------------------------------------------------------------------
 -spec is_enabled(User :: t()) -> boolean().
 
-is_enabled(#{type := ?TYPE, enabled := Val}) ->
+is_enabled(#{type := ?USER_TYPE, enabled := Val}) ->
     Val;
 
-is_enabled(#{type := ?TYPE}) ->
+is_enabled(#{type := ?USER_TYPE}) ->
     true.
 
 
@@ -383,7 +389,8 @@ is_enabled(RealmUri, Username) ->
 %% -----------------------------------------------------------------------------
 -spec resolve(User :: t()) -> Resolved :: t() | no_return().
 
-resolve(#{type := ?TYPE, sso_realm_uri := Uri} = User0) when is_binary(Uri) ->
+resolve(#{type := ?USER_TYPE, sso_realm_uri := Uri} = User0)
+when is_binary(Uri) ->
     SSOUser = fetch(Uri, maps:get(username, User0)),
     User1 = maps:merge(User0, maps:with([password, authorized_keys], SSOUser)),
 
@@ -394,12 +401,13 @@ resolve(#{type := ?TYPE, sso_realm_uri := Uri} = User0) when is_binary(Uri) ->
             User1
     end,
 
-    Enabled = maps:get(enabled, SSOUser, true)
+    Enabled =
+        maps:get(enabled, SSOUser, true)
         andalso maps:get(enabled, User0, true),
 
     maps:put(enabled, Enabled, User2);
 
-resolve(#{type := ?TYPE} = User) ->
+resolve(#{type := ?USER_TYPE} = User) ->
     User.
 
 
@@ -409,7 +417,7 @@ resolve(#{type := ?TYPE} = User) ->
 %% -----------------------------------------------------------------------------
 -spec has_password(User :: t()) -> boolean().
 
-has_password(#{type := ?TYPE} = User) ->
+has_password(#{type := ?USER_TYPE} = User) ->
     maps:is_key(password, User).
 
 
@@ -419,12 +427,13 @@ has_password(#{type := ?TYPE} = User) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec password(User :: t()) ->
-    maybe(bondy_password:future() | bondy_password:t()).
+    optional(bondy_password:future() | bondy_password:t()).
 
-password(#{type := ?TYPE, password := Future}) when is_function(Future, 1) ->
+password(#{type := ?USER_TYPE, password := Future})
+when is_function(Future, 1) ->
     Future;
 
-password(#{type := ?TYPE, password := PW}) ->
+password(#{type := ?USER_TYPE, password := PW}) ->
     %% In previous versions we stored a proplists,
     %% so we call from_term/1. This is not an actual upgrade as the resulting
     %% value does not replace the previous one in the database.
@@ -432,22 +441,22 @@ password(#{type := ?TYPE, password := PW}) ->
     %% migration process.
     bondy_password:from_term(PW);
 
-password(#{type := ?TYPE}) ->
+password(#{type := ?USER_TYPE}) ->
     undefined.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns `true' if user `User' has a authorized keys.
+%% @doc Returns `true' if user `User' has authorized keys.
 %% Otherwise returns `false'.
 %% See {@link authorized_keys/1}.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec has_authorized_keys(User :: t()) -> boolean().
 
-has_authorized_keys(#{type := ?TYPE, authorized_keys := Val}) ->
+has_authorized_keys(#{type := ?USER_TYPE, authorized_keys := Val}) ->
     length(Val) > 0;
 
-has_authorized_keys(#{type := ?TYPE}) ->
+has_authorized_keys(#{type := ?USER_TYPE}) ->
     false.
 
 
@@ -456,10 +465,10 @@ has_authorized_keys(#{type := ?TYPE}) ->
 %% with the WAMP Cryptosign authentication method or equivalent.
 %% @end
 %% -----------------------------------------------------------------------------
-authorized_keys(#{type := ?TYPE, authorized_keys := Val}) ->
+authorized_keys(#{type := ?USER_TYPE, authorized_keys := Val}) ->
     Val;
 
-authorized_keys(#{type := ?TYPE}) ->
+authorized_keys(#{type := ?USER_TYPE}) ->
     [].
 
 
@@ -469,18 +478,25 @@ authorized_keys(#{type := ?TYPE}) ->
 %% -----------------------------------------------------------------------------
 -spec meta(User :: t()) -> map().
 
-meta(#{type := ?TYPE, meta := Val}) -> Val.
+meta(#{type := ?USER_TYPE, meta := Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc Adds a new user to the RBAC store. `User' MUST have been
 %% created using {@link new/1} or {@link new/2}.
 %% This record is globally replicated.
+%%
+%% The call returns an error if the username is already associated with another
+%% user. Notice that this check is currently performed locally only, this means
+%% that a concurrent add on another node will succeed unless this operation
+%% broadcast arrives first. To ensure uniqueness the caller could use a strong
+%% consistency service e.g. a database with ACID guarantees, or act as a
+%% singleton serializing this call.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add(uri(), t()) -> {ok, t()} | {error, add_error()}.
 
-add(RealmUri, #{type := ?TYPE, username := Username} = User) ->
+add(RealmUri, #{type := ?USER_TYPE, username := Username} = User) ->
     try
         %% This should have been validated before but just to avoid any issues
         %% we do it again.
@@ -513,11 +529,12 @@ add_or_update(RealmUri, User) ->
 -spec add_or_update(RealmUri :: uri(), User :: t(), Opts :: update_opts()) ->
     {ok, t()} | {error, add_error()}.
 
-add_or_update(RealmUri, #{type := ?TYPE, username := Username} = User, Opts) ->
+add_or_update(RealmUri, #{type := ?USER_TYPE} = User, Opts) ->
     try
         maybe_throw(add(RealmUri, User))
     catch
         throw:already_exists ->
+            Username = maps:get(username, User),
             update(RealmUri, Username, User, Opts);
 
         throw:Reason ->
@@ -549,7 +566,7 @@ update(RealmUri, Username, Data) ->
     Opts :: update_opts()) ->
     {ok, NewUser :: t()} | {error, any()}.
 
-update(RealmUri, #{type := ?TYPE} = User, Data0, Opts) ->
+update(RealmUri, #{type := ?USER_TYPE} = User, Data0, Opts) ->
     try
 
         Data = maps_utils:validate(Data0, ?UPDATE_VALIDATOR),
@@ -584,7 +601,7 @@ update(RealmUri, Username0, Data0, Opts) when is_binary(Username0) ->
 -spec remove(uri(), binary() | map()) ->
     ok | {error, {no_such_user, username()} | reserved_name}.
 
-remove(RealmUri, #{type := ?TYPE, username := Username}) ->
+remove(RealmUri, #{type := ?USER_TYPE, username := Username}) ->
     remove(RealmUri, Username);
 
 remove(RealmUri, Username0) ->
@@ -595,7 +612,15 @@ remove(RealmUri, Username0) ->
         Username = normalise_username(Username0),
 
         ok = not_reserved_name_check(Username),
-        ok = exists_check(RealmUri, Username),
+
+        User = fetch(RealmUri, Username),
+        Aliases = maps:get(aliases, User, []),
+        PDBPrefix = ?PLUMDB_PREFIX(RealmUri),
+
+        %% We remove all aliases (if it has any)
+        _ = [
+            plum_db:delete(PDBPrefix, Alias) || Alias <- Aliases
+        ],
 
         %% We remove this user from sources
         ok = bondy_rbac_source:remove_all(RealmUri, Username),
@@ -605,7 +630,7 @@ remove(RealmUri, Username0) ->
         ok = bondy_rbac:revoke_user(RealmUri, Username),
 
         %% We finally delete the user
-        ok = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Username),
+        ok = plum_db:delete(PDBPrefix, Username),
 
         on_delete(RealmUri, Username)
 
@@ -630,8 +655,25 @@ lookup(RealmUri, Username0) ->
             Prefix = ?PLUMDB_PREFIX(RealmUri),
 
             case plum_db:get(Prefix, Username) of
-                undefined -> {error, not_found};
-                Value -> from_term({Username, Value})
+                undefined ->
+                    {error, not_found};
+                Val0 when ?IS_ALIAS(Val0) ->
+                    case lookup(RealmUri, maps:get(username, Val0)) of
+                        {error, _} = Error ->
+                            Error;
+                        Val1 when ?IS_USER(Val1) ->
+                            Val1;
+                        Val1 when ?IS_ALIAS(Val1) ->
+                            ?LOG_WARNING(#{
+                                description => "Recursive index for user alias",
+                                alias => Val0
+                            }),
+                            {error, not_found};
+                        Val1 ->
+                            from_term({Username, Val1})
+                    end;
+                Val0 ->
+                    from_term({Username, Val0})
             end
     end.
 
@@ -750,7 +792,7 @@ do_change_password(RealmUri, #{username := Username}, New, _) ->
 -spec enable(RealmUri :: uri(), User :: t()) ->
     ok | {error, any()}.
 
-enable(RealmUri, #{type := ?TYPE} = User) ->
+enable(RealmUri, #{type := ?USER_TYPE} = User) ->
     case update(RealmUri, User, #{enabled => true}) of
         {ok, _} -> ok;
         Error -> Error
@@ -765,7 +807,7 @@ enable(RealmUri, #{type := ?TYPE} = User) ->
 -spec disable(RealmUri :: uri(), User :: t()) ->
     ok | {error, any()}.
 
-disable(RealmUri, #{type := ?TYPE} = User) ->
+disable(RealmUri, #{type := ?USER_TYPE} = User) ->
     case update(RealmUri, User, #{enabled => false}) of
         {ok, _} -> ok;
         Error -> Error
@@ -777,7 +819,7 @@ disable(RealmUri, #{type := ?TYPE} = User) ->
 %% -----------------------------------------------------------------------------
 -spec to_external(User :: t()) -> external().
 
-to_external(#{type := ?TYPE, version := ?VERSION} = User) ->
+to_external(#{type := ?USER_TYPE, version := ?VERSION} = User) ->
     Keys = maps:get(authorized_keys, User, []),
     Map = maps:without([password, authorized_keys], User),
 
@@ -788,6 +830,51 @@ to_external(#{type := ?TYPE, version := ?VERSION} = User) ->
         has_password => has_password(User),
         has_authorized_keys => has_authorized_keys(User)
     }.
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Adds an alias to the user. If the user is an SSO user, the alias is
+%% added on the SSO Realm only.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add_alias(
+    RealmUri :: uri(), User :: t() | username(), Alias :: username()) ->
+    ok | {error, Reason :: any()}.
+
+add_alias(_, #{type := ?USER_TYPE, sso_realm_uri := RealmUri} = User, Alias)
+when is_binary(RealmUri) ->
+    Username = maps:get(username, User),
+    do_add_alias(RealmUri, fetch(RealmUri, Username), Alias);
+
+add_alias(RealmUri, #{type := ?USER_TYPE} = User, Alias) ->
+   do_add_alias(RealmUri, User, Alias);
+
+add_alias(RealmUri, Username, Alias) ->
+    add_alias(RealmUri, fetch(RealmUri, Username), Alias).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove_alias(
+    RealmUri :: uri(), User :: t() | username(), Alias :: username()) ->
+    ok | {error, Reason :: any()}.
+
+remove_alias(
+    _, #{type := ?USER_TYPE, sso_realm_uri := RealmUri} = User, Alias)
+    when is_binary(RealmUri) ->
+    Username = maps:get(username, User),
+    remove_alias(RealmUri, Username, Alias);
+
+remove_alias(RealmUri, #{type := ?USER_TYPE} = User, Alias) ->
+    do_remove_alias(RealmUri, User, Alias);
+
+remove_alias(RealmUri, Username, Alias) ->
+    remove_alias(RealmUri, fetch(RealmUri, Username), Alias).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -946,7 +1033,7 @@ do_add(RealmUri, #{sso_realm_uri := SSOUri} = User0) when is_binary(SSOUri) ->
         [password, authorized_keys], User2
     ),
 
-    SSOUser = type_and_version(SSOUser0#{
+    SSOUser = type_and_version(?USER_TYPE, SSOUser0#{
         username => Username,
         groups => [],
         meta => #{}
@@ -960,6 +1047,7 @@ do_add(RealmUri, #{sso_realm_uri := SSOUri} = User0) when is_binary(SSOUri) ->
     store(RealmUri, LocalUser, fun on_create/2);
 
 do_add(RealmUri, User0) ->
+    %% A local-only user
     Username = maps:get(username, User0),
 
     %% Key validations first
@@ -981,7 +1069,7 @@ maybe_add_sso_user(true, RealmUri, SSOUri, SSOUser) ->
 
     ok = groups_exists_check(SSOUri, maps:get(groups, SSOUser, [])),
 
-    %% We first add the user to the SSO realm
+    %% We add the user to the SSO realm
     {ok, _} = maybe_throw(store(SSOUri, SSOUser, fun on_create/2)),
     ok;
 
@@ -1027,6 +1115,7 @@ do_update(RealmUri, User, Data, Opts) when is_map(User) ->
 %% @private
 do_local_update(RealmUri, User, Data0, Opts0) ->
     ok = groups_exists_check(RealmUri, maps:get(groups, Data0, [])),
+
     %% We split the data into LocalUser and Opts
     {UserOpts, Data} = maps_utils:split([password_opts], Data0),
     Opts = maps:merge(UserOpts, Opts0),
@@ -1074,7 +1163,7 @@ update_groups(RealmUri, Users, Groupnames, Fun) when is_list(Users) ->
     ],
     ok;
 
-update_groups(RealmUri, #{type := ?TYPE} = User, Groupnames, Fun)
+update_groups(RealmUri, #{type := ?USER_TYPE} = User, Groupnames, Fun)
 when is_function(Fun, 2) ->
     Update = #{groups => Fun(maps:get(groups, User), Groupnames)},
     case update(RealmUri, User, Update) of
@@ -1089,8 +1178,10 @@ update_groups(RealmUri, Username, Groupnames, Fun) when is_binary(Username) ->
 %% @private
 store(RealmUri, #{username := Username} = User, Fun) ->
     case plum_db:put(?PLUMDB_PREFIX(RealmUri), Username, User) of
-        ok ->
+        ok when is_function(Fun, 2) ->
             ok = Fun(RealmUri, User),
+            {ok, User};
+        ok ->
             {ok, User};
         Error ->
             Error
@@ -1171,12 +1262,12 @@ maybe_throw({error, Reason}) ->
 maybe_throw(Term) ->
     Term.
 
-%% @private
-exists_check(RealmUri, Username) ->
-    case plum_db:get(?PLUMDB_PREFIX(RealmUri), Username) of
-        undefined -> throw({no_such_user, Username});
-        _ -> ok
-    end.
+% %% @private
+% exists_check(RealmUri, Username) ->
+%     case plum_db:get(?PLUMDB_PREFIX(RealmUri), Username) of
+%         undefined -> throw({no_such_user, Username});
+%         _ -> ok
+%     end.
 
 
 %% @private
@@ -1200,11 +1291,97 @@ groups_exists_check(RealmUri, Groups) ->
             throw({no_such_groups, Unknown})
     end.
 
-
 %% @private
 not_reserved_name_check(Term) ->
     not bondy_rbac:is_reserved_name(Term) orelse throw(reserved_name),
     ok.
+
+%% @private
+validate_alias(Alias0) ->
+    case bondy_data_validators:strict_username(Alias0) of
+        {ok, Alias} ->
+            Alias;
+        true ->
+            Alias0;
+        _ ->
+            throw(invalid_alias)
+    end.
+
+
+%% @private
+do_add_alias(RealmUri, User0, Alias0) ->
+    try
+        %% We validate the value
+        Alias = validate_alias(Alias0),
+        Username = maps:get(username, User0),
+        AliasEntry = #{type => ?ALIAS_TYPE, username => Username},
+        Aliases0 = sets:from_list(maps:get(aliases, User0, [])),
+
+        case sets:add_element(Alias, Aliases0) of
+            Aliases0 ->
+                %% The alias was already there, we store it just in case
+                ok = store_alias(RealmUri, Alias, AliasEntry);
+            Aliases ->
+                ok = store_alias(RealmUri, Alias, AliasEntry),
+                User = User0#{aliases => sets:to_list(Aliases)},
+                _ = store(RealmUri, User, fun on_update/2),
+                ok
+        end
+    catch
+        throw:invalid_alias ->
+            {error, {invalid_value, alias, Alias0}};
+        throw:already_exists ->
+            {error, {already_exists, Alias0}}
+    end.
+
+
+%% @private
+do_remove_alias(RealmUri, User0, Alias0) ->
+    try
+        Alias = validate_alias(Alias0),
+        Aliases0 = sets:from_list(maps:get(aliases, User0, [])),
+        case sets:del_element(Alias, Aliases0) of
+            Aliases0 ->
+                %% Delete anyway
+                _ = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Alias),
+                ok;
+            Aliases ->
+                _ = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Alias),
+                User = User0#{aliases => sets:to_list(Aliases)},
+                store(RealmUri, User, fun on_update/2)
+        end
+
+    catch
+        throw:invalid_alias ->
+            {error, {invalid_value, alias, Alias0}}
+    end.
+
+
+
+%% @private
+store_alias(RealmUri, Alias, AliasEntry) ->
+    Modifier = fun
+        (undefined) ->
+            AliasEntry;
+        ([?TOMBSTONE]) ->
+            AliasEntry;
+        ([Val]) when Val == AliasEntry ->
+            AliasEntry;
+        ([_]) ->
+            %% This is a user whose username == Alias or an alias.
+            throw(already_exists);
+        ([_|_]) ->
+            %% We found multiple values, we just ignore
+            %% TODO what if the last one is a tombstone?
+            throw(already_exists)
+    end,
+
+    case plum_db:put(?PLUMDB_PREFIX(RealmUri), Alias, Modifier) of
+        ok ->
+            ok;
+        {error, Reason} ->
+            throw(Reason)
+    end.
 
 
 %% @private
@@ -1214,17 +1391,17 @@ from_term({Username, PList}) when is_list(PList) ->
     ),
     %% Prev to v1.1 we removed the username (key) from the payload (value).
     User = maps:put(username, Username, User0),
-    type_and_version(User);
+    type_and_version(?USER_TYPE, User);
 
-from_term({_, #{type := ?TYPE, version := ?VERSION} = User}) ->
+from_term({_, #{type := ?USER_TYPE, version := ?VERSION} = User}) ->
     User.
 
 
 %% @private
-type_and_version(Map) ->
+type_and_version(Type, Map) ->
     Map#{
         version => ?VERSION,
-        type => ?TYPE
+        type => Type
     }.
 
 
