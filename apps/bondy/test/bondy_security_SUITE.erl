@@ -533,36 +533,36 @@ password_token_crud_1(Config) ->
     {save_config, [{client_id, ClientId}, {username, U} | Config]}.
 
 
-    issue_revoke_by_device_id(Config) ->
-        {password_token_crud_1, Prev} = ?config(saved_config, Config),
-        Uri = ?config(realm_uri, Prev),
-        C = ?config(client_id, Prev),
-        U = ?config(username, Prev),
-        D = <<"1">>,
+issue_revoke_by_device_id(Config) ->
+    {password_token_crud_1, Prev} = ?config(saved_config, Config),
+    Uri = ?config(realm_uri, Prev),
+    C = ?config(client_id, Prev),
+    U = ?config(username, Prev),
+    D = <<"1">>,
 
-        {ok, _JWT0, RToken0, _Claims0} = bondy_oauth2:issue_token(
-            password, Uri, C, U, [], #{<<"client_device_id">> => D}
-        ),
-        ok = bondy_oauth2:revoke_token(refresh_token, Uri, C, U, D),
-        {error, not_found} = bondy_oauth2:lookup_token(Uri, C, RToken0),
-        {save_config, [{client_id, C}, {username, U} | Config]}.
+    {ok, _JWT0, RToken0, _Claims0} = bondy_oauth2:issue_token(
+        password, Uri, C, U, [], #{<<"client_device_id">> => D}
+    ),
+    ok = bondy_oauth2:revoke_token(refresh_token, Uri, C, U, D),
+    {error, not_found} = bondy_oauth2:lookup_token(Uri, C, RToken0),
+    {save_config, [{client_id, C}, {username, U} | Config]}.
 
 
-    issue_refresh_revoke_by_device_id(Config) ->
-        {issue_revoke_by_device_id, Prev} = ?config(saved_config, Config),
-        Uri = ?config(realm_uri, Prev),
-        C = ?config(client_id, Prev),
-        U = ?config(username, Prev),
-        D = <<"1">>,
+issue_refresh_revoke_by_device_id(Config) ->
+    {issue_revoke_by_device_id, Prev} = ?config(saved_config, Config),
+    Uri = ?config(realm_uri, Prev),
+    C = ?config(client_id, Prev),
+    U = ?config(username, Prev),
+    D = <<"1">>,
 
-        {ok, _, RToken0, _} = bondy_oauth2:issue_token(
-            password, Uri, C, U, [], #{<<"client_device_id">> => D}
-        ),
-        timer:sleep(2000),
-        {ok, _, RToken1, _} = bondy_oauth2:refresh_token(Uri, C, RToken0),
-        {error, not_found} = bondy_oauth2:lookup_token(Uri, C, RToken0),
-        ok = bondy_oauth2:revoke_token(refresh_token, Uri, C, U, D),
-        {error, not_found} = bondy_oauth2:lookup_token(Uri, C, RToken1).
+    {ok, _, RToken0, _} = bondy_oauth2:issue_token(
+        password, Uri, C, U, [], #{<<"client_device_id">> => D}
+    ),
+    timer:sleep(2000),
+    {ok, _, RToken1, _} = bondy_oauth2:refresh_token(Uri, C, RToken0),
+    {error, not_found} = bondy_oauth2:lookup_token(Uri, C, RToken0),
+    ok = bondy_oauth2:revoke_token(refresh_token, Uri, C, U, D),
+    {error, not_found} = bondy_oauth2:lookup_token(Uri, C, RToken1).
 
 
 
