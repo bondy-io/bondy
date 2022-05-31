@@ -31,6 +31,7 @@
 -include("bondy.hrl").
 -include("bondy_plum_db.hrl").
 
+-define(MAX_ALIASES, 5).
 -define(ALIAS_TYPE, alias).
 -define(IS_ALIAS(X), ?ALIAS_TYPE =:= map_get(type, X)).
 -define(USER_TYPE, user).
@@ -1342,6 +1343,8 @@ do_add_alias(RealmUri, User0, Alias0) ->
         AliasEntry = #{type => ?ALIAS_TYPE, username => Username},
         Aliases0 = sets:from_list(maps:get(aliases, User0, [])),
 
+        sets:size(Aliases0) < ?MAX_ALIASES orelse throw(alias_limit),
+
         case sets:add_element(Alias, Aliases0) of
             Aliases0 ->
                 %% The alias was already there, we store it just in case
@@ -1353,6 +1356,8 @@ do_add_alias(RealmUri, User0, Alias0) ->
                 ok
         end
     catch
+        throw:alias_limit ->
+            {error, {property_range_limit, alias, ?MAX_ALIASES}};
         throw:invalid_alias ->
             {error, {invalid_value, alias, Alias0}};
         throw:already_exists ->
