@@ -635,6 +635,8 @@ remove(RealmUri, Username0) ->
         on_delete(RealmUri, Username)
 
     catch
+        error:{no_such_user, _} = Reason ->
+            {error, Reason};
         throw:Reason ->
             {error, Reason}
     end.
