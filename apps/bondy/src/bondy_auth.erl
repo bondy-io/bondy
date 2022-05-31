@@ -168,18 +168,22 @@ when is_binary(SessionId), is_binary(Uri) ->
             init(SessionId, Realm, UserId, Roles, Peer)
     end;
 
-init(SessionId, Realm, UserId0, Roles0, {IPAddress, _})
+init(SessionId, Realm, Username0, Roles0, {IPAddress, _})
 when is_binary(SessionId) ->
     try
         RealmUri = bondy_realm:uri(Realm),
-        UserId = casefold(UserId0),
-        User = get_user(RealmUri, UserId),
+        SSORealmUri = bondy_realm:sso_realm_uri(Realm),
+
+        %% Username1 can be an alias
+        Username1 = casefold(Username0),
+        User = get_user(RealmUri, SSORealmUri, Username1),
+        Username = bondy_rbac_user:username(User),
         {Role, Roles} = valid_roles(Roles0, User),
 
         Ctxt = #{
             session_id => SessionId,
             realm_uri => RealmUri,
-            user_id => UserId,
+            user_id => Username,
             user => User,
             role => Role,
             roles => Roles,
@@ -615,13 +619,24 @@ matches_requirements(Method, #{user_id := UserId, user := User}) ->
 
 
 %% @private
-get_user(_, undefined) ->
+get_user(_, _, undefined) ->
     undefined;
 
-get_user(RealmUri, UserId) ->
-    case bondy_rbac_user:lookup(RealmUri, UserId) of
+get_user(RealmUri, SSORealmUri, UsernameOrAlias) ->
+    case bondy_rbac_user:lookup(RealmUri, UsernameOrAlias) of
+        {error, not_found} when SSORealmUri =:= undefined ->
+            throw({no_such_user, UsernameOrAlias});
         {error, not_found} ->
-            throw({no_such_user, UserId});
+            %% We try to find the user on the SSORealm
+            SSOUser = get_user(SSORealmUri, undefined, UsernameOrAlias),
+            %% Now that we have the username, we try to find in the requested
+            %% realm
+            Username = bondy_rbac_user:username(SSOUser),
+            User = get_user(RealmUri, undefined, Username),
+            %% Finally we resolve the user using both (this is more efficient
+            %% than calling bondy_rbac_user:resolve/1 as we already fetched the
+            %% SSOUser).
+            bondy_rbac_user:resolve(User, SSOUser);
         User ->
             bondy_rbac_user:is_enabled(User) orelse throw(user_disabled),
             %% We call resolve so that we merge the local user to the SSO user

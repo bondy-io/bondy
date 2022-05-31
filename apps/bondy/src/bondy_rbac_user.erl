@@ -253,6 +253,7 @@
 -export([remove_group/3]).
 -export([remove_groups/3]).
 -export([resolve/1]).
+-export([resolve/2]).
 -export([sso_realm_uri/1]).
 -export([to_external/1]).
 -export([unknown/2]).
@@ -389,10 +390,26 @@ is_enabled(RealmUri, Username) ->
 %% -----------------------------------------------------------------------------
 -spec resolve(User :: t()) -> Resolved :: t() | no_return().
 
-resolve(#{type := ?USER_TYPE, sso_realm_uri := Uri} = User0)
+resolve(#{type := ?USER_TYPE, sso_realm_uri := Uri} = User)
 when is_binary(Uri) ->
-    SSOUser = fetch(Uri, maps:get(username, User0)),
-    User1 = maps:merge(User0, maps:with([password, authorized_keys], SSOUser)),
+    SSOUser = fetch(Uri, maps:get(username, User)),
+    resolve(User, SSOUser);
+
+resolve(#{type := ?USER_TYPE} = User) ->
+    User.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec resolve(User :: t(), SSOUser :: t()) -> Resolved :: t() | no_return().
+
+resolve(LocalUser, SSOUser) ->
+    User1 = maps:merge(
+        LocalUser,
+        maps:with([password, authorized_keys], SSOUser)
+    ),
 
     User2 = case maps:find(meta, SSOUser) of
         {ok, Meta} ->
@@ -403,12 +420,10 @@ when is_binary(Uri) ->
 
     Enabled =
         maps:get(enabled, SSOUser, true)
-        andalso maps:get(enabled, User0, true),
+        andalso maps:get(enabled, LocalUser, true),
 
-    maps:put(enabled, Enabled, User2);
+    maps:put(enabled, Enabled, User2).
 
-resolve(#{type := ?USER_TYPE} = User) ->
-    User.
 
 
 %% -----------------------------------------------------------------------------
@@ -734,6 +749,10 @@ list(RealmUri, Opts) ->
     plum_db:fold(
         fun
             ({_, ?TOMBSTONE}, Acc) ->
+                %% Deleted, we ignore it
+                Acc;
+            ({_, #{type := ?ALIAS_TYPE}}, Acc) ->
+                %% An alias, we ignore it
                 Acc;
             ({_, _} = Term, Acc) ->
                 %% Consider legacy storage formats
@@ -1148,7 +1167,11 @@ update_credentials(RealmUri, Username, Data) ->
 
 update_groups(RealmUri, all, Groupnames, Fun) ->
     plum_db:fold(fun
-        ({_, [?TOMBSTONE]}, Acc) ->
+        ({_, ?TOMBSTONE}, Acc) ->
+            %% Deleted, we ignore it
+            Acc;
+        ({_, #{type := ?ALIAS_TYPE}}, Acc) ->
+            %% An alias, we ignore it
             Acc;
         ({_, _} = Term, Acc) ->
             ok = update_groups(RealmUri, from_term(Term), Groupnames, Fun),
@@ -1350,7 +1373,8 @@ do_remove_alias(RealmUri, User0, Alias0) ->
             Aliases ->
                 _ = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Alias),
                 User = User0#{aliases => sets:to_list(Aliases)},
-                store(RealmUri, User, fun on_update/2)
+                _ = store(RealmUri, User, fun on_update/2),
+                ok
         end
 
     catch
