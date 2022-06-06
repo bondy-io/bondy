@@ -790,14 +790,13 @@ do_full_sync(SessionId, RealmUri, _Opts, _State0) ->
 
     Prefixes = [
         %% TODO We should NOT sync the priv keys!!
-        %% We might need to split the realm from the priv keys to simplify AAE
-        %% compare operation. But we should be doing some form of Key exchange
-        %% anyways
+        %% We might need to split the realm from the priv keys to enable a
+        %% AAE hash comparison.
         {?PLUM_DB_REALM_TAB, RealmUri},
         {?PLUM_DB_GROUP_TAB, RealmUri},
-        %% TODO we should not sync passwords!
-        %% We might need to split the password from the user object to simplify
-        %% AAE compare operation
+        %% TODO we should not sync passwords! We might need to split the
+        %% password from the user object and allow admin to enable sync or not
+        %% (e.g. WAMPSCRAM)
         {?PLUM_DB_USER_TAB, RealmUri},
         {?PLUM_DB_SOURCE_TAB, RealmUri},
         {?PLUM_DB_USER_GRANT_TAB, RealmUri},
