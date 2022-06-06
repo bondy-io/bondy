@@ -622,7 +622,9 @@
     authmethods                     ::  optional([binary()]),
     security_enabled                ::  optional(boolean()),
     password_opts                   ::  optional(bondy_password:opts()),
-    private_keys = #{}              ::  keymap(),
+    %% it can be undefined when we strip the value only.
+    %% See strip_private_keys
+    private_keys = #{}              ::  optional(keymap()),
     public_keys = #{}               ::  keymap(),
     encryption_keys = #{}           ::  keymap(),
     info = #{}                      ::  map()
@@ -674,6 +676,7 @@
 -export([is_prototype/1]).
 -export([is_security_enabled/1]).
 -export([is_sso_realm/1]).
+-export([is_type/1]).
 -export([is_value_inherited/2]).
 -export([list/0]).
 -export([lookup/1]).
@@ -686,6 +689,7 @@
 -export([to_external/1]).
 -export([update/2]).
 -export([uri/1]).
+-export([strip_private_keys/1]).
 
 -export([grants/1]).
 -export([grants/2]).
@@ -724,6 +728,21 @@ description(#realm{description = Value}) ->
 
 description(Uri) when is_binary(Uri) ->
     description(fetch(Uri)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
+-spec is_type(Realm :: t() | uri()) -> boolean().
+
+is_type(#realm{}) ->
+    true;
+
+is_type(_) ->
+    false.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns `true' if realm `Realm' is a prototype. Otherwise, returns
@@ -1056,6 +1075,10 @@ password_opts(RealmUri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec private_keys(t() | uri()) -> [map()].
+
+private_keys(#realm{private_keys = undefined}) ->
+    %% Special case when we strip the keys
+    [];
 
 private_keys(#realm{private_keys = Keys} = Realm0) when map_size(Keys) == 0 ->
     Realm = init_keys(Realm0),
@@ -1486,6 +1509,19 @@ to_external(#realm{} = R) ->
 
 to_external(RealmUri) ->
     to_external(fetch(RealmUri)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A temporary hack to prevent keys being synced with an Edge router. We
+%% will use this until be implement partial replication and decide on Key
+%% management strategies.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec strip_private_keys(t()) -> t().
+
+strip_private_keys(#realm{} = R) ->
+    R#realm{private_keys = undefined}.
+
 
 
 %% =============================================================================

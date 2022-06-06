@@ -49,7 +49,8 @@ all() ->
         prototype_uri,
         prototype_inheritance,
 
-        migration
+        migration,
+        strip_private_keys
 
     ].
 
@@ -328,6 +329,26 @@ prototype_inheritance(_) ->
     ?assertEqual(false, bondy_realm:is_security_enabled(R)),
     ?assertEqual(false, bondy_realm:is_value_inherited(P, is_security_enabled)),
     ?assertEqual(true, bondy_realm:is_value_inherited(R, is_security_enabled)).
+
+
+
+strip_private_keys(_) ->
+    Uri = gen_uri(),
+    R0 = bondy_realm:create(#{
+        uri => Uri
+    }),
+    ?assertNotEqual(
+        0,
+        length(bondy_realm:private_keys(R0))
+    ),
+
+    R1 = bondy_realm:strip_private_keys(R0),
+
+    ?assertEqual(
+        0,
+        length(bondy_realm:private_keys(R1))
+    ).
+
 
 migration(_) ->
     Uri = gen_uri(),

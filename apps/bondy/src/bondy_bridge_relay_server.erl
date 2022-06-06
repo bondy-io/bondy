@@ -810,8 +810,9 @@ do_full_sync(SessionId, RealmUri, _Opts, _State0) ->
     _ = lists:foreach(
         fun(Prefix) ->
             lists:foreach(
-                fun(O) ->
-                    Msg = {aae_data, SessionId, O},
+                fun(Obj0) ->
+                    Obj = prepare_object(Obj0),
+                    Msg = {aae_data, SessionId, Obj},
                     gen_statem:cast(Me, {forward_message, Msg})
                 end,
                 pdb_objects(Prefix)
@@ -820,6 +821,19 @@ do_full_sync(SessionId, RealmUri, _Opts, _State0) ->
         Prefixes
     ),
     ok.
+
+
+%% @private
+prepare_object(Obj) ->
+    case bondy_realm:is_type(Obj) of
+        true ->
+            %% A temporary hack to prevent keys being synced with an Edge
+            %% router. We will use this until be implement partial replication
+            %% and decide on Key management strategies.
+            bondy_realm:strip_private_keys(Obj);
+        false ->
+            Obj
+    end.
 
 
 pdb_objects(FullPrefix) ->
