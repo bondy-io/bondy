@@ -87,7 +87,7 @@ all() ->
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
-    RealmUri = <<"com.example.test.auth_password">>,
+    RealmUri = <<"com.example.test.auth_alias">>,
     ok = add_realm(RealmUri),
     [{realm_uri, RealmUri}|Config].
 
