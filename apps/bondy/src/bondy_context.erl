@@ -39,8 +39,8 @@
 
 -type t()       ::  #{
     realm_uri => uri(),
-    session_id => maybe(bondy_session_id:t()),
-    session => maybe(bondy_session:t()),
+    session_id => optional(bondy_session_id:t()),
+    session => optional(bondy_session:t()),
     security_enabled => boolean(),
     %% Peer Info
     peer => bondy_session:peer(),
@@ -238,7 +238,7 @@ close(Ctxt, _Reason) ->
 %% if there is none.
 %% @end
 %% -----------------------------------------------------------------------------
--spec session_id(t()) -> maybe(id()).
+-spec session_id(t()) -> optional(id()).
 
 session_id(#{session := S}) ->
     bondy_session:id(S);
@@ -359,7 +359,7 @@ is_feature_enabled(Ctxt, Role, Feature) ->
 %% Returns the realm uri of the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec realm_uri(t()) -> maybe(uri()).
+-spec realm_uri(t()) -> optional(uri()).
 realm_uri(#{session := S}) ->
     bondy_session:realm_uri(S);
 
@@ -433,7 +433,7 @@ authid(#{}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec authrole(t()) -> binary() | anonymous | undefined.
+-spec authrole(t()) -> binary() | undefined.
 
 authrole(#{authrole := Val}) ->
     Val;

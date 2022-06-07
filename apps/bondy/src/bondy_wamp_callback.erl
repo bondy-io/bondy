@@ -59,7 +59,7 @@ validate_target(MF) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec validate_target({M :: module(), F :: atom()}, A :: maybe([term()])) ->
+-spec validate_target({M :: module(), F :: atom()}, A :: optional([term()])) ->
     boolean().
 
 validate_target({M, F}, A) when is_atom(M), is_atom(F), is_list(A) ->

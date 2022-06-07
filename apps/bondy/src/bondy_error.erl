@@ -28,15 +28,15 @@
 
 
 %% -type error_map() :: #{
-%%     code => binary(),
-%%     message => binary(),
-%%     description => binary(),
+%%     <<"code">> => binary(),
+%%     <<"message">> => binary(),
+%%     <<"description">> => binary(),
 %%     errors => [#{
-%%         code => binary(),
-%%         message => binary(),
-%%         description => binary(),
-%%         key => any(),
-%%         value => any()
+%%         <<"code">> => binary(),
+%%         <<"message">> => binary(),
+%%         <<"description">> => binary(),
+%%         <<"key">> => any(),
+%%         <<"value">> => any()
 %%     }]
 %% }.
 
@@ -173,25 +173,37 @@ map(invalid_scheme) ->
 
 map({missing_required_value, Key}) ->
     #{
-        code => missing_required_value,
-        message => <<"The operation failed due to a missing required value.">>,
-        description => <<"A value for ", $', Key/binary, $', " is required.">>,
-        key => Key
+        <<"code">> => missing_required_value,
+        <<"message">> => <<"The operation failed due to a missing required value.">>,
+        <<"description">> => <<"A value for ", $', (to_bin(Key))/binary, $', " is required.">>,
+        <<"key">> => Key
     };
 
 map({invalid_value, Key, Value}) ->
-    Reason = <<"The value for property ", $', Key/binary, $', " is invalid.">>,
+    Reason = <<"The value for property ", $', (to_bin(Key))/binary, $', " is invalid.">>,
     map({invalid_value, Key, Value, Reason});
 
 map({invalid_value, Key, Value, Reason}) ->
     #{
-        code => invalid_value,
-        message => <<"The operation failed due to an invalid value.">>,
-        description => Reason,
-        key => Key,
-        value => Value
+        <<"code">> => invalid_value,
+        <<"message">> => <<"The operation failed due to an invalid value.">>,
+        <<"description">> => Reason,
+        <<"key">> => Key,
+        <<"value">> => Value
     };
 
+map({property_range_limit, Key, Limit}) ->
+    #{
+        <<"code">> => property_range_limit,
+        <<"message">> => <<"The operation failed because a property range limit was reached.">>,
+        <<"description">> => <<
+            "The value for property '", (to_bin(Key))/binary,
+            "' already contains the maximum number of values allowed (",
+            (to_bin(Limit))/binary, ")."
+        >>,
+        <<"key">> => Key,
+        <<"limit">> => Limit
+    };
 
 map({inconsistency_error, Keys}) when is_list(Keys) ->
     Reason = iolist_to_binary([
@@ -203,9 +215,9 @@ map({inconsistency_error, Keys}) when is_list(Keys) ->
 
 map({inconsistency_error, Keys, Reason}) when is_list(Keys) ->
     #{
-        code => invalid_argument,
-        message => <<"The operation failed due to inconsistent values.">>,
-        description => Reason,
+        <<"code">> => invalid_argument,
+        <<"message">> => <<"The operation failed due to inconsistent values.">>,
+        <<"description">> => Reason,
         keys => Keys
     };
 
@@ -372,3 +384,11 @@ get_message(_) ->
 
 
 
+to_bin(Term) when is_atom(Term) ->
+    atom_to_binary(Term, utf8);
+
+to_bin(Term) when is_integer(Term) ->
+    integer_to_binary(Term);
+
+to_bin(Term) when is_float(Term) ->
+    float_to_binary(Term).

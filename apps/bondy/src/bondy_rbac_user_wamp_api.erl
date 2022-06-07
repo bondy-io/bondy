@@ -138,6 +138,30 @@ handle_call(?BONDY_USER_CHANGE_PASSWORD, #call{} = M, Ctxt) ->
             {reply, E}
     end;
 
+handle_call(?BONDY_USER_ADD_ALIAS, #call{} = M, Ctxt) ->
+    [Uri, Name, Alias] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+
+    case bondy_rbac_user:add_alias(Uri, Name, Alias) of
+        ok ->
+            R = wamp_message:result(M#call.request_id, #{}),
+            {reply, R};
+        {error, Reason} ->
+            E = bondy_wamp_utils:error(Reason, M),
+            {reply, E}
+    end;
+
+handle_call(?BONDY_USER_REMOVE_ALIAS, #call{} = M, Ctxt) ->
+    [Uri, Name, Alias] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+
+    case bondy_rbac_user:remove_alias(Uri, Name, Alias) of
+        ok ->
+            R = wamp_message:result(M#call.request_id, #{}),
+            {reply, R};
+        {error, Reason} ->
+            E = bondy_wamp_utils:error(Reason, M),
+            {reply, E}
+    end;
+
 handle_call(?BONDY_USER_ADD_GROUP, #call{} = M, Ctxt) ->
     [Uri, Name, Group] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
 
@@ -149,6 +173,7 @@ handle_call(?BONDY_USER_ADD_GROUP, #call{} = M, Ctxt) ->
             E = bondy_wamp_utils:error(Reason, M),
             {reply, E}
     end;
+
 
 handle_call(?BONDY_USER_ADD_GROUPS, #call{} = M, Ctxt) ->
     [Uri, Name, Groups] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),

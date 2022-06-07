@@ -375,7 +375,7 @@ forward(M, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec forward(
     M :: wamp_publish(),
-    To :: maybe(bondy_ref:t()),
+    To :: optional(bondy_ref:t()),
     Opts :: map()) ->
     ok | no_return().
 

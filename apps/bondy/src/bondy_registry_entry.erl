@@ -41,7 +41,7 @@
 -record(entry_key, {
     realm_uri           ::  uri(),
     target              ::  wildcard(bondy_ref:target()),
-    session_id          ::  wildcard(maybe(bondy_session_id:t())),
+    session_id          ::  wildcard(optional(bondy_session_id:t())),
     %% The message_id
     entry_id            ::  wildcard(id()),
     is_proxy = false    ::  wildcard(boolean())
@@ -53,14 +53,14 @@
     uri                 ::  uri() | atom(),
     match_policy        ::  binary(),
     ref                 ::  bondy_ref:t(),
-    callback_args       ::  maybe(list(term())),
+    callback_args       ::  optional(list(term())),
     created             ::  pos_integer() | atom(),
     options             ::  options(),
     %% If a proxy, this is the registration|subscription id
     %% of the origin client
     origin_id           ::  wildcard(id()),
     %% If a proxy, this is the ref for the origin client
-    origin_ref          ::  wildcard(maybe(bondy_ref:t()))
+    origin_ref          ::  wildcard(optional(bondy_ref:t()))
 }).
 
 
@@ -69,7 +69,7 @@
 -type t_or_key()        ::  t() | key().
 -type entry_type()      ::  registration | subscription.
 -type wildcard(T)       ::  T | '_'.
--type mfargs()          ::  {M :: module(), F :: atom(), A :: maybe([term()])}.
+-type mfargs()          ::  {M :: module(), F :: atom(), A :: optional([term()])}.
 -type options()         ::  map().
 
 -type details_map()     ::  #{
@@ -89,8 +89,8 @@
     callback_args    :=  list(term()),
     created          :=  pos_integer(),
     options          :=  options(),
-    origin_id        :=  maybe(id()),
-    origin_ref       :=  maybe(bondy_ref:t())
+    origin_id        :=  optional(id()),
+    origin_ref       :=  optional(bondy_ref:t())
 }.
 
 -export_type([t/0]).
@@ -453,7 +453,7 @@ is_callback(#entry{key = Key}) ->
 %% pattern (See {@link pattern/5}).
 %% @end
 %% -----------------------------------------------------------------------------
--spec callback_args(t()) -> maybe(list(term())).
+-spec callback_args(t()) -> optional(list(term())).
 
 callback_args(#entry{callback_args = Val}) ->
     Val.
@@ -465,7 +465,7 @@ callback_args(#entry{callback_args = Val}) ->
 %% pattern (See {@link pattern/5}).
 %% @end
 %% -----------------------------------------------------------------------------
--spec callback(t()) -> wildcard(maybe(mfargs())).
+-spec callback(t()) -> wildcard(optional(mfargs())).
 
 callback(#entry{key = #entry_key{target = {callback, MF}}} = E) ->
     erlang:append_element(MF, E#entry.callback_args);
@@ -484,7 +484,7 @@ callback(#entry{}) ->
 %% pattern (See {@link pattern/5}).
 %% @end
 %% -----------------------------------------------------------------------------
--spec pid(t_or_key()) -> wildcard(maybe(pid())).
+-spec pid(t_or_key()) -> wildcard(optional(pid())).
 
 pid(#entry{ref = Ref}) ->
     bondy_ref:pid(Ref);
@@ -504,7 +504,7 @@ pid(#entry_key{}) ->
 %% property.
 %% @end
 %% -----------------------------------------------------------------------------
--spec session_id(t_or_key()) -> wildcard(maybe(bondy_session_id:t())).
+-spec session_id(t_or_key()) -> wildcard(optional(bondy_session_id:t())).
 
 session_id(#entry{key = Key}) ->
     session_id(Key);
@@ -527,7 +527,7 @@ ref(#entry{ref = Val}) ->
 %% This value is only present when the entry is a proxy.
 %% @end
 %% -----------------------------------------------------------------------------
--spec origin_ref(t()) -> maybe(bondy_ref:t()).
+-spec origin_ref(t()) -> optional(bondy_ref:t()).
 
 origin_ref(#entry{origin_ref = Val}) ->
     Val.
@@ -538,7 +538,7 @@ origin_ref(#entry{origin_ref = Val}) ->
 %% This value is only present when the entry is a proxy.
 %% @end
 %% -----------------------------------------------------------------------------
--spec origin_id(t()) -> maybe(id()).
+-spec origin_id(t()) -> optional(id()).
 
 origin_id(#entry{origin_id = Val}) ->
     Val.

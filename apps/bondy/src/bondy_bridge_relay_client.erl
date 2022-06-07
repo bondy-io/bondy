@@ -41,15 +41,15 @@
     endpoint                ::  {inet:ip_address(), inet:port_number()},
     socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
     idle_timeout            ::  pos_integer(),
-    reconnect_retry         ::  maybe(bondy_retry:t()),
-    reconnect_retry_reason  ::  maybe(any()),
-    ping_retry              ::  maybe(bondy_retry:t()),
-    ping_retry_tref         ::  maybe(timer:ref()),
-    ping_sent               ::  maybe({Ref :: timer:ref(), Data :: binary()}),
+    reconnect_retry         ::  optional(bondy_retry:t()),
+    reconnect_retry_reason  ::  optional(any()),
+    ping_retry              ::  optional(bondy_retry:t()),
+    ping_retry_tref         ::  optional(timer:ref()),
+    ping_sent               ::  optional({Ref :: timer:ref(), Data :: binary()}),
     hibernate = false       ::  boolean(),
     sessions = #{}          ::  sessions(),
     sessions_by_uri = #{}   ::  #{uri() => bondy_session_id:t()},
-    session                 ::  maybe(map()),
+    session                 ::  optional(map()),
     start_ts                ::  integer()
 }).
 

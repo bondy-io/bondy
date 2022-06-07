@@ -340,7 +340,7 @@ migration(_) ->
     %%     [5] security_enabled = true  ::  boolean(),
     %%     [6] is_sso_realm = false     ::  boolean(),
     %%     [7] allow_connections = true ::  boolean(),
-    %%     [8] sso_realm_uri            ::  maybe(gen_uri()),
+    %%     [8] sso_realm_uri            ::  optional(gen_uri()),
     %%     [9] private_keys = #{}       ::  keyset(),
     %%     [10] public_keys = #{}        ::  keyset(),
     %%     [11] password_opts            ::  bondy_password:opts() | undefined,

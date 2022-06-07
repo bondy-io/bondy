@@ -215,9 +215,9 @@
                             allow_not_found     =>  boolean()
                         }.
 -type scope()       ::  #{
-                            realm               :=  maybe(uri()),
-                            client_id           :=  maybe(authid()),
-                            client_instance_id  :=  maybe(binary())
+                            realm               :=  optional(uri()),
+                            client_id           :=  optional(authid()),
+                            client_instance_id  :=  optional(binary())
                         }.
 -type claims()      ::  #{
                             id                  :=  ticket_id(),
@@ -411,7 +411,7 @@ lookup(RealmUri, Authid, Scope) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec revoke(maybe(t())) -> ok | {error, any()}.
+-spec revoke(optional(t())) -> ok | {error, any()}.
 
 revoke(undefined) ->
     ok;

@@ -30,8 +30,8 @@
     max_retries = 0     ::  non_neg_integer(),
     interval            ::  pos_integer(),
     count = 0           ::  non_neg_integer(),
-    backoff             ::  maybe(backoff:backoff()),
-    start_ts            ::  maybe(pos_integer())
+    backoff             ::  optional(backoff:backoff()),
+    start_ts            ::  optional(pos_integer())
 }).
 
 -type t()               ::  #bondy_retry{}.

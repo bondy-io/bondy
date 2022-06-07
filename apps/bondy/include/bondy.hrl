@@ -113,7 +113,7 @@
 %% =============================================================================
 
 
--type maybe(T)          ::  T | undefined.
+-type optional(T)       ::  T | undefined.
 -type nodestring()      ::  binary().
 
 
