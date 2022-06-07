@@ -435,7 +435,7 @@ pid(#bondy_ref{target = {name, Name}} = Ref) ->
     %% Also we only use gproc locally, if this ref is for another node then we
     %% do not have the session here.
     is_local(Ref) orelse error(not_my_node),
-    bondy:lookup_pid(Name);
+    bondy_gproc:lookup_pid(Name);
 
 pid(#bondy_ref{}) ->
     undefined.

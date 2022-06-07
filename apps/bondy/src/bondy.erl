@@ -50,21 +50,14 @@
 -export([call/5]).
 -export([cast/5]).
 -export([check_response/4]).
--export([lookup_pid/1]).
+-export([lrw_nodes/2]).
 -export([peek_via/1]).
 -export([prepare_send/2]).
 -export([prepare_send/3]).
--export([register/1]).
--export([register/2]).
--export([register/4]).
 -export([request/3]).
--export([select/1]).
 -export([send/3]).
 -export([send/4]).
 -export([take_via/1]).
--export([unregister/1]).
--export([unregister/2]).
--export([lrw_nodes/2]).
 
 
 
@@ -289,94 +282,6 @@ peek_via(#{via := Term}) ->
 
 peek_via(_) ->
     undefined.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec register(Name :: any()) -> true.
-
-register(Name) ->
-    gproc:reg({n, l, Name}).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec register(Name :: any(), Pid :: pid()) -> true.
-
-register(Name, Pid) ->
-    gproc:reg_other({n, l, Name}, Pid).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec register(Name :: any(), Pid :: pid(), Type :: atom(), Attr :: any()) ->
-    true.
-
-register(Name, Pid, Type, Attr) ->
-    GType = case Type of
-        aggregated_counter -> a;
-        counter -> c;
-        name -> n;
-        property -> p;
-        resource_counter -> rc;
-        resource_property -> r
-    end,
-    gproc:reg_other({GType, l, Name}, Pid, Attr).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec unregister(Name :: any()) -> true.
-
-unregister(Name) ->
-    gproc:unreg({n, l, Name}).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec unregister(Name :: any(), Type :: atom()) -> true.
-
-unregister(Name, Type) ->
-    GType = case Type of
-        aggregated_counter -> a;
-        counter -> c;
-        name -> n;
-        property -> p;
-        resource_counter -> rc;
-        resource_property -> r
-    end,
-    gproc:unreg({GType, l, Name}).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec lookup_pid(Name :: any()) -> true.
-
-lookup_pid(Name) ->
-    gproc:lookup_pid({n, l, Name}).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec select(MatchSpec :: ets:match_spec()) -> [any()].
-
-select(MatchSpec) ->
-    gproc:select({l, resources}, MatchSpec).
-
 
 
 %% =============================================================================

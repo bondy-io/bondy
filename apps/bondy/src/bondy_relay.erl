@@ -172,7 +172,7 @@ forward(Nodes, Msg, Opts) when is_list(Nodes) ->
 
 
 init([]) ->
-    true = bondy:register(?MODULE),
+    true = bondy_gproc:register(?MODULE),
     {ok, #state{ref = bondy_ref:new(relay)}}.
 
 

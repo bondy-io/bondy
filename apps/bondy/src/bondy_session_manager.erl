@@ -146,7 +146,7 @@ handle_call({open, Session}, _From, State0) ->
     Pid = bondy_session:pid(Session),
 
     %% We register the session owner (pid) under the session key
-    true = bondy:register({bondy_session, Id}, Pid),
+    true = bondy_gproc:register({bondy_session, Id}, Pid),
 
     %% We monitor the session owner (pid) so that we can cleanup when the
     %% process terminates

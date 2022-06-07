@@ -678,9 +678,9 @@ do_subscribe(RealmUri, Opts0, Topic, Bridge, Action0, State) ->
         ),
 
         %% Add to registry and set properties so that we can perform queries
-        true = bondy:register({subscriber, Id}, Pid),
-        true = bondy:register(subscription_id, Pid, resource_property, Id),
-        true = bondy:register(
+        true = bondy_gproc:register({subscriber, Id}, Pid),
+        true = bondy_gproc:register(subscription_id, Pid, resource_property, Id),
+        true = bondy_gproc:register(
             bondy_broker_bridge, Pid, resource_property, Bridge
         ),
 
@@ -724,7 +724,7 @@ subscribers(Bridge) ->
         [],
         ['$1']
     }],
-    bondy:select(MatchSpec).
+    bondy_gproc:select(MatchSpec).
 
 
 %% @private
