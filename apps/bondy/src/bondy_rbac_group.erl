@@ -129,6 +129,7 @@
 -export([new/1]).
 -export([normalise_name/1]).
 -export([remove/2]).
+-export([remove_all/2]).
 -export([remove_group/3]).
 -export([remove_groups/3]).
 -export([to_external/1]).
@@ -372,6 +373,36 @@ remove(RealmUri, Name) ->
         throw:Reason ->
             {error, Reason}
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Removes all groups that beloong to realm `RealmUri'.
+%% If the option `dirty` is set to `true` this removes the groups directly from
+%% store (triggering a brodcast to other Bondy nodes). If set to `false` (the
+%% default) then for each group the function remove/2 is called.
+%%
+%% Use `dirty' with a value of `true' onl when you are removing the realm
+%% entirely.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove_all(uri(), #{dirty => boolean()}) -> ok.
+
+remove_all(RealmUri, Opts) ->
+    Dirty = maps:get(dirty, Opts, false),
+    Prefix = ?PLUMDB_PREFIX(RealmUri),
+    FoldOpts = [{keys_only, true} | {remove_tombstones, true}],
+
+    _ = plum_db:foreach(
+        fun
+            (Name) when Dirty == true ->
+                _ = plum_db:delete(Prefix, Name);
+            (Name) ->
+                _ = remove(RealmUri, Name)
+        end,
+        Prefix,
+        FoldOpts
+    ),
+    ok.
 
 
 %% -----------------------------------------------------------------------------
