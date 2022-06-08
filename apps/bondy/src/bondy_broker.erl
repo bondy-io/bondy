@@ -733,9 +733,11 @@ do_publish(RealmUri, Subscriptions, MakeEvent, Origin) ->
     Fun = fun(Entry, {RelayAcc0, NodeAcc0}) ->
         Subscriber = bondy_registry_entry:ref(Entry),
         IsLocal = bondy_ref:is_local(Subscriber),
+        IsCallback = undefined =/= bondy_ref:callback(Subscriber),
         Publish =
             case bondy_registry_entry:find_option(group_id, Entry) of
                 {ok, _} when Origin == remote ->
+                    %% Support for Broker Bridge functionality
                     %% We MUST not publish or forward if Subscriber is in a
                     %% group and the message has been forwarded, as the
                     %% instance of this subscriber local to the Publisher must
@@ -745,8 +747,15 @@ do_publish(RealmUri, Subscriptions, MakeEvent, Origin) ->
                     true
             end,
 
-        case {Publish, IsLocal} of
-            {true, true} ->
+        case {Publish, IsLocal, IsCallback} of
+            {true, true, true} ->
+                ?LOG_INFO(#{description => "CB Subscriber!!!!!!"}),
+                Event = MakeEvent(bondy_registry_entry:id(Entry)),
+                CBArgs = bondy_registry_entry:callback_args(Entry),
+                ok = apply_dynamic_callback(Event, Subscriber, CBArgs),
+                {RelayAcc0, NodeAcc0};
+
+            {true, true, false} ->
                 case bondy_ref:is_bridge_relay(Subscriber) of
                     true ->
                         {[Subscriber|RelayAcc0], NodeAcc0};
@@ -757,7 +766,7 @@ do_publish(RealmUri, Subscriptions, MakeEvent, Origin) ->
                         {RelayAcc0, NodeAcc0}
                 end;
 
-            {true, false} ->
+            {true, false, _} ->
                 %% A remote subscriber in a peer cluster node.
                 %% We just acummulate the subscribers per node, later we will
                 %% forward a single message to each node.
@@ -767,7 +776,7 @@ do_publish(RealmUri, Subscriptions, MakeEvent, Origin) ->
                 ),
                 {RelayAcc0, NodeAcc};
 
-            {false, _} ->
+            {false, _, _} ->
                 {RelayAcc0, NodeAcc0}
         end
     end,
@@ -1023,3 +1032,44 @@ send_retained(Entry) ->
         end,
         Matches
     ).
+
+
+%% @private
+-spec apply_dynamic_callback(wamp_event(), bondy_ref:t(), [any()]) ->
+    wamp_result() | wamp_error().
+
+apply_dynamic_callback(#event{} = Msg, Subscriber, CBArgs) ->
+    {M, F} = bondy_ref:callback(Subscriber),
+
+    A = lists:append([
+        args_to_list(CBArgs),
+        args_to_list(Msg#event.args),
+        args_to_list(Msg#event.kwargs),
+        args_to_list(Msg#event.details)
+    ]),
+
+    try
+        erlang:apply(M, F, A)
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error while publishing event to subscriber",
+                subscriber => Subscriber,
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            ok
+    end.
+
+
+%% @private
+args_to_list(undefined) ->
+    [];
+
+args_to_list(L) when is_list(L) ->
+    L;
+
+args_to_list(M) when is_map(M) ->
+    [M].
+
