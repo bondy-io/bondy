@@ -36,6 +36,8 @@
 -define(ADMIN_HTTPS, admin_api_https).
 
 -record(state, {
+    %% Use for WAMP subscriptions
+    bondy_ref               ::  bondy_ref:t(),
     exchange_ref            ::  {pid(), reference()} | undefined,
     updated_specs = []      ::  list(),
     subscriptions = #{}     ::  #{id() => uri()}
@@ -275,7 +277,9 @@ delete(Id) when is_binary(Id) ->
 
 
 init([]) ->
-    State = subscribe(#state{}),
+    SessionId = bondy_session_id:new(),
+    Ref = bondy_ref:new(internal, self(), SessionId),
+    State = subscribe(#state{bondy_ref = Ref}),
     {ok, State}.
 
 
@@ -318,17 +322,7 @@ handle_call(Event, From, State) ->
     {reply, {error, {unsupported_call, Event}}, State}.
 
 
-handle_cast(#event{} = Event, State) ->
-    %% We informally implement bondy_subscriber
-    Id = Event#event.subscription_id,
-    Topic = maps:get(Id, State#state.subscriptions, undefined),
-    NewState = case {Topic, Event#event.args} of
-        {undefined, _} ->
-            State;
-        {?BONDY_REALM_DELETED, [Uri]} ->
-            on_realm_deleted(Uri, State)
-    end,
-    {noreply, NewState};
+
 
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
@@ -401,6 +395,18 @@ handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State0) ->
             {noreply, State1}
     end;
 
+handle_info({?BONDY_REQ, _, ?MASTER_REALM_URI, #event{} = Event}, State) ->
+    %% We informally implement bondy_subscriber
+    Id = Event#event.subscription_id,
+    Topic = maps:get(Id, State#state.subscriptions, undefined),
+    NewState = case {Topic, Event#event.args} of
+        {undefined, _} ->
+            State;
+        {?BONDY_REALM_DELETED, [Uri]} ->
+            on_realm_deleted(Uri, State)
+    end,
+    {noreply, NewState};
+
 handle_info(
     {'DOWN', Ref, process, Pid, _Reason},
     #state{exchange_ref = {Pid, Ref}} = State0) ->
@@ -468,11 +474,14 @@ subscribe(State) ->
             subscription_id => bondy_utils:gen_message_id(global),
             match => <<"exact">>
         },
-        ?BONDY_REALM_DELETED
+        ?BONDY_REALM_DELETED,
+        State#state.bondy_ref
     ),
     Subs = maps:put(Id, ?BONDY_REALM_DELETED, State#state.subscriptions),
 
-    State#state{subscriptions = Subs}.
+    State#state{
+        subscriptions = Subs
+    }.
 
 
 %% @private
@@ -1055,5 +1064,5 @@ normalise(Opts0) ->
 %% @end
 %% -----------------------------------------------------------------------------
 on_realm_deleted(_RealmUri, State) ->
-    %% TODO
+    %% TODO: tear down all APIs for this realm
     State.
