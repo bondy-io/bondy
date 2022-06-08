@@ -125,6 +125,7 @@
 -export([meta/1]).
 -export([new_assignment/1]).
 -export([remove/3]).
+-export([remove_all/1]).
 -export([remove_all/2]).
 -export([to_external/1]).
 
@@ -239,6 +240,23 @@ remove(RealmUri, Usernames, CIDR) when is_list(Usernames) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Removes all sources from all users in realm identifier by uri
+%% `RealmUri'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove_all(RealmUri :: uri()) -> ok.
+
+remove_all(RealmUri) ->
+    Prefix  = ?PLUMDB_PREFIX(RealmUri),
+    Opts = [{remove_tombstones, true}, {keys_only, true}],
+
+    plum_db:foreach(
+        fun(Key) -> plum_db:delete(Prefix, Key) end,
+        Prefix,
+        Opts
+    ).
+
+%% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
@@ -246,15 +264,16 @@ remove(RealmUri, Usernames, CIDR) when is_list(Usernames) ->
 
 remove_all(RealmUri, Username) ->
     Prefix  = ?PLUMDB_PREFIX(RealmUri),
-    plum_db:fold(fun
-        ({{Id, _CIDR, _Method} = Key, _}, Acc) when Id == Username ->
-            plum_db:delete(Prefix, Key),
-            Acc;
-        ({{_, _, _}, _}, Acc) ->
-            Acc
+    Opts = [{remove_tombstones, true}, {keys_only, true}],
+
+    plum_db:foreach(fun
+        ({Id, _CIDR, _Method} = Key) when Id == Username ->
+            plum_db:delete(Prefix, Key);
+        (_) ->
+            ok
         end,
-        ok,
-        Prefix
+        Prefix,
+        Opts
     ).
 
 
