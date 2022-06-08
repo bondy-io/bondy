@@ -385,7 +385,7 @@ connected(info, timeout, #state{ping_sent = false} = State0) ->
 %     %% Here we do not return a timeout value as send_ping set an ah-hoc timer
 %     {keep_state, State1};
 
-connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, Msg}, State) ->
+connected(info, {?BONDY_REQ, _Pid, RealmUri, Msg}, State) ->
     ?LOG_DEBUG(#{
         description => "Received WAMP request we need to FWD to core",
         message => Msg

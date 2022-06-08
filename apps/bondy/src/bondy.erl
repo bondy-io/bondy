@@ -94,7 +94,7 @@ aae_exchanges() ->
     tuple().
 
 request(Pid, RealmUri, M) ->
-    {?BONDY_PEER_REQUEST, Pid, RealmUri, M}.
+    {?BONDY_REQ, Pid, RealmUri, M}.
 
 
 %% -----------------------------------------------------------------------------
@@ -341,11 +341,11 @@ call(Uri, Opts, Args, KWArgs, Ctxt0) ->
 
 check_response(Uri, ReqId, Timeout, Ctxt) ->
     receive
-        {?BONDY_PEER_REQUEST, _Pid, _RealmUri, #result{} = R}
+        {?BONDY_REQ, _Pid, _RealmUri, #result{} = R}
         when R#result.request_id == ReqId ->
             %% ok = bondy:ack(Pid, Ref),
             {ok, message_to_map(R)};
-        {?BONDY_PEER_REQUEST, _Pid, _RealmUri, #error{} = R}
+        {?BONDY_REQ, _Pid, _RealmUri, #error{} = R}
         when R#error.request_id == ReqId ->
             %% ok = bondy:ack(Pid, Ref),
             {error, message_to_map(R)};

@@ -257,7 +257,7 @@ connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
     }),
     {stop, Reason};
 
-connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, M}, State) ->
+connected(info, {?BONDY_REQ, _Pid, RealmUri, M}, State) ->
     %% A local bondy:send(), we need to forward to edge client
     ?LOG_DEBUG(#{
         description => "Received WAMP request we need to FWD to edge",
