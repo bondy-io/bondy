@@ -689,8 +689,10 @@ do_publish(#publish{} = M, Ctxt) ->
 
     %% We create a high order fun that will generate the event for each
     %% subscription_id
+    Template = wamp_message:event(0, PubId, Details, Args, KWArgs),
+
     MakeEvent = fun(SubsId) ->
-        wamp_message:event(SubsId, PubId, Details, Args, KWArgs)
+        wamp_message:copy_event(Template, SubsId)
     end,
 
     %% If retained options is provided the message will be retained, this is
