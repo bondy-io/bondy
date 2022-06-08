@@ -609,6 +609,15 @@
 
 }).
 
+-define(DELETE_OPTS, #{
+    force => #{
+        alias => <<"force">>,
+        key => force,
+        required => true,
+        default => false,
+        datatype => boolean
+    }
+}).
 
 -record(realm, {
     uri                             ::  uri(),
@@ -634,6 +643,7 @@
 -type kid()                         ::  binary().
 -type keymap()                      ::  #{kid() => map()}.
 -type keyset()                      ::  [map()].
+-type delete_opts()                 ::  #{force => boolean()}.
 -type external()                    ::  #{
     uri                     :=  uri(),
     is_prototype            :=  boolean(),
@@ -656,6 +666,7 @@
 -export([authmethods/1]).
 -export([create/1]).
 -export([delete/1]).
+-export([delete/2]).
 -export([description/1]).
 -export([disable_security/1]).
 -export([enable_security/1]).
@@ -1349,12 +1360,52 @@ update(Uri, Data) when is_binary(Uri) ->
 -spec delete(t() | uri()) ->
     ok | {error, not_found | active_users} | no_return().
 
-delete(#realm{uri = Uri}) ->
+delete(Term) ->
+    delete(Term, #{force => false}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec delete(t() | uri(), delete_opts()) ->
+    ok | {error, not_found | active_users} | no_return().
+
+delete(#realm{uri = Uri}, Opts0) ->
     %% Cannot delete master and internal realms
     Uri =/= ?MASTER_REALM_URI andalso Uri =/= ?CONTROL_REALM_URI
     orelse error(badarg),
 
-    %% TODO implement this process
+    Opts = maps_utils:validate(Opts0, ?DELETE_OPTS),
+    Force = maps:get(force, Opts),
+
+    %% If there are users in the realm, the caller will need to first
+    %% explicitely delete the users
+    case bondy_rbac_user:list(Uri, #{limit => 1}) of
+        L when Force == true orelse length(L) == 0 ->
+            plum_db:delete(?PLUM_DB_PREFIX(Uri), Uri),
+            ok = async_flush_realm(Uri, Opts),
+            ok = on_delete(Uri),
+            %% TODO we need to close all sessions for this realm
+            %% and send error wamp.close.close_realm
+            %% We need to send this to all nodes
+            ok;
+        L when length(L) > 0 ->
+            {error, active_users}
+    end;
+
+delete(Uri, Opts) when is_binary(Uri) ->
+    case lookup(Uri) of
+        #realm{} = Realm ->
+            delete(Realm, Opts);
+        {error, not_found} = Error ->
+            Error
+    end.
+
+
+%% @private
+async_flush_realm(_Uri, _Opts) ->
+    %% TODO implement this as a durable FSM
     %% 1. Send command to all nodes to delete realm. We need to avoid
     %% replicating all the plum_db state for all the deletes we are about to do
     %% and use a single command that performs the following steps on each node.
@@ -1365,29 +1416,11 @@ delete(#realm{uri = Uri}) ->
     %% 4. delete all grants
     %% 5. delete all sources
     %% 6. delete all groups
+    %% bondy_rbac_group:remove_all(RealmUri, #{dirty => true}),
     %% 7. delete all users
+    %% bondy_rbac_user:remove_all(RealmUri, #{dirty => true}),
     %% 8. delete realm
-
-    %% If there are users in the realm, the caller will need to first
-    %% explicitely delete the users
-    case bondy_rbac_user:list(Uri, #{limit => 1}) of
-        [] ->
-            plum_db:delete(?PLUM_DB_PREFIX(Uri), Uri),
-            ok = on_delete(Uri),
-            %% TODO we need to close all sessions for this realm
-            %% and send error wamp.close.close_realm
-            ok;
-        L when length(L) > 0 ->
-            {error, active_users}
-    end;
-
-delete(Uri) when is_binary(Uri) ->
-    case lookup(Uri) of
-        #realm{} = Realm ->
-            delete(Realm);
-        {error, not_found} = Error ->
-            Error
-    end.
+    ok.
 
 
 
