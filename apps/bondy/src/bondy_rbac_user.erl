@@ -674,7 +674,7 @@ remove(RealmUri, Username0) ->
 remove_all(RealmUri, Opts) ->
     Dirty = maps:get(dirty, Opts, false),
     Prefix = ?PLUMDB_PREFIX(RealmUri),
-    FoldOpts = [{keys_only, true} | {remove_tombstones, true}],
+    FoldOpts = [{keys_only, true} , {remove_tombstones, true}],
 
     _ = plum_db:foreach(
         fun
