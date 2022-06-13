@@ -189,6 +189,7 @@
 -export([revoke_group/2]).
 -export([revoke_user/2]).
 -export([user_grants/2]).
+-export([remove_all/1]).
 
 
 
@@ -550,6 +551,31 @@ when is_binary(Resource) orelse Resource =:= any ->
                     {false, Mssg, Ctxt}
             end
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove_all(RealmUri :: uri()) -> ok.
+
+remove_all(RealmUri) ->
+    Opts = [{remove_tombstones, true}, {keys_only, true}],
+
+    Users = ?PLUMDB_PREFIX(RealmUri, user),
+    ok = plum_db:foreach(
+        fun(Key) -> plum_db:delete(Users, Key) end,
+        Users,
+        Opts
+    ),
+
+    Groups = ?PLUMDB_PREFIX(RealmUri, group),
+    ok = plum_db:foreach(
+        fun(Key) -> plum_db:delete(Groups, Key) end,
+        Groups,
+        Opts
+    ).
+
 
 
 %% =============================================================================

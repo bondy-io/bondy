@@ -35,6 +35,7 @@
 -export([pool_size/0]).
 -export([open/3]).
 -export([close/2]).
+-export([close_all/2]).
 
 
 %% GEN_SERVER CALLBACKS
@@ -129,6 +130,17 @@ close(Session, Reason) ->
     gen_server:cast(Name, {close, Session, Reason}).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Closes all managed sessions in realm with URI `RealmUri'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec close_all(Realm :: uri(), atom()) -> ok.
+
+close_all(RealmUri, Reason) ->
+    Name = gproc_pool:pick_worker(pool(), RealmUri),
+    gen_server:cast(Name, {close_all, RealmUri, Reason}).
+
+
 
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
@@ -204,6 +216,40 @@ handle_cast({close, Session, Reason}, State0) ->
     ok = bondy_session:close(Session),
 
     {noreply, State};
+
+
+handle_cast({close_all, RealmUri, _Reason}, State0) ->
+    M = wamp_message:goodbye(
+        #{
+            message => <<"The realm is being closed">>,
+            description => <<"The realm you were connected to was deleted by the administrator.">>
+        },
+        ?WAMP_CLOSE_REALM
+    ),
+
+    Fun = fun
+        ({continue, Cont}) ->
+            try
+                bondy_session:list_refs(Cont)
+            catch
+                Class:Reason:Stacktrace ->
+                    ?LOG_ERROR(#{
+                        description => "Error while shutting down router",
+                        class => Class,
+                        reason => Reason,
+                        stacktrace => Stacktrace
+                    }),
+                    []
+            end;
+        ({Uri, Ref}) ->
+            catch bondy:send(Uri, Ref, M),
+            ok
+    end,
+
+    %% We loop with batches of 100
+    ok = bondy_utils:foreach(Fun, bondy_session:list_refs(RealmUri, 100)),
+
+    {noreply, State0};
 
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{

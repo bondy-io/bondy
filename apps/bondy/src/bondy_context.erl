@@ -153,9 +153,20 @@ new() ->
 local_context(RealmUri) when is_binary(RealmUri) ->
     Ctxt = new(),
 
+    SecurityEnabled =
+        try
+            bondy_realm:is_security_enabled(RealmUri)
+        catch
+            _:_ ->
+                %% Case when the realm has been removed, it is fine as we only
+                %% use this call for internal reasons
+                true
+        end,
+
+
     Ctxt#{
         realm_uri => RealmUri,
-        security_enabled => bondy_realm:is_security_enabled(RealmUri),
+        security_enabled => SecurityEnabled,
         authid => '$internal'
     }.
 

@@ -340,6 +340,8 @@ handle_outbound(#goodbye{} = M, St0) ->
     ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
     Bin = wamp_encoding:encode(M, encoding(St0)),
     St1 = St0#wamp_state{state_name = shutting_down},
+    %% We use a timeout to make sure we kill the connection even if the client
+    %% doesn't reply.
     {stop, Bin, St1, ?SHUTDOWN_TIMEOUT};
 
 handle_outbound(M, St) ->
@@ -1066,5 +1068,8 @@ reason_uri_to_atom(<<"wamp.close.", _/binary>>) ->
     normal;
 
 reason_uri_to_atom(<<"wamp.error.", _/binary>>) ->
-    error.
+    error;
+
+reason_uri_to_atom(Term) when is_atom(Term) ->
+    Term.
 

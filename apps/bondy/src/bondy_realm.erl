@@ -702,6 +702,10 @@
 -export([uri/1]).
 -export([strip_private_keys/1]).
 
+-export([suspend/1]).
+-export([resume/1]).
+
+
 -export([grants/1]).
 -export([grants/2]).
 -export([groups/1]).
@@ -931,6 +935,47 @@ allow_connections(#realm{allow_connections = Val}) ->
 
 allow_connections(Uri) when is_binary(Uri) ->
     allow_connections(fetch(Uri)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Sets allow_connections to false.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec suspend(Realm :: t() | uri()) -> boolean().
+
+suspend(#realm{} = Realm) ->
+    case is_prototype(Realm) of
+        true ->
+            false;
+        false ->
+            _ = update(Realm, #{allow_connections => false}),
+            true
+    end;
+
+suspend(Uri) when is_binary(Uri) ->
+    suspend(fetch(Uri)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Sets allow_connections to true.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec resume(Realm :: t() | uri()) -> boolean() | no_return().
+
+resume(#realm{} = Realm) ->
+    case is_prototype(Realm) of
+        true ->
+            %% No need to update as prototype realms do not allow connections
+            %% by design, but we return true to make this call idempotent.
+            true;
+        false ->
+            _ = update(Realm, #{allow_connections => true}),
+            true
+    end;
+
+resume(Uri) when is_binary(Uri) ->
+    resume(fetch(Uri)).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -1365,33 +1410,51 @@ delete(Term) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Deletes the realm and all its associated resources in case the realm
+%% has no users or the option `force' was passed with a value of `true'.
+%% Calls bondy_realm_manager:close/2 which amongst other cleanup tasks should
+%% kick out all opened sessions attached to the realm.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec delete(t() | uri(), delete_opts()) ->
     ok | {error, not_found | active_users} | no_return().
 
-delete(#realm{uri = Uri}, Opts0) ->
+delete(#realm{uri = Uri} = Realm, Opts0) ->
+    %% TODO What is this is master realm? or prototype? or SSO?
+
     %% Cannot delete master and internal realms
-    Uri =/= ?MASTER_REALM_URI andalso Uri =/= ?CONTROL_REALM_URI
-    orelse error(badarg),
+    Uri =/= ?MASTER_REALM_URI
+        andalso Uri =/= ?CONTROL_REALM_URI
+        orelse error(badarg),
 
     Opts = maps_utils:validate(Opts0, ?DELETE_OPTS),
-    Force = maps:get(force, Opts),
+    Force = maps:get(force, Opts, false),
 
-    %% If there are users in the realm, the caller will need to first
-    %% explicitely delete the users
     case bondy_rbac_user:list(Uri, #{limit => 1}) of
-        L when Force == true orelse length(L) == 0 ->
+        {L, _Cont} when length(L) > 0 andalso Force == false ->
+            %% If there are users in the realm, the caller will need to first
+            %% explicitely delete the users
+            {error, active_users};
+        _ ->
+            %% Prevent new connections
+            _ = suspend(Realm),
+
+            %% We kick out all the local sessions
+            %% Tell the local manager so that if can kick out the session and
+            %% perform any other cleanup task. This is performed async.
+            ok = bondy_realm_manager:close(Uri, deleted),
+
+            %% We synchronously delete the realm.
+            %% This will be replicated and each node's bondy_realm_manager will
+            %% handle the update (either due to a broadcast or an AAE exchange)
+            %% and will close the realm
             plum_db:delete(?PLUM_DB_PREFIX(Uri), Uri),
+
+            %% We order the removal of all associated data
             ok = async_flush_realm(Uri, Opts),
-            ok = on_delete(Uri),
-            %% TODO we need to close all sessions for this realm
-            %% and send error wamp.close.close_realm
-            %% We need to send this to all nodes
-            ok;
-        L when length(L) > 0 ->
-            {error, active_users}
+
+            %% We notify
+            ok = on_delete(Uri)
     end;
 
 delete(Uri, Opts) when is_binary(Uri) ->
@@ -1404,22 +1467,24 @@ delete(Uri, Opts) when is_binary(Uri) ->
 
 
 %% @private
-async_flush_realm(_Uri, _Opts) ->
+async_flush_realm(Uri, _Opts) ->
     %% TODO implement this as a durable FSM
-    %% 1. Send command to all nodes to delete realm. We need to avoid
-    %% replicating all the plum_db state for all the deletes we are about to do
-    %% and use a single command that performs the following steps on each node.
-    %% 2. disallow new connections to this realm
-    %% ok = plum_db:put(?PLUM_DB_PREFIX(Uri), Uri, Realm#realm{allow_connections = false}),
-    %% 3. Close all existing sessions (in all nodes)
-    %% with wamp.close.close_realm URI reason
-    %% 4. delete all grants
-    %% 5. delete all sources
-    %% 6. delete all groups
-    %% bondy_rbac_group:remove_all(RealmUri, #{dirty => true}),
-    %% 7. delete all users
-    %% bondy_rbac_user:remove_all(RealmUri, #{dirty => true}),
-    %% 8. delete realm
+    %% Delete all grants
+    ok = bondy_rbac:remove_all(Uri),
+
+    %% Delete all tickets
+    %% TODO
+    {error, not_implemented} = bondy_ticket:revoke_all(Uri),
+
+    %% Delete all sources
+    bondy_rbac_source:remove_all(Uri),
+
+    %% Delete all groups
+    bondy_rbac_group:remove_all(Uri, #{dirty => true}),
+
+    %% Delete all users
+    bondy_rbac_user:remove_all(Uri, #{dirty => true}),
+
     ok.
 
 
@@ -1985,8 +2050,7 @@ on_update(Realm) ->
 
 %% @private
 on_delete(Uri) ->
-    ok = bondy_event_manager:notify({realm_deleted, Uri}),
-    ok.
+    ok = bondy_event_manager:notify({realm_deleted, Uri}).
 
 
 %% @private
