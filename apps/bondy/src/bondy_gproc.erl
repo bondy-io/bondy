@@ -30,6 +30,7 @@
 -export([unregister/2]).
 -export([lookup_pid/1]).
 -export([select/1]).
+-export([select/2]).
 
 
 
@@ -121,8 +122,21 @@ lookup_pid(Name) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec select(MatchSpec :: ets:match_spec()) -> [any()].
+-spec select(Term :: ets:match_spec() | ets:continuation()) -> [any()].
 
-select(MatchSpec) ->
-    gproc:select({l, resources}, MatchSpec).
+select(Term) when is_list(Term) ->
+    gproc:select({l, resources}, Term).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec select(MatchSpec :: ets:match_spec(), Limit :: integer()) ->
+    {[any()], Continuation :: ets:continuation()} | '$end_of_table'.
+
+
+select(MatchSpec, Limit) ->
+    gproc:select({l, resources}, MatchSpec, Limit).
 
