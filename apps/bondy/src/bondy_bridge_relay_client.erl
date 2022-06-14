@@ -36,16 +36,16 @@
 
 
 -record(state, {
-    config                  ::  bondy_bridge_relay:t(),
     transport               ::  gen_tcp | ssl,
     endpoint                ::  {inet:ip_address(), inet:port_number()},
+    config                  ::  bondy_bridge_relay:t(),
     socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
     idle_timeout            ::  pos_integer(),
-    reconnect_retry         ::  optional(bondy_retry:t()),
-    reconnect_retry_reason  ::  optional(any()),
     ping_retry              ::  optional(bondy_retry:t()),
     ping_retry_tref         ::  optional(timer:ref()),
-    ping_sent               ::  optional({Ref :: timer:ref(), Data :: binary()}),
+    ping_sent               ::  optional({timer:ref(), binary()}),
+    reconnect_retry         ::  optional(bondy_retry:t()),
+    reconnect_retry_reason  ::  optional(any()),
     hibernate = false       ::  boolean(),
     sessions = #{}          ::  sessions(),
     sessions_by_uri = #{}   ::  #{uri() => bondy_session_id:t()},

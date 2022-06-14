@@ -44,13 +44,12 @@
     socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
     idle_timeout            ::  pos_integer(),
     ping_retry              ::  optional(bondy_retry:t()),
-    ping_tref               ::  optional(timer:ref()),
-    ping_sent               ::  optional({Ref :: timer:ref(), Data :: binary()}),
-    sessions = #{}          ::  #{id() => bondy_bridge_relay_session:t()},
-    sessions_by_uri = #{}   ::  #{uri() => id()},
-    registrations = #{}     ::  reg_indx(),
+    ping_retry_tref         ::  optional(timer:ref()),
+    ping_sent               ::  optional({timer:ref(), binary()}),
+    sessions = #{}          ::  #{id() => bondy_session:t()},
+    sessions_by_realm = #{} ::  #{uri() => id()},
     session                 ::  optional(map()),
-    auth_realm              ::  binary(),
+    registrations = #{}     ::  reg_indx(),
     start_ts                ::  pos_integer()
 }).
 
@@ -289,10 +288,12 @@ connected({call, From}, Request, State) ->
 
     {keep_state_and_data, [idle_timeout(State)]};
 
+%% TODO forward_message or forward?
 connected(cast, {forward_message, Msg}, State) ->
     ok = send_message(Msg, State),
     {keep_state_and_data, [idle_timeout(State)]};
 
+%% TODO forward_message or forward?
 connected(cast, {forward, Msg}, State) ->
     ok = send_message(Msg, State),
     {keep_state_and_data, [idle_timeout(State)]};
@@ -334,14 +335,15 @@ challenge(Realm, Details, State0) ->
         State0#state.transport, State0#state.socket
     ),
     Sessions0 = State0#state.sessions,
-    SessionsByUri0 = State0#state.sessions_by_uri,
+    SessionsByUri0 = State0#state.sessions_by_realm,
+
 
     Uri = bondy_realm:uri(Realm),
     SessionId = bondy_session_id:new(),
     Authid = maps:get(authid, Details),
-    Roles = maps:get(authroles, Details, []),
+    Authroles0 = maps:get(authroles, Details, []),
 
-    case bondy_auth:init(SessionId, Realm, Authid, Roles, Peer) of
+    case bondy_auth:init(SessionId, Realm, Authid, Authroles0, Peer) of
         {ok, AuthCtxt} ->
             %% TODO take it from conf
             ReqMethods = [<<"cryptosign">>],
@@ -365,7 +367,7 @@ challenge(Realm, Details, State0) ->
                     State = State0#state{
                         session = Session,
                         sessions = Sessions,
-                        sessions_by_uri = SessionsByUri
+                        sessions_by_realm = SessionsByUri
                     },
                     do_challenge(SessionId, Details, Method, State)
             end;
@@ -474,8 +476,7 @@ when Session =/= undefined ->
     %% Session already being established, wrong message
     Abort = {abort, protocol_violation, #{
         message => <<"You've sent the HELLO message twice">>
-    }},
-    ok = send_message(Abort, State),
+    }},    ok = send_message(Abort, State),
     {stop, normal, State};
 
 handle_message({hello, Uri, Details}, State0) ->
@@ -869,5 +870,5 @@ session_ref(SessionId, #state{sessions = Map}) ->
 
 
 %% @private
-session_id(RealmUri, #state{sessions_by_uri = Map}) ->
+session_id(RealmUri, #state{sessions_by_realm = Map}) ->
     maps:get(RealmUri, Map).
