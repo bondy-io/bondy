@@ -44,13 +44,12 @@
     socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
     idle_timeout            ::  pos_integer(),
     ping_retry              ::  optional(bondy_retry:t()),
-    ping_tref               ::  optional(timer:ref()),
-    ping_sent               ::  optional({Ref :: timer:ref(), Data :: binary()}),
-    sessions = #{}          ::  #{id() => bondy_bridge_relay_session:t()},
-    sessions_by_uri = #{}   ::  #{uri() => id()},
-    registrations = #{}     ::  reg_indx(),
+    ping_retry_tref         ::  optional(timer:ref()),
+    ping_sent               ::  optional({timer:ref(), binary()}),
+    sessions = #{}          ::  #{id() => bondy_session:t()},
+    sessions_by_realm = #{} ::  #{uri() => id()},
     session                 ::  optional(map()),
-    auth_realm              ::  binary(),
+    registrations = #{}     ::  reg_indx(),
     start_ts                ::  pos_integer()
 }).
 
@@ -257,7 +256,7 @@ connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
     }),
     {stop, Reason};
 
-connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, M}, State) ->
+connected(info, {?BONDY_REQ, _Pid, RealmUri, M}, State) ->
     %% A local bondy:send(), we need to forward to edge client
     ?LOG_DEBUG(#{
         description => "Received WAMP request we need to FWD to edge",
@@ -289,10 +288,12 @@ connected({call, From}, Request, State) ->
 
     {keep_state_and_data, [idle_timeout(State)]};
 
+%% TODO forward_message or forward?
 connected(cast, {forward_message, Msg}, State) ->
     ok = send_message(Msg, State),
     {keep_state_and_data, [idle_timeout(State)]};
 
+%% TODO forward_message or forward?
 connected(cast, {forward, Msg}, State) ->
     ok = send_message(Msg, State),
     {keep_state_and_data, [idle_timeout(State)]};
@@ -334,14 +335,15 @@ challenge(Realm, Details, State0) ->
         State0#state.transport, State0#state.socket
     ),
     Sessions0 = State0#state.sessions,
-    SessionsByUri0 = State0#state.sessions_by_uri,
+    SessionsByUri0 = State0#state.sessions_by_realm,
+
 
     Uri = bondy_realm:uri(Realm),
     SessionId = bondy_session_id:new(),
     Authid = maps:get(authid, Details),
-    Roles = maps:get(authroles, Details, []),
+    Authroles0 = maps:get(authroles, Details, []),
 
-    case bondy_auth:init(SessionId, Realm, Authid, Roles, Peer) of
+    case bondy_auth:init(SessionId, Realm, Authid, Authroles0, Peer) of
         {ok, AuthCtxt} ->
             %% TODO take it from conf
             ReqMethods = [<<"cryptosign">>],
@@ -365,7 +367,7 @@ challenge(Realm, Details, State0) ->
                     State = State0#state{
                         session = Session,
                         sessions = Sessions,
-                        sessions_by_uri = SessionsByUri
+                        sessions_by_realm = SessionsByUri
                     },
                     do_challenge(SessionId, Details, Method, State)
             end;
@@ -474,8 +476,7 @@ when Session =/= undefined ->
     %% Session already being established, wrong message
     Abort = {abort, protocol_violation, #{
         message => <<"You've sent the HELLO message twice">>
-    }},
-    ok = send_message(Abort, State),
+    }},    ok = send_message(Abort, State),
     {stop, normal, State};
 
 handle_message({hello, Uri, Details}, State0) ->
@@ -790,14 +791,13 @@ do_full_sync(SessionId, RealmUri, _Opts, _State0) ->
 
     Prefixes = [
         %% TODO We should NOT sync the priv keys!!
-        %% We might need to split the realm from the priv keys to simplify AAE
-        %% compare operation. But we should be doing some form of Key exchange
-        %% anyways
+        %% We might need to split the realm from the priv keys to enable a
+        %% AAE hash comparison.
         {?PLUM_DB_REALM_TAB, RealmUri},
         {?PLUM_DB_GROUP_TAB, RealmUri},
-        %% TODO we should not sync passwords!
-        %% We might need to split the password from the user object to simplify
-        %% AAE compare operation
+        %% TODO we should not sync passwords! We might need to split the
+        %% password from the user object and allow admin to enable sync or not
+        %% (e.g. WAMPSCRAM)
         {?PLUM_DB_USER_TAB, RealmUri},
         {?PLUM_DB_SOURCE_TAB, RealmUri},
         {?PLUM_DB_USER_GRANT_TAB, RealmUri},
@@ -811,8 +811,9 @@ do_full_sync(SessionId, RealmUri, _Opts, _State0) ->
     _ = lists:foreach(
         fun(Prefix) ->
             lists:foreach(
-                fun(O) ->
-                    Msg = {aae_data, SessionId, O},
+                fun(Obj0) ->
+                    Obj = prepare_object(Obj0),
+                    Msg = {aae_data, SessionId, Obj},
                     gen_statem:cast(Me, {forward_message, Msg})
                 end,
                 pdb_objects(Prefix)
@@ -821,6 +822,19 @@ do_full_sync(SessionId, RealmUri, _Opts, _State0) ->
         Prefixes
     ),
     ok.
+
+
+%% @private
+prepare_object(Obj) ->
+    case bondy_realm:is_type(Obj) of
+        true ->
+            %% A temporary hack to prevent keys being synced with an Edge
+            %% router. We will use this until be implement partial replication
+            %% and decide on Key management strategies.
+            bondy_realm:strip_private_keys(Obj);
+        false ->
+            Obj
+    end.
 
 
 pdb_objects(FullPrefix) ->
@@ -856,5 +870,5 @@ session_ref(SessionId, #state{sessions = Map}) ->
 
 
 %% @private
-session_id(RealmUri, #state{sessions_by_uri = Map}) ->
+session_id(RealmUri, #state{sessions_by_realm = Map}) ->
     maps:get(RealmUri, Map).

@@ -53,6 +53,8 @@
 -define(REGISTRATION_TRIE, bondy_registration_trie).
 -define(TRIES, [?SUBSCRIPTION_TRIE, ?REGISTRATION_TRIE]).
 
+% -define(REGISTRATION_INDEX, bondy_registration_index).
+
 %% OTHER
 % -define(MAX_LIMIT, 10000).
 % -define(LIMIT(Opts), min(maps:get(limit, Opts, ?MAX_LIMIT), ?MAX_LIMIT)).
@@ -281,7 +283,7 @@ add(subscription = Type, Uri, Opts, RealmUri, Ref) ->
             ),
             do_add(Entry);
 
-        [{_, EntryKey}] ->
+        [{_, EntryKey}|_] ->
             %% In case of receiving a "SUBSCRIBE" message from the same
             %% _Subscriber_ and to already added topic, _Broker_ should
             %% answer with "SUBSCRIBED" message, containing the existing

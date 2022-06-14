@@ -55,8 +55,9 @@ handle_call(?BONDY_REALM_CREATE, M, Ctxt) ->
 
 handle_call(?BONDY_REALM_DELETE, M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
+    KWArgs = M#call.kwargs,
 
-    case bondy_realm:delete(Uri) of
+    case bondy_realm:delete(Uri, KWArgs) of
         ok ->
             R = wamp_message:result(M#call.request_id, #{}),
             {reply, R};

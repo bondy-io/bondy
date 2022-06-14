@@ -18,7 +18,7 @@
 -define(MASTER_REALM_URI, <<"com.leapsight.bondy">>).
 -define(CONTROL_REALM_URI, <<"com.leapsight.bondy.internal">>).
 
--define(BONDY_PEER_REQUEST, '$bondy_request').
+-define(BONDY_REQ, '$bondy_request').
 -define(BONDY_PEER_ACK, '$bondy_ack').
 
 %% In msecs

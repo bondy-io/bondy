@@ -609,6 +609,15 @@
 
 }).
 
+-define(DELETE_OPTS, #{
+    force => #{
+        alias => <<"force">>,
+        key => force,
+        required => true,
+        default => false,
+        datatype => boolean
+    }
+}).
 
 -record(realm, {
     uri                             ::  uri(),
@@ -622,7 +631,9 @@
     authmethods                     ::  optional([binary()]),
     security_enabled                ::  optional(boolean()),
     password_opts                   ::  optional(bondy_password:opts()),
-    private_keys = #{}              ::  keymap(),
+    %% it can be undefined when we strip the value only.
+    %% See strip_private_keys
+    private_keys = #{}              ::  optional(keymap()),
     public_keys = #{}               ::  keymap(),
     encryption_keys = #{}           ::  keymap(),
     info = #{}                      ::  map()
@@ -632,6 +643,7 @@
 -type kid()                         ::  binary().
 -type keymap()                      ::  #{kid() => map()}.
 -type keyset()                      ::  [map()].
+-type delete_opts()                 ::  #{force => boolean()}.
 -type external()                    ::  #{
     uri                     :=  uri(),
     is_prototype            :=  boolean(),
@@ -654,6 +666,7 @@
 -export([authmethods/1]).
 -export([create/1]).
 -export([delete/1]).
+-export([delete/2]).
 -export([description/1]).
 -export([disable_security/1]).
 -export([enable_security/1]).
@@ -674,6 +687,7 @@
 -export([is_prototype/1]).
 -export([is_security_enabled/1]).
 -export([is_sso_realm/1]).
+-export([is_type/1]).
 -export([is_value_inherited/2]).
 -export([list/0]).
 -export([lookup/1]).
@@ -686,6 +700,11 @@
 -export([to_external/1]).
 -export([update/2]).
 -export([uri/1]).
+-export([strip_private_keys/1]).
+
+-export([suspend/1]).
+-export([resume/1]).
+
 
 -export([grants/1]).
 -export([grants/2]).
@@ -724,6 +743,21 @@ description(#realm{description = Value}) ->
 
 description(Uri) when is_binary(Uri) ->
     description(fetch(Uri)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
+-spec is_type(Realm :: t() | uri()) -> boolean().
+
+is_type(#realm{}) ->
+    true;
+
+is_type(_) ->
+    false.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns `true' if realm `Realm' is a prototype. Otherwise, returns
@@ -904,6 +938,47 @@ allow_connections(Uri) when is_binary(Uri) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Sets allow_connections to false.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec suspend(Realm :: t() | uri()) -> boolean().
+
+suspend(#realm{} = Realm) ->
+    case is_prototype(Realm) of
+        true ->
+            false;
+        false ->
+            _ = update(Realm, #{allow_connections => false}),
+            true
+    end;
+
+suspend(Uri) when is_binary(Uri) ->
+    suspend(fetch(Uri)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Sets allow_connections to true.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec resume(Realm :: t() | uri()) -> boolean() | no_return().
+
+resume(#realm{} = Realm) ->
+    case is_prototype(Realm) of
+        true ->
+            %% No need to update as prototype realms do not allow connections
+            %% by design, but we return true to make this call idempotent.
+            true;
+        false ->
+            _ = update(Realm, #{allow_connections => true}),
+            true
+    end;
+
+resume(Uri) when is_binary(Uri) ->
+    resume(fetch(Uri)).
+
+
+
+%% -----------------------------------------------------------------------------
 %% @doc Returns the list of supported authentication methods for Realm.
 %%
 %% If the value is `undefined' and the realm has a prototype the prototype's
@@ -1056,6 +1131,10 @@ password_opts(RealmUri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec private_keys(t() | uri()) -> [map()].
+
+private_keys(#realm{private_keys = undefined}) ->
+    %% Special case when we strip the keys
+    [];
 
 private_keys(#realm{private_keys = Keys} = Realm0) when map_size(Keys) == 0 ->
     Realm = init_keys(Realm0),
@@ -1326,45 +1405,87 @@ update(Uri, Data) when is_binary(Uri) ->
 -spec delete(t() | uri()) ->
     ok | {error, not_found | active_users} | no_return().
 
-delete(#realm{uri = Uri}) ->
+delete(Term) ->
+    delete(Term, #{force => false}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Deletes the realm and all its associated resources in case the realm
+%% has no users or the option `force' was passed with a value of `true'.
+%% Calls bondy_realm_manager:close/2 which amongst other cleanup tasks should
+%% kick out all opened sessions attached to the realm.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec delete(t() | uri(), delete_opts()) ->
+    ok | {error, not_found | active_users} | no_return().
+
+delete(#realm{uri = Uri} = Realm, Opts0) ->
+    %% TODO What is this is master realm? or prototype? or SSO?
+
     %% Cannot delete master and internal realms
-    Uri =/= ?MASTER_REALM_URI andalso Uri =/= ?CONTROL_REALM_URI
-    orelse error(badarg),
+    Uri =/= ?MASTER_REALM_URI
+        andalso Uri =/= ?CONTROL_REALM_URI
+        orelse error(badarg),
 
-    %% TODO implement this process
-    %% 1. Send command to all nodes to delete realm. We need to avoid
-    %% replicating all the plum_db state for all the deletes we are about to do
-    %% and use a single command that performs the following steps on each node.
-    %% 2. disallow new connections to this realm
-    %% ok = plum_db:put(?PLUM_DB_PREFIX(Uri), Uri, Realm#realm{allow_connections = false}),
-    %% 3. Close all existing sessions (in all nodes)
-    %% with wamp.close.close_realm URI reason
-    %% 4. delete all grants
-    %% 5. delete all sources
-    %% 6. delete all groups
-    %% 7. delete all users
-    %% 8. delete realm
+    Opts = maps_utils:validate(Opts0, ?DELETE_OPTS),
+    Force = maps:get(force, Opts, false),
 
-    %% If there are users in the realm, the caller will need to first
-    %% explicitely delete the users
     case bondy_rbac_user:list(Uri, #{limit => 1}) of
-        [] ->
+        {L, _Cont} when length(L) > 0 andalso Force == false ->
+            %% If there are users in the realm, the caller will need to first
+            %% explicitely delete the users
+            {error, active_users};
+        _ ->
+            %% Prevent new connections
+            _ = suspend(Realm),
+
+            %% We kick out all the local sessions
+            %% Tell the local manager so that if can kick out the session and
+            %% perform any other cleanup task. This is performed async.
+            ok = bondy_realm_manager:close(Uri, deleted),
+
+            %% We synchronously delete the realm.
+            %% This will be replicated and each node's bondy_realm_manager will
+            %% handle the update (either due to a broadcast or an AAE exchange)
+            %% and will close the realm
             plum_db:delete(?PLUM_DB_PREFIX(Uri), Uri),
-            ok = on_delete(Uri),
-            %% TODO we need to close all sessions for this realm
-            %% and send error wamp.close.close_realm
-            ok;
-        L when length(L) > 0 ->
-            {error, active_users}
+
+            %% We order the removal of all associated data
+            ok = async_flush_realm(Uri, Opts),
+
+            %% We notify
+            ok = on_delete(Uri)
     end;
 
-delete(Uri) when is_binary(Uri) ->
+delete(Uri, Opts) when is_binary(Uri) ->
     case lookup(Uri) of
         #realm{} = Realm ->
-            delete(Realm);
+            delete(Realm, Opts);
         {error, not_found} = Error ->
             Error
     end.
+
+
+%% @private
+async_flush_realm(Uri, _Opts) ->
+    %% TODO implement this as a durable FSM
+    %% Delete all grants
+    ok = bondy_rbac:remove_all(Uri),
+
+    %% Delete all tickets
+    %% TODO
+    {error, not_implemented} = bondy_ticket:revoke_all(Uri),
+
+    %% Delete all sources
+    bondy_rbac_source:remove_all(Uri),
+
+    %% Delete all groups
+    bondy_rbac_group:remove_all(Uri, #{dirty => true}),
+
+    %% Delete all users
+    bondy_rbac_user:remove_all(Uri, #{dirty => true}),
+
+    ok.
 
 
 
@@ -1486,6 +1607,19 @@ to_external(#realm{} = R) ->
 
 to_external(RealmUri) ->
     to_external(fetch(RealmUri)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A temporary hack to prevent keys being synced with an Edge router. We
+%% will use this until be implement partial replication and decide on Key
+%% management strategies.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec strip_private_keys(t()) -> t().
+
+strip_private_keys(#realm{} = R) ->
+    R#realm{private_keys = undefined}.
+
 
 
 %% =============================================================================
@@ -1916,8 +2050,7 @@ on_update(Realm) ->
 
 %% @private
 on_delete(Uri) ->
-    ok = bondy_event_manager:notify({realm_deleted, Uri}),
-    ok.
+    ok = bondy_event_manager:notify({realm_deleted, Uri}).
 
 
 %% @private

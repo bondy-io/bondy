@@ -162,7 +162,7 @@
 -define(NOW, erlang:system_time(second)).
 -define(LEEWAY_SECS, 120). % 2 mins
 
-%% TODO revie, using a dynamic prefix is a bad idea, turn this into
+%% TODO review, using a dynamic prefix is a bad idea, turn this into
 %% {?PLUM_DB_TICKET_TAB, Realm} and use key composition which allow for
 %% iteration using first prefixes
 -define(PLUM_DB_PREFIX(L),
@@ -248,9 +248,15 @@
 -export([issue/2]).
 -export([lookup/3]).
 -export([revoke/1]).
+-export([revoke_all/1]).
 -export([revoke_all/2]).
 -export([revoke_all/3]).
 
+
+
+%% =============================================================================
+%% API
+%% =============================================================================
 
 
 
@@ -436,6 +442,19 @@ revoke(Claims) when is_map(Claims) ->
     %% TODO delete entry in authid index and maybe in client index depending on scope
     error(not_implemented).
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Revokes all tickets issued to all users in realm `RealmUri'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec revoke_all(RealmUri :: uri()) -> ok.
+
+revoke_all(_RealmUri) ->
+    %% We need to redefine storage layout
+    %% using a dynamic prefix is a bad idea, turn this into
+    %% {?PLUM_DB_TICKET_TAB, Realm} and use key composition which allow for
+    %% iteration using first prefixes
+    {error, not_implemented}.
 
 
 %% -----------------------------------------------------------------------------

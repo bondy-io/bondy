@@ -104,7 +104,7 @@ name(Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 pid(Id) ->
-    bondy:lookup_pid({?MODULE, Id}).
+    bondy_gproc:lookup_pid({?MODULE, Id}).
 
 
 %% -----------------------------------------------------------------------------
@@ -224,7 +224,7 @@ handle_cast(Event, State) ->
 
 
 handle_info(
-    {?BONDY_PEER_REQUEST, _Pid, _RealmUri, #event{} = WAMPEvent}, State) ->
+    {?BONDY_REQ, _Pid, _RealmUri, #event{} = WAMPEvent}, State) ->
     case do_handle_event(WAMPEvent, State) of
         {ok, NewState} ->
             {noreply, NewState};

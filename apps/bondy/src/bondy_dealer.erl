@@ -1050,7 +1050,7 @@ apply_dynamic_callback(#call{} = Msg, Callee, CBArgs) ->
     CallId = Msg#call.request_id,
 
     A = lists:append([
-        CBArgs,
+        args_to_list(CBArgs),
         args_to_list(Msg#call.args),
         args_to_list(Msg#call.kwargs),
         args_to_list(Msg#call.options)

@@ -218,7 +218,7 @@
 }).
 
 -record(state, {
-    nodename                        ::  binary(),
+    nodestring                        ::  binary(),
     broker_agent                    ::  binary(),
     bridges = #{}                   ::  #{module() => bridge()}
     %% Cluster sync state
@@ -363,7 +363,7 @@ init([]) ->
         [{Mod, #{id => Mod, config => Config}} || {Mod, Config} <- Bridges]
     ),
     State0 = #state{
-        nodename = list_to_binary(atom_to_list(bondy_config:node())),
+        nodestring = bondy_config:nodestring(),
         broker_agent = bondy_router:agent(),
         bridges = BridgesMap
     },
@@ -607,7 +607,7 @@ mops_ctxt(Event, RealmUri, _Opts, Topic, Bridge, State) ->
 
     Base#{
         <<"broker">> => #{
-            <<"node">> => State#state.nodename,
+            <<"node">> => State#state.nodestring,
             <<"agent">> => State#state.broker_agent
         },
         <<"event">> => CtxtEvent
@@ -663,7 +663,7 @@ do_subscribe(RealmUri, Opts0, Topic, Bridge, Action0, State) ->
                         throw({invalid_action, Reason})
                 end
         end,
-        %% We use bondy_broker subscribers, this is an intance of a
+        %% We use bondy_broker subscribers, this is an instance of a
         %% bondy_subscriber gen_server supervised by bondy_subscribers_sup.
         Opts = Opts0#{
             %% This tells bondy_broker that every node has an instance of this
@@ -671,16 +671,18 @@ do_subscribe(RealmUri, Opts0, Topic, Bridge, Action0, State) ->
             %% have been was published by a local Publisher and avoid
             %% processing forwarded events which would result in duplication.
             %% See bondy_broker:do_publish/4.
+            %% The group_id is the name (identifier) of the BrokerBridge
             group_id => Bridge
         },
+        %% REVIEW: Shall we pass a bondy_ref with a session ID here or use name
         {ok, Id, Pid} = Res = bondy_broker:subscribe(
             RealmUri, Opts, Topic, Fun
         ),
 
         %% Add to registry and set properties so that we can perform queries
-        true = bondy:register({subscriber, Id}, Pid),
-        true = bondy:register(subscription_id, Pid, resource_property, Id),
-        true = bondy:register(
+        true = bondy_gproc:register({subscriber, Id}, Pid),
+        true = bondy_gproc:register(subscription_id, Pid, resource_property, Id),
+        true = bondy_gproc:register(
             bondy_broker_bridge, Pid, resource_property, Bridge
         ),
 
@@ -724,7 +726,7 @@ subscribers(Bridge) ->
         [],
         ['$1']
     }],
-    bondy:select(MatchSpec).
+    bondy_gproc:select(MatchSpec).
 
 
 %% @private

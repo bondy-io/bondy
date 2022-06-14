@@ -39,7 +39,8 @@
     auth_context            ::  map() | undefined,
     auth_timestamp          ::  integer() | undefined,
     state_name = closed     ::  state_name(),
-    context                 ::  bondy_context:t() | undefined
+    context                 ::  bondy_context:t() | undefined,
+    goodbye_reason = normal ::  normal | logout
 }).
 
 
@@ -196,11 +197,14 @@ context(#wamp_state{context = Ctxt}) ->
 terminate(#wamp_state{context = undefined}) ->
     ok;
 
-terminate(#wamp_state{context = Ctxt}) ->
+terminate(#wamp_state{} = State) ->
+    Ctxt = State#wamp_state.context,
+    Reason = reason_uri_to_atom(State#wamp_state.goodbye_reason),
+
     case bondy_context:has_session(Ctxt) of
         true ->
             Session = bondy_context:session(Ctxt),
-            bondy_session_manager:close(Session);
+            bondy_session_manager:close(Session, Reason);
         false ->
             ok
     end,
@@ -336,6 +340,8 @@ handle_outbound(#goodbye{} = M, St0) ->
     ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
     Bin = wamp_encoding:encode(M, encoding(St0)),
     St1 = St0#wamp_state{state_name = shutting_down},
+    %% We use a timeout to make sure we kill the connection even if the client
+    %% doesn't reply.
     {stop, Bin, St1, ?SHUTDOWN_TIMEOUT};
 
 handle_outbound(M, St) ->
@@ -413,7 +419,7 @@ handle_inbound_messages(
     {stop, St1};
 
 handle_inbound_messages(
-    [#goodbye{}|_], #wamp_state{state_name = established} = St0, Acc) ->
+    [#goodbye{} = M|_], #wamp_state{state_name = established} = St0, Acc) ->
 
     %% Client initiated a goodbye, we ignore any subsequent messages
     %% We reply with all previous messages plus a goodbye and stop
@@ -422,8 +428,14 @@ handle_inbound_messages(
         ?WAMP_GOODBYE_AND_OUT
     ),
     Bin = wamp_encoding:encode(Reply, encoding(St0)),
-    ok = bondy_event_manager:notify({wamp, Reply, St0#wamp_state.context}),
-    St1 = St0#wamp_state{state_name = closed},
+
+    St1 = St0#wamp_state{
+        state_name = closed,
+        goodbye_reason = M#goodbye.reason_uri
+    },
+
+    ok = bondy_event_manager:notify({wamp, Reply, St1#wamp_state.context}),
+
     {stop, normal, lists:reverse([Bin|Acc]), St1};
 
 handle_inbound_messages(
@@ -1043,4 +1055,21 @@ update_process_metadata(#wamp_state{} = State) ->
         serializer => Serializer,
         peername => bondy_context:peername(Ctxt)
     }).
+
+
+%% @private
+reason_uri_to_atom(<<"wamp.close.normal">>) ->
+    normal;
+
+reason_uri_to_atom(<<"wamp.close.logout">>) ->
+    logout;
+
+reason_uri_to_atom(<<"wamp.close.", _/binary>>) ->
+    normal;
+
+reason_uri_to_atom(<<"wamp.error.", _/binary>>) ->
+    error;
+
+reason_uri_to_atom(Term) when is_atom(Term) ->
+    Term.
 

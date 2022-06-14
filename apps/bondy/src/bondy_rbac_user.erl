@@ -250,6 +250,7 @@
 -export([normalise_username/1]).
 -export([password/1]).
 -export([remove/2]).
+-export([remove_all/2]).
 -export([remove_alias/3]).
 -export([remove_group/3]).
 -export([remove_groups/3]).
@@ -657,6 +658,35 @@ remove(RealmUri, Username0) ->
             {error, Reason}
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Removes all users that beloong to realm `RealmUri'.
+%% If the option `dirty` is set to `true` this removes the user directly from
+%% store (triggering a brodcast to other Bondy nodes). If set to `false` (the
+%% default) then for each user the function remove/2 is called.
+%%
+%% Use `dirty' with a value of `true' onl when you are removing the realm
+%% entirely.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove_all(uri(), #{dirty => boolean()}) -> ok.
+
+remove_all(RealmUri, Opts) ->
+    Dirty = maps:get(dirty, Opts, false),
+    Prefix = ?PLUMDB_PREFIX(RealmUri),
+    FoldOpts = [{keys_only, true} , {remove_tombstones, true}],
+
+    _ = plum_db:foreach(
+        fun
+            (Name) when Dirty == true ->
+                _ = plum_db:delete(Prefix, Name);
+            (Name) ->
+                _ = remove(RealmUri, Name)
+        end,
+        Prefix,
+        FoldOpts
+    ),
+    ok.
 
 %% -----------------------------------------------------------------------------
 %% @doc

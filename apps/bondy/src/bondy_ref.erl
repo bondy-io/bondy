@@ -435,7 +435,7 @@ pid(#bondy_ref{target = {name, Name}} = Ref) ->
     %% Also we only use gproc locally, if this ref is for another node then we
     %% do not have the session here.
     is_local(Ref) orelse error(not_my_node),
-    bondy:lookup_pid(Name);
+    bondy_gproc:lookup_pid(Name);
 
 pid(#bondy_ref{}) ->
     undefined.
@@ -541,7 +541,6 @@ from_uri(Uri) ->
     end.
 
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
@@ -573,7 +572,7 @@ validate_target(Type, Target, AllowPattern) ->
             Val;
 
         {callback, {M, F}} = Val ->
-            Type == internal
+            (Type == internal orelse Type == '_')
                 andalso is_atom(M)
                 andalso is_atom(F)
                 orelse badtarget(Type, Target),
@@ -581,7 +580,7 @@ validate_target(Type, Target, AllowPattern) ->
             Val;
 
         {M, F} ->
-            Type == internal
+            (Type == internal orelse Type == '_')
                 andalso is_atom(M)
                 andalso is_atom(F)
                 orelse badtarget(Type, Target),

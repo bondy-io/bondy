@@ -36,16 +36,16 @@
 
 
 -record(state, {
-    config                  ::  bondy_bridge_relay:t(),
     transport               ::  gen_tcp | ssl,
     endpoint                ::  {inet:ip_address(), inet:port_number()},
+    config                  ::  bondy_bridge_relay:t(),
     socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
     idle_timeout            ::  pos_integer(),
-    reconnect_retry         ::  optional(bondy_retry:t()),
-    reconnect_retry_reason  ::  optional(any()),
     ping_retry              ::  optional(bondy_retry:t()),
     ping_retry_tref         ::  optional(timer:ref()),
-    ping_sent               ::  optional({Ref :: timer:ref(), Data :: binary()}),
+    ping_sent               ::  optional({timer:ref(), binary()}),
+    reconnect_retry         ::  optional(bondy_retry:t()),
+    reconnect_retry_reason  ::  optional(any()),
     hibernate = false       ::  boolean(),
     sessions = #{}          ::  sessions(),
     sessions_by_uri = #{}   ::  #{uri() => bondy_session_id:t()},
@@ -385,7 +385,7 @@ connected(info, timeout, #state{ping_sent = false} = State0) ->
 %     %% Here we do not return a timeout value as send_ping set an ah-hoc timer
 %     {keep_state, State1};
 
-connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, Msg}, State) ->
+connected(info, {?BONDY_REQ, _Pid, RealmUri, Msg}, State) ->
     ?LOG_DEBUG(#{
         description => "Received WAMP request we need to FWD to core",
         message => Msg

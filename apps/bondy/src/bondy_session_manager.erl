@@ -21,6 +21,7 @@
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy_security.hrl").
 
 
 -record(state, {
@@ -33,7 +34,8 @@
 -export([pool/0]).
 -export([pool_size/0]).
 -export([open/3]).
--export([close/1]).
+-export([close/2]).
+-export([close_all/2]).
 
 
 %% GEN_SERVER CALLBACKS
@@ -120,12 +122,23 @@ open(Id, RealmOrUri, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec close(bondy_session:t()) -> ok.
+-spec close(bondy_session:t(), atom()) -> ok.
 
-close(Session) ->
+close(Session, Reason) ->
     Uri = bondy_session:realm_uri(Session),
     Name = gproc_pool:pick_worker(pool(), Uri),
-    gen_server:cast(Name, {close, Session}).
+    gen_server:cast(Name, {close, Session, Reason}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Closes all managed sessions in realm with URI `RealmUri'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec close_all(Realm :: uri(), atom()) -> ok.
+
+close_all(RealmUri, Reason) ->
+    Name = gproc_pool:pick_worker(pool(), RealmUri),
+    gen_server:cast(Name, {close_all, RealmUri, Reason}).
 
 
 
@@ -145,7 +158,7 @@ handle_call({open, Session}, _From, State0) ->
     Pid = bondy_session:pid(Session),
 
     %% We register the session owner (pid) under the session key
-    true = bondy:register({bondy_session, Id}, Pid),
+    true = bondy_gproc:register({bondy_session, Id}, Pid),
 
     %% We monitor the session owner (pid) so that we can cleanup when the
     %% process terminates
@@ -173,7 +186,7 @@ handle_call(Event, From, State) ->
     {reply, {error, {unsupported_call, Event}}, State}.
 
 
-handle_cast({close, Session}, State0) ->
+handle_cast({close, Session, Reason}, State0) ->
     Id = bondy_session:id(Session),
     ExtId = bondy_session:external_id(Session),
     Uri = bondy_session:realm_uri(Session),
@@ -198,9 +211,45 @@ handle_cast({close, Session}, State0) ->
             }
     end,
 
+    ok = maybe_logout(Uri, Session, Reason),
+
     ok = bondy_session:close(Session),
 
     {noreply, State};
+
+
+handle_cast({close_all, RealmUri, _Reason}, State0) ->
+    M = wamp_message:goodbye(
+        #{
+            message => <<"The realm is being closed">>,
+            description => <<"The realm you were connected to was deleted by the administrator.">>
+        },
+        ?WAMP_CLOSE_REALM
+    ),
+
+    Fun = fun
+        ({continue, Cont}) ->
+            try
+                bondy_session:list_refs(Cont)
+            catch
+                Class:Reason:Stacktrace ->
+                    ?LOG_ERROR(#{
+                        description => "Error while shutting down router",
+                        class => Class,
+                        reason => Reason,
+                        stacktrace => Stacktrace
+                    }),
+                    []
+            end;
+        ({Uri, Ref}) ->
+            catch bondy:send(Uri, Ref, M),
+            ok
+    end,
+
+    %% We loop with batches of 100
+    ok = bondy_utils:foreach(Fun, bondy_session:list_refs(RealmUri, 100)),
+
+    {noreply, State0};
 
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
@@ -306,4 +355,20 @@ cleanup(Session) ->
     },
     %% We close the session too
     bondy_context:close(FakeCtxt, crash),
+    ok.
+
+
+%% @private
+maybe_logout(_Uri, Session, logout) ->
+
+    case bondy_session:authmethod(Session) of
+        ?WAMP_TICKET_AUTH ->
+            %% TODO remove ticket
+            ok;
+        ?WAMP_OAUTH2_AUTH ->
+            %% TODO remove token for sessionID
+            ok
+    end;
+
+maybe_logout(_, _, _) ->
     ok.
