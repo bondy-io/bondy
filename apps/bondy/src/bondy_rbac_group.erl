@@ -731,14 +731,12 @@ type_and_version(Group) ->
 ) -> ok | no_return().
 
 update_groups(RealmUri, all, Groupnames, Fun) ->
-    plum_db:fold(fun
-        ({_, [?TOMBSTONE]}, Acc) ->
-            Acc;
-        ({_, _} = Term, Acc) ->
-            ok = update_groups(RealmUri, from_term(Term), Groupnames, Fun),
-            Acc
+    plum_db:foreach(fun
+        ({_, [?TOMBSTONE]}) ->
+            ok;
+        ({_, _} = Term) ->
+            ok = update_groups(RealmUri, from_term(Term), Groupnames, Fun)
         end,
-        ok,
         ?PLUMDB_PREFIX(RealmUri),
         ?FOLD_OPTS
     );

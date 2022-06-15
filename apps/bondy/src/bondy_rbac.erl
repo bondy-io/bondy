@@ -448,13 +448,11 @@ revoke(RealmUri, Data) when is_map(Data) ->
 %% -----------------------------------------------------------------------------
 revoke_user(RealmUri, Username) ->
     Prefix = ?USER_GRANTS_PREFIX(RealmUri),
-    plum_db:fold(
-        fun({Key, _Value}, Acc) ->
+    plum_db:foreach(
+        fun({Key, _Value}) ->
             %% destructive iteration is allowed
-            ok = plum_db:delete(Prefix, Key),
-            Acc
+            ok = plum_db:delete(Prefix, Key)
         end,
-        ok,
         Prefix,
         [{match, {Username, '_'}}, {resolver, lww}]
     ).
