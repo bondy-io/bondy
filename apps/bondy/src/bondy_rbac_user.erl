@@ -1197,18 +1197,16 @@ update_credentials(RealmUri, Username, Data) ->
 ) -> ok | no_return().
 
 update_groups(RealmUri, all, Groupnames, Fun) ->
-    plum_db:fold(fun
-        ({_, ?TOMBSTONE}, Acc) ->
+    plum_db:foreach(fun
+        ({_, ?TOMBSTONE}) ->
             %% Deleted, we ignore it
-            Acc;
-        ({_, #{type := ?ALIAS_TYPE}}, Acc) ->
+            ok;
+        ({_, #{type := ?ALIAS_TYPE}}) ->
             %% An alias, we ignore it
-            Acc;
-        ({_, _} = Term, Acc) ->
-            ok = update_groups(RealmUri, from_term(Term), Groupnames, Fun),
-            Acc
+            ok;
+        ({_, _} = Term) ->
+            ok = update_groups(RealmUri, from_term(Term), Groupnames, Fun)
         end,
-        ok,
         ?PLUMDB_PREFIX(RealmUri),
         ?FOLD_OPTS
     );
