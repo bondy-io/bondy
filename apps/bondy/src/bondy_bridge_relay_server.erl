@@ -20,6 +20,12 @@
 %% @doc EARLY DRAFT implementation of the server-side connection between and
 %% edge node ({@link bondy_bridge_relay_client}) and a remote/core node
 %% (this module).
+%%
+%% == Configuration Options ==
+%% <ul>
+%% <li>auth_timeout - once the connection is established how long to wait for
+%% the client to send the HELLO message.</li>
+%% </ul>
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_bridge_relay_server).
@@ -42,6 +48,7 @@
     transport               ::  module(),
     opts                    ::  key_value:t(),
     socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
+    auth_timeout            ::  pos_integer(),
     idle_timeout            ::  pos_integer(),
     ping_retry              ::  optional(bondy_retry:t()),
     ping_retry_tref         ::  optional(timer:ref()),
@@ -124,11 +131,15 @@ callback_mode() ->
 %% @end
 %% -----------------------------------------------------------------------------
 init({RanchRef, Transport, Opts}) ->
+    AuthTimeout = key_value:get(auth_timeout, Opts, 5000),
+    IdleTimeout = key_value:get(idle_timeout, Opts, infinity),
+
     State0 = #state{
         ranch_ref = RanchRef,
         transport = Transport,
         opts = Opts,
-        idle_timeout = key_value:get(idle_timeout, Opts, infinity),
+        auth_timeout = AuthTimeout,
+        idle_timeout = IdleTimeout,
         start_ts = erlang:system_time(millisecond)
     },
 
@@ -144,10 +155,7 @@ init({RanchRef, Transport, Opts}) ->
             State0
     end,
 
-    %% How much time till we get
-    Timeout = key_value:get(auth_timeout, Opts, 5000),
-
-    {ok, connected, State, Timeout}.
+    {ok, connected, State, AuthTimeout}.
 
 
 %% -----------------------------------------------------------------------------
@@ -221,7 +229,7 @@ connected(enter, connected, State) ->
 
     ok = on_connect(State),
 
-    {keep_state, State#state{socket = Socket}, [idle_timeout(State)]};
+    {keep_state, State#state{socket = Socket}, [auth_timeout(State)]};
 
 
 connected(info, {Tag, Socket, Data}, #state{socket = Socket} = State)
@@ -462,6 +470,10 @@ on_connect(_State) ->
     ok.
 
 
+%% @private
+auth_timeout(State) ->
+    {timeout, State#state.auth_timeout, auth_timeout}.
+
 
 %% @private
 idle_timeout(State) ->
@@ -492,8 +504,11 @@ handle_message({hello, Uri, Details}, State0) ->
         bondy_realm:allow_connections(Realm)
             orelse throw(connections_not_allowed),
 
+        %% We send the challenge
         State = challenge(Realm, Details, State0),
-        {keep_state, State, [idle_timeout(State)]}
+
+        %% We wait for response and timeout using auth_timeout again
+        {keep_state, State, [auth_timeout(State)]}
 
     catch
         error:{not_found, Uri} ->
