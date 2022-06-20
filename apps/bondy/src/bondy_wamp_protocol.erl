@@ -624,7 +624,9 @@ open_session(Extra, St0) when is_map(Extra) ->
         },
 
         %% We open a session
-        Session = bondy_session_manager:open(SessionId0, RealmUri, Properties),
+        {ok, Session} = bondy_session_manager:open(
+            SessionId0, RealmUri, Properties
+        ),
 
         %% This might be different than the SessionId0 in case we found a
         %% collision while storing (almost impossible).
@@ -860,7 +862,7 @@ abort_message({no_authmethod, _Opts}) ->
 
 abort_message(connections_not_allowed) ->
     Details = #{
-        message => <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure added by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>
+        message => <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure taken by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>
     },
     wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
 

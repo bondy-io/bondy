@@ -858,6 +858,14 @@ parse_details(Opts, Session0)  when is_map(Opts) ->
 
 
 %% @private
+parse_details(id, V, Session) ->
+    case bondy_session_id:is_type(V) of
+        true ->
+            Session#session{id = V};
+        false ->
+            error({invalid_options, id})
+    end;
+
 parse_details(roles, undefined, _) ->
     error({invalid_options, missing_client_role});
 

@@ -33,6 +33,7 @@
 -export([start_link/2]).
 -export([pool/0]).
 -export([pool_size/0]).
+-export([open/1]).
 -export([open/3]).
 -export([close/2]).
 -export([close_all/2]).
@@ -83,8 +84,25 @@ pool_size() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% Creates a new session provided the RealmUri exists or can be dynamically
+%% @doc Stores the session `Session' and sets up a monitor for the calling
+%% process which is assummed to be the client connection process e.g. WAMP
+%% connection. In case the connection crashes it performs the cleanup of any
+%% session data that should not be retained.
+%% -----------------------------------------------------------------------------
+%%
+-spec open(Session :: bondy_session:t()) -> ok | no_return().
+
+open(Session) ->
+    RealmUri = bondy_session:realm_uri(Session),
+    Name = gproc_pool:pick_worker(pool(), RealmUri),
+    {ok, Session} = gen_server:call(Name, {open, Session}, 5000),
+    ok.
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Creates a new session provided the RealmUri exists or can be dynamically
 %% created.
 %% It calls {@link bondy_session:new/4} which will fail with an exception
 %% if the realm does not exist or cannot be created.
@@ -101,21 +119,10 @@ pool_size() ->
     bondy_session:t() | no_return().
 
 open(Id, RealmOrUri, Opts) ->
-    %% We store the session
-    Session0 = bondy_session:new(Id, RealmOrUri, Opts),
-    {ok, Session} = bondy_session:store(Session0),
-
-    %% We register the session
+    Session = bondy_session:new(Id, RealmOrUri, Opts),
     RealmUri = bondy_session:realm_uri(Session),
-
     Name = gproc_pool:pick_worker(pool(), RealmUri),
-
-    case gen_server:call(Name, {open, Session}, 5000) of
-        ok ->
-            Session;
-        Error ->
-            Error
-    end.
+    gen_server:call(Name, {open, Session}, 5000).
 
 
 %% -----------------------------------------------------------------------------
@@ -153,7 +160,10 @@ init([Pool, Name]) ->
     {ok, #state{name = Name}}.
 
 
-handle_call({open, Session}, _From, State0) ->
+handle_call({open, Session0}, _From, State0) ->
+    %% We store the session
+    {ok, Session} = bondy_session:store(Session0),
+
     Id = bondy_session:id(Session),
     Pid = bondy_session:pid(Session),
 
@@ -175,7 +185,7 @@ handle_call({open, Session}, _From, State0) ->
             Ref => Id
         }
     },
-    {reply, ok, State};
+    {reply, {ok, Session}, State};
 
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{

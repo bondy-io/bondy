@@ -48,15 +48,25 @@
     reconnect_retry_reason  ::  optional(any()),
     hibernate = false       ::  boolean(),
     sessions = #{}          ::  sessions(),
-    sessions_by_uri = #{}   ::  #{uri() => bondy_session_id:t()},
-    session                 ::  optional(map()),
+    sessions_by_realm = #{} ::  #{uri() => bondy_session_id:t()},
+    session                 ::  optional(session()),
     start_ts                ::  integer()
 }).
 
 
 -type t()                   ::  #state{}.
 -type sessions()            ::  #{
-    bondy_session_id:t() => bondy_bridge_relay_session:t()
+    bondy_session_id:t() => session()
+}.
+-type session()             ::  #{
+    id := bondy_session_id:t(),
+    ref := bondy_ref:t(),
+    realm := uri(),
+    authid := binary(),
+    pubkey := binary(),
+    signer => fun((Challenge :: binary()) -> Signature :: binary()),
+    subscriptions => map(),
+    registrations => map()
 }.
 
 %% API.
@@ -149,6 +159,7 @@ init(Config0) ->
         transport = transport(Transport),
         endpoint = Endpoint,
         idle_timeout = IdleTimeout,
+        hibernate = key_value:get(hibernate, Config, false),
         start_ts = erlang:system_time(millisecond)
     },
 
@@ -187,7 +198,6 @@ init(Config0) ->
 -spec terminate(term(), atom(), t()) -> term().
 
 terminate(Reason, _StateName, #state{socket = undefined}) ->
-
     ?LOG_NOTICE(#{
         description => "Process terminated",
         reason => Reason
@@ -595,7 +605,7 @@ on_disconnect(State) ->
     State#state{
         socket = undefined,
         sessions = #{},
-        sessions_by_uri = #{}
+        sessions_by_realm = #{}
     }.
 
 
@@ -740,7 +750,8 @@ open_sessions(State0) ->
                     <<"trustroot">> => undefined,
                     <<"challenge">> => undefined,
                     <<"channel_binding">> => undefined
-                }
+                },
+                roles => ?WAMP_CLIENT_ROLES
             },
 
             %% TODO HELLO should include the Bondy Router Bridge Relay protocol
@@ -752,7 +763,7 @@ open_sessions(State0) ->
                 authid => AuthId,
                 pubkey => PubKey,
                 signer => signer(PubKey, H),
-                x_authroles => []
+                authroles => []
             },
 
             State0#state{session = Session}
@@ -771,9 +782,7 @@ init_session_and_sync(SessionId, #state{session = Session0} = State0) ->
     %% Synchronise the realm configuraiton state before proxying
     State2 = aae_sync(Session, State1),
 
-    State2#state{
-        session = undefined
-    }.
+    State2#state{session = undefined}.
 
 
 setup_proxing(SessionId, State0) ->
@@ -798,7 +807,7 @@ setup_proxing(SessionId, State0) ->
 %     {#{realm_uri := Uri}, Sessions} = maps:take(Id, Sessions0),
 %     State#state{
 %         sessions = Sessions,
-%         sessions_by_uri = maps:remove(Uri, State#state.sessions_by_uri)
+%         sessions_by_realm = maps:remove(Uri, State#state.sessions_by_realm)
 %     }.
 
 
@@ -811,7 +820,7 @@ has_session(SessionId, #state{sessions = Sessions}) ->
 add_session(#{id := Id, realm_uri := Uri} = Session, #state{} = State) ->
     State#state{
         sessions = maps:put(Id, Session, State#state.sessions),
-        sessions_by_uri = maps:put(Uri, Id, State#state.sessions_by_uri)
+        sessions_by_realm = maps:put(Uri, Id, State#state.sessions_by_realm)
     }.
 
 
@@ -820,7 +829,7 @@ session(Id, #state{sessions = Map}) ->
 
 
 
-session_id(RealmUri, #state{sessions_by_uri = Map}) ->
+session_id(RealmUri, #state{sessions_by_realm = Map}) ->
     maps:get(RealmUri, Map).
 
 

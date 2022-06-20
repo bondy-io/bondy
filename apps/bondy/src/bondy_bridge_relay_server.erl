@@ -47,8 +47,9 @@
     ping_retry_tref         ::  optional(timer:ref()),
     ping_sent               ::  optional({timer:ref(), binary()}),
     sessions = #{}          ::  #{id() => bondy_session:t()},
-    sessions_by_realm = #{} ::  #{uri() => id()},
-    session                 ::  optional(map()),
+    sessions_by_realm = #{} ::  #{uri() => bondy_session_id:t()},
+    %% The context for the session currently being established
+    auth_context            ::  optional(bondy_auth:context()),
     registrations = #{}     ::  reg_indx(),
     start_ts                ::  pos_integer()
 }).
@@ -334,11 +335,7 @@ challenge(Realm, Details, State0) ->
     {ok, Peer} = bondy_utils:peername(
         State0#state.transport, State0#state.socket
     ),
-    Sessions0 = State0#state.sessions,
-    SessionsByUri0 = State0#state.sessions_by_realm,
 
-
-    Uri = bondy_realm:uri(Realm),
     SessionId = bondy_session_id:new(),
     Authid = maps:get(authid, Details),
     Authroles0 = maps:get(authroles, Details, []),
@@ -353,23 +350,44 @@ challenge(Realm, Details, State0) ->
                     throw({no_authmethod, ReqMethods});
 
                 [Method|_] ->
+                    Uri = bondy_realm:uri(Realm),
+                    FinalAuthid = bondy_auth:user_id(AuthCtxt),
+                    Authrole = bondy_auth:role(AuthCtxt),
+                    Authroles = bondy_auth:roles(AuthCtxt),
+                    Authprovider = bondy_auth:provider(AuthCtxt),
+                    SecEnabled = bondy_realm:is_security_enabled(Realm),
 
-                    Session = #{
-                        id => SessionId,
-                        authid => Authid,
-                        realm_uri => bondy_realm:uri(Realm),
-                        auth_context => AuthCtxt
+                    Properties = #{
+                        type => bridge_relay,
+                        peer => Peer,
+                        security_enabled => SecEnabled,
+                        is_anonymous => FinalAuthid == anonymous,
+                        agent => bondy_router:agent(),
+                        roles => maps:get(roles, Details, undefined),
+                        authid => maybe_gen_authid(FinalAuthid),
+                        authprovider => Authprovider,
+                        authmethod => Method,
+                        authrole => Authrole,
+                        authroles => Authroles
                     },
 
+                    %% We create a new session object but we do not open it
+                    %% yet, as we need to send the callenge and verify the
+                    %% response
+                    Session = bondy_session:new(Uri, Properties),
+
+                    Sessions0 = State0#state.sessions,
                     Sessions = maps:put(SessionId, Session, Sessions0),
+
+                    SessionsByUri0 = State0#state.sessions_by_realm,
                     SessionsByUri = maps:put(Uri, SessionId, SessionsByUri0),
 
                     State = State0#state{
-                        session = Session,
+                        auth_context = AuthCtxt,
                         sessions = Sessions,
                         sessions_by_realm = SessionsByUri
                     },
-                    do_challenge(SessionId, Details, Method, State)
+                    do_challenge(Details, Method, State)
             end;
 
         {error, Reason0} ->
@@ -378,32 +396,25 @@ challenge(Realm, Details, State0) ->
 
 
 %% @private
-do_challenge(SessionId, Details, Method, State0) ->
-    Session0 = maps:get(SessionId, State0#state.sessions),
-    AuthCtxt0 = maps:get(auth_context, Session0),
+do_challenge(Details, Method, State0) ->
+    AuthCtxt0 = State0#state.auth_context,
+    SessionId = bondy_auth:session_id(AuthCtxt0),
 
-    {AuthCtxt, Reply} =
+    {Reply, State} =
         case bondy_auth:challenge(Method, Details, AuthCtxt0) of
-            {false, AuthCtxt1} ->
+            {false, _} ->
                 M = {welcome, SessionId, #{}},
-                {AuthCtxt1, M};
+                {M, State0#state{auth_context = undefined}};
 
             {true, ChallengeExtra, AuthCtxt1} ->
                 M = {challenge, Method, ChallengeExtra},
-                {AuthCtxt1, M};
+                {M, State0#state{auth_context = AuthCtxt1}};
 
             {error, Reason} ->
+                %% At the moment we only support a single session/realm
+                %% so we crash
                 throw({authentication_failed, Reason})
         end,
-
-    Session = Session0#{
-        auth_context => AuthCtxt,
-        start_ts => erlang:system_time(millisecond)
-    },
-
-    State = State0#state{
-        sessions = maps:put(SessionId, Session, State0#state.sessions)
-    },
 
     ok = send_message(Reply, State),
 
@@ -412,37 +423,24 @@ do_challenge(SessionId, Details, Method, State0) ->
 
 %% @private
 authenticate(AuthMethod, Signature, Extra, State0) ->
-    SessionId = maps:get(id, State0#state.session),
+    AuthCtxt0 = State0#state.auth_context,
+    SessionId = bondy_auth:session_id(AuthCtxt0),
 
-    Session0 = maps:get(SessionId, State0#state.sessions),
-    AuthCtxt0 = maps:get(auth_context, Session0),
+    case bondy_auth:authenticate(AuthMethod, Signature, Extra, AuthCtxt0) of
+        {ok, AuthExtra0, _} ->
+            State = State0#state{auth_context = undefined},
 
-    {AuthCtxt, Reply} =
-        case bondy_auth:authenticate(AuthMethod, Signature, Extra, AuthCtxt0) of
-            {ok, AuthExtra0, AuthCtxt1} ->
-                AuthExtra = AuthExtra0#{
-                    node => bondy_config:nodestring()
-                },
-                M = {welcome, SessionId, #{authextra => AuthExtra}},
-                {AuthCtxt1, M};
-            {error, Reason} ->
-                throw({authentication_failed, Reason})
-        end,
+            AuthExtra = AuthExtra0#{node => bondy_config:nodestring()},
+            M = {welcome, SessionId, #{authextra => AuthExtra}},
 
-    Session = Session0#{
-        ref => bondy_ref:new(bridge_relay, self(), SessionId),
-        auth_context => AuthCtxt,
-        start_ts => erlang:system_time(millisecond)
-    },
+            ok = send_message(M, State),
 
-    State = State0#state{
-        sessions = maps:put(SessionId, Session, State0#state.sessions),
-        session = undefined
-    },
-
-    ok = send_message(Reply, State),
-
-    State.
+            State;
+        {error, Reason} ->
+            %% At the moment we only support a single session/realm
+            %% so we crash
+            throw({authentication_failed, Reason})
+    end.
 
 
 %% @private
@@ -471,12 +469,13 @@ idle_timeout(State) ->
 
 
 %% @private
-handle_message({hello, _, _}, #state{session = Session} = State)
-when Session =/= undefined ->
-    %% Session already being established, wrong message
+handle_message({hello, _, _}, #state{auth_context = Ctxt} = State)
+when Ctxt =/= undefined ->
+    %% Session already being established, invalid message
     Abort = {abort, protocol_violation, #{
         message => <<"You've sent the HELLO message twice">>
-    }},    ok = send_message(Abort, State),
+    }},
+    ok = send_message(Abort, State),
     {stop, normal, State};
 
 handle_message({hello, Uri, Details}, State0) ->
@@ -485,6 +484,7 @@ handle_message({hello, Uri, Details}, State0) ->
         description => "Got hello",
         details => Details
     }),
+
     try
 
         Realm = bondy_realm:fetch(Uri),
@@ -506,7 +506,7 @@ handle_message({hello, Uri, Details}, State0) ->
 
         throw:connections_not_allowed = Reason ->
             Abort = {abort, Reason, #{
-                message => <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure added by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>,
+                message => <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure taken by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>,
                 realm => Uri
             }},
             ok = send_message(Abort, State0),
@@ -547,7 +547,7 @@ handle_message({authenticate, Signature, Extra}, State0) ->
 
     catch
         throw:{authentication_failed, Reason} ->
-            RealmUri = maps:get(realm_uri, State0#state.session, undefined),
+            RealmUri = bondy_auth:realm_uri(State0#state.auth_context),
             Abort = {abort, authentication_failed, #{
                 message => <<"Authentication failed.">>,
                 realm_uri => RealmUri,
@@ -744,7 +744,9 @@ remove_registry_entry(SessionId, ExtEntry, State) ->
 
 remove_all_registry_entries(State) ->
     maps:foreach(
-        fun(_, #{realm_uri := RealmUri, ref := Ref}) ->
+        fun(_, Session) ->
+            RealmUri = bondy_session:realm_uri(Session),
+            Ref = bondy_session:ref(Session),
             bondy_router:flush(RealmUri, Ref)
         end,
         State#state.sessions
@@ -861,14 +863,22 @@ pdb_objects(It, Acc0) ->
 
 %% @private
 session_realm(SessionId, #state{sessions = Map}) ->
-    maps:get(realm_uri, maps:get(SessionId, Map)).
+    bondy_session:realm_uri(maps:get(SessionId, Map)).
 
 
 %% @private
 session_ref(SessionId, #state{sessions = Map}) ->
-    maps:get(ref, maps:get(SessionId, Map)).
+    bondy_session:ref(maps:get(SessionId, Map)).
 
 
 %% @private
 session_id(RealmUri, #state{sessions_by_realm = Map}) ->
     maps:get(RealmUri, Map).
+
+
+%% @private
+maybe_gen_authid(anonymous) ->
+    bondy_utils:uuid();
+
+maybe_gen_authid(UserId) ->
+    UserId.
