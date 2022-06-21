@@ -180,7 +180,7 @@ remove_bridge(Name) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec enable_bridge(Name :: binary()) -> ok.
+-spec enable_bridge(Name :: binary()) -> ok | {error, any()}.
 
 enable_bridge(Name) ->
     gen_server:call(?MODULE, {enable_bridge, Name}, timer:seconds(30)).
@@ -190,7 +190,7 @@ enable_bridge(Name) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec disable_bridge(Name :: binary()) -> ok.
+-spec disable_bridge(Name :: binary()) -> ok | {error, any()}.
 
 disable_bridge(Name) ->
     gen_server:call(?MODULE, {disable_bridge, Name}, timer:seconds(30)).
@@ -377,6 +377,14 @@ handle_continue({add_bridges, Config}, State0) ->
 
 handle_call({add_bridge, Data, Opts}, _From, State0) ->
     {Reply, State} = do_add_bridge(Data, Opts, State0),
+    {reply, Reply, State};
+
+handle_call({enable_bridge, _Name}, _From, State) ->
+    Reply = {error, not_implemented},
+    {reply, Reply, State};
+
+handle_call({disable_bridge, _Name}, _From, State) ->
+    Reply = {error, not_implemented},
     {reply, Reply, State};
 
 handle_call({remove_bridge, Name}, _From, State0) ->
