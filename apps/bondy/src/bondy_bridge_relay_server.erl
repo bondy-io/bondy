@@ -36,6 +36,7 @@
 -include_lib("wamp/include/wamp.hrl").
 -include_lib("bondy_plum_db.hrl").
 -include("bondy.hrl").
+-include("bondy_bridge_relay.hrl").
 
 -define(SOCKET_DATA(Tag), Tag == tcp orelse Tag == ssl).
 -define(SOCKET_ERROR(Tag), Tag == tcp_error orelse Tag == ssl_error).
@@ -249,7 +250,7 @@ when ?SOCKET_DATA(Tag) ->
                 description => "Got message from edge",
                 reason => Msg
             }),
-            handle_message(Msg, State)
+            handle_in(Msg, State)
     end;
 
 connected(info, {Tag, _Socket}, _) when ?CLOSED_TAG(Tag) ->
@@ -265,17 +266,14 @@ connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
     }),
     {stop, Reason};
 
-connected(info, {?BONDY_REQ, _Pid, RealmUri, M}, State) ->
+connected(info, {?BONDY_REQ, Pid, RealmUri, M}, State) ->
     %% A local bondy:send(), we need to forward to edge client
     ?LOG_DEBUG(#{
         description => "Received WAMP request we need to FWD to edge",
         message => M
     }),
 
-    SessionId = session_id(RealmUri, State),
-    ok = send_message({receive_message, SessionId, M}, State),
-
-    {keep_state_and_data, [idle_timeout(State)]};
+    handle_out(M, RealmUri, Pid, State);
 
 connected(info, Msg, State) ->
     ?LOG_INFO(#{
@@ -395,7 +393,7 @@ challenge(Realm, Details, State0) ->
                         sessions = Sessions,
                         sessions_by_realm = SessionsByUri
                     },
-                    do_challenge(Details, Method, State)
+                    send_challenge(Details, Method, State)
             end;
 
         {error, Reason0} ->
@@ -404,7 +402,7 @@ challenge(Realm, Details, State0) ->
 
 
 %% @private
-do_challenge(Details, Method, State0) ->
+send_challenge(Details, Method, State0) ->
     AuthCtxt0 = State0#state.auth_context,
     SessionId = bondy_auth:session_id(AuthCtxt0),
 
@@ -432,14 +430,18 @@ do_challenge(Details, Method, State0) ->
 %% @private
 authenticate(AuthMethod, Signature, Extra, State0) ->
     AuthCtxt0 = State0#state.auth_context,
-    SessionId = bondy_auth:session_id(AuthCtxt0),
 
     case bondy_auth:authenticate(AuthMethod, Signature, Extra, AuthCtxt0) of
         {ok, AuthExtra0, _} ->
-            State = State0#state{auth_context = undefined},
+            SessionId = bondy_auth:session_id(AuthCtxt0),
+            Session = session(SessionId, State0),
+
+            ok = bondy_session_manager:open(Session),
 
             AuthExtra = AuthExtra0#{node => bondy_config:nodestring()},
             M = {welcome, SessionId, #{authextra => AuthExtra}},
+
+            State = State0#state{auth_context = undefined},
 
             ok = send_message(M, State),
 
@@ -481,16 +483,16 @@ idle_timeout(State) ->
 
 
 %% @private
-handle_message({hello, _, _}, #state{auth_context = Ctxt} = State)
+handle_in({hello, _, _}, #state{auth_context = Ctxt} = State)
 when Ctxt =/= undefined ->
     %% Session already being established, invalid message
-    Abort = {abort, protocol_violation, #{
+    Abort = {abort, undefined, protocol_violation, #{
         message => <<"You've sent the HELLO message twice">>
     }},
     ok = send_message(Abort, State),
     {stop, normal, State};
 
-handle_message({hello, Uri, Details}, State0) ->
+handle_in({hello, Uri, Details}, State0) ->
     %% TODO validate Details
     ?LOG_DEBUG(#{
         description => "Got hello",
@@ -512,15 +514,20 @@ handle_message({hello, Uri, Details}, State0) ->
 
     catch
         error:{not_found, Uri} ->
-            Abort = {abort, no_such_realm, #{
-                message => <<"Realm does not exist.">>,
-                realm => Uri
-            }},
+            Abort = {
+                abort,
+                undefined,
+                no_such_realm,
+                #{
+                    message => <<"Realm does not exist.">>,
+                    realm => Uri
+                }
+            },
             ok = send_message(Abort, State0),
             {stop, normal, State0};
 
         throw:connections_not_allowed = Reason ->
-            Abort = {abort, Reason, #{
+            Abort = {abort, undefined, Reason, #{
                 message => <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure taken by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>,
                 realm => Uri
             }},
@@ -528,7 +535,7 @@ handle_message({hello, Uri, Details}, State0) ->
             {stop, normal, State0};
 
         throw:{no_authmethod, ReqMethods} ->
-            Abort = {abort, no_authmethod, #{
+            Abort = {abort, undefined, no_authmethod, #{
                 message => <<"The requested authentication methods are not available for this user on this realm.">>,
                 realm => Uri,
                 authmethods => ReqMethods
@@ -537,7 +544,7 @@ handle_message({hello, Uri, Details}, State0) ->
             {stop, normal, State0};
 
         throw:{authentication_failed, Reason} ->
-            Abort = {abort, authentication_failed, #{
+            Abort = {abort, undefined, authentication_failed, #{
                 message => <<"Authentication failed.">>,
                 realm => Uri,
                 reason => Reason
@@ -547,7 +554,7 @@ handle_message({hello, Uri, Details}, State0) ->
 
     end;
 
-handle_message({authenticate, Signature, Extra}, State0) ->
+handle_in({authenticate, Signature, Extra}, State0) ->
     %% TODO validate Details
     ?LOG_DEBUG(#{
         description => "Got authenticate",
@@ -562,8 +569,10 @@ handle_message({authenticate, Signature, Extra}, State0) ->
 
     catch
         throw:{authentication_failed, Reason} ->
-            RealmUri = bondy_auth:realm_uri(State0#state.auth_context),
-            Abort = {abort, authentication_failed, #{
+            AuthCtxt = State0#state.auth_context,
+            RealmUri = bondy_auth:realm_uri(AuthCtxt),
+            SessionId = bondy_auth:realm_uri(AuthCtxt),
+            Abort = {abort, SessionId, authentication_failed, #{
                 message => <<"Authentication failed.">>,
                 realm_uri => RealmUri,
                 reason => Reason
@@ -572,11 +581,24 @@ handle_message({authenticate, Signature, Extra}, State0) ->
             {stop, normal, State0}
     end;
 
-handle_message({aae_sync, SessionId, Opts}, State) ->
+handle_in({aae_sync, SessionId, Opts}, State) ->
     RealmUri = session_realm(SessionId, State),
     ok = full_sync(SessionId, RealmUri, Opts, State),
     Finish = {aae_sync, SessionId, finished},
     ok = gen_statem:cast(self(), {forward_message, Finish}),
+    {keep_state_and_data, [idle_timeout(State)]}.
+
+handle_out({goodbye, Details, ReasonUri}, RealmUri, _From, State) ->
+    %% M is the wamp_goodbye() message.
+    SessionId = session_id(RealmUri, State),
+    M = {goodbye, SessionId, ReasonUri, Details},
+    ok = send_message(M, State),
+    {stop, normal};
+
+handle_out(M, RealmUri, _From, State) ->
+    SessionId = session_id(RealmUri, State),
+    ok = send_message({receive_message, SessionId, M}, State),
+
     {keep_state_and_data, [idle_timeout(State)]}.
 
 
@@ -605,7 +627,7 @@ safe_receive_message(Msg, SessionId, State) ->
                 reason => Reason,
                 stacktrace => Stacktrace
             }),
-            Abort = {abort, server_error, #{
+            Abort = {abort, SessionId, server_error, #{
                 reason => Reason
             }},
             ok = send_message(Abort, State),
@@ -875,6 +897,10 @@ pdb_objects(It, Acc0) ->
             pdb_objects(plum_db:iterate(It), Acc)
     end.
 
+
+%% @private
+session(SessionId, #state{sessions = Map}) ->
+    maps:get(SessionId, Map).
 
 %% @private
 session_realm(SessionId, #state{sessions = Map}) ->
