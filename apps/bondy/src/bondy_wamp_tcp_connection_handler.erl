@@ -309,7 +309,7 @@ format_status(Opt, [_PDict, #state{} = State]) ->
 gen_format(normal, Term) ->
     [{data, [{"State", Term}]}];
 
-gen_format(terminate, Term) ->
+gen_format(_, Term) ->
     Term.
 
 
