@@ -1442,7 +1442,7 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
             %% We kick out all the local sessions
             %% Tell the local manager so that if can kick out the session and
             %% perform any other cleanup task. This is performed async.
-            ok = bondy_realm_manager:close(Uri, deleted),
+            ok = bondy_realm_manager:close(Uri, ?WAMP_CLOSE_REALM),
 
             %% We synchronously delete the realm.
             %% This will be replicated and each node's bondy_realm_manager will

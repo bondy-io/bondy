@@ -22,6 +22,7 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy_plum_db.hrl").
+-include("bondy.hrl").
 
 
 -record(state, {}).
@@ -59,7 +60,10 @@ start_link() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec close(RealmUri :: uri(), Reason :: any()) -> ok.
+-spec close(RealmUri :: uri(), Reason :: optional(uri())) -> ok.
+
+close(RealmUri, undefined) ->
+    close(RealmUri, ?WAMP_CLOSE_REALM);
 
 close(RealmUri, Reason) ->
     gen_server:cast(?MODULE, {close, RealmUri, Reason}).
@@ -118,7 +122,7 @@ handle_info({plum_db_event, object_update, {{{_, _}, Uri}, Obj, _}}, State) ->
     case plum_db_object:value(Resolved) of
         '$deleted' ->
             %% Realm was deleted, call close
-            do_close(Uri, deleted);
+            do_close(Uri, ?WAMP_CLOSE_REALM);
         _ ->
             %% Realm updated, do nothing
             ok
@@ -149,10 +153,10 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 
-do_close(RealmUri, Reason) ->
+do_close(RealmUri, ReasonUri) ->
     ?LOG_WARNING(#{
         description => "Closing realm",
-        reason => Reason,
+        reason => ReasonUri,
         realm => RealmUri
     }),
-    bondy_session_manager:close_all(RealmUri, realm_closed).
+    bondy_session_manager:close_all(RealmUri, ReasonUri).

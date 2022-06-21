@@ -22,6 +22,8 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy_security.hrl").
+-include("bondy_uris.hrl").
+-include("bondy.hrl").
 
 
 -record(state, {
@@ -129,23 +131,29 @@ open(Id, RealmOrUri, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec close(bondy_session:t(), atom()) -> ok.
+-spec close(bondy_session:t(), optional(uri())) -> ok.
 
-close(Session, Reason) ->
+close(RealmUri, undefined) ->
+    close(RealmUri, ?WAMP_CLOSE_NORMAL);
+
+close(Session, ReasonUri) when is_binary(ReasonUri) ->
     Uri = bondy_session:realm_uri(Session),
     Name = gproc_pool:pick_worker(pool(), Uri),
-    gen_server:cast(Name, {close, Session, Reason}).
+    gen_server:cast(Name, {close, Session, ReasonUri}).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc Closes all managed sessions in realm with URI `RealmUri'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec close_all(Realm :: uri(), atom()) -> ok.
+-spec close_all(Realm :: uri(), ReasonUri :: optional(uri())) -> ok.
 
-close_all(RealmUri, Reason) ->
+close_all(RealmUri, undefined) ->
+    close_all(RealmUri, ?WAMP_CLOSE_NORMAL);
+
+close_all(RealmUri, ReasonUri) when is_binary(ReasonUri) ->
     Name = gproc_pool:pick_worker(pool(), RealmUri),
-    gen_server:cast(Name, {close_all, RealmUri, Reason}).
+    gen_server:cast(Name, {close_all, RealmUri, ReasonUri}).
 
 
 
@@ -196,7 +204,7 @@ handle_call(Event, From, State) ->
     {reply, {error, {unsupported_call, Event}}, State}.
 
 
-handle_cast({close, Session, Reason}, State0) ->
+handle_cast({close, Session, ReasonUri}, State0) ->
     Id = bondy_session:id(Session),
     ExtId = bondy_session:external_id(Session),
     Uri = bondy_session:realm_uri(Session),
@@ -221,20 +229,20 @@ handle_cast({close, Session, Reason}, State0) ->
             }
     end,
 
-    ok = maybe_logout(Uri, Session, Reason),
+    ok = maybe_logout(Uri, Session, ReasonUri),
 
     ok = bondy_session:close(Session),
 
     {noreply, State};
 
 
-handle_cast({close_all, RealmUri, _Reason}, State0) ->
+handle_cast({close_all, RealmUri, Reason}, State0) ->
     M = wamp_message:goodbye(
         #{
             message => <<"The realm is being closed">>,
             description => <<"The realm you were connected to was deleted by the administrator.">>
         },
-        ?WAMP_CLOSE_REALM
+        Reason
     ),
 
     Fun = fun
@@ -369,7 +377,7 @@ cleanup(Session) ->
 
 
 %% @private
-maybe_logout(_Uri, Session, logout) ->
+maybe_logout(_Uri, Session, ?WAMP_CLOSE_LOGOUT) ->
 
     case bondy_session:authmethod(Session) of
         ?WAMP_TICKET_AUTH ->
