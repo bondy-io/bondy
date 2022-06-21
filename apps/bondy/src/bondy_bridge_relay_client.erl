@@ -216,7 +216,7 @@ init(Config0) ->
 %% -----------------------------------------------------------------------------
 -spec terminate(term(), atom(), t()) -> term().
 
-terminate(Reason, _StateName, #state{socket = undefined}) ->
+terminate(_, _, #state{socket = undefined}) ->
     ok;
 
 terminate(Reason, StateName, #state{} = State0) ->
