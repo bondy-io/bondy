@@ -49,7 +49,6 @@
 )).
 
 
-
 -record(state, {
     transport               ::  gen_tcp | ssl,
     endpoint                ::  {inet:ip_address(), inet:port_number()},
@@ -69,9 +68,7 @@
 
 
 -type t()                   ::  #state{}.
--type sessions()            ::  #{
-    bondy_session_id:t() => session()
-}.
+-type sessions()            ::  #{bondy_session_id:t() => session()}.
 -type session()             ::  #{
     id := bondy_session_id:t(),
     ref := bondy_ref:t(),
@@ -149,6 +146,7 @@ callback_mode() ->
 %% @end
 %% -----------------------------------------------------------------------------
 init(Config0) ->
+    % erlang:process_flag(sensitive, true),
     #{
         transport := Transport,
         endpoint := Endpoint,
@@ -362,7 +360,7 @@ connected(internal, {goodbye, SessionId, Reason, Details}, _State) ->
         details => Details
     }),
     %% We will be restarted
-    {stop, {goodbye, Reason}};
+    {stop, Reason};
 
 connected(internal, {abort, _SessionId, Reason, Details}, _State) ->
     %% We currently support a single session, so we stop
@@ -372,7 +370,7 @@ connected(internal, {abort, _SessionId, Reason, Details}, _State) ->
         details => Details
     }),
     %% We will be restarted
-    {stop, {abort, Reason}};
+    {stop, Reason};
 
 connected(internal, {aae_sync, SessionId, finished}, State0) ->
     ?LOG_INFO(#{
@@ -560,7 +558,7 @@ when R0 =/= undefined andalso
                 reason => Reason
             }),
             State = State0#state{reconnect_retry = R1},
-            {stop, {limit, Limit}, State}
+            {stop, {retry_limit, Limit}, State}
     end;
 
 maybe_reconnect(Reason, _) ->
