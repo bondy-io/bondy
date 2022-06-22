@@ -153,19 +153,46 @@ format_log([{Key, IfExists, Else} | Rest], Config, Msg, Meta, Acc) ->
 format_log([Term | Rest], Config, Msg, Meta, Acc) when is_list(Term) ->
     format_log(Rest, Config, Msg, Meta, [Term | Acc]).
 
-format_msg(Data, Config) -> format_msg("", Data, Config).
+
+format_msg(Data, Config) ->
+    format_msg("", Data, Config).
+
 
 format_msg(Parents, Data, Config=#{map_depth := 0}) when is_map(Data) ->
     to_string(truncate_key(Parents), Config)++"=... ";
+
 format_msg(Parents, Data, Config = #{map_depth := Depth}) when is_map(Data) ->
     maps:fold(
-      fun(K, V, Acc) when is_map(V) ->
-        [format_msg(Parents ++ to_string(K, Config) ++ "_",
-                    V,
-                    Config#{map_depth := Depth-1}) | Acc]
-      ;  (K, V, Acc) ->
-        [Parents ++ to_string(K, Config), $=,
-         to_string(V, Config), $\s | Acc]
+      fun
+        Flatten(K, V, Acc) when is_map(V) ->
+            [
+                format_msg(Parents ++ to_string(K, Config) ++ "_",
+                V,
+                Config#{map_depth := Depth - 1})
+                | Acc
+            ];
+
+        Flatten(K, V, Acc) when is_list(V) ->
+            try
+                Flatten(K, maps:from_list(V), Acc)
+            catch
+                error:badarg ->
+                    [
+                        Parents ++ to_string(K, Config),
+                        $=,
+                        to_string(V, Config), $\s
+                        | Acc
+                    ]
+            end;
+
+
+        Flatten(K, V, Acc) ->
+            [
+                Parents ++ to_string(K, Config),
+                $=,
+                to_string(V, Config), $\s
+                | Acc
+            ]
       end,
       [],
       Data
