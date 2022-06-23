@@ -511,7 +511,7 @@
 %% A value of 0 means no limit is enforced.
 {mapping, "wamp.message_retention.max_messages", "bondy.wamp_message_retention.max_messages", [
   {default, "1000000"},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
@@ -585,7 +585,7 @@
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.size", "bondy.router_pool.size", [
   {default, 8},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {datatype, integer},
   hidden
 ]}.
@@ -598,7 +598,7 @@
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.capacity", "bondy.router_pool.capacity", [
   {default, 100000},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
@@ -630,7 +630,7 @@
 %% exposing the Admin Rest APIs.
 {mapping, "admin_api.http.port", "bondy.admin_api_http.port", [
   {default, 18081},
-  {validators, [port_number]},
+  {validators, ["port_number"]},
   {datatype, integer},
   hidden
 ]}.
@@ -638,14 +638,14 @@
 %% The Cowboy acceptors_pool_size for the Admin API https listener
 {mapping, "admin_api.http.acceptors_pool_size", "bondy.admin_api_http.acceptors_pool_size", [
   {datatype, integer},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {default, 200}
 ]}.
 
 %% The Cowboy max number of connections for the Admin API https listener
 {mapping, "admin_api.http.max_connections", "bondy.admin_api_http.max_connections", [
   {datatype, integer},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {default, 250000}
 ]}.
 
@@ -653,7 +653,7 @@
 %% The maximum length that the queue of pending connections can grow to.
 {mapping, "admin_api.http.backlog", "bondy.admin_api_http.backlog", [
 {datatype, integer},
-{validators, [pos_integer]},
+{validators, ["pos_integer"]},
 {default, 1024}
 ]}.
 
@@ -710,7 +710,7 @@
 %% exposing the Admin Rest APIs.
 {mapping, "admin_api.https.port", "bondy.admin_api_https.port", [
   {default, 18084},
-  {validators, [port_number]},
+  {validators, ["port_number"]},
   {datatype, integer},
   hidden
 ]}.
@@ -718,21 +718,21 @@
 %% The Cowboy acceptors_pool_size for the Admin API https listener
 {mapping, "admin_api.https.acceptors_pool_size", "bondy.admin_api_https.acceptors_pool_size", [
   {datatype, integer},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {default, 200}
 ]}.
 
 %% The Cowboy max number of connections for the Admin API https listener
 {mapping, "admin_api.https.max_connections", "bondy.admin_api_https.max_connections", [
   {datatype, integer},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {default, 250000}
 ]}.
 
 %% The maximum length that the queue of pending connections can grow to.
 {mapping, "admin_api.https.backlog", "bondy.admin_api_https.backlog", [
   {datatype, integer},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {default, 1024}
 ]}.
 
@@ -847,7 +847,7 @@
 %% exposing the API Gateway managed APIs.
 {mapping, "api_gateway.http.port", "bondy.api_gateway_http.port", [
   {default, 18080},
-  {validators, [port_number]},
+  {validators, ["port_number"]},
   {datatype, integer},
   hidden
 ]}.
@@ -856,7 +856,7 @@
 %% The Cowboy acceptors_pool_size for the API Gateway's http listener
 {mapping, "api_gateway.http.acceptors_pool_size", "bondy.api_gateway_http.acceptors_pool_size", [
   {datatype, integer},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {default, 200}
 ]}.
 
@@ -864,14 +864,14 @@
 %% The Cowboy max number of connections for the Admin API http listener
 {mapping, "api_gateway.http.max_connections", "bondy.api_gateway_http.max_connections", [
   {datatype, integer},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {default, 500000}
 ]}.
 
 %% The maximum length that the queue of pending connections can grow to.
 {mapping, "api_gateway.http.backlog", "bondy.api_gateway_http.backlog", [
   {datatype, integer},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {default, 4096}
 ]}.
 
@@ -944,7 +944,7 @@
 {mapping, "api_gateway.https.port", "bondy.api_gateway_https.port", [
   {default, 18083},
   {datatype, integer},
-  {validators, [port_number]},
+  {validators, ["port_number"]},
   hidden
 ]}.
 
@@ -952,21 +952,21 @@
 %% The Cowboy acceptors_pool_size for the API Gateway's http listener
 {mapping, "api_gateway.https.acceptors_pool_size", "bondy.api_gateway_https.acceptors_pool_size", [
   {datatype, integer},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {default, 200}
 ]}.
 
 %% The Cowboy max number of connections for the Admin API https listener
 {mapping, "api_gateway.https.max_connections", "bondy.api_gateway_https.max_connections", [
   {datatype, integer},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {default, 500000}
 ]}.
 
 %% The maximum length that the queue of pending connections can grow to.
 {mapping, "api_gateway.https.backlog", "bondy.api_gateway_https.backlog", [
   {datatype, integer},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {default, 4096}
 ]}.
 
@@ -1122,47 +1122,51 @@
 %% WAMP WEBSOCKET
 %% =============================================================================
 
-%% @doc Defines if Websockets PING control message functionality is enabled or
-%% not. This option affects server (Bondy) initiated pings only. Some clients
+%% @doc Defines if Websockets PING control message functionality is
+%% enabled or not.
+%% This option affects server (Bondy) initiated pings only. Some clients
 %% might also initiate ping requests and Bondy will always respond to those
 %% even if this option is turned off.
 %% This feature is useful to keep a connection alive and validate the
-%% connection is healthy. For example, Browsers will typically kill websocket
-%% connections after 60s and will not initiate PINGs.
+%% connection is healthy.
 %% Enabling this feature implies having an additional timer per connection and
 %% this can be a considerable cost for servers that need to handle large
 %% numbers of connections. A better solution in most cases is to let the client
-%% handle pings.
+%% handle pings. However, notice web browsers will typically kill websocket
+%% connections after 60s and will not initiate PINGs.
 {mapping, "wamp.websocket.ping.enabled", "bondy.wamp_websocket.ping.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
 
-%% @doc If wamp.websocket.ping.enabled is 'on', this value controls the interval
-%% in which Bondy sends WebSockets PING control messages.
-{mapping, "wamp.websocket.ping.interval", "bondy.wamp_websocket.ping.interval", [
-  {default, "30s"},
+%% @doc If wamp.websocket.ping.enabled is 'on', this parameter controls the
+%% maximum time interval that is permitted to elapse between the point at which
+%% the Client finishes transmitting a message and the point it starts sending
+%% the next.
+%% Notice this is not the same as wamp.websocket.idle_timeout.
+{mapping, "wamp.websocket.ping.idle_timeout", "bondy.wamp_websocket.ping.idle_timeout", [
+  {default, "20s"},
   {datatype, {duration, ms}}
 ]}.
 
-%% @doc If wamp.websocket.ping.enabled is 'on', this value controls the time
-%% Bondy will wait for a ping response. Once that time has passed this counts
-%% as a fail attempt (see max_attempts).
+%% @doc If wamp.websocket.ping.enabled is 'on', this parameter controls the
+%% amount of time Bondy waits for a ping response from the client.
+%% Once that time has passed this counts as a fail attempt
+%% (see wamp.websocket.ping.max_attempts).
 {mapping, "wamp.websocket.ping.timeout", "bondy.wamp_websocket.ping.timeout", [
   {default, "10s"},
   {datatype, {duration, ms}}
 ]}.
 
-%% @doc If wamp.websocket.ping.enabled is 'on', this value controls how many
-%% missed pings are considered a timeout. Thus, after this number of attempts
-%% Bondy will drop the connection.
-%% If the value is 'infinity' Bondy will never timeout based on missed pings.
+%% @doc If wamp.websocket.ping.enabled is 'on', this parameter controls how many
+%% missed pings are allowed to timeout before Bondy closes the connection.
 {mapping,
   "wamp.websocket.ping.max_attempts",
-  "bondy.wamp_websocket.ping.max_attempts",
+"bondy.wamp_websocket.ping.max_attempts",
   [
-    {default, 3},
-    {datatype, [integer, {atom, infinity}]}
+    {default, 2},
+    {datatype, integer},
+    {validators, ["pos_integer"]}
   ]
 }.
 
@@ -1403,7 +1407,8 @@
 
 
 %% @doc Defines if PING control message functionality is enabled or
-%% not. This option affects server (Bondy) initiated pings only. Some clients
+%% not.
+%% This option affects server (Bondy) initiated pings only. Some clients
 %% might also initiate ping requests and Bondy will always respond to those
 %% even if this option is turned off.
 %% This feature is useful to keep a connection alive and validate the
@@ -1417,31 +1422,33 @@
 {datatype, {flag, on, off}}
 ]}.
 
-%% @doc If wamp.tcp.ping.enabled is 'on', this value controls the interval
-%% in which Bondy sends WebSockets PING control messages.
-{mapping, "wamp.tcp.ping.interval", "bondy.wamp_tcp.ping.interval", [
-{default, "30s"},
+%% @doc If wamp.tcp.ping.enabled is 'on', this parameter controls the
+%% maximum time interval that is permitted to elapse between the point at which
+%% the Client finishes transmitting a message and the point it starts sending
+%% the next.
+%% Notice this is not the same as wamp.tcp.idle_timeout.
+{mapping, "wamp.tcp.ping.idle_timeout", "bondy.wamp_tcp.ping.idle_timeout", [
+{default, "20s"},
 {datatype, {duration, ms}}
 ]}.
 
-%% @doc If wamp.tcp.ping.enabled is 'on', this value controls the time
-%% Bondy will wait for a ping response. Once that time has passed this counts
-%% as a fail attempt (see max_attempts).
+%% @doc If wamp.tcp.ping.enabled is 'on', this parameter controls the
+%% amount of time Bondy waits for a ping response from the client.
+%% Once that time has passed this counts as a fail attempt
+%% (see wamp.tcp.ping.max_attempts).
 {mapping, "wamp.tcp.ping.timeout", "bondy.wamp_tcp.ping.timeout", [
 {default, "10s"},
 {datatype, {duration, ms}}
 ]}.
 
-%% @doc If wamp.tcp.ping.enabled is 'on', this value controls how many
+%% @doc If wamp.tcp.ping.enabled is 'on', this parameter controls how many
 %% missed pings are considered a timeout. Thus, after this number of attempts
 %% Bondy will drop the connection.
-%% If the value is 'infinity' Bondy will never timeout based on missed pings.
-{mapping,
-"wamp.tcp.ping.max_attempts",
-"bondy.wamp_tcp.ping.max_attempts",
+{mapping, "wamp.tcp.ping.max_attempts", "bondy.wamp_tcp.ping.max_attempts",
 [
-  {default, 3},
-  {datatype, [integer, {atom, infinity}]}
+  {default, 2},
+  {datatype, integer},
+  {validators, ["pos_integer"]}
 ]
 }.
 
@@ -1556,14 +1563,14 @@
 {datatype, {flag, on, off}}
 ]}.
 
-%% @doc If wamp.tls.ping.enabled is 'on', this value controls the interval
+%% @doc If wamp.tls.ping.enabled is 'on', this parameter controls the interval
 %% in which Bondy sends WebSockets PING control messages.
 {mapping, "wamp.tls.ping.interval", "bondy.wamp_tls.ping.interval", [
 {default, "30s"},
 {datatype, {duration, ms}}
 ]}.
 
-%% @doc If wamp.tls.ping.enabled is 'on', this value controls the time
+%% @doc If wamp.tls.ping.enabled is 'on', this parameter controls the time
 %% Bondy will wait for a ping response. Once that time has passed this counts
 %% as a fail attempt (see max_attempts).
 {mapping, "wamp.tls.ping.timeout", "bondy.wamp_tls.ping.timeout", [
@@ -1571,7 +1578,7 @@
 {datatype, {duration, ms}}
 ]}.
 
-%% @doc If wamp.tls.ping.enabled is 'on', this value controls how many
+%% @doc If wamp.tls.ping.enabled is 'on', this parameter controls how many
 %% missed pings are considered a timeout. Thus, after this number of attempts
 %% Bondy will drop the connection.
 %% If the value is 'infinity' Bondy will never timeout based on missed pings.
@@ -1990,7 +1997,7 @@ end}.
 %% -----------------------------------------------------------------------------
 {mapping, "store.partitions", "plum_db.partitions", [
   {default, 16},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
@@ -2011,7 +2018,7 @@ end}.
 
 {mapping, "store.open_retry_limit", "plum_db.store_open_retry_limit", [
   {default, 30},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 

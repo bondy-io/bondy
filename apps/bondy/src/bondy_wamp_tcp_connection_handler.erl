@@ -29,26 +29,28 @@
 -include("bondy.hrl").
 
 
--define(TIMEOUT, ?PING_TIMEOUT * 2).
--define(PING_TIMEOUT, 10000). % 10 secs
+-define(TIMEOUT(S), S#state.idle_timeout).
 
 
 -record(state, {
+    listener                ::  atom(),
     socket                  ::  gen_tcp:socket() | ssl:socket(),
     peername                ::  binary(),
     transport               ::  module(),
     frame_type              ::  frame_type(),
     encoding                ::  atom(),
     max_len                 ::  pos_integer(),
-    ping_sent = false       ::  {true, binary(), reference()} | false,
-    ping_attempts = 0       ::  non_neg_integer(),
-    ping_max_attempts = 2   ::  non_neg_integer(),
+    idle_timeout            ::  timeout(),
+    ping_idle_timeout       ::  non_neg_integer(),
+    ping_tref               ::  optional(reference()),
+    ping_payload            ::  binary(),
+    ping_retry              ::  optional(bondy_retry:t()),
     hibernate = false       ::  boolean(),
     start_time              ::  integer(),
-    protocol_state          ::  bondy_wamp_protocol:state() | undefined,
     active_n = once         ::  once | -32768..32767,
     buffer = <<>>           ::  binary(),
-    shutdown_reason         ::  term() | undefined
+    shutdown_reason         ::  term() | undefined,
+    protocol_state          ::  bondy_wamp_protocol:state() | undefined
 }).
 -type state() :: #state{}.
 
@@ -94,7 +96,9 @@ start_link(Ref, _, Transport, Opts) ->
 
 
 init({Ref, Transport, _Opts0}) ->
-    St0 = #state{
+    State0 = #state{
+        listener = Ref,
+        idle_timeout = bondy_config:get([Ref, idle_timeout], infinity),
         start_time = erlang:monotonic_time(second),
         transport = Transport
     },
@@ -104,7 +108,7 @@ init({Ref, Transport, _Opts0}) ->
     {ok, Socket} = ranch:handshake(Ref, TLSOpts),
 
     SocketOpts = [
-        {active, active_n(St0)},
+        {active, active_n(State0)},
         {packet, 0}
         | bondy_config:get([Ref, socket_opts], [])
     ],
@@ -117,7 +121,7 @@ init({Ref, Transport, _Opts0}) ->
 
     {ok, Peername} = bondy_utils:peername(Transport, Socket),
 
-    St1 = St0#state{socket = Socket},
+    State = State0#state{socket = Socket},
 
     ok = logger:set_process_metadata(#{
         transport => Transport,
@@ -125,9 +129,9 @@ init({Ref, Transport, _Opts0}) ->
         listener => Ref
     }),
 
-    ok = socket_opened(St1),
+    ok = socket_opened(State),
 
-    gen_server:enter_loop(?MODULE, [], St1, ?TIMEOUT).
+    gen_server:enter_loop(?MODULE, [], State, ?TIMEOUT(State)).
 
 
 handle_call(Event, From, State) ->
@@ -136,7 +140,7 @@ handle_call(Event, From, State) ->
         event => Event,
         from => From
     }),
-    {noreply, State, ?TIMEOUT}.
+    {noreply, State, ?TIMEOUT(State)}.
 
 
 handle_cast(Event, State) ->
@@ -144,22 +148,22 @@ handle_cast(Event, State) ->
         reason => unsupported_event,
         event => Event
     }),
-    {noreply, State, ?TIMEOUT}.
+    {noreply, State, ?TIMEOUT(State)}.
 
 
 handle_info(
     {tcp, Socket, <<?RAW_MAGIC:8, MaxLen:4, Encoding:4, _:16>>},
-    #state{socket = Socket, protocol_state = undefined} = St0) ->
-    case handle_handshake(MaxLen, Encoding, St0) of
-        {ok, St1} ->
-            case maybe_active_once(St1) of
+    #state{socket = Socket, protocol_state = undefined} = State0) ->
+    case handle_handshake(MaxLen, Encoding, State0) of
+        {ok, State} ->
+            case maybe_active_once(State) of
                 ok ->
-                    {noreply, St1, ?TIMEOUT};
+                    {noreply, reset_ping(State), ?TIMEOUT(State)};
                 {error, Reason} ->
-                    {stop, Reason, St1}
+                    {stop, Reason, State}
             end;
-        {stop, Reason, St1} ->
-            {stop, Reason, St1}
+        {stop, Reason, State} ->
+            {stop, Reason, State}
     end;
 
 handle_info(
@@ -182,27 +186,27 @@ handle_info(
     }),
     {stop, invalid_handshake, St};
 
-handle_info({tcp, Socket, Data}, #state{socket = Socket} = St0) ->
+handle_info({tcp, Socket, Data}, #state{socket = Socket} = State0) ->
     %% We append the newly received data to the existing buffer
-    Buffer = St0#state.buffer,
-    St1 = St0#state{buffer = <<>>},
+    Buffer = State0#state.buffer,
+    State1 = State0#state{buffer = <<>>},
 
-    case handle_data(<<Buffer/binary, Data/binary>>, St1) of
-        {ok, St2} ->
-            case maybe_active_once(St1) of
+    case handle_inbound(<<Buffer/binary, Data/binary>>, State1) of
+        {ok, State} ->
+            case maybe_active_once(State1) of
                 ok ->
-                    {noreply, St2, ?TIMEOUT};
+                    {noreply, reset_ping(State), ?TIMEOUT(State)};
                 {error, Reason} ->
-                    {stop, Reason, St2}
+                    {stop, Reason, State}
             end;
-        {stop, Reason, St2} ->
-            {stop, Reason, St2}
+        {stop, Reason, State} ->
+            {stop, Reason, disable_ping(State)}
     end;
 
-handle_info({tcp_passive, Socket}, #state{socket = Socket} = St) ->
+handle_info({tcp_passive, Socket}, #state{socket = Socket} = State) ->
     %% We are using {active, N} and we consumed N messages from the socket
-    ok = reset_inet_opts(St),
-    {noreply, St, ?TIMEOUT};
+    ok = reset_inet_opts(State),
+    {noreply, State, ?TIMEOUT(State)};
 
 handle_info({tcp_closed, _Socket}, State) ->
     {stop, normal, State};
@@ -224,31 +228,32 @@ handle_info({?BONDY_REQ, _Pid, _RealmUri, M}, St) ->
     handle_outbound(M, St);
 
 
-handle_info(timeout, #state{ping_sent = false} = State0) ->
-    ?LOG_DEBUG(#{
-        description => "Connection timeout, sending first ping"
-    }),
-    {ok, State1} = send_ping(State0),
-    %% Here we do not return a timeout value as send_ping set an ah-hoc timet
-    {noreply, State1};
-
 handle_info(
-    ping_timeout,
-    #state{ping_sent = Val, ping_attempts = N, ping_max_attempts = N} = State) when Val =/= false ->
-    ?LOG_ERROR(#{
-        description => "Connection closing",
-        reason => ping_timeout,
-        attempts => N
+    {timeout, Ref, ping_idle_timeout}, #state{ping_tref = Ref} = State) ->
+    ?LOG_DEBUG(#{
+        description => "Connection timeout, sending first ping",
+        attempts => bondy_retry:count(State#state.ping_retry)
     }),
-    {stop, ping_timeout, State#state{ping_sent = false}};
 
-handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
-    %% We try again until we reach ping_max_attempts
-    ?LOG_DEBUG(#{description => "Ping timeout, sending another ping"}),
-    %% We reuse the same payload, in case the client responds the previous one
-    {ok, State1} = send_ping(Bin, State),
-    %% Here we do not return a timeout value as send_ping set an ah-hoc timer
-    {noreply, State1};
+    %% ping_idle_timeout (not to be confused with idle_timeout)
+    %% We avoid using the gen_server timeout as the ping has already a timer
+    maybe_send_ping(State);
+
+handle_info({timeout, Ref, ping_timeout}, #state{ping_tref = Ref} = State) ->
+    ?LOG_DEBUG(#{
+        description => "Ping timeout, retrying ping",
+        attempts => bondy_retry:count(State#state.ping_retry)
+    }),
+    %% We will retry or fail depending on retry configuration and state
+    maybe_send_ping(State);
+
+handle_info({timeout, Ref, Msg}, State) ->
+    ?LOG_DEBUG(#{
+        description => "Received unknown timeout",
+        message => Msg,
+        ref => Ref
+    }),
+    {noreply, State};
 
 handle_info({stop, Reason}, State) ->
     {stop, Reason, State};
@@ -272,17 +277,61 @@ handle_info(Event, State) ->
 
 
 
-terminate(Reason, #state{transport = T, socket = S} = State)
+
+terminate(Reason, #state{transport = T, socket = S} = State0)
 when T =/= undefined andalso S =/= undefined ->
-    ok = close_socket(Reason, State),
-    terminate(Reason, State#state{transport = undefined, socket = undefined});
+    ok = close_socket(Reason, State0),
+    State = State0#state{transport = undefined, socket = undefined},
+    terminate(Reason, State);
 
-terminate(Reason, #state{protocol_state = P} = State) when P =/= undefined ->
-    ok = bondy_wamp_protocol:terminate(P),
-    terminate(Reason, State#state{protocol_state = undefined});
+terminate(normal, State) ->
+    ?LOG_INFO(#{
+        description => "Connection closed by client",
+        reason => normal
+    }),
+    do_terminate(State);
 
-terminate(_, _) ->
-    ok.
+terminate(closed, State) ->
+    ?LOG_INFO(#{
+        description => "Connection closed by client",
+        reason => closed
+    }),
+    do_terminate(State);
+
+terminate(timeout, State) ->
+    ?LOG_INFO(#{
+        description => "Connection closed by router",
+        reason => idle_timeout
+    }),
+    do_terminate(State);
+
+terminate(shutdown, State) ->
+    ?LOG_INFO(#{
+        description => "Connection closed by router",
+        reason => shutdown
+    }),
+    do_terminate(State);
+
+terminate({shutdown, Reason}, State) ->
+    ?LOG_INFO(#{
+        description => "Connection closed by router",
+        reason => Reason
+    }),
+    do_terminate(State);
+
+terminate({tcp_error, _, Reason}, State) ->
+    ?LOG_ERROR(#{
+        description => "Connection closing due to TCP error",
+        reason => Reason
+    }),
+    do_terminate(State);
+
+terminate(Reason, State) ->
+    ?LOG_ERROR(#{
+        description => "Connection closing",
+        reason => Reason
+    }),
+    do_terminate(State).
 
 
 code_change(_OldVsn, State, _Extra) ->
@@ -314,11 +363,12 @@ gen_format(_, Term) ->
 
 
 %% @private
--spec handle_data(Data :: binary(), State :: state()) ->
+-spec handle_inbound(Data :: binary(), State :: state()) ->
     {ok, state()} | {stop, raw_error(), state()}.
 
-handle_data(<<0:5, _:3, Len:24, _Data/binary>>, #state{max_len = MaxLen} = St)
-when Len > MaxLen ->
+handle_inbound(
+    <<0:5, _:3, Len:24, _Data/binary>>, #state{max_len = MaxLen} = St
+) when Len > MaxLen ->
     %% RFC: During the connection, Router MUST NOT send messages to the Client
     %% longer than the LENGTH requested by the Client, and the Client MUST NOT
     %% send messages larger than the maximum requested by the Router in it's
@@ -332,177 +382,188 @@ when Len > MaxLen ->
     }),
     {stop, maximum_message_length_exceeded, St};
 
-handle_data(<<0:5, 0:3, Len:24, Mssg:Len/binary, Rest/binary>>, St) ->
+handle_inbound(<<0:5, 0:3, Len:24, Msg:Len/binary, Rest/binary>>, State0) ->
     %% We received a WAMP message
     %% Len is the number of octets after serialization
-    case bondy_wamp_protocol:handle_inbound(Mssg, St#state.protocol_state) of
+    case bondy_wamp_protocol:handle_inbound(Msg, State0#state.protocol_state) of
         {ok, PSt} ->
-            handle_data(Rest, St#state{protocol_state = PSt});
+            handle_inbound(Rest, State0#state{protocol_state = PSt});
+
         {reply, L, PSt} ->
-            St1 = St#state{protocol_state = PSt},
-            ok = send(L, St1),
-            handle_data(Rest, St1);
+            State = State0#state{protocol_state = PSt},
+            ok = send(L, State),
+            handle_inbound(Rest, State);
+
         {stop, PSt} ->
-            {stop, normal, St#state{protocol_state = PSt}};
+            State = State0#state{protocol_state = PSt},
+            {stop, normal, State};
+
         {stop, L, PSt} ->
-            St1 = St#state{protocol_state = PSt},
-            ok = send(L, St1),
-            {stop, normal, St1};
+            State = State0#state{protocol_state = PSt},
+            ok = send(L, State),
+            {stop, normal, State};
+
         {stop, normal, L, PSt} ->
-            St1 = St#state{protocol_state = PSt},
-            ok = send(L, St1),
-            {stop, normal, St1};
+            State = State0#state{protocol_state = PSt},
+            ok = send(L, State),
+            {stop, normal, State};
+
         {stop, Reason, L, PSt} ->
-            St1 = St#state{
+            State = State0#state{
                 protocol_state = PSt,
                 shutdown_reason = Reason
             },
-            ok = send(L, St1),
-            {stop, shutdown, St1}
+            ok = send(L, State),
+            {stop, shutdown, State}
     end;
 
-handle_data(<<0:5, 1:3, Len:24, Payload:Len/binary, Rest/binary>>, St) ->
+handle_inbound(<<0:5, 1:3, Len:24, Payload:Len/binary, Rest/binary>>, State) ->
     %% We received a PING, send a PONG
-    ok = send_frame(<<0:5, 2:3, Len:24, Payload/binary>>, St),
-    handle_data(Rest, St);
+    ok = send_frame(<<0:5, 2:3, Len:24, Payload/binary>>, State),
+    handle_inbound(Rest, State);
 
-handle_data(<<0:5, 2:3, Len:24, Payload:Len/binary, Rest/binary>>, St) ->
+handle_inbound(<<0:5, 2:3, Len:24, Payload:Len/binary, Rest/binary>>, State) ->
     %% We received a PONG
-    ?LOG_DEBUG(#{description => "Received pong"}),
+    ?LOG_DEBUG(#{
+        description => "Received pong",
+        payload => Payload
+    }),
 
-    case St#state.ping_sent of
-        {true, Payload, TimerRef} ->
-            %% We reset the state
-            ok = erlang:cancel_timer(TimerRef, [{info, false}]),
-            handle_data(Rest, St#state{ping_sent = false, ping_attempts = 0});
-        {true, Bin, TimerRef} ->
-            ok = erlang:cancel_timer(TimerRef, [{info, false}]),
+    case Payload == State#state.ping_payload of
+        true ->
+            handle_inbound(Rest, State);
+
+        false ->
             ?LOG_ERROR(#{
                 description => "Invalid pong message from peer",
                 reason => invalid_ping_response,
-                received => Bin,
-                expected => Payload
+                received => Payload,
+                expected => State#state.ping_payload
             }),
-            {stop, invalid_ping_response, St};
-        false ->
-            ?LOG_ERROR(#{
-                description => "Unrequested pong message from peer"
-            }),
-            %% Should we stop instead?
-            handle_data(Rest, St)
+            {stop, invalid_ping_response, State}
     end;
 
-handle_data(<<0:5, R:3, Len:24, Mssg:Len/binary, Rest/binary>>, St)
+handle_inbound(<<0:5, R:3, Len:24, Msg:Len/binary, Rest/binary>>, State)
 when R > 2 ->
     %% The three bits (R) encode the type of the transport message,
     %% values 3 to 7 are reserved
-    ok = send_frame(error_number(use_of_reserved_bits), St),
+    ok = send_frame(error_number(use_of_reserved_bits), State),
     ?LOG_ERROR(#{
         description =>
             "Client committed a WAMP protocol violation, message dropped",
         reason => use_of_reserved_bits,
         value => R,
-        message => Mssg
+        message => Msg
     }),
     %% Should we stop instead?
-    handle_data(Rest, St);
+    handle_inbound(Rest, State);
 
-handle_data(<<>>, St) ->
+handle_inbound(<<>>, State) ->
     %% We finished consuming data
-    {ok, St};
+    {ok, State};
 
-handle_data(Data, St) ->
+handle_inbound(Data, State0) ->
     %% We have a partial message i.e. byte_size(Data) < Len
     %% we store is as buffer
-    {ok, St#state{buffer = Data}}.
+    State = State0#state{buffer = Data},
+    {ok, State}.
 
 
 -spec handle_outbound(any(), state()) ->
     {noreply, state(), timeout()}
     | {stop, normal, state()}.
 
-handle_outbound(M, St0) ->
-    case bondy_wamp_protocol:handle_outbound(M, St0#state.protocol_state) of
-        {ok, Bin, PSt} ->
-            St1 = St0#state{protocol_state = PSt},
-            case send(Bin, St1) of
+handle_outbound(M, State0) ->
+    case bondy_wamp_protocol:handle_outbound(M, State0#state.protocol_state) of
+        {ok, Bin, ProtoState} ->
+            State = State0#state{protocol_state = ProtoState},
+            case send(Bin, State) of
                 ok ->
-                    {noreply, St1, ?TIMEOUT};
+                    {noreply, State, ?TIMEOUT(State)};
                 {error, Reason} ->
-                    {stop, Reason, St1}
-            end;
-        {stop, PSt} ->
-            {stop, normal, St0#state{protocol_state = PSt}};
-        {stop, Bin, PSt} ->
-            St1 = St0#state{protocol_state = PSt},
-            case send(Bin, St1) of
-                ok ->
-                    {stop, normal, St1};
-                {error, Reason} ->
-                    {stop, Reason, St1}
+                    {stop, Reason, State}
             end;
 
-        {stop, Bin, PSt, Time} when is_integer(Time), Time > 0 ->
-            %% We send ourselves a message to stop after Time
-            St1 = St0#state{protocol_state = PSt},
-            erlang:send_after(
-                Time, self(), {stop, normal}),
-            case send(Bin, St1) of
+        {stop, ProtoState} ->
+            State = State0#state{protocol_state = ProtoState},
+            {stop, normal, disable_ping(State)};
+
+        {stop, Bin, ProtoState} ->
+            State = State0#state{protocol_state = ProtoState},
+            case send(Bin, State) of
                 ok ->
-                    {noreply, St1};
+                    {stop, normal, disable_ping(State)};
                 {error, Reason} ->
-                    {stop, Reason, St1}
+                    {stop, Reason, disable_ping(State)}
+            end;
+
+        {stop, Bin, ProtoState, Time} when is_integer(Time), Time > 0 ->
+            %% We send ourselves a message to stop after Time
+            State = State0#state{protocol_state = ProtoState},
+            erlang:send_after(Time, self(), {stop, normal}),
+
+            case send(Bin, State) of
+                ok ->
+                    {noreply, disable_ping(State)};
+                {error, Reason} ->
+                    {stop, Reason, disable_ping(State)}
             end
     end.
 
 
 %% @private
-handle_handshake(Len, Enc, St) ->
+handle_handshake(Len, Enc, State) ->
     try
-        init_wamp(Len, Enc, St)
+        init_wamp(Len, Enc, State)
     catch
         throw:Reason:Stacktrace ->
-            ok = send_frame(error_number(Reason), St),
+            ok = send_frame(error_number(Reason), State),
             ?LOG_INFO(#{
                 description => "WAMP protocol error, closing connection.",
                 class => throw,
                 reason => Reason,
                 stacktrace => Stacktrace
             }),
-            {stop, Reason, St}
+            {stop, Reason, State}
     end.
 
 
 %% @private
-init_wamp(Len, Enc, St0) ->
+init_wamp(Len, Enc, State0) ->
     MaxLen = validate_max_len(Len),
     {FrameType, EncName} = validate_encoding(Enc),
 
-    case bondy_utils:peername(St0#state.transport, St0#state.socket) of
+    case bondy_utils:peername(State0#state.transport, State0#state.socket) of
         {ok, {_, _} = Peer} ->
             Proto = {raw, FrameType, EncName},
 
             case bondy_wamp_protocol:init(Proto, Peer, #{}) of
-                {ok, CBState} ->
-                    St1 = St0#state{
+                {ok, ProtoState} ->
+                    State1 = State0#state{
                         frame_type = FrameType,
                         encoding = EncName,
                         max_len = MaxLen,
-                        protocol_state = CBState
+                        protocol_state = ProtoState
                     },
 
+                    PingOpts = maps_utils:from_property_list(
+                        bondy_config:get([State0#state.listener, ping])
+                    ),
+
+                    State = maybe_enable_ping(PingOpts, State1),
+
                     ok = send_frame(
-                        <<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, St1
+                        <<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, State
                     ),
 
                     ?LOG_INFO(#{
                         description => "Established connection with client."
                     }),
 
-                    {ok, St1};
+                    {ok, State};
 
                 {error, Reason} ->
-                    {stop, Reason, St0}
+                    {stop, Reason, State0}
             end;
 
         {ok, NonIPAddr} ->
@@ -516,7 +577,7 @@ init_wamp(Len, Enc, St0) ->
                 serializer => EncName,
                 message_max_length => MaxLen
             }),
-            {stop, invalid_socket, St0};
+            {stop, invalid_socket, State0};
 
         {error, Reason} ->
             ?LOG_ERROR(#{
@@ -528,9 +589,17 @@ init_wamp(Len, Enc, St0) ->
                 serializer => EncName,
                 message_max_length => MaxLen
             }),
-            {stop, invalid_socket, St0}
+            {stop, invalid_socket, State0}
     end.
 
+
+%% @private
+do_terminate(undefined) ->
+    ok;
+
+do_terminate(State) ->
+    ok = cancel_timer(State#state.ping_tref),
+    bondy_wamp_protocol:terminate(State#state.protocol_state).
 
 
 %% @private
@@ -549,27 +618,6 @@ send(Bin, St) ->
 send_frame(Frame, St) when is_binary(Frame) ->
     (St#state.transport):send(St#state.socket, Frame).
 
-
-%% @private
-send_ping(St) ->
-    send_ping(integer_to_binary(erlang:system_time(microsecond)), St).
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc Sends a ping message with a reference() as a payload to the client and
-%% sent ourselves a ping_timeout message in the future.
-%% @end
-%% -----------------------------------------------------------------------------
-send_ping(Bin, St0) ->
-    ok = send_frame(<<0:5, 1:3, (byte_size(Bin)):24, Bin/binary>>, St0),
-    Timeout = bondy_config:get(ping_timeout, ?PING_TIMEOUT),
-    TimerRef = erlang:send_after(Timeout, self(), ping_timeout),
-    St1 = St0#state{
-        ping_sent = {true, Bin, TimerRef},
-        ping_attempts = St0#state.ping_attempts + 1
-    },
-    {ok, St1}.
 
 
 %% -----------------------------------------------------------------------------
@@ -632,17 +680,16 @@ validate_encoding(N) ->
 %% 5 - 15: reserved for future errors
 %% @end
 %% -----------------------------------------------------------------------------
-error_number(serializer_unsupported) ->?RAW_ERROR(1);
-error_number(maximum_message_length_unacceptable) ->?RAW_ERROR(2);
-error_number(use_of_reserved_bits) ->?RAW_ERROR(3);
-error_number(maximum_connection_count_reached) ->?RAW_ERROR(4).
+error_number(serializer_unsupported) -> ?RAW_ERROR(1);
+error_number(maximum_message_length_unacceptable) -> ?RAW_ERROR(2);
+error_number(use_of_reserved_bits) -> ?RAW_ERROR(3);
+error_number(maximum_connection_count_reached) -> ?RAW_ERROR(4).
 
 
 %% error_reason(1) -> serializer_unsupported;
 %% error_reason(2) -> maximum_message_length_unacceptable;
 %% error_reason(3) -> use_of_reserved_bits;
 %% error_reason(4) -> maximum_connection_count_reached.
-
 
 
 %% @private
@@ -663,54 +710,16 @@ close_socket(Reason, St) ->
         {socket_closed, wamp, raw, St#state.peername, Seconds}
     ),
 
-    IncrSockerErrorCnt = fun() ->
-        %% We increase the socker error counter
-        bondy_event_manager:notify(
-            {socket_error, wamp, raw, St#state.peername}
-        )
-    end,
-
     case Reason of
-        normal ->
-            ?LOG_INFO(#{
-                description => <<"Connection closed by client">>,
-                reason => Reason
-            }),
-            ok;
-
-        closed ->
-            ?LOG_INFO(#{
-                description => <<"Connection closed by client">>,
-                reason => Reason
-            }),
-            ok;
-
-        shutdown ->
-            ?LOG_INFO(#{
-                description => <<"Connection closed by router">>,
-                reason => Reason
-            }),
-            ok;
-
-        {tcp_error, _Socket, TCPReason} ->
+        {tcp_error, _, _} ->
             %% We increase the socker error counter
-            ok = IncrSockerErrorCnt(),
-            ?LOG_ERROR(#{
-                description => <<"Connection closing due to TCP error">>,
-                reason => TCPReason
-            }),
-            ok;
+            ok = bondy_event_manager:notify(
+                {socket_error, wamp, raw, St#state.peername}
+            );
 
         _ ->
-            %% We increase the socket error counter
-            ok = IncrSockerErrorCnt(),
-            ?LOG_ERROR(#{
-                description => <<"Connection closing due to system error">>,
-                reason => Reason
-            }),
             ok
     end.
-
 
 
 %% @private
@@ -748,3 +757,108 @@ maybe_error({error, Reason}) ->
 
 maybe_error(Term) ->
     Term.
+
+
+
+
+%% =============================================================================
+%% PRIVATE: PING TIMEOUT
+%% =============================================================================
+
+
+
+%% @private
+maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
+    IdleTimeout = maps:get(idle_timeout, PingOpts),
+    Timeout = maps:get(timeout, PingOpts),
+    Attempts = maps:get(max_attempts, PingOpts),
+
+    Retry = bondy_retry:init(
+        ping_timeout,
+        #{
+            deadline => 0, % disable, use max_retries only
+            interval => Timeout,
+            max_retries => Attempts,
+            backoff_enabled => false
+        }
+    ),
+
+    State#state{
+        ping_idle_timeout = IdleTimeout,
+        ping_payload = bondy_utils:generate_fragment(16),
+        ping_retry = Retry
+    };
+
+maybe_enable_ping(#{enabled := false}, State) ->
+    State.
+
+
+%% @private
+reset_ping(#state{ping_retry = undefined} = State) ->
+    %% ping disabled
+    State;
+
+reset_ping(#state{ping_tref = undefined} = State) ->
+    Time = State#state.ping_idle_timeout,
+    Ref = erlang:start_timer(Time, self(), ping_idle_timeout),
+
+    State#state{ping_tref = Ref};
+
+reset_ping(#state{} = State) ->
+    ok = cancel_timer(State#state.ping_tref),
+
+    %% Reset retry state
+    {_, Retry} = bondy_retry:succeed(State#state.ping_retry),
+
+    Time = State#state.ping_idle_timeout,
+    Ref = erlang:start_timer(Time, self(), ping_idle_timeout),
+
+    State#state{
+        ping_retry = Retry,
+        ping_tref = Ref
+    }.
+
+
+%% @private
+disable_ping(#state{ping_retry = undefined} = State) ->
+    State;
+
+disable_ping(#state{} = State) ->
+    ok = cancel_timer(State#state.ping_tref),
+    State#state{ping_retry = undefined}.
+
+
+%% @private
+cancel_timer(Ref) when is_reference(Ref) ->
+    _ = erlang:cancel_timer(Ref),
+    ok;
+
+cancel_timer(_) ->
+    ok.
+
+
+%% @private
+maybe_send_ping(#state{} = State) ->
+    {Result, Retry} = bondy_retry:fail(State#state.ping_retry),
+    maybe_send_ping(Result, State#state{ping_retry = Retry}).
+
+%% @private
+maybe_send_ping(Limit, State)
+when Limit == deadline orelse Limit == max_retries ->
+    % ?LOG_INFO(#{
+    %     description => "Connection closing.",
+    %     reason => ping_timeout
+    % }),
+    {stop, {shutdown, ping_timeout}, State};
+
+maybe_send_ping(_Time, #state{} = State0) ->
+    %% We send a ping
+    Bin = State0#state.ping_payload,
+    Frame = <<0:5, 1:3, (byte_size(Bin)):24, Bin/binary>>,
+    ok = send_frame(Frame, State0),
+
+    %% We schedule the next retry
+    Ref = bondy_retry:fire(State0#state.ping_retry),
+    State = State0#state{ping_tref = Ref},
+
+    {noreply, State}.
