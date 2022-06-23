@@ -208,7 +208,7 @@ map({property_range_limit, Key, Limit}) ->
 map({inconsistency_error, Keys}) when is_list(Keys) ->
     Reason = iolist_to_binary([
         <<"The values provided for the keys [">>,
-        binary_utils:join(Keys, <<", ">>),
+        binary_utils:join([to_bin(K) || K <- Keys], <<", ">>),
         <<"] are inconsistent.">>
     ]),
     map({inconsistency_error, Keys, Reason});
