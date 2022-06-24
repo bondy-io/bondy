@@ -276,8 +276,6 @@ handle_info(Event, State) ->
     {noreply, State}.
 
 
-
-
 terminate(Reason, #state{transport = T, socket = S} = State0)
 when T =/= undefined andalso S =/= undefined ->
     ok = close_socket(Reason, State0),
