@@ -42,6 +42,9 @@ test: xref
 xref:
 	${REBAR} xref skip_deps=true
 
+cover: xref
+	${REBAR} as test ct ${CT_SUITE_ARGS}, cover
+
 dialyzer:
 	${REBAR} dialyzer
 
