@@ -2,7 +2,7 @@
     {description,
         "Bondy Broker Bridge is an application that is part of Bondy and provides a way to integrate Events with external brokers and systems."
     },
-    {vsn, "1.0.0-beta.59"},
+    {vsn, "1.0.0-beta.60"},
     {registered, []},
     {mod, {bondy_broker_bridge_app, []}},
     {applications, [
