@@ -181,6 +181,7 @@ when is_binary(SessionId) ->
         {Role, Roles} = valid_roles(Roles0, User),
 
         Ctxt = #{
+            provider => ?BONDY_AUTH_PROVIDER,
             session_id => SessionId,
             realm_uri => RealmUri,
             user_id => Username,

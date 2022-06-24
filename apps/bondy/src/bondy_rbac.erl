@@ -465,13 +465,11 @@ revoke_user(RealmUri, Username) ->
 revoke_group(RealmUri, Name) ->
     Prefix = ?GROUP_GRANTS_PREFIX(RealmUri),
 
-    plum_db:fold(
-        fun({Key, _Value}, Acc) ->
+    plum_db:foreach(
+        fun({Key, _Value}) ->
             %% destructive iteration is allowed
-            ok = plum_db:delete(Prefix, Key),
-            Acc
+            ok = plum_db:delete(Prefix, Key)
         end,
-        ok,
         Prefix,
         [{match, {Name, '_'}}, {resolver, lww}]
     ).

@@ -49,6 +49,7 @@
 -export([new/0]).
 -export([new/1]).
 -export([to_external/1]).
+-export([is_type/1]).
 
 
 
@@ -114,3 +115,14 @@ to_external(Base62) when is_binary(Base62) ->
     <<ExternalId:?EXT_LEN/integer, _/binary>> = <<Bin:?LEN/integer>>,
 
     ExternalId.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+is_type(Base62) when is_binary(Base62) andalso byte_size(Base62) =:= 27 ->
+    true;
+
+is_type(_) ->
+    false.

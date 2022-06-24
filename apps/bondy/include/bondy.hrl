@@ -34,6 +34,13 @@
 -define(INVOKE_QUEUE_LEAST_LOADED, <<"queue_least_loaded">>).
 -define(INVOKE_QUEUE_LEAST_LOADED_SAMPLE, <<"queue_least_loaded_sample">>).
 
+-define(WAMP_CLIENT_ROLES, #{
+    caller => ?CALLER_FEATURES,
+    callee => ?CALLEE_FEATURES,
+    subscriber => ?SUBSCRIBER_FEATURES,
+    publisher => ?PUBLISHER_FEATURES
+}).
+
 -define(WAMP_DEALER_FEATURES, #{
     call_canceling => true,
     call_timeout => true,

@@ -62,6 +62,7 @@
 -export([succeed/1]).
 -export([get/1]).
 -export([fire/1]).
+-export([count/1]).
 
 -compile({no_auto_import, [get/1]}).
 
@@ -75,6 +76,7 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Set deadline to zero to disable dealine and rely on max_retries only.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec init(Id :: any(), Opts :: opts()) -> t().
@@ -120,7 +122,7 @@ get(#bondy_retry{} = State) ->
     Deadline = State#bondy_retry.deadline,
     B = State#bondy_retry.backoff,
 
-    case Now > Start + Deadline of
+    case Deadline > 0 andalso Now > (Start + Deadline) of
         true ->
             deadline;
         false when B == undefined ->
@@ -194,6 +196,14 @@ fire(#bondy_retry{} = State) ->
     erlang:start_timer(get(State), self(), State#bondy_retry.id).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec count(State :: t()) -> non_neg_integer().
+
+count(#bondy_retry{count = Val}) ->
+    Val.
 
 
 %% =============================================================================

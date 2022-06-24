@@ -20,6 +20,12 @@
 %% @doc EARLY DRAFT implementation of the server-side connection between and
 %% edge node ({@link bondy_bridge_relay_client}) and a remote/core node
 %% (this module).
+%%
+%% == Configuration Options ==
+%% <ul>
+%% <li>auth_timeout - once the connection is established how long to wait for
+%% the client to send the HELLO message.</li>
+%% </ul>
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_bridge_relay_server).
@@ -30,6 +36,7 @@
 -include_lib("wamp/include/wamp.hrl").
 -include_lib("bondy_plum_db.hrl").
 -include("bondy.hrl").
+-include("bondy_bridge_relay.hrl").
 
 -define(SOCKET_DATA(Tag), Tag == tcp orelse Tag == ssl).
 -define(SOCKET_ERROR(Tag), Tag == tcp_error orelse Tag == ssl_error).
@@ -42,13 +49,15 @@
     transport               ::  module(),
     opts                    ::  key_value:t(),
     socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
+    auth_timeout            ::  pos_integer(),
     idle_timeout            ::  pos_integer(),
     ping_retry              ::  optional(bondy_retry:t()),
     ping_retry_tref         ::  optional(timer:ref()),
     ping_sent               ::  optional({timer:ref(), binary()}),
     sessions = #{}          ::  #{id() => bondy_session:t()},
-    sessions_by_realm = #{} ::  #{uri() => id()},
-    session                 ::  optional(map()),
+    sessions_by_realm = #{} ::  #{uri() => bondy_session_id:t()},
+    %% The context for the session currently being established
+    auth_context            ::  optional(bondy_auth:context()),
     registrations = #{}     ::  reg_indx(),
     start_ts                ::  pos_integer()
 }).
@@ -123,11 +132,15 @@ callback_mode() ->
 %% @end
 %% -----------------------------------------------------------------------------
 init({RanchRef, Transport, Opts}) ->
+    AuthTimeout = key_value:get(auth_timeout, Opts, 5000),
+    IdleTimeout = key_value:get(idle_timeout, Opts, infinity),
+
     State0 = #state{
         ranch_ref = RanchRef,
         transport = Transport,
         opts = Opts,
-        idle_timeout = key_value:get(idle_timeout, Opts, infinity),
+        auth_timeout = AuthTimeout,
+        idle_timeout = IdleTimeout,
         start_ts = erlang:system_time(millisecond)
     },
 
@@ -143,10 +156,7 @@ init({RanchRef, Transport, Opts}) ->
             State0
     end,
 
-    %% How much time till we get
-    Timeout = key_value:get(auth_timeout, Opts, 5000),
-
-    {ok, connected, State, Timeout}.
+    {ok, connected, State, AuthTimeout}.
 
 
 %% -----------------------------------------------------------------------------
@@ -220,7 +230,7 @@ connected(enter, connected, State) ->
 
     ok = on_connect(State),
 
-    {keep_state, State#state{socket = Socket}, [idle_timeout(State)]};
+    {keep_state, State#state{socket = Socket}, [auth_timeout(State)]};
 
 
 connected(info, {Tag, Socket, Data}, #state{socket = Socket} = State)
@@ -240,7 +250,7 @@ when ?SOCKET_DATA(Tag) ->
                 description => "Got message from edge",
                 reason => Msg
             }),
-            handle_message(Msg, State)
+            handle_in(Msg, State)
     end;
 
 connected(info, {Tag, _Socket}, _) when ?CLOSED_TAG(Tag) ->
@@ -256,17 +266,14 @@ connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
     }),
     {stop, Reason};
 
-connected(info, {?BONDY_REQ, _Pid, RealmUri, M}, State) ->
+connected(info, {?BONDY_REQ, Pid, RealmUri, M}, State) ->
     %% A local bondy:send(), we need to forward to edge client
     ?LOG_DEBUG(#{
         description => "Received WAMP request we need to FWD to edge",
         message => M
     }),
 
-    SessionId = session_id(RealmUri, State),
-    ok = send_message({receive_message, SessionId, M}, State),
-
-    {keep_state_and_data, [idle_timeout(State)]};
+    handle_out(M, RealmUri, Pid, State);
 
 connected(info, Msg, State) ->
     ?LOG_INFO(#{
@@ -334,11 +341,7 @@ challenge(Realm, Details, State0) ->
     {ok, Peer} = bondy_utils:peername(
         State0#state.transport, State0#state.socket
     ),
-    Sessions0 = State0#state.sessions,
-    SessionsByUri0 = State0#state.sessions_by_realm,
 
-
-    Uri = bondy_realm:uri(Realm),
     SessionId = bondy_session_id:new(),
     Authid = maps:get(authid, Details),
     Authroles0 = maps:get(authroles, Details, []),
@@ -353,23 +356,44 @@ challenge(Realm, Details, State0) ->
                     throw({no_authmethod, ReqMethods});
 
                 [Method|_] ->
+                    Uri = bondy_realm:uri(Realm),
+                    FinalAuthid = bondy_auth:user_id(AuthCtxt),
+                    Authrole = bondy_auth:role(AuthCtxt),
+                    Authroles = bondy_auth:roles(AuthCtxt),
+                    Authprovider = bondy_auth:provider(AuthCtxt),
+                    SecEnabled = bondy_realm:is_security_enabled(Realm),
 
-                    Session = #{
-                        id => SessionId,
-                        authid => Authid,
-                        realm_uri => bondy_realm:uri(Realm),
-                        auth_context => AuthCtxt
+                    Properties = #{
+                        type => bridge_relay,
+                        peer => Peer,
+                        security_enabled => SecEnabled,
+                        is_anonymous => FinalAuthid == anonymous,
+                        agent => bondy_router:agent(),
+                        roles => maps:get(roles, Details, undefined),
+                        authid => maybe_gen_authid(FinalAuthid),
+                        authprovider => Authprovider,
+                        authmethod => Method,
+                        authrole => Authrole,
+                        authroles => Authroles
                     },
 
+                    %% We create a new session object but we do not open it
+                    %% yet, as we need to send the callenge and verify the
+                    %% response
+                    Session = bondy_session:new(Uri, Properties),
+
+                    Sessions0 = State0#state.sessions,
                     Sessions = maps:put(SessionId, Session, Sessions0),
+
+                    SessionsByUri0 = State0#state.sessions_by_realm,
                     SessionsByUri = maps:put(Uri, SessionId, SessionsByUri0),
 
                     State = State0#state{
-                        session = Session,
+                        auth_context = AuthCtxt,
                         sessions = Sessions,
                         sessions_by_realm = SessionsByUri
                     },
-                    do_challenge(SessionId, Details, Method, State)
+                    send_challenge(Details, Method, State)
             end;
 
         {error, Reason0} ->
@@ -378,32 +402,25 @@ challenge(Realm, Details, State0) ->
 
 
 %% @private
-do_challenge(SessionId, Details, Method, State0) ->
-    Session0 = maps:get(SessionId, State0#state.sessions),
-    AuthCtxt0 = maps:get(auth_context, Session0),
+send_challenge(Details, Method, State0) ->
+    AuthCtxt0 = State0#state.auth_context,
+    SessionId = bondy_auth:session_id(AuthCtxt0),
 
-    {AuthCtxt, Reply} =
+    {Reply, State} =
         case bondy_auth:challenge(Method, Details, AuthCtxt0) of
-            {false, AuthCtxt1} ->
+            {false, _} ->
                 M = {welcome, SessionId, #{}},
-                {AuthCtxt1, M};
+                {M, State0#state{auth_context = undefined}};
 
             {true, ChallengeExtra, AuthCtxt1} ->
                 M = {challenge, Method, ChallengeExtra},
-                {AuthCtxt1, M};
+                {M, State0#state{auth_context = AuthCtxt1}};
 
             {error, Reason} ->
+                %% At the moment we only support a single session/realm
+                %% so we crash
                 throw({authentication_failed, Reason})
         end,
-
-    Session = Session0#{
-        auth_context => AuthCtxt,
-        start_ts => erlang:system_time(millisecond)
-    },
-
-    State = State0#state{
-        sessions = maps:put(SessionId, Session, State0#state.sessions)
-    },
 
     ok = send_message(Reply, State),
 
@@ -412,37 +429,28 @@ do_challenge(SessionId, Details, Method, State0) ->
 
 %% @private
 authenticate(AuthMethod, Signature, Extra, State0) ->
-    SessionId = maps:get(id, State0#state.session),
+    AuthCtxt0 = State0#state.auth_context,
 
-    Session0 = maps:get(SessionId, State0#state.sessions),
-    AuthCtxt0 = maps:get(auth_context, Session0),
+    case bondy_auth:authenticate(AuthMethod, Signature, Extra, AuthCtxt0) of
+        {ok, AuthExtra0, _} ->
+            SessionId = bondy_auth:session_id(AuthCtxt0),
+            Session = session(SessionId, State0),
 
-    {AuthCtxt, Reply} =
-        case bondy_auth:authenticate(AuthMethod, Signature, Extra, AuthCtxt0) of
-            {ok, AuthExtra0, AuthCtxt1} ->
-                AuthExtra = AuthExtra0#{
-                    node => bondy_config:nodestring()
-                },
-                M = {welcome, SessionId, #{authextra => AuthExtra}},
-                {AuthCtxt1, M};
-            {error, Reason} ->
-                throw({authentication_failed, Reason})
-        end,
+            ok = bondy_session_manager:open(Session),
 
-    Session = Session0#{
-        ref => bondy_ref:new(bridge_relay, self(), SessionId),
-        auth_context => AuthCtxt,
-        start_ts => erlang:system_time(millisecond)
-    },
+            AuthExtra = AuthExtra0#{node => bondy_config:nodestring()},
+            M = {welcome, SessionId, #{authextra => AuthExtra}},
 
-    State = State0#state{
-        sessions = maps:put(SessionId, Session, State0#state.sessions),
-        session = undefined
-    },
+            State = State0#state{auth_context = undefined},
 
-    ok = send_message(Reply, State),
+            ok = send_message(M, State),
 
-    State.
+            State;
+        {error, Reason} ->
+            %% At the moment we only support a single session/realm
+            %% so we crash
+            throw({authentication_failed, Reason})
+    end.
 
 
 %% @private
@@ -464,6 +472,10 @@ on_connect(_State) ->
     ok.
 
 
+%% @private
+auth_timeout(State) ->
+    {timeout, State#state.auth_timeout, auth_timeout}.
+
 
 %% @private
 idle_timeout(State) ->
@@ -471,20 +483,22 @@ idle_timeout(State) ->
 
 
 %% @private
-handle_message({hello, _, _}, #state{session = Session} = State)
-when Session =/= undefined ->
-    %% Session already being established, wrong message
-    Abort = {abort, protocol_violation, #{
+handle_in({hello, _, _}, #state{auth_context = Ctxt} = State)
+when Ctxt =/= undefined ->
+    %% Session already being established, invalid message
+    Abort = {abort, undefined, protocol_violation, #{
         message => <<"You've sent the HELLO message twice">>
-    }},    ok = send_message(Abort, State),
+    }},
+    ok = send_message(Abort, State),
     {stop, normal, State};
 
-handle_message({hello, Uri, Details}, State0) ->
+handle_in({hello, Uri, Details}, State0) ->
     %% TODO validate Details
     ?LOG_DEBUG(#{
         description => "Got hello",
         details => Details
     }),
+
     try
 
         Realm = bondy_realm:fetch(Uri),
@@ -492,28 +506,36 @@ handle_message({hello, Uri, Details}, State0) ->
         bondy_realm:allow_connections(Realm)
             orelse throw(connections_not_allowed),
 
+        %% We send the challenge
         State = challenge(Realm, Details, State0),
-        {keep_state, State, [idle_timeout(State)]}
+
+        %% We wait for response and timeout using auth_timeout again
+        {keep_state, State, [auth_timeout(State)]}
 
     catch
         error:{not_found, Uri} ->
-            Abort = {abort, no_such_realm, #{
-                message => <<"Realm does not exist.">>,
-                realm => Uri
-            }},
+            Abort = {
+                abort,
+                undefined,
+                no_such_realm,
+                #{
+                    message => <<"Realm does not exist.">>,
+                    realm => Uri
+                }
+            },
             ok = send_message(Abort, State0),
             {stop, normal, State0};
 
         throw:connections_not_allowed = Reason ->
-            Abort = {abort, Reason, #{
-                message => <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure added by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>,
+            Abort = {abort, undefined, Reason, #{
+                message => <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure taken by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>,
                 realm => Uri
             }},
             ok = send_message(Abort, State0),
             {stop, normal, State0};
 
         throw:{no_authmethod, ReqMethods} ->
-            Abort = {abort, no_authmethod, #{
+            Abort = {abort, undefined, no_authmethod, #{
                 message => <<"The requested authentication methods are not available for this user on this realm.">>,
                 realm => Uri,
                 authmethods => ReqMethods
@@ -522,7 +544,7 @@ handle_message({hello, Uri, Details}, State0) ->
             {stop, normal, State0};
 
         throw:{authentication_failed, Reason} ->
-            Abort = {abort, authentication_failed, #{
+            Abort = {abort, undefined, authentication_failed, #{
                 message => <<"Authentication failed.">>,
                 realm => Uri,
                 reason => Reason
@@ -532,7 +554,7 @@ handle_message({hello, Uri, Details}, State0) ->
 
     end;
 
-handle_message({authenticate, Signature, Extra}, State0) ->
+handle_in({authenticate, Signature, Extra}, State0) ->
     %% TODO validate Details
     ?LOG_DEBUG(#{
         description => "Got authenticate",
@@ -547,8 +569,10 @@ handle_message({authenticate, Signature, Extra}, State0) ->
 
     catch
         throw:{authentication_failed, Reason} ->
-            RealmUri = maps:get(realm_uri, State0#state.session, undefined),
-            Abort = {abort, authentication_failed, #{
+            AuthCtxt = State0#state.auth_context,
+            RealmUri = bondy_auth:realm_uri(AuthCtxt),
+            SessionId = bondy_auth:realm_uri(AuthCtxt),
+            Abort = {abort, SessionId, authentication_failed, #{
                 message => <<"Authentication failed.">>,
                 realm_uri => RealmUri,
                 reason => Reason
@@ -557,11 +581,24 @@ handle_message({authenticate, Signature, Extra}, State0) ->
             {stop, normal, State0}
     end;
 
-handle_message({aae_sync, SessionId, Opts}, State) ->
+handle_in({aae_sync, SessionId, Opts}, State) ->
     RealmUri = session_realm(SessionId, State),
     ok = full_sync(SessionId, RealmUri, Opts, State),
     Finish = {aae_sync, SessionId, finished},
     ok = gen_statem:cast(self(), {forward_message, Finish}),
+    {keep_state_and_data, [idle_timeout(State)]}.
+
+handle_out({goodbye, Details, ReasonUri}, RealmUri, _From, State) ->
+    %% M is the wamp_goodbye() message.
+    SessionId = session_id(RealmUri, State),
+    M = {goodbye, SessionId, ReasonUri, Details},
+    ok = send_message(M, State),
+    {stop, normal};
+
+handle_out(M, RealmUri, _From, State) ->
+    SessionId = session_id(RealmUri, State),
+    ok = send_message({receive_message, SessionId, M}, State),
+
     {keep_state_and_data, [idle_timeout(State)]}.
 
 
@@ -590,7 +627,7 @@ safe_receive_message(Msg, SessionId, State) ->
                 reason => Reason,
                 stacktrace => Stacktrace
             }),
-            Abort = {abort, server_error, #{
+            Abort = {abort, SessionId, server_error, #{
                 reason => Reason
             }},
             ok = send_message(Abort, State),
@@ -744,7 +781,9 @@ remove_registry_entry(SessionId, ExtEntry, State) ->
 
 remove_all_registry_entries(State) ->
     maps:foreach(
-        fun(_, #{realm_uri := RealmUri, ref := Ref}) ->
+        fun(_, Session) ->
+            RealmUri = bondy_session:realm_uri(Session),
+            Ref = bondy_session:ref(Session),
             bondy_router:flush(RealmUri, Ref)
         end,
         State#state.sessions
@@ -860,15 +899,27 @@ pdb_objects(It, Acc0) ->
 
 
 %% @private
+session(SessionId, #state{sessions = Map}) ->
+    maps:get(SessionId, Map).
+
+%% @private
 session_realm(SessionId, #state{sessions = Map}) ->
-    maps:get(realm_uri, maps:get(SessionId, Map)).
+    bondy_session:realm_uri(maps:get(SessionId, Map)).
 
 
 %% @private
 session_ref(SessionId, #state{sessions = Map}) ->
-    maps:get(ref, maps:get(SessionId, Map)).
+    bondy_session:ref(maps:get(SessionId, Map)).
 
 
 %% @private
 session_id(RealmUri, #state{sessions_by_realm = Map}) ->
     maps:get(RealmUri, Map).
+
+
+%% @private
+maybe_gen_authid(anonymous) ->
+    bondy_utils:uuid();
+
+maybe_gen_authid(UserId) ->
+    UserId.

@@ -40,7 +40,7 @@
     auth_timestamp          ::  integer() | undefined,
     state_name = closed     ::  state_name(),
     context                 ::  bondy_context:t() | undefined,
-    goodbye_reason = normal ::  normal | logout
+    goodbye_reason          ::  uri() | undefined
 }).
 
 
@@ -199,11 +199,11 @@ terminate(#wamp_state{context = undefined}) ->
 
 terminate(#wamp_state{} = State) ->
     Ctxt = State#wamp_state.context,
-    Reason = reason_uri_to_atom(State#wamp_state.goodbye_reason),
 
     case bondy_context:has_session(Ctxt) of
         true ->
             Session = bondy_context:session(Ctxt),
+            Reason = State#wamp_state.goodbye_reason,
             bondy_session_manager:close(Session, Reason);
         false ->
             ok
@@ -339,7 +339,10 @@ handle_outbound(#goodbye{} = M, St0) ->
     %% get the client's goodbye response
     ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
     Bin = wamp_encoding:encode(M, encoding(St0)),
-    St1 = St0#wamp_state{state_name = shutting_down},
+    St1 = St0#wamp_state{
+        state_name = shutting_down,
+        goodbye_reason = M#goodbye.reason_uri
+    },
     %% We use a timeout to make sure we kill the connection even if the client
     %% doesn't reply.
     {stop, Bin, St1, ?SHUTDOWN_TIMEOUT};
@@ -624,7 +627,9 @@ open_session(Extra, St0) when is_map(Extra) ->
         },
 
         %% We open a session
-        Session = bondy_session_manager:open(SessionId0, RealmUri, Properties),
+        {ok, Session} = bondy_session_manager:open(
+            SessionId0, RealmUri, Properties
+        ),
 
         %% This might be different than the SessionId0 in case we found a
         %% collision while storing (almost impossible).
@@ -860,7 +865,7 @@ abort_message({no_authmethod, _Opts}) ->
 
 abort_message(connections_not_allowed) ->
     Details = #{
-        message => <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure added by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>
+        message => <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure taken by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>
     },
     wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
 
@@ -1055,21 +1060,4 @@ update_process_metadata(#wamp_state{} = State) ->
         serializer => Serializer,
         peername => bondy_context:peername(Ctxt)
     }).
-
-
-%% @private
-reason_uri_to_atom(<<"wamp.close.normal">>) ->
-    normal;
-
-reason_uri_to_atom(<<"wamp.close.logout">>) ->
-    logout;
-
-reason_uri_to_atom(<<"wamp.close.", _/binary>>) ->
-    normal;
-
-reason_uri_to_atom(<<"wamp.error.", _/binary>>) ->
-    error;
-
-reason_uri_to_atom(Term) when is_atom(Term) ->
-    Term.
 

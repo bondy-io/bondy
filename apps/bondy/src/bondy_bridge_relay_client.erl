@@ -28,11 +28,25 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_bridge_relay.hrl").
 
 -define(SOCKET_DATA(Tag), Tag == tcp orelse Tag == ssl).
 -define(SOCKET_ERROR(Tag), Tag == tcp_error orelse Tag == ssl_error).
 -define(CLOSED_TAG(Tag), Tag == tcp_closed orelse Tag == ssl_closed).
 % -define(PASSIVE_TAG(Tag), Tag == tcp_passive orelse Tag == ssl_passive).
+-define(IS_RETRIABLE(Reason), (
+    Reason == timeout orelse
+    Reason == econnrefused orelse
+    Reason == econnreset orelse
+    Reason == ehostdown orelse
+    Reason == enotconn orelse
+    Reason == etimedout
+)).
+-define(IS_NETDOWN(Reason), (
+    Reason == enetdown orelse
+    Reason == ehostunreach orelse
+    Reason == enetunreach
+)).
 
 
 -record(state, {
@@ -45,18 +59,25 @@
     ping_retry_tref         ::  optional(timer:ref()),
     ping_sent               ::  optional({timer:ref(), binary()}),
     reconnect_retry         ::  optional(bondy_retry:t()),
-    reconnect_retry_reason  ::  optional(any()),
     hibernate = false       ::  boolean(),
     sessions = #{}          ::  sessions(),
-    sessions_by_uri = #{}   ::  #{uri() => bondy_session_id:t()},
-    session                 ::  optional(map()),
+    sessions_by_realm = #{} ::  #{uri() => bondy_session_id:t()},
+    session                 ::  optional(session()),
     start_ts                ::  integer()
 }).
 
 
 -type t()                   ::  #state{}.
--type sessions()            ::  #{
-    bondy_session_id:t() => bondy_bridge_relay_session:t()
+-type sessions()            ::  #{bondy_session_id:t() => session()}.
+-type session()             ::  #{
+    id := bondy_session_id:t(),
+    ref := bondy_ref:t(),
+    realm_uri := uri(),
+    authid := binary(),
+    pubkey := binary(),
+    signer => fun((Challenge :: binary()) -> Signature :: binary()),
+    subscriptions => map(),
+    registrations => map()
 }.
 
 %% API.
@@ -68,6 +89,8 @@
 -export([init/1]).
 -export([terminate/3]).
 -export([code_change/4]).
+-export([format_status/2]).
+
 
 %% STATE FUNCTIONS
 -export([connecting/3]).
@@ -123,11 +146,7 @@ callback_mode() ->
 %% @end
 %% -----------------------------------------------------------------------------
 init(Config0) ->
-    ?LOG_NOTICE(#{
-        description => "Starting bridge-relay client",
-        config => Config0
-    }),
-
+    % erlang:process_flag(sensitive, true),
     #{
         transport := Transport,
         endpoint := Endpoint,
@@ -135,6 +154,14 @@ init(Config0) ->
         idle_timeout := IdleTimeout,
         realms := Realms0
     } = Config0,
+
+    ?LOG_NOTICE(#{
+        description => "Starting bridge-relay client",
+        transport => Transport,
+        endpoint => Endpoint,
+        idle_timeout => IdleTimeout,
+        realms => [maps:get(uri, R) || R <- Realms0]
+    }),
 
     %% We rewrite the realms for fast access
     Realms = lists:foldl(
@@ -149,6 +176,7 @@ init(Config0) ->
         transport = transport(Transport),
         endpoint = Endpoint,
         idle_timeout = IdleTimeout,
+        hibernate = key_value:get(hibernate, Config, false),
         start_ts = erlang:system_time(millisecond)
     },
 
@@ -186,22 +214,10 @@ init(Config0) ->
 %% -----------------------------------------------------------------------------
 -spec terminate(term(), atom(), t()) -> term().
 
-terminate(Reason, _StateName, #state{socket = undefined}) ->
-
-    ?LOG_NOTICE(#{
-        description => "Process terminated",
-        reason => Reason
-    }),
-
+terminate(_, _, #state{socket = undefined}) ->
     ok;
 
 terminate(Reason, StateName, #state{} = State0) ->
-
-    ?LOG_WARNING(#{
-        description => "Connection terminated",
-        reason => Reason
-    }),
-
     Transport = State0#state.transport,
     Socket = State0#state.socket,
 
@@ -220,6 +236,29 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
     {ok, StateName, StateData}.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+format_status(Opt, [_PDict, _Statename, #state{} = State]) ->
+    gen_format(Opt, State#state{config = sensitive}).
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc Use format recommended by gen_server:format_status/2
+%% @end
+%% -----------------------------------------------------------------------------
+gen_format(normal, Term) ->
+    [{data, [{"State", Term}]}];
+
+gen_format(_, Term) ->
+    Term.
 
 %% =============================================================================
 %% STATE FUNCTIONS
@@ -248,8 +287,7 @@ connecting(state_timeout, connect, State0) ->
             {next_state, connected, State};
 
         {error, Reason} ->
-            State = State0#state{reconnect_retry_reason = Reason},
-            maybe_reconnect(State)
+            maybe_reconnect(Reason, State0)
     end;
 
 connecting(EventType, Msg, _) ->
@@ -258,7 +296,7 @@ connecting(EventType, Msg, _) ->
         type => EventType,
         event => Msg
     }),
-    {stop, normal}.
+    {stop, {error, unexpected_event}}.
 
 
 %% -----------------------------------------------------------------------------
@@ -292,13 +330,47 @@ connected(internal, {welcome, SessionId, Details}, State0) ->
     %% TODO open sessions on remaning realms
     {keep_state, State, idle_timeout(State)};
 
-connected(internal, {abort, Reason, Details}, State) ->
+connected(internal, {goodbye, SessionId, ?WAMP_CLOSE_REALM, Details}, State) ->
+
+    RealmUri = session_realm(SessionId, State),
+    Name = maps:get(name, State#state.config),
+
+    ?LOG_WARNING(#{
+        description => "Closing connection.",
+        reason => ?WAMP_CLOSE_REALM,
+        name => Name,
+        session_id => SessionId,
+        realm_uri => RealmUri,
+        details => Details
+    }),
+
+    %% Kick out all local sessions
+    bondy_realm_manager:close(RealmUri, ?WAMP_CLOSE_REALM),
+
+    %% We currently support a single session so we shutdown.
+    %% We will NOT be restarted
+    {stop, shutdown};
+
+connected(internal, {goodbye, SessionId, Reason, Details}, _State) ->
+    %% We currently support a single session, so we stop
+    ?LOG_NOTICE(#{
+        description => "Closing connection.",
+        reason => Reason,
+        session_id => SessionId,
+        details => Details
+    }),
+    %% We will be restarted
+    {stop, Reason};
+
+connected(internal, {abort, _SessionId, Reason, Details}, _State) ->
+    %% We currently support a single session, so we stop
     ?LOG_NOTICE(#{
         description => "Got abort message from server, closing connection.",
         reason => Reason,
         details => Details
     }),
-    {stop, server_error, State};
+    %% We will be restarted
+    {stop, Reason};
 
 connected(internal, {aae_sync, SessionId, finished}, State0) ->
     ?LOG_INFO(#{
@@ -358,7 +430,7 @@ connected(info, {Tag, _Socket}, State0) when ?CLOSED_TAG(Tag) ->
     {next_state, connecting, State};
 
 connected(info, {Tag, _, Reason}, State0) when ?SOCKET_ERROR(Tag) ->
-    ?LOG_WARNING(#{description => "Socket error", reason => Reason}),
+    ?LOG_ERROR(#{description => "Socket error", reason => Reason}),
     State = on_disconnect(State0),
     {next_state, connecting, State};
 
@@ -395,7 +467,7 @@ connected(info, {?BONDY_REQ, _Pid, RealmUri, Msg}, State) ->
     {keep_state_and_data, [idle_timeout(State)]};
 
 connected(info, Msg, _) ->
-    ?LOG_WARNING(#{
+    ?LOG_INFO(#{
         description => "Received unknown message",
         type => info,
         event => Msg
@@ -407,7 +479,7 @@ connected({call, _From}, {join, _Realms, _AuthId, _PubKey}, _State) ->
     keep_state_and_data;
 
 connected({call, From}, Request, _) ->
-    ?LOG_WARNING(#{
+    ?LOG_INFO(#{
         description => "Received unknown request",
         type => call,
         event => Request
@@ -420,7 +492,7 @@ connected(cast, {forward_message, Msg, SessionId}, State) ->
         true ->
             send_session_message(SessionId, Msg, State);
         _ ->
-            ?LOG_WARNING(#{
+            ?LOG_INFO(#{
                 description => "Received message for an uplink session that doesn't exist",
                 type => cast,
                 event => Msg,
@@ -444,7 +516,8 @@ connected(timeout, Msg, _) ->
         type => timeout,
         event => Msg
     }),
-    {stop, normal};
+    %% We will be restarted
+    {stop, {timeout, Msg}};
 
 connected(EventType, Msg, _) ->
     ?LOG_INFO(#{
@@ -463,36 +536,40 @@ connected(EventType, Msg, _) ->
 
 
 %% @private
-maybe_reconnect(#state{reconnect_retry = undefined} = State) ->
-    %% Reconnect disabled
-    ?LOG_ERROR(#{
-        description => "Failed to establish uplink connection to core router.",
-        reason => State#state.reconnect_retry_reason
-    }),
-    {stop, normal};
-
-maybe_reconnect(#state{reconnect_retry = R0} = State0) ->
+maybe_reconnect(Reason, #state{reconnect_retry = R0} = State0)
+when R0 =/= undefined andalso
+(?IS_RETRIABLE(Reason) orelse ?IS_NETDOWN(Reason)) ->
     %% Reconnect enabled
-    {Res, R1} = bondy_retry:fail(R0),
-    State = State0#state{reconnect_retry = R1},
-
-    case Res of
-        Delay when is_integer(Delay) ->
-            ?LOG_WARNING(#{
-                description => "Failed to establish uplink connection to core router. Will retry.",
-                delay => Delay
+    case bondy_retry:fail(R0) of
+        {Delay, R1} when is_integer(Delay) ->
+            ?LOG_NOTICE(#{
+                description => "Failed to establish uplink connection to core router. Will retry after delay.",
+                delay => Delay,
+                reason => Reason,
+                reason_description => inet:format_error(Reason)
             }),
+            State = State0#state{reconnect_retry = R1},
             {keep_state, State, [{state_timeout, Delay, connect}]};
 
-        Reason ->
+        {Limit, R1} when Limit == deadline orelse Limit == max_retries ->
             %% We reached max retries
-            ?LOG_ERROR(#{
-                description => "Failed to establish uplink connection to core router.",
-                reason => Reason,
-                last_error_reason => State#state.reconnect_retry_reason
+            ?LOG_NOTICE(#{
+                description => "Failed to establish uplink connection to core router. Re-starting.",
+                reason => Reason
             }),
-            {stop, normal}
-    end.
+            State = State0#state{reconnect_retry = R1},
+            {stop, {retry_limit, Limit}, State}
+    end;
+
+maybe_reconnect(Reason, _) ->
+    %% Reconnect disabled or error is not retriable
+    ?LOG_WARNING(#{
+        description => "Failed to establish uplink connection to core router.",
+        reason => Reason,
+        reason_description => inet:format_error(Reason)
+    }),
+    %% We will NOT be restarted
+    {stop, normal}.
 
 
 %% @private
@@ -522,25 +599,7 @@ connect(Transport, {Host, PortNumber}, Config) ->
         | SocketOpts ++ TLSOpts
     ],
 
-    try
-
-        case Transport:connect(Host, PortNumber, TransportOpts, Timeout) of
-            {ok, _} = OK ->
-                OK;
-            {error, Reason} ->
-                throw(Reason)
-        end
-
-    catch
-        Class:EReason:Stacktrace ->
-            ?LOG_WARNING(#{
-                description => "Error while trying to establish connection with remote router",
-                class => Class,
-                reason => EReason,
-                stacktrace => Stacktrace
-            }),
-            {error, EReason}
-    end.
+    Transport:connect(Host, PortNumber, TransportOpts, Timeout).
 
 
 %% @private
@@ -595,7 +654,7 @@ on_disconnect(State) ->
     State#state{
         socket = undefined,
         sessions = #{},
-        sessions_by_uri = #{}
+        sessions_by_realm = #{}
     }.
 
 
@@ -740,7 +799,8 @@ open_sessions(State0) ->
                     <<"trustroot">> => undefined,
                     <<"challenge">> => undefined,
                     <<"channel_binding">> => undefined
-                }
+                },
+                roles => ?WAMP_CLIENT_ROLES
             },
 
             %% TODO HELLO should include the Bondy Router Bridge Relay protocol
@@ -752,7 +812,7 @@ open_sessions(State0) ->
                 authid => AuthId,
                 pubkey => PubKey,
                 signer => signer(PubKey, H),
-                x_authroles => []
+                authroles => []
             },
 
             State0#state{session = Session}
@@ -771,9 +831,7 @@ init_session_and_sync(SessionId, #state{session = Session0} = State0) ->
     %% Synchronise the realm configuraiton state before proxying
     State2 = aae_sync(Session, State1),
 
-    State2#state{
-        session = undefined
-    }.
+    State2#state{session = undefined}.
 
 
 setup_proxing(SessionId, State0) ->
@@ -798,7 +856,7 @@ setup_proxing(SessionId, State0) ->
 %     {#{realm_uri := Uri}, Sessions} = maps:take(Id, Sessions0),
 %     State#state{
 %         sessions = Sessions,
-%         sessions_by_uri = maps:remove(Uri, State#state.sessions_by_uri)
+%         sessions_by_realm = maps:remove(Uri, State#state.sessions_by_realm)
 %     }.
 
 
@@ -811,7 +869,7 @@ has_session(SessionId, #state{sessions = Sessions}) ->
 add_session(#{id := Id, realm_uri := Uri} = Session, #state{} = State) ->
     State#state{
         sessions = maps:put(Id, Session, State#state.sessions),
-        sessions_by_uri = maps:put(Uri, Id, State#state.sessions_by_uri)
+        sessions_by_realm = maps:put(Uri, Id, State#state.sessions_by_realm)
     }.
 
 
@@ -820,7 +878,11 @@ session(Id, #state{sessions = Map}) ->
 
 
 
-session_id(RealmUri, #state{sessions_by_uri = Map}) ->
+%% @private
+session_realm(SessionId, #state{sessions = Map}) ->
+    key_value:get([SessionId, realm_uri], Map).
+
+session_id(RealmUri, #state{sessions_by_realm = Map}) ->
     maps:get(RealmUri, Map).
 
 
