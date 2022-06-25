@@ -126,9 +126,8 @@ code_change(_OldVsn, State, _Extra) ->
 do_gc() ->
     L = [element(1, X) || X <- recon:proc_count(memory, 100)],
 
-        [
-            erlang:garbage_collect(P)
-            || P <- L,  {status, waiting} == process_info(P, status)
-        ],
-
-        ok.
+    [
+        erlang:garbage_collect(P)
+        || P <- L,  {status, waiting} == process_info(P, status)
+    ],
+    ok.
