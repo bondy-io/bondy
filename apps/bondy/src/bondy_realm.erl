@@ -1395,7 +1395,7 @@ update(#realm{} = Realm, Data0) ->
     do_update(Realm, Data);
 
 update(Uri, Data) when is_binary(Uri) ->
-    do_update(fetch(Uri), Data).
+    update(fetch(Uri), Data).
 
 
 %% -----------------------------------------------------------------------------
