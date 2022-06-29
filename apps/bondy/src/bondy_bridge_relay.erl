@@ -85,6 +85,12 @@
             (_) -> false
         end
     },
+    connect_timeout => #{
+        alias => <<"connect_timeout">>,
+        required => true,
+        default => timer:seconds(5),
+        datatype => timeout
+    },
     reconnect => #{
         alias => <<"reconnect">>,
         required => true,
@@ -114,12 +120,6 @@
             nodelay => true
         },
         validator => ?SOCKET_OPTS_SPEC
-    },
-    timeout => #{
-        alias => <<"timeout">>,
-        required => true,
-        default => timer:seconds(5),
-        datatype => timeout
     },
     idle_timeout => #{
         alias => <<"idle_timeout">>,

@@ -583,7 +583,7 @@ connect(State) ->
 %% @private
 connect(Transport, {Host, PortNumber}, Config) ->
 
-    Timeout = key_value:get(timeout, Config, 5000),
+    Timeout = key_value:get(connect_timeout, Config, 5000),
     SocketOpts = maps:to_list(key_value:get(socket_opts, Config, [])),
     TLSOpts = maps:to_list(key_value:get(tls_opts, Config, [])),
 

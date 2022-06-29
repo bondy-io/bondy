@@ -445,7 +445,7 @@
       when  KeyStr == <<"parallelism">>;
             KeyStr == <<"transport">>;
             KeyStr == <<"idle_timeout">>;
-            KeyStr == <<"timeout">>;
+            KeyStr == <<"connect_timeout">>;
             KeyStr == <<"max_frame_size">> ->
         Key = binary_to_atom(KeyStr),
         Put([Name, Key], Value, Acc);
