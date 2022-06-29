@@ -129,6 +129,7 @@
 -export([new/1]).
 -export([normalise_name/1]).
 -export([remove/2]).
+-export([remove/3]).
 -export([remove_all/2]).
 -export([remove_group/3]).
 -export([remove_groups/3]).
@@ -344,10 +345,21 @@ remove_groups(RealmUri, Groups, Groupnames) ->
 -spec remove(uri(), binary() | map()) ->
     ok | {error, unknown_group | reserved_name}.
 
-remove(RealmUri, #{type := ?TYPE, name := Name}) ->
-    remove(RealmUri, Name);
-
 remove(RealmUri, Name) ->
+    remove(RealmUri, Name, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove(uri(), binary() | map(), #{silent := boolean()}) ->
+    ok | {error, unknown_group | reserved_name}.
+
+remove(RealmUri, #{type := ?TYPE, name := Name}, Opts) ->
+    remove(RealmUri, Name, Opts);
+
+remove(RealmUri, Name, Opts) ->
     try
         ok = not_reserved_name_check(Name),
         ok = exists_check(?PLUMDB_PREFIX(RealmUri), Name),
@@ -367,7 +379,7 @@ remove(RealmUri, Name) ->
         %% We finally delete the group
         ok = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Name),
 
-        on_delete(RealmUri, Name)
+        on_delete(RealmUri, Name, Opts)
 
     catch
         throw:Reason ->
@@ -397,7 +409,7 @@ remove_all(RealmUri, Opts) ->
             (Name) when Dirty == true ->
                 _ = plum_db:delete(Prefix, Name);
             (Name) ->
-                _ = remove(RealmUri, Name)
+                _ = remove(RealmUri, Name, Opts)
         end,
         Prefix,
         FoldOpts
@@ -776,7 +788,10 @@ on_update(RealmUri, Name) ->
 
 
 %% @private
-on_delete(RealmUri, Name) ->
+on_delete(_, _, #{silent := true}) ->
+    ok;
+
+on_delete(RealmUri, Name, _) ->
     ok = bondy_event_manager:notify(
         {group_deleted, RealmUri, Name}
     ),

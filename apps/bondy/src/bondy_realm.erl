@@ -1467,10 +1467,12 @@ delete(Uri, Opts) when is_binary(Uri) ->
 
 
 %% @private
-async_flush_realm(Uri, _Opts) ->
+async_flush_realm(Uri, Opts0) ->
+    Opts = Opts0#{dirty => true, silent => true},
+
     %% TODO implement this as a durable FSM
     %% Delete all grants
-    ok = bondy_rbac:remove_all(Uri),
+    ok = bondy_rbac:remove_all(Uri, Opts),
 
     %% Delete all tickets
     %% TODO
@@ -1480,10 +1482,10 @@ async_flush_realm(Uri, _Opts) ->
     bondy_rbac_source:remove_all(Uri),
 
     %% Delete all groups
-    bondy_rbac_group:remove_all(Uri, #{dirty => true}),
+    bondy_rbac_group:remove_all(Uri, Opts),
 
     %% Delete all users
-    bondy_rbac_user:remove_all(Uri, #{dirty => true}),
+    bondy_rbac_user:remove_all(Uri, Opts),
 
     ok.
 
