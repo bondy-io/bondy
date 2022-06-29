@@ -87,7 +87,7 @@
 
 {mapping, "bridge.$name.reconnect.max_retries", "bondy.bridges", [
   {commented, 100},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
@@ -623,21 +623,21 @@ end}.
 %% The ranch acceptors_pool_size for the socket tcp listener
 {mapping, "bridge.listener.tcp.acceptors_pool_size", "bondy.bridge_relay_tcp.acceptors_pool_size", [
   {datatype, integer},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {default, 200}
 ]}.
 
 %% The ranch max number of connections for the socket tcp listener
 {mapping, "bridge.listener.tcp.max_connections", "bondy.bridge_relay_tcp.max_connections", [
   {datatype, integer},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {default, 100000}
 ]}.
 
 %% The maximum length that the queue of pending connections can grow to.
 {mapping, "bridge.listener.tcp.backlog", "bondy.bridge_relay_tcp.backlog", [
   {datatype, integer},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {default, 1024}
 ]}.
 
@@ -753,14 +753,14 @@ end}.
 %% The ranch acceptors_pool_size for the socket tcp listener
 {mapping, "bridge.listener.tls.acceptors_pool_size", "bondy.bridge_relay_tls.acceptors_pool_size", [
   {datatype, integer},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {default, 200}
 ]}.
 
 %% The ranch max number of connections for the edge TLS listener
 {mapping, "bridge.listener.tls.max_connections", "bondy.bridge_relay_tls.max_connections", [
   {datatype, integer},
-  {validators, [pos_integer]},
+  {validators, ["pos_integer"]},
   {default, 100000}
 ]}.
 
