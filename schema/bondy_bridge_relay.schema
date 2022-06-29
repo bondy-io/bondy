@@ -71,6 +71,17 @@
 ]}.
 
 
+%% @doc Defines the number of TCP connections for the edge-remote connection
+{mapping, "bridge.$name.parallelism", "bondy.bridges", [
+{commented, 1},
+{validators, ["pos_integer"]},
+{datatype, integer}
+]}.
+
+{mapping, "bridge.$name.connect_timeout", "bondy.bridges", [
+{commented, "5s"},
+{datatype, [{atom, infinity}, {duration, ms}]}
+]}.
 
 %% @doc Enables or disables the reconnect feature. Once a connection is
 %% established but fails due to an unknown error or by the connecting being
@@ -106,25 +117,15 @@
   {datatype, {duration, ms}}
 ]}.
 
-%% @doc Defines the number of TCP connections for the edge-remote connection
-{mapping, "bridge.$name.parallelism", "bondy.bridges", [
-  {commented, 1},
-  {validators, [pos_integer]},
-  {datatype, integer}
-]}.
-
-{mapping, "bridge.$name.timeout", "bondy.bridges", [
-  {commented, "5s"},
-  {datatype, [{atom, infinity}, {duration, ms}]}
-]}.
-
 
 %% @doc Drops the connection after a period of inactivity. This option does not
-%% take effect when edge.uplink.ping.enabled is 'off'  and
-%% edge.uplink.ping.interval times edge.uplink.ping.max_retries
-%% results in a value higher than this option.
+%% take effect when bridge.$name.ping.enabled is 'on' and bridge.$name.ping.
+%% interval times bridge.$name.ping.max_attempts results in a value higher
+%% than this option.
 %% Notice that for some clients using this option alone is not enough to keep
 %% a connection alive as the client will drop the connection due to inactivity.
+%% If the client supports tcp PING control messages, enabled them,
+%% otherwise e.g. web browsers set bridge.$name.ping.enabled to on.
 {mapping, "bridge.$name.idle_timeout", "bondy.bridges", [
 {commented, "24h"},
 {datatype, [{atom, infinity}, {duration, ms}]}
@@ -132,7 +133,8 @@
 
 
 %% @doc Defines if PING control message functionality is enabled or
-%% not. This option affects client (Bondy Edge) initiated pings only. The
+%% not.
+%% This option affects client (Bondy Edge) initiated pings only. The
 %% remote Bondy router might also initiate ping requests and Bondy Edge will
 %% always respond to those even if this option is turned off.
 %% This feature is useful to keep a connection alive and validate the
@@ -142,21 +144,33 @@
   {datatype, {flag, on, off}}
 ]}.
 
-%% @doc If edge.uplink.ping.enabled is 'on', this value controls the
-%% interval in which Bondy Edge sends PING control messages to edge peers.
-{mapping, "bridge.$name.ping.interval", "bondy.bridges", [
-  {commented, "30s"},
+%% @doc If bridge.$name.ping.enabled is 'on', this parameter controls the
+%% maximum time interval that is permitted to elapse between the point at which
+%% the remote router finishes transmitting a message and the point it starts
+%% sending the next.
+%% Notice this is not the same as bridge.$name.idle_timeout.
+{mapping, "bridge.$name.ping.idle_timeout", "bondy.bridges", [
+  {commented, "20s"},
   {datatype, {duration, ms}}
 ]}.
 
-%% @doc If edge.uplink.ping.enabled is 'on', this value controls how many
+%% @doc If  bridge.$name.ping.enabled is 'on', this parameter controls the
+%% amount of time Bondy waits for a ping response from the remote.
+%% Once that time has passed this counts as a fail attempt
+%% (see bridge.$name.ping.max_attempts).
+{mapping, "bridge.$name.ping.timeout", "bondy.bridges", [
+{default, "10s"},
+{datatype, {duration, ms}}
+]}.
+
+%% @doc If  bridge.$name.ping.enabled is 'on', this parameter controls how many
 %% missed pings are considered a timeout. Thus, after this number of attempts
 %% Bondy Edge will drop the connection.
-
 {mapping,
-"bridge.$name.ping.max_retries", "bondy.bridges", [
+"bridge.$name.ping.max_attempts", "bondy.bridges", [
   {commented, 3},
-  {datatype, integer}
+  {datatype, integer},
+  {validators, ["pos_integer"]}
 ]}.
 
 
@@ -601,6 +615,8 @@
       end
 
 end}.
+
+
 
 %% =============================================================================
 %% EDGE LISTENER TCP CONNECTIONS

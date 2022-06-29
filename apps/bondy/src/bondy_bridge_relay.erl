@@ -247,23 +247,29 @@
         default => true,
         datatype => boolean
     },
-    interval => #{
-        alias => <<"interval">>,
+    idle_timeout => #{
+        alias => <<"idle_timeout">>,
         required => true,
-        default => timer:seconds(30),
-        datatype => pos_integer
-    },
-    max_retries => #{
-        alias => <<"max_retries">>,
-        required => true,
-        default => 3,
+        default => timer:seconds(20),
         datatype => [integer, {in, [infinity, <<"infinity">>]}],
         validator => fun
             (X) when is_integer(X) -> X > 0;
-            (infinity) -> infinity;
+            (infinity) -> true;
             (<<"infinity">>) -> {ok, infinity};
             (_) -> false
         end
+    },
+    timeout => #{
+        alias => <<"timeout">>,
+        required => true,
+        default => timer:seconds(10),
+        datatype => pos_integer
+    },
+    max_attemps => #{
+        alias => <<"max_attemps">>,
+        required => true,
+        default => 2,
+        datatype => pos_integer
     }
 }).
 
