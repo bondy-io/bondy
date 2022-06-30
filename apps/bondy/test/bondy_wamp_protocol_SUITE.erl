@@ -38,7 +38,7 @@ init_per_suite(Config) ->
     [{realm_uri, <<"com.example.test.wamp_protocol">>}|Config].
 
 end_per_suite(Config) ->
-    bondy_ct:stop_bondy(),
+    %% bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 %% -----------------------------------------------------------------------------
