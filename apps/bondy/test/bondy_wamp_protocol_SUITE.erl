@@ -47,16 +47,8 @@ end_per_suite(Config) ->
 
 format_status(_Config) ->
     lists:foreach(
-        fun(InvalidOpt) ->
-            Error = bondy_wamp_protocol:format_status(InvalidOpt, undefined),
-            ?assertEqual({error, invalid_option}, Error)
-        end,
-        [undefined, invalid]),
-
-    lists:foreach(
         fun({Opt, State}) ->
-            NewState = bondy_wamp_protocol:format_status(Opt, State),
-            ?assertEqual({error, invalid_state}, NewState)
+            ?assertError(function_clause, bondy_wamp_protocol:format_status(Opt, State))
         end,
         [{O, S} || O <- [normal, terminate], S <- [
             {},
@@ -69,7 +61,7 @@ format_status(_Config) ->
             State = bondy_wamp_protocol:format_status(Opt, undefined),
             ?assertEqual(undefined, State)
         end,
-        [normal, terminate]),
+        [normal, terminate, undefined, invalid]),
 
     % No sensitive info at wamp_state level, the reformatting is delegated to other modules.
     lists:foreach(

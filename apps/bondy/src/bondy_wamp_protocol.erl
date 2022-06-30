@@ -103,20 +103,8 @@ format_status(Opt, #wamp_state{} = State) ->
         context = NewCtxt
     };
 
-format_status(normal, undefined) ->
-    undefined;
-
-format_status(terminate, undefined) ->
-    undefined;
-
-format_status(normal, _) ->
-    {error, invalid_state};
-
-format_status(terminate, _) ->
-    {error, invalid_state};
-
-format_status(_, _) ->
-    {error, invalid_option}.
+format_status(_, undefined) ->
+    undefined.
 
 
 
