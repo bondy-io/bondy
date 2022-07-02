@@ -117,6 +117,17 @@
   {datatype, {duration, ms}}
 ]}.
 
+%% @doc Drops the connection when the bridge has been waiting the network to be
+%% up after a period of inactivity.
+%% Notice that to determine if the network is up the current implementation
+%% checks the hosts' number of IPV4 network interfaces (ignoring the loopback
+%% interface), so for local development without and network connection you want
+%% to disable this functionility. Setting a value of 0s disables it.
+{mapping, "bridge.$name.network_timeout", "bondy.bridges", [
+{commented, "0s"},
+{datatype, [{atom, infinity}, {duration, ms}]}
+]}.
+
 
 %% @doc Drops the connection after a period of inactivity. This option does not
 %% take effect when bridge.$name.ping.enabled is 'on' and bridge.$name.ping.
@@ -459,6 +470,7 @@
       when  KeyStr == <<"parallelism">>;
             KeyStr == <<"transport">>;
             KeyStr == <<"idle_timeout">>;
+            KeyStr == <<"network_timeout">>;
             KeyStr == <<"connect_timeout">>;
             KeyStr == <<"max_frame_size">> ->
         Key = binary_to_atom(KeyStr),
