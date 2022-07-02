@@ -3,7 +3,7 @@ REBAR = rebar3
 BONDY_ERL_NODENAME ?= bondy@127.0.0.1
 BONDY_ERL_DISTRIBUTED_COOKIE ?= bondy
 
-.PHONY: genvars compile test xref dialyzer tar
+.PHONY: genvars compile test xref eunit dialyzer tar
 
 certs:
 	cd config && ./make_certs
@@ -29,11 +29,14 @@ clean-docs:
 	rm -rf apps/bondy_broker_bridge/doc/*
 	rm -f apps/bondy_broker_bridge/doc/.build
 
-test: xref
+test: xref eunit
 	${REBAR} as test ct
 
 xref:
 	${REBAR} xref skip_deps=true
+
+eunit:
+	${REBAR} eunit
 
 dialyzer:
 	${REBAR} dialyzer
