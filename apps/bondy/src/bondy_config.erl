@@ -88,15 +88,30 @@
 ]).
 
 -define(CONFIG, [
+    %% The following are configured via bondy.conf:
+    %% - exchange_tick_period <- cluster.exchange_tick_period
+    %% - lazy_tick_period <- cluster.lazy_tick_period
+    %% - peer_port <- cluster.peer_port
+    %% - parallelism <- cluster.parallelism
+    %% - partisan_peer_service_manager <- cluster.overlay.topology
+    %% - partisan.tls <- cluster.tls.enabled
+    %% - partisan.tls_server_options.* <- cluster.tls.server.*
+    %% - partisan.tls_client_options.* <- cluster.tls.client.*
     {partisan, [
-        {broadcast_mods, [plum_db, partisan_plumtree_backend]},
-        {channels, [wamp_peer_relay, data, rpc, membership]},
-        {connect_disterl, false},
-        % {exchange_tick_period, timer:minutes(1)},
-        % {lazy_tick_period, timer:seconds(5)},
+        %% Required for partisan_peer_service_manager ==
+        %% partisan_pluggable_peer_service_manager
         {membership_strategy, partisan_full_membership_strategy},
-        {partisan_peer_service_manager,
-            partisan_pluggable_peer_service_manager},
+        {broadcast_mods, [
+            plum_db,
+            partisan_plumtree_backend
+        ]},
+        {channels, [
+            wamp_peer_relay,
+            data,
+            rpc,
+            membership
+        ]},
+        {connect_disterl, false},
         {pid_encoding, false},
         {ref_encoding, false},
         {binary_padding, false},
