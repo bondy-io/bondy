@@ -98,23 +98,29 @@
     %% - partisan.tls_server_options.* <- cluster.tls.server.*
     %% - partisan.tls_client_options.* <- cluster.tls.client.*
     {partisan, [
+        %% Overlay topology
         %% Required for partisan_peer_service_manager ==
         %% partisan_pluggable_peer_service_manager
         {membership_strategy, partisan_full_membership_strategy},
+        {connect_disterl, false},
         {broadcast_mods, [
             plum_db,
             partisan_plumtree_backend
         ]},
+        %% Remote refs
+        {remote_ref_as_uri, true},
+        {remote_ref_binary_padding, false},
+        {pid_encoding, false},
+        {ref_encoding, false},
+        {register_pid_for_encoding, false},
+        {binary_padding, false},
+        %% Fwd options
         {channels, [
             wamp_peer_relay,
             data,
             rpc,
             membership
         ]},
-        {connect_disterl, false},
-        {pid_encoding, false},
-        {ref_encoding, false},
-        {binary_padding, false},
         {disable_fast_forward, false},
         %% Broadcast options
         {broadcast, false},
