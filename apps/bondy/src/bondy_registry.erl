@@ -27,13 +27,13 @@
 %% Also an in-memory trie-based indexed (materialised vieq) is used for exact
 %% and prefix matching.
 %%
-%%
 %% This module also provides a singleton server to perform the initialisation
 %% of the trie from the plum_db tables.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_registry).
 -behaviour(gen_server).
+
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
@@ -102,6 +102,10 @@
 -export([remove_all/4]).
 -export([start_link/0]).
 
+%% PLUM_DB PREFIX CALLBACKS
+-export([on_object_updated/3]).
+-export([will_merge/3]).
+
 
 %% GEN_SERVER CALLBACKS
 -export([code_change/3]).
@@ -116,7 +120,6 @@
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 
 %% -----------------------------------------------------------------------------
@@ -669,6 +672,29 @@ match({_, ?EOT}) ->
     ?EOT.
 
 %%TODO Implement trie match continuation
+
+
+
+%% =============================================================================
+%% PLUM_DB PREFIX CALLBACKS
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc bondy_config
+%% @end
+%% -----------------------------------------------------------------------------
+will_merge(_PKey, _New, _Old) ->
+    true.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+on_object_updated(_PKey, _New, _Old) ->
+    ok.
 
 
 

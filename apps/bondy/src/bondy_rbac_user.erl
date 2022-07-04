@@ -264,6 +264,11 @@
 -export([update/4]).
 -export([username/1]).
 
+%% PLUM_DB PREFIX CALLBACKS
+-export([on_object_updated/3]).
+-export([will_merge/3]).
+
+
 
 %% =============================================================================
 %% API
@@ -897,8 +902,6 @@ to_external(#{type := ?USER_TYPE, version := ?VERSION} = User) ->
     }.
 
 
-
-
 %% -----------------------------------------------------------------------------
 %% @doc Adds an alias to the user. If the user is an SSO user, the alias is
 %% added on the SSO Realm only.
@@ -939,7 +942,6 @@ remove_alias(RealmUri, #{type := ?USER_TYPE} = User, Alias) ->
 
 remove_alias(RealmUri, Username, Alias) ->
     remove_alias(RealmUri, fetch(RealmUri, Username), Alias).
-
 
 
 %% -----------------------------------------------------------------------------
@@ -1067,6 +1069,28 @@ normalise_username(Term) when is_binary(Term) ->
 
 normalise_username(_) ->
     error(badarg).
+
+
+%% =============================================================================
+%% PLUM_DB PREFIX CALLBACKS
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc bondy_config
+%% @end
+%% -----------------------------------------------------------------------------
+will_merge(_PKey, _New, _Old) ->
+    true.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+on_object_updated(_PKey, _New, _Old) ->
+    ok.
 
 
 
