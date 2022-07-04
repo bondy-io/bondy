@@ -614,6 +614,16 @@
 ]}.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc The capacity of the registry process pool, i.e. the maximum
+%% number of active erlang processes handling registry trie data and operations
+%% (default = 50).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "load_regulation.registry.pool.size", "bondy.registry_pool.size", [
+{default, 50},
+{datatype, integer}
+]}.
 
 %% =============================================================================
 %% ADMIN REST API CLEAR
@@ -1680,7 +1690,6 @@
   {datatype, flag}
 ]}.
 
-
 %% @doc Defines the port to use for the cluster TCP connection
 {mapping, "cluster.peer_port", "partisan.peer_port", [
   {default, 18086},
@@ -2069,7 +2078,9 @@ end}.
 %% Controls when will the AAE system will trigger the next
 %% data exchange.
 {mapping, "aae.exchange_timer", "partisan.exchange_tick_period", [
-  {default, "1m"},
+  %% TODO this should be something like partisan.broadcast_mods.plum_db.
+  %% exchange_tick_period cause it overriden by cluster.exchange_tick_period
+  {default, "10s"},
   {datatype, {duration, ms}}
 ]}.
 
