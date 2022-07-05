@@ -18,10 +18,10 @@
 
 
 %% =============================================================================
-%% EDGE CLIENT TCP CONNECTIONS
+%% CLIENT TCP CONNECTIONS
 %% =============================================================================
 
-
+%% @doc Enabled or disable a bridge relay
 {mapping, "bridge.$name", "bondy.bridges", [
   {commented, off},
   {datatype, flag}
@@ -124,7 +124,7 @@
 %% interface), so for local development without and network connection you want
 %% to disable this functionility. Setting a value of 0s disables it.
 {mapping, "bridge.$name.network_timeout", "bondy.bridges", [
-{commented, "0s"},
+{commented, "30s"},
 {datatype, [{atom, infinity}, {duration, ms}]}
 ]}.
 
@@ -736,16 +736,19 @@ end}.
   {datatype, integer}
 ]}.
 
-%% @doc Drops the connection after a period of inactivity. This option does not
-%% take effect when bridge.listener.tcp.ping.enabled is 'on'
-%% and bridge.listener.tcp.ping.interval times
-%% bridge.listener.tcp.ping.max_retries results in a value higher than this
-%% option.
-%% Notice that for some clients using this option alone is not enough to keep
-%% a connection alive as the client will drop the connection due to inactivity.
+%% @doc The period of inactivity after which a connection is dropped. Ping
+%% control messages do not reset this timer, only client or server data packets
+%% do.
 {mapping, "bridge.listener.tcp.idle_timeout", "bondy.bridge_relay_tcp.idle_timeout", [
   {default, "8h"},
   {datatype, [{atom, infinity}, {duration, ms}]}
+]}.
+
+%% @doc The period of time without a session after which the connection is
+%% dropped.
+{mapping, "bridge.listener.tcp.auth_timeout", "bondy.bridge_relay_tcp.auth_timeout", [
+{default, "5s"},
+{datatype, [{atom, infinity}, {duration, ms}]}
 ]}.
 
 
