@@ -230,7 +230,8 @@ forward(M, #{session := _} = Ctxt) ->
 %% that originate from another Bondy node.
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(wamp_message(), optional(bondy_ref:t()), map()) -> ok | no_return().
+-spec forward(wamp_message(), optional(bondy_ref:t()), map()) ->
+    ok | no_return().
 
 forward(Msg, To, #{realm_uri := RealmUri} = Opts) ->
     %% To == undefined when Msg == #publish{}
