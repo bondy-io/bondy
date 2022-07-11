@@ -136,3 +136,4 @@ bridge.listener.tls.port = 18093
 bridge.listener.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
 bridge.listener.tls.certfile = ${BONDY_ETC_DIR}/ssl/server/cert.pem
 bridge.listener.tls.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
+bridge.listener.tls.idle_timeout = 30s
