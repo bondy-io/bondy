@@ -694,7 +694,6 @@
             [" reason=", reason],
             ""
         },
-        {details, [" details=", details], ""},
         {id, [" id=", id], ""},
         {parent_id, [" parent_id=", parent_id], ""},
         {correlation_id, [" correlation_id=", correlation_id], ""},

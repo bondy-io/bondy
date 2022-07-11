@@ -363,7 +363,8 @@ active(internal, {aae_sync, SessionId, Opts}, State) ->
     ok = full_sync(SessionId, RealmUri, Opts, State),
     Finish = {aae_sync, SessionId, finished},
     ok = gen_statem:cast(self(), {forward_message, Finish}),
-    {keep_state_and_data, [idle_timeout(State)]};
+    Actions = [ping_idle_timeout(State)],
+    {keep_state_and_data, Actions};
 
 active(internal, {session_message, SessionId, Msg}, State) ->
     ?LOG_DEBUG(#{
@@ -383,7 +384,8 @@ active(internal, {session_message, SessionId, Msg}, State) ->
                 reason => Reason,
                 stacktrace => Stacktrace
             }),
-            {keep_state_and_data, [idle_timeout(State)]};
+            Actions = [ping_idle_timeout(State)],
+            {keep_state_and_data, Actions};
 
         Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
@@ -421,12 +423,33 @@ active(EventType, EventContent, State) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-idle(enter, active, _State) ->
-    Actions = [{state_timeout, 0, send_ping}],
-    {keep_state_and_data, Actions};
+idle(enter, active, State) ->
+    %% We use an event timeout meaning any event received will cancel it
+    IdleTimeout = State#state.idle_timeout,
+    PingTimeout = State#state.idle_timeout,
+    Adjusted = IdleTimeout - PingTimeout,
+    Time = case Adjusted > 0 of
+        true -> Adjusted;
+        false -> IdleTimeout
+    end,
 
-idle(state_timeout, send_ping, State) ->
+    Actions = [
+        {state_timeout, Time, idle_timeout}
+    ],
+    maybe_send_ping(State, Actions);
+
+idle({timeout, ping_idle_timeout}, ping_idle_timeout, State) ->
     maybe_send_ping(State);
+
+idle({timeout, ping_timeout}, ping_timeout, State0) ->
+    %% No ping response in time
+    State = ping_fail(State0),
+    %% Try to send another one or stop if retry limit reached
+    maybe_send_ping(State);
+
+idle(state_timeout, idle_timeout, _State) ->
+    %% We will be restarted
+    {stop, idle_timeout};
 
 idle(internal, {pong, Bin}, #state{ping_payload = Bin} = State0) ->
     %% We got a response to our ping
@@ -447,16 +470,6 @@ idle(internal, Msg, State) ->
     %% idle_timeout is a state timeout so it will be cancelled as we are
     %% transitioning to active
     {next_state, active, State, Actions};
-
-idle({timeout, ping_timeout}, ping_timeout, State0) ->
-    %% No ping response in time
-    State = ping_fail(State0),
-    %% Try to send another one or stop if retry limit reached
-    maybe_send_ping(State);
-
-idle(state_timeout, idle_timeout, _State) ->
-    %% We will be restarted
-    {stop, idle_timeout};
 
 idle(EventType, EventContent, State) ->
     handle_event(EventType, EventContent, idle, State).
@@ -488,7 +501,7 @@ handle_event({call, From}, Request, _, _) ->
     {keep_state_and_data, Actions};
 
 handle_event(cast, {forward_message, Msg}, _, State) ->
-    %% This is a cast we do ourselves
+    %% This is a cast we do to ourselves
     ok = send_message(Msg, State),
     Actions = [
         {{timeout, ping_timeout}, cancel},
@@ -522,14 +535,12 @@ when ?SOCKET_DATA(Tag) ->
                 reason => Msg
             }),
             %% The message can be a ping|pong and in the case of idle state we
-            %% should not reset timers here, we;ll do that in the active function
-            %% while handling this event
+            %% should not reset timers here, we'll do that in the handling
+            %% of next_event
             Actions = [
-                {{timeout, ping_timeout}, cancel},
-                {{timeout, ping_idle_timeout}, cancel},
                 {next_event, internal, Msg}
             ],
-            {next_state, active, State, Actions}
+            {keep_state, State, Actions}
     catch
         _:Reason ->
             ?LOG_ERROR(#{
@@ -715,42 +726,67 @@ on_connect(_State) ->
 %% -----------------------------------------------------------------------------
 handle_in({registration_created, Entry}, SessionId, State0) ->
     State = add_registry_entry(SessionId, Entry, State0),
-
-    {keep_state, State, [idle_timeout(State)]};
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
 
 handle_in({registration_added, Entry}, SessionId, State0) ->
     State = add_registry_entry(SessionId, Entry, State0),
-
-    {keep_state, State, [idle_timeout(State)]};
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
 
 handle_in({registration_removed, Entry}, SessionId, State0) ->
     State = remove_registry_entry(SessionId, Entry, State0),
-
-    {keep_state, State, [idle_timeout(State)]};
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
 
 handle_in({registration_deleted, Entry}, SessionId, State0) ->
     State = remove_registry_entry(SessionId, Entry, State0),
-
-    {keep_state, State, [idle_timeout(State)]};
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
 
 handle_in({subscription_created, Entry}, SessionId, State0) ->
     State = add_registry_entry(SessionId, Entry, State0),
-
-    {keep_state, State, [idle_timeout(State)]};
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
 
 handle_in({subscription_added, Entry}, SessionId, State0) ->
     State = add_registry_entry(SessionId, Entry, State0),
-    {keep_state, State, [idle_timeout(State)]};
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
 
 handle_in({subscription_removed, Entry}, SessionId, State0) ->
     State = remove_registry_entry(SessionId, Entry, State0),
-
-    {keep_state, State, [idle_timeout(State)]};
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
 
 handle_in({subscription_deleted, Entry}, SessionId, State0) ->
     State = remove_registry_entry(SessionId, Entry, State0),
-
-    {keep_state, State, [idle_timeout(State)]};
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
 
 handle_in({forward, _, #publish{} = M, _Opts}, SessionId, State) ->
     RealmUri = session_realm(SessionId, State),
@@ -777,7 +813,11 @@ handle_in({forward, _, #publish{} = M, _Opts}, SessionId, State) ->
             error(overload)
     end,
 
-    {keep_state_and_data, [idle_timeout(State)]};
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state_and_data, Actions};
 
 handle_in({forward, To, Msg, Opts}, SessionId, State) ->
     %% using cast here in theory breaks the CALL order guarantee!!!
@@ -786,19 +826,24 @@ handle_in({forward, To, Msg, Opts}, SessionId, State) ->
     %% b) a pool of relays (selecting one by hashing {CallerID, CalleeId}) and
     %% do it sync
     RealmUri = session_realm(SessionId, State),
-    Job = fun() ->
+
+    Fwd = fun() ->
         bondy_router:forward(Msg, To, Opts#{realm_uri => RealmUri})
     end,
 
-    case bondy_router_worker:cast(Job) of
+    case bondy_router_worker:cast(Fwd) of
         ok ->
             ok;
         {error, overload} ->
             %% TODO return proper return ...but we should move this to router
             error(overload)
     end,
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
 
-    {keep_state_and_data, [idle_timeout(State)]};
+    {keep_state_and_data, Actions};
 
 handle_in(Other, SessionId, State) ->
     ?LOG_INFO(#{
@@ -806,7 +851,11 @@ handle_in(Other, SessionId, State) ->
         session => SessionId,
         message => Other
     }),
-    {keep_state_and_data, [idle_timeout(State)]}.
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state_and_data, Actions}.
 
 
 
@@ -815,11 +864,12 @@ handle_in(Other, SessionId, State) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-handle_out({goodbye, Details, ReasonUri}, RealmUri, _From, State) ->
-    %% M is the wamp_goodbye() message.
+handle_out(#goodbye{} = M, RealmUri, _From, State) ->
+    Details = M#goodbye.details,
+    ReasonUri = M#goodbye.reason_uri,
     SessionId = session_id(RealmUri, State),
-    M = {goodbye, SessionId, ReasonUri, Details},
-    ok = send_message(M, State),
+    ControlMsg = {goodbye, SessionId, ReasonUri, Details},
+    ok = send_message(ControlMsg, State),
     {stop, normal};
 
 handle_out(M, RealmUri, _From, State) ->
@@ -1077,11 +1127,18 @@ ping_fail(#state{} = State) ->
 
 
 %% @private
-maybe_send_ping(#state{ping_retry = undefined} = State) ->
-    %% ping disabled
-    {keep_state_and_data, [idle_timeout(State)]};
+maybe_send_ping(State) ->
+    maybe_send_ping(State, []).
 
-maybe_send_ping(#state{} = State) ->
+%% @private
+maybe_send_ping(#state{ping_retry = undefined} = State, Actions0) ->
+    %% ping disabled
+    Actions = [
+        maybe_hibernate(idle, State) | Actions0
+    ],
+    {keep_state_and_data, Actions};
+
+maybe_send_ping(#state{} = State, Actions0) ->
     case bondy_retry:get(State#state.ping_retry) of
         Time when is_integer(Time) ->
             %% We send a ping
@@ -1090,8 +1147,8 @@ maybe_send_ping(#state{} = State) ->
             %% We set the timeout
             Actions = [
                 ping_timeout(Time),
-                idle_timeout(State),
                 maybe_hibernate(idle, State)
+                | Actions0
             ],
             {keep_state, State, Actions};
 
@@ -1102,12 +1159,6 @@ maybe_send_ping(#state{} = State) ->
             % }),
             {stop, {shutdown, ping_timeout}, State}
     end.
-
-
-%% @private
-idle_timeout(State) ->
-    %% We use an event timeout meaning any event received will cancel it
-    {state_timeout, State#state.idle_timeout, idle_timeout}.
 
 
 %% @private
