@@ -64,9 +64,7 @@ start(Ref, Protocol, ProtocolOpts) ->
                 description => "Starting listener",
                 ref => Ref,
                 transport => Transport,
-                transport_opts => TransportOpts,
-                protocol => Protocol,
-                protocol_opts => ProtocolOpts
+                protocol => Protocol
             }),
 
             ok;
