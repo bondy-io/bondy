@@ -20,6 +20,29 @@
 %% @doc EARLY DRAFT implementation of the client-side connection between and
 %% edge node (this module) and a remote/core node
 %% ({@link bondy_bridge_relay_server}).
+%%
+%%
+%% <pre><code class="mermaid">
+%% stateDiagram-v2
+%%     %%{init:{'state':{'nodeSpacing': 50, 'rankSpacing': 200}}}%%
+%%     [*] --> connecting
+%%     connecting --> [*]: retry_limit_reached
+%%     connecting --> connecting: connect | tcp_error | socket_closed
+%%     connecting --> waiting_for_network: network_disconnected
+%%     connecting --> active: connected
+%%     waiting_for_network --> connecting: network_connected
+%%     waiting_for_network --> [*]: network_timeout
+%%     active --> active: session_established | rcv(data|ping) | snd(data|pong)
+%%     active --> idle: ping_idle_timeout
+%%     active --> connecting: tcp_error | socket_closed
+%%     active --> [*]: auth_timeout
+%%     idle --> idle: snd(ping|pong) | rcv(ping|pong)
+%%     idle --> active: snd(data)
+%%     idle --> active: rcv(data)
+%%     idle --> connecting: tcp_error
+%%     idle --> [*]: ping_timeout
+%%     idle --> [*]: idle_timeout
+%% </code></pre>
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_bridge_relay_client).
@@ -30,10 +53,7 @@
 -include("bondy.hrl").
 -include("bondy_bridge_relay.hrl").
 
--define(SOCKET_DATA(Tag), Tag == tcp orelse Tag == ssl).
--define(SOCKET_ERROR(Tag), Tag == tcp_error orelse Tag == ssl_error).
--define(CLOSED_TAG(Tag), Tag == tcp_closed orelse Tag == ssl_closed).
-% -define(PASSIVE_TAG(Tag), Tag == tcp_passive orelse Tag == ssl_passive).
+
 -define(IS_RETRIABLE(Reason), (
     Reason == timeout orelse
     Reason == econnrefused orelse
@@ -54,12 +74,13 @@
     endpoint                ::  {inet:ip_address(), inet:port_number()},
     config                  ::  bondy_bridge_relay:t(),
     socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
-    idle_timeout            ::  pos_integer(),
-    ping_retry              ::  optional(bondy_retry:t()),
-    ping_retry_tref         ::  optional(timer:ref()),
-    ping_sent               ::  optional({timer:ref(), binary()}),
+    network_timeout         ::  pos_integer(),
     reconnect_retry         ::  optional(bondy_retry:t()),
-    hibernate = false       ::  boolean(),
+    ping_retry              ::  optional(bondy_retry:t()),
+    ping_payload            ::  optional(binary()),
+    ping_idle_timeout       ::  optional(non_neg_integer()),
+    idle_timeout            ::  pos_integer(),
+    hibernate = idle        ::  idle | always | never,
     sessions = #{}          ::  sessions(),
     sessions_by_realm = #{} ::  #{uri() => bondy_session_id:t()},
     session                 ::  optional(session()),
@@ -94,8 +115,9 @@
 
 %% STATE FUNCTIONS
 -export([connecting/3]).
--export([connected/3]).
-% -export([established/3]).
+-export([waiting_for_network/3]).
+-export([active/3]).
+-export([idle/3]).
 
 
 
@@ -114,7 +136,7 @@ start_link(Bridge) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Forwards a message to the remote router.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec forward(Ref :: bondy_ref:t(), Msg :: any()) ->
@@ -152,6 +174,10 @@ init(Config0) ->
         endpoint := Endpoint,
         parallelism := _,
         idle_timeout := IdleTimeout,
+        network_timeout := NetTimeout,
+        hibernate := Hibernate,
+        reconnect := ReconnectOpts,
+        ping := PingOpts,
         realms := Realms0
     } = Config0,
 
@@ -171,39 +197,24 @@ init(Config0) ->
     ),
     Config = maps:put(realms, Realms, Config0),
 
+
     State0 = #state{
         config = Config,
         transport = transport(Transport),
         endpoint = Endpoint,
         idle_timeout = IdleTimeout,
-        hibernate = key_value:get(hibernate, Config, false),
+        network_timeout = NetTimeout,
+        hibernate = Hibernate,
         start_ts = erlang:system_time(millisecond)
     },
 
-    %% Setup reconnect
-    ReconnectOpts = key_value:get(reconnect, Config),
+    State1 = maybe_enable_reconnect(ReconnectOpts, State0),
+    State = maybe_enable_ping(PingOpts, State1),
 
-    State1 = case key_value:get(enabled, ReconnectOpts) of
-        true ->
-            RetryOpts = key_value:set(backoff_enabled, true, ReconnectOpts),
-            State0#state{
-                reconnect_retry = bondy_retry:init(connect, RetryOpts)
-            };
-        false ->
-            State0
-    end,
-
-    %% Setup ping
-    PingOpts = key_value:get(ping, Config),
-
-    State = case key_value:get(enabled, PingOpts) of
-        true ->
-            State1#state{
-                ping_retry = bondy_retry:init(ping, PingOpts)
-            };
-        false ->
-            State1
-    end,
+    %% We monitor net status. We will get two info messages:
+    %% 1. {network_connected, Ref}
+    %% 2. {network_disconnected, Ref}
+    ok = partisan_inet:monitor(true),
 
     {ok, connecting, State}.
 
@@ -214,18 +225,41 @@ init(Config0) ->
 %% -----------------------------------------------------------------------------
 -spec terminate(term(), atom(), t()) -> term().
 
-terminate(_, _, #state{socket = undefined}) ->
+terminate({Reason, Details}, StateName, #state{socket = undefined}) ->
+    ?LOG_INFO(#{
+        description => "Closing connection",
+        reason => Reason,
+        details => Details,
+        state_name => StateName
+    }),
+    ok;
+
+terminate(Reason, StateName, #state{socket = undefined}) ->
+    ?LOG_INFO(#{
+        description => "Closing connection",
+        reason => Reason,
+        state_name => StateName
+    }),
     ok;
 
 terminate(Reason, StateName, #state{} = State0) ->
     Transport = State0#state.transport,
     Socket = State0#state.socket,
 
+    %% Ensure we closed socket
+    State1 = State0#state{socket = undefined},
     catch Transport:close(Socket),
 
-    State = on_disconnect(State0),
+    %% Cleanup internal router state
+    State = cleanup(State1),
 
-    terminate(Reason, StateName, State#state{socket = undefined}).
+    %% Cancel monitor
+    ok = partisan_inet:monitor(false),
+
+    %% Notify
+    ok = on_disconnect(State),
+
+    terminate(Reason, StateName, State).
 
 
 %% -----------------------------------------------------------------------------
@@ -240,8 +274,328 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-format_status(Opt, [_PDict, _Statename, #state{} = State]) ->
+format_status(Opt, [_PDict, _StateName, #state{} = State]) ->
     gen_format(Opt, State#state{config = sensitive}).
+
+
+
+%% =============================================================================
+%% STATE FUNCTIONS
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A state function. In the `connecting' state the client is trying to
+%% establish a connection to a remote router (server). This is the initial
+%% state of the client.
+%%
+%% If establishing the connection fails because there is no network the client
+%% transitions to the `waiting_for_network' state. Otherwise, if
+%% `reconnect' is enabled it will retry up the configured limit (deadline or
+%% maximum number of retries). If the reconnect limit is reached the client
+%% will crash with an error reason and thus it will be restarted by the
+%% supervisor.
+%%
+%% The client regards the connection error reasons
+%% `enetdown', `ehostunreach' and `enetunreach' as the absense of network
+%% connectivity.
+%%
+%% The client also monitors the network status using
+%% {@link partisa_inet:monitor/1} and handles the resulting
+%% `{network_connected, ref()}' and `{network_disconnected, ref()}' signals but
+%% gives priority to the connection socket status.
+%%
+%% Previous states: `connecting', `waiting_for_network'.
+%% Next states: `active', `waiting_for_network' or termination.
+%% @end
+%% -----------------------------------------------------------------------------
+connecting(enter, connecting, State) ->
+
+    ok = logger:set_process_metadata(#{
+        transport => State#state.transport,
+        endpoint => State#state.endpoint
+    }),
+    %% We use a timeout to immediately connect
+    Actions = [{state_timeout, 0, connect}],
+    {keep_state_and_data, Actions};
+
+connecting(enter, _, State0) ->
+    %% We reset the retry state, as we re-entered this state
+    State = reset_reconnect_retry_state(State0),
+
+    %% We use a timeout to immediately connect
+    Actions = [{state_timeout, 0, connect}],
+    {keep_state, State, Actions};
+
+connecting(state_timeout, connect, State0) ->
+    case connect(State0) of
+        {ok, Socket} ->
+            State = State0#state{socket = Socket},
+            {next_state, active, State};
+
+        {error, Reason} ->
+            maybe_reconnect(Reason, State0)
+    end;
+
+connecting(info, {network_disconnected, _}, State) ->
+    {next_state, waiting_for_network, State};
+
+connecting(EventType, EventContent, _) ->
+    ?LOG_DEBUG(#{
+        description => "Received unexpected event",
+        type => EventType,
+        event => EventContent
+    }),
+    {stop, {error, unexpected_event}}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A state function. In `waiting_for_network' state the client has
+%% recognised that there is no network available and waits for a signal
+%% indicating that the network has been re-established.
+%%
+%% If the client does not receive a `{network_connected, ref()}' signal
+%% within the configured `network_timeout' it will crash with an error reason
+%% `network_timeout' and thus it will be restarted by the supervisor.
+%%
+%% Previous states: `connecting'.
+%% Next states: `connecting' or termination.
+%% @end
+%% -----------------------------------------------------------------------------
+waiting_for_network(enter, _, State) ->
+    NetTimeout = State#state.network_timeout,
+
+    ?LOG_INFO(#{
+        description =>
+            "Network down. We will wait for the network to be up again before trying to connect.",
+        timeout => NetTimeout
+    }),
+
+    Actions = [{state_timeout, NetTimeout, network_timeout}],
+    {keep_state, State, Actions};
+
+waiting_for_network(state_timeout, network_timeout, _State) ->
+    %% We will be restarted
+    {stop, network_timeout};
+
+waiting_for_network(info, {network_connected, _}, State0) ->
+    State = reset_reconnect_retry_state(State0),
+    {next_state, connecting, State};
+
+waiting_for_network(info, {network_disconnected, _}, _) ->
+    keep_state_and_data;
+
+waiting_for_network(EventType, EventContent, State) ->
+    handle_event(EventType, EventContent, waiting_for_network, State).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A state function. In the `active' state the client is connected and has
+%% at least one active session with a remote router or is trying to establish
+%% such a session.
+%%
+%% In `active' state the client can send and receive messages.
+%%
+%%
+%% Previous states: `connecting' or `idle'.
+%% Next states: `idle', `connecting' or termination.
+%% @end
+%% -----------------------------------------------------------------------------
+active(enter, connecting, #state{} = State0) ->
+    %% We rest the retry state as we've been succesful
+    State1 = reset_reconnect_retry_state(State0),
+    %% We join any realms defined by the config
+    try
+        State = open_sessions(State1),
+        %% Any post notifications
+        ok = on_connect(State),
+        %% We start the idle timeout, if triggered we will transition to idle state
+        Actions = [
+            ping_idle_timeout(State),
+            maybe_hibernate(active, State)
+        ],
+        {keep_state, State, Actions}
+    catch
+        throw:socket_closed ->
+            {next_state, connecting, State1};
+        throw:Reason ->
+            {stop, Reason}
+    end;
+
+active(enter, idle, State) ->
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state_and_data, Actions};
+
+active(internal, {abort, _SessionId, Reason, Details}, _State) ->
+    %% We currently support a single session, so we stop.
+    %% We will be restarted
+    {stop, {Reason, Details}};
+
+active(internal, {challenge, <<"cryptosign">>, ChallengeExtra}, State) ->
+    %% We reply the challenge.
+    case authenticate(ChallengeExtra, State) of
+        ok ->
+            Actions = [
+                ping_idle_timeout(State),
+                maybe_hibernate(active, State)
+            ],
+            {keep_state_and_data, Actions};
+        {error, Reason} ->
+            {stop, Reason}
+    end;
+
+
+active(internal, {welcome, SessionId, _Details}, State0) ->
+    try
+        State = init_session_and_sync(SessionId, State0),
+        Actions = [
+            ping_idle_timeout(State),
+            maybe_hibernate(active, State)
+        ],
+        {keep_state, State, Actions}
+    catch
+        throw:socket_closed ->
+            {next_state, connecting, State0};
+        throw:Reason ->
+            {stop, Reason}
+    end;
+
+active(internal, {goodbye, SessionId, ?WAMP_CLOSE_REALM, Details}, State) ->
+    %% Remote router is kicking us out since the realm we were attached to
+    %% has been deleted.
+    RealmUri = session_realm(SessionId, State),
+    Name = maps:get(name, State#state.config),
+
+    ?LOG_WARNING(#{
+        description => "Realm deleted by remote router. Connection will close.",
+        name => Name,
+        session_id => SessionId,
+        realm_uri => RealmUri,
+        details => Details
+    }),
+
+    %% Kick out all local sessions
+    bondy_realm_manager:close(RealmUri, ?WAMP_CLOSE_REALM),
+
+    %% We currently support a single session so we shutdown the connection.
+    %% We will NOT be restarted
+    {stop, shutdown};
+
+active(internal, {goodbye, _SessionId, Reason, Details}, _State) ->
+    %% The remote router is kicking us out for another reason.
+    % RealmUri = session_realm(SessionId, State),
+
+    %% We currently support a single session, so we stop
+    %% We will be restarted
+    {stop, {Reason, Details}};
+
+active(internal, {aae_sync, SessionId, finished}, State0) ->
+    ?LOG_INFO(#{
+        description => "AAE sync finished",
+        session_id => SessionId
+    }),
+
+    try
+        State = setup_proxing(SessionId, State0),
+        Actions = [
+            ping_idle_timeout(State),
+            maybe_hibernate(active, State)
+        ],
+        {keep_state, State, Actions}
+    catch
+        throw:socket_closed ->
+            {next_state, connecting, State0};
+        throw:Reason ->
+            {stop, Reason}
+    end;
+
+active(internal, {aae_data, SessionId, Data}, State) ->
+    ?LOG_DEBUG(#{
+        description => "Got aae_sync data",
+        session_id => SessionId,
+        data => Data
+    }),
+
+    ok = handle_aae_data(Data, State),
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
+
+active(
+    internal, {session_message, SessionId, {forward, To, Msg, Opts}}, State) ->
+    ?LOG_DEBUG(#{
+        description => "Got session message from remote router",
+        session_id => SessionId,
+        message => Msg,
+        destination => To
+    }),
+
+    ok = forward_remote_message(Msg, To, Opts, SessionId, State),
+
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
+
+active({timeout, ping_idle_timeout}, ping_idle_timeout, State) ->
+    %% We have had no activity, transition to idle and start sending pings
+    {next_state, idle, State};
+
+active(EventType, EventContent, State) ->
+    handle_event(EventType, EventContent, active, State).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+idle(enter, active, _State) ->
+    Actions = [{state_timeout, 0, send_ping}],
+    {keep_state_and_data, Actions};
+
+idle(state_timeout, send_ping, State) ->
+    maybe_send_ping(State);
+
+idle(internal, {pong, Bin}, #state{ping_payload = Bin} = State0) ->
+    %% We got a response to our ping
+    State = ping_succeed(State0),
+    Actions = [
+        {{timeout, ping_timeout}, cancel},
+        ping_idle_timeout(State),
+        maybe_hibernate(idle, State)
+    ],
+    {keep_state, State, Actions};
+
+idle(internal, Msg, State) ->
+    Actions = [
+        {{timeout, ping_timeout}, cancel},
+        {{timeout, ping_idle_timeout}, cancel},
+        {next_event, internal, Msg}
+    ],
+    %% idle_timeout is a state timeout so it will be cancelled as we are
+    %% transitioning to active
+    {next_state, active, State, Actions};
+
+idle({timeout, ping_timeout}, ping_timeout, State0) ->
+    %% No ping response in time
+    State = ping_fail(State0),
+    %% Try to send another one or stop if retry limit reached
+    maybe_send_ping(State);
+
+idle(state_timeout, idle_timeout, _State) ->
+    %% We will be restarted
+    {stop, idle_timeout};
+
+idle(EventType, EventContent, State) ->
+    handle_event(EventType, EventContent, idle, State).
+
 
 
 %% =============================================================================
@@ -260,279 +614,176 @@ gen_format(normal, Term) ->
 gen_format(_, Term) ->
     Term.
 
+
 %% =============================================================================
-%% STATE FUNCTIONS
+%% PRIVATE: COMMON EVENT HANDLING
 %% =============================================================================
 
 
 
 %% -----------------------------------------------------------------------------
-%% @doc The edge router is trying to establish an uplink connection to the core
-%% router.
-%% If reconnect is configured it will retry using the reconnect options defined.
+%% @doc Handle events common to all states
 %% @end
 %% -----------------------------------------------------------------------------
-connecting(enter, _, State) ->
-    ok = logger:set_process_metadata(#{
-        transport => State#state.transport,
-        endpoint => State#state.endpoint,
-        reconnect => State#state.reconnect_retry =/= undefined
-    }),
-    {keep_state_and_data, [{state_timeout, 0, connect}]};
-
-connecting(state_timeout, connect, State0) ->
-    case connect(State0) of
-        {ok, Socket} ->
-            State = State0#state{socket = Socket},
-            {next_state, connected, State};
-
-        {error, Reason} ->
-            maybe_reconnect(Reason, State0)
-    end;
-
-connecting(EventType, Msg, _) ->
-    ?LOG_DEBUG(#{
-        description => "Received unexpected event",
-        type => EventType,
-        event => Msg
-    }),
-    {stop, {error, unexpected_event}}.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc The edge router established the uplink connection with the core router.
-%% At this point the edge router has noy yet joined any realms.
-%% @end
-%% -----------------------------------------------------------------------------
-connected(enter, connecting, #state{} = State0) ->
-    State = on_connect(State0),
-    {keep_state, State};
-
-connected(internal, {challenge, <<"cryptosign">>, ChallengeExtra}, State) ->
-    ?LOG_DEBUG(#{
-        description => "Got challenge",
-        extra => ChallengeExtra
-    }),
-    ok = authenticate(ChallengeExtra, State),
-
-    {keep_state_and_data, idle_timeout(State)};
-
-connected(internal, {welcome, SessionId, Details}, State0) ->
-    ?LOG_DEBUG(#{
-        description => "Got welcome",
-        session_id => SessionId,
-        details => Details
-    }),
-
-    State1 = init_session_and_sync(SessionId, State0),
-    State = reset_reconnect_retry_state(State1),
-
-    %% TODO open sessions on remaning realms
-    {keep_state, State, idle_timeout(State)};
-
-connected(internal, {goodbye, SessionId, ?WAMP_CLOSE_REALM, Details}, State) ->
-
-    RealmUri = session_realm(SessionId, State),
-    Name = maps:get(name, State#state.config),
-
-    ?LOG_WARNING(#{
-        description => "Closing connection.",
-        reason => ?WAMP_CLOSE_REALM,
-        name => Name,
-        session_id => SessionId,
-        realm_uri => RealmUri,
-        details => Details
-    }),
-
-    %% Kick out all local sessions
-    bondy_realm_manager:close(RealmUri, ?WAMP_CLOSE_REALM),
-
-    %% We currently support a single session so we shutdown.
-    %% We will NOT be restarted
-    {stop, shutdown};
-
-connected(internal, {goodbye, SessionId, Reason, Details}, _State) ->
-    %% We currently support a single session, so we stop
-    ?LOG_NOTICE(#{
-        description => "Closing connection.",
-        reason => Reason,
-        session_id => SessionId,
-        details => Details
-    }),
-    %% We will be restarted
-    {stop, Reason};
-
-connected(internal, {abort, _SessionId, Reason, Details}, _State) ->
-    %% We currently support a single session, so we stop
-    ?LOG_NOTICE(#{
-        description => "Got abort message from server, closing connection.",
-        reason => Reason,
-        details => Details
-    }),
-    %% We will be restarted
-    {stop, Reason};
-
-connected(internal, {aae_sync, SessionId, finished}, State0) ->
-    ?LOG_INFO(#{
-        description => "AAE sync finished",
-        session_id => SessionId
-    }),
-
-    State = setup_proxing(SessionId, State0),
-
-    {keep_state, State, idle_timeout(State)};
-
-connected(internal, {aae_data, SessionId, Data}, State) ->
-    ?LOG_DEBUG(#{
-        description => "Got aae_sync data",
-        session_id => SessionId,
-        data => Data
-    }),
-
-    ok = handle_aae_data(Data, State),
-
-    {keep_state, State, idle_timeout(State)};
-
-connected(
-    internal, {receive_message, SessionId, {forward, To, Msg, Opts}}, State) ->
-    ?LOG_DEBUG(#{
-        description => "Got session message from core router",
-        session_id => SessionId,
-        message => Msg
-    }),
-
-    ok = handle_session_message(Msg, To, Opts, SessionId, State),
-
-    {keep_state, State, idle_timeout(State)};
-
-
-connected(info, {Tag, Socket, Data}, #state{socket = Socket} = State)
-when ?SOCKET_DATA(Tag) ->
-    ok = set_socket_active(State),
-
-    ?LOG_DEBUG(#{
-        description => "Got TCP message",
-        message => Data
-    }),
-
-    Actions = [
-        {next_event, internal, binary_to_term(Data)},
-        idle_timeout(State)
-    ],
-    {keep_state_and_data, Actions};
-
-connected(info, {Tag, _Socket}, State0) when ?CLOSED_TAG(Tag) ->
-    ?LOG_INFO(#{
-        description => "Socket closed",
-        reason => closed_by_remote
-    }),
-    State = on_disconnect(State0),
-    {next_state, connecting, State};
-
-connected(info, {Tag, _, Reason}, State0) when ?SOCKET_ERROR(Tag) ->
-    ?LOG_ERROR(#{description => "Socket error", reason => Reason}),
-    State = on_disconnect(State0),
-    {next_state, connecting, State};
-
-connected(info, timeout, #state{ping_sent = false} = State0) ->
-    ?LOG_DEBUG(#{description => "Connection timeout, sending first ping"}),
-    %% Here we do not return a timeout value as send_ping set an ah-hoc timer
-    {ok, State1} = send_ping(State0),
-    {keep_state, State1};
-
-% connected(info, {timeout, Ref, ping}, #state{ping_sent = {Ref, _}} = State)->
-
-%     ?LOG_DEBUG(#{
-%         description => "Connection closing",
-%         reason => ping_timeout
-%     }),
-%     {stop, ping_timeout, State#state{ping_sent = undefined}};
-
-% connected(info, {timeout, Ref, ping}, #state{ping_sent = {_Ref, Bin}} = State) ->
-%     ?LOG_DEBUG(#{
-%         description => "Ping timeout, sending another ping"
-%     }),
-%     %% We reuse the same payload, in case the server responds the previous one
-%     {ok, State1} = send_ping(Bin, State),
-%     %% Here we do not return a timeout value as send_ping set an ah-hoc timer
-%     {keep_state, State1};
-
-connected(info, {?BONDY_REQ, _Pid, RealmUri, Msg}, State) ->
-    ?LOG_DEBUG(#{
-        description => "Received WAMP request we need to FWD to core",
-        message => Msg
-    }),
-    SessionId = session_id(RealmUri, State),
-    ok = send_session_message(SessionId, Msg, State),
-    {keep_state_and_data, [idle_timeout(State)]};
-
-connected(info, Msg, _) ->
-    ?LOG_INFO(#{
-        description => "Received unknown message",
-        type => info,
-        event => Msg
-    }),
-    keep_state_and_data;
-
-connected({call, _From}, {join, _Realms, _AuthId, _PubKey}, _State) ->
-    %% TODO
-    keep_state_and_data;
-
-connected({call, From}, Request, _) ->
+handle_event({call, From}, Request, StateName, State) ->
     ?LOG_INFO(#{
         description => "Received unknown request",
         type => call,
         event => Request
     }),
-    gen_statem:reply(From, {error, badcall}),
-    keep_state_and_data;
+    %% We should not reset timers, nor change state here as this is an invalid
+    %% message
+    Actions = [
+        {reply, From, {error, badcall}},
+        maybe_hibernate(StateName, State)
+    ],
+    {keep_state_and_data, Actions};
 
-connected(cast, {forward_message, Msg, SessionId}, State) ->
-    case has_session(SessionId, State) of
+handle_event(cast, {forward_message, Msg, SessionId}, _, State) ->
+    %% A call to ?MODULE:forward/2
+    Result = case has_session(SessionId, State) of
         true ->
             send_session_message(SessionId, Msg, State);
         _ ->
             ?LOG_INFO(#{
-                description => "Received message for an uplink session that doesn't exist",
+                description => "Received message for a remote session that doesn't exist",
                 type => cast,
                 event => Msg,
                 session_id => SessionId
             }),
             ok
     end,
+
+    case Result of
+        ok ->
+            Actions = [
+                {{timeout, ping_timeout}, cancel},
+                {{timeout, ping_idle_timeout}, cancel}
+            ],
+            {next_state, active, State, Actions};
+        {error, Reason} ->
+            {stop, Reason}
+    end;
+
+handle_event(internal, {ping, Data}, _, State) ->
+    %% The remote (server) is sending us a ping
+    case send_message({pong, Data}, State) of
+        ok ->
+            %% We keep all timers as a ping should not reset the idle state
+            keep_state_and_data;
+        {error, Reason} ->
+            {stop, Reason}
+    end;
+
+handle_event(internal, {pong, _}, active, _) ->
+    %% A late pong, but we are active, so we ignore, the retry state was reset
     keep_state_and_data;
 
-connected(cast, Msg, _) ->
-    ?LOG_INFO(#{
-        description => "Received unknown message",
-        type => cast,
-        event => Msg
-    }),
-    keep_state_and_data;
-
-connected(timeout, Msg, _) ->
+handle_event(info, {?BONDY_REQ, _Pid, RealmUri, Msg}, _StateName, State) ->
     ?LOG_DEBUG(#{
-        description => "Received timeout message",
-        type => timeout,
-        event => Msg
+        description => "Received WAMP request we need to FWD to core",
+        message => Msg
     }),
-    %% We will be restarted
-    {stop, {timeout, Msg}};
+    SessionId = session_id(RealmUri, State),
+    case send_session_message(SessionId, Msg, State) of
+        ok ->
+            Actions = [
+                {{timeout, ping_timeout}, cancel},
+                {{timeout, ping_idle_timeout}, cancel}
+            ],
+            {next_state, active, State, Actions};
+        {error, Reason} ->
+            {stop, Reason}
+    end;
 
-connected(EventType, Msg, _) ->
+handle_event(info, {Tag, Socket, Data}, _, #state{socket = Socket} = State)
+when ?SOCKET_DATA(Tag) ->
+    %% Allow socket to send us more messages
+    ok = set_socket_active(State),
+
+    try
+        Msg = binary_to_term(Data),
+        ?LOG_DEBUG(#{
+            description => "Received message from server",
+            message => Msg
+        }),
+
+        %% The message can be a ping|pong and in the case of idle state we
+        %% should not reset timers here, we;ll do that in the active function
+        %% while handling this event
+        Actions = [
+            {{timeout, ping_timeout}, cancel},
+            {{timeout, ping_idle_timeout}, cancel},
+            {next_event, internal, Msg}
+        ],
+        {next_state, active, State, Actions}
+
+    catch
+        _:Reason ->
+            ?LOG_ERROR(#{
+                description => "Received invalid data from server",
+                data => Data
+            }),
+            {stop, Reason}
+    end;
+
+handle_event(info, {Tag, _Socket}, _, State0) when ?CLOSED_TAG(Tag) ->
+    ?LOG_INFO(#{
+        description => "Socket closed",
+        reason => closed_by_remote
+    }),
+    State = cleanup(State0),
+    {next_state, connecting, State};
+
+handle_event(info, {Tag, _, Reason}, _, State0) when ?SOCKET_ERROR(Tag) ->
+    ?LOG_ERROR(#{description => "Socket error", reason => Reason}),
+    State = cleanup(State0),
+    {next_state, connecting, State};
+
+handle_event(info, {network_connected, _}, _, _) ->
+    %% We do nothing here, this must be handled by the state functions when
+    %% necessary e.g. waiting_for_network state does it.
+    keep_state_and_data;
+
+handle_event(info, {network_disconnected, _}, _, _) ->
+    %% We do nothing here, this must be handled by the state functions as we
+    %% give priority to the socket state rather than this event.
+    %% If the socket had died then we wouldn't be here.
+    keep_state_and_data;
+
+handle_event(EventType, EventContent, StateName, _) ->
     ?LOG_INFO(#{
         description => "Received unknown message",
         type => EventType,
-        event => Msg
+        event => EventContent,
+        state_name => StateName
     }),
+    %% We also keep timers
     keep_state_and_data.
 
 
 
 %% =============================================================================
-%% PRIVATE: CONNECT
+%% PRIVATE: CONNECT UTILS
 %% =============================================================================
 
+
+
+%% @private
+maybe_enable_reconnect(#{enabled := true} = Opts0, State) ->
+    Opts = key_value:set(backoff_enabled, true, Opts0),
+    State#state{
+        reconnect_retry = bondy_retry:init(connect, Opts)
+    };
+
+maybe_enable_reconnect(_, State) ->
+    State.
+
+
+%% @private
+reset_reconnect_retry_state(State) ->
+    {_, R1} = bondy_retry:succeed(State#state.reconnect_retry),
+    State#state{reconnect_retry = R1}.
 
 
 %% @private
@@ -543,10 +794,10 @@ when R0 =/= undefined andalso
     case bondy_retry:fail(R0) of
         {Delay, R1} when is_integer(Delay) ->
             ?LOG_NOTICE(#{
-                description => "Failed to establish uplink connection to core router. Will retry after delay.",
+                description => "Failed to establish connection to target router. Will retry after delay.",
                 delay => Delay,
                 reason => Reason,
-                reason_description => inet:format_error(Reason)
+                details => inet:format_error(Reason)
             }),
             State = State0#state{reconnect_retry = R1},
             {keep_state, State, [{state_timeout, Delay, connect}]};
@@ -554,7 +805,7 @@ when R0 =/= undefined andalso
         {Limit, R1} when Limit == deadline orelse Limit == max_retries ->
             %% We reached max retries
             ?LOG_NOTICE(#{
-                description => "Failed to establish uplink connection to core router. Re-starting.",
+                description => "Failed to establish connection to target router. Re-starting.",
                 reason => Reason
             }),
             State = State0#state{reconnect_retry = R1},
@@ -564,9 +815,9 @@ when R0 =/= undefined andalso
 maybe_reconnect(Reason, _) ->
     %% Reconnect disabled or error is not retriable
     ?LOG_WARNING(#{
-        description => "Failed to establish uplink connection to core router.",
+        description => "Failed to establish connection to target router.",
         reason => Reason,
-        reason_description => inet:format_error(Reason)
+        details => inet:format_error(Reason)
     }),
     %% We will NOT be restarted
     {stop, normal}.
@@ -583,7 +834,7 @@ connect(State) ->
 %% @private
 connect(Transport, {Host, PortNumber}, Config) ->
 
-    Timeout = key_value:get(connect_timeout, Config, 5000),
+    Timeout = key_value:get(connect_timeout, Config, timer:seconds(5)),
     SocketOpts = maps:to_list(key_value:get(socket_opts, Config, [])),
     TLSOpts = maps:to_list(key_value:get(tls_opts, Config, [])),
 
@@ -622,27 +873,24 @@ set_socket_active(State) ->
 
 
 %% @private
+-spec send_message(any(), t()) ->
+    ok | {error, socket_closed | {socket_error, inet:posix()}}.
+
 send_message(Message, State) ->
+    ?LOG_DEBUG(#{description => "sending message", message => Message}),
+
     Data = term_to_binary(Message),
-    (State#state.transport):send(State#state.socket, Data).
-
-
-%% @private
-on_connect(State) ->
-    ?LOG_NOTICE(#{description => "Established connection with remote router"}),
-
-    %% We join any realms defined by the config
-    open_sessions(State).
-
+    case (State#state.transport):send(State#state.socket, Data) of
+        ok ->
+            ok;
+        {error, closed} ->
+            {error, socket_closed};
+        {error, Reason} ->
+            {error, {socket_error, Reason}}
+    end.
 
 %% @private
-reset_reconnect_retry_state(State) ->
-    {_, R1} = bondy_retry:succeed(State#state.reconnect_retry),
-    State#state{reconnect_retry = R1}.
-
-
-%% @private
-on_disconnect(State) ->
+cleanup(State) ->
     %% We flush all subscriptions and registrations for the Bondy Relay session
     _ = maps:foreach(
         fun(_, #{realm_uri := RealmUri, ref := Ref}) ->
@@ -658,35 +906,127 @@ on_disconnect(State) ->
     }.
 
 
+%% @private
+on_connect(_State0) ->
+    ?LOG_NOTICE(#{description => "Established connection with remote router"}),
+    ok.
+
 
 %% @private
-send_ping(St) ->
-    send_ping(integer_to_binary(erlang:system_time(microsecond)), St).
+on_disconnect(_State) ->
+    ok.
 
 
-%% -----------------------------------------------------------------------------
+
+%% =============================================================================
+%% PRIVATE: KEEP ALIVE PING
+%% =============================================================================
+
+
 %% @private
-%% @doc Sends a ping message with a reference() as a payload to the client and
-%% sent ourselves a ping_timeout message in the future.
-%% @end
-%% -----------------------------------------------------------------------------
-send_ping(Data, State0) ->
-    ok = send_message({ping, Data}, State0),
-    Timeout = State0#state.idle_timeout,
+maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
+    IdleTimeout = maps:get(idle_timeout, PingOpts),
+    Timeout = maps:get(timeout, PingOpts),
+    Attempts = maps:get(max_attempts, PingOpts),
 
-    TimerRef = erlang:send_after(Timeout, self(), ping_timeout),
+    Retry = bondy_retry:init(
+        ping_timeout,
+        #{
+            deadline => 0, % disable, use max_retries only
+            interval => Timeout,
+            max_retries => Attempts,
+            backoff_enabled => false
+        }
+    ),
 
-    State = State0#state{
-        ping_sent = {TimerRef, Data}
-        % ping_retry =
-    },
-    {ok, State}.
+    State#state{
+        ping_idle_timeout = IdleTimeout,
+        ping_payload = bondy_utils:generate_fragment(16),
+        ping_retry = Retry
+    };
+
+maybe_enable_ping(#{enabled := false}, State) ->
+    State.
+
+
+%% @private
+ping_succeed(#state{ping_retry = undefined} = State) ->
+    %% ping disabled
+    State;
+
+ping_succeed(#state{} = State) ->
+    {_, Retry} = bondy_retry:succeed(State#state.ping_retry),
+    State#state{ping_retry = Retry}.
+
+
+%% @private
+ping_fail(#state{ping_retry = undefined} = State) ->
+    %% ping disabled
+    State;
+
+ping_fail(#state{} = State) ->
+    {_, Retry} = bondy_retry:fail(State#state.ping_retry),
+    State#state{ping_retry = Retry}.
+
+
+%% @private
+maybe_send_ping(#state{ping_retry = undefined} = State) ->
+    %% ping disabled
+    {keep_state_and_data, [idle_timeout(State)]};
+
+maybe_send_ping(#state{} = State) ->
+    case bondy_retry:get(State#state.ping_retry) of
+        Time when is_integer(Time) ->
+            %% We send a ping
+            Bin = State#state.ping_payload,
+
+            case send_message({ping, Bin}, State) of
+                ok ->
+                    Actions = [
+                        ping_timeout(Time),
+                        idle_timeout(State),
+                        maybe_hibernate(idle, State)
+                    ],
+                    {keep_state, State, Actions};
+                {error, Reason} ->
+                    {stop, Reason}
+            end;
+
+        Limit when Limit == deadline orelse Limit == max_retries ->
+            {stop, {shutdown, ping_timeout}, State}
+    end.
 
 
 %% @private
 idle_timeout(State) ->
     %% We use an event timeout meaning any event received will cancel it
-    {timeout, State#state.idle_timeout, idle_timeout}.
+    {state_timeout, State#state.idle_timeout, idle_timeout}.
+
+
+%% @private
+ping_idle_timeout(State) ->
+    %% We use an generic timeout meaning we only reset the timer manually by
+    %% setting it again.
+    Time = State#state.ping_idle_timeout,
+    {{timeout, ping_idle_timeout}, Time, ping_idle_timeout}.
+
+
+%% @private
+ping_timeout(Time) ->
+    %% We use an generic timeout meaning we only reset the timer manually by
+    %% setting it again.
+    {{timeout, ping_timeout}, Time, ping_timeout}.
+
+
+%% @private
+maybe_hibernate(_, #state{hibernate = never}) ->
+    {hibernate, false};
+
+maybe_hibernate(_, #state{hibernate = always}) ->
+    {hibernate, true};
+
+maybe_hibernate(StateName, #state{hibernate = idle}) ->
+    {hibernate, StateName == idle}.
 
 
 
@@ -714,7 +1054,7 @@ signer(PubKey, #{cryptosign := #{exec := Filename}}) ->
             after
                 10000 ->
                     erlang:port_close(Port),
-                    throw(timeout)
+                    throw(cryptosign_timeout)
             end
         catch
             error:Reason ->
@@ -776,7 +1116,7 @@ authenticate(ChallengeExtra, State) ->
 
 
 %% =============================================================================
-%% PRIVATE: ESTABLISH SESSIONS
+%% PRIVATE: SESSIONS
 %% =============================================================================
 
 
@@ -788,7 +1128,7 @@ open_sessions(State0) ->
             State0;
         [{Uri, H}|_T] ->
             %% POC, we join only the first realm
-            %% TODO join all
+            %% TODO join all realms
             AuthId = key_value:get(authid, H),
             PubKey = key_value:get([cryptosign, pubkey], H),
 
@@ -805,17 +1145,19 @@ open_sessions(State0) ->
 
             %% TODO HELLO should include the Bondy Router Bridge Relay protocol
             %% version
-            ok = send_message({hello, Uri, Details}, State0),
-
-            Session = #{
-                realm_uri => Uri,
-                authid => AuthId,
-                pubkey => PubKey,
-                signer => signer(PubKey, H),
-                authroles => []
-            },
-
-            State0#state{session = Session}
+            case send_message({hello, Uri, Details}, State0) of
+                ok ->
+                    Session = #{
+                        realm_uri => Uri,
+                        authid => AuthId,
+                        pubkey => PubKey,
+                        signer => signer(PubKey, H),
+                        authroles => []
+                    },
+                    State0#state{session = Session};
+                {error, Reason} ->
+                    throw(Reason)
+            end
         end.
 
 
@@ -911,8 +1253,12 @@ aae_sync(#{id := SessionId}, State) ->
     % Ref = make_ref(),
     % State = update_session(sync_ref, Ref, SessionId, State0),
     Msg = {aae_sync, SessionId, #{}},
-    ok = send_message(Msg, State),
-    State.
+    case send_message(Msg, State) of
+        ok ->
+            State;
+        {error, Reason} ->
+            throw(Reason)
+    end.
 
 
 handle_aae_data({PKey, RemoteObj}, _State) ->
@@ -1028,13 +1374,21 @@ proxy_entry(#{id := SessionId}, State, Entry) ->
             State;
         false when Type == registration ->
             Msg = {registration_added, bondy_registry_entry:to_external(Entry)},
-            ok = send_session_message(SessionId, Msg, State),
-            State;
+            case send_session_message(SessionId, Msg, State) of
+                ok ->
+                    State;
+                {error, Reason} ->
+                    throw(Reason)
+            end;
 
         false when Type == subscription ->
             Msg = {subscription_added, bondy_registry_entry:to_external(Entry)},
-            ok = send_session_message(SessionId, Msg, State),
-            State
+            case send_session_message(SessionId, Msg, State) of
+                ok ->
+                    State;
+                {error, Reason} ->
+                    throw(Reason)
+            end
     end.
 
 
@@ -1047,7 +1401,7 @@ proxy_entry(#{id := SessionId}, State, Entry) ->
 
 %% @private
 send_session_message(SessionId, Msg, State) ->
-    send_message({receive_message, SessionId, Msg}, State).
+    send_message({session_message, SessionId, Msg}, State).
 
 
 
@@ -1063,14 +1417,11 @@ send_session_message(SessionId, Msg, State) ->
 %     end,
 %     ets:update_counter(Tab, RealmUri, {Pos, 1}).
 
-handle_session_message(Msg, To, Opts, SessionId, State) ->
+forward_remote_message(Msg, To, Opts, SessionId, State) ->
     #{realm_uri := RealmUri, ref := MyRef} = session(SessionId, State),
 
     SendOpts = bondy:add_via(MyRef, Opts),
     bondy_router:forward(Msg, To, SendOpts#{realm_uri => RealmUri}).
 
 
-
-% handle_event(#event{} = Event, State) ->
-%     case maps:get(topic, Event#event.details) of
 

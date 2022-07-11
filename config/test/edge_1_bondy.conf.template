@@ -1,3 +1,5 @@
+log.handlers.default.level = debug
+
 aae.data_exchange_timeout = 1m
 aae.enabled = off
 aae.exchange_timer = 1m

@@ -251,10 +251,8 @@ stop_bridges() ->
 
 start_listeners() ->
     Protocol = bondy_bridge_relay_server,
-    %% TODO
-    ProtocolOpts = [],
-    ok = bondy_ranch_listener:start(?TCP, Protocol, ProtocolOpts),
-    ok = bondy_ranch_listener:start(?TLS, Protocol, ProtocolOpts).
+    ok = bondy_ranch_listener:start(?TCP, Protocol, bondy_config:get(?TCP)),
+    ok = bondy_ranch_listener:start(?TLS, Protocol, bondy_config:get(?TLS)).
 
 
 %% -----------------------------------------------------------------------------
