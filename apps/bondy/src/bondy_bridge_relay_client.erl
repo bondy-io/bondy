@@ -1405,15 +1405,14 @@ add_event_handler(Session, State) when is_map(Session) ->
     %% We subscribe to registration|subscription events with the following
     %% callback function.
     Fun = fun
-        ({Tag, Entry}) ->
-            ERealmUri = bondy_registry_entry:realm_uri(Entry),
-            ESessionId = bondy_registry_entry:session_id(Entry),
-
+        ({Tag, Term}) ->
             IsMatch =
+                %% It must be a registry event, so Term must be an entry
+                bondy_registry_entry:is_entry(Term)
                 %% We avoid forwarding our own subscriptions
-                ESessionId =/= SessionId
+                andalso SessionId =/= bondy_registry_entry:session_id(Term)
                 %% We are only interested in events for this realm
-                andalso ERealmUri =:= RealmUri
+                andalso RealmUri =:= bondy_registry_entry:realm_uri(Term)
                 %% matching the following event types
                 andalso (
                     Tag =:= registration_created
@@ -1428,13 +1427,14 @@ add_event_handler(Session, State) when is_map(Session) ->
 
             case IsMatch of
                 true ->
-                    Msg = {Tag, bondy_registry_entry:to_external(Entry)},
+                    Msg = {Tag, bondy_registry_entry:to_external(Term)},
                     ok = ?MODULE:forward(MyRef, Msg);
                 false ->
                     ok
             end;
 
         (_) ->
+            %% Other event types
             ok
     end,
 

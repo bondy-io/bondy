@@ -384,15 +384,15 @@ init(CB) ->
     {ok, #state{callback = CB}}.
 
 
-handle_event({Event, Message}, State) ->
+handle_event(Event, State) ->
     try
         case State#state.callback of
             Fun when is_function(Fun, 1) ->
-                Fun({Event, Message});
+                Fun(Event);
             {Fun, Args} ->
-                erlang:apply(Fun, [{Event, Message} | Args]);
+                erlang:apply(Fun, [Event | Args]);
             {M, F, Args} ->
-                erlang:apply(M, F, [{Event, Message} | Args])
+                erlang:apply(M, F, [Event | Args])
         end
     catch
         Class:Reason:Stacktrace ->
@@ -400,7 +400,7 @@ handle_event({Event, Message}, State) ->
                 description => "Error while applying callback function.",
                 class => Class,
                 reason => Reason,
-                event => {Event, Message},
+                event => Event,
                 stacktrace => Stacktrace
             })
     end,
