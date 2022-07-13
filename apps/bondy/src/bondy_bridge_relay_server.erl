@@ -172,6 +172,12 @@ init({RanchRef, Transport, Opts}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+terminate({shutdown, Info}, StateName, #state{socket = undefined} = State) ->
+    ok = remove_all_registry_entries(State),
+    ?LOG_INFO(Info#{
+        state_name => StateName
+    }),
+    ok;
 
 terminate(Reason, StateName, #state{socket = undefined} = State) ->
     ok = remove_all_registry_entries(State),
@@ -378,7 +384,7 @@ active(internal, {session_message, SessionId, Msg}, State) ->
         throw:Reason:Stacktrace ->
             ?LOG_ERROR(#{
                 description => "Unhandled error",
-                session => SessionId,
+                session_id => SessionId,
                 message => Msg,
                 class => throw,
                 reason => Reason,
@@ -390,7 +396,7 @@ active(internal, {session_message, SessionId, Msg}, State) ->
         Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
                 description => "Error while handling session message",
-                session => SessionId,
+                session_id => SessionId,
                 message => Msg,
                 class => Class,
                 reason => Reason,
@@ -448,8 +454,11 @@ idle({timeout, ping_timeout}, ping_timeout, State0) ->
     maybe_send_ping(State);
 
 idle(state_timeout, idle_timeout, _State) ->
-    %% We will be restarted
-    {stop, idle_timeout};
+    Info = #{
+        description => "Shutting down connection due to inactivity.",
+        reason => idle_timeout
+    },
+    {stop, {shutdown, Info}};
 
 idle(internal, {pong, Bin}, #state{ping_payload = Bin} = State0) ->
     %% We got a response to our ping
@@ -542,23 +551,25 @@ when ?SOCKET_DATA(Tag) ->
             ],
             {keep_state, State, Actions}
     catch
-        _:Reason ->
-            ?LOG_ERROR(#{
-                description => "Received invalid data from client",
-                data => Data
-            }),
-            {stop, Reason}
+        Class:Reason ->
+            Info = #{
+                description => "Received invalid data from client.",
+                data => Data,
+                class => Class,
+                reason => Reason
+            },
+            {stop, {shutdown, Info}}
     end;
 
 handle_event(info, {Tag, _Socket}, _, _) when ?CLOSED_TAG(Tag) ->
     ?LOG_INFO(#{
-        description => "Bridge Relay connection closed by client"
+        description => "Connection closed by client."
     }),
     {stop, normal};
 
 handle_event(info, {Tag, _, Reason}, _, _) when ?SOCKET_ERROR(Tag) ->
     ?LOG_INFO(#{
-        description => "Bridge Relay connection closed due to error",
+        description => "Connection closed due to error.",
         reason => Reason
     }),
     {stop, Reason};
@@ -566,7 +577,7 @@ handle_event(info, {Tag, _, Reason}, _, _) when ?SOCKET_ERROR(Tag) ->
 
 handle_event(EventType, EventContent, StateName, _) ->
     ?LOG_INFO(#{
-        description => "Received unknown message",
+        description => "Received unknown message.",
         type => EventType,
         event => EventContent,
         state_name => StateName
@@ -649,13 +660,12 @@ challenge(Realm, Details, State0) ->
 %% @private
 send_challenge(Details, Method, State0) ->
     AuthCtxt0 = State0#state.auth_context,
-    SessionId = bondy_auth:session_id(AuthCtxt0),
 
     {Reply, State} =
         case bondy_auth:challenge(Method, Details, AuthCtxt0) of
             {false, _} ->
-                M = {welcome, SessionId, #{}},
-                {M, State0#state{auth_context = undefined}};
+                %% We got no challenge? This cannot happen with cryptosign
+                exit(invalid_authmethod);
 
             {true, ChallengeExtra, AuthCtxt1} ->
                 M = {challenge, Method, ChallengeExtra},
@@ -712,8 +722,8 @@ send_message(Message, State) ->
 
 %% @private
 on_connect(_State) ->
-    ?LOG_NOTICE(#{
-        description => "Established connection with client router"
+    ?LOG_INFO(#{
+        description => "Established connection with client router."
     }),
     ok.
 
@@ -848,7 +858,7 @@ handle_in({forward, To, Msg, Opts}, SessionId, State) ->
 handle_in(Other, SessionId, State) ->
     ?LOG_INFO(#{
         description => "Unhandled message",
-        session => SessionId,
+        session_id => SessionId,
         message => Other
     }),
     Actions = [
@@ -1153,11 +1163,11 @@ maybe_send_ping(#state{} = State, Actions0) ->
             {keep_state, State, Actions};
 
         Limit when Limit == deadline orelse Limit == max_retries ->
-            % ?LOG_INFO(#{
-            %     description => "Connection closing.",
-            %     reason => ping_timeout
-            % }),
-            {stop, {shutdown, ping_timeout}, State}
+            Info = #{
+                description => "Client router has not responded to our ping on time. Shutting down.",
+                reason => ping_timeout
+            },
+            {stop, {shutdown, Info}, State}
     end.
 
 
