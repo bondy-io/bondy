@@ -18,10 +18,10 @@
 
 
 %% =============================================================================
-%% EDGE CLIENT TCP CONNECTIONS
+%% CLIENT TCP CONNECTIONS
 %% =============================================================================
 
-
+%% @doc Enabled or disable a bridge relay
 {mapping, "bridge.$name", "bondy.bridges", [
   {commented, off},
   {datatype, flag}
@@ -117,20 +117,28 @@
   {datatype, {duration, ms}}
 ]}.
 
+%% @doc Drops the connection when the bridge has been waiting the network to be
+%% up after a period of inactivity.
+%% Notice that to determine if the network is up the current implementation
+%% checks the hosts' number of IPV4 network interfaces (ignoring the loopback
+%% interface), so for local development without and network connection you want
+%% to disable this functionality. Setting a value to infinity, disables it.
+{mapping, "bridge.$name.network_timeout", "bondy.bridges", [
+{commented, "60s"},
+{datatype, [{atom, infinity}, {duration, ms}]}
+]}.
 
-%% @doc Drops the connection after a period of inactivity. This option does not
-%% take effect when bridge.$name.ping.enabled is 'on' and bridge.$name.ping.
-%% interval times bridge.$name.ping.max_attempts results in a value higher
-%% than this option.
-%% Notice that for some clients using this option alone is not enough to keep
-%% a connection alive as the client will drop the connection due to inactivity.
-%% If the client supports tcp PING control messages, enabled them,
-%% otherwise e.g. web browsers set bridge.$name.ping.enabled to on.
+
+%% @doc Drops the connection after a period of inactivity.
 {mapping, "bridge.$name.idle_timeout", "bondy.bridges", [
 {commented, "24h"},
 {datatype, [{atom, infinity}, {duration, ms}]}
 ]}.
 
+{mapping, "bridge.$name.hibernate", "bondy.bridges", [
+{commented, idle},
+{datatype, {enum, [never, idle, always]}}
+]}.
 
 %% @doc Defines if PING control message functionality is enabled or
 %% not.
@@ -154,6 +162,8 @@
   {datatype, {duration, ms}}
 ]}.
 
+
+
 %% @doc If  bridge.$name.ping.enabled is 'on', this parameter controls the
 %% amount of time Bondy waits for a ping response from the remote.
 %% Once that time has passed this counts as a fail attempt
@@ -163,12 +173,10 @@
 {datatype, {duration, ms}}
 ]}.
 
-%% @doc If  bridge.$name.ping.enabled is 'on', this parameter controls how many
-%% missed pings are considered a timeout. Thus, after this number of attempts
-%% Bondy Edge will drop the connection.
+%% @doc If  bridge.$name.ping.enabled is 'on', this parameter controls maximum number of ping attempts Bondy will do before dropping the connection.
 {mapping,
 "bridge.$name.ping.max_attempts", "bondy.bridges", [
-  {commented, 3},
+  {commented, 2},
   {datatype, integer},
   {validators, ["pos_integer"]}
 ]}.
@@ -459,6 +467,8 @@
       when  KeyStr == <<"parallelism">>;
             KeyStr == <<"transport">>;
             KeyStr == <<"idle_timeout">>;
+            KeyStr == <<"hibernate">>;
+            KeyStr == <<"network_timeout">>;
             KeyStr == <<"connect_timeout">>;
             KeyStr == <<"max_frame_size">> ->
         Key = binary_to_atom(KeyStr),
@@ -706,11 +716,23 @@ end}.
   {datatype, {flag, on, off}}
 ]}.
 
-%% @doc If bridge.listener.tcp.ping.enabled is 'on', this value controls the interval
-%% in which Bondy sends PING control messages to edge peers.
-{mapping, "bridge.listener.tcp.ping.interval", "bondy.bridge_relay_tcp.ping.interval", [
-  {default, "30s"},
+%% @doc If bridge.listener.tcp.ping.enabled is 'on', this parameter controls the
+%% maximum time interval that is permitted to elapse between the point at which
+%% the remote router finishes transmitting a message and the point it starts
+%% sending the next.
+%% Notice this is not the same as bridge.listener.tcp.idle_timeout.
+{mapping, "bridge.listener.tcp.ping.idle_timeout", "bondy.bridge_relay_tcp.ping.idle_timeout", [
+  {default, "20s"},
   {datatype, {duration, ms}}
+]}.
+
+%% @doc If bridge.listener.tcp.ping.enabled is 'on', this parameter controls the
+%% amount of time Bondy waits for a ping response from the remote.
+%% Once that time has passed this counts as a fail attempt
+%% (see bridge.listener.tcp.ping.max_attempts).
+{mapping, "bridge.listener.tcp.ping.timeout", "bondy.bridge_relay_tcp.ping.timeout", [
+{default, "10s"},
+{datatype, {duration, ms}}
 ]}.
 
 %% @doc If bridge.listener.tcp.ping.enabled is 'on', this value controls how many
@@ -718,22 +740,33 @@ end}.
 %% Bondy will drop the connection.
 %% If the value is 'infinity' Bondy will never timeout based on missed pings.
 {mapping,
-"bridge.listener.tcp.ping.max_retries",
-"bondy.bridge_relay_tcp.ping.max_retries",[
-  {default, 3},
+"bridge.listener.tcp.ping.max_attempts",
+"bondy.bridge_relay_tcp.ping.max_attempts",[
+  {default, 2},
   {datatype, integer}
 ]}.
 
-%% @doc Drops the connection after a period of inactivity. This option does not
-%% take effect when bridge.listener.tcp.ping.enabled is 'on'
-%% and bridge.listener.tcp.ping.interval times
-%% bridge.listener.tcp.ping.max_retries results in a value higher than this
-%% option.
-%% Notice that for some clients using this option alone is not enough to keep
-%% a connection alive as the client will drop the connection due to inactivity.
+%% @doc The period of inactivity after which a connection is dropped. Ping
+%% control messages do not reset this timer, only client or server data packets
+%% do.
 {mapping, "bridge.listener.tcp.idle_timeout", "bondy.bridge_relay_tcp.idle_timeout", [
   {default, "8h"},
   {datatype, [{atom, infinity}, {duration, ms}]}
+]}.
+
+%% @doc Defines whether the connection process should hibernate when its idle.
+%% Enabling hibernation will typically reduce memory consumption and should not
+%% have a penalty in performance as it is used only during idle state.
+{mapping, "bridge.listener.tcp.hibernate", "bondy.bridge_relay_tcp.hibernate", [
+{default, idle},
+{datatype, {enum, [never, idle, always]}}
+]}.
+
+%% @doc The period of time without a session after which the connection is
+%% dropped.
+{mapping, "bridge.listener.tcp.auth_timeout", "bondy.bridge_relay_tcp.auth_timeout", [
+{default, "5s"},
+{datatype, [{atom, infinity}, {duration, ms}]}
 ]}.
 
 
@@ -823,8 +856,6 @@ end}.
   {default, on}
 ]}.
 
-
-
 %% @doc Defines if  PING control message functionality is enabled or
 %% not. This option affects server (Bondy) initiated pings only. Bondy Edge
 %% might also initiate ping requests and Bondy will always respond to those
@@ -832,15 +863,27 @@ end}.
 %% This feature is useful to keep a connection alive and validate the
 %% connection is healthy.
 {mapping, "bridge.listener.tls.ping", "bondy.bridge_relay_tls.ping.enabled", [
-  {default, on},
-  {datatype, {flag, on, off}}
+{default, on},
+{datatype, {flag, on, off}}
 ]}.
 
-%% @doc If bridge.listener.tls.ping.enabled is 'on', this value controls the interval
-%% in which Bondy sends PING control messages to edge peers.
-{mapping, "bridge.listener.tls.ping.interval", "bondy.bridge_relay_tls.ping.interval", [
-  {default, "30s"},
-  {datatype, {duration, ms}}
+%% @doc If bridge.listener.tls.ping.enabled is 'on', this parameter controls the
+%% maximum time interval that is permitted to elapse between the point at which
+%% the remote router finishes transmitting a message and the point it starts
+%% sending the next.
+%% Notice this is not the same as bridge.listener.tls.idle_timeout.
+{mapping, "bridge.listener.tls.ping.idle_timeout", "bondy.bridge_relay_tls.ping.idle_timeout", [
+{default, "20s"},
+{datatype, {duration, ms}}
+]}.
+
+%% @doc If bridge.listener.tls.ping.enabled is 'on', this parameter controls the
+%% amount of time Bondy waits for a ping response from the remote.
+%% Once that time has passed this counts as a fail attempt
+%% (see bridge.listener.tls.ping.max_attempts).
+{mapping, "bridge.listener.tls.ping.timeout", "bondy.bridge_relay_tls.ping.timeout", [
+{default, "10s"},
+{datatype, {duration, ms}}
 ]}.
 
 %% @doc If bridge.listener.tls.ping.enabled is 'on', this value controls how many
@@ -848,15 +891,15 @@ end}.
 %% Bondy will drop the connection.
 %% If the value is 'infinity' Bondy will never timeout based on missed pings.
 {mapping,
-"bridge.listener.tls.ping.max_retries",
-"bondy.bridge_relay_tls.ping.max_retries", [
-  {default, 3},
-  {datatype, integer}
+"bridge.listener.tls.ping.max_attempts",
+"bondy.bridge_relay_tls.ping.max_attempts",[
+{default, 2},
+{datatype, integer}
 ]}.
 
 %% @doc Drops the connection after a period of inactivity. This option does not
 %% take effect when bridge.listener.tls.ping.enabled is 'on' and bridge.listener.tls.ping.
-%% interval times bridge.listener.tls.ping.max_retries results in a value higher
+%% interval times bridge.listener.tls.ping.max_attempts results in a value higher
 %% than this option.
 %% Notice that for some clients using this option alone is not enough to keep
 %% a connection alive as the client will drop the connection due to inactivity.
@@ -865,6 +908,13 @@ end}.
   {datatype, [{atom, infinity}, {duration, ms}]}
 ]}.
 
+%% @doc Defines whether the connection process should hibernate when its idle.
+%% Enabling hibernation will typically reduce memory consumption and should not
+%% have a penalty in performance as it is used only during idle state.
+{mapping, "bridge.listener.tls.hibernate", "bondy.bridge_relay_tls.hibernate", [
+{default, idle},
+{datatype, {enum, [never, idle, always]}}
+]}.
 
 %% Maximum frame size allowed by this handler. Bondy will close the
 %% connection when a client attempts to send a frame that goes over this limit.

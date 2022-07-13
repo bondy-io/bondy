@@ -69,7 +69,7 @@ cluster.tls.client.versions = 1.2,1.3
 
 erlang.async_threads = 64
 erlang.max_ports = 65536
-load_regulation.router.pool.capacity = 10000
+load_regulation.router.pool.capacity = 1000000
 
 oauth2.client_credentials_grant.duration = 15m
 oauth2.code_grant.duration = 10m

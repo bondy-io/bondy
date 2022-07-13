@@ -68,14 +68,19 @@ start_link() ->
 
 start_child(Bridge) ->
     Id = maps:get(name, Bridge),
-    ChildSpec = ?CLIENT(Id, [Bridge], transient, 5000),
+    %% We use a permanent restart as we offer an API to stop and remove
+    %% children in bondy_bridge_relay_manager and we want to avoid an
+    %% gen_server error log on termination.
+    ChildSpec = ?CLIENT(Id, [Bridge], permanent, 5000),
 
     case supervisor:start_child(?MODULE, ChildSpec) of
         {ok, _} = OK ->
             OK;
+
         {error, already_present} ->
             ok = supervisor:delete_child(?MODULE, Id),
             start_child(Bridge);
+
         {error, _} = Error ->
             Error
     end.
@@ -104,4 +109,10 @@ delete_child(Name) ->
 
 
 init([]) ->
-    {ok, {{one_for_one, 5, 60}, []}}.
+    Flags = #{
+        strategy => one_for_one,
+        intensity => 5,
+        period => 60,
+        auto_shutdown => never
+    },
+    {ok, {Flags, []}}.

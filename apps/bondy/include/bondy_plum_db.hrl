@@ -21,22 +21,97 @@
     %% ram
     %% ------------------------------------------
     %% used by bondy_registry.erl
-    {?PLUM_DB_REGISTRATION_TAB, ram},
-    {?PLUM_DB_SUBSCRIPTION_TAB, ram},
+    {?PLUM_DB_REGISTRATION_TAB, #{
+        type => ram,
+        shard_by => prefix,
+        callbacks => #{
+            will_merge => {bondy_registry, will_merge},
+            object_updated => {bondy_registry, on_object_updated}
+        }
+    }},
+    {?PLUM_DB_SUBSCRIPTION_TAB, #{
+        type => ram,
+        shard_by => prefix,
+        callbacks => #{
+            will_merge => {bondy_registry, will_merge},
+            object_updated => {bondy_registry, on_object_updated}
+        }
+    }},
 
     %% ram_disk
     %% ------------------------------------------
-    {?PLUM_DB_REALM_TAB, ram_disk},
-    {?PLUM_DB_GROUP_GRANT_TAB, ram_disk},
-    {?PLUM_DB_GROUP_TAB, ram_disk},
-    {?PLUM_DB_USER_GRANT_TAB, ram_disk},
-    {?PLUM_DB_USER_TAB, ram_disk},
-    {?PLUM_DB_SOURCE_TAB, ram_disk},
+    {?PLUM_DB_REALM_TAB, #{
+        type => ram_disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }},
+    {?PLUM_DB_GROUP_GRANT_TAB, #{
+        type => ram_disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }},
+    {?PLUM_DB_GROUP_TAB, #{
+        type => ram_disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }},
+    {?PLUM_DB_USER_GRANT_TAB, #{
+        type => ram_disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }},
+    {?PLUM_DB_USER_TAB, #{
+        type => ram_disk,
+        shard_by => prefix,
+        callbacks => #{
+            will_merge => {bondy_rbac_user, will_merge},
+            object_updated => {bondy_rbac_user, on_object_updated}
+        }
+    }},
+    {?PLUM_DB_SOURCE_TAB, #{
+        type => ram_disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }},
 
     %% disk
     %% ------------------------------------------
-    {api_gateway, disk},
-    {?PLUM_DB_TICKET_TAB, disk},
-    {oauth2_refresh_tokens, disk},
-    {bondy_bridge_relay, disk}
+    {api_gateway, #{
+        type => disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }},
+    {?PLUM_DB_TICKET_TAB, #{
+        type => disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }},
+    {oauth2_refresh_tokens, #{
+        type => disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }},
+    {bondy_bridge_relay, #{
+        type => disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }}
 ]).

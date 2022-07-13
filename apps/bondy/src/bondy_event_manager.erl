@@ -52,11 +52,24 @@
 %%
 %% @end
 %% -----------------------------------------------------------------------------
+
+%% -----------------------------------------------------------------------------
+%% @doc This module implement both an event manager and a universal event
+%% handler (when used with {@link add_callback/1} and
+%% {@link add_sup_callback/1}).
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_event_manager).
+
+-behaviour(gen_event).
 
 -include_lib("kernel/include/logger.hrl").
 
 %% API
+-export([add_callback/1]).
+-export([add_callback/2]).
+-export([add_callback/3]).
+-export([add_sup_callback/1]).
 -export([add_handler/2]).
 -export([add_handler/3]).
 -export([add_sup_handler/2]).
@@ -73,13 +86,92 @@
 -export([notify/2]).
 -export([sync_notify/1]).
 -export([sync_notify/2]).
+-export([delete_callback/2]).
+-export([delete_handler/2]).
+-export([delete_watched_handler/1]).
 
+
+%% GEN_EVENT CALLBACKS
+-export([init/1]).
+-export([handle_event/2]).
+-export([handle_call/2]).
+-export([handle_info/2]).
+-export([terminate/2]).
+-export([code_change/3]).
+
+
+%% UNIVERSAL EVENT HANDLER STATE
+-record(state, {
+    callback    :: function() | {M :: module(), F :: atom(), A :: [term()]}
+}).
+
+
+-type handler()     ::  module() | {module(), Id :: term()}.
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
 
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Adds a callback function.
+%% The function needs to have a single argument representing the event that has
+%% been fired.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add_callback(Fun :: fun((any()) -> any())) -> {ok, handler()}.
+
+add_callback(Fun) when is_function(Fun, 1) ->
+    Handler = {?MODULE, make_ref()},
+    gen_event:add_handler(?MODULE, Handler, [Fun]),
+    {ok, Handler}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Adds a callback function.
+%% The function will be called by prepending the event to the list `Args'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add_callback(Fun :: fun((any()) -> any()), Args ::  [term()]) ->
+    {ok, reference()}.
+
+add_callback(Fun, []) ->
+    add_callback(Fun);
+
+add_callback(Fun, Args) when is_function(Fun, length(Args) + 1) ->
+    Handler = {?MODULE, make_ref()},
+    gen_event:add_handler(?MODULE, Handler, {Fun, Args}),
+    {ok, Handler}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Adds a callback MFA
+%% The function will be called by prepending the event to the list `Args'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add_callback(M :: module(), F :: atom(), Args :: [term()]) ->
+    {ok, reference()}.
+
+add_callback(M, F, Args) when is_atom(M), is_atom(F), is_list(Args) ->
+    Ref = make_ref(),
+    gen_event:add_handler(?MODULE, {?MODULE, Ref}, {M, F, Args}),
+    {ok, Ref}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Adds a supervised callback function.
+%% The function needs to have a single argument representing the event that has
+%% been fired.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add_sup_callback(fun((any()) -> any())) -> {ok, reference()}.
+
+add_sup_callback(Fn) when is_function(Fn, 1) ->
+    Ref = make_ref(),
+    gen_event:add_sup_handler(?MODULE, {?MODULE, Ref}, Fn),
+    {ok, Ref}.
 
 
 %% -----------------------------------------------------------------------------
@@ -100,12 +192,11 @@ add_handler(Manager, Handler, Args) ->
     gen_event:add_handler(Manager, Handler, Args).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc Adds a supervised event handler, but also supervises the connection
 %% between the event handler and the calling process.
 %% Calls `gen_event:add_sup_handler(?MODULE, Handler, Args)'.
-%% %% Use this call if you want the event manager to remove the handler when the
+%% Use this call if you want the event manager to remove the handler when the
 %% calling process terminates.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -209,7 +300,41 @@ swap_watched_handler(OldHandler, NewHandler) ->
 %% -----------------------------------------------------------------------------
 swap_watched_handler(Manager, OldHandler, NewHandler) ->
     bondy_event_handler_watcher_sup:start_watcher(
-        Manager, {swap, OldHandler, NewHandler}).
+        Manager, {swap, OldHandler, NewHandler}
+    ).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec delete_callback(Ref :: reference(), Args :: term()) ->
+    term() | {error, module_not_found} | {'EXIT', Reason :: any()}.
+
+delete_callback(Ref, Args) ->
+    delete_handler({?MODULE, Ref}, Args).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec delete_handler(
+    Handler :: module() | {module(), term()}, Args :: term()) ->
+    term() | {error, module_not_found} | {'EXIT', Reason :: any()}.
+
+delete_handler(Handler, Args) ->
+    gen_event:delete_handler(?MODULE, Handler, Args).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec delete_watched_handler(Watcher :: pid()) -> ok | {error, not_found}.
+
+delete_watched_handler(Watcher) ->
+    bondy_event_handler_watcher_sup:terminate_watcher(Watcher).
 
 
 %% -----------------------------------------------------------------------------
@@ -246,3 +371,52 @@ sync_notify(Event) ->
 %% -----------------------------------------------------------------------------
 sync_notify(Manager, Event) ->
     gen_event:sync_notify(Manager, Event).
+
+
+
+%% =============================================================================
+%% GEN_EVENT CALLBACKS
+%% =============================================================================
+
+
+
+init(CB) ->
+    {ok, #state{callback = CB}}.
+
+
+handle_event(Event, State) ->
+    try
+        case State#state.callback of
+            Fun when is_function(Fun, 1) ->
+                Fun(Event);
+            {Fun, Args} ->
+                erlang:apply(Fun, [Event | Args]);
+            {M, F, Args} ->
+                erlang:apply(M, F, [Event | Args])
+        end
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error while applying callback function.",
+                class => Class,
+                reason => Reason,
+                event => Event,
+                stacktrace => Stacktrace
+            })
+    end,
+    {ok, State}.
+
+
+handle_call(_Request, State) ->
+    {ok, ok, State}.
+
+
+handle_info(_Info, State) ->
+    {ok, State}.
+
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.

@@ -758,6 +758,10 @@ do_publish(RealmUri, Subscriptions, MakeEvent, Origin) ->
             {true, true, false} ->
                 case bondy_ref:is_bridge_relay(Subscriber) of
                     true ->
+                        %% We treat a bridge relay subscriber as a remote
+                        %% subscriber as we want it to receive the PUBLICATION
+                        %% as opposed to the EVENT, as the bridge relay will
+                        %% need for forward the publication to a remote cluster.
                         {[Subscriber|RelayAcc0], NodeAcc0};
 
                     false ->
