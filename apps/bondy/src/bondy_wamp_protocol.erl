@@ -101,7 +101,10 @@ format_status(Opt, #wamp_state{} = State) ->
     State#wamp_state{
         auth_context = NewAuthCtxt,
         context = NewCtxt
-    }.
+    };
+
+format_status(_, undefined) ->
+    undefined.
 
 
 

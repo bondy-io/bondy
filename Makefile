@@ -2,6 +2,12 @@
 REBAR = rebar3
 BONDY_ERL_NODENAME ?= bondy@127.0.0.1
 BONDY_ERL_DISTRIBUTED_COOKIE ?= bondy
+CT_SUITE_FILE?=
+ifdef CT_SUITE_FILE
+CT_SUITE_ARGS = --suite ${CT_SUITE_FILE}
+else
+CT_SUITE_ARGS =
+endif
 
 .PHONY: genvars compile test xref eunit dialyzer tar
 
@@ -29,14 +35,15 @@ clean-docs:
 	rm -rf apps/bondy_broker_bridge/doc/*
 	rm -f apps/bondy_broker_bridge/doc/.build
 
-test: xref eunit
-	${REBAR} as test ct
+test: xref
+	${REBAR} as test ct ${CT_SUITE_ARGS}
 
 xref:
 	${REBAR} xref skip_deps=true
 
-eunit:
-	${REBAR} eunit
+
+cover: xref
+	${REBAR} as test ct ${CT_SUITE_ARGS}, cover
 
 dialyzer:
 	${REBAR} dialyzer
