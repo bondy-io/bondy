@@ -45,7 +45,8 @@
 
 handle_call(?BONDY_ROUTER_BRIDGE_ADD, #call{} = M, Ctxt) ->
     [Data] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
-    Reply = case bondy_bridge_relay_manager:add_bridge(Data, M#call.kwargs) of
+    KWArgs = to_map(M#call.kwargs),
+    Reply = case bondy_bridge_relay_manager:add_bridge(Data, KWArgs) of
         {ok, Bridge} ->
             Ext = bondy_bridge_relay:to_external(Bridge),
             wamp_message:result(M#call.request_id, #{}, [Ext]);
@@ -135,3 +136,11 @@ handle_call(_, #call{} = M, _) ->
 no_such_procedure(M) ->
     E = bondy_wamp_utils:no_such_procedure_error(M),
     {reply, E}.
+
+
+%% @private
+to_map(undefined) ->
+    #{};
+to_map(Term) when is_map(Term) ->
+    Term.
+
