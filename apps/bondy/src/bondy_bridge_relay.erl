@@ -376,14 +376,14 @@
         alias => <<"procedures">>,
         required => true,
         default => [],
-        validator => {list, ?ACTION_SPEC}
+        validator => {list, ?PROCEDURE_ACTION_SPEC}
 
     },
     topics => #{
         alias => <<"topics">>,
         required => true,
         default => [],
-        validator => {list, ?ACTION_SPEC}
+        validator => {list, ?TOPIC_ACTION_SPEC}
     }
 }).
 
@@ -421,12 +421,38 @@
             (<<"out">>) ->
                 {ok, out};
             (<<"both">>) ->
-                {ok, both}
+                {ok, both};
+            (_) ->
+                false
         end
     }
 }).
 
+-define(TOPIC_ACTION_SPEC, ?ACTION_SPEC#{
+}).
 
+-define(PROCEDURE_ACTION_SPEC, ?ACTION_SPEC#{
+    registration => #{
+        alias => <<"registration">>,
+        required => false,
+        validator => fun
+            (static) ->
+                true;
+            (dynamic) ->
+                true;
+            ("static") ->
+                {ok, static};
+            ("dynamic") ->
+                {ok, dynamic};
+            (<<"static">>) ->
+                {ok, static};
+            (<<"dynamic">>) ->
+                {ok, dynamic};
+            (_) ->
+                false
+        end
+    }
+}).
 
 -type t() :: #{
     name            :=  binary(),
