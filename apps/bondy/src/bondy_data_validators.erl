@@ -82,6 +82,8 @@ cidr(Term)  ->
 %% -----------------------------------------------------------------------------
 -spec strict_username(Term :: binary()) -> {ok, term()} | boolean().
 
+strict_username(all) -> false;
+strict_username(anonymous) -> false;
 strict_username(<<"all">>) -> false;
 strict_username(<<"anonymous">>) -> false;
 strict_username(<<"any">>) -> false;
@@ -123,11 +125,24 @@ aliases(L) when is_list(L) ->
 aliases(_) ->
     false.
 
+
 %% -----------------------------------------------------------------------------
 %% @doc Allows reserved names like "all", "anonymous", etc
 %% @end
 %% -----------------------------------------------------------------------------
 -spec username(Term :: binary()) -> {ok, term()} | boolean().
+
+username(all) ->
+    true;
+
+username(anonymous) ->
+    true;
+
+username(<<"all">>) ->
+    {ok, all};
+
+username(<<"anonymous">>) ->
+    {ok, anonymous};
 
 username(Term) when is_binary(Term) ->
     %% 3..254 is the range of an email.
@@ -145,7 +160,7 @@ username(_) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Allows reserved names like "all", "anonymous", etc
+%% @doc Allows the keyword 'all', and the reserved username 'anonymous', etc
 %% @end
 %% -----------------------------------------------------------------------------
 -spec usernames(Term :: [binary()] | binary()) -> {ok, [binary()]} | boolean().
@@ -161,8 +176,14 @@ usernames(L) when is_list(L) ->
         Valid = lists:foldl(
             fun(Term, Acc) ->
                 case username(Term) of
+                    {ok, all} ->
+                        %% all cannot be mised with other usernames
+                        throw(abort);
                     {ok, Value} ->
                         [Value | Acc];
+                    true when Term == all ->
+                        %% all cannot be mised with other usernames
+                        throw(abort);
                     true ->
                         [Term | Acc];
                     false ->
