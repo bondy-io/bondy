@@ -70,35 +70,42 @@
 
 
 -record(state, {
-    transport               ::  gen_tcp | ssl,
-    endpoint                ::  {inet:ip_address(), inet:port_number()},
-    config                  ::  bondy_bridge_relay:t(),
-    socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
-    network_timeout         ::  pos_integer(),
-    reconnect_retry         ::  optional(bondy_retry:t()),
-    ping_retry              ::  optional(bondy_retry:t()),
-    ping_payload            ::  optional(binary()),
-    ping_idle_timeout       ::  optional(non_neg_integer()),
-    idle_timeout            ::  pos_integer(),
-    hibernate = idle        ::  idle | always | never,
-    sessions = #{}          ::  sessions(),
-    sessions_by_realm = #{} ::  #{uri() => bondy_session_id:t()},
-    session                 ::  optional(session()),
-    start_ts                ::  integer()
+    transport                   ::  gen_tcp | ssl,
+    endpoint                    ::  {inet:ip_address(), inet:port_number()},
+    config                      ::  bondy_bridge_relay:t(),
+    socket                      ::  gen_tcp:socket() | ssl:sslsocket(),
+    network_timeout             ::  pos_integer(),
+    reconnect_retry             ::  optional(bondy_retry:t()),
+    ping_retry                  ::  optional(bondy_retry:t()),
+    ping_payload                ::  optional(binary()),
+    ping_idle_timeout           ::  optional(non_neg_integer()),
+    idle_timeout                ::  pos_integer(),
+    hibernate = idle            ::  idle | always | never,
+    sessions = #{}              ::  sessions(),
+    sessions_by_realm = #{}     ::  #{uri() => bondy_session_id:t()},
+    event_handlers = #{}        ::  #{{module(), term()} =>
+                                        bondy_session_id:t()
+                                    },
+    session                     ::  optional(session()),
+    start_ts                    ::  integer()
 }).
 
 
--type t()                   ::  #state{}.
--type sessions()            ::  #{bondy_session_id:t() => session()}.
--type session()             ::  #{
-    id := bondy_session_id:t(),
-    ref := bondy_ref:t(),
-    realm_uri := uri(),
-    authid := binary(),
-    pubkey := binary(),
-    signer => fun((Challenge :: binary()) -> Signature :: binary()),
-    subscriptions => map(),
-    registrations => map()
+-type t()                       ::  #state{}.
+-type sessions()                ::  #{bondy_session_id:t() => session()}.
+-type signer()                  ::  fun(
+                                        (Challenge :: binary()) ->
+                                            Signature :: binary()
+                                    ).
+-type session() ::  #{
+    id                          :=  bondy_session_id:t(),
+    ref                         :=  bondy_ref:t(),
+    realm_uri                   :=  uri(),
+    authid                      :=  binary(),
+    pubkey                      :=  binary(),
+    signer                      =>  signer(),
+    subscriptions               =>  map(),
+    registrations               =>  map()
 }.
 
 %% API.
@@ -322,7 +329,7 @@ connecting(enter, connecting, State) ->
     ok = logger:set_process_metadata(#{
         transport => State#state.transport,
         endpoint => State#state.endpoint,
-        id => maps:get(name, State#state.config),
+        id => maps:get(name, State#state.config)
     }),
     %% We use a timeout to immediately connect
     Actions = [{state_timeout, 0, connect}],
@@ -795,6 +802,65 @@ handle_event(info, {network_disconnected, _}, _, _) ->
     %% If the socket had died then we wouldn't be here.
     keep_state_and_data;
 
+handle_event(info, {gen_event_EXIT, {bondy_event_manager, _}, Reason}, _, _)
+when Reason == normal; Reason == shutdown ->
+    keep_state_and_data;
+
+handle_event(
+    info, 
+    {gen_event_EXIT, {bondy_event_manager, Old}, {swapped, New, _} = Reason}, 
+    StateName, 
+    State0
+) ->
+    State =
+        case maps:take(Old, State0#state.event_handlers) of
+            {SessionId, Handlers0} ->
+                ?LOG_DEBUG(#{
+                    description => "Event handler terminated. Adding new handler.",
+                    reason => Reason,
+                    state_name => StateName
+                }),
+                    Handlers0 = maps:remove(Old, State0#state.event_handlers),
+                    Handlers = maps:put(New, SessionId, Handlers0),
+                    State0#state{event_handlers = Handlers};
+            error ->
+                ?LOG_DEBUG(#{
+                    description => "Received exit signal for unknown handler",
+                    reason => Reason,
+                    handler => Old,
+                    state_name => StateName
+                }),
+                State0
+        end,
+
+    {keep_state, State};
+
+handle_event(
+    info, 
+    {gen_event_EXIT, {bondy_event_manager, Handler}, Reason}, 
+    StateName,  
+    State0) ->
+    State =
+        case maps:find(Handler, State0#state.event_handlers) of
+            {ok, SessionId} ->
+                ?LOG_DEBUG(#{
+                    description => "Event handler terminated. Adding new handler.",
+                    reason => Reason,
+                    state_name => StateName
+                }),
+                add_event_handler(SessionId, State0);
+            error ->
+                ?LOG_DEBUG(#{
+                    description => "Received exit signal for unknown handler",
+                    reason => Reason,
+                    handler => Handler,
+                    state_name => StateName
+                }),
+                State0
+        end,
+
+    {keep_state, State};
+
 handle_event(EventType, EventContent, StateName, _) ->
     ?LOG_INFO(#{
         description => "Received unknown message",
@@ -1233,11 +1299,13 @@ init_session_and_sync(SessionId, #state{session = Session0} = State0) ->
 %% @end
 %% -----------------------------------------------------------------------------
 setup_proxing(SessionId, State0) ->
+    %% We do this sequentially as we only support a single session for now.
     Session = session(SessionId, State0),
 
-    %% Setup to WAMP meta topics so that we can dynamically proxy
-    %% events
-    State1 = subscribe_meta_events(Session, State0),
+    %% Setup to WAMP meta topics so that we can receive registration and
+    %% subscription events. We will use those to match against the
+    %% configuration and create|remove their proxies on the remote
+    State1 = add_event_handler(Session, State0),
 
     %% Get the existing local registrations and subscriptions and proxy them
     State2 = proxy_existing(Session, State1),
@@ -1284,13 +1352,6 @@ session_id(RealmUri, #state{sessions_by_realm = Map}) ->
     maps:get(RealmUri, Map).
 
 
-% update_session(Key, Value, Id, #state{} = State) ->
-%     Sessions = State#state.sessions,
-%     Session0 =  maps:get(Id, Sessions),
-%     Session = maps:put(Key, Value, Session0),
-%     State#state{sessions = maps:put(Id, Session, Sessions)}.
-
-
 
 %% =============================================================================
 %% PRIVATE: SYNC
@@ -1333,25 +1394,61 @@ handle_aae_data({PKey, RemoteObj}, _State) ->
 
 
 %% @private
-subscribe_meta_events(Session, State) ->
+add_event_handler(SessionId, State) when is_binary(SessionId) ->
+    add_event_handler(session(SessionId, State), State);
+
+add_event_handler(Session, State) when is_map(Session) ->
     SessionId = maps:get(id, Session),
     RealmUri = maps:get(realm_uri, Session),
     MyRef = maps:get(ref, Session),
 
-    %% We subscribe to registration|subscription events
-    %% The event handler will call forward(Me, Event, SessionId)
+    %% We subscribe to registration|subscription events with the following
+    %% callback function.
+    Fun = fun
+        ({Tag, Entry}) ->
+            ERealmUri = bondy_registry_entry:realm_uri(Entry),
+            ESessionId = bondy_registry_entry:session_id(Entry),
 
-    _ = bondy_event_manager:add_sup_handler(
-        {bondy_bridge_relay_event_handler, SessionId}, [RealmUri, MyRef]
-    ),
+            IsMatch =
+                %% We avoid forwarding our own subscriptions
+                ESessionId =/= SessionId
+                %% We are only interested in events for this realm
+                andalso ERealmUri =:= RealmUri
+                %% matching the following event types
+                andalso (
+                    Tag =:= registration_created
+                    orelse Tag =:= registration_added
+                    orelse Tag =:= registration_deleted
+                    orelse Tag =:= registration_removed
+                    orelse Tag =:= subscription_created
+                    orelse Tag =:= subscription_added
+                    orelse Tag =:= subscription_removed
+                    orelse Tag =:= subscription_deleted
+                ),
 
-    State.
+            case IsMatch of
+                true ->
+                    Msg = {Tag, bondy_registry_entry:to_external(Entry)},
+                    ok = ?MODULE:forward(MyRef, Msg);
+                false ->
+                    ok
+            end;
+
+        (_) ->
+            ok
+    end,
+
+    %% We use the supervised version so that the event handler is terminated
+    %% when we are.
+    {ok, Ref} = bondy_event_manager:add_sup_callback(Fun),
+    Refs = maps:put(Ref, SessionId, State#state.event_handlers),
+    State#state{event_handlers = Refs}.
 
 
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc We subscribe to the topics configured for this realm.
-%% But instead of receiving an EVENT we will get a PUBLISH message. This is an
+%% Instead of receiving an EVENT we will get a PUBLISH message. This is an
 %% optimization performed by bondy_broker to avoid sending N events to N
 %% remote subscribers over the relay or bridge relay.
 %% @end
@@ -1368,7 +1465,7 @@ subscribe_topics(Session0, State) ->
                 %% We subscribe to the local topic so that we can forward its
                 %% events to the remote router.
                 %% We will receive an info ?BONDY_REQ message with the
-                %% wamp_event() that we will handle in handle_event/4
+                %% PUBLISH message that we will handle in handle_event/4
                 {ok, Id} = bondy_broker:subscribe(
                     RealmUri, #{match => Match}, Uri, MyRef
                 ),
