@@ -650,6 +650,10 @@ do_start_bridge(Bridge, State) ->
 
 
 do_stop_bridge(Name, State) ->
+    ?LOG_INFO(# {
+        description => "Stopping bridge relay.",
+        id => Name
+    }),
     case bondy_bridge_relay_client_sup:terminate_child(Name) of
         ok ->
             Started = lists:delete(Name, State#state.started),

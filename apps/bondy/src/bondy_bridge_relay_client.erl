@@ -232,10 +232,20 @@ init(Config0) ->
 %% -----------------------------------------------------------------------------
 -spec terminate(term(), atom(), t()) -> term().
 
-terminate(normal, _, #state{socket = undefined}) ->
+terminate(normal, StateName, #state{socket = undefined}) ->
+    ?LOG_INFO(#{
+        description => "Closing connection",
+        reason => normal,
+        state_name => StateName
+    }),
     ok;
 
-terminate(shutdown, _, #state{socket = undefined} = State) ->
+terminate(shutdown, StateName, #state{socket = undefined} = State) ->
+    ?LOG_INFO(#{
+        description => "Closing connection",
+        reason => shutdown,
+        state_name => StateName
+    }),
     Name = maps:get(name, State#state.config),
     %% We should not be restarted but we are using supervisor permanent restart,
     %% so we tell the manager to remove ourselves from the supervisor
@@ -257,12 +267,12 @@ terminate(Reason, StateName, #state{socket = undefined}) ->
     ok;
 
 terminate(Reason, StateName, #state{} = State0) ->
+    %% Ensure we closed socket
     Transport = State0#state.transport,
     Socket = State0#state.socket,
-
-    %% Ensure we closed socket
-    State1 = State0#state{socket = undefined},
     catch Transport:close(Socket),
+
+    State1 = State0#state{socket = undefined},
 
     %% Cleanup internal router state
     State = cleanup(State1),
