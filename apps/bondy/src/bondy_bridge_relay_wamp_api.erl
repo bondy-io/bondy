@@ -109,13 +109,9 @@ handle_call(?BONDY_ROUTER_BRIDGE_GET, #call{} = M, Ctxt) ->
 
 handle_call(?BONDY_ROUTER_BRIDGE_LIST, #call{} = M, Ctxt) ->
     [] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 0),
-    Reply = case bondy_bridge_relay_manager:list_bridges() of
-        {ok, List} ->
-            Ext = [bondy_bridge_relay:to_external(B) || B <- List],
-            wamp_message:result(M#call.request_id, #{}, [Ext]);
-        {error, Reason} ->
-            bondy_wamp_utils:error(Reason, M)
-    end,
+    List = bondy_bridge_relay_manager:list_bridges(),
+    Ext = [bondy_bridge_relay:to_external(B) || B <- List],
+    Reply = wamp_message:result(M#call.request_id, #{}, [Ext]),
     {reply, Reply};
 
 handle_call(?BONDY_ROUTER_BRIDGE_STATUS, #call{} = M, Ctxt) ->
