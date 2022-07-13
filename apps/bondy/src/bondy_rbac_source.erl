@@ -203,8 +203,9 @@ add(RealmUri, #source_assignment{} = A) ->
     Usernames :: [binary()] | all | anonymous,
     Assignment :: map() | assignment()) -> {ok, t()} | {error, any()}.
 
-add(RealmUri, Usernames, #{type := source} = Source) ->
+add(RealmUri, Usernames0, #{type := source} = Source) ->
     try
+        Usernames = validate_usernames(Usernames0, relaxed),
         do_add(RealmUri, Usernames, Source)
     catch
         throw:Reason ->
@@ -219,24 +220,38 @@ add(RealmUri, Usernames, #{type := source} = Source) ->
 -spec remove(
     RealmUri :: uri(),
     Usernames :: [binary() | anonymous] | binary() | anonymous | all,
-    CIDR :: bondy_cidr:t()) -> ok.
+    CIDR :: bondy_cidr:t()) -> ok | no_return().
 
-remove(RealmUri, Keyword, CIDR)
-when (Keyword == all orelse Keyword == anonymous) ->
-    remove(RealmUri, [Keyword], CIDR);
+remove(RealmUri, Usernames0, CIDR) when is_list(Usernames0) ->
+    Usernames = validate_usernames(Usernames0, strict),
 
-remove(RealmUri, Usernames, CIDR) when is_list(Usernames) ->
     Prefix  = ?PLUMDB_PREFIX(RealmUri),
-    AMask = bondy_cidr:anchor_mask(CIDR),
+    Masked = bondy_cidr:anchor_mask(CIDR),
     UserSources =  lists:flatten([
-        {Username, match(RealmUri, Username, AMask)}
+        {Username, match(RealmUri, Username, Masked)}
         || Username <- Usernames
     ]),
     _ = [
-        plum_db:delete(Prefix, {Username, AMask, Method})
+        plum_db:delete(Prefix, {Username, Masked, Method})
         || {Username, L} <- UserSources, #{authmethod := Method} <- L
     ],
-    ok.
+    ok;
+
+remove(RealmUri, Keyword, CIDR)
+when Keyword == all; Keyword == <<"all">> ->
+    Prefix  = ?PLUMDB_PREFIX(RealmUri),
+    Masked = bondy_cidr:anchor_mask(CIDR),
+    Sources = match(RealmUri, all, Masked),
+
+    _ = [   
+        plum_db:delete(Prefix, {all, Masked, Method})
+        || Source <- Sources, #{authmethod := Method} <- Source
+    ],
+    ok;
+
+remove(RealmUri, Keyword, CIDR)
+when Keyword == anonymous; Keyword == <<"anonymous">> ->
+    remove(RealmUri, [Keyword], CIDR).
 
 
 %% -----------------------------------------------------------------------------
@@ -260,9 +275,13 @@ remove_all(RealmUri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_all(RealmUri :: uri(), Username :: binary()) -> ok.
+-spec remove_all(RealmUri :: uri(), Username :: binary() | anonymous) -> ok.
 
-remove_all(RealmUri, Username) ->
+remove_all(RealmUri, <<"anonymous">>) ->
+    remove_all(RealmUri, anonymous);
+
+remove_all(RealmUri, Username) 
+when is_binary(Username) orelse Username == anonymous ->
     Prefix  = ?PLUMDB_PREFIX(RealmUri),
     Opts = [{remove_tombstones, true}, {keys_only, true}],
 
@@ -407,6 +426,33 @@ to_external(#{type := source, version := ?VERSION} = Source) ->
 
 
 
+%% @private
+validate_usernames(Keyword, relaxed) 
+when Keyword == all; Keyword == <<"all">> ->
+    all;
+
+
+validate_usernames(Keyword, relaxed) 
+when Keyword == anonymous; Keyword == <<"anonymous">> ->
+    [anonymous];
+
+validate_usernames(L0, _) when is_list(L0) ->
+    case bondy_data_validators:usernames(L0) of
+        true ->
+            L0;
+        false ->
+            error({badarg, L0});
+        {ok, L} ->
+            L;
+        {error, Reason} ->
+            error({badarg, Reason})
+    end;
+
+validate_usernames(_, strict) ->
+    throw({badarg, <<"One or more values are not valid usernames.">>}).
+
+
+
 do_add(RealmUri, Keyword, #{type := source} = Source)
 when Keyword == all orelse Keyword == anonymous ->
     Prefix = ?PLUMDB_PREFIX(RealmUri),
@@ -446,6 +492,9 @@ do_add(RealmUri, Usernames, #{type := source} = Source) ->
 %%     #{authmethod => <<"anonymous">>,...,version => <<"1.1">>}}]
 %% }
 %% -----------------------------------------------------------------------------
+do_match(RealmUri, <<"anonymous">>) ->
+    do_match(RealmUri, anonymous);
+
 do_match(RealmUri, Username) ->
     Opts = [{remove_tombstones, true} | ?FOLD_OPTS],
     ProtoSources = case bondy_realm:prototype_uri(RealmUri) of
@@ -494,26 +543,18 @@ type_and_version(Map) ->
 sort_sources(Sources) ->
     %% sort sources first by userlist, so that 'all' matches come last
     %% and then by CIDR, so that most specific masks come first
-    Sources1 = lists:sort(
+    lists:sort(
         fun
-            ({{all, _, _}, _}, {{all, _, _}, _}) ->
-                true;
+            ({{all, {_, MaskA}, _}, _}, {{all, {_, MaskB}, _}, _}) ->
+                MaskA > MaskB;
             ({{all, _, _}, _}, _) ->
-                %% anything is greater than 'all'
                 true;
             (_, {{all, _, _}, _}) ->
                 false;
-            (_, _) ->
-                true
+            ({{_, {_, MaskA}, _}, _}, {{_, {_, MaskB}, _}, _}) ->
+                MaskA > MaskB
         end,
         Sources
-    ),
-
-    lists:sort(
-        fun({{_, {_, MaskA}, _}, _}, {{_, {_, MaskB}, _}, _}) ->
-            MaskA > MaskB
-        end,
-        Sources1
     ).
 
 
