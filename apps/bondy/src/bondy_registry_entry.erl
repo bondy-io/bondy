@@ -69,7 +69,11 @@
 -type t_or_key()        ::  t() | key().
 -type entry_type()      ::  registration | subscription.
 -type wildcard(T)       ::  T | '_'.
--type mfargs()          ::  {M :: module(), F :: atom(), A :: optional([term()])}.
+-type mfargs()          ::  {
+                                M :: module(),
+                                F :: atom(),
+                                A :: optional([term()])
+                            }.
 -type options()         ::  map().
 
 -type details_map()     ::  #{
