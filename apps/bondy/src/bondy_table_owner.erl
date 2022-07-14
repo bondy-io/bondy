@@ -77,11 +77,13 @@ exists(Name) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Creates a new ets table, sets itself as heir.
+%% Makes sense only for public tables.
 %% @end
 %% -----------------------------------------------------------------------------
 add(Name, Opts) when
 is_atom(Name) andalso Name =/= undefined andalso is_list(Opts) ->
   gen_server:call(?MODULE, {add, Name, Opts}).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc Creates a new ets table, sets itself as heir and gives it away
