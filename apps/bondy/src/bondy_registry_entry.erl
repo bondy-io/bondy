@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_registry_backend.erl -
+%%  bondy_registry_entry.erl -
 %%
 %%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
