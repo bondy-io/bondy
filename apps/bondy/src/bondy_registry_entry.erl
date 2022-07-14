@@ -185,7 +185,7 @@ when is_binary(Uri) andalso is_map(Opts0) andalso
         match_policy = MatchPolicy,
         ref = Ref,
         callback_args = CBArgs,
-        created = erlang:system_time(seconds),
+        created = erlang:system_time(second),
         options = Opts
     }.
 
