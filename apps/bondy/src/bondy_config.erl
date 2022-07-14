@@ -131,7 +131,7 @@
     {tuplespace, [
         %% Ring size is determined based on number of Erlang schedulers
         %% which are based on number of CPU Cores.
-        %% {ring_size, 32},
+        {ring_size, min(16, erlang:system_info(schedulers))},
         {static_tables, [
             %% Used by bondy_session.erl
             {bondy_session, [
