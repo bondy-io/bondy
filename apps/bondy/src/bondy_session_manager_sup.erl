@@ -23,7 +23,6 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_session_manager_sup).
 -behaviour(supervisor).
--include_lib("wamp/include/wamp.hrl").
 
 
 %% API

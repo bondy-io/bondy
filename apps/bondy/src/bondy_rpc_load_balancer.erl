@@ -62,7 +62,7 @@
 -define(OPTS_SPEC, #{
     %% BONDY extension
     %% TODO this should be a map
-    %% #{strategy => #{id => queue_least_loaded, force_locality}}
+    %% #{strategy => #{id => queue_least_loaded, x_force_locality}}
     strategy => #{
         required => true,
         allow_null => false,
@@ -89,14 +89,14 @@
                 true
         end
     },
-    'x_force_locality' => #{
+    x_force_locality => #{
         required => true,
         allow_null => false,
         allow_undefined => false,
         default => true,
         datatype => boolean
     },
-    'x_routing_key' => #{
+    x_routing_key => #{
         required => false,
         allow_null => false,
         allow_undefined => false,
@@ -235,7 +235,7 @@ prepare_entries(Entries, #{strategy := jump_consistent_hash}) ->
 prepare_entries(Entries, #{strategy := queue_least_loaded_sample}) ->
     lists_utils:shuffle(Entries);
 
-prepare_entries(Entries, #{strategy := last, force_locality := Flag}) ->
+prepare_entries(Entries, #{strategy := last, x_force_locality := Flag}) ->
     lists:reverse(maybe_sort_by_locality(Flag, Entries));
 
 prepare_entries(Entries, #{strategy := last}) ->
@@ -253,19 +253,34 @@ prepare_entries(Entries, _) ->
 %% @private
 maybe_sort_by_locality(true, L) ->
     Nodestring = bondy_config:nodestring(),
+
     Fun = fun(A, B) ->
-        NSA = bondy_registry_entry:nodestring(A),
-        NSB = bondy_registry_entry:nodestring(B),
-        case {NSA, NSB} of
-            {Nodestring, _} -> true;
-            {_, Nodestring} -> false;
-            _ -> A =< B % to keep order of remaining elements
+        %% We first sort by locality, then by order of registration
+        %% (required by WAMP)
+        NodeA = bondy_registry_entry:nodestring(A),
+        TsA = bondy_registry_entry:created(A),
+        NodeB = bondy_registry_entry:nodestring(B),
+        TsB = bondy_registry_entry:created(B),
+
+        case {NodeA, NodeB} of
+            {Nodestring, Nodestring} ->
+                TsA =< TsB;
+            {Nodestring, _} ->
+                true;
+            {_, Nodestring} ->
+                false;
+            {_, _} ->
+                TsA =< TsB
         end
     end,
     lists:sort(Fun, L);
 
 maybe_sort_by_locality(false, L) ->
-    L.
+    %% We use the order of registration (required by WAMP)
+    Fun = fun(A, B) ->
+        bondy_registry_entry:created(A) =< bondy_registry_entry:created(B)
+    end,
+    lists:sort(Fun, L).
 
 
 %% @private
@@ -286,7 +301,7 @@ do_select({Entry, Iter}, Node) ->
                 true ->
                     {ok, Entry};
                 false ->
-                    %% This should happen when the WAMP Peer
+                    %% This might happen when the WAMP Peer
                     %% disconnected between the time we read the entry
                     %% and now. We contine trying with other entries.
                     do_select(iterate(Iter), Node)

@@ -709,31 +709,31 @@ collector_metrics() ->
         registry_metrics()
     ]).
 
-%% @private
-registry_metric(size, Labels, Value) ->
-    Help = "The total number of elements in a trie.",
-    {registry_trie_elements, gauge, Help, Labels, Value};
-
-registry_metric(nodes, Labels, Value) ->
-    Help = "The total number of modes in a trie.",
-    {registry_trie_nodes, gauge, Help, Labels, Value};
-
-registry_metric(memory, Labels, Value) ->
-    Help = "The total number of modes in a trie.",
-    {registry_trie_nodes, gauge, Help, Labels, Value}.
-
 
 %% @private
 registry_metrics() ->
-    Info = bondy_registry:info(),
-    L = [
-        registry_metric(K, [{name, Name}], V)
-        || {Name, PL} <- Info,  {K, V} <- PL, K =/= owner andalso K =/= heir
-    ],
+    #{size := Size, memory := Mem} = bondy_registry:info(),
+    Labels = [],
     [
-        {registry_tries, gauge, "Registry tries count.", length(Info)}
-        | L
+        {
+            registry_trie_size,
+            gauge,
+            "The total number of elements in the in-memory registry trie."
+            "This does not include the memory used by plum_db tables.",
+            Labels,
+            Size
+        },
+        {
+            registry_trie_memory,
+             gauge,
+             "The total a ount of memory use in the in-memory registry trie."
+             "This does not include the memory used by plum_db tables.",
+             Labels,
+             Mem
+        }
     ].
+
+
 
 
 %% Used by promethues METRIC_NAME macro

@@ -22,7 +22,6 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy).
--include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").

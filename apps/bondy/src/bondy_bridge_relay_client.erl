@@ -53,7 +53,6 @@
 -include("bondy.hrl").
 -include("bondy_bridge_relay.hrl").
 
-
 -define(IS_RETRIABLE(Reason), (
     Reason == timeout orelse
     Reason == econnrefused orelse
@@ -62,6 +61,7 @@
     Reason == enotconn orelse
     Reason == etimedout
 )).
+
 -define(IS_NETDOWN(Reason), (
     Reason == enetdown orelse
     Reason == ehostunreach orelse

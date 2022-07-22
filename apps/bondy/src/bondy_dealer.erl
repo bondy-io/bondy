@@ -311,6 +311,19 @@
     call_opts       := map()
 }.
 
+-type list_cont() ::    {
+                            [bondy_registry_entry:t()],
+                            bondy_registry_entry:continuation()
+                            | bondy_registry_entry:eot()
+                        }
+                        | bondy_registry_entry:eot().
+
+-type match_cont() ::    {
+                            [bondy_registry_entry:t()],
+                            bondy_registry_trie:continuation()
+                            | bondy_registry_trie:eot()
+                        }
+                        | bondy_registry_trie:eot().
 %% API
 -export([callees/1]).
 -export([callees/2]).
@@ -440,12 +453,16 @@ register(Procedure, Opts0, RealmUri, Ref) ->
                 Opts0#{shared_registration => false}
         end,
 
-    case bondy_registry:add(registration, Procedure, Opts, RealmUri, Ref) of
+    case bondy_registry:add(registration, RealmUri, Procedure, Opts, Ref) of
         {ok, Entry, _} ->
             {ok, bondy_registry_entry:id(Entry)};
 
         {error, {already_exists, _}} ->
-            {error, already_exists}
+            {error, already_exists};
+
+        {error, _} = Error ->
+            Error
+
     end.
 
 
@@ -478,10 +495,10 @@ unregister(RegId, Ctxt) when is_map(Ctxt) ->
 unregister(RegId, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
 
-    case bondy_registry:lookup(registration, RegId, RealmUri) of
+    case bondy_registry:lookup(registration, RealmUri, RegId) of
         {error, not_found} = Error ->
             Error;
-        Entry ->
+        {ok, Entry} ->
             case bondy_registry:remove(Entry) of
                 ok ->
                     on_unregister(Entry);
@@ -548,7 +565,7 @@ callees(RealmUri, ProcedureUri, Opts) ->
     %% TODO paginate and groupBy sessionID, so that we call
     %% bondy_session_id:to_external only once per session.
 
-    case bondy_registry:match(registration, ProcedureUri, RealmUri, Opts) of
+    case bondy_registry:match(registration, RealmUri, ProcedureUri, Opts) of
         '$end_of_table' ->
             [];
         {List, Cont} ->
@@ -1256,7 +1273,7 @@ handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     Ref = bondy_context:ref(Ctxt),
 
-    case bondy_registry:add(registration, Uri, Opts, RealmUri, Ref) of
+    case bondy_registry:add(registration, RealmUri, Uri, Opts, Ref) of
         {ok, Entry, IsFirst} ->
             ok = on_register(IsFirst, Entry),
             Id = bondy_registry_entry:id(Entry),
@@ -1297,11 +1314,11 @@ handle_unregister(#unregister{} = M, Ctxt) ->
 
     %% TODO Shouldn't we restrict this operation to the peer who registered it?
     %% and/or a Bondy Admin for revoke registration?
-    case bondy_registry:lookup(registration, RegId, RealmUri) of
+    case bondy_registry:lookup(registration, RealmUri, RegId) of
         {error, not_found} ->
             throw(not_found);
 
-        Entry ->
+        {ok, Entry} ->
             Uri = bondy_registry_entry:uri(Entry),
             %% We authorize first
             ok = bondy_rbac:authorize(<<"wamp.unregister">>, Uri, Ctxt),
@@ -1334,12 +1351,8 @@ unregister(Uri, M, Ctxt) ->
 %% registrations/2 with the RealmUri and SessionId extracted from the Context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec registrations(bondy_registry:continuation()) ->
-    {
-        [bondy_registry_entry:t()],
-        bondy_registry:continuation() | bondy_registry:eot()
-    }
-    | bondy_registry:eot().
+-spec registrations(
+    bondy_registry_entry:continuation() | bondy_registry_entry:eot()) -> list_cont().
 
 registrations(?EOT) ->
     ?EOT;
@@ -1378,8 +1391,7 @@ registrations(RealmUri, SessionId) ->
     RealmUri :: uri(),
     SessionId :: bondy_session_id:t() | '_',
     Limit :: non_neg_integer()) ->
-    {[bondy_registry_entry:t()], bondy_registry_entry:continuation_or_eot()}
-    | bondy_registry_entry:eot().
+    list_cont().
 
 registrations(RealmUri, SessionId, Limit) ->
     bondy_registry:entries(registration, RealmUri, SessionId, Limit).
@@ -1390,15 +1402,12 @@ registrations(RealmUri, SessionId, Limit) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match_registrations(uri(), bondy_context:t()) ->
-    {
-        [bondy_registry_entry:t()],
-        bondy_registry:continuation() | bondy_registry:eot()
-    }.
+-spec match_registrations(Uri :: uri(), bondy_context:t()) ->
+    [bondy_registry_entry:t()].
 
-match_registrations(ProcUri, Ctxt) ->
+match_registrations(Uri, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
-    bondy_registry:match(registration, ProcUri, RealmUri).
+    bondy_registry:match(registration, RealmUri, Uri).
 
 
 %% -----------------------------------------------------------------------------
@@ -1406,15 +1415,12 @@ match_registrations(ProcUri, Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match_registrations(uri(), bondy_context:t(), map()) ->
-    {
-        [bondy_registry_entry:t()],
-        bondy_registry:continuation() | bondy_registry:eot()
-    }.
+-spec match_registrations(Uri :: uri(), bondy_context:t(), Opts :: map()) ->
+    [bondy_registry_entry:t()] | match_cont().
 
-match_registrations(ProcUri, Ctxt, Opts) ->
+match_registrations(Uri, Ctxt, Opts) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
-    bondy_registry:match(registration, ProcUri, RealmUri, Opts).
+    bondy_registry:match(registration, RealmUri, Uri, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -1422,14 +1428,13 @@ match_registrations(ProcUri, Ctxt, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match_registrations(bondy_registry:continuation()) ->
-    {
-        [bondy_registry_entry:t()],
-        bondy_registry:continuation() | bondy_registry:eot()
-    }.
+-spec match_registrations(
+    bondy_registry_trie:continuation() | bondy_registry_trie:eot()) ->
+    match_cont().
 
-match_registrations({registration, _} = Cont) ->
+match_registrations(Cont) ->
     bondy_registry:match(Cont).
+
 
 
 %% @private
@@ -1585,7 +1590,7 @@ when is_function(UserFun, 2) ->
     RealmUri = bondy_context:realm_uri(Ctxt0),
 
     case match_registrations(ProcUri, Ctxt0, #{}) of
-        ?EOT ->
+        Nil when Nil == [] orelse Nil == ?EOT ->
             Error = case format_error(no_such_procedure, Opts) of
                 undefined ->
                     bondy_wamp_utils:no_such_procedure_error(
@@ -1595,7 +1600,7 @@ when is_function(UserFun, 2) ->
                     Value
             end,
             reply_error(Error, Ctxt0);
-        Regs ->
+        Result ->
             %% We invoke Fun for each entry
             Fun = fun
                 ({error, ErrorMap}, Ctxt1) when is_map(ErrorMap) ->
@@ -1686,7 +1691,7 @@ when is_function(UserFun, 2) ->
                             {ok, Ctxt2}
                     end
             end,
-            handle_call_aux(Regs, Fun, Opts, Ctxt0)
+            handle_call_aux(Result, Fun, Opts, Ctxt0)
     end.
 
 
@@ -1694,10 +1699,10 @@ when is_function(UserFun, 2) ->
 handle_call_aux(?EOT, _, _, _) ->
     ok;
 
-handle_call_aux({L, ?EOT}, Fun, Opts, Ctxt) ->
+handle_call_aux({L, ?EOT}, Fun, Opts, Ctxt) when is_list(L) ->
     handle_call_aux(L, Fun, Opts, Ctxt);
 
-handle_call_aux({L, Cont}, Fun, Opts, Ctxt) ->
+handle_call_aux({L, Cont}, Fun, Opts, Ctxt) when is_list(L) ->
     ok = handle_call_aux(L, Fun, Opts, Ctxt),
     handle_call_aux(match_registrations(Cont), Fun, Opts, Ctxt);
 
@@ -1716,8 +1721,8 @@ handle_call_aux(L, Fun, Opts, Ctxt) when is_list(L) ->
 
 %% @private
 -spec handle_call_aux(
-    [{uri(), Strategy :: binary(), Entry :: tuple()}],
-    Last :: tuple() | undefined,
+    [{Uri :: uri(), InvocationPolicy :: binary(), Entry :: tuple()}],
+    Last :: optional({uri(), Strategy :: binary(), Entry :: tuple()}),
     Fun :: function(),
     Opts :: map(),
     Ctxt :: bondy_context:t()) ->
@@ -1745,6 +1750,8 @@ handle_call_aux(
     %% ignore them
     %% Invoke should match too, otherwise there is an inconsistency
     %% in the registry
+    %% TODO REVIEW the prev clause matched the single and called, so shouldn't
+    %% we be stopping here?
     handle_call_aux(T, Last, Fun, Opts, Ctxt);
 
 handle_call_aux([{Uri, Invoke, E}|T], undefined, Fun, Opts, Ctxt) ->

@@ -511,8 +511,15 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(Ref :: bondy_ref:t(), Msg :: any()) ->
+-spec forward(Ref :: bondy_ref:t() | [bondy_ref:t()], Msg :: any()) ->
     ok.
+
+forward([], _) ->
+    ok;
+
+forward([H|T], Msg) ->
+    ok = forward(H, Msg),
+    forward(T, Msg);
 
 forward(Ref, Msg) ->
     bondy_bridge_relay_client:forward(Ref, Msg).
