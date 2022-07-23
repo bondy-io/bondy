@@ -47,7 +47,7 @@ broker_bridge.kafka.clients.default.restart_delay_seconds = 10s
 broker_bridge.kafka.enabled = off
 broker_bridge.kafka.topics.wamp_events = com.leapsight.wamp.events
 
-cluster.automatic_leave = on
+cluster.automatic_leave = off
 cluster.parallelism = 1
 cluster.peer_port = 18286
 cluster.peer_discovery.enabled = on

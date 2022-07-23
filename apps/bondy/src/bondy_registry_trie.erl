@@ -797,9 +797,12 @@ match_pattern_registration(#trie_continuation{}) ->
 match_pattern_subscription(RealmUri, Uri, Opts, Trie) ->
     ART = Trie#bondy_registry_trie.topic_art,
     Pattern = <<RealmUri/binary, $., Uri/binary>>,
-    MS = art_ms(Opts),
+    ArtOpts = #{
+        match_spec => art_ms(Opts),
+        first => <<RealmUri/binary, $.>>
+    },
     %% Always sync at the moment
-    All = art_find_matches(Pattern, MS, ART, 0),
+    All = art_find_matches(Pattern, ArtOpts, ART, 0),
     split_remote(All).
 
 
@@ -828,7 +831,7 @@ split_remote(All) when is_list(All) ->
             ({{_, NS, _, _, _}, _}, {L, R}) when NS =/= Nodestring ->
                 %% A remote subscription, we just append the nodestring on the
                 %% right-hand side acc
-                Node = binary_to_atom(NS, urf8),
+                Node = binary_to_atom(NS, utf8),
                 {L, sets:add_element(Node, R)};
 
             ({{Bin, _, _, _, _}, EntryKey}, {L, R}) ->
@@ -1238,8 +1241,8 @@ decr_counter(Uri, MatchPolicy, N, Trie) ->
 
 
 %% @private
-art_find_matches(Pattern, MS, ART, 0) ->
-    case art:find_matches(Pattern, MS, ART) of
+art_find_matches(Pattern, Opts, ART, 0) ->
+    case art:find_matches(Pattern, Opts, ART) of
         {error, badarg} ->
             [];
         {error, Reason} ->
@@ -1248,12 +1251,13 @@ art_find_matches(Pattern, MS, ART, 0) ->
             Result
     end;
 
-art_find_matches(Pattern, MS, ART, N) when N > 0 ->
+art_find_matches(Pattern, Opts, ART, N) when N > 0 ->
     try
-        art:find_matches(Pattern, MS, ART)
+        art:find_matches(Pattern, Opts, ART)
     catch
         error:badarg ->
-            art_find_matches(Pattern, MS, ART, N - 1);
+            %% retry
+            art_find_matches(Pattern, Opts, ART, N - 1);
         _:Reason ->
             error(Reason)
     end.

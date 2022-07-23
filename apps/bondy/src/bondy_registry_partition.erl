@@ -245,11 +245,29 @@ handle_call(Event, From, State) ->
 %% @end
 %% -----------------------------------------------------------------------------
 handle_cast({execute, Fun, []}, State) ->
-    catch Fun(State#state.trie),
+    try
+        Fun(State#state.trie)
+    catch
+        _:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error during async execute",
+                reason => Reason,
+                stacktrace => Stacktrace
+            })
+    end,
     {noreply, State};
 
 handle_cast({execute, Fun, Args}, State) ->
-    catch erlang:apply(Fun, Args ++ [State#state.trie]),
+    try
+        erlang:apply(Fun, Args ++ [State#state.trie])
+    catch
+        _:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error during async execute",
+                reason => Reason,
+                stacktrace => Stacktrace
+            })
+    end,
     {noreply, State};
 
 handle_cast(Event, State) ->

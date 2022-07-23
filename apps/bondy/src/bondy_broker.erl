@@ -440,7 +440,9 @@ forward(#publish{} = M, undefined, FwdOpts) ->
 
     Fwd = fun
         (Node) when is_atom(Node) ->
-            ok = forward_using_relay(M, FwdOpts, Node);
+            %% We do nothing as this is already a forwarded message and must
+            %% have been already sent to Node by the Publisher
+            ok;
         (Ref) ->
             ok = forward_using_bridge_relay(M, FwdOpts, Ref)
     end,
@@ -731,7 +733,7 @@ when is_function(MakeEvent, 1), is_function(Fwd, 1) ->
     Fun = fun
             (Node, ok) when is_atom(Node) ->
                 %% A remote subscriber located in a peer cluster node.
-                Fwd(node);
+                Fwd(Node);
 
             (Entry, ok) ->
                 Subscriber = bondy_registry_entry:ref(Entry),
@@ -889,7 +891,11 @@ when is_atom(NodeOrNodes); is_list(NodeOrNodes)->
         partition_key => erlang:phash2(RealmUri)
     },
 
-    ok = bondy_relay:forward(NodeOrNodes, RelayMsg, RelayOpts).
+    %% Its fine if we get a not_yet_connected error as we are enabling
+    %% retransmission.
+    %% TODO Validate if we need ack enabled
+    _ = bondy_relay:forward(NodeOrNodes, RelayMsg, RelayOpts),
+    ok.
 
 
 %% -----------------------------------------------------------------------------

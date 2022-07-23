@@ -568,8 +568,8 @@ match(Type, RealmUri, Uri) ->
 
 match(Type, RealmUri, Uri, Opts) ->
     try
-
-        project_trie_match_res(trie_match(Type, RealmUri, Uri, Opts))
+        FN = ?FUNCTION_NAME,
+        project_trie_match_res(trie_match(Type, RealmUri, Uri, Opts, FN))
 
     catch
         throw:non_eligible_entries ->
@@ -722,6 +722,9 @@ format_error(Reason, [{_M, _F, _As, Info} | _]) ->
 %% @end
 %% -----------------------------------------------------------------------------
 will_merge(_PKey, _New, _Old) ->
+    %% ?LOG_DEBUG(#{
+    %%     description => "Will merge called", new => New, old => Old
+    %% }),
     true.
 
 
@@ -729,10 +732,9 @@ will_merge(_PKey, _New, _Old) ->
 %% @doc This function needs to return immediately
 %% @end
 %% -----------------------------------------------------------------------------
-on_merge({{_, RealmUri}, _} = PKey, New, Old) ->
-    Pid = bondy_registry_partition:pick(RealmUri),
-    Args = [PKey, New, Old],
-    bondy_registry_partition:async_execute(Pid, fun do_on_merge/3, Args).
+on_merge(PKey, New, Old) ->
+    %% ?LOG_DEBUG(#{description => "On merge called", new => New, old => Old}),
+    trie_on_merge(PKey, New, Old).
 
 
 %% -----------------------------------------------------------------------------
@@ -740,6 +742,7 @@ on_merge({{_, RealmUri}, _} = PKey, New, Old) ->
 %% @end
 %% -----------------------------------------------------------------------------
 on_update(_PKey, _New, _Old) ->
+    %% ?LOG_DEBUG(#{description => "On update called", new => New, old => Old}),
     ok.
 
 
@@ -816,8 +819,9 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 
-handle_info({plum_db_event, object_update, {PK, New, Old}}, State) ->
-    ok = do_on_merge(PK, New, Old),
+handle_info(
+    {plum_db_event, object_update, {PK, New, Old}}, State) ->
+    ok = trie_on_merge(PK, New, Old),
     {noreply, State};
 
 handle_info({nodeup, _Node} = Event, State) ->
@@ -1302,12 +1306,26 @@ subscription_id(Uri, _) ->
     bondy_utils:gen_message_id({router, Uri}).
 
 
+
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-do_on_merge(_PKey, New, Old) ->
+trie_on_merge({{_, RealmUri}, _} = PKey, New, Old) ->
+    Pid = bondy_registry_partition:pick(RealmUri),
+    Args = [PKey, New, Old],
+    bondy_registry_partition:async_execute(Pid, fun trie_on_merge/4, Args).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% WARNING: This function must be only be called by trie_on_merge/3 as it
+%% assumes it is executing in a registry partition process
+%% @end
+%% -----------------------------------------------------------------------------
+trie_on_merge(_PKey, New, Old, Trie) ->
     case maybe_resolve(New) of
         '$deleted' when Old == undefined ->
             %% We got a delete for an entry we do not know anymore.
@@ -1325,7 +1343,7 @@ do_on_merge(_PKey, New, Old) ->
             Reconciled = plum_db_object:resolve(Old, lww),
             OldEntry = plum_db_object:value(Reconciled),
             %% This works because registry entries are immutable
-            _ = trie_delete(OldEntry);
+            bondy_registry_trie:delete(OldEntry, Trie);
 
         Entry ->
             case bondy_registry_entry:is_local(Entry) of
@@ -1348,7 +1366,7 @@ do_on_merge(_PKey, New, Old) ->
                     ok;
 
                 false ->
-                    _ = trie_add(Entry),
+                    bondy_registry_trie:add(Entry, Trie),
                     ok
 
             end
@@ -1405,11 +1423,6 @@ trie_delete(Entry) ->
             Delete = fun(E, T) -> bondy_registry_trie:delete(E, T) end,
             bondy_registry_partition:async_execute(Pid, Delete, [Entry])
     end.
-
-
-%% @private
-trie_match(Type, RealmUri, Uri, Opts) ->
-    trie_match(Type, RealmUri, Uri, Opts, match).
 
 
 %% @private
@@ -1472,7 +1485,11 @@ project_trie_match_res({L, Cont}) when is_list(L) ->
 project_trie_match_res({{L, R}, Cont}) when is_list(L), is_list(R) ->
     #{type := Type} = bondy_registry_trie:continuation_info(Cont),
     Entries = lookup_entries(Type, L, []),
-    {{Entries, R}, Cont}.
+    {{Entries, R}, Cont};
+
+project_trie_match_res({error, Reason}) ->
+    error(Reason).
+
 
 
 %% -----------------------------------------------------------------------------
