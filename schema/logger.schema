@@ -711,6 +711,7 @@
         {serializer, [" serializer=", serializer], ""},
         " ",
         msg,
+        {version, [" version=", version], ""},
         "\n"
     ],
 
