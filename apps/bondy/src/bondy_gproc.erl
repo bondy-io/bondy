@@ -25,6 +25,7 @@
 
 -export([local_name/1]).
 -export([lookup_pid/1]).
+-export([lookup_pid/2]).
 -export([register/1]).
 -export([register/2]).
 -export([register/4]).
@@ -122,10 +123,20 @@ unregister(Name, Type) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup_pid(Name :: any()) -> true.
+-spec lookup_pid(Name :: any()) -> pid() pid() | no_return().
 
 lookup_pid(Name) ->
     gproc:lookup_pid({n, l, Name}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec lookup_pid(Type :: atom(), Id :: any()) -> pid() | no_return().
+
+lookup_pid(Type, Id) ->
+    lookup_pid({Type, Id}).
 
 
 %% -----------------------------------------------------------------------------
