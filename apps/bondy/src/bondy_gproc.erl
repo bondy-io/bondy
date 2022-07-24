@@ -23,14 +23,16 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_gproc).
 
+-export([local_name/1]).
+-export([lookup_pid/1]).
+-export([lookup_pid/2]).
 -export([register/1]).
 -export([register/2]).
 -export([register/4]).
--export([unregister/1]).
--export([unregister/2]).
--export([lookup_pid/1]).
 -export([select/1]).
 -export([select/2]).
+-export([unregister/1]).
+-export([unregister/2]).
 
 
 
@@ -39,6 +41,15 @@
 %% =============================================================================
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec local_name(Name :: any()) -> true.
+
+local_name(Name) ->
+    {n, l, Name}.
 
 
 %% -----------------------------------------------------------------------------
@@ -112,10 +123,20 @@ unregister(Name, Type) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup_pid(Name :: any()) -> true.
+-spec lookup_pid(Name :: any()) -> pid() | no_return().
 
 lookup_pid(Name) ->
     gproc:lookup_pid({n, l, Name}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec lookup_pid(Type :: atom(), Id :: any()) -> pid() | no_return().
+
+lookup_pid(Type, Id) ->
+    lookup_pid({Type, Id}).
 
 
 %% -----------------------------------------------------------------------------

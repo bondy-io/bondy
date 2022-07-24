@@ -96,8 +96,8 @@ pool_size() ->
 
 open(Session) ->
     RealmUri = bondy_session:realm_uri(Session),
-    Name = gproc_pool:pick_worker(pool(), RealmUri),
-    {ok, Session} = gen_server:call(Name, {open, Session}, 5000),
+    Pid = gproc_pool:pick_worker(pool(), RealmUri),
+    {ok, Session} = gen_server:call(Pid, {open, Session}, 5000),
     ok.
 
 
@@ -354,7 +354,7 @@ register_procedures(Session) ->
     Ref = bondy_ref:new(internal, MF, SessionId),
 
     Args = [SessionId],
-    Opts = #{match => ?PREFIX_MATCH, callback_args => Args},
+    Opts = #{match => ?EXACT_MATCH, callback_args => Args},
     {ok, _} = bondy_dealer:register(ProcUri, Opts, RealmUri, Ref),
 
     ok.

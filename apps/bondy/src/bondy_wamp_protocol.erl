@@ -24,7 +24,6 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_protocol).
 -behaviour(bondy_sensitive).
--include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").

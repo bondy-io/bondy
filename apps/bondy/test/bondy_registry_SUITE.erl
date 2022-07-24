@@ -21,15 +21,23 @@
 -include_lib("stdlib/include/assert.hrl").
 
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
 -include("bondy_security.hrl").
+-include("bondy_registry.hrl").
+
+
+-define(SORT(L), lists:sort(L)).
 
 -compile([nowarn_export_all, export_all]).
 
+
+
 all() ->
     [
-        {group, exact_matching},
-        {group, rpc}
+        {group, rpc},
+        {group, pubsub}
     ].
+
 
 groups() ->
     [
@@ -38,12 +46,18 @@ groups() ->
             register_shared,
             register_callback
         ]},
-        {exact_matching, [sequence], [
-            add_subscription,
-            match_prefix,
-            match_wildcard
+        {pubsub, [sequence], [
+            sub_add_local_exact_1,
+            sub_add_local_exact_2,
+            sub_add_local_prefix_1,
+            sub_add_local_prefix_2,
+            sub_add_local_wildcard_1,
+            sub_add_local_wildcard_,
+            sub_del_local_exact_1,
+            sub_del_local_exact_2
         ]}
     ].
+
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
@@ -68,7 +82,12 @@ init_per_suite(Config) ->
     Ctxt = bondy_context:set_session(Ctxt0, Session),
 
 
-    [{context, Ctxt}, {realm, Realm}, {realm_uri, RealmUri} |Config].
+    [
+        {context, Ctxt},
+        {realm_uri, RealmUri}
+        | Config
+    ].
+
 
 end_per_suite(Config) ->
     meck:unload(),
@@ -77,187 +96,352 @@ end_per_suite(Config) ->
 
 
 %% =============================================================================
-%% API CLIENT
+%% PUBSUB
 %% =============================================================================
 
 
 
-add_subscription(Config) ->
-    Realm = ?config(realm_uri, Config),
-    Ctxt = ?config(context, Config),
-    Opts = #{match => <<"exact">>},
+sub_add_local_exact_1(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Ctxt = key_value:get(context, Config),
+    Type = subscription,
+    Opts = #{match => ?EXACT_MATCH},
+    Uri = <<"com.foo.bar">>,
 
-    Uri = <<"com.a.b.c">>,
+    add_test(Type, RealmUri, Uri, Opts, Ctxt),
 
-    Ref = bondy_context:ref(Ctxt),
-    {ok, Entry, true} = bondy_registry:add(subscription, Uri, Opts, Realm, Ref),
-
-    Id1 = bondy_registry_entry:id(Entry),
-    Found = bondy_registry:lookup(subscription, Id1, Realm),
+    Expected = {[{Uri, ?EXACT_MATCH}], []},
 
     ?assertEqual(
-        Entry,
-        Found
-    ),
-    ?assertEqual(
-        [Entry],
-        bondy_registry:entries(subscription, Ctxt)
+        Expected,
+        project(bondy_registry:match(Type, RealmUri, Uri)),
+        "The trie should have the added entries. Remote subs should be empty"
     ),
 
     ?assertEqual(
-        {error, {already_exists, Entry}},
-        bondy_registry:add(subscription, Uri, Opts, Realm, Ref)
+        Expected,
+        project(bondy_registry:match_exact(Type, RealmUri, Uri, #{})),
+        "The trie should have the added entries. Remote subs should be empty"
     ),
 
     ?assertEqual(
-        Id1,
-        bondy_registry_entry:id(bondy_registry:lookup(subscription, Id1, Realm))
+        {[], []},
+        bondy_registry:match_pattern(Type, RealmUri, Uri, #{}),
+        "The trie should have no pattern subs"
     ),
-
-    {ok, Entry2, true} = bondy_registry:add(
-        subscription, <<"com.a">>, Opts, Realm, Ref
-    ),
-
-    Id2 = bondy_registry_entry:id(Entry2),
 
     ?assertEqual(
-        Id2,
-        bondy_registry_entry:id(bondy_registry:lookup(subscription, Id2, Realm))
+        {[], []},
+        bondy_registry:match(Type, RealmUri, <<"com.foo.baz">>, #{}),
+        "Should not match com.foo.baz"
     ),
-
-    {ok, Entry3, true} = bondy_registry:add(
-        subscription, <<"com.a.b">>, #{match => <<"prefix">>}, Realm, Ref
-    ),
-
-    Id3 = bondy_registry_entry:id(Entry3),
 
     ?assertEqual(
-        Id3,
-        bondy_registry_entry:id(bondy_registry:lookup(subscription, Id3, Realm))
+        {[], []},
+        bondy_registry:match_exact(Type, RealmUri, <<"com.foo.baz">>, #{}),
+        "Should not match com.foo.baz"
+    ),
+
+    ?assertEqual(
+        {[], []},
+        bondy_registry:match_pattern(Type, RealmUri, <<"com.foo.baz">>, #{}),
+        "The trie should have no pattern subs"
     ).
 
 
-match_prefix(Config) ->
-    Realm = ?config(realm_uri, Config),
-    Ctxt = ?config(context, Config),
+sub_add_local_exact_2(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Ctxt = key_value:get(context, Config),
+    Type = subscription,
+    Opts = #{match => ?EXACT_MATCH},
+    Uri = <<"com.foo.baz">>,
 
-    Ref = bondy_context:ref(Ctxt),
+    add_test(Type, RealmUri, Uri, Opts, Ctxt),
 
-    {ok, Entry, false} = bondy_registry:add(
-        subscription, <<"com.a">>, #{match => <<"prefix">>}, Realm, Ref
-    ),
-
-    Id = bondy_registry_entry:id(Entry),
-
-    E = bondy_registry:lookup(subscription, Id, Realm),
-
-    ?assertEqual(Id, bondy_registry_entry:id(E)),
+    Expected = {[{Uri, ?EXACT_MATCH}], []},
 
     ?assertEqual(
-        lists:sort([{<<"com.a">>, <<"prefix">>}, {<<"com.a">>, <<"exact">>}]),
-        project(bondy_registry:match(subscription, <<"com.a">>, Realm))
+        Expected,
+        project(bondy_registry:match(Type, RealmUri, Uri)),
+        "The trie should have the added entries. Remote subs should be empty"
     ),
 
     ?assertEqual(
-        lists:sort([{<<"com.a">>,<<"prefix">>}, {<<"com.a.b">>,<<"prefix">>}]),
-        project(bondy_registry:match(subscription, <<"com.a.b">>, Realm))
+        Expected,
+        project(bondy_registry:match_exact(Type, RealmUri, Uri, #{})),
+        "The trie should have the added entries. Remote subs should be empty"
     ),
 
     ?assertEqual(
-        lists:sort([{<<"com.a">>,<<"prefix">>}, {<<"com.a.b">>,<<"prefix">>}]),
-        project(bondy_registry:match(subscription, <<"com.a.b.c.d">>, Realm))
+        {[], []},
+        bondy_registry:match_pattern(Type, RealmUri, Uri, #{}),
+        "The trie should have no pattern subs"
+    ),
+
+    Expected2 = {[{<<"com.foo.bar">>, ?EXACT_MATCH}], []},
+
+    ?assertEqual(
+        Expected2,
+        project(
+            bondy_registry:match(Type, RealmUri, <<"com.foo.bar">>, #{})
+        ),
+        "Should match com.foo.bar"
+    ),
+
+    ?assertEqual(
+        Expected2,
+        project(
+            bondy_registry:match_exact(Type, RealmUri, <<"com.foo.bar">>, #{})
+        ),
+        "Should match com.foo.bar"
+    ),
+
+    ?assertEqual(
+        {[], []},
+        bondy_registry:match(Type, RealmUri, <<"com.foo.other">>, #{})
+    ),
+
+    ?assertEqual(
+        {[], []},
+        bondy_registry:match_exact(Type, RealmUri, <<"com.foo.other">>, #{})
     ).
 
 
-match_wildcard(Config) ->
-    Realm = ?config(realm_uri, Config),
-    Ctxt = ?config(context, Config),
+sub_add_local_prefix_1(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Ctxt = key_value:get(context, Config),
+    Type = subscription,
+    Opts = #{match => ?PREFIX_MATCH},
+    Uri = <<"com.foo">>,
 
-    Ref = bondy_context:ref(Ctxt),
+    add_test(Type, RealmUri, Uri, Opts, Ctxt),
 
-    {ok, _Entry, true} = bondy_registry:add(
-        subscription, <<"com.">>, #{match => <<"wildcard">>}, Realm, Ref
+    Expected = {[{Uri, ?PREFIX_MATCH}], []},
+
+    ?assertEqual(
+        Expected,
+        project(bondy_registry:match(Type, RealmUri, Uri)),
+        "We should match the prefix"
     ),
 
     ?assertEqual(
-        lists:sort([
-            {<<"com.">>, <<"wildcard">>},
-            {<<"com.a">>, <<"exact">>},
-            {<<"com.a">>, <<"prefix">>}
-        ]),
-        project(bondy_registry:match(subscription, <<"com.a">>, Realm))
+        {[], []},
+        project(bondy_registry:match_exact(Type, RealmUri, Uri, #{})),
+        "The uri is a prefix not an exact match"
     ),
 
     ?assertEqual(
-        lists:sort([
-            {<<"com.">>, <<"wildcard">>}
-        ]),
-        project(bondy_registry:match(subscription, <<"com.b">>, Realm))
+        Expected,
+        project(bondy_registry:match_pattern(Type, RealmUri, Uri, #{})),
+        "We should match the prefix"
     ),
 
     ?assertEqual(
-        lists:sort([
-            {<<"com.">>, <<"wildcard">>}
-        ]),
-        project(bondy_registry:match(subscription, <<"com.bar">>, Realm))
+        {
+            ?SORT([
+                {<<"com.foo.bar">>, ?EXACT_MATCH},
+                {<<"com.foo">>, ?PREFIX_MATCH}
+            ]),
+            []
+        },
+        project(bondy_registry:match(Type, RealmUri, <<"com.foo.bar">>)),
+        "The trie should have the added entries. Remote subs should be empty"
     ),
 
     ?assertEqual(
-        lists:sort([
-            {<<"com.a">>,<<"prefix">>},
-            {<<"com.a.b">>,<<"prefix">>}
-        ]),
-        project(bondy_registry:match(subscription, <<"com.a.b">>, Realm))
-    ),
-
-    ?assertEqual(
-        lists:sort([{<<"com.a">>,<<"prefix">>}, {<<"com.a.b">>,<<"prefix">>}]),
-        project(bondy_registry:match(subscription, <<"com.a.b.c.d">>, Realm))
-    ),
-
-    {ok, _, true} = bondy_registry:add(
-        subscription, <<"....">>, #{match => <<"wildcard">>}, Realm, Ref
-    ),
-
-    {ok, _, true} = bondy_registry:add(
-        subscription, <<"com....">>, #{match => <<"wildcard">>}, Realm, Ref
-    ),
-
-    {ok, _, true} = bondy_registry:add(
-        subscription, <<".a...">>, #{match => <<"wildcard">>}, Realm, Ref
-    ),
-
-    {ok, _, true} = bondy_registry:add(
-        subscription, <<"..b..">>, #{match => <<"wildcard">>}, Realm, Ref
-    ),
-
-    {ok, _, true} = bondy_registry:add(
-        subscription, <<"...c.">>, #{match => <<"wildcard">>}, Realm, Ref
-    ),
-
-    {ok, _, true} = bondy_registry:add(
-        subscription, <<"....d">>, #{match => <<"wildcard">>}, Realm, Ref
+        {
+            ?SORT([
+                {<<"com.foo.baz">>, ?EXACT_MATCH},
+                {<<"com.foo">>, ?PREFIX_MATCH}
+            ]),
+            []
+        },
+        project(bondy_registry:match(Type, RealmUri, <<"com.foo.baz">>)),
+        "The trie should have the added entries. Remote subs should be empty"
     ),
 
 
     ?assertEqual(
-        lists:sort([
-            {<<"....">>, <<"wildcard">>},
-            {<<"com....">>, <<"wildcard">>},
-            {<<"....d">>, <<"wildcard">>},
-            {<<".a...">>, <<"wildcard">>},
-            {<<"..b..">>, <<"wildcard">>},
-            {<<"...c.">>, <<"wildcard">>},
-            {<<"com.a">>, <<"prefix">>},
-            {<<"com.a.b">>, <<"prefix">>}
-        ]),
-        project(bondy_registry:match(subscription, <<"com.a.b.c.d">>, Realm))
+        Expected,
+        project(bondy_registry:match(Type, RealmUri, <<"com.foo.other">>)),
+        "The trie match any subs starting with com.foo"
     ).
+
+
+
+sub_add_local_prefix_2(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Ctxt = key_value:get(context, Config),
+    Type = subscription,
+
+    add_test(Type, RealmUri, <<"com.a">>, #{match => ?PREFIX_MATCH}, Ctxt),
+
+    ?assertEqual(
+        {
+            ?SORT([
+                {<<"com.a">>, ?PREFIX_MATCH}
+            ]),
+            []
+        },
+        project(
+            bondy_registry:match(subscription, RealmUri, <<"com.a">>)
+        )
+    ),
+
+    add_test(Type, RealmUri, <<"com.a">>, #{match => ?EXACT_MATCH}, Ctxt),
+
+    ?assertEqual(
+        {
+            ?SORT([
+                {<<"com.a">>, ?EXACT_MATCH}, {<<"com.a">>, ?PREFIX_MATCH}
+            ]),
+            []
+        },
+        project(
+            bondy_registry:match(subscription, RealmUri, <<"com.a">>)
+        )
+    ),
+
+    add_test(Type, RealmUri, <<"com.a.b">>, #{match => ?PREFIX_MATCH}, Ctxt),
+
+    ?assertEqual(
+        {
+            ?SORT([
+                {<<"com.a">>, ?PREFIX_MATCH}, {<<"com.a.b">>, ?PREFIX_MATCH}
+            ]),
+            []
+        },
+        project(
+            bondy_registry:match(subscription, RealmUri, <<"com.a.b">>)
+        )
+    ),
+
+    ?assertEqual(
+        {
+            ?SORT([
+                {<<"com.a">>, ?PREFIX_MATCH}, {<<"com.a.b">>, ?PREFIX_MATCH}
+            ]),
+            []
+        },
+        project(
+            bondy_registry:match(subscription, RealmUri, <<"com.a.b.c.d">>)
+        )
+    ).
+
+
+
+sub_add_local_wildcard_1(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Ctxt = key_value:get(context, Config),
+    Type = subscription,
+    Opts = #{match => ?WILDCARD_MATCH},
+
+    add_test(Type, RealmUri, <<"com.">>, Opts, Ctxt),
+
+
+    ?assertEqual(
+        {
+            ?SORT([
+                {<<"com.">>, ?WILDCARD_MATCH},
+                {<<"com.a">>, ?EXACT_MATCH},
+                {<<"com.a">>, ?PREFIX_MATCH}
+            ]),
+            []
+        },
+        project(
+            bondy_registry:match(subscription, RealmUri, <<"com.a">>)
+        )
+    ),
+
+    ?assertEqual(
+        {?SORT([{<<"com.">>, ?WILDCARD_MATCH}]), []},
+        project(
+            bondy_registry:match(subscription, RealmUri, <<"com.b">>)
+        )
+    ),
+
+    ?assertEqual(
+        {?SORT([{<<"com.">>, ?WILDCARD_MATCH}]), []},
+        project(
+            bondy_registry:match(subscription, RealmUri, <<"com.bar">>)
+        )
+    ),
+
+    ?assertEqual(
+        {
+            ?SORT([
+                {<<"com.a">>,?PREFIX_MATCH},
+                {<<"com.a.b">>,?PREFIX_MATCH}
+            ]),
+            []
+        },
+        project(
+            bondy_registry:match(subscription, RealmUri, <<"com.a.b">>)
+        )
+    ),
+
+    ?assertEqual(
+        {
+            ?SORT([{<<"com.a">>,?PREFIX_MATCH}, {<<"com.a.b">>,?PREFIX_MATCH}]),
+            []
+        },
+        project(
+            bondy_registry:match(subscription, RealmUri, <<"com.a.b.c.d">>)
+        )
+    ),
+
+    add_test(Type, RealmUri, <<"....">>, Opts, Ctxt),
+
+    add_test(Type, RealmUri, <<"com....">>, Opts, Ctxt),
+
+    add_test(Type, RealmUri, <<".a...">>, Opts, Ctxt),
+
+    add_test(Type, RealmUri, <<"..b..">>, Opts, Ctxt),
+
+    add_test(Type, RealmUri, <<"...c.">>, Opts, Ctxt),
+
+    add_test(Type, RealmUri, <<"....d">>, Opts, Ctxt),
+
+
+    ?assertEqual(
+        {
+            ?SORT([
+                {<<"....">>, ?WILDCARD_MATCH},
+                {<<"com....">>, ?WILDCARD_MATCH},
+                {<<"....d">>, ?WILDCARD_MATCH},
+                {<<".a...">>, ?WILDCARD_MATCH},
+                {<<"..b..">>, ?WILDCARD_MATCH},
+                {<<"...c.">>, ?WILDCARD_MATCH},
+                {<<"com.a">>, ?PREFIX_MATCH},
+                {<<"com.a.b">>, ?PREFIX_MATCH}
+            ]),
+            []
+        },
+        project(
+            bondy_registry:match(subscription, RealmUri, <<"com.a.b.c.d">>)
+        )
+    ).
+
+
+
+sub_add_local_wildcard_(Config) ->
+    Config.
+
+
+sub_del_local_exact_1(Config) ->
+    Config.
+
+
+sub_del_local_exact_2(Config) ->
+    Config.
+
+
+
 
 
 
 register_invoke_single(Config) ->
-    Realm = ?config(realm_uri, Config),
+    RealmUri = key_value:get(realm_uri, Config),
     Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
     Opts = #{invoke => ?INVOKE_SINGLE},
 
@@ -265,22 +449,22 @@ register_invoke_single(Config) ->
 
     ?assertMatch(
         {ok, _},
-        bondy_dealer:register(Uri, Opts, Realm, Ref)
+        bondy_dealer:register(Uri, Opts, RealmUri, Ref)
     ),
 
     ?assertMatch(
         {error, already_exists},
-        bondy_dealer:register(Uri, Opts, Realm, Ref)
+        bondy_dealer:register(Uri, Opts, RealmUri, Ref)
     ),
 
     ?assertMatch(
         {error, already_exists},
-        bondy_dealer:register(Uri, #{invoke => ?INVOKE_ROUND_ROBIN}, Realm, Ref)
+        bondy_dealer:register(Uri, #{invoke => ?INVOKE_ROUND_ROBIN}, RealmUri, Ref)
     ).
 
 
 register_shared(Config) ->
-    Realm = ?config(realm_uri, Config),
+    RealmUri = key_value:get(realm_uri, Config),
     Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
     Opts = #{invoke => ?INVOKE_ROUND_ROBIN},
 
@@ -288,17 +472,17 @@ register_shared(Config) ->
 
     ?assertMatch(
         {ok, _},
-        bondy_dealer:register(Uri, Opts, Realm, Ref)
+        bondy_dealer:register(Uri, Opts, RealmUri, Ref)
     ),
 
     ?assertMatch(
         {ok, _},
-        bondy_dealer:register(Uri, Opts, Realm, Ref)
+        bondy_dealer:register(Uri, Opts, RealmUri, Ref)
     ).
 
 
 register_callback(Config) ->
-    Realm = ?config(realm_uri, Config),
+    RealmUri = key_value:get(realm_uri, Config),
 
     Uri1 = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
     Uri2 = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
@@ -310,11 +494,11 @@ register_callback(Config) ->
 
     ?assertMatch(
         {ok, _},
-        bondy_dealer:register(Uri1, Opts, Realm, Ref1)
+        bondy_dealer:register(Uri1, Opts, RealmUri, Ref1)
     ),
     ?assertMatch(
         {error, already_exists},
-        bondy_dealer:register(Uri1, Opts, Realm, Ref1),
+        bondy_dealer:register(Uri1, Opts, RealmUri, Ref1),
         "Callbacks cannot use shared registration"
     ),
 
@@ -322,7 +506,7 @@ register_callback(Config) ->
     %% Uri2 = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
     % ?assertMatch(
     %     {ok, _},
-    %     bondy_dealer:register(Uri2, Opts, Realm, Ref1),
+    %     bondy_dealer:register(Uri2, Opts, RealmUri, Ref1),
     %     "We can have multiple URIs associates with the same Ref"
     % ),
 
@@ -330,17 +514,17 @@ register_callback(Config) ->
 
     ?assertMatch(
         {error, already_exists},
-        bondy_dealer:register(Uri1, Opts, Realm, Ref2)
+        bondy_dealer:register(Uri1, Opts, RealmUri, Ref2)
     ),
 
     ?assertMatch(
         {ok, _},
-        bondy_dealer:register(Uri2, Opts, Realm, Ref2),
+        bondy_dealer:register(Uri2, Opts, RealmUri, Ref2),
         "We can register another URI"
     ),
     ?assertMatch(
         {error, already_exists},
-        bondy_dealer:register(Uri2, Opts, Realm, Ref2),
+        bondy_dealer:register(Uri2, Opts, RealmUri, Ref2),
         "Callbacks cannot use shared registration"
     ),
 
@@ -350,15 +534,77 @@ register_callback(Config) ->
     ),
     ?assertMatch(
         {error, already_exists},
-        bondy_dealer:register(Uri1, Opts, Realm, Ref3)
+        bondy_dealer:register(Uri1, Opts, RealmUri, Ref3)
     ).
 
 
+project(?EOT) ->
+    [];
 
-project({L, _Cont}) ->
-    lists:sort([
+project(L) when is_list(L) ->
+    project_aux(L);
+
+project({L, R}) when is_list(L), is_list(R) ->
+    {project_aux(L), R};
+
+project({{L, R}, Cont}) ->
+    {{project_aux(L), R}, Cont}.
+
+
+project_aux(Entries) ->
+    ?SORT([
         {
-            bondy_registry_entry:uri(X),
-            bondy_registry_entry:match_policy(X)
-        } || X <- L
+            bondy_registry_entry:uri(E),
+            bondy_registry_entry:match_policy(E)
+        } || E <- Entries
     ]).
+
+
+
+
+
+%% =============================================================================
+%% GENERIC
+%% =============================================================================
+
+
+add_test(Type, RealmUri, Uri, Opts, Ctxt) ->
+    Ref = bondy_context:ref(Ctxt),
+    SessionId = bondy_context:session_id(Ctxt),
+
+    {ok, Entry, true} = bondy_registry:add(
+        subscription, RealmUri, Uri, Opts, Ref
+    ),
+
+    Key = bondy_registry_entry:key(Entry),
+
+    Id = bondy_registry_entry:id(Entry),
+
+    ?assertEqual(
+        {ok, Entry},
+        bondy_registry:lookup(Type, Key),
+        "The new entry should be returned by lookup/2"
+    ),
+
+    ?assertEqual(
+        {ok, Entry},
+        bondy_registry:lookup(Type, RealmUri, Id),
+        "The new entry should be returned by lookup/3"
+    ),
+
+    ?assert(
+        lists:member(Entry, bondy_registry:entries(Type, Ctxt)),
+        "The new entry should be included in the list of stored entries"
+    ),
+
+    ?assert(
+        lists:member(Entry, bondy_registry:entries(Type, RealmUri, SessionId)),
+        "The new entry should be included in the list of stored entries "
+        "for this session"
+    ),
+
+    ?assertEqual(
+        {error, {already_exists, Entry}},
+        bondy_registry:add(Type, RealmUri, Uri, Opts, Ref),
+        "The registry should not allow duplicates"
+    ).
