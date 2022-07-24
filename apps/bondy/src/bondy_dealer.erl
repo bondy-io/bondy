@@ -394,10 +394,12 @@ flush(RealmUri, Ref) ->
     catch
         Class:Reason:Stacktrace ->
             ?LOG_WARNING(#{
-                description => "Error while flushing registration and RPC promise queue items",
+                description =>
+                    "Error while flushing registration and RPC promise "
+                    "queue items",
                 class => Class,
                 reason => Reason,
-                trace => Stacktrace,
+                stacktrace => Stacktrace,
                 realm_uri => RealmUri,
                 ref => Ref
             }),
