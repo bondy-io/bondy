@@ -7,7 +7,7 @@
 FROM erlang:25 AS builder
 
 # Install build dependencies
-RUN apt-get update && \
+RUN --mount=type=cache,id=apt,sharing=locked,target=/var/cache/apt apt-get update && \
     apt-get -y install --no-install-recommends build-essential git libssl-dev libsodium-dev libsnappy-dev curl && \
 	rm -rf /var/lib/apt/lists/*
 
