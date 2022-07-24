@@ -15,6 +15,78 @@
 %%  See the License for the specific language governing permissions and
 %%  limitations under the License.
 %% =============================================================================
+
+
+
+
+
+%% =============================================================================
+%% DEPENDENCIES INCLUDES
+%% =============================================================================
+
+-include_lib("kernel/include/logger.hrl").
+-include_lib("plum_db/include/plum_db.hrl").
+
+
+%% =============================================================================
+%% GENERAL
+%% =============================================================================
+
+
+-define(SUPERVISOR(Id, Args, Restart, Timeout), #{
+    id => Id,
+    start => {Id, start_link, Args},
+    restart => Restart,
+    shutdown => Timeout,
+    type => supervisor,
+    modules => [Id]
+}).
+
+-define(WORKER(Id, Args, Restart, Timeout), #{
+    id => Id,
+    start => {Id, start_link, Args},
+    restart => Restart,
+    shutdown => Timeout,
+    type => worker,
+    modules => [Id]
+}).
+
+-define(EVENT_MANAGER(Id, Restart, Timeout), #{
+    id => Id,
+    start => {gen_event, start_link, [{local, Id}]},
+    restart => Restart,
+    shutdown => Timeout,
+    type => worker,
+    modules => [dynamic]
+}).
+
+-define(ERROR(Reason, Args, Cause), ?ERROR(Reason, Args, Cause, #{})).
+
+-define(ERROR(Reason, Args, Cause, Meta),
+    erlang:error(Reason, Args, ?ERROR_OPTS(Cause, Meta))
+).
+
+-define(ERROR_OPTS(Cause), ?ERROR_OPTS(Cause, #{})).
+
+-define(ERROR_OPTS(Cause, Meta),
+    [{error_info, #{module => ?MODULE, cause => Cause, meta => Meta}}]
+).
+
+
+-define(CHARS2BIN(Chars), unicode:characters_to_binary(Chars, utf8, utf8)).
+-define(CHARS2LIST(Chars), unicode:characters_to_list(Chars, utf8)).
+
+-type optional(T)       ::  T | undefined.
+-type nodestring()      ::  binary().
+
+
+
+%% =============================================================================
+%% WAMP
+%% =============================================================================
+
+
+
 -define(MASTER_REALM_URI, <<"com.leapsight.bondy">>).
 -define(CONTROL_REALM_URI, <<"com.leapsight.bondy.internal">>).
 
@@ -46,7 +118,7 @@
     call_timeout => true,
     call_trustlevels => false,
     caller_identification => true,
-    pattern_based_registration => true,
+    pattern_based_registration => false,
     progressive_call_results => false,
     progressive_calls => false,
     reflection => false,
@@ -54,7 +126,7 @@
     sharded_registration => false,
     shared_registration => true,
     registration_meta_api => true,
-    session_meta_api => false
+    session_meta_api => true
 }).
 -define(DEALER_FEATURES, ?WAMP_DEALER_FEATURES#{
     caller_auth_claims => true
@@ -65,13 +137,13 @@
     call_timeout => true,
     call_trustlevels => false,
     caller_identification => true,
-    pattern_based_registration => true,
+    pattern_based_registration => false,
     progressive_call_results => false,
     progressive_calls => false,
     registration_revocation => false,
     sharded_registration => false,
     shared_registration => true,
-    session_meta_api => false
+    session_meta_api => true
 }).
 -define(CALLEE_FEATURES, ?WAMP_CALLEE_FEATURES#{
     caller_auth_claims => true
@@ -111,38 +183,6 @@
     publisher_identification => true,
     subscriber_blackwhite_listing => false
 }).
-
-
-
-
-%% =============================================================================
-%% GENERAL
-%% =============================================================================
-
-
--type optional(T)       ::  T | undefined.
--type nodestring()      ::  binary().
-
-
-%% =============================================================================
-%% UTILS
-%% =============================================================================
-
--define(EOT, '$end_of_table').
--define(CHARS2BIN(Chars), unicode:characters_to_binary(Chars, utf8, utf8)).
--define(CHARS2LIST(Chars), unicode:characters_to_list(Chars, utf8)).
-
-
-
-%% =============================================================================
-%% PLUM_DB
-%% =============================================================================
-
--define(TOMBSTONE, '$deleted').
-
-
-
-
 
 
 %% =============================================================================

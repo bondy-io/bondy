@@ -28,9 +28,9 @@
 -module(bondy_retained_message).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
 
 -define(DB_PREFIX(Realm), {retained_messages, Realm}).
--define(EOT, '$end_of_table').
 
 -record(bondy_retained_message, {
     valid_to            ::  pos_integer(),

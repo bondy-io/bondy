@@ -13,9 +13,16 @@
 -define(PLUM_DB_USER_GRANT_TAB, security_user_grants).
 -define(PLUM_DB_SOURCE_TAB, security_sources).
 -define(PLUM_DB_TICKET_TAB, bondy_ticket).
+
+%% REGISTRY
 -define(PLUM_DB_REGISTRATION_TAB, bondy_registration).
 -define(PLUM_DB_SUBSCRIPTION_TAB, bondy_subscription).
-
+-define(PLUM_DB_REGISTRATION_PREFIX(RealmUri),
+    {?PLUM_DB_REGISTRATION_TAB, RealmUri}
+).
+-define(PLUM_DB_SUBSCRIPTION_PREFIX(RealmUri),
+    {?PLUM_DB_SUBSCRIPTION_TAB, RealmUri}
+).
 
 -define(PLUM_DB_PREFIXES, [
     %% ram
@@ -26,7 +33,10 @@
         shard_by => prefix,
         callbacks => #{
             will_merge => {bondy_registry, will_merge},
-            object_updated => {bondy_registry, on_object_updated}
+            on_merge => {bondy_registry, on_merge},
+            on_update => {bondy_registry, on_update},
+            on_delete => {bondy_registry, on_delete},
+            on_erase => {bondy_registry, on_erase}
         }
     }},
     {?PLUM_DB_SUBSCRIPTION_TAB, #{
@@ -34,7 +44,10 @@
         shard_by => prefix,
         callbacks => #{
             will_merge => {bondy_registry, will_merge},
-            object_updated => {bondy_registry, on_object_updated}
+            on_merge => {bondy_registry, on_merge},
+            on_update => {bondy_registry, on_update},
+            on_delete => {bondy_registry, on_delete},
+            on_erase => {bondy_registry, on_erase}
         }
     }},
 
@@ -73,7 +86,7 @@
         shard_by => prefix,
         callbacks => #{
             will_merge => {bondy_rbac_user, will_merge},
-            object_updated => {bondy_rbac_user, on_object_updated}
+            on_merge => {bondy_rbac_user, on_merge}
         }
     }},
     {?PLUM_DB_SOURCE_TAB, #{

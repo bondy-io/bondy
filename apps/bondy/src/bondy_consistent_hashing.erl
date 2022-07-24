@@ -62,6 +62,10 @@ bucket(Key, Buckets, jch)
 when is_integer(Key) andalso is_integer(Buckets) andalso Buckets > 1 ->
     jump_consistent_hash(Key, Buckets);
 
+bucket(Key, _, _) when is_integer(Key) ->
+    %% Unknown algorithm
+    error(badarg);
+
 bucket(Key, Buckets, Algo) ->
     bucket(erlang:phash2(Key), Buckets, Algo).
 

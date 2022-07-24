@@ -28,6 +28,17 @@
 -include("bondy_plum_db.hrl").
 -include("bondy.hrl").
 
+-if(?OTP_RELEASE >= 25).
+    -define(VALIDATE_MQ_DATA(X),
+        case X of
+            off_heap -> off_heap;
+            _ -> on_heap
+        end
+    ).
+-else.
+    -define(VALIDATE_MQ_DATA(_), on_heap).
+-endif.
+
 
 -define(WAMP_EXT_OPTIONS, [
     {call, [
@@ -145,16 +156,6 @@
             ]},
             %% Used by bondy_session_counter.erl
             {bondy_session_counter, [
-                set,
-                {keypos, 2},
-                named_table,
-                public,
-                {read_concurrency, true},
-                {write_concurrency, true},
-                {decentralized_counters, true}
-            ]},
-            %% Used by bondy_registry.erl counters
-            {bondy_registry_state, [
                 set,
                 {keypos, 2},
                 named_table,
@@ -352,7 +353,8 @@ set_vsn(Args) ->
 
 %% @private
 setup_mods() ->
-    ok = bondy_json:setup().
+    ok = bondy_json:setup(),
+    ok = configure_registry().
 
 
 %% @private
@@ -381,8 +383,8 @@ setup_wamp() ->
 
 %% @private
 prepare_private_config() ->
-    Config = configure_plum_db(?CONFIG),
-    maybe_configure_message_retention(Config).
+    Config0 = configure_plum_db(?CONFIG),
+    maybe_configure_message_retention(Config0).
 
 
 %% @private
@@ -418,6 +420,29 @@ maybe_configure_message_retention(Config0) ->
             }),
             {error, Reason}
     end.
+
+
+%% @private
+configure_registry() ->
+    %% Configure partition count
+    KeyPath = [registry, partitions],
+
+    ok = case bondy_config:get(KeyPath, undefined) of
+        undefined ->
+            N = min(16, erlang:system_info(schedulers)),
+            bondy_config:set(KeyPath, N),
+            ok;
+        _ ->
+            ok
+    end,
+
+    %% Configure partition spawn_opts
+    Opts0 = bondy_config:get([registry, partition_spawn_opts], []),
+    Value = ?VALIDATE_MQ_DATA(
+        key_value:get(message_queue_data, Opts0, off_heap)
+    ),
+    Opts = key_value:put(message_queue_data, Value, Opts0),
+    bondy_config:set([registry, partition_spawn_opts], Opts).
 
 
 %% @private

@@ -30,6 +30,9 @@
 
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_registry.hrl").
+-include("bondy_plum_db.hrl").
+
 
 %% The WAMP spec defines that the id MUST be drawn randomly from a uniform
 %% distribution over the complete range [1, 2^53], but in a distributed
@@ -40,9 +43,7 @@
 %% KSUID.
 -record(entry_key, {
     realm_uri           ::  uri(),
-    target              ::  wildcard(bondy_ref:target()),
     session_id          ::  wildcard(optional(bondy_session_id:t())),
-    %% The message_id
     entry_id            ::  wildcard(id()),
     is_proxy = false    ::  wildcard(boolean())
 }).
@@ -75,6 +76,12 @@
                                 A :: optional([term()])
                             }.
 -type options()         ::  map().
+-type match_result()        ::  [t()]
+                                | {[t()], continuation_or_eot()}
+                                | eot().
+-type eot()                 ::  ?EOT.
+-type continuation()        ::  plum_db:continuation().
+-type continuation_or_eot() ::  eot() | continuation().
 
 -type details_map()     ::  #{
     id => id(),
@@ -102,13 +109,20 @@
 -export_type([t_or_key/0]).
 -export_type([entry_type/0]).
 -export_type([details_map/0]).
-
+-export_type([eot/0]).
+-export_type([continuation/0]).
 
 -export([callback/1]).
 -export([callback_args/1]).
 -export([created/1]).
--export([get_option/3]).
+-export([delete/1]).
+-export([delete/2]).
+-export([field_index/1]).
 -export([find_option/2]).
+-export([fold/4]).
+-export([fold/5]).
+-export([foreach/4]).
+-export([get_option/3]).
 -export([id/1]).
 -export([is_callback/1]).
 -export([is_entry/1]).
@@ -117,12 +131,18 @@
 -export([is_local/2]).
 -export([is_proxy/1]).
 -export([key/1]).
--export([key_field/1]).
--export([key_pattern/2]).
+-export([key_pattern/4]).
+-export([lookup/2]).
+-export([lookup/3]).
+-export([lookup/4]).
+-export([match/1]).
+-export([match/2]).
+-export([match/3]).
 -export([match_policy/1]).
 -export([new/5]).
 -export([new/6]).
 -export([nodestring/1]).
+-export([node/1]).
 -export([options/1]).
 -export([origin_id/1]).
 -export([origin_ref/1]).
@@ -134,6 +154,9 @@
 -export([realm_uri/1]).
 -export([ref/1]).
 -export([session_id/1]).
+-export([store/1]).
+-export([take/1]).
+-export([take/2]).
 -export([target/1]).
 -export([to_details_map/1]).
 -export([to_external/1]).
@@ -154,9 +177,9 @@
 %% -----------------------------------------------------------------------------
 -spec new(entry_type(), uri(), bondy_ref:t(), uri(), map()) -> t().
 
-new(Type, RealmUri, Ref, Uri, Options) ->
+new(Type, RealmUri, Ref, Uri, Opts) ->
     RegId = bondy_utils:gen_message_id({router, RealmUri}),
-    new(Type, RegId, RealmUri, Ref, Uri, Options).
+    new(Type, RegId, RealmUri, Ref, Uri, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -166,14 +189,11 @@ new(Type, RealmUri, Ref, Uri, Options) ->
 -spec new(entry_type(), id(), uri(), bondy_ref:t(), uri(), map()) -> t().
 
 new(Type, RegId, RealmUri, Ref, Uri, Opts0)
-when is_binary(Uri) andalso is_map(Opts0) andalso
-(Type == registration orelse Type == subscription) ->
-    Target = bondy_ref:target(Ref),
+when is_binary(Uri) andalso is_map(Opts0) andalso ?IS_ENTRY_TYPE(Type) ->
     SessionId = bondy_ref:session_id(Ref),
 
     Key = #entry_key{
         realm_uri = RealmUri,
-        target = Target,
         session_id = SessionId,
         entry_id = RegId
     },
@@ -189,7 +209,7 @@ when is_binary(Uri) andalso is_map(Opts0) andalso
         match_policy = MatchPolicy,
         ref = Ref,
         callback_args = CBArgs,
-        created = erlang:system_time(second),
+        created = erlang:system_time(millisecond),
         options = Opts
     }.
 
@@ -221,12 +241,8 @@ pattern(Type, RealmUri, ProcedureOrTopic, Options) ->
 
 pattern(Type, RealmUri, RegUri, Options, Extra) ->
     SessionId = maps:get(session_id, Extra, '_'),
-    Target0 = maps:get(target, Extra, '_'),
 
-    PatternRef = bondy_ref:pattern('_', Target0, SessionId, '_'),
-    Target = bondy_ref:target(PatternRef),
-
-    KeyPattern = key_pattern(RealmUri, Extra#{target => Target}),
+    KeyPattern = key_pattern(RealmUri, SessionId, '_', '_'),
 
     MatchPolicy = validate_match_policy(pattern, Options),
 
@@ -243,67 +259,44 @@ pattern(Type, RealmUri, RegUri, Options, Extra) ->
         origin_ref = '_'
     }.
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec key_pattern(RealmUri :: uri(), Ref :: bondy_ref:t()) -> key().
+-spec key_pattern(
+    RealmUri    ::  uri(),
+    SessionId   ::  wildcard(bondy_session_id:t()),
+    EntryId     ::  wildcard(id()),
+    IsProxy     ::  boolean()) -> key().
 
-key_pattern(RealmUri, Extra) when is_map(Extra) ->
-    SessionId = maps:get(session_id, Extra, '_'),
-    Target = maps:get(target, Extra, '_'),
-    EntryId = maps:get(entry_id, Extra, '_'),
-    IsProxy = maps:get(is_proxy, Extra, '_'),
-
-    is_binary(RealmUri)
-        orelse RealmUri == '_'
-        orelse error({badarg, {realm_uri, RealmUri}}),
-
-    is_integer(EntryId)
-        orelse EntryId == '_'
-        orelse error({badarg, {entry_id, EntryId}}),
+key_pattern(RealmUri, SessionId, EntryId, IsProxy) when
+is_binary(RealmUri) andalso
+(is_binary(SessionId) orelse SessionId == '_') andalso
+(is_integer(EntryId) orelse EntryId == '_') andalso
+(is_boolean(IsProxy) orelse IsProxy == '_') ->
 
     #entry_key{
         realm_uri = RealmUri,
-        target = Target,
         session_id = SessionId,
         entry_id = EntryId,
         is_proxy = IsProxy
-    };
-
-key_pattern(RealmUri, Ref) ->
-    bondy_ref:is_type(Ref)
-        orelse error({badarg, {ref, Ref}}),
-
-    SessionId = bondy_ref:session_id(Ref),
-    Target = bondy_ref:target(Ref),
-
-    Extra = #{
-        target => Target,
-        session_id => SessionId
-    },
-
-    key_pattern(RealmUri, Extra).
+    }.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-key_field(realm_uri) ->
+field_index(realm_uri) ->
     #entry_key.realm_uri;
 
-key_field(target) ->
-    #entry_key.target;
-
-key_field(session_id) ->
+field_index(session_id) ->
     #entry_key.session_id;
 
-key_field(entry_id) ->
+field_index(entry_id) ->
     #entry_key.entry_id;
 
-key_field(is_proxy) ->
+field_index(is_proxy) ->
     #entry_key.is_proxy.
 
 
@@ -375,10 +368,7 @@ key(#entry{key = Key}) ->
 -spec target(t()) -> wildcard(bondy_ref:target()).
 
 target(#entry{ref = Ref}) ->
-    bondy_ref:target(Ref);
-
-target(#entry_key{target = Val}) ->
-    Val.
+    bondy_ref:target(Ref).
 
 
 %% -----------------------------------------------------------------------------
@@ -397,8 +387,10 @@ realm_uri(#entry_key{realm_uri = Val}) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the value of the subscription's or registration's node property.
-%% This is always the Bondy cluster peer node where the handler exists.
+%% Returns the value of the subscription's or registration's nodestring
+%% property.
+%% This is always the Bondy cluster peer node where the handler exists as a
+%% binary
 %% @end
 %% -----------------------------------------------------------------------------
 -spec nodestring(t()) -> wildcard(nodestring()).
@@ -408,6 +400,21 @@ nodestring(#entry{ref = '_'}) ->
 
 nodestring(#entry{ref = Ref}) ->
     bondy_ref:nodestring(Ref).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the value of the subscription's or registration's node property.
+%% This is always the Bondy cluster peer node where the handler exists.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec node(t()) -> wildcard(node()).
+
+node(#entry{ref = '_'}) ->
+    '_';
+
+node(#entry{ref = Ref}) ->
+    bondy_ref:node(Ref).
 
 
 
@@ -441,14 +448,8 @@ is_local(#entry{ref = Ref}, Nodestring) ->
 %% -----------------------------------------------------------------------------
 -spec is_callback(t()) -> boolean().
 
-is_callback(#entry_key{target = {callback, _}}) ->
-    true;
-
-is_callback(#entry_key{}) ->
-    false;
-
-is_callback(#entry{key = Key}) ->
-    is_callback(Key).
+is_callback(#entry{ref = Ref}) ->
+    callback == bondy_ref:target_type(Ref).
 
 
 %% -----------------------------------------------------------------------------
@@ -465,20 +466,18 @@ callback_args(#entry{callback_args = Val}) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns the callback module when target is a callback, otherwise
-%% returns `undefined' or the wildcard value '_' when the entry was used as a
-%% pattern (See {@link pattern/5}).
+%% returns `undefined'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec callback(t()) -> wildcard(optional(mfargs())).
+-spec callback(t()) -> optional(mfargs()).
 
-callback(#entry{key = #entry_key{target = {callback, MF}}} = E) ->
-    erlang:append_element(MF, E#entry.callback_args);
-
-callback(#entry{key = #entry_key{target = '_'}}) ->
-    '_';
-
-callback(#entry{}) ->
-    undefined.
+callback(#entry{ref = Ref} = E) ->
+    case bondy_ref:target(Ref) of
+        {callback, MF} ->
+            erlang:append_element(MF, E#entry.callback_args);
+        _ ->
+            undefined
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -488,19 +487,10 @@ callback(#entry{}) ->
 %% pattern (See {@link pattern/5}).
 %% @end
 %% -----------------------------------------------------------------------------
--spec pid(t_or_key()) -> wildcard(optional(pid())).
+-spec pid(t_or_key()) -> pid().
 
 pid(#entry{ref = Ref}) ->
-    bondy_ref:pid(Ref);
-
-pid(#entry_key{target = {pid, Bin}}) ->
-    bondy_utils:bin_to_pid(Bin);
-
-pid(#entry_key{target = '_'}) ->
-    '_';
-
-pid(#entry_key{}) ->
-    undefined.
+    bondy_ref:pid(Ref).
 
 
 %% -----------------------------------------------------------------------------
@@ -573,7 +563,7 @@ match_policy(#entry{match_policy = Val}) -> Val.
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Returns the time when this entry was created. Its value is a timestamp in
-%% seconds.
+%% milliseconds.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec created(t()) -> pos_integer().
@@ -684,7 +674,6 @@ proxy(Ref, External) ->
         options := Options
     } = External,
 
-    Target = bondy_ref:target(Ref),
     SessionId = bondy_ref:session_id(Ref),
 
     Id = bondy_utils:gen_message_id({router, RealmUri}),
@@ -692,7 +681,6 @@ proxy(Ref, External) ->
     #entry{
         key = #entry_key{
             realm_uri = RealmUri,
-            target = Target,
             session_id = SessionId,
             entry_id = Id,
             is_proxy = true
@@ -734,11 +722,240 @@ proxy_details(#entry{} = E) ->
     }.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Inserts the entry in plum_db. This will broadcast the delete amongst
+%% the nodes in the cluster.
+%% It will also called the `on_update/3' callback if enabled.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec store(Entry :: t()) -> ok.
+
+store(#entry{} = Entry) ->
+    PDBPrefix = pdb_prefix(Entry),
+    Key = key(Entry),
+
+    plum_db:put(PDBPrefix, Key, Entry).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec lookup(Type :: entry_type(), EntryKey :: key()) ->
+    {ok, Entry :: t()} | {error, not_found}.
+
+lookup(Type, #entry_key{} = EntryKey) when ?IS_ENTRY_TYPE(Type) ->
+    PDBPrefix = pdb_prefix(Type, EntryKey),
+
+    case plum_db:get(PDBPrefix, EntryKey) of
+        #entry{} = Entry ->
+            {ok, Entry};
+        undefined ->
+            {error, not_found}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec lookup(Type :: entry_type(), EntryKey :: key(), Opts :: map()) ->
+    {ok, Entry :: t()} | {error, not_found}.
+
+lookup(Type, #entry_key{} = EntryKey, Opts) when ?IS_ENTRY_TYPE(Type) ->
+    PDBPrefix = pdb_prefix(Type, EntryKey),
+
+    case plum_db:get(PDBPrefix, EntryKey, Opts) of
+        #entry{} = Entry ->
+            {ok, Entry};
+        undefined ->
+            {error, not_found}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec lookup(
+    Type :: entry_type(), RealmUri :: uri(), EntryId :: id(), Opts :: map()) ->
+    {ok, Entry :: t()} | {error, not_found}.
+
+lookup(Type, RealmUri, EntryId, Opts0) when ?IS_ENTRY_TYPE(Type) ->
+
+    PDBPrefix = pdb_prefix(Type, RealmUri),
+    Pattern = key_pattern(RealmUri, '_', EntryId, '_'),
+    Default = [{remove_tombstones, true}, {resolver, lww}],
+    Opts = lists:keymerge(1, lists:sort(Opts0), Default),
+
+    case plum_db:match(PDBPrefix, Pattern, Opts) of
+        [] ->
+            {error, not_found};
+
+        [{_, Entry}] ->
+            {ok, Entry}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec take(Entry :: t()) -> {ok, StoredEntry :: t()} | {error, not_found}.
+
+take(#entry{} = Entry) ->
+    take(type(Entry), key(Entry)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec take(Type :: entry_type(), EntryKey :: key()) ->
+    {ok, StoredEntry :: t()} | {error, not_found}.
+
+take(Type, #entry_key{} = EntryKey) when ?IS_ENTRY_TYPE(Type) ->
+    PDBPrefix = pdb_prefix(Type, EntryKey),
+
+    case plum_db:take(PDBPrefix, EntryKey) of
+        #entry{} = Entry ->
+            {ok, Entry};
+
+        undefined ->
+            {error, not_found}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec delete(Entry :: t()) -> ok.
+
+delete(#entry{} = Entry) ->
+    delete(type(Entry), key(Entry)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec delete(Type :: entry_type(), EntryKey :: key()) -> ok.
+
+delete(Type, #entry_key{} = EntryKey) when ?IS_ENTRY_TYPE(Type) ->
+    PDBPrefix = pdb_prefix(Type, EntryKey),
+    plum_db:delete(PDBPrefix, EntryKey).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec match(continuation()) -> match_result().
+
+match(Cont) ->
+    match(Cont, [{resolver, lww}]).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec match
+    (entry_type(), key()) -> [t()];
+    (continuation(), plum_db:match_opts()) -> match_result().
+
+match(Type, #entry_key{} = Pattern) when ?IS_ENTRY_TYPE(Type) ->
+    Opts = [
+        {resolver, lww},
+        {remove_tombstones, true}
+    ],
+    match(Type, Pattern, Opts);
+
+match(Cont, Opts) when is_list(Opts) ->
+    plum_db:match(Cont, Opts).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec match(entry_type(), key(), plum_db:match_opts()) -> match_result().
+
+match(Type, #entry_key{} = Pattern, Opts) when ?IS_ENTRY_TYPE(Type) ->
+    PDBPrefix = pdb_prefix(Type, realm_uri(Pattern)),
+    plum_db:match(PDBPrefix, Pattern, Opts).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec fold(
+    Type :: entry_type(),
+    RealmUri :: wildcard(uri()),
+    Fun :: plum_db:fold_fun(),
+    Acc :: any(),
+    Opts :: plum_db:fold_opts()) -> any() | {any(), continuation_or_eot()}.
+
+fold(Type, RealmUri, Fun, Acc, Opts) when ?IS_ENTRY_TYPE(Type) ->
+    PDBPrefix = pdb_prefix(Type, RealmUri),
+    plum_db:fold(Fun, Acc, PDBPrefix, Opts).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec fold(
+    Fun :: plum_db:fold_fun(),
+    Acc :: any(),
+    Cont :: continuation(),
+    Opts :: plum_db:fold_opts()) -> any() | {any(), continuation_or_eot()}.
+
+fold(Fun, Acc, Cont, Opts) ->
+    plum_db:fold(Fun, Acc, Cont, Opts).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec foreach(
+    Type :: entry_type(),
+    RealmUri :: uri(),
+    Fun :: plum_db:foreach_fun(),
+    Opts :: plum_db:fold_opts()) -> ok.
+
+foreach(Type, RealmUri, Fun, Opts) when ?IS_ENTRY_TYPE(Type) ->
+    PDBPrefix = pdb_prefix(Type, RealmUri),
+    plum_db:foreach(Fun, PDBPrefix, Opts).
+
+
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
+
+
+%% @private
+pdb_prefix(#entry{} = Entry) ->
+    pdb_prefix(type(Entry), realm_uri(Entry)).
+
+
+%% @private
+pdb_prefix(Type, #entry_key{} = Key) ->
+    pdb_prefix(Type, Key#entry_key.realm_uri);
+
+pdb_prefix(registration, RealmUri)
+when is_binary(RealmUri) orelse RealmUri == '_' ->
+    ?PLUM_DB_REGISTRATION_PREFIX(RealmUri);
+
+pdb_prefix(subscription, RealmUri)
+when is_binary(RealmUri) orelse RealmUri == '_' ->
+    ?PLUM_DB_SUBSCRIPTION_PREFIX(RealmUri).
 
 
 %% @private
@@ -765,4 +982,4 @@ validate_match_policy(_, Options) when is_map(Options) ->
 
 %% @private
 created_format(Secs) ->
-    calendar:system_time_to_universal_time(Secs, second).
+    calendar:system_time_to_universal_time(Secs, millisecond).

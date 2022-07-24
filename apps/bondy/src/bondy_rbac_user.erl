@@ -265,7 +265,7 @@
 -export([username/1]).
 
 %% PLUM_DB PREFIX CALLBACKS
--export([on_object_updated/3]).
+-export([on_merge/3]).
 -export([will_merge/3]).
 
 
@@ -1089,7 +1089,7 @@ will_merge(_PKey, _New, _Old) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-on_object_updated(_PKey, _New, _Old) ->
+on_merge(_PKey, _New, _Old) ->
     ok.
 
 
