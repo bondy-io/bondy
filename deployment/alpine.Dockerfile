@@ -4,7 +4,7 @@
 # Build stage 1
 # ===========================================================================
 
-FROM erlang:24-alpine AS builder
+FROM erlang:25-alpine AS builder
 
 # Install build dependencies
 RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
@@ -28,7 +28,7 @@ RUN rebar3 as prod tar && \
 # Build stage 2
 # ===========================================================================
 
-FROM alpine:3.15 as runner
+FROM alpine:3.16 as runner
 
 # We install the following utils:
 # - bash
