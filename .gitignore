@@ -34,4 +34,6 @@ rebar3.crashdump
 relx
 apps/*/doc/**
 examples/st
-
+examples/custom_config/etc/bondy.conf
+examples/custom_config/etc/disabled/
+examples/custom_config/etc/generated/
