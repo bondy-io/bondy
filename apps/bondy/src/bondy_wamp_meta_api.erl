@@ -422,9 +422,9 @@ summary(Type, RealmUri) ->
 get(Type, [_, _] = L) ->
     get(Type, L ++ [#{}]);
 
-get(Type, [RealmUri, RegId, Details]) ->
+get(Type, [RealmUri, RegId, _Details]) ->
     try
-        case bondy_registry:lookup(Type, RegId, RealmUri, Details) of
+        case bondy_registry:lookup(Type, RealmUri, RegId) of
             {error, not_found} ->
                 {error, bondy_wamp_utils:no_such_registration_error(RegId)};
             Entry ->
@@ -447,7 +447,7 @@ lookup(Type, [_, _] = L) ->
 
 lookup(Type, [RealmUri, Uri, Opts]) ->
     try
-        case bondy_registry:match(Type, Uri, RealmUri, Opts) of
+        case bondy_registry:match(Type, RealmUri, Uri, Opts) of
             {[], '$end_of_table'} ->
                 ok;
             {Entries, '$end_of_table'} ->
@@ -470,7 +470,7 @@ match(Type, [_, _] = L) ->
 
 match(Type, [RealmUri, Uri, Opts]) ->
     try
-        case bondy_registry:match(Type, Uri, RealmUri, Opts) of
+        case bondy_registry:match(Type, RealmUri, Uri, Opts) of
             {[], '$end_of_table'} ->
                 {ok, []};
             {Entries, '$end_of_table'} ->
@@ -544,7 +544,7 @@ list_registration_callees(_RealmUri, _RegId) ->
 
 count_callees(_RealmUri, _Uri) ->
     %% try
-    %%     case bondy_registry:match(registration, Uri, RealmUri) of
+    %%     case bondy_registry:match(registration, RealmUri, Uri) of
     %%         {[], '$end_of_table'} ->
     %%             {ok, 0};
     %%         {[Entries], '$end_of_table'} ->

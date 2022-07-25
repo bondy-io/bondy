@@ -54,7 +54,7 @@
         allow_null => false,
         allow_undefined => false,
         required => true,
-        default => [],
+        default => {{0, 0, 0, 0}, 0},
         datatype => [binary, tuple],
         validator => fun bondy_data_validators:cidr/1
     },
@@ -179,7 +179,7 @@ meta(#{type := source, meta := Val}) -> Val.
 %% -----------------------------------------------------------------------------
 -spec add(
     RealmUri :: uri(), Assignment :: map() | assignment()) ->
-    ok | {error, any()}.
+    {ok, t()}  | {error, any()}.
 
 add(RealmUri, Data) when is_map(Data) ->
     try
@@ -201,7 +201,7 @@ add(RealmUri, #source_assignment{} = A) ->
 -spec add(
     Realmuri :: uri(),
     Usernames :: [binary()] | all | anonymous,
-    Assignment :: map() | assignment()) -> ok | {error, any()}.
+    Assignment :: map() | assignment()) -> {ok, t()} | {error, any()}.
 
 add(RealmUri, Usernames, #{type := source} = Source) ->
     try
@@ -415,7 +415,7 @@ when Keyword == all orelse Keyword == anonymous ->
     %% with the same source
     Authmethod = maps:get(authmethod, Source),
     ok = plum_db:put(Prefix, {Keyword, Masked, Authmethod}, Source),
-    ok;
+    {ok, Source};
 
 do_add(RealmUri, Usernames, #{type := source} = Source) ->
     Prefix = ?PLUMDB_PREFIX(RealmUri),
@@ -434,7 +434,7 @@ do_add(RealmUri, Usernames, #{type := source} = Source) ->
         end,
         Usernames
     ),
-    ok.
+    {ok, Source}.
 
 
 %% -----------------------------------------------------------------------------

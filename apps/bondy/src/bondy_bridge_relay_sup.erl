@@ -23,23 +23,7 @@
 -module(bondy_bridge_relay_sup).
 -behaviour(supervisor).
 
--define(SUPERVISOR(Id, Args, Restart, Timeout), #{
-    id => Id,
-    start => {Id, start_link, Args},
-    restart => Restart,
-    shutdown => Timeout,
-    type => supervisor,
-    modules => [Id]
-}).
-
--define(WORKER(Id, Args, Restart, Timeout), #{
-    id => Id,
-    start => {Id, start_link, Args},
-    restart => Restart,
-    shutdown => Timeout,
-    type => worker,
-    modules => [Id]
-}).
+-include("bondy.hrl").
 
 %% API
 -export([start_link/0]).

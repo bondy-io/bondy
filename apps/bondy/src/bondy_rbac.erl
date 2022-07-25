@@ -189,7 +189,7 @@
 -export([revoke_group/2]).
 -export([revoke_user/2]).
 -export([user_grants/2]).
--export([remove_all/1]).
+-export([remove_all/2]).
 
 
 
@@ -553,9 +553,9 @@ when is_binary(Resource) orelse Resource =:= any ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_all(RealmUri :: uri()) -> ok.
+-spec remove_all(RealmUri :: uri(), Opts :: #{silent := boolean()}) -> ok.
 
-remove_all(RealmUri) ->
+remove_all(RealmUri, _Opts) ->
     Opts = [{remove_tombstones, true}, {keys_only, true}],
 
     Users = ?PLUMDB_PREFIX(RealmUri, user),

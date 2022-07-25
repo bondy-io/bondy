@@ -85,6 +85,56 @@
             (_) -> false
         end
     },
+    connect_timeout => #{
+        alias => <<"connect_timeout">>,
+        required => true,
+        default => timer:seconds(5),
+        datatype => [integer, {in, [infinity, <<"infinity">>]}],
+        validator => fun
+            (X) when is_integer(X) -> X > 0;
+            (infinity) -> true;
+            (<<"infinity">>) -> {ok, infinity};
+            (_) -> false
+        end
+    },
+    network_timeout => #{
+        alias => <<"network_timeout">>,
+        required => true,
+        default => timer:seconds(30),
+        datatype => [integer, {in, [infinity, <<"infinity">>]}],
+        validator => fun
+            (X) when is_integer(X) -> X > 0;
+            (infinity) -> true;
+            (<<"infinity">>) -> {ok, infinity};
+            (_) -> false
+        end
+    },
+    idle_timeout => #{
+        alias => <<"idle_timeout">>,
+        required => true,
+        default => timer:hours(24),
+        datatype => [integer, {in, [infinity, <<"infinity">>]}],
+        validator => fun
+            (X) when is_integer(X) -> X > 0;
+            (infinity) -> true;
+            (<<"infinity">>) -> {ok, infinity};
+            (_) -> false
+        end
+    },
+    hibernate => #{
+        alias => <<"hibernate">>,
+        required => true,
+        default => idle,
+        datatype => [atom, binary],
+        validator => fun
+            (X) when X == never; X == idle; X == always ->
+                true;
+            (X) when X == <<"never">>; X == <<"idle">>; X == <<"always">> ->
+                true;
+            (_) ->
+                false
+        end
+    },
     reconnect => #{
         alias => <<"reconnect">>,
         required => true,
@@ -114,18 +164,6 @@
             nodelay => true
         },
         validator => ?SOCKET_OPTS_SPEC
-    },
-    timeout => #{
-        alias => <<"timeout">>,
-        required => true,
-        default => timer:seconds(5),
-        datatype => timeout
-    },
-    idle_timeout => #{
-        alias => <<"idle_timeout">>,
-        required => true,
-        default => timer:hours(24),
-        datatype => timeout
     },
     parallelism => #{
         alias => <<"parallelism">>,
@@ -247,23 +285,29 @@
         default => true,
         datatype => boolean
     },
-    interval => #{
-        alias => <<"interval">>,
+    idle_timeout => #{
+        alias => <<"idle_timeout">>,
         required => true,
-        default => timer:seconds(30),
-        datatype => pos_integer
-    },
-    max_retries => #{
-        alias => <<"max_retries">>,
-        required => true,
-        default => 3,
+        default => timer:seconds(20),
         datatype => [integer, {in, [infinity, <<"infinity">>]}],
         validator => fun
             (X) when is_integer(X) -> X > 0;
-            (infinity) -> infinity;
+            (infinity) -> true;
             (<<"infinity">>) -> {ok, infinity};
             (_) -> false
         end
+    },
+    timeout => #{
+        alias => <<"timeout">>,
+        required => true,
+        default => timer:seconds(10),
+        datatype => pos_integer
+    },
+    max_attempts => #{
+        alias => <<"max_attempts">>,
+        required => true,
+        default => 2,
+        datatype => pos_integer
     }
 }).
 
@@ -332,14 +376,14 @@
         alias => <<"procedures">>,
         required => true,
         default => [],
-        validator => {list, ?ACTION_SPEC}
+        validator => {list, ?PROCEDURE_ACTION_SPEC}
 
     },
     topics => #{
         alias => <<"topics">>,
         required => true,
         default => [],
-        validator => {list, ?ACTION_SPEC}
+        validator => {list, ?TOPIC_ACTION_SPEC}
     }
 }).
 
@@ -377,12 +421,38 @@
             (<<"out">>) ->
                 {ok, out};
             (<<"both">>) ->
-                {ok, both}
+                {ok, both};
+            (_) ->
+                false
         end
     }
 }).
 
+-define(TOPIC_ACTION_SPEC, ?ACTION_SPEC#{
+}).
 
+-define(PROCEDURE_ACTION_SPEC, ?ACTION_SPEC#{
+    registration => #{
+        alias => <<"registration">>,
+        required => false,
+        validator => fun
+            (static) ->
+                true;
+            (dynamic) ->
+                true;
+            ("static") ->
+                {ok, static};
+            ("dynamic") ->
+                {ok, dynamic};
+            (<<"static">>) ->
+                {ok, static};
+            (<<"dynamic">>) ->
+                {ok, dynamic};
+            (_) ->
+                false
+        end
+    }
+}).
 
 -type t() :: #{
     name            :=  binary(),
@@ -441,8 +511,15 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(Ref :: bondy_ref:t(), Msg :: any()) ->
+-spec forward(Ref :: bondy_ref:t() | [bondy_ref:t()], Msg :: any()) ->
     ok.
+
+forward([], _) ->
+    ok;
+
+forward([H|T], Msg) ->
+    ok = forward(H, Msg),
+    forward(T, Msg);
 
 forward(Ref, Msg) ->
     bondy_bridge_relay_client:forward(Ref, Msg).
@@ -536,6 +613,7 @@ to_external(Bridge) ->
     {Host, Port} = maps:get(endpoint, Bridge),
     Endpoint = <<
         (list_to_binary(Host))/binary,
+        $:,
         (integer_to_binary(Port))/binary
     >>,
 

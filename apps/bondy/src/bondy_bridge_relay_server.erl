@@ -18,8 +18,25 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc EARLY DRAFT implementation of the server-side connection between and
-%% edge node ({@link bondy_bridge_relay_client}) and a remote/core node
+%% client node ({@link bondy_bridge_relay_client}) and a remote/core node
 %% (this module).
+%%
+%% <pre><code class="mermaid">
+%% stateDiagram-v2
+%%     %%{init:{'state':{'nodeSpacing': 50, 'rankSpacing': 200}}}%%
+%%    [*] --> connected
+%%    connected --> active: session_opened
+%%    connected --> [*]: auth_timeout
+%%    active --> active: rcv(data|ping) | snd(data|pong)
+%%    active --> idle: ping_idle_timeout
+%%    active --> [*]: error
+%%    idle --> idle: snd(ping|pong) | rcv(ping|pong)
+%%    idle --> active: snd(data)
+%%    idle --> active: rcv(data)
+%%    idle --> [*]: error
+%%    idle --> [*]: ping_timeout
+%%    idle --> [*]: idle_timeout
+%% </code></pre>
 %%
 %% == Configuration Options ==
 %% <ul>
@@ -38,11 +55,6 @@
 -include("bondy.hrl").
 -include("bondy_bridge_relay.hrl").
 
--define(SOCKET_DATA(Tag), Tag == tcp orelse Tag == ssl).
--define(SOCKET_ERROR(Tag), Tag == tcp_error orelse Tag == ssl_error).
--define(CLOSED_TAG(Tag), Tag == tcp_closed orelse Tag == ssl_closed).
-% -define(PASSIVE_TAG(Tag), Tag == tcp_passive orelse Tag == ssl_passive).
-
 
 -record(state, {
     ranch_ref               ::  atom(),
@@ -50,10 +62,11 @@
     opts                    ::  key_value:t(),
     socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
     auth_timeout            ::  pos_integer(),
-    idle_timeout            ::  pos_integer(),
     ping_retry              ::  optional(bondy_retry:t()),
-    ping_retry_tref         ::  optional(timer:ref()),
-    ping_sent               ::  optional({timer:ref(), binary()}),
+    ping_payload            ::  optional(binary()),
+    ping_idle_timeout       ::  optional(non_neg_integer()),
+    idle_timeout            ::  pos_integer(),
+    hibernate = idle        ::  never | idle | always,
     sessions = #{}          ::  #{id() => bondy_session:t()},
     sessions_by_realm = #{} ::  #{uri() => bondy_session_id:t()},
     %% The context for the session currently being established
@@ -67,6 +80,7 @@
 -type reg_indx()            ::  #{
     SessionId :: bondy_session_id:t() => proxy_map()
 }.
+%% A mapping between a client entry id and the local (server) proxy id
 -type proxy_map()           ::  #{OrigEntryId :: id() => ProxyEntryId :: id()}.
 
 %% API.
@@ -80,12 +94,8 @@
 -export([code_change/4]).
 
 %% STATE FUNCTIONS
--export([connected/3]).
-
-%% TODO pings should only be allowed if we have at least one session, otherwise
-%% they do not count towards the idle_timeout.
-%% At least one session has to be active for the connection to stay
-%% online.
+-export([active/3]).
+-export([idle/3]).
 
 
 
@@ -134,6 +144,8 @@ callback_mode() ->
 init({RanchRef, Transport, Opts}) ->
     AuthTimeout = key_value:get(auth_timeout, Opts, 5000),
     IdleTimeout = key_value:get(idle_timeout, Opts, infinity),
+    %% Shall we hibernate when we are idle?
+    Hibernate = key_value:get(hibernate, Opts, idle),
 
     State0 = #state{
         ranch_ref = RanchRef,
@@ -141,38 +153,42 @@ init({RanchRef, Transport, Opts}) ->
         opts = Opts,
         auth_timeout = AuthTimeout,
         idle_timeout = IdleTimeout,
+        hibernate = Hibernate,
         start_ts = erlang:system_time(millisecond)
     },
 
     %% Setup ping
-    PingOpts = key_value:get(ping, Opts, []),
+    PingOpts = maps:from_list(key_value:get(ping, Opts, [])),
+    State = maybe_enable_ping(PingOpts, State0),
 
-    State = case key_value:get(enabled, PingOpts, false) of
-        true ->
-            State0#state{
-                ping_retry = bondy_retry:init(ping, PingOpts)
-            };
-        false ->
-            State0
-    end,
-
-    {ok, connected, State, AuthTimeout}.
+    %% We setup the auth_timeout timer. This is the period we allow between
+    %% openning a connection and authenticating at least one session. Having
+    %% passed that time we will close the connection.
+    Actions = [auth_timeout(State)],
+    {ok, active, State, Actions}.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+terminate({shutdown, Info}, StateName, #state{socket = undefined} = State) ->
+    ok = remove_all_registry_entries(State),
+    ?LOG_INFO(Info#{
+        state_name => StateName
+    }),
+    ok;
 
-terminate(_Reason, _StateName, #state{socket = undefined} = State) ->
-    ok = remove_all_registry_entries(State);
-
-terminate(Reason, StateName, #state{} = State) ->
+terminate(Reason, StateName, #state{socket = undefined} = State) ->
+    ok = remove_all_registry_entries(State),
     ?LOG_INFO(#{
         description => "Closing connection",
-        reason => Reason
+        reason => Reason,
+        state_name => StateName
     }),
+    ok;
 
+terminate(Reason, StateName, #state{} = State) ->
     Transport = State#state.transport,
     Socket = State#state.socket,
 
@@ -200,7 +216,7 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-connected(enter, connected, State) ->
+active(enter, active, State) ->
     Ref = State#state.ranch_ref,
     Transport = State#state.transport,
 
@@ -214,7 +230,8 @@ connected(enter, connected, State) ->
         {active, once}
         | bondy_config:get([Ref, socket_opts], [])
     ],
-    %% If Transport == ssl, upgrades a gen_tcp, or equivalent, socket to an SSL
+
+    %% If Transport == ssl, upgrades a gen_tcp, or equivalent socket to an SSL
     %% socket by performing the TLS server-side handshake, returning a TLS
     %% socket.
     ok = Transport:setopts(Socket, SocketOpts),
@@ -230,103 +247,342 @@ connected(enter, connected, State) ->
 
     ok = on_connect(State),
 
-    {keep_state, State#state{socket = Socket}, [auth_timeout(State)]};
+    Actions = [auth_timeout(State)],
+    {keep_state, State#state{socket = Socket}, Actions};
 
+active(enter, idle, State) ->
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state_and_data, Actions};
 
-connected(info, {Tag, Socket, Data}, #state{socket = Socket} = State)
-when ?SOCKET_DATA(Tag) ->
-    ok = set_socket_active(State),
+active(
+    internal, {hello, Uri, Details}, #state{auth_context = undefined} = State0
+) ->
+    %% TODO validate Details
+    ?LOG_DEBUG(#{
+        description => "Got hello",
+        details => Details
+    }),
 
-    case binary_to_term(Data) of
-        {receive_message, SessionId, Msg} ->
-            ?LOG_DEBUG(#{
-                description => "Got session message from edge",
-                reason => Msg,
-                session_id => SessionId
-            }),
-            safe_receive_message(Msg, SessionId, State);
-        Msg ->
-            ?LOG_DEBUG(#{
-                description => "Got message from edge",
-                reason => Msg
-            }),
-            handle_in(Msg, State)
+    try
+
+        Realm = bondy_realm:fetch(Uri),
+
+        bondy_realm:allow_connections(Realm)
+            orelse throw(connections_not_allowed),
+
+        %% We send the challenge
+        State = challenge(Realm, Details, State0),
+
+        %% We wait for response and timeout using auth_timeout again
+        Actions = [auth_timeout(State)],
+        {keep_state, State, Actions}
+
+    catch
+        error:{not_found, Uri} ->
+            Abort = {
+                abort,
+                undefined,
+                no_such_realm,
+                #{
+                    message => <<"Realm does not exist.">>,
+                    realm => Uri
+                }
+            },
+            ok = send_message(Abort, State0),
+            {stop, normal, State0};
+
+        throw:connections_not_allowed = Reason ->
+            Abort = {abort, undefined, Reason, #{
+                message => <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure taken by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>,
+                realm => Uri
+            }},
+            ok = send_message(Abort, State0),
+            {stop, normal, State0};
+
+        throw:{no_authmethod, ReqMethods} ->
+            Abort = {abort, undefined, no_authmethod, #{
+                message => <<"The requested authentication methods are not available for this user on this realm.">>,
+                realm => Uri,
+                authmethods => ReqMethods
+            }},
+            ok = send_message(Abort, State0),
+            {stop, normal, State0};
+
+        throw:{authentication_failed, Reason} ->
+            Abort = {abort, undefined, authentication_failed, #{
+                message => <<"Authentication failed.">>,
+                realm => Uri,
+                reason => Reason
+            }},
+            ok = send_message(Abort, State0),
+            {stop, normal, State0}
+
     end;
 
-connected(info, {Tag, _Socket}, _) when ?CLOSED_TAG(Tag) ->
+active(internal, {hello, _, _}, #state{} = State) ->
+    %% Assumption: no concurrent session establishment on this transport
+    %% Session already being established, invalid message
+    Abort = {abort, undefined, protocol_violation, #{
+        message => <<"You've sent the HELLO message twice">>
+    }},
+    ok = send_message(Abort, State),
+    {stop, normal, State};
+
+active(internal, {authenticate, Signature, Extra}, State0) ->
+    %% TODO validate Details
+    ?LOG_DEBUG(#{
+        description => "Got authenticate",
+        signature => Signature,
+        extra => Extra
+    }),
+
+    try
+
+        State = authenticate(<<"cryptosign">>, Signature, Extra, State0),
+        %% We cancel the auth timeout as soon as the connection has at least
+        %% one authenticate session
+        Actions = [
+            {{timeout, auth_timeout}, cancel},
+            ping_idle_timeout(State)
+        ],
+        {keep_state, State, Actions}
+
+    catch
+        throw:{authentication_failed, Reason} ->
+            AuthCtxt = State0#state.auth_context,
+            RealmUri = bondy_auth:realm_uri(AuthCtxt),
+            SessionId = bondy_auth:realm_uri(AuthCtxt),
+            Abort = {abort, SessionId, authentication_failed, #{
+                message => <<"Authentication failed.">>,
+                realm_uri => RealmUri,
+                reason => Reason
+            }},
+            ok = send_message(Abort, State0),
+            {stop, normal, State0}
+    end;
+
+active(internal, {aae_sync, SessionId, Opts}, State) ->
+    RealmUri = session_realm(SessionId, State),
+    ok = full_sync(SessionId, RealmUri, Opts, State),
+    Finish = {aae_sync, SessionId, finished},
+    ok = gen_statem:cast(self(), {forward_message, Finish}),
+    Actions = [ping_idle_timeout(State)],
+    {keep_state_and_data, Actions};
+
+active(internal, {session_message, SessionId, Msg}, State) ->
+    ?LOG_DEBUG(#{
+        description => "Got session message from client",
+        session_id => SessionId,
+        message => Msg
+    }),
+    try
+        handle_in(Msg, SessionId, State)
+    catch
+        throw:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Unhandled error",
+                session_id => SessionId,
+                message => Msg,
+                class => throw,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            Actions = [ping_idle_timeout(State)],
+            {keep_state_and_data, Actions};
+
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error while handling session message",
+                session_id => SessionId,
+                message => Msg,
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            Abort = {abort, SessionId, server_error, #{
+                reason => Reason
+            }},
+            ok = send_message(Abort, State),
+            {stop, Reason, State}
+    end;
+
+active({timeout, auth_timeout}, auth_timeout, _) ->
     ?LOG_INFO(#{
-        description => "Bridge Relay connection closed by client"
+        description => "Closing connection due to authentication timeout.",
+        reason => auth_timeout
     }),
     {stop, normal};
 
-connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
-    ?LOG_INFO(#{
-        description => "Bridge Relay connection closed due to error",
-        reason => Reason
-    }),
-    {stop, Reason};
+active({timeout, ping_idle_timeout}, ping_idle_timeout, State) ->
+    %% We have had no activity, transition to idle and start sending pings
+    {next_state, idle, State};
 
-connected(info, {?BONDY_REQ, Pid, RealmUri, M}, State) ->
-    %% A local bondy:send(), we need to forward to edge client
-    ?LOG_DEBUG(#{
-        description => "Received WAMP request we need to FWD to edge",
-        message => M
-    }),
+active(EventType, EventContent, State) ->
+    handle_event(EventType, EventContent, active, State).
 
-    handle_out(M, RealmUri, Pid, State);
 
-connected(info, Msg, State) ->
-    ?LOG_INFO(#{
-        description => "Received unknown message",
-        type => info,
-        event => Msg
-    }),
 
-    {keep_state_and_data, [idle_timeout(State)]};
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+idle(enter, active, State) ->
+    %% We use an event timeout meaning any event received will cancel it
+    IdleTimeout = State#state.idle_timeout,
+    PingTimeout = State#state.idle_timeout,
+    Adjusted = IdleTimeout - PingTimeout,
+    Time = case Adjusted > 0 of
+        true -> Adjusted;
+        false -> IdleTimeout
+    end,
 
-connected({call, From}, Request, State) ->
+    Actions = [
+        {state_timeout, Time, idle_timeout}
+    ],
+    maybe_send_ping(State, Actions);
+
+idle({timeout, ping_idle_timeout}, ping_idle_timeout, State) ->
+    maybe_send_ping(State);
+
+idle({timeout, ping_timeout}, ping_timeout, State0) ->
+    %% No ping response in time
+    State = ping_fail(State0),
+    %% Try to send another one or stop if retry limit reached
+    maybe_send_ping(State);
+
+idle(state_timeout, idle_timeout, _State) ->
+    Info = #{
+        description => "Shutting down connection due to inactivity.",
+        reason => idle_timeout
+    },
+    {stop, {shutdown, Info}};
+
+idle(internal, {pong, Bin}, #state{ping_payload = Bin} = State0) ->
+    %% We got a response to our ping
+    State = ping_succeed(State0),
+    Actions = [
+        {{timeout, ping_timeout}, cancel},
+        ping_idle_timeout(State),
+        maybe_hibernate(idle, State)
+    ],
+    {keep_state, State, Actions};
+
+idle(internal, Msg, State) ->
+    Actions = [
+        {{timeout, ping_timeout}, cancel},
+        {{timeout, ping_idle_timeout}, cancel},
+        {next_event, internal, Msg}
+    ],
+    %% idle_timeout is a state timeout so it will be cancelled as we are
+    %% transitioning to active
+    {next_state, active, State, Actions};
+
+idle(EventType, EventContent, State) ->
+    handle_event(EventType, EventContent, idle, State).
+
+
+
+%% =============================================================================
+%% PRIVATE: COMMON EVENT HANDLING
+%% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Handle events common to all states
+%% @end
+%% -----------------------------------------------------------------------------
+
+%% TODO forward_message or forward?
+handle_event({call, From}, Request, _, _) ->
     ?LOG_INFO(#{
         description => "Received unknown request",
         type => call,
         event => Request
     }),
+    %% We should not reset timers, nor change state here as this is an invalid
+    %% message
+    Actions = [
+        {reply, From, {error, badcall}}
+    ],
+    {keep_state_and_data, Actions};
 
-    gen_statem:reply(From, {error, badcall}),
-
-    {keep_state_and_data, [idle_timeout(State)]};
-
-%% TODO forward_message or forward?
-connected(cast, {forward_message, Msg}, State) ->
+handle_event(cast, {forward_message, Msg}, _, State) ->
+    %% This is a cast we do to ourselves
     ok = send_message(Msg, State),
-    {keep_state_and_data, [idle_timeout(State)]};
+    Actions = [
+        {{timeout, ping_timeout}, cancel},
+        {{timeout, ping_idle_timeout}, cancel}
+    ],
+    {next_state, active, State, Actions};
 
-%% TODO forward_message or forward?
-connected(cast, {forward, Msg}, State) ->
-    ok = send_message(Msg, State),
-    {keep_state_and_data, [idle_timeout(State)]};
+handle_event(internal, {ping, Data}, _, State) ->
+    %% The client is sending us a ping
+    ok = send_message({pong, Data}, State),
+    %% We keep all timers
+    keep_state_and_data;
 
-connected(cast, Msg, State) ->
-    ?LOG_INFO(#{
-        description => "Received unknown message",
-        type => cast,
-        event => Msg
+handle_event(info, {?BONDY_REQ, Pid, RealmUri, M}, _, State) ->
+    %% A local bondy:send(), we need to forward to client
+    ?LOG_DEBUG(#{
+        description => "Received WAMP request we need to FWD to client",
+        message => M
     }),
-    {keep_state_and_data, [idle_timeout(State)]};
 
-connected(timeout, _Msg, _) ->
+    handle_out(M, RealmUri, Pid, State);
+
+handle_event(info, {Tag, Socket, Data}, _, #state{socket = Socket} = State)
+when ?SOCKET_DATA(Tag) ->
+    ok = set_socket_active(State),
+
+    try binary_to_term(Data) of
+        Msg ->
+            ?LOG_DEBUG(#{
+                description => "Received message from client",
+                reason => Msg
+            }),
+            %% The message can be a ping|pong and in the case of idle state we
+            %% should not reset timers here, we'll do that in the handling
+            %% of next_event
+            Actions = [
+                {next_event, internal, Msg}
+            ],
+            {keep_state, State, Actions}
+    catch
+        Class:Reason ->
+            Info = #{
+                description => "Received invalid data from client.",
+                data => Data,
+                class => Class,
+                reason => Reason
+            },
+            {stop, {shutdown, Info}}
+    end;
+
+handle_event(info, {Tag, _Socket}, _, _) when ?CLOSED_TAG(Tag) ->
     ?LOG_INFO(#{
-        description => "Closing connection",
-        reason => timeout
+        description => "Connection closed by client."
     }),
     {stop, normal};
 
-connected(EventType, Msg, _) ->
+handle_event(info, {Tag, _, Reason}, _, _) when ?SOCKET_ERROR(Tag) ->
     ?LOG_INFO(#{
-        description => "Received unknown message",
-        type => EventType,
-        event => Msg
+        description => "Connection closed due to error.",
+        reason => Reason
     }),
-    {stop, normal}.
+    {stop, Reason};
+
+
+handle_event(EventType, EventContent, StateName, _) ->
+    ?LOG_INFO(#{
+        description => "Received unknown message.",
+        type => EventType,
+        event => EventContent,
+        state_name => StateName
+    }),
+    keep_state_and_data.
 
 
 
@@ -404,13 +660,12 @@ challenge(Realm, Details, State0) ->
 %% @private
 send_challenge(Details, Method, State0) ->
     AuthCtxt0 = State0#state.auth_context,
-    SessionId = bondy_auth:session_id(AuthCtxt0),
 
     {Reply, State} =
         case bondy_auth:challenge(Method, Details, AuthCtxt0) of
             {false, _} ->
-                M = {welcome, SessionId, #{}},
-                {M, State0#state{auth_context = undefined}};
+                %% We got no challenge? This cannot happen with cryptosign
+                exit(invalid_authmethod);
 
             {true, ChallengeExtra, AuthCtxt1} ->
                 M = {challenge, Method, ChallengeExtra},
@@ -460,222 +715,90 @@ set_socket_active(State) ->
 
 %% @private
 send_message(Message, State) ->
+    ?LOG_DEBUG(#{description => "sending message", message => Message}),
     Data = term_to_binary(Message),
     (State#state.transport):send(State#state.socket, Data).
 
 
 %% @private
 on_connect(_State) ->
-    ?LOG_NOTICE(#{
-        description => "Established connection with edge router"
+    ?LOG_INFO(#{
+        description => "Established connection with client router."
     }),
     ok.
 
 
+
+%% -----------------------------------------------------------------------------
 %% @private
-auth_timeout(State) ->
-    {timeout, State#state.auth_timeout, auth_timeout}.
-
-
-%% @private
-idle_timeout(State) ->
-    {timeout, State#state.idle_timeout, idle_timeout}.
-
-
-%% @private
-handle_in({hello, _, _}, #state{auth_context = Ctxt} = State)
-when Ctxt =/= undefined ->
-    %% Session already being established, invalid message
-    Abort = {abort, undefined, protocol_violation, #{
-        message => <<"You've sent the HELLO message twice">>
-    }},
-    ok = send_message(Abort, State),
-    {stop, normal, State};
-
-handle_in({hello, Uri, Details}, State0) ->
-    %% TODO validate Details
-    ?LOG_DEBUG(#{
-        description => "Got hello",
-        details => Details
-    }),
-
-    try
-
-        Realm = bondy_realm:fetch(Uri),
-
-        bondy_realm:allow_connections(Realm)
-            orelse throw(connections_not_allowed),
-
-        %% We send the challenge
-        State = challenge(Realm, Details, State0),
-
-        %% We wait for response and timeout using auth_timeout again
-        {keep_state, State, [auth_timeout(State)]}
-
-    catch
-        error:{not_found, Uri} ->
-            Abort = {
-                abort,
-                undefined,
-                no_such_realm,
-                #{
-                    message => <<"Realm does not exist.">>,
-                    realm => Uri
-                }
-            },
-            ok = send_message(Abort, State0),
-            {stop, normal, State0};
-
-        throw:connections_not_allowed = Reason ->
-            Abort = {abort, undefined, Reason, #{
-                message => <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure taken by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>,
-                realm => Uri
-            }},
-            ok = send_message(Abort, State0),
-            {stop, normal, State0};
-
-        throw:{no_authmethod, ReqMethods} ->
-            Abort = {abort, undefined, no_authmethod, #{
-                message => <<"The requested authentication methods are not available for this user on this realm.">>,
-                realm => Uri,
-                authmethods => ReqMethods
-            }},
-            ok = send_message(Abort, State0),
-            {stop, normal, State0};
-
-        throw:{authentication_failed, Reason} ->
-            Abort = {abort, undefined, authentication_failed, #{
-                message => <<"Authentication failed.">>,
-                realm => Uri,
-                reason => Reason
-            }},
-            ok = send_message(Abort, State0),
-            {stop, normal, State0}
-
-    end;
-
-handle_in({authenticate, Signature, Extra}, State0) ->
-    %% TODO validate Details
-    ?LOG_DEBUG(#{
-        description => "Got authenticate",
-        signature => Signature,
-        extra => Extra
-    }),
-
-    try
-
-        State = authenticate(<<"cryptosign">>, Signature, Extra, State0),
-        {keep_state, State, [idle_timeout(State)]}
-
-    catch
-        throw:{authentication_failed, Reason} ->
-            AuthCtxt = State0#state.auth_context,
-            RealmUri = bondy_auth:realm_uri(AuthCtxt),
-            SessionId = bondy_auth:realm_uri(AuthCtxt),
-            Abort = {abort, SessionId, authentication_failed, #{
-                message => <<"Authentication failed.">>,
-                realm_uri => RealmUri,
-                reason => Reason
-            }},
-            ok = send_message(Abort, State0),
-            {stop, normal, State0}
-    end;
-
-handle_in({aae_sync, SessionId, Opts}, State) ->
-    RealmUri = session_realm(SessionId, State),
-    ok = full_sync(SessionId, RealmUri, Opts, State),
-    Finish = {aae_sync, SessionId, finished},
-    ok = gen_statem:cast(self(), {forward_message, Finish}),
-    {keep_state_and_data, [idle_timeout(State)]}.
-
-handle_out({goodbye, Details, ReasonUri}, RealmUri, _From, State) ->
-    %% M is the wamp_goodbye() message.
-    SessionId = session_id(RealmUri, State),
-    M = {goodbye, SessionId, ReasonUri, Details},
-    ok = send_message(M, State),
-    {stop, normal};
-
-handle_out(M, RealmUri, _From, State) ->
-    SessionId = session_id(RealmUri, State),
-    ok = send_message({receive_message, SessionId, M}, State),
-
-    {keep_state_and_data, [idle_timeout(State)]}.
-
-
-%% @private
-safe_receive_message(Msg, SessionId, State) ->
-    try
-        receive_message(Msg, SessionId, State)
-    catch
-        throw:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Unhandled error",
-                session => SessionId,
-                message => Msg,
-                class => throw,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            {keep_state_and_data, [idle_timeout(State)]};
-
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error while handling session message",
-                session => SessionId,
-                message => Msg,
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            Abort = {abort, SessionId, server_error, #{
-                reason => Reason
-            }},
-            ok = send_message(Abort, State),
-            {stop, Reason, State}
-    end.
-
-
-%% @private
-receive_message({registration_created, Entry}, SessionId, State0) ->
+%% @doc Handles inbound session messages
+%% @end
+%% -----------------------------------------------------------------------------
+handle_in({registration_created, Entry}, SessionId, State0) ->
     State = add_registry_entry(SessionId, Entry, State0),
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
 
-    {keep_state, State, [idle_timeout(State)]};
-
-receive_message({registration_added, Entry}, SessionId, State0) ->
+handle_in({registration_added, Entry}, SessionId, State0) ->
     State = add_registry_entry(SessionId, Entry, State0),
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
 
-    {keep_state, State, [idle_timeout(State)]};
-
-receive_message({registration_removed, Entry}, SessionId, State0) ->
+handle_in({registration_removed, Entry}, SessionId, State0) ->
     State = remove_registry_entry(SessionId, Entry, State0),
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
 
-    {keep_state, State, [idle_timeout(State)]};
-
-receive_message({registration_deleted, Entry}, SessionId, State0) ->
+handle_in({registration_deleted, Entry}, SessionId, State0) ->
     State = remove_registry_entry(SessionId, Entry, State0),
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
 
-    {keep_state, State, [idle_timeout(State)]};
-
-receive_message({subscription_created, Entry}, SessionId, State0) ->
+handle_in({subscription_created, Entry}, SessionId, State0) ->
     State = add_registry_entry(SessionId, Entry, State0),
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
 
-    {keep_state, State, [idle_timeout(State)]};
-
-receive_message({subscription_added, Entry}, SessionId, State0) ->
+handle_in({subscription_added, Entry}, SessionId, State0) ->
     State = add_registry_entry(SessionId, Entry, State0),
-    {keep_state, State, [idle_timeout(State)]};
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
 
-receive_message({subscription_removed, Entry}, SessionId, State0) ->
+handle_in({subscription_removed, Entry}, SessionId, State0) ->
     State = remove_registry_entry(SessionId, Entry, State0),
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
 
-    {keep_state, State, [idle_timeout(State)]};
-
-receive_message({subscription_deleted, Entry}, SessionId, State0) ->
+handle_in({subscription_deleted, Entry}, SessionId, State0) ->
     State = remove_registry_entry(SessionId, Entry, State0),
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state, State, Actions};
 
-    {keep_state, State, [idle_timeout(State)]};
-
-receive_message({forward, _, #publish{} = M, _Opts}, SessionId, State) ->
+handle_in({forward, _, #publish{} = M, _Opts}, SessionId, State) ->
     RealmUri = session_realm(SessionId, State),
     ReqId = M#publish.request_id,
     TopicUri = M#publish.topic_uri,
@@ -700,36 +823,73 @@ receive_message({forward, _, #publish{} = M, _Opts}, SessionId, State) ->
             error(overload)
     end,
 
-    {keep_state_and_data, [idle_timeout(State)]};
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state_and_data, Actions};
 
-receive_message({forward, To, Msg, Opts}, SessionId, State) ->
+handle_in({forward, To, Msg, Opts}, SessionId, State) ->
     %% using cast here in theory breaks the CALL order guarantee!!!
     %% We either need to implement Partisan 4 plus:
     %% a) causality or
     %% b) a pool of relays (selecting one by hashing {CallerID, CalleeId}) and
     %% do it sync
     RealmUri = session_realm(SessionId, State),
-    Job = fun() ->
+
+    Fwd = fun() ->
         bondy_router:forward(Msg, To, Opts#{realm_uri => RealmUri})
     end,
 
-    case bondy_router_worker:cast(Job) of
+    case bondy_router_worker:cast(Fwd) of
         ok ->
             ok;
         {error, overload} ->
             %% TODO return proper return ...but we should move this to router
             error(overload)
     end,
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
 
-    {keep_state_and_data, [idle_timeout(State)]};
+    {keep_state_and_data, Actions};
 
-receive_message(Other, SessionId, State) ->
+handle_in(Other, SessionId, State) ->
     ?LOG_INFO(#{
         description => "Unhandled message",
-        session => SessionId,
+        session_id => SessionId,
         message => Other
     }),
-    {keep_state_and_data, [idle_timeout(State)]}.
+    Actions = [
+        ping_idle_timeout(State),
+        maybe_hibernate(active, State)
+    ],
+    {keep_state_and_data, Actions}.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+handle_out(#goodbye{} = M, RealmUri, _From, State) ->
+    Details = M#goodbye.details,
+    ReasonUri = M#goodbye.reason_uri,
+    SessionId = session_id(RealmUri, State),
+    ControlMsg = {goodbye, SessionId, ReasonUri, Details},
+    ok = send_message(ControlMsg, State),
+    {stop, normal};
+
+handle_out(M, RealmUri, _From, State) ->
+    SessionId = session_id(RealmUri, State),
+    ok = send_message({session_message, SessionId, M}, State),
+    Actions = [
+        {{timeout, ping_timeout}, cancel},
+        {{timeout, ping_idle_timeout}, cancel}
+    ],
+    {next_state, active, State, Actions}.
 
 
 %% @private
@@ -802,7 +962,7 @@ full_sync(SessionId, RealmUri, Opts, State) ->
             full_sync(SessionId, ProtoUri, Opts, State)
     end,
 
-    %% We do not automatically sync the SSO Realms, if the edge node wants it,
+    %% We do not automatically sync the SSO Realms, if the client node wants it,
     %% that should be requested explicitely
 
     %% TODO However, we should sync a proyection of the SSO Realm, the realm
@@ -867,7 +1027,7 @@ do_full_sync(SessionId, RealmUri, _Opts, _State0) ->
 prepare_object(Obj) ->
     case bondy_realm:is_type(Obj) of
         true ->
-            %% A temporary hack to prevent keys being synced with an Edge
+            %% A temporary hack to prevent keys being synced with an client
             %% router. We will use this until be implement partial replication
             %% and decide on Key management strategies.
             bondy_realm:strip_private_keys(Obj);
@@ -923,3 +1083,123 @@ maybe_gen_authid(anonymous) ->
 
 maybe_gen_authid(UserId) ->
     UserId.
+
+
+%% =============================================================================
+%% PRIVATE: KEEP ALIVE PING
+%% =============================================================================
+
+
+%% @private
+maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
+    IdleTimeout = maps:get(idle_timeout, PingOpts),
+    Timeout = maps:get(timeout, PingOpts),
+    Attempts = maps:get(max_attempts, PingOpts),
+
+    Retry = bondy_retry:init(
+        ping_timeout,
+        #{
+            deadline => 0, % disable, use max_retries only
+            interval => Timeout,
+            max_retries => Attempts,
+            backoff_enabled => false
+        }
+    ),
+
+    State#state{
+        ping_idle_timeout = IdleTimeout,
+        ping_payload = bondy_utils:generate_fragment(16),
+        ping_retry = Retry
+    };
+
+maybe_enable_ping(#{enabled := false}, State) ->
+    State.
+
+
+%% @private
+ping_succeed(#state{ping_retry = undefined} = State) ->
+    %% ping disabled
+    State;
+
+ping_succeed(#state{} = State) ->
+    {_, Retry} = bondy_retry:succeed(State#state.ping_retry),
+    State#state{ping_retry = Retry}.
+
+
+%% @private
+ping_fail(#state{ping_retry = undefined} = State) ->
+    %% ping disabled
+    State;
+
+ping_fail(#state{} = State) ->
+    {_, Retry} = bondy_retry:fail(State#state.ping_retry),
+    State#state{ping_retry = Retry}.
+
+
+%% @private
+maybe_send_ping(State) ->
+    maybe_send_ping(State, []).
+
+%% @private
+maybe_send_ping(#state{ping_retry = undefined} = State, Actions0) ->
+    %% ping disabled
+    Actions = [
+        maybe_hibernate(idle, State) | Actions0
+    ],
+    {keep_state_and_data, Actions};
+
+maybe_send_ping(#state{} = State, Actions0) ->
+    case bondy_retry:get(State#state.ping_retry) of
+        Time when is_integer(Time) ->
+            %% We send a ping
+            Bin = State#state.ping_payload,
+            ok = send_message({ping, Bin}, State),
+            %% We set the timeout
+            Actions = [
+                ping_timeout(Time),
+                maybe_hibernate(idle, State)
+                | Actions0
+            ],
+            {keep_state, State, Actions};
+
+        Limit when Limit == deadline orelse Limit == max_retries ->
+            Info = #{
+                description => "Client router has not responded to our ping on time. Shutting down.",
+                reason => ping_timeout
+            },
+            {stop, {shutdown, Info}, State}
+    end.
+
+
+%% @private
+ping_idle_timeout(State) ->
+    %% We use an generic timeout meaning we only reset the timer manually by
+    %% setting it again.
+    Time = State#state.ping_idle_timeout,
+    {{timeout, ping_idle_timeout}, Time, ping_idle_timeout}.
+
+
+%% @private
+ping_timeout(Time) ->
+    %% We use an generic timeout meaning we only reset the timer manually by
+    %% setting it again.
+    {{timeout, ping_timeout}, Time, ping_timeout}.
+
+
+%% @private
+auth_timeout(State) ->
+    %% We use an generic timeout meaning we only reset the timer manually by
+    %% setting it again.
+    Time = State#state.auth_timeout,
+    {{timeout, auth_timeout}, Time, auth_timeout}.
+
+
+%% @private
+maybe_hibernate(_, #state{hibernate = never}) ->
+    {hibernate, false};
+
+maybe_hibernate(_, #state{hibernate = always}) ->
+    {hibernate, true};
+
+maybe_hibernate(StateName, #state{hibernate = idle}) ->
+    {hibernate, StateName == idle}.

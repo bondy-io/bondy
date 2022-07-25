@@ -25,6 +25,7 @@
 %% =============================================================================
 
 
+
 %% -----------------------------------------------------------------------------
 %% @doc Defines whether Bondy will wait for the db partitions to be initialised
 %% before continuing with initialisation.
@@ -605,15 +606,47 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc The capacity of the session manager process pool, i.e. the maximum
-%% number of active erlang processes handling session events (default = 50).
+%% number of active erlang processes handling session events (default = 32).
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.session_manager.pool.size", "bondy.session_manager_pool.size", [
-  {default, 50},
+  {default, 32},
+  {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc The number of registry partitions, i.e. the maximum
+%% number of active erlang processes handling registry trie serialised
+%% operations (default = 32).
+%% Check with the documentation which operations are concurrent and which are
+%% serialised to understand the impact.
+%% Notice that all registrations and subcritions for a realm are stored in the
+%% same (single) partition and partition assignment is based on hashing the
+%% realm uri across the number of partitions. So increasing the number of
+%% partitions will only  affect use cases in which you have a decent amount of
+%% realms.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "registry.partitions", "bondy.registry.partitions", [
+  {default, 32},
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc off_heap only enabled if running on Erlang 25 or later.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping,
+  "registry.partition_spawn_opts.message_queue_data",
+  "bondy.registry.partition_spawn_opts.message_queue_data", [
+  {default, off_heap},
+  {datatype, {enum, [off_heap, on_heap]}},
+  hidden
+]}.
 
 %% =============================================================================
 %% ADMIN REST API CLEAR
@@ -1680,7 +1713,6 @@
   {datatype, flag}
 ]}.
 
-
 %% @doc Defines the port to use for the cluster TCP connection
 {mapping, "cluster.peer_port", "partisan.peer_port", [
   {default, 18086},
@@ -2069,7 +2101,9 @@ end}.
 %% Controls when will the AAE system will trigger the next
 %% data exchange.
 {mapping, "aae.exchange_timer", "partisan.exchange_tick_period", [
-  {default, "1m"},
+  %% TODO this should be something like partisan.broadcast_mods.plum_db.
+  %% exchange_tick_period cause it overriden by cluster.exchange_tick_period
+  {default, "10s"},
   {datatype, {duration, ms}}
 ]}.
 

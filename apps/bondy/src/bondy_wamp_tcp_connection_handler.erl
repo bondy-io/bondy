@@ -24,7 +24,6 @@
 -module(bondy_wamp_tcp_connection_handler).
 -behaviour(gen_server).
 -behaviour(ranch_protocol).
--include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
@@ -274,8 +273,6 @@ handle_info(Event, State) ->
         event => Event
     }),
     {noreply, State}.
-
-
 
 
 terminate(Reason, #state{transport = T, socket = S} = State0)
@@ -838,9 +835,14 @@ cancel_timer(_) ->
 
 
 %% @private
+maybe_send_ping(#state{ping_idle_timeout = undefined} = State) ->
+    %% ping disabled
+    {noreply, State};
+
 maybe_send_ping(#state{} = State) ->
     {Result, Retry} = bondy_retry:fail(State#state.ping_retry),
     maybe_send_ping(Result, State#state{ping_retry = Retry}).
+
 
 %% @private
 maybe_send_ping(Limit, State)

@@ -45,7 +45,6 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_ws_connection_handler).
--include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("http_api.hrl").
 -include("bondy.hrl").
@@ -633,6 +632,10 @@ cancel_timer(_) ->
 
 
 %% @private
+maybe_send_ping(#state{ping_idle_timeout = undefined} = State) ->
+    %% ping disabled
+    {[], State};
+
 maybe_send_ping(#state{} = State) ->
     {Result, Retry} = bondy_retry:fail(State#state.ping_retry),
     maybe_send_ping(Result, State#state{ping_retry = Retry}).

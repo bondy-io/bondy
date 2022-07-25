@@ -59,7 +59,7 @@ multiple_methods(Config) ->
     }),
 
     ?assertMatch(
-        ok,
+        {ok, _},
         bondy_rbac_source:add(RealmUri, Source1)
     ),
 
@@ -75,7 +75,7 @@ multiple_methods(Config) ->
     }),
 
     ?assertMatch(
-        ok,
+        {ok, _},
         bondy_rbac_source:add(RealmUri, Source2)
     ),
 

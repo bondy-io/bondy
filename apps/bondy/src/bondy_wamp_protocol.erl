@@ -24,7 +24,6 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_protocol).
 -behaviour(bondy_sensitive).
--include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
@@ -38,7 +37,7 @@
     authmethod              ::  any(),
     auth_context            ::  map() | undefined,
     auth_timestamp          ::  integer() | undefined,
-    state_name = closed     ::  state_name(),
+    state_name              ::  state_name(),
     context                 ::  bondy_context:t() | undefined,
     goodbye_reason          ::  uri() | undefined
 }).
@@ -101,7 +100,10 @@ format_status(Opt, #wamp_state{} = State) ->
     State#wamp_state{
         auth_context = NewAuthCtxt,
         context = NewCtxt
-    }.
+    };
+
+format_status(_, undefined) ->
+    undefined.
 
 
 
@@ -450,27 +452,20 @@ handle_inbound_messages(
     {stop, shutdown, lists:reverse(Acc), St1};
 
 handle_inbound_messages(
-    [#hello{} = M|_],
-    #wamp_state{state_name = established, context = #{session := _}} = St,
-    Acc) ->
+    [#hello{} = M|_], #wamp_state{context = #{session := _}} = St, Acc) ->
     %% Client already has a session!
     %% RFC: It is a protocol error to receive a second "HELLO" message during
     %% the lifetime of the session and the _Peer_ must fail the session if that
     %% happens.
     %% We reply all previous messages plus an abort message and close
+    %% state_name might be 'close' already
     ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
-    Reason = <<"You've sent a HELLO message more than once.">>,
+    Reason = <<"You've sent a HELLO when the session is already established.">>,
     stop({protocol_violation, Reason}, Acc, St);
 
 handle_inbound_messages(
-    [#hello{} = M|_], #wamp_state{state_name = challenging} = St, _) ->
-    %% Client does not have a session but we already sent a challenge message
-    %% in response to a HELLO message
-    ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
-    Reason = <<"You've sent a HELLO message more than once.">>,
-    stop({protocol_violation, Reason}, St);
-
-handle_inbound_messages([#hello{realm_uri = Uri} = M|_], St0, _) ->
+    [#hello{realm_uri = Uri} = M|_],
+    #wamp_state{state_name = closed} = St0, _) ->
     %% Client is requesting a session
     %% This will return either reply with wamp_welcome() | wamp_challenge()
     %% or abort
@@ -479,18 +474,27 @@ handle_inbound_messages([#hello{realm_uri = Uri} = M|_], St0, _) ->
 
     Ctxt1 = bondy_context:set_realm_uri(Ctxt0, Uri),
     St1 = update_context(Ctxt1, St0),
+    St = set_next_state(establishing, St1),
 
     %% Lookup or create realm
     case bondy_realm:get(Uri) of
         {error, not_found} ->
-            stop({authentication_failed, no_such_realm}, St1);
+            stop({authentication_failed, no_such_realm}, St);
         Realm ->
             ok = logger:update_process_metadata(#{realm => Uri}),
 
             maybe_open_session(
-                maybe_auth_challenge(M#hello.details, Realm, St1)
+                maybe_auth_challenge(M#hello.details, Realm, St)
             )
     end;
+
+handle_inbound_messages([#hello{} = M|_], #wamp_state{} = St, _) ->
+    %% Client does not have a session but we already received a HELLO message
+    %% once, otherwise we would be in the 'close' state and match the previous
+    %% clause
+    ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
+    Reason = <<"You've sent a HELLO message more than once.">>,
+    stop({protocol_violation, Reason}, St);
 
 handle_inbound_messages(
     [#authenticate{} = M|_],
@@ -1035,6 +1039,7 @@ encoding(#wamp_state{subprotocol = {_, _, Serializer}}) ->
 do_init({_, _, _} = Subprotocol, Peer, _Opts) ->
     Ctxt = bondy_context:new(Peer, Subprotocol),
     State = #wamp_state{
+        state_name = closed,
         subprotocol = Subprotocol,
         context = Ctxt
     },
@@ -1047,6 +1052,12 @@ do_init({_, _, _} = Subprotocol, Peer, _Opts) ->
 %% @private
 update_context(Ctxt, St) ->
     St#wamp_state{context = Ctxt}.
+
+
+%% @private
+set_next_state(Name, St) ->
+    St#wamp_state{state_name = Name}.
+
 
 
 update_process_metadata(#wamp_state{} = State) ->

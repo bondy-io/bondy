@@ -251,6 +251,7 @@
 -export([revoke_all/1]).
 -export([revoke_all/2]).
 -export([revoke_all/3]).
+-export([remove_expired/0]).
 
 
 
@@ -515,6 +516,24 @@ revoke_all(_RealmUri, _Authid, _Scope) ->
     % plum_db:foreach(Fun, Prefix, [{resolver, ticket_resolver/2}]).
     error(not_implemented).
 
+
+remove_expired() ->
+    % Prefix = {?PLUM_DB_TICKET_TAB, '_'},
+    % Fun = fun
+    %     ({{Prefix, Key}, O}, ok) ->
+    %         %% fold_elements does not currently respect opts, so we manually
+    %         %% resolve
+    %         case plum_db_object:values(plum_db_object:resolve(O, lww)) of
+    %             ['$deleted'] ->
+    %                 ok;
+    %             [Val] ->
+    %                 plum_db:delete(Prefix, Key)
+    %         end
+    % end,
+    % Opts = [],
+    % plum_db:fold_elements(Fun, ok, Prefix, Opts).
+
+    ok.
 
 
 %% ===========================================================================

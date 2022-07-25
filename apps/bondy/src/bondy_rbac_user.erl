@@ -250,6 +250,7 @@
 -export([normalise_username/1]).
 -export([password/1]).
 -export([remove/2]).
+-export([remove/3]).
 -export([remove_all/2]).
 -export([remove_alias/3]).
 -export([remove_group/3]).
@@ -262,6 +263,11 @@
 -export([update/3]).
 -export([update/4]).
 -export([username/1]).
+
+%% PLUM_DB PREFIX CALLBACKS
+-export([on_merge/3]).
+-export([will_merge/3]).
+
 
 
 %% =============================================================================
@@ -618,10 +624,21 @@ update(RealmUri, Username0, Data0, Opts) when is_binary(Username0) ->
 -spec remove(uri(), binary() | map()) ->
     ok | {error, {no_such_user, username()} | reserved_name}.
 
-remove(RealmUri, #{type := ?USER_TYPE, username := Username}) ->
-    remove(RealmUri, Username);
+remove(RealmUri, Username) ->
+    remove(RealmUri, Username, #{}).
 
-remove(RealmUri, Username0) ->
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove(uri(), binary() | map(), Opts :: map()) ->
+    ok | {error, {no_such_user, username()} | reserved_name}.
+
+remove(RealmUri, #{type := ?USER_TYPE, username := Username}, Opts) ->
+    remove(RealmUri, Username, Opts);
+
+remove(RealmUri, Username0, Opts) ->
     %% TODO do not allow remove when this is an SSO realm and user exists in
     %% other realms (we need a reverse index - array with the list of realms
     %% this user belongs to.
@@ -649,7 +666,7 @@ remove(RealmUri, Username0) ->
         %% We finally delete the user
         ok = plum_db:delete(PDBPrefix, Username),
 
-        on_delete(RealmUri, Username)
+        on_delete(RealmUri, Username, Opts)
 
     catch
         error:{no_such_user, _} = Reason ->
@@ -669,7 +686,7 @@ remove(RealmUri, Username0) ->
 %% entirely.
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_all(uri(), #{dirty => boolean()}) -> ok.
+-spec remove_all(uri(), #{dirty => boolean(), silent := boolean()}) -> ok.
 
 remove_all(RealmUri, Opts) ->
     Dirty = maps:get(dirty, Opts, false),
@@ -681,12 +698,13 @@ remove_all(RealmUri, Opts) ->
             (Name) when Dirty == true ->
                 _ = plum_db:delete(Prefix, Name);
             (Name) ->
-                _ = remove(RealmUri, Name)
+                _ = remove(RealmUri, Name, Opts)
         end,
         Prefix,
         FoldOpts
     ),
     ok.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -884,8 +902,6 @@ to_external(#{type := ?USER_TYPE, version := ?VERSION} = User) ->
     }.
 
 
-
-
 %% -----------------------------------------------------------------------------
 %% @doc Adds an alias to the user. If the user is an SSO user, the alias is
 %% added on the SSO Realm only.
@@ -926,7 +942,6 @@ remove_alias(RealmUri, #{type := ?USER_TYPE} = User, Alias) ->
 
 remove_alias(RealmUri, Username, Alias) ->
     remove_alias(RealmUri, fetch(RealmUri, Username), Alias).
-
 
 
 %% -----------------------------------------------------------------------------
@@ -1054,6 +1069,28 @@ normalise_username(Term) when is_binary(Term) ->
 
 normalise_username(_) ->
     error(badarg).
+
+
+%% =============================================================================
+%% PLUM_DB PREFIX CALLBACKS
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc bondy_config
+%% @end
+%% -----------------------------------------------------------------------------
+will_merge(_PKey, _New, _Old) ->
+    true.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+on_merge(_PKey, _New, _Old) ->
+    ok.
 
 
 
@@ -1489,7 +1526,10 @@ on_credentials_change(RealmUri, #{username := Username} = User) ->
 
 
 %% @private
-on_delete(RealmUri, Username) ->
+on_delete(_, _, #{silent := true}) ->
+    ok;
+
+on_delete(RealmUri, Username, _) ->
     ok = bondy_event_manager:notify(
         {user_deleted, RealmUri, Username}
     ),

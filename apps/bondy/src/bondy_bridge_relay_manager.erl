@@ -251,10 +251,8 @@ stop_bridges() ->
 
 start_listeners() ->
     Protocol = bondy_bridge_relay_server,
-    %% TODO
-    ProtocolOpts = [],
-    ok = bondy_ranch_listener:start(?TCP, Protocol, ProtocolOpts),
-    ok = bondy_ranch_listener:start(?TLS, Protocol, ProtocolOpts).
+    ok = bondy_ranch_listener:start(?TCP, Protocol, bondy_config:get(?TCP)),
+    ok = bondy_ranch_listener:start(?TLS, Protocol, bondy_config:get(?TLS)).
 
 
 %% -----------------------------------------------------------------------------
@@ -652,6 +650,10 @@ do_start_bridge(Bridge, State) ->
 
 
 do_stop_bridge(Name, State) ->
+    ?LOG_INFO(# {
+        description => "Stopping bridge relay.",
+        id => Name
+    }),
     case bondy_bridge_relay_client_sup:terminate_child(Name) of
         ok ->
             Started = lists:delete(Name, State#state.started),

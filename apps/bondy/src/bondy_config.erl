@@ -28,6 +28,17 @@
 -include("bondy_plum_db.hrl").
 -include("bondy.hrl").
 
+-if(?OTP_RELEASE >= 25).
+    -define(VALIDATE_MQ_DATA(X),
+        case X of
+            off_heap -> off_heap;
+            _ -> on_heap
+        end
+    ).
+-else.
+    -define(VALIDATE_MQ_DATA(_), on_heap).
+-endif.
+
 
 -define(WAMP_EXT_OPTIONS, [
     {call, [
@@ -88,18 +99,39 @@
 ]).
 
 -define(CONFIG, [
+    %% The following are configured via bondy.conf:
+    %% - exchange_tick_period <- cluster.exchange_tick_period
+    %% - lazy_tick_period <- cluster.lazy_tick_period
+    %% - peer_port <- cluster.peer_port
+    %% - parallelism <- cluster.parallelism
+    %% - partisan_peer_service_manager <- cluster.overlay.topology
+    %% - partisan.tls <- cluster.tls.enabled
+    %% - partisan.tls_server_options.* <- cluster.tls.server.*
+    %% - partisan.tls_client_options.* <- cluster.tls.client.*
     {partisan, [
-        {broadcast_mods, [plum_db, partisan_plumtree_backend]},
-        {channels, [wamp_peer_relay, data, rpc, membership]},
-        {connect_disterl, false},
-        % {exchange_tick_period, timer:minutes(1)},
-        % {lazy_tick_period, timer:seconds(5)},
+        %% Overlay topology
+        %% Required for partisan_peer_service_manager ==
+        %% partisan_pluggable_peer_service_manager
         {membership_strategy, partisan_full_membership_strategy},
-        {partisan_peer_service_manager,
-            partisan_pluggable_peer_service_manager},
+        {connect_disterl, false},
+        {broadcast_mods, [
+            plum_db,
+            partisan_plumtree_backend
+        ]},
+        %% Remote refs
+        {remote_ref_as_uri, true},
+        {remote_ref_binary_padding, false},
         {pid_encoding, false},
         {ref_encoding, false},
+        {register_pid_for_encoding, false},
         {binary_padding, false},
+        %% Fwd options
+        {channels, [
+            wamp_peer_relay,
+            data,
+            rpc,
+            membership
+        ]},
         {disable_fast_forward, false},
         %% Broadcast options
         {broadcast, false},
@@ -110,7 +142,7 @@
     {tuplespace, [
         %% Ring size is determined based on number of Erlang schedulers
         %% which are based on number of CPU Cores.
-        %% {ring_size, 32},
+        {ring_size, min(16, erlang:system_info(schedulers))},
         {static_tables, [
             %% Used by bondy_session.erl
             {bondy_session, [
@@ -124,16 +156,6 @@
             ]},
             %% Used by bondy_session_counter.erl
             {bondy_session_counter, [
-                set,
-                {keypos, 2},
-                named_table,
-                public,
-                {read_concurrency, true},
-                {write_concurrency, true},
-                {decentralized_counters, true}
-            ]},
-            %% Used by bondy_registry.erl counters
-            {bondy_registry_state, [
                 set,
                 {keypos, 2},
                 named_table,
@@ -331,7 +353,8 @@ set_vsn(Args) ->
 
 %% @private
 setup_mods() ->
-    ok = bondy_json:setup().
+    ok = bondy_json:setup(),
+    ok = configure_registry().
 
 
 %% @private
@@ -360,8 +383,8 @@ setup_wamp() ->
 
 %% @private
 prepare_private_config() ->
-    Config = configure_plum_db(?CONFIG),
-    maybe_configure_message_retention(Config).
+    Config0 = configure_plum_db(?CONFIG),
+    maybe_configure_message_retention(Config0).
 
 
 %% @private
@@ -397,6 +420,29 @@ maybe_configure_message_retention(Config0) ->
             }),
             {error, Reason}
     end.
+
+
+%% @private
+configure_registry() ->
+    %% Configure partition count
+    KeyPath = [registry, partitions],
+
+    ok = case bondy_config:get(KeyPath, undefined) of
+        undefined ->
+            N = min(16, erlang:system_info(schedulers)),
+            bondy_config:set(KeyPath, N),
+            ok;
+        _ ->
+            ok
+    end,
+
+    %% Configure partition spawn_opts
+    Opts0 = bondy_config:get([registry, partition_spawn_opts], []),
+    Value = ?VALIDATE_MQ_DATA(
+        key_value:get(message_queue_data, Opts0, off_heap)
+    ),
+    Opts = key_value:put(message_queue_data, Value, Opts0),
+    bondy_config:set([registry, partition_spawn_opts], Opts).
 
 
 %% @private

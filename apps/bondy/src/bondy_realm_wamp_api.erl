@@ -55,7 +55,7 @@ handle_call(?BONDY_REALM_CREATE, M, Ctxt) ->
 
 handle_call(?BONDY_REALM_DELETE, M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
-    KWArgs = M#call.kwargs,
+    KWArgs = to_map(M#call.kwargs),
 
     case bondy_realm:delete(Uri, KWArgs) of
         ok ->
@@ -119,6 +119,21 @@ handle_call(?BONDY_REALM_SECURITY_IS_ENABLED, M, Ctxt) ->
 handle_call(_, M, _) ->
     E = bondy_wamp_utils:no_such_procedure_error(M),
     {reply, E}.
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+%% @private
+to_map(undefined) ->
+    maps:new();
+
+to_map(Term) when is_map(Term) ->
+    Term.
 
 
 

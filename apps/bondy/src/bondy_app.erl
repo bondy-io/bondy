@@ -280,7 +280,7 @@ configure_services() ->
 
 %% @private
 init_registry() ->
-    case bondy_registry:init_tries() of
+    case bondy_registry:init_trie() of
         ok ->
             ok;
         {error, Reason} ->

@@ -13,30 +13,118 @@
 -define(PLUM_DB_USER_GRANT_TAB, security_user_grants).
 -define(PLUM_DB_SOURCE_TAB, security_sources).
 -define(PLUM_DB_TICKET_TAB, bondy_ticket).
+
+%% REGISTRY
 -define(PLUM_DB_REGISTRATION_TAB, bondy_registration).
 -define(PLUM_DB_SUBSCRIPTION_TAB, bondy_subscription).
-
+-define(PLUM_DB_REGISTRATION_PREFIX(RealmUri),
+    {?PLUM_DB_REGISTRATION_TAB, RealmUri}
+).
+-define(PLUM_DB_SUBSCRIPTION_PREFIX(RealmUri),
+    {?PLUM_DB_SUBSCRIPTION_TAB, RealmUri}
+).
 
 -define(PLUM_DB_PREFIXES, [
     %% ram
     %% ------------------------------------------
     %% used by bondy_registry.erl
-    {?PLUM_DB_REGISTRATION_TAB, ram},
-    {?PLUM_DB_SUBSCRIPTION_TAB, ram},
+    {?PLUM_DB_REGISTRATION_TAB, #{
+        type => ram,
+        shard_by => prefix,
+        callbacks => #{
+            will_merge => {bondy_registry, will_merge},
+            on_merge => {bondy_registry, on_merge},
+            on_update => {bondy_registry, on_update},
+            on_delete => {bondy_registry, on_delete},
+            on_erase => {bondy_registry, on_erase}
+        }
+    }},
+    {?PLUM_DB_SUBSCRIPTION_TAB, #{
+        type => ram,
+        shard_by => prefix,
+        callbacks => #{
+            will_merge => {bondy_registry, will_merge},
+            on_merge => {bondy_registry, on_merge},
+            on_update => {bondy_registry, on_update},
+            on_delete => {bondy_registry, on_delete},
+            on_erase => {bondy_registry, on_erase}
+        }
+    }},
 
     %% ram_disk
     %% ------------------------------------------
-    {?PLUM_DB_REALM_TAB, ram_disk},
-    {?PLUM_DB_GROUP_GRANT_TAB, ram_disk},
-    {?PLUM_DB_GROUP_TAB, ram_disk},
-    {?PLUM_DB_USER_GRANT_TAB, ram_disk},
-    {?PLUM_DB_USER_TAB, ram_disk},
-    {?PLUM_DB_SOURCE_TAB, ram_disk},
+    {?PLUM_DB_REALM_TAB, #{
+        type => ram_disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }},
+    {?PLUM_DB_GROUP_GRANT_TAB, #{
+        type => ram_disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }},
+    {?PLUM_DB_GROUP_TAB, #{
+        type => ram_disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }},
+    {?PLUM_DB_USER_GRANT_TAB, #{
+        type => ram_disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }},
+    {?PLUM_DB_USER_TAB, #{
+        type => ram_disk,
+        shard_by => prefix,
+        callbacks => #{
+            will_merge => {bondy_rbac_user, will_merge},
+            on_merge => {bondy_rbac_user, on_merge}
+        }
+    }},
+    {?PLUM_DB_SOURCE_TAB, #{
+        type => ram_disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }},
 
     %% disk
     %% ------------------------------------------
-    {api_gateway, disk},
-    {?PLUM_DB_TICKET_TAB, disk},
-    {oauth2_refresh_tokens, disk},
-    {bondy_bridge_relay, disk}
+    {api_gateway, #{
+        type => disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }},
+    {?PLUM_DB_TICKET_TAB, #{
+        type => disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }},
+    {oauth2_refresh_tokens, #{
+        type => disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }},
+    {bondy_bridge_relay, #{
+        type => disk,
+        shard_by => prefix,
+        callbacks => #{
+
+        }
+    }}
 ]).
