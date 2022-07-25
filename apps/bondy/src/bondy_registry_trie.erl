@@ -1030,7 +1030,8 @@ del_exact_registration(Entry, Trie) ->
         entry_key = EntryKey
     },
 
-    true = ets:delete(Tab, Object),
+    %% We use match delete because Tab is a bag table
+    true = ets:match_delete(Tab, Object),
 
     _ = decr_counter(Uri, MatchPolicy, 1, Trie),
 
@@ -1078,7 +1079,8 @@ del_exact_subscription(Entry, Trie) ->
         entry_key = EntryKey
     },
 
-    true = ets:delete(Tab, Object),
+    %% We use match delete because Tab is a bag table
+    true = ets:match_delete(Tab, Object),
 
     _ = decr_counter(Uri, MatchPolicy, 1, Trie),
 
