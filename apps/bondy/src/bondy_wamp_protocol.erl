@@ -832,7 +832,10 @@ stop(#abort{reason_uri = Uri} = M, Acc, St0) ->
 
     %% We reply all previous messages plus an abort message and close
     St1 = St0#wamp_state{state_name = closed},
-    {stop, Uri, [Bin|Acc], St1}.
+    {stop, Uri, [Bin|Acc], St1};
+
+stop(Reason, Acc, St) ->
+    stop(abort_message(Reason), Acc, St).
 
 
 %% @private
