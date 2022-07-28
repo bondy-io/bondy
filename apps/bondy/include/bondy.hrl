@@ -33,6 +33,15 @@
 %% =============================================================================
 
 
+-define(BONDY_REQ, '$bondy_request').
+-define(BONDY_ACK, '$bondy_ack').
+-define(BONDY_META_KEY, '$bondy_metadata').
+
+-define(CHARS2BIN(Chars), unicode:characters_to_binary(Chars, utf8, utf8)).
+-define(CHARS2LIST(Chars), unicode:characters_to_list(Chars, utf8)).
+
+-define(JOBS_POOLNAME, jobs_pool).
+
 -define(SUPERVISOR(Id, Args, Restart, Timeout), #{
     id => Id,
     start => {Id, start_link, Args},
@@ -73,12 +82,8 @@
 ).
 
 
--define(CHARS2BIN(Chars), unicode:characters_to_binary(Chars, utf8, utf8)).
--define(CHARS2LIST(Chars), unicode:characters_to_list(Chars, utf8)).
-
 -type optional(T)       ::  T | undefined.
 -type nodestring()      ::  binary().
-
 
 
 %% =============================================================================
@@ -90,8 +95,7 @@
 -define(MASTER_REALM_URI, <<"com.leapsight.bondy">>).
 -define(CONTROL_REALM_URI, <<"com.leapsight.bondy.internal">>).
 
--define(BONDY_REQ, '$bondy_request').
--define(BONDY_PEER_ACK, '$bondy_ack').
+
 
 %% In msecs
 -define(SEND_TIMEOUT, 20000).

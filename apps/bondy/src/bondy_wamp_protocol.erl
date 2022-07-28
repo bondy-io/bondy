@@ -658,13 +658,21 @@ open_session(Extra, St0) when is_map(Extra) ->
         ok = bondy_event_manager:notify({wamp, Welcome, Ctxt1}),
         Bin = wamp_encoding:encode(Welcome, encoding(St1)),
 
-        ok = logger:update_process_metadata(#{
+        %% We define the process metadata and which keys are exposed as logger
+        %% metadata.
+        Meta = #{
             agent => bondy_utils:maybe_slice(Agent, 0, 64),
+            authid => Authid,
             authmethod => Authmethod,
+            authrealm => Authrealm,
+            protocol_session_id => SessionId,
             realm => RealmUri,
-            session_id => SessionId0,
-            protocol_session_id => SessionId
-        }),
+            session_id => SessionId0
+        },
+        %% Do not expose authid as it might be private info
+        LogKeys = [agent, authmethod, protocol_session_id, realm, session_id],
+
+        ok = bondy:set_process_metadata(Meta, LogKeys),
 
         {reply, Bin, St1#wamp_state{state_name = established}}
     catch

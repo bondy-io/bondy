@@ -352,19 +352,28 @@ async_forward(M, Ctxt0) ->
     %% existing worker or spawning a new one depending on
     %% bondy_broker_pool_type.
     Event = {M, Ctxt0},
+    Meta = bondy:get_process_metadata(),
 
-    try bondy_router_worker:cast(fun() -> sync_forward(Event) end) of
+    Fun = fun() ->
+        ok = bondy:set_process_metadata(Meta),
+        sync_forward(Event)
+    end,
+
+    try bondy_router_worker:cast(Fun) of
         ok ->
             {ok, Ctxt0};
+
         {error, overload} ->
             ?LOG_WARNING(#{
-                description => "Router pool overloaded, will route message synchronously"
+                description =>
+                    "Router pool overloaded, will route message synchronously"
             }),
             %% @TODO publish metaevent and stats
             %% @TODO use throttling and send error to caller conditionally
             %% We do it synchronously i.e. blocking the caller
             ok = sync_forward(Event),
             {ok, Ctxt0}
+
     catch
         error:Reason when Acknowledge == true ->
             %% TODO Maybe publish metaevent
