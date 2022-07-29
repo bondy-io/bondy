@@ -153,6 +153,7 @@ anon_auth_not_allowed(Config) ->
     %% We simulate U1 has logged in using wampcra
     Session = bondy_session:new(RealmUri, #{
         peer => Peer,
+        authrealm => RealmUri,
         authid => <<"foo">>,
         authmethod => ?WAMP_ANON_AUTH,
         is_anonymous => true,
@@ -185,6 +186,7 @@ ticket_auth_not_allowed(Config) ->
     %% We simulate U1 has logged in using wampcra
     Session = bondy_session:new(RealmUri, #{
         peer => Peer,
+        authrealm => RealmUri,
         authid => ?U1,
         authmethod => ?WAMP_TICKET_AUTH,
         security_enabled => true,
@@ -213,6 +215,7 @@ local_scope(Config) ->
     %% We simulate U1 has logged in using wampcra
     Session = bondy_session:new(RealmUri, #{
         peer => Peer,
+        authrealm => RealmUri,
         authid => ?U1,
         authmethod => ?WAMP_CRA_AUTH,
         security_enabled => true,
@@ -277,6 +280,7 @@ client_scope_with_ticket(Config) ->
     %% We simulate APP has logged in using cryptosign
     AppSession = bondy_session:new(RealmUri, #{
         peer => Peer,
+        authrealm => RealmUri,
         authid => ?APP,
         authmethod => ?WAMP_CRYPTOSIGN_AUTH,
         security_enabled => true,
@@ -295,6 +299,7 @@ client_scope_with_ticket(Config) ->
     %% We simulate U1 has logged in using wampcra
     UserSession = bondy_session:new(RealmUri, #{
         peer => Peer,
+        authrealm => RealmUri,
         authid => ?U1,
         authmethod => ?WAMP_CRA_AUTH,
         security_enabled => true,
@@ -333,6 +338,7 @@ client_scope_with_id(Config) ->
     %% We simulate U1 has logged in using wampcra
     UserSession = bondy_session:new(RealmUri, #{
         peer => Peer,
+        authrealm => RealmUri,
         authid => ?U1,
         authmethod => ?WAMP_CRA_AUTH,
         security_enabled => true,

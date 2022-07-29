@@ -42,6 +42,7 @@
 %% GEN_SERVER CALLBACKS
 -export([init/1]).
 -export([handle_info/2]).
+-export([handle_continue/2]).
 -export([terminate/2]).
 -export([code_change/3]).
 -export([handle_call/3]).
@@ -91,9 +92,6 @@ cast(Fun) when is_function(Fun, 0) ->
 
 
 
-
-
-
 %% =============================================================================
 %% API : GEN_SERVER CALLBACKS FOR SIDEJOB WORKER
 %% =============================================================================
@@ -108,13 +106,14 @@ init([?POOL_NAME]) ->
 
 init([Fun]) ->
     %% We've been called by sidejob_supervisor
-    %% We immediately timeout so that we find ourselfs in handle_info/2.
-    %% TODO publish metaevent and stats
-    State = #state{
-        pool_type = transient,
-        op = Fun
-    },
-    {ok, State, 0}.
+    State = #state{pool_type = transient},
+    {ok, State, {continue, {apply, Fun}}}.
+
+
+handle_continue({apply, Fun}, State) ->
+    %% We apply and terminate as this is a transient worker.
+    _ = Fun(),
+    {stop, normal, State}.
 
 
 handle_call(Event, From, State) ->
@@ -126,7 +125,7 @@ handle_call(Event, From, State) ->
     {reply, {error, {unsupported_call, Event}}, State}.
 
 
-handle_cast(Fun, State) ->
+handle_cast(Fun, State) when is_function(Fun, 0) ->
     try
         _ = Fun(),
         {noreply, State}
@@ -138,15 +137,18 @@ handle_cast(Fun, State) ->
                 stacktrace => Stacktrace
             }),
             {noreply, State}
-    end.
+    after
+        %% We cleanup, liberating the Fun from having to try..catch and do it
+        bondy:unset_process_metadata()
+    end;
 
+handle_cast(Event, State) ->
+    ?LOG_DEBUG(#{
+        reason => unsupported_event,
+        event => Event
+    }),
+    {noreply, State}.
 
-handle_info(timeout, #state{pool_type = transient, op = Fun} = State)
-when Fun /= undefined ->
-    %% We are a worker that has been spawned to handle this single op,
-    %% so we should stop right after we do it
-    _ = Fun(),
-    {stop, normal, State};
 
 handle_info(Info, State) ->
     ?LOG_DEBUG(#{
@@ -205,19 +207,19 @@ do_start_pool() ->
 %% Helper function for {@link async_forward/2}
 %% @end
 %% -----------------------------------------------------------------------------
-do_cast(permanent, PoolName, Mssg) ->
+do_cast(permanent, PoolName, Fun) ->
     %% We send a request to an existing permanent worker
     %% using bondy_router acting as a sidejob_worker
-    case sidejob:cast(PoolName, Mssg) of
+    case sidejob:cast(PoolName, Fun) of
         ok -> ok;
         overload -> {error, overload}
     end;
 
-do_cast(transient, PoolName, Mssg) ->
+do_cast(transient, PoolName, Fun) ->
     %% We spawn a transient worker using sidejob_supervisor
     sidejob_supervisor:start_child(
         PoolName,
         gen_server,
         start_link,
-        [?MODULE, [Mssg], []]
+        [?MODULE, [Fun], []]
     ).

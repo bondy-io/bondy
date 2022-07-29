@@ -158,6 +158,7 @@
 %% TODO This is a breaking change, we need to migrate the realms in
 %% {security, realms} into their new {security, RealmUri}
 -define(PLUM_DB_PREFIX(Uri), {?PLUM_DB_REALM_TAB, Uri}).
+-define(PLUM_DB_PKEY(Uri), {?PLUM_DB_PREFIX(Uri), Uri}).
 
 -define(DEFAULT_AUTHMETHODS, [
     ?WAMP_ANON_AUTH,
@@ -703,6 +704,7 @@
 -export([strip_private_keys/1]).
 
 -export([suspend/1]).
+-export([close/2]).
 -export([resume/1]).
 
 
@@ -714,6 +716,14 @@
 -export([sources/2]).
 -export([users/1]).
 -export([users/2]).
+
+%% PLUM_DB PREFIX CALLBACKS
+-export([will_merge/3]).
+-export([on_merge/3]).
+-export([on_update/3]).
+-export([on_delete/2]).
+-export([on_erase/2]).
+
 
 
 %% =============================================================================
@@ -976,6 +986,16 @@ resume(#realm{} = Realm) ->
 resume(Uri) when is_binary(Uri) ->
     resume(fetch(Uri)).
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Calls the session manager to asynchronoulsy close all sessions for
+%% realm `Realm'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec close(RealmUri :: uri(), Reason :: uri()) -> ok.
+
+close(RealmUri, Reason) ->
+    bondy_session_manager:close_all(RealmUri, Reason).
 
 
 %% -----------------------------------------------------------------------------
@@ -1412,7 +1432,7 @@ delete(Term) ->
 %% -----------------------------------------------------------------------------
 %% @doc Deletes the realm and all its associated resources in case the realm
 %% has no users or the option `force' was passed with a value of `true'.
-%% Calls bondy_realm_manager:close/2 which amongst other cleanup tasks should
+%% Calls close/2 which amongst other cleanup tasks should
 %% kick out all opened sessions attached to the realm.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -1442,16 +1462,18 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
             %% We kick out all the local sessions
             %% Tell the local manager so that if can kick out the session and
             %% perform any other cleanup task. This is performed async.
-            ok = bondy_realm_manager:close(Uri, ?WAMP_CLOSE_REALM),
+            ok = close(Uri, ?WAMP_CLOSE_REALM),
 
             %% We synchronously delete the realm.
-            %% This will be replicated and each node's bondy_realm_manager will
+            %% This will be replicated and each node will
             %% handle the update (either due to a broadcast or an AAE exchange)
             %% and will close the realm
             plum_db:delete(?PLUM_DB_PREFIX(Uri), Uri),
 
             %% We order the removal of all associated data
-            ok = async_flush_realm(Uri, Opts),
+            ok = bondy_jobs:enqueue(
+                Uri, fun() -> async_flush_realm(Uri, Opts) end
+            ),
 
             %% We notify
             ok = on_delete(Uri)
@@ -1468,7 +1490,7 @@ delete(Uri, Opts) when is_binary(Uri) ->
 
 %% @private
 async_flush_realm(Uri, Opts0) ->
-    Opts = Opts0#{dirty => true, silent => true},
+    Opts = Opts0#{dirty => true},
 
     %% TODO implement this as a durable FSM
     %% Delete all grants
@@ -1732,6 +1754,62 @@ grants(#realm{uri = Uri}, Opts) ->
 
 grants(Uri, Opts) when is_binary(Uri) ->
     grants(fetch(Uri), Opts).
+
+
+
+%% =============================================================================
+%% PLUM_DB PREFIX CALLBACKS
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc bondy_config
+%% @end
+%% -----------------------------------------------------------------------------
+will_merge(_PKey, _New, _Old) ->
+    true.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+on_merge(?PLUM_DB_PKEY(Uri), New, _Old) ->
+    Resolved = plum_db_object:resolve(New, lww),
+
+    case plum_db_object:value(Resolved) of
+        '$deleted' ->
+            %% Realm was deleted on another node, call close
+            close(Uri, ?WAMP_CLOSE_REALM);
+        _ ->
+            %% Realm updated, do nothing
+            ok
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A local update
+%% @end
+%% -----------------------------------------------------------------------------
+on_update(_PKey, _New, _Old) ->
+    ok.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A local delete
+%% @end
+%% -----------------------------------------------------------------------------
+on_delete(_PKey, _Old) ->
+    ok.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A local erase
+%% @end
+%% -----------------------------------------------------------------------------
+on_erase(_PKey, _Old) ->
+    ok.
 
 
 

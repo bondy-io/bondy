@@ -553,7 +553,7 @@ when is_binary(Resource) orelse Resource =:= any ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_all(RealmUri :: uri(), Opts :: #{silent := boolean()}) -> ok.
+-spec remove_all(RealmUri :: uri(), Opts :: map()) -> ok.
 
 remove_all(RealmUri, _Opts) ->
     Opts = [{remove_tombstones, true}, {keys_only, true}],

@@ -57,17 +57,36 @@
         type => ram_disk,
         shard_by => prefix,
         callbacks => #{
-
+            will_merge => {bondy_realm, will_merge},
+            on_merge => {bondy_realm, on_merge},
+            on_update => {bondy_realm, on_update},
+            on_delete => {bondy_realm, on_delete},
+            on_erase => {bondy_realm, on_erase}
         }
     }},
-    {?PLUM_DB_GROUP_GRANT_TAB, #{
+    {?PLUM_DB_USER_TAB, #{
         type => ram_disk,
         shard_by => prefix,
         callbacks => #{
-
+            will_merge => {bondy_rbac_user, will_merge},
+            on_merge => {bondy_rbac_user, on_merge},
+            on_update => {bondy_rbac_user, on_update},
+            on_delete => {bondy_rbac_user, on_delete},
+            on_erase => {bondy_rbac_user, on_erase}
         }
     }},
     {?PLUM_DB_GROUP_TAB, #{
+        type => ram_disk,
+        shard_by => prefix,
+        callbacks => #{
+            will_merge => {bondy_rbac_group, will_merge},
+            on_merge => {bondy_rbac_group, on_merge},
+            on_update => {bondy_rbac_group, on_update},
+            on_delete => {bondy_rbac_group, on_delete},
+            on_erase => {bondy_rbac_group, on_erase}
+        }
+    }},
+    {?PLUM_DB_GROUP_GRANT_TAB, #{
         type => ram_disk,
         shard_by => prefix,
         callbacks => #{
@@ -79,14 +98,6 @@
         shard_by => prefix,
         callbacks => #{
 
-        }
-    }},
-    {?PLUM_DB_USER_TAB, #{
-        type => ram_disk,
-        shard_by => prefix,
-        callbacks => #{
-            will_merge => {bondy_rbac_user, will_merge},
-            on_merge => {bondy_rbac_user, on_merge}
         }
     }},
     {?PLUM_DB_SOURCE_TAB, #{

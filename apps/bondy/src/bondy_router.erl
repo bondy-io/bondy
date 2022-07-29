@@ -281,7 +281,7 @@ pre_stop() ->
     Fun = fun
         ({continue, Cont}) ->
             try
-                bondy_session:list_refs(Cont)
+                bondy_session:list(Cont)
             catch
                 Class:Reason:Stacktrace ->
                     ?LOG_ERROR(#{
@@ -292,13 +292,15 @@ pre_stop() ->
                     }),
                     []
             end;
+
         ({RealmUri, Ref}) ->
             catch bondy:send(RealmUri, Ref, M),
             ok
     end,
 
     %% We loop with batches of 100
-    bondy_utils:foreach(Fun, bondy_session:list_refs(100)).
+    Opts = #{limit => 100, return => ref},
+    bondy_utils:foreach(Fun, bondy_session:list(Opts)).
 
 
 stop() ->
@@ -355,6 +357,8 @@ async_forward(M, Ctxt0) ->
     Meta = bondy:get_process_metadata(),
 
     Fun = fun() ->
+        %% We copy the process meta (we do not need to unset because the worker
+        %% will do it for us).
         ok = bondy:set_process_metadata(Meta),
         sync_forward(Event)
     end,

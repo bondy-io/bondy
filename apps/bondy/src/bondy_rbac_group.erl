@@ -112,7 +112,7 @@
 -export_type([t/0]).
 -export_type([external/0]).
 
-
+%% API
 -export([add/2]).
 -export([add_group/3]).
 -export([add_groups/3]).
@@ -137,6 +137,14 @@
 -export([topsort/1]).
 -export([unknown/2]).
 -export([update/3]).
+
+
+%% PLUM_DB PREFIX CALLBACKS
+-export([will_merge/3]).
+-export([on_merge/3]).
+-export([on_update/3]).
+-export([on_delete/2]).
+-export([on_erase/2]).
 
 
 
@@ -260,7 +268,6 @@ update(RealmUri, Name, Data0) when is_binary(Name) ->
                 ok = group_exists_check(RealmUri, maps:get(groups, NewGroup)),
 
                 ok = plum_db:put(Prefix, Name, NewGroup),
-                ok = on_update(RealmUri, Name),
                 {ok, NewGroup}
         end
 
@@ -353,13 +360,13 @@ remove(RealmUri, Name) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(uri(), binary() | map(), #{silent := boolean()}) ->
+-spec remove(uri(), binary() | map(), map()) ->
     ok | {error, unknown_group | reserved_name}.
 
 remove(RealmUri, #{type := ?TYPE, name := Name}, Opts) ->
     remove(RealmUri, Name, Opts);
 
-remove(RealmUri, Name, Opts) ->
+remove(RealmUri, Name, _Opts) ->
     try
         ok = not_reserved_name_check(Name),
         ok = exists_check(?PLUMDB_PREFIX(RealmUri), Name),
@@ -376,10 +383,8 @@ remove(RealmUri, Name, Opts) ->
         ok = bondy_rbac_user:remove_group(RealmUri, all, Name),
         ok = remove_groups(RealmUri, all, Name),
 
-        %% We finally delete the group
-        ok = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Name),
-
-        on_delete(RealmUri, Name, Opts)
+        %% We finally delete the group, on_delete/2 will be called by plum_db
+        ok = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Name)
 
     catch
         throw:Reason ->
@@ -618,6 +623,63 @@ normalise_name(_) ->
     error(badarg).
 
 
+
+%% =============================================================================
+%% PLUM_DB PREFIX CALLBACKS
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc bondy_config
+%% @end
+%% -----------------------------------------------------------------------------
+will_merge(_PKey, _New, _Old) ->
+    true.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+on_merge(_PKey, _New, _Old) ->
+    ok.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A local update
+%% @end
+%% -----------------------------------------------------------------------------
+on_update({?PLUMDB_PREFIX(RealmUri), Name}, _New, Old) ->
+    IsCreate =
+        Old == undefined orelse
+        ?TOMBSTONE == plum_db_object:value(plum_db_object:resolve(Old, lww)),
+
+    case IsCreate of
+        true ->
+            ok = bondy_event_manager:notify({group_added, RealmUri, Name});
+        false ->
+            ok = bondy_event_manager:notify({group_updated, RealmUri, Name})
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A local delete
+%% @end
+%% -----------------------------------------------------------------------------
+on_delete({?PLUMDB_PREFIX(RealmUri), Name}, _Old) ->
+    ok = bondy_event_manager:notify({group_deleted, RealmUri, Name}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A local erase
+%% @end
+%% -----------------------------------------------------------------------------
+on_erase(_PKey, _Old) ->
+    ok.
+
+
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
@@ -636,7 +698,6 @@ do_add(RealmUri, #{type := ?TYPE, name := Name} = Group) ->
 
     case plum_db:put(Prefix, Name, Group) of
         ok ->
-            ok = on_create(RealmUri, Name),
             {ok, Group};
         Error ->
             Error
@@ -770,32 +831,6 @@ when is_function(2, Fun) ->
 update_groups(RealmUri, GroupName, Groupnames, Fun) when is_binary(GroupName) ->
     update_groups(RealmUri, fetch(RealmUri, GroupName), Groupnames, Fun).
 
-
-%% @private
-on_create(RealmUri, Name) ->
-    ok = bondy_event_manager:notify(
-        {group_added, RealmUri, Name}
-    ),
-    ok.
-
-
-%% @private
-on_update(RealmUri, Name) ->
-    ok = bondy_event_manager:notify(
-        {group_updated, RealmUri, Name}
-    ),
-    ok.
-
-
-%% @private
-on_delete(_, _, #{silent := true}) ->
-    ok;
-
-on_delete(RealmUri, Name, _) ->
-    ok = bondy_event_manager:notify(
-        {group_deleted, RealmUri, Name}
-    ),
-    ok.
 
 
 

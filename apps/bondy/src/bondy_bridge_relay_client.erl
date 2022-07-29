@@ -514,7 +514,7 @@ active(internal, {goodbye, SessionId, ?WAMP_CLOSE_REALM, Details}, State) ->
     }),
 
     %% Kick out all local sessions
-    bondy_realm_manager:close(RealmUri, ?WAMP_CLOSE_REALM),
+    ok = bondy_realm:close(RealmUri, ?WAMP_CLOSE_REALM),
 
     %% We currently support a single session so we shutdown the connection.
     {stop, shutdown};

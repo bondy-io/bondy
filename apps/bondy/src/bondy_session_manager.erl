@@ -31,6 +31,10 @@
     monitor_refs = #{}  :: #{id() => reference()}
 }).
 
+-type close_opts()      ::  #{
+                                exclude => [bondy_session_id:t()]
+                            }.
+
 %% API
 -export([start_link/2]).
 -export([pool/0]).
@@ -38,7 +42,9 @@
 -export([open/1]).
 -export([open/3]).
 -export([close/2]).
+-export([close/4]).
 -export([close_all/2]).
+
 
 
 %% GEN_SERVER CALLBACKS
@@ -101,8 +107,6 @@ open(Session) ->
     ok.
 
 
-
-
 %% -----------------------------------------------------------------------------
 %% @doc Creates a new session provided the RealmUri exists or can be dynamically
 %% created.
@@ -133,20 +137,42 @@ open(Id, RealmOrUri, Opts) ->
 %% -----------------------------------------------------------------------------
 -spec close(bondy_session:t(), optional(uri())) -> ok.
 
-close(RealmUri, undefined) ->
-    close(RealmUri, ?WAMP_CLOSE_NORMAL);
-
-close(Session, ReasonUri) when is_binary(ReasonUri) ->
+close(Session, ReasonUri) ->
     Uri = bondy_session:realm_uri(Session),
     Name = gproc_pool:pick_worker(pool(), Uri),
     gen_server:cast(Name, {close, Session, ReasonUri}).
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Closes all managed sessions in realm with URI `RealmUri'.
+%% @doc Closes all sessions for user `Username' on realm `RealmUri' according
+%% to the options `Opts'.
+%%
+%% Notice that `RealmUri' will be used to match the session's`authrealm'
+%% property and not `realm_uri'. If the user is an SSO user `authrealm' is the
+%% SSO realm and as result all sessions in all associated realms will be closed.
+%%
 %% @end
 %% -----------------------------------------------------------------------------
--spec close_all(Realm :: uri(), ReasonUri :: optional(uri())) -> ok.
+-spec close(
+    RealmUri :: uri(),
+    Authid :: uri(),
+    ReasonUri :: uri(),
+    Opts :: close_opts()) -> ok.
+
+close(RealmUri, Authid, ReasonUri, Opts) ->
+    Name = gproc_pool:pick_worker(pool(), RealmUri),
+    gen_server:cast(Name, {close, RealmUri, Authid, ReasonUri, Opts}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Closes all managed sessions in realm with URI `RealmUri'.
+%%
+%% Notice that `RealmUri' will be used to match the session's`authrealm'
+%% property and not `realm_uri'. If the user is an SSO user `authrealm' is the
+%% SSO realm and as result all sessions in all associated realms will be closed.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec close_all(RealmUri :: uri(), ReasonUri :: optional(uri())) -> ok.
 
 close_all(RealmUri, undefined) ->
     close_all(RealmUri, ?WAMP_CLOSE_NORMAL);
@@ -236,11 +262,11 @@ handle_cast({close, Session, ReasonUri}, State0) ->
     {noreply, State};
 
 
-handle_cast({close_all, RealmUri, Reason}, State0) ->
+handle_cast({close, Authrealm, Authid, Reason, Opts0}, State0) ->
     M = wamp_message:goodbye(
         #{
-            message => <<"The realm is being closed">>,
-            description => <<"The realm you were connected to was deleted by the administrator.">>
+            message => <<"The session is being closed.">>,
+            description => <<"The session is being closed by the router.">>
         },
         Reason
     ),
@@ -248,7 +274,51 @@ handle_cast({close_all, RealmUri, Reason}, State0) ->
     Fun = fun
         ({continue, Cont}) ->
             try
-                bondy_session:list_refs(Cont)
+                bondy_session:match(Cont)
+            catch
+                Class:Reason:Stacktrace ->
+                    ?LOG_ERROR(#{
+                        description => "Error while closing session",
+                        class => Class,
+                        reason => Reason,
+                        stacktrace => Stacktrace
+                    }),
+                    []
+            end;
+        ({Uri, Ref}) ->
+            catch bondy:send(Uri, Ref, M),
+            ok
+    end,
+
+    %% We loop with batches of 100
+    Bindings = #{
+        authrealm => Authrealm,
+        authid => Authid
+    },
+    Opts = #{
+        limit => 100,
+        return => ref,
+        exclude => maps:get(exclude, Opts0, undefined)
+    },
+    Result = bondy_session:match(Bindings, Opts),
+    ok = bondy_utils:foreach(Fun, Result),
+
+    {noreply, State0};
+
+
+handle_cast({close_all, RealmUri, Reason}, State0) ->
+    M = wamp_message:goodbye(
+        #{
+            message => <<"The realm is being closed">>,
+            description => <<"The realm you were attached to was deleted by the administrator.">>
+        },
+        Reason
+    ),
+
+    Fun = fun
+        ({continue, Cont}) ->
+            try
+                bondy_session:match(Cont)
             catch
                 Class:Reason:Stacktrace ->
                     ?LOG_ERROR(#{
@@ -264,8 +334,12 @@ handle_cast({close_all, RealmUri, Reason}, State0) ->
             ok
     end,
 
+    Bindings = #{
+        realm_uri => RealmUri
+    },
     %% We loop with batches of 100
-    ok = bondy_utils:foreach(Fun, bondy_session:list_refs(RealmUri, 100)),
+    Opts = #{limit => 100, return => ref},
+    ok = bondy_utils:foreach(Fun, bondy_session:match(Bindings, Opts)),
 
     {noreply, State0};
 
@@ -285,23 +359,24 @@ handle_info({'DOWN', Ref, _, _, _}, State0) ->
         {ok, Id} ->
             case bondy_session:lookup(Id) of
                 {ok, Session} ->
+                    ProtocolId = bondy_session:external_id(Session),
                     ?LOG_DEBUG(#{
-                        description => "Connection process for session terminated, cleaning up",
-                        protocol_session_id => bondy_session:external_id(Session),
+                        description =>
+                            "Connection process for session terminated, "
+                            " cleaning up.",
+                        protocol_session_id => ProtocolId,
                         session_id => Id
                     }),
                     cleanup(Session);
                 {error, not_found} ->
                     ok
             end,
-            State0#state{
-                monitor_refs = maps:without([Ref, Id], Refs)
-            };
+            State0#state{monitor_refs = maps:without([Ref, Id], Refs)};
+
         error ->
-            State0#state{
-                monitor_refs = maps:without([Ref], Refs)
-            }
+            State0#state{monitor_refs = maps:without([Ref], Refs)}
     end,
+
     {noreply, State};
 
 handle_info(Info, State) ->
@@ -381,12 +456,20 @@ maybe_logout(_Uri, Session, ?WAMP_CLOSE_LOGOUT) ->
 
     case bondy_session:authmethod(Session) of
         ?WAMP_TICKET_AUTH ->
-            %% TODO remove ticket
-            ok;
+            Authid = bondy_session:authid(Session),
+            #{
+                authrealm := Authrealm,
+                scope := Scope
+            } = bondy_session:authmethod_details(Session),
+            bondy_ticket:revoke(Authrealm, Authid, Scope);
+
         ?WAMP_OAUTH2_AUTH ->
             %% TODO remove token for sessionID
             ok
     end;
 
 maybe_logout(_, _, _) ->
+    %% No need to revoke tokens.
+    %% In case of ?BONDY_USER_DELETED, the delete action would have already
+    %% revoked all tokens for this user.
     ok.

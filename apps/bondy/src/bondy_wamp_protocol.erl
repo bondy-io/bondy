@@ -607,6 +607,7 @@ open_session(Extra, St0) when is_map(Extra) ->
         SessionId0 = bondy_context:session_id(Ctxt0),
         ReqDetails = bondy_context:request_details(Ctxt0),
 
+        Authrealm = bondy_auth:authrealm(AuthCtxt),
         Authid = bondy_auth:user_id(AuthCtxt),
         %% Authrole might be undefined here. This happens when the user sends
         %% 'default' or NULL (althrough WAMP clients should not send NULL).
@@ -614,6 +615,7 @@ open_session(Extra, St0) when is_map(Extra) ->
         Authroles = bondy_auth:roles(AuthCtxt),
         Authprovider = bondy_auth:provider(AuthCtxt),
         Authmethod = bondy_auth:method(AuthCtxt),
+        AuthmethodDetails = maps:get(authmethod_details, Extra, undefined),
         Agent = maps:get(agent, ReqDetails, undefined),
         Peer = bondy_context:peer(Ctxt0),
 
@@ -623,9 +625,11 @@ open_session(Extra, St0) when is_map(Extra) ->
             is_anonymous => Authid == anonymous,
             agent => Agent,
             roles => maps:get(roles, ReqDetails, undefined),
+            authrealm => Authrealm,
             authid => maybe_gen_authid(Authid),
             authprovider => Authprovider,
             authmethod => Authmethod,
+            authmethod_details => AuthmethodDetails,
             authrole => Authrole,
             authroles => Authroles
         },

@@ -29,6 +29,7 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_uris.hrl").
 -include("bondy_plum_db.hrl").
 
 -define(MAX_ALIASES, 5).
@@ -212,6 +213,7 @@
 
 -export_type([t/0]).
 -export_type([external/0]).
+-export_type([username/0]).
 -export_type([new_opts/0]).
 -export_type([add_opts/0]).
 -export_type([update_opts/0]).
@@ -265,8 +267,11 @@
 -export([username/1]).
 
 %% PLUM_DB PREFIX CALLBACKS
--export([on_merge/3]).
 -export([will_merge/3]).
+-export([on_merge/3]).
+-export([on_update/3]).
+-export([on_delete/2]).
+-export([on_erase/2]).
 
 
 
@@ -638,7 +643,7 @@ remove(RealmUri, Username) ->
 remove(RealmUri, #{type := ?USER_TYPE, username := Username}, Opts) ->
     remove(RealmUri, Username, Opts);
 
-remove(RealmUri, Username0, Opts) ->
+remove(RealmUri, Username0, _Opts) ->
     %% TODO do not allow remove when this is an SSO realm and user exists in
     %% other realms (we need a reverse index - array with the list of realms
     %% this user belongs to.
@@ -660,13 +665,11 @@ remove(RealmUri, Username0, Opts) ->
         ok = bondy_rbac_source:remove_all(RealmUri, Username),
 
         %% delete any associated grants, so if a user with the same name
-        %% is added again, they don't pick up these grants
+        %% is added again, it doesn't pick up these grants
         ok = bondy_rbac:revoke_user(RealmUri, Username),
 
-        %% We finally delete the user
-        ok = plum_db:delete(PDBPrefix, Username),
-
-        on_delete(RealmUri, Username, Opts)
+        %% We finally delete the user, on_delete/2 will be called by plum_db
+        ok = plum_db:delete(PDBPrefix, Username)
 
     catch
         error:{no_such_user, _} = Reason ->
@@ -677,7 +680,7 @@ remove(RealmUri, Username0, Opts) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Removes all users that beloong to realm `RealmUri'.
+%% @doc Removes all users that belongs to realm `RealmUri'.
 %% If the option `dirty` is set to `true` this removes the user directly from
 %% store (triggering a brodcast to other Bondy nodes). If set to `false` (the
 %% default) then for each user the function remove/2 is called.
@@ -686,7 +689,7 @@ remove(RealmUri, Username0, Opts) ->
 %% entirely.
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_all(uri(), #{dirty => boolean(), silent := boolean()}) -> ok.
+-spec remove_all(uri(), #{dirty => boolean()}) -> ok.
 
 remove_all(RealmUri, Opts) ->
     Dirty = maps:get(dirty, Opts, false),
@@ -1089,7 +1092,82 @@ will_merge(_PKey, _New, _Old) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-on_merge(_PKey, _New, _Old) ->
+on_merge({?PLUMDB_PREFIX(RealmUri), Username}, New, Old) ->
+    %% We need to determine if the user was deleted or its credentials updated
+    %% in which case we need to close all local sessions.
+    %% Tickets and tokens have been revoked by the peer node.
+    %% We do it async so that we return immediately to avoid blocking the
+    %% plum_db process.
+    Fun = fun() ->
+        case plum_db_object:value(plum_db_object:resolve(New, lww)) of
+            ?TOMBSTONE ->
+                %% The user was deleted
+                Reason = ?BONDY_USER_DELETED,
+                close_sessions(RealmUri, Username, Reason);
+
+            NewVal ->
+                OldVal = plum_db_object:value(plum_db_object:resolve(Old, lww)),
+                case have_credentials_changed(NewVal, OldVal) of
+                    true ->
+                        %% Credentials were updated
+                        Reason = ?BONDY_USER_CREDENTIALS_CHANGED,
+                        close_sessions(RealmUri, Username, Reason);
+                    false ->
+                        ok
+                end
+        end
+    end,
+
+    bondy_jobs:enqueue(RealmUri, Fun).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A local update
+%% @end
+%% -----------------------------------------------------------------------------
+on_update({?PLUMDB_PREFIX(RealmUri), Username}, _New, Old) ->
+    IsCreate =
+        Old == undefined orelse
+        ?TOMBSTONE == plum_db_object:value(plum_db_object:resolve(Old, lww)),
+
+    case IsCreate of
+        true ->
+            ok = bondy_event_manager:notify({user_added, RealmUri, Username});
+        false ->
+            %% 1. We need to revoke all auth tokens/tickets
+            ok = revoke_tickets(RealmUri, Username),
+            %% 2. TODO revoke all OAUTH2 Tokens
+            %% 3. We need to close all sessions in this node if the user changed
+            %% its credentials.
+            %% However we need to keep the calling session alive if the session
+            %% authid was the same user. So we cannot do it here as we do not
+            %% have the session_id (this function invoked by the plum_db server
+            %% process so no bondy metadata present). We do it on the update
+            %% operation.
+            %% 4. Finally we publish the event
+            ok = bondy_event_manager:notify({user_updated, RealmUri, Username})
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A local delete
+%% @end
+%% -----------------------------------------------------------------------------
+on_delete({?PLUMDB_PREFIX(RealmUri), Username}, _Old) ->
+    %% 1. We need to revoke all auth tokens/tickets
+    ok = revoke_tickets(RealmUri, Username),
+    %% 2. TODO revoke all OAUTH2 Tokens
+    %% 3. Close all sessions in this node.
+    ok = close_sessions(RealmUri, Username, ?BONDY_USER_DELETED),
+    %% 4. Finally we publish the event
+    ok = bondy_event_manager:notify({user_deleted, RealmUri, Username}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A local erase
+%% @end
+%% -----------------------------------------------------------------------------
+on_erase(_PKey, _Old) ->
     ok.
 
 
@@ -1133,7 +1211,7 @@ do_add(RealmUri, #{sso_realm_uri := SSOUri} = User0) when is_binary(SSOUri) ->
     ),
 
     %% We finally add the local user to the realm
-    store(RealmUri, LocalUser, fun on_create/2);
+    store(RealmUri, LocalUser);
 
 do_add(RealmUri, User0) ->
     %% A local-only user
@@ -1147,7 +1225,7 @@ do_add(RealmUri, User0) ->
     {Opts, User1} = maps_utils:split([sso_opts, password_opts], User0),
     User = apply_password(User1, password_opts(RealmUri, Opts)),
 
-    store(RealmUri, User, fun on_create/2).
+    store(RealmUri, User).
 
 
 %% @private
@@ -1159,7 +1237,7 @@ maybe_add_sso_user(true, RealmUri, SSOUri, SSOUser) ->
     ok = groups_exists_check(SSOUri, maps:get(groups, SSOUser, [])),
 
     %% We add the user to the SSO realm
-    {ok, _} = maybe_throw(store(SSOUri, SSOUser, fun on_create/2)),
+    {ok, _} = maybe_throw(store(SSOUri, SSOUser)),
     ok;
 
 maybe_add_sso_user(false, _, _, _) ->
@@ -1186,6 +1264,7 @@ when is_binary(SSOUri) ->
     case lookup(SSOUri, Username) of
         {error, not_found} ->
             throw(not_such_user);
+
         SSOUser ->
             {SSOData, LocalData} = maps_utils:split(
                 [password_opts, password, authorized_keys], Data0
@@ -1194,11 +1273,33 @@ when is_binary(SSOUri) ->
             _ = maybe_throw(
                 do_local_update(SSOUri, SSOUser, SSOData, Opts)
             ),
+
+            ok = maybe_on_credentials_change(RealmUri, User, SSOData),
+
             do_local_update(RealmUri, User, LocalData, Opts)
     end;
 
 do_update(RealmUri, User, Data, Opts) when is_map(User) ->
+    ok = maybe_on_credentials_change(RealmUri, User, Data),
     do_local_update(RealmUri, User, Data, Opts).
+
+
+%% @private
+have_credentials_changed(User, Data) ->
+    maps:get(password, Data, undefined)
+        =/= maps:get(password, User, undefined)
+    orelse maps:get(authorized_keys, Data, undefined)
+        =/= maps:get(authorized_keys, User, undefined).
+
+
+%% @private
+maybe_on_credentials_change(RealmUri, User, Data) ->
+    case have_credentials_changed(User, Data) of
+        true ->
+            on_credentials_change(RealmUri, User);
+        false ->
+            ok
+    end.
 
 
 %% @private
@@ -1209,14 +1310,13 @@ do_local_update(RealmUri, User, Data0, Opts0) ->
     {UserOpts, Data} = maps_utils:split([password_opts], Data0),
     Opts = maps:merge(UserOpts, Opts0),
     NewUser = merge(RealmUri, User, Data, Opts),
-    store(RealmUri, NewUser, fun on_update/2).
+
+    store(RealmUri, NewUser).
 
 
 %% @private
 update_credentials(RealmUri, Username, Data) ->
-    Opts = #{
-        update_credentials => true
-    },
+    Opts = #{update_credentials => true},
     case update(RealmUri, Username, Data, Opts) of
         {ok, User} ->
             on_credentials_change(RealmUri, User);
@@ -1267,11 +1367,8 @@ update_groups(RealmUri, Username, Groupnames, Fun) when is_binary(Username) ->
 
 
 %% @private
-store(RealmUri, #{username := Username} = User, Fun) ->
+store(RealmUri, #{username := Username} = User) ->
     case plum_db:put(?PLUMDB_PREFIX(RealmUri), Username, User) of
-        ok when is_function(Fun, 2) ->
-            ok = Fun(RealmUri, User),
-            {ok, User};
         ok ->
             {ok, User};
         Error ->
@@ -1417,7 +1514,7 @@ do_add_alias(RealmUri, User0, Alias0) ->
             Aliases ->
                 ok = store_alias(RealmUri, Alias, AliasEntry),
                 User = User0#{aliases => sets:to_list(Aliases)},
-                _ = store(RealmUri, User, fun on_update/2),
+                _ = store(RealmUri, User),
                 ok
         end
     catch
@@ -1443,7 +1540,7 @@ do_remove_alias(RealmUri, User0, Alias0) ->
             Aliases ->
                 _ = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Alias),
                 User = User0#{aliases => sets:to_list(Aliases)},
-                _ = store(RealmUri, User, fun on_update/2),
+                _ = store(RealmUri, User),
                 ok
         end
 
@@ -1502,37 +1599,41 @@ type_and_version(Type, Map) ->
 
 
 %% @private
-on_create(RealmUri, #{username := Username}) ->
-    ok = bondy_event_manager:notify(
-        {user_added, RealmUri, Username}
-    ),
-    ok.
+on_credentials_change(RealmUri, User) ->
+    Username = maps:get(username, User),
 
-
-%% @private
-on_update(RealmUri, #{username := Username}) ->
-    ok = bondy_event_manager:notify(
-        {user_updated, RealmUri, Username}
-    ),
-    ok.
-
-
-%% @private
-on_credentials_change(RealmUri, #{username := Username} = User) ->
+    %% on_update/3 will be called by plum_db
     ok = bondy_event_manager:notify(
         {user_credentials_updated, RealmUri, Username}
     ),
-    on_update(RealmUri, User).
+
+    Reason = ?BONDY_USER_CREDENTIALS_CHANGED,
+    Opts =
+        case bondy:get_process_metadata() of
+            #{session_id := SessionId} ->
+                #{exclude => SessionId};
+            _ ->
+                #{}
+        end,
+    ok = close_sessions(RealmUri, Username, Reason, Opts).
+
 
 
 %% @private
-on_delete(_, _, #{silent := true}) ->
-    ok;
+revoke_tickets(RealmUri, Username) ->
+    bondy_jobs:enqueue(
+        RealmUri, fun() ->
+            bondy_ticket:revoke_all(RealmUri, Username)
+        end
+    ).
 
-on_delete(RealmUri, Username, _) ->
-    ok = bondy_event_manager:notify(
-        {user_deleted, RealmUri, Username}
-    ),
-    ok.
 
+%% @private
+close_sessions(RealmUri, Username, Reason) ->
+    close_sessions(RealmUri, Username, Reason, #{}).
+
+
+%% @private
+close_sessions(RealmUri, Username, Reason, Opts) ->
+    ok = bondy_session_manager:close(RealmUri, Username, Reason, Opts).
 
