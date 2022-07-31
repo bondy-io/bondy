@@ -89,23 +89,17 @@
     {?PLUM_DB_GROUP_GRANT_TAB, #{
         type => ram_disk,
         shard_by => prefix,
-        callbacks => #{
-
-        }
+        callbacks => #{}
     }},
     {?PLUM_DB_USER_GRANT_TAB, #{
         type => ram_disk,
         shard_by => prefix,
-        callbacks => #{
-
-        }
+        callbacks => #{}
     }},
     {?PLUM_DB_SOURCE_TAB, #{
         type => ram_disk,
         shard_by => prefix,
-        callbacks => #{
-
-        }
+        callbacks => #{}
     }},
 
     %% disk
@@ -113,29 +107,23 @@
     {api_gateway, #{
         type => disk,
         shard_by => prefix,
-        callbacks => #{
-
-        }
+        callbacks => #{}
     }},
     {?PLUM_DB_TICKET_TAB, #{
         type => disk,
-        shard_by => prefix,
-        callbacks => #{
-
-        }
+        %% We shard by key as we prioritise ticket creation and lookup over
+        %% listing and range operations.
+        shard_by => key,
+        callbacks => #{}
     }},
     {oauth2_refresh_tokens, #{
         type => disk,
         shard_by => prefix,
-        callbacks => #{
-
-        }
+        callbacks => #{}
     }},
     {bondy_bridge_relay, #{
         type => disk,
         shard_by => prefix,
-        callbacks => #{
-
-        }
+        callbacks => #{}
     }}
 ]).
