@@ -310,7 +310,13 @@ set_process_metadata(Meta) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Set metadata on the process dictionary.
+%% If `LogKeys' is a list of keys found in `Meta' then Logger shall
+%% automatically insert those keys and their values in all log events produced
+%% on the current process.
+%% Subsequent calls to this function overwrites previous data set. To update
+%% existing data instead of overwriting it, see
+%% {@link update_process_metadata/2}.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec set_process_metadata(Meta :: metadata(), LogKeys :: [atom()]) -> ok.
@@ -372,7 +378,8 @@ update_process_metadata(Meta, LogKeys) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Retrieve data set with {@link set_process_metadata/1},
+%% {@link set_process_metadata/2} or {@link update_process_metadata/2}.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get_process_metadata() -> Meta :: metadata() | undefined.
@@ -394,7 +401,8 @@ get_process_metadata() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Delete data set with {@link set_process_metadata/1},
+%% {@link set_process_metadata/2} or {@link update_process_metadata/2}.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec unset_process_metadata() -> ok.

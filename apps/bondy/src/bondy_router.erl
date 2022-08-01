@@ -172,8 +172,7 @@ forward(#call{} = M, #{session := _} = Ctxt0) ->
     %% This is a sync call as it is an easy way to guarantee ordering of
     %% invocations between any given pair of Caller and Callee as
     %% defined by RFC 11.2, as Erlang guarantees causal delivery of messages
-    %% between two processes even when in different nodes (when using
-    %% distributed Erlang).
+    %% between two processes.
     %% RFC:
     %% If Callee A has registered endpoints for both Procedure 1 and Procedure
     %% 2, and Caller B first issues a Call 1 to Procedure 1 and then a Call 2
