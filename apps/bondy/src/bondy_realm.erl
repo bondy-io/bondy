@@ -1472,7 +1472,27 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
 
             %% We order the removal of all associated data
             ok = bondy_jobs:enqueue(
-                Uri, fun() -> async_flush_realm(Uri, Opts) end
+                Uri, fun() ->
+                    Opts = Opts0#{dirty => true},
+
+                    ok = bondy_rbac:remove_all(Uri, Opts),
+
+                    %% Delete all tickets
+                    ok = bondy_ticket:revoke_all(Uri),
+
+                    %% TODO Delete all tokens
+
+                    %% Delete all sources
+                    bondy_rbac_source:remove_all(Uri),
+
+                    %% Delete all groups
+                    bondy_rbac_group:remove_all(Uri, Opts),
+
+                    %% Delete all users
+                    bondy_rbac_user:remove_all(Uri, Opts),
+
+                    ok
+                end
             ),
 
             %% We notify
@@ -1486,31 +1506,6 @@ delete(Uri, Opts) when is_binary(Uri) ->
         {error, not_found} = Error ->
             Error
     end.
-
-
-%% @private
-async_flush_realm(Uri, Opts0) ->
-    Opts = Opts0#{dirty => true},
-
-    %% TODO implement this as a durable FSM
-    %% Delete all grants
-    ok = bondy_rbac:remove_all(Uri, Opts),
-
-    %% Delete all tickets
-    %% TODO
-    {error, not_implemented} = bondy_ticket:revoke_all(Uri),
-
-    %% Delete all sources
-    bondy_rbac_source:remove_all(Uri),
-
-    %% Delete all groups
-    bondy_rbac_group:remove_all(Uri, Opts),
-
-    %% Delete all users
-    bondy_rbac_user:remove_all(Uri, Opts),
-
-    ok.
-
 
 
 %% -----------------------------------------------------------------------------
