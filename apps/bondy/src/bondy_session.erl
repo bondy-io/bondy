@@ -754,11 +754,14 @@ list() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-list(Opts) when is_map(Opts) ->
-    match(#{}, Opts);
+list(?EOT) ->
+    ?EOT;
 
 list(#{continuation := _} = Cont) ->
-    match(Cont).
+    match(Cont);
+
+list(Opts) when is_map(Opts) ->
+    match(#{}, Opts).
 
 
 %% -----------------------------------------------------------------------------
