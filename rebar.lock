@@ -86,7 +86,7 @@
   0},
  {<<"plum_db">>,
   {git,"https://github.com/Leapsight/plum_db.git",
-       {ref,"6347023668ee10714f5e0c298b88160522711ae0"}},
+       {ref,"9cd492b817d0081958165b14091c3e38f392f930"}},
   0},
  {<<"prometheus">>,{pkg,<<"prometheus">>,<<"4.8.1">>},0},
  {<<"prometheus_cowboy">>,{pkg,<<"prometheus_cowboy">>,<<"0.1.8">>},0},
@@ -120,7 +120,7 @@
  {<<"uuid">>,{pkg,<<"uuid_erl">>,<<"2.0.4">>},0},
  {<<"wamp">>,
   {git,"https://github.com/Leapsight/wamp.git",
-       {ref,"214b856fb4aa4ad82852ab7b8f93b7aa14103402"}},
+       {ref,"e6a9b080d6d28e01fadc779842a9e1e675c9a31e"}},
   0}]}.
 [
 {pkg_hash,[
