@@ -1486,7 +1486,9 @@ subscribe_topics(Session0, State) ->
                 %% We need to subscribe on the remote
                 %% Not implemented yet
                 ?LOG_WARNING(#{
-                    description => "Bridge relay subscription direction 'in' not yet supported'",
+                    description =>
+                        "Bridge relay subscription direction 'in' "
+                        "not yet supported'",
                     subscription => Subs
                 }),
                 Acc;
