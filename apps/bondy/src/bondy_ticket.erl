@@ -175,9 +175,7 @@
 %% TODO review, using a dynamic prefix is a bad idea, turn this into
 %% {?PLUM_DB_TICKET_TAB, Realm} and use key composition which allow for
 %% iteration using first prefixes
--define(PLUM_DB_PREFIX(L),
-    {?PLUM_DB_TICKET_TAB, binary_utils:join(L, <<",">>)}
-).
+-define(PLUM_DB_PREFIX(Uri), {?PLUM_DB_TICKET_TAB, Uri}).
 
 -define(OPTS_VALIDATOR, #{
     <<"expiry_time_secs">> => #{
@@ -412,8 +410,8 @@ verify(Ticket, Opts) ->
     Scope :: scope()) -> {ok, Claims :: claims()} | {error, no_found}.
 
 lookup(RealmUri, Authid, Scope) ->
+    Prefix = ?PLUM_DB_PREFIX(RealmUri),
     Key = lookup_key(Authid, Scope),
-    Prefix = ?PLUM_DB_PREFIX([RealmUri, Authid]),
     Opts = [{resolver, fun ticket_resolver/2}, {allow_put, true}],
 
     case plum_db:get(Prefix, Key, Opts) of
@@ -470,7 +468,7 @@ revoke(Claims) when is_map(Claims) ->
 
 revoke(RealmUri, Authid, Scope)
 when is_binary(RealmUri), is_binary(Authid), is_map(Scope) ->
-    Prefix = ?PLUM_DB_PREFIX([RealmUri, Authid]),
+    Prefix = ?PLUM_DB_PREFIX(RealmUri),
     Key = lookup_key(Authid, Scope),
     plum_db:delete(Prefix, Key).
 
@@ -481,12 +479,12 @@ when is_binary(RealmUri), is_binary(Authid), is_map(Scope) ->
 %% -----------------------------------------------------------------------------
 -spec revoke_all(RealmUri :: uri()) -> ok.
 
-revoke_all(_RealmUri) ->
-    %% We need to redefine storage layout
-    %% using a dynamic prefix is a bad idea, turn this into
-    %% {?PLUM_DB_TICKET_TAB, Realm} and use key composition which allow for
-    %% iteration using first prefixes
-    {error, not_implemented}.
+revoke_all(RealmUri) when is_binary(RealmUri) ->
+    Prefix = ?PLUM_DB_PREFIX(RealmUri),
+    Fun = fun({Key, _}) -> plum_db:delete(Prefix, Key) end,
+    %% We cannot use keys_only as it will currently ignore remove_tombstones
+    Opts = [{remove_tombstones, true}, {resolver, lww}],
+    ok = plum_db:foreach(Fun, Prefix, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -499,14 +497,22 @@ revoke_all(_RealmUri) ->
     ok.
 
 revoke_all(RealmUri, Authid) ->
-    Prefix = ?PLUM_DB_PREFIX([RealmUri, Authid]),
+    %% The tickets for a user are distributed across all the plum_db partitions
+    %% because we are sharding by key
+    Prefix = ?PLUM_DB_PREFIX(RealmUri),
     Fun = fun
-        ({_, ?TOMBSTONE}) ->
-            ok;
-        ({Key, _}) ->
-            plum_db:delete(Prefix, Key)
+        ({{Term, _, _} = Key, _}) when Term == Authid ->
+            plum_db:delete(Prefix, Key);
+        (_) ->
+            %% No longer the user's ticket
+            throw(break)
     end,
-    plum_db:foreach(Fun, Prefix, [{resolver, lww}]).
+    Opts = [
+        {first, {Authid, '_', '_'}},
+        {remove_tombstones, true},
+        {resolver, lww}
+    ],
+    plum_db:foreach(Fun, Prefix, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -516,7 +522,7 @@ revoke_all(RealmUri, Authid) ->
 %% -----------------------------------------------------------------------------
 -spec revoke_all(
     RealmUri :: uri(),
-    Username ::  all | bondy_rbac_user:username(),
+    Authid ::  all | bondy_rbac_user:username(),
     Scope :: scope()) -> ok.
 
 revoke_all(_RealmUri, _Authid, _Scope) ->
@@ -731,10 +737,9 @@ scope_type(#{client_id := _}) ->
     client_local.
 
 
-
+%% @private
 is_persistent(Type) ->
     bondy_config:get([security, ticket, Type, persistence], true).
-
 
 
 %% @private
@@ -744,21 +749,23 @@ store_key(Authid, Scope) ->
 
 %% @private
 store_key(Authid, #{client_instance_id := undefined}, sso) ->
-    Authid;
+    {Authid, <<>>, <<>>};
 
 store_key(Authid, #{client_instance_id := Id}, sso) ->
-    <<Authid/binary, $,, Id/binary>>;
+    {Authid, <<>>, Id};
 
-store_key(_, #{realm := Uri, client_instance_id := undefined}, local) ->
-    Uri;
+store_key(Authid, #{realm := Uri, client_instance_id := undefined}, local) ->
+    {Authid, Uri, <<>>};
 
-store_key(_, #{realm := Uri, client_instance_id := Id}, local) ->
-    <<Uri/binary, $,, Id/binary>>;
+store_key(Authid, #{realm := Uri, client_instance_id := Id}, local) ->
+    {Authid, Uri, Id};
 
-store_key(_, #{client_id := ClientId}, _) ->
+store_key(Authid, #{client_id := ClientId}, Type)
+when ClientId =/= undefined andalso
+(Type == client_local orelse Type == client_sso) ->
     %% client scope or client_realm scope ticket
     %% client_instance_id handled internally by list_key
-    ClientId.
+    {Authid, ClientId, <<>>}.
 
 
 %% @private
@@ -783,7 +790,7 @@ list_key(#{realm := Uri, client_instance_id := Id}) ->
 
 %% @private
 store_ticket(AuthRealmUri, Authid, Claims) ->
-    Prefix = ?PLUM_DB_PREFIX([AuthRealmUri, Authid]),
+    Prefix = ?PLUM_DB_PREFIX(AuthRealmUri),
     Scope = maps:get(scope, Claims),
     Key = store_key(Authid, Scope),
 
