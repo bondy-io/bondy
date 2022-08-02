@@ -71,13 +71,15 @@
 -record(proc_index, {
     key                         ::  index_key(),
     invoke                      ::  invoke(),
-    entry_key                   ::  entry_key()
+    entry_key                   ::  entry_key(),
+    is_proxy                    ::  boolean()
 }).
 
 -record(topic_idx, {
     key                         ::  index_key(),
     protocol_session_id         ::  id(),
-    entry_key                   ::  entry_key()
+    entry_key                   ::  entry_key(),
+    is_proxy                    ::  boolean()
 }).
 
 -record(topic_remote_idx, {
@@ -89,7 +91,12 @@
 -type t()                       ::  #bondy_registry_trie{}.
 -type index_key()               ::  {RealmUri :: uri(), Uri :: uri()}.
 -type invoke()                  ::  binary().
--type registration_match()      ::  {index_key(), invoke(), entry_key()}.
+-type registration_match()      ::  {
+                                        index_key(),
+                                        invoke(),
+                                        entry_key(),
+                                        IsProxy :: boolean()
+                                    }.
 -type registration_match_res()  ::  [registration_match()].
 -type registration_match_opts() ::  #{
                                         %% WAMP match policy
@@ -97,7 +104,11 @@
                                         %% WAMP invocation policy
                                         invoke => wildcard(binary())
                                     }.
--type subscription_match()      ::  {index_key(), entry_key()}.
+-type subscription_match()      ::  {
+                                        index_key(),
+                                        entry_key(),
+                                        Isproxy :: boolean()
+                                    }.
 -type subscription_match_res()  ::  {
                                         Local :: [subscription_match()],
                                         Remote :: [node()]
@@ -530,7 +541,8 @@ match_exact_registration(RealmUri, Uri, Opts, Trie) ->
     Pattern = #proc_index{
         key = {RealmUri, Uri},
         invoke = '$1',
-        entry_key = '$2'
+        entry_key = '$2',
+        is_proxy = '$3'
     },
     Conds =
         case Invoke of
@@ -541,7 +553,7 @@ match_exact_registration(RealmUri, Uri, Opts, Trie) ->
         end,
 
     MS = [
-        { Pattern, Conds, [{{{{RealmUri, Uri}}, '$1', '$2'}}] }
+        { Pattern, Conds, [{{{{RealmUri, Uri}}, '$1', '$2', '$3'}}] }
     ],
 
     case maps:find(limit, Opts) of
@@ -697,10 +709,11 @@ match_local_exact_subscription(RealmUri, Uri, Opts, Trie) ->
     Pattern = #topic_idx{
         key = {RealmUri, Uri},
         protocol_session_id = Var,
-        entry_key = '$2'
+        entry_key = '$2',
+        is_proxy = '$3'
     },
 
-    Return = [{{{{RealmUri, Uri}}, '$2'}}],
+    Return = [{{{{RealmUri, Uri}}, '$2', '$3'}}],
 
     MS = [{Pattern, Conds, Return}],
 
@@ -803,7 +816,7 @@ match_pattern_subscription(RealmUri, Uri, Opts, Trie) ->
     },
     %% Always sync at the moment
     All = art_find_matches(Pattern, ArtOpts, ART, 0),
-    split_remote(All).
+    split_remote(subscription, All).
 
 
 %% -----------------------------------------------------------------------------
@@ -820,10 +833,10 @@ match_pattern_subscription(#trie_continuation{}) ->
 
 
 %% @private
-split_remote([]) ->
+split_remote(_, []) ->
     {[], []};
 
-split_remote(All) when is_list(All) ->
+split_remote(subscription, All) when is_list(All) ->
     Nodestring = partisan:nodestring(),
 
     {L, R} = lists:foldl(
@@ -834,7 +847,7 @@ split_remote(All) when is_list(All) ->
                 Node = binary_to_atom(NS, utf8),
                 {L, sets:add_element(Node, R)};
 
-            ({{Bin, _, _, _, _}, EntryKey}, {L, R}) ->
+            ({{Bin, _, _, _, _}, {EntryKey, IsProxy}}, {L, R}) ->
                 %% See trie_key to understand how we generated Bin
                 RealmUri = bondy_registry_entry:realm_uri(EntryKey),
                 Sz = byte_size(RealmUri),
@@ -842,7 +855,10 @@ split_remote(All) when is_list(All) ->
                 Uri = string:trim(Uri0, trailing, "*"),
 
                 %% We project the expected triple
-                Match = {{RealmUri, Uri}, EntryKey},
+                %% TODO this is projection subscriptions only at the moment,
+                %% registrations need the Invoke field too.
+                %% We will need to add INvoke Policy to the art value
+                Match = {{RealmUri, Uri}, EntryKey, IsProxy},
                 {[Match|L], R}
         end,
         {[], sets:new()},
@@ -850,11 +866,11 @@ split_remote(All) when is_list(All) ->
     ),
     {lists:reverse(L), sets:to_list(R)};
 
-split_remote(?EOT) ->
+split_remote(_, ?EOT) ->
     ?EOT;
 
-split_remote({All, Cont}) ->
-    {split_remote(All), Cont}.
+split_remote(Type, {All, Cont}) ->
+    {split_remote(Type, All), Cont}.
 
 
 %% @private
@@ -996,13 +1012,15 @@ add_exact_registration(Entry, Trie) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Uri = bondy_registry_entry:uri(Entry),
     EntryKey = bondy_registry_entry:key(Entry),
+    IsProxy = bondy_registry_entry:is_proxy(Entry),
     Invoke = bondy_registry_entry:get_option(invoke, Entry, ?INVOKE_SINGLE),
     MatchPolicy = bondy_registry_entry:match_policy(Entry),
 
     Object = #proc_index{
         key = {RealmUri, Uri},
         invoke = Invoke,
-        entry_key = EntryKey
+        entry_key = EntryKey,
+        is_proxy = IsProxy
     },
 
     true = ets:insert(Tab, Object),
@@ -1022,12 +1040,14 @@ del_exact_registration(Entry, Trie) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Uri = bondy_registry_entry:uri(Entry),
     EntryKey = bondy_registry_entry:key(Entry),
+    IsProxy = bondy_registry_entry:is_proxy(Entry),
     Invoke = bondy_registry_entry:get_option(invoke, Entry, ?INVOKE_SINGLE),
     MatchPolicy = bondy_registry_entry:match_policy(Entry),
     Object = #proc_index{
         key = {RealmUri, Uri},
         invoke = Invoke,
-        entry_key = EntryKey
+        entry_key = EntryKey,
+        is_proxy = IsProxy
     },
 
     %% We use match delete because Tab is a bag table
@@ -1048,11 +1068,13 @@ add_exact_subscription(Entry, Trie) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Uri = bondy_registry_entry:uri(Entry),
     EntryKey = bondy_registry_entry:key(Entry),
+    IsProxy = bondy_registry_entry:is_proxy(Entry),
     MatchPolicy = bondy_registry_entry:match_policy(Entry),
 
     Object = #topic_idx{
         key = {RealmUri, Uri},
-        entry_key = EntryKey
+        entry_key = EntryKey,
+        is_proxy = IsProxy
     },
 
     true = ets:insert(Tab, Object),
@@ -1072,11 +1094,13 @@ del_exact_subscription(Entry, Trie) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Uri = bondy_registry_entry:uri(Entry),
     EntryKey = bondy_registry_entry:key(Entry),
+    IsProxy = bondy_registry_entry:is_proxy(Entry),
     MatchPolicy = bondy_registry_entry:match_policy(Entry),
 
     Object = #topic_idx{
         key = {RealmUri, Uri},
-        entry_key = EntryKey
+        entry_key = EntryKey,
+        is_proxy = IsProxy
     },
 
     %% We use match delete because Tab is a bag table
@@ -1160,11 +1184,12 @@ add_pattern_entry(Entry, Trie) ->
         subscription ->
             Uri = bondy_registry_entry:uri(Entry),
             EntryKey = bondy_registry_entry:key(Entry),
+            IsProxy = bondy_registry_entry:is_proxy(Entry),
             MatchPolicy = bondy_registry_entry:match_policy(Entry),
 
             TrieKey = art_key(Entry),
-
-            _ = art:set(TrieKey, EntryKey, Trie#bondy_registry_trie.topic_art),
+            Value = {EntryKey, IsProxy},
+            _ = art:set(TrieKey, Value, Trie#bondy_registry_trie.topic_art),
 
             IsFirstEntry = incr_counter(Uri, MatchPolicy, 1, Trie) =:= 1,
 

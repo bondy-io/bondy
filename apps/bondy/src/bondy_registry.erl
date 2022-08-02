@@ -295,7 +295,7 @@ when Task == undefined orelse is_function(Task, 1) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     SessionId = bondy_context:session_id(Ctxt),
     Pattern = bondy_registry_entry:key_pattern(
-        RealmUri, SessionId, EntryId, '_'
+        RealmUri, SessionId, EntryId
     ),
 
     MatchOpts = [
@@ -352,7 +352,7 @@ when Task == undefined orelse is_function(Task, 1) ->
         SessionId ->
             RealmUri = bondy_context:realm_uri(Ctxt),
             Pattern = bondy_registry_entry:key_pattern(
-                RealmUri, SessionId, '_', '_'
+                RealmUri, SessionId, '_'
             ),
             MaybeFun = maybe_fun(Task, Ctxt),
             MatchOpts = [
@@ -378,7 +378,7 @@ when Task == undefined orelse is_function(Task, 1) ->
     Task :: task() | undefined) -> [entry()].
 
 remove_all(Type, RealmUri, SessionId, Task) ->
-    Pattern = bondy_registry_entry:key_pattern(RealmUri, SessionId, '_', '_'),
+    Pattern = bondy_registry_entry:key_pattern(RealmUri, SessionId, '_'),
 
     MatchOpts = [
         {limit, 100},
@@ -488,7 +488,7 @@ entries(Type, RealmUri, SessionId) ->
     [entry()] | {[entry()], store_continuation() | eot()} | eot().
 
 entries(Type, RealmUri, SessionId, Limit) ->
-    Pattern = bondy_registry_entry:key_pattern(RealmUri, SessionId, '_', '_'),
+    Pattern = bondy_registry_entry:key_pattern(RealmUri, SessionId, '_'),
     Opts = [
         {limit, Limit},
         {remove_tombstones, true},
@@ -940,7 +940,7 @@ add(subscription = Type, RealmUri, Uri, Opts, Ref, Trie) ->
 
     Acc = none,
     KeyPattern = bondy_registry_entry:key_pattern(
-        RealmUri, SessionId, '_', '_'
+        RealmUri, SessionId, '_'
     ),
     FoldOpts = [
         {match, KeyPattern},
@@ -1164,9 +1164,10 @@ resolve_inconsistencies(All, Invoke, SessionId) ->
 
 sort_registrations(L) ->
     lists:sort(
-        fun ({_, _, A}, {_, _, B}) ->
-            bondy_registry_entry:created(A)
-                =< bondy_registry_entry:created(B)
+        fun ({_, _, A, _}, {_, _, B, _}) ->
+            TsA = bondy_registry_entry:created(A),
+            TsB = bondy_registry_entry:created(B),
+            TsA =< TsB
         end,
         L
     ).
@@ -1185,15 +1186,15 @@ find_registration_duplicates(_, undefined) ->
     %% Undefined is used for internal callees and we allow duplicates
     [];
 
-find_registration_duplicates(Triples, SessionId) ->
+find_registration_duplicates(Quads, SessionId) ->
     [
-        Triple
-        || {_, _, EntryKey} = Triple <- Triples,
+        Quad
+        || {_, _, EntryKey, IsProxy} = Quad <- Quads,
             %% Proxy entries can have duplicates, this is
             %% because the handler (proxy) is registering
             %% the entries for multiple remote handlers,
             %% so we filter them out
-            false == bondy_registry_entry:is_proxy(EntryKey),
+            false == IsProxy,
             SessionId == bondy_registry_entry:session_id(EntryKey)
     ].
 
@@ -1651,6 +1652,10 @@ lookup_entries(Type, [H|T], Acc) ->
 
 
 %% @private
-entry_key(subscription, {_, Val}) -> Val;
-entry_key(registration, {_, _, Val}) -> Val.
+entry_key(subscription, {_, Val, _}) -> Val;
+entry_key(registration, {_, _, Val, _}) -> Val.
+
+
+
+
 
