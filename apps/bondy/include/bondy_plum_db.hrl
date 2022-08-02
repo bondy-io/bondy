@@ -13,6 +13,7 @@
 -define(PLUM_DB_USER_GRANT_TAB, security_user_grants).
 -define(PLUM_DB_SOURCE_TAB, security_sources).
 -define(PLUM_DB_TICKET_TAB, bondy_ticket).
+-define(PLUM_DB_REGISTRY_ACTOR, '$bondy_registry').
 
 %% REGISTRY
 -define(PLUM_DB_REGISTRATION_TAB, bondy_registration).

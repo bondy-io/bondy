@@ -117,6 +117,8 @@
 -export([created/1]).
 -export([delete/1]).
 -export([delete/2]).
+-export([dirty_delete/1]).
+-export([dirty_delete/2]).
 -export([field_index/1]).
 -export([find_option/2]).
 -export([fold/4]).
@@ -837,6 +839,88 @@ delete(#entry{} = Entry) ->
 delete(Type, #entry_key{} = EntryKey) when ?IS_ENTRY_TYPE(Type) ->
     PDBPrefix = pdb_prefix(Type, EntryKey),
     plum_db:delete(PDBPrefix, EntryKey).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc WARNING: Never use this unless you know exactly what you are doing!
+%% We use this only when we want to remove a remote entry from the registry as
+%% a result of the owner node being down.
+%% We want to achieve the following:
+%% 1. The delete has to be idempotent, so that we avoid having to merge N
+%% versions either during broadcast or AAE exchange. We can use the owners
+%% ActorID and Timestamp for this, manipulating the plum_db_object, a little
+%% bit nasty but effective and almost harmless as entries are immutable anyway.
+%% 2. If we can achieve (1) then we could disable broadcast, as all nodes
+%% will be doing (1).
+%% 3. We still have the AAE exchange, so (1) has to ensure that the hash of
+%% the object is the same in all nodes. I think that comes naturally from
+%% doing (1) anyway, but we need to check, e.g. timestamp differences?
+%% @end
+%% -----------------------------------------------------------------------------
+-spec dirty_delete(Type :: t()) -> ok.
+
+dirty_delete(#entry{type = Type, key = Key}) ->
+    dirty_delete(Type, Key).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc WARNING: Never use this unless you know exactly what you are doing!
+%% We use this only when we want to remove a remote entry from the registry as
+%% a result of the owner node being down.
+%% We want to achieve the following:
+%% 1. The delete has to be idempotent, so that we avoid having to merge N
+%% versions either during broadcast or AAE exchange. We can use the owners
+%% ActorID and Timestamp for this, manipulating the plum_db_object, a little
+%% bit nasty but effective and almost harmless as entries are immutable anyway.
+%% 2. If we can achieve (1) then we could disable broadcast, as all nodes
+%% will be doing (1).
+%% 3. We still have the AAE exchange, so (1) has to ensure that the hash of
+%% the object is the same in all nodes. I think that comes naturally from
+%% doing (1) anyway, but we need to check, e.g. timestamp differences?
+%% @end
+%% -----------------------------------------------------------------------------
+-spec dirty_delete(Type :: entry_type(), EntryKey :: key()) -> ok.
+
+dirty_delete(Type, EntryKey) ->
+    PDBPrefix = pdb_prefix(Type, EntryKey),
+
+    case plum_db:get_object({PDBPrefix, EntryKey}) of
+        undefined ->
+            ok;
+
+        {object, Clock} = Obj0 ->
+            %% We use a static fake ActorID and the original timestamp so that
+            %% the tombstone is deterministically.
+            %% This allows the operation to be idempotent when performed
+            %% concurrently by multiple nodes. Idempotency is a requirement so
+            %% that the hash of the object is the same and compares equal
+            %% between nodes irrespective of who created it.
+            %% Also the ActorID helps us determine this is a dirty delete.
+            Partition = plum_db:get_partition({PDBPrefix, EntryKey}),
+            ActorId = {Partition, ?PLUM_DB_REGISTRY_ACTOR},
+            Context = plum_db_object:context(Obj0),
+            [{_, Timestamp}] = plum_db_dvvset:values(Clock),
+            InsertRec = plum_db_dvvset:new(Context, {?TOMBSTONE, Timestamp}),
+
+            %% We create a new object
+            Obj = {object, plum_db_dvvset:update(InsertRec, Clock, ActorId)},
+
+            %% We must resolve the object before calling dirty_put/4.
+            Resolved = plum_db_object:resolve(Obj, lww),
+
+            %% Avoid broadcasting, the primary objective of this delete is to
+            %% remove the local replica of an entry when we get disconnected
+            %% from its root node.
+            %% Every node will do the same, so if this is a node crashing we
+            %% will have a tsunami of deletes being broadcasted.
+            %% We will achieve convergence via AAE.
+            Opts = [
+                {broadcast, false}
+            ],
+
+            plum_db:dirty_put(PDBPrefix, EntryKey, Resolved, Opts)
+    end.
 
 
 %% -----------------------------------------------------------------------------
