@@ -213,6 +213,11 @@ authorize(Permission, Ctxt) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns 'ok' or an exception.
+%% Failures:
+%% <ul>
+%% <li>`{no_such_realm, uri()}'</li>
+%% <li>`{not_authorized, Reason :: binary()}'</li>
+%% </ul>
 %% @end
 %% -----------------------------------------------------------------------------
 -spec authorize(binary(), binary() | any, bondy_context:t() | context()) ->
@@ -225,7 +230,9 @@ authorize(_, _, #{authid := '$internal'}) ->
     ok;
 
 authorize(Permission, Resource, Ctxt) ->
-    case bondy_context:is_security_enabled(Ctxt) of
+    RealmUri = bondy_context:realm_uri(Ctxt),
+
+    try bondy_context:is_security_enabled(Ctxt) of
         true ->
             RBACCtxt = bondy_session:rbac_context(
                 bondy_context:session(Ctxt)
@@ -233,6 +240,9 @@ authorize(Permission, Resource, Ctxt) ->
             do_authorize(Permission, Resource, RBACCtxt);
         false ->
             ok
+    catch
+        _:{not_found, RealmUri} ->
+            error({no_such_realm, RealmUri})
     end.
 
 
