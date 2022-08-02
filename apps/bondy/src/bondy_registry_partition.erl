@@ -287,21 +287,6 @@ handle_info({'ETS-TRANSFER', _, _, _}, State) ->
     %% We ignore as tables are named.
     {noreply, State};
 
-handle_info({nodeup, _Node} = Event, State) ->
-    ?LOG_DEBUG(#{
-        event => Event
-    }),
-    {noreply, State};
-
-handle_info({nodedown, _Node} = Event, State) ->
-    %% A connection with node has gone down
-    ?LOG_DEBUG(#{
-        event => Event
-    }),
-    %% TODO deactivate (keep a bloomfilter or list) to filter
-    %% future searches or delete?
-    {noreply, State};
-
 handle_info(Info, State) ->
     ?LOG_DEBUG(#{
         reason => unexpected_event,
