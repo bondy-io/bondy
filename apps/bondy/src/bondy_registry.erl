@@ -721,11 +721,106 @@ format_error(Reason, [{_M, _F, _As, Info} | _]) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-will_merge(_PKey, _New, _Old) ->
+will_merge(_PKey, _New, undefined) ->
+    %% [Case 1] If New is an entry rooted in this node we need to delete and
+    %% broadcast to the cluster members.
+    %% We handle this case in on_merge as we can simply read the entry from
+    %% plum_db and immediately delete (without the entry ever being added to
+    %% the trie) which sends a broadcast.
+    true;
+
+will_merge(_PKey, New, Old) ->
     %% ?LOG_DEBUG(#{
     %%     description => "Will merge called", new => New, old => Old
     %% }),
-    true.
+    NewResolved = maybe_resolve(New),
+    NewEntry = plum_db_object:value(NewResolved),
+    OldEntry = resolve_value(Old),
+
+    case {NewEntry, OldEntry} of
+        {?TOMBSTONE, ?TOMBSTONE} ->
+            true;
+
+        {?TOMBSTONE, OldEntry} ->
+            case bondy_registry_entry:is_local(OldEntry) of
+                true ->
+                    %% [Case 2]
+                    %% A peer node deleted an entry rooted in this node.
+                    %% The entry is still active as we still have it on plum_db.
+                    %% This MUST only occur when the other node was
+                    %% disconnected from us but we both remained operational
+                    %% i.e. a net split. In this situation the other node used
+                    %% bondy_registry_entry:dirty_delete/1 which adds a
+                    %% tombstone in a deterministic way (by using a static
+                    %% ActorID and the original timestamp). It also disables
+                    %% broadcast, so the fact that we are handling this here is
+                    %% due to an AAE exchange. We need override the delete and
+                    %% let all cluster members know the entry is still active.
+                    %% To do that we replace the delete with the old value
+                    %% while advancing the vector clock.
+                    %% plum_db will store this new value locally and broadcast
+                    %% the change to the cluster members.
+                    Ctxt = plum_db_object:context(New),
+                    [{{Partition, _}, _}|_] = Ctxt,
+                    ActorId = {Partition, partisan:node()},
+                    Modified = plum_db_object:modify(
+                        New, Ctxt, OldEntry, ActorId
+                    ),
+                    {true, Modified};
+
+                false ->
+                    %% [Case 3]
+                    %% We (A) need to first check if this was deleted by the
+                    %% owner (B) or not, and if not, check if we are still
+                    %% connected to the owner. If so we MUST ignore. This would
+                    %% be the case of node C deleting the entry (as itself got
+                    %% disconnected from B but not from us).
+                    case plum_db_object:context(NewResolved) of
+                        [{{_, ?PLUM_DB_REGISTRY_ACTOR}, _}] ->
+                            %% Not deleted by the owner
+                            Peer = bondy_registry_entry:node(NewEntry),
+                            not partisan:is_connected(Peer);
+                        _ ->
+                            %% Deleted by the owner then. Merge and handle the
+                            %% delete in on_merge/3.
+                            true
+                    end
+            end;
+
+        {NewEntry, ?TOMBSTONE} ->
+            case bondy_registry_entry:is_local(NewEntry) of
+                true ->
+                    %% [Case 4]
+                    %% Another node is telling us we are missing an entry that
+                    %% is rooted here, this is an inconsistency issue produced
+                    %% by the eventual consistency model. Most probably this
+                    %% other node has not handled the nodedown signal properly.
+                    %% We need to mark it as deleted in plum_db so that the
+                    %% other nodes get the event and stop trying to re-surface
+                    %% it.
+                    %% The following will mark it as deleted and broadcast the
+                    %% change to all cluster members.
+                    Ctxt = plum_db_object:context(New),
+                    [{{Partition, _}, _}|_] = Ctxt,
+                    ActorId = {Partition, partisan:node()},
+                    Modified = plum_db_object:modify(
+                        New, Ctxt, ?TOMBSTONE, ActorId
+                    ),
+                    {true, Modified};
+                false ->
+                    %% [Case 5]
+                    %% An entry rooted in another node is being resurfaced.
+                    %% Most probably we were disconnected from this node and
+                    %% marked the entry as deleted but now we got a connection
+                    %% back to this node. However we might not yet have a
+                    %% connection with that node (and getting this via another
+                    %% node), so we need to check. If its not connected we
+                    %% return false, ignoring the merge (retaining our
+                    %% tombstone).
+                    Peer = bondy_registry_entry:node(NewEntry),
+                    partisan:is_connected(Peer)
+            end
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -763,7 +858,6 @@ on_erase(_PKey, _Old) ->
 
 
 
-
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
@@ -771,23 +865,6 @@ on_erase(_PKey, _Old) ->
 
 
 init([]) ->
-    process_flag(trap_exit, true),
-
-    %% We subscribe to plum_db_events change notifications. We get updates
-    %% in handle_info so that we can we update the tries
-    %% MS = [{
-    %%     %% {{{_, _} = FullPrefix, Key}, NewObj, ExistingObj}
-    %%     {{{'$1', '_'}, '_'}, '_', '_'},
-    %%     [
-    %%         {'orelse',
-    %%             {'=:=', ?PLUM_DB_REGISTRATION_TAB, '$1'},
-    %%             {'=:=', ?PLUM_DB_SUBSCRIPTION_TAB, '$1'}
-    %%         }
-    %%     ],
-    %%     [true]
-    %% }],
-    %% ok = plum_db_events:subscribe(object_update, MS),
-
     %% Every time a node goes up/down we get an info message
     ok = partisan:monitor_nodes(true),
 
@@ -819,23 +896,19 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 
-handle_info(
-    {plum_db_event, object_update, {PK, New, Old}}, State) ->
-    ok = trie_on_merge(PK, New, Old),
-    {noreply, State};
-
 handle_info({nodeup, _Node} = Event, State) ->
-    ?LOG_DEBUG(#{
-        event => Event
-    }),
+    ?LOG_DEBUG(#{event => Event}),
     {noreply, State};
 
-handle_info({nodedown, _Node} = Event, State) ->
+handle_info({nodedown, Node} = Event, State) ->
     %% A connection with node has gone down
-    ?LOG_DEBUG(#{
-        event => Event
-    }),
-    %% TODO deactivate node entries
+    ?LOG_DEBUG(#{event => Event}),
+    %% TODO Remove all Node's entries from the trie but and from plum_db.
+    %% We need to achieve the following:
+    %% use bondy_registry_entry:dirty_delete
+
+    ok = bondy_registry_entry:prune(Node),
+
     {noreply, State};
 
 handle_info(Info, State) ->
@@ -1326,48 +1399,72 @@ trie_on_merge({{_, RealmUri}, _} = PKey, New, Old) ->
 %% assumes it is executing in a registry partition process
 %% @end
 %% -----------------------------------------------------------------------------
-trie_on_merge(_PKey, New, Old, Trie) ->
-    case maybe_resolve(New) of
-        '$deleted' when Old == undefined ->
+trie_on_merge(_PKey, New, undefined, Trie) ->
+    NewEntry = resolve_value(New),
+
+    case NewEntry of
+        ?TOMBSTONE ->
             %% We got a delete for an entry we do not know anymore.
-            %% This happens when the registry has just been reset
-            %% as we do not persist registrations any more
-            %%
-            %% TODO use the future plum_db:erase instead of delete and avoid
-            %% tombstones being resurfaced
+            %% This could happen when we shutdown or crashed
+            %% (while the registry is using ram-only storage).
+            %% We assume the tombstone was created with
+            %% bondy_registry_entry:dirty_delete/1 and if this was an entry
+            %% rooted in this node the result would be the same as if it have
+            %% been done locally (idempotence).
             ok;
-
-        '$deleted' when Old =/= undefined ->
-            %% We do this since we need to know the Match Policy of the
-            %% previous entry in order to generate the trie key and we want to
-            %% avoid including yet another element to the entry_key
-            Reconciled = plum_db_object:resolve(Old, lww),
-            OldEntry = plum_db_object:value(Reconciled),
-            %% This works because registry entries are immutable
-            bondy_registry_trie:delete(OldEntry, Trie);
-
-        Entry ->
-            case bondy_registry_entry:is_local(Entry) of
-                true when Old =:= undefined ->
+        NewEntry ->
+            case bondy_registry_entry:is_local(NewEntry) of
+                true ->
+                    %% [Case 1]
                     %% Another node is telling us we are missing an entry that
                     %% is rooted here, this is an inconsistency issue produced
-                    %% by our eventual consistency model. Most probably we
-                    %% crashed and we never had the chance to mark this entry
-                    %% as deleted or if we did it never reached the peer node.
+                    %% by the eventual consistency model. Most probably this
+                    %% other node has not handled the nodedown signal properly.
                     %% We need to mark it as deleted in plum_db so that the
                     %% other nodes get the event and stop trying to re-surface
                     %% it.
+                    %% The following will mark it as deleted and broadcast the
+                    %% change to all cluster nodes.
+                    ok = bondy_registry_entry:delete(NewEntry);
 
-                    %% This will mark it as deleted and broadcast the change to
-                    %% all cluster nodes.
-                    ok = bondy_registry_entry:delete(Entry);
+                false ->
+                    bondy_registry_trie:add(NewEntry, Trie),
+                    ok
+            end
+    end;
 
-                true when Old =/= undefined ->
-                    %% This case should never happen as entries are immutable
+trie_on_merge(_PKey, New, Old, Trie) ->
+    case resolve_value(New) of
+        ?TOMBSTONE  ->
+            OldEntry = resolve_value(Old),
+            case bondy_registry_entry:is_local(OldEntry) of
+                true ->
+                    %% [Case 2] We handled this on will_merge/3;
+                    %% We do not need to update the trie
                     ok;
 
                 false ->
-                    bondy_registry_trie:add(Entry, Trie),
+                    %% [Case 3]
+                    %% We need to delete the entry from the trie (as it was
+                    %% deleted from plum_db) but we do not have the key, so we
+                    %% use the old value to get the Entry to be deleted.
+                    %% This works because registry entries are immutable.
+                    bondy_registry_trie:delete(OldEntry, Trie)
+                end;
+
+        NewEntry ->
+            %% Case 4
+            case bondy_registry_entry:is_local(NewEntry) of
+                true ->
+                    %% [Case 4] Handled by will_merge/3. We do not need to
+                    %% update the trie.
+                    ok;
+
+                false ->
+                    %% [Case 5] Handled by will_merge/3.
+                    %% If we are here then the we are connected to the root
+                    %% node for Entry, so we add to the trie
+                    bondy_registry_trie:add(NewEntry, Trie),
                     ok
 
             end
@@ -1376,18 +1473,22 @@ trie_on_merge(_PKey, New, Old, Trie) ->
 
 %% @private
 maybe_resolve(Object) ->
+    maybe_resolve(Object, lww).
+
+
+%% @private
+maybe_resolve(Object, Resolver) ->
     case plum_db_object:value_count(Object) > 1 of
         true ->
-            %% Entries are immutable so we either get an Entry or a tombstone
-            Resolver = fun
-                ('$deleted', _) -> '$deleted';
-                (_, '$deleted') -> '$deleted'
-            end,
-            Resolved = plum_db_object:resolve(Object, Resolver),
-            plum_db_object:value(Resolved);
+            plum_db_object:resolve(Object, Resolver);
         false ->
-            plum_db_object:value(Object)
+            Object
     end.
+
+
+%% @private
+resolve_value(Object) ->
+    plum_db_object:value(maybe_resolve(Object)).
 
 
 %% -----------------------------------------------------------------------------
@@ -1508,7 +1609,7 @@ init_trie(State) ->
     Opts = [{resolver, lww}, {remove_tombstones, true}],
 
     Fun = fun
-        ({_, '$deleted'}) ->
+        ({_, ?TOMBSTONE}) ->
             ok;
 
         ({_, Entry}) ->
@@ -1594,7 +1695,6 @@ maybe_execute(Fun, Entry) when is_function(Fun, 1) ->
             }),
             ok
     end.
-
 
 
 %% @private

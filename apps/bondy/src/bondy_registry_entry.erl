@@ -153,6 +153,7 @@
 -export([pid/1]).
 -export([proxy/2]).
 -export([proxy_details/1]).
+-export([prune/1]).
 -export([realm_uri/1]).
 -export([ref/1]).
 -export([session_id/1]).
@@ -921,6 +922,17 @@ dirty_delete(Type, EntryKey) ->
 
             plum_db:dirty_put(PDBPrefix, EntryKey, Resolved, Opts)
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec prune(Node :: node()) -> ok.
+
+prune(Node) when is_atom(Node) ->
+    _Now = erlang:system_time(millisecond),
+    ok.
 
 
 %% -----------------------------------------------------------------------------
