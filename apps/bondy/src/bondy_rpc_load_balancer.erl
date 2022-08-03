@@ -151,8 +151,8 @@
     {ok, bondy_registry_entry:t()} | {error, noproc | map()}.
 
 select(Entries, Opts) when is_list(Entries) ->
-    Node = bondy_config:nodestring(),
-    do_select(iterate(Entries, Opts), Node).
+    Nodestring = bondy_config:nodestring(),
+    do_select(iterate(Entries, Opts), Nodestring).
 
 
 %% -----------------------------------------------------------------------------
@@ -290,8 +290,10 @@ do_select('$end_of_table', _) ->
 do_select({error, _} = Error, _) ->
     Error;
 
-do_select({Entry, Iter}, Node) ->
-    case bondy_registry_entry:nodestring(Entry) =:= Node of
+do_select({Entry, Iter}, Nodestring) ->
+    %% An optimisation as bondy_registry_entry:is_local/1 would fetch the
+    %% nodestring everytime.
+    case bondy_registry_entry:nodestring(Entry) =:= Nodestring of
         true ->
             %% The wamp peer is local, so we should have a peer
             %% Callback peers are not allowed to be used on shared registration
@@ -304,18 +306,20 @@ do_select({Entry, Iter}, Node) ->
                     %% This might happen when the WAMP Peer
                     %% disconnected between the time we read the entry
                     %% and now. We contine trying with other entries.
-                    do_select(iterate(Iter), Node)
+                    do_select(iterate(Iter), Nodestring)
             end;
         false ->
-            %% This wamp peer is remote.
-            %% We cannot check the remote node as we might not have
-            %% a direct connection, so we trust we have an up-todate state.
-            %% Any failover strategy should be handled by the user.
-            {ok, Entry}
+            Node = bondy_registry_entry:node(Entry),
+            case partisan:is_connected(Node) of
+                true ->
+                    {ok, Entry};
+                false ->
+                    %% The cluster peer is not connected and the registry has
+                    %% not yet been pruned.
+                    %% We try to find another candidate
+                    do_select(iterate(Iter), Nodestring)
+            end
     end.
-
-
-
 
 
 %% -----------------------------------------------------------------------------
