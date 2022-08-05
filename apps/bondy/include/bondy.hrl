@@ -130,7 +130,8 @@
     sharded_registration => false,
     shared_registration => true,
     registration_meta_api => true,
-    session_meta_api => true
+    session_meta_api => true,
+    payload_passthru_mode => false
 }).
 -define(DEALER_FEATURES, ?WAMP_DEALER_FEATURES#{
     caller_auth_claims => true
@@ -147,7 +148,8 @@
     registration_revocation => false,
     sharded_registration => false,
     shared_registration => true,
-    session_meta_api => true
+    session_meta_api => true,
+    payload_passthru_mode => false
 }).
 -define(CALLEE_FEATURES, ?WAMP_CALLEE_FEATURES#{
     caller_auth_claims => true
@@ -158,7 +160,8 @@
     call_timeout => true,
     caller_identification => true,
     progressive_call_results => false,
-    progressive_calls => false
+    progressive_calls => false,
+    payload_passthru_mode => false
 }).
 
 -define(BROKER_FEATURES, #{
@@ -171,7 +174,8 @@
     subscriber_blackwhite_listing => false,
     reflection => false,
     session_meta_api => false,
-    subscription_meta_api => false
+    subscription_meta_api => false,
+    payload_passthru_mode => false
 }).
 
 -define(SUBSCRIBER_FEATURES, #{
@@ -179,13 +183,15 @@
     event_history => false,
     publication_trustlevels => false,
     publisher_identification => true,
-    sharded_subscription => false
+    sharded_subscription => false,
+    payload_passthru_mode => false
 }).
 
 -define(PUBLISHER_FEATURES, #{
     publisher_exclusion => true,
     publisher_identification => true,
-    subscriber_blackwhite_listing => false
+    subscriber_blackwhite_listing => false,
+    payload_passthru_mode => false
 }).
 
 
