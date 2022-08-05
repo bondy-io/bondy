@@ -40,8 +40,11 @@
 -include("bondy_registry.hrl").
 -include("bondy_plum_db.hrl").
 
+-define(MERGE_STATUS_TAB, bondy_registry_merge_status).
+
 -record(state, {
-    start_ts  :: pos_integer()
+    timers = #{}    ::  #{node() => reference()},
+    start_ts        ::  pos_integer()
 }).
 
 -type task() :: fun((entry(), bondy_context:t()) -> ok).
@@ -84,6 +87,7 @@
 -export([remove_all/4]).
 -export([start_link/0]).
 -export([trie/1]).
+-export([pick/1]).
 
 
 %% PLUM_DB PREFIX CALLBACKS
@@ -125,6 +129,16 @@ start_link() ->
 %% -----------------------------------------------------------------------------
 init_trie() ->
     gen_server:call(?MODULE, init_trie, timer:minutes(10)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec pick(Uri :: binary()) -> pid().
+
+pick(Uri) ->
+    bondy_registry_partition:pick(Uri).
 
 
 %% -----------------------------------------------------------------------------
@@ -175,8 +189,9 @@ add(Entry) ->
 
     ok = bondy_registry_entry:store(Entry),
 
-    case trie_add(Entry) of
+    case add_indices(Entry) of
         {ok, _, IsFirstEntry} ->
+            %% No need to add to remote index as proxies are local
             {ok, IsFirstEntry};
 
         {error, {already_exists, _}} ->
@@ -265,7 +280,7 @@ add(Type, RealmUri, Uri, Opts, Ref) ->
 -spec remove(entry()) -> ok.
 
 remove(Entry) ->
-    ok = trie_delete(Entry),
+    ok = delete_indices(Entry),
     ok = bondy_registry_entry:delete(Entry).
 
 
@@ -311,7 +326,7 @@ when Task == undefined orelse is_function(Task, 1) ->
             ok;
         {[{_Key, Entry}], _Cont} ->
             %% We delete entry from the trie first
-            ok = trie_delete(Entry),
+            ok = delete_indices(Entry),
             %% We delete the entry from plum_db. This will broadcast the delete
             %% amongst the nodes in the cluster
             ok = bondy_registry_entry:delete(Entry),
@@ -697,6 +712,7 @@ match_pattern(Type, RealmUri, Uri, Opts) ->
     end.
 
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -775,15 +791,22 @@ will_merge(_PKey, New, Old) ->
                     %% connected to the owner. If so we MUST ignore. This would
                     %% be the case of node C deleting the entry (as itself got
                     %% disconnected from B but not from us).
+                    %% Also we should ignore if merging is disabled.
+                    Peer = bondy_registry_entry:node(OldEntry),
+                    Status = bondy_table:get(Peer, ?MERGE_STATUS_TAB, enabled),
+
                     case plum_db_object:context(NewResolved) of
                         [{{_, ?PLUM_DB_REGISTRY_ACTOR}, _}] ->
-                            %% Not deleted by the owner
-                            Peer = bondy_registry_entry:node(NewEntry),
-                            not partisan:is_connected(Peer);
+                            %% Not deleted by the owner, merge only if we are
+                            %% disconnected from the owner and merging is
+                            %% enabled
+                            not partisan:is_connected(Peer)
+                                andalso Status == enabled;
+
                         _ ->
-                            %% Deleted by the owner then. Merge and handle the
-                            %% delete in on_merge/3.
-                            true
+                            %% Deleted by the owner. Merge and handle the
+                            %% delete in on_merge/3 if merging is enabled
+                            Status == enabled
                     end
             end;
 
@@ -812,13 +835,16 @@ will_merge(_PKey, New, Old) ->
                     %% An entry rooted in another node is being resurfaced.
                     %% Most probably we were disconnected from this node and
                     %% marked the entry as deleted but now we got a connection
-                    %% back to this node. However we might not yet have a
-                    %% connection with that node (and getting this via another
-                    %% node), so we need to check. If its not connected we
+                    %% back to this node. However, we might not yet have a
+                    %% connection with that node but getting this via another
+                    %% node, so we need to check. If its not connected we
                     %% return false, ignoring the merge (retaining our
-                    %% tombstone).
+                    %% tombstone). If connected we check if merging is enabled (
+                    %% disabled during pruning).
                     Peer = bondy_registry_entry:node(NewEntry),
-                    partisan:is_connected(Peer)
+                    Status = bondy_table:get(Peer, ?MERGE_STATUS_TAB, enabled),
+
+                    partisan:is_connected(Peer) andalso Status == enabled
             end
     end.
 
@@ -868,6 +894,19 @@ init([]) ->
     %% Every time a node goes up/down we get an info message
     ok = partisan:monitor_nodes(true),
 
+    %% We create a table allowing us to suspend merging data with a node
+    %% during a prune operation.
+    %% When a node gets disconnected we need to 'dirty_delete' its entries in
+    %% case the node never comes back e.g. pruning. During pruning we might get
+    %% entries from the disconnected node either becuase it re-connects sends
+    %% broadcasts or performs an AAE exchange or becuase a third node which is
+    %% still connected to it and to us is performing an AAE exchange (this
+    %% latter case means we cannot simply decide to postpone the reconnection
+    %% of the disconnected node e.g. via Partisan).
+    %% The apprach is for the will_merge/3 callback to use this table to check
+    %% the registry merge status for a node i.e. suspended | running.
+    ?MERGE_STATUS_TAB = bondy_table:new(?MERGE_STATUS_TAB, protected, true),
+
     State = #state{
         start_ts = erlang:system_time(millisecond)
     },
@@ -901,14 +940,20 @@ handle_info({nodeup, _Node} = Event, State) ->
     {noreply, State};
 
 handle_info({nodedown, Node} = Event, State) ->
+    ?LOG_DEBUG(#{event => Event}),
+    Tref = erlang:send_after(5000, self(), {prune, Node}),
+    Timers = (State#state.timers)#{Node => Tref},
+    {noreply, State#state{timers = Timers}};
+
+handle_info({prune_finished, Node} = Event, State) ->
+    ?LOG_DEBUG(#{event => Event}),
+    ok = bondy_table:put(Node, enabled, ?MERGE_STATUS_TAB),
+    {noreply, State};
+
+handle_info({prune, Node} = Event, State) ->
     %% A connection with node has gone down
     ?LOG_DEBUG(#{event => Event}),
-    %% TODO Remove all Node's entries from the trie but and from plum_db.
-    %% We need to achieve the following:
-    %% use bondy_registry_entry:dirty_delete
-
-    ok = bondy_registry_entry:prune(Node),
-
+    ok = prune(Node),
     {noreply, State};
 
 handle_info(Info, State) ->
@@ -1012,9 +1057,7 @@ add(subscription = Type, RealmUri, Uri, Opts, Ref, Trie) ->
     end,
 
     Acc = none,
-    KeyPattern = bondy_registry_entry:key_pattern(
-        RealmUri, SessionId, '_'
-    ),
+    KeyPattern = bondy_registry_entry:key_pattern(RealmUri, SessionId, '_'),
     FoldOpts = [
         {match, KeyPattern},
         {remove_tombstones, true},
@@ -1030,6 +1073,7 @@ add(subscription = Type, RealmUri, Uri, Opts, Ref, Trie) ->
                 Type, RegId, RealmUri, Ref, Uri, Opts
             ),
             ok = bondy_registry_entry:store(Entry),
+            ok = maybe_remote_index_do(add, Entry),
             bondy_registry_trie:add(Entry, Trie);
 
         {EntryKey, Entry} ->
@@ -1121,6 +1165,7 @@ add_registration(RealmUri, Uri, Opts, Ref, Trie) ->
             %% No existing registrations for this URI
             Entry = new_registration(RealmUri, Ref, Uri, Opts),
             ok = bondy_registry_entry:store(Entry),
+            ok = maybe_remote_index_do(add, Entry),
             bondy_registry_trie:add(Entry, Trie);
 
         L ->
@@ -1145,10 +1190,39 @@ add_registration(RealmUri, Uri, Opts, Ref, Trie) ->
                 ok ->
                     Entry = new_registration(RealmUri, Ref, Uri, Opts),
                     ok = bondy_registry_entry:store(Entry),
+                    ok = maybe_remote_index_do(add, Entry),
                     bondy_registry_trie:add(Entry, Trie);
 
                 {error, {already_exists, _}} = Error ->
                     Error
+            end
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+maybe_remote_index_do(Op, Entry) ->
+    Nodestring = partisan:nodestring(),
+
+    case bondy_registry_entry:nodestring(Entry) of
+        Nodestring ->
+            %% Local entry, we skip
+            ok;
+
+        Peerstring ->
+            %% We choose index partition based on Node and not RealmUri, so
+            %% that all entries for a given node are together.
+            Index = bondy_registry_partition:remote_index(Peerstring),
+
+            %% We can add/delete concurrently to this index
+            case Op of
+                add ->
+                    bondy_registry_remote_index:add(Entry, Index);
+                delete ->
+                    bondy_registry_remote_index:delete(Entry, Index)
             end
     end.
 
@@ -1388,7 +1462,7 @@ subscription_id(Uri, _) ->
 %% -----------------------------------------------------------------------------
 trie_on_merge({{_, RealmUri}, _} = PKey, New, Old) ->
     Pid = bondy_registry_partition:pick(RealmUri),
-    Args = [PKey, New, Old],
+    Args = [PKey, New, Old], %% + Trie arg appended by bondy_registry_partition
     bondy_registry_partition:async_execute(Pid, fun trie_on_merge/4, Args).
 
 
@@ -1428,8 +1502,7 @@ trie_on_merge(_PKey, New, undefined, Trie) ->
                     ok = bondy_registry_entry:delete(NewEntry);
 
                 false ->
-                    bondy_registry_trie:add(NewEntry, Trie),
-                    ok
+                    maybe_merge(NewEntry, Trie)
             end
     end;
 
@@ -1449,7 +1522,9 @@ trie_on_merge(_PKey, New, Old, Trie) ->
                     %% deleted from plum_db) but we do not have the key, so we
                     %% use the old value to get the Entry to be deleted.
                     %% This works because registry entries are immutable.
+                    ok = maybe_remote_index_do(delete, OldEntry),
                     bondy_registry_trie:delete(OldEntry, Trie)
+
                 end;
 
         NewEntry ->
@@ -1464,10 +1539,26 @@ trie_on_merge(_PKey, New, Old, Trie) ->
                     %% [Case 5] Handled by will_merge/3.
                     %% If we are here then the we are connected to the root
                     %% node for Entry, so we add to the trie
-                    bondy_registry_trie:add(NewEntry, Trie),
-                    ok
-
+                    maybe_merge(NewEntry, Trie)
             end
+    end.
+
+
+%% @private
+maybe_merge(Entry, Trie) ->
+    Peer = bondy_registry_entry:node(Entry),
+
+    %% Disabled when prunning in progress, we skip merging to
+    %% avoid inconsistencies in the trie, we will converge
+    %% on a subsequent AAE exchange (if/when merge re-enabled)
+    case bondy_table:get(Peer, ?MERGE_STATUS_TAB, enabled) of
+        enabled ->
+            ok = maybe_remote_index_do(add, Entry),
+            _ = bondy_registry_trie:add(Entry, Trie),
+            ok;
+
+        disabled ->
+            ok
     end.
 
 
@@ -1496,50 +1587,56 @@ resolve_value(Object) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-trie_add(Entry) ->
+add_indices(Entry) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Type = bondy_registry_entry:type(Entry),
 
+    Add = fun(E, Trie) ->
+        maybe_remote_index_do(add, E),
+        bondy_registry_trie:add(E, Trie)
+    end,
+
     case ?CONCURRENT_ADD(Type) of
         true ->
-            Trie = trie(RealmUri),
-            bondy_registry_trie:add(Entry, Trie);
+            Add(Entry, trie(RealmUri));
         false ->
             Pid = bondy_registry_partition:pick(RealmUri),
-            Add = fun(Trie) -> bondy_registry_trie:add(Entry, Trie) end,
-            bondy_registry_partition:execute(Pid, Add, [], 5000)
+            bondy_registry_partition:execute(Pid, Add, [Entry], 5000)
     end.
 
 
 %% @private
-trie_delete(Entry) ->
+delete_indices(Entry) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Type = bondy_registry_entry:type(Entry),
 
+    Delete = fun(E, T) ->
+        ok = maybe_remote_index_do(delete, Entry),
+        ok = bondy_registry_trie:delete(E, T)
+    end,
+
     case ?CONCURRENT_DELETE(Type) of
         true ->
-            Trie = trie(RealmUri),
-            bondy_registry_trie:delete(Entry, Trie);
+            Delete(Entry, trie(RealmUri));
         false ->
             Pid = bondy_registry_partition:pick(RealmUri),
-            Delete = fun(E, T) -> bondy_registry_trie:delete(E, T) end,
             bondy_registry_partition:async_execute(Pid, Delete, [Entry])
     end.
 
 
 %% @private
-trie_match(Type, RealmUri, Uri, Opts, FN) ->
+trie_match(Type, RealmUri, Uri, Opts, FunctionName) ->
+    Match = fun(FN, Trie) ->
+        bondy_registry_trie:FN(Type, RealmUri, Uri, Opts, Trie)
+    end,
+
     case ?CONCURRENT_MATCH(Type) of
         true ->
-            Trie = trie(RealmUri),
-            bondy_registry_trie:FN(Type, RealmUri, Uri, Opts, Trie);
+            Match(FunctionName, trie(RealmUri));
 
         false ->
             Pid = bondy_registry_partition:pick(RealmUri),
-            Match = fun(Trie) ->
-                bondy_registry_trie:FN(Type, RealmUri, Uri, Opts, Trie)
-            end,
-            bondy_registry_partition:execute(Pid, Match, [], 15000)
+            bondy_registry_partition:execute(Pid, Match, [FunctionName], 15000)
     end.
 
 
@@ -1631,13 +1728,13 @@ init_trie(State) ->
                         entry => Entry
                     }),
 
-                    _ = trie_delete(Entry),
+                    _ = delete_indices(Entry),
 
                     %% TODO implement and use plum_db:async_delete(.., EntryKey)
                     ok;
 
                 false ->
-                    _ = trie_add(Entry),
+                    _ = add_indices(Entry),
                     ok
             end
     end,
@@ -1722,7 +1819,7 @@ do_remove_all({[{_EntryKey, Entry}|T], Cont}, SessionId, Fun, Acc) ->
 
     case SessionId =:= Session orelse SessionId == '_' of
         true ->
-            ok = trie_delete(Entry),
+            ok = delete_indices(Entry),
             %% We delete the entry from plum_db.
             %% This will broadcast the delete to all nodes.
             ok = bondy_registry_entry:delete(Entry),
@@ -1756,6 +1853,83 @@ entry_key(subscription, {_, Val, _}) -> Val;
 entry_key(registration, {_, _, Val, _}) -> Val.
 
 
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+prune(Node) when is_atom(Node) ->
+    Nodestring = atom_to_binary(Node, utf8),
+    %% We prune all entries from the trie and plum_db
+    Index = bondy_registry_partition:remote_index(Nodestring),
+    %% TODO use bondy_worker pool
+    From = self(),
+    Fun = fun() -> do_prune(Node, Index, From) end,
+    {_Pid, _Ref} = erlang:spawn_monitor(Fun),
+    ok.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+do_prune(Node, Index, From) when is_atom(Node) ->
+    case bondy_registry_remote_index:match(Node, 100, Index) of
+        ?EOT ->
+            From ! {prune_finished, Node};
+
+        {L, ?EOT} ->
+            ok = do_prune(Node, Index, From, L),
+            From ! {prune_finished, Node};
+
+        {L, ETSCont} ->
+            ok = do_prune(Node, Index, From, L),
+            do_prune(Node, Index, From, ETSCont)
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+do_prune(_Node, _Index, _From, L) when is_list(L) ->
+    %% Delete them from Plum_db
+    lists:foreach(
+        fun({Type, EntryKey}) ->
+            case bondy_registry_entry:dirty_delete(Type, EntryKey) of
+                undefined ->
+                    ?LOG_WARNING(#{
+                        description =>
+                            "Inconsistency between registry trie "
+                            "and main store.",
+                        entry_type => Type,
+                        entry_key => EntryKey
+                    }),
+                    ok;
+
+                Entry ->
+                    delete_indices(Entry)
+            end
+        end,
+        L
+    );
+
+do_prune(Node, Index, From, ETSCont) ->
+    case bondy_registry_remote_index:match(ETSCont) of
+        ?EOT ->
+            From ! {prune_finished, Node};
+
+        {L, ?EOT} ->
+            ok = do_prune(Node, Index, From, L),
+            From ! {prune_finished, Node};
+
+        {L, ETSCont} ->
+            ok = do_prune(Node, Index, From, L),
+            do_prune(Node, Index, From, ETSCont)
+    end.
 
 
 

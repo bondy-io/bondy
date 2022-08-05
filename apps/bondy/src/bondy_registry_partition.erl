@@ -29,28 +29,34 @@
 
 
 -define(SERVER_NAME(Index), {?MODULE, Index}).
--define(REGISTRY_TRIE_KEY(Index), {?SERVER_NAME(Index), tables}).
+-define(REGISTRY_TRIE_KEY(Index), {?SERVER_NAME(Index), trie}).
+-define(REGISTRY_REMOTE_IDX_KEY(Index), {?SERVER_NAME(Index), remote_tab}).
 
 
 -record(state, {
-    index               :: integer(),
-    trie                :: bondy_registry_trie:t(),
-    start_ts            :: pos_integer()
+    index               ::  integer(),
+    trie                ::  bondy_registry_trie:t(),
+    remote_tab          ::  bondy_registry_remote_index:t(),
+    start_ts            ::  pos_integer()
 }).
+
 
 -type execute_fun()     ::  fun((bondy_registry_trie:t()) -> execute_ret())
                             | fun((...) -> execute_ret()).
 -type execute_ret()     ::  any().
 
+
 %% API
--export([start_link/1]).
--export([pick/1]).
--export([trie/1]).
+-export([async_execute/2]).
+-export([async_execute/3]).
 -export([execute/2]).
 -export([execute/3]).
 -export([execute/4]).
--export([async_execute/2]).
--export([async_execute/3]).
+-export([partitions/0]).
+-export([pick/1]).
+-export([start_link/1]).
+-export([trie/1]).
+-export([remote_index/1]).
 
 
 %% GEN_SERVER CALLBACKS
@@ -84,17 +90,27 @@ start_link(Index) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec pick(Uri :: binary()) -> pid().
+-spec partitions() -> [pid()].
 
-pick(Uri) when is_binary(Uri) ->
-    gproc_pool:pick_worker(?REGISTRY_POOL, Uri).
+partitions() ->
+    gproc_pool:active_workers(?REGISTRY_POOL).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec trie(Arg :: integer() | binary() ) -> bondy_registry_trie:t() | undefined.
+-spec pick(Arg :: binary() | nodestring()) -> pid().
+
+pick(Arg) when is_binary(Arg) ->
+    gproc_pool:pick_worker(?REGISTRY_POOL, Arg).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec trie(Arg :: integer() | binary()) -> bondy_registry_trie:t() | undefined.
 
 trie(Index) when is_integer(Index) ->
     persistent_term:get(?REGISTRY_TRIE_KEY(Index), undefined);
@@ -106,6 +122,26 @@ trie(Uri) when is_binary(Uri) ->
     N = bondy_config:get([registry, partitions]),
     Index = erlang:phash2(Uri, N) + 1,
     trie(Index).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remote_index(Arg :: integer() | nodestring()) ->
+    bondy_registry_remote_index:t() | undefined.
+
+remote_index(Index) when is_integer(Index) ->
+    persistent_term:get(?REGISTRY_REMOTE_IDX_KEY(Index), undefined);
+
+remote_index(Uri) when is_binary(Uri) ->
+    %% This is the same hashing algorithm used by gproc_pool but using
+    %% gproc_pool:pick to determine the Index is 2x slower.
+    %% We assume there gproc will not stop using phash2.
+    N = bondy_config:get([registry, partitions]),
+    Index = erlang:phash2(Uri, N) + 1,
+    remote_index(Index).
 
 
 %% -----------------------------------------------------------------------------
@@ -193,15 +229,21 @@ init([Index]) ->
 %% @end
 %% -----------------------------------------------------------------------------
 handle_continue({init_storage, Index}, State0) ->
+
+    Tab = bondy_registry_remote_index:new(Index),
     Trie = bondy_registry_trie:new(Index),
 
-    %% Store the trie so that concurrent processes can access it without
-    %% calling the server
+    %% Store the trie and tab so that concurrent processes can access them
+    %% without calling the server
     _ = persistent_term:put(?REGISTRY_TRIE_KEY(Index), Trie),
+    _ = persistent_term:put(?REGISTRY_REMOTE_IDX_KEY(Index), Tab),
 
     %% Also storing it on the state for quicker access when handling a
     %% sequential operation ourselves
-    State = State0#state{trie = Trie},
+    State = State0#state{
+        remote_tab = Tab,
+        trie = Trie
+    },
     {noreply, State}.
 
 
@@ -270,6 +312,7 @@ handle_cast({execute, Fun, Args}, State) ->
     end,
     {noreply, State};
 
+
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -283,7 +326,7 @@ handle_cast(Event, State) ->
 %% @end
 %% -----------------------------------------------------------------------------
 handle_info({'ETS-TRANSFER', _, _, _}, State) ->
-    %% The trie ets tables uses bondy_table_owner.
+    %% The remote_tab and trie ets tables use bondy_table_owner.
     %% We ignore as tables are named.
     {noreply, State};
 
@@ -311,10 +354,5 @@ terminate(_Reason, _State) ->
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-
-
-
-
 
 

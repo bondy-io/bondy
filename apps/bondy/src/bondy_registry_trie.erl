@@ -38,7 +38,6 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_registry.hrl").
--include("bondy_plum_db.hrl").
 
 -record(bondy_registry_trie, {
     %% Stores registrations w/match_policy == exact
@@ -87,6 +86,7 @@
     node                        ::  node(),
     ref_count                   ::  non_neg_integer()
 }).
+
 
 -type t()                       ::  #bondy_registry_trie{}.
 -type index_key()               ::  {RealmUri :: uri(), Uri :: uri()}.
@@ -137,7 +137,9 @@
 -type eot()                     ::  ?EOT.
 -type wildcard(T)               ::  T | '_'.
 
+
 %% Aliases
+-type entry()                   ::  bondy_registry_entry:t().
 -type entry_type()              ::  bondy_registry_entry:entry_type().
 -type entry_key()               ::  bondy_registry_entry:key().
 
@@ -155,7 +157,6 @@
 -export_type([subscription_match_res/0]).
 
 
-
 %% API
 -export([add/2]).
 -export([delete/2]).
@@ -169,7 +170,6 @@
 -export([match_pattern/5]).
 -export([new/1]).
 -export([continuation_info/1]).
-
 
 
 %% =============================================================================
@@ -217,7 +217,7 @@ new(Index) ->
     %% Stores local subscriptions w/match_policy =/= exact
     T5 = art:new(gen_table_name(topic_art, Index), []),
 
-     %% Stores realm/uri counters
+    %% Stores realm/uri counters
     {ok, T6} = bondy_table_owner:add_or_claim(
         gen_table_name(counters, Index),
         [set, {keypos, 1} | Opts]
@@ -276,8 +276,8 @@ continuation_info(#trie_continuation{type = Type, realm_uri = RealmUri}) ->
 %% @doc Adds and entry to the trie.
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(Entry :: bondy_registry_entry:t(), Trie :: t()) ->
-    {ok, bondy_registry_entry:t(), IsFirstEntry :: boolean()}.
+-spec add(Entry :: entry(), Trie :: t()) ->
+    {ok, entry(), IsFirstEntry :: boolean()}.
 
 add(Entry, #bondy_registry_trie{} = Trie) ->
     bondy_registry_entry:is_entry(Entry)
@@ -297,7 +297,7 @@ add(Entry, #bondy_registry_trie{} = Trie) ->
             add_pattern_entry(Entry, Trie);
 
         {subscription, ?EXACT_MATCH} when IsLocal == true ->
-            add_exact_subscription(Entry, Trie);
+            add_local_exact_subscription(Entry, Trie);
 
         {subscription, ?EXACT_MATCH} when IsLocal == false ->
             add_remote_exact_subscription(Entry, Trie);
@@ -311,7 +311,7 @@ add(Entry, #bondy_registry_trie{} = Trie) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec delete(Entry :: bondy_registry_entry:t(), Trie :: t()) ->
+-spec delete(Entry :: entry(), Trie :: t()) ->
     ok | {error, Reason :: any()}.
 
 delete(Entry, #bondy_registry_trie{} = Trie) ->
@@ -1063,7 +1063,7 @@ del_exact_registration(Entry, Trie) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-add_exact_subscription(Entry, Trie) ->
+add_local_exact_subscription(Entry, Trie) ->
     Tab = Trie#bondy_registry_trie.topic_tab,
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Uri = bondy_registry_entry:uri(Entry),
@@ -1191,6 +1191,7 @@ add_pattern_entry(Entry, Trie) ->
             Value = {EntryKey, IsProxy},
             _ = art:set(TrieKey, Value, Trie#bondy_registry_trie.topic_art),
 
+            %% Aditional indices and counters
             IsFirstEntry = incr_counter(Uri, MatchPolicy, 1, Trie) =:= 1,
 
             {ok, Entry, IsFirstEntry}

@@ -153,7 +153,6 @@
 -export([pid/1]).
 -export([proxy/2]).
 -export([proxy_details/1]).
--export([prune/1]).
 -export([realm_uri/1]).
 -export([ref/1]).
 -export([session_id/1]).
@@ -859,7 +858,7 @@ delete(Type, #entry_key{} = EntryKey) when ?IS_ENTRY_TYPE(Type) ->
 %% doing (1) anyway, but we need to check, e.g. timestamp differences?
 %% @end
 %% -----------------------------------------------------------------------------
--spec dirty_delete(Type :: t()) -> ok.
+-spec dirty_delete(Type :: t()) -> t() | undefined.
 
 dirty_delete(#entry{type = Type, key = Key}) ->
     dirty_delete(Type, Key).
@@ -881,14 +880,18 @@ dirty_delete(#entry{type = Type, key = Key}) ->
 %% doing (1) anyway, but we need to check, e.g. timestamp differences?
 %% @end
 %% -----------------------------------------------------------------------------
--spec dirty_delete(Type :: entry_type(), EntryKey :: key()) -> ok.
+-spec dirty_delete(Type :: entry_type(), EntryKey :: key()) ->
+    t() | undefined.
 
 dirty_delete(Type, EntryKey) ->
     PDBPrefix = pdb_prefix(Type, EntryKey),
 
     case plum_db:get_object({PDBPrefix, EntryKey}) of
         undefined ->
-            ok;
+            undefined;
+
+        ?TOMBSTONE ->
+            undefined;
 
         {object, Clock} = Obj0 ->
             %% We use a static fake ActorID and the original timestamp so that
@@ -920,19 +923,12 @@ dirty_delete(Type, EntryKey) ->
                 {broadcast, false}
             ],
 
-            plum_db:dirty_put(PDBPrefix, EntryKey, Resolved, Opts)
+            ok = plum_db:dirty_put(PDBPrefix, EntryKey, Resolved, Opts),
+
+            %% We return the original value
+            plum_db_object:value(Obj0)
+
     end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec prune(Node :: node()) -> ok.
-
-prune(Node) when is_atom(Node) ->
-    _Now = erlang:system_time(millisecond),
-    ok.
 
 
 %% -----------------------------------------------------------------------------
