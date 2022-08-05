@@ -1862,8 +1862,29 @@ validate_rbac_config(#realm{uri = Uri} = Realm, Map) ->
 
     Groups = group_topsort(Uri, Groups0),
 
+    PassOpts0 = password_opts(Realm),
+    Len = 16,
+
+    %% We pass a time-based salt so that within a given window all nodes
+    %% performing this operation will generate the same salt, which will mean
     Users = [
-        bondy_rbac_user:new(Data, #{password_opts => password_opts(Realm)})
+        %% The following is not ideal but users shouldn't be providing
+        %% passwords on the security configuration file anyway, instead they
+        %% should be using Cryptosign for static users.
+        %% TODO Review the idea of banning the creation of static users w/
+        %% passwords altogether.
+
+        %% We will be rebasing the plum_db_object during insertion, so we do
+        %% need the user object hash to be the same, otherwise we will have
+        %% differences on the AAE hashtrees. The following makes sure we
+        %% geneate exactly the same salted password on every node. This is
+        %% obviously assuming each node uses the same configuration file.
+        begin
+            Secret = module_info(md5),
+            Salt = crypto:macN(hmac, sha, Secret, term_to_binary(Data), Len),
+            PassOpts = key_value:put([params, salt], Salt, PassOpts0),
+            bondy_rbac_user:new(Data, #{password_opts => PassOpts})
+        end
         || Data <- maps:get(users, Map, [])
     ],
     SourceAssignments = [
@@ -1903,19 +1924,21 @@ apply_rbac_config(#realm{uri = Uri}, Map) ->
         grants := Grants
     } = Map,
 
+    Opts = #{rebase => true},
+
     _ = [
         ok = maybe_error(
-            bondy_rbac_group:add_or_update(Uri, Group), Uri
+            bondy_rbac_group:add(Uri, Group, Opts), Uri
         )
         || Group <- Groups
     ],
 
     _ = [
         ok = maybe_error(
-            bondy_rbac_user:add_or_update(
+            bondy_rbac_user:add(
                 Uri,
                 User,
-                #{update_credentials => true, forward_credentials => true}
+                Opts#{update_credentials => true, forward_credentials => true}
             ),
             Uri
         )

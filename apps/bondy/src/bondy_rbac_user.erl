@@ -195,7 +195,10 @@
     password_opts       => bondy_password:opts()
 }.
 -type add_opts()        ::  #{
-    password_opts       =>  bondy_password:opts()
+    password_opts       =>  bondy_password:opts(),
+    rebase              => boolean(),
+    actor_id            => term(),
+    if_exists           => fail | update
 }.
 -type update_opts()        ::  #{
     update_credentials      =>  boolean(),
@@ -220,11 +223,10 @@
 
 
 -export([add/2]).
+-export([add/3]).
 -export([add_alias/3]).
 -export([add_group/3]).
 -export([add_groups/3]).
--export([add_or_update/2]).
--export([add_or_update/3]).
 -export([authorized_keys/1]).
 %% TODO new API
 %% -export([add_authorized_key/2]).
@@ -524,42 +526,32 @@ meta(#{type := ?USER_TYPE, meta := Val}) -> Val.
 %% -----------------------------------------------------------------------------
 -spec add(uri(), t()) -> {ok, t()} | {error, add_error()}.
 
-add(RealmUri, #{type := ?USER_TYPE, username := Username} = User) ->
+add(RealmUri, User) ->
+    add(RealmUri, User, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Adds a new user to the RBAC store. `User' MUST have been
+%% created using {@link new/1} or {@link new/2}.
+%% This record is globally replicated.
+%%
+%% The call returns an error if the username is already associated with another
+%% user. Notice that this check is currently performed locally only, this means
+%% that a concurrent add on another node will succeed unless this operation
+%% broadcast arrives first. To ensure uniqueness the caller could use a strong
+%% consistency service e.g. a database with ACID guarantees, or act as a
+%% singleton serializing this call.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add(uri(), t(), add_opts()) -> {ok, t()} | {error, add_error()}.
+
+add(RealmUri, #{type := ?USER_TYPE, username := Username} = User, Opts) ->
     try
         %% This should have been validated before but just to avoid any issues
         %% we do it again.
         %% We asume the username is normalised
         ok = not_reserved_name_check(Username),
-        do_add(RealmUri, User)
-    catch
-        throw:Reason ->
-            {error, Reason}
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Adds a new user or updates an existing one.
-%% This change is globally replicated.
-%% @end
-%% -----------------------------------------------------------------------------
--spec add_or_update(RealmUri :: uri(), User :: t()) ->
-    {ok, t()} | {error, add_error()}.
-
-add_or_update(RealmUri, User) ->
-    add_or_update(RealmUri, User, #{}).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Adds a new user or updates an existing one.
-%% This change is globally replicated.
-%% @end
-%% -----------------------------------------------------------------------------
--spec add_or_update(RealmUri :: uri(), User :: t(), Opts :: update_opts()) ->
-    {ok, t()} | {error, add_error()}.
-
-add_or_update(RealmUri, #{type := ?USER_TYPE} = User, Opts) ->
-    try
-        maybe_throw(add(RealmUri, User))
+        do_add(RealmUri, User, Opts)
     catch
         throw:already_exists ->
             Username = maps:get(username, User),
@@ -568,6 +560,7 @@ add_or_update(RealmUri, #{type := ?USER_TYPE} = User, Opts) ->
         throw:Reason ->
             {error, Reason}
     end.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -1093,6 +1086,11 @@ will_merge(_PKey, _New, _Old) ->
 %% @end
 %% -----------------------------------------------------------------------------
 on_merge({?PLUMDB_PREFIX(RealmUri), Username}, New, Old) ->
+    ?LOG_DEBUG(#{
+        description => "on_merge",
+        new => New,
+        old => Old
+    }),
     %% We need to determine if the user was deleted or its credentials updated
     %% in which case we need to close all local sessions.
     %% Tickets and tokens have been revoked by the peer node.
@@ -1183,18 +1181,21 @@ on_erase(_PKey, _Old) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec do_add(RealmUri :: binary(), User :: t()) -> ok | no_return().
+-spec do_add(RealmUri :: binary(), User :: t(), add_opts()) -> ok | no_return().
 
-do_add(RealmUri, #{sso_realm_uri := SSOUri} = User0) when is_binary(SSOUri) ->
+do_add(RealmUri, #{sso_realm_uri := SSOUri} = User0, Opts)
+when is_binary(SSOUri) ->
     Username = maps:get(username, User0),
 
     %% Key validations first
-    ok = not_exists_check(RealmUri, Username),
+    %% We avoid checking when we are rebasing
+    Rebase = maps:get(rebase, Opts, false),
+    Rebase == true orelse not_exists_check(RealmUri, Username),
     ok = groups_exists_check(RealmUri, maps:get(groups, User0, [])),
 
     %% We split the user into LocalUser, SSOUser and Opts
-    {Opts, User1} = maps_utils:split([password_opts], User0),
-    User2 = apply_password(User1, password_opts(RealmUri, Opts)),
+    {UserOpts, User1} = maps_utils:split([password_opts], User0),
+    User2 = apply_password(User1, password_opts(RealmUri, UserOpts)),
 
     {SSOUser0, LocalUser} = maps_utils:split(
         [password, authorized_keys], User2
@@ -1206,30 +1207,31 @@ do_add(RealmUri, #{sso_realm_uri := SSOUri} = User0) when is_binary(SSOUri) ->
         meta => #{}
     }),
 
-    ok = maybe_add_sso_user(
-        not exists(SSOUri, Username), RealmUri, SSOUri, SSOUser
-    ),
+    Flag = Rebase == true orelse not exists(SSOUri, Username),
+    ok = maybe_add_sso_user(Flag, RealmUri, SSOUri, SSOUser, Opts),
 
     %% We finally add the local user to the realm
-    store(RealmUri, LocalUser);
+    store(RealmUri, LocalUser, Opts);
 
-do_add(RealmUri, User0) ->
+do_add(RealmUri, User0, Opts) ->
     %% A local-only user
     Username = maps:get(username, User0),
 
     %% Key validations first
-    ok = not_exists_check(RealmUri, Username),
+    %% We avoid checking when we are rebasing
+    Rebase = maps:get(rebase, Opts, false),
+    Rebase == true orelse not_exists_check(RealmUri, Username),
     ok = groups_exists_check(RealmUri, maps:get(groups, User0, [])),
 
     %% We split the user into LocalUser, SSOUSer and Opts
-    {Opts, User1} = maps_utils:split([sso_opts, password_opts], User0),
-    User = apply_password(User1, password_opts(RealmUri, Opts)),
+    {UserOpts, User1} = maps_utils:split([sso_opts, password_opts], User0),
+    User = apply_password(User1, password_opts(RealmUri, UserOpts)),
 
-    store(RealmUri, User).
+    store(RealmUri, User, Opts).
 
 
 %% @private
-maybe_add_sso_user(true, RealmUri, SSOUri, SSOUser) ->
+maybe_add_sso_user(true, RealmUri, SSOUri, SSOUser, Opts) ->
 
     bondy_realm:is_allowed_sso_realm(RealmUri, SSOUri)
         orelse throw(invalid_sso_realm),
@@ -1237,12 +1239,11 @@ maybe_add_sso_user(true, RealmUri, SSOUri, SSOUser) ->
     ok = groups_exists_check(SSOUri, maps:get(groups, SSOUser, [])),
 
     %% We add the user to the SSO realm
-    {ok, _} = maybe_throw(store(SSOUri, SSOUser)),
+    {ok, _} = maybe_throw(store(SSOUri, SSOUser, Opts)),
     ok;
 
-maybe_add_sso_user(false, _, _, _) ->
+maybe_add_sso_user(false, _, _, _, _) ->
     ok.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -1311,7 +1312,7 @@ do_local_update(RealmUri, User, Data0, Opts0) ->
     Opts = maps:merge(UserOpts, Opts0),
     NewUser = merge(RealmUri, User, Data, Opts),
 
-    store(RealmUri, NewUser).
+    store(RealmUri, NewUser, #{}).
 
 
 %% @private
@@ -1367,7 +1368,18 @@ update_groups(RealmUri, Username, Groupnames, Fun) when is_binary(Username) ->
 
 
 %% @private
-store(RealmUri, #{username := Username} = User) ->
+store(RealmUri, #{username := Username} = User, #{rebase := true} = Opts) ->
+    ActorId = maps:get(actor_id, Opts, undefined),
+    Object = bondy_utils:rebase_object(User, ActorId),
+
+    case plum_db:dirty_put(?PLUMDB_PREFIX(RealmUri), Username, Object, []) of
+        ok ->
+            {ok, User};
+        Error ->
+            Error
+    end;
+
+store(RealmUri, #{username := Username} = User, _) ->
     case plum_db:put(?PLUMDB_PREFIX(RealmUri), Username, User) of
         ok ->
             {ok, User};
@@ -1514,7 +1526,7 @@ do_add_alias(RealmUri, User0, Alias0) ->
             Aliases ->
                 ok = store_alias(RealmUri, Alias, AliasEntry),
                 User = User0#{aliases => sets:to_list(Aliases)},
-                _ = store(RealmUri, User),
+                _ = store(RealmUri, User, #{}),
                 ok
         end
     catch
@@ -1540,7 +1552,7 @@ do_remove_alias(RealmUri, User0, Alias0) ->
             Aliases ->
                 _ = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Alias),
                 User = User0#{aliases => sets:to_list(Aliases)},
-                _ = store(RealmUri, User),
+                _ = store(RealmUri, User, #{}),
                 ok
         end
 
