@@ -60,7 +60,7 @@ In addition Bondy provides
 ### Advanced Pub/Sub features
 * [x] Event Retention
 * [x] Pattern-based Subscriptions
-* [ ] Payload Transparency
+* [ ] Payload Passthru Mode
 * [x] Publication Trust Levels
 * [x] Publisher Exclusion
 * [x] Publisher Identification

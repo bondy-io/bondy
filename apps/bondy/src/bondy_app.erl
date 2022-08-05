@@ -83,30 +83,37 @@ vsn() ->
 %% @end
 %% -----------------------------------------------------------------------------
 start(_Type, Args) ->
-    %% Partisan will be re-started by plum_db
+    %% Partisan is automatically started by plum_db, so we need to stop it so
+    %% that we can configure it.
+    %% TODO Consider maaking partisan an "informal" dependency of plum_db to
+    %% avoid this step.
     application:stop(partisan),
 
-    %% We initialised the Bondy app config
+    %% We initialise the Bondy config
     ok = bondy_config:init(Args),
 
     %% We temporarily disable plum_db's AAE to avoid rebuilding hashtrees
     %% until we are ready to do it
     ok = suspend_aae(),
 
+    %% Now that we have initialiased the configuration we start the following
+    %% dependencies (plum_db will restart Partisan)
     _ = application:ensure_all_started(tuplespace, permanent),
     _ = application:ensure_all_started(plum_db, permanent),
 
-
+    %% We need Partisan to be app so that we can get the nodename
     ok = logger:update_primary_config(#{metadata => #{
         node => bondy_config:node(),
         router_vsn => vsn()
     }}),
 
+    %% Finally we start the supervisor
     case bondy_sup:start_link() of
         {ok, Pid} ->
-            ok = bondy_sysmon_handler:add_handler(),
+            ok = setup_commons(),
             %% Please do not change the order of this function calls
             %% unless, of course, you know exactly what you are doing.
+            ok = bondy_sysmon_handler:add_handler(),
             ok = bondy_router_worker:start_pool(),
             ok = setup_event_handlers(),
             ok = maybe_wait_for_plum_db_partitions(),
@@ -117,10 +124,13 @@ start(_Type, Args) ->
             %% We need to re-enable AAE (if it was enabled) so that hashtrees
             %% are build
             ok = restore_aae(),
+            %% Part of the bondy controlled startup process
             ok = maybe_wait_for_plum_db_hashtrees(),
             ok = maybe_wait_for_aae_exchange(),
+            %% Finally we allow clients to connect
             ok = start_public_listeners(),
             {ok, Pid};
+
         Other  ->
             Other
     end.
@@ -174,6 +184,10 @@ stop(_State) ->
 %% PRIVATE
 %% =============================================================================
 
+
+%% @private
+setup_commons() ->
+    ok.
 
 
 %% @private
