@@ -18,6 +18,8 @@
 
 -module(bondy_password_cra).
 
+-define(SALT_LENGTH, 16).
+
 -type data()        ::  #{
     salt := binary(),
     salted_password := binary()
@@ -27,6 +29,7 @@
     iterations := non_neg_integer(),
     hash_function := hash_fun(),
     hash_length := non_neg_integer(),
+    salt := binary(),
     salt_length := non_neg_integer()
 }.
 -type kdf()             ::  pbkdf2.
@@ -63,8 +66,17 @@
     bondy_password:t() | no_return().
 
 new(Password, Params0, Builder) ->
-    Params = validate_params(Params0),
-    Salt = salt(),
+    Params1 = validate_params(Params0),
+
+    {Salt, Params} =
+        case maps:take(salt, Params1) of
+            {Bytes, Params2} ->
+                byte_size(Bytes) == salt_length() orelse error(badarg),
+                {base64:encode(Bytes), Params2};
+            error ->
+                {salt(), Params1}
+        end,
+
     SPassword = salted_password(Password, Salt, Params),
     Data = #{
         salt => Salt,
@@ -135,7 +147,7 @@ hash_length() ->
 -spec salt_length() -> integer().
 
 salt_length() ->
-    16.
+    ?SALT_LENGTH.
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -148,7 +160,7 @@ nonce_length() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc A base64 encoded 128-bit random value.
+%% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 -spec salt() -> binary().

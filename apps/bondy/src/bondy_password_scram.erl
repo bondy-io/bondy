@@ -23,6 +23,8 @@
 -module(bondy_password_scram).
 
 
+-define(SALT_LENGTH, 16).
+
 -type data()      ::  #{
     salt := binary(),
     stored_key := binary(),
@@ -34,6 +36,7 @@
     memory => non_neg_integer(),
     hash_function := hash_fun(),
     hash_length := non_neg_integer(),
+    salt := binary(),
     salt_length := non_neg_integer()
 }.
 -type kdf()             ::  pbkdf2 | argon2id13.
@@ -79,8 +82,17 @@
     bondy_password:t() | no_return().
 
 new(String, Params0, Builder) when is_function(Builder, 2) ->
-    Params = validate_params(Params0),
-    Salt = salt(),
+    Params1 = validate_params(Params0),
+
+    {Salt, Params} =
+        case maps:take(salt, Params1) of
+            {Bytes, Params2} ->
+                byte_size(Bytes) == salt_length() orelse error(badarg),
+                %% REVIEW salt as based64
+                {Bytes, Params2};
+            error ->
+                {salt(), Params1}
+        end,
 
     SPassword = salted_password(String, Salt, Params),
     ServerKey = server_key(SPassword),
@@ -159,7 +171,7 @@ hash_length() ->
 -spec salt_length() -> integer().
 
 salt_length() ->
-    16.
+    ?SALT_LENGTH.
 
 
 %% -----------------------------------------------------------------------------
@@ -169,6 +181,7 @@ salt_length() ->
 -spec salt() -> Salt :: binary().
 
 salt() ->
+    %% REVIEW salt as based64
     enacl:randombytes(salt_length()).
 
 
