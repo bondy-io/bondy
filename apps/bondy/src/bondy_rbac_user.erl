@@ -546,6 +546,7 @@ add(RealmUri, User) ->
 -spec add(uri(), t(), add_opts()) -> {ok, t()} | {error, add_error()}.
 
 add(RealmUri, #{type := ?USER_TYPE, username := Username} = User, Opts) ->
+    IfExists = maps:get(if_exists, Opts, fail),
     try
         %% This should have been validated before but just to avoid any issues
         %% we do it again.
@@ -553,9 +554,12 @@ add(RealmUri, #{type := ?USER_TYPE, username := Username} = User, Opts) ->
         ok = not_reserved_name_check(Username),
         do_add(RealmUri, User, Opts)
     catch
-        throw:already_exists ->
+        throw:already_exists when IfExists == update ->
             Username = maps:get(username, User),
             update(RealmUri, Username, User, Opts);
+
+        throw:already_exists ->
+            {error, already_exists};
 
         throw:Reason ->
             {error, Reason}
