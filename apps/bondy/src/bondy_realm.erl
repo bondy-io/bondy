@@ -1924,6 +1924,7 @@ apply_rbac_config(#realm{uri = Uri}, Map) ->
         grants := Grants
     } = Map,
 
+    %% We rebase all objects i.e. we will use a dirty put storing a deterministic value that will override the existing object ()
     Opts = #{rebase => true},
 
     _ = [
@@ -1951,7 +1952,7 @@ apply_rbac_config(#realm{uri = Uri}, Map) ->
     ],
 
     _ = [
-        ok = maybe_error(bondy_rbac:grant(Uri, Grant), Uri)
+        ok = maybe_error(bondy_rbac:grant(Uri, Grant, Opts), Uri)
         || Grant <- Grants
     ],
 
