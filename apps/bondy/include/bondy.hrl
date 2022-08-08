@@ -123,15 +123,15 @@
     call_trustlevels => false,
     caller_identification => true,
     pattern_based_registration => false,
+    payload_passthru_mode => false,
     progressive_call_results => false,
     progressive_calls => false,
     reflection => false,
-    registration_revocation => false,
-    sharded_registration => false,
-    shared_registration => true,
     registration_meta_api => true,
+    registration_revocation => false,
     session_meta_api => true,
-    payload_passthru_mode => false
+    sharded_registration => false,
+    shared_registration => true
 }).
 -define(DEALER_FEATURES, ?WAMP_DEALER_FEATURES#{
     caller_auth_claims => true
@@ -143,13 +143,13 @@
     call_trustlevels => false,
     caller_identification => true,
     pattern_based_registration => false,
+    payload_passthru_mode => false,
     progressive_call_results => false,
     progressive_calls => false,
     registration_revocation => false,
-    sharded_registration => false,
-    shared_registration => true,
     session_meta_api => true,
-    payload_passthru_mode => false
+    sharded_registration => false,
+    shared_registration => true
 }).
 -define(CALLEE_FEATURES, ?WAMP_CALLEE_FEATURES#{
     caller_auth_claims => true
@@ -159,39 +159,39 @@
     call_canceling => true,
     call_timeout => true,
     caller_identification => true,
+    payload_passthru_mode => false,
     progressive_call_results => false,
-    progressive_calls => false,
-    payload_passthru_mode => false
+    progressive_calls => false
 }).
 
 -define(BROKER_FEATURES, #{
-    pattern_based_subscription => true,
-    publisher_exclusion => true,
     event_history => false,
+    pattern_based_subscription => true,
+    payload_passthru_mode => false,
     publication_trustlevels => false,
+    publisher_exclusion => true,
     publisher_identification => true,
-    sharded_subscription => false,
-    subscriber_blackwhite_listing => false,
     reflection => false,
     session_meta_api => false,
-    subscription_meta_api => false,
-    payload_passthru_mode => false
+    sharded_subscription => false,
+    subscriber_blackwhite_listing => false,
+    subscription_meta_api => false
 }).
 
 -define(SUBSCRIBER_FEATURES, #{
-    pattern_based_subscription => true,
     event_history => false,
+    pattern_based_subscription => true,
+    payload_passthru_mode => false,
     publication_trustlevels => false,
     publisher_identification => true,
-    sharded_subscription => false,
-    payload_passthru_mode => false
+    sharded_subscription => false
 }).
 
 -define(PUBLISHER_FEATURES, #{
+    payload_passthru_mode => false,
     publisher_exclusion => true,
     publisher_identification => true,
-    subscriber_blackwhite_listing => false,
-    payload_passthru_mode => false
+    subscriber_blackwhite_listing => false
 }).
 
 
