@@ -1239,7 +1239,7 @@ get_random_kid(Uri) when is_binary(Uri) ->
 encryption_keys(#realm{encryption_keys = Keys} = Realm0)
 when map_size(Keys) == 0 ->
     Data = #{encryption_keys => gen_encryption_keys()},
-    Realm = merge_and_store(Realm0, Data),
+    Realm = merge_and_store(Realm0, Data, #{}),
     encryption_keys(Realm);
 
 encryption_keys(#realm{encryption_keys = Keys}) ->
@@ -1390,7 +1390,7 @@ create(Map0) when is_map(Map0) ->
         true ->
             error({already_exists, Uri});
         false ->
-            do_create(Map1)
+            do_create(Map1, #{})
     end;
 
 create(Uri) when is_binary(Uri) ->
@@ -1408,11 +1408,11 @@ update(#realm{uri = ?CONTROL_REALM_URI}, _) ->
 
 update(#realm{uri = ?MASTER_REALM_URI} = Realm, Data0) ->
     Data = maps_utils:validate(Data0, ?MASTER_REALM_UPDATE_VALIDATOR),
-    do_update(Realm, Data);
+    do_update(Realm, Data, #{});
 
 update(#realm{} = Realm, Data0) ->
     Data = validate(Data0, ?REALM_UPDATE_VALIDATOR),
-    do_update(Realm, Data);
+    do_update(Realm, Data, #{});
 
 update(Uri, Data) when is_binary(Uri) ->
     update(fetch(Uri), Data).
@@ -1521,7 +1521,11 @@ apply_config() ->
         undefined ->
             ok;
         Filename ->
-            from_file(Filename)
+            %% We rebase all objects i.e. we will use a dirty put storing a
+            %% deterministic value that will override the existing object. This
+            %% is to ensure all nodes create the same object (hashing to the
+            %% same value) so that we do not trigger AAE.
+            from_file(Filename, #{rebase => true})
     end.
 
 
@@ -1532,6 +1536,17 @@ apply_config() ->
 -spec from_file(Filename :: file:filename_all()) -> ok | no_return().
 
 from_file(Filename) ->
+    from_file(Filename, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Loads a security config file from `Filename'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec from_file(Filename :: file:filename_all(), #{rebase := boolean()}) ->
+    ok | no_return().
+
+from_file(Filename, Opts) ->
     case bondy_utils:json_consult(Filename) of
         {ok, Realms} ->
             %% Because realms can have the sso_realm_uri and prototype
@@ -1566,7 +1581,7 @@ from_file(Filename) ->
             %% We add the realm and allow an update if it
             %% already exists by setting IsStrict argument
             %% to false
-            _ = [add_or_update(Data) || Data <- SortedRealms],
+            _ = [add_or_update(Data, Opts) || Data <- SortedRealms],
             ok;
 
         {error, enoent} ->
@@ -1817,7 +1832,7 @@ on_erase(_PKey, _Old) ->
 %% @private
 add_master_realm() ->
     Data = validate(?MASTER_REALM, ?MASTER_REALM_VALIDATOR),
-    do_create(Data).
+    do_create(Data, #{rebase => true}).
 
 
 %% @private
@@ -1916,16 +1931,13 @@ get_password_opts(Methods) when is_list(Methods) ->
 
 
 %% @private
-apply_rbac_config(#realm{uri = Uri}, Map) ->
+apply_rbac_config(#realm{uri = Uri}, Map, Opts) ->
     #{
         groups := Groups,
         users := Users,
         sources := SourcesAssignments,
         grants := Grants
     } = Map,
-
-    %% We rebase all objects i.e. we will use a dirty put storing a deterministic value that will override the existing object ()
-    Opts = #{rebase => true},
 
     _ = [
         ok = maybe_error(
@@ -1991,21 +2003,22 @@ maybe_create(Uri, Opts) ->
 
 
 %% @private
-add_or_update(#{<<"uri">> := Uri} = Data0) ->
+add_or_update(#{<<"uri">> := Uri} = Data0, Opts) ->
     case lookup(Uri) of
         #realm{} = Realm ->
             Data = validate(Data0, ?REALM_UPDATE_VALIDATOR),
-            do_update(Realm, Data);
+            do_update(Realm, Data, Opts);
+
         {error, not_found} ->
             Data = validate(Data0, ?REALM_VALIDATOR),
-            do_create(Data)
+            do_create(Data, Opts)
     end.
 
 
 %% @private
-do_create(#{uri := Uri} = Map) ->
+do_create(#{uri := Uri} = Map, Opts) ->
     Realm0 = #realm{uri = Uri},
-    Realm = merge_and_store(Realm0, Map),
+    Realm = merge_and_store(Realm0, Map, Opts),
     ok = on_create(Realm),
     Realm.
 
@@ -2036,14 +2049,14 @@ do_lookup(Uri) ->
 
 
 %% @private
-do_update(Realm0, Map) ->
-    Realm = merge_and_store(Realm0, Map),
+do_update(Realm0, Map, Opts) ->
+    Realm = merge_and_store(Realm0, Map, Opts),
     ok = on_update(Realm),
     Realm.
 
 
 %% @private
-merge_and_store(Realm0, Map) ->
+merge_and_store(Realm0, Map, Opts) ->
     Realm = maps:fold(fun fold_props/3, Realm0, Map),
 
     ok = check_integrity_constraints(Realm),
@@ -2055,12 +2068,46 @@ merge_and_store(Realm0, Map) ->
 
     %% We then create the realm
     Uri = Realm#realm.uri,
-    ok = plum_db:put(?PLUM_DB_PREFIX(Uri), Uri, Realm),
+
+    %% We override Opts for realms, this is because realms are assigned new
+    %% singing and encryption keys by default, each node will then generate
+    %% different keys. Combined with rebase this will create a situation where
+    %% plum_db refuses to merge the values (as they have the same actorID and
+    %% clock) but trying to do it forever.
+    %% At the moment this will mean that every new Bondy node that is deployed
+    %% without keys, will produce a new version, updating the keys in all other
+    %% Bondy nodes.
+    %% TODO consider forcing the user to provide the keys instead of generating
+    %% default ones to avoid the issue and enable rebase back.
+    ok = store(?PLUM_DB_PREFIX(Uri), Uri, Realm, #{rebase => false}),
 
     %% We finally apply all the RBAC objects that have been validated
-    ok = apply_rbac_config(Realm, RBACConfig),
+    %% but for them we do use the Opts as we received it (potentially using
+    %% rebase).
+    ok = apply_rbac_config(Realm, RBACConfig, Opts),
 
     Realm.
+
+
+%% @private
+store(Prefix, Key, Realm, #{rebase := true} = Opts) ->
+    ActorId = maps:get(actor_id, Opts, undefined),
+    Object = bondy_utils:rebase_object(Realm, ActorId),
+
+    case plum_db:dirty_put(Prefix, Key, Object, []) of
+        ok ->
+            ok;
+        {error, Reason} ->
+            throw(Reason)
+    end;
+
+store(Prefix, Key, Realm, _) ->
+    case plum_db:put(Prefix, Key, Realm) of
+        ok ->
+            ok;
+        {error, Reason} ->
+            throw(Reason)
+    end.
 
 
 %% @private
@@ -2206,7 +2253,7 @@ validate_keys(_) ->
 %% @doc This updates the realm and stores it.
 init_keys(Realm) ->
     Data = #{private_keys => gen_keys()},
-    merge_and_store(Realm, Data).
+    merge_and_store(Realm, Data, #{}).
 
 
 %% @private

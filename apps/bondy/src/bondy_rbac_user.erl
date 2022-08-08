@@ -1316,7 +1316,7 @@ do_local_update(RealmUri, User, Data0, Opts0) ->
     Opts = maps:merge(UserOpts, Opts0),
     NewUser = merge(RealmUri, User, Data, Opts),
 
-    store(RealmUri, NewUser, #{}).
+    store(RealmUri, NewUser, Opts0).
 
 
 %% @private
