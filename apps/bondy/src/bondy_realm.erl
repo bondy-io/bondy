@@ -1946,7 +1946,7 @@ apply_rbac_config(#realm{uri = Uri}, Map) ->
     ],
 
     _ = [
-        ok = maybe_error(bondy_rbac_source:add(Uri, Assignment), Uri)
+        ok = maybe_error(bondy_rbac_source:add(Uri, Assignment, Opts), Uri)
         || Assignment <- SourcesAssignments
     ],
 
