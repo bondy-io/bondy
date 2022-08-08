@@ -671,7 +671,7 @@ message_to_map(#error{} = M) ->
         args = Args,
         kwargs = KWArgs
     } = M,
-    %% We need these keys to be binaries, becuase we will
+    %% We need these keys to be binaries, because we will
     %% inject this in a mops context.
     #{
         request_type => Type,

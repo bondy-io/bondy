@@ -409,7 +409,7 @@ register_procedures(Session) ->
     %% wamp.session.{ID}.get
     %% -------------------------------------------------------------------------
     %% The wamp.session.get implementation forwards the call to this dynamic
-    %% URI. This is required becuase sessions are not replicated, so we need a
+    %% URI. This is required because sessions are not replicated, so we need a
     %% way to located the node where the session lives to route the call to it.
     %% If we have more session methods then we should implement prefix
     %% registration i.e. wamp.session.{ID}.*

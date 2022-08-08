@@ -971,7 +971,7 @@ method_to_lowercase(<<"PUT">>) -> <<"put">>.
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%% This function exists just becuase because hackney (http client) uses atoms
+%% This function exists just because because hackney (http client) uses atoms
 %% @end
 %% -----------------------------------------------------------------------------
 method_to_atom(<<"delete">>) -> delete;

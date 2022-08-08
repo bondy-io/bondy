@@ -463,7 +463,7 @@ sync_forward({M, _Ctxt}) ->
 %% The following messages are never forwarded between cluster peer nodes:
 %% INVOCATION, YIELD, INTERRUPT, EVENT.
 %% EVENT is particular since Bondy forwards PUBLISH messages when subscribers
-%% exist in cluster peer nodes, this is becuase in WAMP every EVENT has a per
+%% exist in cluster peer nodes, this is because in WAMP every EVENT has a per
 %% subscriber sequence number, so these events could not possibly be generated
 %% on the publisher's node.
 %% @end.

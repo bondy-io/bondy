@@ -898,8 +898,8 @@ init([]) ->
     %% during a prune operation.
     %% When a node gets disconnected we need to 'dirty_delete' its entries in
     %% case the node never comes back e.g. pruning. During pruning we might get
-    %% entries from the disconnected node either becuase it re-connects sends
-    %% broadcasts or performs an AAE exchange or becuase a third node which is
+    %% entries from the disconnected node either because it re-connects sends
+    %% broadcasts or performs an AAE exchange or because a third node which is
     %% still connected to it and to us is performing an AAE exchange (this
     %% latter case means we cannot simply decide to postpone the reconnection
     %% of the disconnected node e.g. via Partisan).

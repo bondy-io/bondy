@@ -1228,7 +1228,7 @@ del_pattern_entry(Entry, Trie) ->
 %% PRIVATE: URI COUNTERS
 %% =============================================================================
 
-%% TODO we should remove the use of these counters. We use them becuase
+%% TODO we should remove the use of these counters. We use them because
 %% WAMP distinguishes between on_create|on_delete and on_subscribe|on_register
 %% events.
 %% In a distributed setting with no coordination this distinction is impossible
