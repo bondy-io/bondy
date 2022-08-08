@@ -114,9 +114,16 @@ authenticate(Ticket, _, Ctxt, State) ->
     % Opts = #{},
 
     case bondy_ticket:verify(Ticket) of
-        {ok, #{authid := UserId, scope := #{realm := Uri}}}
+        {ok, #{authid := UserId, scope := #{realm := Uri}} = Claims}
         when Uri == undefined orelse Uri == RealmUri ->
-            {ok, #{}, State};
+            Extra = #{
+                authmethod_details => #{
+                    id => maps:get(id, Claims),
+                    authrealm => maps:get(authrealm, Claims),
+                    scope => maps:get(scope, Claims)
+                }
+            },
+            {ok, Extra, State};
         {ok, _} ->
             {error, invalid_ticket, State};
         {error, Reason} ->

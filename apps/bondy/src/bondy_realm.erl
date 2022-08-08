@@ -158,6 +158,7 @@
 %% TODO This is a breaking change, we need to migrate the realms in
 %% {security, realms} into their new {security, RealmUri}
 -define(PLUM_DB_PREFIX(Uri), {?PLUM_DB_REALM_TAB, Uri}).
+-define(PLUM_DB_PKEY(Uri), {?PLUM_DB_PREFIX(Uri), Uri}).
 
 -define(DEFAULT_AUTHMETHODS, [
     ?WAMP_ANON_AUTH,
@@ -703,6 +704,7 @@
 -export([strip_private_keys/1]).
 
 -export([suspend/1]).
+-export([close/2]).
 -export([resume/1]).
 
 
@@ -714,6 +716,14 @@
 -export([sources/2]).
 -export([users/1]).
 -export([users/2]).
+
+%% PLUM_DB PREFIX CALLBACKS
+-export([will_merge/3]).
+-export([on_merge/3]).
+-export([on_update/3]).
+-export([on_delete/2]).
+-export([on_erase/2]).
+
 
 
 %% =============================================================================
@@ -977,6 +987,16 @@ resume(Uri) when is_binary(Uri) ->
     resume(fetch(Uri)).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Calls the session manager to asynchronoulsy close all sessions for
+%% realm `Realm'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec close(RealmUri :: uri(), Reason :: uri()) -> ok.
+
+close(RealmUri, Reason) ->
+    bondy_session_manager:close_all(RealmUri, Reason).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns the list of supported authentication methods for Realm.
@@ -1219,7 +1239,7 @@ get_random_kid(Uri) when is_binary(Uri) ->
 encryption_keys(#realm{encryption_keys = Keys} = Realm0)
 when map_size(Keys) == 0 ->
     Data = #{encryption_keys => gen_encryption_keys()},
-    Realm = merge_and_store(Realm0, Data),
+    Realm = merge_and_store(Realm0, Data, #{}),
     encryption_keys(Realm);
 
 encryption_keys(#realm{encryption_keys = Keys}) ->
@@ -1370,7 +1390,7 @@ create(Map0) when is_map(Map0) ->
         true ->
             error({already_exists, Uri});
         false ->
-            do_create(Map1)
+            do_create(Map1, #{})
     end;
 
 create(Uri) when is_binary(Uri) ->
@@ -1388,11 +1408,11 @@ update(#realm{uri = ?CONTROL_REALM_URI}, _) ->
 
 update(#realm{uri = ?MASTER_REALM_URI} = Realm, Data0) ->
     Data = maps_utils:validate(Data0, ?MASTER_REALM_UPDATE_VALIDATOR),
-    do_update(Realm, Data);
+    do_update(Realm, Data, #{});
 
 update(#realm{} = Realm, Data0) ->
     Data = validate(Data0, ?REALM_UPDATE_VALIDATOR),
-    do_update(Realm, Data);
+    do_update(Realm, Data, #{});
 
 update(Uri, Data) when is_binary(Uri) ->
     update(fetch(Uri), Data).
@@ -1412,7 +1432,7 @@ delete(Term) ->
 %% -----------------------------------------------------------------------------
 %% @doc Deletes the realm and all its associated resources in case the realm
 %% has no users or the option `force' was passed with a value of `true'.
-%% Calls bondy_realm_manager:close/2 which amongst other cleanup tasks should
+%% Calls close/2 which amongst other cleanup tasks should
 %% kick out all opened sessions attached to the realm.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -1442,16 +1462,38 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
             %% We kick out all the local sessions
             %% Tell the local manager so that if can kick out the session and
             %% perform any other cleanup task. This is performed async.
-            ok = bondy_realm_manager:close(Uri, ?WAMP_CLOSE_REALM),
+            ok = close(Uri, ?WAMP_CLOSE_REALM),
 
             %% We synchronously delete the realm.
-            %% This will be replicated and each node's bondy_realm_manager will
+            %% This will be replicated and each node will
             %% handle the update (either due to a broadcast or an AAE exchange)
             %% and will close the realm
             plum_db:delete(?PLUM_DB_PREFIX(Uri), Uri),
 
             %% We order the removal of all associated data
-            ok = async_flush_realm(Uri, Opts),
+            ok = bondy_jobs:enqueue(
+                Uri, fun() ->
+                    Opts = Opts0#{dirty => true},
+
+                    ok = bondy_rbac:remove_all(Uri, Opts),
+
+                    %% Delete all tickets
+                    ok = bondy_ticket:revoke_all(Uri),
+
+                    %% TODO Delete all tokens
+
+                    %% Delete all sources
+                    bondy_rbac_source:remove_all(Uri),
+
+                    %% Delete all groups
+                    bondy_rbac_group:remove_all(Uri, Opts),
+
+                    %% Delete all users
+                    bondy_rbac_user:remove_all(Uri, Opts),
+
+                    ok
+                end
+            ),
 
             %% We notify
             ok = on_delete(Uri)
@@ -1464,31 +1506,6 @@ delete(Uri, Opts) when is_binary(Uri) ->
         {error, not_found} = Error ->
             Error
     end.
-
-
-%% @private
-async_flush_realm(Uri, Opts0) ->
-    Opts = Opts0#{dirty => true, silent => true},
-
-    %% TODO implement this as a durable FSM
-    %% Delete all grants
-    ok = bondy_rbac:remove_all(Uri, Opts),
-
-    %% Delete all tickets
-    %% TODO
-    {error, not_implemented} = bondy_ticket:revoke_all(Uri),
-
-    %% Delete all sources
-    bondy_rbac_source:remove_all(Uri),
-
-    %% Delete all groups
-    bondy_rbac_group:remove_all(Uri, Opts),
-
-    %% Delete all users
-    bondy_rbac_user:remove_all(Uri, Opts),
-
-    ok.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -1504,7 +1521,11 @@ apply_config() ->
         undefined ->
             ok;
         Filename ->
-            from_file(Filename)
+            %% We rebase all objects i.e. we will use a dirty put storing a
+            %% deterministic value that will override the existing object. This
+            %% is to ensure all nodes create the same object (hashing to the
+            %% same value) so that we do not trigger AAE.
+            from_file(Filename, #{rebase => true})
     end.
 
 
@@ -1515,6 +1536,17 @@ apply_config() ->
 -spec from_file(Filename :: file:filename_all()) -> ok | no_return().
 
 from_file(Filename) ->
+    from_file(Filename, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Loads a security config file from `Filename'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec from_file(Filename :: file:filename_all(), #{rebase := boolean()}) ->
+    ok | no_return().
+
+from_file(Filename, Opts) ->
     case bondy_utils:json_consult(Filename) of
         {ok, Realms} ->
             %% Because realms can have the sso_realm_uri and prototype
@@ -1549,7 +1581,7 @@ from_file(Filename) ->
             %% We add the realm and allow an update if it
             %% already exists by setting IsStrict argument
             %% to false
-            _ = [add_or_update(Data) || Data <- SortedRealms],
+            _ = [add_or_update(Data, Opts) || Data <- SortedRealms],
             ok;
 
         {error, enoent} ->
@@ -1736,6 +1768,62 @@ grants(Uri, Opts) when is_binary(Uri) ->
 
 
 %% =============================================================================
+%% PLUM_DB PREFIX CALLBACKS
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc bondy_config
+%% @end
+%% -----------------------------------------------------------------------------
+will_merge(_PKey, _New, _Old) ->
+    true.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+on_merge(?PLUM_DB_PKEY(Uri), New, _Old) ->
+    Resolved = plum_db_object:resolve(New, lww),
+
+    case plum_db_object:value(Resolved) of
+        '$deleted' ->
+            %% Realm was deleted on another node, call close
+            close(Uri, ?WAMP_CLOSE_REALM);
+        _ ->
+            %% Realm updated, do nothing
+            ok
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A local update
+%% @end
+%% -----------------------------------------------------------------------------
+on_update(_PKey, _New, _Old) ->
+    ok.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A local delete
+%% @end
+%% -----------------------------------------------------------------------------
+on_delete(_PKey, _Old) ->
+    ok.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A local erase
+%% @end
+%% -----------------------------------------------------------------------------
+on_erase(_PKey, _Old) ->
+    ok.
+
+
+
+%% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
@@ -1744,7 +1832,7 @@ grants(Uri, Opts) when is_binary(Uri) ->
 %% @private
 add_master_realm() ->
     Data = validate(?MASTER_REALM, ?MASTER_REALM_VALIDATOR),
-    do_create(Data).
+    do_create(Data, #{rebase => true}).
 
 
 %% @private
@@ -1789,8 +1877,29 @@ validate_rbac_config(#realm{uri = Uri} = Realm, Map) ->
 
     Groups = group_topsort(Uri, Groups0),
 
+    PassOpts0 = password_opts(Realm),
+    Len = 16,
+
+    %% We pass a time-based salt so that within a given window all nodes
+    %% performing this operation will generate the same salt, which will mean
     Users = [
-        bondy_rbac_user:new(Data, #{password_opts => password_opts(Realm)})
+        %% The following is not ideal but users shouldn't be providing
+        %% passwords on the security configuration file anyway, instead they
+        %% should be using Cryptosign for static users.
+        %% TODO Review the idea of banning the creation of static users w/
+        %% passwords altogether.
+
+        %% We will be rebasing the plum_db_object during insertion, so we do
+        %% need the user object hash to be the same, otherwise we will have
+        %% differences on the AAE hashtrees. The following makes sure we
+        %% geneate exactly the same salted password on every node. This is
+        %% obviously assuming each node uses the same configuration file.
+        begin
+            Secret = module_info(md5),
+            Salt = crypto:macN(hmac, sha, Secret, term_to_binary(Data), Len),
+            PassOpts = key_value:put([params, salt], Salt, PassOpts0),
+            bondy_rbac_user:new(Data, #{password_opts => PassOpts})
+        end
         || Data <- maps:get(users, Map, [])
     ],
     SourceAssignments = [
@@ -1822,7 +1931,7 @@ get_password_opts(Methods) when is_list(Methods) ->
 
 
 %% @private
-apply_rbac_config(#realm{uri = Uri}, Map) ->
+apply_rbac_config(#realm{uri = Uri}, Map, Opts) ->
     #{
         groups := Groups,
         users := Users,
@@ -1832,17 +1941,17 @@ apply_rbac_config(#realm{uri = Uri}, Map) ->
 
     _ = [
         ok = maybe_error(
-            bondy_rbac_group:add_or_update(Uri, Group), Uri
+            bondy_rbac_group:add(Uri, Group, Opts), Uri
         )
         || Group <- Groups
     ],
 
     _ = [
         ok = maybe_error(
-            bondy_rbac_user:add_or_update(
+            bondy_rbac_user:add(
                 Uri,
                 User,
-                #{update_credentials => true, forward_credentials => true}
+                Opts#{update_credentials => true, forward_credentials => true}
             ),
             Uri
         )
@@ -1850,12 +1959,12 @@ apply_rbac_config(#realm{uri = Uri}, Map) ->
     ],
 
     _ = [
-        ok = maybe_error(bondy_rbac_source:add(Uri, Assignment), Uri)
+        ok = maybe_error(bondy_rbac_source:add(Uri, Assignment, Opts), Uri)
         || Assignment <- SourcesAssignments
     ],
 
     _ = [
-        ok = maybe_error(bondy_rbac:grant(Uri, Grant), Uri)
+        ok = maybe_error(bondy_rbac:grant(Uri, Grant, Opts), Uri)
         || Grant <- Grants
     ],
 
@@ -1894,21 +2003,22 @@ maybe_create(Uri, Opts) ->
 
 
 %% @private
-add_or_update(#{<<"uri">> := Uri} = Data0) ->
+add_or_update(#{<<"uri">> := Uri} = Data0, Opts) ->
     case lookup(Uri) of
         #realm{} = Realm ->
             Data = validate(Data0, ?REALM_UPDATE_VALIDATOR),
-            do_update(Realm, Data);
+            do_update(Realm, Data, Opts);
+
         {error, not_found} ->
             Data = validate(Data0, ?REALM_VALIDATOR),
-            do_create(Data)
+            do_create(Data, Opts)
     end.
 
 
 %% @private
-do_create(#{uri := Uri} = Map) ->
+do_create(#{uri := Uri} = Map, Opts) ->
     Realm0 = #realm{uri = Uri},
-    Realm = merge_and_store(Realm0, Map),
+    Realm = merge_and_store(Realm0, Map, Opts),
     ok = on_create(Realm),
     Realm.
 
@@ -1939,14 +2049,14 @@ do_lookup(Uri) ->
 
 
 %% @private
-do_update(Realm0, Map) ->
-    Realm = merge_and_store(Realm0, Map),
+do_update(Realm0, Map, Opts) ->
+    Realm = merge_and_store(Realm0, Map, Opts),
     ok = on_update(Realm),
     Realm.
 
 
 %% @private
-merge_and_store(Realm0, Map) ->
+merge_and_store(Realm0, Map, Opts) ->
     Realm = maps:fold(fun fold_props/3, Realm0, Map),
 
     ok = check_integrity_constraints(Realm),
@@ -1958,12 +2068,46 @@ merge_and_store(Realm0, Map) ->
 
     %% We then create the realm
     Uri = Realm#realm.uri,
-    ok = plum_db:put(?PLUM_DB_PREFIX(Uri), Uri, Realm),
+
+    %% We override Opts for realms, this is because realms are assigned new
+    %% singing and encryption keys by default, each node will then generate
+    %% different keys. Combined with rebase this will create a situation where
+    %% plum_db refuses to merge the values (as they have the same actorID and
+    %% clock) but trying to do it forever.
+    %% At the moment this will mean that every new Bondy node that is deployed
+    %% without keys, will produce a new version, updating the keys in all other
+    %% Bondy nodes.
+    %% TODO consider forcing the user to provide the keys instead of generating
+    %% default ones to avoid the issue and enable rebase back.
+    ok = store(?PLUM_DB_PREFIX(Uri), Uri, Realm, #{rebase => false}),
 
     %% We finally apply all the RBAC objects that have been validated
-    ok = apply_rbac_config(Realm, RBACConfig),
+    %% but for them we do use the Opts as we received it (potentially using
+    %% rebase).
+    ok = apply_rbac_config(Realm, RBACConfig, Opts),
 
     Realm.
+
+
+%% @private
+store(Prefix, Key, Realm, #{rebase := true} = Opts) ->
+    ActorId = maps:get(actor_id, Opts, undefined),
+    Object = bondy_utils:rebase_object(Realm, ActorId),
+
+    case plum_db:dirty_put(Prefix, Key, Object, []) of
+        ok ->
+            ok;
+        {error, Reason} ->
+            throw(Reason)
+    end;
+
+store(Prefix, Key, Realm, _) ->
+    case plum_db:put(Prefix, Key, Realm) of
+        ok ->
+            ok;
+        {error, Reason} ->
+            throw(Reason)
+    end.
 
 
 %% @private
@@ -2109,7 +2253,7 @@ validate_keys(_) ->
 %% @doc This updates the realm and stores it.
 init_keys(Realm) ->
     Data = #{private_keys => gen_keys()},
-    merge_and_store(Realm, Data).
+    merge_and_store(Realm, Data, #{}).
 
 
 %% @private

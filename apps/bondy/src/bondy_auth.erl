@@ -69,22 +69,24 @@
 
 %% API
 -export([authenticate/4]).
--export([method/1]).
--export([provider/1]).
--export([role/1]).
--export([roles/1]).
+-export([authrealm/1]).
 -export([available_methods/1]).
 -export([available_methods/2]).
 -export([challenge/3]).
 -export([conn_ip/1]).
 -export([init/5]).
+-export([method/1]).
 -export([method_info/0]).
 -export([method_info/1]).
 -export([methods/0]).
--export([session_id/1]).
+-export([provider/1]).
 -export([realm_uri/1]).
--export([user_id/1]).
+-export([role/1]).
+-export([roles/1]).
+-export([session_id/1]).
+-export([sso_realm_uri/1]).
 -export([user/1]).
+-export([user_id/1]).
 
 
 
@@ -184,6 +186,7 @@ when is_binary(SessionId) ->
             provider => ?BONDY_AUTH_PROVIDER,
             session_id => SessionId,
             realm_uri => RealmUri,
+            sso_realm_uri => SSORealmUri,
             user_id => Username,
             user => User,
             role => Role,
@@ -333,6 +336,29 @@ user(_) ->
 -spec realm_uri(context()) -> uri().
 
 realm_uri(#{realm_uri := Value}) ->
+    Value.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec sso_realm_uri(context()) -> uri().
+
+sso_realm_uri(#{sso_realm_uri := Value}) ->
+    Value.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authrealm(context()) -> uri().
+
+authrealm(#{sso_realm_uri := undefined, realm_uri := Value}) ->
+    Value;
+
+authrealm(#{sso_realm_uri := Value}) ->
     Value.
 
 
@@ -627,6 +653,7 @@ get_user(RealmUri, SSORealmUri, UsernameOrAlias) ->
     case bondy_rbac_user:lookup(RealmUri, UsernameOrAlias) of
         {error, not_found} when SSORealmUri =:= undefined ->
             throw({no_such_user, UsernameOrAlias});
+
         {error, not_found} ->
             %% We try to find the user on the SSORealm
             SSOUser = get_user(SSORealmUri, undefined, UsernameOrAlias),
@@ -638,6 +665,7 @@ get_user(RealmUri, SSORealmUri, UsernameOrAlias) ->
             %% than calling bondy_rbac_user:resolve/1 as we already fetched the
             %% SSOUser).
             bondy_rbac_user:resolve(User, SSOUser);
+
         User ->
             bondy_rbac_user:is_enabled(User) orelse throw(user_disabled),
             %% We call resolve so that we merge the local user to the SSO user

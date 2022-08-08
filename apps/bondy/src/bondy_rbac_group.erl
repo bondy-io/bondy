@@ -90,6 +90,7 @@
     meta => #{}
 })).
 
+
 -define(TYPE, group).
 -define(VERSION, <<"1.1">>).
 -define(PLUMDB_PREFIX(RealmUri), {?PLUM_DB_GROUP_TAB, RealmUri}).
@@ -106,17 +107,22 @@
 
 -type external()        ::  t().
 -type name()            ::  binary() | anonymous | all.
+-type add_opts()        ::  #{
+                                rebase => boolean(),
+                                actor_id => term(),
+                                if_exists => fail | update
+                            }.
 -type add_error()       ::  no_such_realm | reserved_name | already_exists.
 -type list_opts()       ::  #{limit => pos_integer()}.
 
 -export_type([t/0]).
 -export_type([external/0]).
 
-
+%% API
 -export([add/2]).
+-export([add/3]).
 -export([add_group/3]).
 -export([add_groups/3]).
--export([add_or_update/2]).
 -export([exists/2]).
 -export([fetch/2]).
 -export([groups/1]).
@@ -137,6 +143,14 @@
 -export([topsort/1]).
 -export([unknown/2]).
 -export([update/3]).
+
+
+%% PLUM_DB PREFIX CALLBACKS
+-export([will_merge/3]).
+-export([on_merge/3]).
+-export([on_update/3]).
+-export([on_delete/2]).
+-export([on_erase/2]).
 
 
 
@@ -202,13 +216,8 @@ meta(#{type := ?TYPE, meta := Val}) -> Val.
 %% -----------------------------------------------------------------------------
 -spec add(uri(), t()) -> {ok, t()} | {error, any()}.
 
-add(RealmUri, #{type := ?TYPE} = Group) ->
-    try
-        do_add(RealmUri, Group)
-    catch
-        throw:Reason ->
-            {error, Reason}
-    end.
+add(RealmUri, Group) ->
+    add(RealmUri, Group, #{}).
 
 
 %% -----------------------------------------------------------------------------
@@ -216,15 +225,20 @@ add(RealmUri, #{type := ?TYPE} = Group) ->
 %% This change is globally replicated.
 %% @end
 %% -----------------------------------------------------------------------------
--spec add_or_update(RealmUri :: uri(), Gropu :: t()) ->
+-spec add(RealmUri :: uri(), Group :: t(), Opts :: add_opts()) ->
     {ok, t()} | {error, add_error()}.
 
-add_or_update(RealmUri, #{type := ?TYPE, name := Name} = Group) ->
+add(RealmUri, #{type := ?TYPE, name := Name} = Group, Opts) ->
+    IfExists = maps:get(if_exists, Opts, fail),
+
     try
-        do_add(RealmUri, Group)
+        do_add(RealmUri, Group, Opts)
     catch
-        throw:already_exists ->
+        throw:already_exists when IfExists == update ->
             update(RealmUri, Name, Group);
+
+        throw:already_exists ->
+            {error, already_exists};
 
         throw:Reason ->
             {error, Reason}
@@ -260,7 +274,6 @@ update(RealmUri, Name, Data0) when is_binary(Name) ->
                 ok = group_exists_check(RealmUri, maps:get(groups, NewGroup)),
 
                 ok = plum_db:put(Prefix, Name, NewGroup),
-                ok = on_update(RealmUri, Name),
                 {ok, NewGroup}
         end
 
@@ -272,7 +285,7 @@ update(RealmUri, Name, Data0) when is_binary(Name) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Adds group named `Groupname' to gropus `Groups' in realm with uri
+%% @doc Adds group named `Groupname' to groups `Groups' in realm with uri
 %% `RealmUri'.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -286,7 +299,7 @@ add_group(RealmUri, Groups, Groupname) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Adds groups `Groupnames' to gropus `Groups' in realm with uri
+%% @doc Adds groups `Groupnames' to groups `Groups' in realm with uri
 %% `RealmUri'.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -308,7 +321,7 @@ add_groups(RealmUri, Groups, Groupnames)  ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Removes groups `Groupnames' from gropus `Groups' in realm with uri
+%% @doc Removes groups `Groupnames' from groups `Groups' in realm with uri
 %% `RealmUri'.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -322,7 +335,7 @@ remove_group(RealmUri, Groups, Groupname) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Removes groups `Groupnames' from gropus `Groups' in realm with uri
+%% @doc Removes groups `Groupnames' from groups `Groups' in realm with uri
 %% `RealmUri'.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -353,13 +366,13 @@ remove(RealmUri, Name) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(uri(), binary() | map(), #{silent := boolean()}) ->
+-spec remove(uri(), binary() | map(), map()) ->
     ok | {error, unknown_group | reserved_name}.
 
 remove(RealmUri, #{type := ?TYPE, name := Name}, Opts) ->
     remove(RealmUri, Name, Opts);
 
-remove(RealmUri, Name, Opts) ->
+remove(RealmUri, Name, _Opts) ->
     try
         ok = not_reserved_name_check(Name),
         ok = exists_check(?PLUMDB_PREFIX(RealmUri), Name),
@@ -376,10 +389,8 @@ remove(RealmUri, Name, Opts) ->
         ok = bondy_rbac_user:remove_group(RealmUri, all, Name),
         ok = remove_groups(RealmUri, all, Name),
 
-        %% We finally delete the group
-        ok = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Name),
-
-        on_delete(RealmUri, Name, Opts)
+        %% We finally delete the group, on_delete/2 will be called by plum_db
+        ok = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Name)
 
     catch
         throw:Reason ->
@@ -618,6 +629,63 @@ normalise_name(_) ->
     error(badarg).
 
 
+
+%% =============================================================================
+%% PLUM_DB PREFIX CALLBACKS
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc bondy_config
+%% @end
+%% -----------------------------------------------------------------------------
+will_merge(_PKey, _New, _Old) ->
+    true.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+on_merge(_PKey, _New, _Old) ->
+    ok.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A local update
+%% @end
+%% -----------------------------------------------------------------------------
+on_update({?PLUMDB_PREFIX(RealmUri), Name}, _New, Old) ->
+    IsCreate =
+        Old == undefined orelse
+        ?TOMBSTONE == plum_db_object:value(plum_db_object:resolve(Old, lww)),
+
+    case IsCreate of
+        true ->
+            ok = bondy_event_manager:notify({group_added, RealmUri, Name});
+        false ->
+            ok = bondy_event_manager:notify({group_updated, RealmUri, Name})
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A local delete
+%% @end
+%% -----------------------------------------------------------------------------
+on_delete({?PLUMDB_PREFIX(RealmUri), Name}, _Old) ->
+    ok = bondy_event_manager:notify({group_deleted, RealmUri, Name}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A local erase
+%% @end
+%% -----------------------------------------------------------------------------
+on_erase(_PKey, _Old) ->
+    ok.
+
+
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
@@ -625,23 +693,38 @@ normalise_name(_) ->
 
 
 %% @private
-do_add(RealmUri, #{type := ?TYPE, name := Name} = Group) ->
+do_add(RealmUri, #{type := ?TYPE, name := Name} = Group, Opts) ->
     Prefix = ?PLUMDB_PREFIX(RealmUri),
 
     %% This should have been validated before but just to avoid any issues
     %% we do it again.
     ok = not_reserved_name_check(Name),
-    ok = not_exists_check(Prefix, Name),
     ok = group_exists_check(RealmUri, maps:get(groups, Group)),
 
-    case plum_db:put(Prefix, Name, Group) of
+    %% We avoid checking when we are rebasing
+    Rebase = maps:get(rebase, Opts, false),
+    Rebase == true orelse not_exists_check(Prefix, Name),
+
+    case store(Prefix, Name, Group, Opts) of
         ok ->
-            ok = on_create(RealmUri, Name),
             {ok, Group};
         Error ->
             Error
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+store(Prefix, Name, Group, #{rebase := true} = Opts) ->
+    ActorId = maps:get(actor_id, Opts, undefined),
+    Object = bondy_utils:rebase_object(Group, ActorId),
+    plum_db:dirty_put(Prefix, Name, Object, []);
+
+store(Prefix, Name, Group, _) ->
+    plum_db:put(Prefix, Name, Group).
 
 
 %% -----------------------------------------------------------------------------
@@ -770,32 +853,6 @@ when is_function(2, Fun) ->
 update_groups(RealmUri, GroupName, Groupnames, Fun) when is_binary(GroupName) ->
     update_groups(RealmUri, fetch(RealmUri, GroupName), Groupnames, Fun).
 
-
-%% @private
-on_create(RealmUri, Name) ->
-    ok = bondy_event_manager:notify(
-        {group_added, RealmUri, Name}
-    ),
-    ok.
-
-
-%% @private
-on_update(RealmUri, Name) ->
-    ok = bondy_event_manager:notify(
-        {group_updated, RealmUri, Name}
-    ),
-    ok.
-
-
-%% @private
-on_delete(_, _, #{silent := true}) ->
-    ok;
-
-on_delete(RealmUri, Name, _) ->
-    ok = bondy_event_manager:notify(
-        {group_deleted, RealmUri, Name}
-    ),
-    ok.
 
 
 

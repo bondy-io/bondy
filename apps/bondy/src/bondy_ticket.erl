@@ -75,6 +75,15 @@
 %% A ticket can be issued using different scopes. The scope is determined based
 %% on the options used to issue the ticket.
 %%
+%% There are 4 scopes:
+%%
+%% <ol>
+%% <li>Local scope</l1>
+%% <li>SSO scope</l1>
+%% <li>Client-Local scope</l1>
+%% <li>Client-SSO scope</l1>
+%% <ol>
+%%
 %% === Local scope ===
 %% The ticket was issued with `allow_sso' option set to `false' or when set to
 %% `true' the user did not have SSO credentials, and the option `client_ticket'
@@ -82,19 +91,18 @@
 %% The ticket can be used to authenticate on the session's realm only.
 %%
 %% ==== Authorization ====
-%% To be able to issue this ticket, the session must have been granted the
+%% To be able to issue this ticket, the user must have been granted
 %% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.local">>'
 %% resource.
 %%
-%%
 %% === SSO Scope ===
-%% The ticket was issued with `allow_sso' option set to `true' and the user has
+%% The ticket was issued with `allow_sso' option set to `true', the user has
 %% SSO credentials, and the option `client_ticket' was not provided.
-%% The ticket can be used to authenticate  on any realm the user has access to
+%% The ticket can be used to authenticate on any realm the user has access to
 %% through SSO.
 %%
 %% ==== Authorization ====
-%% To be able to issue this ticket, the session must have been granted the
+%% To be able to issue this ticket, the user must have been granted
 %% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.sso">>'
 %% resource.
 %%
@@ -103,27 +111,29 @@
 %% `true' the user did not have SSO credentials, and the option `client_ticket'
 %% was provided having a valid ticket issued by a client
 %% (a local or sso ticket).
-%% The ticket can be used to authenticate on the session's realm only.
+%% The ticket can be used to authenticate on the session's realm by the
+%% specified client only.
 %%
 %% ==== Authorization ====
-%% To be able to issue this ticket, the session must have been granted the
+%% To be able to issue this ticket, the session must have been granted
 %% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.client_local">>'
 %% resource.
-%%
 %%
 %% === Client-SSO scope ===
 %% The ticket was issued with `allow_sso' option set to `true' and the user has
 %% SSO credentials, and the option `client_ticket' was provided having a valid
-%% ticket issued by a client ( a local or sso ticket).
+%% ticket issued by a client (a local or sso ticket).
 %% The ticket can be used to authenticate on any realm the user has access to
-%% through SSO.
+%% through SSO only by the specified client.
 %%
 %% ==== Authorization ====
-%% To be able to issue this ticket, the session must have been granted the
+%% To be able to issue this ticket, the session must have been granted
 %% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.client_local">>'
 %% resource.
 %%
 %% === Scope Summary ===
+%%
+%% *Keys:*
 %% * `uri()' in the following table refers to the scope realm (not the
 %% Authentication realm which is used in the prefix)
 %%
@@ -165,9 +175,7 @@
 %% TODO review, using a dynamic prefix is a bad idea, turn this into
 %% {?PLUM_DB_TICKET_TAB, Realm} and use key composition which allow for
 %% iteration using first prefixes
--define(PLUM_DB_PREFIX(L),
-    {?PLUM_DB_TICKET_TAB, binary_utils:join(L, <<",">>)}
-).
+-define(PLUM_DB_PREFIX(Uri), {?PLUM_DB_TICKET_TAB, Uri}).
 
 -define(OPTS_VALIDATOR, #{
     <<"expiry_time_secs">> => #{
@@ -238,20 +246,24 @@
                         | invalid_request
                         | invalid_ticket
                         | not_authorized.
+
+
 -export_type([t/0]).
 -export_type([claims/0]).
+-export_type([ticket_id/0]).
 -export_type([scope/0]).
 -export_type([opts/0]).
 
 
--export([verify/1]).
 -export([issue/2]).
 -export([lookup/3]).
+-export([remove_expired/0]).
 -export([revoke/1]).
+-export([revoke/3]).
 -export([revoke_all/1]).
 -export([revoke_all/2]).
 -export([revoke_all/3]).
--export([remove_expired/0]).
+-export([verify/1]).
 
 
 
@@ -295,7 +307,12 @@ issue(Session, Opts0) ->
 
         lists:member(Authmethod, Allowed) orelse throw({
             not_authorized,
-            <<"The authentication method '", Authmethod/binary, "' you used to establish this session is not in the list of methods allowed to issue tickets (configuration option 'security.ticket.authmethods').">>
+            <<
+                "The authentication method '", Authmethod/binary,
+                "' you used to establish this session is not in the list of "
+                "methods allowed to issue tickets (configuration option "
+                "'security.ticket.authmethods')."
+            >>
         }),
 
         do_issue(Session, Opts)
@@ -393,8 +410,8 @@ verify(Ticket, Opts) ->
     Scope :: scope()) -> {ok, Claims :: claims()} | {error, no_found}.
 
 lookup(RealmUri, Authid, Scope) ->
-    Key = store_key(Authid, normalise_scope(Scope)),
-    Prefix = ?PLUM_DB_PREFIX([RealmUri, Authid]),
+    Prefix = ?PLUM_DB_PREFIX(RealmUri),
+    Key = lookup_key(Authid, Scope),
     Opts = [{resolver, fun ticket_resolver/2}, {allow_put, true}],
 
     case plum_db:get(Prefix, Key, Opts) of
@@ -433,15 +450,27 @@ revoke(Ticket) when is_binary(Ticket) ->
 
 revoke(Claims) when is_map(Claims) ->
     #{
-        % id := Id,
-        % authrealm := AuthRealmUri,
-        % authid := Authid,
-        % scope := Scope
+        authrealm := RealmUri,
+        authid := Authid,
+        scope := Scope
     } = Claims,
+    revoke(RealmUri, Authid, Scope).
 
-    %% TODO find ID and delete
-    %% TODO delete entry in authid index and maybe in client index depending on scope
-    error(not_implemented).
+
+%% -----------------------------------------------------------------------------
+%% @doc `RealmUri' should eb aht value of the ticket's `authrealm' claim
+%% @end
+%% -----------------------------------------------------------------------------
+-spec revoke(
+    RealmUri :: uri(),
+    Authid :: bondy_rbac_user:username(),
+    Scope :: scope()) -> ok.
+
+revoke(RealmUri, Authid, Scope)
+when is_binary(RealmUri), is_binary(Authid), is_map(Scope) ->
+    Prefix = ?PLUM_DB_PREFIX(RealmUri),
+    Key = lookup_key(Authid, Scope),
+    plum_db:delete(Prefix, Key).
 
 
 %% -----------------------------------------------------------------------------
@@ -450,12 +479,12 @@ revoke(Claims) when is_map(Claims) ->
 %% -----------------------------------------------------------------------------
 -spec revoke_all(RealmUri :: uri()) -> ok.
 
-revoke_all(_RealmUri) ->
-    %% We need to redefine storage layout
-    %% using a dynamic prefix is a bad idea, turn this into
-    %% {?PLUM_DB_TICKET_TAB, Realm} and use key composition which allow for
-    %% iteration using first prefixes
-    {error, not_implemented}.
+revoke_all(RealmUri) when is_binary(RealmUri) ->
+    Prefix = ?PLUM_DB_PREFIX(RealmUri),
+    Fun = fun({Key, _}) -> plum_db:delete(Prefix, Key) end,
+    %% We cannot use keys_only as it will currently ignore remove_tombstones
+    Opts = [{remove_tombstones, true}, {resolver, lww}],
+    ok = plum_db:foreach(Fun, Prefix, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -468,14 +497,22 @@ revoke_all(_RealmUri) ->
     ok.
 
 revoke_all(RealmUri, Authid) ->
-    Prefix = ?PLUM_DB_PREFIX([RealmUri, Authid]),
+    %% The tickets for a user are distributed across all the plum_db partitions
+    %% because we are sharding by key
+    Prefix = ?PLUM_DB_PREFIX(RealmUri),
     Fun = fun
-        ({_, ?TOMBSTONE}) ->
-            ok;
-        ({Key, _}) ->
-            plum_db:delete(Prefix, Key)
+        ({{Term, _, _} = Key, _}) when Term == Authid ->
+            plum_db:delete(Prefix, Key);
+        (_) ->
+            %% No longer the user's ticket
+            throw(break)
     end,
-    plum_db:foreach(Fun, Prefix, [{resolver, lww}]).
+    Opts = [
+        {first, {Authid, '_', '_'}},
+        {remove_tombstones, true},
+        {resolver, lww}
+    ],
+    plum_db:foreach(Fun, Prefix, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -485,7 +522,7 @@ revoke_all(RealmUri, Authid) ->
 %% -----------------------------------------------------------------------------
 -spec revoke_all(
     RealmUri :: uri(),
-    Username ::  all | bondy_rbac_user:username(),
+    Authid ::  all | bondy_rbac_user:username(),
     Scope :: scope()) -> ok.
 
 revoke_all(_RealmUri, _Authid, _Scope) ->
@@ -545,19 +582,20 @@ remove_expired() ->
 %% @private
 do_issue(Session, Opts) ->
     RealmUri = bondy_session:realm_uri(Session),
+    AuthRealmUri = bondy_session:authrealm(Session),
     Authid = bondy_session:authid(Session),
     User = bondy_session:user(Session),
     SSORealmUri = bondy_rbac_user:sso_realm_uri(User),
 
-    {AuthUri, ScopeUri} = case maps:get(allow_sso, Opts) of
+    ScopeUri = case maps:get(allow_sso, Opts) of
         true when SSORealmUri =/= undefined ->
             %% The ticket can be used to authenticate on all user realms
             %% connected to this SSORealmUri
-            {SSORealmUri, undefined};
+            undefined;
         _ ->
             %% SSORealmUri is undefined or SSO was not allowed,
             %% the scope realm can only be the session realm
-            {RealmUri, RealmUri}
+            RealmUri
     end,
 
     Scope = scope(Session, Opts, ScopeUri),
@@ -566,7 +604,7 @@ do_issue(Session, Opts) ->
 
     ok = authorize(ScopeType, AuthCtxt),
 
-    AuthRealm = bondy_realm:fetch(AuthUri),
+    AuthRealm = bondy_realm:fetch(AuthRealmUri),
     Kid = bondy_realm:get_random_kid(AuthRealm),
 
     IssuedAt = ?NOW,
@@ -574,7 +612,7 @@ do_issue(Session, Opts) ->
 
     Claims = #{
         id => bondy_utils:uuid(),
-        authrealm => AuthUri,
+        authrealm => AuthRealmUri,
         authid => Authid,
         authmethod => bondy_session:authmethod(Session),
         issued_by => issuer(Authid, Scope),
@@ -594,22 +632,13 @@ do_issue(Session, Opts) ->
 
     case is_persistent(ScopeType) of
         true ->
-            ok = store_ticket(AuthUri, Authid, Claims);
+            ok = store_ticket(AuthRealmUri, Authid, Claims);
         false ->
             ok
     end,
 
     {ok, Ticket, Claims}.
 
-
-%% @private
-normalise_scope(Scope) ->
-    Default = #{
-        realm => undefined,
-        client_id => undefined,
-        client_instance_id => undefined
-    },
-    maps:merge(Default, Scope).
 
 
 %% @private
@@ -708,10 +737,9 @@ scope_type(#{client_id := _}) ->
     client_local.
 
 
-
+%% @private
 is_persistent(Type) ->
     bondy_config:get([security, ticket, Type, persistence], true).
-
 
 
 %% @private
@@ -721,21 +749,38 @@ store_key(Authid, Scope) ->
 
 %% @private
 store_key(Authid, #{client_instance_id := undefined}, sso) ->
-    Authid;
+    {Authid, <<>>, <<>>};
 
 store_key(Authid, #{client_instance_id := Id}, sso) ->
-    <<Authid/binary, $,, Id/binary>>;
+    {Authid, <<>>, Id};
 
-store_key(_, #{realm := Uri, client_instance_id := undefined}, local) ->
-    Uri;
+store_key(Authid, #{realm := Uri, client_instance_id := undefined}, local) ->
+    {Authid, Uri, <<>>};
 
-store_key(_, #{realm := Uri, client_instance_id := Id}, local) ->
-    <<Uri/binary, $,, Id/binary>>;
+store_key(Authid, #{realm := Uri, client_instance_id := Id}, local) ->
+    {Authid, Uri, Id};
 
-store_key(_, #{client_id := ClientId}, _) ->
+store_key(Authid, #{client_id := ClientId}, Type)
+when ClientId =/= undefined andalso
+(Type == client_local orelse Type == client_sso) ->
     %% client scope or client_realm scope ticket
     %% client_instance_id handled internally by list_key
-    ClientId.
+    {Authid, ClientId, <<>>}.
+
+
+%% @private
+lookup_key(Authid, Scope) ->
+    store_key(Authid, normalise_scope(Scope)).
+
+
+%% @private
+normalise_scope(Scope) ->
+    Default = #{
+        realm => undefined,
+        client_id => undefined,
+        client_instance_id => undefined
+    },
+    maps:merge(Default, Scope).
 
 
 %% @private
@@ -744,8 +789,8 @@ list_key(#{realm := Uri, client_instance_id := Id}) ->
 
 
 %% @private
-store_ticket(RealmUri, Authid, Claims) ->
-    Prefix = ?PLUM_DB_PREFIX([RealmUri, Authid]),
+store_ticket(AuthRealmUri, Authid, Claims) ->
+    Prefix = ?PLUM_DB_PREFIX(AuthRealmUri),
     Scope = maps:get(scope, Claims),
     Key = store_key(Authid, Scope),
 

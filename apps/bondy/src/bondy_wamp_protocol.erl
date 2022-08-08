@@ -607,6 +607,7 @@ open_session(Extra, St0) when is_map(Extra) ->
         SessionId0 = bondy_context:session_id(Ctxt0),
         ReqDetails = bondy_context:request_details(Ctxt0),
 
+        Authrealm = bondy_auth:authrealm(AuthCtxt),
         Authid = bondy_auth:user_id(AuthCtxt),
         %% Authrole might be undefined here. This happens when the user sends
         %% 'default' or NULL (althrough WAMP clients should not send NULL).
@@ -614,6 +615,7 @@ open_session(Extra, St0) when is_map(Extra) ->
         Authroles = bondy_auth:roles(AuthCtxt),
         Authprovider = bondy_auth:provider(AuthCtxt),
         Authmethod = bondy_auth:method(AuthCtxt),
+        AuthmethodDetails = maps:get(authmethod_details, Extra, undefined),
         Agent = maps:get(agent, ReqDetails, undefined),
         Peer = bondy_context:peer(Ctxt0),
 
@@ -623,9 +625,11 @@ open_session(Extra, St0) when is_map(Extra) ->
             is_anonymous => Authid == anonymous,
             agent => Agent,
             roles => maps:get(roles, ReqDetails, undefined),
+            authrealm => Authrealm,
             authid => maybe_gen_authid(Authid),
             authprovider => Authprovider,
             authmethod => Authmethod,
+            authmethod_details => AuthmethodDetails,
             authrole => Authrole,
             authroles => Authroles
         },
@@ -658,13 +662,21 @@ open_session(Extra, St0) when is_map(Extra) ->
         ok = bondy_event_manager:notify({wamp, Welcome, Ctxt1}),
         Bin = wamp_encoding:encode(Welcome, encoding(St1)),
 
-        ok = logger:update_process_metadata(#{
+        %% We define the process metadata and which keys are exposed as logger
+        %% metadata.
+        Meta = #{
             agent => bondy_utils:maybe_slice(Agent, 0, 64),
+            authid => Authid,
             authmethod => Authmethod,
+            authrealm => Authrealm,
+            protocol_session_id => SessionId,
             realm => RealmUri,
-            session_id => SessionId0,
-            protocol_session_id => SessionId
-        }),
+            session_id => SessionId0
+        },
+        %% Do not expose authid as it might be private info
+        LogKeys = [agent, authmethod, protocol_session_id, realm, session_id],
+
+        ok = bondy:set_process_metadata(Meta, LogKeys),
 
         {reply, Bin, St1#wamp_state{state_name = established}}
     catch
@@ -832,7 +844,10 @@ stop(#abort{reason_uri = Uri} = M, Acc, St0) ->
 
     %% We reply all previous messages plus an abort message and close
     St1 = St0#wamp_state{state_name = closed},
-    {stop, Uri, [Bin|Acc], St1}.
+    {stop, Uri, [Bin|Acc], St1};
+
+stop(Reason, Acc, St) ->
+    stop(abort_message(Reason), Acc, St).
 
 
 %% @private

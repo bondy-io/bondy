@@ -200,15 +200,20 @@ publish(Opts, TopicUri, Args, ArgsKw, Ctxt) ->
 
 publish(ReqId, Opts, TopicUri, Args, KWArgs, Ctxt)
 when is_map(Ctxt) ->
-    try
+    RealmUri = bondy_context:realm_uri(Ctxt),
 
+    try
         ok = bondy_rbac:authorize(<<"wamp.publish">>, TopicUri, Ctxt),
         M = wamp_message:publish(ReqId, Opts, TopicUri, Args, KWArgs),
         do_publish(M, Ctxt)
 
     catch
-        _:{not_authorized, _Reason} ->
-            {error, not_authorized};
+        _:{not_authorized, _Reason} = Reason ->
+            {error, Reason};
+
+        _:{no_such_realm, RealmUri} = Reason ->
+            %% Realm doesn't exist
+            {error, Reason};
 
         _:Reason:Stacktrace->
             SessionId = bondy_context:session_id(Ctxt),

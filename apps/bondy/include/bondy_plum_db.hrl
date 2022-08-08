@@ -13,6 +13,7 @@
 -define(PLUM_DB_USER_GRANT_TAB, security_user_grants).
 -define(PLUM_DB_SOURCE_TAB, security_sources).
 -define(PLUM_DB_TICKET_TAB, bondy_ticket).
+-define(PLUM_DB_REGISTRY_ACTOR, '$bondy_registry').
 
 %% REGISTRY
 -define(PLUM_DB_REGISTRATION_TAB, bondy_registration).
@@ -57,28 +58,11 @@
         type => ram_disk,
         shard_by => prefix,
         callbacks => #{
-
-        }
-    }},
-    {?PLUM_DB_GROUP_GRANT_TAB, #{
-        type => ram_disk,
-        shard_by => prefix,
-        callbacks => #{
-
-        }
-    }},
-    {?PLUM_DB_GROUP_TAB, #{
-        type => ram_disk,
-        shard_by => prefix,
-        callbacks => #{
-
-        }
-    }},
-    {?PLUM_DB_USER_GRANT_TAB, #{
-        type => ram_disk,
-        shard_by => prefix,
-        callbacks => #{
-
+            will_merge => {bondy_realm, will_merge},
+            on_merge => {bondy_realm, on_merge},
+            on_update => {bondy_realm, on_update},
+            on_delete => {bondy_realm, on_delete},
+            on_erase => {bondy_realm, on_erase}
         }
     }},
     {?PLUM_DB_USER_TAB, #{
@@ -86,15 +70,37 @@
         shard_by => prefix,
         callbacks => #{
             will_merge => {bondy_rbac_user, will_merge},
-            on_merge => {bondy_rbac_user, on_merge}
+            on_merge => {bondy_rbac_user, on_merge},
+            on_update => {bondy_rbac_user, on_update},
+            on_delete => {bondy_rbac_user, on_delete},
+            on_erase => {bondy_rbac_user, on_erase}
         }
+    }},
+    {?PLUM_DB_GROUP_TAB, #{
+        type => ram_disk,
+        shard_by => prefix,
+        callbacks => #{
+            will_merge => {bondy_rbac_group, will_merge},
+            on_merge => {bondy_rbac_group, on_merge},
+            on_update => {bondy_rbac_group, on_update},
+            on_delete => {bondy_rbac_group, on_delete},
+            on_erase => {bondy_rbac_group, on_erase}
+        }
+    }},
+    {?PLUM_DB_GROUP_GRANT_TAB, #{
+        type => ram_disk,
+        shard_by => prefix,
+        callbacks => #{}
+    }},
+    {?PLUM_DB_USER_GRANT_TAB, #{
+        type => ram_disk,
+        shard_by => prefix,
+        callbacks => #{}
     }},
     {?PLUM_DB_SOURCE_TAB, #{
         type => ram_disk,
         shard_by => prefix,
-        callbacks => #{
-
-        }
+        callbacks => #{}
     }},
 
     %% disk
@@ -102,29 +108,23 @@
     {api_gateway, #{
         type => disk,
         shard_by => prefix,
-        callbacks => #{
-
-        }
+        callbacks => #{}
     }},
     {?PLUM_DB_TICKET_TAB, #{
         type => disk,
-        shard_by => prefix,
-        callbacks => #{
-
-        }
+        %% We shard by key as we prioritise ticket creation and lookup over
+        %% listing and range operations.
+        shard_by => key,
+        callbacks => #{}
     }},
     {oauth2_refresh_tokens, #{
         type => disk,
         shard_by => prefix,
-        callbacks => #{
-
-        }
+        callbacks => #{}
     }},
     {bondy_bridge_relay, #{
         type => disk,
         shard_by => prefix,
-        callbacks => #{
-
-        }
+        callbacks => #{}
     }}
 ]).

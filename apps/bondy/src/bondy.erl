@@ -27,21 +27,31 @@
 -include("bondy_uris.hrl").
 
 -type send_opts()       ::  #{
-    from := bondy_ref:t(),
-    realm_uri := uri(),
-    via => optional(queue:queue())
-}.
+                                from := bondy_ref:t(),
+                                realm_uri := uri(),
+                                via => optional(queue:queue())
+                            }.
 
 -type wamp_error_map() ::  #{
-    error_uri => uri(),
-    details => map(),
-    args => list(),
-    kwargs => map(),
-    payload => binary()
-}.
+                                error_uri => uri(),
+                                details => map(),
+                                args => list(),
+                                kwargs => map(),
+                                payload => binary()
+                            }.
+-type metadata()        ::  #{
+                                authrealm => uri(),
+                                protocol_session_id => id(),
+                                realm_uri => uri(),
+                                session_id => bondy_session_id:t(),
+                                authid => bondy_rbac_user:username(),
+                                atom() => term()
+                            }.
 
 -export_type([wamp_error_map/0]).
 -export_type([send_opts/0]).
+-export_type([metadata/0]).
+
 
 -export([aae_exchanges/0]).
 -export([ack/2]).
@@ -49,6 +59,7 @@
 -export([call/5]).
 -export([cast/5]).
 -export([check_response/4]).
+-export([get_process_metadata/0]).
 -export([lrw_nodes/2]).
 -export([peek_via/1]).
 -export([prepare_send/2]).
@@ -56,7 +67,11 @@
 -export([request/3]).
 -export([send/3]).
 -export([send/4]).
+-export([set_process_metadata/1]).
+-export([set_process_metadata/2]).
 -export([take_via/1]).
+-export([unset_process_metadata/0]).
+-export([update_process_metadata/2]).
 
 
 
@@ -283,6 +298,121 @@ peek_via(_) ->
     undefined.
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_process_metadata(Meta :: metadata()) -> ok.
+
+set_process_metadata(Meta) ->
+    set_process_metadata(Meta, []).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Set metadata on the process dictionary.
+%% If `LogKeys' is a list of keys found in `Meta' then Logger shall
+%% automatically insert those keys and their values in all log events produced
+%% on the current process.
+%% Subsequent calls to this function overwrites previous data set. To update
+%% existing data instead of overwriting it, see
+%% {@link update_process_metadata/2}.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_process_metadata(Meta :: metadata(), LogKeys :: [atom()]) -> ok.
+
+set_process_metadata(Meta0, LogKeys0) when is_map(Meta0), is_list(LogKeys0) ->
+    {LogKeys, Meta} = case maps:take('$log_keys', Meta0) of
+        {LogKeys1, Meta1} ->
+            L = sets:to_list(
+                sets:union(sets:from_list(LogKeys0), sets:from_list(LogKeys1))
+            ),
+            {L, Meta1};
+        error ->
+            {LogKeys0, Meta0}
+    end,
+    {Logger, Bondy} = maps_utils:split(LogKeys, Meta),
+    _ = put(?BONDY_META_KEY, Bondy),
+    ok = logger:set_process_metadata(Logger);
+
+set_process_metadata(Meta, LogKeys) ->
+    erlang:error(badarg, [Meta, LogKeys]).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec update_process_metadata(Meta :: metadata(), LogKeys :: [atom()]) -> ok.
+
+update_process_metadata(Meta0, LogKeys0)
+when is_map(Meta0), is_list(LogKeys0) ->
+    {LogKeys, Meta} = case maps:take('$log_keys', Meta0) of
+        {LogKeys1, Meta1} ->
+            L = sets:to_list(
+                sets:union(sets:from_list(LogKeys0), sets:from_list(LogKeys1))
+            ),
+            {L, Meta1};
+        error ->
+            {LogKeys0, Meta0}
+    end,
+    {Logger, Bondy} = maps_utils:split(LogKeys, Meta),
+
+    case get(?BONDY_META_KEY) of
+        undefined ->
+            put(?BONDY_META_KEY, Bondy);
+        Bondy0 ->
+            put(?BONDY_META_KEY, maps:merge(Bondy0, Bondy))
+    end,
+
+    case logger:get_process_metadata() of
+        undefined ->
+            logger:set_process_metadata(Logger);
+        Logger0 ->
+            logger:set_process_metadata(maps:merge(Logger0, Logger))
+    end,
+    ok;
+
+update_process_metadata(Meta, LogKeys) ->
+    erlang:error(badarg, [Meta, LogKeys]).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Retrieve data set with {@link set_process_metadata/1},
+%% {@link set_process_metadata/2} or {@link update_process_metadata/2}.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_process_metadata() -> Meta :: metadata() | undefined.
+
+get_process_metadata() ->
+    Bondy = get(?BONDY_META_KEY),
+    Logger = logger:get_process_metadata(),
+
+    case {Bondy, Logger} of
+        {undefined, undefined} ->
+            undefined;
+        {undefined, _} ->
+            maps:put('$log_keys', maps:keys(Logger), Logger);
+        {_, undefined} ->
+            Bondy;
+        {_, _} ->
+            maps:put('$log_keys', maps:keys(Logger), maps:merge(Logger, Bondy))
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Delete data set with {@link set_process_metadata/1},
+%% {@link set_process_metadata/2} or {@link update_process_metadata/2}.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec unset_process_metadata() -> ok.
+
+unset_process_metadata() ->
+    _ = erase(?BONDY_META_KEY),
+    ok = logger:unset_process_metadata().
+
+
+
 %% =============================================================================
 %% API - DEPRECATED
 %% =============================================================================
@@ -303,7 +433,7 @@ ack(Pid, _) when Pid =:= self()  ->
     ok;
 
 ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
-    Pid ! {?BONDY_PEER_ACK, Ref},
+    Pid ! {?BONDY_ACK, Ref},
     ok.
 
 
@@ -541,7 +671,7 @@ message_to_map(#error{} = M) ->
         args = Args,
         kwargs = KWArgs
     } = M,
-    %% We need these keys to be binaries, becuase we will
+    %% We need these keys to be binaries, because we will
     %% inject this in a mops context.
     #{
         request_type => Type,

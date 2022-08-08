@@ -44,8 +44,7 @@
 -record(entry_key, {
     realm_uri           ::  uri(),
     session_id          ::  wildcard(optional(bondy_session_id:t())),
-    entry_id            ::  wildcard(id()),
-    is_proxy = false    ::  wildcard(boolean())
+    entry_id            ::  wildcard(id())
 }).
 
 -record(entry, {
@@ -57,6 +56,7 @@
     callback_args       ::  optional(list(term())),
     created             ::  pos_integer() | atom(),
     options             ::  options(),
+    is_proxy = false    ::  wildcard(boolean()),
     %% If a proxy, this is the registration|subscription id
     %% of the origin client
     origin_id           ::  wildcard(id()),
@@ -117,6 +117,8 @@
 -export([created/1]).
 -export([delete/1]).
 -export([delete/2]).
+-export([dirty_delete/1]).
+-export([dirty_delete/2]).
 -export([field_index/1]).
 -export([find_option/2]).
 -export([fold/4]).
@@ -131,7 +133,7 @@
 -export([is_local/2]).
 -export([is_proxy/1]).
 -export([key/1]).
--export([key_pattern/4]).
+-export([key_pattern/3]).
 -export([lookup/2]).
 -export([lookup/3]).
 -export([lookup/4]).
@@ -141,8 +143,8 @@
 -export([match_policy/1]).
 -export([new/5]).
 -export([new/6]).
--export([nodestring/1]).
 -export([node/1]).
+-export([nodestring/1]).
 -export([options/1]).
 -export([origin_id/1]).
 -export([origin_ref/1]).
@@ -242,7 +244,7 @@ pattern(Type, RealmUri, ProcedureOrTopic, Options) ->
 pattern(Type, RealmUri, RegUri, Options, Extra) ->
     SessionId = maps:get(session_id, Extra, '_'),
 
-    KeyPattern = key_pattern(RealmUri, SessionId, '_', '_'),
+    KeyPattern = key_pattern(RealmUri, SessionId, '_'),
 
     MatchPolicy = validate_match_policy(pattern, Options),
 
@@ -255,6 +257,7 @@ pattern(Type, RealmUri, RegUri, Options, Extra) ->
         callback_args = '_',
         created = '_',
         options = '_',
+        is_proxy = '_',
         origin_id = '_',
         origin_ref = '_'
     }.
@@ -266,20 +269,17 @@ pattern(Type, RealmUri, RegUri, Options, Extra) ->
 -spec key_pattern(
     RealmUri    ::  uri(),
     SessionId   ::  wildcard(bondy_session_id:t()),
-    EntryId     ::  wildcard(id()),
-    IsProxy     ::  boolean()) -> key().
+    EntryId     ::  wildcard(id())) -> key().
 
-key_pattern(RealmUri, SessionId, EntryId, IsProxy) when
+key_pattern(RealmUri, SessionId, EntryId) when
 is_binary(RealmUri) andalso
 (is_binary(SessionId) orelse SessionId == '_') andalso
-(is_integer(EntryId) orelse EntryId == '_') andalso
-(is_boolean(IsProxy) orelse IsProxy == '_') ->
+(is_integer(EntryId) orelse EntryId == '_')  ->
 
     #entry_key{
         realm_uri = RealmUri,
         session_id = SessionId,
-        entry_id = EntryId,
-        is_proxy = IsProxy
+        entry_id = EntryId
     }.
 
 
@@ -294,10 +294,7 @@ field_index(session_id) ->
     #entry_key.session_id;
 
 field_index(entry_id) ->
-    #entry_key.entry_id;
-
-field_index(is_proxy) ->
-    #entry_key.is_proxy.
+    #entry_key.entry_id.
 
 
 %% -----------------------------------------------------------------------------
@@ -682,8 +679,7 @@ proxy(Ref, External) ->
         key = #entry_key{
             realm_uri = RealmUri,
             session_id = SessionId,
-            entry_id = Id,
-            is_proxy = true
+            entry_id = Id
         },
         type = Type,
         ref = Ref,
@@ -691,6 +687,7 @@ proxy(Ref, External) ->
         match_policy = MatchPolicy,
         created = Created,
         options = Options,
+        is_proxy = true,
         origin_ref = OriginRef,
         origin_id = OriginId
     }.
@@ -700,12 +697,9 @@ proxy(Ref, External) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_proxy(Entry :: t_or_key()) -> boolean().
+-spec is_proxy(Entry :: t()) -> wildcard(boolean()).
 
-is_proxy(#entry{key = Key}) ->
-    is_proxy(Key);
-
-is_proxy(#entry_key{is_proxy = Val}) ->
+is_proxy(#entry{is_proxy = Val}) ->
     Val.
 
 
@@ -784,7 +778,7 @@ lookup(Type, #entry_key{} = EntryKey, Opts) when ?IS_ENTRY_TYPE(Type) ->
 lookup(Type, RealmUri, EntryId, Opts0) when ?IS_ENTRY_TYPE(Type) ->
 
     PDBPrefix = pdb_prefix(Type, RealmUri),
-    Pattern = key_pattern(RealmUri, '_', EntryId, '_'),
+    Pattern = key_pattern(RealmUri, '_', EntryId),
     Default = [{remove_tombstones, true}, {resolver, lww}],
     Opts = lists:keymerge(1, lists:sort(Opts0), Default),
 
@@ -845,6 +839,96 @@ delete(#entry{} = Entry) ->
 delete(Type, #entry_key{} = EntryKey) when ?IS_ENTRY_TYPE(Type) ->
     PDBPrefix = pdb_prefix(Type, EntryKey),
     plum_db:delete(PDBPrefix, EntryKey).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc WARNING: Never use this unless you know exactly what you are doing!
+%% We use this only when we want to remove a remote entry from the registry as
+%% a result of the owner node being down.
+%% We want to achieve the following:
+%% 1. The delete has to be idempotent, so that we avoid having to merge N
+%% versions either during broadcast or AAE exchange. We can use the owners
+%% ActorID and Timestamp for this, manipulating the plum_db_object, a little
+%% bit nasty but effective and almost harmless as entries are immutable anyway.
+%% 2. If we can achieve (1) then we could disable broadcast, as all nodes
+%% will be doing (1).
+%% 3. We still have the AAE exchange, so (1) has to ensure that the hash of
+%% the object is the same in all nodes. I think that comes naturally from
+%% doing (1) anyway, but we need to check, e.g. timestamp differences?
+%% @end
+%% -----------------------------------------------------------------------------
+-spec dirty_delete(Type :: t()) -> t() | undefined.
+
+dirty_delete(#entry{type = Type, key = Key}) ->
+    dirty_delete(Type, Key).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc WARNING: Never use this unless you know exactly what you are doing!
+%% We use this only when we want to remove a remote entry from the registry as
+%% a result of the owner node being down.
+%% We want to achieve the following:
+%% 1. The delete has to be idempotent, so that we avoid having to merge N
+%% versions either during broadcast or AAE exchange. We can use the owners
+%% ActorID and Timestamp for this, manipulating the plum_db_object, a little
+%% bit nasty but effective and almost harmless as entries are immutable anyway.
+%% 2. If we can achieve (1) then we could disable broadcast, as all nodes
+%% will be doing (1).
+%% 3. We still have the AAE exchange, so (1) has to ensure that the hash of
+%% the object is the same in all nodes. I think that comes naturally from
+%% doing (1) anyway, but we need to check, e.g. timestamp differences?
+%% @end
+%% -----------------------------------------------------------------------------
+-spec dirty_delete(Type :: entry_type(), EntryKey :: key()) ->
+    t() | undefined.
+
+dirty_delete(Type, EntryKey) ->
+    PDBPrefix = pdb_prefix(Type, EntryKey),
+
+    case plum_db:get_object({PDBPrefix, EntryKey}) of
+        undefined ->
+            undefined;
+
+        ?TOMBSTONE ->
+            undefined;
+
+        {object, Clock} = Obj0 ->
+            %% We use a static fake ActorID and the original timestamp so that
+            %% the tombstone is deterministically.
+            %% This allows the operation to be idempotent when performed
+            %% concurrently by multiple nodes. Idempotency is a requirement so
+            %% that the hash of the object is the same and compares equal
+            %% between nodes irrespective of who created it.
+            %% Also the ActorID helps us determine this is a dirty delete.
+            Partition = plum_db:get_partition({PDBPrefix, EntryKey}),
+            ActorId = {Partition, ?PLUM_DB_REGISTRY_ACTOR},
+            Context = plum_db_object:context(Obj0),
+            [{_, Timestamp}] = plum_db_dvvset:values(Clock),
+            InsertRec = plum_db_dvvset:new(Context, {?TOMBSTONE, Timestamp}),
+
+            %% We create a new object
+            Obj = {object, plum_db_dvvset:update(InsertRec, Clock, ActorId)},
+
+            %% We must resolve the object before calling dirty_put/4.
+            Resolved = plum_db_object:resolve(Obj, lww),
+
+            %% Avoid broadcasting, the primary objective of this delete is to
+            %% remove the local replica of an entry when we get disconnected
+            %% from its root node.
+            %% Every node will do the same, so if this is a node crashing we
+            %% will have a tsunami of deletes being broadcasted.
+            %% We will achieve convergence via AAE.
+            Opts = [
+                {broadcast, false}
+            ],
+
+            ok = plum_db:dirty_put(PDBPrefix, EntryKey, Resolved, Opts),
+
+            %% We return the original value
+            plum_db_object:value(Obj0)
+
+    end.
 
 
 %% -----------------------------------------------------------------------------

@@ -54,7 +54,7 @@ tar:
 	mkdir -p _build/tar
 	tar -zxvf _build/prod/rel/*/*.tar.gz -C _build/tar
 
-# Notice we need REBAR3_PROFILE en var even if we use 'as prod' becuase this is
+# Notice we need REBAR3_PROFILE en var even if we use 'as prod' because this is
 # handled by rebar.conf.script which does not know we have used the 'as prod'
 # higher level command
 prod-xcomp-rel:
@@ -63,7 +63,7 @@ prod-xcomp-rel:
 	REBAR3_TARGET_SYSTEM_LIBS=/Users/aramallo/otp/24.2/lib \
 	${REBAR} as prod release
 
-# Notice we need REBAR3_PROFILE en var even if we use 'as prod' becuase this is
+# Notice we need REBAR3_PROFILE en var even if we use 'as prod' because this is
 # handled by rebar.conf.script which does not know we have used the 'as prod'
 # higher level command
 prod-xcomp-tar:

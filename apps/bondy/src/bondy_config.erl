@@ -354,7 +354,8 @@ set_vsn(Args) ->
 %% @private
 setup_mods() ->
     ok = bondy_json:setup(),
-    ok = configure_registry().
+    ok = configure_registry(),
+    ok = configure_jobs_pool().
 
 
 %% @private
@@ -384,7 +385,7 @@ setup_wamp() ->
 %% @private
 prepare_private_config() ->
     Config0 = configure_plum_db(?CONFIG),
-    maybe_configure_message_retention(Config0).
+    configure_message_retention(Config0).
 
 
 %% @private
@@ -397,7 +398,7 @@ configure_plum_db(Config) ->
 
 
 %% @private
-maybe_configure_message_retention(Config0) ->
+configure_message_retention(Config0) ->
     try
         case bondy_config:get([wamp_message_retention, enabled], false) of
             true ->
@@ -443,6 +444,20 @@ configure_registry() ->
     ),
     Opts = key_value:put(message_queue_data, Value, Opts0),
     bondy_config:set([registry, partition_spawn_opts], Opts).
+
+
+configure_jobs_pool() ->
+    %% Configure partition count
+    KeyPath = [jobs_pool, size],
+
+    case bondy_config:get(KeyPath, undefined) of
+        undefined ->
+            N = min(16, erlang:system_info(schedulers)),
+            bondy_config:set(KeyPath, N),
+            ok;
+        _ ->
+            ok
+    end.
 
 
 %% @private

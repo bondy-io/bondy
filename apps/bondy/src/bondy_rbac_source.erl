@@ -106,6 +106,11 @@
     meta                =>  #{binary() => any()}
 }.
 
+-type add_opts()        ::  #{
+    rebase              => boolean(),
+    actor_id            => term()
+}.
+
 -type external()        ::  t().
 -type list_opts()       ::  #{limit => pos_integer()}.
 
@@ -181,35 +186,37 @@ meta(#{type := source, meta := Val}) -> Val.
     RealmUri :: uri(), Assignment :: map() | assignment()) ->
     {ok, t()}  | {error, any()}.
 
-add(RealmUri, Data) when is_map(Data) ->
+add(RealmUri, Assisgnment) ->
+    add(RealmUri, Assisgnment, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Adds a source to the realm identified by `RealmUri' using
+%% assignment or map `Assignment'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add(
+    RealmUri :: uri(),
+    Assignment :: map() | assignment(),
+    Opts :: add_opts()) ->
+    {ok, t()}  | {error, any()}.
+
+add(RealmUri, Data, Opts) when is_map(Data) ->
     try
         Assignment = new_assignment(Data),
-        add(RealmUri, Assignment)
+        add(RealmUri, Assignment, Opts)
     catch
         throw:Reason ->
             {error, Reason}
     end;
 
-add(RealmUri, #source_assignment{} = A) ->
-    do_add(RealmUri, A#source_assignment.usernames, A#source_assignment.data).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec add(
-    Realmuri :: uri(),
-    Usernames :: [binary()] | all | anonymous,
-    Assignment :: map() | assignment()) -> {ok, t()} | {error, any()}.
-
-add(RealmUri, Usernames, #{type := source} = Source) ->
-    try
-        do_add(RealmUri, Usernames, Source)
-    catch
-        throw:Reason ->
-            {error, Reason}
-    end.
+add(RealmUri, #source_assignment{} = A, Opts) ->
+    do_add(
+        RealmUri,
+        A#source_assignment.usernames,
+        A#source_assignment.data,
+        Opts
+    ).
 
 
 %% -----------------------------------------------------------------------------
@@ -219,24 +226,47 @@ add(RealmUri, Usernames, #{type := source} = Source) ->
 -spec remove(
     RealmUri :: uri(),
     Usernames :: [binary() | anonymous] | binary() | anonymous | all,
-    CIDR :: bondy_cidr:t()) -> ok.
+    CIDR :: bondy_cidr:t() | binary()) -> ok.
 
 remove(RealmUri, Keyword, CIDR)
 when (Keyword == all orelse Keyword == anonymous) ->
     remove(RealmUri, [Keyword], CIDR);
 
-remove(RealmUri, Usernames, CIDR) when is_list(Usernames) ->
+remove(RealmUri, Usernames0, CIDR0) when is_list(Usernames0) ->
+    Usernames =
+        case bondy_data_validators:usernames(Usernames0) of
+            {ok, Valid} ->
+                Valid;
+            true ->
+                Usernames0;
+            false ->
+                ?ERROR(badarg, [RealmUri, Usernames0, CIDR0], usernames)
+        end,
+
+    AMask =
+        case bondy_data_validators:cidr(CIDR0) of
+            {ok, CIDR} ->
+                bondy_cidr:anchor_mask(CIDR);
+            true ->
+                bondy_cidr:anchor_mask(CIDR0);
+            false ->
+                ?ERROR(badarg, [RealmUri, Usernames, CIDR0], invalid_cidr)
+    end,
+
     Prefix  = ?PLUMDB_PREFIX(RealmUri),
-    AMask = bondy_cidr:anchor_mask(CIDR),
+
     UserSources =  lists:flatten([
-        {Username, match(RealmUri, Username, AMask)}
+        do_match(RealmUri, Username, AMask)
         || Username <- Usernames
     ]),
     _ = [
-        plum_db:delete(Prefix, {Username, AMask, Method})
-        || {Username, L} <- UserSources, #{authmethod := Method} <- L
+        plum_db:delete(Prefix, Key)
+        || {Key, _} <- UserSources
     ],
-    ok.
+    ok;
+
+remove(RealmUri, Username, CIDR) when is_binary(Username) ->
+    remove(RealmUri, [Username], CIDR).
 
 
 %% -----------------------------------------------------------------------------
@@ -267,7 +297,7 @@ remove_all(RealmUri, Username) ->
     Opts = [{remove_tombstones, true}, {keys_only, true}],
 
     plum_db:foreach(fun
-        ({Id, _CIDR, _Method} = Key) when Id == Username ->
+        ({Id, _Mask, _Method} = Key) when Id == Username ->
             plum_db:delete(Prefix, Key);
         (_) ->
             ok
@@ -407,19 +437,16 @@ to_external(#{type := source, version := ?VERSION} = Source) ->
 
 
 
-do_add(RealmUri, Keyword, #{type := source} = Source)
+do_add(RealmUri, Keyword, #{type := source} = Source, Opts)
 when Keyword == all orelse Keyword == anonymous ->
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
     Masked = bondy_cidr:anchor_mask(maps:get(cidr, Source)),
     %% TODO check if there are already 'user' sources for this CIDR
     %% with the same source
     Authmethod = maps:get(authmethod, Source),
-    ok = plum_db:put(Prefix, {Keyword, Masked, Authmethod}, Source),
-    {ok, Source};
+    Key = {Keyword, Masked, Authmethod},
+    store(RealmUri, Key, Source, Opts);
 
-do_add(RealmUri, Usernames, #{type := source} = Source) ->
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
-
+do_add(RealmUri, Usernames, #{type := source} = Source, Opts) ->
     %% We validate all usernames exist
     Unknown = bondy_rbac_user:unknown(RealmUri, Usernames),
     [] =:= Unknown orelse throw({no_such_users, Unknown}),
@@ -430,11 +457,34 @@ do_add(RealmUri, Usernames, #{type := source} = Source) ->
         fun(Username) ->
             %% prev we added {Authmethod, Meta} instead of Source
             Authmethod = maps:get(authmethod, Source),
-            plum_db:put(Prefix, {Username, Masked, Authmethod}, Source)
+            Key = {Username, Masked, Authmethod},
+            _ = store(RealmUri, Key, Source, Opts),
+            ok
         end,
         Usernames
     ),
     {ok, Source}.
+
+
+store(RealmUri, Key, Source, #{rebase := true} = Opts) ->
+    ActorId = maps:get(actor_id, Opts, undefined),
+    Object = bondy_utils:rebase_object(Source, ActorId),
+
+    case plum_db:dirty_put(?PLUMDB_PREFIX(RealmUri), Key, Object, []) of
+        ok ->
+            {ok, Source};
+        Error ->
+            Error
+    end;
+
+store(RealmUri, Key, Source, _) ->
+    case plum_db:put(?PLUMDB_PREFIX(RealmUri), Key, Source) of
+        ok ->
+            {ok, Source};
+        Error ->
+            Error
+    end.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -458,6 +508,27 @@ do_match(RealmUri, Username) ->
     end,
     Sources = plum_db:match(
         ?PLUMDB_PREFIX(RealmUri), {Username, '_', '_'}, Opts
+    ),
+    lists:append(Sources, ProtoSources).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+do_match(RealmUri, Username, AMask) ->
+    Opts = [{remove_tombstones, true} | ?FOLD_OPTS],
+    ProtoSources = case bondy_realm:prototype_uri(RealmUri) of
+        undefined ->
+            [];
+        ProtoUri ->
+            %% TODO when we enable assigned to groups here we need to also
+            %% union the sources assigned to the group in the proto
+            plum_db:match(?PLUMDB_PREFIX(ProtoUri), {all, '_', '_'}, Opts)
+    end,
+    Sources = plum_db:match(
+        ?PLUMDB_PREFIX(RealmUri), {Username, AMask, '_'}, Opts
     ),
     lists:append(Sources, ProtoSources).
 

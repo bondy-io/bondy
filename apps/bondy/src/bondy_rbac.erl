@@ -154,18 +154,23 @@
                                 | bondy_rbac_group:name().
 -type request_data()        ::  map().
 -type request()             ::  #{
-    type                :=  request,
-    roles               :=  [rolename()],
-    permissions         :=  [binary()],
-    resources           :=  [normalised_resource()]
-}.
+                                    type :=  request,
+                                    roles :=  [rolename()],
+                                    permissions :=  [binary()],
+                                    resources :=  [normalised_resource()]
+                                }.
 -type grant()               ::  {
                                     normalised_resource(),
                                     [Permission :: permission()]
                                 }.
+-type grant_opts()          ::  #{
+                                    rebase => boolean(),
+                                    actor_id => term()
+                                }.
 
 -export_type([context/0]).
 -export_type([grant/0]).
+-export_type([grant_opts/0]).
 -export_type([permission/0]).
 -export_type([request/0]).
 -export_type([request_data/0]).
@@ -178,6 +183,7 @@
 -export([get_context/1]).
 -export([get_context/2]).
 -export([grant/2]).
+-export([grant/3]).
 -export([grants/2]).
 -export([grants/3]).
 -export([group_grants/2]).
@@ -213,6 +219,11 @@ authorize(Permission, Ctxt) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns 'ok' or an exception.
+%% Failures:
+%% <ul>
+%% <li>`{no_such_realm, uri()}'</li>
+%% <li>`{not_authorized, Reason :: binary()}'</li>
+%% </ul>
 %% @end
 %% -----------------------------------------------------------------------------
 -spec authorize(binary(), binary() | any, bondy_context:t() | context()) ->
@@ -225,7 +236,9 @@ authorize(_, _, #{authid := '$internal'}) ->
     ok;
 
 authorize(Permission, Resource, Ctxt) ->
-    case bondy_context:is_security_enabled(Ctxt) of
+    RealmUri = bondy_context:realm_uri(Ctxt),
+
+    try bondy_context:is_security_enabled(Ctxt) of
         true ->
             RBACCtxt = bondy_session:rbac_context(
                 bondy_context:session(Ctxt)
@@ -233,6 +246,9 @@ authorize(Permission, Resource, Ctxt) ->
             do_authorize(Permission, Resource, RBACCtxt);
         false ->
             ok
+    catch
+        _:{not_found, RealmUri} ->
+            error({no_such_realm, RealmUri})
     end.
 
 
@@ -408,7 +424,25 @@ request(Data) ->
 -spec grant(RealmUri :: uri(), Request :: request() | map()) ->
     ok | {error, Reason :: any()} | no_return().
 
-grant(RealmUri, #{type := request} = Request) ->
+grant(RealmUri, Arg) ->
+    grant(RealmUri, Arg, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% **Use cases**
+%%
+%% ```
+%% grant <permissions> on any to all|{<user>|<group>[,...]}
+%% grant <permissions> on {<resource>, <exact|prefix|wildcard>} to all|{<user>|<group>[,...]}
+%% '''
+%% @end
+%% -----------------------------------------------------------------------------
+-spec grant(
+    RealmUri :: uri(), Request :: request() | map(), Opts :: grant_opts()) ->
+    ok | {error, Reason :: any()} | no_return().
+
+grant(RealmUri, #{type := request} = Request, Opts) ->
     bondy_realm:exists(RealmUri) orelse error({no_such_realm, RealmUri}),
     #{
         roles := Roles,
@@ -416,10 +450,10 @@ grant(RealmUri, #{type := request} = Request) ->
         resources := Resources
     } = Request,
 
-    grant(RealmUri, Roles, Resources, Permissions);
+    grant(RealmUri, Roles, Resources, Permissions, Opts);
 
-grant(RealmUri, Data) when is_map(Data) ->
-    grant(RealmUri, request(Data)).
+grant(RealmUri, Data, Opts) when is_map(Data) ->
+    grant(RealmUri, request(Data), Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -553,7 +587,7 @@ when is_binary(Resource) orelse Resource =:= any ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_all(RealmUri :: uri(), Opts :: #{silent := boolean()}) -> ok.
+-spec remove_all(RealmUri :: uri(), Opts :: map()) -> ok.
 
 remove_all(RealmUri, _Opts) ->
     Opts = [{remove_tombstones, true}, {keys_only, true}],
@@ -840,14 +874,19 @@ inconsistency_error(Keys) ->
 %% @doc Grant permissions to one or more roles(
 %% @end
 %% -----------------------------------------------------------------------------
--spec grant(binary(), all | [binary()], [normalised_resource()], [binary()]) ->
+-spec grant(
+    RealmUri ::binary(),
+    Arg :: all | [binary()],
+    Resources :: [normalised_resource()],
+    Permissions :: [binary()],
+    Opts :: grant_opts()) ->
     ok | {error, term()}.
 
-grant(RealmUri, Keyword, Resources, Permissions)
+grant(RealmUri, Keyword, Resources, Permissions, Opts)
 when Keyword == all orelse Keyword == anonymous->
-    do_grant([{Keyword, group}], RealmUri, Resources, Permissions);
+    do_grant([{Keyword, group}], RealmUri, Resources, Permissions, Opts);
 
-grant(RealmUri, RoleList0, Resources, Permissions) ->
+grant(RealmUri, RoleList0, Resources, Permissions, Opts) ->
     {Anon, RoleList} = lists:splitwith(
         fun
             (anonymous) -> true;
@@ -858,8 +897,8 @@ grant(RealmUri, RoleList0, Resources, Permissions) ->
     ),
 
     %% If anonymous was found in the list, add the grant for it
-    _ = length(Anon) > 0 andalso
-        grant(RealmUri, anonymous, Resources, Permissions),
+    _ = length(Anon) > 0
+            andalso grant(RealmUri, anonymous, Resources, Permissions, Opts),
 
     ProtoUri = bondy_realm:prototype_uri(RealmUri),
     RealmProto = {RealmUri, ProtoUri},
@@ -891,17 +930,17 @@ grant(RealmUri, RoleList0, Resources, Permissions) ->
 
     case check_grant_blockers(UnknownRoles, NameOverlaps) of
         none ->
-            do_grant(RoleTypes, RealmUri, Resources, Permissions);
+            do_grant(RoleTypes, RealmUri, Resources, Permissions, Opts);
         Error ->
             Error
     end.
 
 
 %% @private
-do_grant([], _, _, _) ->
+do_grant([], _, _, _, _) ->
     ok;
 
-do_grant([{Rolename, RoleType} | T], RealmUri, Resources, Permissions0) ->
+do_grant([{Rolename, RoleType} | T], RealmUri, Resources, Permissions0, Opts) ->
     Prefix = ?PLUMDB_PREFIX(RealmUri, RoleType),
 
     ok = lists:foreach(
@@ -919,14 +958,33 @@ do_grant([{Rolename, RoleType} | T], RealmUri, Resources, Permissions0) ->
 
             %% We finally store the updated grant
             Key = {Rolename, Resource},
-            ok = plum_db:put(Prefix, Key, Permissions1)
+            ok = store(Prefix, Key, Permissions1, Opts)
         end,
         Resources
     ),
 
-    do_grant(T, RealmUri, Resources, Permissions0).
+    do_grant(T, RealmUri, Resources, Permissions0, Opts).
 
 
+%% @private
+store(Prefix, Key, Permissions, #{rebase := true} = Opts) ->
+    ActorId = maps:get(actor_id, Opts, undefined),
+    Object = bondy_utils:rebase_object(Permissions, ActorId),
+
+    case plum_db:dirty_put(Prefix, Key, Object, []) of
+        ok ->
+            ok;
+        {error, Reason} ->
+            throw(Reason)
+    end;
+
+store(Prefix, Key, Permissions, _) ->
+    case plum_db:put(Prefix, Key, Permissions) of
+        ok ->
+            ok;
+        {error, Reason} ->
+            throw(Reason)
+    end.
 
 
 %% -----------------------------------------------------------------------------

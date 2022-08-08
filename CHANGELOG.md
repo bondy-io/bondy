@@ -36,6 +36,7 @@
 * Logging improvements
 * Removed high cardinality labels in promethues metrics (before we would tag each WAMP message stats with realm, session, message type etc. this is not good for stats databases like Promethues).
 * Added RBAC context caching to avoid computing the user grants on every request.
+* Tickets database location: The location of the tickets changes on beta.64 onwards
 
 ## Known Issues
 

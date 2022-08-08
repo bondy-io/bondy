@@ -58,7 +58,10 @@ start_link() ->
 
 
 init([]) ->
-    RestartStrategy = {one_for_one, 0, 1},
+    %% TODO move to one_for_one
+    %% We can only use one_for_one when each partition can rebuild the its trie
+    %% from plum_db on init
+    RestartStrategy = {one_for_all, 0, 1},
 
     %% Start partitions first
     Children = partitions() ++ [

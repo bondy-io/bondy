@@ -28,9 +28,10 @@
 -export([bin_to_pid/1]).
 -export([decode/2]).
 -export([elapsed_time/2]).
+-export([external_session_id/1]).
 -export([foreach/2]).
--export([generate_fragment/1]).
 -export([gen_message_id/1]).
+-export([generate_fragment/1]).
 -export([get_nonce/0]).
 -export([get_nonce/1]).
 -export([get_random_string/2]).
@@ -40,7 +41,10 @@
 -export([maybe_encode/2]).
 -export([maybe_slice/3]).
 -export([merge_map_flags/2]).
+-export([peername/2]).
 -export([pid_to_bin/1]).
+-export([rebase_object/1]).
+-export([rebase_object/2]).
 -export([session_id_to_uri_part/1]).
 -export([system_time_to_rfc3339/2]).
 -export([tc/3]).
@@ -49,8 +53,8 @@
 -export([to_existing_atom_keys/1]).
 -export([uuid/0]).
 -export([uuid/1]).
--export([external_session_id/1]).
--export([peername/2]).
+-export([timed_mac/3]).
+
 
 
 
@@ -244,9 +248,6 @@ decode(ContentType, Term) ->
     #{<<"type">> => ContentType, <<"content">> => Term}.
 
 
-
-
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% IDs in the _global scope_ MUST be drawn _randomly_ from a _uniform
@@ -373,6 +374,31 @@ peername(Transport, Socket) when Transport == ranch_ssl; Transport == ssl ->
     ssl:peername(Socket).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec rebase_object(Value :: term()) -> plum_db_object:t().
+
+rebase_object(Value) ->
+    rebase_object(Value, undefined).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec rebase_object(Value :: term(), Actor :: term()) -> plum_db_object:t().
+
+rebase_object(Value, undefined) ->
+    rebase_object(Value, '$bondy');
+
+rebase_object(Value, Actor) ->
+    Timestamp = {0, 0, 0},
+    NewRecord = plum_db_dvvset:new({Value, Timestamp}),
+    {object, plum_db_dvvset:update(NewRecord, Actor)}.
+
+
 
 %% =============================================================================
 %%  PRIVATE
@@ -471,3 +497,20 @@ tc(M, F, A) ->
     T2 = erlang:monotonic_time(),
     Time = erlang:convert_time_unit(T2 - T1, native, perf_counter),
     {Time, Val}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Creates a time-dependent Message Authentication Code with byte length
+%% `Len' duration in seconds `Duration' and secret `Secret`.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec timed_mac(Secret :: binary(), Duration :: integer(), Len :: integer()) ->
+    binary().
+
+timed_mac(Secret, Duration, Len) ->
+    {MegaSecs, Secs, _} = os:timestamp(),
+    Interval = trunc((MegaSecs * 1000000 + (Secs + Duration)) / Duration),
+    Msg = <<Interval:8/big-unsigned-integer-unit:8>>,
+    crypto:macN(hmac, sha, Secret, Msg, Len).
+
+

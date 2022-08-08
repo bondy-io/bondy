@@ -172,8 +172,7 @@ forward(#call{} = M, #{session := _} = Ctxt0) ->
     %% This is a sync call as it is an easy way to guarantee ordering of
     %% invocations between any given pair of Caller and Callee as
     %% defined by RFC 11.2, as Erlang guarantees causal delivery of messages
-    %% between two processes even when in different nodes (when using
-    %% distributed Erlang).
+    %% between two processes.
     %% RFC:
     %% If Callee A has registered endpoints for both Procedure 1 and Procedure
     %% 2, and Caller B first issues a Call 1 to Procedure 1 and then a Call 2
@@ -281,7 +280,7 @@ pre_stop() ->
     Fun = fun
         ({continue, Cont}) ->
             try
-                bondy_session:list_refs(Cont)
+                bondy_session:list(Cont)
             catch
                 Class:Reason:Stacktrace ->
                     ?LOG_ERROR(#{
@@ -292,13 +291,15 @@ pre_stop() ->
                     }),
                     []
             end;
+
         ({RealmUri, Ref}) ->
             catch bondy:send(RealmUri, Ref, M),
             ok
     end,
 
     %% We loop with batches of 100
-    bondy_utils:foreach(Fun, bondy_session:list_refs(100)).
+    Opts = #{limit => 100, return => ref},
+    bondy_utils:foreach(Fun, bondy_session:list(Opts)).
 
 
 stop() ->
@@ -352,19 +353,30 @@ async_forward(M, Ctxt0) ->
     %% existing worker or spawning a new one depending on
     %% bondy_broker_pool_type.
     Event = {M, Ctxt0},
+    Meta = bondy:get_process_metadata(),
 
-    try bondy_router_worker:cast(fun() -> sync_forward(Event) end) of
+    Fun = fun() ->
+        %% We copy the process meta (we do not need to unset because the worker
+        %% will do it for us).
+        ok = bondy:set_process_metadata(Meta),
+        sync_forward(Event)
+    end,
+
+    try bondy_router_worker:cast(Fun) of
         ok ->
             {ok, Ctxt0};
+
         {error, overload} ->
             ?LOG_WARNING(#{
-                description => "Router pool overloaded, will route message synchronously"
+                description =>
+                    "Router pool overloaded, will route message synchronously"
             }),
             %% @TODO publish metaevent and stats
             %% @TODO use throttling and send error to caller conditionally
             %% We do it synchronously i.e. blocking the caller
             ok = sync_forward(Event),
             {ok, Ctxt0}
+
     catch
         error:Reason when Acknowledge == true ->
             %% TODO Maybe publish metaevent
@@ -451,7 +463,7 @@ sync_forward({M, _Ctxt}) ->
 %% The following messages are never forwarded between cluster peer nodes:
 %% INVOCATION, YIELD, INTERRUPT, EVENT.
 %% EVENT is particular since Bondy forwards PUBLISH messages when subscribers
-%% exist in cluster peer nodes, this is becuase in WAMP every EVENT has a per
+%% exist in cluster peer nodes, this is because in WAMP every EVENT has a per
 %% subscriber sequence number, so these events could not possibly be generated
 %% on the publisher's node.
 %% @end.

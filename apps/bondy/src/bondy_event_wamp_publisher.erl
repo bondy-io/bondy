@@ -163,13 +163,19 @@ handle_event({group_updated, RealmUri, Name}, State) ->
     {ok, State};
 
 handle_event({group_deleted, RealmUri, Name}, State) ->
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_utils:gen_message_id(global),
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
+    %% Silence when this is a cascade delete
+    case bondy_realm:exists(RealmUri) of
+        true ->
+            %% We use a global ID as this is not a publishers request
+            ReqId = bondy_utils:gen_message_id(global),
+            Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
 
-    _ = bondy_broker:publish(
-        ReqId, #{}, ?BONDY_GROUP_DELETED, [RealmUri, Name], #{}, Ctxt
-    ),
+            _ = bondy_broker:publish(
+                ReqId, #{}, ?BONDY_GROUP_DELETED, [RealmUri, Name], #{}, Ctxt
+            );
+        false ->
+            ok
+    end,
     {ok, State};
 
 handle_event({user_added, RealmUri, Username}, State) ->
@@ -198,19 +204,24 @@ handle_event({user_updated, RealmUri, Username}, State) ->
     {ok, State};
 
 handle_event({user_deleted, RealmUri, Username}, State) ->
-    %% The effect of revoking tickets and tokens will be replicated through
-    %% plum_db
-    ok = bondy_ticket:revoke_all(RealmUri, Username),
-    ok = bondy_oauth2:revoke_refresh_tokens(RealmUri, Username),
+    %% Silence when this is a cascade delete
+    case bondy_realm:exists(RealmUri) of
+        true ->
+            %% The effect of revoking tickets and tokens will be replicated
+            %% through plum_db
+            ok = bondy_ticket:revoke_all(RealmUri, Username),
+            ok = bondy_oauth2:revoke_refresh_tokens(RealmUri, Username),
 
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_utils:gen_message_id(global),
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
+            %% We use a global ID as this is not a publishers request
+            ReqId = bondy_utils:gen_message_id(global),
+            Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
 
-    _ = bondy_broker:publish(
-        ReqId, #{}, ?BONDY_USER_DELETED, [RealmUri, Username], #{}, Ctxt
-    ),
-
+            _ = bondy_broker:publish(
+                ReqId, #{}, ?BONDY_USER_DELETED, [RealmUri, Username], #{}, Ctxt
+            );
+        false ->
+            ok
+    end,
     {ok, State};
 
 handle_event({user_credentials_updated, RealmUri, Username}, State) ->

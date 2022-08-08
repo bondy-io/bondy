@@ -68,6 +68,12 @@
         alias => <<"memory">>,
         key => memory,
         required => false
+    },
+    salt => #{
+        alias => <<"salt">>,
+        key => salt,
+        required => false,
+        datatype => binary
     }
 }).
 

@@ -134,8 +134,18 @@
     {wamp,[
         {uri_strictness,loose}
     ]},
-    {bondy,
-        [{oauth2,
+    {bondy,[
+        {session_manager_pool,[{size,50}]},
+        {router_pool,[{capacity,10000},{size,8},{type,transient}]},
+        {load_regulation_enabled,true},
+        {jobs_pool,[{size,16}]},
+        {registry,[
+            {partition_spawn_opts,[
+                {message_queue_data,on_heap}
+            ]},
+            {partitions,32}
+        ]},
+        {oauth2,
             [{refresh_token_length,40},
             {refresh_token_duration,2592000},
             {code_grant_duration,600},
@@ -257,9 +267,6 @@
             {acceptors_pool_size,200},
             {port,18081},
             {enabled,true}]},
-        {session_manager_pool,[{size,50}]},
-        {router_pool,[{capacity,10000},{size,8},{type,transient}]},
-        {load_regulation_enabled,true},
         {request_timeout,20000},
         {wamp_message_retention,
             [{default_ttl,0},

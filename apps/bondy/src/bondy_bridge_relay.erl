@@ -225,7 +225,7 @@
     versions => #{
         alias => <<"versions">>,
         required => true,
-        default => 'tlsv1.3',
+        default => ['tlsv1.3'],
         datatype => {list, {in, [
             'tlsv1.2', 'tlsv1.3',
             <<"tlsv1.2">>, <<"tlsv1.3">>,
