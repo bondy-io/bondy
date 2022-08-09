@@ -42,6 +42,15 @@
 
 -define(MERGE_STATUS_TAB, bondy_registry_merge_status).
 
+-define(REMOVE_MATCH_OPTS, [
+    {allow_put, false} | ?MATCH_OPTS
+]).
+
+-define(MATCH_OPTS, [
+    {remove_tombstones, true},
+    {resolver, lww}
+]).
+
 -record(state, {
     timers = #{}    ::  #{node() => reference()},
     start_ts        ::  pos_integer()
@@ -313,11 +322,7 @@ when Task == undefined orelse is_function(Task, 1) ->
         RealmUri, SessionId, EntryId
     ),
 
-    MatchOpts = [
-        {limit, 1},
-        {resolver, lww},
-        {remove_tombstones, true}
-    ],
+    MatchOpts = [{limit, 1} | ?MATCH_OPTS],
 
     %% We should match at most one entry for the {RealmUri, SessionId, EntryId}
     %% combination.
@@ -370,12 +375,7 @@ when Task == undefined orelse is_function(Task, 1) ->
                 RealmUri, SessionId, '_'
             ),
             MaybeFun = maybe_fun(Task, Ctxt),
-            MatchOpts = [
-                {limit, 100},
-                {resolver, lww},
-                {allow_put, false},
-                {remove_tombstones, true}
-            ],
+            MatchOpts = [{limit, 100} | ?REMOVE_MATCH_OPTS],
             Matches = bondy_registry_entry:match(Type, Pattern, MatchOpts),
             do_remove_all(Matches, SessionId, MaybeFun)
     end.
@@ -395,15 +395,9 @@ when Task == undefined orelse is_function(Task, 1) ->
 remove_all(Type, RealmUri, SessionId, Task) ->
     Pattern = bondy_registry_entry:key_pattern(RealmUri, SessionId, '_'),
 
-    MatchOpts = [
-        {limit, 100},
-        {remove_tombstones, true},
-        {resolver, lww},
-        {allow_put, false}
-    ],
+    MatchOpts = [{limit, 100} | ?REMOVE_MATCH_OPTS],
     Matches = bondy_registry_entry:match(Type, Pattern, MatchOpts),
     do_remove_all(Matches, SessionId, Task).
-
 
 
 %% -----------------------------------------------------------------------------
@@ -504,11 +498,7 @@ entries(Type, RealmUri, SessionId) ->
 
 entries(Type, RealmUri, SessionId, Limit) ->
     Pattern = bondy_registry_entry:key_pattern(RealmUri, SessionId, '_'),
-    Opts = [
-        {limit, Limit},
-        {remove_tombstones, true},
-        {resolver, lww}
-    ],
+    Opts = [{limit, Limit} | ?MATCH_OPTS],
 
     case bondy_registry_entry:match(Type, Pattern, Opts) of
         ?EOT ->
@@ -1812,7 +1802,10 @@ do_remove_all({[], Cont}, SessionId, Fun, Acc) ->
     %% We apply the Fun here as opposed to in every iteration to minimise art
     %% trie concurrency access,
     _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
-    do_remove_all(bondy_registry_entry:match(Cont), SessionId, Fun, Acc);
+
+    Res = bondy_registry_entry:match(Cont, ?REMOVE_MATCH_OPTS),
+
+    do_remove_all(Res, SessionId, Fun, Acc);
 
 do_remove_all({[{_EntryKey, Entry}|T], Cont}, SessionId, Fun, Acc) ->
     Session = bondy_registry_entry:session_id(Entry),
