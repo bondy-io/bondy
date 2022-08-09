@@ -19,7 +19,7 @@
 %% -----------------------------------------------------------------------------
 %% @doc An entry is a record of a RPC registration or PubSub subscription. It
 %% is stored in-memory in the Registry {@link bondy_registry} and replicated
-%% globally and is immutable.
+%% globally. Entries are immutable.
 %%
 %% @TODO Because entries is replicated (even if only in memmory), changes to
 %% the data structure MUST be managed to be able to support rolling cluster
