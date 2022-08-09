@@ -111,6 +111,8 @@
     origin_ref       :=  optional(bondy_ref:t())
 }.
 
+-type comparator()      ::  fun(({t(), t()}) -> boolean()).
+
 -export_type([t/0]).
 -export_type([key/0]).
 -export_type([t_or_key/0]).
@@ -118,6 +120,7 @@
 -export_type([details_map/0]).
 -export_type([eot/0]).
 -export_type([continuation/0]).
+-export_type([comparator/0]).
 
 -export([callback/1]).
 -export([callback_args/1]).
@@ -141,6 +144,8 @@
 -export([is_proxy/1]).
 -export([key/1]).
 -export([key_pattern/3]).
+-export([locality_comparator/0]).
+-export([locality_comparator/1]).
 -export([lookup/2]).
 -export([lookup/3]).
 -export([lookup/4]).
@@ -148,6 +153,8 @@
 -export([match/2]).
 -export([match/3]).
 -export([match_policy/1]).
+-export([mg_comparator/0]).
+-export([mg_comparator/1]).
 -export([new/5]).
 -export([new/6]).
 -export([node/1]).
@@ -167,16 +174,14 @@
 -export([take/1]).
 -export([take/2]).
 -export([target/1]).
+-export([time_comparator/0]).
 -export([to_details_map/1]).
 -export([to_external/1]).
 -export([type/1]).
 -export([uri/1]).
 
--export([wildcard_degree/1]).
 
--export([time_comparator/0]).
--export([most_general_match_comparator/0]).
--export([locality_comparator/0]).
+
 
 
 %% =============================================================================
@@ -1056,7 +1061,8 @@ time_comparator() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc An ordering function to sort entries in the WAMP call matching
+%% @doc Most general comparator.
+%% An ordering function to sort entries in the WAMP call matching
 %% algorithm order.
 %%
 %% %% [WAMP] 11.8.3] The following algorithm MUST be applied to find a single
@@ -1076,19 +1082,53 @@ time_comparator() ->
 %% <ol>
 %% @end
 %% -----------------------------------------------------------------------------
--spec most_general_match_comparator() -> fun(({t(), t()}) -> boolean()).
+-spec mg_comparator() -> comparator().
 
-most_general_match_comparator() ->
+mg_comparator() ->
+    mg_comparator(time_comparator()).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Most general comparator.
+%% An ordering function to sort entries in the WAMP call matching
+%% algorithm order.
+%%
+%% %% [WAMP] 11.8.3] The following algorithm MUST be applied to find a single
+%% RPC registration to which a call is routed:
+%% <ol>
+%% <li>Check for exact matching registration. If this match exists — use
+%% it.</li>
+%% <li>If there are prefix-based registrations, find the registration with the
+%% longest prefix match. Longest means it has more URI components matched, e.g.
+%% for call URI `a1.b2.c3.d4' registration `a1.b2.c3` has higher priority than
+%% registration `a1.b2'. If this match exists — use it.</li>
+%% <li>If there are wildcard-based registrations, find the registration with the
+%% longest portion of URI components matched before each wildcard. E.g. for
+%% call URI `a1.b2.c3.d4' registration `a1.b2..d4' has higher priority than
+%% registration `a1...d4', see below for more complex examples. If this match
+%% exists — use it.</li>
+%% <ol>
+%% @end
+%% -----------------------------------------------------------------------------
+-spec mg_comparator(comparator()) -> comparator().
+
+mg_comparator(Fun) ->
     fun
         (#entry{match_policy = P} = A ,#entry{match_policy = P} = B)
         when P == ?EXACT_MATCH ->
-            A#entry.created =< B#entry.created;
+            Fun(A, B);
+
+        (#entry{match_policy = ?EXACT_MATCH}, #entry{}) ->
+            true;
+
+        (#entry{}, #entry{match_policy = ?EXACT_MATCH}) ->
+            false;
 
         (#entry{match_policy = P} = A ,#entry{match_policy = P} = B)
         when P == ?PREFIX_MATCH ->
             case A#entry.uri == B#entry.uri of
                 true ->
-                    A#entry.created =< B#entry.created;
+                    Fun(A, B);
                 false when A#entry.uri > B#entry.uri ->
                     true;
                 false ->
@@ -1099,16 +1139,11 @@ most_general_match_comparator() ->
         when P == ?WILDCARD_MATCH ->
             case A#entry.uri == B#entry.uri of
                 true ->
-                    A#entry.created =< B#entry.created;
+                    Fun(A, B);
                 false ->
                     A#entry.wildcard_degree >= B#entry.wildcard_degree
             end;
 
-        (#entry{match_policy = ?EXACT_MATCH}, #entry{}) ->
-            true;
-
-        (#entry{}, #entry{match_policy = ?EXACT_MATCH}) ->
-            false;
 
         (#entry{match_policy = ?PREFIX_MATCH}, #entry{}) ->
             true;
@@ -1126,10 +1161,20 @@ most_general_match_comparator() ->
 -spec locality_comparator() -> fun(({t(), t()}) -> boolean()).
 
 locality_comparator() ->
+    locality_comparator(mg_comparator()).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec locality_comparator(comparator()) -> comparator().
+
+locality_comparator(Fun) ->
     %% We read the value once
     N = bondy_config:nodestring(),
 
-    fun(#entry{created = TA} = A, #entry{created = TB} = B) ->
+    fun(#entry{} = A, #entry{} = B) ->
         %% We first sort by locality, then by order of registration
         %% (required by WAMP)
         NA = nodestring(A),
@@ -1137,13 +1182,13 @@ locality_comparator() ->
 
         case {NA, NB} of
             {N, N} ->
-                TA =< TB;
+                Fun(A, B);
             {N, _} ->
                 true;
             {_, N} ->
                 false;
             {_, _} ->
-                TA =< TB
+                Fun(A, B)
         end
     end.
 

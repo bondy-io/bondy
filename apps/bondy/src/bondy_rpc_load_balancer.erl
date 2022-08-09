@@ -252,34 +252,12 @@ prepare_entries(Entries, _) ->
 
 %% @private
 maybe_sort_by_locality(true, L) ->
-    Nodestring = bondy_config:nodestring(),
-
-    Fun = fun(A, B) ->
-        %% We first sort by locality, then by order of registration
-        %% (required by WAMP)
-        NodeA = bondy_registry_entry:nodestring(A),
-        TsA = bondy_registry_entry:created(A),
-        NodeB = bondy_registry_entry:nodestring(B),
-        TsB = bondy_registry_entry:created(B),
-
-        case {NodeA, NodeB} of
-            {Nodestring, Nodestring} ->
-                TsA =< TsB;
-            {Nodestring, _} ->
-                true;
-            {_, Nodestring} ->
-                false;
-            {_, _} ->
-                TsA =< TsB
-        end
-    end,
+    Fun = bondy_registry_entry:locality_comparator(),
     lists:sort(Fun, L);
 
 maybe_sort_by_locality(false, L) ->
     %% We use the order of registration (required by WAMP)
-    Fun = fun(A, B) ->
-        bondy_registry_entry:created(A) =< bondy_registry_entry:created(B)
-    end,
+    Fun = bondy_registry_entry:mg_comparator(),
     lists:sort(Fun, L).
 
 
