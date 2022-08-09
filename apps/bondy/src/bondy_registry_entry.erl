@@ -34,6 +34,12 @@
 -include("bondy_plum_db.hrl").
 
 
+-define(MATCH_OPTS, [
+    {resolver, lww},
+    {remove_tombstones, true}
+]).
+
+
 %% The WAMP spec defines that the id MUST be drawn randomly from a uniform
 %% distribution over the complete range [1, 2^53], but in a distributed
 %% setting we might have 2 or more nodes generating the same ID.
@@ -52,9 +58,10 @@
     type                ::  wildcard(entry_type()),
     uri                 ::  uri() | atom(),
     match_policy        ::  binary(),
+    wildcard_degree     ::  optional([integer()]),
     ref                 ::  bondy_ref:t(),
     callback_args       ::  optional(list(term())),
-    created             ::  pos_integer() | atom(),
+    created             ::  pos_integer(),
     options             ::  options(),
     is_proxy = false    ::  wildcard(boolean()),
     %% If a proxy, this is the registration|subscription id
@@ -165,6 +172,11 @@
 -export([type/1]).
 -export([uri/1]).
 
+-export([wildcard_degree/1]).
+
+-export([time_comparator/0]).
+-export([most_general_match_comparator/0]).
+-export([locality_comparator/0]).
 
 
 %% =============================================================================
@@ -201,14 +213,23 @@ when is_binary(Uri) andalso is_map(Opts0) andalso ?IS_ENTRY_TYPE(Type) ->
     },
 
     MatchPolicy = validate_match_policy(Opts0),
+
+    WildcardDegree =
+        case MatchPolicy == ?WILDCARD_MATCH of
+            true -> wildcard_degree(Uri);
+            false -> undefined
+        end,
+
     CBArgs = maps:get(callback_args, Opts0, undefined),
     Opts = maps:without([match, callback_args], Opts0),
+
 
     #entry{
         key = Key,
         type = Type,
         uri = Uri,
         match_policy = MatchPolicy,
+        wildcard_degree = WildcardDegree,
         ref = Ref,
         callback_args = CBArgs,
         created = erlang:system_time(millisecond),
@@ -253,6 +274,7 @@ pattern(Type, RealmUri, RegUri, Options, Extra) ->
         type = Type,
         uri = RegUri,
         match_policy = MatchPolicy,
+        wildcard_degree = '_',
         ref = '_',
         callback_args = '_',
         created = '_',
@@ -675,6 +697,12 @@ proxy(Ref, External) ->
 
     Id = bondy_utils:gen_message_id({router, RealmUri}),
 
+    WildcardDegree =
+        case MatchPolicy == ?WILDCARD_MATCH of
+            true -> wildcard_degree(Uri);
+            false -> undefined
+        end,
+
     #entry{
         key = #entry_key{
             realm_uri = RealmUri,
@@ -685,6 +713,7 @@ proxy(Ref, External) ->
         ref = Ref,
         uri = Uri,
         match_policy = MatchPolicy,
+        wildcard_degree = WildcardDegree,
         created = Created,
         options = Options,
         is_proxy = true,
@@ -938,7 +967,7 @@ dirty_delete(Type, EntryKey) ->
 -spec match(continuation()) -> match_result().
 
 match(Cont) ->
-    match(Cont, [{resolver, lww}]).
+    match(Cont, ?MATCH_OPTS).
 
 
 %% -----------------------------------------------------------------------------
@@ -950,11 +979,7 @@ match(Cont) ->
     (continuation(), plum_db:match_opts()) -> match_result().
 
 match(Type, #entry_key{} = Pattern) when ?IS_ENTRY_TYPE(Type) ->
-    Opts = [
-        {resolver, lww},
-        {remove_tombstones, true}
-    ],
-    match(Type, Pattern, Opts);
+    match(Type, Pattern, ?MATCH_OPTS);
 
 match(Cont, Opts) when is_list(Opts) ->
     plum_db:match(Cont, Opts).
@@ -1018,6 +1043,113 @@ foreach(Type, RealmUri, Fun, Opts) when ?IS_ENTRY_TYPE(Type) ->
 
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec time_comparator() -> fun(({t(), t()}) -> boolean()).
+
+time_comparator() ->
+    fun(#entry{created = TA}, #entry{created = TB}) ->
+        TA =< TB
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc An ordering function to sort entries in the WAMP call matching
+%% algorithm order.
+%%
+%% %% [WAMP] 11.8.3] The following algorithm MUST be applied to find a single
+%% RPC registration to which a call is routed:
+%% <ol>
+%% <li>Check for exact matching registration. If this match exists — use
+%% it.</li>
+%% <li>If there are prefix-based registrations, find the registration with the
+%% longest prefix match. Longest means it has more URI components matched, e.g.
+%% for call URI `a1.b2.c3.d4' registration `a1.b2.c3` has higher priority than
+%% registration `a1.b2'. If this match exists — use it.</li>
+%% <li>If there are wildcard-based registrations, find the registration with the
+%% longest portion of URI components matched before each wildcard. E.g. for
+%% call URI `a1.b2.c3.d4' registration `a1.b2..d4' has higher priority than
+%% registration `a1...d4', see below for more complex examples. If this match
+%% exists — use it.</li>
+%% <ol>
+%% @end
+%% -----------------------------------------------------------------------------
+-spec most_general_match_comparator() -> fun(({t(), t()}) -> boolean()).
+
+most_general_match_comparator() ->
+    fun
+        (#entry{match_policy = P} = A ,#entry{match_policy = P} = B)
+        when P == ?EXACT_MATCH ->
+            A#entry.created =< B#entry.created;
+
+        (#entry{match_policy = P} = A ,#entry{match_policy = P} = B)
+        when P == ?PREFIX_MATCH ->
+            case A#entry.uri == B#entry.uri of
+                true ->
+                    A#entry.created =< B#entry.created;
+                false when A#entry.uri > B#entry.uri ->
+                    true;
+                false ->
+                    false
+            end;
+
+        (#entry{match_policy = P} = A ,#entry{match_policy = P} = B)
+        when P == ?WILDCARD_MATCH ->
+            case A#entry.uri == B#entry.uri of
+                true ->
+                    A#entry.created =< B#entry.created;
+                false ->
+                    A#entry.wildcard_degree >= B#entry.wildcard_degree
+            end;
+
+        (#entry{match_policy = ?EXACT_MATCH}, #entry{}) ->
+            true;
+
+        (#entry{}, #entry{match_policy = ?EXACT_MATCH}) ->
+            false;
+
+        (#entry{match_policy = ?PREFIX_MATCH}, #entry{}) ->
+            true;
+
+        (#entry{}, #entry{match_policy = ?PREFIX_MATCH}) ->
+            false
+
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec locality_comparator() -> fun(({t(), t()}) -> boolean()).
+
+locality_comparator() ->
+    %% We read the value once
+    N = bondy_config:nodestring(),
+
+    fun(#entry{created = TA} = A, #entry{created = TB} = B) ->
+        %% We first sort by locality, then by order of registration
+        %% (required by WAMP)
+        NA = nodestring(A),
+        NB = nodestring(B),
+
+        case {NA, NB} of
+            {N, N} ->
+                TA =< TB;
+            {N, _} ->
+                true;
+            {_, N} ->
+                false;
+            {_, _} ->
+                TA =< TB
+        end
+    end.
+
+
+
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
@@ -1067,3 +1199,44 @@ validate_match_policy(_, Options) when is_map(Options) ->
 %% @private
 created_format(Secs) ->
     calendar:system_time_to_universal_time(Secs, millisecond).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc Computes an integer value that can be use to determine the most general
+%% match between a set of URIs.
+%% WAMP proposes the following algorithm to determine which procedure
+%% registration to choose when multiple registrations of differing match policy
+%% are found.
+%%
+%% [WAMP] 11.8.3]
+%% If there are wildcard-based registrations, find the registration with the
+%% longest portion of URI components matched before each wildcard. E.g. for
+%% call URI `a1.b2.c3.d4' registration `a1.b2..d4' has higher priority than
+%% registration `a1...d4'.
+%%
+%% This function creates a binary mask were each ground component is assigned 1
+%% and each wildcard component is assigned 0. So for URI `a1.b2..d4' returns
+%% `2#1101' and for URI `a1...d4' returns `2#1001'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec wildcard_degree(uri()) -> integer().
+
+wildcard_degree(Uri) ->
+    L = binary:split(Uri, <<$.>>, [global]),
+    wildcard_degree(L, length(L) - 1, 0).
+
+
+%% @private
+wildcard_degree([], _, Acc) ->
+    Acc;
+
+wildcard_degree([<<>>|T], Len, Acc) ->
+    wildcard_degree(T, Len - 1, Acc);
+
+wildcard_degree([_|T], Len, Acc) ->
+    Val = 1 bsl Len,
+    wildcard_degree(T, Len - 1, Acc + Val).
+
+
+
