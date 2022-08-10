@@ -539,7 +539,7 @@ load_config(Map, State) when is_map(Map) ->
         {ok, Spec} ->
             #{<<"subscriptions">> := L} = Spec,
             %% We make sure all subscriptions are unique
-            Subscriptions = sets:to_list(sets:from_list(L)),
+            Subscriptions = lists:usort(L),
             %% We instantiate the subscribers
             Folder = fun(#{<<"bridge">> := Bridge} = Subs, Acc) ->
                 Bridges = Acc#state.bridges,
