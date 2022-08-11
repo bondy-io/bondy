@@ -216,10 +216,15 @@ do_cast(permanent, PoolName, Fun) ->
     end;
 
 do_cast(transient, PoolName, Fun) ->
+    Opts = [
+        {spawn_opt, [
+            {min_heap_size, 1598}
+        ]}
+    ],
     %% We spawn a transient worker using sidejob_supervisor
     sidejob_supervisor:start_child(
         PoolName,
         gen_server,
         start_link,
-        [?MODULE, [Fun], []]
+        [?MODULE, [Fun], Opts]
     ).

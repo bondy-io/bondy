@@ -359,7 +359,12 @@ async_forward(M, Ctxt0) ->
         %% We copy the process meta (we do not need to unset because the worker
         %% will do it for us).
         ok = bondy:set_process_metadata(Meta),
-        sync_forward(Event)
+        Res = sync_forward(Event),
+        %% ?LOG_DEBUG(#{
+        %%     description => "info",
+        %%     info => process_info(self())
+        %% }),
+        Res
     end,
 
     try bondy_router_worker:cast(Fun) of
