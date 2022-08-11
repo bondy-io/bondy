@@ -75,6 +75,7 @@
 
 -export([callback/1]).
 -export([from_uri/1]).
+-export([is_alive/1]).
 -export([is_bridge_relay/1]).
 -export([is_client/1]).
 -export([is_internal/1]).
@@ -100,6 +101,7 @@
 -export([type/1]).
 -export([types/0]).
 
+-compile({no_auto_import, [node/1]}).
 
 
 %% =============================================================================
@@ -274,6 +276,23 @@ node(#bondy_ref{nodestring = Val}) ->
 
 session_id(#bondy_ref{session_id = Val}) ->
     Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns `false' if the ref is local and its target is a process which
+%% is not alive (See `erlang:is_process_alive/1') or if the ref is remote (
+%% regardless of its target type) and the remote node is disconnected (See
+%% `partisan:is_connected/1). Otherwise returns `true'.
+%% @end
+%% -----------------------------------------------------------------------------
+is_alive(#bondy_ref{} = Ref) ->
+    case is_local(Ref) of
+        true ->
+            Pid = pid(Ref),
+            Pid == undefined orelse erlang:is_process_alive(Pid);
+        false ->
+            partisan:is_connected(node(Ref))
+    end.
 
 
 %% -----------------------------------------------------------------------------
