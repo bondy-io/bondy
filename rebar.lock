@@ -120,7 +120,7 @@
  {<<"uuid">>,{pkg,<<"uuid_erl">>,<<"2.0.4">>},0},
  {<<"wamp">>,
   {git,"https://github.com/Leapsight/wamp.git",
-       {ref,"e6a9b080d6d28e01fadc779842a9e1e675c9a31e"}},
+       {ref,"b4bb9ae7f43123d8b962b26af65764ed00bd668a"}},
   0}]}.
 [
 {pkg_hash,[
