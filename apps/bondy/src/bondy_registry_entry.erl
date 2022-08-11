@@ -59,6 +59,7 @@
     uri                 ::  uri() | atom(),
     match_policy        ::  binary(),
     wildcard_degree     ::  optional([integer()]),
+    invocation_policy   ::  optional(binary()),
     ref                 ::  bondy_ref:t(),
     callback_args       ::  optional(list(term())),
     created             ::  pos_integer(),
@@ -111,7 +112,8 @@
     origin_ref       :=  optional(bondy_ref:t())
 }.
 
--type comparator()      ::  fun(({t(), t()}) -> boolean()).
+-type comparator()          ::  fun(({t(), t()}) -> boolean()).
+-type invocation_policy()   ::  binary().
 
 -export_type([t/0]).
 -export_type([key/0]).
@@ -135,7 +137,12 @@
 -export([fold/5]).
 -export([foreach/4]).
 -export([get_option/3]).
+-export([group_by_invocation_policy/1]).
 -export([id/1]).
+-export([invocation_policy/1]).
+-export([invocation_policy_comparator/0]).
+-export([invocation_policy_comparator/1]).
+-export([is_alive/1]).
 -export([is_callback/1]).
 -export([is_entry/1]).
 -export([is_key/1]).
@@ -175,12 +182,11 @@
 -export([take/2]).
 -export([target/1]).
 -export([time_comparator/0]).
+-export([time_comparator/1]).
 -export([to_details_map/1]).
 -export([to_external/1]).
 -export([type/1]).
 -export([uri/1]).
-
-
 
 
 
@@ -225,15 +231,25 @@ when is_binary(Uri) andalso is_map(Opts0) andalso ?IS_ENTRY_TYPE(Type) ->
             false -> undefined
         end,
 
-    CBArgs = maps:get(callback_args, Opts0, undefined),
-    Opts = maps:without([match, callback_args], Opts0),
+    InvocationPolicy =
+        case Type of
+            registration ->
+                maps:get(invoke, Opts0, ?INVOKE_SINGLE);
+            _ ->
+                undefined
+        end,
 
+    CBArgs = maps:get(callback_args, Opts0, undefined),
+
+    %% We leave invocation_policy and other
+    Opts = maps:without([match, callback_args], Opts0),
 
     #entry{
         key = Key,
         type = Type,
         uri = Uri,
         match_policy = MatchPolicy,
+        invocation_policy = InvocationPolicy,
         wildcard_degree = WildcardDegree,
         ref = Ref,
         callback_args = CBArgs,
@@ -279,6 +295,7 @@ pattern(Type, RealmUri, RegUri, Options, Extra) ->
         type = Type,
         uri = RegUri,
         match_policy = MatchPolicy,
+        invocation_policy = '_',
         wildcard_degree = '_',
         ref = '_',
         callback_args = '_',
@@ -441,7 +458,6 @@ node(#entry{ref = Ref}) ->
     bondy_ref:node(Ref).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc Returns true if the entry represents a handler local to the caller's
 %% node and false when the target is located in a cluster peer.
@@ -462,6 +478,24 @@ is_local(#entry{ref = Ref}) ->
 
 is_local(#entry{ref = Ref}, Nodestring) ->
     bondy_ref:is_local(Ref, Nodestring).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns `false' if the entry is local and its target is a process which
+%% is not alive (See `erlang:is_process_alive/1') or if the entry is remote (
+%% regardless of its target type) and the remote node is disconnected (See
+%% `partisan:is_connected/1). Otherwise returns `true'.
+%%
+%% Normally entries are removed from the registry once the owner session dies.
+%% However that can happen between the session terminated and the time we read
+%% the entry and the time of this function call. Or, in the case of a remote
+%% entry,when the cluster peer is not connected and the registry has not yet
+%% been pruned.
+%% @end
+%% -----------------------------------------------------------------------------
+is_alive(#entry{ref = Ref}) ->
+    bondy_ref:is_alive(Ref).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -582,6 +616,20 @@ uri(#entry{uri = Val}) -> Val.
 -spec match_policy(t()) -> binary().
 
 match_policy(#entry{match_policy = Val}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the match_policy used by this subscription or regitration.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec invocation_policy(t()) -> optional(invocation_policy()).
+
+invocation_policy(#entry{type = subscription}) ->
+    undefined;
+
+invocation_policy(#entry{invocation_policy = Val}) ->
+    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -708,6 +756,14 @@ proxy(Ref, External) ->
             false -> undefined
         end,
 
+    InvocationPolicy =
+        case Type of
+            registration ->
+                maps:get(invoke, Options, ?INVOKE_SINGLE);
+            _ ->
+                undefined
+        end,
+
     #entry{
         key = #entry_key{
             realm_uri = RealmUri,
@@ -718,6 +774,7 @@ proxy(Ref, External) ->
         ref = Ref,
         uri = Uri,
         match_policy = MatchPolicy,
+        invocation_policy = InvocationPolicy,
         wildcard_degree = WildcardDegree,
         created = Created,
         options = Options,
@@ -1047,17 +1104,33 @@ foreach(Type, RealmUri, Fun, Opts) when ?IS_ENTRY_TYPE(Type) ->
     plum_db:foreach(Fun, PDBPrefix, Opts).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec time_comparator() -> fun(({t(), t()}) -> boolean()).
+-spec time_comparator() -> comparator().
 
 time_comparator() ->
     fun(#entry{created = TA}, #entry{created = TB}) ->
         TA =< TB
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec time_comparator(comparator()) -> comparator().
+
+time_comparator(Fun) ->
+    fun
+        (#entry{created = T} = A, #entry{created = T} = B) ->
+            Fun(A, B);
+
+        (#entry{created = TA}, #entry{created = TB}) ->
+            TA < TB
+    end.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -1085,13 +1158,15 @@ time_comparator() ->
 -spec mg_comparator() -> comparator().
 
 mg_comparator() ->
-    mg_comparator(time_comparator()).
+    mg_comparator(invocation_policy_comparator()).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc Most general comparator.
 %% An ordering function to sort entries in the WAMP call matching
 %% algorithm order.
+%%
+%% Meant to work on registration type entries only.
 %%
 %% %% [WAMP] 11.8.3] The following algorithm MUST be applied to find a single
 %% RPC registration to which a call is routed:
@@ -1144,7 +1219,6 @@ mg_comparator(Fun) ->
                     A#entry.wildcard_degree >= B#entry.wildcard_degree
             end;
 
-
         (#entry{match_policy = ?PREFIX_MATCH}, #entry{}) ->
             true;
 
@@ -1155,17 +1229,58 @@ mg_comparator(Fun) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Sorts entries based in their invocation_policy in the following order:
+%% `single < roundrobin < random < first < last < qll < qlls < jch'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec invocation_policy_comparator() -> comparator().
+
+invocation_policy_comparator() ->
+    invocation_policy_comparator(time_comparator()).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Sorts entries based in their invocation_policy in the following order:
+%% `single < first < jch < last < qll < qlls < random < roundrobin'.
+%% Meant to work on registration type entries only.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec invocation_policy_comparator(comparator()) -> comparator().
+
+invocation_policy_comparator(Fun) ->
+     fun(
+        #entry{invocation_policy = PA} = A,
+        #entry{invocation_policy = PB} = B
+        ) ->
+        case {PA, PB} of
+            {?INVOKE_SINGLE, ?INVOKE_SINGLE} ->
+                Fun(A, B);
+            {?INVOKE_SINGLE, _} ->
+                true;
+            {_, ?INVOKE_SINGLE} ->
+                false;
+            {P, P} ->
+                Fun(A, B);
+            {PA, PB} ->
+                PA < PB
+        end
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Orders entries by locality, with local entries first. Then applies
+%% `time_comparator/1'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec locality_comparator() -> fun(({t(), t()}) -> boolean()).
 
 locality_comparator() ->
-    locality_comparator(mg_comparator()).
+    locality_comparator(time_comparator()).
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Orders entries by locality, with local entries first. Then applies
+%% comparator `Fun'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec locality_comparator(comparator()) -> comparator().
@@ -1176,7 +1291,6 @@ locality_comparator(Fun) ->
 
     fun(#entry{} = A, #entry{} = B) ->
         %% We first sort by locality, then by order of registration
-        %% (required by WAMP)
         NA = nodestring(A),
         NB = nodestring(B),
 
@@ -1192,6 +1306,18 @@ locality_comparator(Fun) ->
         end
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec group_by_invocation_policy([t()]) -> [{invocation_policy(), [t()]}].
+
+group_by_invocation_policy(L) ->
+    Project = lists:seq(1, record_info(size, entry)),
+    leap_tuples:summarize(
+        L, {#entry.invocation_policy, {function, collect, Project}}, #{}
+    ).
 
 
 
