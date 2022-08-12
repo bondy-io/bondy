@@ -52,7 +52,7 @@
     ]},
     {register, [
         'x_disclose_session_info',
-        'x_force_locality',
+        'x_prefer_local',
         %% number of concurrent, outstanding calls that can exist
         %% for a single endpoint
         'x_concurrency',

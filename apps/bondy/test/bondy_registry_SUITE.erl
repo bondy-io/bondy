@@ -119,33 +119,9 @@ sub_add_local_exact_1(Config) ->
     ),
 
     ?assertEqual(
-        Expected,
-        project(bondy_registry:match_exact(Type, RealmUri, Uri, #{})),
-        "The trie should have the added entries. Remote subs should be empty"
-    ),
-
-    ?assertEqual(
-        {[], []},
-        bondy_registry:match_pattern(Type, RealmUri, Uri, #{}),
-        "The trie should have no pattern subs"
-    ),
-
-    ?assertEqual(
         {[], []},
         bondy_registry:match(Type, RealmUri, <<"com.foo.baz">>, #{}),
         "Should not match com.foo.baz"
-    ),
-
-    ?assertEqual(
-        {[], []},
-        bondy_registry:match_exact(Type, RealmUri, <<"com.foo.baz">>, #{}),
-        "Should not match com.foo.baz"
-    ),
-
-    ?assertEqual(
-        {[], []},
-        bondy_registry:match_pattern(Type, RealmUri, <<"com.foo.baz">>, #{}),
-        "The trie should have no pattern subs"
     ).
 
 
@@ -166,18 +142,6 @@ sub_add_local_exact_2(Config) ->
         "The trie should have the added entries. Remote subs should be empty"
     ),
 
-    ?assertEqual(
-        Expected,
-        project(bondy_registry:match_exact(Type, RealmUri, Uri, #{})),
-        "The trie should have the added entries. Remote subs should be empty"
-    ),
-
-    ?assertEqual(
-        {[], []},
-        bondy_registry:match_pattern(Type, RealmUri, Uri, #{}),
-        "The trie should have no pattern subs"
-    ),
-
     Expected2 = {[{<<"com.foo.bar">>, ?EXACT_MATCH}], []},
 
     ?assertEqual(
@@ -189,21 +153,8 @@ sub_add_local_exact_2(Config) ->
     ),
 
     ?assertEqual(
-        Expected2,
-        project(
-            bondy_registry:match_exact(Type, RealmUri, <<"com.foo.bar">>, #{})
-        ),
-        "Should match com.foo.bar"
-    ),
-
-    ?assertEqual(
         {[], []},
         bondy_registry:match(Type, RealmUri, <<"com.foo.other">>, #{})
-    ),
-
-    ?assertEqual(
-        {[], []},
-        bondy_registry:match_exact(Type, RealmUri, <<"com.foo.other">>, #{})
     ).
 
 
@@ -221,18 +172,6 @@ sub_add_local_prefix_1(Config) ->
     ?assertEqual(
         Expected,
         project(bondy_registry:match(Type, RealmUri, Uri)),
-        "We should match the prefix"
-    ),
-
-    ?assertEqual(
-        {[], []},
-        project(bondy_registry:match_exact(Type, RealmUri, Uri, #{})),
-        "The uri is a prefix not an exact match"
-    ),
-
-    ?assertEqual(
-        Expected,
-        project(bondy_registry:match_pattern(Type, RealmUri, Uri, #{})),
         "We should match the prefix"
     ),
 

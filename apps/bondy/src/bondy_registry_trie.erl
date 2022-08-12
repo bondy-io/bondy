@@ -47,44 +47,49 @@
     proc_art                    ::  art:t(),
     %% Stores local subscriptions w/match_policy == exact (ets bag)
     topic_tab                   ::  ets:tab(),
-    %% Stores local subscriptions w/match_policy =/= exact
-    topic_art                   ::  art:t(),
     %% Stores remote subscriptions w/match_policy == exact (ets set)
     topic_remote_tab            ::  ets:tab(),
+    %% Stores local subscriptions w/match_policy =/= exact
+    topic_art                   ::  art:t(),
     %% Stores counter per URI, used to distinguish on_create vs
     %% on_register|on_subscribe
     counters                    ::  ets:tab()
 }).
 
--record(trie_continuation, {
-    type                        ::  entry_type(),
-    realm_uri                   ::  uri(),
-    function                    ::  atom(),
-    proc_tab                    ::  optional(ets:continuation() | eot()),
-    proc_art                    ::  optional(term() | eot()),
-    topic_tab                   ::  optional(ets:continuation() | eot()),
-    topic_art                   ::  optional(term() | eot()),
-    topic_remote_tab            ::  optional(ets:continuation() | eot())
-}).
-
 -record(proc_index, {
     key                         ::  index_key(),
-    invoke                      ::  invoke(),
-    entry_key                   ::  entry_key(),
-    is_proxy                    ::  boolean()
+    entry_key                   ::  var(entry_key()),
+    is_proxy                    ::  var(boolean()),
+    invoke                      ::  var(invoke()),
+    timestamp                   ::  var(pos_integer())
 }).
 
 -record(topic_idx, {
     key                         ::  index_key(),
-    protocol_session_id         ::  id(),
-    entry_key                   ::  entry_key(),
-    is_proxy                    ::  boolean()
+    protocol_session_id         ::  var(id()),
+    entry_key                   ::  var(entry_key()),
+    is_proxy                    ::  var(boolean())
 }).
 
 -record(topic_remote_idx, {
     key                         ::  index_key(),
-    node                        ::  node(),
-    ref_count                   ::  non_neg_integer()
+    node                        ::  var(node()),
+    ref_count                   ::  var(non_neg_integer())
+}).
+
+-record(trie_continuation, {
+    type                        ::  entry_type(),
+    function                    ::  find | match,
+    policy                      ::  binary() | '_',
+    realm_uri                   ::  uri(),
+    uri                         ::  uri(),
+    opts                        ::  map(),
+    proc_cont                   ::  optional(ets:continuation() | eot()),
+    proc_art_cont               ::  optional(term() | eot()),
+    topic_cont                  ::  optional(ets:continuation() | eot()),
+    topic_remote_cont           ::  optional(ets:continuation() | eot()),
+    topic_art_cont              ::  optional(term() | eot()),
+    trie                        ::  t()
 }).
 
 
@@ -93,16 +98,19 @@
 -type invoke()                  ::  binary().
 -type registration_match()      ::  {
                                         index_key(),
-                                        invoke(),
                                         entry_key(),
-                                        IsProxy :: boolean()
+                                        IsProxy :: boolean(),
+                                        invoke(),
+                                        Timestamp :: pos_integer()
                                     }.
 -type registration_match_res()  ::  [registration_match()].
 -type registration_match_opts() ::  #{
                                         %% WAMP match policy
                                         match => wildcard(binary()),
                                         %% WAMP invocation policy
-                                        invoke => wildcard(binary())
+                                        invoke => wildcard(binary()),
+                                        sort =>
+                                            bondy_registry_entry:comparator()
                                     }.
 -type subscription_match()      ::  {
                                         index_key(),
@@ -117,7 +125,9 @@
                                         nodestring => wildcard(nodestring()),
                                         node => wildcard(node()),
                                         eligible => [id()],
-                                        exclude => [id()]
+                                        exclude => [id()],
+                                        sort =>
+                                            bondy_registry_entry:comparator()
                                     }.
 -type match_opts()              ::  registration_match_opts()
                                     | subscription_match_opts().
@@ -136,6 +146,7 @@
 -opaque continuation()          ::  #trie_continuation{}.
 -type eot()                     ::  ?EOT.
 -type wildcard(T)               ::  T | '_'.
+-type var(T)                    ::  wildcard(T) | '$1' | '$2' | '$3' | '$4'.
 
 
 %% Aliases
@@ -162,14 +173,13 @@
 -export([delete/2]).
 -export([format_error/2]).
 -export([info/1]).
+-export([find/1]).
+-export([find/5]).
 -export([match/1]).
 -export([match/5]).
--export([match_exact/1]).
--export([match_exact/5]).
--export([match_pattern/1]).
--export([match_pattern/5]).
 -export([new/1]).
 -export([continuation_info/1]).
+
 
 
 %% =============================================================================
@@ -293,17 +303,18 @@ add(Entry, #bondy_registry_trie{} = Trie) ->
         {registration, ?EXACT_MATCH} ->
             add_exact_registration(Entry, Trie);
 
-        {registration, _} ->
-            add_pattern_entry(Entry, Trie);
-
         {subscription, ?EXACT_MATCH} when IsLocal == true ->
             add_local_exact_subscription(Entry, Trie);
 
         {subscription, ?EXACT_MATCH} when IsLocal == false ->
             add_remote_exact_subscription(Entry, Trie);
 
-        {subscription, _} ->
-            add_pattern_entry(Entry, Trie)
+        {_, ?PREFIX_MATCH} ->
+            add_pattern_entry(Type, Entry, Trie);
+
+        {_, ?WILDCARD_MATCH} ->
+            add_pattern_entry(Type, Entry, Trie)
+
     end.
 
 
@@ -343,21 +354,107 @@ delete(Entry, #bondy_registry_trie{} = Trie) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Matches the indices in the trie.
+%% WARNING: Only safe to be called concurrently if option match is ?MATCH_EXACT.
 %% @end
 %% -----------------------------------------------------------------------------
--spec match(continuation() | eot()) -> match_res().
+-spec find(
+    Type :: entry_type(),
+    RealmUri :: uri(),
+    Uri :: uri(),
+    Opts :: map(),
+    Trie :: t()
+    ) -> match_res().
 
-match(?EOT) ->
-    ?EOT;
+find(Type, RealmUri, Uri, Opts, #bondy_registry_trie{} = Trie) ->
+    Policy = maps:get(match, Opts, '_'),
+    Limit = maps:get(limit, Opts, undefined),
 
-match(#trie_continuation{} = C) ->
-    FunctionName = C#trie_continuation.function,
-    ?MODULE:FunctionName(C).
+    case {Policy, Limit} of
+        {'_', undefined} ->
+            ExactRes = find_exact(Type, RealmUri, Uri, Opts, Trie),
+            PatternRes = find_pattern(Type, RealmUri, Uri, Opts, Trie),
+            merge_match_res(Type, find, ExactRes, PatternRes);
+
+        {'_', _} ->
+            case find_exact(Type, RealmUri, Uri, Opts, Trie) of
+                ?EOT ->
+                    find_pattern(Type, RealmUri, Uri, Opts, Trie);
+                Result ->
+                    Result
+            end;
+
+        {?EXACT_MATCH, _} ->
+            find_exact(Type, RealmUri, Uri, Opts, Trie);
+
+        {?PREFIX_MATCH, _} ->
+            find_pattern(Type, RealmUri, Uri, Opts, Trie);
+
+        {?WILDCARD_MATCH, _} ->
+            find_pattern(Type, RealmUri, Uri, Opts, Trie)
+    end.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc only safe to be called concurrently if option match is ?MATCH_EXACT
+%% @doc Continues a match started with `find/5'. The next chunk of the size
+%% specified in the initial `find/5' call is returned together with a new
+%% `Continuation', which can be used in subsequent calls to this function.
+%% When there are no more objects in the table, '$end_of_table' is returned.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec find(Continuation :: continuation() | eot()) -> match_res().
+
+find(?EOT) ->
+    ?EOT;
+
+find(#trie_continuation{function = Name} = C) when Name =/= find ->
+    error(badarg, [C]);
+
+find(#trie_continuation{policy = '_'} = C0) ->
+    case find_exact(C0) of
+        ?EOT ->
+            Type = C0#trie_continuation.type,
+            RealmUri = C0#trie_continuation.realm_uri,
+            Uri = C0#trie_continuation.uri,
+            Opts = C0#trie_continuation.opts,
+            Trie = C0#trie_continuation.trie,
+
+            case find_pattern(Type, RealmUri, Uri, Opts, Trie) of
+                ?EOT ->
+                    ?EOT;
+
+                {_, ?EOT} = Result ->
+                    Result;
+
+                {L, C1} when Type == registration ->
+                    C = C1#trie_continuation{
+                        proc_cont = ?EOT
+                    },
+                    {L, C};
+
+                {L, C1} when Type == subscription ->
+                    C = C1#trie_continuation{
+                        topic_cont = ?EOT,
+                        topic_remote_cont = ?EOT
+                    },
+                    {L, C}
+
+            end;
+
+        Result ->
+            Result
+    end;
+
+find(#trie_continuation{policy = ?EXACT_MATCH} = C) ->
+    find_exact(C);
+
+find(#trie_continuation{} = C) ->
+    find_pattern(C).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Matches the indices in the trie.
+%% WARNING: Only safe to be called concurrently if option match is ?MATCH_EXACT.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match(
@@ -369,108 +466,87 @@ match(#trie_continuation{} = C) ->
     ) -> match_res().
 
 match(Type, RealmUri, Uri, Opts, #bondy_registry_trie{} = Trie) ->
-    %% The match policy for shared subscriptions (registrations)
-    Match = maps:get(match, Opts, '_'),
+    Policy = maps:get(match, Opts, '_'),
+    Limit = maps:get(limit, Opts, undefined),
 
-    case {Match, Type} of
-        {'_', registration} ->
-            match_registration(RealmUri, Uri, Opts, Trie);
+    case {Policy, Limit} of
+        {'_', undefined} ->
+            ExactRes = match_exact(Type, RealmUri, Uri, Opts, Trie),
+            PatternRes = match_pattern(Type, RealmUri, Uri, Opts, Trie),
+            merge_match_res(Type, match, ExactRes, PatternRes);
 
-        {'_', subscription} ->
-            match_subscription(RealmUri, Uri, Opts, Trie);
+        {'_', _} ->
+            case match_exact(Type, RealmUri, Uri, Opts, Trie) of
+                ?EOT ->
+                    match_pattern(Type, RealmUri, Uri, Opts, Trie);
+                ExactRes ->
+                    ExactRes
+            end;
 
-        {?EXACT_MATCH, registration} ->
-            match_exact(registration, RealmUri, Uri, Opts, Trie);
+        {?EXACT_MATCH, _} ->
+            match_exact(Type, RealmUri, Uri, Opts, Trie);
 
-        {?EXACT_MATCH, subscription} ->
-            match_exact(subscription, RealmUri, Uri, Opts, Trie);
+        {?PREFIX_MATCH, _} ->
+            match_pattern(Type, RealmUri, Uri, Opts, Trie);
 
-        {_, registration} ->
-            match_pattern_registration(RealmUri, Uri, Opts, Trie);
-
-        {_, subscription} ->
-            match_pattern_subscription(RealmUri, Uri, Opts, Trie)
+        {?WILDCARD_MATCH, _} ->
+            match_pattern(Type, RealmUri, Uri, Opts, Trie)
     end.
 
 
-
 %% -----------------------------------------------------------------------------
-%% @doc Can be access concurrently as it uses ets tables.
+%% @doc Continues a match started with `match/5'. The next chunk of the size
+%% specified in the initial `match/5' call is returned together with a new
+%% `Continuation', which can be used in subsequent calls to this function.
+%% When there are no more objects in the table, '$end_of_table' is returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec match_exact(
-    Type :: entry_type(),
-    RealmUri :: uri(),
-    Uri :: uri(),
-    Opts :: map(),
-    Trie :: t()
-    ) -> match_res().
+-spec match(Continuation :: continuation() | eot()) -> match_res().
 
-match_exact(registration, RealmUri, Uri, Opts, #bondy_registry_trie{} = Trie) ->
-    NewOpts = Opts#{invoke => maps:get(invoke, Opts, '_')},
-    match_exact_registration(RealmUri, Uri, NewOpts, Trie);
-
-match_exact(subscription, RealmUri, Uri, Opts, #bondy_registry_trie{} = Trie) ->
-    match_exact_subscription(RealmUri, Uri, Opts, Trie).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Can be access concurrently as it uses ets tables.
-%% @end
-%% -----------------------------------------------------------------------------
--spec match_exact(continuation() | eot()) -> match_res().
-
-match_exact(?EOT) ->
+match(?EOT) ->
     ?EOT;
 
-match_exact(#trie_continuation{} = C) ->
-    case C#trie_continuation.function of
-        match_exact_registration ->
-            match_exact_registration(C);
-        match_exact_subscription ->
-            match_exact_subscription(C);
-        _ ->
-            error(badarg)
-    end.
+match(#trie_continuation{function = Name} = C) when Name =/= match ->
+    error(badarg, [C]);
 
+match(#trie_continuation{policy = '_'} = C0) ->
+    case match_exact(C0) of
+        ?EOT ->
+            Type = C0#trie_continuation.type,
+            RealmUri = C0#trie_continuation.realm_uri,
+            Uri = C0#trie_continuation.uri,
+            Opts = C0#trie_continuation.opts,
+            Trie = C0#trie_continuation.trie,
 
-%% -----------------------------------------------------------------------------
-%% @doc Since it uses art and at doesn't support concurrent readers at the
-%% moment we need to synchronise access via a bondy_registry_partition
-%% @end
-%% -----------------------------------------------------------------------------
--spec match_pattern(
-    Type :: entry_type(),
-    RealmUri :: uri(),
-    Uri :: uri(),
-    Opts :: map(),
-    Trie :: t()
-    ) -> match_res().
+            case match_pattern(Type, RealmUri, Uri, Opts, Trie) of
+                ?EOT ->
+                    ?EOT;
 
-match_pattern(registration, RealmUri, Uri, Opts, #bondy_registry_trie{} = T) ->
-    NewOpts = Opts#{invoke => maps:get(invoke, Opts, '_')},
-    match_pattern_registration(RealmUri, Uri, NewOpts, T);
+                {_, ?EOT} = Result ->
+                    Result;
 
-match_pattern(subscription, RealmUri, Uri, Opts, #bondy_registry_trie{} = T) ->
-    match_pattern_subscription(RealmUri, Uri, Opts, T).
+                {L, C1} when Type == registration ->
+                    C = C1#trie_continuation{proc_cont = ?EOT},
+                    {L, C};
 
+                {L, C1} when Type == subscription ->
+                    C = C1#trie_continuation{
+                        topic_cont = ?EOT,
+                        topic_remote_cont = ?EOT
+                    },
+                    {L, C}
 
-%% -----------------------------------------------------------------------------
-%% @doc Since it uses art and at doesn't support concurrent readers at the
-%% moment we need to synchronise access via a bondy_registry_partition
-%% @end
-%% -----------------------------------------------------------------------------
--spec match_pattern(continuation()) -> match_res().
+            end;
 
-match_pattern(#trie_continuation{} = C) ->
-    case C#trie_continuation.function of
-        match_pattern_registration ->
-            match_pattern_registration(C);
-        match_pattern_subscription ->
-            match_pattern_subscription(C);
-        _ ->
-            error(badarg)
-    end.
+        Result ->
+            Result
+    end;
+
+match(#trie_continuation{policy = ?EXACT_MATCH} = C) ->
+    match_exact(C);
+
+match(#trie_continuation{} = C) ->
+    match_pattern(C).
 
 
 %% -----------------------------------------------------------------------------
@@ -507,6 +583,108 @@ gen_table_name(Name, Index) when is_atom(Name), is_integer(Index) ->
 
 
 %% =============================================================================
+%% PRIVATE: FIND
+%% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec find_exact(entry_type(), uri(), uri(), map(), t()) ->
+    registration_match() | subscription_match().
+
+find_exact(Type, RealmUri, Uri, Opts, Trie) ->
+    case match_exact(Type, RealmUri, Uri, Opts, Trie) of
+        {L, #trie_continuation{} = C} ->
+            {L, C#trie_continuation{function = find}};
+        Result ->
+            Result
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+find_exact(?EOT) ->
+    ?EOT;
+
+find_exact(#trie_continuation{} = C0) ->
+    case match_exact(C0#trie_continuation{function = match}) of
+        {L, #trie_continuation{} = C} ->
+            {L, C#trie_continuation{function = find}};
+        Result ->
+            Result
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec find_pattern(entry_type(), uri(), uri(), map(), t()) ->
+    registration_match() | subscription_match().
+
+find_pattern(Type, RealmUri, Uri, Opts, Trie) ->
+    ART = art(Type, Trie),
+    Limit = maps:get(limit, Opts, undefined),
+    %% We do not use limit as ART does not support them yet.
+    ARTOpts = #{
+        %% We match the Uri exactly
+        mode => exact,
+        match_spec => art_ms(Type, Opts),
+        first => <<RealmUri/binary, $.>>
+    },
+
+    Pattern = art_key_pattern(Type, RealmUri, Uri),
+
+    %% Always sync at the moment
+    %% We use art:match/3 instead of art:find_matches/3.
+    %% Notice: Current art:match/3 differs from art:find_matches/3
+    %% in args order!
+    case art:match(Pattern, ART, ARTOpts) of
+        {error, badarg} when Limit =/= undefined ->
+            match_pattern_res(Type, ?EOT);
+
+        {error, badarg} ->
+            match_pattern_res(Type, []);
+
+        {error, Reason} ->
+            error(Reason);
+
+        [] when Limit =/= undefined ->
+            match_pattern_res(Type, ?EOT);
+
+        [] ->
+            match_pattern_res(Type, []);
+
+        Result when Limit =/= undefined ->
+            match_pattern_res(Type, {Result, ?EOT});
+
+        Result ->
+            match_pattern_res(Type, Result)
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec find_pattern(continuation()) ->
+    registration_match() | subscription_match().
+
+find_pattern(#trie_continuation{}) ->
+    %% ART does not support limits yet
+    ?EOT.
+
+
+
+%% =============================================================================
 %% PRIVATE: MATCH
 %% =============================================================================
 
@@ -517,43 +695,30 @@ gen_table_name(Name, Index) when is_atom(Name), is_integer(Index) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-match_registration(RealmUri, Uri, RegOpts, Trie) ->
-    merge_match_res(
-        registration,
-        ?FUNCTION_NAME,
-        match_exact_registration(RealmUri, Uri, RegOpts, Trie),
-        match_pattern_registration(RealmUri, Uri, RegOpts, Trie)
-    ).
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec match_exact_registration(uri(), uri(), map(), t()) ->
+-spec match_exact(entry_type(), uri(), uri(), map(), t()) ->
     registration_match_res().
 
-match_exact_registration(RealmUri, Uri, Opts, Trie) ->
+match_exact(registration, RealmUri, Uri, Opts, Trie) ->
     %% This option might be passed for admin purposes, not during a call
     Invoke = maps:get(invoke, Opts, '_'),
     Tab = Trie#bondy_registry_trie.proc_tab,
     Pattern = #proc_index{
         key = {RealmUri, Uri},
-        invoke = '$1',
-        entry_key = '$2',
-        is_proxy = '$3'
+        entry_key = '$1',
+        is_proxy = '$2',
+        invoke = '$3',
+        timestamp = '$4'
     },
     Conds =
         case Invoke of
             '_' ->
                 [];
             _ ->
-                [{'=:=', '$1', Invoke}]
+                [{'=:=', '$3', Invoke}]
         end,
 
     MS = [
-        { Pattern, Conds, [{{{{RealmUri, Uri}}, '$1', '$2', '$3'}}] }
+        { Pattern, Conds, [{{{{RealmUri, Uri}}, '$1', '$2', '$3', '$4'}}] }
     ],
 
     case maps:find(limit, Opts) of
@@ -561,136 +726,66 @@ match_exact_registration(RealmUri, Uri, Opts, Trie) ->
             case ets:select(Tab, MS, N)  of
                 ?EOT ->
                     ?EOT;
-                {L0, Cont} ->
+
+                {L, ETSCont} ->
+
+                    Policy = maps:get(match, Opts, '_'),
+
                     C = #trie_continuation{
                         type = registration,
+                        function = match,
                         realm_uri = RealmUri,
-                        function = ?FUNCTION_NAME,
-                        topic_tab = Cont
+                        uri = Uri,
+                        policy = Policy,
+                        opts = Opts,
+                        trie = Trie,
+                        proc_cont = ETSCont
                     },
-                    {L0, C}
+                    {L, C}
             end;
 
         error ->
             ets:select(Tab, MS)
-    end.
+    end;
 
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec match_exact_registration(continuation() | eot()) ->
-    registration_match_res().
-
-
-match_exact_registration(?EOT) ->
-    ?EOT;
-
-match_exact_registration(#trie_continuation{proc_tab = Cont0} = C0) ->
-    case ets:select(Cont0) of
-        ?EOT ->
-            ?EOT;
-        {L0, Cont} ->
-            C = C0#trie_continuation{
-                proc_tab = Cont
-            },
-            {L0, C}
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
- match_subscription(RealmUri, Uri, Opts, Trie) ->
-    merge_match_res(
-        subscription,
-        ?FUNCTION_NAME,
-        match_exact_subscription(RealmUri, Uri, Opts, Trie),
-        match_pattern_subscription(RealmUri, Uri, Opts, Trie)
-    ).
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec match_exact_subscription(uri(), uri(), map(), t()) ->
-    subscription_match_res().
-
-match_exact_subscription(RealmUri, Uri, Opts, Trie) ->
+match_exact(subscription, RealmUri, Uri, Opts, Trie) ->
     L = match_local_exact_subscription(RealmUri, Uri, Opts, Trie),
     R = match_remote_exact_subscription(RealmUri, Uri, Opts, Trie),
-    match_exact_subscription(L, R).
+    zip_local_remote(L, R).
 
 
 %% @private
-match_exact_subscription(L, R) when is_list(L), is_list(R) ->
-    {L, R};
+match_exact(#trie_continuation{type = registration} = C0) ->
+    case ets:select(C0#trie_continuation.proc_cont) of
+        ?EOT ->
+            Type = C0#trie_continuation.type,
+            RealmUri = C0#trie_continuation.realm_uri,
+            Uri = C0#trie_continuation.uri,
+            Opts = C0#trie_continuation.opts,
+            Trie = C0#trie_continuation.trie,
 
-match_exact_subscription(?EOT, ?EOT) ->
-    ?EOT;
+            case match_pattern(Type, RealmUri, Uri, Opts, Trie) of
+                ?EOT ->
+                    ?EOT;
 
-match_exact_subscription({L, C0}, ?EOT) ->
-    C = C0#trie_continuation{function = ?FUNCTION_NAME},
-    {{L, []}, C};
+                {_, ?EOT} = Result ->
+                    Result;
 
-match_exact_subscription(?EOT, {R, C0}) ->
-    C = C0#trie_continuation{function = ?FUNCTION_NAME},
-    {{[], R}, C};
+                {L, C1} ->
+                    C = C1#trie_continuation{proc_cont = ?EOT},
+                    {L, C}
+            end;
 
-match_exact_subscription({L, C0}, {R, C1}) ->
-    C = C0#trie_continuation{
-        function = ?FUNCTION_NAME,
-        topic_remote_tab = C1#trie_continuation.topic_remote_tab
-    },
-    {{L, R}, C}.
+        {L, Cont} ->
+            C = C0#trie_continuation{proc_cont = Cont},
+            {L, C}
+    end;
 
+match_exact(#trie_continuation{type = subscription} = C) ->
+    L = match_local_exact_subscription(C),
+    R = match_remote_exact_subscription(C),
+    zip_local_remote(L, R).
 
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec match_exact_subscription(ets:continuation()) ->
-    subscription_match_res().
-
-match_exact_subscription(#trie_continuation{} = C0) ->
-    {L, C1} =
-        case C0#trie_continuation.topic_tab of
-            undefined ->
-                {[], C0};
-            Tab1 ->
-                case ets:select(Tab1) of
-                    ?EOT ->
-                        {[], C0};
-                    {L0, LCont} ->
-                        {L0, C0#trie_continuation{topic_tab = LCont}}
-                end
-        end,
-
-    {R, C} =
-        case C1#trie_continuation.topic_remote_tab of
-            undefined ->
-                {[], C1};
-            Tab2 ->
-                case ets:select(Tab2)  of
-                    ?EOT ->
-                        {[], C1};
-                    {R0, RCont} ->
-                        {R0, C1#trie_continuation{topic_remote_tab = RCont}}
-                end
-        end,
-
-    case {L, R} of
-        {[], []} ->
-            ?EOT;
-        Res ->
-            {Res, C}
-    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -722,11 +817,16 @@ match_local_exact_subscription(RealmUri, Uri, Opts, Trie) ->
             case ets:select(Tab, MS, N) of
                 ?EOT ->
                     ?EOT;
+
                 {L, ETSCont} ->
                     C = #trie_continuation{
                         type = subscription,
+                        function = match,
                         realm_uri = RealmUri,
-                        topic_tab = ETSCont
+                        uri = Uri,
+                        opts = Opts,
+                        trie = Trie,
+                        topic_cont = ETSCont
                     },
                     {L, C}
             end;
@@ -734,6 +834,23 @@ match_local_exact_subscription(RealmUri, Uri, Opts, Trie) ->
             ets:select(Tab, MS)
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec match_local_exact_subscription(continuation()) ->
+    subscription_match_res().
+
+match_local_exact_subscription(#trie_continuation{} = C0) ->
+     case ets:select(C0#trie_continuation.topic_cont) of
+        ?EOT ->
+            ?EOT;
+
+        {L, ETSCont} ->
+            {L, C0#trie_continuation{topic_cont = ETSCont}}
+    end.
 
 %% -----------------------------------------------------------------------------
 %% @private
@@ -761,11 +878,16 @@ match_remote_exact_subscription(RealmUri, Uri, Opts, Trie) ->
             case ets:select(Tab, MS, N) of
                 ?EOT ->
                     ?EOT;
+
                 {L, ETSCont} ->
                     C = #trie_continuation{
                         type = subscription,
+                        function = match,
                         realm_uri = RealmUri,
-                        topic_remote_tab = ETSCont
+                        uri = Uri,
+                        opts = Opts,
+                        trie = Trie,
+                        topic_remote_cont = ETSCont
                     },
                     {L, C}
             end;
@@ -779,11 +901,38 @@ match_remote_exact_subscription(RealmUri, Uri, Opts, Trie) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match_pattern_registration(uri(), uri(), map(), t()) ->
-    registration_match().
+-spec match_remote_exact_subscription(ets:continuation()) ->
+    subscription_match_res().
 
-match_pattern_registration(_RealmUri, _Uri, _Opts, _Trie) ->
-    ?EOT.
+match_remote_exact_subscription(#trie_continuation{} = C0) ->
+    case ets:select(C0#trie_continuation.topic_remote_cont) of
+        ?EOT ->
+            ?EOT;
+
+        {L, ETSCont} ->
+            C = C0#trie_continuation{topic_remote_cont = ETSCont},
+            {L, C}
+    end.
+
+
+%% @private
+zip_local_remote(L, R) when is_list(L), is_list(R) ->
+    {L, R};
+
+zip_local_remote(?EOT, ?EOT) ->
+    ?EOT;
+
+zip_local_remote({L, C}, ?EOT) ->
+    {{L, []}, C};
+
+zip_local_remote(?EOT, {R, C}) ->
+    {{[], R}, C};
+
+zip_local_remote({L, C0}, {R, C1}) ->
+    C = C0#trie_continuation{
+        topic_remote_cont = C1#trie_continuation.topic_remote_cont
+    },
+    {{L, R}, C}.
 
 
 %% -----------------------------------------------------------------------------
@@ -791,32 +940,42 @@ match_pattern_registration(_RealmUri, _Uri, _Opts, _Trie) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match_pattern_registration(continuation()) ->
-    registration_match().
+-spec match_pattern(entry_type(), uri(), uri(), map(), t()) ->
+    registration_match() | subscription_match().
 
-match_pattern_registration(#trie_continuation{}) ->
-    %% ART does not support limits yet
-    ?EOT.
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec match_pattern_subscription(uri(), uri(), map(), t()) ->
-    subscription_match().
-
-match_pattern_subscription(RealmUri, Uri, Opts, Trie) ->
-    ART = Trie#bondy_registry_trie.topic_art,
-    Pattern = <<RealmUri/binary, $., Uri/binary>>,
-    ArtOpts = #{
-        match_spec => art_ms(Opts),
+match_pattern(Type, RealmUri, Uri, Opts, Trie) ->
+    ART = art(Type, Trie),
+    Limit = maps:get(limit, Opts, undefined),
+    %% We do not use limit as ART does not support them yet.
+    ARTOpts = #{
+        match_spec => art_ms(Type, Opts),
         first => <<RealmUri/binary, $.>>
     },
+    Pattern = <<RealmUri/binary, $., Uri/binary>>,
+
     %% Always sync at the moment
-    All = art_find_matches(Pattern, ArtOpts, ART, 0),
-    split_remote(subscription, All).
+    case art:find_matches(Pattern, ARTOpts, ART) of
+        {error, badarg} when Limit =/= undefined ->
+            match_pattern_res(Type, ?EOT);
+
+        {error, badarg} ->
+            match_pattern_res(Type, []);
+
+        {error, Reason} ->
+            error(Reason);
+
+        [] when Limit =/= undefined ->
+            match_pattern_res(Type, ?EOT);
+
+        [] ->
+            match_pattern_res(Type, []);
+
+        L when Limit =/= undefined ->
+            match_pattern_res(Type, {L, ?EOT});
+
+        L ->
+            match_pattern_res(Type, L)
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -824,19 +983,22 @@ match_pattern_subscription(RealmUri, Uri, Opts, Trie) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match_pattern_subscription(continuation()) ->
-    subscription_match().
+-spec match_pattern(continuation()) ->
+    registration_match() | subscription_match().
 
-match_pattern_subscription(#trie_continuation{}) ->
+match_pattern(#trie_continuation{}) ->
     %% ART does not support limits yet
     ?EOT.
 
 
 %% @private
-split_remote(_, []) ->
+match_pattern_res(_, ?EOT) ->
+    ?EOT;
+
+match_pattern_res(subscription, []) ->
     {[], []};
 
-split_remote(subscription, All) when is_list(All) ->
+match_pattern_res(subscription, All) when is_list(All) ->
     Nodestring = partisan:nodestring(),
 
     {L, R} = lists:foldl(
@@ -848,16 +1010,12 @@ split_remote(subscription, All) when is_list(All) ->
                 {L, sets:add_element(Node, R)};
 
             ({{Bin, _, _, _, _}, {EntryKey, IsProxy}}, {L, R}) ->
-                %% See trie_key to understand how we generated Bin
-                RealmUri = bondy_registry_entry:realm_uri(EntryKey),
-                Sz = byte_size(RealmUri),
-                <<RealmUri:Sz/binary, $., Uri0/binary>> = Bin,
-                Uri = string:trim(Uri0, trailing, "*"),
-
                 %% We project the expected triple
                 %% TODO this is projection subscriptions only at the moment,
                 %% registrations need the Invoke field too.
                 %% We will need to add INvoke Policy to the art value
+                RealmUri = bondy_registry_entry:realm_uri(EntryKey),
+                Uri = parse_index_key_uri(RealmUri, Bin),
                 Match = {{RealmUri, Uri}, EntryKey, IsProxy},
                 {[Match|L], R}
         end,
@@ -866,11 +1024,29 @@ split_remote(subscription, All) when is_list(All) ->
     ),
     {lists:reverse(L), sets:to_list(R)};
 
-split_remote(_, ?EOT) ->
-    ?EOT;
+match_pattern_res(registration, All) when is_list(All) ->
+    [
+        begin
+            RealmUri = bondy_registry_entry:realm_uri(EntryKey),
+            Uri = parse_index_key_uri(RealmUri, Bin),
+            {{RealmUri, Uri}, EntryKey, IsProxy, Invoke, TS}
+        end
+        || {{Bin, _, _, _, _}, {EntryKey, IsProxy, Invoke, TS}} <- All
+    ];
 
-split_remote(Type, {All, Cont}) ->
-    {split_remote(Type, All), Cont}.
+match_pattern_res(Type, {All, Cont}) ->
+    {match_pattern_res(Type, All), Cont}.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc See trie_key to understand how we generated Bin
+%% @end
+%% -----------------------------------------------------------------------------
+parse_index_key_uri(RealmUri, Bin) ->
+    Sz = byte_size(RealmUri),
+    <<RealmUri:Sz/binary, $., Uri0/binary>> = Bin,
+    string:trim(Uri0, trailing, "*").
 
 
 %% @private
@@ -919,13 +1095,6 @@ topic_session_restrictions(Var, Opts) ->
 
 
 %% @private
-merge_match_res(registration, _, L1, L2) when is_list(L1), is_list(L2) ->
-    lists:append(L1, L2);
-
-merge_match_res(subscription, _, {L1, R1}, {L2, R2})
-when is_list(L1), is_list(R1), is_list(L2), is_list(R2) ->
-    {lists:append(L1, L2), lists:append(R1, R2)};
-
 merge_match_res(_, _, ?EOT, ?EOT) ->
     ?EOT;
 
@@ -935,11 +1104,17 @@ merge_match_res(_, _, ?EOT, Res) ->
 merge_match_res(_, _, Res, ?EOT) ->
     Res;
 
+merge_match_res(registration, _, L1, L2) when is_list(L1), is_list(L2) ->
+    lists:append(L1, L2);
+
 merge_match_res(registration, FN, {L1, C1}, {L2, C2})
 when is_list(L1), is_list(L2) ->
     C = merge_continuation(FN, C1, C2),
     {lists:append(L1, L2), C};
 
+merge_match_res(subscription, _, {L1, R1}, {L2, R2})
+when is_list(L1), is_list(R1), is_list(L2), is_list(R2) ->
+    {lists:append(L1, L2), lists:append(R1, R2)};
 
 merge_match_res(subscription, FN, {{L1, R1}, C1}, {{L2, R2}, C2})
 when is_list(L1), is_list(R1), is_list(L2), is_list(R2) ->
@@ -948,56 +1123,62 @@ when is_list(L1), is_list(R1), is_list(L2), is_list(R2) ->
 
 
 %% @private
+merge_continuation(_, ?EOT, ?EOT) ->
+    ?EOT;
+
+merge_continuation(FN, A, ?EOT) ->
+    A#trie_continuation{function = FN};
+
+merge_continuation(FN, ?EOT, B) ->
+    B#trie_continuation{function = FN};
+
 merge_continuation(FN, A, B) ->
     #trie_continuation{
         type = T1,
         realm_uri = R1,
-        proc_tab = Tab1a,
-        proc_art = Tab2a,
-        topic_tab = Tab3a,
-        topic_art = Tab4a,
-        topic_remote_tab = Tab5a
+        proc_cont = Cont1a,
+        proc_art_cont = Cont2a,
+        topic_cont = Cont3a,
+        topic_art_cont = Cont4a,
+        topic_remote_cont = Cont5a
     } = A,
 
     #trie_continuation{
         type = T2,
         realm_uri = R2,
-        proc_tab = Tab1b,
-        proc_art = Tab2b,
-        topic_tab = Tab3b,
-        topic_art = Tab4b,
-        topic_remote_tab = Tab5b
+        proc_cont = Cont1b,
+        proc_art_cont = Cont2b,
+        topic_cont = Cont3b,
+        topic_art_cont = Cont4b,
+        topic_remote_cont = Cont5b
     } = B,
 
     (T1 == T2 andalso R1 == R2) orelse error(badarg),
 
     A#trie_continuation{
         function = FN,
-        proc_tab = merge_continuation_tab(Tab1a, Tab1b),
-        proc_art = merge_continuation_tab(Tab2a, Tab2b),
-        topic_tab = merge_continuation_tab(Tab3a, Tab3b),
-        topic_art = merge_continuation_tab(Tab4a, Tab4b),
-        topic_remote_tab = merge_continuation_tab(Tab5a, Tab5b)
+        proc_cont = merge_cont_value(Cont1a, Cont1b),
+        proc_art_cont = merge_cont_value(Cont2a, Cont2b),
+        topic_cont = merge_cont_value(Cont3a, Cont3b),
+        topic_art_cont = merge_cont_value(Cont4a, Cont4b),
+        topic_remote_cont = merge_cont_value(Cont5a, Cont5b)
     }.
 
 
 %% @private
-merge_continuation_tab(undefined, undefined) ->
+merge_cont_value(undefined, undefined) ->
     undefined;
 
-merge_continuation_tab(undefined, Value) ->
+merge_cont_value(undefined, Value) ->
     Value;
 
-merge_continuation_tab(Value, undefined) ->
+merge_cont_value(Value, undefined) ->
     Value.
 
 
 
-
-
-
 %% =============================================================================
-%% PRIVATE: CRUD
+%% PRIVATE: ADD/DELETE
 %% =============================================================================
 
 
@@ -1015,12 +1196,14 @@ add_exact_registration(Entry, Trie) ->
     IsProxy = bondy_registry_entry:is_proxy(Entry),
     Invoke = bondy_registry_entry:get_option(invoke, Entry, ?INVOKE_SINGLE),
     MatchPolicy = bondy_registry_entry:match_policy(Entry),
+    Timestamp = bondy_registry_entry:created(Entry),
 
     Object = #proc_index{
         key = {RealmUri, Uri},
-        invoke = Invoke,
         entry_key = EntryKey,
-        is_proxy = IsProxy
+        is_proxy = IsProxy,
+        invoke = Invoke,
+        timestamp = Timestamp
     },
 
     true = ets:insert(Tab, Object),
@@ -1043,11 +1226,14 @@ del_exact_registration(Entry, Trie) ->
     IsProxy = bondy_registry_entry:is_proxy(Entry),
     Invoke = bondy_registry_entry:get_option(invoke, Entry, ?INVOKE_SINGLE),
     MatchPolicy = bondy_registry_entry:match_policy(Entry),
+    Timestamp = bondy_registry_entry:created(Entry),
+
     Object = #proc_index{
         key = {RealmUri, Uri},
-        invoke = Invoke,
         entry_key = EntryKey,
-        is_proxy = IsProxy
+        is_proxy = IsProxy,
+        invoke = Invoke,
+        timestamp = Timestamp
     },
 
     %% We use match delete because Tab is a bag table
@@ -1176,26 +1362,18 @@ del_remote_exact_subscription(Entry, Trie) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-add_pattern_entry(Entry, Trie) ->
-    case bondy_registry_entry:type(Entry) of
-        registration ->
-            {error, unsupported_match_policy};
+add_pattern_entry(Type, Entry, Trie) ->
+    ART = art(Type, Trie),
+    Key = art_key(Entry),
+    Value = art_value(Entry),
 
-        subscription ->
-            Uri = bondy_registry_entry:uri(Entry),
-            EntryKey = bondy_registry_entry:key(Entry),
-            IsProxy = bondy_registry_entry:is_proxy(Entry),
-            MatchPolicy = bondy_registry_entry:match_policy(Entry),
+    _ = art:set(Key, Value, ART),
 
-            TrieKey = art_key(Entry),
-            Value = {EntryKey, IsProxy},
-            _ = art:set(TrieKey, Value, Trie#bondy_registry_trie.topic_art),
+    Uri = bondy_registry_entry:uri(Entry),
+    MatchPolicy = bondy_registry_entry:match_policy(Entry),
+    IsFirstEntry = incr_counter(Uri, MatchPolicy, 1, Trie) =:= 1,
 
-            %% Aditional indices and counters
-            IsFirstEntry = incr_counter(Uri, MatchPolicy, 1, Trie) =:= 1,
-
-            {ok, Entry, IsFirstEntry}
-    end.
+    {ok, Entry, IsFirstEntry}.
 
 
 %% -----------------------------------------------------------------------------
@@ -1204,20 +1382,12 @@ add_pattern_entry(Entry, Trie) ->
 %% @end
 %% -----------------------------------------------------------------------------
 del_pattern_entry(Entry, Trie) ->
-    ART = case bondy_registry_entry:type(Entry) of
-        registration ->
-            Trie#bondy_registry_trie.proc_art;
-
-        subscription ->
-            Trie#bondy_registry_trie.topic_art
-    end,
-
-    Uri = bondy_registry_entry:uri(Entry),
-    MatchPolicy = bondy_registry_entry:match_policy(Entry),
-
+    ART = art(bondy_registry_entry:type(Entry), Trie),
     TrieKey = art_key(Entry),
     ok = art:delete(TrieKey, ART),
 
+    Uri = bondy_registry_entry:uri(Entry),
+    MatchPolicy = bondy_registry_entry:match_policy(Entry),
     _ = decr_counter(Uri, MatchPolicy, 1, Trie),
 
     ok.
@@ -1250,6 +1420,7 @@ decr_counter(Uri, MatchPolicy, N, Trie) ->
     Tab = Trie#bondy_registry_trie.counters,
     Key = {Uri, MatchPolicy},
     Default = {counter, Key, 0},
+
     case ets:update_counter(Tab, Key, {3, -N, 0, 0}, Default) of
         0 ->
             %% Other process might have concurrently incremented the counter,
@@ -1269,38 +1440,110 @@ decr_counter(Uri, MatchPolicy, N, Trie) ->
 
 
 %% @private
-art_find_matches(Pattern, Opts, ART, 0) ->
-    case art:find_matches(Pattern, Opts, ART) of
-        {error, badarg} ->
-            [];
-        {error, Reason} ->
-            error(Reason);
-        Result ->
-            Result
-    end;
+art(registration, Trie) ->
+    Trie#bondy_registry_trie.proc_art;
 
-art_find_matches(Pattern, Opts, ART, N) when N > 0 ->
-    try
-        art:find_matches(Pattern, Opts, ART)
-    catch
-        error:badarg ->
-            %% retry
-            art_find_matches(Pattern, Opts, ART, N - 1);
-        _:Reason ->
-            error(Reason)
+art(subscription, Trie) ->
+    Trie#bondy_registry_trie.topic_art.
+
+
+%% @private
+-spec art_key(bondy_registry_entry:t_or_key()) -> art:key().
+
+art_key(Entry) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    Uri = bondy_registry_entry:uri(Entry),
+    SessionId0 = bondy_registry_entry:session_id(Entry),
+    Nodestring = bondy_registry_entry:nodestring(Entry),
+    MatchPolicy = bondy_registry_entry:match_policy(Entry),
+
+
+    {ProtocolSessionId, SessionId, Id} = case bondy_registry_entry:id(Entry) of
+        _ when SessionId0 == '_' ->
+            %% As we currently do not support wildcard matching in art:match,
+            %% we turn this into a prefix matching query
+            %% TODO change when wildcard matching is enabled in art.
+            {<<>>, <<>>, <<>>};
+
+        Id0 when SessionId0 == undefined ->
+            {<<"undefined">>, <<"undefined">>, term_to_art_key_part(Id0)};
+
+        Id0 when is_binary(SessionId0) ->
+            ProtocolSessionId0 = bondy_session_id:to_external(SessionId0),
+            {
+                term_to_art_key_part(ProtocolSessionId0),
+                term_to_art_key_part(SessionId0),
+                term_to_art_key_part(Id0)
+            }
+    end,
+
+    %% RealmUri is always ground, so we join it with URI using a $. as any
+    %% other separator will not work with art:find_matches/2
+    Key = <<RealmUri/binary, $., Uri/binary>>,
+
+    %% We add Nodestring for cases where SessionId == <<>>
+    case MatchPolicy of
+        ?PREFIX_MATCH ->
+            %% art lib uses the star char to explicitely denote a prefix
+            {<<Key/binary, $*>>, Nodestring, ProtocolSessionId, SessionId, Id};
+
+        _ ->
+            {Key, Nodestring, ProtocolSessionId, SessionId, Id}
     end.
 
 
 %% @private
--spec art_ms(map()) -> ets:match_spec() | undefined.
+art_key_pattern(_Type, RealmUri, Uri) ->
+    {<<RealmUri/binary, $., Uri/binary>>, <<>>, <<>>, <<>>, <<>>}.
 
-art_ms(Opts) ->
-    %% {{$1, $2, $3, $4, $5}, $6},
-    %% {{Key, Node, ProtocolSessionId, SessionId, EntryIdBin}, '_'},
-    Node =
+
+%% @private
+term_to_art_key_part('_') ->
+    <<>>;
+
+term_to_art_key_part(Term) when is_atom(Term) ->
+    atom_to_binary(Term, utf8);
+
+term_to_art_key_part(Term) when is_integer(Term) ->
+    integer_to_binary(Term);
+
+term_to_art_key_part(Term) when is_binary(Term) ->
+    Term.
+
+
+%% @private
+art_value(Entry) ->
+    art_value(Entry, bondy_registry_entry:type(Entry)).
+
+
+%% @private
+art_value(Entry, registration) ->
+    EntryKey = bondy_registry_entry:key(Entry),
+    IsProxy = bondy_registry_entry:is_proxy(Entry),
+    Invoke = bondy_registry_entry:get_option(invoke, Entry, ?INVOKE_SINGLE),
+    Timestamp = bondy_registry_entry:created(Entry),
+    {EntryKey, IsProxy, Invoke, Timestamp};
+
+art_value(Entry, subscription) ->
+    EntryKey = bondy_registry_entry:key(Entry),
+    IsProxy = bondy_registry_entry:is_proxy(Entry),
+    {EntryKey, IsProxy}.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc This is match_spec that art applies after a match.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec art_ms(Type :: entry_type(), Opts :: map()) ->
+    ets:match_spec() | undefined.
+
+art_ms(registration, Opts) ->
+    Nodestring =
         case maps:find(node, Opts) of
             {ok, Val} ->
                 Val;
+
             error ->
                 case maps:get(nodestring, Opts, '_') of
                     '_' ->
@@ -1310,55 +1553,102 @@ art_ms(Opts) ->
                 end
         end,
 
-    Conds1 = case maps:find(eligible, Opts) of
-        error ->
-            %% Not provided
-            [];
-        {ok, []} ->
-            %% Idem as not provided
-            [];
+    Conds =
+        case maps:get(invoke, Opts, '_') of
+            '_' ->
+                [];
+            Invoke ->
+                [{'=:=', '$3', Invoke}]
+        end,
 
-        {ok, EligibleIds} ->
-            %% We include the provided ProtocolSessionIds
-            [
-                maybe_or(
-                    [
-                        {'=:=', '$3', {const, integer_to_binary(S)}}
-                        || S <- EligibleIds
-                    ]
-                )
-            ]
-    end,
-
-    Conds2 = case maps:find(exclude, Opts) of
-        error ->
-            Conds1;
-
-        {ok, []} ->
-            Conds1;
-
-        {ok, ExcludedIds} ->
-            %% We exclude the provided ProtocolSessionIds
-            ExclConds = maybe_and(
-                [
-                    {'=/=', '$3', {const, integer_to_binary(S)}}
-                    || S <- ExcludedIds
-                ]
-            ),
-            [ExclConds | Conds1]
-    end,
-
-    case Conds2 of
+    case Conds of
         [] ->
             undefined;
 
         [_] ->
-            % {Key, Node, ProtocolSessionId, SessionId, EntryIdBin}
-            [{ {{'_', Node, '$3', '_', '_'}, '_'}, Conds2, ['$_'] }];
+            %% {Key, Nodestring, ProtocolSessionId, SessionId, EntryIdBin}
+            Key = {'_', Nodestring, '_', '_'},
+            %% {EntryKey, IsProxy, Invoke}
+            Value = {'_', '_', '$3', '_'},
+
+            [{ {Key, Value}, Conds, ['$_'] }]
+    end;
+
+art_ms(subscription, Opts) ->
+    %% {{$1, $2, $3, $4, $5}, $6},
+    %% {{Key, Node, ProtocolSessionId, SessionId, EntryIdBin}, '_'},
+    Node =
+        case maps:find(node, Opts) of
+            {ok, Val} ->
+                Val;
+
+            error ->
+                case maps:get(nodestring, Opts, '_') of
+                    '_' ->
+                        '_';
+                    Bin ->
+                        binary_to_atom(Bin, utf8)
+                end
+        end,
+
+    Conds1 =
+        case maps:find(eligible, Opts) of
+            error ->
+                [];
+
+            {ok, []} ->
+                [];
+
+            {ok, EligibleIds} ->
+                [
+                    maybe_or(
+                        [
+                            {'=:=', '$1', {const, integer_to_binary(S)}}
+                            || S <- EligibleIds
+                        ]
+                    )
+                ]
+        end,
+
+    Conds2 =
+        case maps:find(exclude, Opts) of
+            error ->
+                Conds1;
+
+            {ok, []} ->
+                Conds1;
+
+            {ok, ExcludedIds} ->
+                ExclConds = maybe_and(
+                    [
+                        {'=/=', '$1', {const, integer_to_binary(S)}}
+                        || S <- ExcludedIds
+                    ]
+                ),
+                [ExclConds | Conds1]
+        end,
+
+    Conds =
+        case Conds2 of
+            [] ->
+                [];
+            [_] ->
+                Conds2;
+            _ ->
+                [list_to_tuple(['andalso' | Conds2])]
+        end,
+
+    case Conds of
+        [] ->
+            undefined;
 
         _ ->
-            Conds3 = [list_to_tuple(['andalso' | Conds2])],
-            [{ {{'_', Node, '$3', '_', '_'}, '_'}, Conds3, ['$_'] }]
+            %% {Key, Node, ProtocolSessionId, SessionId, EntryIdBin}
+            Key = {'_', Node, '$1', '_', '_'},
+            %% {EntryKey, IsProxy}.
+            Value = {'_', '_'},
+
+            [{ {Key, Value}, Conds, ['$_'] }]
     end.
 
 
@@ -1376,72 +1666,5 @@ maybe_or([Clause]) ->
 maybe_or(Clauses) ->
     list_to_tuple(['or' | Clauses]).
 
-
-%% @private
--spec art_key(bondy_registry_entry:t_or_key()) -> art:key().
-
-art_key(Entry) ->
-    Policy = bondy_registry_entry:match_policy(Entry),
-    art_key(Entry, Policy).
-
-
-%% @private
--spec art_key(bondy_registry_entry:t_or_key(), binary()) -> art:key().
-
-art_key(Entry, Policy) ->
-    RealmUri = bondy_registry_entry:realm_uri(Entry),
-    Uri = bondy_registry_entry:uri(Entry),
-    SessionId0 = bondy_registry_entry:session_id(Entry),
-    Nodestring = bondy_registry_entry:nodestring(Entry),
-
-
-    {ProtocolSessionId, SessionId, Id} = case bondy_registry_entry:id(Entry) of
-        _ when SessionId0 == '_' ->
-            %% As we currently do not support wildcard matching in art:match,
-            %% we turn this into a prefix matching query
-            %% TODO change when wildcard matching is enabled in art.
-            {<<>>, <<>>, <<>>};
-        Id0 when SessionId0 == undefined ->
-            {<<"undefined">>, <<"undefined">>, term_to_trie_key_part(Id0)};
-        Id0 when is_binary(SessionId0) ->
-            ProtocolSessionId0 = bondy_session_id:to_external(SessionId0),
-            {
-                term_to_trie_key_part(ProtocolSessionId0),
-                term_to_trie_key_part(SessionId0),
-                term_to_trie_key_part(Id0)
-            }
-    end,
-
-    %% RealmUri is always ground, so we join it with URI using a $. as any
-    %% other separator will not work with art:find_matches/2
-    Key = <<RealmUri/binary, $., Uri/binary>>,
-
-    %% We add Nodestring for cases where SessionId == <<>>
-    case Policy of
-        ?PREFIX_MATCH ->
-            %% art lib uses the star char to explicitely denote a prefix
-            {<<Key/binary, $*>>, Nodestring, ProtocolSessionId, SessionId, Id};
-        _ ->
-            {Key, Nodestring, ProtocolSessionId, SessionId, Id}
-    end.
-
-
-%% @private
-term_to_trie_key_part('_') ->
-    <<>>;
-
-term_to_trie_key_part(Term) when is_atom(Term) ->
-    atom_to_binary(Term, utf8);
-
-term_to_trie_key_part(Term) when is_integer(Term) ->
-    integer_to_binary(Term);
-
-term_to_trie_key_part(Term) when is_binary(Term) ->
-    Term.
-
-
-%% trie_key_realm_procedure(RealmUri, {Key, _, _, _, _}) ->
-%%     <<RealmUri:(byte_size(RealmUri))/binary, $., Uri/binary>> = Key,
-%%     Uri.
 
 

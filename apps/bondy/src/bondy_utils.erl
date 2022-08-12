@@ -35,6 +35,8 @@
 -export([get_nonce/0]).
 -export([get_nonce/1]).
 -export([get_random_string/2]).
+-export([groups_from_list/2]).
+-export([groups_from_list/3]).
 -export([is_uuid/1]).
 -export([json_consult/1]).
 -export([json_consult/2]).
@@ -48,12 +50,12 @@
 -export([session_id_to_uri_part/1]).
 -export([system_time_to_rfc3339/2]).
 -export([tc/3]).
+-export([timed_mac/3]).
 -export([timeout/1]).
 -export([to_binary_keys/1]).
 -export([to_existing_atom_keys/1]).
 -export([uuid/0]).
 -export([uuid/1]).
--export([timed_mac/3]).
 
 
 
@@ -514,3 +516,101 @@ timed_mac(Secret, Duration, Len) ->
     crypto:macN(hmac, sha, Secret, Msg, Len).
 
 
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Borrowed from https://github.com/erlang/otp/blob/master/lib/stdlib/src/
+%% maps.erl
+%% @end
+%% -----------------------------------------------------------------------------
+-spec groups_from_list(Fun, List) -> MapOut when
+    Fun :: fun((Elem :: T) -> Selected),
+    MapOut :: #{Selected => List},
+    Selected :: term(),
+    List :: [T],
+    T :: term().
+
+groups_from_list(Fun, List0) when is_function(Fun, 1) ->
+    try lists:reverse(List0) of
+        List ->
+            groups_from_list_1(Fun, List, #{})
+    catch
+        error:_ ->
+            badarg_with_info([Fun, List0])
+    end;
+
+groups_from_list(Fun, List) ->
+    badarg_with_info([Fun, List]).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Borrowed from https://github.com/erlang/otp/blob/master/lib/stdlib/src/
+%% maps.erl
+%% @end
+%% -----------------------------------------------------------------------------
+-spec groups_from_list(Fun, ValueFun, List) -> MapOut when
+    Fun :: fun((Elem :: T) -> Key),
+    ValueFun :: fun((Elem :: T) -> ValOut),
+    MapOut :: #{Key := ListOut},
+    Key :: term(),
+    ValOut :: term(),
+    List :: [T],
+    ListOut :: [ValOut],
+    T :: term().
+
+groups_from_list(Fun, ValueFun, List0) when is_function(Fun, 1),
+                                            is_function(ValueFun, 1) ->
+    try lists:reverse(List0) of
+        List ->
+            groups_from_list_2(Fun, ValueFun, List, #{})
+    catch
+        error:_ ->
+            badarg_with_info([Fun, ValueFun, List0])
+    end;
+
+groups_from_list(Fun, ValueFun, List) ->
+    badarg_with_info([Fun, ValueFun, List]).
+
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+%% @private
+groups_from_list_1(Fun, [H | Tail], Acc) ->
+    K = Fun(H),
+    NewAcc = case Acc of
+                 #{K := Vs} -> Acc#{K := [H | Vs]};
+                 #{} -> Acc#{K => [H]}
+             end,
+    groups_from_list_1(Fun, Tail, NewAcc);
+groups_from_list_1(_Fun, [], Acc) ->
+    Acc.
+
+
+%% @private
+groups_from_list_2(Fun, ValueFun, [H | Tail], Acc) ->
+    K = Fun(H),
+    V = ValueFun(H),
+    NewAcc = case Acc of
+                 #{K := Vs} -> Acc#{K := [V | Vs]};
+                 #{} -> Acc#{K => [V]}
+             end,
+    groups_from_list_2(Fun, ValueFun, Tail, NewAcc);
+
+groups_from_list_2(_Fun, _ValueFun, [], Acc) ->
+    Acc.
+
+
+%% @private
+badarg_with_info(Args) ->
+    erlang:error(badarg, Args, [{error_info, #{module => erl_stdlib_errors}}]).

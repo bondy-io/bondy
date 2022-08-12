@@ -311,19 +311,15 @@
     call_opts       := map()
 }.
 
--type list_cont() ::    {
-                            [bondy_registry_entry:t()],
-                            bondy_registry_entry:continuation()
-                            | bondy_registry_entry:eot()
-                        }
-                        | bondy_registry_entry:eot().
+-type call_fun()   ::   fun(
+                            (entry() | {error, any()}, bondy_context:t()) ->
+                                {ok, bondy_context:t()}
+                        ).
+%% Aliases
+-type entry()                   ::  bondy_registry_entry:t().
+-type trie_continuation()       ::  bondy_registry_trie:continuation().
+-type eot()                     ::  bondy_registry_trie:eot().
 
--type match_cont() ::    {
-                            [bondy_registry_entry:t()],
-                            bondy_registry_trie:continuation()
-                            | bondy_registry_trie:eot()
-                        }
-                        | bondy_registry_trie:eot().
 %% API
 -export([callees/1]).
 -export([callees/2]).
@@ -333,12 +329,8 @@
 -export([forward/2]).
 -export([forward/3]).
 -export([is_feature_enabled/1]).
--export([match_registrations/2]).
 -export([register/3]).
 -export([register/4]).
--export([registrations/1]).
--export([registrations/2]).
--export([registrations/3]).
 -export([unregister/1]).
 -export([unregister/2]).
 
@@ -523,7 +515,7 @@ unregister(RegId, Ctxt) ->
 callees(RealmUri) ->
     %% TODO paginate and groupBy sessionID, so that we call
     %% bondy_session_id:to_external only once per session.
-    case bondy_registry:entries(registration, RealmUri, '_') of
+    case bondy_registry:find(registration, RealmUri, '_') of
         [] ->
             [];
         List ->
@@ -563,14 +555,16 @@ callees(RealmUri, ProcedureUri) ->
 -spec callees(RealmUri :: uri(), ProcedureUri :: uri(), Opts :: map()) ->
     [map()] | no_return().
 
-callees(RealmUri, ProcedureUri, Opts) ->
-    %% TODO paginate and groupBy sessionID, so that we call
-    %% bondy_session_id:to_external only once per session.
+callees(RealmUri, ProcedureUri, Opts0) ->
+    %% TODO ask the registry to offer callees/3
 
-    case bondy_registry:match(registration, RealmUri, ProcedureUri, Opts) of
-        '$end_of_table' ->
+    %% We do not support limits yet
+    Opts = maps:without([limit], Opts0),
+
+    case bondy_registry:find(registration, RealmUri, ProcedureUri, Opts) of
+        [] ->
             [];
-        {List, Cont} ->
+        List ->
             Set = lists:foldl(
                 fun(E, Acc) ->
                     Ref = bondy_registry_entry:ref(E),
@@ -585,16 +579,7 @@ callees(RealmUri, ProcedureUri, Opts) ->
                 sets:new(),
                 List
             ),
-            Res = sets:to_list(Set),
-
-            case Cont of
-                '$end_of_table' ->
-                    Res;
-                _Cont ->
-                    %% TODO
-                    Res
-            end
-
+            sets:to_list(Set)
     end.
 
 
@@ -1283,10 +1268,18 @@ handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
             bondy:send(RealmUri, Ref, Reply);
 
         {error, {already_exists, Entry}} ->
+            EntrySessionId = bondy_registry_entry:session_id(Entry),
+            Who =
+                case bondy:get_process_metadata() of
+                    #{session_id := Id} when Id == EntrySessionId ->
+                        <<"this session">>;
+                    _ ->
+                        <<"another session">>
+                end,
             Policy = bondy_registry_entry:match_policy(Entry),
             Msg = <<
-                "The procedure is already registered by another peer ",
-                "with policy ", $', Policy/binary, $', $.
+                "The procedure is already registered by ", Who/binary,
+                " with policy ", $', Policy/binary, $', $.
             >>,
             Reply = wamp_message:error(
                 ?REGISTER,
@@ -1342,101 +1335,6 @@ unregister(Uri, M, Ctxt) ->
     Reply = wamp_message:unregistered(M#unregister.request_id),
 
     bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply).
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns the list of registrations for the active session.
-%%
-%% When called with a bondy:context() it is equivalent to calling
-%% registrations/2 with the RealmUri and SessionId extracted from the Context.
-%% @end
-%% -----------------------------------------------------------------------------
--spec registrations(
-    bondy_registry_entry:continuation() | bondy_registry_entry:eot()) -> list_cont().
-
-registrations(?EOT) ->
-    ?EOT;
-
-registrations({registration, _} = Cont) ->
-    bondy_registry:entries(Cont).
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns the complete list of registrations matching the RealmUri
-%% and SessionId.
-%%
-%% Use {@link registrations/3} and {@link registrations/1} to limit the
-%% number of registrations returned.
-%% @end
-%% -----------------------------------------------------------------------------
--spec registrations(
-    RealmUri :: uri(), SessionId :: bondy_session_id:t() | '_') ->
-    [bondy_registry_entry:t()].
-
-registrations(RealmUri, SessionId) ->
-    bondy_registry:entries(registration, RealmUri, SessionId).
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns the  list of registrations matching the RealmUri and SessionId.
-%%
-%% Use {@link registrations/3} to limit the number of registrations returned.
-%% @end
-%% -----------------------------------------------------------------------------
--spec registrations(
-    RealmUri :: uri(),
-    SessionId :: bondy_session_id:t() | '_',
-    Limit :: non_neg_integer()) ->
-    list_cont().
-
-registrations(RealmUri, SessionId, Limit) ->
-    bondy_registry:entries(registration, RealmUri, SessionId, Limit).
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec match_registrations(Uri :: uri(), bondy_context:t()) ->
-    [bondy_registry_entry:t()].
-
-match_registrations(Uri, Ctxt) ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    bondy_registry:match(registration, RealmUri, Uri).
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec match_registrations(Uri :: uri(), bondy_context:t(), Opts :: map()) ->
-    [bondy_registry_entry:t()] | match_cont().
-
-match_registrations(Uri, Ctxt, Opts) ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    bondy_registry:match(registration, RealmUri, Uri, Opts).
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec match_registrations(
-    bondy_registry_trie:continuation() | bondy_registry_trie:eot()) ->
-    match_cont().
-
-match_registrations(Cont) ->
-    bondy_registry:match(Cont).
-
 
 
 %% @private
@@ -1527,7 +1425,13 @@ no_matching_promise(M) ->
 
 
 
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec handle_call(wamp_call(), bondy_context:t(), uri(), map()) -> ok.
+
 handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
     RealmUri = bondy_context:realm_uri(Ctxt0),
     CallUri = Msg#call.procedure_uri,
@@ -1562,7 +1466,8 @@ handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
                 _ when IsLocal == false orelse CalleeType == bridge_relay ->
                     %% We will forward the call to the cluster peer node or
                     %% bridged node where the Callee is located, so we need to
-                    %% gather all local context and create a new Call. This new Call will include a '$private' field under 'options'.
+                    %% gather all local context and create a new Call. This new
+                    %% Call will include a '$private' field under 'options'.
                     Call = prepare_call(Msg, Uri, Entry, Ctxt),
                     {ok, Call, Ctxt};
 
@@ -1584,15 +1489,22 @@ handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
 %% Throws {not_authorized, binary()}
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_call(id(), uri(), function(), invoke_opts(), bondy_context:t()) ->
+-spec handle_call(id(), uri(), call_fun(), invoke_opts(), bondy_context:t()) ->
     ok.
 
-handle_call(CallId, ProcUri, UserFun, Opts, Ctxt0)
-when is_function(UserFun, 2) ->
-    RealmUri = bondy_context:realm_uri(Ctxt0),
+handle_call(CallId, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    %% choose/2 expects a match result w/continuations
+    MatchOpts = #{limit => 100},
+    Matches = bondy_registry:match(registration, RealmUri, ProcUri, MatchOpts),
 
-    case match_registrations(ProcUri, Ctxt0, #{}) of
-        Nil when Nil == [] orelse Nil == ?EOT ->
+    case choose(Matches, Opts) of
+        {ok, Entry} ->
+            do_call(CallId, ProcUri, Fun, Opts, Ctxt, Entry);
+
+        {error, no_proc} ->
+            %% The matches were all dead (local process dead or remote target
+            %% unreachable)
             Error = case format_error(no_such_procedure, Opts) of
                 undefined ->
                     bondy_wamp_utils:no_such_procedure_error(
@@ -1601,233 +1513,157 @@ when is_function(UserFun, 2) ->
                 Value ->
                     Value
             end,
-            reply_error(Error, Ctxt0);
-        Result ->
-            %% We invoke Fun for each entry
-            Fun = fun
-                ({error, ErrorMap}, Ctxt1) when is_map(ErrorMap) ->
-                    Error = case format_error(no_such_procedure, Opts) of
-                        undefined ->
-                            error_from_map(ErrorMap, CallId);
-                        Value ->
-                            Value
-                    end,
-                    ok = reply_error(Error, Ctxt1),
-                    {ok, Ctxt1};
 
-                ({error, noproc}, Ctxt1) ->
-                    %% The local process associated with the entry
-                    %% is no longer alive, we turn this into no_such_procedure
-                    Error = case format_error(no_such_procedure, Opts) of
-                        undefined ->
-                            bondy_wamp_utils:no_such_procedure_error(
-                                ProcUri, ?CALL, CallId
-                            );
-                        Value ->
-                            Value
-                    end,
+            ok = reply_error(Error, Ctxt);
 
-                    ok = reply_error(Error, Ctxt1),
-                    {ok, Ctxt1};
-
-                (Entry, Ctxt1) ->
-                    %% We invoke the provided fun which returns a command.
-                    case UserFun(Entry, Ctxt1) of
-                        {ok, Ctxt2} ->
-                            %% UserFun sent a response sequentially, no need
-                            %% for promises. This is the case for callback
-                            %% implemented procedures.
-                            {ok, Ctxt2};
-
-
-                        {ok, Msg, Ctxt2} ->
-                            Caller = bondy_context:ref(Ctxt1),
-                            Ref = bondy_registry_entry:ref(Entry),
-                            Origin = bondy_registry_entry:origin_ref(Entry),
-
-                            %% SendOpts might include 'via' field which we use
-                            %% to build the promise
-                            {Callee, SendOpts} = bondy:prepare_send(
-                                Ref, Origin, Opts#{from => Caller}
-                            ),
-
-                            Timeout = bondy_utils:timeout(call_opts(SendOpts)),
-
-                            PromiseOpts = #{
-                                procedure_uri => ProcUri,
-                                timeout => Timeout
-                            },
-
-                            Promise = case Msg of
-                                #call{} ->
-                                    %% The callee is on another node or bridged
-                                    %% cluster so we forward the call.
-                                    %% We will store a local call promise,
-                                    %% to match the incoming forwarded RESULT |
-                                    %% ERROR.
-                                    %% The remote node will store an invocation
-                                    %% promise.
-                                    bondy_rpc_promise:new_call(
-                                        RealmUri,
-                                        Caller,
-                                        CallId,
-                                        PromiseOpts
-                                    );
-
-                                #invocation{request_id = InvocationId} ->
-                                    %% The callee is local.
-                                    %% We will store an invocation promise
-                                    %% to match the incoming YIELD | ERROR.
-                                    bondy_rpc_promise:new_invocation(
-                                        RealmUri,
-                                        Caller, CallId,
-                                        Callee, InvocationId,
-                                        PromiseOpts
-                                    )
-                            end,
-
-                            ok = bondy_rpc_promise:add(Promise),
-
-                            ok = bondy:send(RealmUri, Callee, Msg, SendOpts),
-
-                            {ok, Ctxt2}
-                    end
-            end,
-            handle_call_aux(Result, Fun, Opts, Ctxt0)
+        {error, ErrorMap} when is_map(ErrorMap) ->
+            %% bondy_rpc_load_balancer opts validation error
+            Error = error_from_map(ErrorMap, CallId),
+            ok = reply_error(Error, Ctxt)
     end.
-
-
-%% @private
-handle_call_aux(?EOT, _, _, _) ->
-    ok;
-
-handle_call_aux({L, ?EOT}, Fun, Opts, Ctxt) when is_list(L) ->
-    handle_call_aux(L, Fun, Opts, Ctxt);
-
-handle_call_aux({L, Cont}, Fun, Opts, Ctxt) when is_list(L) ->
-    ok = handle_call_aux(L, Fun, Opts, Ctxt),
-    handle_call_aux(match_registrations(Cont), Fun, Opts, Ctxt);
-
-handle_call_aux(L, Fun, Opts, Ctxt) when is_list(L) ->
-    %% Registrations have different invocation strategies provided by the
-    %% 'invoke' key.
-    Triples = [
-        {
-            bondy_registry_entry:uri(E),
-            maps:get(invoke, bondy_registry_entry:options(E), ?INVOKE_SINGLE),
-            E
-        } || E <- L
-    ],
-    handle_call_aux(Triples, undefined, Fun, Opts, Ctxt).
-
-
-%% @private
--spec handle_call_aux(
-    [{Uri :: uri(), InvocationPolicy :: binary(), Entry :: tuple()}],
-    Last :: optional({uri(), Strategy :: binary(), Entry :: tuple()}),
-    Fun :: function(),
-    Opts :: map(),
-    Ctxt :: bondy_context:t()) ->
-    ok.
-
-handle_call_aux([], undefined, _, _, _) ->
-    ok;
-
-handle_call_aux([], {_, ?INVOKE_SINGLE, []}, _, _, _) ->
-    ok;
-
-handle_call_aux([], {_, Invoke, L}, Fun, Opts, Ctxt0) ->
-    {ok, _Ctxt1} = do_call({Invoke, L}, Fun, Opts, Ctxt0),
-    ok;
-
-handle_call_aux([{Uri, ?INVOKE_SINGLE, E}|T], undefined, Fun, Opts, Ctxt0) ->
-    {ok, Ctxt1} = do_call({?INVOKE_SINGLE, [E]}, Fun, Opts, Ctxt0),
-    %% We add an accummulator to drop any subsequent matching Uris.
-    handle_call_aux(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Opts, Ctxt1);
-
-handle_call_aux(
-    [{Uri, ?INVOKE_SINGLE, _}|T], {Uri, ?INVOKE_SINGLE, _} = Last,
-    Fun, Opts, Ctxt) ->
-    %% A single invocation strategy and we have multiple registrations so we
-    %% ignore them
-    %% Invoke should match too, otherwise there is an inconsistency
-    %% in the registry
-    %% TODO REVIEW the prev clause matched the single and called, so shouldn't
-    %% we be stopping here?
-    handle_call_aux(T, Last, Fun, Opts, Ctxt);
-
-handle_call_aux([{Uri, Invoke, E}|T], undefined, Fun, Opts, Ctxt) ->
-    %% We do not apply the invocation yet as it is not single, so we need
-    %% to accummulate and apply at the end.
-    %% We build a list for subsequent entries for same Uri.
-    handle_call_aux(T, {Uri, Invoke, [E]}, Fun, Opts, Ctxt);
-
-handle_call_aux([{Uri, Invoke, E}|T], {Uri, Invoke, L}, Fun, Opts, Ctxt)  ->
-    %% We do not invoke yet as it is not single, so we need
-    %% to accummulate and apply at the end using load balancing.
-    %% We build a list for subsequent entries for same Uri.
-    %% Invoke should match too, otherwise there is an inconsistency
-    %% in the registry
-    handle_call_aux(T, {Uri, Invoke, [E|L]}, Fun, Opts, Ctxt);
-
-handle_call_aux([{Uri, ?INVOKE_SINGLE, E}|T], {_, Invoke, L}, Fun, Opts, Ctxt0) ->
-    %% We found a different Uri so we invoke the previous one
-    {ok, Ctxt1} = do_call({Invoke, L}, Fun, Opts, Ctxt0),
-    %% The new one is a single so we also invoke and continue
-    %% TODO why do we invoke this one?
-    {ok, Ctxt2} = do_call({?INVOKE_SINGLE, [E]}, Fun, Opts, Ctxt1),
-    handle_call_aux(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Opts, Ctxt2);
-
-handle_call_aux([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Opts, Ctxt0)  ->
-    %% We found another Uri so we invoke the previous one
-    {ok, Ctxt1} = do_call({Invoke, L}, Fun, Opts, Ctxt0),
-    %% We do not apply the invocation yet as it is not single, so we need
-    %% to accummulate and apply at the end.
-    %% We build a list for subsequent entries for same Uri.
-    handle_call_aux(T, {Uri, Invoke, [E]}, Fun, Opts, Ctxt1).
 
 
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%% Implements load balancing and fail over invocation strategies.
-%% This works over a list of registration entries for the SAME
-%% procedure.
 %% @end
 %% -----------------------------------------------------------------------------
--spec do_call(term(), function(), map(), bondy_context:t()) ->
-    {ok, bondy_context:t()}.
+-spec do_call(
+    id(), uri(), call_fun(), invoke_opts(), bondy_context:t(), entry()) -> ok.
+
+do_call(CallId, ProcUri, UserFun, Opts, Ctxt0, Entry) ->
+    %% We invoke the provided fun which returns a command.
+    case UserFun(Entry, Ctxt0) of
+        {ok, _} ->
+            %% UserFun sent a response sequentially, no need
+            %% for promises. This is the case for callback
+            %% implemented procedures.
+            ok;
+
+        {ok, Msg, Ctxt1} ->
+            RealmUri = bondy_context:realm_uri(Ctxt1),
+            Caller = bondy_context:ref(Ctxt1),
+            Ref = bondy_registry_entry:ref(Entry),
+            Origin = bondy_registry_entry:origin_ref(Entry),
+
+            %% SendOpts might include 'via' field which we use
+            %% to build the promise
+            {Callee, SendOpts} = bondy:prepare_send(
+                Ref, Origin, Opts#{from => Caller}
+            ),
+
+            Timeout = bondy_utils:timeout(call_opts(SendOpts)),
+
+            PromiseOpts = #{
+                procedure_uri => ProcUri,
+                timeout => Timeout
+            },
+
+            Promise = case Msg of
+                #call{} ->
+                    %% The callee is on another node or bridged
+                    %% cluster so we forward the call.
+                    %% We will store a local call promise,
+                    %% to match the incoming forwarded RESULT |
+                    %% ERROR.
+                    %% The remote node will store an invocation
+                    %% promise.
+                    bondy_rpc_promise:new_call(
+                        RealmUri,
+                        Caller,
+                        CallId,
+                        PromiseOpts
+                    );
+
+                #invocation{request_id = InvocationId} ->
+                    %% The callee is local.
+                    %% We will store an invocation promise
+                    %% to match the incoming YIELD | ERROR.
+                    bondy_rpc_promise:new_invocation(
+                        RealmUri,
+                        Caller, CallId,
+                        Callee, InvocationId,
+                        PromiseOpts
+                    )
+            end,
+
+            ok = bondy_rpc_promise:add(Promise),
+
+            ok = bondy:send(RealmUri, Callee, Msg, SendOpts)
+    end.
 
 
-do_call({?INVOKE_SINGLE, [Entry]}, Fun, _, Ctxt) ->
-    try
-        %% This might be a callback implemented procedure
-        Fun(Entry, Ctxt)
-    catch
-        throw:{error, _} = ErrorMap ->
-            %% Unexpected error ocurred
-            Fun(ErrorMap, Ctxt)
+
+%% -----------------------------------------------------------------------------
+%% @doc Assummes `Entries' is sorted using bondy_registry_entry:mg_comparator().
+%% @end
+%% -----------------------------------------------------------------------------
+-spec choose(
+    Entries :: {[entry()], trie_continuation() | eot()} | eot(), CallOpts :: map()) -> {ok, Entry :: entry()} | {error, no_proc}.
+
+choose(?EOT, _) ->
+    {error, no_proc};
+
+choose({L, Cont}, CallOpts) ->
+    choose(L, CallOpts, undefined, [], Cont).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Assummes `Entries' is sorted using bondy_registry_entry:mg_comparator().
+%% @end
+%% -----------------------------------------------------------------------------
+-spec choose(
+    Entries :: [entry()],
+    CallOpts :: map(),
+    Group :: {Uri :: uri(), Match :: binary(), Invoke :: binary()} | undefined,
+    Acc :: [entry()],
+    Cont :: trie_continuation()) ->
+    {ok, Entry :: entry()} | {error, no_proc}.
+
+choose([], _, _, [], ?EOT) ->
+    {error, no_proc};
+
+choose([], CallOpts, _, [], Cont) ->
+    choose(bondy_registry:match(Cont), CallOpts);
+
+choose([], CallOpts, {_, _, Invoke}, Acc, Cont) ->
+    L = lists:reverse(Acc),
+    LBOpts = lb_opts(Invoke, CallOpts),
+    case bondy_rpc_load_balancer:select(L, LBOpts) of
+        {ok, _} = OK ->
+            OK;
+        {error, no_proc} ->
+            choose(bondy_registry:match(Cont), CallOpts);
+        Error ->
+            Error
     end;
 
-do_call({Strategy, L}, Fun, CallOpts0, Ctxt) ->
-    Opts = load_balancer_options(Strategy, CallOpts0),
+choose([H|T], CallOpts, LastGroup, Acc, Cont) ->
+    Uri = bondy_registry_entry:uri(H),
+    Match = bondy_registry_entry:match_policy(H),
+    Invoke = bondy_registry_entry:invocation_policy(H),
+    Group = {Uri, Match, Invoke},
 
-    try
-        %% All this entries need to be registered by a process (internal or
-        %% client), otherwise we will crash when bondy_rpc_load_balancer checks
-        %% the process is alive. A callback implemented procedure should never
-        %% reach this point anyway as they use INVOKE_SINGLE exclusively.
-        case bondy_rpc_load_balancer:select(L, Opts) of
-            {ok, Entry} ->
-                Fun(Entry, Ctxt);
-            {error, _} = Error ->
-                %% We tried all callees in the list `L' but none was alive
-                Fun(Error, Ctxt)
-        end
-    catch
-        throw:{error, _} = ErrorMap ->
-            %% Validation error occurred
-            Fun(ErrorMap, Ctxt)
+    case LastGroup == undefined orelse LastGroup == Group of
+        true ->
+            %% We accummulate until we find no more matches for Group
+            choose(T, CallOpts, Group, [H|Acc], Cont);
+
+        false ->
+            %% All entries in Acc belong to same group, we reverse to restore
+            %% the original order
+            L = lists:reverse(Acc),
+            LBOpts = lb_opts(Invoke, CallOpts),
+
+            case bondy_rpc_load_balancer:select(L, LBOpts) of
+                {ok, _} = OK ->
+                    OK;
+                {error, no_proc} ->
+                    %% We continue w/next group, we reset Acc
+                    choose(T, CallOpts, Group, [H], Cont);
+                Error ->
+                    Error
+            end
     end.
 
 
@@ -1841,7 +1677,7 @@ do_call({Strategy, L}, Fun, CallOpts0, Ctxt) ->
 %%
 %% @end
 %% -----------------------------------------------------------------------------
-load_balancer_options(Strategy, CallOpts0) ->
+lb_opts(Strategy, CallOpts0) ->
     CallOpts1 = coerce_strategy(Strategy, CallOpts0),
     coerce_routing_key(CallOpts1).
 

@@ -1513,13 +1513,13 @@ proxy_existing(Session, State0) ->
     Limit = 100,
 
     %% We proxy all existing registrations
-    Regs = bondy_dealer:registrations(RealmUri, AnySessionId, Limit),
-    GetRegs = fun(Cont) -> bondy_dealer:registrations(Cont) end,
+    Regs = bondy_registry:entries(registration, RealmUri, AnySessionId, Limit),
+    GetRegs = fun(Cont) -> bondy_registry:entries(registration, Cont) end,
     State1 = proxy_existing(Session, State0, GetRegs, Regs),
 
     %% We proxy all existing subscriptions
     Subs = bondy_broker:subscriptions(RealmUri, AnySessionId, Limit),
-    GetSubs = fun(Cont) -> bondy_dealer:registrations(Cont) end,
+    GetSubs = fun(Cont) -> bondy_registry:entries(registration, Cont) end,
 
     proxy_existing(Session, State1, GetSubs, Subs).
 

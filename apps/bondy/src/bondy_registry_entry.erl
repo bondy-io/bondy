@@ -57,9 +57,9 @@
     key                 ::  key(),
     type                ::  wildcard(entry_type()),
     uri                 ::  uri() | atom(),
-    match_policy        ::  binary(),
+    match_policy        ::  match_policy(),
     wildcard_degree     ::  optional([integer()]),
-    invocation_policy   ::  optional(binary()),
+    invocation_policy   ::  optional(invocation_policy()),
     ref                 ::  bondy_ref:t(),
     callback_args       ::  optional(list(term())),
     created             ::  pos_integer(),
@@ -113,6 +113,7 @@
 }.
 
 -type comparator()          ::  fun(({t(), t()}) -> boolean()).
+-type match_policy()        ::  binary().
 -type invocation_policy()   ::  binary().
 
 -export_type([t/0]).
@@ -137,7 +138,6 @@
 -export([fold/5]).
 -export([foreach/4]).
 -export([get_option/3]).
--export([group_by_invocation_policy/1]).
 -export([id/1]).
 -export([invocation_policy/1]).
 -export([invocation_policy_comparator/0]).
@@ -1305,20 +1305,6 @@ locality_comparator(Fun) ->
                 Fun(A, B)
         end
     end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec group_by_invocation_policy([t()]) -> [{invocation_policy(), [t()]}].
-
-group_by_invocation_policy(L) ->
-    Project = lists:seq(1, record_info(size, entry)),
-    leap_tuples:summarize(
-        L, {#entry.invocation_policy, {function, collect, Project}}, #{}
-    ).
-
 
 
 %% =============================================================================
