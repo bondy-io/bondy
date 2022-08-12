@@ -62,7 +62,7 @@
 -define(OPTS_SPEC, #{
     %% BONDY extension
     %% TODO this should be a map
-    %% #{strategy => #{id => queue_least_loaded, x_force_locality}}
+    %% #{strategy => #{id => queue_least_loaded, x_prefer_local}}
     strategy => #{
         required => true,
         allow_null => false,
@@ -89,7 +89,7 @@
                 true
         end
     },
-    x_force_locality => #{
+    x_prefer_local => #{
         required => true,
         allow_null => false,
         allow_undefined => false,
@@ -122,7 +122,7 @@
                                 | queue_least_loaded_sample.
 -type opts()                ::  #{
     strategy := strategy(),
-    'x_force_locality' => boolean(),
+    'x_prefer_local' => boolean(),
     'x_routing_key' => binary()
 }.
 -opaque iterator()          ::  #iterator{}.
@@ -194,7 +194,7 @@ iterate(#iterator{strategy = queue_least_loaded_sample} = Iter) ->
     next_queue_least_loaded(Iter, 2);
 
 iterate(#iterator{} = Iter) ->
-    %%  single, first, last
+    %%  single, first, last, random
     next(Iter).
 
 
@@ -229,58 +229,36 @@ iterator(Entries, Opts) ->
 
 
 %% @private
+prepare_entries(Entries, #{strategy := single}) ->
+    %% There should only be one entry here, but instead of failing
+    %% we would consistently select the first one, regardless of location.
+    Entries;
+
 prepare_entries(Entries, #{strategy := jump_consistent_hash}) ->
     lists:keysort(1, Entries);
 
 prepare_entries(Entries, #{strategy := queue_least_loaded_sample}) ->
     lists_utils:shuffle(Entries);
 
-prepare_entries(Entries, #{strategy := last, x_force_locality := Flag}) ->
-    lists:reverse(maybe_sort_by_locality(Flag, Entries));
-
-prepare_entries(Entries, #{strategy := last}) ->
-    lists:reverse(maybe_sort_by_locality(true, Entries));
-
-prepare_entries(Entries, #{strategy := single}) ->
-    %% There should only be one entry here, but instead of failing
-    %% we would consistently select the first one, regardless of location.
-    lists:keysort(1, Entries);
+prepare_entries(Entries, #{x_prefer_local := Flag}) ->
+    maybe_sort_by_locality(Flag, Entries);
 
 prepare_entries(Entries, _) ->
-    maybe_sort_by_locality(true, Entries).
+    maybe_sort_by_locality(false, Entries).
 
 
 %% @private
 maybe_sort_by_locality(true, L) ->
-    Nodestring = bondy_config:nodestring(),
-
-    Fun = fun(A, B) ->
-        %% We first sort by locality, then by order of registration
-        %% (required by WAMP)
-        NodeA = bondy_registry_entry:nodestring(A),
-        TsA = bondy_registry_entry:created(A),
-        NodeB = bondy_registry_entry:nodestring(B),
-        TsB = bondy_registry_entry:created(B),
-
-        case {NodeA, NodeB} of
-            {Nodestring, Nodestring} ->
-                TsA =< TsB;
-            {Nodestring, _} ->
-                true;
-            {_, Nodestring} ->
-                false;
-            {_, _} ->
-                TsA =< TsB
-        end
-    end,
-    lists:sort(Fun, L);
+    %% We always sort first by most general (required by WAMP) then by locality
+    %% and then by time.
+    TimeComp = bondy_registry_entry:time_comparator(),
+    LocComp = bondy_registry_entry:locality_comparator(TimeComp),
+    Comp = bondy_registry_entry:mg_comparator(LocComp),
+    lists:sort(Comp, L);
 
 maybe_sort_by_locality(false, L) ->
-    %% We use the order of registration (required by WAMP)
-    Fun = fun(A, B) ->
-        bondy_registry_entry:created(A) =< bondy_registry_entry:created(B)
-    end,
-    lists:sort(Fun, L).
+    %% We asume entries are already sorted
+    L.
 
 
 %% @private
@@ -293,32 +271,11 @@ do_select({error, _} = Error, _) ->
 do_select({Entry, Iter}, Nodestring) ->
     %% An optimisation as bondy_registry_entry:is_local/1 would fetch the
     %% nodestring everytime.
-    case bondy_registry_entry:nodestring(Entry) =:= Nodestring of
+    case bondy_registry_entry:is_alive(Entry) of
         true ->
-            %% The wamp peer is local, so we should have a peer
-            %% Callback peers are not allowed to be used on shared registration
-            Pid = bondy_registry_entry:pid(Entry),
-
-            case erlang:is_process_alive(Pid) of
-                true ->
-                    {ok, Entry};
-                false ->
-                    %% This might happen when the WAMP Peer
-                    %% disconnected between the time we read the entry
-                    %% and now. We contine trying with other entries.
-                    do_select(iterate(Iter), Nodestring)
-            end;
+            {ok, Entry};
         false ->
-            Node = bondy_registry_entry:node(Entry),
-            case partisan:is_connected(Node) of
-                true ->
-                    {ok, Entry};
-                false ->
-                    %% The cluster peer is not connected and the registry has
-                    %% not yet been pruned.
-                    %% We try to find another candidate
-                    do_select(iterate(Iter), Nodestring)
-            end
+            do_select(iterate(Iter), Nodestring)
     end.
 
 

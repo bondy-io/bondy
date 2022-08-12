@@ -112,9 +112,9 @@ aliases(L) when is_list(L) ->
                 end
             end,
             [],
-            sets:to_list(sets:from_list(L))
+            lists:usort(L)
         ),
-        {ok, lists:reverse(Valid)}
+        {ok, Valid}
     catch
         throw:abort ->
             {error, <<"One or more values are not valid aliases.">>}

@@ -2,7 +2,7 @@
 
 ![License](https://img.shields.io/github/license/leapsight/bondy?style=for-the-badge)
 ![Architecture](https://img.shields.io/badge/architecture-linux%2Famd64%20%7C%20linux%2Farm64%20%7C%20macOS%2Fintel%20%7C%20macOS%2FM1-lightgrey?style=for-the-badge)
-![Version](https://img.shields.io/badge/version-1.0.0--beta.63-blue?style=for-the-badge)<br>
+![Version](https://img.shields.io/badge/version-1.0.0--beta.64-blue?style=for-the-badge)<br>
 ![Docker Pulls](https://img.shields.io/docker/pulls/leapsight/bondy?style=for-the-badge)
 ![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/leapsight/bondy/CI/master?label=docker%3Amaster&style=for-the-badge)
 ![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/leapsight/bondy/CI/develop?label=docker%3Adevelop&style=for-the-badge)
@@ -29,13 +29,14 @@ For our work-in-progress documentation go to [http://docs.getbondy.io](http://do
 ### Authentication
 
 * [x] Anonymous
-* [ ] Cookie
 * [x] Cryptosign
 * [x] Ticket
 * [x] WAMP-CRA
-* [ ] WAMP-SCRAM
+* [ ] WAMP-SCRAM (WIP)
+* [ ] Cookie
 
-In addition Bondy provides
+In addition Bondy provides:
+
 * [x] HTTP OAuth2
 * [x] HTTP Password
 * [x] Same Sign-on -- use a single set of credentials to sign on to multiple realms
@@ -46,26 +47,29 @@ In addition Bondy provides
 * [x] Call Timeouts
 * [x] Call Trust Levels
 * [x] Caller Identification
-* [ ] Payload Transparency
-* [ ] Progressive Call Results
-* [ ] Progressive Calls
+* [x] Pattern-based registration
 * [x] Shared Registration
      * [x] Load Balancing
           * [x] Random
-          * [x] Roundrobin
+          * [x] Round robin
      * [x] Hot Stand-by
-          * [x] First, Last
+          * [x] First
+          * [x] Last
+* [ ] Payload Passthru Mode (WIP)
+* [ ] Registration Revocation (WIP)
+* [ ] Progressive Call Results
+* [ ] Progressive Calls
 
 
 ### Advanced Pub/Sub features
 * [x] Event Retention
 * [x] Pattern-based Subscriptions
-* [ ] Payload Passthru Mode
 * [x] Publication Trust Levels
 * [x] Publisher Exclusion
 * [x] Publisher Identification
-* [ ] Sharded Subscriptions
 * [x] Subscriber Black- and Whitelisting
+* [ ] Payload Passthru Mode (WIP)
+* [ ] Sharded Subscriptions
 * [ ] Subscription Revocation
 
 ### Transport
@@ -77,11 +81,11 @@ In addition Bondy provides
 ### Transport Serialization
 
 * [x] JSON
-* [ ] JSON batched
 * [x] Msgpack
-* [ ] Msgpack batched
 * [x] BERT
 * [x] Erlang (subset)
+* [ ] JSON batched
+* [ ] Msgpack batched
 
 ## How is Bondy different than other WAMP routers?
 

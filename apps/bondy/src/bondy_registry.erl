@@ -42,6 +42,15 @@
 
 -define(MERGE_STATUS_TAB, bondy_registry_merge_status).
 
+-define(REMOVE_MATCH_OPTS, [
+    {allow_put, false} | ?MATCH_OPTS
+]).
+
+-define(MATCH_OPTS, [
+    {remove_tombstones, true},
+    {resolver, lww}
+]).
+
 -record(state, {
     timers = #{}    ::  #{node() => reference()},
     start_ts        ::  pos_integer()
@@ -72,13 +81,12 @@
 -export([init_trie/0]).
 -export([lookup/2]).
 -export([lookup/3]).
+-export([find/1]).
+-export([find/3]).
+-export([find/4]).
 -export([match/1]).
 -export([match/3]).
 -export([match/4]).
--export([match_exact/1]).
--export([match_exact/4]).
--export([match_pattern/1]).
--export([match_pattern/4]).
 -export([remove/1]).
 -export([remove/3]).
 -export([remove/4]).
@@ -313,11 +321,7 @@ when Task == undefined orelse is_function(Task, 1) ->
         RealmUri, SessionId, EntryId
     ),
 
-    MatchOpts = [
-        {limit, 1},
-        {resolver, lww},
-        {remove_tombstones, true}
-    ],
+    MatchOpts = [{limit, 1} | ?MATCH_OPTS],
 
     %% We should match at most one entry for the {RealmUri, SessionId, EntryId}
     %% combination.
@@ -370,12 +374,7 @@ when Task == undefined orelse is_function(Task, 1) ->
                 RealmUri, SessionId, '_'
             ),
             MaybeFun = maybe_fun(Task, Ctxt),
-            MatchOpts = [
-                {limit, 100},
-                {resolver, lww},
-                {allow_put, false},
-                {remove_tombstones, true}
-            ],
+            MatchOpts = [{limit, 100} | ?REMOVE_MATCH_OPTS],
             Matches = bondy_registry_entry:match(Type, Pattern, MatchOpts),
             do_remove_all(Matches, SessionId, MaybeFun)
     end.
@@ -395,15 +394,9 @@ when Task == undefined orelse is_function(Task, 1) ->
 remove_all(Type, RealmUri, SessionId, Task) ->
     Pattern = bondy_registry_entry:key_pattern(RealmUri, SessionId, '_'),
 
-    MatchOpts = [
-        {limit, 100},
-        {remove_tombstones, true},
-        {resolver, lww},
-        {allow_put, false}
-    ],
+    MatchOpts = [{limit, 100} | ?REMOVE_MATCH_OPTS],
     Matches = bondy_registry_entry:match(Type, Pattern, MatchOpts),
     do_remove_all(Matches, SessionId, Task).
-
 
 
 %% -----------------------------------------------------------------------------
@@ -504,11 +497,7 @@ entries(Type, RealmUri, SessionId) ->
 
 entries(Type, RealmUri, SessionId, Limit) ->
     Pattern = bondy_registry_entry:key_pattern(RealmUri, SessionId, '_'),
-    Opts = [
-        {limit, Limit},
-        {remove_tombstones, true},
-        {resolver, lww}
-    ],
+    Opts = [{limit, Limit} | ?MATCH_OPTS],
 
     case bondy_registry_entry:match(Type, Pattern, Opts) of
         ?EOT ->
@@ -525,6 +514,89 @@ entries(Type, RealmUri, SessionId, Limit) ->
     end.
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec find(trie_continuation() | eot()) ->
+    {[entry()], trie_continuation() | eot()} | eot().
+
+find(?EOT) ->
+    ?EOT;
+
+find(Cont0) ->
+    try
+        #{type := Type} = bondy_registry_trie:continuation_info(Cont0),
+        project_trie_res(Type, trie_find(Cont0))
+
+    catch
+        throw:non_eligible_entries ->
+            ?EOT;
+
+        error:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error while searching trie",
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            ?EOT
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Calls {@link match/4}.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec find(Type :: entry_type(), RealmUri :: uri(), Uri :: uri()) ->
+    {[entry()], trie_continuation() | eot()} | eot().
+
+find(Type, RealmUri, Uri) ->
+    find(Type, RealmUri, Uri, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the entries matching either a topic or procedure Uri according to
+%% each entry's configured match specification.
+%%
+%% This function is used by the Broker to return all subscriptions that match a
+%% topic. And in case of registrations it is used by the Dealer to return all
+%% registrations matching a procedure.
+%%
+%% This function uses the bondy_registry_trie.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec find(Type :: entry_type(), RealmUri :: uri(), uri(), map()) ->
+    {[entry()], trie_continuation() | eot()} | eot().
+
+find(Type, RealmUri, Uri, Opts) ->
+    Limit = maps:get(limit, Opts, undefined),
+
+    try
+        project_trie_res(Type, trie_find(Type, RealmUri, Uri, Opts))
+
+    catch
+        throw:non_eligible_entries when Limit =/= undefined ->
+            case maps:get(limit, Opts, undefined) of
+                undefined -> [];
+                _ -> ?EOT
+            end;
+
+        error:Reason:Stacktrace when Limit =/= undefined ->
+            ?LOG_ERROR(#{
+                description => "Error while searching trie",
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            case maps:get(limit, Opts, undefined) of
+                undefined -> [];
+                _ -> ?EOT
+            end
+    end.
+
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -537,8 +609,8 @@ match(?EOT) ->
 
 match(Cont0) ->
     try
-
-        project_trie_match_res(trie_match(Cont0))
+        #{type := Type} = bondy_registry_trie:continuation_info(Cont0),
+        project_trie_res(Type, trie_match(Cont0))
 
     catch
         throw:non_eligible_entries ->
@@ -560,7 +632,7 @@ match(Cont0) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match(Type :: entry_type(), RealmUri :: uri(), Uri :: uri()) ->
-    {[entry()], trie_continuation() | eot()} | eot().
+    [entry()] | {[entry()], trie_continuation() | eot()} | eot().
 
 match(Type, RealmUri, Uri) ->
     match(Type, RealmUri, Uri, #{}).
@@ -583,8 +655,7 @@ match(Type, RealmUri, Uri) ->
 
 match(Type, RealmUri, Uri, Opts) ->
     try
-        FN = ?FUNCTION_NAME,
-        project_trie_match_res(trie_match(Type, RealmUri, Uri, Opts, FN))
+        project_trie_res(Type, trie_match(Type, RealmUri, Uri, Opts))
 
     catch
         throw:non_eligible_entries ->
@@ -598,119 +669,6 @@ match(Type, RealmUri, Uri, Opts) ->
             }),
             ?EOT
     end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec match_exact(trie_continuation() | eot()) ->
-    {[entry()], trie_continuation() | eot()} | eot().
-
-match_exact(?EOT) ->
-    ?EOT;
-
-match_exact(Cont0) ->
-    try
-        FN = ?FUNCTION_NAME,
-        project_trie_match_res(trie_match(Cont0, FN))
-
-    catch
-        throw:non_eligible_entries ->
-            ?EOT;
-
-        error:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error while searching trie",
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            ?EOT
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec match_exact(
-    Type :: entry_type(), RealmUri :: uri(), Uri :: uri(), Opts :: map()
-    ) -> {[entry()], trie_continuation() | eot()} | eot().
-
-match_exact(Type, RealmUri, Uri, Opts) ->
-    try
-        FN = ?FUNCTION_NAME,
-        project_trie_match_res(trie_match(Type, RealmUri, Uri, Opts, FN))
-
-    catch
-        throw:non_eligible_entries ->
-            ?EOT;
-
-        error:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error while searching trie",
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            ?EOT
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec match_pattern(trie_continuation() | eot()) ->
-    {[entry()], trie_continuation() | eot()} | eot().
-
-match_pattern(?EOT) ->
-    ?EOT;
-
-match_pattern(Cont0) ->
-    try
-        FN = ?FUNCTION_NAME,
-        project_trie_match_res(trie_match(Cont0, FN))
-
-    catch
-        throw:non_eligible_entries ->
-            ?EOT;
-
-        error:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error while searching trie",
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            ?EOT
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec match_pattern(
-    Type :: entry_type(), RealmUri :: uri(), Uri :: uri(), Opts :: map()
-    ) -> {[entry()], trie_continuation() | eot()} | eot().
-
-match_pattern(Type, RealmUri, Uri, Opts) ->
-    try
-        FN = ?FUNCTION_NAME,
-        project_trie_match_res(trie_match(Type, RealmUri, Uri, Opts, FN))
-
-    catch
-        throw:non_eligible_entries ->
-            ?EOT;
-
-        error:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error while searching trie",
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            ?EOT
-    end.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -1130,13 +1088,24 @@ add_callback_registration(RealmUri, Uri, Opts0, Ref, Trie) ->
 maybe_add_registration(RealmUri, Uri, Opts, Ref, Trie) ->
     Invoke = maps:get(invoke, Opts, ?INVOKE_SINGLE),
     Shared = maps:get(shared_registration, Opts, false),
+    Match = maps:get(match, Opts, ?EXACT_MATCH),
+    PBR = bondy_config:get([dealer, pattern_based_registration], true),
 
-    case Shared == true orelse Invoke == ?INVOKE_SINGLE of
-        true ->
-            add_registration(RealmUri, Uri, Opts, Ref, Trie);
-        false ->
-            {error, shared_registration_disabled}
+    try
+
+        Match =/= ?EXACT_MATCH andalso PBR == false
+            andalso throw(pattern_based_registration_disabled),
+
+        Invoke == ?INVOKE_SINGLE orelse Shared == true
+            orelse throw(shared_registration_disabled),
+
+        add_registration(RealmUri, Uri, Opts, Ref, Trie)
+
+    catch
+        throw:Reason ->
+            {error, Reason}
     end.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -1158,7 +1127,7 @@ add_registration(RealmUri, Uri, Opts, Ref, Trie) ->
         invoke => '_'
     },
 
-    Results = bondy_registry_trie:match(Type, RealmUri, Uri, MOpts, Trie),
+    Results = bondy_registry_trie:find(Type, RealmUri, Uri, MOpts, Trie),
 
     case Results of
         [] ->
@@ -1186,7 +1155,7 @@ add_registration(RealmUri, Uri, Opts, Ref, Trie) ->
             %% TODO extract this so that it is implemented as a funcion that
             %% the dealer will send.
 
-            case resolve_inconsistencies(L, Invoke, SessionId) of
+            case resolve_inconsistencies(Invoke, SessionId, L) of
                 ok ->
                     Entry = new_registration(RealmUri, Ref, Uri, Opts),
                     ok = bondy_registry_entry:store(Entry),
@@ -1238,66 +1207,71 @@ maybe_remote_index_do(Op, Entry) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec resolve_inconsistencies(
-    [bondy_registration_trie:registration_match()],
     Invoke :: binary(),
-    SessionId :: optional(bondy_session_id:t())
+    SessionId :: optional(bondy_session_id:t()),
+    [bondy_registration_trie:registration_match()]
     ) -> ok | {error, any()}.
 
-resolve_inconsistencies([], _, _) ->
+resolve_inconsistencies(_, _, []) ->
     ok;
 
-resolve_inconsistencies(All, Invoke, SessionId) ->
-    Type = registration,
-    Project = [1, 2, 3],
-    Grouped = leap_tuples:summarize(
-        All, {2, {function, collect, Project}}, #{}
+resolve_inconsistencies(Invoke, SessionId, L) ->
+    Groups = bondy_utils:groups_from_list(
+        fun({_, _, _, InvocationPolicy, _}) -> InvocationPolicy end,
+        L
     ),
+    resolve_inconsistencies(Invoke, SessionId, L, Groups, maps:keys(Groups)).
 
-    case Grouped of
-        [] ->
-            %% No existing registrations
-            ok;
 
-        [{?INVOKE_SINGLE, [L]}] ->
+%% @private
+resolve_inconsistencies(_, _, _, Groups, [H]) when H == ?INVOKE_SINGLE ->
+    case maps:get(H, Groups) of
+        [Match] ->
             %% Result is 'ok' iff entry is missing from main store
             %% (due to inconsistency). Otherwise is the already_exists
             %% error.
-            resolve_existing(registration, L);
-
-        [{?INVOKE_SINGLE, L0}] ->
+            resolve_existing(registration, Match);
+        Matches ->
             %% Multiple registrations w/invoke == single
             %% We need to revoke all but the first one registered, so we sort
-            KeyPairs = sort_registrations(L0),
+            Sorted = sort_registration_matches(Matches),
 
             %% Result is 'ok' iff all entries are missing from main store
             %% (due to inconsistency). Otherwise is the already_exists
             %% error with the first entry alive.
-            resolve_duplicates(KeyPairs);
+            resolve_duplicates(Sorted)
+    end;
 
-        [{Group, L0}] when Group == Invoke ->
-            %% The registrations are consistent (all using the same invocation
-            %% policy). However, we still need to check for duplicates within
-            %% the same session.
-            L = find_registration_duplicates(L0, SessionId),
-            resolve_duplicates(L);
+resolve_inconsistencies(Invoke, SessionId, _, Groups, [H]) when H == Invoke ->
+    %% The registrations are consistent (all using the same invocation
+    %% policy). However, we still need to check for duplicates within
+    %% the same session.
+    Dups = find_registration_duplicates(maps:get(Invoke, Groups), SessionId),
+    resolve_duplicates(Dups);
 
-        [{_Group, L}] ->
-            %% The caller is trying to register using an invocation policy
-            %% that does not match the one being used so far for this procedure
-            resolve_existing(Type, L);
+resolve_inconsistencies(_, _, L, _, [_]) ->
+    %% The caller is trying to register using an invocation policy
+    %% that does not match the one being used so far for this procedure.
+    %% We test each one to discard an inconsistency between trie and
+    %% main store.
+    %% Normally we will get {error, {already_exists, Entry}} where
+    %% Entry is the first element in L.
+    Sorted = sort_registration_matches(L),
+    resolve_existing(registration, Sorted);
 
-        _  ->
-            %% The worse case: 2 or more groups
-            case resolve_existing(Type, sort_registrations(All)) of
-                ok ->
-                    ok;
-                {error, {already_exists, _Entry}} = Error ->
-                    %% TODO if INVOKE_SINGLE, revoke all other registrations
-                    %% if other policy, revoke all registrations for other
-                    %% policies
-                    Error
-            end
+resolve_inconsistencies(_, _, L, _, [_|_]) ->
+    %% The worse case: 2 or more groups.
+    Sorted = sort_registration_matches(L),
 
+    case resolve_existing(registration, Sorted) of
+        ok ->
+            ok;
+        {error, {already_exists, _Entry}} = Error ->
+            %% TODO if we have INVOKE_SINGLE, we need to
+            %% revoke all other registrations.
+            %% if other policy, revoke all registrations for other
+            %% policies
+            Error
     end.
 
 
@@ -1306,14 +1280,13 @@ resolve_inconsistencies(All, Invoke, SessionId) ->
 %% @doc Sort registration `proc()' index entries by time
 %% @end
 %% -----------------------------------------------------------------------------
--spec sort_registrations([bondy_registration_trie:registration_match()]) ->
+-spec sort_registration_matches(
+    [bondy_registration_trie:registration_match()]) ->
     [bondy_registration_trie:registration_match()].
 
-sort_registrations(L) ->
+sort_registration_matches(L) ->
     lists:sort(
-        fun ({_, _, A, _}, {_, _, B, _}) ->
-            TsA = bondy_registry_entry:created(A),
-            TsB = bondy_registry_entry:created(B),
+        fun ({_, _, _, _, TsA}, {_, _, _, _, TsB}) ->
             TsA =< TsB
         end,
         L
@@ -1336,7 +1309,7 @@ find_registration_duplicates(_, undefined) ->
 find_registration_duplicates(Quads, SessionId) ->
     [
         Quad
-        || {_, _, EntryKey, IsProxy} = Quad <- Quads,
+        || {_, EntryKey, IsProxy, _Invoke, _Timestamp} = Quad <- Quads,
             %% Proxy entries can have duplicates, this is
             %% because the handler (proxy) is registering
             %% the entries for multiple remote handlers,
@@ -1388,43 +1361,49 @@ resolve_existing(_, []) ->
 
 resolve_existing(Type, [H|T]) ->
     case resolve_existing(Type, H) of
-        {error, {already_exists, _}} = Error ->
-            Error;
         ok ->
-            resolve_existing(Type, T)
+            resolve_existing(Type, T);
+        Error ->
+            Error
     end;
 
-resolve_existing(Type, {_TrieKey, _, EntryKey}) ->
-    case bondy_registry_entry:lookup(Type, EntryKey) of
-        {ok, Entry} ->
-            {error, {already_exists, Entry}};
+resolve_existing(Type, {_IndexKey, EntryKey, _, _, _}) ->
+    Opts = [{remove_tombstones, false}, {resolver, lww}],
+
+    case bondy_registry_entry:lookup(Type, EntryKey, Opts) of
+        {ok, ?TOMBSTONE} ->
+            %% We found an inconsistency between the trie and plum_db.
+            %% This is very rare, but we need to cater for it.
+            %% TODO
+            %% delete_from_trie(registration, RealmUri, TrieKey),
+            %% TODO maybe revoke registration (but the client might
+            %% crash if it doesn't know it)
+            ok;
 
         {error, not_found} ->
             %% We found an inconsistency between the trie and plum_db.
             %% This is very rare, but we need to cater for it.
-            %% Use fww instead?
-            Opts = [{remove_tombstones, false}, {resolver, lww}],
+            ?LOG_WARNING(#{
+                description =>
+                    "Inconsistency found in registry. "
+                    "An entry found in the trie "
+                    "could not be found on the main store.",
+                reason => not_found,
+                registry_entry_key => EntryKey
+            }),
 
-            case bondy_registry_entry:lookup(Type, EntryKey, Opts) of
-                {ok, ?TOMBSTONE} ->
-                    %% We fix the trie but allow the registration to happen
-                    %% TODO
-                    %% delete_from_trie(registration, RealmUri, TrieKey),
-                    %% TODO maybe revoke registration (but the client might
-                    %% crash if it doesn't know it)
-                    %% NOTICE
-                    %% FIXME
-                    ok;
+            %% TODO
+            %% delete_from_trie(registration, RealmUri, TrieKey),
+            %% TODO maybe revoke registration (but the client might
+            %% crash if it doesn't know it)
+            ok;
 
-                {error, not_found} ->
-                    ?LOG_WARNING(#{
-                        description =>
-                            "Inconsistency found in registry. "
-                            "An entry found in the trie "
-                            "could not be found on the main store.",
-                        reason => not_found,
-                        registry_entry_key => EntryKey
-                    }),
+        {ok, Entry} ->
+            case bondy_registry_entry:is_alive(Entry) of
+                true ->
+                    {error, {already_exists, Entry}};
+                false ->
+                    %% It will be eventually pruned, so ignore
                     ok
             end
     end.
@@ -1554,6 +1533,8 @@ maybe_merge(Entry, Trie) ->
     case bondy_table:get(Peer, ?MERGE_STATUS_TAB, enabled) of
         enabled ->
             ok = maybe_remote_index_do(add, Entry),
+            %% TODO we need to resolve registrationinconsistencies here, so we
+            %% need to reuse the logic of ?MODULE:maybe_add_registration
             _ = bondy_registry_trie:add(Entry, Trie),
             ok;
 
@@ -1625,28 +1606,26 @@ delete_indices(Entry) ->
 
 
 %% @private
-trie_match(Type, RealmUri, Uri, Opts, FunctionName) ->
-    Match = fun(FN, Trie) ->
-        bondy_registry_trie:FN(Type, RealmUri, Uri, Opts, Trie)
+trie_find(Type, RealmUri, Uri, Opts) ->
+    Match = fun(Trie) ->
+        bondy_registry_trie:find(Type, RealmUri, Uri, Opts, Trie)
     end,
 
     case ?CONCURRENT_MATCH(Type) of
         true ->
-            Match(FunctionName, trie(RealmUri));
+            Match(trie(RealmUri));
 
         false ->
             Pid = bondy_registry_partition:pick(RealmUri),
-            bondy_registry_partition:execute(Pid, Match, [FunctionName], 15000)
+            bondy_registry_partition:execute(Pid, Match, [], 15000)
     end.
 
 
 %% @private
-trie_match(Cont) ->
-    trie_match(Cont, match).
+trie_find(?EOT) ->
+    ?EOT;
 
-
-%% @private
-trie_match(Cont, FN) ->
+trie_find(Cont) ->
     #{
         type := Type,
         realm_uri := RealmUri
@@ -1654,41 +1633,109 @@ trie_match(Cont, FN) ->
 
     case ?CONCURRENT_MATCH(Type) of
         true ->
-            bondy_registry_trie:FN(Cont);
+            bondy_registry_trie:find(Cont);
+
+        false ->
+            Pid = bondy_registry_partition:pick(RealmUri),
+            Find = fun(_Trie) ->
+                bondy_registry_trie:find(Cont)
+            end,
+            bondy_registry_partition:execute(Pid, Find, [], 15000)
+    end.
+
+
+%% @private
+trie_match(Type, RealmUri, Uri, Opts0) ->
+    Match = fun(Trie) ->
+        Fun = bondy_registry_entry:mg_comparator(),
+        Opts = Opts0#{sort => Fun},
+        bondy_registry_trie:match(Type, RealmUri, Uri, Opts, Trie)
+    end,
+
+    case ?CONCURRENT_MATCH(Type) of
+        true ->
+            Match(trie(RealmUri));
+
+        false ->
+            Pid = bondy_registry_partition:pick(RealmUri),
+            bondy_registry_partition:execute(Pid, Match, [], 15000)
+    end.
+
+
+%% @private
+trie_match(?EOT) ->
+    ?EOT;
+
+trie_match(Cont) ->
+    #{
+        type := Type,
+        realm_uri := RealmUri
+    } = bondy_registry_trie:continuation_info(Cont),
+
+    case ?CONCURRENT_MATCH(Type) of
+        true ->
+            bondy_registry_trie:match(Cont);
 
         false ->
             Pid = bondy_registry_partition:pick(RealmUri),
             Match = fun(_Trie) ->
-                bondy_registry_trie:FN(Cont)
+                bondy_registry_trie:match(Cont)
             end,
             bondy_registry_partition:execute(Pid, Match, [], 15000)
     end.
 
 
 %% @private
-project_trie_match_res(L) when is_list(L) ->
-    %% registrations
+project_trie_res(registration, L) when is_list(L) ->
     lookup_entries(registration, L, []);
 
-project_trie_match_res({L, R}) when is_list(L), is_list(R) ->
-    %% subscriptions
+project_trie_res(subscription, {L, R}) when is_list(L), is_list(R) ->
     {lookup_entries(subscription, L, []), R};
 
-project_trie_match_res(?EOT) ->
+project_trie_res(_, ?EOT) ->
     ?EOT;
 
-project_trie_match_res({L, Cont}) when is_list(L) ->
-    #{type := Type} = bondy_registry_trie:continuation_info(Cont),
+project_trie_res(Type, {L, Cont}) when is_list(L) ->
     {lookup_entries(Type, L, []), Cont};
 
-project_trie_match_res({{L, R}, Cont}) when is_list(L), is_list(R) ->
-    #{type := Type} = bondy_registry_trie:continuation_info(Cont),
+project_trie_res(Type, {{L, R}, Cont}) when is_list(L), is_list(R) ->
     Entries = lookup_entries(Type, L, []),
     {{Entries, R}, Cont};
 
-project_trie_match_res({error, Reason}) ->
+project_trie_res(_, {error, Reason}) ->
     error(Reason).
 
+
+%% @private
+lookup_entries(_, [], []) ->
+    [];
+
+lookup_entries(registration, [], Acc) ->
+    lists:sort(bondy_registry_entry:mg_comparator(), Acc);
+
+lookup_entries(subscription, [], Acc) ->
+    Acc;
+
+lookup_entries(Type, [H|T], Acc) ->
+    EntryKey = entry_key(Type, H),
+
+    case bondy_registry_entry:lookup(Type, EntryKey) of
+        {ok, Entry} ->
+            lookup_entries(Type, T, [Entry|Acc]);
+
+        {error, not_found} ->
+            lookup_entries(Type, T, Acc)
+    end.
+
+
+%% @private
+entry_key(registration, {_, Val, _, _, _}) ->
+    %% {{Realm, Uri}, EntryKey, IsProxy, Invoke}
+    Val;
+
+entry_key(subscription, {_, Val, _}) ->
+    %% {{Realm, Uri}, EntryKey, IsProxy}
+    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -1756,13 +1803,6 @@ init_trie(State) ->
     end.
 
 
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
-
-
 %% @private
 maybe_fun(undefined, _) ->
     undefined;
@@ -1812,7 +1852,10 @@ do_remove_all({[], Cont}, SessionId, Fun, Acc) ->
     %% We apply the Fun here as opposed to in every iteration to minimise art
     %% trie concurrency access,
     _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
-    do_remove_all(bondy_registry_entry:match(Cont), SessionId, Fun, Acc);
+
+    Res = bondy_registry_entry:match(Cont, ?REMOVE_MATCH_OPTS),
+
+    do_remove_all(Res, SessionId, Fun, Acc);
 
 do_remove_all({[{_EntryKey, Entry}|T], Cont}, SessionId, Fun, Acc) ->
     Session = bondy_registry_entry:session_id(Entry),
@@ -1830,28 +1873,6 @@ do_remove_all({[{_EntryKey, Entry}|T], Cont}, SessionId, Fun, Acc) ->
             %% No longer our session
             ok
     end.
-
-
-%% @private
-lookup_entries(_, [], Acc) ->
-    lists:reverse(Acc);
-
-lookup_entries(Type, [H|T], Acc) ->
-    EntryKey = entry_key(Type, H),
-
-    case bondy_registry_entry:lookup(Type, EntryKey) of
-        {ok, Entry} ->
-            lookup_entries(Type, T, [Entry|Acc]);
-
-        {error, not_found} ->
-            lookup_entries(Type, T, Acc)
-    end.
-
-
-%% @private
-entry_key(subscription, {_, Val, _}) -> Val;
-entry_key(registration, {_, _, Val, _}) -> Val.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -1908,6 +1929,9 @@ do_prune(_Node, _Index, _From, L) when is_list(L) ->
                         entry_type => Type,
                         entry_key => EntryKey
                     }),
+                    ok;
+
+                ?TOMBSTONE ->
                     ok;
 
                 Entry ->

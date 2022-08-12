@@ -615,6 +615,10 @@ do_send(To, M, #{realm_uri := RealmUri} = Opts) ->
                 true ->
                     ok;
                 false ->
+                    %% bondy_dealer (using bondy_rpc_load_balancer) is already
+                    %% checking if process is alive, so for RPC this is a
+                    %% double check, not expensive but a waste anyway.
+                    %% TODO Consider avoiding this check here.
                     case erlang:is_process_alive(Pid) of
                         true ->
                             Pid ! request(self(), RealmUri, M),

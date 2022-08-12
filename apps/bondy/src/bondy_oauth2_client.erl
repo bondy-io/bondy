@@ -155,7 +155,7 @@ validate(Data0, Spec) ->
 %% @private
 maybe_add_groups(#{<<"groups">> := Groups0} = M) ->
     Groups1 = [<<"api_clients">> | Groups0],
-    maps:put(<<"groups">>, sets:to_list(sets:from_list(Groups1)), M);
+    maps:put(<<"groups">>, lists:usort(Groups1), M);
 
 maybe_add_groups(#{} = M) ->
     %% For update op

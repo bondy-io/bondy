@@ -395,16 +395,12 @@ summary(Type, RealmUri) ->
             [] ->
                 {ok, Default};
             Entries ->
-                Tuples = [
-                    {
-                        bondy_registry_entry:id(E),
-                        bondy_registry_entry:match_policy(E)
-                    } || E <- Entries
-                ],
-                Summary = leap_tuples:summarize(
-                    Tuples, {2, {function, collect, [1]}}, #{}
+                Grouped = bondy_utils:groups_from_list(
+                    fun(E) -> bondy_registry_entry:match_policy(E) end,
+                    fun(E) -> bondy_registry_entry:id(E) end,
+                    Entries
                 ),
-                Map = maps:merge(Default, maps:from_list(Summary)),
+                Map = maps:merge(Default, Grouped),
                 {ok, Map}
         end
     catch
