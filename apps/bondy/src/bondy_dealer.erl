@@ -1618,7 +1618,7 @@ choose({L, Cont}, CallOpts) ->
     Group :: {Uri :: uri(), Match :: binary(), Invoke :: binary()} | undefined,
     Acc :: [entry()],
     Cont :: trie_continuation()) ->
-    {ok, Entry :: entry()} | {error, no_proc}.
+    {ok, Entry :: entry()} | {error, no_proc | any()}.
 
 choose([], _, _, [], ?EOT) ->
     {error, no_proc};
