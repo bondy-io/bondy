@@ -1931,6 +1931,9 @@ do_prune(_Node, _Index, _From, L) when is_list(L) ->
                     }),
                     ok;
 
+                ?TOMBSTONE ->
+                    ok;
+
                 Entry ->
                     delete_indices(Entry)
             end
