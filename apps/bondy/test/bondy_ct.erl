@@ -364,7 +364,10 @@ start_bondy() ->
                 {ok, _} ->
                     ok;
                 {error, {already_started, _}} ->
-                    ok
+                    ok;
+                {error, {{shutdown, {failed_to_start_child, net_kernel, {'EXIT', nodistribution}}}, _}} ->
+                    os:cmd("epmd -daemon"),
+                    {ok, _} = net_kernel:start(Nodename)
             end,
 
 
