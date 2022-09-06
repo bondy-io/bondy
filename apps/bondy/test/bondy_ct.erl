@@ -18,6 +18,7 @@
 
 -module(bondy_ct).
 -include_lib("common_test/include/ct.hrl").
+-include_lib("stdlib/include/assert.hrl").
 
 -define(KERNEL_ENV, [
     {logger_level, info},
@@ -378,12 +379,26 @@
     ]}
 ]).
 
+-define(OPTS_SLAVE, [
+    {monitor_master, true}
+]).
+
+-define(ORDER_CRITICAL_APPS, [
+    jobs,
+    gproc,
+    tuplespace,
+    partisan,
+    plum_db,
+    bondy
+]).
+
 -export([
     all/0,
     groups/1,
     suite/0,
     tests/1,
     start_bondy/0,
+    start_bondy/1,
     stop_bondy/0
 ]).
 
@@ -404,6 +419,7 @@ is_a_test(is_a_test) ->
 is_a_test(Function) ->
     hd(lists:reverse(string:tokens(atom_to_list(Function), "_"))) == "test".
 
+%% Start bondy on the master node.
 start_bondy() ->
     case persistent_term:get({?MODULE, bondy_started}, false) of
         false ->
@@ -448,6 +464,43 @@ start_bondy() ->
             ok
     end.
 
+%% Start bondy on a slave node with a given name and return the full node name.
+start_bondy(Node) ->
+    % List in the right order of the apps to start on the slave node
+    AllApps = [element(1, Line) || Line <- application:which_applications()],
+    ?assert(
+        lists:member(bondy, AllApps),
+        "bondy must run on master before starting a slave."
+    ),
+    OrderedApps = lists:append(AllApps -- ?ORDER_CRITICAL_APPS, ?ORDER_CRITICAL_APPS),
+
+    NodeName = start_slave(Node),
+
+    EnvSlave = update_for_slave(Node, ?ENV),
+    ok = rpc:call(NodeName, application, set_env, [EnvSlave], 1000),
+
+    PathsValid = [D || D <- code:get_path(), filelib:is_dir(D)],
+    maybe_error(rpc:call(NodeName, code, set_path, [PathsValid], 1000)),
+
+    % Load all apps then ensure they are started
+    _ = [
+        case rpc:call(NodeName, application, Fct, [App], 5000) of
+            ok ->
+                ok;
+            {ok, _} ->
+                ok;
+            {error, {already_loaded, _}} ->
+                ok;
+            {error, Error} ->
+                error({Fct, App, Error});
+            {badrpc, Error} ->
+                error({Fct, App, Error})
+        end
+     || Fct <- [load, ensure_all_started], App <- OrderedApps
+    ],
+
+    NodeName.
+
 stop_bondy() ->
     ok = application:stop(gproc),
     ok = application:stop(jobs),
@@ -457,4 +510,42 @@ stop_bondy() ->
 maybe_error({error, _} = Error) ->
     error(Error);
 maybe_error({ok, _}) ->
+    ok;
+maybe_error(true) ->
     ok.
+
+%% @private
+start_slave(Node) ->
+    case ct_slave:start(Node, ?OPTS_SLAVE) of
+        {ok, NodeName} ->
+            NodeName;
+        {error, already_started, NodeName} ->
+            NodeName;
+        {error, not_alive, nonode@nohost} ->
+            exit("Master is not a distributed node, call net_kernel:start before ct_slave:start");
+        {error, started_not_connected, NodeName} ->
+            % Only happens if slave was started with {monitor_master, false}
+            net_kernel:connect_node(NodeName) orelse
+                exit("Unable to connect to slave node " ++ NodeName),
+            NodeName
+    end.
+
+%% Functions to update ?ENV to start bondy on a slave node
+
+%% @private
+update_for_slave(Node, Config) ->
+    Config0 = key_value:put([partisan, connect_disterl], true, Config),
+    Config1 = key_value:put([partisan, peer_port], 18087, Config0),
+    Config2 = key_value:set([bondy, bridge_relay_tcp, enabled], false, Config1),
+
+    PathExtension = "_" ++ atom_to_list(Node),
+    Config3 = extend_path([plum_db, data_dir], PathExtension, Config2),
+    Config4 = extend_path([bondy, platform_log_dir], PathExtension, Config3),
+    Config5 = extend_path([bondy, platform_tmp_dir], PathExtension, Config4),
+    Config6 = extend_path([bondy, platform_data_dir], PathExtension, Config5),
+    Config6.
+
+%% @private
+extend_path(Key, Ext, Config) ->
+    Value = key_value:get(Key, Config) ++ Ext,
+    key_value:set(Key, Value, Config).
