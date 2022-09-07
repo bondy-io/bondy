@@ -124,6 +124,7 @@
         {tiered_slow_level, 0}
     ]},
     {partisan, [
+        {connect_disterl, true},
         {exchange_tick_period, 60000},
         {tls_options, [
             {cacertfile, "./etc/cacert.pem"},
@@ -534,8 +535,7 @@ start_slave(Node) ->
 
 %% @private
 update_for_slave(Node, Config) ->
-    Config0 = key_value:put([partisan, connect_disterl], true, Config),
-    Config1 = key_value:put([partisan, peer_port], 18087, Config0),
+    Config1 = key_value:put([partisan, peer_port], 18087, Config),
     Config2 = key_value:set([bondy, bridge_relay_tcp, enabled], false, Config1),
 
     PathExtension = "_" ++ atom_to_list(Node),
