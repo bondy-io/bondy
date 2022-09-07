@@ -1438,7 +1438,6 @@
 ]}.
 
 
-
 %% @doc Defines if PING control message functionality is enabled or
 %% not.
 %% This option affects server (Bondy) initiated pings only. Some clients
