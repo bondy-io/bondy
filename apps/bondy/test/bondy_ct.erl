@@ -535,15 +535,23 @@ start_slave(Node) ->
 
 %% @private
 update_for_slave(Node, Config) ->
-    Config1 = key_value:put([partisan, peer_port], 18087, Config),
-    Config2 = key_value:set([bondy, bridge_relay_tcp, enabled], false, Config1),
+    Config0 = key_value:set([admin_api_http, port], 19081, Config),
+    Config1 = key_value:set([admin_api_https, port], 19084, Config0),
+    Config2 = key_value:set([api_gateway_http, port], 19080, Config1),
+    Config3 = key_value:set([bondy, bridge_relay_tcp, enabled], false, Config2),
+    Config4 = key_value:set([bondy, bridge_relay_tcp, port], 19092, Config3),
+    Config5 = key_value:set([bondy, bridge_relay_tls, port], 19093, Config4),
+    Config6 = key_value:set([partisan, peer_port], 19086, Config5),
+    Config7 = key_value:set([wamp_tcp, port], 19082, Config6),
+    Config8 = key_value:set([wamp_tls, port], 19085, Config7),
 
     PathExtension = "_" ++ atom_to_list(Node),
-    Config3 = extend_path([plum_db, data_dir], PathExtension, Config2),
-    Config4 = extend_path([bondy, platform_log_dir], PathExtension, Config3),
-    Config5 = extend_path([bondy, platform_tmp_dir], PathExtension, Config4),
-    Config6 = extend_path([bondy, platform_data_dir], PathExtension, Config5),
-    Config6.
+    Config9 = extend_path([bondy, platform_data_dir], PathExtension, Config8),
+    ConfigA = extend_path([bondy, platform_etc_dir], PathExtension, Config9),
+    ConfigB = extend_path([bondy, platform_log_dir], PathExtension, ConfigA),
+    ConfigC = extend_path([bondy, platform_tmp_dir], PathExtension, ConfigB),
+    ConfigD = extend_path([plum_db, data_dir], PathExtension, ConfigC),
+    ConfigD.
 
 %% @private
 extend_path(Key, Ext, Config) ->
