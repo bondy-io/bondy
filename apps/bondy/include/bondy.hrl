@@ -125,7 +125,7 @@
     call_canceling => true,
     caller_identification => true,
     sharded_registration => false,
-    payload_passthru_mode => false
+    payload_passthru_mode => true
 }).
 
 -define(DEALER_FEATURES, (?COMMON_RPC_FEATURES)#{
@@ -156,7 +156,7 @@
 }).
 
 -define(COMMON_PUBSUB_FEATURES, #{
-    payload_passthru_mode => false,
+    payload_passthru_mode => true,
     publisher_identification => true,
     sharded_subscription => false
 }).
