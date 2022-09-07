@@ -361,8 +361,7 @@ features(Ctxt, Role, With) ->
 -spec is_feature_enabled(t(), atom(), binary()) -> boolean().
 
 is_feature_enabled(Ctxt, Role, Feature) ->
-    maps_utils:get_path([Role, Feature], roles(Ctxt), false).
-
+    key_value:get([Role, features, Feature], roles(Ctxt), false).
 
 
 %% -----------------------------------------------------------------------------
@@ -371,6 +370,7 @@ is_feature_enabled(Ctxt, Role, Feature) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec realm_uri(t()) -> optional(uri()).
+
 realm_uri(#{session := S}) ->
     bondy_session:realm_uri(S);
 

@@ -638,10 +638,18 @@ not_found_error(M, _Ctxt) ->
         <<"There are no subcriptions matching the id ",
         $', (M#unsubscribe.subscription_id)/integer, $'>>
     ),
+
+    ErrorDetails = case M of
+        #publish{options = Opts} ->
+            maps:with(?WAMP_PPT_ATTRS, Opts);
+        _ ->
+            #{}
+    end,
+
     wamp_message:error(
         ?UNSUBSCRIBE,
         M#unsubscribe.request_id,
-        #{},
+        ErrorDetails,
         ?WAMP_NO_SUCH_SUBSCRIPTION,
         [Msg],
         #{
@@ -687,15 +695,19 @@ do_publish(#publish{} = M, Ctxt) ->
     MatchOpts = make_match_opts(SessionId, Opts),
     Subscriptions = match_subscriptions(TopicUri, RealmUri, MatchOpts),
 
-    Details = make_event_details(TopicUri, Opts, Ctxt),
-
     %% We generate a new publication id
     PubId = bondy_utils:gen_message_id(global),
+
+    %% Prepare details, we will use them for the local event creation and also
+    %% to forward to the remote nodes (See FwdOpts below)
+    Details = make_event_details(TopicUri, Opts, Ctxt),
 
     %% We create a high order fun that will generate the event for each
     %% subscription_id
     Template = wamp_message:event(0, PubId, Details, Args, KWArgs),
 
+    %% TODO This fun should also take a 2nd arg with the Subscriber features
+    %% so that we can remove Details that are not supported e.g. disclose info
     MakeEvent = fun(SubsId) ->
         wamp_message:copy_event(Template, SubsId)
     end,
@@ -707,7 +719,6 @@ do_publish(#publish{} = M, Ctxt) ->
 
     %% We publish to all matching local subscribers and/or forward to
     %% local bridge relays and remote subscribers in the cluster peer nodes.
-
     FwdOpts = #{
         realm_uri => RealmUri,
         from => Publisher,
@@ -736,53 +747,53 @@ when is_function(MakeEvent, 1), is_function(Fwd, 1) ->
     %% Erlang might penalise a process that is sending lots of messages to many
     %% processes. Maybe resolve this in the bondy_registry_trie itself!
     Fun = fun
-            (Node, ok) when is_atom(Node) ->
-                %% A remote subscriber located in a peer cluster node.
-                Fwd(Node);
+        (Node, ok) when is_atom(Node) ->
+            %% A remote subscriber located in a peer cluster node.
+            Fwd(Node);
 
-            (Entry, ok) ->
-                Subscriber = bondy_registry_entry:ref(Entry),
-                EntryId = bondy_registry_entry:id(Entry),
-                IsCallback = undefined =/= bondy_ref:callback(Subscriber),
-                Publish =
-                    case bondy_registry_entry:find_option(group_id, Entry) of
-                        {ok, _} when Origin == remote ->
-                            %% Support for Broker Bridge functionality
-                            %% We MUST not publish or forward if Subscriber is
-                            %% in a group and the message has been forwarded,
-                            %% as the instance of this subscriber local to the
-                            %% Publisher must have already received this event.
-                            false;
-                        _ ->
-                            true
-                    end,
+        (Entry, ok) ->
+            Subscriber = bondy_registry_entry:ref(Entry),
+            EntryId = bondy_registry_entry:id(Entry),
+            IsCallback = undefined =/= bondy_ref:callback(Subscriber),
+            Publish =
+                case bondy_registry_entry:find_option(group_id, Entry) of
+                    {ok, _} when Origin == remote ->
+                        %% Support for Broker Bridge functionality
+                        %% We MUST not publish or forward if Subscriber is
+                        %% in a group and the message has been forwarded,
+                        %% as the instance of this subscriber local to the
+                        %% Publisher must have already received this event.
+                        false;
+                    _ ->
+                        true
+                end,
 
-                case {Publish, IsCallback} of
-                    {true, true} ->
-                        ?LOG_INFO(#{description => "CB Subscriber!!!!!!"}),
-                        Event = MakeEvent(EntryId),
-                        CBArgs = bondy_registry_entry:callback_args(Entry),
-                        ok = apply_dynamic_callback(Event, Subscriber, CBArgs);
+            case {Publish, IsCallback} of
+                {true, true} ->
+                    ?LOG_INFO(#{description => "CB Subscriber!!!!!!"}),
+                    Event = MakeEvent(EntryId),
+                    CBArgs = bondy_registry_entry:callback_args(Entry),
+                    ok = apply_dynamic_callback(Event, Subscriber, CBArgs);
 
-                    {true, false} ->
-                        case bondy_ref:is_bridge_relay(Subscriber) of
-                            true ->
-                                %% We treat a bridge relay subscriber as a
-                                %% remote subscriber as we want it to receive
-                                %% the PUBLICATION as opposed to the EVENT, as
-                                %% the bridge relay will
-                                %% need for forward the publication to a remote
-                                %% cluster.
-                                Fwd(Subscriber);
+                {true, false} ->
+                    case bondy_ref:is_bridge_relay(Subscriber) of
+                        true ->
+                            %% We treat a bridge relay subscriber as a
+                            %% remote subscriber as we want it to receive
+                            %% the PUBLICATION as opposed to the EVENT, as
+                            %% the bridge relay will
+                            %% need for forward the publication to a remote
+                            %% cluster.
+                            Fwd(Subscriber);
 
-                            false ->
-                                Event = MakeEvent(EntryId),
-                                ok = bondy:send(RealmUri, Subscriber, Event)
-                        end;
+                        false ->
+                            Event = MakeEvent(EntryId),
+                            ok = bondy:send(RealmUri, Subscriber, Event)
+                    end;
 
-                    {false, _} ->
-                        ok
-                end
+                {false, _} ->
+                    ok
+            end
     end,
 
     %% We send the event to the local subscribers and we get back a list of
@@ -798,7 +809,8 @@ make_match_opts(SessionId, Opts) ->
     %%
     %% 1. if there is an eligible attribute present, the Subscriber's sessionid
     %% is in this list [DONE]
-    %% 2. if there is an exclude attribute present, the Subscriber's sessionid is NOT in this list [DONE]
+    %% 2. if there is an exclude attribute present, the Subscriber's sessionid
+    %% is NOT in this list [DONE]
     %% 3. if there is an eligible_authid attribute present, the
     %% Subscriber's authid is in this list  [TODO]
     %% 4. if there is an exclude_authid attribute present, the Subscriber's
@@ -847,25 +859,22 @@ make_match_opts(SessionId, Opts) ->
 
 %% @private
 make_event_details(TopicUri, Opts, Ctxt) ->
+    %5 We forward PPT attributes
+    Details0 = maps:with(?WAMP_PPT_ATTRS, Opts),
 
-    %% TODO disclose info only if feature is announced by Publishers, Brokers
-    %% and Subscribers
-
-    Details0 = #{
-        %% This is mandatory only for pattern-based subscriptions but we prefer
-        %% to always have it
-        topic => TopicUri,
-        %% Private internal
-        <<"timestamp">> => erlang:system_time(millisecond)
+    Details = Details0#{
+        %% This is mandatory only for pattern-based subscriptions
+        %% but we prefer to always add it
+        topic => TopicUri
     },
 
     %% TODO disclose info only if feature is announced by Publishers, Brokers
     %% and Subscribers
     case maps:get(disclose_me, Opts, true) of
         true ->
-            bondy_context:publisher_details(Ctxt, Details0);
+            bondy_context:publisher_details(Ctxt, Details);
         false ->
-            Details0
+            Details
     end.
 
 

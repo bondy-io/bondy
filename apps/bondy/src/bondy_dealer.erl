@@ -923,7 +923,8 @@ do_forward(#yield{} = M, Ctxt0) ->
             %% promise).
             Result = wamp_message:result(
                 CallId,
-                %% TODO check if yield.options should be assigned to result.details
+                %% We fwd all yield options (we know we should at least forward
+                %% all ppt_* attributes in Options)
                 M#yield.options,
                 M#yield.args,
                 M#yield.kwargs
@@ -1049,6 +1050,15 @@ apply_dynamic_callback(#call{} = Msg, Callee) ->
 %% @private
 -spec apply_dynamic_callback(wamp_call(), bondy_ref:t(), [any()]) ->
     wamp_result() | wamp_error().
+
+apply_dynamic_callback(#call{options = #{ppt_scheme := _}} = Msg, _, _) ->
+    wamp_message:error(
+        ?CALL,
+        Msg#call.request_id,
+        Msg#call.options,
+        ?WAMP_INVALID_ARGUMENT,
+        [<<"Payload Passthru Mode not supported on Router APIs.">>]
+    );
 
 apply_dynamic_callback(#call{} = Msg, Callee, CBArgs) ->
     CallId = Msg#call.request_id,
@@ -1480,7 +1490,7 @@ handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
 
     Opts = Opts0#{call_opts => Msg#call.options},
 
-    handle_call(Msg#call.request_id, Uri, Fun, Opts, Ctxt0).
+    handle_call(Msg, Uri, Fun, Opts, Ctxt0).
 
 
 %% -----------------------------------------------------------------------------
@@ -1489,10 +1499,12 @@ handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
 %% Throws {not_authorized, binary()}
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_call(id(), uri(), call_fun(), invoke_opts(), bondy_context:t()) ->
+-spec handle_call(
+    wamp_call(), uri(), call_fun(), invoke_opts(), bondy_context:t()) ->
     ok.
 
-handle_call(CallId, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
+handle_call(Msg, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
+    CallId = Msg#call.request_id,
     RealmUri = bondy_context:realm_uri(Ctxt),
     %% choose/2 expects a match result w/continuations
     MatchOpts = #{limit => 100},
@@ -1518,7 +1530,27 @@ handle_call(CallId, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
 
         {error, ErrorMap} when is_map(ErrorMap) ->
             %% bondy_rpc_load_balancer opts validation error
-            Error = error_from_map(ErrorMap, CallId),
+            ErrorMsg = <<
+                "The request failed due to invalid option parameters."
+            >>,
+
+            ErrorOpts = maps:with(?WAMP_PPT_ATTRS, Msg#call.options),
+
+            Error = wamp_message:error(
+                ?CALL,
+                CallId,
+                ErrorOpts,
+                ?WAMP_INVALID_ARGUMENT,
+                [ErrorMsg],
+                #{
+                    message => ErrorMsg,
+                    details => ErrorMap,
+                    description => <<
+                        "A required options parameter was missing in the "
+                        "request or while present they were malformed."
+                    >>
+                }
+            ),
             ok = reply_error(Error, Ctxt)
     end.
 
@@ -1706,7 +1738,7 @@ coerce_routing_key(CallOpts) ->
 %% @end
 prepare_call(M, Uri, Entry, Ctxt) ->
     Args = maybe_append_callback_args(M#call.args, Entry),
-    Options = append_options(
+    Options = prepare_call_options(
         M#call.options, M#call.request_id, Uri, Entry, Ctxt
     ),
     M#call{options = Options, args = Args}.
@@ -1736,6 +1768,7 @@ call_to_invocation(#call{options = #{'$private' := Private}} = M, ReqId) ->
     wamp_message:invocation(ReqId, RegistrationId, Details, Args, KWArgs).
 
 
+%% -----------------------------------------------------------------------------
 %% @private
 %% @doc If this is a callback, then it must be a remote callback, as we should
 %% have handled the local callback sequentially.
@@ -1743,7 +1776,7 @@ call_to_invocation(#call{options = #{'$private' := Private}} = M, ReqId) ->
 %% we avoid the receiving node having to look the local copy of the entry
 %% to retrieve the arguments.
 %% @end
-
+%% -----------------------------------------------------------------------------
 maybe_append_callback_args(Args0, Entry) ->
     Args = args_to_list(Args0),
 
@@ -1755,8 +1788,17 @@ maybe_append_callback_args(Args0, Entry) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
 %% @private
-append_options(Options, CallId, Uri, Entry, Ctxt) ->
+%% @doc An internal function that we use to parse and evaluate CALL.Options. We
+%% use this to cache certain metadata we need to either forward the CALL
+%% to another node and/or turn the CALL into an INVOCATION.
+%% The resulting CALL has Options.'$private' field with subfields call_id,
+%% registration_id and invocation_details. The latter is the map we will pass
+%% as value to INVOCATION.Details.
+%% @end
+%% -----------------------------------------------------------------------------
+prepare_call_options(Options, CallId, Uri, Entry, Ctxt) ->
     RegistrationId =
         case bondy_registry_entry:is_proxy(Entry) of
             true ->
@@ -1768,7 +1810,10 @@ append_options(Options, CallId, Uri, Entry, Ctxt) ->
                 bondy_registry_entry:id(Entry)
         end,
 
-    Details0 = #{
+    %% Forward PPT attributes to INVOCATION.Details
+    Details0 = maps:with(?WAMP_PPT_ATTRS, Options),
+
+    Details1 = Details0#{
         procedure => Uri,
         trust_level => 0
     },
@@ -1787,11 +1832,11 @@ append_options(Options, CallId, Uri, Entry, Ctxt) ->
     ),
     DiscloseMe = maps:get(disclose_me, Options, true),
 
-    Details1 = case DiscloseCaller orelse DiscloseMe of
+    Details2 = case DiscloseCaller orelse DiscloseMe of
         true ->
-            bondy_context:caller_details(Ctxt, Details0);
+            bondy_context:caller_details(Ctxt, Details1);
         false ->
-            Details0
+            Details1
     end,
 
     DiscloseSession = bondy_registry_entry:get_option(
@@ -1808,9 +1853,9 @@ append_options(Options, CallId, Uri, Entry, Ctxt) ->
                 'x_authroles' => bondy_session:authroles(Session),
                 'x_meta' => key_value:get([authextra, meta], Info0, #{})
             },
-            Details1#{'x_session_info' => Info};
+            Details2#{'x_session_info' => Info};
         false ->
-            Details1
+            Details2
     end,
 
     Options#{
@@ -1851,20 +1896,15 @@ on_delete(Entry) ->
     bondy_event_manager:notify({registration_deleted, Entry}).
 
 
-error_from_map(Error, CallId) ->
-    Msg = <<"The request failed due to invalid option parameters.">>,
-    wamp_message:error(
-        ?CALL,
-        CallId,
-        #{},
-        ?WAMP_INVALID_ARGUMENT,
-        [Msg],
-        #{
-            message => Msg,
-            details => Error,
-            description => <<"A required options parameter was missing in the request or while present they were malformed.">>
-        }
-    ).
+%% @private
+%% revoke(_Entry) ->
+    %% If the Callee does not support registration_revocation, the Dealer may
+    %% still revoke a registration to support administrative functionality. In
+    %% this case, the Dealer MUST NOT send an UNREGISTERED message to the
+    %% Callee. The Callee MAY use the registration meta event
+    %% wamp.registration.on_unregister to determine whether a session is
+    %% removed from a registration.
+    %% ok.
 
 
 % %% @private
