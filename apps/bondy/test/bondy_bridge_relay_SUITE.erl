@@ -96,6 +96,7 @@ all() ->
 -define(OPT_AUTOSTART, #{autostart => true}).
 
 init_per_suite(Config) ->
+    ct:pal("ct config: ~p~n", [Config]),
     bondy_ct:start_bondy(),
     NodeBridge = bondy_ct:start_bondy(bridge),
     {ok, _Bridge} =

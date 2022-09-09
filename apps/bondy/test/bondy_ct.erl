@@ -380,6 +380,71 @@
     ]}
 ]).
 
+-define(SLAVE_PARTISAN, [
+    {lazy_tick_period, 1000},
+    {reservations, []},
+    {distance_enabled, true},
+    {disable_fast_forward, false},
+    {listen_addrs, [#{ip => {127, 0, 0, 1}, port => 19086}]},
+    {exchange_selection, optimized},
+    {ref_encoding, false},
+    {tag, undefined},
+    {random_promotion, true},
+    {membership_strategy_tracing, false},
+    {tracing, false},
+    {relay_ttl, 5},
+    {register_pid_for_encoding, false},
+    {gossip, true},
+    {name, 'bridge@Alans-MacBook-Pro'},
+    {shrinking, false},
+    % to be updated !!
+    {peer_port, 18086},
+    {tree_refresh, 1000},
+    {remote_ref_binary_padding, false},
+    {ingress_delay, 0},
+    {random_seed, {90873625, -576460750611642483, -576460752303423455}},
+    {periodic_interval, 10000},
+    {parallelism, 1},
+    {exchange_tick_period, 10000},
+    {replaying, false},
+    {periodic_enabled, true},
+    {connect_disterl, true},
+    {min_active_size, 3},
+    {membership_strategy, partisan_full_membership_strategy},
+    {tls_client_options, [
+        {verify, verify_none},
+        {versions, ['tlsv1.3']}
+    ]},
+    {disable_fast_receive, false},
+    {arwl, 5},
+    {channels, [data, membership, rpc, undefined, wamp_peer_relay]},
+    {fanout, 5},
+    {peer_host, undefined},
+    {passive_view_shuffle_period, 10000},
+    {binary_padding, false},
+    {partisan_peer_service_manager, partisan_pluggable_peer_service_manager},
+    {egress_delay, 0},
+    {tls_server_options, [
+        {verify, verify_none},
+        {versions, ['tlsv1.3']}
+    ]},
+    {orchestration_strategy, undefined},
+    {peer_ip, {127, 0, 0, 1}},
+    {broadcast_mods, [partisan_plumtree_backend, plum_db]},
+    {remote_ref_uri_padding, false},
+    {prwl, 30},
+    {nodestring, <<"bridge@Alans-MacBook-Pro">>},
+    {connection_jitter, 1000},
+    {tls, false},
+    {causal_labels, []},
+    {remote_ref_as_uri, true},
+    {max_active_size, 6},
+    {max_passive_size, 30},
+    {pid_encoding, false},
+    {xbot_interval, 32708},
+    {broadcast, false}
+]).
+
 -define(OPTS_SLAVE, [
     {monitor_master, true}
 ]).
@@ -427,8 +492,8 @@ start_bondy() ->
             application:set_env([{kernel, ?KERNEL_ENV}]),
 
             {ok, Hostname} = inet:gethostname(),
-            Nodename = [list_to_atom("runner@" ++ Hostname), shortnames],
-            case net_kernel:start(Nodename) of
+            NetKernelOptions = [list_to_atom("runner@" ++ Hostname), shortnames],
+            case net_kernel:start(NetKernelOptions) of
                 {ok, _} ->
                     ok;
                 {error, {already_started, _}} ->
@@ -437,7 +502,7 @@ start_bondy() ->
                     {shutdown, {failed_to_start_child, net_kernel, {'EXIT', nodistribution}}}, _
                 }} ->
                     os:cmd("epmd -daemon"),
-                    {ok, _} = net_kernel:start(Nodename)
+                    {ok, _} = net_kernel:start(NetKernelOptions)
             end,
 
             _ = [
@@ -474,31 +539,74 @@ start_bondy(Node) ->
         "bondy must run on master before starting a slave."
     ),
     OrderedApps = lists:append(AllApps -- ?ORDER_CRITICAL_APPS, ?ORDER_CRITICAL_APPS),
+    write_term("out/master_apps", OrderedApps),
+    [
+        begin
+            case application:get_all_env(App) of
+                [] ->
+                    ok;
+                AppConfig ->
+                    Filename = io_lib:format("out/master_app_~p", [App]),
+                    write_term(Filename, lists:sort(AppConfig))
+            end
+        end
+     || App <- lists:sort(OrderedApps)
+    ],
+    PrivDirs = [{App, code:priv_dir(App)} || App <- lists:sort(OrderedApps)],
+    write_term("out/master_priv_dirs", lists:sort(PrivDirs)),
 
     NodeName = start_slave(Node),
+    ct:pal("Node: ~p", [NodeName]),
 
+    %EnvNoPartisan = [{App, Config} || {App, Config} <- ?ENV, App /= partisan],
+    %EnvWithPartisan = EnvNoPartisan ++ [{partisan, ?SLAVE_PARTISAN}],
+    %EnvSlave = update_for_slave(Node, EnvWithPartisan),
     EnvSlave = update_for_slave(Node, ?ENV),
+
     ok = rpc:call(NodeName, application, set_env, [EnvSlave], 1000),
 
     PathsValid = [D || D <- code:get_path(), filelib:is_dir(D)],
+    write_term("out/master_path", lists:sort(PathsValid)),
     maybe_error(rpc:call(NodeName, code, set_path, [PathsValid], 1000)),
 
     % Load all apps then ensure they are started
-    _ = [
-        case rpc:call(NodeName, application, Fct, [App], 5000) of
-            ok ->
-                ok;
-            {ok, _} ->
-                ok;
-            {error, {already_loaded, _}} ->
-                ok;
-            {error, Error} ->
-                error({Fct, App, Error});
-            {badrpc, Error} ->
-                error({Fct, App, Error})
-        end
-     || Fct <- [load, ensure_all_started], App <- OrderedApps
-    ],
+    try
+        _ = [
+            case rpc:call(NodeName, application, Fct, [App], 5000) of
+                ok ->
+                    ok;
+                {ok, _} ->
+                    ok;
+                {error, {already_loaded, _}} ->
+                    ok;
+                {error, Error} ->
+                    error({Fct, App, Error});
+                {badrpc, Error} ->
+                    error({Fct, App, Error})
+            end
+         || Fct <- [load, ensure_all_started], App <- OrderedApps
+        ],
+        ok
+    catch
+        _:E ->
+            ct:pal("Got an exception"),
+            SlaveAllApps = lists:sort([
+                element(1, L)
+             || L <- rpc:call(NodeName, application, which_applications, [], 1000)
+            ]),
+            write_term("out/slave_apps", lists:sort(SlaveAllApps)),
+            [
+                case rpc:call(NodeName, application, get_all_env, [App], 1000) of
+                    [] ->
+                        ok;
+                    AppConfig ->
+                        Filename = io_lib:format("out/slave_app_~p", [App]),
+                        write_term(Filename, lists:sort(AppConfig))
+                end
+             || App <- OrderedApps
+            ],
+            error(E)
+    end,
 
     NodeName.
 
@@ -535,25 +643,55 @@ start_slave(Node) ->
 
 %% @private
 update_for_slave(Node, Config) ->
-    Config0 = key_value:set([admin_api_http, port], 19081, Config),
-    Config1 = key_value:set([admin_api_https, port], 19084, Config0),
-    Config2 = key_value:set([api_gateway_http, port], 19080, Config1),
-    Config3 = key_value:set([bondy, bridge_relay_tcp, enabled], false, Config2),
-    Config4 = key_value:set([bondy, bridge_relay_tcp, port], 19092, Config3),
-    Config5 = key_value:set([bondy, bridge_relay_tls, port], 19093, Config4),
-    Config6 = key_value:set([partisan, peer_port], 19086, Config5),
-    Config7 = key_value:set([wamp_tcp, port], 19082, Config6),
-    Config8 = key_value:set([wamp_tls, port], 19085, Config7),
+    Plus1000 = fun(Port) -> 1000 + Port end,
+    ExtendPath = fun(Path) -> Path ++ "_" ++ atom_to_list(Node) end,
 
-    PathExtension = "_" ++ atom_to_list(Node),
-    Config9 = extend_path([bondy, platform_data_dir], PathExtension, Config8),
-    ConfigA = extend_path([bondy, platform_etc_dir], PathExtension, Config9),
-    ConfigB = extend_path([bondy, platform_log_dir], PathExtension, ConfigA),
-    ConfigC = extend_path([bondy, platform_tmp_dir], PathExtension, ConfigB),
-    ConfigD = extend_path([plum_db, data_dir], PathExtension, ConfigC),
-    ConfigD.
+    Updates = [
+        {[bondy, admin_api_http, port], Plus1000},
+        {[bondy, admin_api_https, port], Plus1000},
+        {[bondy, api_gateway_http, port], Plus1000},
+        {[bondy, api_gateway_https, port], Plus1000},
+        %{[bondy, bridge_relay_tcp, enabled], false},
+        {[bondy, bridge_relay_tcp, port], Plus1000},
+        {[bondy, bridge_relay_tls, port], Plus1000},
+        {[bondy, platform_data_dir], ExtendPath},
+        {[bondy, platform_etc_dir], ExtendPath},
+        {[bondy, platform_log_dir], ExtendPath},
+        {[bondy, platform_tmp_dir], ExtendPath},
+        {[bondy, wamp_tcp, port], Plus1000},
+        {[bondy, wamp_tls, port], Plus1000},
+        {[eleveldb, data_root], ExtendPath},
+        {[partisan, peer_port], Plus1000},
+        % reverted?
+        {[plum_db, aae_enabled], true},
+        {[plum_db, data_dir], ExtendPath}
+    ],
+    Config1 = lists:foldl(fun(Elem, Acc) -> key_value_apply(Elem, Acc) end, Config, Updates),
+
+    AllApps = [element(1, Line) || Line <- application:which_applications()],
+    lists:foldl(
+        fun(App, Acc) ->
+            PrivDir = code:priv_dir(App),
+            key_value:set([App, priv_dir], ExtendPath(PrivDir), Acc)
+        end,
+        Config1,
+        AllApps
+    ).
 
 %% @private
-extend_path(Key, Ext, Config) ->
-    Value = key_value:get(Key, Config) ++ Ext,
-    key_value:set(Key, Value, Config).
+key_value_apply({Key, Change}, Config) when is_function(Change, 0) ->
+    Value = Change(),
+    key_value:set(Key, Value, Config);
+key_value_apply({Key, Change}, Config) when is_function(Change, 1) ->
+    OldValue = key_value:get(Key, Config),
+    NewValue = Change(OldValue),
+    key_value:set(Key, NewValue, Config);
+key_value_apply({Key, Change}, Config) when not is_function(Change) ->
+    key_value:set(Key, Change, Config).
+
+%% @private
+write_term(Filename, Term) ->
+    T = io_lib:format("~p.~n", [Term]),
+    B = unicode:characters_to_binary(T),
+    ok = filelib:ensure_dir(Filename),
+    ok = file:write_file(Filename, B).
