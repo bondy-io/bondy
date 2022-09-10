@@ -356,10 +356,11 @@ handle_outbound(M, St) ->
             Bin = wamp_encoding:encode(M, encoding(St)),
             {ok, Bin, St};
         false ->
-            %% RFC: WAMP implementations MUST close sessions (disposing all of their resources such as subscriptions and registrations) on protocol errors caused by offending peers.
+            %% RFC: WAMP implementations MUST close sessions (disposing all of
+            %% their resources such as subscriptions and registrations) on
+            %% protocol errors caused by offending peers.
             {stop, St}
     end.
-
 
 
 
