@@ -455,7 +455,8 @@
     tuplespace,
     partisan,
     plum_db,
-    bondy
+    bondy,
+    bondy_broker_bridge
 ]).
 
 -export([
@@ -490,6 +491,9 @@ start_bondy() ->
     case persistent_term:get({?MODULE, bondy_started}, false) of
         false ->
             application:set_env([{kernel, ?KERNEL_ENV}]),
+
+            AllApps0 = [element(1, Line) || Line <- application:which_applications()],
+            ct:pal("master pre net_kernel:start~n~p~n", [AllApps0]),
 
             {ok, Hostname} = inet:gethostname(),
             NetKernelOptions = [list_to_atom("runner@" ++ Hostname), shortnames],
@@ -538,8 +542,8 @@ start_bondy(Node) ->
         lists:member(bondy, AllApps),
         "bondy must run on master before starting a slave."
     ),
-    OrderedApps = lists:append(AllApps -- ?ORDER_CRITICAL_APPS, ?ORDER_CRITICAL_APPS),
-    write_term("out/master_apps", OrderedApps),
+    OrderedAppsAll = lists:append(AllApps -- ?ORDER_CRITICAL_APPS, ?ORDER_CRITICAL_APPS),
+    ct:pal("master pre node start~n~p~n", [OrderedAppsAll]),
     [
         begin
             case application:get_all_env(App) of
@@ -550,18 +554,25 @@ start_bondy(Node) ->
                     write_term(Filename, lists:sort(AppConfig))
             end
         end
-     || App <- lists:sort(OrderedApps)
+     || App <- lists:sort(OrderedAppsAll)
     ],
-    PrivDirs = [{App, code:priv_dir(App)} || App <- lists:sort(OrderedApps)],
+    PrivDirs = [{App, code:priv_dir(App)} || App <- lists:sort(OrderedAppsAll)],
     write_term("out/master_priv_dirs", lists:sort(PrivDirs)),
 
     NodeName = start_slave(Node),
     ct:pal("Node: ~p", [NodeName]),
+    AppsSlave0 = [
+        element(1, L)
+     || L <- rpc:call(NodeName, application, which_applications, [], 1000)
+    ],
+    ct:pal("slave post node start~n~p~n", [AppsSlave0]),
 
     %EnvNoPartisan = [{App, Config} || {App, Config} <- ?ENV, App /= partisan],
     %EnvWithPartisan = EnvNoPartisan ++ [{partisan, ?SLAVE_PARTISAN}],
     %EnvSlave = update_for_slave(Node, EnvWithPartisan),
     EnvSlave = update_for_slave(Node, ?ENV),
+    AppsSlaveEnv = [element(1, E) || E <- EnvSlave],
+    OrderedApps = lists:append(AppsSlaveEnv -- ?ORDER_CRITICAL_APPS, ?ORDER_CRITICAL_APPS),
 
     ok = rpc:call(NodeName, application, set_env, [EnvSlave], 1000),
 
@@ -569,22 +580,30 @@ start_bondy(Node) ->
     write_term("out/master_path", lists:sort(PathsValid)),
     maybe_error(rpc:call(NodeName, code, set_path, [PathsValid], 1000)),
 
-    % Load all apps then ensure they are started
+    % Reload all apps then ensure they are started
     try
-        _ = [
-            case rpc:call(NodeName, application, Fct, [App], 5000) of
-                ok ->
-                    ok;
-                {ok, _} ->
-                    ok;
-                {error, {already_loaded, _}} ->
-                    ok;
-                {error, Error} ->
-                    error({Fct, App, Error});
-                {badrpc, Error} ->
-                    error({Fct, App, Error})
+        [
+            begin
+                Res = rpc:call(NodeName, application, Fct, [App], 5000),
+                ct:pal("~p ~p ~p~n", [Fct, App, Res])
             end
-         || Fct <- [load, ensure_all_started], App <- OrderedApps
+         || Fct <- [stop, unload, load], App <- OrderedApps
+        ],
+        [
+            begin
+                case rpc:call(NodeName, application, Fct, [App], 5000) of
+                    ok ->
+                        ok;
+                    {ok, _} ->
+                        ok;
+                    {error, Error} ->
+                        error({Fct, App, Error});
+                    {badrpc, Error} ->
+                        error({Fct, App, Error})
+                end,
+                ct:pal("~p ~p~n", [Fct, App])
+            end
+         || Fct <- [ensure_all_started], App <- OrderedApps
         ],
         ok
     catch
@@ -594,7 +613,7 @@ start_bondy(Node) ->
                 element(1, L)
              || L <- rpc:call(NodeName, application, which_applications, [], 1000)
             ]),
-            write_term("out/slave_apps", lists:sort(SlaveAllApps)),
+            ct:pal("Slave running apps~n~p~n", [lists:sort(SlaveAllApps)]),
             [
                 case rpc:call(NodeName, application, get_all_env, [App], 1000) of
                     [] ->
@@ -603,7 +622,7 @@ start_bondy(Node) ->
                         Filename = io_lib:format("out/slave_app_~p", [App]),
                         write_term(Filename, lists:sort(AppConfig))
                 end
-             || App <- OrderedApps
+             || App <- SlaveAllApps
             ],
             error(E)
     end,
@@ -668,7 +687,8 @@ update_for_slave(Node, Config) ->
     ],
     Config1 = lists:foldl(fun(Elem, Acc) -> key_value_apply(Elem, Acc) end, Config, Updates),
 
-    AllApps = [element(1, Line) || Line <- application:which_applications()],
+    %AllApps = [element(1, Line) || Line <- application:which_applications()],
+    AllApps = [element(1, L) || L <- Config1],
     lists:foldl(
         fun(App, Acc) ->
             PrivDir = code:priv_dir(App),
