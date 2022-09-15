@@ -96,10 +96,11 @@ all() ->
 -define(OPT_AUTOSTART, #{autostart => true}).
 
 init_per_suite(Config) ->
-    ct:pal("ct config: ~p~n", [Config]),
     bondy_ct:start_bondy(),
-    NodeBridge = bondy_ct:start_bondy(bridge),
-    {ok, _Bridge} =
+
+    NodeBridge = bondy_ct:start_bondy(bridge, 1000),
+    ct:pal("Running nodes: ~p", [nodes()]),
+    {ok, Bridge} =
         rpc:call(
             NodeBridge,
             bondy_bridge_relay_manager,
@@ -107,6 +108,8 @@ init_per_suite(Config) ->
             [?CONFIG_BRIDGE_DEFAULT, ?OPT_AUTOSTART],
             5000
         ),
+    ct:pal("Bridge~n~p", [Bridge]),
+
     [{slaves, [NodeBridge]} | Config].
 
 end_per_suite(Config) ->
@@ -114,5 +117,14 @@ end_per_suite(Config) ->
     lists:foreach(fun(Slave) -> ct_slave:stop(Slave) end, Slaves),
     {save_config, Config}.
 
-something(_Config) ->
-    ok.
+something(Config) ->
+    {slaves, Slaves} = lists:keyfind(slaves, 1, Config),
+    NodeBridge = lists:nth(1, Slaves),
+    ?assert(lists:member(NodeBridge, nodes())),
+
+    AppsMaster = lists:sort([element(1, E) || E <- application:which_applications()]),
+    AppsSlave = lists:sort([
+        element(1, E)
+     || E <- rpc:call(NodeBridge, application, which_applications, [])
+    ]),
+    ?assertEqual(AppsMaster, AppsSlave).

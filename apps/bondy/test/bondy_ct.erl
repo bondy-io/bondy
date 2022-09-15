@@ -380,83 +380,8 @@
     ]}
 ]).
 
--define(SLAVE_PARTISAN, [
-    {lazy_tick_period, 1000},
-    {reservations, []},
-    {distance_enabled, true},
-    {disable_fast_forward, false},
-    {listen_addrs, [#{ip => {127, 0, 0, 1}, port => 19086}]},
-    {exchange_selection, optimized},
-    {ref_encoding, false},
-    {tag, undefined},
-    {random_promotion, true},
-    {membership_strategy_tracing, false},
-    {tracing, false},
-    {relay_ttl, 5},
-    {register_pid_for_encoding, false},
-    {gossip, true},
-    {name, 'bridge@Alans-MacBook-Pro'},
-    {shrinking, false},
-    % to be updated !!
-    {peer_port, 18086},
-    {tree_refresh, 1000},
-    {remote_ref_binary_padding, false},
-    {ingress_delay, 0},
-    {random_seed, {90873625, -576460750611642483, -576460752303423455}},
-    {periodic_interval, 10000},
-    {parallelism, 1},
-    {exchange_tick_period, 10000},
-    {replaying, false},
-    {periodic_enabled, true},
-    {connect_disterl, true},
-    {min_active_size, 3},
-    {membership_strategy, partisan_full_membership_strategy},
-    {tls_client_options, [
-        {verify, verify_none},
-        {versions, ['tlsv1.3']}
-    ]},
-    {disable_fast_receive, false},
-    {arwl, 5},
-    {channels, [data, membership, rpc, undefined, wamp_peer_relay]},
-    {fanout, 5},
-    {peer_host, undefined},
-    {passive_view_shuffle_period, 10000},
-    {binary_padding, false},
-    {partisan_peer_service_manager, partisan_pluggable_peer_service_manager},
-    {egress_delay, 0},
-    {tls_server_options, [
-        {verify, verify_none},
-        {versions, ['tlsv1.3']}
-    ]},
-    {orchestration_strategy, undefined},
-    {peer_ip, {127, 0, 0, 1}},
-    {broadcast_mods, [partisan_plumtree_backend, plum_db]},
-    {remote_ref_uri_padding, false},
-    {prwl, 30},
-    {nodestring, <<"bridge@Alans-MacBook-Pro">>},
-    {connection_jitter, 1000},
-    {tls, false},
-    {causal_labels, []},
-    {remote_ref_as_uri, true},
-    {max_active_size, 6},
-    {max_passive_size, 30},
-    {pid_encoding, false},
-    {xbot_interval, 32708},
-    {broadcast, false}
-]).
-
 -define(OPTS_SLAVE, [
     {monitor_master, true}
-]).
-
--define(ORDER_CRITICAL_APPS, [
-    jobs,
-    gproc,
-    tuplespace,
-    partisan,
-    plum_db,
-    bondy,
-    bondy_broker_bridge
 ]).
 
 -export([
@@ -466,6 +391,7 @@
     tests/1,
     start_bondy/0,
     start_bondy/1,
+    start_bondy/2,
     stop_bondy/0
 ]).
 
@@ -486,39 +412,40 @@ is_a_test(is_a_test) ->
 is_a_test(Function) ->
     hd(lists:reverse(string:tokens(atom_to_list(Function), "_"))) == "test".
 
+master_nodename() ->
+    {ok, Hostname} = inet:gethostname(),
+    list_to_atom("master" ++ Hostname).
+
+enable_distributed_erlang() ->
+    NetKernelOptions = [master_nodename(), shortnames],
+    case net_kernel:start(NetKernelOptions) of
+        {ok, Pid} ->
+            Pid;
+        {error, {already_started, Pid}} ->
+            Pid;
+        {error, {
+            {shutdown, {failed_to_start_child, net_kernel, {'EXIT', nodistribution}}}, _
+        }} ->
+            os:cmd("epmd -daemon"),
+            % Sometimes on fresh start (e.g. post reboot) epmd takes longer to start.
+            timer:sleep(100),
+            {ok, Pid} = net_kernel:start(NetKernelOptions),
+            Pid
+    end.
+
 %% Start bondy on the master node.
 start_bondy() ->
     case persistent_term:get({?MODULE, bondy_started}, false) of
         false ->
             application:set_env([{kernel, ?KERNEL_ENV}]),
+            enable_distributed_erlang(),
 
-            AllApps0 = [element(1, Line) || Line <- application:which_applications()],
-            ct:pal("master pre net_kernel:start~n~p~n", [AllApps0]),
-
-            {ok, Hostname} = inet:gethostname(),
-            NetKernelOptions = [list_to_atom("runner@" ++ Hostname), shortnames],
-            case net_kernel:start(NetKernelOptions) of
-                {ok, _} ->
-                    ok;
-                {error, {already_started, _}} ->
-                    ok;
-                {error, {
-                    {shutdown, {failed_to_start_child, net_kernel, {'EXIT', nodistribution}}}, _
-                }} ->
-                    os:cmd("epmd -daemon"),
-                    {ok, _} = net_kernel:start(NetKernelOptions)
-            end,
-
-            _ = [
+            [
                 begin
+                    application:stop(App),
                     application:unload(App),
                     application:set_env([{App, Env}]),
-                    case lists:member(App, [tuplespace, plum_db]) of
-                        true ->
-                            ok;
-                        false ->
-                            application:load(App)
-                    end
+                    application:load(App)
                 end
              || {App, Env} <- ?ENV
             ],
@@ -532,100 +459,36 @@ start_bondy() ->
             ok;
         true ->
             ok
-    end.
+    end,
+    node().
 
 %% Start bondy on a slave node with a given name and return the full node name.
 start_bondy(Node) ->
-    % List in the right order of the apps to start on the slave node
-    AllApps = [element(1, Line) || Line <- application:which_applications()],
-    ?assert(
-        lists:member(bondy, AllApps),
-        "bondy must run on master before starting a slave."
-    ),
-    OrderedAppsAll = lists:append(AllApps -- ?ORDER_CRITICAL_APPS, ?ORDER_CRITICAL_APPS),
-    ct:pal("master pre node start~n~p~n", [OrderedAppsAll]),
-    [
-        begin
-            case application:get_all_env(App) of
-                [] ->
-                    ok;
-                AppConfig ->
-                    Filename = io_lib:format("out/master_app_~p", [App]),
-                    write_term(Filename, lists:sort(AppConfig))
-            end
-        end
-     || App <- lists:sort(OrderedAppsAll)
-    ],
-    PrivDirs = [{App, code:priv_dir(App)} || App <- lists:sort(OrderedAppsAll)],
-    write_term("out/master_priv_dirs", lists:sort(PrivDirs)),
+    start_bondy(Node, 0).
 
+start_bondy(Node, N) ->
     NodeName = start_slave(Node),
-    ct:pal("Node: ~p", [NodeName]),
-    AppsSlave0 = [
-        element(1, L)
-     || L <- rpc:call(NodeName, application, which_applications, [], 1000)
-    ],
-    ct:pal("slave post node start~n~p~n", [AppsSlave0]),
-
-    %EnvNoPartisan = [{App, Config} || {App, Config} <- ?ENV, App /= partisan],
-    %EnvWithPartisan = EnvNoPartisan ++ [{partisan, ?SLAVE_PARTISAN}],
-    %EnvSlave = update_for_slave(Node, EnvWithPartisan),
-    EnvSlave = update_for_slave(Node, ?ENV),
-    AppsSlaveEnv = [element(1, E) || E <- EnvSlave],
-    OrderedApps = lists:append(AppsSlaveEnv -- ?ORDER_CRITICAL_APPS, ?ORDER_CRITICAL_APPS),
-
-    ok = rpc:call(NodeName, application, set_env, [EnvSlave], 1000),
 
     PathsValid = [D || D <- code:get_path(), filelib:is_dir(D)],
-    write_term("out/master_path", lists:sort(PathsValid)),
-    maybe_error(rpc:call(NodeName, code, set_path, [PathsValid], 1000)),
+    ct:pal("Set path: ~p", [rpc:call(NodeName, code, set_path, [PathsValid])]),
 
-    % Reload all apps then ensure they are started
-    try
-        [
-            begin
-                Res = rpc:call(NodeName, application, Fct, [App], 5000),
-                ct:pal("~p ~p ~p~n", [Fct, App, Res])
-            end
-         || Fct <- [stop, unload, load], App <- OrderedApps
-        ],
-        [
-            begin
-                case rpc:call(NodeName, application, Fct, [App], 5000) of
-                    ok ->
-                        ok;
-                    {ok, _} ->
-                        ok;
-                    {error, Error} ->
-                        error({Fct, App, Error});
-                    {badrpc, Error} ->
-                        error({Fct, App, Error})
-                end,
-                ct:pal("~p ~p~n", [Fct, App])
-            end
-         || Fct <- [ensure_all_started], App <- OrderedApps
-        ],
-        ok
-    catch
-        _:E ->
-            ct:pal("Got an exception"),
-            SlaveAllApps = lists:sort([
-                element(1, L)
-             || L <- rpc:call(NodeName, application, which_applications, [], 1000)
-            ]),
-            ct:pal("Slave running apps~n~p~n", [lists:sort(SlaveAllApps)]),
-            [
-                case rpc:call(NodeName, application, get_all_env, [App], 1000) of
-                    [] ->
-                        ok;
-                    AppConfig ->
-                        Filename = io_lib:format("out/slave_app_~p", [App]),
-                        write_term(Filename, lists:sort(AppConfig))
-                end
-             || App <- SlaveAllApps
-            ],
-            error(E)
-    end,
+    % Reload the apps with the correct env
+    EnvUpdated = update_for_slave(Node, N, ?ENV),
+    ResultReloads = [
+        {App, rpc:call(NodeName, application, stop, [App]),
+            rpc:call(NodeName, application, unload, [App]),
+            rpc:call(NodeName, application, set_env, [[{App, Env}]]),
+            rpc:call(NodeName, application, load, [App])}
+     || {App, Env} <- EnvUpdated
+    ],
+    ct:pal("~p: Reload apps {App, stop, unload, set_env, load}~n~p", [
+        Node, lists:sort(ResultReloads)
+    ]),
+
+    {ok, StartedApps} = rpc:call(NodeName, application, ensure_all_started, [bondy]),
+    ct:pal("Started applications~n~p", [lists:sort(StartedApps)]),
+    RunningApps = [element(1, L) || L <- rpc:call(NodeName, application, which_applications, [])],
+    ct:pal("Running applications~n~p", [lists:sort(RunningApps)]),
 
     NodeName.
 
@@ -644,59 +507,59 @@ maybe_error(true) ->
 
 %% @private
 start_slave(Node) ->
-    case ct_slave:start(Node, ?OPTS_SLAVE) of
+    start_slave(Node, ?OPTS_SLAVE).
+
+%% @private
+start_slave(Node, Opts) ->
+    case ct_slave:start(Node, Opts) of
         {ok, NodeName} ->
+            ct:pal("~p started", [NodeName]),
             NodeName;
         {error, already_started, NodeName} ->
+            ct:pal("~p already started. Restarting slave.", [NodeName]),
+            net_adm:ping(NodeName),
+            ct_slave:stop(NodeName),
+            {ok, NodeName} = ct_slave:start(Node),
             NodeName;
         {error, not_alive, nonode@nohost} ->
-            exit("Master is not a distributed node, call net_kernel:start before ct_slave:start");
+            ct:pal("Master not a distributed node. Turning into one and starting slave again."),
+            enable_distributed_erlang(),
+            {ok, NodeName} = ct_slave:start(Node),
+            NodeName;
         {error, started_not_connected, NodeName} ->
-            % Only happens if slave was started with {monitor_master, false}
+            % Happens if slave was started with {monitor_master, false} before.
+            ct:pal("~p started not connected. Connecting.", [NodeName]),
             net_kernel:connect_node(NodeName) orelse
                 exit("Unable to connect to slave node " ++ NodeName),
             NodeName
     end.
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Functions to update ?ENV to start bondy on a slave node
 
 %% @private
-update_for_slave(Node, Config) ->
-    Plus1000 = fun(Port) -> 1000 + Port end,
+update_for_slave(Node, N, Config) ->
+    PlusN = fun(Port) -> N + Port end,
     ExtendPath = fun(Path) -> Path ++ "_" ++ atom_to_list(Node) end,
 
     Updates = [
-        {[bondy, admin_api_http, port], Plus1000},
-        {[bondy, admin_api_https, port], Plus1000},
-        {[bondy, api_gateway_http, port], Plus1000},
-        {[bondy, api_gateway_https, port], Plus1000},
-        %{[bondy, bridge_relay_tcp, enabled], false},
-        {[bondy, bridge_relay_tcp, port], Plus1000},
-        {[bondy, bridge_relay_tls, port], Plus1000},
+        {[bondy, admin_api_http, port], PlusN},
+        {[bondy, admin_api_https, port], PlusN},
+        {[bondy, api_gateway_http, port], PlusN},
+        {[bondy, api_gateway_https, port], PlusN},
+        {[bondy, bridge_relay_tcp, port], PlusN},
+        {[bondy, bridge_relay_tls, port], PlusN},
         {[bondy, platform_data_dir], ExtendPath},
         {[bondy, platform_etc_dir], ExtendPath},
         {[bondy, platform_log_dir], ExtendPath},
         {[bondy, platform_tmp_dir], ExtendPath},
-        {[bondy, wamp_tcp, port], Plus1000},
-        {[bondy, wamp_tls, port], Plus1000},
+        {[bondy, wamp_tcp, port], PlusN},
+        {[bondy, wamp_tls, port], PlusN},
         {[eleveldb, data_root], ExtendPath},
-        {[partisan, peer_port], Plus1000},
-        % reverted?
-        {[plum_db, aae_enabled], true},
+        {[partisan, peer_port], PlusN},
         {[plum_db, data_dir], ExtendPath}
     ],
-    Config1 = lists:foldl(fun(Elem, Acc) -> key_value_apply(Elem, Acc) end, Config, Updates),
-
-    %AllApps = [element(1, Line) || Line <- application:which_applications()],
-    AllApps = [element(1, L) || L <- Config1],
-    lists:foldl(
-        fun(App, Acc) ->
-            PrivDir = code:priv_dir(App),
-            key_value:set([App, priv_dir], ExtendPath(PrivDir), Acc)
-        end,
-        Config1,
-        AllApps
-    ).
+    lists:foldl(fun(Elem, Acc) -> key_value_apply(Elem, Acc) end, Config, Updates).
 
 %% @private
 key_value_apply({Key, Change}, Config) when is_function(Change, 0) ->
@@ -708,10 +571,3 @@ key_value_apply({Key, Change}, Config) when is_function(Change, 1) ->
     key_value:set(Key, NewValue, Config);
 key_value_apply({Key, Change}, Config) when not is_function(Change) ->
     key_value:set(Key, Change, Config).
-
-%% @private
-write_term(Filename, Term) ->
-    T = io_lib:format("~p.~n", [Term]),
-    B = unicode:characters_to_binary(T),
-    ok = filelib:ensure_dir(Filename),
-    ok = file:write_file(Filename, B).
