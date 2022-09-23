@@ -335,6 +335,9 @@ set_process_metadata(Meta0, LogKeys0) when is_map(Meta0), is_list(LogKeys0) ->
     _ = put(?BONDY_META_KEY, Bondy),
     ok = logger:set_process_metadata(Logger);
 
+set_process_metadata(undefined, _LogKeys) ->
+    ok;
+
 set_process_metadata(Meta, LogKeys) ->
     erlang:error(badarg, [Meta, LogKeys]).
 
