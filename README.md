@@ -98,9 +98,9 @@ Bondy provides a unique combination of features which sets it apart from other a
 - **Low latency data replication** – All nodes in a Bondy cluster share a global state which is replicated through a highly scaleable and low latency eventually consistency model based on epidemic broadcasting (gossip). Bondy uses [Partisan](http://github.com/aramallo/partisan.git), a high-performance Distributed Erlang replacement that enables various network topologies and supports large clusters (Partisan has been demonstrated to scale up to 1,024 Erlang nodes, and provide better scalability and reduced latency than Distributed Erlang).
 - **Ease of use** – Bondy is easy to operate due to its operational simplicity enabled by its peer-to-peer nature, the lack of special nodes, automatic data replication and self-healing.
 - **Embedded HTTP API Gateway** – Bondy embeds a powerful API Gateway that can translate HTTP actions to WAMP routed RPC and PubSub operations. The API Gateway leverages the underlying storage and replication technology to deploy the API Specifications to the cluster nodes in real-time.
-- **Embedded Broker Bridge** – Bondy embeds a Broker Bridge that can manage a set of WAMP subscribers that re-publish WAMP events to an external non-WAMP system e.g. a message broker.
 - **Embedded Identity Management & Authentication** - Each realm manages user identity and authentication using multiple WAMP and HTTP authentication methods. Identity data is replicated across the cluster to ensure always-on and low-latency operations.
 - **Embedded Role-based Access Control (RBAC)** – Each realm embeds a RBAC subsystem controlling access to realm resources through the definition of groups and the assignment of permissions. RBAC data is replicated across the cluster to ensure always-on and low-latency operations.
+- **Embedded Broker Bridge** – Bondy embeds a Broker Bridge that can manage a set of WAMP subscribers that re-publish WAMP events to an external non-WAMP system e.g. a message broker.
 
 ## Quick Start
 
