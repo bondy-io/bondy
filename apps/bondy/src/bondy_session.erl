@@ -950,9 +950,13 @@ parse_properties(_, _, Session) ->
 %% ------------------------------------------------------------------------
 parse_roles(Roles) ->
     maps:map(
-        fun(Key, #{features := Requested}) ->
-            Merged = merge_feature_flags(Key, Requested),
-            #{features => Merged}
+        fun
+            (Key, #{features := Requested}) ->
+                Merged = merge_feature_flags(Key, Requested),
+                #{features => Merged};
+            (Key, #{}) ->
+                Merged = merge_feature_flags(Key, #{}),
+                #{features => Merged}
         end,
         Roles
     ).
