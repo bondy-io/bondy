@@ -100,7 +100,7 @@ Bondy provides a unique combination of features which sets it apart from other a
 - **Embedded HTTP API Gateway** – Bondy embeds a powerful API Gateway that can translate HTTP actions to WAMP routed RPC and PubSub operations. The API Gateway leverages the underlying storage and replication technology to deploy the API Specifications to the cluster nodes in real-time.
 - **Embedded Identity Management & Authentication** - Each realm manages user identity and authentication using multiple WAMP and HTTP authentication methods. Identity data is replicated across the cluster to ensure always-on and low-latency operations.
 - **Embedded Role-based Access Control (RBAC)** – Each realm embeds a RBAC subsystem controlling access to realm resources through the definition of groups and the assignment of permissions. RBAC data is replicated across the cluster to ensure always-on and low-latency operations.
-- **Embedded Broker Bridge** – Bondy embeds a Broker Bridge that can manage a set of WAMP subscribers that re-publish WAMP events to an external non-WAMP system e.g. a message broker.
+- **Embedded Broker Bridge** – Bondy embeds a Broker Bridge that can manage a set of WAMP subscribers that re-publish WAMP events to an external non-WAMP system e.g. another message broker (Kafka Bridge implemented).
 
 ## Quick Start
 
