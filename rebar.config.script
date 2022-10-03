@@ -37,7 +37,7 @@ Replace =
             end
     end,
 
-    case {ErtsPath, SystemLibsPath} of
+case {ErtsPath, SystemLibsPath} of
     {false, false} ->
         CONFIG;
     {Path, false} ->
@@ -54,4 +54,4 @@ Replace =
                 CONFIG
             )
         )
-    end.
+end.
