@@ -505,23 +505,23 @@ verify_jwt(RealmUri, JWT) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec verify_jwt(RealmUri :: binary(), JWTString :: binary(), MatchSpec :: map()) ->
+-spec verify_jwt(RealmUri :: binary(), JWT :: binary(), MatchSpec :: map()) ->
     {ok, map()} | {error, error()}.
 
-verify_jwt(RealmUri, JWTString, MatchSpec) ->
+verify_jwt(RealmUri, JWT, MatchSpec) ->
 
-    case bondy_cache:get(RealmUri, JWTString) of
+    case bondy_cache:get(RealmUri, JWT) of
         {ok, Claims} ->
             %% We skip verification as we found the JWT
-            maybe_expired(matches(RealmUri, Claims, MatchSpec), JWTString);
+            maybe_expired(matches(RealmUri, Claims, MatchSpec), JWT);
         {error, not_found} ->
             %% This JWT might still be valid i.e. created by another Bondy
             %% node and we have never received the broadcast,
             %% so we verify it and if valid we cache it
             Result = maybe_expired(
-                do_verify_jwt(RealmUri, JWTString, MatchSpec), JWTString
+                do_verify_jwt(RealmUri, JWT, MatchSpec), JWT
             ),
-            maybe_cache(Result, JWTString)
+            maybe_cache(Result, JWT)
     end.
 
 
