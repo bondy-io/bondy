@@ -18,7 +18,7 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Realms are routing and administrative domains and act as namespaces for
+%% @doc Realms are routing and administrative domains and act as namespaces for
 %% all resources in Bondy i.e. all users, groups, permissions, registrations
 %% and subscriptions belong to a Realm. Messages and events are routed
 %% separately for each individual realm so sessions attached to a realm won’t
