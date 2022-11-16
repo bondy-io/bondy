@@ -250,10 +250,10 @@ make node3
 ```
 
 ## Resources
-
-* [http://docs.getbondy.io](http://docs.getbondy.io).
+* [bondy.io](https://www.bondy.io)
+* [developer.bondy.io](http://developer.bondy.io) - for documentation and more
 * [WAMP Specification](wamp-proto.org)
-* [Follow us on twitter @leapsight](https://twitter.com/leapsight)
+* [Follow us on twitter @bondyIO](https://twitter.com/bondyIO)
 * Recorded webinars
      * [Implementing a polyglot microservices architecture](https://www.youtube.com/watch?v=XxJ1IS8mo84)<br>Date: 10 July 2019
 
