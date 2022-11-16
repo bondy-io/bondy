@@ -130,7 +130,7 @@ leapsight/bondy:master
 
 ### Building from source
 #### Requirements
-* macOS (x86|Apple Silicon) or Linux (amd64|arm64)
+* macOS (Intel|Apple Silicon) or Linux (amd64|arm64)
 * [Erlang](https://www.erlang.org/) 24 or later
 * [Rebar3](https://rebar3.readme.io/) 3.17.0 or later
 * openssl
