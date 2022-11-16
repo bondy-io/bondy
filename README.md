@@ -22,7 +22,7 @@ Bondy implements the open Web Application Messaging Protocol (WAMP) offering bot
 
 ## Documentation
 
-For our work-in-progress documentation go to [http://docs.getbondy.io](http://docs.getbondy.io).
+For our work-in-progress documentation for v1.0.0 go to [https://developer.bondy.io](http://developer.bondy.io).
 
 ## Supported WAMP features
 
@@ -130,7 +130,7 @@ leapsight/bondy:master
 
 ### Building from source
 #### Requirements
-* macOS (x86|Apple Silicon) or Linux (amd64|arm64)
+* macOS (Intel|Apple Silicon) or Linux (amd64|arm64)
 * [Erlang](https://www.erlang.org/) 24 or later
 * [Rebar3](https://rebar3.readme.io/) 3.17.0 or later
 * openssl
@@ -250,14 +250,14 @@ make node3
 ```
 
 ## Resources
-
-* [http://docs.getbondy.io](http://docs.getbondy.io).
+* [bondy.io](https://www.bondy.io)
+* [developer.bondy.io](https://developer.bondy.io) - for documentation and more
 * [WAMP Specification](wamp-proto.org)
-* [Follow us on twitter @leapsight](https://twitter.com/leapsight)
+* [Follow us on twitter @bondyIO](https://twitter.com/bondyIO)
 * Recorded webinars
      * [Implementing a polyglot microservices architecture](https://www.youtube.com/watch?v=XxJ1IS8mo84)<br>Date: 10 July 2019
 
 ---
 
 Copyright by Leapsight, material licensed under the CC-BY-SA 4.0,
-provided as-is without any warranties, Bondy documentation (http://docs.getbondy.io).
+provided as-is without any warranties, Bondy documentation (https://developer.bondy.io).
