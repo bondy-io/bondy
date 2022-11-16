@@ -22,7 +22,7 @@ Bondy implements the open Web Application Messaging Protocol (WAMP) offering bot
 
 ## Documentation
 
-For our work-in-progress documentation go to [http://docs.getbondy.io](http://docs.getbondy.io).
+For our work-in-progress documentation for v1.0.0 go to [http://developer.bondy.io](http://developer.bondy.io).
 
 ## Supported WAMP features
 
