@@ -10,9 +10,11 @@
 # Bondy
 
 ### The distributed application networking platform
-Bondy is an open source, always-on and scalable application networking platform for modern distributed architectures.  It is an all-in-one event and service mesh with support for multiple communication patterns, multiple protocols and secure multi-tenancy.
+Bondy is an open source, always-on and scaleable application networking platform connecting all elements of a distributed application—offering service and event mesh capabilities combined.
 
-Bondy implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC) communication patterns.
+From web and mobile apps to IoT devices and backend microservices, Bondy allows everything to talk using one simple and secured communication protocol in a decoupled and dynamic way.
+
+Bondy implements the open Web Application Messaging Protocol (WAMP).
 
 <br><br>
 <p align="center">
