@@ -260,4 +260,4 @@ make node3
 ---
 
 Copyright by Leapsight, material licensed under the CC-BY-SA 4.0,
-provided as-is without any warranties, Bondy documentation (http://docs.getbondy.io).
+provided as-is without any warranties, Bondy documentation (http://developer.bondy.io).
