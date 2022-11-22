@@ -233,7 +233,7 @@ send_email(Action) ->
     %% 500, 502, 503, 504 Server Errors - something is wrong on Mailgun’s end
 
     case email:send(Email, Sender, Subject, FormattedBody) of
-        {ok, Res} ->
+        {ok, Res} ->
             #{<<"id">> := Ref} = jsone:decode(Res, [{object_format, map}]),
             {ok, Ref};
         {error, timeout} = Error ->

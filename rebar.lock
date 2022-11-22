@@ -78,7 +78,7 @@
  {<<"parse_trans">>,{pkg,<<"parse_trans">>,<<"3.4.1">>},0},
  {<<"partisan">>,
   {git,"http://github.com/aramallo/partisan.git",
-       {ref,"4db92b4477b2ed97669efc3f3d6143081fcc1dbc"}},
+       {ref,"73e1477fe64fc39ae415e7ef9e467736d58cefb6"}},
   1},
  {<<"pbkdf2">>,
   {git,"https://github.com/leapsight-oss/erlang-pbkdf2.git",
@@ -86,7 +86,7 @@
   0},
  {<<"plum_db">>,
   {git,"https://github.com/Leapsight/plum_db.git",
-       {ref,"848f2e6c47d2315f7632e3be6f0093fe8e35dc50"}},
+       {ref,"31ce10c4eb353d7a1fccb0ff4dac74e5d4d41021"}},
   0},
  {<<"prometheus">>,{pkg,<<"prometheus">>,<<"4.8.1">>},0},
  {<<"prometheus_cowboy">>,{pkg,<<"prometheus_cowboy">>,<<"0.1.8">>},0},
@@ -120,7 +120,7 @@
  {<<"uuid">>,{pkg,<<"uuid_erl">>,<<"2.0.4">>},0},
  {<<"wamp">>,
   {git,"https://github.com/Leapsight/wamp.git",
-       {ref,"b4bb9ae7f43123d8b962b26af65764ed00bd668a"}},
+       {ref,"ded9e3b7fffd25e7d18755bf1c085e2d027100ed"}},
   0}]}.
 [
 {pkg_hash,[

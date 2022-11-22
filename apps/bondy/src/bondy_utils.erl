@@ -42,7 +42,6 @@
 -export([json_consult/2]).
 -export([maybe_encode/2]).
 -export([maybe_slice/3]).
--export([merge_map_flags/2]).
 -export([peername/2]).
 -export([pid_to_bin/1]).
 -export([rebase_object/1]).
@@ -326,17 +325,6 @@ elapsed_time(Timestamp, TimeUnit) ->
     erlang:convert_time_unit(Nsecs, nanosecond, TimeUnit).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% The call will fail with a {badkey, any()} exception is any key found in M1
-%% is not present in M2.
-%% @end
-%% -----------------------------------------------------------------------------
-merge_map_flags(M1, M2) when is_map(M1) andalso is_map(M2) ->
-    maps:fold(fun merge_fun/3, M2, M1).
-
-
-
 %% Borrowed from
 %% https://github.com/kivra/oauth2/blob/master/src/oauth2_token.erl
 -spec generate_fragment(non_neg_integer()) -> binary().
@@ -407,14 +395,6 @@ rebase_object(Value, Actor) ->
 %% =============================================================================
 
 
-
-%% @private
-merge_fun(K, V, Acc) ->
-    case {maps:get(K, Acc, undefined), V} of
-        {true, true} -> Acc;
-        {false, false} -> Acc;
-        _ -> maps:put(K, false, Acc)
-    end.
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns a base64 encoded random string

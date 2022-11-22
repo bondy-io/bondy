@@ -942,42 +942,53 @@ parse_properties(_, _, Session) ->
 
 %% ------------------------------------------------------------------------
 %% private
-%% @doc
-%% Merges the client provided role features with the ones provided by
+%% @doc Merges the client provided role features with the ones provided by
 %% the router. This will become the feature set used by the router on
 %% every session request.
+%% This is a capability negotiation between client and router.
 %% @end
 %% ------------------------------------------------------------------------
 parse_roles(Roles) ->
-    parse_roles(maps:keys(Roles), Roles).
+    maps:map(
+        fun
+            (Key, #{features := Requested}) ->
+                Merged = merge_feature_flags(Key, Requested),
+                #{features => Merged};
+            (Key, #{}) ->
+                Merged = merge_feature_flags(Key, #{}),
+                #{features => Merged}
+        end,
+        Roles
+    ).
 
 
+%% -----------------------------------------------------------------------------
 %% @private
-parse_roles([], Roles) ->
-    Roles;
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+merge_feature_flags(Router, Req) when is_map(Router) andalso is_map(Req) ->
+    Combiner = fun
+        (_, true, true) -> true;
+        (_, _, _) -> false
+    end,
+    maps:merge_with(Combiner, Req, Router);
 
-parse_roles([caller|T], Roles) ->
-    F = bondy_utils:merge_map_flags(
-        maps:get(caller, Roles), ?CALLER_FEATURES),
-    parse_roles(T, Roles#{caller => F});
+merge_feature_flags(caller, Req) when is_map(Req) ->
+    merge_feature_flags(?CALLER_FEATURES, Req);
 
-parse_roles([callee|T], Roles) ->
-    F = bondy_utils:merge_map_flags(
-        maps:get(callee, Roles), ?CALLEE_FEATURES),
-    parse_roles(T, Roles#{callee => F});
+merge_feature_flags(callee, Req) when is_map(Req) ->
+    merge_feature_flags(?CALLEE_FEATURES, Req);
 
-parse_roles([subscriber|T], Roles) ->
-    F = bondy_utils:merge_map_flags(
-        maps:get(subscriber, Roles), ?SUBSCRIBER_FEATURES),
-    parse_roles(T, Roles#{subscriber => F});
+merge_feature_flags(publisher, Req) when is_map(Req) ->
+    merge_feature_flags(?PUBLISHER_FEATURES, Req);
 
-parse_roles([publisher|T], Roles) ->
-    F = bondy_utils:merge_map_flags(
-        maps:get(publisher, Roles), ?PUBLISHER_FEATURES),
-    parse_roles(T, Roles#{publisher => F});
+merge_feature_flags(subscriber, Req) when is_map(Req) ->
+    merge_feature_flags(?SUBSCRIBER_FEATURES, Req);
 
-parse_roles([_|T], Roles) ->
-    parse_roles(T, Roles).
+merge_feature_flags(_, Req) ->
+    Req.
+
 
 
 %% @private

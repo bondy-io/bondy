@@ -2,7 +2,7 @@
 
 ![License](https://img.shields.io/github/license/leapsight/bondy?style=for-the-badge)
 ![Architecture](https://img.shields.io/badge/architecture-linux%2Famd64%20%7C%20linux%2Farm64%20%7C%20macOS%2Fintel%20%7C%20macOS%2FM1-lightgrey?style=for-the-badge)
-![Version](https://img.shields.io/badge/version-1.0.0--beta.64-blue?style=for-the-badge)<br>
+![Version](https://img.shields.io/badge/version-1.0.0--beta.65-blue?style=for-the-badge)<br>
 ![Docker Pulls](https://img.shields.io/docker/pulls/leapsight/bondy?style=for-the-badge)
 ![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/leapsight/bondy/CI/master?label=docker%3Amaster&style=for-the-badge)
 ![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/leapsight/bondy/CI/develop?label=docker%3Adevelop&style=for-the-badge)
@@ -10,9 +10,11 @@
 # Bondy
 
 ### The distributed application networking platform
-Bondy is an open source, always-on and scalable application networking platform for modern distributed architectures.  It is an all-in-one event and service mesh with support for multiple communication patterns, multiple protocols and secure multi-tenancy.
+Bondy is an open source, always-on and scaleable application networking platform connecting all elements of a distributed application—offering service and event mesh capabilities combined.
 
-Bondy implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC) communication patterns.
+From web and mobile apps to IoT devices and backend microservices, Bondy allows everything to talk using one simple and secured communication protocol in a decoupled and dynamic way.
+
+Bondy implements the open Web Application Messaging Protocol (WAMP).
 
 <br><br>
 <p align="center">
@@ -22,7 +24,7 @@ Bondy implements the open Web Application Messaging Protocol (WAMP) offering bot
 
 ## Documentation
 
-For our work-in-progress documentation go to [http://docs.getbondy.io](http://docs.getbondy.io).
+For our work-in-progress documentation for v1.0.0 go to [https://developer.bondy.io](http://developer.bondy.io).
 
 ## Supported WAMP features
 
@@ -93,13 +95,14 @@ Bondy provides a unique combination of features which sets it apart from other a
 
 - **Distributed by design** – As opposed to other WAMP Router implementations, Bondy was designed as a reliable distributed router, ensuring continued operation in the event of node or network failures through clustering and data replication.
 - **Scalability** – Bondy is written in Erlang/OTP which provides the underlying operating system to handle concurrency and scalability requirements, allowing Bondy to scale to thousands and even millions of concurrent connections on a single node. Its distributed architecture also allows for horizontal scaling by simply adding nodes to the cluster.
-- **Decentralised peer-to-peer master-less clustering** – All nodes in a Bondy cluster are equal, thanks to the underlying clustering and networking technology which provides a decentralised master-less architecture.
-- **Low latency data replication** – All nodes in a Bondy cluster share a global state which is replicated through a highly scaleable and low latency eventually consistency model based on gossip. Bondy uses [Partisan](http://github.com/aramallo/partisan.git), a high-performance Distributed Erlang replacement that enables various network topologies and supports large clusters (Partisan has been demonstrated to scale up to 1,024 Erlang nodes, and provide better scalability and reduced latency than Distributed Erlang).
+- **Decentralised peer-to-peer master-less clustering** – All nodes in a Bondy cluster are equal, thanks to the underlying clustering and networking technology which provides a decentralised master-less architecture. This includes all nodes acting as relays enabling Transparent routing. All nodes can also act as Bridge Relays to enable per-realm inter-cluster routing (aka Bondy Edge [Experimental]).
+- **Transparent routing** - Bondy will route any Caller/Publisher (sender) messages to any Callee/Subscriber (receiver) regardless of their session location in the cluster. When using Full Mesh topology (default), this results in a single hop between sender and receiver. When using the upcoming Peer-to-Peer topology this results in one or multiple hops between sender and receiver.
+- **Low latency data replication** – All nodes in a Bondy cluster share a global state which is replicated through a highly scaleable and low latency eventually consistency model which combines causality tracking, real-time epidemic broadcasting (gossip) and periodic active anti-entropy. Bondy uses [Partisan](http://github.com/aramallo/partisan.git), a high-performance Distributed Erlang replacement that enables various network topologies and supports large clusters (Partisan has been demonstrated to scale up to 1,024 Erlang nodes, and provide better scalability and reduced latency than Distributed Erlang).
 - **Ease of use** – Bondy is easy to operate due to its operational simplicity enabled by its peer-to-peer nature, the lack of special nodes, automatic data replication and self-healing.
 - **Embedded HTTP API Gateway** – Bondy embeds a powerful API Gateway that can translate HTTP actions to WAMP routed RPC and PubSub operations. The API Gateway leverages the underlying storage and replication technology to deploy the API Specifications to the cluster nodes in real-time.
-- **Embedded Broker Bridge** – Bondy embeds a Broker Bridge that can manage a set of WAMP subscribers that re-publish WAMP events to an external non-WAMP system e.g. a message broker.
 - **Embedded Identity Management & Authentication** - Each realm manages user identity and authentication using multiple WAMP and HTTP authentication methods. Identity data is replicated across the cluster to ensure always-on and low-latency operations.
-- **Embedded Role-based Access Control (RBAC)** – Each realm embeds a RBAC subsystem controlling access to realm resources through the definition of groups and the assignment of permissions. RBAC data is replicated across the cluster to ensure always-on and low-latency operations.
+- **Embedded Role-based Access Control (RBAC)** – Each realm embeds a RBAC subsystem controlling access to realm resources and authorizing message routing through the definition of groups and the assignment of permissions. RBAC data is replicated across the cluster to ensure always-on and low-latency operations.
+- **Embedded Broker Bridge** – Bondy embeds a Broker Bridge that can manage a set of WAMP subscribers that re-publish WAMP events to an external non-WAMP system e.g. another message broker (Kafka Bridge implemented).
 
 ## Quick Start
 
@@ -129,7 +132,7 @@ leapsight/bondy:master
 
 ### Building from source
 #### Requirements
-
+* macOS (Intel|Apple Silicon) or Linux (amd64|arm64)
 * [Erlang](https://www.erlang.org/) 24 or later
 * [Rebar3](https://rebar3.readme.io/) 3.17.0 or later
 * openssl
@@ -249,14 +252,14 @@ make node3
 ```
 
 ## Resources
-
-* [http://docs.getbondy.io](http://docs.getbondy.io).
+* [bondy.io](https://www.bondy.io)
+* [developer.bondy.io](https://developer.bondy.io) - for documentation and more
 * [WAMP Specification](wamp-proto.org)
-* [Follow us on twitter @leapsight](https://twitter.com/leapsight)
+* [Follow us on twitter @bondyIO](https://twitter.com/bondyIO)
 * Recorded webinars
      * [Implementing a polyglot microservices architecture](https://www.youtube.com/watch?v=XxJ1IS8mo84)<br>Date: 10 July 2019
 
 ---
 
 Copyright by Leapsight, material licensed under the CC-BY-SA 4.0,
-provided as-is without any warranties, Bondy documentation (http://docs.getbondy.io).
+provided as-is without any warranties, Bondy documentation (https://developer.bondy.io).

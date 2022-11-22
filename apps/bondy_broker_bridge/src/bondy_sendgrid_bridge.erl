@@ -252,7 +252,7 @@ send_email(Action) ->
     %% 500 Server Errors - something is wrong on Sendgrid's end
 
     case email:send(Email, Sender, Subject, FormattedBody, Options) of
-        {ok, Res} ->
+        {ok, Res} ->
             #{<<"id">> := Ref} = jsone:decode(Res, [{object_format, map}]),
             {ok, Ref};
         {error, timeout} = Error ->

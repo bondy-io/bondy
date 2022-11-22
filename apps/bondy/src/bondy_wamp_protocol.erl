@@ -356,10 +356,11 @@ handle_outbound(M, St) ->
             Bin = wamp_encoding:encode(M, encoding(St)),
             {ok, Bin, St};
         false ->
-            %% RFC: WAMP implementations MUST close sessions (disposing all of their resources such as subscriptions and registrations) on protocol errors caused by offending peers.
+            %% RFC: WAMP implementations MUST close sessions (disposing all of
+            %% their resources such as subscriptions and registrations) on
+            %% protocol errors caused by offending peers.
             {stop, St}
     end.
-
 
 
 
@@ -467,8 +468,8 @@ handle_inbound_messages(
     [#hello{realm_uri = Uri} = M|_],
     #wamp_state{state_name = closed} = St0, _) ->
     %% Client is requesting a session
-    %% This will return either reply with wamp_welcome() | wamp_challenge()
-    %% or abort
+    %% This will return either reply with
+    %% wamp_welcome() | wamp_challenge() | wamp_abort()
     Ctxt0 = St0#wamp_state.context,
     ok = bondy_event_manager:notify({wamp, M, Ctxt0}),
 
@@ -480,9 +481,9 @@ handle_inbound_messages(
     case bondy_realm:get(Uri) of
         {error, not_found} ->
             stop({authentication_failed, no_such_realm}, St);
+
         Realm ->
             ok = logger:update_process_metadata(#{realm => Uri}),
-
             maybe_open_session(
                 maybe_auth_challenge(M#hello.details, Realm, St)
             )
@@ -606,6 +607,7 @@ open_session(Extra, St0) when is_map(Extra) ->
         RealmUri = bondy_context:realm_uri(Ctxt0),
         SessionId0 = bondy_context:session_id(Ctxt0),
         ReqDetails = bondy_context:request_details(Ctxt0),
+        ReqRoles = maps:get(roles, ReqDetails, undefined),
 
         Authrealm = bondy_auth:authrealm(AuthCtxt),
         Authid = bondy_auth:user_id(AuthCtxt),
@@ -624,7 +626,7 @@ open_session(Extra, St0) when is_map(Extra) ->
             security_enabled => bondy_realm:is_security_enabled(RealmUri),
             is_anonymous => Authid == anonymous,
             agent => Agent,
-            roles => maps:get(roles, ReqDetails, undefined),
+            roles => ReqRoles,
             authrealm => Authrealm,
             authid => maybe_gen_authid(Authid),
             authprovider => Authprovider,

@@ -49,7 +49,7 @@ dialyzer:
 	${REBAR} dialyzer
 
 tar:
-	rm -rf _build/tar
+	rm -rf _build/prod
 	${REBAR} as prod tar
 	mkdir -p _build/tar
 	tar -zxvf _build/prod/rel/*/*.tar.gz -C _build/tar

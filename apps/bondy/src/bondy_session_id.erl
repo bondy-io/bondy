@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  ksuid.erl -
+%%  bondy_session_id.erl -
 %%
 %%  Copyright (c) 2016-2022 Leapsight Holdings Limited. All rights reserved.
 %%

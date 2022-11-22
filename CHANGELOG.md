@@ -4,6 +4,7 @@
 
 ### Added
  * Pattern matching now supports wildcards
+ * Pattern-based Registration
 
 #### General
 * Upgraded to OTP 24
