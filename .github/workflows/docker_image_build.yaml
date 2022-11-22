@@ -56,7 +56,7 @@ jobs:
           labels: |
             maintainer=Leapsight
             org.opencontainers.image.title=Bondy
-            org.opencontainers.image.description=Bondy is an open source, always-on and scalable application networking platform for modern distributed architectures. It is an all-in-one event and service mesh with support for multiple communication patterns, multiple protocols and secure multi-tenancy.
+            org.opencontainers.image.description=Bondy is an open source, always-on and scalable application networking platform connecting all elements of a distributed application—offering event and service mesh capabilities combined. From web and mobile apps to IoT devices and backend microservices, Bondy allows everything to talk using one simple communication protocol.
             org.opencontainers.image.vendor=Leapsight
       -
         name: Build, cache and push standard image
