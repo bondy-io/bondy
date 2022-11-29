@@ -28,7 +28,7 @@ RUN rebar3 as prod tar && \
 # Build stage 2
 # ===========================================================================
 
-FROM debian:bullseye-20220801-slim as runner
+FROM debian:bullseye-20220711-slim as runner
 
 # We install the following utils:
 # - bash
