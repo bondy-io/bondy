@@ -65,7 +65,7 @@ ENV HOME "/bondy"
 # We setup the bondy group and user and the /bondy dir
 RUN apt-get update \
     && apt-get -y install \
-    bash procps iproute2 net-tools curl jq nano \
+    sudo bash procps iproute2 net-tools curl jq nano \
     openssl libsodium-dev libsnappy-dev \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 -r bondy \
@@ -76,6 +76,7 @@ USER bondy:bondy
 
 # Copy the release to workdir
 COPY --chown=bondy:bondy --from=builder /bondy/rel .
+COPY --from=builder /bondy/src/priv/docker/entrypoint.sh .
 
 # Define which ports are intended to be published
 # We are hardcoding the ports here, the bondy.conf definitions need to match
@@ -99,4 +100,4 @@ EXPOSE 18086/tcp
 # user-defined environment variables (BONDY_*_DIR)
 VOLUME ["/bondy/etc", "/bondy/data", "/bondy/log", "/bondy/tmp"]
 
-ENTRYPOINT ["bondy", "foreground"]
+ENTRYPOINT ["/bin/sh", "entrypoint.sh"]
