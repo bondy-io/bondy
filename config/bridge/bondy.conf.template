@@ -1020,35 +1020,6 @@ aae.exchange_on_cluster_join = off
 
 
 
-## =============================================================================
-## DIRECTORIES
-## =============================================================================
-
-##
-## Default: ./data
-##
-## Acceptable values:
-##   - the path to a directory
-platform_data_dir = ./data
-##
-## Default: ./etc
-##
-## Acceptable values:
-##   - the path to a directory
-# platform_etc_dir = ./etc
-##
-## Default: ./log
-##
-## Acceptable values:
-##   - the path to a directory
-platform_log_dir = ./log
-##
-## Default: ./tmp
-##
-## Acceptable values:
-##   - the path to a directory
-platform_tmp_dir = ./tmp
-
 
 ## =============================================================================
 ## STORAGE
