@@ -14,17 +14,22 @@ BONDY_RELEASE_DIR=./releases/{{release_version}}/
 
 # We export this variables so that users can use them in bondy.conf file.
 # They will be used by replace-ev-vars below.
+# This dir cannot be defined by the user, this is a limitation we have as
+# rebar.conf needs to know already the location
+export BONDY_ETC_DIR={{platform_etc_dir}}
+# The following dirs can be defined by the user but we default to the values
+# defines in the vars.config (variable replacement is performed by rebar3)
 export BONDY_ERL_NODENAME="${BONDY_ERL_NODENAME:-bondy}"
 export BONDY_ERL_DISTRIBUTED_COOKIE="${BONDY_ERL_DISTRIBUTED_COOKIE:-bondy}"
-export BONDY_ETC_DIR="${BONDY_ETC_DIR:-{{platform_etc_dir}}}"
 export BONDY_DATA_DIR="${BONDY_DATA_DIR:-{{platform_data_dir}}}"
 export BONDY_LOG_DIR="${BONDY_LOG_DIR:-{{platform_log_dir}}}"
 export BONDY_TMP_DIR="${BONDY_TMP_DIR:-{{platform_tmp_dir}}}"
 
 echo "${GREEN}===> Running Bondy Rebar3 pre_start hook"
-echo "${GREEN}===> Exporting the following default values:"
+echo "${GREEN}===> Exporting the following variables:"
 echo "${NC}===> BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME}"
 echo "${NC}===> BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE}"
+echo "${NC}===> BONDY_ETC_DIR=${BONDY_ETC_DIR}"
 echo "${NC}===> BONDY_DATA_DIR=${BONDY_DATA_DIR}"
 echo "${NC}===> BONDY_LOG_DIR=${BONDY_LOG_DIR}"
 echo "${NC}===> BONDY_TMP_DIR=${BONDY_TMP_DIR}"

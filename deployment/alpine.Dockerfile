@@ -20,15 +20,33 @@ COPY ../ /bondy/src
 RUN mkdir -p /bondy/rel
 
 # Generates tar in /bondy/src/_build and untars in /bondy/rel
-RUN rebar3 as prod tar && \
-    tar -zxvf /bondy/src/_build/prod/rel/*/*.tar.gz -C /bondy/rel/
+RUN rebar3 as docker tar && \
+    tar -zxvf /bondy/src/_build/docker/rel/*/*.tar.gz -C /bondy/rel/
 
 
 # ===========================================================================
 # Build stage 2
 # ===========================================================================
 
-FROM alpine:3.15 as runner
+FROM alpine:3.16 as runner
+
+# We define defaults
+# We assume you have DNS. Erlang will take the FQDN and generate
+# a node name == ${BONDY_ERL_NODENAME}@${FQDN}
+ENV BONDY_ERL_NODENAME=bondy
+ENV BONDY_ERL_DISTRIBUTED_COOKIE=bondy
+ENV BONDY_LOG_CONSOLE=console
+ENV BONDY_LOG_LEVEL=info
+ENV ERL_CRASH_DUMP=/dev/null
+ENV ERL_DIST_PORT=27784
+
+# We add Bondy executables to PATH
+ENV PATH="/bondy/bin:$PATH"
+# This is required so that relx replaces the vm.args
+# BONDY_ERL_NODENAME and BONDY_ERL_DISTRIBUTED_COOKIE variables
+ENV RELX_REPLACE_OS_VARS=true
+
+ENV HOME "/bondy"
 
 # We install the following utils:
 # - bash
@@ -44,6 +62,8 @@ FROM alpine:3.15 as runner
 # We install the following required packages:
 # - openssl: required by Erlang crypto application
 # - libsodium: required by enacl application
+# We setup the bondy group and user, the /bondy dir
+# and we override directory locations
 RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
     ln -s /var/cache/apk /etc/apk/cache \
     && apk add --no-cache \
@@ -56,7 +76,11 @@ RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
         --disabled-password \
         --ingroup bondy \
         --home /bondy \
-        --shell /bin/bash bondy
+        --shell /bin/bash bondy \
+    && export BONDY_ETC_DIR=/bondy/etc \
+    && export BONDY_DATA_DIR=/bondy/data \
+    && export BONDY_LOG_DIR=/bondy/log \
+    && export BONDY_TMP_DIR=/bondy/tmp
 
 
 WORKDIR /bondy
@@ -65,24 +89,6 @@ USER bondy:bondy
 # Copy the release to workdir
 COPY --chown=bondy:bondy --from=builder /bondy/rel .
 
-# We add Bondy executables to PATH
-ENV PATH="/bondy/bin:$PATH"
-ENV BONDY_LOG_CONSOLE=console
-ENV BONDY_LOG_LEVEL=info
-ENV ERL_CRASH_DUMP=/dev/null
-
-# This is required so that relx replaces the vm.args
-# BONDY_ERL_NODENAME and BONDY_ERL_DISTRIBUTED_COOKIE variables
-ENV RELX_REPLACE_OS_VARS=true
-# Default value. We assume you have DNS. Erlang will take the FQDN and generate
-# a node name == ${BONDY_ERL_NODENAME}@${FQDN}
-ENV BONDY_ERL_NODENAME=bondy
-# Default value.
-ENV BONDY_ERL_DISTRIBUTED_COOKIE=bondy
-# This env var is read by the Erlang VM
-ENV ERL_DIST_PORT=27784
-
-ENV HOME "/bondy"
 
 # Define which ports are intended to be published
 # 18080 API GATEWAY HTTP and WS
@@ -100,6 +106,6 @@ EXPOSE 18085/tcp
 # 18086 CLUSTER PEER SERVICE
 EXPOSE 18086/tcp
 
-VOLUME ["/bondy/data", "/bondy/etc", "/bondy/tmp", "/bondy/log"]
+VOLUME ["/bondy/etc", "/bondy/data", "/bondy/tmp", "/bondy/log"]
 
 ENTRYPOINT ["bondy", "foreground"]

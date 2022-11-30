@@ -128,7 +128,7 @@ run-edge1:
 
 # DOCKER
 
-docker-build-prod:
+docker-build:
 	docker buildx install
 	docker stop bondy-prod || true
 	docker rm bondy-prod || true
@@ -140,7 +140,7 @@ docker-build-prod:
 		-t "bondy-prod" \
 		-f deployment/Dockerfile .
 
-docker-build-prod-alpine:
+docker-build-alpine:
 	docker buildx install
 	docker stop bondy-prod || true
 	docker rm bondy-prod || true
@@ -151,6 +151,18 @@ docker-build-prod-alpine:
 		--load \
 		-t "bondy-prod" \
 		-f deployment/alpine.Dockerfile .
+
+docker-build-slim:
+	docker buildx install
+	docker stop bondy-prod || true
+	docker rm bondy-prod || true
+	docker rmi bondy-prod || true
+	docker build \
+		--pull \
+		--platform linux/amd64 \
+		--load \
+		-t "bondy-prod" \
+		-f deployment/slim.Dockerfile .
 
 docker-run-prod:
 	# docker stop bondy-prod || true
