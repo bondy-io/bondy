@@ -62,19 +62,14 @@ ENV HOME "/bondy"
 # We install the following required packages:
 # - openssl: required by Erlang crypto application
 # - libsodium: required by enacl application
-# We setup the bondy group and user, the /bondy dir
-# and we override directory locations
+# We setup the bondy group and user and the /bondy dir
 RUN apt-get update \
     && apt-get -y install \
     bash procps iproute2 net-tools curl jq nano \
     openssl libsodium-dev libsnappy-dev \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 -r bondy \
-    && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "bondy" bondy \
-    && export BONDY_ETC_DIR=/bondy/etc \
-    && export BONDY_DATA_DIR=/bondy/data \
-    && export BONDY_LOG_DIR=/bondy/log \
-    && export BONDY_TMP_DIR=/bondy/tmp
+    && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "bondy" bondy
 
 WORKDIR /bondy
 USER bondy:bondy
@@ -100,6 +95,8 @@ EXPOSE 18085/tcp
 # CLUSTER PEER SERVICE (Default: 18086)
 EXPOSE 18086/tcp
 
-VOLUME ["/bondy/etc", "/bondy/data", "/bondy.log", "/bondy/tmp"]
+# The pre_start script will hardcode the following paths i.e. ignoring the
+# user-defined environment variables (BONDY_*_DIR)
+VOLUME ["/bondy/etc", "/bondy/data", "/bondy/log", "/bondy/tmp"]
 
 ENTRYPOINT ["bondy", "foreground"]

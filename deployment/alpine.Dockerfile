@@ -62,8 +62,7 @@ ENV HOME "/bondy"
 # We install the following required packages:
 # - openssl: required by Erlang crypto application
 # - libsodium: required by enacl application
-# We setup the bondy group and user, the /bondy dir
-# and we override directory locations
+# We setup the bondy group and user and the /bondy dir
 RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
     ln -s /var/cache/apk /etc/apk/cache \
     && apk add --no-cache \
@@ -76,12 +75,7 @@ RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
         --disabled-password \
         --ingroup bondy \
         --home /bondy \
-        --shell /bin/bash bondy \
-    && export BONDY_ETC_DIR=/bondy/etc \
-    && export BONDY_DATA_DIR=/bondy/data \
-    && export BONDY_LOG_DIR=/bondy/log \
-    && export BONDY_TMP_DIR=/bondy/tmp
-
+        --shell /bin/bash bondy
 
 WORKDIR /bondy
 USER bondy:bondy
@@ -89,23 +83,26 @@ USER bondy:bondy
 # Copy the release to workdir
 COPY --chown=bondy:bondy --from=builder /bondy/rel .
 
-
 # Define which ports are intended to be published
-# 18080 API GATEWAY HTTP and WS
+# We are hardcoding the ports here, the bondy.conf definitions need to match
+# these!
+# API GATEWAY HTTP and WS (Default: 18080)
 EXPOSE 18080/tcp
-# 18081 ADMIN API HTTP
+# ADMIN API HTTP (Default: 18081)
 EXPOSE 18081/tcp
-# 18082 WAMP TCP
+# WAMP TCP  (Default: 18082)
 EXPOSE 18082/tcp
-# 18083 API GATEWAY HTTPS and WSS
+# API GATEWAY HTTPS and WSS (Default: 18083)
 EXPOSE 18083/tcp
-# 18084 ADMIN API HTTPS
+# ADMIN API HTTPS (Default: 18084)
 EXPOSE 18084/tcp
-# 18085 WAMP TLS
+# WAMP TLS (Default: 18085)
 EXPOSE 18085/tcp
-# 18086 CLUSTER PEER SERVICE
+# CLUSTER PEER SERVICE (Default: 18086)
 EXPOSE 18086/tcp
 
+# The pre_start script will hardcode the following paths i.e. ignoring the
+# user-defined environment variables (BONDY_*_DIR)
 VOLUME ["/bondy/etc", "/bondy/data", "/bondy/tmp", "/bondy/log"]
 
 ENTRYPOINT ["bondy", "foreground"]
