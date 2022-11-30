@@ -72,7 +72,6 @@ RUN apt-get update \
     && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "bondy" bondy
 
 WORKDIR /bondy
-USER bondy:bondy
 
 # Copy the release to workdir
 COPY --chown=bondy:bondy --from=builder /bondy/rel .
