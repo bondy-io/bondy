@@ -1,5 +1,5 @@
 #!/bin/sh
 
-chown -R bondy:bondy /bondy/etc
+chown bondy:bondy /bondy/etc
 sudo su - bondy
 bondy foreground
