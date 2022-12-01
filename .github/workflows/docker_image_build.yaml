@@ -70,8 +70,8 @@ jobs:
           push: true
           tags: leapsight/${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ steps.meta.outputs.tags }}-buildcache
-          cache-to: type=registry,ref=${{ steps.meta.outputs.tags }}-buildcache,mode=max
+          cache-from: type=registry,ref=leapsight/${{ steps.meta.outputs.tags }}-buildcache
+          cache-to: type=registry,ref=leapsight/${{ steps.meta.outputs.tags }}-buildcache,mode=max
       -
         # Copy multiplatform image from dockerhub to multiple registries
         # without changing the image SHA
