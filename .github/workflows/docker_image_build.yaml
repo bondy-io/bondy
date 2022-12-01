@@ -44,8 +44,10 @@ jobs:
         id: meta
         uses: docker/metadata-action@v4
         with:
+          # without registry name, we will add it in the build-push-action as
+          # each registry has diff namespace at the moment
           images: |
-            leapsight/bondy
+            bondy
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -66,19 +68,19 @@ jobs:
           file: ./deployment/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: leapsight/${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=${{ steps.meta.outputs.tags }}-buildcache
           cache-to: type=registry,ref=${{ steps.meta.outputs.tags }}-buildcache,mode=max
-      # -
-      #   # Copy multiplatform image from dockerhub to multiple registries
-      #   # without changing the image SHA
-      #   name: Copy Image to multiple registries
-      #   uses: akhilerm/tag-push-action@v2.0.0
-      #   with:
-      #     src: docker.io/${{ steps.meta.outputs.tags }}
-      #     dst: |
-      #       ghcr.io/${{ steps.meta.outputs.tags }}
+      -
+        # Copy multiplatform image from dockerhub to multiple registries
+        # without changing the image SHA
+        name: Copy Image to multiple registries
+        uses: akhilerm/tag-push-action@v2.0.0
+        with:
+          src: docker.io/leapsight/${{ steps.meta.outputs.tags }}
+          dst: |
+            ghcr.io/bondy-io/${{ steps.meta.outputs.tags }}
       -
         name: Build and push alpine image
         uses: docker/build-push-action@v3
@@ -87,14 +89,14 @@ jobs:
           file: ./deployment/alpine.Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}-alpine
+          tags: leapsight/${{ steps.meta.outputs.tags }}-alpine
           labels: ${{ steps.meta.outputs.labels }}
-      # -
-      #   # Copy multiplatform image from dockerhub to multiple registries
-      #   # without changing the image SHA
-      #   name: Copy Image to multiple registries
-      #   uses: akhilerm/tag-push-action@v2.0.0
-      #   with:
-      #     src: docker.io/${{ steps.meta.outputs.tags }}-alpine
-      #     dst: |
-      #       ghcr.io/${{ steps.meta.outputs.tags }}-alpine
+      -
+        # Copy multiplatform image from dockerhub to multiple registries
+        # without changing the image SHA
+        name: Copy Image to multiple registries
+        uses: akhilerm/tag-push-action@v2.0.0
+        with:
+          src: docker.io/leapsight/${{ steps.meta.outputs.tags }}-alpine
+          dst: |
+            ghcr.io/bondy-io/${{ steps.meta.outputs.tags }}-alpine
