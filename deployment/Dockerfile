@@ -63,19 +63,23 @@ ENV HOME "/bondy"
 # - openssl: required by Erlang crypto application
 # - libsodium: required by enacl application
 # We setup the bondy group and user and the /bondy dir
+# Create the bondy's config directory (if not exists) with the proper rights
 RUN apt-get update \
     && apt-get -y install \
-    sudo bash procps iproute2 net-tools curl jq nano \
+    bash procps iproute2 net-tools curl jq nano \
     openssl libsodium-dev libsnappy-dev \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 -r bondy \
-    && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "bondy" bondy
+    && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "bondy" bondy \
+    && mkdir -p /bondy/etc \
+    && chown bondy:bondy /bondy/etc
 
 WORKDIR /bondy
+USER bondy:bondy
 
 # Copy the release to workdir
 COPY --chown=bondy:bondy --from=builder /bondy/rel .
-COPY --from=builder /bondy/src/priv/docker/entrypoint.sh .
+
 
 # Define which ports are intended to be published
 # We are hardcoding the ports here, the bondy.conf definitions need to match
@@ -99,4 +103,4 @@ EXPOSE 18086/tcp
 # user-defined environment variables (BONDY_*_DIR)
 VOLUME ["/bondy/etc", "/bondy/data", "/bondy/log", "/bondy/tmp"]
 
-ENTRYPOINT ["/bin/sh", "entrypoint.sh"]
+ENTRYPOINT ["bondy", "foreground"]
