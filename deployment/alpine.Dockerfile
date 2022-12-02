@@ -63,6 +63,9 @@ ENV HOME "/bondy"
 # - openssl: required by Erlang crypto application
 # - libsodium: required by enacl application
 # We setup the bondy group and user and the /bondy dir
+# We also create the /bondy/etc dir to avoid an issue when deploying in K8s
+# where the permissions are not assigned to the directory and Bondy will not
+# have permission to write.
 RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
     ln -s /var/cache/apk /etc/apk/cache \
     && apk add --no-cache \
@@ -75,7 +78,9 @@ RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
         --disabled-password \
         --ingroup bondy \
         --home /bondy \
-        --shell /bin/bash bondy
+        --shell /bin/bash bondy \
+    && mkdir -p /bondy/etc \
+    && chown bondy:bondy /bondy/etc
 
 WORKDIR /bondy
 USER bondy:bondy
