@@ -29,7 +29,7 @@
 ## Erlang
 ## -----------------------------------------------------------------------------
 
-+sbwt medium
++sbwt none
 
 ## Enable Time Correction
 +c true
