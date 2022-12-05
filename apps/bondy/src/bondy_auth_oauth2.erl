@@ -86,10 +86,13 @@ requirements() ->
 -spec challenge(
     Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
     {false, NewState :: state()}
+    | {true, Extra :: map(), NewState :: state()}
     | {error, Reason :: any(), NewState :: state()}.
 
+
 challenge(_, _, State) ->
-    {false, State}.
+    %% The client will respond to the challenge by sending the Token
+    {true, #{}, State}.
 
 
 %% -----------------------------------------------------------------------------
@@ -106,10 +109,15 @@ challenge(_, _, State) ->
 
 authenticate(JWT, _, Ctxt, State) ->
     RealmUri = bondy_auth:realm_uri(Ctxt),
+    UserId = bondy_auth:user_id(Ctxt),
 
     case bondy_oauth2:verify_jwt(RealmUri, JWT) of
-        {ok, Claims} ->
+        {ok, #{<<"sub">> := UserId} = Claims} ->
             {ok, Claims, State};
+
+        {ok, _} ->
+            {error, oauth2_invalid_grant, State};
+
         {error, Reason} ->
             {error, Reason, State}
     end.
