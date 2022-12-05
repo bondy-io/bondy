@@ -36,7 +36,7 @@
         "connect_timeout": 5000,
         "schemes": "{{variables.schemes}}",
         "headers": "{{variables.headers}}",
-        "security": {}
+        "security":"{{variables.oauth2}}"
     },
     "versions": {
         "1.0.0": {
