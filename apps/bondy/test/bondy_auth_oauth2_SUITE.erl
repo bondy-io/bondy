@@ -22,10 +22,12 @@
 
 -include("bondy_security.hrl").
 
+-define(REALM_URI, <<"com.example.test.oauth2">>).
 -define(U1, <<"user_1">>).
 -define(U2, <<"user_2">>).
--define(P1, <<"aWe11KeptSecret">>).
--define(P2, <<"An0therWe11KeptSecret">>).
+-define(APP1, <<"app_1">>).
+-define(APP2, <<"app_2">>).
+-define(PASS, <<"aWe11KeptSecret">>).
 
 -compile([nowarn_export_all, export_all]).
 
@@ -38,9 +40,9 @@ all() ->
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
-    RealmUri = <<"com.example.test.oauth2">>,
+    RealmUri = ?REALM_URI,
     ok = add_realm(RealmUri),
-    [{realm_uri, RealmUri} | Config].
+    Config.
 
 end_per_suite(Config) ->
     % bondy_ct:stop_bondy(),
@@ -50,7 +52,6 @@ end_per_suite(Config) ->
 add_realm(RealmUri) ->
     Config = #{
         uri => RealmUri,
-        description => <<"A test realm">>,
         authmethods => [
             ?WAMP_OAUTH2_AUTH, ?PASSWORD_AUTH
         ],
@@ -74,16 +75,27 @@ add_realm(RealmUri) ->
         users => [
             #{
                 username => ?U1,
-                password => ?P1,
-                groups => [<<"resource_owners">>]
+                password => ?PASS,
+                groups => [<<"resource_owners">>, <<"group_1">>]
             },
             #{
                 username => ?U2,
-                password => ?P1,
+                password => ?PASS,
+                groups => [<<"group_1">>]
+            },
+            #{
+                username => ?APP1,
+                password => ?PASS,
+                groups => [<<"api_clients">>]
+            },
+            #{
+                username => ?APP2,
+                password => ?PASS,
                 groups => [<<"api_clients">>]
             }
         ],
         groups => [
+            #{name => <<"group_1">>},
             #{name => <<"api_clients">>},
             #{name => <<"resource_owners">>}
         ],
@@ -104,9 +116,50 @@ add_realm(RealmUri) ->
     ok.
 
 
+
+
+
+resource_owner_password(_) ->
+    SessionId = bondy_session_id:new(),
+    Roles = [],
+    Peer = {{127, 0, 0, 1}, 10000},
+
+    {ok, AccessToken, _RefreshToken, _Claims} =
+        issue_token(password, ?APP1, ?U1, [<<"group_1">>]),
+
+    {ok, Ctxt1} = bondy_auth:init(SessionId, ?REALM_URI, ?U1, Roles, Peer),
+
+    ?assertEqual(
+        true,
+        lists:member(?WAMP_OAUTH2_AUTH, bondy_auth:available_methods(Ctxt1))
+    ),
+
+    ?assertMatch(
+        {ok, _, _},
+        bondy_auth:authenticate(?WAMP_OAUTH2_AUTH, AccessToken, #{}, Ctxt1)
+    ),
+
+    ok.
+
+
 client_credentials(_) ->
     ok.
 
 
-resource_owner_password(_) ->
-    ok.
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+issue_token(GrantType, Client, Username, Groups) ->
+    bondy_oauth2:issue_token(
+        GrantType,
+        ?REALM_URI,
+        Client,
+        Username,
+        Groups,
+        #{}
+    ).
+
