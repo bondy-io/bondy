@@ -372,9 +372,10 @@ handle_outbound(M, St) ->
 
 -spec handle_inbound_messages([raw_wamp_message()], state()) ->
     {ok, state()}
+    | {reply, [binary()], state()}
     | {stop, state()}
     | {stop, [binary()], state()}
-    | {reply, [binary()], state()}.
+    | {stop, Reason :: any(), [binary()], state()}.
 
 handle_inbound_messages(Messages, St) ->
     try

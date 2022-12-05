@@ -92,6 +92,7 @@ requirements() ->
     | {error, Reason :: any(), NewState :: state()}.
 
 challenge(_, _, State) ->
+    %% The client will respond to the challenge by sending the Ticket
     {true, #{}, State}.
 
 

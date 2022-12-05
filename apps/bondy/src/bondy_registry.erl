@@ -23,9 +23,9 @@
 %% providing pattern matching capabilities including support for WAMP's
 %% version 2.0 match policies (exact, prefix and wildcard).
 %%
-%% The registry is stored both in an in-memory distributed table (plum_db).
-%% Also an in-memory trie-based indexed (materialised vieq) is used for exact
-%% and prefix matching.
+%% The registry entries are stored in plum_db (using an in-memory prefix). The
+%% registry also uses in-memory in-memory trie-based indexed (materialised
+%% view) using {@link bondy_registry_trie}.
 %%
 %% This module also provides a singleton server to perform the initialisation
 %% of the trie from the plum_db tables.
@@ -123,7 +123,7 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc Starts the registry server. The server subscribes to plum_db broadcast
-%% and AAE events in order to keep the bondy_registry_trie up-to-date with
+%% and AAE events in order to keep the `bondy_registry_trie' up-to-date with
 %% plum_db.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -132,7 +132,8 @@ start_link() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Initialises the trie  ({@link bondy_registry_trie}) from the stored
+%% entries.
 %% @end
 %% -----------------------------------------------------------------------------
 init_trie() ->
@@ -140,10 +141,10 @@ init_trie() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the registry partition pid for realm uri `Uri'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec pick(Uri :: binary()) -> pid().
+-spec pick(Uri :: uri()) -> pid().
 
 pick(Uri) ->
     bondy_registry_partition:pick(Uri).
@@ -160,7 +161,9 @@ trie(Arg) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns information about the registry
+%% @doc Returns the tuple `{Size, Mem}; where `Size' is the number of elements
+%% stored in the registry and `Mem' is the memory consumed by the registry in
+%% bytes.
 %% @end
 %% -----------------------------------------------------------------------------
 info() ->
@@ -184,6 +187,8 @@ info() ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Used for adding proxy entries only as it skips all checks.
+%% Failes with `badarg' if  `Entry' is not a proxy entry
+%% (`bondy_registry_entry:t()').
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add(entry()) ->
@@ -193,6 +198,11 @@ add(Entry) ->
     bondy_registry_entry:is_entry(Entry)
         orelse ?ERROR(badarg, [Entry], #{
             1 => "is not a entry()"
+        }),
+
+    bondy_registry_entry:is_proxy(Entry)
+        orelse ?ERROR(badarg, [Entry], #{
+            1 => "is not a proxy entry()"
         }),
 
     ok = bondy_registry_entry:store(Entry),
@@ -239,7 +249,7 @@ add(Type, Uri, Opts, Ctxt) when is_map(Ctxt) ->
 %% already added before by the same _Subscriber_, the _Broker_ should not fail
 %% and answer with a "SUBSCRIBED" message, containing the existing
 %% "Subscription|id". So in this case this function returns
-%% {ok, entry(), boolean()}.
+%% `{ok, entry(), boolean()}'.
 %%
 %% In case of a registration, as a default, only a single Callee may
 %% register a procedure for an URI. However, when shared registrations are
@@ -248,8 +258,8 @@ add(Type, Uri, Opts, Ctxt) when is_map(Ctxt) ->
 %% what Invocation Rules to apply in case such additional registrations are
 %% made.
 %%
-%% This is configured through the 'invoke' options.
-%% When invoke is not 'single', Dealer MUST fail all subsequent attempts to
+%% This is configured through the `invoke' options.
+%% When invoke is not `single', Dealer MUST fail all subsequent attempts to
 %% register a procedure for the URI where the value for the invoke option does
 %% not match that of the initial registration. Accordingly this function might
 %% return an error tuple.
@@ -282,7 +292,7 @@ add(Type, RealmUri, Uri, Opts, Ref) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Removes (deletes) an entry from the registry.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove(entry()) -> ok.
@@ -340,8 +350,10 @@ when Task == undefined orelse is_function(Task, 1) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% Removes all entries matching the context's realm and session_id (if any).
+%% @doc Removes all entries of type `Type' matching the context's realm and
+%% session_id.
+%%
+%% Same as calling `remove_all(Type, Ctxt, undefined)'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove_all(entry_type(), bondy_context:t()) -> ok.
@@ -351,14 +363,18 @@ remove_all(Type, Ctxt) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% Removes all entries matching the context's realm and session_id (if any).
+%% @doc Removes all entries of type `Type' matching the context's realm and
+%% session_id.
+%%
+%% If `Task' is defined, it executes the task passing the removed entry as
+%% argument.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove_all(entry_type(), bondy_context:t(), task() | undefined) -> ok.
 
 remove_all(Type, Ctxt, Task)
-when Task == undefined orelse is_function(Task, 1) ->
+when Task == undefined
+orelse is_function(Task, 1) orelse is_function(Task, 2) ->
 
     case bondy_context:session_id(Ctxt) of
         undefined ->
@@ -381,7 +397,7 @@ when Task == undefined orelse is_function(Task, 1) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Removes all registry entries of type Type, for a {RealmUri, Node
+%% @doc Removes all registry entries of type Type, for a {RealmUri
 %% SessionId} relation.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -391,7 +407,8 @@ when Task == undefined orelse is_function(Task, 1) ->
     SessionId :: id(),
     Task :: task() | undefined) -> [entry()].
 
-remove_all(Type, RealmUri, SessionId, Task) ->
+remove_all(Type, RealmUri, SessionId, Task)
+when Task == undefined orelse is_function(Task, 1) ->
     Pattern = bondy_registry_entry:key_pattern(RealmUri, SessionId, '_'),
 
     MatchOpts = [{limit, 100} | ?REMOVE_MATCH_OPTS],
