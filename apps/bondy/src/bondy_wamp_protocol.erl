@@ -789,6 +789,11 @@ authroles(Details) ->
 
 
 %% @private
+-spec auth_challenge(Method :: binary(), State :: state()) ->
+    {ok, AuthExtra :: map(), NewState :: state()}
+    | {send_challenge, Method :: binary(), ChallengeExtra :: map(), NewState :: state()}
+    | {error, {authentication_failed, Reason :: any()}, NewState :: state()}.
+
 auth_challenge(Method, St0) ->
     Ctxt = St0#wamp_state.context,
     AuthCtxt0 = St0#wamp_state.auth_context,
@@ -807,7 +812,7 @@ auth_challenge(Method, St0) ->
                     },
                     {ok, AuthExtra, St1};
                 {error, Reason} ->
-                    stop({authentication_failed, Reason}, St0)
+                    {error, {authentication_failed, Reason}, St0}
             end;
 
         {true, ChallengeExtra, AuthCtxt1} ->
