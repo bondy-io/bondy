@@ -1,5 +1,6 @@
 %% =============================================================================
-%%  bondy_http_gateway_api_spec_parser.erl - parses the Bondy API Specification file
+%%  bondy_http_gateway_api_spec_parser.erl - parses the Bondy API Specification
+%%  file
 %%
 %%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
