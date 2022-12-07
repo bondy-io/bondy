@@ -1007,17 +1007,17 @@ from_file(Filename) ->
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Parses the Spec map returning a new valid spec where all defaults have been
-%% applied and all variables have been replaced by either a value of a promise.
-%% Fails with in case the Spec is invalid.
+%% applied and all variables have been replaced by either a value or a promise.
+%% Fails with `invalid_specification_format' in case the Spec is invalid.
 %%
 %% Variable replacepement is performed using our "mop" library.
 %% @end
 %% -----------------------------------------------------------------------------
--spec parse(map()) ->
+-spec parse(Spec :: map()) ->
     map() | {error, invalid_specification_format} | no_return().
 
-parse(Map) when is_map(Map) ->
-    parse(Map, get_context_proxy());
+parse(Spec) when is_map(Spec) ->
+    parse(Spec, get_context_proxy());
 
 parse(_) ->
     {error, invalid_specification_format}.
