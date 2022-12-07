@@ -220,9 +220,7 @@ websocket_handle(pong, State) ->
 
 websocket_handle({pong, Data}, #state{ping_payload = Data} = State) ->
     %% We've got an answer to a Bondy-initiated ping.
-    % {[], reset_ping(State)};
-{[], State};
-
+    {[], reset_ping(State)};
 
 websocket_handle({T, Data}, #state{frame_type = T} = State0) ->
     ProtoState0 = State0#state.protocol_state,
