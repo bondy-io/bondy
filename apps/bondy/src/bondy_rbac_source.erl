@@ -308,7 +308,7 @@ remove_all(RealmUri, Username) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns all the sources for user including the ones for speacial
+%% @doc Returns all the sources for user including the ones for special
 %% use 'all'.
 %% @end
 %% -----------------------------------------------------------------------------
