@@ -120,7 +120,7 @@ init(Config) ->
     catch
         _:Reason ->
             ?LOG_ERROR(#{
-                description => "Error while initialising brigde",
+                description => "Error while initialising bridge",
                 config => Config,
                 reason => Reason
             }),

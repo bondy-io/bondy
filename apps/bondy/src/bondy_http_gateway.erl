@@ -345,7 +345,7 @@ handle_info(
     {noreply, State1};
 
 handle_info({plum_db_event, exchange_finished, {_, _}}, State) ->
-    %% We are receiving the notification after we recevied a DOWN message
+    %% We are receiving the notification after we received a DOWN message
     %% we do nothing
     {noreply, State};
 

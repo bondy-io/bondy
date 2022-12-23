@@ -17,7 +17,7 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc This state machine is reponsible for discovering Bondy cluster peers
+%% @doc This state machine is responsible for discovering Bondy cluster peers
 %% using the defined implementation backend (callback module).
 %%
 %% Its behaviour can be configured using the `cluster.peer_discovery' family of

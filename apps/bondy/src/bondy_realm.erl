@@ -111,7 +111,7 @@
 %%
 %% === Inherited properties ===
 %% The following is the list of properties which a realm inherits from a
-%% prototype when those properties have not been asigned a value. Setting a
+%% prototype when those properties have not been assigned a value. Setting a
 %% value to these properties is equivalente to overriding the prototype's.
 %%
 %% * **security_enabled**
@@ -193,7 +193,7 @@
                 {error, <<"Value is too big (max. is 512 bytes).">>}
         end
     },
-    %% Determines whether the realm is a prototype. Protoype realms cannot be
+    %% Determines whether the realm is a prototype. Prototype realms cannot be
     %% used by themselves. Once a realm has been designated as a prototype it
     %% cannot be changed.
     <<"is_prototype">> => #{
@@ -273,7 +273,7 @@
         default => [],
         datatype => {list, map}
     },
-    %% This is a way to atomically create gropus together with the realm
+    %% This is a way to atomically create groups together with the realm
     %% creation. User can be added at any time using the bondy_rbac_group
     %% module.
     %% This feature is used by the security config file see apply_config/1
@@ -337,7 +337,7 @@
     )
 ).
 
-%% The overriden maps_utils:validate/2 specification
+%% The overridden maps_utils:validate/2 specification
 %% to make certain keys not required or not available during updates
 -define(REALM_UPDATE_VALIDATOR, #{
     <<"description">> => #{
@@ -922,7 +922,7 @@ is_sso_realm(Uri) when is_binary(Uri) ->
 %% value set to this property. This this property is just used as a template
 %% for realms to inherit from.
 %%
-%% This setting is used to either temporarilly restrict new connections to the
+%% This setting is used to either temporarily restrict new connections to the
 %% realm or to avoid connections when the realm is used as a Single Sign-on
 %% Realm. When connections are not allowed the only way of managing the
 %% resources in the realm is through a connection to the Bondy Master Realm.
@@ -1453,7 +1453,7 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
     case bondy_rbac_user:list(Uri, #{limit => 1}) of
         {L, _Cont} when length(L) > 0 andalso Force == false ->
             %% If there are users in the realm, the caller will need to first
-            %% explicitely delete the users
+            %% explicitly delete the users
             {error, active_users};
         _ ->
             %% Prevent new connections
@@ -1892,7 +1892,7 @@ validate_rbac_config(#realm{uri = Uri} = Realm, Map) ->
         %% We will be rebasing the plum_db_object during insertion, so we do
         %% need the user object hash to be the same, otherwise we will have
         %% differences on the AAE hashtrees. The following makes sure we
-        %% geneate exactly the same salted password on every node. This is
+        %% generate exactly the same salted password on every node. This is
         %% obviously assuming each node uses the same configuration file.
         begin
             Secret = module_info(md5),
@@ -1923,7 +1923,7 @@ get_password_opts([]) ->
     undefined;
 
 get_password_opts(Methods) when is_list(Methods) ->
-    %% We do this to overide the config default protocol
+    %% We do this to override the config default protocol
     case lists:member(?WAMP_SCRAM_AUTH, Methods) of
         true -> bondy_password:default_opts(scram);
         false -> bondy_password:default_opts()
@@ -2314,7 +2314,7 @@ group_topsort(Uri, Groups) ->
             EReason = list_to_binary(
                 io_lib:format(
                     <<
-                        "Bondy could not compute a precendece graph for the "
+                        "Bondy could not compute a precedence graph for the "
                         "groups defined on the configuration provided for "
                         "realm '~s' as they form a cycle with path ~p"
                     >>,
@@ -2334,7 +2334,7 @@ topsort(Realms) ->
 
         case digraph_utils:topsort(Graph) of
             false ->
-                %% Bondy could not compute a precendence graph for the realms
+                %% Bondy could not compute a precedence graph for the realms
                 %% defined on the configuration file.
                 Realms;
             Vertices ->
@@ -2346,7 +2346,7 @@ topsort(Realms) ->
             EReason = list_to_binary(
                 io_lib:format(
                     <<
-                        "Bondy could not compute a precendece graph for the "
+                        "Bondy could not compute a precedence graph for the "
                         "realms defined on the configuration provided as they "
                         "form a cycle with path ~p"
                     >>,
@@ -2418,7 +2418,7 @@ precedence_graph_add_edge(Graph, A, B) ->
     end.
 
 
-%% @private we validate just the URIs that are needed to build the precendence
+%% @private we validate just the URIs that are needed to build the precedence
 %% graph
 validate_uris(Data) ->
     %% We prevalidate the data

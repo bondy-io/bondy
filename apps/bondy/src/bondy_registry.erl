@@ -187,7 +187,7 @@ info() ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Used for adding proxy entries only as it skips all checks.
-%% Failes with `badarg' if  `Entry' is not a proxy entry
+%% Fails with `badarg' if  `Entry' is not a proxy entry
 %% (`bondy_registry_entry:t()').
 %% @end
 %% -----------------------------------------------------------------------------
@@ -1169,7 +1169,7 @@ add_registration(RealmUri, Uri, Opts, Ref, Trie) ->
             SessionId = bondy_ref:session_id(Ref),
             Invoke = maps:get(invoke, Opts, ?INVOKE_SINGLE),
 
-            %% TODO extract this so that it is implemented as a funcion that
+            %% TODO extract this so that it is implemented as a function that
             %% the dealer will send.
 
             case resolve_inconsistencies(Invoke, SessionId, L) of
@@ -1215,7 +1215,7 @@ maybe_remote_index_do(Op, Entry) ->
 
 %% -----------------------------------------------------------------------------
 %% @private
-%% @doc We might have inconsistencies that might have ocurred during a net
+%% @doc We might have inconsistencies that might have occurred during a net
 %% split.
 %%
 %% There are two cases:
@@ -1782,7 +1782,7 @@ init_trie(State) ->
             EntryNode = bondy_registry_entry:nodestring(Entry),
             Created = bondy_registry_entry:created(Entry),
 
-            %% IMPORTANT We asume nodes keep their names forever.
+            %% IMPORTANT We assume nodes keep their names forever.
             case Node == EntryNode andalso Created < Now of
                 true ->
                     %% This entry should have been deleted when node
@@ -1812,7 +1812,7 @@ init_trie(State) ->
         throw:Reason:Stacktrace ->
             ?LOG_ERROR(#{
                 description =>
-                    "Error while initilising registry trie from store",
+                    "Error while initialising registry trie from store",
                 reason => Reason,
                 stacktrace => Stacktrace
             }),

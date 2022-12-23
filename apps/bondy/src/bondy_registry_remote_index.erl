@@ -166,7 +166,7 @@ do(Op, Entry, T) ->
             EntryKey = bondy_registry_entry:key(Entry),
 
             %% Entry is the value we are interested in but we use it as part of
-            %% the key to dissambiguate, and avoid adding more elements to the
+            %% the key to disambiguate, and avoid adding more elements to the
             %% tuple.
             Key = {Node, Type, EntryKey},
 

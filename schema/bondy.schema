@@ -118,11 +118,11 @@
 %% internal representation of the password object to accommodate new protocols,
 %% features or bug fixes. Normally some of this changes can be done without
 %% user input, but when these changes include a re-calculation of the salted
-%% hash they can only happend during authentication or when the user changes
+%% hash they can only happen during authentication or when the user changes
 %% the password.
 %% If this option is set to 'on', then Bondy will try to upgrade the password
 %% protocol of an existing password to the protocol defined by the
-%% 'security.password.protocol' option using the defaul parameters defined in
+%% 'security.password.protocol' option using the default parameters defined in
 %% the 'security.password.{SelectedProtocol}.{Option}' options.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -381,7 +381,7 @@
 %% -----------------------------------------------------------------------------
 %% @doc Defines whether Bondy will allow a valid ticket to be used for
 %% authentication when a local copy of the ticket has not been found in
-%% storage. This might happen if the ticket data has not yet been syncrhonised
+%% storage. This might happen if the ticket data has not yet been synchronised
 %% to the node handling the authentication request.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -1111,8 +1111,8 @@
 %% serializer, and specifies json and msgpack to be assigned to slots 1 and 2
 %% respectively, leaving the remaining 13 slots for future assignment.
 %%
-%% Because some clients might be harcoded to expect certain serializers in
-%% certain slots, we need to make the slots asigned to "erl" and "bert"
+%% Because some clients might be hardcoded to expect certain serializers in
+%% certain slots, we need to make the slots assigned to "erl" and "bert"
 %% configurable.
 %%
 %% For example, in order to assign the erl serializer to a slot 15 and bert
@@ -1310,13 +1310,13 @@
   {datatype, {enum, [default, filtered, huffman_only, rle]}}
 ]}.
 
-%%  Using no_takeover can severly limit the usefulness of compression.
+%%  Using no_takeover can severely limit the usefulness of compression.
 {mapping, "wamp.websocket.deflate.server_context_takeover", "bondy.wamp_websocket.deflate_opts.server_context_takeover", [
   {default, takeover},
   {datatype, {enum, [takeover, no_takeover]}}
 ]}.
 
-%%  Using no_takeover can severly limit the usefulness of compression.
+%%  Using no_takeover can severely limit the usefulness of compression.
 {mapping, "wamp.websocket.deflate.client_context_takeover", "bondy.wamp_websocket.deflate_opts.client_context_takeover", [
   {default, takeover},
   {datatype, {enum, [takeover, no_takeover]}}
@@ -1757,7 +1757,7 @@
 
 %% If enabled Bondy will discover peers using the defined
 %% cluster.peer_discovery.type e.g. bondy_peer_discovery_dns_agent.
-%% This can only be configured before tunning Bondy.
+%% This can only be configured before tuning Bondy.
 {mapping, "cluster.peer_discovery.enabled", "bondy.peer_discovery.enabled", [
   {default, off},
   {datatype, flag}
@@ -2101,7 +2101,7 @@ end}.
 %% data exchange.
 {mapping, "aae.exchange_timer", "partisan.exchange_tick_period", [
   %% TODO this should be something like partisan.broadcast_mods.plum_db.
-  %% exchange_tick_period cause it overriden by cluster.exchange_tick_period
+  %% exchange_tick_period cause it overridden by cluster.exchange_tick_period
   {default, "10s"},
   {datatype, {duration, ms}}
 ]}.

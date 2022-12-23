@@ -21,7 +21,7 @@
 %% is stored in-memory in the Registry {@link bondy_registry} and replicated
 %% globally. Entries are immutable.
 %%
-%% @TODO Because entries is replicated (even if only in memmory), changes to
+%% @TODO Because entries is replicated (even if only in memory), changes to
 %% the data structure MUST be managed to be able to support rolling cluster
 %% updates.
 %% @end

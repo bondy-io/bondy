@@ -45,7 +45,7 @@
     info                    ::  optional(map())
 }).
 
-%% Wilcards are allowed only when key is used as pattern.
+%% Wildcards are allowed only when key is used as pattern.
 %% The order of the key fields was defined based on the most common search
 %% pattern which is the one performed during a YIELD | ERROR which contains
 %% grounded values for callee_session_id and invocation_id (realm_uri is always

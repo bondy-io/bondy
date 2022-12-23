@@ -797,7 +797,7 @@ when is_function(MakeEvent, 1), is_function(Fwd, 1) ->
     end,
 
     %% We send the event to the local subscribers and we get back a list of
-    %% (local) Bridge Relays and Cluster Peer nodestrings where we foudn at
+    %% (local) Bridge Relays and Cluster Peer nodestrings where we found at
     %% least one subscriber
     publish_fold(Subscriptions, Fun, ok).
 

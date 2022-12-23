@@ -209,11 +209,11 @@ security.password.protocol = cra
 ## internal representation of the password object to accommodate new protocols,
 ## features or bug fixes. Normally some of this changes can be done without
 ## user input, but when these changes include a re-calculation of the salted
-## hash they can only happend during authentication or when the user changes
+## hash they can only happen during authentication or when the user changes
 ## the password.
 ## If this option is set to 'on', then Bondy will try to upgrade the password
 ## protocol of an existing password to the protocol defined by the
-## 'security.password.protocol' option using the defaul parameters defined in
+## 'security.password.protocol' option using the default parameters defined in
 ## the 'security.password.{SelectedProtocol}.{Option}' options.
 ##
 ## Default: off
@@ -300,7 +300,7 @@ security.password.argon2id13.memory = interactive
 
 ## Defines whether Bondy will allow a valid ticket to be used for
 ## authentication when a local copy of the ticket has not been found in
-## storage. This might happen if the ticket data has not yet been syncrhonised
+## storage. This might happen if the ticket data has not yet been synchronised
 ## to the node handling the authentication request.
 ##
 ## Default: on

@@ -96,7 +96,7 @@ start(_Type, Args) ->
     %% until we are ready to do it
     ok = suspend_aae(),
 
-    %% Now that we have initialiased the configuration we start the following
+    %% Now that we have initialised the configuration we start the following
     %% dependencies (plum_db will restart Partisan)
     _ = application:ensure_all_started(tuplespace, permanent),
     _ = application:ensure_all_started(plum_db, permanent),
@@ -308,7 +308,7 @@ start_admin_listeners() ->
     %% This is to enable certain operations during startup i.e. liveness and
     %% readiness http probes.
     %% The /ping (liveness) and /metrics paths will now go live
-    %% The /ready (readyness) path will now go live but will return false as
+    %% The /ready (readiness) path will now go live but will return false as
     %% bondy_config:get(status) will return `initialising'
     ?LOG_NOTICE(#{description => "Starting Admin API listeners"}),
     bondy_http_gateway:start_admin_listeners().

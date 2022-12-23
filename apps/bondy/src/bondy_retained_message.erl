@@ -476,7 +476,7 @@ maybe_append(_, _, Acc) ->
 is_eligible(SessionId, Opts) ->
     case maps:find(eligible, Opts) of
         {ok, []} ->
-            %% Non eligible! The empty list is mot probably a mistake
+            %% Non eligible! The empty list is not probably a mistake
             %% but we need to respect the semantics
             false;
         {ok, List} ->

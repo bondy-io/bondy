@@ -41,7 +41,7 @@
 %% This module handles only the concurrency and basic routing logic,
 %% delegating the rest to either {@link bondy_broker} for PubSub interactions,
 %% {@link bondy_dealer} for RPC interactions and {@link bondy_relay} for
-%% all interactions targetting a remote peer.
+%% all interactions targeting a remote peer.
 %%
 %% ```
 %% ,------.                                    ,------.
@@ -123,7 +123,7 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returnes the broker and dealer roles with their features.
+%% @doc Returns the broker and dealer roles with their features.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec roles() -> #{binary() => #{binary() => boolean()}}.
@@ -463,7 +463,7 @@ sync_forward({M, _Ctxt}) ->
 %% @private
 %% @doc Auxiliary function used by forward/3.
 %% These are messages sent by Caller or Publisher only i.e. client-to-router
-%% direction or a router-to-client message that is also being forewarded by
+%% direction or a router-to-client message that is also being forwarded by
 %% another cluster peer node.
 %% The following messages are never forwarded between cluster peer nodes:
 %% INVOCATION, YIELD, INTERRUPT, EVENT.

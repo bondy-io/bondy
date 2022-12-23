@@ -550,7 +550,7 @@ add(RealmUri, #{type := ?USER_TYPE, username := Username} = User, Opts) ->
     try
         %% This should have been validated before but just to avoid any issues
         %% we do it again.
-        %% We asume the username is normalised
+        %% We assume the username is normalised
         ok = not_reserved_name_check(Username),
         do_add(RealmUri, User, Opts)
     catch
@@ -679,10 +679,10 @@ remove(RealmUri, Username0, _Opts) ->
 %% -----------------------------------------------------------------------------
 %% @doc Removes all users that belongs to realm `RealmUri'.
 %% If the option `dirty` is set to `true` this removes the user directly from
-%% store (triggering a brodcast to other Bondy nodes). If set to `false` (the
+%% store (triggering a broadcast to other Bondy nodes). If set to `false` (the
 %% default) then for each user the function remove/2 is called.
 %%
-%% Use `dirty' with a value of `true' onl when you are removing the realm
+%% Use `dirty' with a value of `true' only when you are removing the realm
 %% entirely.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -1430,7 +1430,7 @@ merge(RealmUri, U1, U2, #{update_credentials := true} = Opts) ->
     end;
 
 merge(_, U1, U2, _) ->
-    %% We only allow updates to modify password if explicitely requested via
+    %% We only allow updates to modify password if explicitly requested via
     %% option update_credentials.
     %% authorized_keys are allowed to be merge as the contain public keys.
     maps:merge(U1, maps:without([password], U2)).

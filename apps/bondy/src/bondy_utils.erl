@@ -198,7 +198,7 @@ maybe_encode(erl, Term) ->
    binary_to_term(Term);
 
 maybe_encode(json, Term) when is_binary(Term) ->
-    %% TODO this is wrong, we should be pasing the metadada so that we know in
+    %% TODO this is wrong, we should be passing the metadada so that we know in
     %% which encoding the Term is
     case jsone:try_decode(Term) of
         {ok, JSON, _} ->

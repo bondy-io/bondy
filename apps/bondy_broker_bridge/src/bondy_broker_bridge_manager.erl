@@ -296,7 +296,7 @@ load(Term) when is_map(Term) orelse is_list(Term) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Creates a subscription using bondy_broker.
-%% This results in a new supervised bondy_subscriber processed that subcribes
+%% This results in a new supervised bondy_subscriber processed that subscribes
 %% to {Realm, Topic} and forwards any received publication (event) to the
 %% bridge identified by `Bridge'.
 %%
@@ -373,7 +373,7 @@ init([]) ->
 
 
 handle_continue(init_bridges, State0) ->
-    %% At the moment we are assumming bridges are only configured on startup
+    %% At the moment we are assuming bridges are only configured on startup
     %% through a config file.
 
     case init_bridges(State0) of
@@ -601,7 +601,7 @@ load_config(_, State) ->
 %% @end
 %% -----------------------------------------------------------------------------
 mops_ctxt(Event, RealmUri, _Opts, Topic, Bridge, State) ->
-    %% mops requiere binary keys
+    %% mops require binary keys
     Base = maps:get(ctxt, bridge(Bridge)),
     CtxtEvent = bondy_broker_bridge_event:new(RealmUri, Topic, Event),
 

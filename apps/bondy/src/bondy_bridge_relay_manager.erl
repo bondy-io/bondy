@@ -113,7 +113,7 @@ start_link() ->
 %% Options:
 %%
 %% <ul>
-%% <li>`autostart :: boolean()' - if true and the add operation succeded
+%% <li>`autostart :: boolean()' - if true and the add operation succeeded
 %% the bridge will be immediately started. If `false' the bridge can be started
 %% later using {@link start_bridge/1}.
 %% </li>
@@ -200,7 +200,7 @@ disable_bridge(Name) ->
 %% @doc Adds a bridge to the manager and optionally starts it.
 %% Options:
 %% <ul>
-%% <li>`autostart :: boolean()'</li> - if true and the add operation succeded
+%% <li>`autostart :: boolean()'</li> - if true and the add operation succeeded
 %% the bridge will be immediately started.
 %% </ul>
 %% @end
@@ -340,7 +340,7 @@ handle_continue({add_bridges, Config}, State0) ->
         Config
     ),
 
-    %% We read all the known bridges previsouly created by the user using     %% bondy_bridge_relay_wamp_api and defined as permanent (and thus
+    %% We read all the known bridges previously created by the user using     %% bondy_bridge_relay_wamp_api and defined as permanent (and thus
     %% peristed in the database).
     AllPermanent = bondy_bridge_relay:list(),
 
@@ -348,7 +348,7 @@ handle_continue({add_bridges, Config}, State0) ->
     %% want to run a bridge per node in the cluster!
     %% This is to be replaced by a leader election capability in the future
     %% which will determine which node runs which bridge.
-    %% So at the moment we asume the edge router (bridge relay client) is
+    %% So at the moment we assume the edge router (bridge relay client) is
     %% running in single node.
     MyNodeStr = bondy_config:nodestring(),
 

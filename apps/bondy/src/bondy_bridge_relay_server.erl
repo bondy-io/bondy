@@ -162,7 +162,7 @@ init({RanchRef, Transport, Opts}) ->
     State = maybe_enable_ping(PingOpts, State0),
 
     %% We setup the auth_timeout timer. This is the period we allow between
-    %% openning a connection and authenticating at least one session. Having
+    %% opening a connection and authenticating at least one session. Having
     %% passed that time we will close the connection.
     Actions = [auth_timeout(State)],
     {ok, active, State, Actions}.
@@ -963,9 +963,9 @@ full_sync(SessionId, RealmUri, Opts, State) ->
     end,
 
     %% We do not automatically sync the SSO Realms, if the client node wants it,
-    %% that should be requested explicitely
+    %% that should be requested explicitly
 
-    %% TODO However, we should sync a proyection of the SSO Realm, the realm
+    %% TODO However, we should sync a projection of the SSO Realm, the realm
     %% definition itself but with users, groups, sources and grants that affect
     %% the Realm's users, and avoiding bringing the password
     %% SO WE NEED REPLICATION FILTERS AT PLUM_DB LEVEL

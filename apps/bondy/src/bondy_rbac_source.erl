@@ -157,7 +157,7 @@ new_assignment(Data) when is_map(Data) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns the authmethod associated withe the source
+%% @doc Returns the authmethod associated with the source
 %% @end
 %% -----------------------------------------------------------------------------
 authmethod(#{type := source, authmethod := Val}) -> Val.

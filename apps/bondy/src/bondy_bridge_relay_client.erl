@@ -322,7 +322,7 @@ format_status(Opt, [_PDict, _StateName, #state{} = State]) ->
 %% supervisor.
 %%
 %% The client regards the connection error reasons
-%% `enetdown', `ehostunreach' and `enetunreach' as the absense of network
+%% `enetdown', `ehostunreach' and `enetunreach' as the absence of network
 %% connectivity.
 %%
 %% The client also monitors the network status using
@@ -434,7 +434,7 @@ waiting_for_network(EventType, EventContent, State) ->
 active(enter, connecting, #state{} = State0) ->
     ok = on_connect(State0),
 
-    %% We rest the retry state as we've been succesful
+    %% We rest the retry state as we've been successful
     State1 = reset_reconnect_retry_state(State0),
 
     try
@@ -960,7 +960,7 @@ connect(Transport, {Host, PortNumber}, Config) ->
     %% So erlang first reads 4 bytes to get length of our data, allocates a
     %% buffer to hold it and reads data into buffer after on each tcp
     %% packet. When finished it sends the buffer as one packet to our process.
-    %% This is more efficient than buidling the buffer ourselves.
+    %% This is more efficient than building the buffer ourselves.
     TransportOpts = [
         binary,
         {packet, 4},
