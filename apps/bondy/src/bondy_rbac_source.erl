@@ -157,7 +157,7 @@ new_assignment(Data) when is_map(Data) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns the authmethod associated withe the source
+%% @doc Returns the authmethod associated with the source
 %% @end
 %% -----------------------------------------------------------------------------
 authmethod(#{type := source, authmethod := Val}) -> Val.
@@ -308,7 +308,7 @@ remove_all(RealmUri, Username) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns all the sources for user including the ones for speacial
+%% @doc Returns all the sources for user including the ones for special
 %% use 'all'.
 %% @end
 %% -----------------------------------------------------------------------------

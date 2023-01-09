@@ -123,7 +123,7 @@
 %% local or remote to the caller.
 %%
 %% Notice that the erlang code included in the diagram notes are to be
-%% considered pseudo-code as they do not necesarily match the actual function
+%% considered pseudo-code as they do not necessarily match the actual function
 %% signatures.
 %%
 %% <pre><code class="mermaid">
@@ -267,7 +267,7 @@
 %%
 %% In other words, WAMP guarantees ordering of invocations between any
 %% given _pair_ of _Caller_ and _Callee_. The current implementation
-%% relies on Distributed Erlang which guarantees message ordering betweeen
+%% relies on Distributed Erlang which guarantees message ordering between
 %% processes in different nodes.
 %%
 %% There are no guarantees on the order of call results and errors in
@@ -1218,7 +1218,7 @@ handle_cancel(#cancel{} = M, Ctxt0, skip) ->
     %% the result is discarded when received.
     %% We dequeue the invocation, that way the response will be
     %% discarded.
-    %% TODO instead of dequeing, update the entry to reflect it was
+    %% TODO instead of dequeuing, update the entry to reflect it was
     %% cancelled
     CallId = M#cancel.request_id,
     Caller = bondy_context:ref(Ctxt0),
@@ -1627,7 +1627,7 @@ do_call(CallId, ProcUri, UserFun, Opts, Ctxt0, Entry) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Assummes `Entries' is sorted using bondy_registry_entry:mg_comparator().
+%% @doc Assumes `Entries' is sorted using bondy_registry_entry:mg_comparator().
 %% @end
 %% -----------------------------------------------------------------------------
 -spec choose(
@@ -1641,7 +1641,7 @@ choose({L, Cont}, CallOpts) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Assummes `Entries' is sorted using bondy_registry_entry:mg_comparator().
+%% @doc Assumes `Entries' is sorted using bondy_registry_entry:mg_comparator().
 %% @end
 %% -----------------------------------------------------------------------------
 -spec choose(
@@ -1909,11 +1909,11 @@ on_delete(Entry) ->
 
 % %% @private
 % no_eligible_callee(call, CallId) ->
-%     Desc = <<"A call was forwarded throught the router cluster for a callee that is no longer available.">>,
+%     Desc = <<"A call was forwarded through the router cluster for a callee that is no longer available.">>,
 %     no_eligible_callee(?CALL, CallId, Desc);
 
 % no_eligible_callee(invocation, CallId) ->
-%     Desc = <<"An invocation was forwarded throught the router cluster to a callee that is no longer available.">>,
+%     Desc = <<"An invocation was forwarded through the router cluster to a callee that is no longer available.">>,
 %     no_eligible_callee(?INVOCATION, CallId, Desc).
 
 

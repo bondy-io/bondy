@@ -77,7 +77,7 @@ cidr(Term)  ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Does not allow reserved namess
+%% @doc Does not allow reserved names
 %% @end
 %% -----------------------------------------------------------------------------
 -spec strict_username(Term :: binary()) -> {ok, term()} | boolean().
@@ -92,7 +92,7 @@ strict_username(Term) -> username(Term).
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Does not allow reserved namess
+%% @doc Does not allow reserved names
 %% @end
 %% -----------------------------------------------------------------------------
 -spec aliases(List :: [binary()]) -> {ok, [term()]} | boolean().

@@ -1,16 +1,16 @@
 ![Bondy logo](https://github.com/Leapsight/bondy/blob/develop/doc/assets/bondy_bg.png?raw=true)
 
-![License](https://img.shields.io/github/license/leapsight/bondy?style=for-the-badge)
-![Architecture](https://img.shields.io/badge/architecture-linux%2Famd64%20%7C%20linux%2Farm64%20%7C%20macOS%2Fintel%20%7C%20macOS%2FM1-lightgrey?style=for-the-badge)
-![Version](https://img.shields.io/badge/version-1.0.0--beta.68-blue?style=for-the-badge)<br>
+![Version](https://img.shields.io/badge/version-1.0.0--beta.69-blue?style=for-the-badge)<br>
 ![Docker Pulls](https://img.shields.io/docker/pulls/leapsight/bondy?style=for-the-badge)
-![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/leapsight/bondy/CI/master?label=docker%3Amaster&style=for-the-badge)
-![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/leapsight/bondy/CI/develop?label=docker%3Adevelop&style=for-the-badge)
+![Docker Build (master)](https://img.shields.io/github/actions/workflow/status/bondy-io/bondy/docker_image_build.yaml?&branch=master&label=docker-master&style=for-the-badge)
+![Docker Build (master)](https://img.shields.io/github/actions/workflow/status/bondy-io/bondy/docker_image_build.yaml?&branch=develop&label=docker-develop&style=for-the-badge)
+<br>![Architectures](https://img.shields.io/badge/architecture-linux%2Famd64%20%7C%20linux%2Farm64%20%7C%20macOS%2Fintel%20%7C%20macOS%2FM1-lightgrey?style=for-the-badge)
+
 
 # Bondy
 
 ### The distributed application networking platform
-Bondy is an open source, always-on and scaleable application networking platform connecting all elements of a distributed application—offering service and event mesh capabilities combined.
+Bondy is an open source, always-on and scalable application networking platform connecting all elements of a distributed application—offering service and event mesh capabilities combined.
 
 From web and mobile apps to IoT devices and backend microservices, Bondy allows everything to talk using one simple and secured communication protocol in a decoupled and dynamic way.
 
@@ -97,7 +97,7 @@ Bondy provides a unique combination of features which sets it apart from other a
 - **Scalability** – Bondy is written in Erlang/OTP which provides the underlying operating system to handle concurrency and scalability requirements, allowing Bondy to scale to thousands and even millions of concurrent connections on a single node. Its distributed architecture also allows for horizontal scaling by simply adding nodes to the cluster.
 - **Decentralised peer-to-peer master-less clustering** – All nodes in a Bondy cluster are equal, thanks to the underlying clustering and networking technology which provides a decentralised master-less architecture. This includes all nodes acting as relays enabling Transparent routing. All nodes can also act as Bridge Relays to enable per-realm inter-cluster routing (aka Bondy Edge [Experimental]).
 - **Transparent routing** - Bondy will route any Caller/Publisher (sender) messages to any Callee/Subscriber (receiver) regardless of their session location in the cluster. When using Full Mesh topology (default), this results in a single hop between sender and receiver. When using the upcoming Peer-to-Peer topology this results in one or multiple hops between sender and receiver.
-- **Low latency data replication** – All nodes in a Bondy cluster share a global state which is replicated through a highly scaleable and low latency eventually consistency model which combines causality tracking, real-time epidemic broadcasting (gossip) and periodic active anti-entropy. Bondy uses [Partisan](http://github.com/aramallo/partisan.git), a high-performance Distributed Erlang replacement that enables various network topologies and supports large clusters (Partisan has been demonstrated to scale up to 1,024 Erlang nodes, and provide better scalability and reduced latency than Distributed Erlang).
+- **Low latency data replication** – All nodes in a Bondy cluster share a global state which is replicated through a highly scalable and low latency eventually consistency model which combines causality tracking, real-time epidemic broadcasting (gossip) and periodic active anti-entropy. Bondy uses [Partisan](http://github.com/aramallo/partisan.git), a high-performance Distributed Erlang replacement that enables various network topologies and supports large clusters (Partisan has been demonstrated to scale up to 1,024 Erlang nodes, and provide better scalability and reduced latency than Distributed Erlang).
 - **Ease of use** – Bondy is easy to operate due to its operational simplicity enabled by its peer-to-peer nature, the lack of special nodes, automatic data replication and self-healing.
 - **Embedded HTTP API Gateway** – Bondy embeds a powerful API Gateway that can translate HTTP actions to WAMP routed RPC and PubSub operations. The API Gateway leverages the underlying storage and replication technology to deploy the API Specifications to the cluster nodes in real-time.
 - **Embedded Identity Management & Authentication** - Each realm manages user identity and authentication using multiple WAMP and HTTP authentication methods. Identity data is replicated across the cluster to ensure always-on and low-latency operations.
@@ -155,7 +155,7 @@ rebar3 as prod tar
 Untar and copy the resulting tarball to the location where you want to install Bondy e.g. `~/tmp/bondy`.
 
 ```shell
-tar -zxvf _build/prod/rel/bondy-1.0.0-beta.28.tar.qz -C ~/tmp/bondy
+tar -zxvf _build/prod/rel/bondy-1.0.0-beta.69.tar.qz -C ~/tmp/bondy
 ```
 
 #### Running

@@ -867,7 +867,7 @@ abort_message(internal_error) ->
 
 abort_message(decoding_error) ->
     Details = #{
-        message => <<"An error ocurred while deserealising a message.">>
+        message => <<"An error occurred while deserealising a message.">>
     },
     wamp_message:abort(Details, ?WAMP_PROTOCOL_VIOLATION);
 

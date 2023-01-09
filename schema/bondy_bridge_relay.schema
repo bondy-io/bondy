@@ -222,7 +222,7 @@
   {datatype, string}
 ]}.
 
-%% Defines the FileName for an exectuable to be use to compute the Crytosign
+%% Defines the FileName for an executable to be use to compute the Crytosign
 %% signature. The filename in its whole is used as the name of the executable,
 %% including any spaces. The arguments are passed to the executable as-is,
 %% without environment variable expansion or other processing, neutralizing
@@ -441,7 +441,7 @@
               );
             throw:invalid_endpoint ->
               cuttlefish:invalid(
-                "value for the endpoint referes to a non-existing domain"
+                "value for the endpoint refers to a non-existing domain"
               )
         end;
 

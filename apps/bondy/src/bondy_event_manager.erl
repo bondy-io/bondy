@@ -21,7 +21,7 @@
 %% events. It implements the "watched" handler capability i.e.
 %% `add_watched_handler/2,3', `swap_watched_handler/2,3'.
 %% In addition, this module mirrors most of the gen_event API and adds variants
-%% with two arguments were the first argument is the defaul event manager
+%% with two arguments were the first argument is the default event manager
 %% (`bondy_event_manager').
 %%
 %% ```

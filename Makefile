@@ -8,8 +8,12 @@ CT_SUITE_ARGS = --suite ${CT_SUITE_FILE}
 else
 CT_SUITE_ARGS =
 endif
+CODESPELL 		= $(shell which codespell)
+SPELLCHECK 	    = $(CODESPELL) -S _build -S doc -S .git -L applys,nd,accout,mattern,pres,fo
+SPELLFIX      	= $(SPELLCHECK) -i 3 -w
 
-.PHONY: genvars compile test xref eunit dialyzer tar
+
+.PHONY: genvars compile test xref eunit dialyzer tar spellcheck spellfix
 
 certs:
 	cd config && ./make_certs
@@ -41,6 +45,11 @@ test: xref
 xref:
 	${REBAR} xref skip_deps=true
 
+spellcheck:
+	$(if $(CODESPELL), $(SPELLCHECK), $(error "Aborting, command codespell not found in PATH"))
+
+spellfix:
+	$(if $(CODESPELL), $(SPELLFIX), $(error "Aborting, command codespell not found in PATH"))
 
 cover: xref
 	${REBAR} as test ct ${CT_SUITE_ARGS}, cover

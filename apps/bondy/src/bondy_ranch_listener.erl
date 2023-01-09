@@ -40,7 +40,7 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Conditionally starts a listener wirth reference `Ref'.
+%% @doc Conditionally starts a listener with reference `Ref'.
 %% References for each listener is defined by the bondy.schema file.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -118,7 +118,7 @@ connections(Ref) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns the transport and transport options to be used wirh listener
+%% @doc Returns the transport and transport options to be used with listener
 %% `Ref'.
 %%
 %% The definition of the listeners in bondy.schema MUST match this structure.

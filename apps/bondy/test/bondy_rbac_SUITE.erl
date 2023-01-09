@@ -513,5 +513,5 @@ prototype_1(_) ->
     ?assertError(
         {not_authorized, _},
         bondy_rbac:authorize(<<"test.permission">>, <<"bar">>, C3),
-        "U1 should no longer have permission via prototypical inheritance, because we have overriden prototype_group_b"
+        "U1 should no longer have permission via prototypical inheritance, because we have overridden prototype_group_b"
     ).

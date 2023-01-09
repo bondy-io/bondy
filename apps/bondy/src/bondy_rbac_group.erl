@@ -401,10 +401,10 @@ remove(RealmUri, Name, _Opts) ->
 %% -----------------------------------------------------------------------------
 %% @doc Removes all groups that beloong to realm `RealmUri'.
 %% If the option `dirty` is set to `true` this removes the groups directly from
-%% store (triggering a brodcast to other Bondy nodes). If set to `false` (the
+%% store (triggering a broadcast to other Bondy nodes). If set to `false` (the
 %% default) then for each group the function remove/2 is called.
 %%
-%% Use `dirty' with a value of `true' onl when you are removing the realm
+%% Use `dirty' with a value of `true' only when you are removing the realm
 %% entirely.
 %% @end
 %% -----------------------------------------------------------------------------

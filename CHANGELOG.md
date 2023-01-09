@@ -24,7 +24,7 @@
 * Fixes group ordering issue in processing of security (realm) configuration files.
     - bondy_realm topological ordering of groups within each realm according to their group membership relationship. If any cycles are found amongst groups, an error is raised.
     - Existing groups referred by name in the group's 'group' property are not fetched, so cycles might still be created once the new groups are stored on the database.
-* Fixes a concurrency issue with busy clients, in particular when they end up calling themselves. This was produced by an unnecesary used of internal acknowledgments which have been removed
+* Fixes a concurrency issue with busy clients, in particular when they end up calling themselves. This was produced by an unnecessary used of internal acknowledgments which have been removed
 * Fixes the following issues: #6, #7, #8
 
 ### WAMP
@@ -56,7 +56,7 @@
     - queue_least_loaded
     - quede_least_loaded_sample
     - jump_consistent_hash (MUST not be used as this is experimental and the implementation will change with upcoming definitions from WAMP Specification)
-* Aded support for WS compression
+* Added support for WS compression
     - now supports permessage-deflate websocket extension and enabled by default
     - added configuration option `wamp.websocket.compression_enabled`
     - added configuration option `wamp.websocket.deflate.level`
@@ -112,11 +112,11 @@
 ### Added
 
 - Added a controlled phased startup process
-  - Bondy now starts in phases allowing to block on several steps using configuration parameters. The main benefit is to avoid starting up the WAMP client socket listeners before serveral subsystems have finish initialisation and/or some processes have been completed.
+  - Bondy now starts in phases allowing to block on several steps using configuration parameters. The main benefit is to avoid starting up the WAMP client socket listeners before several subsystems have finish initialisation and/or some processes have been completed.
     - `startup.wait_for_store_partitions` - controls whether to block further stages until all db partitions have been initialised, this includes loading all data into those entities stored in ram and disk. Default is `on`.
     - `startup.wait_for_store_hashtrees` - defines whether Bondy will wait for the db hashtrees to be built before continuing with initialisation. Default is `on`.
     - `startup.wait_for_store_aae_exchange` - Defines whether Bondy will wait for the first active anti-entropy exchange to be finished before continuing with initialisation. These only works if Bondy is part of a cluster i.e. when Peer Discovery and Automatic Cluster join is enabled.
-  - The Bondy Admin HTTP API listeners are started as soon as the store partitions and other subsystems are initilised. This allows for liveness probes to be able to check on Bondy and/or admin users to inspect and/or operate while the other phases are running.
+  - The Bondy Admin HTTP API listeners are started as soon as the store partitions and other subsystems are initialised. This allows for liveness probes to be able to check on Bondy and/or admin users to inspect and/or operate while the other phases are running.
 
 ### Fixed
 
@@ -175,7 +175,7 @@ This version introduces an incompatibility with previous versions data storage. 
 - Internal wamp subscriptions
     - We have implemented a first version of an internal WAMP subscription so that Bondy internally can subscribe to WAMP events. This is done through new functions in bondy_broker and the new module bondy_broker_events
 - OAuth 2 Security
-    - Major changes to security subsytem including harmonisation of APIs, deduplication and bug fixes.
+    - Major changes to security subsystem including harmonisation of APIs, deduplication and bug fixes.
     - Use new internal wamp subscriptions to avoid coupling Bondy Security with Bondy API Gateway & OAuth.
         - Bondy Security modules publishe wamp events on entity actions e.g. user creation, deletion, etc.
         - Bondy API Gateway modules and bondy_api_gateway_client subscribe to the user delete events to cleanup OAuth tokens
@@ -210,7 +210,7 @@ This version introduces an incompatibility with previous versions data storage. 
     - Removed unused modules
     - Minor error description fixes
     - Code tidy up
-- Depencies
+- Dependencies
     - cowboy, hackney, jsx, sidejob, promethus, lager and other dependencies upgraded
 - Oauth2
     - Revoke refresh_token

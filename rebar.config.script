@@ -32,7 +32,7 @@ Replace =
                     NewValue = {Key, Value},
                     lists:keyreplace(Key, 1, Config, NewValue);
                 {Key, _} ->
-                    %% false or harcoded Path, so we respect that
+                    %% false or hardcoded Path, so we respect that
                     Config
             end
     end,

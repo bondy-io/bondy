@@ -257,7 +257,7 @@ maybe_sort_by_locality(true, L) ->
     lists:sort(Comp, L);
 
 maybe_sort_by_locality(false, L) ->
-    %% We asume entries are already sorted
+    %% We assume entries are already sorted
     L.
 
 
@@ -270,7 +270,7 @@ do_select({error, _} = Error, _) ->
 
 do_select({Entry, Iter}, Nodestring) ->
     %% An optimisation as bondy_registry_entry:is_local/1 would fetch the
-    %% nodestring everytime.
+    %% nodestring every time.
     case bondy_registry_entry:is_alive(Entry) of
         true ->
             {ok, Entry};

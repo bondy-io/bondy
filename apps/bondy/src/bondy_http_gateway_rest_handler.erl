@@ -225,7 +225,7 @@ delete_resource(Req0, #{api_spec := Spec} = St0) ->
 
 delete_completed(Req, St) ->
     %% Called after delete_resource
-    %% We asume deletes are final and synchronous
+    %% We assume deletes are final and synchronous
     {true, Req, St}.
 
 
@@ -519,7 +519,7 @@ update_context({security, Claims}, #{<<"request">> := Req} = Ctxt) ->
         <<"realm_uri">> => maps:get(<<"aud">>, Claims),
         <<"session">> => maps:get(<<"id">>, Claims),
         <<"client_id">> => maps:get(<<"iss">>, Claims),
-        %% We keep it for legacy reasons, we shoult be using authid
+        %% We keep it for legacy reasons, we should be using authid
         <<"username">> => maps:get(<<"sub">>, Claims),
         %% Wamp synonym for username
         <<"authid">> => maps:get(<<"sub">>, Claims),
@@ -677,7 +677,7 @@ perform_action(
     Method0,
     #{<<"action">> := #{<<"type">> := <<"forward">>} = Act} = Spec,
     St0) ->
-    %% At the moment we just do not decode it and asume upstream accepts
+    %% At the moment we just do not decode it and assume upstream accepts
     %% the same type
     Ctxt0 = maps:get(api_context, St0),
     %% Arguments might be funs waiting for the
@@ -778,6 +778,7 @@ perform_action(
 
     case bondy:call(P, Opts, A, Akw, WampCtxt) of
         {ok, Result0} ->
+            %% Result is map #{request_id, details, args, kwargs};
             %% mops uses binary keys
             Result1 = bondy_utils:to_binary_keys(Result0),
             ApiCtxt1 = update_context({result, Result1}, ApiCtxt0),

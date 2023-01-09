@@ -1484,7 +1484,7 @@ art_key(Entry) ->
     %% We add Nodestring for cases where SessionId == <<>>
     case MatchPolicy of
         ?PREFIX_MATCH ->
-            %% art lib uses the star char to explicitely denote a prefix
+            %% art lib uses the star char to explicitly denote a prefix
             {<<Key/binary, $*>>, Nodestring, ProtocolSessionId, SessionId, Id};
 
         _ ->

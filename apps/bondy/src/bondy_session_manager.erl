@@ -93,7 +93,7 @@ pool_size() ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Stores the session `Session' and sets up a monitor for the calling
-%% process which is assummed to be the client connection process e.g. WAMP
+%% process which is assumed to be the client connection process e.g. WAMP
 %% connection. In case the connection crashes it performs the cleanup of any
 %% session data that should not be retained.
 %% -----------------------------------------------------------------------------
@@ -114,7 +114,7 @@ open(Session) ->
 %% if the realm does not exist or cannot be created.
 %%
 %% This function also sets up a monitor for the calling process which is
-%% assummed to be the client connection process e.g. WAMP connection. In case
+%% assumed to be the client connection process e.g. WAMP connection. In case
 %% the connection crashes it performs the cleanup of any session data that
 %% should not be retained.
 %% -----------------------------------------------------------------------------

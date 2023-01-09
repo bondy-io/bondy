@@ -505,7 +505,7 @@ valid_roles(undefined, User) ->
 valid_roles(_, #{username := anonymous}) ->
     %% If anonymous (user) the only valid role (group) is anonymous
     %% so we drop the requested ones.
-    %% We turn it to binary eventhough the group internally (in the db) is
+    %% We turn it to binary even though the group internally (in the db) is
     %% called 'anonymous', but the bondy_rbac_group accepts both for lookups.
     {<<"anonymous">>, [<<"anonymous">>]};
 
@@ -672,7 +672,7 @@ get_user(RealmUri, SSORealmUri, UsernameOrAlias) ->
             %% (if any), so that we get the credentials (password and
             %% authorized_keys).
             %% If for whatever reason the local user had values for the
-            %% credentials, they will be overriden by those from the SSO.
+            %% credentials, they will be overridden by those from the SSO.
             bondy_rbac_user:resolve(User)
     end.
 

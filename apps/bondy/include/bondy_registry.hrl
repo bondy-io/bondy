@@ -7,7 +7,7 @@
 -define(CONCURRENT_ADD(Type), ?CONCURRENT_MATCH(Type)).
 -define(CONCURRENT_DELETE(Type), ?CONCURRENT_ADD(Type)).
 -define(CONCURRENT_MATCH(Type),
-    %% Adding an entry requires matching againts art tries, even for
+    %% Adding an entry requires matching against art tries, even for
     %% exact matching policy when pattern_based_registration is enabled.
     ?TRIE_CONCURRENT_MATCH
     orelse (
