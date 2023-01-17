@@ -24,7 +24,6 @@
 -behaviour(app_config).
 
 -include_lib("kernel/include/logger.hrl").
--include_lib("partisan/include/partisan.hrl").
 -include("bondy_plum_db.hrl").
 -include("bondy.hrl").
 
@@ -322,7 +321,7 @@ nodestring() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec node_spec() -> node_spec().
+-spec node_spec() -> partisan:node_spec().
 
 node_spec() ->
     partisan:node_spec().
