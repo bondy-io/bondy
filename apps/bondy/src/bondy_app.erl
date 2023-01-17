@@ -83,13 +83,9 @@ vsn() ->
 %% @end
 %% -----------------------------------------------------------------------------
 start(_Type, Args) ->
-    %% Partisan is automatically started by plum_db, so we need to stop it so
-    %% that we can configure it.
-    %% TODO Consider maaking partisan an "informal" dependency of plum_db to
-    %% avoid this step.
-    application:stop(partisan),
-
-    %% We initialise the Bondy config
+    %% We initialise the Bondy config, we need to make this call before
+    %% starting tuplespace, partisan and plum_db are started, becuase we are
+    %% modifying their application environments.
     ok = bondy_config:init(Args),
 
     %% We temporarily disable plum_db's AAE to avoid rebuilding hashtrees
@@ -97,22 +93,23 @@ start(_Type, Args) ->
     ok = suspend_aae(),
 
     %% Now that we have initialised the configuration we start the following
-    %% dependencies (plum_db will restart Partisan)
+    %% dependencies
     _ = application:ensure_all_started(tuplespace, permanent),
+    %% plum_db will start partisan
     _ = application:ensure_all_started(plum_db, permanent),
 
-    %% We need Partisan to be app so that we can get the nodename
+    %% We need Partisan to be up so that we can get the nodename
     ok = logger:update_primary_config(#{metadata => #{
-        node => bondy_config:node(),
+        node => partisan:node(),
         router_vsn => vsn()
     }}),
 
     %% Finally we start the supervisor
     case bondy_sup:start_link() of
         {ok, Pid} ->
-            ok = setup_commons(),
             %% Please do not change the order of this function calls
             %% unless, of course, you know exactly what you are doing.
+            ok = setup_commons(),
             ok = bondy_sysmon_handler:add_handler(),
             ok = bondy_router_worker:start_pool(),
             ok = setup_event_handlers(),
@@ -236,7 +233,9 @@ maybe_wait_for_aae_exchange() ->
                     ok;
                 Peers ->
                     ?LOG_NOTICE(#{
-                        description => "Application master is waiting for plum_db AAE to perform exchange"
+                        description =>
+                            "Application master is waiting for "
+                            "plum_db AAE to perform exchange"
                     }),
                     %% We are in a cluster, we randomnly pick a peer and
                     %% perform an AAE exchange
@@ -276,7 +275,8 @@ wait_for_hashtrees() ->
 %% @private
 configure_services() ->
     ?LOG_NOTICE(#{
-        description => "Configuring master and user realms from configuration file"
+        description =>
+            "Configuring master and user realms from configuration file"
     }),
 
     ok = bondy_session_counter:init(),
@@ -287,9 +287,7 @@ configure_services() ->
     ok = bondy_realm:apply_config(),
 
     %% ok = bondy_oauth2:apply_config(),
-
-    ok = bondy_http_gateway:apply_config(),
-    ok.
+    ok = bondy_http_gateway:apply_config().
 
 
 %% @private

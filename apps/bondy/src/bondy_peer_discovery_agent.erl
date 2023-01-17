@@ -34,7 +34,6 @@
 -behaviour(gen_statem).
 
 -include_lib("kernel/include/logger.hrl").
--include_lib("partisan/include/partisan.hrl").
 
 -record(state, {
     enabled                 ::  boolean(),
@@ -49,7 +48,7 @@
     peers = []              ::  [peer()]
 }).
 
--type peer()                ::  node_spec(). % partisan's
+-type peer()                ::  partisan:node_spec(). % partisan's
 
 
 -export_type([peer/0]).
