@@ -4,7 +4,7 @@
 # Build stage 1
 # ===========================================================================
 
-FROM erlang:24 AS builder
+FROM erlang:25 AS builder
 
 # Install build dependencies
 RUN --mount=type=cache,id=apt,sharing=locked,target=/var/cache/apt apt-get update && \
