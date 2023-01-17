@@ -1958,8 +1958,8 @@ do_prune(_Node, _Index, _From, L) when is_list(L) ->
         L
     );
 
-do_prune(Node, Index, From, ETSCont) ->
-    case bondy_registry_remote_index:match(ETSCont) of
+do_prune(Node, Index, From, ETSCont0) ->
+    case bondy_registry_remote_index:match(ETSCont0) of
         ?EOT ->
             From ! {prune_finished, Node};
 
