@@ -565,7 +565,8 @@ init_wamp(Len, Enc, State0) ->
 
         {ok, NonIPAddr} ->
             ?LOG_ERROR(#{
-                description => "Unexpected peername when establishing connection",
+                description =>
+                    "Unexpected peername when establishing connection",
                 reason => invalid_socket,
                 peername => NonIPAddr,
                 protocol => wamp,
@@ -578,7 +579,8 @@ init_wamp(Len, Enc, State0) ->
 
         {error, Reason} ->
             ?LOG_ERROR(#{
-                description => "Unexpected peername when establishing connection",
+                description =>
+                    "Unexpected peername when establishing connection",
                 reason => inet:format_error(Reason),
                 protocol => wamp,
                 transport => raw,
