@@ -23,6 +23,10 @@
 -module(bondy_config).
 -behaviour(app_config).
 
+%% We renamed the default plum_db data channel
+-define(BONDY_DATA_CHANNEL, data).
+-define(WAMP_RELAY_CHANNEL, wamp_relay).
+
 -include_lib("kernel/include/logger.hrl").
 -include("bondy_plum_db.hrl").
 -include("bondy.hrl").
@@ -103,7 +107,7 @@
     %% - lazy_tick_period <- cluster.lazy_tick_period
     %% - peer_port <- cluster.peer_port
     %% - parallelism <- cluster.parallelism
-    %% - partisan_peer_service_manager <- cluster.overlay.topology
+    %% - peer_service_manager <- cluster.overlay.topology
     %% - partisan.tls <- cluster.tls.enabled
     %% - partisan.tls_server_options.* <- cluster.tls.server.*
     %% - partisan.tls_client_options.* <- cluster.tls.client.*
@@ -125,12 +129,6 @@
         {register_pid_for_encoding, false},
         {binary_padding, false},
         %% Fwd options
-        {channels, [
-            wamp_peer_relay,
-            data,
-            rpc,
-            membership
-        ]},
         {disable_fast_forward, false},
         %% Broadcast options
         {broadcast, false},
@@ -238,9 +236,12 @@ init(Args) ->
 
     ok = setup_mods(),
 
-    ok = apply_private_config(prepare_private_config()),
+    ok = setup_partisan_channels(),
 
     ok = setup_partisan(),
+
+    ok = apply_private_config(prepare_private_config()),
+
 
     ?LOG_NOTICE(#{description => "Bondy configuration finished"}),
     ok.
@@ -357,6 +358,33 @@ setup_mods() ->
     ok = configure_jobs_pool().
 
 
+setup_partisan_channels() ->
+    DefaultChannels = #{
+        ?BONDY_DATA_CHANNEL => #{parallelism => 2, compression => false},
+        ?WAMP_RELAY_CHANNEL => #{parallelism => 2, compression => false}
+    },
+    Channels =
+        case application:get_env(bondy, channels, []) of
+            [] ->
+                DefaultChannels;
+            Channels0 ->
+                Channels1 = lists:foldl(
+                    fun({Channel, PList}, Acc) ->
+                        maps:put(Channel, maps:from_list(PList), Acc)
+                    end,
+                    maps:new(),
+                    Channels0
+                ),
+                maps:merge(DefaultChannels, Channels1)
+        end,
+
+    %% There is some redundancy as plum_db_config also configures channels, so
+    %% we make sure they coincide.
+    DataChannelOpts = maps:get(?BONDY_DATA_CHANNEL, Channels),
+    application:set_env(plum_db, data_channel_opts, DataChannelOpts),
+    application:set_env(partisan, channels, maps:to_list(Channels)).
+
+
 %% @private
 setup_partisan() ->
     %% We re-apply partisan config, this reads the partisan env and re-caches
@@ -368,8 +396,8 @@ setup_partisan() ->
     %% other applications.
     ok = partisan_config:init(),
 
-    %% We add the wamp_peer_relay channel
-    ok = bondy_config:set(wamp_peer_channel, wamp_peer_relay).
+    %% We add the wamp_relay channel
+    ok = bondy_config:set(wamp_peer_channel, wamp_relay).
 
 
 %% @private
@@ -390,6 +418,7 @@ prepare_private_config() ->
 %% @private
 configure_plum_db(Config) ->
     PDBConfig = [
+        {data_channel, ?BONDY_DATA_CHANNEL},
         {prefixes, ?PLUM_DB_PREFIXES},
         {data_dir, get(platform_data_dir)}
     ],

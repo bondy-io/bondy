@@ -1724,6 +1724,107 @@
   {datatype, integer}
 ]}.
 
+{mapping, "cluster.channels.default.parallelism", "bondy.channels.default.parallelism", [
+  {default, 1},
+  {datatype, integer}
+]}.
+
+{mapping, "cluster.channels.default.compression", "bondy.channels.default.compression", [
+  {default, false},
+  {datatype, [flag, integer]}
+]}.
+
+{mapping, "cluster.channels.data.parallelism", "bondy.channels.data.parallelism", [
+  {default, 2},
+  {datatype, integer}
+]}.
+
+{mapping, "cluster.channels.data.compression", "bondy.channels.data.compression", [
+  {default, false},
+  {datatype, [flag, integer]}
+]}.
+
+{mapping, "cluster.channels.control_plane.parallelism", "bondy.channels.partisan_membership.parallelism", [
+  {default, 1},
+  {datatype, integer}
+]}.
+
+{mapping, "cluster.channels.control_plane.compression", "bondy.channels.partisan_membership.compression", [
+  {default, true},
+  {datatype, [flag, integer]}
+]}.
+
+
+{mapping, "cluster.channels.wamp_relay.parallelism", "bondy.channels.wamp_relay.parallelism", [
+  {default, 2},
+  {datatype, integer}
+]}.
+
+{mapping, "cluster.channels.wamp_relay.compression", "bondy.channels.wamp_relay.compression", [
+  {default, false},
+  {datatype, [flag, integer]}
+]}.
+
+
+%% {translation,
+%% "bondy.channels",
+%% fun(Conf0) ->
+%%     Conf = cuttlefish_variable:filter_by_prefix(
+%%       "cluster.channels", Conf0
+%%     ),
+%%     Dict = lists:foldl(
+%%         fun
+%%           ({[_, _, Channel, "parallelism"], Value}, Acc) ->
+%%             (is_integer(Value) andalso Value > 1)
+%%               orelse cuttlefish:invalid(
+%%                 "invalid value for property 'parallelism'"
+%%               ),
+%%             Fun = fun(Spec) -> maps:put(parallelism, Value, Spec) end,
+%%             Init = #{parallelism => Value},
+%%             maps:update_with(Channel, Fun, Init, Acc)
+
+%%             dict:store(list_to_atom(Key), list_to_binary(Value), Acc);
+%%           ({[_, _, _, Key, _], Value}, Acc) ->
+%%             dict:append(list_to_binary(Key), list_to_binary(Value), Acc)
+%%         end,
+%%         dict:new(),
+%%         Conf
+%%     ),
+%%     dict:fold(
+%%       fun
+%%         (K, V, Acc) when is_list(V) ->
+%%           [{K, lists:reverse(V)} | Acc];
+%%         (K, V, Acc) ->
+%%           [{K, V} | Acc]
+%%       end,
+%%       [],
+%%       Dict
+%%     )
+
+%%     Dict = lists:foldl(
+%%         fun
+%%           ({[_, _, Channel, "parallelism"], Value}, Acc) ->
+%%             (is_integer(Value) andalso Value > 1)
+%%               orelse cuttlefish:invalid(
+%%                 "invalid value for property 'parallelism'"
+%%               ),
+%%             Fun = fun(Spec) -> maps:put(parallelism, Value, Spec) end,
+%%             Init = #{parallelism => Value},
+%%             maps:update_with(Channel, Fun, Init, Acc)
+
+%%           ({[_, _, Channel, "compression"], Value}, Acc) ->
+%%             is_boolean(Value)
+%%               orelse (is_integer(Value) andalso Value >= 0 andalso Value =< 9)
+%%               orelse cuttlefish:invalid(
+%%                 "invalid value for property 'compression', it should be 'on', "
+%%                 "'off' or an integer in the range 0..9"
+%%               ),
+%%         end,
+%%         Conf,
+%%         Conf
+%%     )
+%% end}.
+
 {mapping, "cluster.lazy_tick_period", "partisan.lazy_tick_period", [
   {default, "1s"},
   {datatype, {duration, ms}},
@@ -1736,13 +1837,13 @@
   hidden
 ]}.
 
-{mapping, "cluster.overlay.topology", "partisan.partisan_peer_service_manager", [
+{mapping, "cluster.overlay.topology", "partisan.peer_service_manager", [
   {default, fullmesh},
   {datatype, {enum, [fullmesh, p2p]}},
   hidden
 ]}.
 
-{translation, "partisan.partisan_peer_service_manager",
+{translation, "partisan.peer_service_manager",
   fun(Conf) ->
     case cuttlefish:conf_get("cluster.overlay.topology", Conf) of
           fullmesh ->
