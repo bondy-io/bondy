@@ -294,6 +294,8 @@
 -include("bondy.hrl").
 
 
+-define(MATCH_LIMIT, 100).
+
 -define(RESERVED_NS(NS),
     <<"Use of reserved namespace '", NS/binary, "'.">>
 ).
@@ -1507,7 +1509,7 @@ handle_call(Msg, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
     CallId = Msg#call.request_id,
     RealmUri = bondy_context:realm_uri(Ctxt),
     %% choose/2 expects a match result w/continuations
-    MatchOpts = #{limit => 100},
+    MatchOpts = #{limit => ?MATCH_LIMIT},
     Matches = bondy_registry:match(registration, RealmUri, ProcUri, MatchOpts),
 
     case choose(Matches, Opts) of
@@ -1631,7 +1633,8 @@ do_call(CallId, ProcUri, UserFun, Opts, Ctxt0, Entry) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec choose(
-    Entries :: {[entry()], trie_continuation() | eot()} | eot(), CallOpts :: map()) -> {ok, Entry :: entry()} | {error, no_proc}.
+    Entries :: {[entry()], trie_continuation() | eot()} | eot(),
+    CallOpts :: map()) -> {ok, Entry :: entry()} | {error, no_proc}.
 
 choose(?EOT, _) ->
     {error, no_proc};
@@ -1661,6 +1664,7 @@ choose([], CallOpts, _, [], Cont) ->
 choose([], CallOpts, {_, _, Invoke}, Acc, Cont) ->
     L = lists:reverse(Acc),
     LBOpts = lb_opts(Invoke, CallOpts),
+
     case bondy_rpc_load_balancer:select(L, LBOpts) of
         {ok, _} = OK ->
             OK;

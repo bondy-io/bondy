@@ -72,6 +72,7 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
+-define(MATCH_LIMIT, 100).
 
 -define(GET_REALM_URI(Map),
     case maps:find(realm_uri, Map) of
@@ -435,7 +436,7 @@ forward(#publish{} = M, undefined, FwdOpts) ->
             MatchOpts0#{nodestring => bondy_config:nodestring()}
     end,
 
-    Subscriptions = match_subscriptions(TopicUri, RealmUri, MatchOpts),
+    MatchResult = match_subscriptions(TopicUri, RealmUri, MatchOpts),
 
     %% We create a high order fun that will generate the event for each
     %% subscription_id
@@ -458,7 +459,7 @@ forward(#publish{} = M, undefined, FwdOpts) ->
     %% We publish to all matching local subscribers and we get back the list of
     %% local bridge relays and the cluster peer nodes where we found remote
     %% subscribers
-    ok = do_publish(RealmUri, Subscriptions, MakeEvent, Fwd, remote),
+    ok = do_publish(RealmUri, MatchResult, MakeEvent, Fwd, remote),
 
     {ok, PubId}.
 
@@ -513,14 +514,16 @@ subscriptions(RealmUri, SessionId, Limit) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the tuple `{LocalSubscriptions, Nodes}' where `Nodes' are the
+%% nodes where there are additional subscriptions.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match_subscriptions(uri(), RealmUri :: uri()) ->
-    {[bondy_registry_entry:t()], [node()]}.
+    {LocalSubscriptions :: [bondy_registry_entry:t()], Nodes :: [node()]}.
 
 match_subscriptions(TopicUri, RealmUri) ->
-    bondy_registry:match(subscription, RealmUri, TopicUri).
+    Opts = #{limit => ?MATCH_LIMIT},
+    bondy_registry:match(subscription, RealmUri, TopicUri, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -541,6 +544,9 @@ match_subscriptions(TopicUri, RealmUri, Opts) ->
 -spec match_subscriptions(
     bondy_registry_trie:continuation() | bondy_registry_trie:eot()
     ) -> match_cont().
+
+match_subscriptions(?EOT) ->
+    ?EOT;
 
 match_subscriptions(Cont) ->
     ets:select(Cont).
@@ -621,8 +627,6 @@ do_forward(#publish{} = M, Ctxt) ->
     %% not.
     %% This behavior can be changed with the option
     %% "PUBLISH.Options.acknowledge|bool"
-    %% We publish first to the local subscribers and if succeed we forward
-    %% to cluster peers
     case maps:get(acknowledge, Opts, false) of
         true ->
             Reply = wamp_message:published(ReqId, PubId),
@@ -739,7 +743,7 @@ do_publish(#publish{} = M, Ctxt) ->
 
 
 %% @private
-do_publish(RealmUri, Subscriptions, MakeEvent, Fwd, Origin)
+do_publish(RealmUri, {_, _} = MatchResult, MakeEvent, Fwd, Origin)
 when is_function(MakeEvent, 1), is_function(Fwd, 1) ->
     %% REVIEW Consider creating a Broadcast tree out of the registry trie
     %% results so that instead of us sending possibly millions of Erlang
@@ -799,7 +803,7 @@ when is_function(MakeEvent, 1), is_function(Fwd, 1) ->
     %% We send the event to the local subscribers and we get back a list of
     %% (local) Bridge Relays and Cluster Peer nodestrings where we found at
     %% least one subscriber
-    publish_fold(Subscriptions, Fun, ok).
+    fold_matches(MatchResult, Fun, ok).
 
 
 %% @private
@@ -930,23 +934,24 @@ forward_using_bridge_relay(M, FwdOpts, RefOrRefs) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-publish_fold(?EOT, _Fun, Acc) ->
+fold_matches(?EOT, _Fun, Acc) ->
     Acc;
 
-publish_fold({L, R}, Fun, Acc) when is_list(L), is_list(R) ->
+fold_matches({{L, R}, Cont}, Fun, Acc0) when is_list(L), is_list(R) ->
+    %% Match with a limit set
+    %% We fold the nodes then the (local) entriss
+    Acc = fold_matches(L, Fun, fold_matches(R, Fun, Acc0)),
+    fold_matches(match_subscriptions(Cont), Fun, Acc);
+
+fold_matches({L, R}, Fun, Acc) when is_list(L), is_list(R) ->
+    %% Match without a limit set
     %% We fold the nodes then the (local) entries
-    publish_fold(L, Fun, publish_fold(R, Fun, Acc));
+    fold_matches(L, Fun, fold_matches(R, Fun, Acc));
 
-publish_fold({L, ?EOT}, Fun, Acc) ->
-    publish_fold(L, Fun, Acc);
+fold_matches([H|T], Fun, Acc) ->
+    fold_matches(T, Fun, Fun(H, Acc));
 
-publish_fold({L, Cont}, Fun, Acc) ->
-    publish_fold(match_subscriptions(Cont), Fun, publish_fold(L, Fun, Acc));
-
-publish_fold([H|T], Fun, Acc) ->
-    publish_fold(T, Fun, Fun(H, Acc));
-
-publish_fold([], _Fun, Acc) ->
+fold_matches([], _Fun, Acc) ->
     Acc.
 
 

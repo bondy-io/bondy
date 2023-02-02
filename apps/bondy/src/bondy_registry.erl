@@ -537,7 +537,11 @@ entries(Type, RealmUri, SessionId, Limit) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec find(trie_continuation() | eot()) ->
-    {[entry()], trie_continuation() | eot()} | eot().
+    Registrations :: [entry()]
+    | {Registrations :: [entry()], trie_continuation() | eot()}
+    | Subscriptions :: {[entry()], [node()]}
+    | {Subscriptions :: {[entry()], [node()]}, trie_continuation() | eot()}
+    | eot().
 
 find(?EOT) ->
     ?EOT;
@@ -566,8 +570,11 @@ find(Cont0) ->
 %% Calls {@link match/4}.
 %% @end
 %% -----------------------------------------------------------------------------
--spec find(Type :: entry_type(), RealmUri :: uri(), Uri :: uri()) ->
-    {[entry()], trie_continuation() | eot()} | eot().
+-spec find
+    (subscription, RealmUri :: uri(), uri()) ->
+        {[entry()], [node()]};
+    (registration, RealmUri :: uri(), uri()) ->
+        [entry()].
 
 find(Type, RealmUri, Uri) ->
     find(Type, RealmUri, Uri, #{}).
@@ -585,8 +592,13 @@ find(Type, RealmUri, Uri) ->
 %% This function uses the bondy_registry_trie.
 %% @end
 %% -----------------------------------------------------------------------------
--spec find(Type :: entry_type(), RealmUri :: uri(), uri(), map()) ->
-    {[entry()], trie_continuation() | eot()} | eot().
+-spec find
+    (subscription, RealmUri :: uri(), uri(), map()) ->
+        {[entry()], [node()]}
+        | {{[entry()], [node()]}, trie_continuation() | eot()} | eot();
+    (registration, RealmUri :: uri(), uri(), map()) ->
+        [entry()]
+        | {[entry()], trie_continuation() | eot()} | eot().
 
 find(Type, RealmUri, Uri, Opts) ->
     Limit = maps:get(limit, Opts, undefined),
@@ -619,7 +631,11 @@ find(Type, RealmUri, Uri, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match(trie_continuation() | eot()) ->
-    {[entry()], trie_continuation() | eot()} | eot().
+    Registrations :: [entry()]
+    | {Registrations :: [entry()], trie_continuation() | eot()}
+    | Subscriptions :: {[entry()], [node()]}
+    | {Subscriptions :: {[entry()], [node()]}, trie_continuation() | eot()}
+    | eot().
 
 match(?EOT) ->
     ?EOT;
@@ -648,8 +664,11 @@ match(Cont0) ->
 %% Calls {@link match/4}.
 %% @end
 %% -----------------------------------------------------------------------------
--spec match(Type :: entry_type(), RealmUri :: uri(), Uri :: uri()) ->
-    [entry()] | {[entry()], trie_continuation() | eot()} | eot().
+-spec match
+    (subscription, RealmUri :: uri(), uri()) ->
+        {[entry()], [node()]};
+    (registration, RealmUri :: uri(), uri()) ->
+        [entry()].
 
 match(Type, RealmUri, Uri) ->
     match(Type, RealmUri, Uri, #{}).
@@ -667,8 +686,13 @@ match(Type, RealmUri, Uri) ->
 %% This function uses the bondy_registry_trie.
 %% @end
 %% -----------------------------------------------------------------------------
--spec match(Type :: entry_type(), RealmUri :: uri(), uri(), map()) ->
-    {[entry()], trie_continuation() | eot()} | eot().
+-spec match
+    (subscription, RealmUri :: uri(), uri(), map()) ->
+        {[entry()], [node()]}
+        | {{[entry()], [node()]}, trie_continuation() | eot()} | eot();
+    (registration, RealmUri :: uri(), uri(), map()) ->
+        [entry()]
+        | {[entry()], trie_continuation() | eot()} | eot().
 
 match(Type, RealmUri, Uri, Opts) ->
     try
@@ -1702,25 +1726,34 @@ trie_match(Cont) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
 %% @private
-project_trie_res(registration, L) when is_list(L) ->
-    lookup_entries(registration, L, []);
-
-project_trie_res(subscription, {L, R}) when is_list(L), is_list(R) ->
-    {lookup_entries(subscription, L, []), R};
-
+%% @doc Takes the trie matches (index entries and nodes) and returns entries
+%% and nodes
+%% @end
+%% -----------------------------------------------------------------------------
 project_trie_res(_, ?EOT) ->
     ?EOT;
 
-project_trie_res(Type, {L, Cont}) when is_list(L) ->
-    {lookup_entries(Type, L, []), Cont};
-
-project_trie_res(Type, {{L, R}, Cont}) when is_list(L), is_list(R) ->
-    Entries = lookup_entries(Type, L, []),
-    {{Entries, R}, Cont};
-
 project_trie_res(_, {error, Reason}) ->
-    error(Reason).
+    error(Reason);
+
+project_trie_res(Type, {{L, Nodes}, Cont})
+when Type == subscription, is_list(L), is_list(Nodes) ->
+    Entries = lookup_entries(Type, L, []),
+    {{Entries, Nodes}, Cont};
+
+project_trie_res(Type, {L, Nodes})
+when Type == subscription, is_list(L), is_list(Nodes) ->
+    Entries = lookup_entries(Type, L, []),
+    {Entries, Nodes};
+
+project_trie_res(Type, {L, Cont}) when Type == registration, is_list(L) ->
+    Entries = lookup_entries(Type, L, []),
+    {Entries, Cont};
+
+project_trie_res(Type, L) when Type == registration, is_list(L) ->
+    lookup_entries(Type, L, []).
 
 
 %% @private
