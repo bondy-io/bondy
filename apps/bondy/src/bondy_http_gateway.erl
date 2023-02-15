@@ -828,7 +828,9 @@ load_dispatch_tables() ->
                 Parsed = bondy_http_gateway_api_spec_parser:parse(V),
                 Ts = maps:get(<<"ts">>, V),
                 ?LOG_INFO(#{
-                    description => "Loading and parsing API Gateway specification from store",
+                    description =>
+                        "Loading and parsing API Gateway specification "
+                        "from store",
                     name => maps:get(<<"name">>, V),
                     id => maps:get(<<"id">>, V),
                     timestamp => Ts
@@ -838,7 +840,9 @@ load_dispatch_tables() ->
                 _:_:_ ->
                     _ = delete(K),
                     ?LOG_WARNING(#{
-                        description => "Removed invalid API Gateway specification from store",
+                        description =>
+                            "Removed invalid API Gateway specification "
+                            "from store",
                         key => K
                     }),
                     []
