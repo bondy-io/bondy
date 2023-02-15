@@ -193,7 +193,9 @@ maybe_wait_for_plum_db_partitions() ->
         true ->
             %% We block until all partitions are initialised
             ?LOG_NOTICE(#{
-                description => "Application master is waiting for plum_db partitions to be initialised"
+                description =>
+                    "Application master is waiting for plum_db partitions "
+                    "to be initialised"
             }),
             plum_db_startup_coordinator:wait_for_partitions();
         false ->
