@@ -19,65 +19,77 @@
 -module(bondy_ct).
 -include_lib("common_test/include/ct.hrl").
 
+-if(?OTP_RELEASE >= 25).
+    %% already defined by OTP
+-else.
+    -define(CT_PEER, ct_slave).
+-endif.
+
 -define(KERNEL_ENV, [
     {logger_level,info},
     {logger,
-        [{handler,default,logger_std_h,
-            #{config =>
-                    #{burst_limit_enable => true,
-                    burst_limit_max_count => 500,
-                    burst_limit_window_time => 1000,drop_mode_qlen => 200,
-                    filesync_repeat_interval => no_repeat,
-                    flush_qlen => 1000,overload_kill_enable => false,
-                    overload_kill_mem_size => 3000000,
-                    overload_kill_qlen => 20000,
-                    overload_kill_restart_after => 5000,
-                    sync_mode_qlen => 10,type => standard_io},
-                filter_default => stop,
-                filters =>
-                    [{remote_gl,{fun logger_filters:remote_gl/2,stop}},
-                    {no_domain,
-                        {fun logger_filters:domain/2,{log,undefined,[]}}},
-                    {domain,
-                        {fun logger_filters:domain/2,{stop,equal,[sasl]}}},
-                    {domain,
-                        {fun logger_filters:domain/2,
-                        {log,super,[otp,bondy_audit]}}}],
-                formatter =>
-                    {bondy_logger_formatter,
-                        #{colored => true,colored_alert => "\e[1;45m",
-                        colored_critical => "\e[1;35m",
-                        colored_debug => "\e[0;38m",
-                        colored_emergency => "\e[1;41;1m",
-                        colored_error => "\e[1;31m",
-                        colored_info => "\e[1;37m",
-                        colored_notice => "\e[1;36m",
-                        colored_warning => "\e[1;33m",map_depth => 3,
-                        template =>
-                            [colored_start,"when=",time," level=",level,
-                            {pid,[" pid=",pid],[]},
-                            " at=",mfa,":",line,
-                            {{msg,description},
-                                [" description=",description],
-                                []},
-                            colored_end,
-                            {{msg,reason},[" reason=",reason],[]},
-                            {id,[" id=",id],[]},
-                            {parent_id,[" parent_id=",parent_id],[]},
-                            {correlation_id,
-                                [" correlation_id=",correlation_id],
-                                []},
-                            {node,[" node=",node],[]},
-                            {router_vsn,[" router_vsn=",router_vsn],[]},
-                            {realm,[" realm=",realm],[]},
-                            {session_id,[" session_id=",session_id],[]},
-                            {protocol,[" protocol=",protocol],[]},
-                            {transport,[" transport=",transport],[]},
-                            {peername,[" peername=",peername],[]},
-                            " ",msg,"\n"],
-                        term_depth => 50,time_designator => "T",
-                        time_offset => 0}},
-                level => debug}}]}
+        [{handler,default,logger_std_h,#{
+            config => #{
+                burst_limit_enable => true,
+                burst_limit_max_count => 500,
+                burst_limit_window_time => 1000,drop_mode_qlen => 200,
+                filesync_repeat_interval => no_repeat,
+                flush_qlen => 1000,overload_kill_enable => false,
+                overload_kill_mem_size => 3000000,
+                overload_kill_qlen => 20000,
+                overload_kill_restart_after => 5000,
+                sync_mode_qlen => 10,type => standard_io
+            },
+            filter_default => stop,
+            filters =>
+                [{remote_gl,{fun logger_filters:remote_gl/2,stop}},
+                {no_domain,
+                    {fun logger_filters:domain/2,{log,undefined,[]}}},
+                {domain,
+                    {fun logger_filters:domain/2,{stop,equal,[sasl]}}},
+                {domain,
+                    {fun logger_filters:domain/2,
+                    {log,super,[otp,bondy_audit]}}}],
+            formatter =>
+                {bondy_logger_formatter,#{
+                    colored => true,colored_alert => "\e[1;45m",
+                    colored_critical => "\e[1;35m",
+                    colored_debug => "\e[0;38m",
+                    colored_emergency => "\e[1;41;1m",
+                    colored_error => "\e[1;31m",
+                    colored_info => "\e[1;37m",
+                    colored_notice => "\e[1;36m",
+                    colored_warning => "\e[1;33m",map_depth => 3,
+                    template =>[
+                        colored_start,"when=",time," level=",level,
+                        {pid,[" pid=",pid],[]},
+                        " at=",mfa,":",line,
+                        {{msg,description},
+                            [" description=",description],
+                            []},
+                        colored_end,
+                        {{msg,reason},[" reason=",reason],[]},
+                        {id,[" id=",id],[]},
+                        {parent_id,[" parent_id=",parent_id],[]},
+                        {correlation_id,
+                            [" correlation_id=",correlation_id],
+                            []},
+                        {node,[" node=",node],[]},
+                        {router_vsn,[" router_vsn=",router_vsn],[]},
+                        {realm,[" realm=",realm],[]},
+                        {session_id,[" session_id=",session_id],[]},
+                        {protocol,[" protocol=",protocol],[]},
+                        {transport,[" transport=",transport],[]},
+                        {peername,[" peername=",peername],[]},
+                        " ",msg,"\n"
+                    ],
+                    term_depth => 50,
+                    time_designator => "T",
+                    time_offset => 0
+                }},
+            level => debug
+        }}
+    ]}
 ]).
 
 %% ENV IN DESIRED LOAD ORDER
@@ -332,8 +344,18 @@
 	 suite/0,
      tests/1,
      start_bondy/0,
-     stop_bondy/0
+     stop_bondy/0,
+     start_cluster/3,
+     stop_nodes/1
 	]).
+
+
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+
 
 all() ->
     [{group, main}].
@@ -353,23 +375,17 @@ is_a_test(is_a_test) ->
 is_a_test(Function) ->
     hd(lists:reverse(string:tokens(atom_to_list(Function), "_"))) == "test".
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Starts Bondy as part of the runner
+%% @end
+%% -----------------------------------------------------------------------------
 start_bondy() ->
     case persistent_term:get({?MODULE, bondy_started}, false) of
         false ->
             application:set_env([{kernel, ?KERNEL_ENV}]),
 
-            {ok, Hostname} = inet:gethostname(),
-            Nodename = [list_to_atom("runner@" ++ Hostname), shortnames],
-            case net_kernel:start(Nodename) of
-                {ok, _} ->
-                    ok;
-                {error, {already_started, _}} ->
-                    ok;
-                {error, {{shutdown, {failed_to_start_child, net_kernel, {'EXIT', nodistribution}}}, _}} ->
-                    os:cmd("epmd -daemon"),
-                    {ok, _} = net_kernel:start(Nodename)
-            end,
-
+            ok = start_disterl(),
 
             _ = [
                 begin
@@ -396,6 +412,10 @@ start_bondy() ->
     end.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Stops Bondy (to be used with start_bondy/0).
+%% @end
+%% -----------------------------------------------------------------------------
 stop_bondy() ->
     ok = application:stop(gproc),
     ok = application:stop(jobs),
@@ -403,7 +423,86 @@ stop_bondy() ->
     application:stop(bondy).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Starts a set of CT_PEER nodes as per `Config' and joins them in a
+%% cluster.
+%% @end
+%% -----------------------------------------------------------------------------
+start_cluster(_Case, _Config, _Options) ->
+    error(not_implemented).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Stop the CT peers in `Nodes'.
+%% @end
+%% -----------------------------------------------------------------------------
+stop_nodes(Nodes) ->
+    StopFun = fun({Name, _Node}) ->
+        case ?CT_PEER:stop(Name) of
+            {ok, _} ->
+                ok;
+            {error, stop_timeout, _} ->
+                ct:pal("Failed to stop node ~p: stop_timeout!", [Name]),
+                stop_nodes(Nodes),
+                ok;
+            {error, not_started, _} ->
+                ok;
+            Error ->
+                ct:fail(Error)
+        end
+    end,
+    lists:map(StopFun, Nodes),
+    ok.
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+%% @private
+start_disterl() ->
+    {ok, Hostname} = inet:gethostname(),
+    Nodename = [list_to_atom("runner@" ++ Hostname), shortnames],
+
+    case net_kernel:start(Nodename) of
+        {ok, _} ->
+            ok;
+
+        {error, {already_started, _}} ->
+            ok;
+
+        {error, {
+            {shutdown, {
+                failed_to_start_child, net_kernel, {'EXIT', nodistribution}}},
+                _
+            }
+        } ->
+            os:cmd(os:find_executable("epmd") ++ " -daemon"),
+            {ok, _} = net_kernel:start(Nodename)
+    end.
+
+
+%% @private
 maybe_error({error, _} = Error) ->
     error(Error);
+
 maybe_error({ok, _}) ->
     ok.
+
+
+%% @private
+codepath() ->
+    lists:filter(fun filelib:is_dir/1, code:get_path()).
+
+
+%% @private
+join(Node, Peer, _Config) ->
+    PeerSpec = rpc:call(Peer, partisan, node_spec, []),
+    ct:pal("Joining node: ~p with peer: ~p", [Node, PeerSpec]),
+    ok = rpc:call(Node, partisan_peer_service, join, [PeerSpec]).
+
+
+
