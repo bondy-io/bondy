@@ -1900,40 +1900,40 @@ on_delete(Entry) ->
     bondy_event_manager:notify({registration_deleted, Entry}).
 
 
-%% @private
+%% %% @private
 %% revoke(_Entry) ->
-    %% If the Callee does not support registration_revocation, the Dealer may
-    %% still revoke a registration to support administrative functionality. In
-    %% this case, the Dealer MUST NOT send an UNREGISTERED message to the
-    %% Callee. The Callee MAY use the registration meta event
-    %% wamp.registration.on_unregister to determine whether a session is
-    %% removed from a registration.
-    %% ok.
+%%     If the Callee does not support registration_revocation, the Dealer may
+%%     still revoke a registration to support administrative functionality. In
+%%     this case, the Dealer MUST NOT send an UNREGISTERED message to the
+%%     Callee. The Callee MAY use the registration meta event
+%%     wamp.registration.on_unregister to determine whether a session is
+%%     removed from a registration.
+%%     ok.
 
 
-% %% @private
-% no_eligible_callee(call, CallId) ->
-%     Desc = <<"A call was forwarded through the router cluster for a callee that is no longer available.">>,
-%     no_eligible_callee(?CALL, CallId, Desc);
+%% %% @private
+%% no_eligible_callee(call, CallId) ->
+%%     Desc = <<"A call was forwarded through the router cluster for a callee that is no longer available.">>,
+%%     no_eligible_callee(?CALL, CallId, Desc);
 
-% no_eligible_callee(invocation, CallId) ->
-%     Desc = <<"An invocation was forwarded through the router cluster to a callee that is no longer available.">>,
-%     no_eligible_callee(?INVOCATION, CallId, Desc).
+%% no_eligible_callee(invocation, CallId) ->
+%%     Desc = <<"An invocation was forwarded through the router cluster to a callee that is no longer available.">>,
+%%     no_eligible_callee(?INVOCATION, CallId, Desc).
 
 
-% %% @private
-% no_eligible_callee(Type, Id, Desc) ->
-%     Msg = <<
-%         "There are no elibible callees for the procedure."
-%     >>,
-%     wamp_message:error(
-%         Type,
-%         Id,
-%         #{},
-%         ?WAMP_NO_ELIGIBLE_CALLE,
-%         [Msg],
-%         #{message => Msg, description => Desc}
-%     ).
+%% %% @private
+%% no_eligible_callee(Type, Id, Desc) ->
+%%     Msg = <<
+%%         "There are no elibible callees for the procedure."
+%%     >>,
+%%     wamp_message:error(
+%%         Type,
+%%         Id,
+%%         #{},
+%%         ?WAMP_NO_ELIGIBLE_CALLE,
+%%         [Msg],
+%%         #{message => Msg, description => Desc}
+%%     ).
 
 
 %% @private

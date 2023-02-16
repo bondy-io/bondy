@@ -1152,7 +1152,7 @@ time_comparator(Fun) ->
 %% call URI `a1.b2.c3.d4' registration `a1.b2..d4' has higher priority than
 %% registration `a1...d4', see below for more complex examples. If this match
 %% exists — use it.</li>
-%% <ol>
+%% </ol>
 %% @end
 %% -----------------------------------------------------------------------------
 -spec mg_comparator() -> comparator().
@@ -1182,7 +1182,7 @@ mg_comparator() ->
 %% call URI `a1.b2.c3.d4' registration `a1.b2..d4' has higher priority than
 %% registration `a1...d4', see below for more complex examples. If this match
 %% exists — use it.</li>
-%% <ol>
+%% </ol>
 %% @end
 %% -----------------------------------------------------------------------------
 -spec mg_comparator(comparator()) -> comparator().

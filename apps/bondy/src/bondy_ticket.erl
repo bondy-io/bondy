@@ -49,12 +49,10 @@
 %% This claim can be used to determine the age of the ticket. Its value is a
 %% timestamp in seconds.</li>
 %% <li>`issued_on': the bondy nodename in which the ticket was issued.</li>
-%% <li>`scope': the scope of the ticket, consisting of<ul>
+%% <li>`scope': the scope of the ticket, consisting of</li>
 %% <li>`realm': If `undefined' the ticket grants access to all realms the user
 %% has access to by the authrealm (an SSO realm). Otherwise, the value is the
 %% realm this ticket is valid on.</li>
-%% </ul>
-%% </li>
 %% </ul>
 %%
 %% == Claims Storage ==
@@ -78,11 +76,11 @@
 %% There are 4 scopes:
 %%
 %% <ol>
-%% <li>Local scope</l1>
-%% <li>SSO scope</l1>
-%% <li>Client-Local scope</l1>
-%% <li>Client-SSO scope</l1>
-%% <ol>
+%% <li>Local scope</li>
+%% <li>SSO scope</li>
+%% <li>Client-Local scope</li>
+%% <li>Client-SSO scope</li>
+%% </ol>
 %%
 %% === Local scope ===
 %% The ticket was issued with `allow_sso' option set to `false' or when set to

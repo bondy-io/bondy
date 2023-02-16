@@ -483,7 +483,7 @@ tc(M, F, A) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Creates a time-dependent Message Authentication Code with byte length
-%% `Len' duration in seconds `Duration' and secret `Secret`.
+%% `Len' duration in seconds `Duration' and secret `Secret'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec timed_mac(Secret :: binary(), Duration :: integer(), Len :: integer()) ->

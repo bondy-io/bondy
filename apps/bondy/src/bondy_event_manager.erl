@@ -18,8 +18,13 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc This module is used by Bondy to manage event handlers and notify them of
-%% events. It implements the "watched" handler capability i.e.
+%% events.
+%%
+%% It implements both an event manager and a universal event
+%% handler (when used with {@link add_callback/1} and
+%% {@link add_sup_callback/1}) and the "watched" handler capability i.e.
 %% `add_watched_handler/2,3', `swap_watched_handler/2,3'.
+%%
 %% In addition, this module mirrors most of the gen_event API and adds variants
 %% with two arguments were the first argument is the default event manager
 %% (`bondy_event_manager').
@@ -53,12 +58,6 @@
 %% @end
 %% -----------------------------------------------------------------------------
 
-%% -----------------------------------------------------------------------------
-%% @doc This module implement both an event manager and a universal event
-%% handler (when used with {@link add_callback/1} and
-%% {@link add_sup_callback/1}).
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_event_manager).
 
 -behaviour(gen_event).
