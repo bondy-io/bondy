@@ -125,7 +125,7 @@
             {certfile,"./etc/cert.pem"},
             {versions,['tlsv1.3']}]},
         {tls,false},
-        {partisan_peer_service_manager,partisan_pluggable_peer_service_manager},
+        {peer_service_manager,partisan_pluggable_peer_service_manager},
         {lazy_tick_period,1000},
         {parallelism,1},
         {peer_port,18086}]},
