@@ -1718,7 +1718,7 @@
   {datatype, integer}
 ]}.
 
-%% @doc Defines the number of TCP connections for the cluster TCP stack
+%% @doc Defines the default number of TCP connections for the cluster TCP stack
 {mapping, "cluster.parallelism", "partisan.parallelism", [
   {default, 1},
   {datatype, integer}

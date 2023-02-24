@@ -113,7 +113,7 @@
     %% - partisan.tls_client_options.* <- cluster.tls.client.*
     {partisan, [
         %% Overlay topology
-        %% Required for partisan_peer_service_manager ==
+        %% Required for peer_service_manager ==
         %% partisan_pluggable_peer_service_manager
         {membership_strategy, partisan_full_membership_strategy},
         {connect_disterl, false},
@@ -122,7 +122,7 @@
             partisan_plumtree_backend
         ]},
         %% Remote refs
-        {remote_ref_as_uri, true},
+        {remote_ref_format, improper_list},
         {remote_ref_binary_padding, false},
         {pid_encoding, false},
         {ref_encoding, false},
