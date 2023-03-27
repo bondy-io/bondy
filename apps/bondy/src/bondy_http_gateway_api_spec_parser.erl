@@ -663,12 +663,26 @@
         required => true,
         allow_null => false,
         validator => fun
+            (#{<<"type">> := <<"wamp_call">>} = V) ->
+                {ok, maps_utils:validate(V, ?WAMP_RPC_ACTION_SPEC)};
+            %% (#{<<"type">> := <<"wamp_register">>} = V) ->
+            %%     {ok, maps_utils:validate(V, ?WAMP_RPC_ACTION_SPEC)};
+            %% (#{<<"type">> := <<"wamp_unregister">>} = V) ->
+            %%     {ok, maps_utils:validate(V, ?WAMP_RPC_ACTION_SPEC)};
+
+            (#{<<"type">> := <<"wamp_publish">>} = V) ->
+                {ok, maps_utils:validate(V, ?WAMP_PUBSUB_ACTION_SPEC)};
+            %% (#{<<"type">> := <<"wamp_subscribe">>} = V) ->
+            %%     {ok, maps_utils:validate(V, ?WAMP_PUBSUB_ACTION_SPEC)};
+            %% (#{<<"type">> := <<"wamp_unsubscribe">>} = V) ->
+            %%     {ok, maps_utils:validate(V, ?WAMP_PUBSUB_ACTION_SPEC)};
+
             (#{<<"type">> := <<"static">>} = V) ->
                 {ok, maps_utils:validate(V, ?STATIC_ACTION_SPEC)};
-            (#{<<"type">> := <<"wamp_", _/binary>>} = V) ->
-                {ok, maps_utils:validate(V, ?WAMP_ACTION_SPEC)};
+
             (#{<<"type">> := <<"forward">>} = V) ->
                 {ok, maps_utils:validate(V, ?FWD_ACTION_SPEC)};
+
             (V) ->
                 #{} =:= V
         end
@@ -809,18 +823,17 @@ end).
     <<"retry_timeout">> => <<"{{defaults.retry_timeout}}">>
 }).
 
--define(WAMP_ACTION_SPEC, #{
+
+-define(WAMP_RPC_ACTION_SPEC, #{
     <<"type">> => #{
         alias => type,
         required => true,
         allow_null => false,
         datatype => {in, [
-            <<"wamp_call">>,
-            <<"wamp_publish">>,
-            <<"wamp_register">>,
-            <<"wamp_unregister">>,
-            <<"wamp_subscribe">>,
-            <<"wamp_unsubscribe">>
+            <<"wamp_call">>
+            %% ,
+            %% <<"wamp_register">>,
+            %% <<"wamp_unregister">>
         ]}
     },
     <<"timeout">> => #{
@@ -834,6 +847,64 @@ end).
         datatype => [integer, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"procedure">> => #{
+        alias => procedure,
+        required => true,
+        allow_null => false,
+        datatype => [binary, ?MOPS_PROXY_FUN_TYPE],
+        validator => fun
+            (X) when is_binary(X) -> wamp_uri:is_valid(X);
+            (X) -> mops:is_proxy(X)
+        end
+    },
+    <<"options">> => #{
+        alias => options,
+        required => true,
+        allow_null => true,
+        datatype => [map, ?MOPS_PROXY_FUN_TYPE]
+    },
+    <<"args">> => #{
+        aliases => [args, <<"arguments">>, arguments],
+        required => true,
+        allow_null => true,
+        datatype => [list, ?MOPS_PROXY_FUN_TYPE]
+    },
+    <<"kwargs">> => #{
+        aliases => [kwargs, <<"arguments_kw">>, arguments_kw],
+        required => true,
+        allow_null => true,
+        datatype => [map, ?MOPS_PROXY_FUN_TYPE]
+    },
+    <<"payload">> => #{
+        aliases => [payload],
+        required => false,
+        allow_null => true,
+        datatype => [binary, ?MOPS_PROXY_FUN_TYPE]
+    }
+}).
+
+-define(WAMP_PUBSUB_ACTION_SPEC, #{
+    <<"type">> => #{
+        alias => type,
+        required => true,
+        allow_null => false,
+        datatype => {in, [
+            <<"wamp_publish">>
+            %% ,
+            %% <<"wamp_subscribe">>,
+            %% <<"wamp_unsubscribe">>
+        ]}
+    },
+    <<"timeout">> => #{
+        alias => timeout,
+        required => true,
+        datatype => [timeout, ?MOPS_PROXY_FUN_TYPE]
+    },
+    <<"retries">> => #{
+        alias => retries,
+        required => true,
+        datatype => [integer, ?MOPS_PROXY_FUN_TYPE]
+    },
+    <<"topic">> => #{
         alias => procedure,
         required => true,
         allow_null => false,
@@ -1272,10 +1343,16 @@ parse_request_method(Method, Spec0, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec parse_action(binary(), map(), map()) -> map().
 
-parse_action(_, #{<<"type">> := <<"wamp_", _/binary>>} = Spec, Ctxt) ->
+parse_action(_, #{<<"type">> := <<"wamp_call">>} = Spec, Ctxt) ->
     maps_utils:validate(
         mops_eval(maps:merge(?DEFAULT_WAMP_ACTION, Spec), Ctxt),
-        ?WAMP_ACTION_SPEC
+        ?WAMP_RPC_ACTION_SPEC
+    );
+
+parse_action(_, #{<<"type">> := <<"wamp_publish">>} = Spec, Ctxt) ->
+    maps_utils:validate(
+        mops_eval(maps:merge(?DEFAULT_WAMP_ACTION, Spec), Ctxt),
+        ?WAMP_PUBSUB_ACTION_SPEC
     );
 
 parse_action(_, #{<<"type">> := <<"forward">>} = Spec, Ctxt) ->
