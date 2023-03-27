@@ -799,6 +799,67 @@ perform_action(
             {StatusCode1, Response1} = take_status_code(
                 Response0, ?HTTP_INTERNAL_SERVER_ERROR),
             {error, StatusCode1, Response1, St2}
+    end;
+
+perform_action(
+    Method,
+    #{<<"action">> := #{<<"type">> := <<"wamp_publish">>} = Act} = Spec, St0) ->
+    St1 = decode_body_in_context(Method, St0),
+    ApiCtxt0 = maps:get(api_context, St1),
+
+    %% Mops path rewriting to replace legacy API naming
+    Callback = fun
+        (will_get_path, [A, B, <<"arguments">>]) ->
+            [A, B, <<"args">>];
+
+        (will_get_path, [A, B, <<"arguments_kw">>]) ->
+            [A, B, <<"kwargs">>];
+
+        (will_get_path, Path) ->
+            Path
+    end,
+
+    MopsOpts = #{callback => Callback},
+
+    %% Arguments might be funs waiting for the
+    %% request.* values to be bound
+    %% so we need to evaluate them passing the context
+    #{
+        <<"topic">> := Topic,
+        <<"args">> := A,
+        <<"kwargs">> := Akw,
+        <<"options">> := Opts
+    } = mops_eval(Act, ApiCtxt0, MopsOpts),
+
+    RSpec = maps:get(<<"response">>, Spec),
+
+    %% TODO We need to recreate ctxt and session from JWT
+    Peer = maps_utils:get_path([<<"request">>, <<"peer">>], ApiCtxt0),
+    RealmUri = maps:get(realm_uri, St1),
+    WampCtxt = wamp_context(RealmUri, Peer, St1),
+
+    case bondy_broker:publish(Opts, Topic, A, Akw, WampCtxt) of
+        {ok, PubId} ->
+            Result = #{<<"publication_id">> => PubId},
+            ApiCtxt1 = update_context({result, Result}, ApiCtxt0),
+            Response = mops_eval(
+                maps:get(<<"on_result">>, RSpec), ApiCtxt1, MopsOpts
+            ),
+            St2 = maps:update(api_context, ApiCtxt1, St1),
+            {ok, Response, St2};
+
+        {error, WampError0} ->
+            StatusCode0 = uri_to_status_code(maps:get(error_uri, WampError0)),
+            WampError1 = bondy_utils:to_binary_keys(WampError0),
+            Error = maps:put(<<"status_code">>, StatusCode0, WampError1),
+            ApiCtxt1 = update_context({error, Error}, ApiCtxt0),
+            Response0 = mops_eval(
+                maps:get(<<"on_error">>, RSpec), ApiCtxt1, MopsOpts
+            ),
+            St2 = maps:update(api_context, ApiCtxt1, St1),
+            {StatusCode1, Response1} = take_status_code(
+                Response0, ?HTTP_INTERNAL_SERVER_ERROR),
+            {error, StatusCode1, Response1, St2}
     end.
 
 
