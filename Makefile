@@ -13,7 +13,7 @@ SPELLCHECK 	    = $(CODESPELL) -S _build -S doc -S .git -L applys,nd,accout,matt
 SPELLFIX      	= $(SPELLCHECK) -i 3 -w
 
 
-.PHONY: genvars compile test xref eunit dialyzer tar spellcheck spellfix
+.PHONY: genvars compile check test xref eunit dialyzer tar spellcheck spellfix
 
 certs:
 	cd config && ./make_certs
@@ -44,6 +44,17 @@ test: xref
 
 xref:
 	${REBAR} xref skip_deps=true
+
+check: kill test xref dialyzer eqwalizer spellcheck
+
+xref: compile
+	${REBAR} xref skip_deps=true
+
+dialyzer: compile
+	${REBAR} dialyzer
+
+eqwalizer:
+	elp eqwalize-all
 
 spellcheck:
 	$(if $(CODESPELL), $(SPELLCHECK), $(error "Aborting, command codespell not found in PATH"))
