@@ -825,7 +825,6 @@ change_password(RealmUri, Username, New) when is_binary(New) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-
 change_password(RealmUri, Username, New, Old) ->
     case lookup(RealmUri, Username) of
         {error, not_found} = Error ->
@@ -833,25 +832,6 @@ change_password(RealmUri, Username, New, Old) ->
         #{} = User ->
             do_change_password(RealmUri, resolve(User), New, Old)
     end.
-
-
-%% @private
-do_change_password(RealmUri, #{password := PW, username := Username}, New, Old)
-when Old =/= undefined ->
-    case bondy_password:verify_string(Old, PW) of
-        true when Old == New ->
-            ok;
-        true ->
-            update_credentials(RealmUri, Username, #{password => New});
-        false ->
-            {error, bad_signature}
-    end;
-
-do_change_password(RealmUri, #{username := Username}, New, _) ->
-        %% User did not have a password or is an SSO user,
-        %% update_credentials knows how to forward the change to the
-        %% SSO realm
-        update_credentials(RealmUri, Username, #{password => New}).
 
 
 %% -----------------------------------------------------------------------------
@@ -1069,6 +1049,7 @@ normalise_username(Term) when is_binary(Term) ->
 
 normalise_username(_) ->
     error(badarg).
+
 
 
 %% =============================================================================
@@ -1291,10 +1272,22 @@ do_update(RealmUri, User, Data, Opts) when is_map(User) ->
 
 %% @private
 have_credentials_changed(User, Data) ->
-    maps:get(password, Data, undefined)
-        =/= maps:get(password, User, undefined)
-    orelse maps:get(authorized_keys, Data, undefined)
-        =/= maps:get(authorized_keys, User, undefined).
+    has_password_changed(User, Data)
+        orelse have_authorized_keys_changed(User, Data).
+
+
+%% @private
+has_password_changed(User, Data) ->
+    NewPassword = maps:get(password, Data, undefined),
+    NewPassword =/= undefined
+        andalso NewPassword =/= maps:get(password, User, undefined).
+
+
+%% @private
+have_authorized_keys_changed(User, Data) ->
+    NewKeys = maps:get(authorized_keys, Data, undefined),
+    NewKeys =/= undefined
+        andalso NewKeys =/= maps:get(authorized_keys, User, undefined).
 
 
 %% @private
@@ -1317,6 +1310,25 @@ do_local_update(RealmUri, User, Data0, Opts0) ->
     NewUser = merge(RealmUri, User, Data, Opts),
 
     store(RealmUri, NewUser, Opts0).
+
+
+%% @private
+do_change_password(RealmUri, #{password := PW, username := Username}, New, Old)
+when Old =/= undefined ->
+    case bondy_password:verify_string(Old, PW) of
+        true when Old == New ->
+            ok;
+        true ->
+            update_credentials(RealmUri, Username, #{password => New});
+        false ->
+            {error, bad_signature}
+    end;
+
+do_change_password(RealmUri, #{username := Username}, New, _) ->
+        %% User did not have a password or is an SSO user,
+        %% update_credentials knows how to forward the change to the
+        %% SSO realm
+        update_credentials(RealmUri, Username, #{password => New}).
 
 
 %% @private
@@ -1432,7 +1444,8 @@ merge(RealmUri, U1, U2, #{update_credentials := true} = Opts) ->
 merge(_, U1, U2, _) ->
     %% We only allow updates to modify password if explicitly requested via
     %% option update_credentials.
-    %% authorized_keys are allowed to be merge as the contain public keys.
+    %% authorized_keys are always allowed to be merged
+    %% as they contain public keys.
     maps:merge(U1, maps:without([password], U2)).
 
 
@@ -1495,10 +1508,12 @@ groups_exists_check(RealmUri, Groups) ->
             throw({no_such_groups, Unknown})
     end.
 
+
 %% @private
 not_reserved_name_check(Term) ->
     not bondy_rbac:is_reserved_name(Term) orelse throw(reserved_name),
     ok.
+
 
 %% @private
 validate_alias(Alias0) ->
@@ -1632,7 +1647,6 @@ on_credentials_change(RealmUri, User) ->
                 #{}
         end,
     ok = close_sessions(RealmUri, Username, Reason, Opts).
-
 
 
 %% @private
