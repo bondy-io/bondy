@@ -181,7 +181,7 @@
 -type external() ::  #{
     type                :=  ?USER_TYPE,
     version             :=  binary(),
-    username            :=  username(),
+    username            :=  username_int(),
     groups              :=  [binary()],
     has_password        :=  boolean(),
     has_authorized_keys :=  boolean(),
@@ -190,7 +190,8 @@
     meta                =>  #{binary() => any()}
 }.
 
--type username()        ::  binary() | anonymous.
+-type username()        ::  binary().
+-type username_int()    ::  username() | anonymous.
 -type new_opts()        ::  #{
     password_opts       => bondy_password:opts()
 }.
@@ -210,7 +211,7 @@
 -type add_error()       ::  no_such_realm | reserved_name | already_exists.
 -type update_error()    ::  no_such_realm
                             | reserved_name
-                            | {no_such_user, username()}
+                            | {no_such_user, username_int()}
                             | {no_such_groups, [bondy_rbac_group:name()]}.
 
 
@@ -381,7 +382,7 @@ is_enabled(#{type := ?USER_TYPE}) ->
 %% See {@link enable/2} and {@link disable/3}.
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_enabled(RealmUri :: uri(), Username :: binary()) -> boolean().
+-spec is_enabled(RealmUri :: uri(), Username :: username_int()) -> boolean().
 
 is_enabled(RealmUri, Username) ->
     is_enabled(fetch(RealmUri, Username)).
@@ -572,11 +573,11 @@ add(RealmUri, #{type := ?USER_TYPE, username := Username} = User, Opts) ->
 %% This change is globally replicated.
 %% @end
 %% -----------------------------------------------------------------------------
--spec update(RealmUri :: uri(), Username :: binary(), Data :: map()) ->
+-spec update(RealmUri :: uri(), Arg :: username() | t(), Data :: map()) ->
     {ok, NewUser :: t()} | {error, update_error()}.
 
-update(RealmUri, Username, Data) ->
-    update(RealmUri, Username, Data, #{}).
+update(RealmUri, Arg, Data) ->
+    update(RealmUri, Arg, Data, #{}).
 
 
 %% -----------------------------------------------------------------------------
@@ -586,7 +587,7 @@ update(RealmUri, Username, Data) ->
 %% -----------------------------------------------------------------------------
 -spec update(
     RealmUri :: uri(),
-    UserOrUsername :: t() | binary(),
+    Arg :: username() | t(),
     Data :: map(),
     Opts :: update_opts()) ->
     {ok, NewUser :: t()} | {error, any()}.
@@ -599,6 +600,7 @@ update(RealmUri, #{type := ?USER_TYPE} = User, Data0, Opts) ->
     catch
         error:{no_such_user, _} = Reason ->
             {error, Reason};
+
         throw:Reason ->
             {error, Reason}
     end;
@@ -608,39 +610,47 @@ update(RealmUri, Username0, Data0, Opts) when is_binary(Username0) ->
 
         Data = maps_utils:validate(Data0, ?UPDATE_VALIDATOR),
         Username = normalise_username(Username0),
+
+        %% Validations
+        Username == anonymous andalso throw(not_allowed),
         ok = not_reserved_name_check(Username),
+
         User = fetch(RealmUri, Username),
         do_update(RealmUri, User, Data, Opts)
     catch
         error:{no_such_user, _} = Reason ->
             {error, Reason};
+
         throw:Reason ->
             {error, Reason}
-    end.
+    end;
+
+update(_, anonymous, _, _) ->
+    {error, not_allowed}.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(uri(), binary() | map()) ->
+-spec remove(RealmUri :: uri(), Arg :: username() | t()) ->
     ok | {error, {no_such_user, username()} | reserved_name}.
 
-remove(RealmUri, Username) ->
-    remove(RealmUri, Username, #{}).
+remove(RealmUri, Arg) ->
+    remove(RealmUri, Arg, #{}).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(uri(), binary() | map(), Opts :: map()) ->
+-spec remove(uri(), username() | t(), Opts :: map()) ->
     ok | {error, {no_such_user, username()} | reserved_name}.
 
 remove(RealmUri, #{type := ?USER_TYPE, username := Username}, Opts) ->
     remove(RealmUri, Username, Opts);
 
-remove(RealmUri, Username0, _Opts) ->
+remove(RealmUri, Username0, _Opts) when is_binary(Username0) ->
     %% TODO do not allow remove when this is an SSO realm and user exists in
     %% other realms (we need a reverse index - array with the list of realms
     %% this user belongs to.
@@ -673,7 +683,10 @@ remove(RealmUri, Username0, _Opts) ->
             {error, Reason};
         throw:Reason ->
             {error, Reason}
-    end.
+    end;
+
+remove(_, anonymous, _) ->
+    {error, reserved_name}.
 
 
 %% -----------------------------------------------------------------------------
@@ -710,19 +723,21 @@ remove_all(RealmUri, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(RealmUri :: uri(), Username :: binary()) ->
+-spec lookup(RealmUri :: uri(), Username :: username_int()) ->
     t() | {error, not_found}.
 
 lookup(RealmUri, Username0) ->
     case normalise_username(Username0) of
         anonymous ->
             ?ANONYMOUS;
+
         Username ->
             Prefix = ?PLUMDB_PREFIX(RealmUri),
 
             case plum_db:get(Prefix, Username) of
                 undefined ->
                     {error, not_found};
+
                 Val0 when ?IS_ALIAS(Val0) ->
                     case lookup(RealmUri, maps:get(username, Val0)) of
                         {error, _} = Error ->
@@ -738,6 +753,7 @@ lookup(RealmUri, Username0) ->
                         Val1 ->
                             from_term({Username, Val1})
                     end;
+
                 Val0 ->
                     from_term({Username, Val0})
             end
@@ -748,7 +764,7 @@ lookup(RealmUri, Username0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec exists(RealmUri :: uri(), Username :: binary()) -> boolean().
+-spec exists(RealmUri :: uri(), Username :: username_int()) -> boolean().
 
 exists(RealmUri, Username0) ->
     lookup(RealmUri, Username0) =/= {error, not_found}.
@@ -758,12 +774,13 @@ exists(RealmUri, Username0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec fetch(uri(), binary()) -> t() | no_return().
+-spec fetch(uri(), username_int()) -> t() | no_return().
 
 fetch(RealmUri, Username) ->
     case lookup(RealmUri, Username) of
         {error, not_found} ->
             error({no_such_user, Username});
+
         User ->
             User
     end.
@@ -817,7 +834,12 @@ list(RealmUri, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-change_password(RealmUri, Username, New) when is_binary(New) ->
+-spec change_password(
+    RealmUri :: uri(),
+    Username :: username(),
+    New :: binary()) -> ok | {error, any()}.
+
+change_password(RealmUri, Username, New) ->
     change_password(RealmUri, Username, New, undefined).
 
 
@@ -825,10 +847,17 @@ change_password(RealmUri, Username, New) when is_binary(New) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec change_password(
+    RealmUri :: uri(),
+    Username :: username(),
+    New :: binary(),
+    Old :: binary() | undefined) -> ok | {error, any()}.
+
 change_password(RealmUri, Username, New, Old) ->
     case lookup(RealmUri, Username) of
         {error, not_found} = Error ->
             Error;
+
         #{} = User ->
             do_change_password(RealmUri, resolve(User), New, Old)
     end.
@@ -839,13 +868,15 @@ change_password(RealmUri, Username, New, Old) ->
 %% See {@link is_enabled/2}.
 %% @end
 %% -----------------------------------------------------------------------------
--spec enable(RealmUri :: uri(), User :: t()) ->
+-spec enable(RealmUri :: uri(), Arg :: t() | username()) ->
     ok | {error, any()}.
 
-enable(RealmUri, #{type := ?USER_TYPE} = User) ->
-    case update(RealmUri, User, #{enabled => true}) of
-        {ok, _} -> ok;
-        Error -> Error
+enable(RealmUri, Arg) ->
+    case update(RealmUri, Arg, #{enabled => true}) of
+        {ok, _} ->
+            ok;
+        Error ->
+            Error
     end.
 
 
@@ -854,14 +885,17 @@ enable(RealmUri, #{type := ?USER_TYPE} = User) ->
 %% See {@link is_enabled/2}.
 %% @end
 %% -----------------------------------------------------------------------------
--spec disable(RealmUri :: uri(), User :: t()) ->
+-spec disable(RealmUri :: uri(), Arg :: t() | binary()) ->
     ok | {error, any()}.
 
-disable(RealmUri, #{type := ?USER_TYPE} = User) ->
-    case update(RealmUri, User, #{enabled => false}) of
-        {ok, _} -> ok;
-        Error -> Error
+disable(RealmUri, Arg) ->
+    case update(RealmUri, Arg, #{enabled => false}) of
+        {ok, _} ->
+            ok;
+        Error ->
+            Error
     end.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns the external representation of the user `User'.
@@ -1528,6 +1562,9 @@ validate_alias(Alias0) ->
 
 
 %% @private
+do_add_alias(_, #{username := anonymous}, _) ->
+    {error, not_allowed};
+
 do_add_alias(RealmUri, User0, Alias0) ->
     try
         %% We validate the value
