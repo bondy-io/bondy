@@ -76,6 +76,8 @@
 -export([resource_exists/2]).
 -export([to_json/2]).
 -export([to_msgpack/2]).
+-export([expires/2]).
+-export([forbidden/2]).
 
 
 
@@ -163,6 +165,17 @@ is_authorized(Req0, St0) ->
             Req1 = reply(StatusCode, json, Response, Req0),
             {stop, Req1, St0}
     end.
+
+
+forbidden(Req, St) ->
+    %% TODO add feature to spec
+    %% At the moment authorizacion happens during action execution
+    {false, Req, St}.
+
+
+expires(Req, St) ->
+    %% TODO add feature to spec
+    {false, Req, St}.
 
 
 rate_limited(Req, St) ->
@@ -302,7 +315,8 @@ is_authorized(_, Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
     ?LOG_WARNING(#{
-        description => "Request is using unsupported api_key authentication scheme",
+        description =>
+            "Request is using unsupported api_key authentication scheme",
         request => Req
     }),
     {false, Req, St};
@@ -312,7 +326,7 @@ is_authorized(_, Req, #{security := _} = St0)  ->
     {true, Req, St1}.
 
 
-
+%% @private
 authenticate(Token, Ctxt0, Req0, St0) ->
     case bondy_auth:authenticate(?OAUTH2_AUTH, Token, #{}, Ctxt0) of
         {ok, Claims, _Ctxt1} when is_map(Claims) ->
