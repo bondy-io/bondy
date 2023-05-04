@@ -177,7 +177,7 @@ succeed(#bondy_retry{backoff = undefined} = State0) ->
     {get(State), State};
 
 succeed(#bondy_retry{backoff = B0} = State0) ->
-    {_, B1} = backoff:fail(B0),
+    {_, B1} = backoff:succeed(B0),
     State = State0#bondy_retry{
         count = 0,
         start_ts = undefined,
