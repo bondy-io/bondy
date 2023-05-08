@@ -26,7 +26,7 @@
 
 -record(bondy_retry, {
     id                  ::  any(),
-    deadline            ::  pos_integer(),
+    deadline            ::  non_neg_integer(),
     max_retries = 0     ::  non_neg_integer(),
     interval            ::  pos_integer(),
     count = 0           ::  non_neg_integer(),
@@ -35,16 +35,16 @@
 }).
 
 -type t()               ::  #bondy_retry{}.
--type opt()             ::  {deadline, pos_integer()}
-                            | {max_retries, pos_integer()}
+-type opt()             ::  {deadline, non_neg_integer()}
+                            | {max_retries, non_neg_integer()}
                             | {interval, pos_integer()}
                             | {backoff_enabled, boolean()}
                             | {backoff_min, pos_integer()}
                             | {backoff_max, pos_integer()}
                             | {backoff_type, jitter | normal}.
 -type opts_map()        ::  #{
-                                deadline => pos_integer(),
-                                max_retries => pos_integer(),
+                                deadline => non_neg_integer(),
+                                max_retries => non_neg_integer(),
                                 interval => pos_integer(),
                                 backoff_enabled => boolean(),
                                 backoff_min => pos_integer(),
@@ -66,6 +66,7 @@
 
 -compile({no_auto_import, [get/1]}).
 
+-eqwalizer({nowarn_function, init/2}).
 
 
 %% =============================================================================
@@ -118,9 +119,16 @@ get(#bondy_retry{count = N, max_retries = M}) when N > M ->
 
 get(#bondy_retry{} = State) ->
     Now = erlang:system_time(millisecond),
-    Start = State#bondy_retry.start_ts,
     Deadline = State#bondy_retry.deadline,
     B = State#bondy_retry.backoff,
+
+    Start =
+        case State#bondy_retry.start_ts of
+            undefined ->
+                0;
+            Val ->
+                Val
+        end,
 
     case Deadline > 0 andalso Now > (Start + Deadline) of
         true ->
@@ -148,7 +156,7 @@ fail(#bondy_retry{backoff = undefined} = State0) ->
         count = State0#bondy_retry.count + 1
     },
     State = maybe_init_ts(State1),
-
+    %% eqwalizer:ignore
     {get(State), State};
 
 fail(#bondy_retry{backoff = B0} = State0) ->
@@ -159,7 +167,7 @@ fail(#bondy_retry{backoff = B0} = State0) ->
         backoff = B1
     },
     State = maybe_init_ts(State1),
-
+    %% eqwalizer:ignore
     {get(State), State}.
 
 
@@ -174,6 +182,7 @@ succeed(#bondy_retry{backoff = undefined} = State0) ->
         count = 0,
         start_ts = undefined
     },
+    %% eqwalizer:ignore
     {get(State), State};
 
 succeed(#bondy_retry{backoff = B0} = State0) ->
@@ -183,6 +192,7 @@ succeed(#bondy_retry{backoff = B0} = State0) ->
         start_ts = undefined,
         backoff = B1
     },
+    %% eqwalizer:ignore
     {get(State), State}.
 
 
@@ -190,10 +200,15 @@ succeed(#bondy_retry{backoff = B0} = State0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec fire(State :: t()) -> Ref :: timer:ref().
+-spec fire(State :: t()) -> Ref :: reference() | no_return().
 
 fire(#bondy_retry{} = State) ->
-    erlang:start_timer(get(State), self(), State#bondy_retry.id).
+    case get(State) of
+        Delay when is_integer(Delay) ->
+            erlang:start_timer(Delay, self(), State#bondy_retry.id);
+        Other ->
+            error(Other)
+    end.
 
 
 %% -----------------------------------------------------------------------------
