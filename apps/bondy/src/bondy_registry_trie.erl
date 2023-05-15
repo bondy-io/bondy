@@ -47,7 +47,7 @@
     proc_art                    ::  art:t(),
     %% Stores local subscriptions w/match_policy == exact (ets bag)
     topic_tab                   ::  ets:tab(),
-    %% Stores remote subscriptions w/match_policy == exact (ets set)
+    %% Stores remote subscriptions w/match_policy == exact (ets bag)
     topic_remote_tab            ::  ets:tab(),
     %% Stores local subscriptions w/match_policy =/= exact
     topic_art                   ::  art:t(),
@@ -72,9 +72,11 @@
 }).
 
 -record(topic_remote_idx, {
-    key                         ::  index_key(),
-    node                        ::  var(node()),
-    ref_count                   ::  var(non_neg_integer())
+    key                         ::  {
+                                        RealmUri :: uri(),
+                                        Uri :: uri()
+                                    },
+    node                        ::  var(node())
 }).
 
 -record(trie_continuation, {
@@ -218,10 +220,10 @@ new(Index) ->
         [bag, {keypos, 2} | Opts]
     ),
 
-    %% Stores remote subscriptions (set)
+    %% Stores remote subscriptions (bag)
     {ok, T4} = bondy_table_owner:add_or_claim(
         gen_table_name(topic_remote_tab, Index),
-        [set, {keypos, 2} | Opts]
+        [bag, {keypos, 2} | Opts]
     ),
 
     %% Stores local subscriptions w/match_policy =/= exact
@@ -865,10 +867,9 @@ match_remote_exact_subscription(RealmUri, Uri, Opts, Trie) ->
 
     Pattern = #topic_remote_idx{
         key = {RealmUri, Uri},
-        node = '$1',
-        ref_count = '$2'
+        node = '$1'
     },
-    Conds = [{'>', '$2', 0}],
+    Conds = [],
     Return = ['$1'],
 
     MS = [{Pattern, Conds, Return}],
@@ -1307,15 +1308,16 @@ add_remote_exact_subscription(Entry, Trie) ->
     Tab = Trie#bondy_registry_trie.topic_remote_tab,
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Uri = bondy_registry_entry:uri(Entry),
-    Key = {RealmUri, Uri},
-    Default = #topic_remote_idx{
-        key = Key,
-        node = bondy_registry_entry:node(Entry),
-        ref_count = 1
-    },
-    Incr = {#topic_remote_idx.ref_count, 1},
+    Node = bondy_registry_entry:node(Entry),
 
-    _ = ets:update_counter(Tab, Key, Incr, Default),
+    Key = {RealmUri, Uri},
+
+    Obj = #topic_remote_idx{
+        key = Key,
+        node = Node
+    },
+
+    true = ets:insert(Tab, Obj),
 
     %% This is a remote entry, so the on_create event was already generated on
     %% its node.
@@ -1333,28 +1335,15 @@ del_remote_exact_subscription(Entry, Trie) ->
     Tab = Trie#bondy_registry_trie.topic_remote_tab,
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Uri = bondy_registry_entry:uri(Entry),
-    Key = {RealmUri, Uri},
+    Node = bondy_registry_entry:node(Entry),
 
-    try
-        Incr = {#topic_remote_idx.ref_count, -1},
-        case ets:update_counter(Tab, Key, Incr) of
-            0 ->
-                %% Other process might have concurrently incremented the count,
-                %% so we do a match delete
-                Pattern = #topic_remote_idx{
-                    key = Key,
-                    node = bondy_registry_entry:node(Entry),
-                    ref_count = 0
-                },
-                true = ets:match_delete(Tab, Pattern),
-                ok;
-            _ ->
-                ok
-        end
-    catch
-        error:badarg ->
-            ok
-    end.
+    Obj = #topic_remote_idx{
+        key = {RealmUri, Uri},
+        node = Node
+    },
+
+    true = ets:delete_object(Tab, Obj),
+    ok.
 
 
 %% -----------------------------------------------------------------------------
