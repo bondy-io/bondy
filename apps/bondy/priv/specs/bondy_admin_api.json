@@ -906,6 +906,250 @@
                         }
                     }
                 },
+                "/realms/:realm_uri/users/:id/enabled" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get": {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.is_enabled",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ],
+                            "kwargs" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.enable",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.disable",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/users/:id/aliases" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.add_alias",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.body}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/users/:id/aliases/:alias" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.add_alias",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.bindings.alias}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.remove_alias",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.bindings.alias}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/users/:id/groups/:group" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.add_group",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.bindings.group}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.remove_group",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.bindings.group}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
                 "/realms/:realm_uri/groups" : {
                     "is_collection" : true,
                     "options": {
