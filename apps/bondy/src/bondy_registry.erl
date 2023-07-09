@@ -844,7 +844,13 @@ will_merge(_PKey, New, Old) ->
                     Status = bondy_table:get(Peer, ?MERGE_STATUS_TAB, enabled),
 
                     partisan:is_connected(Peer) andalso Status == enabled
-            end
+            end;
+
+        {Val, Val} ->
+            %% This should not happen. It would be an issue in plum_db but just
+            %% in case we deal with it
+            false
+
     end.
 
 
