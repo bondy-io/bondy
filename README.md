@@ -1,10 +1,10 @@
 ![Bondy logo](https://github.com/Leapsight/bondy/blob/develop/doc/assets/bondy_bg.png?raw=true)
 
-![Version](https://img.shields.io/badge/version-1.0.0--beta.74-blue?style=for-the-badge)<br>
+![Version](https://img.shields.io/badge/version-1.0.0--beta.75-blue?style=for-the-badge)<br>
 ![Docker Pulls](https://img.shields.io/docker/pulls/leapsight/bondy?style=for-the-badge)
 ![Docker Build (master)](https://img.shields.io/github/actions/workflow/status/bondy-io/bondy/docker_image_build.yaml?&branch=master&label=docker-master&style=for-the-badge)
 ![Docker Build (develop)](https://img.shields.io/github/actions/workflow/status/bondy-io/bondy/docker_image_build.yaml?&branch=develop&label=docker-develop&style=for-the-badge)
-![Docker Build (latest-tag)](https://img.shields.io/github/actions/workflow/status/bondy-io/bondy/docker_image_build.yaml?&tag=version-1.0.0-beta.74&label=docker-1.0.0-beta.74&style=for-the-badge)
+![Docker Build (latest-tag)](https://img.shields.io/github/actions/workflow/status/bondy-io/bondy/docker_image_build.yaml?&tag=version-1.0.0-beta.75&label=docker-1.0.0-beta.75&style=for-the-badge)
 <br>![Architectures](https://img.shields.io/badge/architecture-linux%2Famd64%20%7C%20linux%2Farm64%20%7C%20macOS%2Fintel%20%7C%20macOS%2FM1-lightgrey?style=for-the-badge)
 
 
@@ -156,7 +156,7 @@ rebar3 as prod tar
 Untar and copy the resulting tarball to the location where you want to install Bondy e.g. `~/tmp/bondy`.
 
 ```shell
-tar -zxvf _build/prod/rel/bondy-1.0.0-beta.74.tar.qz -C ~/tmp/bondy
+tar -zxvf _build/prod/rel/bondy-1.0.0-beta.75.tar.qz -C ~/tmp/bondy
 ```
 
 #### Running
