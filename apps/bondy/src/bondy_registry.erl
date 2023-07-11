@@ -1500,9 +1500,7 @@ trie_on_merge({{_, RealmUri}, _} = PKey, New, Old) ->
 %% @end
 %% -----------------------------------------------------------------------------
 trie_on_merge(_PKey, New, undefined, Trie) ->
-    NewEntry = resolve_value(New),
-
-    case NewEntry of
+    case resolve_value(New) of
         ?TOMBSTONE ->
             %% We got a delete for an entry we do not know anymore.
             %% This could happen when we shutdown or crashed
@@ -1533,9 +1531,12 @@ trie_on_merge(_PKey, New, undefined, Trie) ->
     end;
 
 trie_on_merge(_PKey, New, Old, Trie) ->
-    case resolve_value(New) of
-        ?TOMBSTONE  ->
-            OldEntry = resolve_value(Old),
+
+    case {resolve_value(New), resolve_value(Old)} of
+        {?TOMBSTONE, ?TOMBSTONE}  ->
+            ok;
+
+        {?TOMBSTONE, OldEntry}  ->
             case bondy_registry_entry:is_local(OldEntry) of
                 true ->
                     %% [Case 2] We handled this on will_merge/3;
@@ -1553,7 +1554,7 @@ trie_on_merge(_PKey, New, Old, Trie) ->
 
                 end;
 
-        NewEntry ->
+        {NewEntry, _} ->
             %% Case 4
             case bondy_registry_entry:is_local(NewEntry) of
                 true ->
