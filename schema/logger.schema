@@ -294,32 +294,32 @@
 ]}.
 
 {mapping, "log.handlers.default.formatter.colored_info", "kernel.logger", [
-    {default, "\e[1;37m"},
+    {default, "\e[0;39m"},
     {datatype, string}
 ]}.
 
 {mapping, "log.handlers.default.formatter.colored_notice", "kernel.logger", [
-    {default, "\e[1;36m"},
+    {default, "\e[0;36m"},
     {datatype, string}
 ]}.
 
 {mapping, "log.handlers.default.formatter.colored_warning", "kernel.logger", [
-    {default, "\e[1;33m"},
+    {default, "\e[0;33m"},
     {datatype, string}
 ]}.
 
 {mapping, "log.handlers.default.formatter.colored_error", "kernel.logger", [
-    {default, "\e[1;31m"},
+    {default, "\e[0;31m"},
     {datatype, string}
 ]}.
 
 {mapping, "log.handlers.default.formatter.colored_critical", "kernel.logger", [
-    {default, "\e[1;35m"},
+    {default, "\e[0;35m"},
     {datatype, string}
 ]}.
 
 {mapping, "log.handlers.default.formatter.colored_alert", "kernel.logger", [
-    {default, "\e[1;45m"},
+    {default, "\e[0;45m"},
     {datatype, string}
 ]}.
 
@@ -624,32 +624,32 @@
 ]}.
 
 {mapping, "log.handlers.$id.formatter.colored_info", "kernel.logger", [
-    {default, "\e[1;37m"},
+    {default, "\e[0;39m"},
     {datatype, string}
 ]}.
 
 {mapping, "log.handlers.$id.formatter.colored_notice", "kernel.logger", [
-    {default, "\e[1;36m"},
+    {default, "\e[0;36m"},
     {datatype, string}
 ]}.
 
 {mapping, "log.handlers.$id.formatter.colored_warning", "kernel.logger", [
-    {default, "\e[1;33m"},
+    {default, "\e[0;33m"},
     {datatype, string}
 ]}.
 
 {mapping, "log.handlers.$id.formatter.colored_error", "kernel.logger", [
-    {default, "\e[1;31m"},
+    {default, "\e[0;31m"},
     {datatype, string}
 ]}.
 
 {mapping, "log.handlers.$id.formatter.colored_critical", "kernel.logger", [
-    {default, "\e[1;35m"},
+    {default, "\e[0;35m"},
     {datatype, string}
 ]}.
 
 {mapping, "log.handlers.$id.formatter.colored_alert", "kernel.logger", [
-    {default, "\e[1;45m"},
+    {default, "\e[0;45m"},
     {datatype, string}
 ]}.
 
@@ -695,8 +695,8 @@
             ""
         },
         {id, [" id=", id], ""},
-        {parent_id, [" parent_id=", parent_id], ""},
-        {correlation_id, [" correlation_id=", correlation_id], ""},
+        {span_id, [" span_id=", span_id], ""},
+        {trace_id, [" trace_id=", trace_id], ""},
         {node, [" node=", node], ""},
         {router_vsn, [" router_vsn=", router_vsn], ""},
         {realm, [" realm=", realm], ""},

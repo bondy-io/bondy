@@ -1104,6 +1104,15 @@ will_merge(_PKey, _New, _Old) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+on_merge({?PLUMDB_PREFIX(RealmUri), _}, New, undefined = Old) ->
+    ?LOG_DEBUG(#{
+        description => "on_merge",
+        realm_uri => RealmUri,
+        new => New,
+        old => Old
+    }),
+    ok;
+
 on_merge({?PLUMDB_PREFIX(RealmUri), Username}, New, Old) ->
     ?LOG_DEBUG(#{
         description => "on_merge",
