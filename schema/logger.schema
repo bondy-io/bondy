@@ -8,7 +8,6 @@
     ]}}
 ]}.
 
-
 %% =============================================================================
 %% DEFAULT HANDLER
 %% =============================================================================
@@ -263,10 +262,15 @@
 %% and print them to a dedicated handler.
 %%
 %% The value is a comma separated string which con contain one or more of the
-%% following elements: "otp", "sasl" and "bondy_audit"
+%% following elements: "otp", "ssl" and "bondy_audit"
 {mapping, "log.handlers.default.filter_domains", "kernel.logger", [
     {default, "otp, bondy_audit"},
     {datatype, string}
+]}.
+
+{mapping, "log.handlers.default.allow_progress_reports", "kernel.logger", [
+    {default, off},
+    {datatype, flag}
 ]}.
 
 %% When formatting maps limit their depth to a value. If -1 is provided, this
@@ -599,6 +603,11 @@
     {datatype, string}
 ]}.
 
+{mapping, "log.handlers.$id.allow_progress_reports", "kernel.logger", [
+    {default, off},
+    {datatype, flag}
+]}.
+
 %% When formatting maps limit their depth to a value. If -1 is provided, this
 %% option is disabled.
 {mapping, "log.handlers.$id.formatter.map_depth", "kernel.logger", [
@@ -775,10 +784,19 @@
             end,
 
             %% Filters
-            AllDomains = sets:from_list([otp, sasl, bondy_audit]),
+            AllDomains = sets:from_list([otp, ssl, bondy_audit]),
             ConfDomains = cuttlefish:conf_get(
                 HandlerPrefix ++ ["filter_domains"], HandlersConf
             ),
+
+            AllowProgressReports = cuttlefish:conf_get(
+                HandlerPrefix ++ ["allow_progress_reports"], HandlersConf
+            ),
+            ProgressAction =
+                case AllowProgressReports of
+                    true -> log;
+                    false -> stop
+                end,
 
             LogDomains = sets:from_list([
                 list_to_existing_atom(string:strip(X, both))
@@ -786,24 +804,40 @@
             ]),
 
             StopDomains = sets:subtract(AllDomains, LogDomains),
+            DomainFilter = fun
+                (Action, _, D) when D == otp; D == sasl ->
+                    {
+                        fun logger_filters:domain/2,
+                        {Action, equal, [otp, sasl]}
+                    };
+                (Action, Rel, D) ->
+                    {
+                        fun logger_filters:domain/2,
+                        {Action, equal, [D]}
+                    }
+            end,
+            LogFilters = [
+                {D,
+                    DomainFilter(log, sub, D)
+                } || D <- sets:to_list(LogDomains)
+            ],
+            StopFilters = [
+                {D,
+                    DomainFilter(stop, super, D)
+                } || D <- sets:to_list(StopDomains)
+            ],
             Filters = [
+                {progress,
+                    {fun logger_filters:progress/2, ProgressAction}
+                },
                 {remote_gl,
                     {fun logger_filters:remote_gl/2, stop}
                 },
                 {no_domain,
                     {fun logger_filters:domain/2, {log, undefined, []}}
-                },
-                {domain,
-                    {
-                        fun logger_filters:domain/2,
-                        {stop, equal, sets:to_list(StopDomains)}}
-                },
-                {domain,
-                    {
-                        fun logger_filters:domain/2,
-                        {log, super, sets:to_list(LogDomains)}}
-                }
+                } | LogFilters ++ StopFilters
             ],
+
             %% Formatter
             FormatConf = cuttlefish_variable:filter_by_prefix(
                 HandlerPrefix ++ ["formatter"], CuttleConf
