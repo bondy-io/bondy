@@ -71,6 +71,7 @@ garbage_collect() ->
 
 
 init([]) ->
+    ok = schedule_gc(),
     {ok, #state{}}.
 
 
@@ -96,6 +97,10 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 
+handle_info(scheduled_gc, State) ->
+    ok = do_gc(),
+    ok = schedule_gc(),
+    {noreply, State};
 
 handle_info(Info, State) ->
     ?LOG_DEBUG(#{
@@ -123,11 +128,25 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 
 
+
+schedule_gc() ->
+    Interval = bondy_config:get(gc_interval, timer:minutes(5)),
+    erlang:send_after(Interval, self(), scheduled_gc),
+    ok.
+
+
+
 do_gc() ->
-    L = [element(1, X) || X <- recon:proc_count(memory, 100)],
+    {process_count, Count} = erlang:system_info(process_count),
+    Ratio = bondy_config:get(gc_ratio, 0.3),
+    N = round(Count * Ratio),
+    L = [element(1, X) || X <- recon:proc_count(memory, N)],
 
     [
         erlang:garbage_collect(P)
         || P <- L,  {status, waiting} == process_info(P, status)
     ],
+
+    %% We gc ourselves
+    erlang:garbage_collect(),
     ok.
