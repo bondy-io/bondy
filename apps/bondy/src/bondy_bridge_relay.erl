@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_bridge_relay_listener.erl -
+%%  bondy_bridge_relay.erl -
 %%
 %%  Copyright (c) 2016-2023 Leapsight. All rights reserved.
 %%
@@ -220,6 +220,28 @@
             (<<"verify_peer">>) -> {ok, verify_peer};
             (<<"verify_none">>) -> {ok, verify_none};
             (_) -> false
+        end
+    },
+    hostname_verification => #{
+        alias => <<"hostname_verification">>,
+        %% We rename the prop
+        key => customize_hostname_check,
+        required => false,
+        datatype => {in, [
+            wildcard, none,
+            <<"wildcard">>, <<"none">>
+        ]},
+        validator => fun
+            (V) when V == <<"wildcard">>; V == wildcard ->
+                %% tls_options will end up having
+                %% #{
+                %%  ...
+                %%  customize_hostname_check => [{match_fun, Match}]
+                %% }
+                Match = public_key:pkix_verify_hostname_match_fun(https),
+                {ok, [{match_fun, Match}]};
+            (_) ->
+                {ok, []}
         end
     },
     versions => #{
