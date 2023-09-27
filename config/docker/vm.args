@@ -29,7 +29,16 @@
 ## Erlang
 ## -----------------------------------------------------------------------------
 
+# Disable Speculative Scheduler Busy Waiting
+# The threshold determines how long schedulers are to busy wait when running out
+# of work before going to sleep.
 +sbwt none
+
+# As +sbwt but affects dirty CPU schedulers.
++sbwtdcpu none
+
+# As +sbwt but affects dirty IO schedulers.
++sbwtdio none
 
 ## Enable Time Correction
 +c true
