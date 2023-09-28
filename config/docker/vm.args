@@ -22,14 +22,24 @@
 ## Connections between hidden nodes and other nodes are not transitive, they must be set up explicitly.
 -hidden
 
+
+## -----------------------------------------------------------------------------
+## Emulator Flags
+## -----------------------------------------------------------------------------
+
 ## Increase distribution port buffer size.
 +zdbbl 32768
 
-## -----------------------------------------------------------------------------
-## Erlang
-## -----------------------------------------------------------------------------
-
+# Disable Speculative Scheduler Busy Waiting
+# The threshold determines how long schedulers are to busy wait when running out
+# of work before going to sleep.
 +sbwt none
+
+# As +sbwt but affects dirty CPU schedulers.
++sbwtdcpu none
+
+# As +sbwt but affects dirty IO schedulers.
++sbwtdio none
 
 ## Enable Time Correction
 +c true
@@ -39,9 +49,6 @@
 
 ## Max processes
 +P 2000000
-
-## Kernel polling
-+K true
 
 ## Async I/O threads
 +A 64

@@ -4,7 +4,7 @@
 # Build stage 1
 # ===========================================================================
 
-FROM erlang:24-alpine AS builder
+FROM erlang:26-alpine AS builder
 
 # Install build dependencies
 RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
@@ -28,7 +28,7 @@ RUN rebar3 as docker tar && \
 # Build stage 2
 # ===========================================================================
 
-FROM alpine:3.16 as runner
+FROM alpine:3.18.3 as runner
 
 # We define defaults
 # We assume you have DNS. Erlang will take the FQDN and generate

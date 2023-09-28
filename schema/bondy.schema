@@ -668,14 +668,14 @@
   hidden
 ]}.
 
-%% The Cowboy acceptors_pool_size for the Admin API https listener
+%% The Cowboy acceptors_pool_size for the Admin API http listener
 {mapping, "admin_api.http.acceptors_pool_size", "bondy.admin_api_http.acceptors_pool_size", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 200}
 ]}.
 
-%% The Cowboy max number of connections for the Admin API https listener
+%% The Cowboy max number of connections for the Admin API http listener
 {mapping, "admin_api.http.max_connections", "bondy.admin_api_http.max_connections", [
   {datatype, integer},
   {validators, ["pos_integer"]},
@@ -1891,13 +1891,11 @@
 
 %% The time the agent will wait to initiate the next join attempt. For this to
 %% take effect cluster.peer_discovery.automatic_join needs to be on.
-{mapping, "cluster.peer_discovery.join_retry_interval", "bondy.peer_discovery.join_retry_interval", [
+{mapping, "cluster.peer_discovery.join_retry_interval",
+  "bondy.peer_discovery.join_retry_interval", [
   {default, "5s"},
   {datatype, {duration, ms}}
 ]}.
-
-
-
 
 %% The name of a module implementing the bondy_peer_discovery_agent behaviour.
 %% At the moment Bondy provides only the `bondy_peer_discovery_dns_agent', which
@@ -1960,6 +1958,28 @@ end}.
   {datatype, flag}
 ]}.
 
+%% @doc If the `off' value is provided, it does nothing and the configuration
+%% will use any value provided by cluster.tls.server.cacertfile.
+%% If the `on' value is provided tries to load the trusted CA certificates
+%% provided by the OS. If no cacerts could be loaded it disables the option and
+%% revers to cluster.tls.server.cacertfile.
+%% If a DER-encoded trusted certificates string is provided it overrides option
+%% cluster.tls.server.cacertfile.
+{mapping, "cluster.tls.server.cacerts", "partisan.tls_server_options.cacerts", [
+  {default, false},
+  {datatype, [flag, string]}
+]}.
+
+%% @doc Defaults to verify_none as additional options are needed to be able to
+%% perform the certificate verification. A warning will be emitted unless
+%% verify_none is explicitly configured. Usually the applications will want to
+%% configure verify_peer together with an appropriate cacert or cacertfile
+%% option.
+{mapping, "cluster.tls.server.verify", "partisan.tls_server_options.verify", [
+  {datatype, {enum, [verify_peer, verify_none]}},
+  {default, verify_none}
+]}.
+
 %% @doc Default cert location for cluster TLS connection
 {mapping, "cluster.tls.server.certfile", "partisan.tls_server_options.certfile", [
   {datatype, file},
@@ -1985,11 +2005,24 @@ end}.
   {default, "1.3"}
 ]}.
 
-{mapping, "cluster.tls.server.verify", "partisan.tls_server_options.verify", [
+
+
+{mapping, "cluster.tls.client.verify", "partisan.tls_client_options.verify", [
   {datatype, {enum, [verify_peer, verify_none]}},
   {default, verify_none}
 ]}.
 
+%% @doc If the `off' value is provided, it does nothing and the configuration
+%% will use any value provided by cluster.tls.client.cacertfile.
+%% If the `on' value is provided tries to load the trusted CA certificates
+%% provided by the OS. If no cacerts could be loaded it disables the option and
+%% revers to cluster.tls.client.cacertfile.
+%% If a DER-encoded trusted certificates string is provided it overrides option
+%% cluster.tls.client.cacertfile.
+{mapping, "cluster.tls.client.cacerts", "partisan.tls_client_options.cacerts", [
+  {default, false},
+  {datatype, [flag, string]}
+]}.
 
 %% @doc Default cert location for cluster TLS connection
 {mapping, "cluster.tls.client.certfile", "partisan.tls_client_options.certfile", [
@@ -2014,11 +2047,6 @@ end}.
 {mapping, "cluster.tls.client.versions", "partisan.tls_client_options.versions", [
   {datatype, string},
   {default, "1.3"}
-]}.
-
-{mapping, "cluster.tls.client.verify", "partisan.tls_client_options.verify", [
-  {datatype, {enum, [verify_peer, verify_none]}},
-  {default, verify_none}
 ]}.
 
 

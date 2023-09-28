@@ -58,6 +58,13 @@
 {commented, "{{platform_etc_dir}}/client/cacert.pem"}
 ]}.
 
+
+{mapping, "bridge.$name.tls.hostname_verification",
+  "bondy.bridges", [
+  {datatype, {enum, [wildcard, none]}},
+  {default, wildcard}
+]}.
+
 %% @doc A comma separate list of TLS protocol versions that will be supported
 %% At the moment Bondy only supports versions 1.2 and 1.3
 {mapping, "bridge.$name.tls.versions", "bondy.bridges", [
@@ -478,6 +485,7 @@
       when  KeyStr == <<"cacertfile">>;
             KeyStr == <<"certfile">>;
             KeyStr == <<"keyfile">>;
+            KeyStr == <<"hostname_verification">>;
             KeyStr == <<"verify">>  ->
         Key = binary_to_atom(KeyStr),
         Put([Name, tls_opts, Key], Value, Acc);
@@ -931,7 +939,7 @@ end}.
 %% with the edge.tls config variable, for example:
 {mapping, "bridge.listener.tls.certfile", "bondy.bridge_relay_tls.tls_opts.certfile", [
   {datatype, file},
-  {default, "{{platform_etc_dir}}/cert.pem"}
+  {default, "{{platform_etc_dir}}/keycert.pem"}
 ]}.
 
 %% @doc Default key location for https can be overridden with the

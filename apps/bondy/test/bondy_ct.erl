@@ -20,9 +20,9 @@
 -include_lib("common_test/include/ct.hrl").
 
 -if(?OTP_RELEASE >= 25).
-    %% already defined by OTP
+    -define(TEST_SERVER, test_server).
 -else.
-    -define(CT_PEER, ct_slave).
+    -define(TEST_SERVER, ct_slave).
 -endif.
 
 -define(KERNEL_ENV, [
@@ -46,10 +46,8 @@
                 {no_domain,
                     {fun logger_filters:domain/2,{log,undefined,[]}}},
                 {domain,
-                    {fun logger_filters:domain/2,{stop,equal,[sasl]}}},
-                {domain,
                     {fun logger_filters:domain/2,
-                    {log,super,[otp,bondy_audit]}}}],
+                    {log,super,[otp, sasl, bondy_audit]}}}],
             formatter =>
                 {bondy_logger_formatter,#{
                     colored => true,colored_alert => "\e[0;45m",
@@ -119,10 +117,15 @@
         {tiered_slow_level,0}]},
     {partisan,
         [{exchange_tick_period,60000},
-        {tls_options,
-            [{cacertfile,"./etc/cacert.pem"},
-            {keyfile,"./etc/key.pem"},
-            {certfile,"./etc/cert.pem"},
+        {tls_server_options,
+            [{cacertfile,"./etc/ssl/server/cacert.pem"},
+            {keyfile,"./etc/ssl/server/key.pem"},
+            {certfile,"./etc/ssl/server/keycert.pem"},
+            {versions,['tlsv1.3']}]},
+        {tls_client_options,
+            [{cacertfile,"./etc/ssl/client/cacert.pem"},
+            {keyfile,"./etc/ssl/client/key.pem"},
+            {certfile,"./etc/ssl/client/keycert.pem"},
             {versions,['tlsv1.3']}]},
         {tls,false},
         {peer_service_manager,partisan_pluggable_peer_service_manager},
@@ -166,9 +169,9 @@
             {config_file,"./etc/oauth2_config.json"}]},
         {bridge_relay_tls,
             [{socket_opts,
-                [{cacertfile,"./etc/cacert.pem"},
-                {keyfile,"./etc/key.pem"},
-                {certfile,"./etc/cert.pem"},
+                [{cacertfile,"./etc/ssl/server/cacert.pem"},
+                {keyfile,"./etc/ssl/server/key.pem"},
+                {certfile,"./etc/ssl/server/keycert.pem"},
                 {nodelay,true},
                 {keepalive,true},
                 {versions,['tlsv1.3']}]},
@@ -206,9 +209,9 @@
             {enabled,false}]},
         {wamp_tls,
             [{socket_opts,
-                [{cacertfile,"./etc/cacert.pem"},
-                {keyfile,"./etc/key.pem"},
-                {certfile,"./etc/cert.pem"},
+                [{cacertfile,"./etc/ssl/server/cacert.pem"},
+                {keyfile,"./etc/ssl/server/key.pem"},
+                {certfile,"./etc/ssl/server/keycert.pem"},
                 {nodelay,true},
                 {keepalive,true},
                 {versions,['tlsv1.2','tlsv1.3']}]},
@@ -240,9 +243,9 @@
         {wamp_serializers,[{bert,4},{erl,15}]},
         {api_gateway_https,
             [{socket_opts,
-                [{cacertfile,"./etc/cacert.pem"},
-                {keyfile,"./etc/key.pem"},
-                {certfile,"./etc/cert.pem"},
+                [{cacertfile,"./etc/ssl/server/cacert.pem"},
+                {keyfile,"./etc/ssl/server/key.pem"},
+                {certfile,"./etc/ssl/server/keycert.pem"},
                 {nodelay,true},
                 {keepalive,false},
                 {versions,['tlsv1.3']}]},
@@ -261,9 +264,9 @@
         {api_gateway,[{config_file,"./etc/api_gateway_config.json"}]},
         {admin_api_https,
             [{socket_opts,
-                [{cacertfile,"./etc/cacert.pem"},
-                {keyfile,"./etc/key.pem"},
-                {certfile,"./etc/cert.pem"},
+                [{cacertfile,"./etc/ssl/server/cacert.pem"},
+                {keyfile,"./etc/ssl/server/key.pem"},
+                {certfile,"./etc/ssl/server/keycert.pem"},
                 {nodelay,true},
                 {keepalive,false},
                 {versions,['tlsv1.3']}]},
@@ -424,7 +427,7 @@ stop_bondy() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Starts a set of CT_PEER nodes as per `Config' and joins them in a
+%% @doc Starts a set of TEST_SERVER nodes as per `Config' and joins them in a
 %% cluster.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -438,7 +441,7 @@ start_cluster(_Case, _Config, _Options) ->
 %% -----------------------------------------------------------------------------
 stop_nodes(Nodes) ->
     StopFun = fun({Name, _Node}) ->
-        case ?CT_PEER:stop(Name) of
+        case ?TEST_SERVER:stop(Name) of
             {ok, _} ->
                 ok;
             {error, stop_timeout, _} ->

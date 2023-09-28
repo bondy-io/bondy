@@ -1217,8 +1217,8 @@ signer(_, #{cryptosign := #{privkey_env_var := Var}}) ->
             end
     end;
 
-signer(_, _) ->
-    error(invalid_cryptosign_config).
+signer(_, Conf) ->
+    error({invalid_cryptosign_config, Conf}).
 
 
 %% @private

@@ -12,6 +12,17 @@ CODESPELL 		= $(shell which codespell)
 SPELLCHECK 	    = $(CODESPELL) -S _build -S doc -S .git -L applys,nd,accout,mattern,pres,fo
 SPELLFIX      	= $(SPELLCHECK) -i 3 -w
 
+# Architecture Auto configuration
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_M), x86_64)
+	DOCKER_PLATFORM = amd64
+else ifeq ($(UNAME_M), aarch64)
+	DOCKER_PLATFORM = arm64
+else ifeq ($(UNAME_M), arm64)
+	DOCKER_PLATFORM = arm64
+else ifeq ($(UNAME_M), armv7l)
+	DOCKER_PLATFORM = arm32v7
+endif
 
 .PHONY: genvars compile check test xref eunit dialyzer tar spellcheck spellfix
 
@@ -32,6 +43,10 @@ docs: xref
 	mkdir -p apps/bondy_broker_bridge/doc/assets/
 	cp -r doc/assets/* apps/bondy/doc/assets/
 	cp -r doc/assets/* apps/bondy_broker_bridge/doc/assets/
+
+clean: node1-clean node2-clean node3-clean
+	${REBAR} clean
+
 
 clean-docs:
 	rm -rf apps/bondy/doc/*
@@ -119,18 +134,28 @@ node1:
 	${REBAR} as node1 release
 	ERL_DIST_PORT=27781 _build/node1/rel/bondy/bin/bondy console
 
+node1-clean:
+	${REBAR} as node1 clean
+
 node2:
 	${REBAR} as node2 release
 	ERL_DIST_PORT=27782 _build/node2/rel/bondy/bin/bondy console
+
+node2-clean:
+	${REBAR} as node2 clean
 
 node3:
 	${REBAR} as node3 release
 	ERL_DIST_PORT=27783 _build/node3/rel/bondy/bin/bondy console
 
+node3-clean:
+	${REBAR} as node3 clean
 
 edge1:
 	${REBAR} as edge1 release
-	ERL_DIST_PORT=27784 _build/edge1/rel/bondy/bin/bondy console
+	EDGE1_DEVICE1_PRIVKEY=4ffddd896a530ce5ee8c86b83b0d31835490a97a9cd718cb2f09c9fd31c4a7d71766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd \
+	ERL_DIST_PORT=27784 \
+	_build/edge1/rel/bondy/bin/bondy console
 
 
 run-node1:
@@ -155,7 +180,7 @@ docker-build:
 	docker rmi bondy-prod || true
 	docker build \
 		--pull \
-		--platform linux/amd64 \
+		--platform linux/$(DOCKER_PLATFORM) \
 		--load \
 		-t "bondy-prod" \
 		-f deployment/Dockerfile .
@@ -167,7 +192,7 @@ docker-build-alpine:
 	docker rmi bondy-prod || true
 	docker build \
 		--pull \
-		--platform linux/amd64 \
+		--platform linux/$(DOCKER_PLATFORM) \
 		--load \
 		-t "bondy-prod" \
 		-f deployment/alpine.Dockerfile .
@@ -179,7 +204,7 @@ docker-build-slim:
 	docker rmi bondy-prod || true
 	docker build \
 		--pull \
-		--platform linux/amd64 \
+		--platform linux/$(DOCKER_PLATFORM) \
 		--load \
 		-t "bondy-prod" \
 		-f deployment/slim.Dockerfile .
