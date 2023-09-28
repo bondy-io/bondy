@@ -12,6 +12,17 @@ CODESPELL 		= $(shell which codespell)
 SPELLCHECK 	    = $(CODESPELL) -S _build -S doc -S .git -L applys,nd,accout,mattern,pres,fo
 SPELLFIX      	= $(SPELLCHECK) -i 3 -w
 
+# Architecture Auto configuration
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_M), x86_64)
+	DOCKER_PLATFORM = amd64
+else ifeq ($(UNAME_M), aarch64)
+	DOCKER_PLATFORM = arm64
+else ifeq ($(UNAME_M), arm64)
+	DOCKER_PLATFORM = arm64
+else ifeq ($(UNAME_M), armv7l)
+	DOCKER_PLATFORM = arm32v7
+endif
 
 .PHONY: genvars compile check test xref eunit dialyzer tar spellcheck spellfix
 
@@ -169,7 +180,7 @@ docker-build:
 	docker rmi bondy-prod || true
 	docker build \
 		--pull \
-		--platform linux/amd64 \
+		--platform linux/$(DOCKER_PLATFORM) \
 		--load \
 		-t "bondy-prod" \
 		-f deployment/Dockerfile .
@@ -181,7 +192,7 @@ docker-build-alpine:
 	docker rmi bondy-prod || true
 	docker build \
 		--pull \
-		--platform linux/amd64 \
+		--platform linux/$(DOCKER_PLATFORM) \
 		--load \
 		-t "bondy-prod" \
 		-f deployment/alpine.Dockerfile .
@@ -193,7 +204,7 @@ docker-build-slim:
 	docker rmi bondy-prod || true
 	docker build \
 		--pull \
-		--platform linux/amd64 \
+		--platform linux/$(DOCKER_PLATFORM) \
 		--load \
 		-t "bondy-prod" \
 		-f deployment/slim.Dockerfile .

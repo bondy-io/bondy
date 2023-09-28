@@ -4,7 +4,7 @@
 # Build stage 1
 # ===========================================================================
 
-FROM erlang:24 AS builder
+FROM erlang:26 AS builder
 
 # Install build dependencies
 RUN --mount=type=cache,id=apt,sharing=locked,target=/var/cache/apt apt-get update && \
@@ -69,7 +69,7 @@ ENV HOME "/bondy"
 RUN apt-get update \
     && apt-get -y install \
     sudo bash procps iproute2 net-tools curl jq nano \
-    openssl libsodium-dev libsnappy-dev \
+    openssl libsodium-dev libsnappy-dev\
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 -r bondy \
     && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "bondy" bondy \
