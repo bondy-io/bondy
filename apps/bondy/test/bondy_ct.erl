@@ -20,9 +20,9 @@
 -include_lib("common_test/include/ct.hrl").
 
 -if(?OTP_RELEASE >= 25).
-    %% already defined by OTP
+    -define(TEST_SERVER, test_server).
 -else.
-    -define(CT_PEER, ct_slave).
+    -define(TEST_SERVER, ct_slave).
 -endif.
 
 -define(KERNEL_ENV, [
@@ -427,7 +427,7 @@ stop_bondy() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Starts a set of CT_PEER nodes as per `Config' and joins them in a
+%% @doc Starts a set of TEST_SERVER nodes as per `Config' and joins them in a
 %% cluster.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -441,7 +441,7 @@ start_cluster(_Case, _Config, _Options) ->
 %% -----------------------------------------------------------------------------
 stop_nodes(Nodes) ->
     StopFun = fun({Name, _Node}) ->
-        case ?CT_PEER:stop(Name) of
+        case ?TEST_SERVER:stop(Name) of
             {ok, _} ->
                 ok;
             {error, stop_timeout, _} ->
