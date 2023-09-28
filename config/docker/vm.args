@@ -22,12 +22,13 @@
 ## Connections between hidden nodes and other nodes are not transitive, they must be set up explicitly.
 -hidden
 
-## Increase distribution port buffer size.
-+zdbbl 32768
 
 ## -----------------------------------------------------------------------------
-## Erlang
+## Emulator Flags
 ## -----------------------------------------------------------------------------
+
+## Increase distribution port buffer size.
++zdbbl 32768
 
 # Disable Speculative Scheduler Busy Waiting
 # The threshold determines how long schedulers are to busy wait when running out
