@@ -1,0 +1,98 @@
+# fly.toml app configuration file generated for bondy on 2023-09-30T19:02:59+01:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = "bondy"
+primary_region = "lhr"
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+console_command = "bin/bondy remote_console"
+
+[experimental]
+  entrypoint = ["/bondy/start.sh"]
+
+[build]
+  image = "leapsight/bondy:1.0.0-rc.1-alpine"
+
+[deploy]
+  strategy = "rolling"
+
+[env]
+  BONDY_DATA_DIR = "/bondy/data"
+  BONDY_ERL_DISTRIBUTED_COOKIE = "bondy"
+  BONDY_ERL_NODENAME = "bondy@127.0.0.1"
+  BONDY_LOG_LEVEL = "info"
+  ERL_CRASH_DUMP = "/dev/null"
+  ERL_DIST_PORT = "27784"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 18080
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+    [services.ports.tls_options]
+      alpn = ["h2", "http/1.1"]
+      versions = ["TLSv1.2", "TLSv1.3"]
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 16384
+    soft_limit = 16384
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "5m0s"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 18082
+
+  [[services.ports]]
+    port = 18082
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 16384
+    soft_limit = 16384
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "5m0s"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 18086
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 16384
+    soft_limit = 16384
+
+[[files]]
+  guest_path = "/bondy/start.sh"
+  local_path = "start.sh"
+  secret_name = ""
+  raw_value = ""
+
+[[files]]
+  guest_path = "/bondy/etc/bondy.conf.template"
+  local_path = "config/bondy.conf.template"
+  secret_name = ""
+  raw_value = ""
+
+[[files]]
+  guest_path = "/bondy/etc/security_config.json"
+  local_path = "config/security_config.json"
+  secret_name = ""
+  raw_value = ""
+
+[[metrics]]
+  port = 18081
+  path = "/metrics"

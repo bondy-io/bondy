@@ -1,0 +1,11 @@
+security.config_file = ${BONDY_ETC_DIR}/security_config.json
+platform_data_dir=${BONDY_DATA_DIR}
+
+vm.process_limit = 500000
+vm.port_limit = 500000
+vm.cpu.schedulers.busy_wait_threshold = none
+vm.cpu.dirty_schedulers.busy_wait_threshold = none
+vm.io.dirty_schedulers = 16
+vm.io.dirty_schedulers.busy_wait_threshold = none
+vm.memory_allocators.super_carrier_only = off
+vm.memory_allocators.super_carrier_size = 0MB
