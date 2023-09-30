@@ -58,9 +58,16 @@ main([EtcDir, _ReleaseDir]) ->
     BondyCheck = case sets:to_list(sets:intersection(Bondy, Etc)) of
         [] ->
             ?LOG_INFO(
-                "No Bondy configuration file found at ~p. Bondy will use the default configuration. Otherwise please make sure a 'bondy.conf' file (or 'bondy.conf.template' in case environment variables replacement is required) is present in the ~p directory.",
+                "No Bondy configuration file found at ~p. "
+                "Bondy will use the default configuration. "
+                "Otherwise please make sure a 'bondy.conf' file (or "
+                "'bondy.conf.template' in case environment variables "
+                "replacement is required) is present in the ~p directory.",
                 [EtcDir, EtcDir]
             ),
+            %% We generate an empty file otherwise rebar3_scuttler will not
+            %% produce the default config
+            ok = file:write_file(filename:join(EtcDir, "bondy.conf"), <<>>),
             true;
         [B1] ->
             ?LOG_INFO(
