@@ -1965,10 +1965,10 @@ end}.
 %% revers to cluster.tls.server.cacertfile.
 %% If a DER-encoded trusted certificates string is provided it overrides option
 %% cluster.tls.server.cacertfile.
-{mapping, "cluster.tls.server.cacerts", "partisan.tls_server_options.cacerts", [
-  {default, false},
-  {datatype, [flag, string]}
-]}.
+%% {mapping, "cluster.tls.server.cacerts", "partisan.tls_server_options.cacerts", [
+%%   {default, false},
+%%   {datatype, [flag, string]}
+%% ]}.
 
 %% @doc Defaults to verify_none as additional options are needed to be able to
 %% perform the certificate verification. A warning will be emitted unless
@@ -2019,10 +2019,10 @@ end}.
 %% revers to cluster.tls.client.cacertfile.
 %% If a DER-encoded trusted certificates string is provided it overrides option
 %% cluster.tls.client.cacertfile.
-{mapping, "cluster.tls.client.cacerts", "partisan.tls_client_options.cacerts", [
-  {default, false},
-  {datatype, [flag, string]}
-]}.
+%% {mapping, "cluster.tls.client.cacerts", "partisan.tls_client_options.cacerts", [
+%%   {default, false},
+%%   {datatype, [flag, string]}
+%% ]}.
 
 %% @doc Default cert location for cluster TLS connection
 {mapping, "cluster.tls.client.certfile", "partisan.tls_client_options.certfile", [
