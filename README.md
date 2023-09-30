@@ -151,7 +151,7 @@ Clone this repository and `cd` to the location where you cloned it.
 To generate a Bondy release to be used in production execute the following command which will generate a tarball containing the release at `$(PWD)/_build/prod/rel/`.
 
 ```shell
-rebar3 as prod tar
+make release
 ```
 
 Untar and copy the resulting tarball to the location where you want to install Bondy e.g. `~/tmp/bondy`.

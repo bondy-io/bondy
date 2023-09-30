@@ -1,0 +1,651 @@
+%%-*- mode: erlang -*-
+
+% IMPORTANT NOTE
+%
+% Note that '-name' and '-setcookie' are NOT a part of the Erlang VM flags
+% schema. This is left for the Erlang Developer to add to his own handwritten
+% vm.args/vm.args.src. This is so that 'relx' is able to parse the 'vm.args' and
+% find the name/cookie of the node which it needs to talk to
+% (eg. ping, remote_console, etc).
+
+% Note: all of the Erlang VM options below can be consulted at
+%   http://erlang.org/doc/man/erl.html
+%
+% Up-to-date doc on how to write one of these schema files
+% available at:
+%   https://github.com/basho/cuttlefish/wiki/Cuttlefish-for-Erlang-Developers
+
+
+
+%% @doc Suggested stack size, in kilowords, for threads in the async thread
+%% pool. Valid range is 16-8192 kilowords. The default suggested stack size is
+%% 16 kilowords, that is, 64 kilobyte on 32-bit architectures. This small
+%% default size has been chosen because the number of async threads can be
+%% large. The default size is enough for drivers delivered with Erlang/OTP, but
+%% might not be large enough for other dynamically linked-in drivers that use
+%% the driver_async() functionality. Notice that the value passed is only a
+%% suggestion, and it can even be ignored on some platforms.
+%% More information at: http://erlang.org/doc/man/erl.html
+{mapping, "vm.async_threads", "vm_args.+a", [
+  {datatype, integer},
+  {commented, 16},
+  {validators, ["range:16-8192"]},
+  hidden
+]}.
+
+
+%% @doc Sets the number of threads in async thread pool. Valid range is 1-1024.
+%% The async thread pool is used by linked-in drivers to handle work that may
+%% take a very long time. Since OTP 21 there are very few linked-in drivers in
+%% the default Erlang/OTP distribution that uses the async thread pool. Most of
+%% them have been migrated to dirty IO schedulers. Defaults to 1.
+%% More information at: http://erlang.org/doc/man/erl.html
+{mapping, "vm.async_threads", "vm_args.+A", [
+  {datatype, integer},
+  {default, 10},
+  {commented, 1},
+  {validators, ["range:0-1024"]},
+  hidden
+]}.
+
+
+%% @doc Enable or disable time correction. Defaults to on.
+%% More information: http://erlang.org/doc/man/erl.html#emulator-flags
+{mapping, "vm.time_correction", "vm_args.+c", [
+  {default, on},
+  {datatype, flag},
+  hidden
+]}.
+
+
+%% @doc Sets the Erlang Time Warp Mode. Defaults to no_time_warp.
+%% More information: http://erlang.org/doc/man/erl.html#emulator-flags
+{mapping, "vm.time_correction.warp_mode", "vm_args.+C", [
+  {default, multi_time_warp},
+  {datatype, {enum, [no_time_warp, single_time_warp, multi_time_warp]}},
+  hidden
+]}.
+
+
+%% @doc Sets the maximum number of ETS tables.
+%% This limit is partially obsolete (http://erlang.org/doc/man/ets.html#max_ets_tables).
+{mapping, "vm.max_ets_tables", "vm_args.+e", [
+  {datatype, integer},
+  {commented, 256000},
+  hidden
+]}.
+
+
+%% @doc Sets the number of IO pollsets to use when polling for I/O. This option
+%% is only used on platforms that support concurrent updates of a pollset,
+%% otherwise the same number of pollsets are used as IO poll threads. The
+%% default is 1.
+{mapping, "vm.poolsets.number", "vm_args.+IOp", [
+  {datatype, integer},
+  {comment, 1},
+  hidden
+]}.
+
+
+%% @doc Similar to +IOp but uses percentages to set the number of IO pollsets to
+%% create, based on the number of poll threads configured. If both +IOPp and
+%% +IOp are used, +IOPp is ignored.
+{mapping, "vm.poolsets.percentage", "vm_args.+IOpp", [
+{datatype, integer},
+hidden
+]}.
+
+
+%% @doc Sets the number of IO poll threads to use when polling for I/O. The
+%% maximum number of poll threads allowed is 1024. The default is 1.
+%% A good way to check if more IO poll threads are needed is to use microstate
+%% accounting and see what the load of the IO poll thread is. If it is high it
+%% could be a good idea to add more threads.
+{mapping, "vm.poolthreads.number", "vm_args.+IOt", [
+{datatype, integer},
+{comment, 1},
+hidden
+]}.
+
+
+%% @doc Similar to +IOt but uses percentages to set the number of IO poll
+%% threads to create, based on the number of schedulers configured. If both
+%% +IOPt and +IOt are used, +IOPt is ignored.
+{mapping, "vm.poolthreads.percentage", "vm_args.+IOtp", [
+{datatype, integer},
+hidden
+]}.
+
+
+%% @doc Sets the maximum number of simultaneously existing processes for this
+%% system if a Number is passed as value. Valid range for Number is
+%% [1024-134217727]
+%% NOTE: The actual maximum chosen may be much larger than the Number passed.
+%% Currently the runtime system often, but not always, chooses a value that is
+%% a power of 2.
+%% This might, however, be changed in the future.
+%% The actual value chosen can be checked by calling erlang:system_info
+%% (process_limit).
+{mapping, "vm.process_limit", "vm_args.+P", [
+  {datatype, integer},
+  {default, 2097152},
+  {validators, ["process_limit"]},
+  hidden
+]}.
+
+
+%% @doc Sets the maximum number of simultaneously existing ports for this system
+%% if a Number is passed as value. Valid range for Number is [1024-134217727]
+%% NOTE: The actual maximum chosen may be much larger than the actual Number
+%% passed.
+%% Currently the runtime system often, but not always, chooses a value that is a
+%% power of 2. This might, however, be changed in the future. The actual value
+%% chosen can be checked by calling erlang:system_info(port_limit).
+%% The default value used is normally 65536. However, if the runtime system is
+%% able to determine maximum amount of file descriptors that it is allowed to
+%% open and this value is larger than 65536, the chosen value will increased to
+%% a value larger or equal to the maximum amount of file descriptors that can be
+%% opened.
+%%% On Windows the default value is set to 8196 because the normal OS limitations
+%%% are set higher than most machines can handle.
+{mapping, "vm.port_limit", "vm_args.+Q", [
+  {datatype, integer},
+  {default, 2097152},
+  {validators, ["port_limit"]},
+  hidden
+]}.
+
+
+%% @doc Sets the number of scheduler threads to create and scheduler threads to set online.
+%% The maximum for both values is 1024.
+%% If the Erlang runtime system is able to determine the number of logical processors
+%% configured and logical processors available,
+%% Schedulers defaults to logical processors configured, and SchedulersOnline defaults to
+%% logical processors available; otherwise the default values are 1.
+%% If the emulator detects that it is subject to a CPU quota, the default value for
+%% SchedulersOnline will be limited accordingly.
+%%% Schedulers can be omitted if :SchedulerOnline is not and conversely.
+%%% The number of schedulers online can be changed at runtime through
+%%% erlang:system_flag(schedulers_online, SchedulersOnline).
+%%% If Schedulers or SchedulersOnline is specified as a negative number, the value is
+%%% subtracted from the default number of logical processors configured or logical
+%%% processors available, respectively.
+%%% Specifying value 0 for Schedulers or SchedulersOnline resets the number of scheduler
+%%% threads or scheduler threads online, respectively, to its default value.
+{mapping, "vm.cpu.schedulers.total", "vm_args.+S", [
+  {datatype, integer},
+  {commented, 0},
+  {validators, ["=<1024"]},
+  hidden
+]}.
+
+
+%% @see vm.schedulers.total
+{mapping, "vm.cpu.schedulers.online", "vm_args.+S", [
+  {datatype, integer},
+  {commented, 0},
+  {validators, ["=<1024"]},
+  hidden
+]}.
+
+{translation, "vm_args.+S",
+     fun(Conf) ->
+      Total0 = cuttlefish:conf_get("vm.cpu.schedulers.total", Conf, undefined),
+      Online0 = cuttlefish:conf_get("vm.cpu.schedulers.online", Conf, undefined),
+      case {Total0, Online0} of
+          {undefined, undefined} ->
+              cuttlefish:unset();
+          {undefined, Online} ->
+              ":" ++ integer_to_list(Online);
+          {Total, undefined} ->
+              integer_to_list(Total);
+          {Total, Online} ->
+              integer_to_list(Total) ++ ":" ++ integer_to_list(Online)
+      end
+     end
+}.
+
+
+
+%% @doc Sets scheduler busy wait threshold. Defaults to short.
+%% The threshold determines how long schedulers are to busy wait when
+%% running out of work before going to sleep.
+%% Note: This flag can be removed or changed at any time without prior notice.
+{mapping, "vm.cpu.schedulers.busy_wait_threshold", "vm_args.+sbwt", [
+  {datatype, {enum, [none, very_short, short, medium, long, very_long]}},
+  {default, short},
+  hidden
+]}.
+
+
+%% @doc Set scheduler forced wakeup interval. All run queues will be
+%% scanned each Interval milliseconds. While there are sleeping
+%% schedulers in the system, one scheduler will be woken for each
+%% non-empty run queue found. An Interval of zero disables this
+%% feature, which also is the default.
+%%
+%% This feature is a workaround for lengthy executing native code, and
+%% native code that do not bump reductions properly.
+%%
+%% More information: http://www.erlang.org/doc/man/erl.html#+sfwi
+{mapping, "vm.cpu.schedulers.force_wakeup_interval", "vm_args.+sfwi", [
+  {commented, 500},
+  {datatype, integer},
+  hidden
+]}.
+
+
+
+%% @doc Enable or disable scheduler compaction of load. By default
+%% scheduler compaction of load is enabled. When enabled, load
+%% balancing will strive for a load distribution which causes as many
+%% scheduler threads as possible to be fully loaded (i.e., not run out
+%% of work). This is accomplished by migrating load (e.g. runnable
+%% processes) into a smaller set of schedulers when schedulers
+%% frequently run out of work. When disabled, the frequency with which
+%% schedulers run out of work will not be taken into account by the
+%% load balancing logic.
+%%
+%% More information: http://www.erlang.org/doc/man/erl.html#+scl
+{mapping, "vm.cpu.schedulers.compaction_of_load", "vm_args.+scl", [
+  {commented, "false"},
+  {datatype, {enum, [true, false]}},
+  hidden
+]}.
+
+%% @doc Enable or disable scheduler utilization balancing of load. By
+%% default scheduler utilization balancing is disabled and instead
+%% scheduler compaction of load is enabled which will strive for a
+%% load distribution which causes as many scheduler threads as
+%% possible to be fully loaded (i.e., not run out of work). When
+%% scheduler utilization balancing is enabled the system will instead
+%% try to balance scheduler utilization between schedulers. That is,
+%% strive for equal scheduler utilization on all schedulers.
+%%
+%% More information: http://www.erlang.org/doc/man/erl.html#+sub
+{mapping, "vm.cpu.schedulers.utilization_balancing", "vm_args.+sub", [
+  {commented, "true"},
+  {datatype, {enum, [true, false]}},
+  hidden
+]}.
+
+%% @doc Sets the number of dirty CPU scheduler threads to create and dirty CPU
+%% scheduler threads to set online. The maximum for both values is 1024, and
+%% each value is further limited by the settings for normal schedulers:
+%%
+%% The number of dirty CPU scheduler threads created cannot exceed the number
+%% of normal scheduler threads created.
+%%
+%% The number of dirty CPU scheduler threads online cannot exceed the number of
+%% normal scheduler threads online.
+%% For details, see the +S and +SP. By default, the number of dirty CPU
+%% scheduler threads created equals the number of normal scheduler threads
+%% created, and the number of dirty CPU scheduler threads online equals the
+%% number of normal scheduler threads online. DirtyCPUSchedulers can be omitted
+%% if :DirtyCPUSchedulersOnline is not and conversely. The number of dirty CPU
+%% schedulers online can be changed at runtime through erlang:system_flag
+%% (dirty_cpu_schedulers_online, DirtyCPUSchedulersOnline).
+%%
+%% The amount of dirty CPU schedulers is limited by the amount of normal
+%% schedulers in order to limit the effect on processes executing on ordinary
+%% schedulers. If the amount of dirty CPU schedulers was allowed to be
+%% unlimited, dirty CPU bound jobs would potentially starve normal jobs.
+%%
+%% Typical users of the dirty CPU schedulers are large garbage collections,
+%% json protocol encode/decoders written as nifs and matrix manipulation
+%% libraries.
+%%
+%% You can use msacc(3) in order to see the current load of the dirty CPU
+%% schedulers threads and adjust the number used accordingly.
+{mapping, "vm.cpu.dirty_schedulers.total", "vm_args.+SDcpu", [
+  {datatype, integer},
+  {commented, 0},
+  {validators, ["=<1024"]},
+  hidden
+]}.
+
+%% @see vm.cpu.dirty_schedulers.total
+{mapping, "vm.cpu.dirty_schedulers.online", "vm_args.+SDcpu", [
+  {datatype, integer},
+  {commented, 0},
+  {validators, ["=<1024"]},
+  hidden
+]}.
+
+{translation, "vm_args.+SDcpu",
+ fun(Conf) ->
+  Total0 = cuttlefish:conf_get(
+    "vm.cpu.dirty_schedulers.total", Conf, undefined
+  ),
+  Online0 = cuttlefish:conf_get(
+    "vm.cpu.dirty_schedulers.online", Conf, undefined
+  ),
+  case {Total0, Online0} of
+      {undefined, undefined} ->
+          cuttlefish:unset();
+      {undefined, Online} ->
+          ":" ++ integer_to_list(Online);
+      {Total, undefined} ->
+          integer_to_list(Total);
+      {Total, Online} ->
+          integer_to_list(Total) ++ ":" ++ integer_to_list(Online)
+  end
+ end
+}.
+
+%% @doc As +sbwt but affects dirty CPU schedulers. Defaults to short.
+{mapping, "vm.cpu.dirty_schedulers.busy_wait_threshold", "vm_args.+sbwtdcpu", [
+  {datatype, {enum, [none, very_short, short, medium, long, very_long]}},
+  {default, short},
+  hidden
+]}.
+
+
+%% @doc Sets the number of dirty I/O scheduler threads to create. Valid range
+%% is 1-1024. By default, the number of dirty I/O scheduler threads created is
+%% 10.
+%%
+%% The amount of dirty IO schedulers is not limited by the amount of normal
+%% schedulers like the amount of dirty CPU schedulers. This since only I/O
+%% bound work is expected to execute on dirty I/O schedulers. If the user
+%% should schedule CPU bound jobs on dirty I/O schedulers, these jobs might
+%% starve ordinary jobs executing on ordinary schedulers.
+%%
+%% Typical users of the dirty IO schedulers are reading and writing to files.
+%%
+%% You can use msacc(3) in order to see the current load of the dirty IO
+%% schedulers threads and adjust the number used accordingly.
+{mapping, "vm.io.dirty_schedulers", "vm_args.+SDio", [
+  {datatype, integer},
+  {commented, 10},
+  {validators, ["=<1024"]},
+  hidden
+]}.
+
+
+%% @doc As +sbwt but affects dirty IO schedulers. Defaults to short.
+{mapping, "vm.io.dirty_schedulers.busy_wait_threshold", "vm_args.+sbwtdio", [
+  {datatype, {enum, [none, very_short, short, medium, long, very_long]}},
+  {default, short},
+  hidden
+]}.
+
+
+
+%% @doc Sets the mapping of warning messages for error_logger.
+%% Messages sent to the error logger using one of the warning routines can
+%% be mapped to errors (+W e), warnings (+W w), or information reports (+W i).
+%% Defaults to warnings. The current mapping can be retrieved using
+%% error_logger:warning_map/0. For more information,
+%% see error_logger:warning_map/0 in Kernel.
+{mapping, "vm.W", "vm_args.+W", [
+  {datatype, {enum, [w, i, e]}},
+  {default, w},
+  hidden
+]}.
+
+%% @doc Suggested stack size, in kilowords, for threads in the async thread pool.
+%% Valid range is 16-8192 kilowords.
+%% The default suggested stack size is 16 kilowords, that is, 64 kilobyte on
+%% 32-bit architectures. This small default size has been chosen because the number
+%% of async threads can be large. The default size is enough for drivers delivered
+%% with Erlang/OTP, but might not be large enough for other dynamically linked-in
+%% drivers that use the driver_async() functionality. Notice that the value passed
+%% is only a suggestion, and it can even be ignored on some platforms.
+{mapping, "vm.async_threads.stack_size", "vm_args.+a", [
+  {datatype, bytesize},
+  {validators, [ "stack-size-divisible", "stack-size-range"]},
+  hidden
+]}.
+
+{translation, "vm_args.+a",
+     fun(Conf) ->
+       RawValue = cuttlefish:conf_get("vm.async_threads.stack_size", Conf),
+       RawValue div (1024 * erlang:system_info({wordsize, external}))
+     end
+}.
+
+
+%% @doc Sets the distribution buffer busy limit (dist_buf_busy_limit) in kilobytes.
+%%      Valid range is 1-2097151. Defaults to 1024.
+%%%     A larger buffer limit allows processes to buffer more outgoing messages over the
+%%%     distribution.
+%%%     When the buffer limit has been reached, sending processes will be suspended until
+%%%     the buffer size has shrunk. The buffer limit is per distribution channel.
+%%%     A higher limit gives lower latency and higher throughput at the expense of higher memory use.
+%%%
+%%% See: http://www.erlang.org/doc/man/erl.html#%2bzdbbl
+{mapping, "vm.distribution.buffer_size", "vm_args.+zdbbl", [
+  {datatype, bytesize},
+  {commented, "1MB"},
+  {validators, ["zdbbl_range"]},
+  hidden
+]}.
+
+{translation, "vm_args.+zdbbl",
+ fun(Conf) ->
+  ZDBBL = cuttlefish:conf_get("vm.distribution.buffer_size", Conf, undefined),
+  case ZDBBL of
+    undefined -> undefined;
+    X when is_integer(X) -> cuttlefish_util:ceiling(X / 1024); %% Bytes to Kilobytes;
+    _ -> undefined
+  end
+ end
+}.
+
+
+{mapping, "vm.distribution.listen", "vm_args.-dist_listen", [
+  {datatype, flag},
+  {default, true},
+  hidden
+]}.
+
+{mapping, "vm.distribution.port", "vm_args.-env ERL_DIST_PORT", [
+  {datatype, integer},
+  {default, 27780},
+  hidden
+]}.
+
+{mapping, "vm.distribution.epmd.start", "vm_args.-start_epmd", [
+  {datatype, flag},
+  {default, off},
+  hidden
+]}.
+
+%% @doc Starts the Erlang runtime system as a hidden node, if it is run as a
+%% distributed node. Hidden nodes always establish hidden connections to all
+%% other nodes except for nodes in the same global group. Hidden connections are
+%% not published on any of the connected nodes, that is, none of the connected
+%% nodes are part of the result from nodes/0 on the other node.
+%% If on, connections between hidden nodes and other nodes are not transitive,
+%% they must be set up explicitly.
+{mapping, "vm.distribution.hidden", "vm_args.-hidden", [
+  {datatype, flag},
+  {default, on},
+  hidden
+]}.
+
+{mapping, "vm.distribution.auto_connect", "kernel.dist_auto_connect", [
+  {datatype, flag},
+  {default, off},
+  hidden
+]}.
+
+
+{mapping, "vm.distribution.connect_all", "kernel.connect_all", [
+  {datatype, flag},
+  {default, off},
+  hidden
+]}.
+
+%% @doc For ease of firewall configuration, the Erlang distribution
+%% can be bound to a limited range of TCP ports. If this is set, and
+%% erlang.distribution.port_range.maximum is *unset*, only this port
+%% will be used. If the minimum is *unset*, no restriction will be
+%% made on the port range; instead Erlang will listen on a random
+%% high-numbered port.
+%%
+%% More information: http://www.erlang.org/faq/how_do_i.html#id55090
+%% http://www.erlang.org/doc/man/kernel_app.html
+{mapping, "vm.distribution.port_range.minimum", "kernel.inet_dist_listen_min", [
+  {commented, 6000},
+  {datatype, integer},
+  hidden
+]}.
+
+%% @see erlang.distribution.port_range.minimum
+{mapping, "vm.distribution.port_range.maximum", "kernel.inet_dist_listen_max", [
+  {commented, 7999},
+  {datatype, integer},
+  hidden
+]}.
+
+%% @doc Set the interface/IP to listen for distributed Erlang connections.
+%%
+%% More information: http://erlang.org/doc/man/kernel_app.html
+{mapping, "vm.distribution.interface", "kernel.inet_dist_use_interface", [
+  {commented, "true"},
+  {datatype, string},
+  {validators, ["ip_strict"]},
+  hidden
+]}.
+
+{translation, "kernel.inet_dist_use_interface",
+ fun(Conf) ->
+  IPStr = cuttlefish:conf_get("vm.distribution.interface", Conf),
+  {ok, IP_address} = inet:parse_strict_address(IPStr),
+  IP_address
+ end
+}.
+
+%% @doc Set the net_kernel's net_ticktime.
+%%
+%% More information: http://www.erlang.org/doc/man/kernel_app.html#net_ticktime
+%% and http://www.erlang.org/doc/man/net_kernel.html#set_net_ticktime-1
+{mapping, "vm.distribution.net_ticktime", "vm_args.-kernel net_ticktime", [
+  {commented, 60},
+  {datatype, integer},
+  hidden
+]}.
+
+
+%% @doc A non-negative integer which indicates how many times
+%% generational garbage collections can be done without forcing a
+%% fullsweep collection. In low-memory systems (especially without
+%% virtual memory), setting the value to 0 can help to conserve
+%% memory.
+%%
+%% More information at:
+%% http://www.erlang.org/doc/man/erlang.html#system_flag-2
+{mapping, "vm.fullsweep_after", "vm_args.-env ERL_FULLSWEEP_AFTER", [
+  {datatype, integer},
+  {commented, undefined},
+  {validators, ["positive_integer"]},
+  hidden
+]}.
+
+%% @doc Set the location of crash dumps
+{mapping, "vm.crash_dump", "vm_args.-env ERL_CRASH_DUMP", [
+  {datatype, file},
+  {commented, ""},
+  hidden
+]}.
+
+
+%% @doc Sets super carrier only flag. Defaults to true. When a super carrier is
+%% used and this flag is true, mseg_alloc only creates carriers in the super
+%% carrier. Notice that the alloc_util framework can create sys_alloc carriers,
+%% so if you want all carriers to be created in the super carrier, you therefore
+%% want to disable use of sys_alloc carriers by also passing +Musac false. When
+%% the flag is false, mseg_alloc tries to create carriers outside of the super
+%% carrier when the super carrier is full.
+{mapping, "vm.memory_allocators.super_carrier_only", "vm_args.+MMsco", [
+  {datatype, flag},
+  {default, off},
+  hidden
+]}.
+
+%% @doc Sets super carrier size (in MB). Defaults to 0, that is, the super
+%% carrier is by default disabled. The super carrier is a large continuous area
+%% in the virtual address space. mseg_alloc always tries to create new carriers
+%% in the super carrier if it exists. Notice that the alloc_util framework can
+%% create sys_alloc carriers. For more information,
+%% see vm.memory_allocators.super_carrier_only.
+{mapping, "vm.memory_allocators.super_carrier_size", "vm_args.+MMscs", [
+  {datatype, bytesize},
+  {default, "0MB"},
+  hidden
+]}.
+
+{translation, "vm_args.+MMscs",
+     fun(Conf) ->
+       Bytes = cuttlefish:conf_get(
+        "vm.memory_allocators.super_carrier_size", Conf
+        ),
+       %% Return MBs
+       case Bytes == 0 of
+          true ->
+            0;
+          false ->
+            trunc(Bytes / math:pow(1024, 2))
+       end
+     end
+}.
+
+
+
+% ----------- Validators ----------------------
+{validator, "=<1024", "has a maximum value of 1024",
+     fun(X) ->
+        X =< 1024
+     end}.
+
+{validator, "range:0-1024", "must be 0 to 1024",
+ fun(X) -> X >= 0 andalso X =< 1024 end}.
+
+{validator, "range:16-8192", "must be 0 to 1024",
+ fun(X) -> X >= 16 andalso X =< 8192 end}.
+
+{validator, "stack-size-divisible", ("must be divisible by " ++ integer_to_list(erlang:system_info({wordsize,external}))),
+ fun(X) ->
+    X rem (erlang:system_info({wordsize, external})) == 0
+ end}.
+
+{validator, "stack-size-range",
+ begin
+     WordSize = erlang:system_info({wordsize, external}),
+     ("must be in the range of " ++ cuttlefish_bytesize:to_string(16 * 1024 * WordSize)
+      ++ " to " ++ cuttlefish_bytesize:to_string(8192 * 1024 * WordSize))
+ end,
+ fun(X) ->
+   Scaled = X div (1024 * erlang:system_info({wordsize, external})),
+   Scaled =< 8192 andalso Scaled >= 16
+ end}.
+
+{validator, "process_limit", "must be 1024 to 134217727",
+ fun(X) -> X >= 1024 andalso X =< 134217727 end}.
+
+{validator, "port_limit", "must be 1024 to 134217727",
+ fun(X) -> X >= 1024 andalso X =< 134217727 end}.
+
+{validator, "positive_integer", "must be a positive integer",
+  fun(X) -> X >= 0 end}.
+
+{validator, "zdbbl_range", "must be between 1KB and 2097151KB",
+ fun(ZDBBL) ->
+  %% 2097151KB = 2147482624
+  ZDBBL >= 1024 andalso ZDBBL =< 2147482624
+ end
+}.
+
+{validator, "ip_strict", "must be a valid IPv4 or IPv6 address",
+fun(String) ->
+  try inet:parse_strict_address(String) of
+    {ok,{_,_,_,_}} -> true;
+    {ok,{_,_,_,_,_,_,_,_}} -> true;
+    _ -> false
+  catch  _:_ ->
+    false
+  end
+end}.
+
