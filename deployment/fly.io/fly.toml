@@ -32,7 +32,7 @@ console_command = "bin/bondy remote_console"
   entrypoint = ["/bondy/start.sh"]
 
 [build]
-  image = "leapsight/bondy:1.0.0-rc.1-alpine"
+  image = "leapsight/bondy:1.0.0-rc.2-alpine"
 
 [deploy]
   strategy = "rolling"
