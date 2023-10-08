@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## 1.0.0-rc.2
+
+### Changes
+* The peer discovery capabilities was moved from bondy to Partisan. The interface remains very similar. The following two examples show how to configure the `list` and `dns` strategies in `bondy.conf`
+
+```erlang
+cluster.peer_discovery.enabled = on
+cluster.peer_discovery.initial_delay = 1will_merge0s
+cluster.peer_discovery.polling_interval = 10s
+cluster.peer_discovery.timeout = 5s
+cluster.peer_discovery.type = list
+cluster.peer_discovery.config.addresses = [127.0.0.1:18086]
+```
+
+```erlang
+cluster.peer_discovery.enabled = on
+cluster.peer_discovery.initial_delay = 1will_merge0s
+cluster.peer_discovery.polling_interval = 10s
+cluster.peer_discovery.timeout = 5s
+cluster.peer_discovery.type = dns
+cluster.peer_discovery.config.record_type = fqdns
+cluster.peer_discovery.config.query = bondy.internal
+cluster.peer_discovery.config.node_basename = bondy
+```
+
+### Fixes
+* This revision addresses an issue in the Active Anti-Entropy (AAE) implementation of PlumDB and the latest version of Erlang/OTP. In the latest version of Erlang, the binary serialization of terms is not deterministic by default, causing the AAE merkle tree to compute different values for the same object in different nodes. As a result, the AAE sync continuously exchanges terms that are actually the same.
+
+
 ## 1.0.0-beta
 
 ### Added
