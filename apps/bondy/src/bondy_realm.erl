@@ -1896,7 +1896,8 @@ validate_rbac_config(#realm{uri = Uri} = Realm, Map) ->
         %% obviously assuming each node uses the same configuration file.
         begin
             Secret = module_info(md5),
-            Salt = crypto:macN(hmac, sha, Secret, term_to_binary(Data), Len),
+            Bin = term_to_binary(data, [deterministic]),
+            Salt = crypto:macN(hmac, sha, Secret, Bin, Len),
             PassOpts = key_value:put([params, salt], Salt, PassOpts0),
             bondy_rbac_user:new(Data, #{password_opts => PassOpts})
         end
