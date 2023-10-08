@@ -53,7 +53,7 @@
 %% -----------------------------------------------------------------------------
 {mapping, "startup.wait_for_store_aae_exchange", "plum_db.wait_for_aae_exchange", [
   {datatype, flag},
-  {default, on}
+  {default, off}
 ]}.
 
 
@@ -1699,18 +1699,70 @@
 
 
 
-%% @doc Defines the IP to use for the cluster TCP connection
-%% {mapping, "cluster.peer_ip", "partisan.peer_ip", [
-%%   {default, "{{bondy_ip}}"},
-%%   {datatype, integer}
-%% ]}.
-
 %% @doc Defines whether a Bondy node should perform a cluster leave operation
 %% automatically when it is being shutdown.
 {mapping, "cluster.automatic_leave", "bondy.automatic_leave", [
   {default, off},
   {datatype, flag}
 ]}.
+
+%% @doc Defines a list of ip_address:port this node will use to listen for
+%% incoming cluster connections. The value accepts the following input formats
+%% - 192.168.50.174:18086
+%% - [192.168.50.174:18086]
+%% - 192.168.50.174:18086, 192.168.50.180:18086
+%% - [192.168.50.174:18086, 192.168.50.180:18086]
+%%
+%% If this option is provided Partisan will ignore 'cluster.peer_port' but notice that the value for peer port is still required for some discovery strategies used by partisan_peer_discovery_agent e.g. dns discovery which
+{mapping, "cluster.listen_addrs", "partisan.listen_addrs", [
+  {datatype, string}
+]}.
+
+
+{translation,
+  "partisan.listen_addrs",
+  fun(Conf0) ->
+      Conf = cuttlefish_variable:filter_by_prefix(
+        "cluster.listen_addrs", Conf0
+      ),
+
+      Parse = fun(Val, ForceList) ->
+         case string:split(Val, ",") of
+            [Val] when ForceList == true ->
+              [list_to_binary(Val)];
+            [Val] when ForceList == false ->
+              list_to_binary(Val);
+            L when is_list(L) ->
+              [list_to_binary(E) || E <- L]
+          end
+      end,
+
+      lists:foldl(
+          fun
+            ({["cluster", "listen_addrs"], Value0}, Acc) ->
+              %% Remove empty spaces
+              Value1 = unicode:characters_to_list(
+                string:replace(Value0, " ", "", all)
+              ),
+              %% parse list
+              case string:trim(Value1, both, "[]") of
+                Value1 ->
+                  %% No list, but maybe list without [ ]
+                  [Parse(Value1, false) | Acc];
+                Trimmed ->
+                  %% A list
+                  [Parse(Trimmed, true) | Acc]
+              end;
+
+            ({["cluster", "listen_addrs"], Value}, Acc) ->
+              [list_to_binary(Value) | Acc]
+
+          end,
+          [],
+          Conf
+      )
+  end
+}.
 
 %% @doc Defines the port to use for the cluster TCP connection
 {mapping, "cluster.peer_port", "partisan.peer_port", [
@@ -1724,13 +1776,13 @@
   {datatype, integer}
 ]}.
 
-{mapping, "cluster.channels.default.parallelism", "bondy.channels.default.parallelism", [
+{mapping, "cluster.channels.default.parallelism", "bondy.channels.undefined.parallelism", [
   {default, 1},
   {datatype, integer}
 ]}.
 
-{mapping, "cluster.channels.default.compression", "bondy.channels.default.compression", [
-  {default, false},
+{mapping, "cluster.channels.default.compression", "bondy.channels.undefined.compression", [
+  {default, off},
   {datatype, [flag, integer]}
 ]}.
 
@@ -1740,7 +1792,7 @@
 ]}.
 
 {mapping, "cluster.channels.data.compression", "bondy.channels.data.compression", [
-  {default, false},
+  {default, off},
   {datatype, [flag, integer]}
 ]}.
 
@@ -1750,7 +1802,7 @@
 ]}.
 
 {mapping, "cluster.channels.control_plane.compression", "bondy.channels.partisan_membership.compression", [
-  {default, true},
+  {default, on},
   {datatype, [flag, integer]}
 ]}.
 
@@ -1859,52 +1911,66 @@
 %% If enabled Bondy will discover peers using the defined
 %% cluster.peer_discovery.type e.g. bondy_peer_discovery_dns_agent.
 %% This can only be configured before tuning Bondy.
-{mapping, "cluster.peer_discovery.enabled", "bondy.peer_discovery.enabled", [
+{mapping, "cluster.peer_discovery.enabled", "partisan.peer_discovery.enabled", [
   {default, off},
   {datatype, flag}
 ]}.
 
 %% The time the agent will wait to initiate the lookup.
-{mapping, "cluster.peer_discovery.initial_delay", "bondy.peer_discovery.initial_delay", [
+{mapping,
+  "cluster.peer_discovery.initial_delay",
+  "partisan.peer_discovery.initial_delay", [
   {default, "10s"},
   {datatype, {duration, ms}}
 ]}.
 
-
-%% If enabled Bondy will try to automatically join a random peer from the
-%% defined cluster.peer_discovery.type
-{mapping, "cluster.peer_discovery.automatic_join", "bondy.peer_discovery.automatic_join", [
-  {default, off},
-  {datatype, flag}
-]}.
 
 %% The time the agent will wait till polling for results after the last one
-{mapping, "cluster.peer_discovery.polling_interval", "bondy.peer_discovery.polling_interval", [
+{mapping,
+  "cluster.peer_discovery.polling_interval",
+  "partisan.peer_discovery.polling_interval", [
   {default, "10s"},
   {datatype, {duration, ms}}
 ]}.
 
-{mapping, "cluster.peer_discovery.timeout", "bondy.peer_discovery.timeout", [
+{mapping,
+  "cluster.peer_discovery.timeout",
+  "partisan.peer_discovery.timeout", [
   {default, "5s"},
   {datatype, {duration, ms}}
 ]}.
 
-%% The time the agent will wait to initiate the next join attempt. For this to
-%% take effect cluster.peer_discovery.automatic_join needs to be on.
-{mapping, "cluster.peer_discovery.join_retry_interval",
-  "bondy.peer_discovery.join_retry_interval", [
-  {default, "5s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% The name of a module implementing the bondy_peer_discovery_agent behaviour.
-%% At the moment Bondy provides only the `bondy_peer_discovery_dns_agent', which
-%% ssumes that all Bondy nodes are deployed using a common base name e.g. bondy,
-%% are using unique longnames e.g. {BASENAME}@{UNIQUE}.{SERVICE_NAME}
-{mapping, "cluster.peer_discovery.type", "bondy.peer_discovery.type", [
-  {default, bondy_peer_discovery_dns_agent},
+%% @doc The name of the agent type or module implementing the
+%% partisan_peer_discovery_agent behaviour.
+%%
+%% Options:
+%% - dns: a shortcut for partisan_peer_discovery_dns (provided by partisan)
+%% - list: a shortcut for partisan_peer_discovery_list
+%% - The name of a module implementing the partisan_peer_discovery_agent
+%% behaviour.
+{mapping,
+  "cluster.peer_discovery.type",
+  "partisan.peer_discovery.type", [
   {datatype, atom}
 ]}.
+
+{translation,
+"partisan.peer_discovery.type",
+fun(Conf0) ->
+    Value = cuttlefish:conf_get(
+      "cluster.peer_discovery.type", Conf0, undefined
+    ),
+    case Value of
+      undefined ->
+        cuttlefish:unset();
+      dns ->
+        partisan_peer_discovery_dns;
+      list ->
+        partisan_peer_discovery_list;
+      Other ->
+        Other
+    end
+end}.
 
 %% The configuration for the selected strategy.
 %% Example:
@@ -1916,41 +1982,67 @@
 %% cluster.peer_discovery.config.keyA._ = value2
 %%
 %% Refer to each strategy documentation
-{mapping, "cluster.peer_discovery.config.$name", "bondy.peer_discovery.config", [
+{mapping,
+  "cluster.peer_discovery.config.$name",
+  "partisan.peer_discovery.config", [
   {datatype, string}
 ]}.
 
-{mapping, "cluster.peer_discovery.config.$name.$_", "bondy.peer_discovery.config", [
-{datatype, string}
-]}.
 
 {translation,
-"bondy.peer_discovery.config",
-fun(Conf0) ->
-    Conf = cuttlefish_variable:filter_by_prefix(
-      "cluster.peer_discovery.config", Conf0
-    ),
-    Dict = lists:foldl(
-        fun
-          ({[_, _, _, Key], Value}, Acc) ->
-            dict:store(list_to_binary(Key), list_to_binary(Value), Acc);
-          ({[_, _, _, Key, _], Value}, Acc) ->
-            dict:append(list_to_binary(Key), list_to_binary(Value), Acc)
-        end,
-        dict:new(),
-        Conf
-    ),
-    dict:fold(
-      fun
-        (K, V, Acc) when is_list(V) ->
-          [{K, lists:reverse(V)} | Acc];
-        (K, V, Acc) ->
-          [{K, V} | Acc]
+  "partisan.peer_discovery.config",
+  fun(Conf0) ->
+      Conf = cuttlefish_variable:filter_by_prefix(
+        "cluster.peer_discovery.config", Conf0
+      ),
+
+      Split = fun(Val, ForceList) ->
+         case string:split(Val, ",") of
+            [Val] when ForceList == true ->
+              [list_to_binary(Val)];
+            [Val] when ForceList == false ->
+              list_to_binary(Val);
+            L when is_list(L) ->
+              [list_to_binary(E) || E <- L]
+          end
       end,
-      [],
-      Dict
-    )
-end}.
+
+      Dict = lists:foldl(
+          fun
+            ({[_, _, _, Key], Value0}, Acc) ->
+              Value1 = unicode:characters_to_list(
+                string:replace(Value0, " ", "", all)
+              ),
+              Value =
+                case string:trim(Value1, both, "[]") of
+                  Value1 ->
+                    %% No list, but maybe list without [ ]
+                    Split(Value1, false);
+                  Trimmed ->
+                    %% A list
+                    Split(Trimmed, true)
+                end,
+              dict:store(list_to_atom(Key), Value, Acc);
+
+            ({[_, _, _, Key, _], Value}, Acc) ->
+              dict:append(list_to_atom(Key), list_to_binary(Value), Acc)
+
+          end,
+          dict:new(),
+          Conf
+      ),
+      dict:fold(
+        fun
+          (K, V, Acc) when is_list(V) ->
+            maps:put(K, lists:reverse(V), Acc);
+          (K, V, Acc) ->
+            maps:put(K, V, Acc)
+        end,
+        #{},
+        Dict
+      )
+  end
+}.
 
 
 {mapping, "cluster.tls.enabled", "partisan.tls", [
@@ -1965,10 +2057,10 @@ end}.
 %% revers to cluster.tls.server.cacertfile.
 %% If a DER-encoded trusted certificates string is provided it overrides option
 %% cluster.tls.server.cacertfile.
-{mapping, "cluster.tls.server.cacerts", "partisan.tls_server_options.cacerts", [
-  {default, false},
-  {datatype, [flag, string]}
-]}.
+%% {mapping, "cluster.tls.server.cacerts", "partisan.tls_server_options.cacerts", [
+%%   {default, false},
+%%   {datatype, [flag, string]}
+%% ]}.
 
 %% @doc Defaults to verify_none as additional options are needed to be able to
 %% perform the certificate verification. A warning will be emitted unless
@@ -2006,7 +2098,6 @@ end}.
 ]}.
 
 
-
 {mapping, "cluster.tls.client.verify", "partisan.tls_client_options.verify", [
   {datatype, {enum, [verify_peer, verify_none]}},
   {default, verify_none}
@@ -2019,10 +2110,10 @@ end}.
 %% revers to cluster.tls.client.cacertfile.
 %% If a DER-encoded trusted certificates string is provided it overrides option
 %% cluster.tls.client.cacertfile.
-{mapping, "cluster.tls.client.cacerts", "partisan.tls_client_options.cacerts", [
-  {default, false},
-  {datatype, [flag, string]}
-]}.
+%% {mapping, "cluster.tls.client.cacerts", "partisan.tls_client_options.cacerts", [
+%%   {default, false},
+%%   {datatype, [flag, string]}
+%% ]}.
 
 %% @doc Default cert location for cluster TLS connection
 {mapping, "cluster.tls.client.certfile", "partisan.tls_client_options.certfile", [

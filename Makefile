@@ -1,30 +1,47 @@
 
-REBAR = rebar3
+CFLAGS ?=
+CXXFLAGS ?=
+LDFLAGS ?=
+REBAR ?= rebar3
+REBAR3_PROFILE ?= prod
 BONDY_ERL_NODENAME ?= bondy@127.0.0.1
 BONDY_ERL_DISTRIBUTED_COOKIE ?= bondy
-CT_SUITE_FILE?=
+CT_SUITE_FILE ?=
 ifdef CT_SUITE_FILE
 CT_SUITE_ARGS = --suite ${CT_SUITE_FILE}
 else
 CT_SUITE_ARGS =
 endif
+
 CODESPELL 		= $(shell which codespell)
 SPELLCHECK 	    = $(CODESPELL) -S _build -S doc -S .git -L applys,nd,accout,mattern,pres,fo
 SPELLFIX      	= $(SPELLCHECK) -i 3 -w
 
 # Architecture Auto configuration
 UNAME_M := $(shell uname -m)
+
 ifeq ($(UNAME_M), x86_64)
 	DOCKER_PLATFORM = amd64
 else ifeq ($(UNAME_M), aarch64)
 	DOCKER_PLATFORM = arm64
+	CFLAGS := $(CFLAGS) -arch arm64 -O2 -g
+	CXXFLAGS := $(CXXFLAGS) -arch arm64
+	LDFLAGS := $(LDFLAGS) -arch arm64
 else ifeq ($(UNAME_M), arm64)
 	DOCKER_PLATFORM = arm64
+	CFLAGS := $(CFLAGS) -arch arm64 -O2 -g
+	CXXFLAGS := $(CXXFLAGS) -arch arm64
+	LDFLAGS := $(LDFLAGS) -arch arm64
 else ifeq ($(UNAME_M), armv7l)
 	DOCKER_PLATFORM = arm32v7
 endif
 
-.PHONY: genvars compile check test xref eunit dialyzer tar spellcheck spellfix
+export CFLAGS
+export CXXLAGS
+export LDFLAGS
+
+
+.PHONY: genvars compile check test xref eunit dialyzer release release-tar spellcheck spellfix
 
 certs:
 	cd config && ./make_certs
@@ -68,7 +85,7 @@ xref: compile
 dialyzer: compile
 	${REBAR} dialyzer
 
-eqwalizer:
+eqwalizer: compile
 	elp eqwalize-all
 
 spellcheck:
@@ -80,32 +97,18 @@ spellfix:
 cover: xref
 	${REBAR} as test ct ${CT_SUITE_ARGS}, cover
 
-dialyzer:
+dialyzer: compile
 	${REBAR} dialyzer
 
-tar:
-	rm -rf _build/prod
-	${REBAR} as prod tar
+release:
+	rm -rf _build/${REBAR3_PROFILE}
+	${REBAR} as ${REBAR3_PROFILE}
+
+release-tar:
+	rm -rf _build/${REBAR3_PROFILE}
+	${REBAR} as ${REBAR3_PROFILE} tar
 	mkdir -p _build/tar
-	tar -zxvf _build/prod/rel/*/*.tar.gz -C _build/tar
-
-# Notice we need REBAR3_PROFILE en var even if we use 'as prod' because this is
-# handled by rebar.conf.script which does not know we have used the 'as prod'
-# higher level command
-prod-xcomp-rel:
-	REBAR3_PROFILE=prod \
-	REBAR3_TARGET_INCLUDE_ERTS=/Users/aramallo/otp/24.2/ \
-	REBAR3_TARGET_SYSTEM_LIBS=/Users/aramallo/otp/24.2/lib \
-	${REBAR} as prod release
-
-# Notice we need REBAR3_PROFILE en var even if we use 'as prod' because this is
-# handled by rebar.conf.script which does not know we have used the 'as prod'
-# higher level command
-prod-xcomp-tar:
-	REBAR3_PROFILE=prod \
-	REBAR3_TARGET_INCLUDE_ERTS=/Users/aramallo/otp/24.2/ \
-	REBAR3_TARGET_SYSTEM_LIBS=/Users/aramallo/otp/24.2/lib \
-	${REBAR} as prod tar
+	tar -zxvf _build/${REBAR3_PROFILE}/rel/*/*.tar.gz -C _build/tar
 
 devrun:
 	${REBAR} as dev release
@@ -121,14 +124,12 @@ devrun:
 prodrun:
 	${REBAR} as prod release
 	RELX_REPLACE_OS_VARS=true \
-	ERL_DIST_PORT=27788 \
 	BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME} \
 	BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE} \
 	_build/prod/rel/bondy/bin/bondy console
 
 prodtarrun: tar
-	ERL_DIST_PORT=27788 BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME} BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE} _build/tar/bin/bondy console
-
+	BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME} BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE} _build/tar/bin/bondy console
 
 node1:
 	${REBAR} as node1 release

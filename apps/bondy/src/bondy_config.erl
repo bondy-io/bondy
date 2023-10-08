@@ -24,7 +24,7 @@
 -behaviour(app_config).
 
 %% We renamed the default plum_db data channel
--define(BONDY_DATA_CHANNEL, data).
+-define(PLUM_DB_DATA_CHANNEL, data).
 -define(WAMP_RELAY_CHANNEL, wamp_relay).
 
 -include_lib("kernel/include/logger.hrl").
@@ -360,7 +360,7 @@ setup_mods() ->
 
 setup_partisan_channels() ->
     DefaultChannels = #{
-        ?BONDY_DATA_CHANNEL => #{parallelism => 2, compression => false},
+        ?PLUM_DB_DATA_CHANNEL => #{parallelism => 2, compression => false},
         ?WAMP_RELAY_CHANNEL => #{parallelism => 2, compression => false}
     },
     Channels =
@@ -369,8 +369,9 @@ setup_partisan_channels() ->
                 DefaultChannels;
             Channels0 ->
                 Channels1 = lists:foldl(
-                    fun({Channel, PList}, Acc) ->
-                        maps:put(Channel, maps:from_list(PList), Acc)
+                    fun
+                        ({Channel, PList}, Acc) ->
+                            maps:put(Channel, maps:from_list(PList), Acc)
                     end,
                     maps:new(),
                     Channels0
@@ -380,7 +381,7 @@ setup_partisan_channels() ->
 
     %% There is some redundancy as plum_db_config also configures channels, so
     %% we make sure they coincide.
-    DataChannelOpts = maps:get(?BONDY_DATA_CHANNEL, Channels),
+    DataChannelOpts = maps:get(?PLUM_DB_DATA_CHANNEL, Channels),
     application:set_env(plum_db, data_channel_opts, DataChannelOpts),
     application:set_env(partisan, channels, maps:to_list(Channels)).
 
@@ -418,7 +419,7 @@ prepare_private_config() ->
 %% @private
 configure_plum_db(Config) ->
     PDBConfig = [
-        {data_channel, ?BONDY_DATA_CHANNEL},
+        {data_channel, ?PLUM_DB_DATA_CHANNEL},
         {prefixes, ?PLUM_DB_PREFIXES},
         {data_dir, get(platform_data_dir)}
     ],

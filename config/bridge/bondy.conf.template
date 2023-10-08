@@ -966,7 +966,7 @@ cluster.peer_discovery.timeout = 5s
 ##
 ## Acceptable values:
 ##   - text
-cluster.peer_discovery.type = bondy_peer_discovery_static_agent
+cluster.peer_discovery.type = list
 
 
 

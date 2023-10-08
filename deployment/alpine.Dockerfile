@@ -33,12 +33,12 @@ FROM alpine:3.18.3 as runner
 # We define defaults
 # We assume you have DNS. Erlang will take the FQDN and generate
 # a node name == ${BONDY_ERL_NODENAME}@${FQDN}
-ENV BONDY_ERL_NODENAME=bondy
+ENV BONDY_ERL_NODENAME=bondy@127.0.0.1
 ENV BONDY_ERL_DISTRIBUTED_COOKIE=bondy
 ENV BONDY_LOG_CONSOLE=console
 ENV BONDY_LOG_LEVEL=info
 ENV ERL_CRASH_DUMP=/dev/null
-ENV ERL_DIST_PORT=27784
+ENV ERL_DIST_PORT=27780
 
 # We add Bondy executables to PATH
 ENV PATH="/bondy/bin:$PATH"

@@ -62,13 +62,14 @@ broker_bridge.kafka.enabled = off
 
 cluster.automatic_leave = off
 cluster.parallelism = 1
+#cluster.listen_addrs = 192.168.50.174:18086
 cluster.peer_port = 18086
 cluster.peer_discovery.enabled = off
-cluster.peer_discovery.automatic_join = on
 cluster.peer_discovery.polling_interval = 10s
 cluster.peer_discovery.timeout = 5s
-# cluster.peer_discovery.type = bondy_peer_discovery_static_agent
-# cluster.peer_discovery.config.nodes.1 = bondy1@127.0.0.1:18086
+cluster.peer_discovery.type = list
+cluster.peer_discovery.config.addresses = [bondy2@127.0.0.1:18186]
+
 cluster.tls.enabled = on
 cluster.tls.server.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
 cluster.tls.server.certfile = ${BONDY_ETC_DIR}/ssl/server/keycert.pem
