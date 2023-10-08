@@ -1,4 +1,4 @@
-security.config_file = ${BONDY_ETC_DIR}/security_config.json
+
 platform_data_dir=${BONDY_DATA_DIR}
 
 vm.process_limit = 500000
@@ -9,4 +9,20 @@ vm.io.dirty_schedulers = 16
 vm.io.dirty_schedulers.busy_wait_threshold = none
 vm.memory_allocators.super_carrier_only = off
 vm.memory_allocators.super_carrier_size = 0MB
+
+security.config_file = ${BONDY_ETC_DIR}/security_config.json
+
+startup.wait_for_store_partitions = on
+startup.wait_for_store_hashtrees = on
+startup.wait_for_store_aae_exchange = off
+shutdown.grace_period = 20s
+
+cluster.peer_discovery.enabled = on
+cluster.peer_discovery.initial_delay = 1will_merge0s
+cluster.peer_discovery.polling_interval = 10s
+cluster.peer_discovery.timeout = 5s
+cluster.peer_discovery.type = dns
+cluster.peer_discovery.config.record_type = fqdns
+cluster.peer_discovery.config.query = ${FLY_APP_NAME}.internal
+cluster.peer_discovery.config.node_basename = ${FLY_APP_NAME}
 

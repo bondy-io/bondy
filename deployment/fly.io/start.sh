@@ -1,5 +1,6 @@
 #!/bin/sh
 
+# Node naming
 ip=$NODE_IP
 if [ -z $ip ]
 then
@@ -19,4 +20,11 @@ fi
 node_name="${FLY_APP_NAME:=bondy}"
 
 export BONDY_ERL_NODENAME=$node_name@$ip
+export BONDY_REGION=${FLY_REGION}
+export BONDY_HOST_ID=${FLY_MACHINE_ID}
+
+# Disable swap
+swapoff -a
+
+# Start
 bondy foreground

@@ -1,7 +1,22 @@
-# fly.toml app configuration file generated for bondy on 2023-09-30T19:02:59+01:00
+# =============================================================================
+#  Copyright (c) 2023 Leapsight. All rights reserved.
 #
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
 #
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+# =============================================================================
+
+
+# See https://fly.io/docs/reference/configuration/ for information about how to
+# use this file.
 
 app = "bondy"
 primary_region = "lhr"
@@ -10,6 +25,10 @@ kill_timeout = "30s"
 console_command = "bin/bondy remote_console"
 
 [experimental]
+  # We use a custom entry point so that we can dynamically define the node's
+  # name by extracting the IP from fly-local-6pn, we also use it to set some
+  # environment variables we could use in Bondy such as
+  # BONDY_REGION, BONDY_HOST_ID
   entrypoint = ["/bondy/start.sh"]
 
 [build]
@@ -21,7 +40,6 @@ console_command = "bin/bondy remote_console"
 [env]
   BONDY_DATA_DIR = "/bondy/data"
   BONDY_ERL_DISTRIBUTED_COOKIE = "bondy"
-  BONDY_ERL_NODENAME = "bondy@127.0.0.1"
   BONDY_LOG_LEVEL = "info"
   ERL_CRASH_DUMP = "/dev/null"
   ERL_DIST_PORT = "27784"
