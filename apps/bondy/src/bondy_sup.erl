@@ -67,7 +67,6 @@ init([]) ->
         ?WORKER(bondy_relay, [], permanent, 5000),
         ?WORKER(bondy_backup, [], permanent, 5000),
         ?WORKER(bondy_http_gateway, [], permanent, 5000),
-        ?WORKER(bondy_peer_discovery_agent, [], permanent, 5000),
         ?SUPERVISOR(bondy_bridge_relay_sup, [], permanent, infinity)
     ],
     {ok, {{one_for_one, 1, 5}, Children}}.
