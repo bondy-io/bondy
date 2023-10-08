@@ -53,7 +53,7 @@
 %% -----------------------------------------------------------------------------
 {mapping, "startup.wait_for_store_aae_exchange", "plum_db.wait_for_aae_exchange", [
   {datatype, flag},
-  {default, on}
+  {default, off}
 ]}.
 
 
