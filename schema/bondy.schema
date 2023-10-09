@@ -1989,6 +1989,13 @@ end}.
 ]}.
 
 
+{mapping,
+  "cluster.peer_discovery.config.$name.$item",
+  "partisan.peer_discovery.config", [
+  {datatype, string}
+]}.
+
+
 {translation,
   "partisan.peer_discovery.config",
   fun(Conf0) ->
@@ -2009,7 +2016,7 @@ end}.
 
       Dict = lists:foldl(
           fun
-            ({[_, _, _, Key], Value0}, Acc) ->
+            ({["cluster", "peer_discovery", "config", Key], Value0}, Acc) ->
               Value1 = unicode:characters_to_list(
                 string:replace(Value0, " ", "", all)
               ),
@@ -2024,9 +2031,10 @@ end}.
                 end,
               dict:store(list_to_atom(Key), Value, Acc);
 
-            ({[_, _, _, Key, _], Value}, Acc) ->
+            ({["cluster", "peer_discovery", "config", Key, _], Value}, Acc) ->
+              %% TODO check if we can use list_to_existing_atom here
+              %% we might need to create atoms first
               dict:append(list_to_atom(Key), list_to_binary(Value), Acc)
-
           end,
           dict:new(),
           Conf

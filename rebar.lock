@@ -86,7 +86,7 @@
  {<<"parse_trans">>,{pkg,<<"parse_trans">>,<<"3.4.1">>},0},
  {<<"partisan">>,
   {git,"http://github.com/lasp-lang/partisan.git",
-       {ref,"fc023c84233ea71f02f512548113e93f5647324f"}},
+       {ref,"81cede0e7c64eb4ae7df2bffbfe7c3d0cfeb7c4b"}},
   0},
  {<<"pbkdf2">>,
   {git,"https://github.com/leapsight-oss/erlang-pbkdf2.git",
