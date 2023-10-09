@@ -10,8 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        otp: ['24.2']
-        rebar3: ['3.19']
+        otp: '26.1.1'
+        rebar3: ['3.22.1']
     steps:
       
       - name: Checkout
