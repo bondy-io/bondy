@@ -1,22 +1,7 @@
-# =============================================================================
-#  Copyright (c) 2023 Leapsight. All rights reserved.
+# fly.toml app configuration file generated for bondy on 2023-10-08T22:54:05+01:00
 #
-#  Licensed under the Apache License, Version 2.0 (the "License");
-#  you may not use this file except in compliance with the License.
-#  You may obtain a copy of the License at
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-#  limitations under the License.
-# =============================================================================
-
-
-# See https://fly.io/docs/reference/configuration/ for information about how to
-# use this file.
 
 app = "bondy"
 primary_region = "lhr"
@@ -25,11 +10,7 @@ kill_timeout = "30s"
 console_command = "bin/bondy remote_console"
 
 [experimental]
-  # We use a custom entry point so that we can dynamically define the node's
-  # name by extracting the IP from fly-local-6pn, we also use it to set some
-  # environment variables we could use in Bondy such as
-  # BONDY_REGION, BONDY_HOST_ID
-  entrypoint = ["/bondy/start.sh"]
+  entrypoint = ["/bin/bash", "-c", "source /bondy/setup.sh && exec bin/bondy foreground"]
 
 [build]
   image = "leapsight/bondy:1.0.0-rc.2-alpine"
@@ -44,30 +25,23 @@ console_command = "bin/bondy remote_console"
   ERL_CRASH_DUMP = "/dev/null"
   ERL_DIST_PORT = "27784"
 
-[[services]]
-  protocol = "tcp"
+[http_service]
   internal_port = 18080
-
-  [[services.ports]]
-    port = 80
-    handlers = ["http"]
-    force_https = true
-
-  [[services.ports]]
-    port = 443
-    handlers = ["tls", "http"]
-    [services.ports.tls_options]
-      alpn = ["h2", "http/1.1"]
-      versions = ["TLSv1.2", "TLSv1.3"]
-  [services.concurrency]
+  auto_stop_machines = false
+  auto_start_machines = false
+  min_machines_running = 0
+  [http_service.concurrency]
     type = "connections"
     hard_limit = 16384
     soft_limit = 16384
 
-  [[services.tcp_checks]]
-    interval = "15s"
-    timeout = "2s"
-    grace_period = "5m0s"
+[[services]]
+  protocol = "tcp"
+  internal_port = 18081
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 16384
+    soft_limit = 16384
 
 [[services]]
   protocol = "tcp"
@@ -93,9 +67,19 @@ console_command = "bin/bondy remote_console"
     hard_limit = 16384
     soft_limit = 16384
 
+[checks]
+  [checks.liveness]
+    port = 18081
+    type = "http"
+    interval = "15s"
+    timeout = "10s"
+    grace_period = "30s"
+    method = "get"
+    path = "/ping"
+
 [[files]]
-  guest_path = "/bondy/start.sh"
-  local_path = "start.sh"
+  guest_path = "/bondy/setup.sh"
+  local_path = "setup.sh"
   secret_name = ""
   raw_value = ""
 
