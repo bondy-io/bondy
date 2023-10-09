@@ -1,4 +1,15 @@
 # CHANGELOG
+## 1.0.0-rc.3
+### Changes
+* Upgraded Partisan with support for IPv6 in DNS discovery.
+
+```erlang
+cluster.peer_discovery.type = dns
+cluster.peer_discovery.config.record_type = aaaa
+cluster.peer_discovery.config.nameservers.1 = fdaa::3
+cluster.peer_discovery.config.query = bondy.internal
+cluster.peer_discovery.config.node_basename = bondy
+```
 
 ## 1.0.0-rc.2
 
