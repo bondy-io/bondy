@@ -172,6 +172,14 @@ format_msg(Parents, Data, Config = #{map_depth := Depth}) when is_map(Data) ->
                 | Acc
             ];
 
+        Flatten(K, [], Acc) ->
+            [
+                Parents ++ to_string(K, Config),
+                $=,
+                "[]", $\s
+                | Acc
+            ];
+
         Flatten(K, V, Acc) when is_list(V) ->
             try
                 Flatten(K, maps:from_list(V), Acc)
