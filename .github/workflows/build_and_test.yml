@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        otp: '26.1.1'
+        otp: ['26.1.1']
         rebar3: ['3.22.1']
     steps:
       
