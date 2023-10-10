@@ -27,10 +27,12 @@
 -define(BONDY_BACKUP_RESTORE,           <<"bondy.backup.restore">>).
 -define(BONDY_BACKUP_STATUS,            <<"bondy.backup.status">>).
 
+-define(BONDY_CLUSTER_JOIN,             <<"bondy.cluster.join">>).
+-define(BONDY_CLUSTER_LEAVE,            <<"bondy.cluster.leave">>).
 -define(BONDY_CLUSTER_CONNECTIONS,      <<"bondy.cluster.connections">>).
 -define(BONDY_CLUSTER_MEMBERS,          <<"bondy.cluster.members">>).
--define(BONDY_CLUSTER_PEER_INFO,        <<"bondy.cluster.peer_info">>).
--define(BONDY_CLUSTER_STATUS,           <<"bondy.cluster.status">>).
+-define(BONDY_CLUSTER_BCAST_MEMBERS,    <<"bondy.cluster.broadcast_members">>).
+-define(BONDY_CLUSTER_INFO,             <<"bondy.cluster.info">>).
 
 
 -define(BONDY_ROUTER_BRIDGE_ADD,          <<"bondy.router.bridge.add">>).

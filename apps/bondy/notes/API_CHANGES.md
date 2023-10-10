@@ -1,4 +1,14 @@
 # API Changes
+## 1.0.0
+### NEW URIS
+|MACRO|CURRENT|NEW|
+|---|---|---|
+|BONDY_CLUSTER_PEER_INFO|-|bondy.cluster.info|
+
+### DEPRECATED URIS
+|MACRO|URI|
+|---|---|
+|BONDY_CLUSTER_STATUS|bondy.cluster.status|
 
 ## 0.9.0
 ### Conventions

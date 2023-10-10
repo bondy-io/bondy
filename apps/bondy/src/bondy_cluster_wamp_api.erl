@@ -49,29 +49,44 @@
     | {continue, uri() | wamp_call(), fun(
         (Reason :: any()) -> wamp_error() | undefined)
     }
-    | {reply, wamp_result() | wamp_error()}.
+    | {reply, wamp_result() | wamp_error()}
+    | no_return().
 
+handle_call(?BONDY_CLUSTER_JOIN, #call{} = M, _Ctxt) ->
+    R = bondy_wamp_utils:no_such_procedure_error(M),
+    {reply, R};
+
+handle_call(?BONDY_CLUSTER_LEAVE, #call{} = M, _Ctxt) ->
+    %% TODO
+    R = wamp_message:result(M#call.request_id, #{}, []),
+    {reply, R};
 
 handle_call(?BONDY_CLUSTER_CONNECTIONS, #call{} = M, _Ctxt) ->
     %% TODO
-    E = bondy_wamp_utils:no_such_procedure_error(M),
-    {reply, E};
+    R = bondy_wamp_utils:no_such_procedure_error(M),
+    {reply, R};
 
 handle_call(?BONDY_CLUSTER_MEMBERS, #call{} = M, _Ctxt) ->
-    %% TODO
-    E = bondy_wamp_utils:no_such_procedure_error(M),
-    {reply, E};
+    {ok, Members} = partisan_peer_service:members(),
+    R = wamp_message:result(M#call.request_id, #{}, [Members]),
+    {reply, R};
 
-handle_call(?BONDY_CLUSTER_PEER_INFO, #call{} = M, _Ctxt) ->
+handle_call(?BONDY_CLUSTER_INFO, #call{} = M, _Ctxt) ->
     %% TODO
-    E = bondy_wamp_utils:no_such_procedure_error(M),
-    {reply, E};
-
-handle_call(?BONDY_CLUSTER_STATUS, #call{} = M, _Ctxt) ->
-    %% TODO
-    E = bondy_wamp_utils:no_such_procedure_error(M),
-    {reply, E};
+    Info = #{
+        <<"node_spec">> => bondy_wamp_utils:node_spec(),
+        <<"nodes">> => partisan:nodes()
+    },
+    R = wamp_message:result(M#call.request_id, #{}, [Info]),
+    {reply, R};
 
 handle_call(_, #call{} = M, _) ->
-    E = bondy_wamp_utils:no_such_procedure_error(M),
-    {reply, E}.
+    R = bondy_wamp_utils:no_such_procedure_error(M),
+    {reply, R}.
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
