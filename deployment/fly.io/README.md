@@ -19,3 +19,8 @@ fly deploy
 ```shell
 fly scale count 2
 ```
+
+## SSH
+```shell
+fly ssh console -s
+```
