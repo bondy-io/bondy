@@ -1,5 +1,5 @@
-log.handlers.default.level = debug
-
+log.handlers.default.level = notice
+log.level = notice
 
 aae.data_exchange_timeout = 1m
 aae.enabled = on
@@ -65,10 +65,6 @@ cluster.parallelism = 1
 #cluster.listen_addrs = 192.168.50.174:18086
 cluster.peer_port = 18086
 cluster.peer_discovery.enabled = off
-cluster.peer_discovery.polling_interval = 10s
-cluster.peer_discovery.timeout = 5s
-cluster.peer_discovery.type = list
-cluster.peer_discovery.config.addresses = [bondy2@127.0.0.1:18186]
 
 cluster.tls.enabled = on
 cluster.tls.server.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
