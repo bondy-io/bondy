@@ -25,6 +25,7 @@
 -include_lib("wamp/include/wamp.hrl").
 
 
+
 -export([bin_to_pid/1]).
 -export([decode/2]).
 -export([elapsed_time/2]).
@@ -32,6 +33,7 @@
 -export([foreach/2]).
 -export([gen_message_id/1]).
 -export([generate_fragment/1]).
+-export([get_ipaddr/2]).
 -export([get_nonce/0]).
 -export([get_nonce/1]).
 -export([get_random_string/2]).
@@ -55,7 +57,6 @@
 -export([to_existing_atom_keys/1]).
 -export([uuid/0]).
 -export([uuid/1]).
-
 
 
 
@@ -362,6 +363,32 @@ peername(Transport, Socket) when Transport == ranch_tcp; Transport == tcp ->
 
 peername(Transport, Socket) when Transport == ranch_ssl; Transport == ssl ->
     ssl:peername(Socket).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+get_ipaddr(localhost, IPVersion) ->
+    {ok, IP} = inet:getaddr("localhost", IPVersion),
+    IP;
+
+get_ipaddr(hostname, IPVersion) ->
+    {ok, Hostname} = inet:gethostname(),
+    {ok, IP} = inet:getaddr(Hostname, IPVersion),
+    IP;
+
+get_ipaddr(partisan, _) ->
+    #{listen_addrs := [Addr|_]} = partisan:node_spec(),
+    maps:get(ip, Addr);
+
+get_ipaddr(IP0, IPVersion) ->
+    case inet:getaddr(IP0, IPVersion) of
+        {ok, IP} ->
+            IP;
+        {error, _} ->
+            exit({badarg, [IP0, IPVersion]})
+    end.
 
 
 %% -----------------------------------------------------------------------------

@@ -309,7 +309,9 @@
 %% @end
 %% -----------------------------------------------------------------------------
 %%
-{mapping, "security.ticket.expiry_time", "bondy.security.ticket.expiry_time_secs",[
+{mapping,
+  "security.ticket.expiry_time",
+  "bondy.security.ticket.expiry_time_secs",[
   {default, "30d"},
   {datatype, {duration, s}}
 ]}.
@@ -320,7 +322,9 @@
 %% @end
 %% -----------------------------------------------------------------------------
 %%
-{mapping, "security.ticket.max_expiry_time", "bondy.security.ticket.max_expiry_time_secs",[
+{mapping,
+  "security.ticket.max_expiry_time",
+  "bondy.security.ticket.max_expiry_time_secs",[
 {default, "30d"},
 {datatype, {duration, s}}
 ]}.
@@ -668,6 +672,40 @@
   hidden
 ]}.
 
+%% @doc admin_api.http.ip is the IP address that Bondy uses for
+%% exposing the API Gateway managed APIs.. When the host has many network
+%% interfaces, this option specifies which one to listen on.
+{mapping, "admin_api.http.ip", "bondy.admin_api_http.ip", [
+  {datatype, string},
+  {validators, ["ip_address"]}
+]}.
+
+%% @doc The IP version to use. Either 4 or 6.
+{mapping, "admin_api.http.ip_version", "bondy.admin_api_http.ip_version", [
+  {default, "4"},
+  {datatype, string}
+]}.
+
+{translation, "bondy.admin_api_http.ip_version",
+  fun(Conf) ->
+    Value =  cuttlefish:conf_get("admin_api.http.ip_version", Conf),
+      try
+        case string:strip(Value) of
+          "4" -> 'inet';
+          "6" -> 'inet6';
+          _ -> throw(invalid_version)
+        end
+      catch
+        throw:invalid_version ->
+          cuttlefish:invalid(
+            "Invalid IP version: "
+            ++ Value
+            ++ " . Value should be 4 or 6."
+          )
+      end
+  end
+}.
+
 %% The Cowboy acceptors_pool_size for the Admin API http listener
 {mapping, "admin_api.http.acceptors_pool_size", "bondy.admin_api_http.acceptors_pool_size", [
   {datatype, integer},
@@ -747,6 +785,40 @@
   {datatype, integer},
   hidden
 ]}.
+
+%% @doc admin_api.http.ip is the IP address that Bondy uses for
+%% exposing the API Gateway managed APIs.. When the host has many network
+%% interfaces, this option specifies which one to listen on.
+{mapping, "admin_api.https.ip", "bondy.admin_api_https.ip", [
+  {datatype, string},
+  {validators, ["ip_address"]}
+]}.
+
+%% @doc The IP version to use. Either 4 or 6.
+{mapping, "admin_api.https.ip_version", "bondy.admin_api_https.ip_version", [
+  {default, "4"},
+  {datatype, string}
+]}.
+
+{translation, "bondy.admin_api_https.ip_version",
+  fun(Conf) ->
+    Value =  cuttlefish:conf_get("admin_api.https.ip_version", Conf),
+      try
+        case string:strip(Value) of
+          "4" -> 'inet';
+          "6" -> 'inet6';
+          _ -> throw(invalid_version)
+        end
+      catch
+        throw:invalid_version ->
+          cuttlefish:invalid(
+            "Invalid IP version: "
+            ++ Value
+            ++ " . Value should be 4 or 6."
+          )
+      end
+  end
+}.
 
 %% The Cowboy acceptors_pool_size for the Admin API https listener
 {mapping, "admin_api.https.acceptors_pool_size", "bondy.admin_api_https.acceptors_pool_size", [
@@ -886,6 +958,40 @@
 ]}.
 
 
+%% @doc api_gateway.http.ip is the IP address that Bondy uses for
+%% exposing the API Gateway managed APIs.. When the host has many network
+%% interfaces, this option specifies which one to listen on.
+{mapping, "api_gateway.http.ip", "bondy.api_gateway_http.ip", [
+  {datatype, string},
+  {validators, ["ip_address"]}
+]}.
+
+%% @doc The IP version to use. Either 4 or 6.
+{mapping, "api_gateway.http.ip_version", "bondy.api_gateway_http.ip_version", [
+  {default, "4"},
+  {datatype, string}
+]}.
+
+{translation, "bondy.api_gateway_http.ip_version",
+  fun(Conf) ->
+    Value =  cuttlefish:conf_get("api_gateway.http.ip_version", Conf),
+      try
+        case string:strip(Value) of
+          "4" -> 'inet';
+          "6" -> 'inet6';
+          _ -> throw(invalid_version)
+        end
+      catch
+        throw:invalid_version ->
+          cuttlefish:invalid(
+            "Invalid IP version: "
+            ++ Value
+            ++ " . Value should be 4 or 6."
+          )
+      end
+  end
+}.
+
 %% The Cowboy acceptors_pool_size for the API Gateway's http listener
 {mapping, "api_gateway.http.acceptors_pool_size", "bondy.api_gateway_http.acceptors_pool_size", [
   {datatype, integer},
@@ -980,6 +1086,40 @@
   {validators, ["port_number"]},
   hidden
 ]}.
+
+%% @doc api_gateway.http.ip is the IP address that Bondy uses for
+%% exposing the API Gateway managed APIs.. When the host has many network
+%% interfaces, this option specifies which one to listen on.
+{mapping, "api_gateway.https.ip", "bondy.api_gateway_https.ip", [
+  {datatype, string},
+  {validators, ["ip_address"]}
+]}.
+
+%% @doc The IP version to use. Either 4 or 6.
+{mapping, "api_gateway.https.ip_version", "bondy.api_gateway_https.ip_version", [
+  {default, "4"},
+  {datatype, string}
+]}.
+
+{translation, "bondy.api_gateway_https.ip_version",
+  fun(Conf) ->
+    Value =  cuttlefish:conf_get("api_gateway.https.ip_version", Conf),
+      try
+        case string:strip(Value) of
+          "4" -> 'inet';
+          "6" -> 'inet6';
+          _ -> throw(invalid_version)
+        end
+      catch
+        throw:invalid_version ->
+          cuttlefish:invalid(
+            "Invalid IP version: "
+            ++ Value
+            ++ " . Value should be 4 or 6."
+          )
+      end
+  end
+}.
 
 
 %% The Cowboy acceptors_pool_size for the API Gateway's http listener
@@ -1373,12 +1513,46 @@
   {datatype, {flag, on, off}}
 ]}.
 
-%% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
+%% @doc wamp.tcp.port is the TCP port that Bondy uses for
 %% exposing the WAMP raw socket transport
 {mapping, "wamp.tcp.port", "bondy.wamp_tcp.port", [
   {default, 18082},
   {datatype, integer}
 ]}.
+
+%% @doc wamp.tcp.ip is the IP address that Bondy uses for
+%% exposing the WAMP raw socket transport. When the host has many network
+%% interfaces, this option specifies which one to listen on.
+{mapping, "wamp.tcp.ip", "bondy.wamp_tcp.ip", [
+  {datatype, string},
+  {validators, ["ip_address"]}
+]}.
+
+%% @doc The IP version to use. Either 4 or 6.
+{mapping, "wamp.tcp.ip_version", "bondy.wamp_tcp.ip_version", [
+  {default, "4"},
+  {datatype, string}
+]}.
+
+{translation, "bondy.wamp_tcp.ip_version",
+  fun(Conf) ->
+    Value =  cuttlefish:conf_get("wamp.tcp.ip_version", Conf),
+      try
+        case string:strip(Value) of
+          "4" -> 'inet';
+          "6" -> 'inet6';
+          _ -> throw(invalid_version)
+        end
+      catch
+        throw:invalid_version ->
+          cuttlefish:invalid(
+            "Invalid IP version: "
+            ++ Value
+            ++ " . Value should be 4 or 6."
+          )
+      end
+  end
+}.
 
 
 %% The ranch acceptors_pool_size for the WAMP raw socket tcp listener
@@ -1520,6 +1694,40 @@
   {default, 18085},
   {datatype, integer}
 ]}.
+
+%% @doc wamp.tls.ip is the IP address that Bondy uses for
+%% exposing the WAMP raw socket transport. When the host has many network
+%% interfaces, this option specifies which one to listen on.
+{mapping, "wamp.tls.ip", "bondy.wamp_tls.ip", [
+  {datatype, string},
+  {validators, ["ip_address"]}
+]}.
+
+%% @doc The IP version to use. Either 4 or 6.
+{mapping, "wamp.tls.ip_version", "bondy.wamp_tls.ip_version", [
+  {default, "4"},
+  {datatype, string}
+]}.
+
+{translation, "bondy.wamp_tls.ip_version",
+  fun(Conf) ->
+    Value =  cuttlefish:conf_get("wamp.tls.ip_version", Conf),
+      try
+        case string:strip(Value) of
+          "4" -> 'inet';
+          "6" -> 'inet6';
+          _ -> throw(invalid_version)
+        end
+      catch
+        throw:invalid_version ->
+          cuttlefish:invalid(
+            "Invalid IP version: "
+            ++ Value
+            ++ " . Value should be 4 or 6."
+          )
+      end
+  end
+}.
 
 %% The ranch acceptors_pool_size for the WAMP raw socket tcp listener
 {mapping, "wamp.tls.acceptors_pool_size", "bondy.wamp_tls.acceptors_pool_size", [
@@ -2362,4 +2570,23 @@ end}.
   "port_number",
   "greater than 1024 and less or equal to 65535",
   fun(Port) -> Port >= 1024 andalso Port =< 65535 end
+}.
+
+
+{validator,
+  "ip_address",
+  "A valid IPv4 or IPv6 address",
+  fun(Term) ->
+    case inet:getaddr(Term, inet) of
+      {ok, _} ->
+          true;
+      {error, einval} ->
+        case inet:getaddr(Term, inet6) of
+          {ok, _} ->
+              true;
+          {error, _} ->
+              false
+        end
+    end
+  end
 }.
