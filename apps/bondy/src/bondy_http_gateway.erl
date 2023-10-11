@@ -720,18 +720,20 @@ maybe_start_http(Routes, Name) ->
 
 start_http(Routes, Name) ->
     {TransportOpts, ProtoOpts} = cowboy_opts(Routes, Name),
+    LogMeta = #{
+        listener => Name,
+        transport_opts => TransportOpts
+    },
 
     case cowboy:start_clear(Name, TransportOpts, ProtoOpts) of
         {ok, _} ->
+            ?LOG_NOTICE(LogMeta#{description => "Started HTTP Listener"}),
             ok;
-        {error, eaddrinuse} ->
-            ?LOG_ERROR(#{
-                description => "Cannot start HTTP listener, address is in use", name => Name,
-                reason => eaddrinuse,
-                transport_opts => TransportOpts
+        {error, Reason} = Error ->
+            ?LOG_ERROR(LogMeta#{
+                description => "Failed to start HTTP listener",
+                reason => Reason
             }),
-            {error, eaddrinuse};
-        {error, _} = Error ->
             Error
     end.
 
@@ -780,19 +782,20 @@ cowboy_opts(Routes, Name) ->
 
 start_https(Routes, Name) ->
     {TransportOpts, ProtoOpts} = cowboy_opts(Routes, Name),
+    LogMeta = #{
+        listener => Name,
+        transport_opts => TransportOpts
+    },
 
     case cowboy:start_tls(Name, TransportOpts, ProtoOpts) of
         {ok, _} ->
+            ?LOG_NOTICE(LogMeta#{description => "Started HTTPS Listener"}),
             ok;
-        {error, eaddrinuse} ->
-            ?LOG_ERROR(#{
-                description => "Cannot start HTTPS listener, address is in use",
-                name => Name,
-                reason => eaddrinuse,
-                transport_opts => TransportOpts
+        {error, Reason} = Error ->
+            ?LOG_ERROR(LogMeta#{
+                description => "Failed to start HTTPS listener",
+                reason => Reason
             }),
-            {error, eaddrinuse};
-        {error, _} = Error ->
             Error
     end.
 

@@ -53,6 +53,7 @@ start(Ref, Protocol, ProtocolOpts) ->
             Transport = ref_to_transport(Ref),
             TransportOpts = transport_opts(Ref),
 
+
             {ok, _} = ranch:start_listener(
                 Ref,
                 Transport,
@@ -61,9 +62,10 @@ start(Ref, Protocol, ProtocolOpts) ->
                 ProtocolOpts
             ),
             ?LOG_NOTICE(#{
-                description => "Starting listener",
-                ref => Ref,
+                description => "Started TCP listener",
+                listener => Ref,
                 transport => Transport,
+                transport_opts => TransportOpts,
                 protocol => Protocol
             }),
 
