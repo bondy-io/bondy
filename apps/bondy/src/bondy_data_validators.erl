@@ -458,7 +458,7 @@ inet_host(Term) ->
             case inet:getaddr(Term, inet6) of
                 {ok, _} ->
                     true;
-                {error, einval} ->
+                {error, _} ->
                     false
             end
     end.
