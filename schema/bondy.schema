@@ -2580,7 +2580,7 @@ end}.
     case inet:getaddr(Term, inet) of
       {ok, _} ->
           true;
-      {error, einval} ->
+      {error, _} ->
         case inet:getaddr(Term, inet6) of
           {ok, _} ->
               true;
