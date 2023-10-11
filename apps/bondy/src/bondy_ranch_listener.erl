@@ -123,6 +123,7 @@ connections(Ref) ->
 %%
 %% The definition of the listeners in bondy.schema MUST match this structure.
 %% - Ref
+%%     - ip
 %%     - port
 %%     - acceptors_pool_size
 %%     - max_connections
@@ -144,9 +145,12 @@ connections(Ref) ->
 
 transport_opts(Ref) ->
     Opts = bondy_config:get(Ref),
-    {_, Port} = lists:keyfind(port, 1, Opts),
-    {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
-    {_, MaxConnections} = lists:keyfind(max_connections, 1, Opts),
+    Port = key_value:get(port, Opts),
+    IPVersion = key_value:get(ip_version, Opts, inet),
+    IP = key_value:get(ip, Opts, hostname),
+    IPAddress = bondy_utils:get_ipaddr(IP, IPVersion),
+    PoolSize = key_value:get(acceptors_pool_size, Opts),
+    MaxConnections = key_value:get(max_connections, Opts),
 
     %% In ranch 2.0 we will need to use socket_opts directly
     SocketOpts = normalise(key_value:get(socket_opts, Opts, [])),
@@ -156,12 +160,19 @@ transport_opts(Ref) ->
     #{
         num_acceptors => PoolSize,
         max_connections => MaxConnections,
-        socket_opts => [{port, Port} | SocketOpts ++ TLSOpts]
+        socket_opts => [
+            IPVersion,
+            {ip, IPAddress},
+            {port, Port} | SocketOpts ++ TLSOpts
+        ]
     }.
+
+
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
 
 
 
