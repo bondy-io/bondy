@@ -19,9 +19,10 @@
 -module(bondy_data_validators).
 -include_lib("wamp/include/wamp.hrl").
 
+
 -type endpoint() :: {
     Host :: inet:ip_address() | inet:hostname(),
-    PortNumber :: N :: 1024..65535
+    PortNumber :: N :: inet:port_number()
 }.
 
 -export([authorized_key/1]).
@@ -435,7 +436,13 @@ realm_uri(Term) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec ip_address(inet:ip_address()) -> boolean().
+-spec ip_address(inet:ip_address() | string()) -> boolean().
+
+ip_address({_, _, _, _} = IP) ->
+    inet:is_ipv4_address(IP);
+
+ip_address({_, _, _, _, _, _, _, _} = IP) ->
+    inet:is_ipv6_address(IP);
 
 ip_address(Term) ->
     case inet:ntoa(Term) of
@@ -465,13 +472,13 @@ inet_host(Term) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Is valid only if 0 =< N =< 65535.
 %% @end
 %% -----------------------------------------------------------------------------
--spec port_number(N :: 1024..65535) -> boolean().
+-spec port_number(N :: inet:port_number()) -> boolean().
 
 port_number(N) ->
-    N >= 1024 andalso N =< 65535.
+    (((N) band bnot 16#ffff) =:= 0).
 
 
 %% -----------------------------------------------------------------------------

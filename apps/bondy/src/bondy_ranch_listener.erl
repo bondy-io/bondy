@@ -147,10 +147,10 @@ connections(Ref) ->
 
 transport_opts(Ref) ->
     Opts = bondy_config:get(Ref),
+    IP0 = key_value:get(ip, Opts, any),
+    Family0 = key_value:get(ip_version, Opts, inet),
+    {IP, Family} = bondy_utils:get_ipaddr_family(IP0, Family0),
     Port = key_value:get(port, Opts),
-    IPVersion = key_value:get(ip_version, Opts, inet),
-    IP = key_value:get(ip, Opts, hostname),
-    IPAddress = bondy_utils:get_ipaddr(IP, IPVersion),
     PoolSize = key_value:get(acceptors_pool_size, Opts),
     MaxConnections = key_value:get(max_connections, Opts),
 
@@ -163,8 +163,8 @@ transport_opts(Ref) ->
         num_acceptors => PoolSize,
         max_connections => MaxConnections,
         socket_opts => [
-            IPVersion,
-            {ip, IPAddress},
+            Family,
+            {ip, IP},
             {port, Port} | SocketOpts ++ TLSOpts
         ]
     }.

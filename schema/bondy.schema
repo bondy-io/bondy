@@ -2568,8 +2568,8 @@ end}.
 
 {validator,
   "port_number",
-  "greater than 1024 and less or equal to 65535",
-  fun(Port) -> Port >= 1024 andalso Port =< 65535 end
+  "a number greater or equal to 0 and less or equal to 65535",
+  fun(Port) -> (((Port) band bnot 16#ffff) =:= 0) end
 }.
 
 

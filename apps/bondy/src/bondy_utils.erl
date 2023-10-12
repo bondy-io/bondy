@@ -34,6 +34,7 @@
 -export([gen_message_id/1]).
 -export([generate_fragment/1]).
 -export([get_ipaddr/2]).
+-export([get_ipaddr_family/2]).
 -export([get_nonce/0]).
 -export([get_nonce/1]).
 -export([get_random_string/2]).
@@ -365,30 +366,77 @@ peername(Transport, Socket) when Transport == ranch_ssl; Transport == ssl ->
     ssl:peername(Socket).
 
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-get_ipaddr(localhost, IPVersion) ->
-    {ok, IP} = inet:getaddr("localhost", IPVersion),
-    IP;
+-spec get_ipaddr_family(
+    IPOrHostname :: inet:ip_address() | string() | any | localhost | hostname, Family :: inet | inet6) ->
+    {inet:ip_address(), Family :: inet | inet6} | no_return().
 
-get_ipaddr(hostname, IPVersion) ->
+get_ipaddr_family(IPOrHostname, Family) ->
+    case get_ipaddr(IPOrHostname, Family) of
+        {_, _, _, _} = IP ->
+            {IP, inet};
+
+        {_, _, _, _, _, _, _, _} = IP ->
+            {IP, inet6}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Family is ignored when an `IPOrHostname' is an an inet:ip_address()
+%% or a string or binary representation of it.
+%%
+%% === Example ===
+%% ```
+%% > get_ipaddr({127,0,0,1}, inet).
+%% {127,0,0,1}
+%% > get_ipaddr({127,0,0,1}, inet6).
+%% {127,0,0,1}
+%% ```
+%%
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_ipaddr(
+    IPOrHostname :: inet:ip_address() | string() | any | localhost | hostname, Family :: inet | inet6) ->
+    {inet:ip_address(), inet | inet6} | no_return().
+
+get_ipaddr(any, inet) ->
+    {0, 0, 0, 0};
+
+get_ipaddr(any, inet6) ->
+    %% i.e. "::"
+    {0, 0, 0, 0, 0, 0, 0, 0};
+
+get_ipaddr(localhost, inet) ->
+    {127, 0, 0, 1};
+
+get_ipaddr(localhost, inet6) ->
+    %% i.e. "::1"
+    {0, 0, 0, 0, 0, 0, 0, 1};
+
+get_ipaddr(hostname, Family) ->
     {ok, Hostname} = inet:gethostname(),
-    {ok, IP} = inet:getaddr(Hostname, IPVersion),
+    {ok, IP} = inet:getaddr(Hostname, Family),
     IP;
 
 get_ipaddr(partisan, _) ->
     #{listen_addrs := [Addr|_]} = partisan:node_spec(),
     maps:get(ip, Addr);
 
-get_ipaddr(IP0, IPVersion) ->
-    case inet:getaddr(IP0, IPVersion) of
-        {ok, IP} ->
-            IP;
-        {error, _} ->
-            exit({badarg, [IP0, IPVersion]})
-    end.
+get_ipaddr({_, _, _, _} = IP, _) ->
+    inet:is_ipv4_address(IP);
+
+get_ipaddr({_, _, _, _, _, _, _, _} = IP, _) ->
+    inet:is_ipv6_address(IP);
+
+get_ipaddr(IPOrHostname, Family) when is_binary(IPOrHostname) ->
+    get_ipaddr(binary_to_list(IPOrHostname), Family);
+
+get_ipaddr(IPOrHostname, Family) when is_list(IPOrHostname) ->
+    get_ipaddr(IPOrHostname, Family, continue).
 
 
 %% -----------------------------------------------------------------------------
@@ -621,3 +669,28 @@ groups_from_list_2(_Fun, _ValueFun, [], Acc) ->
 %% @private
 badarg_with_info(Args) ->
     erlang:error(badarg, Args, [{error_info, #{module => erl_stdlib_errors}}]).
+
+
+
+%% @private
+get_ipaddr(IPOrHostname, Family, continue) ->
+    case inet:getaddr(IPOrHostname, Family) of
+        {ok, IP} ->
+            IP;
+
+        {error, _} when Family == inet ->
+            get_ipaddr(IPOrHostname, inet6, fail);
+
+
+        {error, _} when Family == inet6 ->
+            get_ipaddr(IPOrHostname, inet, fail)
+    end;
+
+get_ipaddr(IPOrHostname, Family, fail) ->
+    case inet:getaddr(IPOrHostname, Family) of
+        {ok, IP} ->
+            IP;
+        {error, _} ->
+            exit({badarg, [IPOrHostname, Family]})
+    end.
+

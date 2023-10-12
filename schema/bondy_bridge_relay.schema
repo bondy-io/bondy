@@ -418,8 +418,7 @@
             [Host, PortStr] ->
               Port = list_to_integer(PortStr),
 
-              Port >= 1024
-                andalso Port =< 65535
+              (((Port) band bnot 16#ffff) =:= 0)
                 orelse throw(invalid_port),
 
               case inet:getaddr(Host, inet) of
@@ -444,7 +443,7 @@
               );
             throw:invalid_port ->
               cuttlefish:invalid(
-                "value for the Port Number should be greater than 1023 and lower than 65536"
+                "value for the Port Number should greater or equal to 0 and less than or equal to 65535"
               );
             throw:invalid_endpoint ->
               cuttlefish:invalid(
@@ -1081,8 +1080,8 @@ end
 
 {validator,
   "port_number",
-  "greater than 1024 and less or equal to 65535",
-  fun(Port) -> Port >= 1024 andalso Port =< 65535 end
+  "a number greater or equal to 0 and less than or equal to 65535",
+  fun(Port) -> (((Port) band bnot 16#ffff) =:= 0) end
 }.
 
 
