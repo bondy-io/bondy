@@ -7,7 +7,7 @@ app = "bondy"
 primary_region = "lhr"
 kill_signal = "SIGTERM"
 kill_timeout = "30s"
-console_command = "bin/bondy remote_console"
+# console_command = "bin/bondy remote_console"
 
 [experimental]
   entrypoint = ["/bin/bash", "-c", "source /bondy/setup.sh && exec bin/bondy foreground"]
@@ -45,38 +45,6 @@ console_command = "bin/bondy remote_console"
     hard_limit = 16384
     soft_limit = 16384
 
-[[services]]
-  protocol = "tcp"
-  internal_port = 18082
-
-  [services.concurrency]
-    type = "connections"
-    hard_limit = 16384
-    soft_limit = 16384
-
-  [[services.ports]]
-    port = 18082
-    handlers = ["proxy_proto"]
-
-
-[[services]]
-  protocol = "tcp"
-  internal_port = 18086
-
-  [services.concurrency]
-    type = "connections"
-    hard_limit = 16384
-    soft_limit = 16384
-
-[[services]]
-  protocol = "tcp"
-  internal_port = 27784
-
-  [services.concurrency]
-    type = "connections"
-    hard_limit = 16384
-    soft_limit = 16384
-
 [checks]
   [checks.admin-http-alive]
     port = 18081
@@ -86,18 +54,6 @@ console_command = "bin/bondy remote_console"
     grace_period = "30s"
     method = "get"
     path = "/ping"
-  [checks.rawsocket-alive]
-    port = 18082
-    type = "tcp"
-    interval = "15s"
-    timeout = "2s"
-    grace_period = "5m0s"
-  [checks.partisan-alive]
-    port = 18086
-    type = "tcp"
-    interval = "15s"
-    timeout = "2s"
-    grace_period = "5m0s"
 
 [[files]]
   guest_path = "/bondy/setup.sh"
