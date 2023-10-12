@@ -33,6 +33,8 @@ api_gateway.http.keepalive = off
 api_gateway.http.max_connections = 500000
 api_gateway.http.nodelay = on
 api_gateway.http.port = 18080
+#api_gateway.http.ip = ::1
+#api_gateway.http.ip_version = 6
 
 api_gateway.https.enabled = on
 api_gateway.https.port = 18083
