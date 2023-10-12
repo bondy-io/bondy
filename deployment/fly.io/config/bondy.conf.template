@@ -69,4 +69,6 @@ wamp.tcp.keepalive = on
 wamp.tcp.max_connections = 100000
 wamp.tcp.nodelay = on
 wamp.tcp.port = 18082
+## Autobahn Python doesn't support pings
+wamp.tcp.ping.enabled = off
 wamp.websocket.ping.enabled = off
