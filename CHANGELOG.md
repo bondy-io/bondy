@@ -1,6 +1,12 @@
 # CHANGELOG
 ## 1.0.0-rc.3
+
 ### Changes
+* Added support for IPv6 across all listeners
+* Fixed port validaros accepting full port range (as opposed to previous rule which prescribed system ports)
+* Added marketplace demo realm for testing
+* Added Fly deployment
+* Added dnsutils to Dockerimage
 * Upgraded Partisan with support for IPv6 in DNS discovery.
 
 ```erlang
@@ -18,7 +24,7 @@ cluster.peer_discovery.config.node_basename = bondy
 
 ```erlang
 cluster.peer_discovery.enabled = on
-cluster.peer_discovery.initial_delay = 1will_merge0s
+cluster.peer_discovery.initial_delay = 10s
 cluster.peer_discovery.polling_interval = 10s
 cluster.peer_discovery.timeout = 5s
 cluster.peer_discovery.type = list
@@ -27,7 +33,7 @@ cluster.peer_discovery.config.addresses = [127.0.0.1:18086]
 
 ```erlang
 cluster.peer_discovery.enabled = on
-cluster.peer_discovery.initial_delay = 1will_merge0s
+cluster.peer_discovery.initial_delay = 10s
 cluster.peer_discovery.polling_interval = 10s
 cluster.peer_discovery.timeout = 5s
 cluster.peer_discovery.type = dns
