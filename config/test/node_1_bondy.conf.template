@@ -1,5 +1,5 @@
-log.handlers.default.level = debug
-
+log.handlers.default.level = notice
+log.level = notice
 
 aae.data_exchange_timeout = 1m
 aae.enabled = on
@@ -21,7 +21,7 @@ admin_api.https.acceptors_pool_size = 200
 admin_api.http.backlog = 1024
 admin_api.https.keepalive = off
 admin_api.https.max_connections = 250000
-admin_api.https.backlog = 18084
+admin_api.https.backlog = 4096
 admin_api.https.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
 admin_api.https.certfile = ${BONDY_ETC_DIR}/ssl/server/keycert.pem
 admin_api.https.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
@@ -33,6 +33,8 @@ api_gateway.http.keepalive = off
 api_gateway.http.max_connections = 500000
 api_gateway.http.nodelay = on
 api_gateway.http.port = 18080
+#api_gateway.http.ip = ::1
+#api_gateway.http.ip_version = 6
 
 api_gateway.https.enabled = on
 api_gateway.https.port = 18083
@@ -65,10 +67,6 @@ cluster.parallelism = 1
 #cluster.listen_addrs = 192.168.50.174:18086
 cluster.peer_port = 18086
 cluster.peer_discovery.enabled = off
-cluster.peer_discovery.polling_interval = 10s
-cluster.peer_discovery.timeout = 5s
-cluster.peer_discovery.type = list
-cluster.peer_discovery.config.addresses = [bondy2@127.0.0.1:18186]
 
 cluster.tls.enabled = on
 cluster.tls.server.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem

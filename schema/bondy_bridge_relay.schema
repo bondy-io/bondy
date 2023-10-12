@@ -418,8 +418,7 @@
             [Host, PortStr] ->
               Port = list_to_integer(PortStr),
 
-              Port >= 1024
-                andalso Port =< 65535
+              (((Port) band bnot 16#ffff) =:= 0)
                 orelse throw(invalid_port),
 
               case inet:getaddr(Host, inet) of
@@ -444,7 +443,7 @@
               );
             throw:invalid_port ->
               cuttlefish:invalid(
-                "value for the Port Number should be greater than 1023 and lower than 65536"
+                "value for the Port Number should greater or equal to 0 and less than or equal to 65535"
               );
             throw:invalid_endpoint ->
               cuttlefish:invalid(
@@ -654,6 +653,42 @@ end}.
   {datatype, integer}
 ]}.
 
+%% @doc TheIP address that Bondy uses for
+%% exposing the Bridge Relay listener. When the host has many network
+%% interfaces, this option specifies which one to listen on.
+{mapping, "bridge.listener.tcp.ip", "bondy.bridge_relay_tcp.ip", [
+  {datatype, string},
+  {validators, ["ip_address"]}
+]}.
+
+%% @doc The IP version to use. Either 4 or 6.
+{mapping,
+  "bridge.listener.tcp.ip_version",
+  "bondy.bridge_relay_tcp.ip_version", [
+  {default, "4"},
+  {datatype, string}
+]}.
+
+{translation, "bondy.bridge_relay_tcp.ip_version",
+  fun(Conf) ->
+    Value =  cuttlefish:conf_get("bridge.listener.tcp.ip_version", Conf),
+      try
+        case string:strip(Value) of
+          "4" -> 'inet';
+          "6" -> 'inet6';
+          _ -> throw(invalid_version)
+        end
+      catch
+        throw:invalid_version ->
+          cuttlefish:invalid(
+            "Invalid IP version: "
+            ++ Value
+            ++ " . Value should be 4 or 6."
+          )
+      end
+  end
+}.
+
 %% The ranch acceptors_pool_size for the socket tcp listener
 {mapping, "bridge.listener.tcp.acceptors_pool_size", "bondy.bridge_relay_tcp.acceptors_pool_size", [
   {datatype, integer},
@@ -806,6 +841,43 @@ end}.
   {validators, [port_number]},
   {datatype, integer}
 ]}.
+
+
+%% @doc TheIP address that Bondy uses for
+%% exposing the Bridge Relay listener. When the host has many network
+%% interfaces, this option specifies which one to listen on.
+{mapping, "bridge.listener.tls.ip", "bondy.bridge_relay_tls.ip", [
+  {datatype, string},
+  {validators, ["ip_address"]}
+]}.
+
+%% @doc The IP version to use. Either 4 or 6.
+{mapping,
+  "bridge.listener.tls.ip_version",
+  "bondy.bridge_relay_tls.ip_version", [
+  {default, "4"},
+  {datatype, string}
+]}.
+
+{translation, "bondy.bridge_relay_tls.ip_version",
+  fun(Conf) ->
+    Value =  cuttlefish:conf_get("bridge.listener.tls.ip_version", Conf),
+      try
+        case string:strip(Value) of
+          "4" -> 'inet';
+          "6" -> 'inet6';
+          _ -> throw(invalid_version)
+        end
+      catch
+        throw:invalid_version ->
+          cuttlefish:invalid(
+            "Invalid IP version: "
+            ++ Value
+            ++ " . Value should be 4 or 6."
+          )
+      end
+  end
+}.
 
 %% The ranch acceptors_pool_size for the socket tcp listener
 {mapping, "bridge.listener.tls.acceptors_pool_size", "bondy.bridge_relay_tls.acceptors_pool_size", [
@@ -1008,6 +1080,25 @@ end
 
 {validator,
   "port_number",
-  "greater than 1024 and less or equal to 65535",
-  fun(Port) -> Port >= 1024 andalso Port =< 65535 end
+  "a number greater or equal to 0 and less than or equal to 65535",
+  fun(Port) -> (((Port) band bnot 16#ffff) =:= 0) end
+}.
+
+
+{validator,
+  "ip_address",
+  "A valid IPv4 or IPv6 address",
+  fun(Term) ->
+    case inet:getaddr(Term, inet) of
+      {ok, _} ->
+          true;
+      {error, _} ->
+        case inet:getaddr(Term, inet6) of
+          {ok, _} ->
+              true;
+          {error, _} ->
+              false
+        end
+    end
+  end
 }.

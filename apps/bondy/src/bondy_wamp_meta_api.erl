@@ -67,8 +67,9 @@
 handle_call(#call{procedure_uri = ?WAMP_SESSION_GET} = M0, Ctxt) ->
     [_, SessionId] = bondy_wamp_utils:validate_call_args(M0, Ctxt, 2),
     %% Session data is local to each node, so when a session is created we
-    %% register a the following URI and ask the dealer to lookup the entry in
-    %% the registry and forward to the existing session's node.
+    %% register a unique 'get' procedure URI.
+    %% We ask the dealer to lookup the entry in the registry and forward to the
+    %% existing session's node.
     %% In the other node we will handle this call in the following clause.
     %% Part is a 16 byte binary.
     Part = bondy_utils:session_id_to_uri_part(SessionId),

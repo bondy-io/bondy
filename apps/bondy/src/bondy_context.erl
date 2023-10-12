@@ -270,6 +270,7 @@ session_id(_) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec peer(t()) -> bondy_session:peer().
+
 peer(#{peer := Val}) -> Val.
 
 
@@ -289,7 +290,11 @@ peername(#{peer := Val}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec set_peer(t(), bondy_session:peer()) -> t().
-set_peer(Ctxt, {{_, _, _, _}, _Port} = Peer) when is_map(Ctxt) ->
+set_peer(Ctxt, {IPAddr, _Port} = Peer) when is_map(Ctxt) ->
+    bondy_data_validators:ip_address(IPAddr)
+        orelse  ?ERROR(badarg, [Ctxt, Peer], #{
+            2 => "is not a valid IP address"
+        }),
     Ctxt#{peer => Peer}.
 
 

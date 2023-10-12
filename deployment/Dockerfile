@@ -68,7 +68,7 @@ ENV HOME "/bondy"
 # have permission to write.
 RUN apt-get update \
     && apt-get -y install \
-    sudo bash procps iproute2 net-tools curl jq nano \
+    sudo bash procps iproute2 net-tools dnsutils curl jq nano \
     openssl libsodium-dev libsnappy-dev\
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 -r bondy \

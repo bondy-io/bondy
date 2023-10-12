@@ -26,5 +26,3 @@ export BONDY_HOST_ID=${FLY_MACHINE_ID}
 # Disable swap
 swapoff -a
 
-# Start
-bondy foreground

@@ -720,18 +720,20 @@ maybe_start_http(Routes, Name) ->
 
 start_http(Routes, Name) ->
     {TransportOpts, ProtoOpts} = cowboy_opts(Routes, Name),
+    LogMeta = #{
+        listener => Name,
+        transport_opts => TransportOpts
+    },
 
     case cowboy:start_clear(Name, TransportOpts, ProtoOpts) of
         {ok, _} ->
+            ?LOG_NOTICE(LogMeta#{description => "Started HTTP Listener"}),
             ok;
-        {error, eaddrinuse} ->
-            ?LOG_ERROR(#{
-                description => "Cannot start HTTP listener, address is in use", name => Name,
-                reason => eaddrinuse,
-                transport_opts => TransportOpts
+        {error, Reason} = Error ->
+            ?LOG_ERROR(LogMeta#{
+                description => "Failed to start HTTP listener",
+                reason => Reason
             }),
-            {error, eaddrinuse};
-        {error, _} = Error ->
             Error
     end.
 
@@ -745,7 +747,7 @@ maybe_start_https(Routes, Name) ->
 
 
 cowboy_opts(Routes, Name) ->
-    {TransportOpts, _OtherTransportOpts}  = transport_opts(Name),
+    {TransportOpts, _OtherTransportOpts} = transport_opts(Name),
     ProtocolOpts = #{
         env => #{
             bondy => #{
@@ -780,19 +782,20 @@ cowboy_opts(Routes, Name) ->
 
 start_https(Routes, Name) ->
     {TransportOpts, ProtoOpts} = cowboy_opts(Routes, Name),
+    LogMeta = #{
+        listener => Name,
+        transport_opts => TransportOpts
+    },
 
     case cowboy:start_tls(Name, TransportOpts, ProtoOpts) of
         {ok, _} ->
+            ?LOG_NOTICE(LogMeta#{description => "Started HTTPS Listener"}),
             ok;
-        {error, eaddrinuse} ->
-            ?LOG_ERROR(#{
-                description => "Cannot start HTTPS listener, address is in use",
-                name => Name,
-                reason => eaddrinuse,
-                transport_opts => TransportOpts
+        {error, Reason} = Error ->
+            ?LOG_ERROR(LogMeta#{
+                description => "Failed to start HTTPS listener",
+                reason => Reason
             }),
-            {error, eaddrinuse};
-        {error, _} = Error ->
             Error
     end.
 
@@ -1007,20 +1010,29 @@ maybe_init_groups(RealmUri) ->
 
 transport_opts(Name) ->
     Opts = bondy_config:get(Name),
-    {_, Port} = lists:keyfind(port, 1, Opts),
-    {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
-    {_, MaxConnections} = lists:keyfind(max_connections, 1, Opts),
+    %% Default to listen on any i.e. 0.0.0.0 or ::1 depending on IPVer
+    IP0 = key_value:get(ip, Opts, any),
+    Family0 = key_value:get(ip_version, Opts, inet),
+    {IP, Family} = bondy_utils:get_ipaddr_family(IP0, Family0),
+    Port = key_value:get(port, Opts),
+    PoolSize = key_value:get(acceptors_pool_size, Opts),
+    MaxConnections = key_value:get(max_connections, Opts),
 
     %% In ranch 2.0 we will need to use socket_opts directly
-    {SocketOpts, OtherSocketOpts} = case lists:keyfind(socket_opts, 1, Opts) of
-        {socket_opts, L} -> normalise(L);
-        false -> {[], []}
-    end,
+    {SocketOpts, OtherSocketOpts} =
+        case lists:keyfind(socket_opts, 1, Opts) of
+            {socket_opts, L} -> normalise(L);
+            false -> {[], []}
+        end,
 
     TransportOpts = #{
         num_acceptors => PoolSize,
         max_connections =>  MaxConnections,
-        socket_opts => [{port, Port} | SocketOpts]
+        socket_opts => [
+            Family,
+            {ip, IP},
+            {port, Port} | SocketOpts
+        ]
     },
     {TransportOpts, OtherSocketOpts}.
 

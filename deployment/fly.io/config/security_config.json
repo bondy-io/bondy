@@ -288,5 +288,236 @@
                 }
             ]
         }
+    },
+    {
+        "uri": "com.market.demo",
+        "description": "The market realm",
+        "authmethods": [
+            "cryptosign",
+            "anonymous",
+            "oauth2",
+            "password"
+        ],
+        "security_enabled": true,
+        "users": [
+            {
+                "username": "market",
+                "authorized_keys": [
+                    "1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd"
+                ],
+                "groups": [
+                    "urn:group:market"
+                ]
+            },
+            {
+                "username": "bot",
+                "authorized_keys": [
+                    "669D0A9934B46DDDA57B7C6C66805E5D7BD13EE71340D54BB5AC394ACC7603E5"
+                ],
+                "groups": [
+                    "urn:group:bot"
+                ]
+            },
+            {
+                "username": "webapp",
+                "authorized_keys": [
+                    "1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd"
+                ],
+                "groups": [
+                    "urn:group:webapp"
+                ]
+            },
+            {
+                "username": "postman",
+                "password": "Postman123456!",
+                "meta": {
+                    "description": "Postman app user for testing purposes"
+                },
+                "groups": [
+                    "api_clients"
+                ]
+            },
+            {
+                "username": "victor",
+                "password": "Victor123456!",
+                "meta": {
+                    "description": "Victor end user for testing purposes"
+                },
+                "groups": [
+                    "resource_owners"
+                ]
+            }
+        ],
+        "groups": [
+            {
+                "name": "urn:group:bidder",
+                "groups": [],
+                "meta": {
+                    "description": "Group for clients that can bid on the market"
+                }
+            },
+            {
+                "name": "urn:group:bot",
+                "groups": [
+                    "urn:group:bidder"
+                ],
+                "meta": {
+                    "description": "Group for the bot clients that make automated bids."
+                }
+            },
+            {
+                "name": "urn:group:market",
+                "groups": [],
+                "meta": {
+                    "description": "Group for the market client that handles sales and bids."
+                }
+            },
+            {
+                "name": "urn:group:webapp",
+                "groups": [],
+                "meta": {
+                    "description": "Group for the market webapp client that handles sales, bids and receives events."
+                }
+            },
+            {
+                "name": "resource_owners",
+                "groups": [],
+                "meta": {
+                    "description": "OAuth2 Resource Owners. An entity capable of authorizing access to a protected resource."
+                }
+            },
+            {
+                "name": "api_clients",
+                "groups": [],
+                "meta": {
+                    "description": "OAuth2 confidential client. A third-party application that wants access to the private resources of the Resource Owner. The OAuth client can make protected resource requests on behalf of the Resource Owner after the latter grants it authorization."
+                }
+            }
+        ],
+        "grants": [
+            {
+                "permissions": [
+                    "wamp.call",
+                    "wamp.subscribe"
+                ],
+                "resources": [
+                    {
+                        "uri": "com.market.",
+                        "match": "prefix"
+                    }
+                ],
+                "roles": [
+                    "urn:group:bidder"
+                ]
+            },
+            {
+                "permissions": [
+                    "wamp.register",
+                    "wamp.unregister",
+                    "wamp.publish"
+                ],
+                "resources": [
+                    {
+                        "uri": "com.market.",
+                        "match": "prefix"
+                    }
+                ],
+                "roles": [
+                    "urn:group:market"
+                ]
+            },
+            {
+                "permissions": [
+                    "wamp.register",
+                    "wamp.unregister",
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish"
+                ],
+                "uri": "*",
+                "roles": [
+                    "anonymous"
+                ]
+            },
+            {
+                "permissions": [
+                    "wamp.subscribe",
+                    "wamp.call"
+                ],
+                "resources": [
+                    {
+                        "uri": "com.market.",
+                        "match": "prefix"
+                    }
+                ],
+                "roles": [
+                    "urn:group:webapp"
+                ]
+            },
+            {
+                "permissions": [
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish"
+                ],
+                "uri": "*",
+                "roles": [
+                    "api_clients"
+                ]
+            },
+            {
+                "permissions": [
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish"
+                ],
+                "uri": "*",
+                "roles": [
+                    "resource_owners"
+                ]
+            }
+        ],
+        "sources": [
+            {
+                "usernames": "all",
+                "authmethod": "cryptosign",
+                "cidr": "0.0.0.0/0",
+                "meta": {
+                    "description": "Allows all users to authenticate using 'cryptosign' authentication method."
+                }
+            },
+            {
+                "usernames": [
+                    "anonymous"
+                ],
+                "authmethod": "anonymous",
+                "cidr": "0.0.0.0/0",
+                "meta": {
+                    "description": "Allows all users from any network authenticate as anonymous."
+                }
+            },
+            {
+                "usernames": "all",
+                "authmethod": "password",
+                "cidr": "0.0.0.0/0",
+                "meta": {
+                    "description": "Allows all users from any network authenticate using password authentication method."
+                }
+            },
+            {
+                "usernames": "all",
+                "authmethod": "oauth2",
+                "cidr": "0.0.0.0/0",
+                "meta": {
+                    "description": "Allows all users from any network authenticate using password credentials. This covers OAuth2 Client Credentials and Resource Owner Password flows."
+                }
+            }
+        ]
     }
 ]

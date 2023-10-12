@@ -100,6 +100,7 @@ wamp.tcp.keepalive = on
 wamp.tcp.max_connections = 100000
 wamp.tcp.nodelay = on
 wamp.tcp.port = 18282
+#wamp.tcp.ip = ::1
 wamp.tls.acceptors_pool_size = 200
 wamp.tls.backlog = 1024
 wamp.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem

@@ -25,11 +25,12 @@
 -include("bondy.hrl").
 
 
--export([maybe_error/2]).
 -export([error/2]).
+-export([maybe_error/2]).
 -export([no_such_procedure_error/1]).
 -export([no_such_procedure_error/3]).
 -export([no_such_registration_error/1]).
+-export([node_spec/0]).
 -export([validate_admin_call_args/3]).
 -export([validate_admin_call_args/4]).
 -export([validate_call_args/3]).
@@ -44,6 +45,22 @@
 %% =============================================================================
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec node_spec() -> map().
+
+node_spec() ->
+    #{listen_addrs := Addrs0}  = NodeSpec = partisan:node_spec(),
+
+    NodeSpec#{
+        name => partisan:nodestring(),
+        listen_addrs => [
+            Addr#{ip => list_to_binary(inet:ntoa(IP))}
+            || #{ip := IP} = Addr <- Addrs0
+        ]
+    }.
 
 
 %% -----------------------------------------------------------------------------
