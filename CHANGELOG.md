@@ -1,4 +1,8 @@
 # CHANGELOG
+## 1.0.0-rc.4
+### Changes
+* New config params `cluter.peer_ip` and `cluster.listen_addresses` based on updated Partisan
+
 ## 1.0.0-rc.3
 
 ### Changes
