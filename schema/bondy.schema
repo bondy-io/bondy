@@ -1923,7 +1923,7 @@
 %% - [192.168.50.174:18086, 192.168.50.180:18086]
 %%
 %% If this option is provided Partisan will ignore 'cluster.peer_port' but notice that the value for peer port is still required for some discovery strategies used by partisan_peer_discovery_agent e.g. dns discovery which
-{mapping, "cluster.listen_addrs", "partisan.listen_addrs", [
+{mapping, "cluster.listen_addresses", "partisan.listen_addrs", [
   {datatype, string}
 ]}.
 
@@ -1932,7 +1932,7 @@
   "partisan.listen_addrs",
   fun(Conf0) ->
       Conf = cuttlefish_variable:filter_by_prefix(
-        "cluster.listen_addrs", Conf0
+        "cluster.listen_addresses", Conf0
       ),
 
       Parse = fun(Val, ForceList) ->
@@ -1948,7 +1948,7 @@
 
       lists:foldl(
           fun
-            ({["cluster", "listen_addrs"], Value0}, Acc) ->
+            ({["cluster", "listen_addresses"], Value0}, Acc) ->
               %% Remove empty spaces
               Value1 = unicode:characters_to_list(
                 string:replace(Value0, " ", "", all)
@@ -1963,7 +1963,7 @@
                   [Parse(Trimmed, true) | Acc]
               end;
 
-            ({["cluster", "listen_addrs"], Value}, Acc) ->
+            ({["cluster", "listen_addresses"], Value}, Acc) ->
               [list_to_binary(Value) | Acc]
 
           end,
