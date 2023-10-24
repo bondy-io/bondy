@@ -463,101 +463,6 @@
 }.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Not currently working, leave the value as 'session'
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "wamp.connection_lifetime", "bondy.wamp_connection_lifetime", [
-  {default, session},
-  %% {datatype, {enum, [session, connection]}},
-  {datatype, {enum, [session]}},
-  hidden
-]}.
-
-%% -----------------------------------------------------------------------------
-%% @doc The default timeout for WAMP (RPC) Calls when the CALL.Options.timeout
-%% property is not used. This value will be restricted by the
-%% 'wamp.max_call_timeout' property
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "wamp.call_timeout", "bondy.wamp_call_timeout", [
-  {default, "30s"}, % Long enough but not infinity
-  {datatype, {duration, ms}}
-]}.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc The maximum timeout value for WAMP (RPC) Calls for the CALL.Options.
-%% timeout or the wamp.call_timeout default.
-%% According to the protocol a missing value or a value
-%% of 0 disables the timeout feature, but we disagree, there should be no such
-%% thing as "infinite timeout". Set it to 24 hours, a week or even a year if
-%% you want.
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "wamp.max_call_timeout", "bondy.wamp_max_call_timeout", [
-{default, "10m"}, % Long enough but not infinity
-{datatype, {duration, ms}}
-]}.
-
-{mapping, "wamp.message_retention.enabled", "bondy.wamp_message_retention.enabled", [
-  {datatype, flag},
-  {default, on}
-]}.
-
-%% How will Bondy store the retained messages.
-{mapping, "wamp.message_retention.storage_type", "bondy.wamp_message_retention.storage_type", [
-  {default, ram},
-  {datatype, {enum, [ram, disk, ram_disk]}}
-]}.
-
-%% Maximum number of messages that can be store in a Bondy node.
-%% Once the max has been reached no more events will be stored.
-%% A value of 0 means no limit is enforced.
-{mapping, "wamp.message_retention.max_messages", "bondy.wamp_message_retention.max_messages", [
-  {default, "1000000"},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-
-%% Maximum space in memory used by retained messages.
-%% Once the max has been reached no more events will be stored.
-%% A value of 0 means no limit is enforced.
-{mapping, "wamp.message_retention.max_memory", "bondy.wamp_message_retention.max_memory", [
-  {default, "1GB"},
-  {datatype, bytesize}
-]}.
-
-%% The max size for an event message.
-%% All events whose size exceeds this value will not be retained.
-{mapping, "wamp.message_retention.max_message_size", "bondy.wamp_message_retention.max_message_size", [
-  {default, "64KB"},
-  {datatype, bytesize}
-]}.
-
-%% The default Time To Live (TTL) in seconds Bondy will use for all retained
-%% messages not specifying a specific TTL.
-%% A value of 0 means a message will not be expired.
-{mapping, "wamp.message_retention.default_ttl", "bondy.wamp_message_retention.default_ttl", [
-  {default, "0"},
-  {datatype, [integer, {duration, s}]}
-]}.
-
-{mapping, "request_timeout", "bondy.request_timeout", [
-  {default, "20s"}, % Long enough but not infinity
-  {datatype, {duration, ms}},
-  hidden
-]}.
-
-
-{mapping, "wamp.uri.strictness", "wamp.uri_strictness", [
-  {default, loose},
-  {datatype, {enum, [loose, strict]}}
-]}.
-
-
-
 %% =============================================================================
 %% OVERLOAD PROTECTION AND LOAD REGULATION
 %% =============================================================================
@@ -1244,6 +1149,102 @@
 %% WAMP
 %% =============================================================================
 
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Not currently working, leave the value as 'session'
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "wamp.connection_lifetime", "bondy.wamp_connection_lifetime", [
+  {default, session},
+  %% {datatype, {enum, [session, connection]}},
+  {datatype, {enum, [session]}},
+  hidden
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The default timeout for WAMP (RPC) Calls when the CALL.Options.timeout
+%% property is not used. This value will be restricted by the
+%% 'wamp.max_call_timeout' property
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "wamp.call_timeout", "bondy.wamp_call_timeout", [
+  {default, "30s"}, % Long enough but not infinity
+  {datatype, {duration, ms}}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc The maximum timeout value for WAMP (RPC) Calls for the CALL.Options.
+%% timeout or the wamp.call_timeout default.
+%% According to the protocol a missing value or a value
+%% of 0 disables the timeout feature, but we disagree, there should be no such
+%% thing as "infinite timeout". Set it to 24 hours, a week or even a year if
+%% you want.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "wamp.max_call_timeout", "bondy.wamp_max_call_timeout", [
+{default, "10m"}, % Long enough but not infinity
+{datatype, {duration, ms}}
+]}.
+
+{mapping, "wamp.message_retention.enabled", "bondy.wamp_message_retention.enabled", [
+  {datatype, flag},
+  {default, on}
+]}.
+
+%% How will Bondy store the retained messages.
+{mapping, "wamp.message_retention.storage_type", "bondy.wamp_message_retention.storage_type", [
+  {default, ram},
+  {datatype, {enum, [ram, disk, ram_disk]}}
+]}.
+
+%% Maximum number of messages that can be store in a Bondy node.
+%% Once the max has been reached no more events will be stored.
+%% A value of 0 means no limit is enforced.
+{mapping, "wamp.message_retention.max_messages", "bondy.wamp_message_retention.max_messages", [
+  {default, "1000000"},
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+
+%% Maximum space in memory used by retained messages.
+%% Once the max has been reached no more events will be stored.
+%% A value of 0 means no limit is enforced.
+{mapping, "wamp.message_retention.max_memory", "bondy.wamp_message_retention.max_memory", [
+  {default, "1GB"},
+  {datatype, bytesize}
+]}.
+
+%% The max size for an event message.
+%% All events whose size exceeds this value will not be retained.
+{mapping, "wamp.message_retention.max_message_size", "bondy.wamp_message_retention.max_message_size", [
+  {default, "64KB"},
+  {datatype, bytesize}
+]}.
+
+%% The default Time To Live (TTL) in seconds Bondy will use for all retained
+%% messages not specifying a specific TTL.
+%% A value of 0 means a message will not be expired.
+{mapping, "wamp.message_retention.default_ttl", "bondy.wamp_message_retention.default_ttl", [
+  {default, "0"},
+  {datatype, [integer, {duration, s}]}
+]}.
+
+{mapping, "request_timeout", "bondy.request_timeout", [
+  {default, "20s"}, % Long enough but not infinity
+  {datatype, {duration, ms}},
+  hidden
+]}.
+
+
+{mapping, "wamp.uri.strictness", "wamp.uri_strictness", [
+  {default, loose},
+  {datatype, {enum, [loose, strict]}}
+]}.
+
+
 %% In addition to JSON and Msgpack, Bondy supports Erlang External Term Format
 %% ("erl") and BERT ("bert") serializations.
 %%
@@ -1902,7 +1903,7 @@
 
 
 %% =============================================================================
-%% CLUSTER PEER TCP
+%% CLUSTERING
 %% =============================================================================
 
 
