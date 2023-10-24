@@ -1974,6 +1974,12 @@
 }.
 
 %% @doc Defines the port to use for the cluster TCP connection
+{mapping, "cluster.peer_ip", "partisan.peer_ip", [
+  {datatype, string},
+  {validators, ["ip_address"]}
+]}.
+
+%% @doc Defines the port to use for the cluster TCP connection
 {mapping, "cluster.peer_port", "partisan.peer_port", [
   {default, 18086},
   {datatype, integer}
