@@ -114,11 +114,8 @@ init({Ref, Transport, _Opts0}) ->
     %% If Transport == ssl, upgrades a gen_tcp, or equivalent, socket to an SSL
     %% socket by performing the TLS server-side handshake, returning a TLS
     %% socket.
-    Res = Transport:setopts(Socket, SocketOpts),
-
-    ok = maybe_error(Res),
-
-    {ok, Peername} = bondy_utils:peername(Transport, Socket),
+    ok = maybe_error(Transport:setopts(Socket, SocketOpts)),
+    {ok, Peername} = maybe_error(bondy_utils:peername(Transport, Socket)),
 
     State = State0#state{socket = Socket},
 

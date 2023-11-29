@@ -695,7 +695,7 @@ do_verify_jwt(RealmUri, JWT, Match) ->
         %% a match.
         JWTRealmUri == RealmUri orelse throw(oauth2_invalid_grant),
 
-        %% We check the realm actualyy exists
+        %% We check the realm actually exists
         Realm = bondy_realm:fetch(RealmUri),
 
         %% Finally we try to verify the JWT
