@@ -1,4 +1,9 @@
 # CHANGELOG
+## 1.0.0-rc.5
+### Fixes
+* Upgrade PlumDB with fixes to hashtree encoding on OTP26
+* PlumDB no creates a manifest will be used in the near future to enable database migration
+
 ## 1.0.0-rc.4
 ### Changes
 * New config params `cluter.peer_ip` and `cluster.listen_addresses` based on updated Partisan
