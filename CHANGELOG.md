@@ -1,4 +1,8 @@
 # CHANGELOG
+## 1.0.0-rc.6
+### Fixes
+* Upgrade Partisan with fixes to fast forward which was not working 
+
 ## 1.0.0-rc.5
 ### Fixes
 * Upgrade PlumDB with fixes to hashtree encoding on OTP26
