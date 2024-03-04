@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 1.0.0-rc.8
+
+## Fixes
+* Fixes bug in authentication when migrating from Bondy version =< 0.8
+
 ## 1.0.0-rc.7
 * Updated Docker image base OS version to match those of the new OTP26 images
 
