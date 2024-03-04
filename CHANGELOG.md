@@ -1,4 +1,8 @@
 # CHANGELOG
+
+## 1.0.0-rc.7
+* Updated Docker image base OS version to match those of the new OTP26 images
+
 ## 1.0.0-rc.6
 ### Fixes
 * Upgrade Partisan with fixes to fast forward which was not working 
