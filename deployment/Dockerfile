@@ -28,7 +28,7 @@ RUN rebar3 as docker tar && \
 # Build stage 2
 # ===========================================================================
 
-FROM debian:bullseye-slim as runner
+FROM debian:bookworm-slim as runner
 
 # We define defaults
 # We assume you have DNS. Erlang will take the FQDN and generate

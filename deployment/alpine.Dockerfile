@@ -28,7 +28,7 @@ RUN rebar3 as docker tar && \
 # Build stage 2
 # ===========================================================================
 
-FROM alpine:3.18.3 as runner
+FROM alpine:3.19 as runner
 
 # We define defaults
 # We assume you have DNS. Erlang will take the FQDN and generate
