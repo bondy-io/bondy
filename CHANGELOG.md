@@ -4,6 +4,7 @@
 
 ## Fixes
 * Fixes bug in authentication when migrating from Bondy version =< 0.8
+* Change in Backup restore to avoid resotring and migrating expired OAUTH2 refresh tokens
 
 ## 1.0.0-rc.7
 * Updated Docker image base OS version to match those of the new OTP26 images
