@@ -257,6 +257,9 @@ is_type(_) ->
 protocol(#{type := password, version := ?VERSION, protocol := Value}) ->
     Value;
 
+protocol(#{version := <<"1.0">>}) ->
+    cra;
+
 protocol(#{version := <<"1.1">>}) ->
     cra;
 

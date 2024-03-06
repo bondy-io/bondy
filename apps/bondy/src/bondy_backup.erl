@@ -431,6 +431,9 @@ async_restore(#{filename := Filename}, State0) ->
     Ts = erlang:system_time(second),
     Me = self(),
     Pid = spawn_link(fun() ->
+        %% Set timestamp
+        _ = put({?MODULE, timestamp}, Ts),
+
         case do_restore(Filename) of
             {ok, _Counters} = OK ->
                 Me ! {restore_reply, OK, self()};
@@ -536,8 +539,37 @@ restore_terms([], _, Counters) ->
 
 
 %% @private
+migrate(Vsn, {{{oauth2_refresh_tokens, _}, _}, Object} = KeyValue)
+when Vsn >= <<"1.2.0">> ->
+
+    case Object of
+        {object, {
+            [{_, _, [{{bondy_oauth2_token, _, _, _, _, _, ExpIn, _}, _}]}],
+            _
+        }} ->
+        %% Here we are matching at the plum_db_object level only the case for a
+        %% single valued object (which should be the mayority of cases for
+        %% refresh tokens). If there was an unresolved conflict we would have
+        %% multiple values, but in that case we skip it.
+
+        %% We get the timestamp that was stored in this process' dictionary by
+        %% async_restore
+        Ts = get({?MODULE, timestamp}),
+
+        case ExpIn >= Ts of
+            true ->
+                KeyValue;
+            false ->
+                skip
+        end;
+
+    _ ->
+        skip
+    end;
+
 migrate(Vsn, KeyValue) when Vsn >= <<"1.2.0">> ->
     KeyValue;
+
 migrate(Vsn, {PKey, Object}) when Vsn < <<"1.2.0">> ->
     {Prefix, Key} = PKey,
     case rename_prefix(Prefix) of
