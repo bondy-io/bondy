@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 1.0.0-rc.9
+
+## Fixes
+* Fixes bug in enacl dependency via a fork
+
 ## 1.0.0-rc.8
 
 ## Fixes
