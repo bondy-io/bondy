@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 1.0.0-rc.10
+
+## Fixes
+* Fixes trying to restore non expired OAUTH2 refresh tokens based on its expiration time (issued at + expires in) from an old backup (tested case `0.41.6` version).
+
 ## 1.0.0-rc.9
 
 ## Fixes
@@ -9,7 +14,7 @@
 
 ## Fixes
 * Fixes bug in authentication when migrating from Bondy version =< 0.8
-* Change in Backup restore to avoid resotring and migrating expired OAUTH2 refresh tokens
+* Change in Backup restore to avoid restoring and migrating expired OAUTH2 refresh tokens
 
 ## 1.0.0-rc.7
 * Updated Docker image base OS version to match those of the new OTP26 images
