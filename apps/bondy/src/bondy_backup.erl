@@ -544,7 +544,7 @@ when Vsn >= <<"1.2.0">> ->
 
     case Object of
         {object, {
-            [{_, _, [{{bondy_oauth2_token, _, _, _, _, _, ExpIn, _}, _}]}],
+            [{_, _, [{{bondy_oauth2_token, _, _, _, _, ExpIn, IssuedAt, _}, _}]}],
             _
         }} ->
         %% Here we are matching at the plum_db_object level only the case for a
@@ -552,12 +552,18 @@ when Vsn >= <<"1.2.0">> ->
         %% refresh tokens). If there was an unresolved conflict we would have
         %% multiple values, but in that case we skip it.
 
-        %% We get the timestamp that was stored in this process' dictionary by
-        %% async_restore
-        Ts = get({?MODULE, timestamp}),
+        %% We get the timestamp (in seconds) that was stored in this process' dictionary by async_restore
+        StartedAt = get({?MODULE, timestamp}),
+        ExpiresAt = IssuedAt + ExpIn,
 
-        case ExpIn >= Ts of
+        case ExpiresAt >= StartedAt of
             true ->
+                ?LOG_DEBUG(#{
+                    description => "bondy_oauth2_token restored",
+                    started_at => StartedAt,
+                    expires_at => ExpiresAt,
+                    value => KeyValue
+                }),
                 KeyValue;
             false ->
                 skip
