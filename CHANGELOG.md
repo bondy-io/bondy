@@ -1,4 +1,9 @@
 # CHANGELOG
+## 1.0.0-rc.11
+
+## Changes
+* Upgrades Partisan to latest
+* Upgrades OTP to latest
 
 ## 1.0.0-rc.10
 
