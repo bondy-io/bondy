@@ -1,4 +1,11 @@
 # CHANGELOG
+## 1.0.0-rc.12
+## Fixes
+* Fixes #24 - missing command in Makefile target
+
+## Changes
+* Upgrades PlumDB to latest
+
 ## 1.0.0-rc.11
 
 ## Changes
