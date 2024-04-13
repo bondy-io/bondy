@@ -102,7 +102,7 @@ dialyzer: compile
 
 release:
 	rm -rf _build/${REBAR3_PROFILE}
-	${REBAR} as ${REBAR3_PROFILE}
+	${REBAR} as ${REBAR3_PROFILE} release
 
 release-tar:
 	rm -rf _build/${REBAR3_PROFILE}
