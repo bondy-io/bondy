@@ -42,52 +42,52 @@
 
 %% @doc Default cert location for cluster TLS connection
 {mapping, "bridge.$name.tls.certfile", "bondy.bridges", [
-{datatype, file},
-{commented, "{{platform_etc_dir}}/client/keycert.pem"}
+  {datatype, file},
+  {commented, "{{platform_etc_dir}}/client/keycert.pem"}
 ]}.
 
 %% @doc Default key location for cluster TLS connection
 {mapping, "bridge.$name.tls.keyfile", "bondy.bridges", [
-{datatype, file},
-{commented, "{{platform_etc_dir}}/client/key.pem"}
+  {datatype, file},
+  {commented, "{{platform_etc_dir}}/client/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for cluster TLS connection
 {mapping, "bridge.$name.tls.cacertfile", "bondy.bridges", [
-{datatype, file},
-{commented, "{{platform_etc_dir}}/client/cacert.pem"}
+  {datatype, file},
+  {commented, "{{platform_etc_dir}}/client/cacert.pem"}
 ]}.
 
 
 {mapping, "bridge.$name.tls.hostname_verification",
   "bondy.bridges", [
   {datatype, {enum, [wildcard, none]}},
-  {default, wildcard}
+  {commented, wildcard}
 ]}.
 
 %% @doc A comma separate list of TLS protocol versions that will be supported
 %% At the moment Bondy only supports versions 1.2 and 1.3
 {mapping, "bridge.$name.tls.versions", "bondy.bridges", [
-{datatype, string},
-{commented, "1.3"}
+  {datatype, string},
+  {commented, "1.3"}
 ]}.
 
 {mapping, "bridge.$name.tls.verify", "bondy.bridges", [
-{datatype, {enum, [verify_peer, verify_none]}},
-{commented, verify_none}
+  {datatype, {enum, [verify_peer, verify_none]}},
+  {commented, verify_none}
 ]}.
 
 
 %% @doc Defines the number of TCP connections for the edge-remote connection
 {mapping, "bridge.$name.parallelism", "bondy.bridges", [
-{commented, 1},
-{validators, ["pos_integer"]},
-{datatype, integer}
+  {commented, 1},
+  {validators, ["pos_integer"]},
+  {datatype, integer}
 ]}.
 
 {mapping, "bridge.$name.connect_timeout", "bondy.bridges", [
-{commented, "5s"},
-{datatype, [{atom, infinity}, {duration, ms}]}
+  {commented, "5s"},
+  {datatype, [{atom, infinity}, {duration, ms}]}
 ]}.
 
 %% @doc Enables or disables the reconnect feature. Once a connection is
@@ -131,20 +131,20 @@
 %% interface), so for local development without and network connection you want
 %% to disable this functionality. Setting a value to infinity, disables it.
 {mapping, "bridge.$name.network_timeout", "bondy.bridges", [
-{commented, "60s"},
-{datatype, [{atom, infinity}, {duration, ms}]}
+  {commented, "60s"},
+  {datatype, [{atom, infinity}, {duration, ms}]}
 ]}.
 
 
 %% @doc Drops the connection after a period of inactivity.
 {mapping, "bridge.$name.idle_timeout", "bondy.bridges", [
-{commented, "24h"},
-{datatype, [{atom, infinity}, {duration, ms}]}
+  {commented, "24h"},
+  {datatype, [{atom, infinity}, {duration, ms}]}
 ]}.
 
 {mapping, "bridge.$name.hibernate", "bondy.bridges", [
-{commented, idle},
-{datatype, {enum, [never, idle, always]}}
+  {commented, idle},
+  {datatype, {enum, [never, idle, always]}}
 ]}.
 
 %% @doc Defines if PING control message functionality is enabled or
@@ -169,14 +169,12 @@
   {datatype, {duration, ms}}
 ]}.
 
-
-
 %% @doc If  bridge.$name.ping.enabled is 'on', this parameter controls the
 %% amount of time Bondy waits for a ping response from the remote.
 %% Once that time has passed this counts as a fail attempt
 %% (see bridge.$name.ping.max_attempts).
 {mapping, "bridge.$name.ping.timeout", "bondy.bridges", [
-{default, "10s"},
+{commented, "10s"},
 {datatype, {duration, ms}}
 ]}.
 
@@ -198,7 +196,6 @@
   {commented, infinity},
   {datatype, [{atom, infinity}, integer]}
 ]}.
-
 
 {mapping, "bridge.$name.realm.$id.uri", "bondy.bridges", [
   {datatype, string}
