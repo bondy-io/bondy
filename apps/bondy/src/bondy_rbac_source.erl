@@ -186,8 +186,8 @@ meta(#{type := source, meta := Val}) -> Val.
     RealmUri :: uri(), Assignment :: map() | assignment()) ->
     {ok, t()}  | {error, any()}.
 
-add(RealmUri, Assisgnment) ->
-    add(RealmUri, Assisgnment, #{}).
+add(RealmUri, Assignment) ->
+    add(RealmUri, Assignment, #{}).
 
 
 %% -----------------------------------------------------------------------------
