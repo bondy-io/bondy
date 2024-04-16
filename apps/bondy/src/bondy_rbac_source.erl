@@ -543,6 +543,9 @@ from_term(
     };
 
 from_term({{Username, CIDR}, [{Authmethod, Options}]}) ->
+    from_term({{Username, CIDR}, {Authmethod, Options}});
+
+from_term({{Username, CIDR}, {Authmethod, Options}}) ->
     %% Legacy version format
     Meta = maps:from_list(Options),
     Source = #{
