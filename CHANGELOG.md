@@ -1,4 +1,7 @@
 # CHANGELOG
+## 1.0.0-rc.13
+* Fixes #28 - default configuration value for Bridge Relay produces a crash. This happened because some of the Bridge Relay options in the schema were using `default` as opposed to `commented`. The result was an invalid configuration for a Bridge relayed called `name` when this should be empty.
+
 ## 1.0.0-rc.12
 ## Fixes
 * Fixes #24 - missing command in Makefile target
