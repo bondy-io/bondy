@@ -230,7 +230,7 @@ add(RealmUri, #source_assignment{} = A, Opts) ->
 
 remove(RealmUri, Keyword, CIDR)
 when (Keyword == all orelse Keyword == anonymous) ->
-    remove(RealmUri, [Keyword], CIDR);
+    remove(RealmUri, [atom_to_binary(Keyword)], CIDR);
 
 remove(RealmUri, Usernames0, CIDR0) when is_list(Usernames0) ->
     Usernames =
