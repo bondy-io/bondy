@@ -42,7 +42,7 @@ format(#{level:=Level, msg:={report, Msg0}, meta:=Meta}, UsrConfig) when is_map(
         case maps:get(unknown_metakey, UsrConfig, log) of
             log ->
                 Unknown = maps:without(template_keys(Template), Meta),
-                maps:merge(Msg0, Unknown);
+                maps:merge(Unknown, Msg0);
             ignore ->
                 Msg0
         end,
