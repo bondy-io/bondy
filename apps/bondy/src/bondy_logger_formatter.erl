@@ -329,13 +329,14 @@ template_keys(List) ->
         undefined ->
             TemplateKeys = lists:foldl(
                 fun
-                    GetKey(K, Acc) when is_atom(K) -> [K | Acc];
+                GetKey(K, Acc) when is_atom(K) -> [K | Acc];
                     GetKey({msg, K}, Acc) -> [K | Acc];
                     GetKey({K, _}, Acc) -> GetKey(K, Acc);
                     GetKey({K, _, _}, Acc) -> GetKey(K, Acc);
                     GetKey(_, Acc) -> Acc
                 end,
-                [],
+                %% Init with OTP metadata
+                [line, time, file, gl, mfa, report_cb],
                 List
             ),
             _ = persistent_term:put(Key, TemplateKeys),
