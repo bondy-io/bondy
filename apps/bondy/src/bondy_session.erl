@@ -161,6 +161,7 @@
 -export([fetch/1]).
 -export([id/1]).
 -export([gen_message_id/1]).
+-export([is_anonymous/1]).
 -export([is_security_enabled/1]).
 -export([list/0]).
 -export([list/1]).
@@ -693,6 +694,19 @@ is_security_enabled(#session{security_enabled = Val}) ->
 
 is_security_enabled(Id) ->
     lookup_field(Id, #session.security_enabled).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_anonymous(t()) -> boolean().
+
+is_anonymous(#session{is_anonymous = Val}) ->
+    Val;
+
+is_anonymous(Id) ->
+    lookup_field(Id, #session.is_anonymous).
 
 
 %% -----------------------------------------------------------------------------

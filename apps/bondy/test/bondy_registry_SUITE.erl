@@ -78,9 +78,7 @@ init_per_suite(Config) ->
             subscriber => #{}
         }
     }),
-    Ctxt0 = bondy_context:new(Peer, {ws, text, json}),
-    Ctxt = bondy_context:set_session(Ctxt0, Session),
-
+    Ctxt = bondy_context:new(Peer, {ws, text, json}, #{session => Session}),
 
     [
         {context, Ctxt},

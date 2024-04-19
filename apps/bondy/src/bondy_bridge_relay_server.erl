@@ -61,6 +61,9 @@
     transport               ::  module(),
     opts                    ::  key_value:t(),
     socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
+    proxy_protocol          ::  bondy_tcp_proxy_protocol:t(),
+    peername                ::  binary() | undefined,
+    source_ip               ::  inet:ip_address() | undefined,
     auth_timeout            ::  pos_integer(),
     ping_retry              ::  optional(bondy_retry:t()),
     ping_payload            ::  optional(binary()),
@@ -94,6 +97,7 @@
 -export([code_change/4]).
 
 %% STATE FUNCTIONS
+-export([connecting/3]).
 -export([active/3]).
 -export([idle/3]).
 
@@ -141,14 +145,19 @@ callback_mode() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-init({RanchRef, Transport, Opts}) ->
+init({Ref, Transport, Opts}) ->
+    ok = logger:update_process_metadata(#{
+        listener => Ref,
+        transport => Transport
+    }),
+
     AuthTimeout = key_value:get(auth_timeout, Opts, 5000),
     IdleTimeout = key_value:get(idle_timeout, Opts, infinity),
     %% Shall we hibernate when we are idle?
     Hibernate = key_value:get(hibernate, Opts, idle),
 
     State0 = #state{
-        ranch_ref = RanchRef,
+        ranch_ref = Ref,
         transport = Transport,
         opts = Opts,
         auth_timeout = AuthTimeout,
@@ -165,7 +174,7 @@ init({RanchRef, Transport, Opts}) ->
     %% opening a connection and authenticating at least one session. Having
     %% passed that time we will close the connection.
     Actions = [auth_timeout(State)],
-    {ok, active, State, Actions}.
+    {ok, connecting, State, Actions}.
 
 
 %% -----------------------------------------------------------------------------
@@ -211,24 +220,64 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 %% =============================================================================
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-active(enter, active, State) ->
-    Ref = State#state.ranch_ref,
-    Transport = State#state.transport,
+connecting(enter, connecting, State0) ->
+    Ref = State0#state.ranch_ref,
+    Transport = State0#state.transport,
+
+    %% We to make this call before ranch:handshake/2
+    ProxyProtocol = bondy_tcp_proxy_protocol:init(Ref, 15_000),
 
     %% Setup and configure socket
     TLSOpts = bondy_config:get([Ref, tls_opts], []),
     {ok, Socket} = ranch:handshake(Ref, TLSOpts),
 
+    {PeerIP, _} = Peername = peername(Transport, Socket),
+
+    case bondy_tcp_proxy_protocol:source_ip(ProxyProtocol, PeerIP) of
+        {ok, SourceIP} ->
+            State = State0#state{
+                proxy_protocol = ProxyProtocol,
+                source_ip = SourceIP,
+                peername = Peername,
+                socket = Socket
+            },
+            {keep_state, State, [{next_event, internal, connection_setup}]};
+
+        {error, {socket_error, Message}} ->
+            ?LOG_INFO(#{
+                description =>
+                    "Connection rejected. "
+                    "The source IP Address couldn't be obtained "
+                    "due to a socket error.",
+                reason => Message,
+                proxy_protocol => maps:without([error], ProxyProtocol)
+            }),
+            {stop, normal, State0};
+
+        {error, {protocol_error, Message}} ->
+            ?LOG_INFO(#{
+                description =>
+                    "Connection rejected. "
+                    "The source IP Address couldn't be obtained "
+                    "due to a proxy protocol error.",
+                reason => Message,
+                proxy_protocol => maps:without([error], ProxyProtocol)
+            }),
+            {stop, normal, State0}
+    end;
+
+connecting(internal, connection_setup, State) ->
+    Transport = State#state.transport,
+    Socket = State#state.socket,
     SocketOpts = [
         binary,
         {packet, 4},
         {active, once}
-        | bondy_config:get([Ref, socket_opts], [])
+        | bondy_config:get([State#state.ranch_ref, socket_opts], [])
     ],
 
     %% If Transport == ssl, upgrades a gen_tcp, or equivalent socket to an SSL
@@ -236,19 +285,31 @@ active(enter, active, State) ->
     %% socket.
     ok = Transport:setopts(Socket, SocketOpts),
 
-    {ok, Peername} = bondy_utils:peername(Transport, Socket),
-    PeernameBin = inet_utils:peername_to_binary(Peername),
-
     ok = logger:set_process_metadata(#{
         transport => Transport,
-        peername => PeernameBin,
-        socket => Socket
+        socket => Socket,
+        peername => inet_utils:peername_to_binary(State#state.peername),
+        source_ip => inet:ntoa(State#state.source_ip)
     }),
 
-    ok = on_connect(State),
+    ?LOG_INFO(#{
+        description => "Established connection with client router."
+    }),
 
     Actions = [auth_timeout(State)],
-    {keep_state, State#state{socket = Socket}, Actions};
+    {next_state, active, State, Actions};
+
+connecting(EventType, EventContent, State) ->
+    handle_event(EventType, EventContent, connecting, State).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+active(enter, active, _) ->
+    keep_state_and_data;
 
 active(enter, idle, State) ->
     Actions = [
@@ -591,18 +652,39 @@ handle_event(EventType, EventContent, StateName, _) ->
 %% =============================================================================
 
 
+%% @private
+peername(Transport, Socket) ->
+    case bondy_utils:peername(Transport, Socket) of
+        {ok, {_, _} = Peername} ->
+           Peername;
+
+        {ok, NonIPAddr} ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Unexpected peername when establishing connection",
+                reason => invalid_socket,
+                peername => NonIPAddr
+            }),
+            error(invalid_socket);
+
+        {error, Reason} ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Unexpected peername when establishing connection",
+                reason => inet:format_error(Reason)
+            }),
+            error(invalid_socket)
+    end.
+
 
 %% @private
 challenge(Realm, Details, State0) ->
-    {ok, Peer} = bondy_utils:peername(
-        State0#state.transport, State0#state.socket
-    ),
-
     SessionId = bondy_session_id:new(),
     Authid = maps:get(authid, Details),
     Authroles0 = maps:get(authroles, Details, []),
+    SourceIP = State0#state.source_ip,
 
-    case bondy_auth:init(SessionId, Realm, Authid, Authroles0, Peer) of
+    case bondy_auth:init(SessionId, Realm, Authid, Authroles0, SourceIP) of
         {ok, AuthCtxt} ->
             %% TODO take it from conf
             ReqMethods = [<<"cryptosign">>],
@@ -621,7 +703,8 @@ challenge(Realm, Details, State0) ->
 
                     Properties = #{
                         type => bridge_relay,
-                        peer => Peer,
+                        peer => State0#state.peername,
+                        source_ip => SourceIP,
                         security_enabled => SecEnabled,
                         is_anonymous => FinalAuthid == anonymous,
                         agent => bondy_router:agent(),
@@ -718,15 +801,6 @@ send_message(Message, State) ->
     ?LOG_DEBUG(#{description => "sending message", message => Message}),
     Data = term_to_binary(Message),
     (State#state.transport):send(State#state.socket, Data).
-
-
-%% @private
-on_connect(_State) ->
-    ?LOG_INFO(#{
-        description => "Established connection with client router."
-    }),
-    ok.
-
 
 
 %% -----------------------------------------------------------------------------

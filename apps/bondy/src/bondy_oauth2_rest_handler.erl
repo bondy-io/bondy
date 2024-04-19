@@ -195,6 +195,8 @@
 
 -record(state, {
     realm_uri           ::  binary(),
+    proxy_protocol      ::  bondy_http_proxy_protocol:t() | undefined,
+    source_ip           ::  inet:ip_address() | undefined,
     client_auth_ctxt    ::  bondy_auth:context() | undefined,
     owner_auth_ctxt     ::  bondy_auth:context() | undefined,
     client_id           ::  binary() | undefined,
@@ -209,6 +211,7 @@
 -export([allowed_methods/2]).
 -export([content_types_accepted/2]).
 -export([content_types_provided/2]).
+-export([forbidden/2]).
 -export([init/2]).
 -export([is_authorized/2]).
 -export([options/2]).
@@ -263,14 +266,49 @@ options(Req, State) ->
 
 
 is_authorized(Req0, St0) ->
-    %% TODO at the moment the flows that we support required these vals
-    %% but not sure all flows do.
-    case cowboy_req:method(Req0) of
-        <<"OPTIONS">> ->
-            {true, Req0, St0};
-        _ ->
-            do_is_authorized(Req0, St0)
+    ProxyProtocol = bondy_http_proxy_protocol:init(Req0),
+    St1 = St0#{proxy_protocol => ProxyProtocol},
+
+    case bondy_http_proxy_protocol:source_ip(ProxyProtocol) of
+        {ok, SourceIP} ->
+            St = St1#state{
+                proxy_protocol = ProxyProtocol,
+                source_ip = SourceIP
+            },
+
+            %% TODO at the moment the flows that we support required these vals
+            %% but not sure all flows do.
+            case cowboy_req:method(Req0) of
+                <<"OPTIONS">> ->
+                    {true, Req0, St};
+                _ ->
+                    do_is_authorized(Req0, St)
+            end;
+
+        {error, {protocol_error, Message}} ->
+            ?LOG_INFO(#{
+                description =>
+                    "Connection rejected. "
+                    "The source IP Address couldn't be obtained "
+                    "due to a proxy protocol error.",
+                reason => Message,
+                proxy_protocol => maps:without([error], ProxyProtocol)
+            }),
+            Body = bondy_error:map({
+                proxy_protocol_error,
+                <<"Operation forbidden">>,
+                <<"The source IP Address couldn't be determined.">>
+            }),
+            Response = #{<<"body">> => Body, <<"headers">> => #{}},
+            Req1 = reply(?HTTP_FORBIDDEN, json, Response, Req0),
+            {stop, Req1, St0}
     end.
+
+
+
+
+forbidden(Req, St) ->
+    {false, Req, St}.
 
 
 rate_limited(Req, St) ->
@@ -332,8 +370,7 @@ accept(Req0, St) ->
 
 
 do_is_authorized(Req0, St0) ->
-    Peer = cowboy_req:peer(Req0),
-    ClientIP = bondy_http_utils:client_ip(Req0),
+    SourceIP = St0#state.source_ip,
 
     try
         Auth = bondy_http_utils:parse_authorization(Req0),
@@ -349,7 +386,7 @@ do_is_authorized(Req0, St0) ->
         RealmUri = St0#state.realm_uri,
         SessionId = bondy_session_id:new(),
 
-        case bondy_auth:init(SessionId, RealmUri, ClientId, all, Peer) of
+        case bondy_auth:init(SessionId, RealmUri, ClientId, all, SourceIP) of
             {ok, AuthCtxt} ->
                 St1 = St0#state{
                     client_id = ClientId,
@@ -371,7 +408,7 @@ do_is_authorized(Req0, St0) ->
                 description => "API Client login failed due to invalid client ID",
                 reason => EReason,
                 realm => St0#state.realm_uri,
-                client_ip => ClientIP
+                source_ip => SourceIP
             }),
             Req1 = reply(oauth2_invalid_client, Req0),
             {stop, Req1, St0};
@@ -382,7 +419,7 @@ do_is_authorized(Req0, St0) ->
                 reason => badheader,
                 header => H,
                 realm => St0#state.realm_uri,
-                client_ip => ClientIP
+                source_ip => SourceIP
             }),
 
             Req1 = reply({badheader, H, Desc}, Req0),
@@ -435,13 +472,13 @@ token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
     } = maps_utils:validate(Map, ?RESOURCE_OWNER_SPEC),
 
     RealmUri = St0#state.realm_uri,
-    {IP, _Port} = Peer = cowboy_req:peer(Req0),
 
     %% This is ID will bot be used as the ID is already defined in the JWT
     SessionId = bondy_session_id:new(),
+    SourceIP = St0#state.source_ip,
 
     try
-        case bondy_auth:init(SessionId, RealmUri, Username, all, Peer) of
+        case bondy_auth:init(SessionId, RealmUri, Username, all, SourceIP) of
             {ok, Ctxt} ->
                 St1 = St0#state{
                     device_id = DeviceId,
@@ -454,13 +491,13 @@ token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
         end
     catch
         throw:EReason ->
-            BinIP = inet_utils:ip_address_to_binary(IP),
             ?LOG_INFO(#{
-                description => "Resource Owner login failed. The grant is invalid",
+                description =>
+                    "Resource Owner login failed. The grant is invalid",
                 reason => EReason,
                 client_device_id => DeviceId,
                 realm_uri => RealmUri,
-                cient_ip => BinIP
+                cient_ip => inet_utils:ip_address_to_binary(SourceIP)
             }),
             {stop, reply(oauth2_invalid_grant, Req0), St0}
     end;
@@ -683,3 +720,21 @@ on_login(_RealmUri, _Username, _Meta) ->
 set_resp_headers(Headers, Req0) ->
     Req1 = cowboy_req:set_resp_headers(Headers, Req0),
     cowboy_req:set_resp_headers(bondy_http_utils:meta_headers(), Req1).
+
+
+reply(HTTPCode, Enc, Response, Req0) ->
+    %% We add the content-type since we are bypassing Cowboy by replying
+    %% ourselves
+    MimeType = case Enc of
+        msgpack ->
+            <<"application/msgpack; charset=utf-8">>;
+        json ->
+            <<"application/json; charset=utf-8">>;
+        undefined ->
+            <<"application/json; charset=utf-8">>;
+        Bin ->
+            Bin
+    end,
+    Req1 = cowboy_req:set_resp_header(<<"content-type">>, MimeType, Req0),
+    cowboy_req:reply(HTTPCode, prepare_request(Enc, Response, Req1)).
+

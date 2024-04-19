@@ -53,7 +53,9 @@
     security => map(),
     is_anonymous => boolean(),
     authid => binary() | undefined,
-    encoding => binary() | json | msgpack
+    encoding => binary() | json | msgpack,
+    proxy_protocol => bondy_http_proxy_protocol:t(),
+    source_ip => inet:ip_address()
 }.
 
 
@@ -138,17 +140,54 @@ options(Req, #{api_spec := Spec} = St) ->
 
 is_authorized(Req0, St0) ->
     try
+
         %% We validate realm exists
         _Realm = bondy_realm:fetch(maps:get(realm_uri, St0)),
-        is_authorized(cowboy_req:method(Req0), Req0, St0)
+
+        %% We have to do this here and not in the forbidden call
+        %% since we need to source_ip
+        ProxyProtocol = bondy_http_proxy_protocol:init(Req0),
+        St1 = St0#{proxy_protocol => ProxyProtocol},
+
+        case bondy_http_proxy_protocol:source_ip(ProxyProtocol) of
+            {ok, SourceIP} ->
+                St = St1#{
+                    proxy_protocol => ProxyProtocol,
+                    source_ip => SourceIP
+                },
+                is_authorized(cowboy_req:method(Req0), Req0, St);
+
+            {error, {protocol_error, Message}} ->
+                ?LOG_INFO(#{
+                    description =>
+                        "Connection rejected. "
+                        "The source IP Address couldn't be obtained "
+                        "due to a proxy protocol error.",
+                    reason => Message,
+                    proxy_protocol => maps:without([error], ProxyProtocol)
+                }),
+                throw(proxy_protocol_error)
+        end
+
 
     catch
+        throw:proxy_protocol_error ->
+            Body = bondy_error:map({
+                proxy_protocol_error,
+                <<"Operation forbidden">>,
+                <<"The source IP Address couldn't be determined.">>
+            }),
+            Response = #{<<"body">> => Body, <<"headers">> => #{}},
+            Req1 = reply(?HTTP_FORBIDDEN, json, Response, Req0),
+            {stop, Req1, St0};
+
         error:no_such_realm = Reason ->
             {StatusCode, Body} = take_status_code(
                 bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, json, Response, Req0),
             {stop, Req1, St0};
+
         Class:Reason:Stacktrace ->
             _ = log(
                 error,
@@ -286,7 +325,7 @@ is_authorized(
     %% check scopes vs action requirements
 
     RealmUri = maps:get(realm_uri, St0),
-    Peer = cowboy_req:peer(Req0),
+    SourceIP = maps:get(source_ip, St0),
     %% This is ID will bot be used as the ID is already defined in the JWT
     SessionId = bondy_session_id:new(),
 
@@ -295,7 +334,7 @@ is_authorized(
         Claims = bondy_oauth2:decode_jwt(Token),
         UserId = maps:get(<<"sub">>, Claims, undefined),
 
-        case bondy_auth:init(SessionId, RealmUri, UserId, all, Peer) of
+        case bondy_auth:init(SessionId, RealmUri, UserId, all, SourceIP) of
             {ok, Ctxt} ->
                 authenticate(Token, Ctxt, Req0, St0);
             {error, Reason} ->
@@ -900,11 +939,7 @@ wamp_context(RealmUri, Peer, St1) ->
     Session = bondy_session:new(RealmUri, SessionProps),
 
     Subprotocol = {http, text, maps:get(encoding, St1)},
-    Ctxt0 = bondy_context:new(Peer, Subprotocol),
-    Ctxt1 = bondy_context:set_realm_uri(Ctxt0, RealmUri),
-    Ctxt2 = bondy_context:set_session(Ctxt1, Session),
-    Ctxt3 = bondy_context:set_authid(Ctxt2, Authid),
-    bondy_context:set_is_anonymous(Ctxt3, IsAnonymous).
+    bondy_context:new(Peer, Subprotocol, #{session => Session}).
 
 
 %% @private

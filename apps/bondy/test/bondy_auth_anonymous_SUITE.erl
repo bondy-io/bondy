@@ -43,10 +43,12 @@ end_per_suite(Config) ->
 test(Config) ->
     RealmUri = ?config(realm_uri, Config),
     Roles = [],
-    Peer = {{127, 0, 0, 1}, 10000},
+    SourceIP = {127, 0, 0, 1},
     SessionId = bondy_session_id:new(),
 
-    {ok, Ctxt} = bondy_auth:init(SessionId, RealmUri, anonymous, Roles, Peer),
+    {ok, Ctxt} = bondy_auth:init(
+        SessionId, RealmUri, anonymous, Roles, SourceIP
+    ),
 
     ?assertMatch(
         {false, _},
@@ -61,17 +63,17 @@ test(Config) ->
 
     ?assertMatch(
         {ok, _, _},
-        authenticate(?WAMP_ANON_AUTH, RealmUri, Roles, Peer)
+        authenticate(?WAMP_ANON_AUTH, RealmUri, Roles, SourceIP)
     ),
 
     ?assertMatch(
         {error, method_not_allowed},
-        authenticate(?PASSWORD_AUTH, RealmUri, Roles, Peer)
+        authenticate(?PASSWORD_AUTH, RealmUri, Roles, SourceIP)
     ),
 
     ?assertMatch(
         {error, invalid_method},
-        authenticate(<<"foo">>, RealmUri, Roles, Peer)
+        authenticate(<<"foo">>, RealmUri, Roles, SourceIP)
     ).
 
 

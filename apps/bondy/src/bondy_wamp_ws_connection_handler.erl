@@ -57,8 +57,9 @@
 
 -record(state, {
     frame_type              ::  bondy_wamp_protocol:frame_type(),
-    auth_token              ::  map(),
-    client_ip               ::  binary(),
+    auth_token              ::  map() | undefined,
+    proxy_protocol          ::  bondy_http_proxy_protocol:t(),
+    source_ip               ::  inet:ip_address(),
     ping_idle_timeout       ::  non_neg_integer(),
     ping_tref               ::  optional(reference()),
     ping_payload            ::  binary(),
@@ -103,18 +104,40 @@ init(Req0, _) ->
     Subprotocols = cowboy_req:parse_header(?SUBPROTO_HEADER, Req0),
 
     try
-
         {ok, Subproto, BinProto} = select_subprotocol(Subprotocols),
 
         %% If we have a token we pass it to the WAMP protocol state so that
         %% we can verify it and immediately authenticate the client using
         %% the token stored information.
         AuthToken = maybe_token(Req0),
-        State1 = #state{auth_token = AuthToken},
+        ProxyProtocol = bondy_http_proxy_protocol:init(Req0),
 
-        do_init(Subproto, BinProto, Req0, State1)
+        case bondy_http_proxy_protocol:source_ip(ProxyProtocol) of
+            {ok, SourceIP} ->
+                State0 = #state{
+                    proxy_protocol = ProxyProtocol,
+                    source_ip = SourceIP,
+                    auth_token = AuthToken
+                },
+
+                do_init(Subproto, BinProto, Req0, State0);
+            {error, Reason} ->
+                throw({Reason, ProxyProtocol})
+        end
 
     catch
+        throw:{{protocol_error, Message}, PP} ->
+            ?LOG_INFO(#{
+                description =>
+                    "Connection rejected. "
+                    "The source IP Address couldn't be obtained "
+                    "due to a proxy protocol error.",
+                reason => Message,
+                proxy_protocol => maps:without([error], PP)
+            }),
+            Req1 = cowboy_req:reply(?HTTP_FORBIDDEN, Req0),
+            {ok, Req1, undefined};
+
         throw:invalid_scheme ->
             %% Returning ok will cause the handler
             %% to stop in websocket_handle
@@ -180,7 +203,7 @@ websocket_init(#state{protocol_state = PSt} = State) ->
     ok = logger:update_process_metadata(#{
         transport => websockets,
         protocol => wamp,
-        client_ip => State#state.client_ip
+        source_ip => inet:ntoa(State#state.source_ip)
     }),
     ok = bondy_wamp_protocol:update_process_metadata(PSt),
 
@@ -452,14 +475,14 @@ maybe_token(Req) ->
 %% @private
 do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State0) ->
     Peer = cowboy_req:peer(Req0),
-    ClientIP = bondy_http_utils:client_ip(Req0),
+    SourceIP = State0#state.source_ip,
     AuthToken = State0#state.auth_token,
-    ProtoOpts = #{auth_token => AuthToken},
+    ProtoOpts = #{auth_token => AuthToken, source_ip => SourceIP},
 
     ok = logger:update_process_metadata(#{
         transport => websockets,
         protocol => wamp,
-        real_ip => ClientIP
+        source_ip => SourceIP
     }),
 
     case bondy_wamp_protocol:init(Subproto, Peer, ProtoOpts) of
@@ -469,13 +492,12 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State0) ->
             ),
             {PingOpts, Opts} = maps:take(ping, Opts0),
 
-            State1 = maybe_enable_ping(PingOpts, State0),
-
-            State = State1#state{
-                client_ip = ClientIP,
+            State1 = State0#state{
                 frame_type = FrameType,
                 protocol_state = CBState
             },
+
+            State = maybe_enable_ping(PingOpts, State1),
 
             Req = cowboy_req:set_resp_header(?SUBPROTO_HEADER, BinProto, Req0),
 

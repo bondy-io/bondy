@@ -210,7 +210,10 @@ terminate(#wamp_state{} = State) ->
         false ->
             ok
     end,
-    bondy_context:close(Ctxt).
+    bondy_context:close(Ctxt);
+
+terminate(_) ->
+    ok.
 
 
 
@@ -716,10 +719,10 @@ when UserId =/= <<"anonymous">> ->
 
     SessionId = bondy_context:session_id(Ctxt),
     Roles = authroles(Details),
-    Peer = bondy_context:peer(Ctxt),
+    SourceIP = bondy_context:source_ip(Ctxt),
 
     %% We initialise the auth context
-    case bondy_auth:init(SessionId, Realm, UserId, Roles, Peer) of
+    case bondy_auth:init(SessionId, Realm, UserId, Roles, SourceIP) of
         {ok, AuthCtxt} ->
             St2 = St1#wamp_state{auth_context = AuthCtxt},
             ReqMethods = maps:get(authmethods, Details, []),
@@ -743,10 +746,10 @@ maybe_auth_challenge(enabled, Details, Realm, St0) ->
 
     SessionId = bondy_context:session_id(Ctxt),
     Roles = [<<"anonymous">>],
-    Peer = bondy_context:peer(Ctxt),
+    SourceIP = bondy_context:source_ip(Ctxt),
 
     %% We initialise the auth context with anon id and role
-    case bondy_auth:init(SessionId, Realm, anonymous, Roles, Peer) of
+    case bondy_auth:init(SessionId, Realm, anonymous, Roles, SourceIP) of
         {ok, AuthCtxt} ->
             St2 = St1#wamp_state{auth_context = AuthCtxt},
             auth_challenge(?WAMP_ANON_AUTH, St2);
@@ -1059,8 +1062,8 @@ encoding(#wamp_state{subprotocol = {_, _, Serializer}}) ->
 
 
 %% @private
-do_init({_, _, _} = Subprotocol, Peer, _Opts) ->
-    Ctxt = bondy_context:new(Peer, Subprotocol),
+do_init({_, _, _} = Subprotocol, Peer, Opts) ->
+    Ctxt = bondy_context:new(Peer, Subprotocol, Opts),
     State = #wamp_state{
         state_name = closed,
         subprotocol = Subprotocol,

@@ -210,11 +210,11 @@ ticket_auth_not_allowed(Config) ->
 local_scope(Config) ->
     RealmUri = ?config(realm_uri, Config),
     Roles = [],
-    Peer = {{127, 0, 0, 1}, 10000},
+    SourceIP = {127, 0, 0, 1},
 
     %% We simulate U1 has logged in using wampcra
     Session = bondy_session:new(RealmUri, #{
-        peer => Peer,
+        peer => {SourceIP, 0},
         authrealm => RealmUri,
         authid => ?U1,
         authmethod => ?WAMP_CRA_AUTH,
@@ -252,7 +252,7 @@ local_scope(Config) ->
 
     %% We simulate a new session
     SessionId = bondy_session_id:new(),
-    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
+    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, SourceIP),
 
     ?assertEqual(
         true,
@@ -275,11 +275,11 @@ local_scope(Config) ->
 client_scope_with_ticket(Config) ->
     RealmUri = ?config(realm_uri, Config),
     Roles = [],
-    Peer = {{127, 0, 0, 1}, 10000},
+    SourceIP = {127, 0, 0, 1},
 
     %% We simulate APP has logged in using cryptosign
     AppSession = bondy_session:new(RealmUri, #{
-        peer => Peer,
+        peer => {SourceIP, 0},
         authrealm => RealmUri,
         authid => ?APP,
         authmethod => ?WAMP_CRYPTOSIGN_AUTH,
@@ -298,7 +298,7 @@ client_scope_with_ticket(Config) ->
 
     %% We simulate U1 has logged in using wampcra
     UserSession = bondy_session:new(RealmUri, #{
-        peer => Peer,
+        peer => {SourceIP, 0},
         authrealm => RealmUri,
         authid => ?U1,
         authmethod => ?WAMP_CRA_AUTH,
@@ -318,7 +318,7 @@ client_scope_with_ticket(Config) ->
 
     %% We simulate a new session
     SessionId = bondy_session_id:new(),
-    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
+    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, SourceIP),
 
     ?assertEqual(
         true,
@@ -333,11 +333,11 @@ client_scope_with_ticket(Config) ->
 client_scope_with_id(Config) ->
     RealmUri = ?config(realm_uri, Config),
     Roles = [],
-    Peer = {{127, 0, 0, 1}, 10000},
+    SourceIP = {127, 0, 0, 1},
 
     %% We simulate U1 has logged in using wampcra
     UserSession = bondy_session:new(RealmUri, #{
-        peer => Peer,
+        peer => {SourceIP, 0},
         authrealm => RealmUri,
         authid => ?U1,
         authmethod => ?WAMP_CRA_AUTH,
@@ -365,7 +365,7 @@ client_scope_with_id(Config) ->
 
     %% We simulate a new session
     SessionId = bondy_session_id:new(),
-    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
+    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, SourceIP),
 
     ?assertEqual(
         true,

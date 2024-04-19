@@ -1,33 +1,70 @@
 # CHANGELOG
+
+## 1.0.0-rc.14 (WIP)
+
+### Added
+* Support for TCP/TLS proxy protocol and HTTP equivalent via headers 
+  `forwarded`, `x-real-ip`, `x-forwarded-for`. The algorithm searches for 
+  the presence of headers in that order and chooses the first Private IP found,
+  returning the first IP Address if none are private.
+    * New config options to enable/disable it
+        * `wamp.tcp.proxy_protocol`
+        * `wamp.tls.proxy_protocol`
+        * `admin_api.http.proxy_protocol`
+        * `admin_api.https.proxy_protocol`
+        * `api_gateway.http.proxy_protocol`
+        * `api_gateway.https.proxy_protocol`
+        * `bridge.listener.tcp.proxy_protocol`
+        * `bridge.listener.tls.proxy_protocol`
+        * Default: `off`
+    * New config options to define whether to reject connections when a 
+    `source_ip` address cannot be obtained from the proxy (`strict`) or
+    fallback to the local IP address (`relaxed`).
+        * `wamp.tcp.proxy_protocol.mode`
+        * `wamp.tls.proxy_protocol.mode`
+        * `admin_api.http.proxy_protocol.mode`
+        * `admin_api.https.proxy_protocol.mode`
+        * `api_gateway.http.proxy_protocol.mode`
+        * `api_gateway.https.proxy_protocol.mode`
+        * `bridge.listener.tcp.proxy_protocol.mode`
+        * `bridge.listener.tls.proxy_protocol.mode`
+        * Default: `relaxed`
+
+### Fixes
+* Re-establish support for HTTP `x-forwarded-for` and `x-real-ip` headers
+* Fixed logger formatter so that metadata values for keys not included in the  
+  template are included as part of the message.
+
 ## 1.0.0-rc.13
 * Fixes #28 - default configuration value for Bridge Relay produces a crash. This happened because some of the Bridge Relay options in the schema were using `default` as opposed to `commented`. The result was an invalid configuration for a Bridge relayed called `name` when this should be empty.
 
 ## 1.0.0-rc.12
-## Fixes
+
+### Fixes
 * Fixes #24 - missing command in Makefile target
 
-## Changes
+### Changes
 * Upgrades PlumDB to latest
 
 ## 1.0.0-rc.11
 
-## Changes
+### Changes
 * Upgrades Partisan to latest
 * Upgrades OTP to latest
 
 ## 1.0.0-rc.10
 
-## Fixes
+### Fixes
 * Fixes trying to restore non expired OAUTH2 refresh tokens based on its expiration time (issued at + expires in) from an old backup (tested case `0.41.6` version).
 
 ## 1.0.0-rc.9
 
-## Fixes
+### Fixes
 * Fixes bug in enacl dependency via a fork
 
 ## 1.0.0-rc.8
 
-## Fixes
+### Fixes
 * Fixes bug in authentication when migrating from Bondy version =< 0.8
 * Change in Backup restore to avoid restoring and migrating expired OAUTH2 refresh tokens
 
@@ -35,11 +72,11 @@
 * Updated Docker image base OS version to match those of the new OTP26 images
 
 ## 1.0.0-rc.6
-### Fixes
+#### Fixes
 * Upgrade Partisan with fixes to fast forward which was not working 
 
 ## 1.0.0-rc.5
-### Fixes
+#### Fixes
 * Upgrade PlumDB with fixes to hashtree encoding on OTP26
 * PlumDB no creates a manifest will be used in the near future to enable database migration
 
@@ -90,7 +127,7 @@ cluster.peer_discovery.config.query = bondy.internal
 cluster.peer_discovery.config.node_basename = bondy
 ```
 
-### Fixes
+#### Fixes
 * This revision addresses an issue in the Active Anti-Entropy (AAE) implementation of PlumDB and the latest version of Erlang/OTP. In the latest version of Erlang, the binary serialization of terms is not deterministic by default, causing the AAE merkle tree to compute different values for the same object in different nodes. As a result, the AAE sync continuously exchanges terms that are actually the same.
 
 

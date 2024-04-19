@@ -669,7 +669,23 @@
   {default, on}
 ]}.
 
+%% @doc Enables or disables the HTTP x-forwarded-for or x-real-ip heather check.
+%% This is used to capture the source IP address which will be used for matching
+%% against RBAC Source assignments.
+{mapping, "admin_api.http.proxy_protocol", "bondy.admin_api_http.proxy_protocol.enabled", [
+  {datatype, {flag, on, off}},
+  {default, off}
+]}.
 
+%% @doc Defines the mode in which Bondy operates when
+%% admin_api.http.proxy_protocol is enabled. If 'strict' a connection that
+%% is not sending the x-forwarded-for or x-real-ip header or with invalid
+%% headers will be dropped. If 'relaxed' the connection is always accepted and
+%% Bondy will log when there is no header or if it is invalid.
+{mapping, "admin_api.http.proxy_protocol.mode", "bondy.admin_api_http.proxy_protocol.mode", [
+  {datatype, {enum, [strict, relaxed]}},
+  {default, relaxed}
+]}.
 
 
 %% =============================================================================
@@ -842,6 +858,25 @@
 }.
 
 
+%% @doc Enables or disables the HTTP x-forwarded-for or x-real-ip heather check.
+%% This is used to capture the source IP address which will be used for matching
+%% against RBAC Source assignments.
+{mapping, "admin_api.https.proxy_protocol", "bondy.admin_api_https.proxy_protocol.enabled", [
+  {datatype, {flag, on, off}},
+  {default, off}
+]}.
+
+%% @doc Defines the mode in which Bondy operates when
+%% admin_api.http.proxy_protocol is enabled. If 'strict' a connection that
+%% is not sending the x-forwarded-for or x-real-ip header or with invalid
+%% headers will be dropped. If 'relaxed' the connection is always accepted and
+%% Bondy will log when there is no header or if it is invalid.
+{mapping, "admin_api.https.proxy_protocol.mode", "bondy.admin_api_https.proxy_protocol.mode", [
+  {datatype, {enum, [strict, relaxed]}},
+  {default, relaxed}
+]}.
+
+
 
 %% =============================================================================
 %% API GATEWAY CLEAR
@@ -972,6 +1007,24 @@
   {default, on}
 ]}.
 
+
+%% @doc Enables or disables the HTTP x-forwarded-for or x-real-ip heather check.
+%% This is used to capture the source IP address which will be used for matching
+%% against RBAC Source assignments.
+{mapping, "api_gateway.http.proxy_protocol", "bondy.api_gateway_http.proxy_protocol.enabled", [
+  {datatype, {flag, on, off}},
+  {default, off}
+]}.
+
+%% @doc Defines the mode in which Bondy operates when
+%% api_gateway.http.proxy_protocol is enabled. If 'strict' a connection that
+%% is not sending the x-forwarded-for or x-real-ip header or with invalid
+%% headers will be dropped. If 'relaxed' the connection is always accepted and
+%% Bondy will log when there is no header or if it is invalid.
+{mapping, "api_gateway.http.proxy_protocol.mode", "bondy.api_gateway_http.proxy_protocol.mode", [
+  {datatype, {enum, [strict, relaxed]}},
+  {default, relaxed}
+]}.
 
 %% =============================================================================
 %% API GATEWAY TLS
@@ -1142,7 +1195,23 @@
   end
 }.
 
+%% @doc Enables or disables the HTTP x-forwarded-for or x-real-ip heather check.
+%% This is used to capture the source IP address which will be used for matching
+%% against RBAC Source assignments.
+{mapping, "api_gateway.https.proxy_protocol", "bondy.api_gateway_https.proxy_protocol.enabled", [
+  {datatype, {flag, on, off}},
+  {default, off}
+]}.
 
+%% @doc Defines the mode in which Bondy operates when
+%% api_gateway.http.proxy_protocol is enabled. If 'strict' a connection that
+%% is not sending the x-forwarded-for or x-real-ip header or with invalid
+%% headers will be dropped. If 'relaxed' the connection is always accepted and
+%% Bondy will log when there is no header or if it is invalid.
+{mapping, "api_gateway.https.proxy_protocol.mode", "bondy.api_gateway_https.proxy_protocol.mode", [
+  {datatype, {enum, [strict, relaxed]}},
+  {default, relaxed}
+]}.
 
 
 %% =============================================================================
@@ -1672,6 +1741,23 @@
 {datatype, [{duration, ms}, {atom, infinity}]}
 ]}.
 
+%% @doc Enables or disables the TCP Proxy Protocol. This is used to capture
+%% the source IP address which will be used for matching against RBAC Source
+%% assignments.
+{mapping, "wamp.tcp.proxy_protocol", "bondy.wamp_tcp.proxy_protocol.enabled", [
+  {datatype, {flag, on, off}},
+  {default, off}
+]}.
+
+%% @doc Defines the mode in which Bondy operates when wamp.tcp.proxy_protocol is
+%% enabled. If 'strict' a connection that is not using the Proxy Protocol or
+%% with invalid headers will be dropped. If 'relaxed' the connection is
+%% always accepted and Bondy will log when there is not Proxy Procotol header
+%% or if it is invalid.
+{mapping, "wamp.tcp.proxy_protocol.mode", "bondy.wamp_tcp.proxy_protocol.mode", [
+  {datatype, {enum, [strict, relaxed]}},
+  {default, relaxed}
+]}.
 
 
 
@@ -1900,6 +1986,24 @@
   end
 }.
 
+
+%% @doc Enables or disables the TCP Proxy Protocol. This is used to capture
+%% the source IP address which will be used for matching against RBAC Source
+%% assignments.
+{mapping, "wamp.tls.proxy_protocol", "bondy.wamp_tls.proxy_protocol.enabled", [
+  {datatype, {flag, on, off}},
+  {default, off}
+]}.
+
+%% @doc Defines the mode in which Bondy operates when wamp.tls.proxy_protocol is
+%% enabled. If 'strict' a connection that is not using the Proxy Protocol or
+%% with invalid headers will be dropped. If 'relaxed' the connection is
+%% always accepted and Bondy will log when there is not Proxy Procotol header
+%% or if it is invalid.
+{mapping, "wamp.tls.proxy_protocol.mode", "bondy.wamp_tls.proxy_protocol.mode", [
+  {datatype, {enum, [strict, relaxed]}},
+  {default, relaxed}
+]}.
 
 
 %% =============================================================================

@@ -27,10 +27,12 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_rbac_source).
+-include_lib("partisan/include/partisan_util.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_plum_db.hrl").
 -include("bondy_security.hrl").
+
 
 
 -define(ASSIGNMENT_VALIDATOR, #{
@@ -333,7 +335,7 @@ match(RealmUri, Username) ->
     Username :: binary() | all | anonymous,
     ConnIP :: inet:ip_address()) -> [t()].
 
-match(RealmUri, Username, ConnIP) ->
+match(RealmUri, Username, ConnIP) when ?IS_IP(ConnIP) ->
     %% We need to use the internal match function (do_match) as it returns Keys
     %% and Values, we need the keys to be able to sort
 

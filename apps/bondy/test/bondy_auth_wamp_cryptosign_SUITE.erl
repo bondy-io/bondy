@@ -113,9 +113,9 @@ test_1(Config) ->
 
     SessionId = bondy_session_id:new(),
     Roles = [],
-    Peer = {{127, 0, 0, 1}, 10000},
+    SourceIP = {127, 0, 0, 1},
 
-    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
+    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, SourceIP),
 
 
     ?assertEqual(
@@ -181,7 +181,7 @@ test_1(Config) ->
     ),
 
     %% user 2 is not granted access from Peer (see test_2)
-    {ok, Ctxt2} = bondy_auth:init(SessionId, RealmUri, ?U2, Roles, Peer),
+    {ok, Ctxt2} = bondy_auth:init(SessionId, RealmUri, ?U2, Roles, SourceIP),
 
     ?assertEqual(
         false,

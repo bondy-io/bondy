@@ -105,12 +105,12 @@ test_1(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
     Roles = [],
-    Peer = {{127, 0, 0, 1}, 10000},
+    SourceIP = {127, 0, 0, 1},
     Alias = <<?U1/binary, ":alias1">>,
 
     ok = bondy_rbac_user:add_alias(RealmUri, ?U1, Alias),
 
-    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, Alias, Roles, Peer),
+    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, Alias, Roles, SourceIP),
 
 
     ?assertMatch(
@@ -122,7 +122,7 @@ test_1(Config) ->
 
     ?assertEqual(
         {error,{no_such_user, Alias}},
-        bondy_auth:init(SessionId, RealmUri, Alias, Roles, Peer)
+        bondy_auth:init(SessionId, RealmUri, Alias, Roles, SourceIP)
     ).
 
 
@@ -165,18 +165,18 @@ sso(_) ->
     },
     SessionId = bondy_session_id:new(),
     Roles = [],
-    Peer = {{127, 0, 0, 1}, 10000},
+    SourceIP = {127, 0, 0, 1},
     Alias = <<?U1/binary, ":alias2">>,
 
     {ok, _} = bondy_rbac_user:add(Uri, bondy_rbac_user:new(User)),
 
-    {ok, Ctxt1} = bondy_auth:init(SessionId, SSOUri, ?U1, Roles, Peer),
+    {ok, Ctxt1} = bondy_auth:init(SessionId, SSOUri, ?U1, Roles, SourceIP),
     ?assertMatch(
         {ok, _, _},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt1)
     ),
 
-    {ok, Ctxt2} = bondy_auth:init(SessionId, Uri, ?U1, Roles, Peer),
+    {ok, Ctxt2} = bondy_auth:init(SessionId, Uri, ?U1, Roles, SourceIP),
     ?assertMatch(
         {ok, _, _},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt2)
@@ -185,13 +185,13 @@ sso(_) ->
     ok = bondy_rbac_user:add_alias(Uri, ?U1, Alias),
 
 
-    {ok, Ctxt3} = bondy_auth:init(SessionId, SSOUri, Alias, Roles, Peer),
+    {ok, Ctxt3} = bondy_auth:init(SessionId, SSOUri, Alias, Roles, SourceIP),
     ?assertMatch(
         {ok, _, _},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt3)
     ),
 
-    {ok, Ctxt4} = bondy_auth:init(SessionId, Uri, Alias, Roles, Peer),
+    {ok, Ctxt4} = bondy_auth:init(SessionId, Uri, Alias, Roles, SourceIP),
     ?assertMatch(
         {ok, _, _},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt4)
@@ -201,10 +201,10 @@ sso(_) ->
 
     ?assertEqual(
         {error,{no_such_user, Alias}},
-        bondy_auth:init(SessionId, SSOUri, Alias, Roles, Peer)
+        bondy_auth:init(SessionId, SSOUri, Alias, Roles, SourceIP)
     ),
     ?assertEqual(
         {error,{no_such_user, Alias}},
-        bondy_auth:init(SessionId, Uri, Alias, Roles, Peer)
+        bondy_auth:init(SessionId, Uri, Alias, Roles, SourceIP)
     ).
 

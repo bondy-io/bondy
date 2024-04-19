@@ -575,8 +575,8 @@ authenticate(Uri, Username, Secret) ->
 do_authenticate(Uri, Username, Secret) ->
     SessionId = bondy_session_id:new(),
     Roles = [],
-    Peer = {{127,0,0,1}, 1111},
-    {ok, Ctxt} = bondy_auth:init(SessionId, Uri, Username, Roles, Peer),
+    SourceIP = {127,0,0,1},
+    {ok, Ctxt} = bondy_auth:init(SessionId, Uri, Username, Roles, SourceIP),
     ?assertEqual(
         true,
         lists:member(?PASSWORD_AUTH, bondy_auth:available_methods(Ctxt))
