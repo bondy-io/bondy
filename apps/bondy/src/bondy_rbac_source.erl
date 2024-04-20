@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_rbac_source.erl -
 %%
-%%  Copyright (c) 2016-2023 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
 %%  Copyright (c) 2013 Basho Technologies, Inc.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
