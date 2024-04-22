@@ -294,12 +294,6 @@ is_authorized(Req0, St0) ->
                 reason => Message,
                 proxy_protocol => maps:without([error], ProxyProtocol)
             }),
-            Body = bondy_error:map({
-                proxy_protocol_error,
-                <<"Operation forbidden">>,
-                <<"The source IP Address couldn't be determined.">>
-            }),
-            Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(oauth2_invalid_client, Req0),
             {stop, Req1, St0}
     end.
@@ -449,7 +443,8 @@ authenticate(
 %% @private
 do_authenticate(Password, Ctxt) ->
     %% TODO If the user configured realm authmethods with OAUTH2 but not
-    %% PASSWORD this will fail.  We need to ask bondy_auth to authenticate using password even if password is not an allowed method (this)
+    %% PASSWORD this will fail.  We need to ask bondy_auth to authenticate using
+    %% password even if password is not an allowed method (this)
     case bondy_auth:authenticate(?PASSWORD_AUTH, Password, undefined, Ctxt) of
         {ok, _, NewCtxt} ->
             NewCtxt;
@@ -726,19 +721,19 @@ set_resp_headers(Headers, Req0) ->
     cowboy_req:set_resp_headers(bondy_http_utils:meta_headers(), Req1).
 
 
-reply(HTTPCode, Enc, Response, Req0) ->
-    %% We add the content-type since we are bypassing Cowboy by replying
-    %% ourselves
-    MimeType = case Enc of
-        msgpack ->
-            <<"application/msgpack; charset=utf-8">>;
-        json ->
-            <<"application/json; charset=utf-8">>;
-        undefined ->
-            <<"application/json; charset=utf-8">>;
-        Bin ->
-            Bin
-    end,
-    Req1 = cowboy_req:set_resp_header(<<"content-type">>, MimeType, Req0),
-    cowboy_req:reply(HTTPCode, prepare_request(Enc, Response, Req1)).
+%% reply(HTTPCode, Enc, Response, Req0) ->
+%%     %% We add the content-type since we are bypassing Cowboy by replying
+%%     %% ourselves
+%%     MimeType = case Enc of
+%%         msgpack ->
+%%             <<"application/msgpack; charset=utf-8">>;
+%%         json ->
+%%             <<"application/json; charset=utf-8">>;
+%%         undefined ->
+%%             <<"application/json; charset=utf-8">>;
+%%         Bin ->
+%%             Bin
+%%     end,
+%%     Req1 = cowboy_req:set_resp_header(<<"content-type">>, MimeType, Req0),
+%%     cowboy_req:reply(HTTPCode, prepare_request(Enc, Response, Req1)).
 
