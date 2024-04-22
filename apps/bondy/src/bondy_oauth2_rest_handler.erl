@@ -300,7 +300,7 @@ is_authorized(Req0, St0) ->
                 <<"The source IP Address couldn't be determined.">>
             }),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
-            Req1 = reply(?HTTP_FORBIDDEN, json, Response, Req0),
+            Req1 = reply(oauth2_invalid_client, Req0),
             {stop, Req1, St0}
     end.
 
