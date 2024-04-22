@@ -267,7 +267,7 @@ options(Req, State) ->
 
 is_authorized(Req0, St0) ->
     ProxyProtocol = bondy_http_proxy_protocol:init(Req0),
-    St1 = St0#{proxy_protocol => ProxyProtocol},
+    St1 = St0#state{proxy_protocol = ProxyProtocol},
 
     case bondy_http_proxy_protocol:source_ip(ProxyProtocol) of
         {ok, SourceIP} ->
