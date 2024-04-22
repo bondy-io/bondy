@@ -379,7 +379,9 @@ do_is_authorized(Req0, St0) ->
             {basic, A, B} ->
                 {A, B};
             _ ->
-                Txt = <<"The authorization header should use the 'basic' scheme">>,
+                Txt = <<
+                    "The authorization header should use the 'basic' scheme"
+                >>,
                 throw({request_error, {header, <<"authorization">>}, Txt})
         end,
 
@@ -405,7 +407,8 @@ do_is_authorized(Req0, St0) ->
     catch
         throw:EReason ->
             ?LOG_INFO(#{
-                description => "API Client login failed due to invalid client ID",
+                description =>
+                    "API Client login failed due to invalid client ID",
                 reason => EReason,
                 realm => St0#state.realm_uri,
                 source_ip => SourceIP
@@ -415,7 +418,8 @@ do_is_authorized(Req0, St0) ->
 
         _:{request_error, {header, H}, Desc} ->
             ?LOG_INFO(#{
-                description => "API Client login failed due to invalid client ID",
+                description =>
+                    "API Client login failed due to invalid client ID",
                 reason => badheader,
                 header => H,
                 realm => St0#state.realm_uri,
