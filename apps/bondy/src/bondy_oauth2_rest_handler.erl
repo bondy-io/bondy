@@ -271,10 +271,7 @@ is_authorized(Req0, St0) ->
 
     case bondy_http_proxy_protocol:source_ip(ProxyProtocol) of
         {ok, SourceIP} ->
-            St = St1#state{
-                proxy_protocol = ProxyProtocol,
-                source_ip = SourceIP
-            },
+            St = St1#state{source_ip = SourceIP},
 
             %% TODO at the moment the flows that we support required these vals
             %% but not sure all flows do.
@@ -295,7 +292,7 @@ is_authorized(Req0, St0) ->
                 proxy_protocol => maps:without([error], ProxyProtocol)
             }),
             Req1 = reply(oauth2_invalid_client, Req0),
-            {stop, Req1, St0}
+            {stop, Req1, St1}
     end.
 
 
