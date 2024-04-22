@@ -64,7 +64,8 @@
         %% 1st-party deps
         mops,
         art,
-        wamp
+        wamp,
+        bondy_stdlib
         %% plum_db and tuplespace are started manually by bondy_app
     ]},
     {env, []},

@@ -60,6 +60,9 @@ docs: xref
 	mkdir -p apps/bondy_broker_bridge/doc/assets/
 	cp -r doc/assets/* apps/bondy/doc/assets/
 	cp -r doc/assets/* apps/bondy_broker_bridge/doc/assets/
+	mkdir -p apps/bondy_stdlib/doc/assets/
+	cp -r doc/assets/* apps/bondy/doc/assets/
+	cp -r doc/assets/* apps/bondy_stdlib/doc/assets/
 
 clean: node1-clean node2-clean node3-clean
 	${REBAR} clean
@@ -70,9 +73,14 @@ clean-docs:
 	rm -f apps/bondy/doc/.build
 	rm -rf apps/bondy_broker_bridge/doc/*
 	rm -f apps/bondy_broker_bridge/doc/.build
+	rm -rf apps/bondy_stdlib/doc/*
+	rm -f apps/bondy_stdlib/doc/.build
 
-test: xref
+test: xref eunit
 	${REBAR} as test ct ${CT_SUITE_ARGS}
+
+eunit:
+	${REBAR} eunit
 
 xref:
 	${REBAR} xref skip_deps=true
