@@ -173,7 +173,7 @@ when is_binary(SessionId), is_binary(Uri), ?IS_IP(SourceIP) ->
     end;
 
 init(SessionId, Realm, Username0, Roles0, SourceIP)
-when is_binary(SessionId), is_tuple(Realm) ->
+when is_binary(SessionId), is_tuple(Realm), ?IS_IP(SourceIP) ->
     try
         RealmUri = bondy_realm:uri(Realm),
         SSORealmUri = bondy_realm:sso_realm_uri(Realm),
