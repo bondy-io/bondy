@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## 1.0.0-rc.14 (WIP)
+## 1.0.0-rc.14
 
 ### Added
 * Support for TCP/TLS proxy protocol and HTTP equivalent via headers 
@@ -31,6 +31,7 @@
         * Default: `relaxed`
 
 ### Fixes
+* Fix bug in WAMP procedure `bondy.oauth2.token.revoke`
 * Re-establish support for HTTP `x-forwarded-for` and `x-real-ip` headers
 * Fixed logger formatter so that metadata values for keys not included in the  
   template are included as part of the message.
