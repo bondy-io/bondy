@@ -484,9 +484,12 @@ rebuild_token_indices(RealmUri, Issuer0) ->
 %% -----------------------------------------------------------------------------
 -spec decode_jwt(binary()) -> map().
 
-decode_jwt(JWT) ->
+decode_jwt(JWT) when is_binary(JWT) and byte_size(JWT) >= 32 ->
     {jose_jwt, Map} = jose_jwt:peek(JWT),
-    Map.
+    Map;
+
+decode_jwt(Term) ->
+    error({badarg, [Term]}).
 
 
 %% -----------------------------------------------------------------------------
