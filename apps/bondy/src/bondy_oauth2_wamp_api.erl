@@ -182,14 +182,23 @@ handle_call(?BONDY_OAUTH2_TOKEN_LOOKUP, #call{} = M, Ctxt) ->
     {reply, R};
 
 handle_call(?BONDY_OAUTH2_TOKEN_REVOKE, #call{} = M, Ctxt) ->
-    L = bondy_wamp_utils:validate_call_args(M, Ctxt, 3, 4),
-    Result = erlang:apply(bondy_oauth2, revoke_token, L),
+    Result =
+        case bondy_wamp_utils:validate_call_args(M, Ctxt, 3, 4) of
+            [Uri, Issuer, Token] ->
+                bondy_oauth2:revoke_token(refresh_token, Uri, Issuer, Token);
+
+            [Uri, Issuer, Username, DeviceId] ->
+                bondy_oauth2:revoke_token(
+                    refresh_token, Uri, Issuer, Username, DeviceId
+                )
+        end,
+
     R = bondy_wamp_utils:maybe_error(Result, M),
     {reply, R};
 
 handle_call(?BONDY_OAUTH2_TOKEN_REVOKE_ALL, #call{} = M, Ctxt) ->
     [Uri, Issuer, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
-    Result = bondy_oauth2:revoke_token(refresh_token, Uri, Issuer, Username),
+    Result = bondy_oauth2:revoke_tokens(refresh_token, Uri, Issuer, Username),
     R = bondy_wamp_utils:maybe_error(Result, M),
     {reply, R};
 
