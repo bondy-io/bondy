@@ -279,7 +279,7 @@ revoke_token(access_token, _, _, _) ->
     bondy_realm:uri(),
     Issuer :: binary(),
     Username :: binary(),
-    DeviceId :: non_neg_integer()) -> ok | {error, unsupported_operation}.
+    DeviceId :: binary()) -> ok | {error, unsupported_operation}.
 
 revoke_token(refresh_token, RealmUri, Issuer, Username, DeviceId) ->
     revoke_refresh_token(RealmUri, Issuer, Username, DeviceId);
@@ -288,6 +288,39 @@ revoke_token(access_token, _, _, _, _) ->
     {error, unsupported_operation}.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec revoke_tokens(
+    Hint :: token_type() | undefined,
+    Realm :: bondy_realm:uri(),
+    Username :: binary()) ->
+        ok | {error, unsupported_operation}.
+
+revoke_tokens(refresh_token, RealmUri, Username) ->
+    revoke_refresh_tokens(RealmUri, Username);
+
+revoke_tokens(access_token, _RealmUri, _Username) ->
+    {error, unsupported_operation}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec revoke_tokens(
+    Hint :: token_type() | undefined,
+    bondy_realm:uri(),
+    Issuer :: binary(),
+    Username :: binary()) ->
+        ok | {error, unsupported_operation}.
+
+revoke_tokens(refresh_token, RealmUri, Issuer, Username) ->
+    revoke_refresh_tokens(RealmUri, Issuer, Username);
+
+revoke_tokens(access_token, _RealmUri, _Issuer, _Username) ->
+    {error, unsupported_operation}.
 
 
 %% -----------------------------------------------------------------------------
@@ -339,41 +372,6 @@ revoke_refresh_token(RealmUri, Issuer0, Username, DeviceId) ->
         Token ->
             revoke_refresh_token(RealmUri, Issuer, Token)
     end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec revoke_tokens(
-    Hint :: token_type() | undefined,
-    Realm :: bondy_realm:uri(),
-    Username :: binary()) ->
-        ok | {error, unsupported_operation}.
-
-revoke_tokens(refresh_token, RealmUri, Username) ->
-    revoke_refresh_tokens(RealmUri, Username);
-
-revoke_tokens(access_token, _RealmUri, _Username) ->
-    {error, unsupported_operation}.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec revoke_tokens(
-    Hint :: token_type() | undefined,
-    bondy_realm:uri(),
-    Issuer :: binary(),
-    Username :: binary()) ->
-        ok | {error, unsupported_operation}.
-
-revoke_tokens(refresh_token, RealmUri, Issuer, Username) ->
-    revoke_refresh_tokens(RealmUri, Issuer, Username);
-
-revoke_tokens(access_token, _RealmUri, _Issuer, _Username) ->
-    {error, unsupported_operation}.
 
 
 %% -----------------------------------------------------------------------------
