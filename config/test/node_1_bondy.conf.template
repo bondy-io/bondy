@@ -1,5 +1,5 @@
-log.handlers.default.level = notice
-log.level = notice
+log.handlers.default.level = info
+log.level = info
 
 aae.data_exchange_timeout = 1m
 aae.enabled = on
@@ -138,3 +138,12 @@ bridge.listener.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
 bridge.listener.tls.certfile = ${BONDY_ETC_DIR}/ssl/server/keycert.pem
 bridge.listener.tls.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
 bridge.listener.tls.idle_timeout = 30s
+
+
+
+wamp.tcp.proxy_protocol = on
+wamp.tcp.proxy_protocol.mode = relaxed
+api_gateway.http.proxy_protocol = on
+api_gateway.http.proxy_protocol.mode = relaxed
+admin_api.http.proxy_protocol = on
+admin_api.http.proxy_protocol.mode = relaxed

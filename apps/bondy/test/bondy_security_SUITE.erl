@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_SUITE.erl -
 %%
-%%  Copyright (c) 2016-2023 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -575,8 +575,8 @@ authenticate(Uri, Username, Secret) ->
 do_authenticate(Uri, Username, Secret) ->
     SessionId = bondy_session_id:new(),
     Roles = [],
-    Peer = {{127,0,0,1}, 1111},
-    {ok, Ctxt} = bondy_auth:init(SessionId, Uri, Username, Roles, Peer),
+    SourceIP = {127,0,0,1},
+    {ok, Ctxt} = bondy_auth:init(SessionId, Uri, Username, Roles, SourceIP),
     ?assertEqual(
         true,
         lists:member(?PASSWORD_AUTH, bondy_auth:available_methods(Ctxt))

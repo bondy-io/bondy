@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_auth.erl -
 %%
-%%  Copyright (c) 2016-2023 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -28,8 +28,10 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_auth).
 -behaviour(bondy_sensitive).
--include("bondy.hrl").
+
+-include_lib("partisan/include/partisan_util.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
 -include("bondy_security.hrl").
 
 -type context()         ::  #{
@@ -40,7 +42,7 @@
     available_methods := [binary()],
     role := binary(),
     roles := [binary()],
-    conn_ip := [{ip, inet:ip_address()}],
+    source_ip := inet:ip_address(),
     provider => binary(),
     method => binary(),
     callback_mod => module(),
@@ -73,7 +75,7 @@
 -export([available_methods/1]).
 -export([available_methods/2]).
 -export([challenge/3]).
--export([conn_ip/1]).
+-export([source_ip/1]).
 -export([init/5]).
 -export([method/1]).
 -export([method_info/0]).
@@ -156,22 +158,22 @@ format_status(_Opt, Ctxt) ->
     Realm :: bondy_realm:t() | uri(),
     UserId :: binary() | anonymous,
     Roles :: all | binary() | [binary()] | undefined,
-    Peer :: {inet:ip_address(), inet:port_number()}) ->
+    SourceIP :: inet:ip_address()) ->
     {ok, context()}
     | {error, {no_such_user, binary()} | no_such_realm | no_such_group}
     | no_return().
 
-init(SessionId, Uri, UserId, Roles, Peer)
-when is_binary(SessionId), is_binary(Uri) ->
+init(SessionId, Uri, UserId, Roles, SourceIP)
+when is_binary(SessionId), is_binary(Uri), ?IS_IP(SourceIP) ->
     case bondy_realm:lookup(string:casefold(Uri)) of
         {error, not_found} ->
             {error, no_such_realm};
         Realm ->
-            init(SessionId, Realm, UserId, Roles, Peer)
+            init(SessionId, Realm, UserId, Roles, SourceIP)
     end;
 
-init(SessionId, Realm, Username0, Roles0, {IPAddress, _})
-when is_binary(SessionId) ->
+init(SessionId, Realm, Username0, Roles0, SourceIP)
+when is_binary(SessionId), is_tuple(Realm), ?IS_IP(SourceIP) ->
     try
         RealmUri = bondy_realm:uri(Realm),
         SSORealmUri = bondy_realm:sso_realm_uri(Realm),
@@ -191,7 +193,7 @@ when is_binary(SessionId) ->
             user => User,
             role => Role,
             roles => Roles,
-            conn_ip => IPAddress
+            source_ip => SourceIP
         },
         Methods = compute_available_methods(Realm, Ctxt),
         {ok, maps:put(available_methods, Methods, Ctxt)}
@@ -366,9 +368,9 @@ authrealm(#{sso_realm_uri := Value}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec conn_ip(context()) -> [{ip, inet:ip_address()}].
+-spec source_ip(context()) -> inet:ip_address().
 
-conn_ip(#{conn_ip := Value}) ->
+source_ip(#{source_ip := Value}) ->
     Value.
 
 
@@ -568,7 +570,7 @@ compute_available_methods(Realm, Ctxt) ->
     #{
         realm_uri := RealmUri,
         user_id := UserId,
-        conn_ip := IPAddress
+        source_ip := IPAddress
     } = Ctxt,
 
     %% The allowed methods for the Realm

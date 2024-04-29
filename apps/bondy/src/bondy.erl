@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy.erl -
 %%
-%%  Copyright (c) 2016-2023 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -333,7 +333,7 @@ set_process_metadata(Meta0, LogKeys0) when is_map(Meta0), is_list(LogKeys0) ->
     end,
     {Logger, Bondy} = maps_utils:split(LogKeys, Meta),
     _ = put(?BONDY_META_KEY, Bondy),
-    ok = logger:set_process_metadata(Logger);
+    ok = logger:update_process_metadata(Logger);
 
 set_process_metadata(undefined, _LogKeys) ->
     ok;
@@ -370,9 +370,9 @@ when is_map(Meta0), is_list(LogKeys0) ->
 
     case logger:get_process_metadata() of
         undefined ->
-            logger:set_process_metadata(Logger);
+            logger:update_process_metadata(Logger);
         Logger0 ->
-            logger:set_process_metadata(maps:merge(Logger0, Logger))
+            logger:update_process_metadata(maps:merge(Logger0, Logger))
     end,
     ok;
 

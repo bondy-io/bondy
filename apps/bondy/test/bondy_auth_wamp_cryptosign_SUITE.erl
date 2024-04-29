@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_auth_wamp_cryptosign_SUITE.erl -
 %%
-%%  Copyright (c) 2016-2023 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -113,9 +113,9 @@ test_1(Config) ->
 
     SessionId = bondy_session_id:new(),
     Roles = [],
-    Peer = {{127, 0, 0, 1}, 10000},
+    SourceIP = {127, 0, 0, 1},
 
-    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
+    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, SourceIP),
 
 
     ?assertEqual(
@@ -181,7 +181,7 @@ test_1(Config) ->
     ),
 
     %% user 2 is not granted access from Peer (see test_2)
-    {ok, Ctxt2} = bondy_auth:init(SessionId, RealmUri, ?U2, Roles, Peer),
+    {ok, Ctxt2} = bondy_auth:init(SessionId, RealmUri, ?U2, Roles, SourceIP),
 
     ?assertEqual(
         false,

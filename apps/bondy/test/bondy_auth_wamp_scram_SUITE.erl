@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_auth_wamp_scram_SUITE.erl -
 %%
-%%  Copyright (c) 2016-2023 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -122,9 +122,9 @@ missing_client_nonce(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
     Roles = [],
-    Peer = {{127, 0, 0, 1}, 10000},
+    SourceIP = {127, 0, 0, 1},
 
-    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
+    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, SourceIP),
     ?assertEqual(
         true,
         lists:member(?WAMP_SCRAM_AUTH, bondy_auth:available_methods(Ctxt1))
@@ -141,9 +141,9 @@ test_1(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = bondy_session_id:new(),
     Roles = [],
-    Peer = {{127, 0, 0, 1}, 10000},
+    SourceIP = {127, 0, 0, 1},
 
-    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
+    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, SourceIP),
 
     User = bondy_rbac_user:lookup(RealmUri, ?U1),
 
@@ -193,8 +193,8 @@ test_1(Config) ->
         bondy_auth:authenticate(<<"foo">>, <<"foo">>, undefined, Ctxt1)
     ),
 
-    %% user 2 is not granted access from Peer (see test_2)
-    {ok, Ctxt2} = bondy_auth:init(SessionId, RealmUri, ?U2, Roles, Peer),
+    %% user 2 is not granted access from SourceIP (see test_2)
+    {ok, Ctxt2} = bondy_auth:init(SessionId, RealmUri, ?U2, Roles, SourceIP),
 
     ?assertEqual(
         false,

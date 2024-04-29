@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_wamp_tcp_connection_handler.erl -
 %%
-%%  Copyright (c) 2016-2023 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -34,7 +34,9 @@
 -record(state, {
     listener                ::  atom(),
     socket                  ::  gen_tcp:socket() | ssl:socket(),
-    peername                ::  binary(),
+    proxy_protocol          ::  bondy_tcp_proxy_protocol:t(),
+    peername                ::  {inet:ip_address(), integer()},
+    source_ip               ::  inet:ip_address(),
     transport               ::  module(),
     frame_type              ::  frame_type(),
     encoding                ::  atom(),
@@ -51,11 +53,11 @@
     shutdown_reason         ::  term() | undefined,
     protocol_state          ::  bondy_wamp_protocol:state() | undefined
 }).
+
 -type state() :: #state{}.
 
 
 -export([start_link/4]).
-
 
 -export([init/1]).
 -export([handle_call/3]).
@@ -95,37 +97,54 @@ start_link(Ref, _, Transport, Opts) ->
 
 
 init({Ref, Transport, _Opts0}) ->
-    State0 = #state{
-        listener = Ref,
-        idle_timeout = bondy_config:get([Ref, idle_timeout], infinity),
-        start_time = erlang:monotonic_time(second),
-        transport = Transport
-    },
+    ok = logger:update_process_metadata(#{
+        listener => Ref,
+        transport => Transport
+    }),
+
+    %% We to make this call before ranch:handshake/2
+    ProxyProtocol = bondy_tcp_proxy_protocol:init(Ref, 15_000),
 
     %% Setup and configure socket
     TLSOpts = bondy_config:get([Ref, tls_opts], []),
     {ok, Socket} = ranch:handshake(Ref, TLSOpts),
 
+    {PeerIP, _} = Peername = peername(Transport, Socket),
+
+    SourceIP = source_ip(ProxyProtocol, PeerIP),
+
+    ok = logger:update_process_metadata(#{
+        peername => inet_utils:peername_to_binary(Peername),
+        source_ip => inet:ntoa(SourceIP)
+    }),
+
+    State = #state{
+        listener = Ref,
+        idle_timeout = bondy_config:get([Ref, idle_timeout], infinity),
+        start_time = erlang:monotonic_time(second),
+        transport = Transport,
+        socket = Socket,
+        proxy_protocol = ProxyProtocol,
+        peername = Peername,
+        source_ip = SourceIP
+    },
+
     SocketOpts = [
-        {active, active_n(State0)},
+        {active, active_n(State)},
         {packet, 0}
         | bondy_config:get([Ref, socket_opts], [])
     ],
+
     %% If Transport == ssl, upgrades a gen_tcp, or equivalent, socket to an SSL
     %% socket by performing the TLS server-side handshake, returning a TLS
     %% socket.
-    ok = maybe_error(Transport:setopts(Socket, SocketOpts)),
-    {ok, Peername} = maybe_error(bondy_utils:peername(Transport, Socket)),
-
-    State = State0#state{socket = Socket},
-
-    ok = logger:set_process_metadata(#{
-        transport => Transport,
-        peername => inet_utils:peername_to_binary(Peername),
-        listener => Ref
-    }),
+    ok = maybe_exit(Transport:setopts(Socket, SocketOpts)),
 
     ok = socket_opened(State),
+
+    ?LOG_INFO(#{
+        description => "Established connection with client."
+    }),
 
     gen_server:enter_loop(?MODULE, [], State, ?TIMEOUT(State)).
 
@@ -174,10 +193,6 @@ handle_info(
     ?LOG_WARNING(#{
         description => "Received data before WAMP protocol handshake",
         reason => invalid_handshake,
-        peername => St#state.peername,
-        protocol => wamp,
-        transport => St#state.transport,
-        serializer => St#state.encoding,
         data => Data
     }),
     {stop, invalid_handshake, St};
@@ -344,6 +359,59 @@ format_status(Opt, [_PDict, #state{} = State]) ->
 %% =============================================================================
 
 
+source_ip(ProxyProtocol, PeerIP) ->
+    case bondy_tcp_proxy_protocol:source_ip(ProxyProtocol, PeerIP) of
+        {ok, SourceIP} ->
+            SourceIP;
+
+        {error, {socket_error, Message}} ->
+            ?LOG_INFO(#{
+                description =>
+                    "Connection rejected. "
+                    "The source IP Address couldn't be obtained "
+                    "due to a socket error.",
+                reason => Message,
+                proxy_protocol => maps:without([error], ProxyProtocol)
+            }),
+            exit(normal);
+
+        {error, {protocol_error, Message}} ->
+            ?LOG_INFO(#{
+                description =>
+                    "Connection rejected. "
+                    "The source IP Address couldn't be obtained "
+                    "due to a proxy protocol error.",
+                reason => Message,
+                proxy_protocol => maps:without([error], ProxyProtocol)
+            }),
+            exit(normal)
+    end.
+
+
+peername(Transport, Socket) ->
+    case bondy_utils:peername(Transport, Socket) of
+        {ok, {_, _} = Peername} ->
+           Peername;
+
+        {ok, NonIPAddr} ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Unexpected peername when establishing connection",
+                reason => invalid_socket,
+                peername => NonIPAddr
+            }),
+            error(invalid_socket);
+
+        {error, Reason} ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Unexpected peername when establishing connection",
+                reason => inet:format_error(Reason)
+            }),
+            error(invalid_socket)
+    end.
+
+
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc Use format recommended by gen_server:format_status/2
@@ -372,6 +440,7 @@ handle_inbound(
     ?LOG_ERROR(#{
         description => "Client committed a WAMP protocol violation",
         reason => maximum_message_length_exceeded,
+        maximum_length => MaxLen,
         message_length => Len
     }),
     {stop, maximum_message_length_exceeded, St};
@@ -526,68 +595,43 @@ handle_handshake(Len, Enc, State) ->
 init_wamp(Len, Enc, State0) ->
     MaxLen = validate_max_len(Len),
     {FrameType, EncName} = validate_encoding(Enc),
+    Proto = {raw, FrameType, EncName},
+    Peer = State0#state.peername,
+    Opts = #{source_ip => State0#state.source_ip},
 
-    case bondy_utils:peername(State0#state.transport, State0#state.socket) of
-        {ok, {_, _} = Peer} ->
-            Proto = {raw, FrameType, EncName},
+    case bondy_wamp_protocol:init(Proto, Peer, Opts) of
+        {ok, ProtoState} ->
+            State1 = State0#state{
+                frame_type = FrameType,
+                encoding = EncName,
+                max_len = MaxLen,
+                protocol_state = ProtoState
+            },
 
-            case bondy_wamp_protocol:init(Proto, Peer, #{}) of
-                {ok, ProtoState} ->
-                    State1 = State0#state{
-                        frame_type = FrameType,
-                        encoding = EncName,
-                        max_len = MaxLen,
-                        protocol_state = ProtoState
-                    },
+            PingOpts = maps_utils:from_property_list(
+                bondy_config:get([State0#state.listener, ping])
+            ),
 
-                    PingOpts = maps_utils:from_property_list(
-                        bondy_config:get([State0#state.listener, ping])
-                    ),
+            State = maybe_enable_ping(PingOpts, State1),
 
-                    State = maybe_enable_ping(PingOpts, State1),
+            ok = send_frame(
+                <<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, State
+            ),
 
-                    ok = send_frame(
-                        <<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, State
-                    ),
-
-                    ?LOG_INFO(#{
-                        description => "Established connection with client."
-                    }),
-
-                    {ok, State};
-
-                {error, Reason} ->
-                    {stop, Reason, State0}
-            end;
-
-        {ok, NonIPAddr} ->
-            ?LOG_ERROR(#{
-                description =>
-                    "Unexpected peername when establishing connection",
-                reason => invalid_socket,
-                peername => NonIPAddr,
+            ok = logger:update_process_metadata(#{
                 protocol => wamp,
-                transport => raw,
-                frame_type => FrameType,
-                serializer => EncName,
-                message_max_length => MaxLen
+                serializer => State#state.encoding
             }),
-            {stop, invalid_socket, State0};
+
+            ?LOG_INFO(#{
+                description => "Established WAMP Session with client."
+            }),
+
+            {ok, State};
 
         {error, Reason} ->
-            ?LOG_ERROR(#{
-                description =>
-                    "Unexpected peername when establishing connection",
-                reason => inet:format_error(Reason),
-                protocol => wamp,
-                transport => raw,
-                frame_type => FrameType,
-                serializer => EncName,
-                message_max_length => MaxLen
-            }),
-            {stop, invalid_socket, State0}
+            {stop, Reason, State0}
     end.
-
 
 %% @private
 do_terminate(undefined) ->
@@ -613,7 +657,6 @@ send(Bin, St) ->
 
 send_frame(Frame, St) when is_binary(Frame) ->
     (St#state.transport):send(St#state.socket, Frame).
-
 
 
 %% -----------------------------------------------------------------------------
@@ -662,7 +705,6 @@ validate_encoding(N) ->
             %% TODO define correct error return
             throw(serializer_unsupported)
     end.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -748,10 +790,10 @@ reset_inet_opts(#state{} = State) ->
 
 
 %% @private
-maybe_error({error, Reason}) ->
-    error(Reason);
+maybe_exit({error, Reason}) ->
+    exit(Reason);
 
-maybe_error(Term) ->
+maybe_exit(Term) ->
     Term.
 
 

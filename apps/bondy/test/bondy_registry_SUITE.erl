@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_SUITE.erl -
 %%
-%%  Copyright (c) 2016-2023 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -78,9 +78,7 @@ init_per_suite(Config) ->
             subscriber => #{}
         }
     }),
-    Ctxt0 = bondy_context:new(Peer, {ws, text, json}),
-    Ctxt = bondy_context:set_session(Ctxt0, Session),
-
+    Ctxt = bondy_context:new(Peer, {ws, text, json}, #{session => Session}),
 
     [
         {context, Ctxt},

@@ -11,6 +11,7 @@
 
 %% API exports
 -export([format/2]).
+-export([template_keys/1]).
 
 -ifdef(TEST).
 -export([format_msg/2, to_string/2]).
@@ -30,18 +31,32 @@ format(Map = #{msg := {report, #{label := {error_logger, _}, format := Format, a
                         #{unstructured_log =>
                               unicode:characters_to_binary(io_lib:format(Format, Terms))}}},
            UsrConfig);
-format(#{level:=Level, msg:={report, Msg}, meta:=Meta}, UsrConfig) when is_map(Msg) ->
+format(#{level:=Level, msg:={report, Msg0}, meta:=Meta}, UsrConfig) when is_map(Msg0) ->
     NewMeta = maps:merge(Meta, #{level => Level
                                 ,colored_start => Level
                                 ,colored_end => "\e[0m"
                                 }),
-    format_log(maps:get(template, UsrConfig), UsrConfig, Msg, NewMeta);
+    Template = maps:get(template, UsrConfig),
+
+    Msg =
+        case maps:get(unknown_metakey, UsrConfig, log) of
+            log ->
+                Unknown = maps:without(template_keys(Template), Meta),
+                maps:merge(Unknown, Msg0);
+            ignore ->
+                Msg0
+        end,
+
+    format_log(Template, UsrConfig, Msg, NewMeta);
+
 format(Map = #{msg := {report, KeyVal}}, UsrConfig) when is_list(KeyVal) ->
     format(Map#{msg := {report, maps:from_list(KeyVal)}}, UsrConfig);
+
 format(Map = #{msg := {string, String}}, UsrConfig) ->
     format(Map#{msg := {report,
                         #{unstructured_log =>
                           unicode:characters_to_binary(String)}}}, UsrConfig);
+
 format(Map = #{msg := {Format, Terms}}, UsrConfig) ->
     format(Map#{msg := {report,
                         #{unstructured_log =>
@@ -54,6 +69,7 @@ format(Map = #{msg := {Format, Terms}}, UsrConfig) ->
 % apply_defaults(Map) ->
 %     maps:merge(
 %       #{term_depth => undefined,
+%         unknown_metakey => log,
 %         map_depth => -1,
 %         time_offset => 0,
 %         time_designator => $T,
@@ -124,7 +140,8 @@ format_log([{msg, Key} | Rest], Config, Msg, Meta, Acc) when is_atom(Key) ->
     end;
 
 format_log([Key | Rest], Config, Msg, Meta, Acc) when is_atom(Key)
-                                                 orelse is_atom(hd(Key)) -> % from OTP
+                                                 orelse is_atom(hd(Key)) ->
+    % from OTP
     case maps:find(Key, Meta) of
         error ->
             format_log(Rest, Config, Msg, Meta, Acc);
@@ -304,3 +321,30 @@ do_escape(Str) ->
 truncate_key([]) -> [];
 truncate_key("_") -> "";
 truncate_key([H|T]) -> [H | truncate_key(T)].
+
+
+template_keys(List) ->
+    Key = {?MODULE, template_keys},
+    case persistent_term:get(Key, undefined) of
+        undefined ->
+            TemplateKeys = lists:foldl(
+                fun
+                GetKey(K, Acc) when is_atom(K) -> [K | Acc];
+                    GetKey({msg, K}, Acc) -> [K | Acc];
+                    GetKey({K, _}, Acc) -> GetKey(K, Acc);
+                    GetKey({K, _, _}, Acc) -> GetKey(K, Acc);
+                    GetKey(_, Acc) -> Acc
+                end,
+                %% Init with OTP metadata
+                [line, time, file, gl, mfa, report_cb],
+                List
+            ),
+            _ = persistent_term:put(Key, TemplateKeys),
+            TemplateKeys;
+        TemplateKeys ->
+            TemplateKeys
+    end.
+
+
+
+

@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_auth_oauth2_SUITE.erl -
 %%
-%%  Copyright (c) 2016-2023 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -122,12 +122,12 @@ add_realm(RealmUri) ->
 resource_owner_password(_) ->
     SessionId = bondy_session_id:new(),
     Roles = [],
-    Peer = {{127, 0, 0, 1}, 10000},
+    SourceIP = {127, 0, 0, 1},
 
     {ok, AccessToken, _RefreshToken, _Claims} =
         issue_token(password, ?APP1, ?U1, [<<"group_1">>]),
 
-    {ok, Ctxt1} = bondy_auth:init(SessionId, ?REALM_URI, ?U1, Roles, Peer),
+    {ok, Ctxt1} = bondy_auth:init(SessionId, ?REALM_URI, ?U1, Roles, SourceIP),
 
     ?assertEqual(
         true,

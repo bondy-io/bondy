@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy.schema - Bondy configuration schema for Cuttlefish
 %%
-%%  Copyright (c) 2016-2023 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -821,6 +821,25 @@ end}.
 ]}.
 
 
+%% @doc Enables or disables the TCP Proxy Protocol. This is used to capture
+%% the source IP address which will be used for matching against RBAC Source
+%% assignments.
+{mapping, "bridge.listener.tcp.proxy_protocol", "bondy.bridge_relay_tcp.proxy_protocol.enabled", [
+  {datatype, {flag, on, off}},
+  {default, off}
+]}.
+
+%% @doc Defines the mode in which Bondy operates when wamp.tcp.proxy_protocol is
+%% enabled. If 'strict' a connection that is not using the Proxy Protocol or
+%% with invalid headers will be dropped. If 'relaxed' the connection is
+%% always accepted and Bondy will log when there is not Proxy Procotol header
+%% or if it is invalid.
+{mapping, "bridge.listener.tcp.proxy_protocol.mode", "bondy.bridge_relay_tcp.proxy_protocol.mode", [
+  {datatype, {enum, [strict, relaxed]}},
+  {default, relaxed}
+]}.
+
+
 %% =============================================================================
 %% EDGE LISTENER TLS CONNECTIONS
 %% =============================================================================
@@ -1062,6 +1081,23 @@ end
 }.
 
 
+%% @doc Enables or disables the TCP Proxy Protocol. This is used to capture
+%% the source IP address which will be used for matching against RBAC Source
+%% assignments.
+{mapping, "bridge.listener.tls.proxy_protocol", "bondy.bridge_relay_tls.proxy_protocol.enabled", [
+  {datatype, {flag, on, off}},
+  {default, off}
+]}.
+
+%% @doc Defines the mode in which Bondy operates when wamp.tls.proxy_protocol is
+%% enabled. If 'strict' a connection that is not using the Proxy Protocol or
+%% with invalid headers will be dropped. If 'relaxed' the connection is
+%% always accepted and Bondy will log when there is not Proxy Procotol header
+%% or if it is invalid.
+{mapping, "bridge.listener.tls.proxy_protocol.mode", "bondy.bridge_relay_tls.proxy_protocol.mode", [
+  {datatype, {enum, [strict, relaxed]}},
+  {default, relaxed}
+]}.
 
 %% =============================================================================
 %% VALIDATORS
