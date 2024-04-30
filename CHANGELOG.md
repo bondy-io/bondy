@@ -1,4 +1,7 @@
 # CHANGELOG
+## 1.0.0-rc.16
+### Fixed
+* Bug introduced `1.0.0-rc.16` on JWT parsing
 
 ## 1.0.0-rc.15
 
