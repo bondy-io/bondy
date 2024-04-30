@@ -1314,6 +1314,14 @@ do_update(RealmUri, User, Data, Opts) when is_map(User) ->
 
 
 %% @private
+have_credentials_changed(User, Data) when is_list(User) ->
+    %% Support for legacy formar
+    have_credentials_changed(value_from_term(User), Data);
+
+have_credentials_changed(User, Data) when is_list(Data) ->
+    %% Support for legacy formar
+    have_credentials_changed(User, value_from_term(Data));
+
 have_credentials_changed(User, Data) ->
     has_password_changed(User, Data)
         orelse have_authorized_keys_changed(User, Data).
@@ -1656,15 +1664,19 @@ store_alias(RealmUri, Alias, AliasEntry) ->
 
 %% @private
 from_term({Username, PList}) when is_list(PList) ->
-    User0 = maps:from_list(
-        lists:keymap(fun erlang:binary_to_existing_atom/1, 1, PList)
-    ),
+    User0 = value_from_term(PList),
     %% Prev to v1.1 we removed the username (key) from the payload (value).
     User = maps:put(username, Username, User0),
     type_and_version(?USER_TYPE, User);
 
 from_term({_, #{type := ?USER_TYPE, version := ?VERSION} = User}) ->
     User.
+
+
+value_from_term(PList) when is_list(PList) ->
+    maps:from_list(
+        lists:keymap(fun erlang:binary_to_existing_atom/1, 1, PList)
+    ).
 
 
 %% @private
