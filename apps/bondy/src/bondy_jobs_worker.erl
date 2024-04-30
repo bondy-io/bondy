@@ -84,7 +84,7 @@ pick(RealmUri) when is_binary(RealmUri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec execute(Server :: pid(), Fun :: execute_fun())->
-    ok.
+    {ok, any()} | {error, any()}.
 
 execute(Server, Fun) ->
     execute(Server, Fun, []).
@@ -95,7 +95,7 @@ execute(Server, Fun) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec execute(Server :: pid(), Fun :: execute_fun(), Args :: [any()]) ->
-    ok.
+    {ok, any()} | {error, any()}.
 
 execute(Server, Fun, Args) ->
     execute(Server, Fun, Args, infinity).
@@ -109,7 +109,7 @@ execute(Server, Fun, Args) ->
     Server :: pid(),
     Fun :: execute_fun(),
     Args :: [any()],
-    Timetout :: timeout()) -> ok.
+    Timetout :: timeout()) -> {ok, any()} | {error, any()}.
 
 execute(Server, Fun, Args, Timeout) when is_function(Fun, length(Args) + 1) ->
     gen_server:call(Server, {execute, Fun, Args}, Timeout).
@@ -162,24 +162,26 @@ init([PoolName, Index]) ->
 %% @end
 %% -----------------------------------------------------------------------------
 handle_call({execute, Fun, []}, _From, State) ->
-    try
-        Fun()
-    catch
-        _:Reason ->
-            {error, Reason}
-    end,
+    Reply =
+        try
+            Fun()
+        catch
+            _:Reason ->
+                {error, Reason}
+        end,
 
-    {reply, ok, State};
+    {reply, Reply, State};
 
 handle_call({execute, Fun, Args}, _From, State) ->
-    try
-        erlang:apply(Fun, Args)
-    catch
-        _:Reason ->
-            {error, Reason}
-    end,
+    Reply =
+        try
+            erlang:apply(Fun, Args)
+        catch
+            _:Reason ->
+                {error, Reason}
+        end,
 
-    {reply, ok, State};
+    {reply, Reply, State};
 
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
