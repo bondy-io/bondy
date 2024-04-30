@@ -590,11 +590,13 @@ relay_message(RealmUri, Node, To, Msg, Opts) ->
     From = maps:get(from, Opts, undefined),
     RelayMsg = {forward, To, Msg, Opts#{realm_uri => RealmUri}},
 
-    RelayOpts = #{
-        ack => true,
-        retransmission => true,
-        partition_key => erlang:phash2({From, To})
-    },
+    RelayOpts =
+        case bondy_config:get([bridge_relay, forward]) of
+            #{ack := true} = RelayOpts0 ->
+                RelayOpts0#{partition_key => erlang:phash2({From, To})};
+            #{ack := false} = RelayOpts0 ->
+                RelayOpts0
+        end,
 
     bondy_relay:forward(Node, RelayMsg, RelayOpts).
 

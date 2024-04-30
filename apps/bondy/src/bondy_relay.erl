@@ -215,7 +215,8 @@ handle_cast({forward, To, Msg, Opts0} = M, State) ->
                 ok;
             {error, overload} ->
                 %% TODO send back WAMP message
-                %% We should synchronoulsy call bondy_router:forward to get back a WAMP ERROR we can send back to the Opts.from
+                %% We should synchronoulsy call bondy_router:forward to get back
+                %% a WAMP ERROR we can send back to the Opts.from
                 ?LOG_DEBUG(#{
                     description => "Error while forwarding peer message",
                     reason => overload

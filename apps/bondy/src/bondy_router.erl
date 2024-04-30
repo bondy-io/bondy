@@ -241,11 +241,14 @@ forward(Msg, To, #{realm_uri := RealmUri} = Opts) ->
             do_forward(Msg, To, Opts);
         false ->
             %% We need to route the message through a relay
-            RelayOpts = #{
-                ack => true,
-                retransmission => true,
-                partition_key => erlang:phash2(RealmUri)
-            },
+            RelayOpts =
+                case bondy_config:get([router, forward]) of
+                    #{ack := true} = RelayOpts0 ->
+                        RelayOpts0#{partition_key => erlang:phash2(RealmUri)};
+                    #{ack := false} = RelayOpts0 ->
+                        RelayOpts0
+                end,
+
             case bondy:peek_via(Opts) of
                 undefined ->
                     Node = bondy_ref:node(To),
