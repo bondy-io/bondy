@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## 1.0.0-rc.15 (WIP)
+## 1.0.0-rc.15
 
 ### Added
 - Partisan forwarding guarantees configuration.
