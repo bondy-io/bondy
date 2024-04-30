@@ -67,6 +67,47 @@
 {datatype, {duration, s}}
 ]}.
 
+%% =============================================================================
+%% ROUTER
+%% =============================================================================
+
+
+{mapping,
+  "router.forward.ack",
+  "bondy.router.forward.ack",
+  [
+    {default, off},
+    {datatype, flag}
+  ]
+}.
+
+{mapping,
+  "router.forward.retransmission",
+  "bondy.router.forward.retransmission",
+  [
+    {default, off},
+    {datatype, flag}
+  ]
+}.
+
+
+{translation, "bondy.router.forward",
+  fun(Conf0) ->
+    Conf = cuttlefish_variable:filter_by_prefix("router.forward", Conf0),
+    Fwd =
+      lists:foldl(
+        fun
+          ({["router", "forward", "ack"], V}, Acc) ->
+            maps:put(ack, V, Acc);
+          ({["router", "forward", "retransmission"], V}, Acc) ->
+            maps:put(retransmission, V, Acc)
+        end,
+        #{},
+        Conf
+      ),
+    Fwd
+ end
+}.
 
 %% =============================================================================
 %% SECURITY REALMS
@@ -2105,6 +2146,7 @@
   {datatype, [flag, integer]}
 ]}.
 
+
 {mapping, "cluster.channels.data.parallelism", "bondy.channels.data.parallelism", [
   {default, 2},
   {datatype, integer}
@@ -2114,6 +2156,7 @@
   {default, off},
   {datatype, [flag, integer]}
 ]}.
+
 
 {mapping, "cluster.channels.control_plane.parallelism", "bondy.channels.partisan_membership.parallelism", [
   {default, 1},
@@ -2135,7 +2178,6 @@
   {default, false},
   {datatype, [flag, integer]}
 ]}.
-
 
 %% {translation,
 %% "bondy.channels",

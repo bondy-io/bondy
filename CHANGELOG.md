@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## 1.0.0-rc.15
+
+### Added
+- Partisan forwarding guarantees configuration.
+   - `router.forward.ack`
+   - `router.forward.retransmission`
+   - `bridge.forward.ack`
+   - `bridge.forward.retransmission`
+
+### Changed
+- Until Partisan gurantees are provided by a more scalable backend we are disabling them by default by removing the previosuly hardcoded configuration and defining the following `bondy.conf` options defauls
+   - `router.forward.ack = on|off`
+   - `router.forward.retransmission = on|off`
+   - `bridge.forward.ack = on|off`
+   - `bridge.forward.retransmission = on|off`
+   - 
+
+### Fixed
+- Fixed a bug that occured in `bondy_rpc_laod_balancer` when entries are empty
+
 ## 1.0.0-rc.14
 
 ### Added
@@ -29,6 +49,8 @@
         * `bridge.listener.tcp.proxy_protocol.mode`
         * `bridge.listener.tls.proxy_protocol.mode`
         * Default: `relaxed`
+
+
 
 ### Fixes
 * Fix bug in WAMP procedure `bondy.oauth2.token.revoke`

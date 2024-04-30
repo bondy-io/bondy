@@ -903,11 +903,13 @@ when is_atom(NodeOrNodes); is_list(NodeOrNodes)->
 
     #{realm_uri := RealmUri} = FwdOpts,
 
-    RelayOpts = #{
-        ack => true,
-        retransmission => true,
-        partition_key => erlang:phash2(RealmUri)
-    },
+    RelayOpts =
+        case bondy_config:get([router, forward]) of
+            #{ack := true} = RelayOpts0 ->
+                RelayOpts0#{partition_key => erlang:phash2(RealmUri)};
+            #{ack := false} = RelayOpts0 ->
+                RelayOpts0
+        end,
 
     %% Its fine if we get a not_yet_connected error as we are enabling
     %% retransmission.

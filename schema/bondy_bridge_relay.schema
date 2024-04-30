@@ -580,6 +580,9 @@
               )
           end;
 
+      ({[<<"forward">>, _], _}, Acc) ->
+        Acc;
+
       (KV, Acc) ->
         cuttlefish:invalid(
           "invalid configuration option " ++
@@ -1098,6 +1101,43 @@ end
   {datatype, {enum, [strict, relaxed]}},
   {default, relaxed}
 ]}.
+
+
+{mapping,
+  "bridge.forward.ack",
+  "bondy.bridge_relay.forward.ack",
+  [
+    {default, off},
+    {datatype, flag}
+  ]
+}.
+
+{mapping,
+  "bridge.forward.retransmission",
+  "bondy.bridge_relay.forward.retransmission",
+  [
+    {default, off},
+    {datatype, flag}
+  ]
+}.
+
+{translation, "bondy.bridge_relay.forward",
+  fun(Conf0) ->
+    Conf = cuttlefish_variable:filter_by_prefix("bridge.forward", Conf0),
+    Fwd =
+      lists:foldl(
+        fun
+          ({["bridge", "forward", "ack"], V}, Acc) ->
+            maps:put(ack, V, Acc);
+          ({["bridge", "forward", "retransmission"], V}, Acc) ->
+            maps:put(retransmission, V, Acc)
+        end,
+        #{},
+        Conf
+      ),
+    Fwd
+ end
+}.
 
 %% =============================================================================
 %% VALIDATORS

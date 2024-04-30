@@ -303,6 +303,9 @@ next(#iterator{entries = []}) ->
 -spec next_round_robin(iterator()) ->
     {bondy_registry_entry:t(), iterator()} | '$end_of_table'.
 
+next_round_robin(#iterator{entries = []}) ->
+    '$end_of_table';
+
 next_round_robin(Iter) ->
     First = hd(Iter#iterator.entries),
     Uri = bondy_registry_entry:uri(First),
@@ -310,6 +313,7 @@ next_round_robin(Iter) ->
     next_round_robin(Iter, last_invocation(RealmUri, Uri)).
 
 
+%% @private
 next_round_robin(#iterator{entries = [H|T]} = Iter, undefined) ->
     %% We never invoked this procedure before or we reordered the round
     NewIter = Iter#iterator{entries = T},
