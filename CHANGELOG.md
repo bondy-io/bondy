@@ -1,7 +1,12 @@
 # CHANGELOG
+## 1.0.0-rc.17
+### Fixed
+* Fixes a bug when synchronising legacy formatted data
+
+
 ## 1.0.0-rc.16
 ### Fixed
-* Bug introduced `1.0.0-rc.16` on JWT parsing
+* Bug introduced `1.0.0-rc.15` on JWT parsing
 
 ## 1.0.0-rc.15
 
