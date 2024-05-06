@@ -1,8 +1,10 @@
 # CHANGELOG
+## 1.0.0-rc.18
+* Downgrade to OTP 26.2.2 to avoid issue with cgroups cpu_quota bug in 26.2.4 and avoid memory crash issue with 26.2.3 until 26.2.5 is released.
+
 ## 1.0.0-rc.17
 ### Fixed
 * Fixes a bug when synchronising legacy formatted data
-
 
 ## 1.0.0-rc.16
 ### Fixed
