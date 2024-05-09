@@ -1,4 +1,7 @@
 # CHANGELOG
+## 1.0.0-rc.19
+* Upgrade Dockerfile to OTP 26.2.5 to avoid memory-related bugs in BEAM
+
 ## 1.0.0-rc.18
 * Downgrade to OTP 26.2.2 to avoid issue with cgroups cpu_quota bug in 26.2.4 and avoid memory crash issue with 26.2.3 until 26.2.5 is released.
 
