@@ -1,4 +1,4 @@
-name: CI
+name: Docker Build OTP 25
 
 on:
   workflow_dispatch:
@@ -65,7 +65,7 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
-          file: ./deployment/Dockerfile
+          file: ./deployment/otp25/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: leapsight/${{ steps.meta.outputs.tags }}
@@ -86,10 +86,10 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
-          file: ./deployment/alpine.Dockerfile
+          file: ./deployment/otp25/alpine.Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: leapsight/${{ steps.meta.outputs.tags }}-alpine
+          tags: leapsight/${{ steps.meta.outputs.tags }}-alpine-otp25
           labels: ${{ steps.meta.outputs.labels }}
       -
         # Copy multiplatform image from dockerhub to multiple registries
@@ -97,6 +97,6 @@ jobs:
         name: Copy Image to multiple registries
         uses: akhilerm/tag-push-action@v2.0.0
         with:
-          src: docker.io/leapsight/${{ steps.meta.outputs.tags }}-alpine
+          src: docker.io/leapsight/${{ steps.meta.outputs.tags }}-alpine-otp25
           dst: |
-            ghcr.io/bondy-io/${{ steps.meta.outputs.tags }}-alpine
+            ghcr.io/bondy-io/${{ steps.meta.outputs.tags }}-alpine-otp25
