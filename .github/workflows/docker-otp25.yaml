@@ -1,4 +1,8 @@
+<<<<<<<< HEAD:.github/workflows/docker-otp25.yaml
 name: Docker Build OTP 25
+========
+name: Docker Build OTP 26
+>>>>>>>> 83d03c26f6859796889f9bb8c9e689f2d8897240:.github/workflows/docker.yaml
 
 on:
   workflow_dispatch:
