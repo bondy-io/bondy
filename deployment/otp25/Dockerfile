@@ -4,25 +4,12 @@
 # Build stage 1
 # ===========================================================================
 
-FROM erlang:26.2.5-alpine AS builder
+FROM erlang:25.3.2.12 AS builder
 
 # Install build dependencies
-RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
-    ln -s /var/cache/apk /etc/apk/cache && \
-    apk add --no-cache \
-        build-base \
-        libstdc++ \
-        git \
-        tar \
-        patch \
-        ncurses \
-        openssl \
-        snappy-dev \
-        libsodium-dev \
-        jq \
-        curl \
-        bash \
-        nano
+RUN --mount=type=cache,id=apt,sharing=locked,target=/var/cache/apt apt-get update && \
+    apt-get -y install --no-install-recommends build-essential git libssl-dev libsodium-dev libsnappy-dev curl && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /bondy/src
 
@@ -41,7 +28,7 @@ RUN rebar3 as docker tar && \
 # Build stage 2
 # ===========================================================================
 
-FROM alpine:3.19 as runner
+FROM debian:bullseye-slim as runner
 
 # We define defaults
 # We assume you have DNS. Erlang will take the FQDN and generate
@@ -79,19 +66,13 @@ ENV HOME "/bondy"
 # We also create the /bondy/etc dir to avoid an issue when deploying in K8s
 # where the permissions are not assigned to the directory and Bondy will not
 # have permission to write.
-RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
-    ln -s /var/cache/apk /etc/apk/cache \
-    && apk add --no-cache \
-        libstdc++  \
-        bash procps iproute2 net-tools curl jq nano \
-        ncurses openssl libsodium-dev \
-    && addgroup --gid 1000 bondy \
-    && adduser \
-        --uid 1000 \
-        --disabled-password \
-        --ingroup bondy \
-        --home /bondy \
-        --shell /bin/bash bondy \
+RUN apt-get update \
+    && apt-get -y install \
+    sudo bash procps iproute2 net-tools dnsutils curl jq nano \
+    openssl libsodium-dev libsnappy-dev\
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -g 1000 -r bondy \
+    && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "bondy" bondy \
     && mkdir -p /bondy/etc \
     && chown bondy:bondy /bondy/etc
 
@@ -121,6 +102,6 @@ EXPOSE 18086/tcp
 
 # The pre_start script will hardcode the following paths i.e. ignoring the
 # user-defined environment variables (BONDY_*_DIR)
-VOLUME ["/bondy/etc", "/bondy/data", "/bondy/tmp", "/bondy/log"]
+VOLUME ["/bondy/etc", "/bondy/data", "/bondy/log", "/bondy/tmp"]
 
 ENTRYPOINT ["bondy", "foreground"]
