@@ -1,4 +1,4 @@
-name: Docker Build OTP 26mlon:
+name: Docker Build OTP 26:
   workflow_dispatch:
   push:
     branches : [develop, master]
