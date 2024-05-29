@@ -1,4 +1,7 @@
 # CHANGELOG
+## 1.0.0-rc.20
+* Drop Min OTP version to OTP25 and CI workflow to publish Bondy build with OTP25 and OTP26
+
 ## 1.0.0-rc.19
 * Upgrade Dockerfile to OTP 26.2.5 to avoid memory-related bugs in BEAM
 

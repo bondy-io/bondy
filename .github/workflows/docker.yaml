@@ -1,6 +1,4 @@
-name: CI
-
-on:
+name: Docker Build OTP 26:
   workflow_dispatch:
   push:
     branches : [develop, master]
@@ -68,7 +66,7 @@ jobs:
           file: ./deployment/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: leapsight/${{ steps.meta.outputs.tags }}
+          tags: leapsight/${{ steps.meta.outputs.tags }},leapsight/${{ steps.meta.outputs.tags }}-otp26
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=leapsight/${{ steps.meta.outputs.tags }}-buildcache
           cache-to: type=registry,ref=leapsight/${{ steps.meta.outputs.tags }}-buildcache,mode=max
@@ -89,7 +87,7 @@ jobs:
           file: ./deployment/alpine.Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: leapsight/${{ steps.meta.outputs.tags }}-alpine
+          tags: leapsight/${{ steps.meta.outputs.tags }}-alpine,leapsight/${{ steps.meta.outputs.tags }}-alpine-otp26
           labels: ${{ steps.meta.outputs.labels }}
       -
         # Copy multiplatform image from dockerhub to multiple registries
@@ -100,3 +98,12 @@ jobs:
           src: docker.io/leapsight/${{ steps.meta.outputs.tags }}-alpine
           dst: |
             ghcr.io/bondy-io/${{ steps.meta.outputs.tags }}-alpine
+      -
+        # Copy multiplatform image from dockerhub to multiple registries
+        # without changing the image SHA
+        name: Copy Image to multiple registries
+        uses: akhilerm/tag-push-action@v2.0.0
+        with:
+          src: docker.io/leapsight/${{ steps.meta.outputs.tags }}-alpine-otp26
+          dst: |
+            ghcr.io/bondy-io/${{ steps.meta.outputs.tags }}-alpine-otp26
