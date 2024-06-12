@@ -1314,6 +1314,7 @@ do_update(RealmUri, User, Data, Opts) when is_map(User) ->
 
 
 %% @private
+%% User can't be a TOMBSTONE because is checked before calling this function
 have_credentials_changed(User, Data) when is_list(User) ->
     %% Support for legacy formar
     have_credentials_changed(value_from_term(User), Data);
@@ -1321,6 +1322,10 @@ have_credentials_changed(User, Data) when is_list(User) ->
 have_credentials_changed(User, Data) when is_list(Data) ->
     %% Support for legacy formar
     have_credentials_changed(User, value_from_term(Data));
+
+have_credentials_changed(_, ?TOMBSTONE) ->
+    %% Credentials were deleted
+    true;
 
 have_credentials_changed(User, Data) ->
     has_password_changed(User, Data)
