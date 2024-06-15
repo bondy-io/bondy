@@ -924,6 +924,7 @@ wamp_context(RealmUri, Peer, St1) ->
         peer => Peer,
         is_anonymous => IsAnonymous,
         authid => Authid,
+        authroles => authroles(St1),
         roles => #{
             caller => #{
                 features => #{
@@ -948,6 +949,14 @@ authid(#{is_anonymous := true}) ->
 
 authid(St) ->
     maps:get(authid, St).
+
+
+%% @private
+authroles(#{api_context := #{<<"security">> := #{<<"groups">> := Groups}}}) ->
+   Groups;
+
+authroles(_) ->
+    [].
 
 
 %% @private
