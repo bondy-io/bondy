@@ -267,6 +267,9 @@ revoke_token(refresh_token, RealmUri, Issuer, Token) ->
     revoke_refresh_token(RealmUri, Issuer, Token);
 
 revoke_token(access_token, _, _, _) ->
+    {error, unsupported_operation};
+
+revoke_token(undefined, _, _, _) ->
     {error, unsupported_operation}.
 
 
@@ -285,6 +288,9 @@ revoke_token(refresh_token, RealmUri, Issuer, Username, DeviceId) ->
     revoke_refresh_token(RealmUri, Issuer, Username, DeviceId);
 
 revoke_token(access_token, _, _, _, _) ->
+    {error, unsupported_operation};
+
+revoke_token(undefined, _, _, _, _) ->
     {error, unsupported_operation}.
 
 

@@ -1,4 +1,12 @@
 # CHANGELOG
+## 1.0.0-rc.21
+### Fixed
+* Fix checking user credentials changes in `on_merge` (#31)
+* Fixes several bugs reported in #30:
+    * Missing `authroles` in WAMP context for Oauth2 flow 
+    * Pattern matching exception in Bondy Dealer where the atom `no_proc` was wrongly used instead of `noproc`
+    * Fix in bondy Oauth2 un be able to handle undefined as a "token_type" in the  `revoke_token` operation
+
 ## 1.0.0-rc.20
 * Drop Min OTP version to OTP25 and CI workflow to publish Bondy build with OTP25 and OTP26
 

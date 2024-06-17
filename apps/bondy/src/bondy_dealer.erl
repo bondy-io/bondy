@@ -1516,7 +1516,7 @@ handle_call(Msg, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
         {ok, Entry} ->
             do_call(CallId, ProcUri, Fun, Opts, Ctxt, Entry);
 
-        {error, no_proc} ->
+        {error, noproc} ->
             %% The matches were all dead (local process dead or remote target
             %% unreachable)
             Error = case format_error(no_such_procedure, Opts) of
@@ -1634,10 +1634,10 @@ do_call(CallId, ProcUri, UserFun, Opts, Ctxt0, Entry) ->
 %% -----------------------------------------------------------------------------
 -spec choose(
     Entries :: {[entry()], trie_continuation() | eot()} | eot(),
-    CallOpts :: map()) -> {ok, Entry :: entry()} | {error, no_proc}.
+    CallOpts :: map()) -> {ok, Entry :: entry()} | {error, noproc}.
 
 choose(?EOT, _) ->
-    {error, no_proc};
+    {error, noproc};
 
 choose({L, Cont}, CallOpts) ->
     choose(L, CallOpts, undefined, [], Cont).
@@ -1653,10 +1653,10 @@ choose({L, Cont}, CallOpts) ->
     Group :: {Uri :: uri(), Match :: binary(), Invoke :: binary()} | undefined,
     Acc :: [entry()],
     Cont :: trie_continuation()) ->
-    {ok, Entry :: entry()} | {error, no_proc | any()}.
+    {ok, Entry :: entry()} | {error, noproc | any()}.
 
 choose([], _, _, [], ?EOT) ->
-    {error, no_proc};
+    {error, noproc};
 
 choose([], CallOpts, _, [], Cont) ->
     choose(bondy_registry:match(Cont), CallOpts);
@@ -1668,7 +1668,7 @@ choose([], CallOpts, {_, _, Invoke}, Acc, Cont) ->
     case bondy_rpc_load_balancer:select(L, LBOpts) of
         {ok, _} = OK ->
             OK;
-        {error, no_proc} ->
+        {error, noproc} ->
             choose(bondy_registry:match(Cont), CallOpts);
         Error ->
             Error
@@ -1694,7 +1694,7 @@ choose([H|T], CallOpts, LastGroup, Acc, Cont) ->
             case bondy_rpc_load_balancer:select(L, LBOpts) of
                 {ok, _} = OK ->
                     OK;
-                {error, no_proc} ->
+                {error, noproc} ->
                     %% We continue w/next group, we reset Acc
                     choose(T, CallOpts, Group, [H], Cont);
                 Error ->
