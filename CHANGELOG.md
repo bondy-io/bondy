@@ -1,4 +1,7 @@
 # CHANGELOG
+## 1.0.0-rc.22
+* Fix CI for OTP26 docker variant
+
 ## 1.0.0-rc.21
 ### Fixed
 * Fix checking user credentials changes in `on_merge` (#31)
