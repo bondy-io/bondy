@@ -174,7 +174,7 @@ lazy_or(ok = Result, Fun) when is_function(Fun, 0) ->
 lazy_or({ok, _} = Result, Fun) when is_function(Fun, 0) ->
     Result;
 
-lazy_or({error, _} = Result, Fun) when is_function(Fun, 0) ->
+lazy_or({error, _}, Fun) when is_function(Fun, 0) ->
     Fun().
 
 
@@ -406,13 +406,13 @@ try_recover({error, _} = Result, Fun) when is_function(Fun, 1) ->
     Fun :: fun((any()) -> t()),
     Fun :: fun((any()) -> t())) -> t() | no_return().
 
-try_both(ok = Result, Fun, RecoverFun) ->
+try_both(ok = Result, Fun, _) ->
     'try'(Result, Fun);
 
-try_both({ok, _} = Result, Fun, RecoverFun) ->
+try_both({ok, _} = Result, Fun, _) ->
     'try'(Result, Fun);
 
-try_both({error, _} = Result, Fun, RecoverFun) ->
+try_both({error, _} = Result, _, RecoverFun) ->
     try_recover(Result, RecoverFun).
 
 
@@ -435,7 +435,7 @@ unwrap({error, _}, Default) -> Default.
 %% -----------------------------------------------------------------------------
 -spec unwrap_both(Result :: t()) -> any().
 
-unwrap_both(ok, _) -> undefined;
+unwrap_both(ok) -> undefined;
 unwrap_both({ok, Value}) -> Value;
 unwrap_both({error, Error}) -> Error.
 
