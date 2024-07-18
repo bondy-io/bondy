@@ -3,7 +3,7 @@ deploy: deploy-bondy deploy-marketplace deploy-bots
 
 .PHONY: deploy-bondy-primary
 deploy-bondy-primary:
-	fly deploy --config ./fly.toml--region lhr
+	fly deploy --config ./fly.toml --regions lhr
 	fly scale vm shared-cpu-2x
 	fly scale memory 2048
 	fly scale count 2
