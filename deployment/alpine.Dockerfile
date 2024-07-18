@@ -11,6 +11,7 @@ RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
     ln -s /var/cache/apk /etc/apk/cache && \
     apk add --no-cache \
         build-base \
+        cmake \
         libstdc++ \
         git \
         tar \
