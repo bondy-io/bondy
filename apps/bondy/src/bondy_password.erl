@@ -572,8 +572,10 @@ new_scram(Password, Params) ->
 validate_string(Password) ->
     Size = byte_size(Password),
     Regex = persistent_term:get({?MODULE, regex}),
+    Min = bondy_config:get([security, password, min_length]),
+    Max = bondy_config:get([security, password, max_length]),
 
-    Size >= 6 andalso Size =< 256
+    Size >= Min andalso Size =< Max
     andalso nomatch =:= re:run(Password, Regex)
     orelse error(invalid_password),
 
