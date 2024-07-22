@@ -885,10 +885,20 @@ rebuild_dispatch_table(https, Routes) ->
     rebuild_dispatch_table(<<"https">>, Routes);
 
 rebuild_dispatch_table(<<"http">>, Routes) ->
-    cowboy:set_env(?HTTP, dispatch, cowboy_router:compile(Routes));
-
+    case bondy_config:get([?HTTP, enabled], true) of
+        true ->
+            cowboy:set_env(?HTTP, dispatch, cowboy_router:compile(Routes));
+        false ->
+            ok
+    end;
+    
 rebuild_dispatch_table(<<"https">>, Routes) ->
-    cowboy:set_env(?HTTPS, dispatch, cowboy_router:compile(Routes)).
+    case bondy_config:get([?HTTPS, enabled], true) of
+        true ->
+            cowboy:set_env(?HTTPS, dispatch, cowboy_router:compile(Routes));
+        false ->
+            ok
+    end.
 
 
 %% @private
