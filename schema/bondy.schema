@@ -176,7 +176,7 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc Defines the minimum length for newly created passwords. The value
-%% should be at least 6 and at most 254.
+%% should be at least 3 and at most 256.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "security.password.min_length", "bondy.security.password.min_length", [
@@ -188,11 +188,11 @@
 {translation, "bondy.security.password.min_length",
   fun(Conf) ->
     case cuttlefish:conf_get("security.password.min_length", Conf) of
-        Value when is_integer(Value), Value >= 6, Value =< 254 ->
+        Value when is_integer(Value), Value >= 3, Value =< 256 ->
           Value;
         _ ->
             cuttlefish:invalid(
-              "value should be an integer in the range 6..254"
+              "value should be an integer in the range 3..256"
             )
     end
   end
@@ -200,7 +200,7 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc Defines the maximum length for newly created passwords. The value
-%% should be at least 6 and at most 254.
+%% should be at least 3 and at most 256.
 %% @end
 %% -----------------------------------------------------------------------------
 
@@ -213,11 +213,11 @@
   fun(Conf) ->
     Min = cuttlefish:conf_get("security.password.min_length", Conf),
     case cuttlefish:conf_get("security.password.max_length", Conf) of
-        Value when is_integer(Value), Value >= Min, Value =< 254 ->
+        Value when is_integer(Value), Value >= Min, Value =< 256 ->
           Value;
         _ ->
             cuttlefish:invalid(
-              "value should be an integer in the range {Min}..254"
+              "value should be an integer in the range {Min}..256"
             )
     end
   end
