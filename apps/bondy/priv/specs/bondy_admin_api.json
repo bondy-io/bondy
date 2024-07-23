@@ -1604,6 +1604,156 @@
                             }
                         }
                     }
+                },
+                "/realms/:realm_uri/grants" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.realm.grants",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.grant.create",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.body}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.grant.revoke",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.body}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/groups/:id/grants" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.group.grants",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/users/:id/grants" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.grants",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
                 }
             }
         }

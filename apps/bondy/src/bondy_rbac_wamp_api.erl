@@ -49,6 +49,36 @@
     }
     | {reply, wamp_result() | wamp_error()}.
 
+%% -----------------------------------------------------------------------------
+%% @doc It creates a grant for a given realm URI.
+%% @end
+%% -----------------------------------------------------------------------------
+handle_call(?BONDY_GRANT_CREATE, #call{} = M, Ctxt) ->
+    [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    case bondy_rbac:grant(Uri, Data) of
+        ok ->
+            R = wamp_message:result(M#call.request_id, #{}),
+            {reply, R};
+        {error, Reason} ->
+            E = bondy_wamp_utils:error(Reason, M),
+            {reply, E}
+    end;
+
+%% -----------------------------------------------------------------------------
+%% @doc It revokes a grant for a given realm URI.
+%% @end
+%% -----------------------------------------------------------------------------
+handle_call(?BONDY_GRANT_REVOKE, #call{} = M, Ctxt) ->
+    [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    case bondy_rbac:revoke(Uri, Data) of
+        ok ->
+            R = wamp_message:result(M#call.request_id, #{}),
+            {reply, R};
+        {error, Reason} ->
+            E = bondy_wamp_utils:error(Reason, M),
+            {reply, E}
+    end;
+
 handle_call(_, #call{} = M, _) ->
     E = bondy_wamp_utils:no_such_procedure_error(M),
     {reply, E}.
