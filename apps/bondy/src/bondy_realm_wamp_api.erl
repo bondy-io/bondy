@@ -116,6 +116,17 @@ handle_call(?BONDY_REALM_SECURITY_IS_ENABLED, M, Ctxt) ->
     R = wamp_message:result(M#call.request_id, #{}, [Boolean]),
     {reply, R};
 
+%% -----------------------------------------------------------------------------
+%% @doc It returns the grants for a given realm URI.
+%% @end
+%% -----------------------------------------------------------------------------
+handle_call(?BONDY_REALM_GRANTS, #call{} = M, Ctxt) ->
+    [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
+    
+    Ext = [bondy_rbac:externalize_grant(X) || X <- bondy_realm:grants(Uri)],
+    R = wamp_message:result(M#call.request_id, #{}, [Ext]),
+    {reply, R};
+
 handle_call(_, M, _) ->
     E = bondy_wamp_utils:no_such_procedure_error(M),
     {reply, E}.

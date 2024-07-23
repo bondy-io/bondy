@@ -212,6 +212,17 @@ handle_call(?BONDY_USER_REMOVE_GROUPS, #call{} = M, Ctxt) ->
             {reply, E}
     end;
 
+%% -----------------------------------------------------------------------------
+%% @doc It returns the grants for a given user.
+%% @end
+%% -----------------------------------------------------------------------------
+handle_call(?BONDY_USER_GRANTS, #call{} = M, Ctxt) ->
+    [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    
+    Ext = [bondy_rbac:externalize_grant(X) || X <- bondy_rbac:user_grants(Uri, Username)],
+    R = wamp_message:result(M#call.request_id, #{}, [Ext]),
+    {reply, R};
+
 handle_call(_, #call{} = M, _) ->
     E = bondy_wamp_utils:no_such_procedure_error(M),
     {reply, E}.

@@ -568,7 +568,7 @@ lazy_or_test_() ->
         ?_assertEqual(error(bar), lazy_or(error(foo), fun() -> error(bar) end)),
         ?_assertEqual(ok(1), lazy_or(ok(1), fun() -> not_a_result end)),
 
-        ?_assertError(badarg, lazy_or(error(foo), fun() -> not_a_result end)),
+        ?_assertEqual(not_a_result, lazy_or(error(foo), fun() -> not_a_result end)),
         ?_assertError(function_clause, lazy_or(ok(1), not_a_fun)),
         ?_assertError(function_clause, lazy_or(error(foo), not_a_fun))
     ].
