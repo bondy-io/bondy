@@ -310,6 +310,24 @@
                                 "body" : "{{action.result.args |> head}}"
                             }
                         }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.http_gateway.api.delete",
+                            "options" : {},
+                            "args" : ["{{request.bindings.id}}"],
+                            "kwargs" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" : "{{action.result.args |> head}}"
+                            }
+                        }
                     }
                 },
                 "/api_specs/:id/info" : {

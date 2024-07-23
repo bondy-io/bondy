@@ -85,6 +85,18 @@ handle_call(?BONDY_HTTP_GATEWAY_GET, #call{} = M, Ctxt) ->
             {reply, R}
     end;
 
+handle_call(?BONDY_HTTP_GATEWAY_DELETE, #call{} = M, Ctxt) ->
+    [Id] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
+
+    case bondy_http_gateway:delete(Id) of
+        {error, Reason} ->
+            E = bondy_wamp_utils:error(Reason, M),
+            {reply, E};
+        Spec ->
+            R = wamp_message:result(M#call.request_id, #{}, [Spec]),
+            {reply, R}
+    end;
+
 handle_call(_, #call{} = M, _) ->
     E = bondy_wamp_utils:no_such_procedure_error(M),
     {reply, E}.
