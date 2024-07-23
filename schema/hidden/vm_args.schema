@@ -26,7 +26,7 @@
 %% the driver_async() functionality. Notice that the value passed is only a
 %% suggestion, and it can even be ignored on some platforms.
 %% More information at: http://erlang.org/doc/man/erl.html
-{mapping, "vm.async_threads", "vm_args.+a", [
+{mapping, "vm.async_threads.stack_size", "vm_args.+a", [
   {datatype, integer},
   {commented, 16},
   {validators, ["range:16-8192"]},
