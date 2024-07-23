@@ -128,6 +128,8 @@ do_handle_call(<<"bondy.oauth2.", _/binary>> = Proc, M, Ctxt) ->
 do_handle_call(<<"bondy.telemetry.", _/binary>> = Proc, M, Ctxt) ->
     bondy_telemetry_wamp_api:handle_call(Proc, M, Ctxt);
 
+do_handle_call(<<"bondy.grant.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_rbac_wamp_api:handle_call(Proc, M, Ctxt);
 
 % do_handle_call(<<"bondy.registry.", _/binary>> = Proc, M, Ctxt) ->
 %     do_do_handle_call(Proc, M, Ctxt);
