@@ -147,3 +147,6 @@ api_gateway.http.proxy_protocol = on
 api_gateway.http.proxy_protocol.mode = relaxed
 admin_api.http.proxy_protocol = on
 admin_api.http.proxy_protocol.mode = relaxed
+
+
+vm.io.dirty_schedulers = 128
