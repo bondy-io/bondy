@@ -827,6 +827,8 @@ type_and_version(Group) ->
 
 update_groups(RealmUri, all, Groupnames, Fun) ->
     plum_db:foreach(fun
+        ({_, ?TOMBSTONE}) ->
+            ok;
         ({_, [?TOMBSTONE]}) ->
             ok;
         ({_, _} = Term) ->
