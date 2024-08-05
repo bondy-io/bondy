@@ -1473,9 +1473,9 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
             %% We order the removal of all associated data
             ok = bondy_jobs:enqueue(
                 Uri, fun() ->
-                    Opts = Opts0#{dirty => true},
+                    Opts1 = Opts0#{dirty => true},
 
-                    ok = bondy_rbac:remove_all(Uri, Opts),
+                    ok = bondy_rbac:remove_all(Uri, Opts1),
 
                     %% Delete all tickets
                     ok = bondy_ticket:revoke_all(Uri),
@@ -1486,10 +1486,10 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
                     bondy_rbac_source:remove_all(Uri),
 
                     %% Delete all groups
-                    bondy_rbac_group:remove_all(Uri, Opts),
+                    bondy_rbac_group:remove_all(Uri, Opts1),
 
                     %% Delete all users
-                    bondy_rbac_user:remove_all(Uri, Opts),
+                    bondy_rbac_user:remove_all(Uri, Opts1),
 
                     ok
                 end
