@@ -642,7 +642,7 @@ find_pattern(Type, RealmUri, Uri, Opts, Trie) ->
         first => <<RealmUri/binary, $.>>
     },
 
-    Pattern = art_key_pattern(Type, RealmUri, Uri),
+    Pattern = art_key_pattern(Type, RealmUri, term_to_art_key_part(Uri)),
 
     %% Always sync at the moment
     %% We use art:match/3 instead of art:find_matches/3.
