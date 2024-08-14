@@ -979,16 +979,16 @@ dirty_delete(Type, EntryKey) ->
 
     case plum_db:get_object({PDBPrefix, EntryKey}) of
         undefined ->
-            %% It is possible?
+            %% Is it possible?
             undefined;
 
         ?TOMBSTONE ->
-            %% It is possible?
+            %% Is it possible?
             %% or [{?TOMBSTONE, _}] = plum_db_dvvset:values(Clock),
             undefined;
 
-        {error, Reason} ->
-            %% It is possible?
+        {error, _Reason} ->
+            %% Is it possible?
             undefined;
 
         % {{case_clause,{ok,{object,{[{{10,\
