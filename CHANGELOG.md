@@ -1,7 +1,8 @@
 # CHANGELOG
-## DEVELOP
+## ## 1.0.0-rc.23
 ### Changes
 * Migration from eleveldb to rocksdb - NOTICE: Rocksdb storage is incompatible with Leveldb so if you rely on Bondy storing real information (realms, users, groups, grants, etc), you will need to export/import them using the `bondy.backup.create` and `bondy.backup.restore` WAMP procedures.
+* Bug fix in `bondy_resgistry_entry:dirty_delete/1`
 
 ## 1.0.0-rc.22
 * Fix CI for OTP26 docker variant
