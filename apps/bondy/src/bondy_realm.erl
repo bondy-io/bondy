@@ -1756,7 +1756,8 @@ grants(Realm) ->
 %% These includes the grants inherited from the prototype (if defined).
 %% @end
 %% -----------------------------------------------------------------------------
--spec grants(Realm :: t() | uri(), Opts :: map()) -> list(bondy_rbac_user:t()).
+-spec grants(Realm :: t() | uri(), Opts :: map())
+-> [{{binary(), {binary(), binary()}}, [binary()]}].
 
 grants(#realm{uri = Uri}, Opts) ->
     %% TODO change this with continuation return
