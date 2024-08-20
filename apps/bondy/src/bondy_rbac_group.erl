@@ -221,7 +221,7 @@ add(RealmUri, Group) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Adds a new user or updates an existing one.
+%% @doc Adds a new group or updates an existing one.
 %% This change is globally replicated.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -251,7 +251,7 @@ add(RealmUri, #{type := ?TYPE, name := Name} = Group, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec update(RealmUri :: uri(), Name :: binary(), Data :: map()) ->
-    {ok, NewUser :: t()} | {error, any()}.
+    {ok, NewGroup :: t()} | {error, any()}.
 
 update(RealmUri, Name, Data0) when is_binary(Name) ->
      %% TODO validate that we are not updating a prototype group, if so raise a
@@ -387,7 +387,7 @@ remove(RealmUri, Name, _Opts) ->
         %% By doing this we will be automatically upgradings those object
         %% versions.
         ok = bondy_rbac_user:remove_group(RealmUri, all, Name),
-        ok = remove_groups(RealmUri, all, Name),
+        ok = remove_group(RealmUri, all, Name),
 
         %% We finally delete the group, on_delete/2 will be called by plum_db
         ok = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Name)
@@ -520,7 +520,7 @@ list(RealmUri, Opts) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns the external representation of the user `User'.
+%% @doc Returns the external representation of the Group.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec to_external(Group :: t()) -> external().
@@ -827,6 +827,8 @@ type_and_version(Group) ->
 
 update_groups(RealmUri, all, Groupnames, Fun) ->
     plum_db:foreach(fun
+        ({_, ?TOMBSTONE}) ->
+            ok;
         ({_, [?TOMBSTONE]}) ->
             ok;
         ({_, _} = Term) ->
@@ -838,14 +840,14 @@ update_groups(RealmUri, all, Groupnames, Fun) ->
 
 update_groups(RealmUri, Groups, Groupnames, Fun) when is_list(Groups) ->
     _ = [
-        update_groups(RealmUri, User, Groupnames, Fun) || User <- Groups
+        update_groups(RealmUri, Group, Groupnames, Fun) || Group <- Groups
     ],
     ok;
 
-update_groups(RealmUri, #{type := ?TYPE} = Group, Groupnames, Fun)
-when is_function(2, Fun) ->
+update_groups(RealmUri, #{type := ?TYPE, name := Name} = Group, Groupnames, Fun)
+when is_function(Fun, 2) ->
     Update = #{groups => Fun(maps:get(groups, Group), Groupnames)},
-    case update(RealmUri, Group, Update) of
+    case update(RealmUri, Name, Update) of
         {ok, _} -> ok;
         {error, Reason} -> throw(Reason)
     end;

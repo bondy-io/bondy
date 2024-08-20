@@ -399,6 +399,11 @@ verify_string(String, #{version := <<"1.0">>} = PW) ->
     %% StoredHash is hex value
     pbkdf2:compare_secure(pbkdf2:to_hex(Hash), StoredHash);
 
+%% to handle the error: reason=function_clause
+%% example: [{bondy_password,verify_string,[<<\"Nes 2907\">>,[{hash_pass,<<\"adcebee9a2cbbe4e26c340f95da646a1ab60c676\">>},{auth_name,pbkdf2},{hash_func,sha},{salt,<<76,202,0,27,196,167,217,222,194,142,96,185,219,169,96,233>>},{iterations,65536}]]
+verify_string(Hash, PWList) when is_list(PWList) ->
+    verify_string(Hash, maps:from_list(PWList));
+
 verify_string(Hash, #{} = PW) ->
     verify_string(Hash, add_version(PW)).
 
@@ -572,8 +577,10 @@ new_scram(Password, Params) ->
 validate_string(Password) ->
     Size = byte_size(Password),
     Regex = persistent_term:get({?MODULE, regex}),
+    Min = bondy_config:get([security, password, min_length]),
+    Max = bondy_config:get([security, password, max_length]),
 
-    Size >= 6 andalso Size =< 256
+    Size >= Min andalso Size =< Max
     andalso nomatch =:= re:run(Password, Regex)
     orelse error(invalid_password),
 

@@ -110,7 +110,7 @@
         required => true,
         allow_undefined => true,
         default => undefined,
-        datatype => {in, [<<"exact">>, <<"prefix">>, <<"wildcard">>]}
+        datatype => {in, [?EXACT_MATCH, ?PREFIX_MATCH, ?WILDCARD_MATCH]}
     }
 }).
 
@@ -178,6 +178,7 @@
 
 -export([authorize/2]).
 -export([authorize/3]).
+-export([externalize_grant/1]).
 -export([get_anonymous_context/1]).
 -export([get_anonymous_context/2]).
 -export([get_context/1]).
@@ -185,17 +186,16 @@
 -export([grant/2]).
 -export([grant/3]).
 -export([grants/2]).
--export([grants/3]).
 -export([group_grants/2]).
 -export([is_reserved_name/1]).
 -export([normalise_name/1]).
 -export([refresh_context/1]).
+-export([remove_all/2]).
 -export([request/1]).
--export([revoke/2]).
 -export([revoke_group/2]).
 -export([revoke_user/2]).
+-export([revoke/2]).
 -export([user_grants/2]).
--export([remove_all/2]).
 
 
 
@@ -513,14 +513,21 @@ revoke_group(RealmUri, Name) ->
 %% @doc Returns the local grants assigned in realm `RealmUri'. This function does not use protypical inheritance.
 %% @end
 %% -----------------------------------------------------------------------------
--spec grants(RealmUri :: uri(), Opts :: map()) -> [grant()].
+-spec grants(RealmUri :: uri(), Opts :: map())
+-> [{{binary(), normalised_resource()}, [permission()]}].
 
 grants(RealmUri, Opts0) ->
     Opts = maps:to_list(Opts0),
-    lists:append(
-        find_grants(RealmUri, '_', group, Opts),
-        find_grants(RealmUri, '_', user, Opts)
-    ).
+    GroupGrants = [
+        {{concat_role(group, Name), Resource}, Permissions} ||
+        {{Name, Resource}, Permissions} <- find_grants(RealmUri, '_', group, Opts)
+    ],
+    UserGrants = [
+        {{concat_role(user, Name), Resource}, Permissions} ||
+        {{Name, Resource}, Permissions} <- find_grants(RealmUri, '_', user, Opts)
+    ],
+
+    lists:append(GroupGrants, UserGrants).
 
 
 %% -----------------------------------------------------------------------------
@@ -606,6 +613,41 @@ remove_all(RealmUri, _Opts) ->
         Opts
     ).
 
+-spec externalize_grant(grant()) -> map().
+
+%% -----------------------------------------------------------------------------
+%% @doc To list the grants for a realm
+%% @end
+%% -----------------------------------------------------------------------------
+externalize_grant({{Role, {_, _} = Resource}, Permissions}) ->
+    ResourceMap = externalize_grant({Resource, Permissions}),
+    ResourceMap#{
+        <<"roles">> => [Role]
+    };
+
+%% -----------------------------------------------------------------------------
+%% @doc To list the grants for a role (group or user)
+%% @end
+%% -----------------------------------------------------------------------------
+externalize_grant({{Uri, Strategy}, Permissions}) ->
+    #{
+        <<"resources">> => #{
+            <<"uri">> => Uri,
+            <<"match">> => Strategy
+        },
+        <<"permissions">> => Permissions
+    };
+%% TODO: check if it is possible or necessary to remove this clause
+%% due to {<<>>, <<"prefix">>} is stored in this case matching the previous clause
+externalize_grant({any, Permissions}) ->
+    #{
+        <<"resources">> => #{
+            <<"uri">> => <<"">>,
+            <<"match">> => ?PREFIX_MATCH
+        },
+        <<"permissions">> => Permissions
+    }.
+
 
 
 %% =============================================================================
@@ -634,7 +676,7 @@ get_context(RealmUri, Username, Grants) ->
         fun
             ({any, Permissions}, {Map, L}) ->
                 {maps:put(any, Permissions, Map), L};
-            ({{Uri, <<"exact">>}, Permissions}, {Map, L}) ->
+            ({{Uri, ?EXACT_MATCH}, Permissions}, {Map, L}) ->
                 {maps:put(Uri, Permissions, Map), L};
             (Term, {Map, L}) ->
                 {Map, [Term|L]}

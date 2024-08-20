@@ -26,7 +26,7 @@
 -module(bondy_result).
 
 
--type t()       ::  ok() | error().
+-type t()       ::  ok | ok() | error().
 -type ok()      ::  ok(any()).
 -type error()   ::  error(any()).
 -type ok(T)     ::  {ok, T}.
@@ -43,13 +43,16 @@
 -export([map/2]).
 -export([map_error/2]).
 -export([ok/1]).
--export(['or'/2]).
+-export([or_else/2]).
 -export([partition/1]).
 -export([replace/2]).
 -export([replace_error/2]).
 -export([then/2]).
+-export([then_recover/2]).
+-export([then_both/3]).
 -export(['try'/2]).
 -export([try_recover/2]).
+-export([try_both/3]).
 -export([undefined_error/1]).
 -export([unwrap/2]).
 -export([unwrap_both/1]).
@@ -142,6 +145,7 @@ flatten({error, _} = Result) ->
 %% -----------------------------------------------------------------------------
 -spec is_error(t()) -> boolean().
 
+is_error(ok) -> false;
 is_error({ok, _}) -> false;
 is_error({error, _}) -> true.
 
@@ -152,6 +156,7 @@ is_error({error, _}) -> true.
 %% -----------------------------------------------------------------------------
 -spec is_ok(t()) -> boolean().
 
+is_ok(ok) -> true;
 is_ok({ok, _}) -> true;
 is_ok({error, _}) -> false.
 
@@ -163,11 +168,14 @@ is_ok({error, _}) -> false.
 %% -----------------------------------------------------------------------------
 -spec lazy_or(Result :: t(), Fun :: fun(() -> t())) -> t().
 
+lazy_or(ok = Result, Fun) when is_function(Fun, 0) ->
+    Result;
+
 lazy_or({ok, _} = Result, Fun) when is_function(Fun, 0) ->
     Result;
 
-lazy_or({error, _} = Result, Fun) when is_function(Fun, 0) ->
-    eval_result(Result, Fun).
+lazy_or({error, _}, Fun) when is_function(Fun, 0) ->
+    Fun().
 
 
 %% -----------------------------------------------------------------------------
@@ -177,6 +185,8 @@ lazy_or({error, _} = Result, Fun) when is_function(Fun, 0) ->
 %% -----------------------------------------------------------------------------
 -spec lazy_unwrap(Result :: t(), Fun :: fun(() -> t())) -> any().
 
+lazy_unwrap(ok, Fun) when is_function(Fun, 0) ->
+    undefined;
 lazy_unwrap({ok, Value}, Fun) when is_function(Fun, 0) ->
     Value;
 lazy_unwrap({error, _}, Fun) when is_function(Fun, 0) ->
@@ -192,6 +202,9 @@ lazy_unwrap({error, _}, Fun) when is_function(Fun, 0) ->
 %% -----------------------------------------------------------------------------
 
 -spec map(Result :: t(), fun((any()) -> any())) -> error() | any().
+
+map(ok, Fun) when is_function(Fun, 1) ->
+    {ok, Fun(undefined)};
 
 map({ok, Value}, Fun) when is_function(Fun, 1) ->
     {ok, Fun(Value)};
@@ -210,6 +223,9 @@ map({error, _} = Result, Fun) when is_function(Fun, 1) ->
 
 -spec map_error(Result :: t(), fun((any()) -> any())) -> error() | any().
 
+map_error(ok = Result, Fun) when is_function(Fun, 1) ->
+    Result;
+
 map_error({ok, _} = Result, Fun) when is_function(Fun, 1) ->
     Result;
 
@@ -224,6 +240,9 @@ map_error({error, Error}, Fun) when is_function(Fun, 1) ->
 
 -spec undefined_error(Result :: t()) -> ok() | error(undefined).
 
+undefined_error(ok = Result) ->
+    Result;
+
 undefined_error({ok, _} = Result) ->
     Result;
 
@@ -236,11 +255,13 @@ undefined_error({error, _}) ->
 %% value.
 %% @end
 %% -----------------------------------------------------------------------------
--spec 'or'(First :: t(), Second :: t()) -> t().
+-spec or_else(First :: t(), Second :: t()) -> t().
 
-'or'({ok, _} = Result, _) -> Result;
-'or'(_, {ok, _} = Result) -> Result;
-'or'(_, {error, _} = Result) -> Result.
+or_else(ok = Result, _) -> Result;
+or_else(_, ok = Result) -> Result;
+or_else({ok, _} = Result, _) -> Result;
+or_else(_, {ok, _} = Result) -> Result;
+or_else(_, {error, _} = Result) -> Result.
 
 
 %% -----------------------------------------------------------------------------
@@ -256,6 +277,9 @@ undefined_error({error, _}) ->
 partition(Results) ->
     lists:foldl(
         fun
+            (ok, Acc) ->
+                Acc;
+
             ({ok, Value}, {Values, Errors}) ->
                 {[Value | Values], Errors};
 
@@ -276,6 +300,7 @@ partition(Results) ->
 %% -----------------------------------------------------------------------------
 -spec replace(Result :: t(), Value :: any()) -> t().
 
+replace(ok, Value) -> {ok, Value};
 replace({ok, _}, Value) -> {ok, Value};
 replace({error, _} = Result, _) -> Result.
 
@@ -286,6 +311,7 @@ replace({error, _} = Result, _) -> Result.
 %% -----------------------------------------------------------------------------
 -spec replace_error(Result :: t(), Error :: any()) -> t().
 
+replace_error(ok = Result, _) -> Result;
 replace_error({ok, _} = Result, _) -> Result;
 replace_error({error, _}, Error) -> {error, Error}.
 
@@ -298,6 +324,26 @@ replace_error({error, _}, Error) -> {error, Error}.
 -spec then(Result :: t(), Fun :: fun((any()) -> t())) -> t() | no_return().
 
 then(Result, Fun) -> 'try'(Result, Fun).
+
+%% -----------------------------------------------------------------------------
+%% @doc An alias for `try_recover/2`.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec then_recover(Result :: t(), Fun :: fun((any()) -> t())) ->
+    t() | no_return().
+
+then_recover(Result, Fun) -> try_recover(Result, Fun).
+
+%% -----------------------------------------------------------------------------
+%% @doc An alias for `try_both/3`.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec then_both(
+    Result :: t(),
+    Fun :: fun((any()) -> t()),
+    Fun :: fun((any()) -> t())) -> t() | no_return().
+
+then_both(Result, Fun, RecoverFun) -> try_both(Result, Fun, RecoverFun).
 
 
 %% -----------------------------------------------------------------------------
@@ -313,6 +359,9 @@ then(Result, Fun) -> 'try'(Result, Fun).
 %% @end
 %% -----------------------------------------------------------------------------
 -spec 'try'(Result :: t(), Fun :: fun((any()) -> t())) -> t() | no_return().
+
+'try'(ok = Result, Fun) when is_function(Fun, 1) ->
+    eval_result(Result, Fun);
 
 'try'({ok, _} = Result, Fun) when is_function(Fun, 1) ->
     eval_result(Result, Fun);
@@ -336,11 +385,36 @@ then(Result, Fun) -> 'try'(Result, Fun).
 -spec try_recover(Result :: t(), Fun :: fun((any()) -> t())) ->
     t() | no_return().
 
+try_recover(ok = Result, Fun) when is_function(Fun, 1) ->
+    Result;
+
 try_recover({ok, _} = Result, Fun) when is_function(Fun, 1) ->
     Result;
 
 try_recover({error, _} = Result, Fun) when is_function(Fun, 1) ->
     eval_result(Result, Fun).
+
+%% -----------------------------------------------------------------------------
+%% @doc Updates an `ok' result by passing its value to a `fun' that yields
+%% a result, and returning the yielded result. If the input is an `error' rather
+%% than an `ok', updates a value held within the `error` of a result by calling
+%% `recover_fun' on it, where the given function also returns a result.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec try_both(
+    Result :: t(),
+    Fun :: fun((any()) -> t()),
+    Fun :: fun((any()) -> t())) -> t() | no_return().
+
+try_both(ok = Result, Fun, _) ->
+    'try'(Result, Fun);
+
+try_both({ok, _} = Result, Fun, _) ->
+    'try'(Result, Fun);
+
+try_both({error, _} = Result, _, RecoverFun) ->
+    try_recover(Result, RecoverFun).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -350,6 +424,7 @@ try_recover({error, _} = Result, Fun) when is_function(Fun, 1) ->
 %% -----------------------------------------------------------------------------
 -spec unwrap(Result :: t(), Default :: any()) -> any().
 
+unwrap(ok, _) -> undefined;
 unwrap({ok, Value}, _) -> Value;
 unwrap({error, _}, Default) -> Default.
 
@@ -360,6 +435,7 @@ unwrap({error, _}, Default) -> Default.
 %% -----------------------------------------------------------------------------
 -spec unwrap_both(Result :: t()) -> any().
 
+unwrap_both(ok) -> undefined;
 unwrap_both({ok, Value}) -> Value;
 unwrap_both({error, Error}) -> Error.
 
@@ -372,6 +448,7 @@ unwrap_both({error, Error}) -> Error.
 %% -----------------------------------------------------------------------------
 -spec unwrap_error(Result :: t(), Default :: any()) -> any().
 
+unwrap_error(ok, Default) -> Default;
 unwrap_error({ok, _}, Default) -> Default;
 unwrap_error({error, Error}, _) -> Error.
 
@@ -386,7 +463,7 @@ values(Results) ->
     lists:filtermap(
         fun
             ({ok, Value}) -> {true, Value};
-            ({error, _}) -> false
+            (_) -> false
         end,
         Results
     ).
@@ -400,6 +477,8 @@ values(Results) ->
 
 eval_result(Result0, Fun) when is_function(Fun, 0) ->
     case Fun() of
+        ok = Result ->
+            Result;
         {ok, _} = Result ->
             Result;
         {error, _} = Result ->
@@ -410,6 +489,8 @@ eval_result(Result0, Fun) when is_function(Fun, 0) ->
 
 eval_result(Result0, Fun) when is_function(Fun, 1) ->
     case Fun(element(2, Result0)) of
+        ok = Result ->
+            Result;
         {ok, _} = Result ->
             Result;
         {error, _} = Result ->
@@ -487,7 +568,7 @@ lazy_or_test_() ->
         ?_assertEqual(error(bar), lazy_or(error(foo), fun() -> error(bar) end)),
         ?_assertEqual(ok(1), lazy_or(ok(1), fun() -> not_a_result end)),
 
-        ?_assertError(badarg, lazy_or(error(foo), fun() -> not_a_result end)),
+        ?_assertEqual(not_a_result, lazy_or(error(foo), fun() -> not_a_result end)),
         ?_assertError(function_clause, lazy_or(ok(1), not_a_fun)),
         ?_assertError(function_clause, lazy_or(error(foo), not_a_fun))
     ].
@@ -518,10 +599,10 @@ undefined_error_test_() ->
 
 or_test_() ->
     [
-        ?_assertEqual(ok(1), 'or'(ok(1), ok(2))),
-        ?_assertEqual(ok(1), 'or'(ok(1), error(foo))),
-        ?_assertEqual(ok(2), 'or'(error(foo), ok(2))),
-        ?_assertEqual(error(bar), 'or'(error(foo), error(bar)))
+        ?_assertEqual(ok(1), or_else(ok(1), ok(2))),
+        ?_assertEqual(ok(1), or_else(ok(1), error(foo))),
+        ?_assertEqual(ok(2), or_else(error(foo), ok(2))),
+        ?_assertEqual(error(bar), or_else(error(foo), error(bar)))
     ].
 
 

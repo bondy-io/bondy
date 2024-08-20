@@ -86,6 +86,18 @@
 -define(BONDY_SOURCE_GET,          <<"bondy.source.get">>).
 -define(BONDY_SOURCE_LIST,         <<"bondy.source.list">>).
 -define(BONDY_SOURCE_MATCH,        <<"bondy.source.match">>).
+
+%% In the RBAC context, the procedures for grants:
+%% - GrantPermission(role, resource, permission): Creates a grant to allow the specified role to access the specified resource with the given permission.
+%% - RevokePermission(role, resource, permission): Removes a grant that allows the specified role to access the specified resource with the given permission.
+%% - ListPermissions(role): Retrieves a list of permissions granted to the specified role or even to the realm (Identity Provider).
+-define(BONDY_GRANT_CREATE,        <<"bondy.grant.create">>).
+-define(BONDY_GRANT_REVOKE,        <<"bondy.grant.revoke">>).
+
+-define(BONDY_REALM_GRANTS,        <<"bondy.realm.grants">>).
+-define(BONDY_GROUP_GRANTS,        <<"bondy.group.grants">>).
+-define(BONDY_USER_GRANTS,         <<"bondy.user.grants">>).
+
 -define(BONDY_USER_ADD,            <<"bondy.user.add">>).
 -define(BONDY_USER_ADD_ALIAS,      <<"bondy.user.add_alias">>).
 -define(BONDY_USER_ADD_GROUP,      <<"bondy.user.add_group">>).
@@ -97,7 +109,7 @@
 -define(BONDY_USER_GET,            <<"bondy.user.get">>).
 -define(BONDY_USER_IS_ENABLED,     <<"bondy.user.is_enabled">>).
 -define(BONDY_USER_LIST,           <<"bondy.user.list">>).
--define(BONDY_USER_REMOVE_ALIAS,     <<"bondy.user.remove_alias">>).
+-define(BONDY_USER_REMOVE_ALIAS,   <<"bondy.user.remove_alias">>).
 -define(BONDY_USER_REMOVE_GROUP,   <<"bondy.user.remove_group">>).
 -define(BONDY_USER_REMOVE_GROUPS,  <<"bondy.user.remove_groups">>).
 -define(BONDY_USER_UPDATE,         <<"bondy.user.update">>).
