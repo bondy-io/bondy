@@ -979,12 +979,39 @@ dirty_delete(Type, EntryKey) ->
 
     case plum_db:get_object({PDBPrefix, EntryKey}) of
         undefined ->
+            %% Is it possible?
             undefined;
 
         ?TOMBSTONE ->
+            %% Is it possible?
+            %% or [{?TOMBSTONE, _}] = plum_db_dvvset:values(Clock),
             undefined;
 
-        {object, Clock} = Obj0 ->
+        {error, _Reason} ->
+            %% Is it possible?
+            undefined;
+
+        % {{case_clause,{ok,{object,{[{{10,\
+        % 'bondy@bondy-2.bondy.message-brokers.svc.cluster.local'},\
+        % 2,\
+        % [{'$deleted',{1723,148981,370249}}]}],\
+        % []}}}},\
+        % [{bondy_registry_entry,dirty_delete,2,\
+        % [{file,\"/bondy/src/apps/bondy/src/bondy_registry_entry.erl\"},\
+        % {line,980}]},\
+        % {bondy_registry,'-do_prune/4-fun-0-',1,\
+        % [{file,\"/bondy/src/apps/bondy/src/bondy_registry.erl\"},\
+        % {line,1980}]},\
+        % {lists,foreach_1,2,[{file,\"lists.erl\"},{line,1686}]},\
+        % {bondy_registry,do_prune,3,\
+        % [{file,\"/bondy/src/apps/bondy/src/bondy_registry.erl\"},\
+        % {line,1966}]}]}\
+
+        % Clock = {[{{10,'bondy@bondy-2.bondy.message-brokers.svc.cluster.local'},2,[{'$deleted',{1723,148981,370249}}]}],[]}.
+        % plum_db_dvvset:values(Clock).
+        % [{'$deleted',{1723,148981,370249}}]
+
+        {ok, {object, Clock} = Obj0} ->
             %% We use a static fake ActorID and the original timestamp so that
             %% the tombstone is deterministically.
             %% This allows the operation to be idempotent when performed

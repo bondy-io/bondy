@@ -186,7 +186,6 @@
 -export([grant/2]).
 -export([grant/3]).
 -export([grants/2]).
--export([grants/3]).
 -export([group_grants/2]).
 -export([is_reserved_name/1]).
 -export([normalise_name/1]).
@@ -514,14 +513,21 @@ revoke_group(RealmUri, Name) ->
 %% @doc Returns the local grants assigned in realm `RealmUri'. This function does not use protypical inheritance.
 %% @end
 %% -----------------------------------------------------------------------------
--spec grants(RealmUri :: uri(), Opts :: map()) -> [grant()].
+-spec grants(RealmUri :: uri(), Opts :: map())
+-> [{{binary(), normalised_resource()}, [permission()]}].
 
 grants(RealmUri, Opts0) ->
     Opts = maps:to_list(Opts0),
-    lists:append(
-        find_grants(RealmUri, '_', group, Opts),
-        find_grants(RealmUri, '_', user, Opts)
-    ).
+    GroupGrants = [
+        {{concat_role(group, Name), Resource}, Permissions} ||
+        {{Name, Resource}, Permissions} <- find_grants(RealmUri, '_', group, Opts)
+    ],
+    UserGrants = [
+        {{concat_role(user, Name), Resource}, Permissions} ||
+        {{Name, Resource}, Permissions} <- find_grants(RealmUri, '_', user, Opts)
+    ],
+
+    lists:append(GroupGrants, UserGrants).
 
 
 %% -----------------------------------------------------------------------------
