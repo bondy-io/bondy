@@ -978,46 +978,13 @@ dirty_delete(Type, EntryKey) ->
     PDBPrefix = pdb_prefix(Type, EntryKey),
 
     case plum_db:get_object({PDBPrefix, EntryKey}) of
-        undefined ->
-            %% Is it possible?
-            undefined;
-
-        ?TOMBSTONE ->
-            %% Is it possible?
-            %% or [{?TOMBSTONE, _}] = plum_db_dvvset:values(Clock),
-            undefined;
-
-        {error, _Reason} ->
-            %% Is it possible?
-            undefined;
-
-        % {{case_clause,{ok,{object,{[{{10,\
-        % 'bondy@bondy-2.bondy.message-brokers.svc.cluster.local'},\
-        % 2,\
-        % [{'$deleted',{1723,148981,370249}}]}],\
-        % []}}}},\
-        % [{bondy_registry_entry,dirty_delete,2,\
-        % [{file,\"/bondy/src/apps/bondy/src/bondy_registry_entry.erl\"},\
-        % {line,980}]},\
-        % {bondy_registry,'-do_prune/4-fun-0-',1,\
-        % [{file,\"/bondy/src/apps/bondy/src/bondy_registry.erl\"},\
-        % {line,1980}]},\
-        % {lists,foreach_1,2,[{file,\"lists.erl\"},{line,1686}]},\
-        % {bondy_registry,do_prune,3,\
-        % [{file,\"/bondy/src/apps/bondy/src/bondy_registry.erl\"},\
-        % {line,1966}]}]}\
-
-        % Clock = {[{{10,'bondy@bondy-2.bondy.message-brokers.svc.cluster.local'},2,[{'$deleted',{1723,148981,370249}}]}],[]}.
-        % plum_db_dvvset:values(Clock).
-        % [{'$deleted',{1723,148981,370249}}]
-
         {ok, {object, Clock} = Obj0} ->
             %% We use a static fake ActorID and the original timestamp so that
-            %% the tombstone is deterministically.
+            %% the tombstone is deterministic.
             %% This allows the operation to be idempotent when performed
             %% concurrently by multiple nodes. Idempotency is a requirement so
-            %% that the hash of the object is the same and compares equal
-            %% between nodes irrespective of who created it.
+            %% that the hash of the object compares equal between nodes
+            %% irrespective of which created it.
             %% Also the ActorID helps us determine this is a dirty delete.
             Partition = plum_db:get_partition({PDBPrefix, EntryKey}),
             ActorId = {Partition, ?PLUM_DB_REGISTRY_ACTOR},
@@ -1035,16 +1002,20 @@ dirty_delete(Type, EntryKey) ->
             %% remove the local replica of an entry when we get disconnected
             %% from its root node.
             %% Every node will do the same, so if this is a node crashing we
-            %% will have a tsunami of deletes being broadcasted.
+            %% would have a tsunami of deletes being broadcasted.
             %% We will achieve convergence via AAE.
-            Opts = [
-                {broadcast, false}
-            ],
+            Opts = [{broadcast, false}],
 
             ok = plum_db:dirty_put(PDBPrefix, EntryKey, Resolved, Opts),
 
             %% We return the original value
             plum_db_object:value(Obj0)
+
+        {error, not_found} ->
+            undefined;
+
+        {error, _} ->
+            undefined;
 
     end.
 
