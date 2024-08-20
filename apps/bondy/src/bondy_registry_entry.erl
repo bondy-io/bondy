@@ -1009,13 +1009,13 @@ dirty_delete(Type, EntryKey) ->
             ok = plum_db:dirty_put(PDBPrefix, EntryKey, Resolved, Opts),
 
             %% We return the original value
-            plum_db_object:value(Obj0)
+            plum_db_object:value(Obj0);
 
         {error, not_found} ->
             undefined;
 
         {error, _} ->
-            undefined;
+            undefined
 
     end.
 
