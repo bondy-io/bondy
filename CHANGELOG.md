@@ -1,5 +1,8 @@
 # CHANGELOG
-## ## 1.0.0-rc.23
+## 1.0.0-rc.24
+* Upgraded PlumDB and Partisan with fix to avoid partisan_plumree_brodcast to crash when the behaviour implementors raise an exception
+* Fixes to Debian dockerfile 
+## 1.0.0-rc.23
 ### Changes
 **BREAKING CHANGE NOTICE**
 * This version replaces Leveldb with Rocksdb - Rocksdb storage is incompatible with Leveldb so if you rely on Bondy storing real information (realms, users, groups, grants, etc), you will need to export/import them using the `bondy.backup.create` and `bondy.backup.restore` WAMP procedures.
