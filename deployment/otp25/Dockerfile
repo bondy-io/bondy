@@ -7,15 +7,16 @@
 FROM erlang:25.3.2.12 AS builder
 
 # Install build dependencies
-RUN apt-get update \
-    && apt-get -y install \
-    sudo bash procps iproute2 net-tools dnsutils curl jq nano \
-    openssl libsodium-dev libsnappy-dev\
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd -g 1000 -r bondy \
-    && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "bondy" bondy \
-    && mkdir -p /bondy/etc \
-    && chown bondy:bondy /bondy/etc
+RUN --mount=type=cache,id=apt,sharing=locked,target=/var/cache/apt apt-get update && \
+    apt-get -y install --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    libssl-dev \
+    libsodium-dev \
+    libsnappy-dev \
+    curl && \
+	rm -rf /var/lib/apt/lists/*
 
 WORKDIR /bondy/src
 
