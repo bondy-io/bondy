@@ -88,7 +88,7 @@ sign(Challenge, #{public := Pub, secret := Priv}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec verify(
-    Signature :: binary(), Challenge :: binary(), PublicKey :: binary()) -> boolean() | no_return()
+    Signature :: binary(), Challenge :: binary(), PublicKey :: binary()) -> boolean() | no_return().
 
 verify(Signature, Challenge, PublicKey) ->
     Normalised = normalise_signature(Signature, Challenge),
