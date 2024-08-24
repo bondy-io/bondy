@@ -42,7 +42,7 @@ all() ->
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
-    KeyPairs = [enacl:crypto_sign_ed25519_keypair() || _ <- lists:seq(1, 3)],
+    KeyPairs = [bondy_cryptosign:generate_key() || _ <- lists:seq(1, 3)],
     RealmUri = <<"com.example.test.auth_ticket">>,
     ok = add_realm(RealmUri, KeyPairs),
     [{realm_uri, RealmUri}, {keypairs, KeyPairs} | Config].

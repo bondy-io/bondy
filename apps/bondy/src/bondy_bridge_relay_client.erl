@@ -1198,14 +1198,14 @@ signer(PubKey, #{cryptosign := #{exec := Filename}}) ->
             error(Reason)
     end;
 
-signer(_, #{cryptosign := #{privkey := HexString}}) ->
+signer(PubKey, #{cryptosign := #{privkey := HexString}}) ->
     %% For testing only, this will be remove on 1.0.0
     fun(Message) ->
         PrivKey = hex_utils:hexstr_to_bin(HexString),
-        sign(Message, PrivKey)
+        sign(Message, PrivKey, PubKey)
     end;
 
-signer(_, #{cryptosign := #{privkey_env_var := Var}}) ->
+signer(PubKey, #{cryptosign := #{privkey_env_var := Var}}) ->
 
     case os:getenv(Var) of
         false ->
@@ -1213,7 +1213,7 @@ signer(_, #{cryptosign := #{privkey_env_var := Var}}) ->
         HexString ->
             fun(Message) ->
                 PrivKey = hex_utils:hexstr_to_bin(HexString),
-                sign(Message, PrivKey)
+                sign(Message, PrivKey, PubKey)
             end
     end;
 
@@ -1222,10 +1222,12 @@ signer(_, Conf) ->
 
 
 %% @private
-sign(Message, PrivKey) ->
+sign(Message, PrivKey, PubKey) ->
     list_to_binary(
         hex_utils:bin_to_hexstr(
-            enacl:sign_detached(Message, PrivKey)
+            bondy_cryptosign:sign(
+                Message, #{public => PubKey, secret => PrivKey}
+            )
         )
     ).
 

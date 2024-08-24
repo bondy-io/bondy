@@ -247,7 +247,7 @@ security.password.max_length = 254
 ## Default: pbkdf2
 ##
 ## Acceptable values:
-##   - one of: pbkdf2, argon2id13
+##   - one of: pbkdf2
 security.password.scram.kdf = pbkdf2
 
 
@@ -273,7 +273,8 @@ security.password.pbkdf2.iterations = 10000
 ## Acceptable values:
 ##   - one of: interactive, moderate, sensitive
 ##   - an integer
-security.password.argon2id13.iterations = moderate
+## OPTION RETIRED UNTIL NEW IMPLEMENTATION IS DONE
+## security.password.argon2id13.iterations = moderate
 
 ## Defines the default memory to be used with the argon2id13 key
 ## derivation function. It should be an integer in the range 8192..1073741824
@@ -290,7 +291,8 @@ security.password.argon2id13.iterations = moderate
 ## Acceptable values:
 ##   - one of: interactive, moderate, sensitive
 ##   - a byte size with units, e.g. 10GB
-security.password.argon2id13.memory = interactive
+## OPTION RETIRED UNTIL NEW IMPLEMENTATION IS DONE
+## security.password.argon2id13.memory = interactive
 
 
 ## =============================================================================

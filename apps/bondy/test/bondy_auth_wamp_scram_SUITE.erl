@@ -156,7 +156,7 @@ test_1(Config) ->
         lists:member(?WAMP_SCRAM_AUTH, bondy_auth:available_methods(Ctxt1))
     ),
 
-    ClientNonce = enacl:randombytes(16),
+    ClientNonce = crypto:strong_rand_bytes(16),
     HelloDetails = #{authextra => #{
         <<"nonce">> => base64:encode(ClientNonce)
     }},
