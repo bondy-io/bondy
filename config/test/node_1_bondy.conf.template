@@ -141,7 +141,7 @@ bridge.listener.tls.idle_timeout = 30s
 
 
 
-wamp.tcp.proxy_protocol = on
+wamp.tcp.proxy_protocol = off
 wamp.tcp.proxy_protocol.mode = relaxed
 api_gateway.http.proxy_protocol = on
 api_gateway.http.proxy_protocol.mode = relaxed
