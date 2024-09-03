@@ -35,7 +35,10 @@ all() ->
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
-    KeyPairs = [enacl:crypto_sign_ed25519_keypair() || _ <- lists:seq(1, 3)],
+    KeyPairs = [
+        bondy_cryptosign:generate_key()
+        || _ <- lists:seq(1, 3)
+    ],
     RealmUri = <<"com.example.test.auth_cryptosign">>,
     ok = add_realm(RealmUri, KeyPairs),
 
@@ -152,7 +155,7 @@ test_1(Config) ->
     Message = hex_utils:hexstr_to_bin(HexMessage),
     Signature = list_to_binary(
         hex_utils:bin_to_hexstr(
-            enacl:sign_detached(Message, maps:get(secret, KeyPair))
+            bondy_cryptosign:sign(Message, KeyPair)
         )
     ),
 

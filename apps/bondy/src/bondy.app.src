@@ -40,9 +40,7 @@
         sasl,
         tools,
         %% 3rd-party Crypto
-        enacl,
         jose,
-        pbkdf2,
         stringprep,
         %% 3rd-party Web Sevrver|client
         cowboy,

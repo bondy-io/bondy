@@ -56,7 +56,7 @@
         key => kdf,
         required => true,
         default => bondy_config:get([security, password, scram, kdf]),
-        datatype => {in, [pbkdf2, <<"pbkdf2">>, argon2id13, <<"argon2id13">>]},
+        datatype => {in, [pbkdf2, argon2id13, <<"pbkdf2">>, <<"argon2id13">>]},
         validator => fun bondy_data_validators:existing_atom/1
     },
     iterations => #{
@@ -199,7 +199,6 @@ replace(Password, PWD) ->
     new(Password, #{protocol => Protocol, params => Params}).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -232,7 +231,6 @@ default_opts(Protocol) ->
 
 opts_validator() ->
     ?OPTS_VALIDATOR.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -332,17 +330,17 @@ verify_hash(_Hash, #{version := ?VERSION, protocol := scram} = _PW) ->
     error(not_implemented);
 
 verify_hash(Hash, #{version := ?VERSION, protocol := cra} = PW) ->
-    SPassword = maps_utils:get_path([data, salted_password], PW),
-    pbkdf2:compare_secure(pbkdf2:to_hex(Hash), pbkdf2:to_hex(SPassword));
+    Salted = maps_utils:get_path([data, salted_password], PW),
+    crypto:hash_equals(Hash, Salted);
 
 verify_hash(Hash, #{version := <<"1.1">>} = PW) ->
-    #{hash_pass := StoredHash} = PW,
-    %% StoredHash is base64 encoded
-    pbkdf2:compare_secure(pbkdf2:to_hex(Hash), pbkdf2:to_hex(StoredHash));
+    #{hash_pass := Salted} = PW,
+    %% Stored Salted is base64 encoded in 1.1
+    crypto:hash_equals(Hash, Salted);
 
 verify_hash(Hash, #{version := <<"1.0">>} = PW) when is_binary(Hash) ->
-    #{hash_pass := StoredHash} = PW,
-    pbkdf2:compare_secure(pbkdf2:to_hex(Hash), StoredHash);
+    #{hash_pass := Salted} = PW,
+    crypto:hash_equals(Hash, Salted);
 
 verify_hash(Hash, #{} = PW) ->
     verify_string(Hash, add_version(PW)).
@@ -373,7 +371,7 @@ verify_string(String, #{version := ?VERSION, protocol := cra} = PW) ->
 
 verify_string(String, #{version := <<"1.1">>} = PW) ->
     #{
-        hash_pass := StoredHash,
+        hash_pass := Salted,
         hash_func := HashFun,
         iterations := HashIter,
         salt := Salt
@@ -381,23 +379,21 @@ verify_string(String, #{version := <<"1.1">>} = PW) ->
     HashLen = hash_length(PW),
 
     %% We use keylen in version > 1.0
-    {ok, Hash0} = pbkdf2:pbkdf2(HashFun, String, Salt, HashIter, HashLen),
+    Hash0 = crypto:pbkdf2_hmac(HashFun, String, Salt, HashIter, HashLen),
 
-    pbkdf2:compare_secure(
-        pbkdf2:to_hex(StoredHash),
-        pbkdf2:to_hex(base64:encode(Hash0)) %% StoredHash is base64 encoded
-    );
+    %% Stored Salted is base64 encoded in 1.1
+    crypto:hash_equals(Salted, base64:encode(Hash0));
 
 verify_string(String, #{version := <<"1.0">>} = PW) ->
     #{
-        hash_pass := StoredHash,
+        hash_pass := Salted,
         hash_func := HashFun,
         iterations := HashIter,
         salt := Salt
     } = PW,
-    {ok, Hash} = pbkdf2:pbkdf2(HashFun, String, Salt, HashIter),
-    %% StoredHash is hex value
-    pbkdf2:compare_secure(pbkdf2:to_hex(Hash), StoredHash);
+    HashLen = hash_length(PW),
+    Hash = crypto:pbkdf2_hmac(HashFun, String, Salt, HashIter, HashLen),
+    crypto:hash_equals(Hash, Salted);
 
 %% to handle the error: reason=function_clause
 %% example: [{bondy_password,verify_string,[<<\"Nes 2907\">>,[{hash_pass,<<\"adcebee9a2cbbe4e26c340f95da646a1ab60c676\">>},{auth_name,pbkdf2},{hash_func,sha},{salt,<<76,202,0,27,196,167,217,222,194,142,96,185,219,169,96,233>>},{iterations,65536}]]

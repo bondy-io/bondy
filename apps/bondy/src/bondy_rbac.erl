@@ -1355,6 +1355,9 @@ find_grants(Realm, KeyPattern, Type, Opts0) ->
 concat_role(user, Name) ->
     <<"user/", Name/binary>>;
 
+concat_role(group, all) ->
+    <<"group/all">>;
+
 concat_role(group, anonymous) ->
     <<"group/anonymous">>;
 

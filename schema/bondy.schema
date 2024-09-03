@@ -231,7 +231,9 @@
   "security.password.scram.kdf",
   "bondy.security.password.scram.kdf", [
   {default, pbkdf2},
-  {datatype, {enum, [pbkdf2, argon2id13]}}
+  %% argon2id13 RETIRED UNTIL NEW IMPLEMENTATION IS DONE
+  %% {datatype, {enum, [pbkdf2, argon2id13]}}
+  {datatype, {enum, [pbkdf2]}}
 ]}.
 
 
@@ -283,29 +285,30 @@
 %% - sensitive (integer 4)
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping,
-  "security.password.argon2id13.iterations",
-  "bondy.security.password.argon2id13.iterations", [
-  {default, moderate},
-  {datatype, [
-    {enum, [interactive, moderate, sensitive]}, integer
-  ]}
-]}.
+%% argon2id13 RETIRED UNTIL NEW IMPLEMENTATION IS DONE
+%% {mapping,
+%%   "security.password.argon2id13.iterations",
+%%   "bondy.security.password.argon2id13.iterations", [
+%%   {default, moderate},
+%%   {datatype, [
+%%     {enum, [interactive, moderate, sensitive]}, integer
+%%   ]}
+%% ]}.
 
-{translation, "bondy.security.password.argon2id13.iterations",
-  fun(Conf) ->
-    case cuttlefish:conf_get("security.password.argon2id13.iterations", Conf) of
-        Value when is_integer(Value), Value >= 1, Value =< 4294967295 ->
-          Value;
-        Value when Value == interactive; Value == moderate; Value == sensitive ->
-          Value;
-        _ ->
-            cuttlefish:invalid(
-              "value should be an integer in the range 1..4294967295"
-            )
-    end
-  end
-}.
+%% {translation, "bondy.security.password.argon2id13.iterations",
+%%   fun(Conf) ->
+%%     case cuttlefish:conf_get("security.password.argon2id13.iterations", Conf) of
+%%         Value when is_integer(Value), Value >= 1, Value =< 4294967295 ->
+%%           Value;
+%%         Value when Value == interactive; Value == moderate; Value == sensitive ->
+%%           Value;
+%%         _ ->
+%%             cuttlefish:invalid(
+%%               "value should be an integer in the range 1..4294967295"
+%%             )
+%%     end
+%%   end
+%% }.
 
 %% -----------------------------------------------------------------------------
 %% @doc Defines the default memory to be used with the argon2id13 key
@@ -320,29 +323,30 @@
 %% DoS attack).
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping,
-  "security.password.argon2id13.memory",
-  "bondy.security.password.argon2id13.memory", [
-  {default, interactive},
-  {datatype, [
-    {enum, [interactive, moderate, sensitive]}, bytesize
-  ]}
-]}.
+%% RETIRED TILL NEW IMPLEMENTATION IS DONE
+%% {mapping,
+%%   "security.password.argon2id13.memory",
+%%   "bondy.security.password.argon2id13.memory", [
+%%   {default, interactive},
+%%   {datatype, [
+%%     {enum, [interactive, moderate, sensitive]}, bytesize
+%%   ]}
+%% ]}.
 
-{translation, "bondy.security.password.argon2id13.memory",
-  fun(Conf) ->
-    case cuttlefish:conf_get("security.password.argon2id13.memory", Conf) of
-        Value when is_integer(Value), Value >= 8192, Value =< 1073741824 ->
-          Value;
-        Value when Value == interactive; Value == moderate; Value == sensitive ->
-          Value;
-        _ ->
-            cuttlefish:invalid(
-              "value should be an integer in the range 1..4294967295"
-            )
-    end
-  end
-}.
+%% {translation, "bondy.security.password.argon2id13.memory",
+%%   fun(Conf) ->
+%%     case cuttlefish:conf_get("security.password.argon2id13.memory", Conf) of
+%%         Value when is_integer(Value), Value >= 8192, Value =< 1073741824 ->
+%%           Value;
+%%         Value when Value == interactive; Value == moderate; Value == sensitive ->
+%%           Value;
+%%         _ ->
+%%             cuttlefish:invalid(
+%%               "value should be an integer in the range 1..4294967295"
+%%             )
+%%     end
+%%   end
+%% }.
 
 %% -----------------------------------------------------------------------------
 %% @doc The default expiration time on or after which authentication ticket
