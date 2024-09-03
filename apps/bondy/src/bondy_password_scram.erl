@@ -39,7 +39,9 @@
     salt := binary(),
     salt_length := non_neg_integer()
 }.
--type kdf()             ::  pbkdf2 | argon2id13.
+%% OPTION RETIRED UNTIL NEW IMPLEMENTATION IS DONE
+%% -type kdf()             ::  pbkdf2 | argon2id13.
+-type kdf()             ::  pbkdf2.
 -type hash_fun()        ::  sha256.
 
 -export_type([data/0]).
@@ -182,7 +184,7 @@ salt_length() ->
 
 salt() ->
     %% REVIEW salt as based64
-    enacl:randombytes(salt_length()).
+    crypto:strong_rand_bytes(salt_length()).
 
 
 %% -----------------------------------------------------------------------------
@@ -192,7 +194,7 @@ salt() ->
 -spec server_nonce(ClientNonce :: binary()) -> ServerNonce :: binary().
 
 server_nonce(ClientNonce) ->
-    <<ClientNonce/binary, (enacl:randombytes(16))/binary>>.
+    <<ClientNonce/binary, (crypto:strong_rand_bytes(16))/binary>>.
 
 
 %% -----------------------------------------------------------------------------
@@ -204,15 +206,15 @@ server_nonce(ClientNonce) ->
     Salt :: binary(),
     Params :: params()) -> SaltedPassword :: binary().
 
-salted_password(Password, Salt, #{kdf := argon2id13} = Params) ->
-    Normalised = stringprep:resourceprep(Password),
-    #{
-        kdf := KDF,
-        iterations := Iterations,
-        memory := Memory
-    } = Params,
-    %% REVIEW encode SALT with base64?
-    enacl:pwhash(Normalised, Salt, Iterations, Memory, KDF);
+%% salted_password(Password, Salt, #{kdf := argon2id13} = Params) ->
+%%     Normalised = stringprep:resourceprep(Password),
+%%     #{
+%%         kdf := KDF,
+%%         iterations := Iterations,
+%%         memory := Memory
+%%     } = Params,
+%%     %% REVIEW encode SALT with base64?
+%%     enacl:pwhash(Normalised, Salt, Iterations, Memory, KDF);
 
 salted_password(Password, Salt, #{kdf := pbkdf2} = Params) ->
     Normalised = stringprep:resourceprep(Password),
@@ -222,10 +224,7 @@ salted_password(Password, Salt, #{kdf := pbkdf2} = Params) ->
         hash_length := HashLen
     } = Params,
 
-    {ok, SaltedPassword} = pbkdf2:pbkdf2(
-        HashFun, Normalised, Salt, Iterations, HashLen
-    ),
-    SaltedPassword.
+    crypto:pbkdf2_hmac(HashFun, Normalised, Salt, Iterations, HashLen).
 
 
 %% -----------------------------------------------------------------------------
@@ -370,8 +369,8 @@ auth_message(
 validate_kdf(#{kdf := pbkdf2} = Params) ->
     Params;
 
-validate_kdf(#{kdf := argon2id13} = Params) ->
-    Params;
+%% validate_kdf(#{kdf := argon2id13} = Params) ->
+%%     Params;
 
 validate_kdf(#{kdf := _}) ->
     error({invalid_argument, kdf});
@@ -412,19 +411,19 @@ iterations_to_integer(pbkdf2, N) when is_integer(N) ->
     N >= 4096 andalso N =< 65536 orelse error({invalid_argument, iterations}),
     N;
 
-iterations_to_integer(argon2id13, Name) when is_atom(Name) ->
-    %% We convert names to their values according to
-    %% https://github.com/jedisct1/libsodium/blob/master/src/libsodium/include/sodium/crypto_pwhash_argon2id.h
-    case Name of
-        interactive -> 2;
-        moderate -> 3;
-        sensitive -> 4;
-        _ -> error({invalid_argument, iterations})
-    end;
+%% iterations_to_integer(argon2id13, Name) when is_atom(Name) ->
+%%     %% We convert names to their values according to
+%%     %% https://github.com/jedisct1/libsodium/blob/master/src/libsodium/include/sodium/crypto_pwhash_argon2id.h
+%%     case Name of
+%%         interactive -> 2;
+%%         moderate -> 3;
+%%         sensitive -> 4;
+%%         _ -> error({invalid_argument, iterations})
+%%     end;
 
-iterations_to_integer(argon2id13, N) when is_integer(N) ->
-    N >= 1 andalso N =< 4294967295 orelse error({invalid_argument, iterations}),
-    N;
+%% iterations_to_integer(argon2id13, N) when is_integer(N) ->
+%%     N >= 1 andalso N =< 4294967295 orelse error({invalid_argument, iterations}),
+%%     N;
 
 iterations_to_integer(_, _) ->
     error({invalid_argument, iterations}).
@@ -434,25 +433,25 @@ iterations_to_integer(_, _) ->
 memory_to_integer(pbkdf2, _) ->
     undefined;
 
-memory_to_integer(argon2id13, undefined) ->
-    memory_to_integer(argon2id13, interactive);
+%% memory_to_integer(argon2id13, undefined) ->
+%%     memory_to_integer(argon2id13, interactive);
 
-memory_to_integer(argon2id13, Name) when is_atom(Name) ->
-    %% We convert names to their values according to
-    %% https://github.com/jedisct1/libsodium/blob/master/src/libsodium/include/sodium/crypto_pwhash_argon2id.h
-    case Name of
-        interactive -> 67108864;
-        moderate -> 268435456;
-        sensitive -> 1073741824;
-        _ -> error({invalid_argument, memory})
-    end;
+%% memory_to_integer(argon2id13, Name) when is_atom(Name) ->
+%%     %% We convert names to their values according to
+%%     %% https://github.com/jedisct1/libsodium/blob/master/src/libsodium/include/sodium/crypto_pwhash_argon2id.h
+%%     case Name of
+%%         interactive -> 67108864;
+%%         moderate -> 268435456;
+%%         sensitive -> 1073741824;
+%%         _ -> error({invalid_argument, memory})
+%%     end;
 
-memory_to_integer(argon2id13, N) when is_integer(N) ->
-    %% Notice that the underlying library (libsodium) allows up to
-    %% 4398046510080 but we have restricted this value to avoid a configuration
-    %% error to enable a DoS attack.
-    N >= 8192 andalso N =< 1073741824 orelse error({invalid_argument, memory}),
-    N;
+%% memory_to_integer(argon2id13, N) when is_integer(N) ->
+%%     %% Notice that the underlying library (libsodium) allows up to
+%%     %% 4398046510080 but we have restricted this value to avoid a configuration
+%%     %% error to enable a DoS attack.
+%%     N >= 8192 andalso N =< 1073741824 orelse error({invalid_argument, memory}),
+%%     N;
 
 memory_to_integer(_, _) ->
     error({invalid_argument, memory}).

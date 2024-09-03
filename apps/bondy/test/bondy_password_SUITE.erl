@@ -123,6 +123,9 @@ new_cra_options(_) ->
     ok.
 
 
+
+
+
 new_scram_too_low_iterations(_) ->
 
     ?assertError(
@@ -133,13 +136,22 @@ new_scram_too_low_iterations(_) ->
         })
     ),
 
+    %% TEMPORARILY INVALID UNTIL WE REPLACE ARGON2id13 IMPLEMENTATION
     ?assertError(
-        {invalid_argument, iterations},
+        {invalid_argument, kdf},
         bondy_password:new(?P1, #{
             protocol => scram,
-            params => #{kdf => argon2id13, iterations => 0}
+            params => #{kdf => argon2id13}
         })
     ).
+
+    %% ?assertError(
+    %%     {invalid_argument, iterations},
+    %%     bondy_password:new(?P1, #{
+    %%         protocol => scram,
+    %%         params => #{kdf => argon2id13, iterations => 0}
+    %%     })
+    %% ).
 
 
 new_scram_too_high_iterations(_) ->
@@ -152,13 +164,22 @@ new_scram_too_high_iterations(_) ->
         })
     ),
 
+    %% TEMPORARILY INVALID UNTIL WE REPLACE ARGON2id13 IMPLEMENTATION
     ?assertError(
-        {invalid_argument, iterations},
+        {invalid_argument, kdf},
         bondy_password:new(?P1, #{
             protocol => scram,
-            params => #{kdf => argon2id13, iterations => 4294967295 + 1}
+            params => #{kdf => argon2id13}
         })
     ).
+
+    %% ?assertError(
+    %%     {invalid_argument, iterations},
+    %%     bondy_password:new(?P1, #{
+    %%         protocol => scram,
+    %%         params => #{kdf => argon2id13, iterations => 4294967295 + 1}
+    %%     })
+    %% ).
 
 
 new_scram_options_pbkdf2(_) ->
@@ -180,7 +201,6 @@ new_scram_options_pbkdf2(_) ->
 
     ok.
 
-
 new_scram_options_argon2id13(_) ->
 
     Opts = #{
@@ -188,14 +208,18 @@ new_scram_options_argon2id13(_) ->
         params => #{kdf => argon2id13}
     },
 
-
-    A = bondy_password:new(?P1, Opts),
-
-    ?assertMatch(
-        #{protocol := scram, params := #{kdf := argon2id13}},
-        A
+    %% TEMPORARILY INVALID UNTIL WE REPLACE ARGON2id13 IMPLEMENTATION
+    ?assertError(
+        {invalid_argument, kdf},
+        bondy_password:new(?P1, Opts)
     ),
-    ?assertEqual(true, bondy_password:verify_string(?P1, A)),
-    ?assertEqual(false, bondy_password:verify_string(?P2, A)),
+
+    %% A = bondy_password:new(?P1, Opts),
+    %% ?assertMatch(
+    %%     #{protocol := scram, params := #{kdf := argon2id13}},
+    %%     A
+    %% ),
+    %% ?assertEqual(true, bondy_password:verify_string(?P1, A)),
+    %% ?assertEqual(false, bondy_password:verify_string(?P2, A)),
 
     ok.

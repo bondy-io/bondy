@@ -1,4 +1,16 @@
 # CHANGELOG
+## 1.0.0-rc.25
+### Changes
+* Removed `enacl` and `pbkdf2` libraries, replacing its funcionality with 
+  Erlang's `public_key` and `crypto` applications for password hashing and WAMP 
+  Cryptosign.
+* Upgraded several dependencies
+**BREAKING CHANGE NOTICE**
+* As a result of `enacl` removal we have temporarily retired support for the `argon2` algorithm until we finish an implementation via Rustler.
+
+### Fixes
+* Fixes a bug in `bondy_rbac:conca_role` function that affected the RBAC APIs.
+
 ## 1.0.0-rc.24
 * Upgraded PlumDB and Partisan with fix to avoid partisan_plumree_brodcast to crash when the behaviour implementors raise an exception
 * Fixes to Debian dockerfile 

@@ -166,7 +166,7 @@ nonce_length() ->
 -spec salt() -> binary().
 
 salt() ->
-    base64:encode(enacl:randombytes(salt_length())).
+    base64:encode(crypto:strong_rand_bytes(salt_length())).
 
 
 %% -----------------------------------------------------------------------------
@@ -176,7 +176,7 @@ salt() ->
 -spec nonce() -> binary().
 
 nonce() ->
-    base64:encode(enacl:randombytes(nonce_length())).
+    base64:encode(crypto:strong_rand_bytes(nonce_length())).
 
 
 %% -----------------------------------------------------------------------------
@@ -192,7 +192,7 @@ salted_password(Password, Salt, #{kdf := pbkdf2} = Params) ->
         hash_length := HashLen
     } = Params,
 
-    {ok, SaltedPassword} = pbkdf2:pbkdf2(
+    SaltedPassword = crypto:pbkdf2_hmac(
         HashFun, Password, Salt, Iterations, HashLen
     ),
     base64:encode(SaltedPassword).
@@ -205,7 +205,7 @@ salted_password(Password, Salt, #{kdf := pbkdf2} = Params) ->
 -spec compare(binary(), binary()) -> boolean().
 
 compare(A, B) ->
-    pbkdf2:compare_secure(pbkdf2:to_hex(A), pbkdf2:to_hex(B)).
+    crypto:hash_equals(A, B).
 
 
 
