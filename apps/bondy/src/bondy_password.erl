@@ -293,7 +293,7 @@ data(#{version := ?VERSION, data := Value}) ->
 
 hash_length(#{version := <<"1.0">>, hash_pass := Val}) ->
     %% hash_pass is hex formatted, so two chars per original char
-    byte_size(Val) / 2;
+    trunc(byte_size(Val) / 2);
 
 hash_length(#{version := <<"1.1">>, hash_len := Val}) ->
     Val;
