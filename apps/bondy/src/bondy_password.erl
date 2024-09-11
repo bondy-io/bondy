@@ -293,7 +293,7 @@ data(#{version := ?VERSION, data := Value}) ->
 
 hash_length(#{version := <<"1.0">>, hash_pass := Val}) ->
     %% hash_pass is hex formatted, so two chars per original char
-    byte_size(Val) / 2;
+    trunc(byte_size(Val) / 2);
 
 hash_length(#{version := <<"1.1">>, hash_len := Val}) ->
     Val;
@@ -340,7 +340,8 @@ verify_hash(Hash, #{version := <<"1.1">>} = PW) ->
 
 verify_hash(Hash, #{version := <<"1.0">>} = PW) when is_binary(Hash) ->
     #{hash_pass := Salted} = PW,
-    crypto:hash_equals(Hash, Salted);
+    %% in version 1.0 the stored hash is hex encoded
+    crypto:hash_equals(Hash, hex_utils:hexstr_to_bin(Salted));
 
 verify_hash(Hash, #{} = PW) ->
     verify_string(Hash, add_version(PW)).
@@ -379,10 +380,10 @@ verify_string(String, #{version := <<"1.1">>} = PW) ->
     HashLen = hash_length(PW),
 
     %% We use keylen in version > 1.0
-    Hash0 = crypto:pbkdf2_hmac(HashFun, String, Salt, HashIter, HashLen),
+    Hash = crypto:pbkdf2_hmac(HashFun, String, Salt, HashIter, HashLen),
 
     %% Stored Salted is base64 encoded in 1.1
-    crypto:hash_equals(Salted, base64:encode(Hash0));
+    crypto:hash_equals(Salted, base64:encode(Hash));
 
 verify_string(String, #{version := <<"1.0">>} = PW) ->
     #{
@@ -393,7 +394,8 @@ verify_string(String, #{version := <<"1.0">>} = PW) ->
     } = PW,
     HashLen = hash_length(PW),
     Hash = crypto:pbkdf2_hmac(HashFun, String, Salt, HashIter, HashLen),
-    crypto:hash_equals(Hash, Salted);
+    %% in version 1.0 the stored hash is hex encoded
+    crypto:hash_equals(Hash, hex_utils:hexstr_to_bin(Salted));
 
 %% to handle the error: reason=function_clause
 %% example: [{bondy_password,verify_string,[<<\"Nes 2907\">>,[{hash_pass,<<\"adcebee9a2cbbe4e26c340f95da646a1ab60c676\">>},{auth_name,pbkdf2},{hash_func,sha},{salt,<<76,202,0,27,196,167,217,222,194,142,96,185,219,169,96,233>>},{iterations,65536}]]

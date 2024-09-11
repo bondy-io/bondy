@@ -1,4 +1,8 @@
 # CHANGELOG
+## 1.0.0-rc.26
+### Fixes
+* Fixed bug in password hash comparison for version 1.0 passwords (PR #40)
+
 ## 1.0.0-rc.25
 ### Changes
 * Removed `enacl` and `pbkdf2` libraries, replacing its funcionality with 
