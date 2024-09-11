@@ -552,6 +552,15 @@ hidden
 ]}.
 
 
+
+
+%% =============================================================================
+%% MEMORY ALLOCATORS
+%% =============================================================================
+
+
+
+
 %% @doc Sets super carrier only flag. Defaults to true. When a super carrier is
 %% used and this flag is true, mseg_alloc only creates carriers in the super
 %% carrier. Notice that the alloc_util framework can create sys_alloc carriers,
