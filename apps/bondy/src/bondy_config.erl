@@ -355,7 +355,7 @@ set_vsn(Args) ->
 
 %% @private
 setup_mods() ->
-    ok = bondy_json:setup(),
+    ok = jose:json_module(bondy_json),
     ok = configure_registry(),
     ok = configure_jobs_pool().
 

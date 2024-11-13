@@ -124,7 +124,7 @@ challenge(_, Ctxt, #{password := PWD} = State) ->
             bondy_auth:session_id(Ctxt)
         ),
         Microsecs = erlang:system_time(microsecond),
-        Challenge = jsone:encode(#{
+        Challenge = bondy_json:encode(#{
             authid => UserId,
             authrole => Role,
             authmethod => ?WAMP_CRA_AUTH,

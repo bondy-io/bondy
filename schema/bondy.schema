@@ -67,6 +67,44 @@
 {datatype, {duration, s}}
 ]}.
 
+
+{mapping,
+  "serializers.json.float_format",
+  "bondy.json.float_format", [
+  {datatype, string},
+  {default, "[{decimals, 16}]"}
+]}.
+
+
+{translation, "bondy.json.float_format",
+  fun(Conf) ->
+
+    case cuttlefish:conf_get("serializers.json.float_format", Conf) of
+      undefined ->
+        [];
+
+      String when is_list(String) ->
+        case erl_scan:string(String ++ ".") of
+          {ok, Tokens, _} ->
+            {ok, Term} = erl_parse:parse_term(Tokens),
+            Term;
+
+          {error, _} ->
+            cuttlefish:invalid(
+              "value should be a list of options "
+              "according to erlang:float_to_binary/2"
+            )
+        end;
+
+        _ ->
+          cuttlefish:invalid(
+            "value should be a list of options "
+            "according to erlang:float_to_binary/2"
+          )
+    end
+  end}.
+
+
 %% =============================================================================
 %% ROUTER
 %% =============================================================================
@@ -2715,6 +2753,12 @@ end}.
 %% VALIDATORS
 %% =============================================================================
 
+
+{validator,
+  "non_neg_integer",
+  "greater than 0",
+  fun(Size) -> Size >= 0 end
+}.
 
 {validator,
   "pos_integer",

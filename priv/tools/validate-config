@@ -52,68 +52,10 @@
 
 main([EtcDir, _ReleaseDir]) ->
     ?LOG_WARNING("Validating configuration files", []),
-    Etc = sets:from_list(files(EtcDir)),
-    Bondy = sets:from_list(["bondy.conf", "bondy.conf.template"]),
-
-    BondyCheck = case sets:to_list(sets:intersection(Bondy, Etc)) of
-        [] ->
-            ?LOG_INFO(
-                "No Bondy configuration file found at ~p. "
-                "Bondy will use the default configuration. "
-                "Otherwise please make sure a 'bondy.conf' file (or "
-                "'bondy.conf.template' in case environment variables "
-                "replacement is required) is present in the ~p directory.",
-                [EtcDir, EtcDir]
-            ),
-            %% We generate an empty file otherwise rebar3_scuttler will not
-            %% produce the default config
-            ok = file:write_file(filename:join(EtcDir, "bondy.conf"), <<>>),
-            true;
-        [B1] ->
-            ?LOG_INFO(
-                "Bondy configuration file ~p was found in ~p directory",
-                [B1, EtcDir]
-            ),
-            true;
-        [B1, B2] ->
-            ?LOG_INFO(
-                "Both Bondy configuration file variants (~p and ~p) were found in the ~p directory. Using 'bondy.conf.template' and moving 'bondy.conf' to 'disabled/bondy.conf'.",
-                [B1, B2, EtcDir]
-            ),
-            DisabledDir = filename:join(EtcDir, "disabled"),
-            _ = catch file:make_dir(DisabledDir),
-            ok = file:rename(
-                filename:join(EtcDir, "bondy.conf"),
-                filename:join(DisabledDir, "bondy.conf")
-            ),
-            true
-    end,
-
-    % Etc = sets:from_list(files(EtcDir)),
-    % Erlang = sets:from_list(["vm.args", "vm.args.template"]),
-    % _ErlangCheck = case sets:to_list(sets:intersection(Erlang, All)) of
-    %     [] ->
-    %         ?LOG_ERROR(
-    %             "No Erlang VM arguments file was found, please make sure your \"vm.args\" file (or \"vm.args.template\" in case environment variables replacement is required) is present in the ~p directory. An Erlang VM Arguments is required with at least the -name and -cookie parameters.",
-    %             [Dir]
-    %         ),
-    %         false;
-    %     [E1] ->
-    %         ?LOG_INFO(
-    %             "Erlang VM arguments file ~p was found in ~p directory",
-    %             [E1 , Dir]
-    %         ),
-    %         true;
-    %     [E1, E2] ->
-    %         ?LOG_ERROR(
-    %             "Both Erlang VM arguments file variants (~p and ~p) were found in ~p directory. Please provide only one of them i.e. use \"vm.args.template\" in case environment variables replacement is required).",
-    %             [E1, E2, Dir]
-    %         ),
-    %         false
-    % end,
-    BondyCheck orelse halt(1),
-    %% ErlangCheck orelse halt(1),
-
+    AllFiles = sets:from_list(files(EtcDir)),
+    BondyCheck = bondy_config_check(EtcDir, AllFiles),
+    VMExtraCheck = vm_extra_check(EtcDir, AllFiles),
+    (BondyCheck andalso VMExtraCheck) orelse halt(1),
     ok;
 
 main(Args) ->
@@ -130,6 +72,100 @@ main(Args) ->
 %% PRIVATE
 %% =============================================================================
 
+bondy_config_check(EtcDir, AllFiles) ->
+    Bondy = sets:from_list(["bondy.conf", "bondy.conf.template"]),
+
+    case sets:to_list(sets:intersection(Bondy, AllFiles)) of
+        [] ->
+            ?LOG_INFO(
+                "No Bondy configuration file found at ~p. "
+                "Bondy will use the default configuration. "
+                "Otherwise please make sure a 'bondy.conf' file (or "
+                "'bondy.conf.template' in case environment variables "
+                "replacement is required) is present in the ~p directory.",
+                [EtcDir, EtcDir]
+            ),
+            %% We generate an empty file otherwise rebar3_scuttler will not
+            %% produce the default config
+            ok = file:write_file(filename:join(EtcDir, "bondy.conf"), <<>>),
+            true;
+
+        [B1] ->
+            ?LOG_INFO(
+                "Bondy configuration file ~p was found in ~p directory",
+                [B1, EtcDir]
+            ),
+            true;
+
+        [B1, B2] ->
+            ?LOG_INFO(
+                "Both Bondy configuration file variants (~p and ~p) were found"
+                " in the ~p directory. Using 'bondy.conf.template' and moving "
+                "'bondy.conf' to 'disabled/bondy.conf'.",
+                [B1, B2, EtcDir]
+            ),
+            DisabledDir = filename:join(EtcDir, "disabled"),
+            _ = catch file:make_dir(DisabledDir),
+            ok = file:rename(
+                filename:join(EtcDir, "bondy.conf"),
+                filename:join(DisabledDir, "bondy.conf")
+            ),
+            true
+    end.
+
+vm_extra_check(EtcDir, AllFiles) ->
+    VMExtra = sets:from_list(["vm.extra.args"]),
+
+    case sets:to_list(sets:intersection(VMExtra, AllFiles)) of
+        [] ->
+            ?LOG_INFO(
+                "No vm.extra.args file found at ~p, "
+                "creating it with empty content.",
+                [EtcDir]
+            ),
+            %% We need this file to exist as it is loaded by the
+            %% vm.args.template file, so we generate an empty file
+            ok = file:write_file(
+                filename:join(EtcDir, "vm.extra.args"),
+                <<
+                    "## Use this file to add any additional Erlang VM ",
+                    "arguments that are not provided\n",
+                    "## by the options in bondy.config file.\n",
+                    "## The initalization script will remove any line ",
+                    "containing options sname,\n",
+                    "## name or setcookie as this are dynamically ",
+                    "defined by Bondy based on\n"
+                    "## environment variables and bondy.conf settings."
+                >>),
+            true;
+
+        [File] ->
+            ?LOG_INFO(
+                "VM Extra configuration file ~p was found in ~p directory. "
+                "Chedking file and removing any usage of -sname, -name and "
+                "-setcookie options as these are dynamically added by Bondy "
+                "based on the 'bondy.config' filed and environment variables.",
+                [File, EtcDir]
+            ),
+            remove_vm_args_options(EtcDir, File)
+    end.
+
+
+% Function to filter lines
+remove_vm_args_options(EtcDir, File) ->
+    Filename = filename:join(EtcDir, File),
+    {ok, Content} = file:read_file(Filename),
+    Lines = binary:split(Content, <<"\n">>, [global]),
+    FilteredLines = [Line || Line <- Lines, not is_prohibited_option(Line)],
+    % Writing the filtered lines back to the file
+    NewContent = lists:join(<<"\n">>, FilteredLines),
+    ok == file:write_file(Filename, NewContent).
+
+
+% Function to check if the line contains prohibited options
+is_prohibited_option(Line) ->
+    LineStr = binary_to_list(Line),
+    lists:any(fun(Opt) -> string:find(LineStr, Opt) /= nomatch end, ["-sname", "-name", "-setcookie"]).
 
 
 files(Dir) ->
