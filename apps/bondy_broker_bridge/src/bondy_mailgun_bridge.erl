@@ -234,7 +234,7 @@ send_email(Action) ->
 
     case email:send(Email, Sender, Subject, FormattedBody) of
         {ok, Res} ->
-            #{<<"id">> := Ref} = jsone:decode(Res, [{object_format, map}]),
+            #{<<"id">> := Ref} = bondy_json:decode(Res, [{object_format, map}]),
             {ok, Ref};
         {error, timeout} = Error ->
             Error;

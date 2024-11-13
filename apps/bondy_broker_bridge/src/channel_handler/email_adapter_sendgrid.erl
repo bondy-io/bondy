@@ -164,7 +164,7 @@ when StatusCode == 400 orelse
     StatusCode == 404 orelse
     StatusCode == 413 orelse
     StatusCode == 500 ->
-    Reason = jsone:decode(RespBody, [{object_format, map}]),
+    Reason = bondy_json:decode(RespBody),
     {error, {StatusCode, Reason}};
 
 process_response(StatusCode, _RespHeaders, _RespBody)
@@ -184,7 +184,7 @@ formatted_body(From, To, Subject, _Body, #{<<"template_id">> := TemplateId} = Op
     TemplateData = maps:get(<<"template_data">>, Options),
     FormattedBody = ?SINGLE_EMAIL_SINGLE_RECIPIENT_TEMPLATE_REQUEST(From, To,
         TemplateId, TemplateData#{<<"subject">> => Subject}),
-    jsone:encode(FormattedBody);
+    bondy_json:encode(FormattedBody);
 
 formatted_body(From, To, Subject, Body, _Options) ->
     Type = lists:keyfind(<<"html">>, 1, Body),
@@ -201,4 +201,4 @@ formatted_body(From, To, Subject, Body, _Options) ->
 
     FormattedBody = ?SINGLE_EMAIL_SINGLE_RECIPIENT_REQUEST(From, To,
         Subject, Content, ContentType),
-    jsone:encode(FormattedBody).
+    bondy_json:encode(FormattedBody).

@@ -202,15 +202,15 @@ maybe_encode(erl, Term) ->
 maybe_encode(json, Term) when is_binary(Term) ->
     %% TODO this is wrong, we should be passing the metadada so that we know in
     %% which encoding the Term is
-    case jsone:try_decode(Term) of
-        {ok, JSON, _} ->
+    case bondy_json:try_decode(Term) of
+        {ok, JSON} ->
             JSON;
         {error, _} ->
-            jsone:encode(Term, [undefined_as_null, {object_key_type, string}])
+            bondy_json:encode(Term)
     end;
 
 maybe_encode(json, Term) ->
-    jsone:encode(Term, [undefined_as_null, {object_key_type, string}]);
+    bondy_json:encode(Term);
 
 maybe_encode(msgpack, Term) ->
      %% TODO see if we can catch error when Term is already encoded
@@ -239,7 +239,7 @@ decode(json, <<>>) ->
     <<>>;
 
 decode(json, Term) ->
-    jsone:decode(Term, [undefined_as_null]);
+    bondy_json:decode(Term);
 
 decode(msgpack, Term) ->
     Opts = [{map_format, map}, {unpack_str, as_binary}],
@@ -524,11 +524,11 @@ json_consult(File) ->
 json_consult(File, Opts) when is_list(Opts) ->
     case file:read_file(File) of
         {ok, JSONBin}  ->
-            case jsone:try_decode(JSONBin, Opts) of
-                {ok, Term, _} ->
+            case bondy_json:try_decode(JSONBin, Opts) of
+                {ok, Term} ->
                     {ok, Term};
-                {error, {Reason, _}} ->
-                    {error, Reason}
+                {error, _} = Error ->
+                    Error
             end;
         {error, _} = Error ->
             Error
