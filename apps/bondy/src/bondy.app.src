@@ -48,7 +48,6 @@
         backoff,
         %% 3rd-party Utils
         %% 3rd-party Instrumentation
-        bear,
         prometheus,
         telemetry,
         riak_sysmon,

@@ -2,8 +2,10 @@
 
 ## 1.0.0-rc.28
 ## Fixes
-* Updated plum_db with a fix to a bug causing a plum_db partition a crash when 
+* Upgraded `plum_db` with a fix to a bug causing a partition a crash when 
   forcing a partition hashtree reset
+* Upgraded `observer_cli` and `prometheus` dependencies
+* Remove unused `bear` dependency
 
 ## 1.0.0-rc.27
 ## Changes
