@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 1.0.0-rc.28
+## Fixes
+* Upgraded `plum_db` with a fix to a bug causing a partition a crash when 
+  forcing a partition hashtree reset
+* Upgraded `observer_cli` and `prometheus` dependencies
+* Remove unused `bear` dependency
+
 ## 1.0.0-rc.27
 ## Changes
 * Moved json encoding to `bondy_json` module which now uses the new `json` moduled instead of `jsone` when running on OTP27. In addition, float and date formatting has been implemented to mirror those existing in `jsone`. Also the defaul float format respects the deprecated `jsx` lib format for backwards compatibility.
