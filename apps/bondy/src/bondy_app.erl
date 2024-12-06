@@ -84,7 +84,7 @@ vsn() ->
 %% -----------------------------------------------------------------------------
 start(_Type, Args) ->
     %% We initialise the Bondy config, we need to make this call before
-    %% starting tuplespace, partisan and plum_db are started, becuase we are
+    %% starting tuplespace, partisan and plum_db are started, because we are
     %% modifying their application environments.
     ok = bondy_config:init(Args),
 
@@ -104,16 +104,20 @@ start(_Type, Args) ->
         router_vsn => vsn()
     }}),
 
+    %% We wait for plum_db partitions to be up, we now need to do this before
+    %% we start the supervisor
+    ok = maybe_wait_for_plum_db_partitions(),
+
     %% Finally we start the supervisor
     case bondy_sup:start_link() of
         {ok, Pid} ->
+
             %% Please do not change the order of this function calls
             %% unless, of course, you know exactly what you are doing.
             ok = setup_commons(),
             ok = bondy_sysmon_handler:add_handler(),
             ok = bondy_router_worker:start_pool(),
             ok = setup_event_handlers(),
-            ok = maybe_wait_for_plum_db_partitions(),
             ok = configure_services(),
             ok = init_registry(),
             ok = setup_wamp_subscriptions(),
