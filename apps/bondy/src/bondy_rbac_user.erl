@@ -1728,5 +1728,5 @@ close_sessions(RealmUri, Username, Reason) ->
 
 %% @private
 close_sessions(RealmUri, Username, Reason, Opts) ->
-    ok = bondy_session_manager:close(RealmUri, Username, Reason, Opts).
+    ok = bondy_session_manager:close_all(RealmUri, Username, Reason, Opts).
 
