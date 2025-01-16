@@ -205,11 +205,14 @@ terminate(#wamp_state{} = State) ->
     case bondy_context:has_session(Ctxt) of
         true ->
             Session = bondy_context:session(Ctxt),
-            Reason = State#wamp_state.goodbye_reason,
-            bondy_session_manager:close(Session, Reason);
+            %% We just cleanup without specifying reason to avoid sending a
+            %% GOODBYE message as it should have already been sent.
+            bondy_session_manager:close(Session);
+
         false ->
             ok
     end,
+
     bondy_context:close(Ctxt);
 
 terminate(_) ->
@@ -430,7 +433,6 @@ handle_inbound_messages(
 
 handle_inbound_messages(
     [#goodbye{} = M|_], #wamp_state{state_name = established} = St0, Acc) ->
-
     %% Client initiated a goodbye, we ignore any subsequent messages
     %% We reply with all previous messages plus a goodbye and stop
     Reply = wamp_message:goodbye(
@@ -686,6 +688,9 @@ open_session(Extra, St0) when is_map(Extra) ->
 
         {reply, Bin, St1#wamp_state{state_name = established}}
     catch
+        error:pool_busy = Reason ->
+            stop(Reason, St0);
+
         error:{invalid_options, missing_client_role} = Reason ->
             stop(Reason, St0)
     end.

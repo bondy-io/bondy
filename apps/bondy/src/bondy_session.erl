@@ -40,6 +40,7 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_security.hrl").
 
 -define(SESSION_SPACE, ?MODULE).
 
@@ -153,7 +154,7 @@
 -export([authmethod_details/1]).
 -export([authrole/1]).
 -export([authroles/1]).
--export([close/1]).
+-export([close/2]).
 -export([created/1]).
 -export([external_id/1]).
 -export([features/2]).
@@ -329,31 +330,38 @@ update(#session{id = Id} = S) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec close(t()) -> ok.
+-spec close(t(), Reason :: optional(uri())) -> ok.
 
-close(#session{} = S) ->
+close(#session{} = S, Reason)
+when is_binary(Reason) orelse Reason == undefined ->
     Id = S#session.id,
     ExtId = S#session.external_id,
     RealmUri = S#session.realm_uri,
-    Secs = erlang:system_time(second) - S#session.created,
-    ok = bondy_event_manager:notify({session_closed, S, Secs}),
 
-    %% Delete session
+    %% Cleanup session
     Tab1 = tuplespace:locate_table(?SESSION_SPACE, Id),
     true = ets:delete(Tab1, Id),
 
-    %% Delete index
+    %% Cleanup index
     Tab2 = tuplespace:locate_table(?SESSION_SPACE, ExtId),
     true = ets:delete(Tab2, ExtId),
 
-    %% Delete counters
+    %% Cleanup counters
     ok = bondy_session_counter:delete_all(Id),
+
+    %% Revoke Tickets and Tokens
+    ok = maybe_revoke_tickets(S, Reason),
+
+    %% Notify internally
+    Secs = erlang:system_time(second) - S#session.created,
+    ok = bondy_event_manager:notify({session_closed, S, Secs}),
 
     ?LOG_DEBUG(#{
         description => "Session closed",
         realm => RealmUri,
         session_id => Id,
-        protocol_session_id => ExtId
+        protocol_session_id => ExtId,
+        reason => Reason
     }),
 
     ok.
@@ -1212,6 +1220,29 @@ get_rbac_context(#session{is_anonymous = true, realm_uri = Uri}) ->
 
 get_rbac_context(#session{authid = Authid, realm_uri = Uri}) ->
     bondy_rbac:get_context(Uri, Authid).
+
+
+%% @private
+maybe_revoke_tickets(Session, ?WAMP_CLOSE_LOGOUT) ->
+    case authmethod(Session) of
+        ?WAMP_TICKET_AUTH ->
+            Authid = authid(Session),
+            #{
+                authrealm := Authrealm,
+                scope := Scope
+            } = authmethod_details(Session),
+            bondy_ticket:revoke(Authrealm, Authid, Scope);
+
+        ?WAMP_OAUTH2_AUTH ->
+            %% TODO remove token for sessionID
+            ok
+    end;
+
+maybe_revoke_tickets(_, _) ->
+    %% No need to revoke tokens.
+    %% In case of ?BONDY_USER_DELETED, the delete action would have already
+    %% revoked all tokens for this user.
+    ok.
 
 
 

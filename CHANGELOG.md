@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 1.0.0-rc.29
+## Changes
+* Changed the `bondy_session_manager` pool worker selection to use the Session
+ Id as opposed to the realm to distribute load evenly when a single realm is 
+ used
+
+## Fixes
+* Fixed sending a GOODBYE message only when session is close by the Router.
+
+
 ## 1.0.0-rc.28
 ## Fixes
 * Upgraded `plum_db` with a fix to a bug causing a partition a crash when 

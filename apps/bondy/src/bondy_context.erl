@@ -236,8 +236,7 @@ close(Ctxt0) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Closes the context. This function calls {@link bondy_session:close/1}
-%% and {@link bondy_router:close_context/1}.
+%% Closes the context.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec close(t(), Reason :: normal | crash | shutdown) -> ok.

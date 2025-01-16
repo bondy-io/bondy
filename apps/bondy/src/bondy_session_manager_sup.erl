@@ -56,21 +56,19 @@ start_link() ->
 
 
 init([]) ->
-    Pool = bondy_session_manager:pool(),
-    Size = bondy_session_manager:pool_size(),
-    Names = init_pool(Pool, Size),
+    {PoolName, WorkerNames} = init_pool(),
     RestartStrategy = {one_for_one, 0, 1},
 
     Children = [
         #{
-            id => Name,
-            start => {bondy_session_manager, start_link, [Pool, Name]},
+            id => WorkerName,
+            start => {bondy_session_manager, start_link, [PoolName, WorkerName]},
             restart => permanent,
             shutdown => 5000,
             type => worker,
             modules => [bondy_session_manager]
         }
-        || Name <- Names
+        || WorkerName <- WorkerNames
     ],
     {ok, {RestartStrategy, Children}}.
 
@@ -83,23 +81,27 @@ init([]) ->
 
 
 
-init_pool(Pool, Size) ->
-    ok = gproc_pool:new(Pool, hash, [{size, Size}]),
+init_pool() ->
+    #{
+        name := PoolName,
+        size := Size,
+        algorithm := Algorithm
+    } = bondy_session_manager:pool(),
 
-    Names = [
+    ok = gproc_pool:new(PoolName, Algorithm, [{size, Size}]),
+
+    WorkerNames = [
         begin
-            Name = name(Id),
-            _ = gproc_pool:add_worker(Pool, Name),
-            Name
+            WorkerName = worker_name(Id),
+            _ = gproc_pool:add_worker(PoolName, WorkerName),
+            WorkerName
         end
         || Id <- lists:seq(1, Size)
     ],
-
-    Names.
-
+    {PoolName, WorkerNames}.
 
 
-name(Id) when is_integer(Id) ->
+worker_name(Id) when is_integer(Id) ->
     list_to_atom("bondy_session_manager_" ++ integer_to_list(Id)).
 
 
