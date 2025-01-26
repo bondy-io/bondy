@@ -67,6 +67,7 @@
     security_enabled = true         ::  boolean(),
     is_anonymous = false            ::  boolean(),
     rbac_context                    ::  optional(bondy_rbac:context()),
+    is_persistent = false           ::  boolean(),
     %% Expiration and Limits
     created                         ::  pos_integer(),
     expires_at                      ::  pos_integer() | infinity,
@@ -162,6 +163,7 @@
 -export([fetch/1]).
 -export([id/1]).
 -export([is_anonymous/1]).
+-export([is_persistent/1]).
 -export([is_security_enabled/1]).
 -export([list/0]).
 -export([list/1]).
@@ -683,6 +685,20 @@ is_security_enabled(#session{security_enabled = Val}) ->
 
 is_security_enabled(Id) ->
     lookup_field(Id, #session.security_enabled).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_persistent(t()) -> boolean().
+
+is_persistent(#session{is_persistent = Val}) ->
+    Val;
+
+is_persistent(Id) ->
+    lookup_field(Id, #session.is_persistent).
+
 
 
 %% -----------------------------------------------------------------------------
