@@ -203,7 +203,7 @@
 -spec new(entry_type(), uri(), bondy_ref:t(), uri(), map()) -> t().
 
 new(Type, RealmUri, Ref, Uri, Opts) ->
-    RegId = bondy_utils:gen_message_id({router, RealmUri}),
+    RegId = bondy_message_id:router(RealmUri),
     new(Type, RegId, RealmUri, Ref, Uri, Opts).
 
 
@@ -748,7 +748,7 @@ proxy(Ref, External) ->
 
     SessionId = bondy_ref:session_id(Ref),
 
-    Id = bondy_utils:gen_message_id({router, RealmUri}),
+    Id = bondy_message_id:router(RealmUri),
 
     WildcardDegree =
         case MatchPolicy == ?WILDCARD_MATCH of

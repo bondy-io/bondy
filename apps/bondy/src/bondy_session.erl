@@ -161,7 +161,6 @@
 -export([features/3]).
 -export([fetch/1]).
 -export([id/1]).
--export([gen_message_id/1]).
 -export([is_anonymous/1]).
 -export([is_security_enabled/1]).
 -export([list/0]).
@@ -347,7 +346,7 @@ when is_binary(Reason) orelse Reason == undefined ->
     true = ets:delete(Tab2, ExtId),
 
     %% Cleanup counters
-    ok = bondy_session_counter:delete_all(Id),
+    ok = bondy_message_id:purge_session(RealmUri, Id),
 
     %% Revoke Tickets and Tokens
     ok = maybe_revoke_tickets(S, Reason),
@@ -658,24 +657,6 @@ refresh_rbac_context(#session{id = Id} = Session) ->
 
 refresh_rbac_context(Id) when is_binary(Id) ->
     refresh_rbac_context(fetch(Id)).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec gen_message_id(t_or_id()) -> map().
-
-gen_message_id(#session{id = Id}) ->
-    gen_message_id(Id);
-
-gen_message_id(Id) when is_binary(Id) ->
-    try
-        bondy_session_counter:incr(Id, message_id)
-    catch
-        error:badarg ->
-            bondy_utils:gen_message_id(global)
-    end.
 
 
 

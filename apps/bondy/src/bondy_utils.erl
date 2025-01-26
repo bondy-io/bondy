@@ -31,7 +31,6 @@
 -export([elapsed_time/2]).
 -export([external_session_id/1]).
 -export([foreach/2]).
--export([gen_message_id/1]).
 -export([generate_fragment/1]).
 -export([get_ipaddr/2]).
 -export([get_ipaddr_family/2]).
@@ -249,32 +248,6 @@ decode(msgpack, Term) ->
 decode(ContentType, Term) ->
     %% We cannot decode this so create a wrapped data object
     #{<<"type">> => ContentType, <<"content">> => Term}.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% IDs in the _global scope_ MUST be drawn _randomly_ from a _uniform
-%% distribution_ over the complete range [0, 2^53]
-%% @end
-%% -----------------------------------------------------------------------------
--spec gen_message_id(Scope :: global | {router, uri()} | {session, id()}) ->
-    id().
-
-gen_message_id(global) ->
-    %% IDs in the _global scope_ MUST be drawn _randomly_ from a _uniform
-    %% distribution_ over the complete range [0, 2^53]
-    wamp_utils:rand_uniform();
-
-gen_message_id({router, _}) ->
-    gen_message_id(global);
-
-gen_message_id({session, SessionOrId}) ->
-    %% IDs in the _session scope_ SHOULD be incremented by 1 beginning
-    %% with 1 (for each direction - _Client-to-Router_ and _Router-to-
-    %% Client_)
-    %% This is the router-to-client direction
-    bondy_session:gen_message_id(SessionOrId).
-
 
 %% -----------------------------------------------------------------------------
 %% @doc Converts a session identifier into a 0-padded binary string.

@@ -242,6 +242,11 @@ handle_call({open, Session0}, _From, State0) ->
     %% We store the session
     {ok, Session} = bondy_session:store(Session0),
 
+    %% We init the session-sceped counters
+    RealmUri = bondy_session:realm_uri(Session),
+    SessionId = bondy_session:id(Session),
+    ok = bondy_message_id:init_session(RealmUri, SessionId),
+
     Id = bondy_session:id(Session),
     Pid = bondy_session:pid(Session),
 

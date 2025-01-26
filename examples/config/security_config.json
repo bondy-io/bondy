@@ -84,6 +84,17 @@
         ],
         "users" : [
             {
+                "username" : "webapp",
+                "password" : "secret",
+                "description": "A test client",
+                "groups":["api_clients"]
+            },
+             {
+                "username" : "alice",
+                "password" : "123456",
+                "groups" : ["resource_owners"]
+            },
+            {
                 "username" : "app1",
                 "password" : "changethispassword",
                 "groups" : ["api_clients"],
@@ -269,28 +280,7 @@
                     {"uri" : "bondy.", "match": "prefix"}
                 ]
             }
-        ],
-        "oauth2" : {
-            "clients" : [
-                {
-                    "client_id" : "webapp",
-                    "client_secret" : "secret",
-                    "description": "A test client",
-                    "groups":["admin"]
-                }
-            ],
-            "resource_owners" : [
-                {
-                    "username" : "user3@example.com",
-                    "password" : "123456",
-                    "groups" : ["account_admin"],
-                    "meta" : {
-                        "account_id" : "1",
-                        "user_id" : "1"
-                    }
-                }
-            ]
-        }
+        ]
     },
     {
         "uri" : "com.leapsight.test_1",
