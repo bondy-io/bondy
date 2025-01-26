@@ -264,7 +264,7 @@ subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
     %% is restarted by the supervisor.
     Id = case maps:find(subscription_id, Opts) of
         {ok, Value} -> Value;
-        error -> bondy_utils:gen_message_id(global)
+        error -> bondy_message_id:global()
     end,
 
     %% subscriber will call subscribe(RealmUri, Opts, Topic, Pid)
@@ -700,7 +700,7 @@ do_publish(#publish{} = M, Ctxt) ->
     Subscriptions = match_subscriptions(TopicUri, RealmUri, MatchOpts),
 
     %% We generate a new publication id
-    PubId = bondy_utils:gen_message_id(global),
+    PubId = bondy_message_id:global(),
 
     %% Prepare details, we will use them for the local event creation and also
     %% to forward to the remote nodes (See FwdOpts below)

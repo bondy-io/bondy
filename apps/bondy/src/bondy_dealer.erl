@@ -664,7 +664,7 @@ forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
             {To, SendOpts} = bondy:prepare_send(Callee, Opts),
 
             CalleeSessionId = bondy_ref:session_id(Callee),
-            InvocationId = bondy_session:gen_message_id(CalleeSessionId),
+            InvocationId = bondy_message_id:session(RealmUri, CalleeSessionId),
             Timeout = bondy_utils:timeout(Opts),
 
             Invocation = call_to_invocation(Msg, InvocationId),
@@ -1749,16 +1749,18 @@ prepare_call(M, Uri, Entry, Ctxt) ->
 
 
 %% @private
-call_to_invocation(#call{options = #{'$private' := _}} = M, _, Entry, _) ->
+call_to_invocation(#call{options = #{'$private' := _}} = M, _, Entry, Ctxt) ->
+    RealmUri = bondy_context:realm_uri(Ctxt),
     Callee = bondy_registry_entry:ref(Entry),
     CalleeSessionId = bondy_ref:session_id(Callee),
-    InvocationId = bondy_session:gen_message_id(CalleeSessionId),
+    InvocationId = bondy_message_id:session(RealmUri, CalleeSessionId),
     call_to_invocation(M, InvocationId);
 
 call_to_invocation(#call{} = M, Uri, Entry, Ctxt) ->
+    RealmUri = bondy_context:realm_uri(Ctxt),
     Callee = bondy_registry_entry:ref(Entry),
     CalleeSessionId = bondy_ref:session_id(Callee),
-    InvocationId = bondy_session:gen_message_id(CalleeSessionId),
+    InvocationId = bondy_message_id:session(RealmUri, CalleeSessionId),
     call_to_invocation(prepare_call(M, Uri, Entry, Ctxt), InvocationId).
 
 
