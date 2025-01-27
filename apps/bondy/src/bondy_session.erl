@@ -67,6 +67,7 @@
     security_enabled = true         ::  boolean(),
     is_anonymous = false            ::  boolean(),
     rbac_context                    ::  optional(bondy_rbac:context()),
+    is_persistent = false           ::  boolean(),
     %% Expiration and Limits
     created                         ::  pos_integer(),
     expires_at                      ::  pos_integer() | infinity,
@@ -161,8 +162,8 @@
 -export([features/3]).
 -export([fetch/1]).
 -export([id/1]).
--export([gen_message_id/1]).
 -export([is_anonymous/1]).
+-export([is_persistent/1]).
 -export([is_security_enabled/1]).
 -export([list/0]).
 -export([list/1]).
@@ -347,7 +348,7 @@ when is_binary(Reason) orelse Reason == undefined ->
     true = ets:delete(Tab2, ExtId),
 
     %% Cleanup counters
-    ok = bondy_session_counter:delete_all(Id),
+    ok = bondy_message_id:purge_session(RealmUri, Id),
 
     %% Revoke Tickets and Tokens
     ok = maybe_revoke_tickets(S, Reason),
@@ -660,24 +661,6 @@ refresh_rbac_context(Id) when is_binary(Id) ->
     refresh_rbac_context(fetch(Id)).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec gen_message_id(t_or_id()) -> map().
-
-gen_message_id(#session{id = Id}) ->
-    gen_message_id(Id);
-
-gen_message_id(Id) when is_binary(Id) ->
-    try
-        bondy_session_counter:incr(Id, message_id)
-    catch
-        error:badarg ->
-            bondy_utils:gen_message_id(global)
-    end.
-
-
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns the number of sessions in the tuplespace.
@@ -702,6 +685,20 @@ is_security_enabled(#session{security_enabled = Val}) ->
 
 is_security_enabled(Id) ->
     lookup_field(Id, #session.security_enabled).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_persistent(t()) -> boolean().
+
+is_persistent(#session{is_persistent = Val}) ->
+    Val;
+
+is_persistent(Id) ->
+    lookup_field(Id, #session.is_persistent).
+
 
 
 %% -----------------------------------------------------------------------------

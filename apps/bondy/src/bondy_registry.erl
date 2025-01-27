@@ -1469,7 +1469,7 @@ registration_id(_, #{registration_id := Val}) ->
     Val;
 
 registration_id(RealmUri, _) ->
-    bondy_utils:gen_message_id({router, RealmUri}).
+    bondy_message_id:router(RealmUri).
 
 
 %% @private
@@ -1477,7 +1477,7 @@ subscription_id(_, #{subscription_id := Val}) ->
     Val;
 
 subscription_id(Uri, _) ->
-    bondy_utils:gen_message_id({router, Uri}).
+    bondy_message_id:router(Uri).
 
 
 

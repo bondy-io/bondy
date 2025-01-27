@@ -541,17 +541,17 @@ when is_map(Ctxt) andalso (is_binary(Val) orelse Val == anonymous) ->
 -spec gen_message_id(Ctxt :: t(), Scope :: global | router | session) -> id().
 
 gen_message_id(_, global) ->
-    bondy_utils:gen_message_id(global);
+    bondy_message_id:global();
 
-gen_message_id(#{realm_uri := Uri}, router) ->
-    bondy_utils:gen_message_id({router, Uri});
+gen_message_id(#{realm_uri := RealmUri}, router) ->
+    bondy_message_id:router(RealmUri);
 
-gen_message_id(#{session := Session}, session) ->
-    bondy_session:gen_message_id(Session);
+gen_message_id(#{realm_uri := RealmUri, session := Session}, session) ->
+    bondy_message_id:session(RealmUri, Session);
 
 gen_message_id(_, session) ->
     %% Internal process without sessions
-    bondy_utils:gen_message_id(global).
+    bondy_message_id:global().
 
 
 %% -----------------------------------------------------------------------------

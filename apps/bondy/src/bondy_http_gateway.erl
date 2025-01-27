@@ -471,7 +471,7 @@ subscribe(State) ->
     {ok, Id} = bondy_broker:subscribe(
         ?MASTER_REALM_URI,
         #{
-            subscription_id => bondy_utils:gen_message_id(global),
+            subscription_id => bondy_message_id:global(),
             match => <<"exact">>
         },
         ?BONDY_REALM_DELETED,

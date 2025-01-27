@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 1.0.0-rc.30
+## Fixes
+* Fixed a memory leak caused by the uncleaned `bondy_session_counter` table, which was used for session-scoped WAMP ID generation in the HTTP API Gateway. The new implementation uses random numbers for HTTP API Gateway requests instead of maintaining a counter. All logic related to WAMP message ID generation has been consolidated in the bondy_message_id module. Counters are not only used for WAMP sessions.
+
+
 ## 1.0.0-rc.29
 ## Changes
 * Changed the `bondy_session_manager` pool worker selection to use the Session
