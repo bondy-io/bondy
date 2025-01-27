@@ -1,4 +1,7 @@
 # CHANGELOG
+## 1.0.0-rc.31
+* Updated Dockerfile: removed deprecated libraries and uphgrade both Linux and Erlang versions
+* Removed the OTP25 version of Bondy.
 
 ## 1.0.0-rc.30
 ## Fixes

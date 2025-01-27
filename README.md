@@ -135,11 +135,10 @@ leapsight/bondy:master
 ### Building from source
 #### Requirements
 * macOS (Intel|Apple Silicon) or Linux (amd64|arm64)
-* [Erlang](https://www.erlang.org/) 26.0.2 or later
+* [Erlang](https://www.erlang.org/) 26.2.5.6 (Support for OTP 27 is on its way)
 * [Rebar3](https://rebar3.readme.io/) 3.22.1 or later
 * openssl
 * libssl
-* [Libsodium](https://github.com/jedisct1/libsodium) - if installing on Apple Silicon and having an issue compiling the libary check the last response on [this Github Issue](https://github.com/jlouis/enacl/issues/53)
 * libsnappy
 * liblz4
 * libcrypto

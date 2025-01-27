@@ -16,24 +16,24 @@ jobs:
     steps:
       -
         name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       -
         name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@v3
         with:
           platforms: all
       -
         name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
       -
         name: Login to DockerHub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       -
         name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -41,7 +41,7 @@ jobs:
       -
         name: Docker meta
         id: meta
-        uses: docker/metadata-action@v4
+        uses: docker/metadata-action@v5
         with:
           # without registry name, we will add it in the build-push-action as
           # each registry has diff namespace at the moment
@@ -61,13 +61,13 @@ jobs:
             org.opencontainers.image.vendor=Leapsight
       -
         name: Build, cache and push standard image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./deployment/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: leapsight/${{ steps.meta.outputs.tags }},leapsight/${{ steps.meta.outputs.tags }}-otp26
+          tags: leapsight/${{ steps.meta.outputs.tags }},leapsight/${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=leapsight/${{ steps.meta.outputs.tags }}-buildcache
           cache-to: type=registry,ref=leapsight/${{ steps.meta.outputs.tags }}-buildcache,mode=max
@@ -75,26 +75,26 @@ jobs:
         # Copy multiplatform image from dockerhub to multiple registries
         # without changing the image SHA
         name: Copy Image to multiple registries
-        uses: akhilerm/tag-push-action@v2.0.0
+        uses: akhilerm/tag-push-action@v2.1.0
         with:
           src: docker.io/leapsight/${{ steps.meta.outputs.tags }}
           dst: |
             ghcr.io/bondy-io/${{ steps.meta.outputs.tags }}
       -
         name: Build and push alpine image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./deployment/alpine.Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: leapsight/${{ steps.meta.outputs.tags }}-alpine,leapsight/${{ steps.meta.outputs.tags }}-alpine-otp26
+          tags: leapsight/${{ steps.meta.outputs.tags }}-alpine,leapsight/${{ steps.meta.outputs.tags }}-alpine
           labels: ${{ steps.meta.outputs.labels }}
       -
         # Copy multiplatform image from dockerhub to multiple registries
         # without changing the image SHA
         name: Copy Image to multiple registries
-        uses: akhilerm/tag-push-action@v2.0.0
+        uses: akhilerm/tag-push-action@v2.1.0
         with:
           src: docker.io/leapsight/${{ steps.meta.outputs.tags }}-alpine
           dst: |
@@ -103,8 +103,8 @@ jobs:
         # Copy multiplatform image from dockerhub to multiple registries
         # without changing the image SHA
         name: Copy Image to multiple registries
-        uses: akhilerm/tag-push-action@v2.0.0
+        uses: akhilerm/tag-push-action@v2.1.0
         with:
-          src: docker.io/leapsight/${{ steps.meta.outputs.tags }}-alpine-otp26
+          src: docker.io/leapsight/${{ steps.meta.outputs.tags }}-alpine
           dst: |
-            ghcr.io/bondy-io/${{ steps.meta.outputs.tags }}-alpine-otp26
+            ghcr.io/bondy-io/${{ steps.meta.outputs.tags }}-alpine
