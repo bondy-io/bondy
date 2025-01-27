@@ -1,4 +1,4 @@
-name: Docker Build OTP 26
+name: Bondy Debian OTP 26
 on:
   workflow_dispatch:
   push:
@@ -60,45 +60,15 @@ jobs:
             org.opencontainers.image.description=Bondy is an open source, always-on and scalable application networking platform connecting all elements of a distributed application—offering event and service mesh capabilities combined. From web and mobile apps to IoT devices and backend microservices, Bondy allows everything to talk using one simple communication protocol.
             org.opencontainers.image.vendor=Leapsight
       -
-        name: Build, cache and push standard image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./deployment/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: leapsight/${{ steps.meta.outputs.tags }},leapsight/${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=leapsight/${{ steps.meta.outputs.tags }}-buildcache
-          cache-to: type=registry,ref=leapsight/${{ steps.meta.outputs.tags }}-buildcache,mode=max
-      -
-        # Copy multiplatform image from dockerhub to multiple registries
-        # without changing the image SHA
-        name: Copy Image to multiple registries
-        uses: akhilerm/tag-push-action@v2.1.0
-        with:
-          src: docker.io/leapsight/${{ steps.meta.outputs.tags }}
-          dst: |
-            ghcr.io/bondy-io/${{ steps.meta.outputs.tags }}
-      -
-        name: Build and push alpine image
+        name: Build, cache and push image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./deployment/alpine.Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: leapsight/${{ steps.meta.outputs.tags }}-alpine,leapsight/${{ steps.meta.outputs.tags }}-alpine
+          tags: leapsight/${{ steps.meta.outputs.tags }}-alpine
           labels: ${{ steps.meta.outputs.labels }}
-      -
-        # Copy multiplatform image from dockerhub to multiple registries
-        # without changing the image SHA
-        name: Copy Image to multiple registries
-        uses: akhilerm/tag-push-action@v2.1.0
-        with:
-          src: docker.io/leapsight/${{ steps.meta.outputs.tags }}-alpine
-          dst: |
-            ghcr.io/bondy-io/${{ steps.meta.outputs.tags }}-alpine
       -
         # Copy multiplatform image from dockerhub to multiple registries
         # without changing the image SHA
