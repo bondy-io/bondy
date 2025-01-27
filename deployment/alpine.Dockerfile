@@ -19,7 +19,6 @@ RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
         ncurses \
         openssl \
         snappy-dev \
-        libsodium-dev \
         jq \
         curl \
         bash \
@@ -75,7 +74,6 @@ ENV HOME "/bondy"
 #
 # We install the following required packages:
 # - openssl: required by Erlang crypto application
-# - libsodium: required by enacl application
 # We setup the bondy group and user and the /bondy dir
 # We also create the /bondy/etc dir to avoid an issue when deploying in K8s
 # where the permissions are not assigned to the directory and Bondy will not
@@ -85,7 +83,7 @@ RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
     && apk add --no-cache \
         libstdc++  \
         bash procps iproute2 net-tools curl jq nano \
-        ncurses openssl libsodium-dev \
+        ncurses openssl \
     && addgroup --gid 1000 bondy \
     && adduser \
         --uid 1000 \
