@@ -4,7 +4,7 @@
 # Build stage 1
 # ===========================================================================
 
-FROM erlang:26.2.5 AS builder
+FROM erlang:26.2.5.6 AS builder
 
 # Install build dependencies
 RUN --mount=type=cache,id=apt,sharing=locked,target=/var/cache/apt apt-get update && \
@@ -13,7 +13,6 @@ RUN --mount=type=cache,id=apt,sharing=locked,target=/var/cache/apt apt-get updat
     cmake \
     git \
     libssl-dev \
-    libsodium-dev \
     libsnappy-dev \
     curl && \
 	rm -rf /var/lib/apt/lists/*
@@ -68,7 +67,6 @@ ENV HOME "/bondy"
 #
 # We install the following required packages:
 # - openssl: required by Erlang crypto application
-# - libsodium: required by enacl application
 # We setup the bondy group and user and the /bondy dir
 # We also create the /bondy/etc dir to avoid an issue when deploying in K8s
 # where the permissions are not assigned to the directory and Bondy will not
@@ -76,7 +74,7 @@ ENV HOME "/bondy"
 RUN apt-get update \
     && apt-get -y install \
     sudo bash procps iproute2 net-tools dnsutils curl jq nano \
-    openssl libsodium-dev libsnappy-dev\
+    openssl libsnappy-dev\
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 -r bondy \
     && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "bondy" bondy \
