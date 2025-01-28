@@ -65,7 +65,7 @@ jobs:
         with:
           context: .
           file: ./deployment/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: leapsight/${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
