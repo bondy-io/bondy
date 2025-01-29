@@ -1,12 +1,14 @@
 # CHANGELOG
 
-## 1.0.0-rc.31
+## 1.0.0-rc.32
 * Updated Dockerfile
     * Removed deprecated libraries
     * Upgraded OS and Erlang/OTP versions
     * New multi-arch Github action
-* Removed support for OTP25
 
+## 1.0.0-rc.31
+* Removed support for OTP25
+* Updated Github Actions
 
 ## 1.0.0-rc.30
 ## Fixes
