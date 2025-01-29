@@ -10,36 +10,34 @@ on:
       - '[0-9]+.[0-9]+.[0-9]+.[0-9]+'
 
 jobs:
-  docker:
+  build-push-arm7:
     runs-on: ubuntu-24-arm64-4x
-    name: Build an publish docker images to multiple registries
+
     steps:
-      -
-        name: Checkout
+      - name: Checkout
         uses: actions/checkout@v4
-      -
-        name: Set up QEMU
+
+      - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-        with:
-          platforms: all
-      -
-        name: Set up Docker Buildx
+
+      - name: Set up Docker Context for Buildx
+        id: buildx-context
+        run: |
+          docker context create builders
+
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      -
-        name: Login to DockerHub
+        with:
+          version: latest
+          endpoint: builders
+
+      - name: Login to DockerHub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      -
-        name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-      -
-        name: Docker meta
+
+      - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -59,22 +57,176 @@ jobs:
             org.opencontainers.image.title=Bondy
             org.opencontainers.image.description=Bondy is an open source, always-on and scalable application networking platform connecting all elements of a distributed application—offering event and service mesh capabilities combined. From web and mobile apps to IoT devices and backend microservices, Bondy allows everything to talk using one simple communication protocol.
             org.opencontainers.image.vendor=Leapsight
-      -
-        name: Build, cache and push image
+
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./deployment/Dockerfile
-          platforms: linux/arm64,linux/amd64
-          push: true
-          tags: leapsight/${{ steps.meta.outputs.tags }}
+          platforms: linux/arm/v7
+          tags: leapsight/${{ steps.meta.outputs.tags }}-armv7
+
+  build-push-arm64:
+    runs-on: [self-hosted, ARM64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Context for Buildx
+        id: buildx-context
+        run: |
+          docker context create builders
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: latest
+          endpoint: builders
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # without registry name, we will add it in the build-push-action as
+          # each registry has diff namespace at the moment
+          images: |
+            bondy
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+          flavor: |
+            latest=false
+            prefix=
+            suffix=
+          labels: |
+            maintainer=Leapsight
+            org.opencontainers.image.title=Bondy
+            org.opencontainers.image.description=Bondy is an open source, always-on and scalable application networking platform connecting all elements of a distributed application—offering event and service mesh capabilities combined. From web and mobile apps to IoT devices and backend microservices, Bondy allows everything to talk using one simple communication protocol.
+            org.opencontainers.image.vendor=Leapsight
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./deployment/Dockerfile
+          platforms: linux/arm64
+          tags: leapsight/${{ steps.meta.outputs.tags }}-arm64
+
+  build-push-x64:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Context for Buildx
+        id: buildx-context
+        run: |
+          docker context create builders
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: latest
+          endpoint: builders
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # without registry name, we will add it in the build-push-action as
+          # each registry has diff namespace at the moment
+          images: |
+            bondy
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+          flavor: |
+            latest=false
+            prefix=
+            suffix=
+          labels: |
+            maintainer=Leapsight
+            org.opencontainers.image.title=Bondy
+            org.opencontainers.image.description=Bondy is an open source, always-on and scalable application networking platform connecting all elements of a distributed application—offering event and service mesh capabilities combined. From web and mobile apps to IoT devices and backend microservices, Bondy allows everything to talk using one simple communication protocol.
+            org.opencontainers.image.vendor=Leapsight
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./deployment/Dockerfile
+          platforms: linux/amd64
+          tags: leapsight/${{ steps.meta.outputs.tags }}-amd64
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=leapsight/${{ steps.meta.outputs.tags }}-buildcache
-          cache-to: type=registry,ref=leapsight/${{ steps.meta.outputs.tags }}-buildcache,mode=max
+
+  create-manifests:
+    runs-on: ubuntu-latest
+    needs: [build-push-x64, build-push-arm7, build-push-arm64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # without registry name, we will add it in the build-push-action as
+          # each registry has diff namespace at the moment
+          images: |
+            bondy
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+          flavor: |
+            latest=false
+            prefix=
+            suffix=
+          labels: |
+            maintainer=Leapsight
+            org.opencontainers.image.title=Bondy
+            org.opencontainers.image.description=Bondy is an open source, always-on and scalable application networking platform connecting all elements of a distributed application—offering event and service mesh capabilities combined. From web and mobile apps to IoT devices and backend microservices, Bondy allows everything to talk using one simple communication protocol.
+            org.opencontainers.image.vendor=Leapsight
+
+      - name: Create branch/tag manifest and push
+        run: |
+          docker manifest create \
+            leapsight/${{ steps.meta.outputs.tags }} \
+            --amend leapsight/${{ steps.meta.outputs.tags }}-amd64 \
+            --amend leapsight/${{ steps.meta.outputs.tags }}-armv7 \
+            --amend leapsight/${{ steps.meta.outputs.tags }}-arm64
+          docker manifest push leapsight/${{ steps.meta.outputs.tags }}
+
       -
-        # Copy multiplatform image from dockerhub to multiple registries
+        # Copy multiplatform image from dockerhub to Github Registry
         # without changing the image SHA
-        name: Copy Image to multiple registries
+        name: Copy Image to GH Registry
         uses: akhilerm/tag-push-action@v2.1.0
         with:
           src: docker.io/leapsight/${{ steps.meta.outputs.tags }}
