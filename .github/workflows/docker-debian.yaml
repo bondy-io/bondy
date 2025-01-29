@@ -2,7 +2,7 @@ name: Bondy Debian OTP 26
 on:
   workflow_dispatch:
   push:
-    branches : [develop, master]
+    branches : [feature/aramallo.ci]
     tags:
       - '[0-9]+.[0-9]+.[0-9]+'
       - '[0-9]+.[0-9]+.[0-9]+-[a-zA-Z0-9]+'
@@ -11,7 +11,7 @@ on:
 
 jobs:
   docker:
-    runs-on: ubuntu-latest-m
+    runs-on: ubuntu-24-arm64-4x
     name: Build an publish docker images to multiple registries
     steps:
       -
@@ -65,7 +65,7 @@ jobs:
         with:
           context: .
           file: ./deployment/Dockerfile
-          platforms: linux/amd64
+          platforms: linux/arm64,linux/amd64
           push: true
           tags: leapsight/${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
