@@ -164,7 +164,6 @@ jobs:
           docker manifest create \
             leapsight/${{ steps.meta.outputs.tags }} \
             --amend leapsight/${{ steps.meta.outputs.tags }}-amd64 \
-            --amend leapsight/${{ steps.meta.outputs.tags }}-armv7 \
             --amend leapsight/${{ steps.meta.outputs.tags }}-arm64
           docker manifest push leapsight/${{ steps.meta.outputs.tags }}
 
