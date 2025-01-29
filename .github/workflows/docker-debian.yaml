@@ -171,8 +171,8 @@ jobs:
         run: |
           docker buildx imagetools create \
             -t leapsight/${{ steps.meta.outputs.tags }}  \
-            --amend leapsight/${{ steps.meta.outputs.tags }}-amd64 \
-            --amend leapsight/${{ steps.meta.outputs.tags }}-arm64
+            leapsight/${{ steps.meta.outputs.tags }}-amd64 \
+            leapsight/${{ steps.meta.outputs.tags }}-arm64
           docker buildx imagetools inspect \
             leapsight/${{ steps.meta.outputs.tags }}
 
