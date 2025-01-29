@@ -169,11 +169,12 @@ jobs:
 
       - name: Create branch/tag manifest and push
         run: |
-          docker manifest create \
-            leapsight/${{ steps.meta.outputs.tags }} \
+          docker buildx imagetools create \
+            -t leapsight/${{ steps.meta.outputs.tags }}  \
             --amend leapsight/${{ steps.meta.outputs.tags }}-amd64 \
             --amend leapsight/${{ steps.meta.outputs.tags }}-arm64
-          docker manifest push leapsight/${{ steps.meta.outputs.tags }}
+          docker buildx imagetools inspect \
+            leapsight/${{ steps.meta.outputs.tags }}
 
       -
         name: Login to GitHub Container Registry
