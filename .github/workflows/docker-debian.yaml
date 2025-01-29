@@ -61,6 +61,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
+          push: true
           context: .
           file: ./deployment/Dockerfile
           platforms: linux/arm64
@@ -116,6 +117,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
+          push: true
           context: .
           file: ./deployment/Dockerfile
           platforms: linux/amd64
@@ -168,9 +170,16 @@ jobs:
           docker manifest push leapsight/${{ steps.meta.outputs.tags }}
 
       -
+        name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      -
         # Copy multiplatform image from dockerhub to Github Registry
         # without changing the image SHA
-        name: Copy Image to GH Registry
+        name: Copy Image to GitHub Container Registry
         uses: akhilerm/tag-push-action@v2.1.0
         with:
           src: docker.io/leapsight/${{ steps.meta.outputs.tags }}
