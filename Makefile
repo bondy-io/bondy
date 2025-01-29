@@ -193,6 +193,19 @@ docker-build:
 		-t "bondy-prod" \
 		-f deployment/Dockerfile .
 
+docker-cloud-build:
+	docker buildx install
+	docker stop bondy-prod || true
+	docker rm bondy-prod || true
+	docker rmi bondy-prod || true
+	docker build \
+		--builder cloud-leapsight-bondy-cloud-builder \
+		--pull \
+		--platform linux/$(DOCKER_PLATFORM) \
+		--load \
+		-t "bondy-prod" \
+		-f deployment/Dockerfile .
+
 docker-build-alpine:
 	docker buildx install
 	docker stop bondy-prod || true
@@ -224,4 +237,5 @@ docker-run-prod:
 
 docker-scan-prod:
 	docker scan bondy-prod
+
 
