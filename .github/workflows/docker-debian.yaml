@@ -15,6 +15,10 @@ jobs:
     runs-on: ubuntu-24-arm64-4x
 
     steps:
+      # Not strictly required as it should default based on runner)
+      - name: Set Platform to arm64
+        run: echo "DOCKER_DEFAULT_PLATFORM=linux/arm64" >> $GITHUB_ENV
+
       - uses: actions/checkout@v4
 
       - name: Set up QEMU
@@ -64,13 +68,16 @@ jobs:
           push: true
           context: .
           file: ./deployment/Dockerfile
-          platforms: linux/arm64
           tags: leapsight/${{ steps.meta.outputs.tags }}-arm64
 
   build-push-x64:
     runs-on: ubuntu-latest
 
     steps:
+      # Not strictly required as it should default based on runner)
+      - name: Set Platform to amd64
+        run: echo "DOCKER_DEFAULT_PLATFORM=linux/amd64" >> $GITHUB_ENV
+
       - uses: actions/checkout@v4
 
       - name: Set up QEMU
@@ -120,7 +127,6 @@ jobs:
           push: true
           context: .
           file: ./deployment/Dockerfile
-          platforms: linux/amd64
           tags: leapsight/${{ steps.meta.outputs.tags }}-amd64
           labels: ${{ steps.meta.outputs.labels }}
 
