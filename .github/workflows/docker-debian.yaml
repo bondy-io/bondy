@@ -10,6 +10,7 @@ on:
       - '[0-9]+.[0-9]+.[0-9]+.[0-9]+'
 
 jobs:
+
   build-push-arm64:
     runs-on: [self-hosted, ARM64]
 
@@ -123,7 +124,7 @@ jobs:
 
   create-manifests:
     runs-on: ubuntu-latest
-    needs: [build-push-x64, build-push-arm7, build-push-arm64]
+    needs: [build-push-x64, build-push-arm64]
 
     steps:
       - uses: actions/checkout@v4
@@ -163,6 +164,7 @@ jobs:
           docker manifest create \
             leapsight/${{ steps.meta.outputs.tags }} \
             --amend leapsight/${{ steps.meta.outputs.tags }}-amd64 \
+            --amend leapsight/${{ steps.meta.outputs.tags }}-armv7 \
             --amend leapsight/${{ steps.meta.outputs.tags }}-arm64
           docker manifest push leapsight/${{ steps.meta.outputs.tags }}
 
