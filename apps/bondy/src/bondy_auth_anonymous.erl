@@ -121,10 +121,10 @@ challenge(_, _, State) ->
 authenticate(_, _, Ctxt, State) ->
     %% We validate the ctxt has not changed between init and authenticate calls
     Data = #{
-        source_ip => bondy_auth:source_ip(Ctxt),
+        user_id => bondy_auth:user_id(Ctxt),
         role => bondy_auth:role(Ctxt),
         roles => bondy_auth:roles(Ctxt),
-        user_id => bondy_auth:user_id(Ctxt)
+        source_ip => bondy_auth:source_ip(Ctxt)
     },
 
     case Data == State of
