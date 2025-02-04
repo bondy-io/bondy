@@ -1,5 +1,8 @@
 # CHANGELOG
 
+## 1.0.0-rc.33
+* Fixes #41 - error when authentication using anonymous when real's security is disabled
+
 ## 1.0.0-rc.32
 * Updated Dockerfile
     * Removed deprecated libraries
