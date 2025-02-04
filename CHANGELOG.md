@@ -1,7 +1,15 @@
 # CHANGELOG
 
+## 1.0.0-rc.34
+## Changes
+* It is now an error to open a session to a Realm when security is disabled and using an `authmethod` other than anonymous.
+
+## Fixes
+* #42 - error when authentication using anonymous when realm's security is disabled (additional case)
+
 ## 1.0.0-rc.33
-* Fixes #41 - error when authentication using anonymous when real's security is disabled
+## Fixes
+* #41 - error when authentication using anonymous when realm's security is disabled
 
 ## 1.0.0-rc.32
 * Updated Dockerfile
