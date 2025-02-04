@@ -716,8 +716,17 @@ maybe_auth_challenge(Details, Realm, St) ->
 
 
 %% @private
-maybe_auth_challenge(enabled, #{authid := UserId} = Details, Realm, St0)
-when UserId =/= <<"anonymous">> ->
+maybe_auth_challenge(Flag, #{authid := <<"anonymous">>} = Details, Realm, St) ->
+    maybe_auth_challenge(Flag, maps:without([authid], Details), Realm, St);
+
+maybe_auth_challenge(disabled, #{authid := _}, _
+    , St) ->
+    Reason = <<
+        "You've provided and authid but the realm's security is disabled"
+    >>,
+    {error, {authentication_failed, Reason}, St};
+
+maybe_auth_challenge(enabled, #{authid := UserId} = Details, Realm, St0) ->
     Ctxt0 = St0#wamp_state.context,
     Ctxt1 = bondy_context:set_request_details(Ctxt0, Details),
     Ctxt = bondy_context:set_authid(Ctxt1, UserId),
@@ -732,6 +741,7 @@ when UserId =/= <<"anonymous">> ->
         {ok, AuthCtxt} ->
             St2 = St1#wamp_state{auth_context = AuthCtxt},
             ReqMethods = maps:get(authmethods, Details, []),
+
             case bondy_auth:available_methods(ReqMethods, AuthCtxt) of
                 [] ->
                     {error, {no_authmethod, ReqMethods}, St2};
@@ -743,37 +753,6 @@ when UserId =/= <<"anonymous">> ->
         {error, Reason} ->
             {error, {authentication_failed, Reason}, St1}
     end;
-
-maybe_auth_challenge(disabled, #{authid := UserId} = Details, Realm, St0) ->
-    Ctxt0 = St0#wamp_state.context,
-    Ctxt1 = bondy_context:set_request_details(Ctxt0, Details),
-    Ctxt = bondy_context:set_authid(Ctxt1, UserId),
-    St1 = update_context(Ctxt, St0),
-
-    SessionId = bondy_context:session_id(Ctxt),
-    Roles = authroles(Details),
-    SourceIP = bondy_context:source_ip(Ctxt),
-
-    case bondy_auth:init(SessionId, Realm, UserId, Roles, SourceIP) of
-        {ok, AuthCtxt} ->
-            %% Security is disabled so we do no authenticate
-            St = St1#wamp_state{auth_context = AuthCtxt},
-            AuthExtra = #{},
-            {ok, AuthExtra, St};
-
-        {error, Reason} ->
-            {error, {authentication_failed, Reason}, St1}
-    end;
-
-maybe_auth_challenge(
-    SecFlag, #{authid := <<"anonymous">>} = Details, Realm, St) ->
-    maybe_auth_challenge(SecFlag, maps:without([authid], Details), Realm, St);
-
-maybe_auth_challenge(disabled, #{authid := _}, _, St) ->
-    %% With security disabled it doesn't make sense to pass an authid other than
-    %% <<"anonymous">>
-    {error, {authentication_failed, <<"You've provided and authid but the realm's security is disabled">>}, St};
-
 
 maybe_auth_challenge(_, Details, Realm, St0) ->
     %% Anonymous: authid missing or matched prev clause with <<"anonymous">>
