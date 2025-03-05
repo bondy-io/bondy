@@ -158,7 +158,7 @@ validate_float_opt(Arg) ->
 -if(?OTP_RELEASE >= 27).
 
 do_encode(Term, FloatOpts) ->
-    IOList = json:encode(Term, fun
+    Fun =  fun
         (undefined, _Encode) ->
             <<"null">>;
 
@@ -171,8 +171,9 @@ do_encode(Term, FloatOpts) ->
 
         (Value, Encode) ->
             json:encode_value(Value, Encode)
-    end),
-    iolist_to_binary(IOList).
+    end,
+
+    iolist_to_binary(json:encode(Term, Fun)).
 
 do_decode(Term, _Opts) ->
     json:decode(Term).
