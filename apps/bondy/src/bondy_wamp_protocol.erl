@@ -389,6 +389,7 @@ handle_inbound_messages(Messages, St) ->
     catch
         throw:Reason ->
             stop(Reason, St);
+
         Class:Reason:Stacktrace when Class /= throw ->
             ?LOG_ERROR(#{
                 class => Class,
