@@ -33,7 +33,7 @@
 
 
 
--define(VALIDATOR, ?UPDATE_VALIDATOR#{
+-define(VALIDATOR, #{
     <<"name">> => #{
         alias => name,
         key => name,

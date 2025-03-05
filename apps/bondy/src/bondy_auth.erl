@@ -67,7 +67,7 @@
 -export_type([requirements/0]).
 
 %% BONDY_SENSITIVE CALLBACKS
--export([format_status/2]).
+-export([format_status/1]).
 
 %% API
 -export([authenticate/4]).
@@ -130,9 +130,9 @@
 
 
 
--spec format_status(Opt :: normal | terminate, Ctxt :: context()) -> term().
+-spec format_status(Ctxt :: context()) -> context().
 
-format_status(_Opt, Ctxt) ->
+format_status(Ctxt) ->
     #{user_id := Id, user := User, callback_mod_state := CBModState} = Ctxt,
 
     Ctxt#{

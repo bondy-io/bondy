@@ -139,13 +139,13 @@
         alias => <<"reconnect">>,
         required => true,
         default => #{},
-        validator => ?RECONNECT_SPEC
+        validator => begin ?RECONNECT_SPEC end
     },
     ping => #{
         alias => <<"ping">>,
         required => true,
         default => #{},
-        validator => ?PING_SPEC
+        validator => begin ?PING_SPEC end
     },
     %% Client opts!
     tls_opts => #{
@@ -154,7 +154,7 @@
         default => #{
             verify => verify_none
         },
-        validator => ?TLS_OPTS_SPEC
+        validator => begin ?TLS_OPTS_SPEC end
     },
     socket_opts => #{
         alias => <<"socket_opts">>,
@@ -163,7 +163,7 @@
             keepalive => true,
             nodelay => true
         },
-        validator => ?SOCKET_OPTS_SPEC
+        validator => begin ?SOCKET_OPTS_SPEC end
     },
     parallelism => #{
         alias => <<"parallelism">>,
@@ -186,7 +186,7 @@
     realms => #{
         alias => <<"realms">>,
         required => true,
-        validator => {list, ?REALM_SPEC}
+        validator => {list, begin ?REALM_SPEC end}
     }
 }).
 
@@ -398,14 +398,14 @@
         alias => <<"procedures">>,
         required => true,
         default => [],
-        validator => {list, ?PROCEDURE_ACTION_SPEC}
+        validator => begin {list, ?PROCEDURE_ACTION_SPEC} end
 
     },
     topics => #{
         alias => <<"topics">>,
         required => true,
         default => [],
-        validator => {list, ?TOPIC_ACTION_SPEC}
+        validator => begin {list, ?TOPIC_ACTION_SPEC} end
     }
 }).
 
@@ -418,8 +418,8 @@
     match => #{
         alias => <<"match">>,
         required => false,
-        default => ?EXACT_MATCH,
-        datatype => {in, ?MATCH_STRATEGIES}
+        default => begin ?EXACT_MATCH end,
+        datatype => begin {in, ?MATCH_STRATEGIES} end
     },
     direction => #{
         alias => <<"direction">>,
@@ -450,10 +450,10 @@
     }
 }).
 
--define(TOPIC_ACTION_SPEC, ?ACTION_SPEC#{
+-define(TOPIC_ACTION_SPEC, begin ?ACTION_SPEC end #{
 }).
 
--define(PROCEDURE_ACTION_SPEC, ?ACTION_SPEC#{
+-define(PROCEDURE_ACTION_SPEC, begin ?ACTION_SPEC end #{
     registration => #{
         alias => <<"registration">>,
         required => false,

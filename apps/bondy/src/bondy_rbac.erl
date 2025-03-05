@@ -57,7 +57,7 @@
 -include("bondy_security.hrl").
 
 
--define(GRANT_REQ_VALIDATOR_V1, ?GRANT_RESOURCE_VALIDATOR#{
+-define(GRANT_REQ_VALIDATOR_V1, begin ?GRANT_RESOURCE_VALIDATOR end #{
     <<"roles">> => #{
         alias => roles,
         key => roles,

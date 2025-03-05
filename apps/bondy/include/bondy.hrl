@@ -128,7 +128,7 @@
     payload_passthru_mode => true
 }).
 
--define(DEALER_FEATURES, (?COMMON_RPC_FEATURES)#{
+-define(DEALER_FEATURES, begin ?COMMON_RPC_FEATURES end#{
     call_reroute => false,
     call_trustlevels => false,
     pattern_based_registration => true,
@@ -142,7 +142,7 @@
     caller_auth_claims => true
 }).
 
--define(CALLEE_FEATURES, (?COMMON_RPC_FEATURES)#{
+-define(CALLEE_FEATURES, begin ?COMMON_RPC_FEATURES end#{
     call_reroute => false,
     call_trustlevels => false,
     pattern_based_registration => true,
@@ -152,7 +152,7 @@
     caller_auth_claims => true
 }).
 
--define(CALLER_FEATURES, (?COMMON_RPC_FEATURES)#{
+-define(CALLER_FEATURES, begin ?COMMON_RPC_FEATURES end#{
 }).
 
 -define(COMMON_PUBSUB_FEATURES, #{
@@ -161,7 +161,7 @@
     sharded_subscription => false
 }).
 
--define(BROKER_FEATURES, (?COMMON_PUBSUB_FEATURES)#{
+-define(BROKER_FEATURES, begin ?COMMON_PUBSUB_FEATURES end#{
     subscriber_blackwhite_listing => true,
     publisher_exclusion => true,
     publication_trustlevels => false,
@@ -177,7 +177,7 @@
     acknowledge_subscriber_received => false
 }).
 
--define(SUBSCRIBER_FEATURES, (?COMMON_PUBSUB_FEATURES)#{
+-define(SUBSCRIBER_FEATURES, begin ?COMMON_PUBSUB_FEATURES end#{
     publication_trustlevels => false,
     pattern_based_subscription => true,
     event_history => false,
@@ -186,7 +186,7 @@
     acknowledge_subscriber_received => false
 }).
 
--define(PUBLISHER_FEATURES, (?COMMON_PUBSUB_FEATURES)#{
+-define(PUBLISHER_FEATURES, begin ?COMMON_PUBSUB_FEATURES end#{
     subscriber_blackwhite_listing => true,
     publisher_exclusion => true,
     %% Non-standard

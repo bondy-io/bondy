@@ -117,7 +117,7 @@
 -export([init/1]).
 -export([terminate/3]).
 -export([code_change/4]).
--export([format_status/2]).
+-export([format_status/1]).
 
 
 %% STATE FUNCTIONS
@@ -298,8 +298,8 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-format_status(Opt, [_PDict, _StateName, #state{} = State]) ->
-    gen_format(Opt, State#state{config = sensitive}).
+format_status(#{state := State} = Status) ->
+    Status#{state => State#state{config = sensitive}}.
 
 
 
@@ -651,28 +651,6 @@ idle(internal, Msg, State) ->
 idle(EventType, EventContent, State) ->
     handle_event(EventType, EventContent, idle, State).
 
-
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc Use format recommended by gen_server:format_status/2
-%% @end
-%% -----------------------------------------------------------------------------
-gen_format(normal, State) ->
-    [{data, [{"State", gen_format(State)}]}];
-
-gen_format(_, State) ->
-    gen_format(State).
-
-
-%% @private
-gen_format(State) ->
-    State.
 
 
 %% =============================================================================

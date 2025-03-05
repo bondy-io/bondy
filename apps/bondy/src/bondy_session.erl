@@ -145,7 +145,7 @@
 
 
 %% BONDY_SENSITIVE CALLBACKS
--export([format_status/2]).
+-export([format_status/1]).
 
 %% API
 -export([agent/1]).
@@ -205,9 +205,9 @@
 
 
 
--spec format_status(Opt :: normal | terminate, Session :: t()) -> term().
+-spec format_status(Session :: t()) -> term().
 
-format_status(_Opt, #session{} = S) ->
+format_status(#session{} = S) ->
     S#session{
         authid = bondy_sensitive:wrap(S#session.authid),
         rbac_context = bondy_sensitive:wrap(S#session.rbac_context),

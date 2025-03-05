@@ -63,7 +63,7 @@
 
 
 %% BONDY_SENSITIVE CALLBACKS
--export([format_status/2]).
+-export([format_status/1]).
 
 %% API
 -export([init/3]).
@@ -88,21 +88,21 @@
 
 
 
--spec format_status(Opts :: normal | terminate, State :: state()) -> term().
+-spec format_status(State :: state()) -> state().
 
-format_status(Opt, #wamp_state{} = State) ->
+format_status(#wamp_state{} = State) ->
     NewAuthCtxt = bondy_sensitive:format_status(
-        Opt, bondy_auth, State#wamp_state.auth_context
+        bondy_auth, State#wamp_state.auth_context
     ),
     NewCtxt = bondy_sensitive:format_status(
-        Opt, bondy_context, State#wamp_state.context
+        bondy_context, State#wamp_state.context
     ),
     State#wamp_state{
         auth_context = NewAuthCtxt,
         context = NewCtxt
     };
 
-format_status(_, undefined) ->
+format_status(undefined) ->
     undefined.
 
 

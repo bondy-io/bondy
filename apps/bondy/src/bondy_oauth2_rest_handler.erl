@@ -36,11 +36,11 @@
 
 -define(GRANT_TYPE, <<"grant_type">>).
 
--define(HEADERS, ?CORS_HEADERS#{
+-define(HEADERS, begin ?CORS_HEADERS end#{
     <<"content-type">> => <<"application/json; charset=utf-8">>
 }).
 
--define(OPTIONS_HEADERS, ?HEADERS#{
+-define(OPTIONS_HEADERS, begin ?HEADERS end#{
     <<"access-control-allow">> => <<"HEAD,OPTIONS,POST">>
 }).
 

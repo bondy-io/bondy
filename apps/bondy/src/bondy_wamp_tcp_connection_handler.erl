@@ -65,7 +65,7 @@
 -export([handle_info/2]).
 -export([terminate/2]).
 -export([code_change/3]).
--export([format_status/2]).
+-export([format_status/1]).
 
 
 
@@ -347,11 +347,22 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 
-format_status(Opt, [_PDict, #state{} = State]) ->
-    ProtocolState = bondy_sensitive:format_status(
-        Opt, bondy_wamp_protocol, State#state.protocol_state
-    ),
-    gen_format(Opt, State#state{protocol_state = ProtocolState}).
+format_status(Status) ->
+    maps:map(
+        fun
+            (state, #state{protocol_state = PState0} = State) ->
+                PState = bondy_sensitive:format_status(
+                    bondy_wamp_protocol, PState0
+                ),
+                maps:put(state, State#state{protocol_state = PState});
+
+           (_, Value) ->
+                Value
+        end,
+        Status
+    ).
+
+
 
 
 %% =============================================================================
@@ -411,17 +422,6 @@ peername(Transport, Socket) ->
             error(invalid_socket)
     end.
 
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc Use format recommended by gen_server:format_status/2
-%% @end
-%% -----------------------------------------------------------------------------
-gen_format(normal, Term) ->
-    [{data, [{"State", Term}]}];
-
-gen_format(_, Term) ->
-    Term.
 
 
 %% @private

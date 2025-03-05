@@ -96,11 +96,6 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
--define(ROUTER_ROLES, #{
-    broker => #{features => ?BROKER_FEATURES},
-    dealer => #{features => ?DEALER_FEATURES}
-}).
-
 
 -type event()       ::  {wamp_message(), bondy_context:t()}.
 
@@ -129,7 +124,10 @@
 -spec roles() -> #{binary() => #{binary() => boolean()}}.
 
 roles() ->
-    ?ROUTER_ROLES.
+    #{
+        broker => #{features => ?BROKER_FEATURES },
+        dealer => #{features => ?DEALER_FEATURES }
+    }.
 
 
 %% -----------------------------------------------------------------------------

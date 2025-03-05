@@ -57,7 +57,7 @@
 
 
 %% BONDY_SENSITIVE CALLBACKS
--export([format_status/2]).
+-export([format_status/1]).
 
 %% API
 -export([agent/1]).
@@ -109,9 +109,9 @@
 
 
 
--spec format_status(Opts :: normal | terminate, Ctxt :: t()) -> term().
+-spec format_status(Ctxt :: t()) -> t().
 
-format_status(Opt, Ctxt0) ->
+format_status(Ctxt0) ->
     Ctxt = Ctxt0#{
         authid => bondy_sensitive:wrap(authid(Ctxt0))
     },
@@ -119,11 +119,10 @@ format_status(Opt, Ctxt0) ->
     case session(Ctxt) of
         undefined ->
             Ctxt;
-        Session ->
-            Formatted = bondy_sensitive:format_status(
-                Opt, bondy_session, Session
-            ),
-            Ctxt#{session => Formatted}
+
+        Session0 ->
+            Session = bondy_sensitive:format_status(bondy_session, Session0),
+            Ctxt#{session => Session}
     end.
 
 

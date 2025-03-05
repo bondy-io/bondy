@@ -45,7 +45,7 @@
 %% checking whether they exist.
 -define(FOLD_OPTS, [{resolver, lww}]).
 
--define(VALIDATOR, ?OPTS_VALIDATOR#{
+-define(VALIDATOR, begin ?OPTS_VALIDATOR end#{
     <<"username">> => #{
         alias => username,
         key => username,
@@ -101,7 +101,7 @@
 }).
 
 
--define(UPDATE_VALIDATOR, ?OPTS_VALIDATOR#{
+-define(UPDATE_VALIDATOR, begin ?OPTS_VALIDATOR end#{
     <<"password">> => #{
         alias => password,
         key => password,
