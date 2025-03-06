@@ -57,7 +57,7 @@
 -type state() :: #state{}.
 
 
--export([start_link/4]).
+-export([start_link/3]).
 
 -export([init/1]).
 -export([handle_call/3]).
@@ -81,11 +81,11 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec start_link(
-    Ref :: ranch:ref(), _, Transport :: module(), ProtoOpts :: any()) ->
+    Ref :: ranch:ref(), Transport :: module(), ProtoOpts :: any()) ->
     {ok, ConnPid :: pid()}
     | {ok, SupPid :: pid(), ConnPid :: pid()}.
 
-start_link(Ref, _, Transport, Opts) ->
+start_link(Ref, Transport, Opts) ->
     {ok, proc_lib:spawn_link(?MODULE, init, [{Ref, Transport, Opts}])}.
 
 
