@@ -317,6 +317,7 @@ issue(Session, Opts0) ->
     catch
         throw:Reason ->
             {error, Reason};
+
         error:{not_authorized, _} = Reason ->
             {error, Reason}
     end.
@@ -649,13 +650,12 @@ when is_binary(Ticket) ->
 
     case verify(Ticket, VerifyOpts) of
         {ok, #{scope := #{client_id := Val}}} when Val =/= undefined ->
-            %% Nested tickets are not allowed
-            throw(invalid_request);
+            throw({invalid_request, "Nested tickets are not allowed"});
 
         {ok, #{issued_by := Authid}} ->
             %% A client is requesting a ticket issued to itself using its own
             %% client_ticket.
-            throw(invalid_request);
+            throw({invalid_request, "Self-granting ticket not allowed"});
 
         {ok, #{authid := ClientId, scope := Scope}} ->
             Id0 = maps:get(client_instance_id, Scope),
