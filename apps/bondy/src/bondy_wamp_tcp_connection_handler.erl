@@ -347,21 +347,13 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 
+format_status(#{state := State} = Status) ->
+    PState0 = State#state.protocol_state,
+    PState = bondy_sensitive:format_status(bondy_wamp_protocol, PState0),
+    maps:put(Status, state, State#state{protocol_state = PState});
+
 format_status(Status) ->
-    maps:map(
-        fun
-            (state, #state{protocol_state = PState0} = State) ->
-                PState = bondy_sensitive:format_status(
-                    bondy_wamp_protocol, PState0
-                ),
-                maps:put(state, State#state{protocol_state = PState});
-
-           (_, Value) ->
-                Value
-        end,
-        Status
-    ).
-
+    Status.
 
 
 

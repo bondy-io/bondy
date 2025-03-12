@@ -97,7 +97,7 @@ end_per_suite(Config) ->
 
 
 add_realm(RealmUri) ->
-    _ = bondy_realm:create((?REALM)#{uri => RealmUri}),
+    _ = bondy_realm:create(maps:merge(?REALM, #{uri => RealmUri})),
     ok.
 
 
@@ -130,7 +130,7 @@ sso(_) ->
     SSOUri = <<"com.leapsight.test+auth_alias_sso">>,
     Uri = <<"com.leapsight.test+auth_alias">>,
 
-    _ = bondy_realm:create((?REALM)#{
+    _ = bondy_realm:create(maps:merge(?REALM, #{
         uri => SSOUri,
         is_sso_realm => true,
         users => [],
@@ -142,8 +142,8 @@ sso(_) ->
             }
         ]
 
-    }),
-    _ = bondy_realm:create((?REALM)#{
+    })),
+    _ = bondy_realm:create(maps:merge(?REALM, #{
         uri => Uri,
         authmethods => [?PASSWORD_AUTH],
         is_sso_realm => false,
@@ -156,7 +156,7 @@ sso(_) ->
                 cidr => <<"0.0.0.0/0">>
             }
         ]
-    }),
+    })),
 
     User = #{
         username => ?U1,

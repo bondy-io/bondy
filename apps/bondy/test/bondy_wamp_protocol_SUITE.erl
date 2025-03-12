@@ -47,31 +47,20 @@ end_per_suite(Config) ->
 
 format_status(_Config) ->
     lists:foreach(
-        fun({Opt, State}) ->
-            ?assertError(function_clause, bondy_wamp_protocol:format_status(Opt, State))
+        fun(State) ->
+            ?assertError(function_clause, bondy_wamp_protocol:format_status( State))
         end,
-        [{O, S} || O <- [normal, terminate], S <- [
-            {},
-            {wamp_state},
-            {wamp_state, undefined, undefined, undefined, undefined, undefined, undefined}
-        ]]),
-
-    lists:foreach(
-        fun(Opt) ->
-            State = bondy_wamp_protocol:format_status(Opt, undefined),
-            ?assertEqual(undefined, State)
-        end,
-        [normal, terminate, undefined, invalid]),
+        [S || S <- [{}, {wamp_state}]]
+    ),
 
     % No sensitive info at wamp_state level, the reformatting is delegated to other modules.
     lists:foreach(
-        fun({Opt, SubProtocol, AuthMethod, AuthContext, AuthTime, Name, Context, Reason}) ->
+        fun({SubProtocol, AuthMethod, AuthContext, AuthTime, Name, Context, Reason}) ->
             State = {wamp_state, SubProtocol, AuthMethod, AuthContext, AuthTime, Name, Context, Reason},
-            NewState = bondy_wamp_protocol:format_status(Opt, State),
+            NewState = bondy_wamp_protocol:format_status(State),
             ?assertEqual(State, NewState)
         end,
-        [{Op, SP, AM, AC, AT, SN, Co, Re} ||
-            Op <- [normal, terminate],
+        [{SP, AM, AC, AT, SN, Co, Re} ||
             SP <- [undefined, {raw, binary, json}],
             AM <- [undefined, cryptosign],
             AC <- [undefined, #{}],

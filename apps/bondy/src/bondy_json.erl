@@ -17,37 +17,33 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc A utility module use to customised the JSON encoding for 3rd-party libs
-%% e.g. erlang_jose
+%% @doc A utility module that offers some customisation options over the jsone
+%% module.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_json).
 
-%% For backwards compat with jsx lib default
+%% For backwards compat with jsx lib used in previous versions
 -define(DEFAULT_FLOAT_FORMAT, [{decimals, 16}]).
 -define(DEFAULT_ENCODE_OPTS, [{float_format, ?DEFAULT_FLOAT_FORMAT}]).
+-define(IS_UINT(X), (is_integer(X) andalso X >= 0)).
+-define(IS_PNUM(X), (is_number(X) andalso X >= 0)).
+-define(IS_DATETIME(Y, M, D, H, Mi, S),
+    (
+        ?IS_UINT(Y) andalso
+        ?IS_UINT(M) andalso
+        ?IS_UINT(D) andalso
+        ?IS_UINT(H) andalso
+        ?IS_UINT(Mi) andalso
+        ?IS_PNUM(S)
+    )
+).
+-define(SECONDS_PER_MINUTE, 60).
+-define(SECONDS_PER_HOUR, 3600).
 
--if(?OTP_RELEASE >= 27).
 
-    -define(IS_UINT(X), (is_integer(X) andalso X >= 0)).
-    -define(IS_PNUM(X), (is_number(X) andalso X >= 0)).
-    -define(IS_DATETIME(Y, M, D, H, Mi, S),
-        (
-            ?IS_UINT(Y) andalso
-            ?IS_UINT(M) andalso
-            ?IS_UINT(D) andalso
-            ?IS_UINT(H) andalso
-            ?IS_UINT(Mi) andalso
-            ?IS_PNUM(S)
-        )
-    ).
-
-    -define(SECONDS_PER_MINUTE, 60).
-    -define(SECONDS_PER_HOUR, 3600).
-
--endif.
-
--type encode_opt()  ::  {float_format, [float_format()]}.
+-type encode_opt()  ::  {float_format, [float_format()]}
+                        | {check_duplicate_keys, boolean()}.
 
 %% idem erlang:float_to_binary/2 options
 -type float_format()    ::  {scientific, Decimals :: 0..249}
@@ -76,8 +72,7 @@ encode(Term) ->
 -spec encode(any(), [encode_opt()]) -> iodata() | binary().
 
 encode(Term, Opts) ->
-    FloatOpts = float_opts(validate_opts(Opts)),
-    do_encode(Term, FloatOpts).
+    do_encode(Term, Opts).
 
 
 decode(Term) ->
@@ -124,6 +119,11 @@ float_opts(Opts) ->
 validate_opt({float_format, Opts}) ->
     {float_format, validate_float_opts(Opts)};
 
+validate_opt({check_duplicate_keys, Arg} = Term) ->
+    is_boolean(Arg) orelse
+    error(badarg, {check_duplicate_keys, Arg}),
+    Term;
+
 validate_opt({datetime_format, _Opts} = Term) ->
     %% TODO
     Term.
@@ -135,11 +135,6 @@ validate_float_opts(Opts) ->
 validate_float_opt({scientific, Decimals} = Term)
 when is_integer(Decimals), Decimals >= 0, Decimals =< 249 ->
     Term;
-
-validate_float_opt({scientific, Decimals})
-when is_integer(Decimals), Decimals >= 0 ->
-    %% Coerce to max
-    {scientific, 249};
 
 validate_float_opt({decimals, Decimals} = Term)
 when is_integer(Decimals), Decimals >= 0, Decimals =< 253 ->
@@ -155,9 +150,11 @@ validate_float_opt(Arg) ->
     error(badarg, {float_format, Arg}).
 
 
--if(?OTP_RELEASE >= 27).
+%% @private
+do_encode(Term, Opts) ->
+    FloatOpts = float_opts(validate_opts(Opts)),
+    Checked = key_value:get(check_duplicate_keys, Opts, false),
 
-do_encode(Term, FloatOpts) ->
     Fun =  fun
         (undefined, _Encode) ->
             <<"null">>;
@@ -169,6 +166,12 @@ do_encode(Term, FloatOpts) ->
         when ?IS_DATETIME(Y, M, D, H, Mi, S) ->
             encode_datetime({{Y, M, D}, {H, Mi, S}});
 
+        ([{_, _} | _] = Value, Encode) when is_list(Value), Checked == true ->
+            json:encode_key_value_list_checked(Value, Encode);
+
+        ([{_, _} | _] = Value, Encode) when is_list(Value), Checked == false ->
+            json:encode_key_value_list(Value, Encode);
+
         (Value, Encode) ->
             json:encode_value(Value, Encode)
     end,
@@ -177,31 +180,6 @@ do_encode(Term, FloatOpts) ->
 
 do_decode(Term, _Opts) ->
     json:decode(Term).
-
--else.
-
-do_encode(Term, FloatOpts) ->
-    jsone:encode(Term, [
-        undefined_as_null,
-        {float_format, FloatOpts},
-        {datetime_format, iso8601},
-        {object_key_type, string}
-    ]).
-
-do_decode(Term, _Opts) ->
-    jsone:decode(Term, [
-        undefined_as_null,
-        {object_format, map}
-    ]).
-
--endif.
-
-
-
-
-
-
-
 
 
 -if(?OTP_RELEASE >= 27).

@@ -308,7 +308,10 @@ client_scope_with_ticket(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:external_id(UserSession)), UserSession),
+    ets:insert(
+        bondy_session:table(bondy_session:external_id(UserSession)),
+        UserSession
+    ),
 
     %% We issue a self-issued ticket
     {ok, UserTicket, _} = bondy_ticket:issue(UserSession, #{
