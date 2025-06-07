@@ -112,7 +112,9 @@
                                 actor_id => term(),
                                 if_exists => fail | update
                             }.
--type add_error()       ::  no_such_realm | reserved_name | already_exists.
+-type add_error()       ::  {no_such_realm, uri()}
+                            | reserved_name
+                            | already_exists.
 -type list_opts()       ::  #{limit => pos_integer()}.
 
 -export_type([t/0]).

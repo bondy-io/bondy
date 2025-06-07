@@ -240,7 +240,7 @@
 -type ticket_id()   ::  binary().
 -type authid()      ::  bondy_rbac_user:username().
 -type issue_error() ::  {no_such_user, authid()}
-                        | no_such_realm
+                        | {no_such_realm, uri()}
                         | invalid_request
                         | invalid_ticket
                         | not_authorized.

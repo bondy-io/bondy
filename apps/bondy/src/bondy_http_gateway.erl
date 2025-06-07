@@ -510,10 +510,7 @@ do_start_listeners(public) ->
 
     try
         _ = [
-            resulto:map_error(
-                start_listener({Scheme, Routes}),
-                fun (Reason) -> throw(Reason) end
-            )
+            resulto:throw_or(start_listener({Scheme, Routes}))
             || {Scheme, Routes} <- DTables
         ],
         ok
@@ -531,10 +528,7 @@ do_start_listeners(admin) ->
 
     try
         _ = [
-            resulto:map_error(
-                start_admin_listener({Scheme, Routes}),
-                fun (Reason) -> throw(Reason) end
-            )
+            resulto:throw_or(start_admin_listener({Scheme, Routes}))
             || {Scheme, Routes} <- DTables
         ],
         ok

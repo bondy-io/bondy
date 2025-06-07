@@ -160,14 +160,18 @@ format_status(Ctxt) ->
     Roles :: all | binary() | [binary()] | undefined,
     SourceIP :: inet:ip_address()) ->
     {ok, context()}
-    | {error, {no_such_user, binary()} | no_such_realm | no_such_group}
+    | {error,
+        {no_such_user, binary()}
+        | {no_such_realm, binary()}
+        | no_such_group
+    }
     | no_return().
 
 init(SessionId, Uri, UserId, Roles, SourceIP)
 when is_binary(SessionId), is_binary(Uri), ?IS_IP(SourceIP) ->
     case bondy_realm:lookup(string:casefold(Uri)) of
         {error, not_found} ->
-            {error, no_such_realm};
+            {error, {no_such_realm, Uri}};
         Realm ->
             init(SessionId, Realm, UserId, Roles, SourceIP)
     end;

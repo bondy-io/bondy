@@ -484,7 +484,7 @@ handle_inbound_messages(
     %% Lookup or create realm
     case bondy_realm:get(Uri) of
         {error, not_found} ->
-            stop({authentication_failed, no_such_realm}, St);
+            stop({authentication_failed, {no_such_realm, Uri}}, St);
 
         Realm ->
             ok = logger:update_process_metadata(#{realm => Uri}),
@@ -912,6 +912,12 @@ abort_message(no_such_realm) ->
     },
     wamp_message:abort(Details, ?WAMP_NO_SUCH_REALM);
 
+abort_message({no_such_realm, Realm}) ->
+    Details = #{
+        message => <<"Realm '", Realm/binary, "' does not exist.">>
+    },
+    wamp_message:abort(Details, ?WAMP_NO_SUCH_REALM);
+
 abort_message(no_such_group) ->
     Details = #{
         message => <<"Group does not exist.">>
@@ -933,9 +939,9 @@ abort_message({authentication_failed, invalid_authmethod}) ->
     },
     wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
 
-abort_message({authentication_failed, no_such_realm}) ->
+abort_message({authentication_failed, {no_such_realm, Realm}}) ->
     Details = #{
-        message => <<"Realm does not exist.">>
+        message => <<"Realm '", Realm/binary, "' does not exist.">>
     },
     wamp_message:abort(Details, ?WAMP_NO_SUCH_REALM);
 

@@ -104,13 +104,17 @@ pool() ->
 %% calling process' pid.
 %% -----------------------------------------------------------------------------
 %%
--spec open(Session :: bondy_session:t()) -> ok | no_return().
+-spec open(Session :: bondy_session:t()) -> ok | {error, timeout}.
 
 open(Session) ->
     do_for_worker(
         fun(ServerRef) ->
-            {ok, Session} = gen_server:call(ServerRef, {open, Session}, 5000),
-            ok
+            try
+                gen_server:call(ServerRef, {open, Session}, 10000)
+            catch
+              exit:timeout ->
+                {error, timeout}
+            end
         end,
         bondy_session:id(Session)
     ).
@@ -131,13 +135,18 @@ open(Session) ->
     bondy_session_id:t(),
     uri() | bondy_realm:t(),
     bondy_session:properties()) ->
-    {ok, bondy_session:t()} | no_return().
+    {ok, bondy_session:t()} | {error, timeout}.
 
 open(Id, RealmOrUri, Opts) ->
     do_for_worker(
         fun(ServerRef) ->
-            Session = bondy_session:new(Id, RealmOrUri, Opts),
-            gen_server:call(ServerRef, {open, Session}, 5000)
+            try
+                Session = bondy_session:new(Id, RealmOrUri, Opts),
+                gen_server:call(ServerRef, {open, Session}, 10000)
+            catch
+              exit:timeout ->
+                {error, timeout}
+            end
         end,
         Id
     ).

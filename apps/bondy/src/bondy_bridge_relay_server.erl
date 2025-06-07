@@ -774,7 +774,7 @@ authenticate(AuthMethod, Signature, Extra, State0) ->
             SessionId = bondy_auth:session_id(AuthCtxt0),
             Session = session(SessionId, State0),
 
-            ok = bondy_session_manager:open(Session),
+            ok = resulto:throw_or(bondy_session_manager:open(Session)),
 
             AuthExtra = AuthExtra0#{node => bondy_config:nodestring()},
             M = {welcome, SessionId, #{authextra => AuthExtra}},

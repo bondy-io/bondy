@@ -208,9 +208,11 @@
 -type list_opts()       ::  #{
     limit => pos_integer()
 }.
--type add_error()       ::  no_such_realm | reserved_name | already_exists.
--type update_error()    ::  no_such_realm
+-type add_error()       ::  {no_such_realm, uri()}
                             | reserved_name
+                            | already_exists.
+-type update_error()    ::  reserved_name
+                            | {no_such_realm, uri()}
                             | {no_such_user, username_int()}
                             | {no_such_groups, [bondy_rbac_group:name()]}.
 
