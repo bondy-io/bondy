@@ -66,11 +66,17 @@ start_link() ->
 
 
 init([]) ->
+    SupFlags = #{
+        strategy => one_for_one,
+        intensity => 10, % max restarts
+        period => 60, % seconds
+        auto_shutdown => never
+    },
     Children = [
-        ?WORKER(bondy_bridge_relay_manager, [], permanent, 5000),
-        ?SUPERVISOR(bondy_bridge_relay_client_sup, [], permanent, infinity)
+        ?SUPERVISOR(bondy_bridge_relay_client_sup, [], permanent, infinity),
+        ?WORKER(bondy_bridge_relay_manager, [], permanent, 5000)
     ],
-    {ok, {{one_for_one, 1, 5}, Children}}.
+    {ok, {SupFlags, Children}}.
 
 
 

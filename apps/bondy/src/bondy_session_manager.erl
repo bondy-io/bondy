@@ -328,8 +328,12 @@ handle_info(Info, State) ->
 
 
 terminate(_Reason, State) ->
-    _ = gproc_pool:disconnect_worker(pool(), State#state.name),
-    ok.
+    try
+        gproc_pool:disconnect_worker(pool(), State#state.name)
+    catch
+        _:_ ->
+            ok
+    end.
 
 
 code_change(_OldVsn, State, _Extra) ->

@@ -58,12 +58,17 @@ start_link() ->
 
 
 init([]) ->
-    RestartStrategy = {one_for_one, 0, 1},
+    SupFlags = #{
+        strategy => one_for_one,
+        intensity => 5, % max restarts
+        period => 10, % seconds
+        auto_shutdown => never
+    },
 
     %% Start partitions first
     Children = partitions(),
 
-    {ok, {RestartStrategy, Children}}.
+    {ok, {SupFlags, Children}}.
 
 
 
@@ -80,12 +85,14 @@ partitions() ->
     WorkerMod = bondy_jobs_worker,
     N = bondy_config:get([jobs_pool, size]),
 
-    ok = gproc_pool:new(PoolName, hash, [{size, N}]),
+    %% If the supervisor restarts and we call groc_pool:new it will fail with
+    %% an exception
+    _ = catch gproc_pool:new(PoolName, hash, [{size, N}]),
 
     Indices = [
         begin
             WorkerName = {WorkerMod, Index},
-            Index = gproc_pool:add_worker(PoolName, WorkerName, Index),
+            _ = catch gproc_pool:add_worker(PoolName, WorkerName, Index),
             Index
         end
         || Index <- lists:seq(1, N)

@@ -57,8 +57,12 @@ start_link() ->
 
 init([]) ->
     {PoolName, WorkerNames} = init_pool(),
-    RestartStrategy = {one_for_one, 0, 1},
-
+    SupFlags = #{
+        strategy => one_for_one,
+        intensity => 5, % max restarts
+        period => 10, % seconds
+        auto_shutdown => never
+    },
     Children = [
         #{
             id => WorkerName,
@@ -70,8 +74,7 @@ init([]) ->
         }
         || WorkerName <- WorkerNames
     ],
-    {ok, {RestartStrategy, Children}}.
-
+    {ok, {SupFlags, Children}}.
 
 
 
@@ -88,12 +91,14 @@ init_pool() ->
         algorithm := Algorithm
     } = bondy_session_manager:pool(),
 
-    ok = gproc_pool:new(PoolName, Algorithm, [{size, Size}]),
+    %% If the supervisor restarts and we call groc_pool:new it will fail with
+    %% an exception
+    _ = catch gproc_pool:new(PoolName, Algorithm, [{size, Size}]),
 
     WorkerNames = [
         begin
             WorkerName = worker_name(Id),
-            _ = gproc_pool:add_worker(PoolName, WorkerName),
+            _ = catch gproc_pool:add_worker(PoolName, WorkerName),
             WorkerName
         end
         || Id <- lists:seq(1, Size)

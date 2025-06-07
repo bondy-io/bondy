@@ -86,11 +86,17 @@ start_link() ->
 
 
 init([]) ->
+    SupFlags = #{
+        strategy => simple_one_for_one,
+        intensity => 5, % max restarts
+        period => 10, % seconds
+        auto_shutdown => never
+    },
     Children = [
         ?CHILD(bondy_subscriber, worker, [], transient, 5000)
     ],
-    Specs = {{simple_one_for_one, 0, 1}, Children},
-    {ok, Specs}.
+
+    {ok, {SupFlags, Children}}.
 
 
 
