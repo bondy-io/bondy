@@ -84,56 +84,69 @@ vsn() ->
 %% -----------------------------------------------------------------------------
 start(_Type, Args) ->
     %% We initialise the Bondy config, we need to make this call before
-    %% starting tuplespace, partisan and plum_db are started, because we are
+    %% starting tuplespace, partisan and plum_db. This is because we are
     %% modifying their application environments.
     ok = bondy_config:init(Args),
 
     %% We temporarily disable plum_db's AAE to avoid rebuilding hashtrees
     %% until we are ready to do it
-    ok = suspend_aae(),
+    ok = suspend_pdb_aae(),
 
     %% Now that we have initialised the configuration we start the following
     %% dependencies
     _ = application:ensure_all_started(tuplespace, permanent),
-    %% plum_db will start partisan
+
+    %% We do not need to start partisan since plum_db will do it
     _ = application:ensure_all_started(plum_db, permanent),
 
-    %% We need Partisan to be up so that we can get the nodename
+    %% Now that Partisan is up we can get our nodename
     ok = logger:update_primary_config(#{metadata => #{
         node => partisan:node(),
         router_vsn => vsn()
     }}),
 
-    %% We wait for plum_db partitions to be up, we now need to do this before
+    %% We wait for plum_db partitions to be up, we need to do this before
     %% we start the supervisor
-    ok = maybe_wait_for_plum_db_partitions(),
+    ok = maybe_wait_for_pdb_partitions(),
 
     %% Finally we start the supervisor
     case bondy_sup:start_link() of
         {ok, Pid} ->
+            maybe
+                %% Please do not change the order of this function calls
+                %% unless, of course, you know exactly what you are doing.
+                ok ?= setup_commons(),
+                ok ?= bondy_sysmon_handler:add_handler(),
+                ok ?= bondy_router_worker:start_pool(),
+                ok ?= setup_event_handlers(),
+                ok ?= configure_services(),
+                ok ?= init_registry(),
+                ok ?= setup_wamp_subscriptions(),
+                %% We just start the admin API rest listeners [HTTP(S), WS(S)].
+                %% This is to enable certain operations during startup i.e.
+                %% liveness and readiness http probes.
+                ok ?= start_admin_listeners(),
+                %% We need to re-enable AAE (if it was enabled) so
+                %% that hashtrees are build
+                ok ?= restore_pdb_aae(),
+                %% We conditionally wait for hashtrees to be built
+                %% (this can be disabled via configuration)
+                ok ?= maybe_wait_for_pdb_hashtrees(),
+                %% We conditionally force a first AAE sync exchange
+                %% (this can be disabled via configuration)
+                ok ?= maybe_wait_for_pdb_aae_exchange(),
+                %% Finally we allow clients to connect
+                ok ?= start_public_listeners(),
+                {ok, Pid}
 
-            %% Please do not change the order of this function calls
-            %% unless, of course, you know exactly what you are doing.
-            ok = setup_commons(),
-            ok = bondy_sysmon_handler:add_handler(),
-            ok = bondy_router_worker:start_pool(),
-            ok = setup_event_handlers(),
-            ok = configure_services(),
-            ok = init_registry(),
-            ok = setup_wamp_subscriptions(),
-            ok = start_admin_listeners(),
-            %% We need to re-enable AAE (if it was enabled) so that hashtrees
-            %% are build
-            ok = restore_aae(),
-            %% Part of the bondy controlled startup process
-            ok = maybe_wait_for_plum_db_hashtrees(),
-            ok = maybe_wait_for_aae_exchange(),
-            %% Finally we allow clients to connect
-            ok = start_public_listeners(),
-            {ok, Pid};
+            else
+                {error, _} = Error ->
+                    Error
 
-        Other  ->
-            Other
+            end;
+
+        Error  ->
+            Error
     end.
 
 
@@ -155,7 +168,6 @@ prep_stop(_State) ->
 
     %% We sleep for a while to allow all sessions to terminate gracefully
     Secs = bondy_config:get(shutdown_grace_period, 5),
-
     ?LOG_NOTICE(#{
         description => "Awaiting for client sessions to gracefully terminate",
         timer_secs => Secs
@@ -192,7 +204,7 @@ setup_commons() ->
 
 
 %% @private
-maybe_wait_for_plum_db_partitions() ->
+maybe_wait_for_pdb_partitions() ->
     case wait_for_partitions() of
         true ->
             %% We block until all partitions are initialised
@@ -208,14 +220,16 @@ maybe_wait_for_plum_db_partitions() ->
 
 
 %% @private
-maybe_wait_for_plum_db_hashtrees() ->
-    case wait_for_hashtrees() of
+maybe_wait_for_pdb_hashtrees() ->
+    case wait_for_pdb_hashtrees() of
         true ->
             %% We block until all hashtrees are built
-            ?LOG_NOTICE(#{
-                description => "Application master is waiting for plum_db hashtrees to be built"
+            ?LOG_NOTICE(#{description =>
+                "Application master is waiting for "
+                "plum_db hashtrees to be built"
             }),
             plum_db_startup_coordinator:wait_for_hashtrees();
+
         false ->
             ok
     end,
@@ -225,10 +239,10 @@ maybe_wait_for_plum_db_hashtrees() ->
 
 
 %% @private
-maybe_wait_for_aae_exchange() ->
+maybe_wait_for_pdb_aae_exchange() ->
     %% When plum_db is included in a principal application, the latter can
     %% join the cluster before this phase and perform a first aae exchange
-    case wait_for_aae_exchange() of
+    case wait_for_pdb_aae_exchange() of
         true ->
             MyNode = partisan:node(),
             Members = partisan_plumtree_broadcast:broadcast_members(),
@@ -237,11 +251,12 @@ maybe_wait_for_aae_exchange() ->
                 [] ->
                     %% We have not yet joined a cluster, so we finish
                     ok;
+
                 Peers ->
                     ?LOG_NOTICE(#{
                         description =>
                             "Application master is waiting for "
-                            "plum_db AAE to perform exchange"
+                            "plum_db AAE to perform an exchange"
                     }),
                     %% We are in a cluster, we randomnly pick a peer and
                     %% perform an AAE exchange
@@ -251,13 +266,14 @@ maybe_wait_for_aae_exchange() ->
                     _ = plum_db:sync_exchange(Peer),
                     ok
             end;
+
         false ->
             ok
     end.
 
 
 %% @private
-wait_for_aae_exchange() ->
+wait_for_pdb_aae_exchange() ->
     plum_db_config:get(aae_enabled) andalso
     plum_db_config:get(wait_for_aae_exchange).
 
@@ -265,17 +281,17 @@ wait_for_aae_exchange() ->
 %% @private
 wait_for_partitions() ->
     %% Waiting for hashtrees implies waiting for partitions
-    plum_db_config:get(wait_for_partitions) orelse wait_for_hashtrees().
+    plum_db_config:get(wait_for_partitions) orelse wait_for_pdb_hashtrees().
 
 
 %% @private
-wait_for_hashtrees() ->
+wait_for_pdb_hashtrees() ->
     %% If aae is disabled the hastrees will never get build
     %% and we would block forever
     (
         plum_db_config:get(aae_enabled)
         andalso plum_db_config:get(wait_for_hashtrees)
-    ) orelse wait_for_aae_exchange().
+    ) orelse wait_for_pdb_aae_exchange().
 
 
 %% @private
@@ -308,9 +324,6 @@ init_registry() ->
 
 %% @private
 start_admin_listeners() ->
-    %% We start just the admin API rest listeners (HTTP/HTTPS, WS(S)).
-    %% This is to enable certain operations during startup i.e. liveness and
-    %% readiness http probes.
     %% The /ping (liveness) and /metrics paths will now go live
     %% The /ready (readiness) path will now go live but will return false as
     %% bondy_config:get(status) will return `initialising'
@@ -392,7 +405,7 @@ setup_wamp_subscriptions() ->
 
 
 %% @private
-suspend_aae() ->
+suspend_pdb_aae() ->
     case application:get_env(plum_db, aae_enabled, true) of
         true ->
             ok = application:set_env(plum_db, priv_aae_enabled, true),
@@ -407,7 +420,7 @@ suspend_aae() ->
 
 
 %% @private
-restore_aae() ->
+restore_pdb_aae() ->
     case application:get_env(plum_db, priv_aae_enabled, false) of
         true ->
             %% plum_db should have started so we call plum_db_config

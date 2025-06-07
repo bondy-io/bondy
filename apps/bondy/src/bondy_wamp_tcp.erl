@@ -44,7 +44,7 @@
 %% Starts the tcp and tls raw socket listeners
 %% @end
 %% -----------------------------------------------------------------------------
--spec start_listeners() -> ok.
+-spec start_listeners() -> ok | {error, any()}.
 
 start_listeners() ->
     Protocol = bondy_wamp_tcp_connection_handler,

@@ -181,7 +181,7 @@ is_authorized(Req0, St0) ->
             Req1 = reply(?HTTP_FORBIDDEN, json, Response, Req0),
             {stop, Req1, St0};
 
-        error:no_such_realm = Reason ->
+        error:{no_such_realm, _} = Reason ->
             {StatusCode, Body} = take_status_code(
                 bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
@@ -388,8 +388,8 @@ authenticate(Token, Ctxt0, Req0, St0) ->
             },
             %% TODO update context
             {true, Req0, St1};
-        {error, no_such_realm} ->
-            {_, ErrorMap} = take_status_code(bondy_error:map(no_such_realm)),
+        {error, {no_such_realm, _} = Reason} ->
+            {_, ErrorMap} = take_status_code(bondy_error:map(Reason)),
             Response = #{
                 <<"body">> => ErrorMap,
                 <<"headers">> => eval_headers(Req0, St0)

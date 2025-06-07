@@ -99,7 +99,7 @@ start_link() ->
 %% {@link start_admin_listeners()} for that.
 %% @end
 %% -----------------------------------------------------------------------------
--spec start_listeners() -> ok.
+-spec start_listeners() -> ok | {error, any()}.
 
 start_listeners() ->
     gen_server:call(?MODULE, {start_listeners, public}).
@@ -139,6 +139,8 @@ stop_listeners() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec start_admin_listeners() -> ok | {error, any()}.
+
 start_admin_listeners() ->
     gen_server:call(?MODULE, {start_listeners, admin}).
 
@@ -503,17 +505,43 @@ do_start_listeners(public) ->
     ?LOG_NOTICE(#{
         description => "Starting public HTTP(S) listeners"
     }),
+
     DTables = load_dispatch_tables(),
-    _ = [start_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
-    ok;
+
+    try
+        _ = [
+            resulto:map_error(
+                start_listener({Scheme, Routes}),
+                fun (Reason) -> throw(Reason) end
+            )
+            || {Scheme, Routes} <- DTables
+        ],
+        ok
+    catch
+        throw:Reason ->
+            {error, Reason}
+    end;
 
 do_start_listeners(admin) ->
     ?LOG_NOTICE(#{
         description => "Starting admin HTTP(S) listeners"
     }),
+
     DTables = parse_specs([admin_spec()], admin_base_routes()),
-    _ = [start_admin_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
-    ok.
+
+    try
+        _ = [
+            resulto:map_error(
+                start_admin_listener({Scheme, Routes}),
+                fun (Reason) -> throw(Reason) end
+            )
+            || {Scheme, Routes} <- DTables
+        ],
+        ok
+    catch
+        throw:Reason ->
+            {error, Reason}
+    end.
 
 
 %% @private
@@ -692,15 +720,14 @@ start_listener({<<"https">>, Routes}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec start_admin_listener({Scheme :: binary(), [tuple()]}) -> ok.
+-spec start_admin_listener({Scheme :: binary(), [tuple()]}) ->
+    ok | {error, any()}.
 
 start_admin_listener({<<"http">>, Routes}) ->
-    ok = maybe_start_http(Routes, ?ADMIN_HTTP),
-    ok;
+    maybe_start_http(Routes, ?ADMIN_HTTP);
 
 start_admin_listener({<<"https">>, Routes}) ->
-    ok = maybe_start_https(Routes, ?ADMIN_HTTPS),
-    ok.
+    maybe_start_https(Routes, ?ADMIN_HTTPS).
 
 
 maybe_start_http(Routes, Name) ->
@@ -729,6 +756,16 @@ start_http(Routes, Name) ->
         {ok, _} ->
             ?LOG_NOTICE(LogMeta#{description => "Started HTTP Listener"}),
             ok;
+
+        {error, eaddrinuse = Reason} = Error ->
+            ?LOG_ERROR(LogMeta#{
+                description =>
+                    "Failed to start HTTPS listener, "
+                    "the address is already in use",
+                reason => Reason
+            }),
+            Error;
+
         {error, Reason} = Error ->
             ?LOG_ERROR(LogMeta#{
                 description => "Failed to start HTTP listener",
@@ -791,9 +828,19 @@ start_https(Routes, Name) ->
         {ok, _} ->
             ?LOG_NOTICE(LogMeta#{description => "Started HTTPS Listener"}),
             ok;
+
+        {error, eaddrinuse = Reason} = Error ->
+            ?LOG_ERROR(LogMeta#{
+                description =>
+                    "Failed to start HTTPS listener, "
+                    "the address is already in use",
+                reason => Reason
+            }),
+            Error;
+
         {error, Reason} = Error ->
             ?LOG_ERROR(LogMeta#{
-                description => "Failed to start HTTPS listener",
+                description => "Failed to start HTTP listener",
                 reason => Reason
             }),
             Error
