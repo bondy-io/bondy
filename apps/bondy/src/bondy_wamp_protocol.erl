@@ -641,9 +641,10 @@ open_session(Extra, St0) when is_map(Extra) ->
         },
 
         %% We open a session
-        {ok, Session} = bondy_session_manager:open(
-            SessionId0, RealmUri, Properties
-        ),
+        Result = bondy_session_manager:open(SessionId0, RealmUri, Properties),
+        %% throw if we got an error
+        resulto:then_error(Result, fun(Reason) -> throw(Reason) end),
+        Session = resulto:unwrap(Result),
 
         %% This might be different than the SessionId0 in case we found a
         %% collision while storing (almost impossible).
@@ -686,6 +687,9 @@ open_session(Extra, St0) when is_map(Extra) ->
 
         {reply, Bin, St1#wamp_state{state_name = established}}
     catch
+        throw:Reason ->
+            stop(Reason, St0);
+
         error:pool_busy = Reason ->
             stop(Reason, St0);
 
