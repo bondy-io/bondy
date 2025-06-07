@@ -643,8 +643,7 @@ open_session(Extra, St0) when is_map(Extra) ->
         %% We open a session
         Result = bondy_session_manager:open(SessionId0, RealmUri, Properties),
         %% throw if we got an error
-        resulto:then_error(Result, fun(Reason) -> throw(Reason) end),
-        Session = resulto:unwrap(Result),
+        Session = resulto:throw_or_unwrap(Result),
 
         %% This might be different than the SessionId0 in case we found a
         %% collision while storing (almost impossible).
