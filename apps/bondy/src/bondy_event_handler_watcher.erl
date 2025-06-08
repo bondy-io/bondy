@@ -97,7 +97,7 @@ start_link(Manager, Handler, Args) when is_atom(Handler) ->
 
 
 init([Manager, {swap, Old, {Handler, Args} = New}]) ->
-    ok = gen_event:swap_sup_handler(alarm_handler, Old, New),
+    ok = gen_event:swap_sup_handler(Manager, Old, New),
     {ok, #state{manager = Manager, handler = Handler, args = Args}};
 
 init([Manager, Handler, Args]) ->
