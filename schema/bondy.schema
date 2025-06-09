@@ -560,6 +560,7 @@
   hidden
 ]}.
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -605,6 +606,30 @@
   {default, 32},
   {validators, ["pos_integer"]},
   {datatype, integer}
+]}.
+
+{mapping, "load_regulation.job_manager.pool.size", "bondy.job_manager_pool.size", [
+  {default, 32},
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The maximun number of elements in the FIFO queue after which older items
+%% are evicted. This is the sum of all queues (1 per worker)
+%% -----------------------------------------------------------------------------
+{mapping, "load_regulation.job_manager.queue.size", "bondy.job_manager_queue.max_size", [
+  {default, 20000},
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The duration of a job in the FIFO queue after which it is evicted.
+%% -----------------------------------------------------------------------------
+{mapping, "load_regulation.job_manager.queue.ttl", "bondy.job_manager_queue.ttl", [
+  {default, "10m"},
+  {datatype, {duration, ms}}
 ]}.
 
 

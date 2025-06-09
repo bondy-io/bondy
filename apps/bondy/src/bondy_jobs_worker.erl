@@ -99,14 +99,13 @@ enqueue(Fun, PartitionKey) when is_function(Fun, 0) ->
 init([PoolName, Index]) ->
     %% We create a dedicated jobs queue for the worker
     %% TODO get config
-    Opts = #{},
+    PoolSize = bondy_config:get([job_manager_pool, size]),
+    MaxSize = round(bondy_config:get([job_manager_queue, max_size]) / PoolSize),
     QOpts = [
         {type, {passive, fifo}},
-        {max_time, maps:get(ttl, Opts, timer:minutes(10))},
-        {link, self()},
-        {regulators, [
-            {counter, [{limit, erlang:system_info(schedulers_online)}]}
-        ]}
+        {max_time, bondy_config:get([job_manager_queue, ttl])},
+        {max_size, MaxSize},
+        {link, self()}
     ],
     Queue = ?QUEUE_NAME(Index),
     ok = jobs:add_queue(Queue, QOpts),
