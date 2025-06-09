@@ -24,8 +24,6 @@
 -define(SERVER_NAME(Index), {?MODULE, Index}).
 -define(QUEUE_NAME(Index), {?MODULE, Index, queue}).
 
--type execute_fun()     ::  fun(() -> any()).
-
 -record(state, {
     index               :: integer(),
     queue               :: {?MODULE, pos_integer(), queue}
@@ -33,12 +31,7 @@
 
 
 %% API
--export([async_execute/2]).
--export([async_execute/3]).
 -export([enqueue/2]).
--export([execute/2]).
--export([execute/3]).
--export([execute/4]).
 -export([pick_queue/1]).
 -export([pick_worker/1]).
 -export([start_link/1]).
