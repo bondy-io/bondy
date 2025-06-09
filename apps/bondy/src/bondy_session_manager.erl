@@ -110,7 +110,7 @@ open(Session) ->
     do_for_worker(
         fun(ServerRef) ->
             try
-                gen_server:call(ServerRef, {open, Session}, 10000)
+                gen_server:call(ServerRef, {open, Session}, 15000)
             catch
               exit:timeout ->
                 {error, timeout}
