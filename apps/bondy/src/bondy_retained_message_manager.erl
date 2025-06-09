@@ -64,9 +64,9 @@ get(Realm, Topic) ->
     bondy_retained_message:t() | undefined.
 
 take(Realm, Topic) ->
-    Mssg = bondy_retained_message:take(Realm, Topic),
-    ok = maybe_decr_counters(get_counters_ref(Realm), Mssg),
-    Mssg.
+    Msg = bondy_retained_message:take(Realm, Topic),
+    ok = maybe_decr_counters(get_counters_ref(Realm), Msg),
+    Msg.
 
 
 %% -----------------------------------------------------------------------------
@@ -342,8 +342,8 @@ handle_info(
             %% This happens when the registry has just been reset
             %% as we do not persist registrations any more
             ok;
-        Mssg ->
-            maybe_incr_counters(Realm, Mssg)
+        Msg ->
+            maybe_incr_counters(Realm, Msg)
     end,
     {noreply, State};
 
@@ -381,8 +381,8 @@ code_change(_OldVsn, State, _Extra) ->
 %% @private
 init_evictor() ->
 
-    Decr = fun(Realm, Mssg) ->
-        decr_counters(Realm, 1, bondy_retained_message:size(Mssg))
+    Decr = fun(Realm, Msg) ->
+        decr_counters(Realm, 1, bondy_retained_message:size(Msg))
     end,
     Fun = fun() ->
         N = bondy_retained_message:evict_expired('_', Decr),
@@ -429,16 +429,16 @@ maybe_resolve(Object) ->
 
 
 %% @private
-maybe_incr_counters(Realm, Mssg) when is_tuple(Mssg) ->
-    incr_counters(Realm, 1, bondy_retained_message:size(Mssg));
+maybe_incr_counters(Realm, Msg) when is_tuple(Msg) ->
+    incr_counters(Realm, 1, bondy_retained_message:size(Msg));
 
 maybe_incr_counters(_, _) ->
     ok.
 
 
 %% @private
-maybe_decr_counters(Realm, Mssg) when is_tuple(Mssg) ->
-    decr_counters(Realm, 1, bondy_retained_message:size(Mssg));
+maybe_decr_counters(Realm, Msg) when is_tuple(Msg) ->
+    decr_counters(Realm, 1, bondy_retained_message:size(Msg));
 
 maybe_decr_counters(_, _) ->
     ok.
