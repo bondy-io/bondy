@@ -65,8 +65,8 @@ init([]) ->
         auto_shutdown => never
     },
 
-    %% Start partitions first
-    Children = partitions(),
+    %% Start shards first
+    Children = shards(),
 
     {ok, {SupFlags, Children}}.
 
@@ -80,7 +80,7 @@ init([]) ->
 
 
 %% @private
-partitions() ->
+shards() ->
     PoolName = ?JOBS_POOLNAME,
     WorkerMod = bondy_jobs_worker,
     N = bondy_config:get([jobs_pool, size]),
@@ -89,25 +89,25 @@ partitions() ->
     %% an exception
     _ = catch gproc_pool:new(PoolName, hash, [{size, N}]),
 
-    Indices = [
+    Shards = [
         begin
-            WorkerName = {WorkerMod, Index},
-            _ = catch gproc_pool:add_worker(PoolName, WorkerName, Index),
-            Index
+            WorkerName = {WorkerMod, Shard},
+            _ = catch gproc_pool:add_worker(PoolName, WorkerName, Shard),
+            Shard
         end
-        || Index <- lists:seq(1, N)
+        || Shard <- lists:seq(1, N)
     ],
 
     [
         #{
-            id => Index,
-            start => {WorkerMod, start_link, [Index]},
+            id => Shard,
+            start => {WorkerMod, start_link, [Shard]},
             restart => permanent,
             shutdown => 5000,
             type => worker,
             modules => [WorkerMod]
         }
-        || Index <- Indices
+        || Shard <- Shards
     ].
 
 
