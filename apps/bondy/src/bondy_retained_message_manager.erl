@@ -403,7 +403,13 @@ init_evictor() ->
     ok = jobs:add_queue(bondy_retained_message_eviction, [
         {producer, Fun},
         {regulators, [
-            {counter, [{limit, 1}]}
+            {counter, [
+                {limit, 1},
+                {modifiers, [
+                    {cpu, 10},
+                    {memory, 10}
+                ]}
+            ]}
         ]}
     ]),
 
