@@ -969,7 +969,7 @@ fold_matches([], _Fun, Acc) ->
 
 on_create(Entry) ->
     ok = maybe_send_retained(Entry),
-    bondy_event_manager:notify({subscription_created, Entry}).
+    bondy_event_manager:notify({[bondy, broker, subscription, created], Entry}).
 
 
 %% @private
@@ -977,21 +977,21 @@ on_create(Entry) ->
 
 on_subscribe(Entry) ->
     ok = maybe_send_retained(Entry),
-    bondy_event_manager:notify({subscription_added, Entry}).
+    bondy_event_manager:notify({[bondy, broker, subscription, added], Entry}).
 
 
 %% @private
 -spec on_unsubscribe(bondy_registry_entry:t()) -> ok.
 
 on_unsubscribe(Entry) ->
-    bondy_event_manager:notify({subscription_removed, Entry}).
+    bondy_event_manager:notify({[bondy, broker, subscription, removed], Entry}).
 
 
 %% @private
 -spec on_delete(bondy_registry_entry:t()) -> ok.
 
 on_delete(Entry) ->
-    bondy_event_manager:notify({subscription_deleted, Entry}).
+    bondy_event_manager:notify({[bondy, broker, subscription, deleted], Entry}).
 
 
 

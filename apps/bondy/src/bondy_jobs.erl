@@ -17,7 +17,7 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc Temp hack for future reliable workflow stuff.
+%% @doc Load regulation
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_jobs).
@@ -26,9 +26,10 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
-
 %% API
 -export([enqueue/2]).
+-export([enqueue/1]).
+
 
 
 
@@ -37,16 +38,17 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc  A temp hack, not actually enqueuing externally, just sending the fun
-%% to a gen_server worker, hashed by RealmUri.
-%% @end
-%% -----------------------------------------------------------------------------
--spec enqueue(RealmUri :: uri(), Fun :: function()) -> ok.
 
-enqueue(RealmUri, Fun) ->
-    Pid = bondy_jobs_worker:pick(RealmUri),
-    bondy_jobs_worker:async_execute(Pid, Fun).
+-spec enqueue(Fun :: function()) -> ok.
+
+enqueue(Fun) ->
+    enqueue(Fun, undefined).
+
+
+-spec enqueue(Fun :: function(), PartitionKey :: any()) -> ok.
+
+enqueue(Fun, PartitionKey) ->
+    bondy_jobs_worker:enqueue(Fun, PartitionKey).
 
 
 

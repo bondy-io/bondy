@@ -29,9 +29,14 @@
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
 
+
+
 -record(state, {
     ref :: bondy_ref:t()
 }).
+
+-type event() :: [atom()].
+-type partition_key() :: any().
 
 %% GEN_EVENT CALLBACKS
 -export([init/1]).
@@ -50,443 +55,20 @@
 
 
 init([]) ->
-    State = #state{
-        ref = bondy_ref:new(internal)
-    },
+    State = #state{ref = bondy_ref:new(internal)},
     {ok, State}.
 
 
-handle_event({cluster_connection_up, Node}, State) ->
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    MyNode = bondy_config:nodestring(),
-    Topic = ?BONDY_CLUSTER_CONN_UP,
-    Ctxt = bondy_context:local_context(?MASTER_REALM_URI, State#state.ref),
-
-    _ = bondy_broker:publish(ReqId, #{}, Topic, [MyNode, Node], #{}, Ctxt),
-    {ok, State};
-
-handle_event({cluster_connection_down, Node}, State) ->
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    MyNode = bondy_config:nodestring(),
-    Topic = ?BONDY_CLUSTER_CONN_DOWN,
-    Ctxt = bondy_context:local_context(?MASTER_REALM_URI, State#state.ref),
-
-    _ = bondy_broker:publish(ReqId, #{}, Topic, [MyNode, Node], #{}, Ctxt),
-    {ok, State};
-
-handle_event({realm_created, Uri}, State) ->
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Ctxt = bondy_context:local_context(?MASTER_REALM_URI, State#state.ref),
-
-    _ = bondy_broker:publish(
-        ReqId, #{}, ?BONDY_REALM_CREATED, [Uri], #{}, Ctxt
-    ),
-    {ok, State};
-
-handle_event({realm_updated, Uri}, State) ->
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Ctxt = bondy_context:local_context(?MASTER_REALM_URI, State#state.ref),
-
-    _ = bondy_broker:publish(
-        ReqId, #{}, ?BONDY_REALM_UPDATED, [Uri], #{}, Ctxt
-    ),
-    {ok, State};
-
-handle_event({realm_deleted, Uri}, State) ->
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Ctxt = bondy_context:local_context(?MASTER_REALM_URI, State#state.ref),
-
-    _ = bondy_broker:publish(
-        ReqId, #{}, ?BONDY_REALM_DELETED, [Uri], #{}, Ctxt
-    ),
-    {ok, State};
-
-handle_event({session_opened, Session}, State) ->
-    RealmUri = bondy_session:realm_uri(Session),
-    Args = [bondy_session:to_external(Session)],
-    KWArgs = #{
-        session_guid => bondy_session:id(Session)
-    },
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-
-    _ = bondy_broker:publish(
-        ReqId, #{}, ?WAMP_SESSION_ON_JOIN, Args, KWArgs, Ctxt
-    ),
-    {ok, State};
-
-handle_event({session_closed, Session, _DurationSecs}, State) ->
-    RealmUri = bondy_session:realm_uri(Session),
-    Id = bondy_session:external_id(Session),
-    Authid = bondy_session:authid(Session),
-    Authrole = bondy_session:authrole(Session),
-
-    Args = [Id, Authid, Authrole],
-    KWArgs = #{
-        session_guid => bondy_session:id(Session)
-    },
-
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-    _ = bondy_broker:publish(
-        ReqId, #{}, ?WAMP_SESSION_ON_LEAVE, Args, KWArgs, Ctxt
-    ),
-    {ok, State};
-
-handle_event({group_added, RealmUri, Name}, State) ->
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-    _ = bondy_broker:publish(
-        ReqId, #{}, ?BONDY_GROUP_ADDED, [RealmUri, Name], #{}, Ctxt
-    ),
-    {ok, State};
-
-handle_event({group_updated, RealmUri, Name}, State) ->
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-    _ = bondy_broker:publish(
-        ReqId, #{}, ?BONDY_GROUP_UPDATED, [RealmUri, Name], #{}, Ctxt
-    ),
-    {ok, State};
-
-handle_event({group_deleted, RealmUri, Name}, State) ->
-    %% Silence when this is a cascade delete
-    case bondy_realm:exists(RealmUri) of
-        true ->
-            %% We use a global ID as this is not a publishers request
-            ReqId = bondy_message_id:global(),
-            Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-            _ = bondy_broker:publish(
-                ReqId, #{}, ?BONDY_GROUP_DELETED, [RealmUri, Name], #{}, Ctxt
-            );
-        false ->
-            ok
-    end,
-    {ok, State};
-
-handle_event({user_added, RealmUri, Username}, State) ->
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-    _ = bondy_broker:publish(
-        ReqId, #{}, ?BONDY_USER_ADDED, [Username], #{}, Ctxt
-    ),
-    {ok, State};
-
-handle_event({user_updated, RealmUri, Username}, State) ->
-    ok = bondy_ticket:revoke_all(RealmUri, Username),
-    ok = bondy_oauth2:revoke_refresh_tokens(RealmUri, Username),
-
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-    _ = bondy_broker:publish(
-        ReqId, #{}, ?BONDY_USER_UPDATED, [RealmUri, Username], #{}, Ctxt
-    ),
-    %% TODO Refresh any sessions' rbac_ctxt caches this user has in this node
-    %% for other realms. This is because
-    {ok, State};
-
-handle_event({user_deleted, RealmUri, Username}, State) ->
-    %% Silence when this is a cascade delete
-    case bondy_realm:exists(RealmUri) of
-        true ->
-            %% The effect of revoking tickets and tokens will be replicated
-            %% through plum_db
-            ok = bondy_ticket:revoke_all(RealmUri, Username),
-            ok = bondy_oauth2:revoke_refresh_tokens(RealmUri, Username),
-
-            %% We use a global ID as this is not a publishers request
-            ReqId = bondy_message_id:global(),
-            Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-            _ = bondy_broker:publish(
-                ReqId, #{}, ?BONDY_USER_DELETED, [RealmUri, Username], #{}, Ctxt
-            );
-        false ->
-            ok
-    end,
-    {ok, State};
-
-handle_event({user_credentials_updated, RealmUri, Username}, State) ->
-    ok = bondy_ticket:revoke_all(RealmUri, Username),
-    ok = bondy_oauth2:revoke_refresh_tokens(RealmUri, Username),
-
-    Uri = ?BONDY_USER_CREDENTIALS_CHANGED,
-
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-    _ = bondy_broker:publish(
-        ReqId, #{}, Uri, [RealmUri, Username], #{}, Ctxt
-    ),
-
-    {ok, State};
-
-handle_event({user_log_in, RealmUri, Username, Meta}, State) ->
-    Uri = ?BONDY_USER_LOGGED_IN,
-
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-    _ = bondy_broker:publish(ReqId, #{}, Uri, [Username, Meta], #{}, Ctxt),
-    {ok, State};
-
-handle_event({backup_started, #{filename := File}}, State) ->
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Ctxt = bondy_context:local_context(?MASTER_REALM_URI, State#state.ref),
-
-    _ = bondy_broker:publish(
-        ReqId, #{}, ?BONDY_BACKUP_STARTED, [File], #{}, Ctxt
-    ),
-    {ok, State};
-
-handle_event({backup_finished, Args}, State) ->
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Ctxt = bondy_context:local_context(?MASTER_REALM_URI, State#state.ref),
-
-    _ = bondy_broker:publish(
-        ReqId, #{}, ?BONDY_BACKUP_FINISHED, Args, #{}, Ctxt
-    ),
-    {ok, State};
-
-handle_event({backup_failed, Args}, State) ->
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Ctxt = bondy_context:local_context(?MASTER_REALM_URI, State#state.ref),
-
-    _ = bondy_broker:publish(
-        ReqId, #{}, ?BONDY_BACKUP_FAILED, Args, #{}, Ctxt
-    ),
-    {ok, State};
-
-handle_event({backup_restore_started, File}, State) ->
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Ctxt = bondy_context:local_context(?MASTER_REALM_URI, State#state.ref),
-
-    _ = bondy_broker:publish(
-        ReqId, #{}, ?BONDY_BACKUP_RESTORE_STARTED, [File], #{}, Ctxt
-    ),
-    {ok, State};
-
-handle_event({backup_restore_finished, Args}, State) ->
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Ctxt = bondy_context:local_context(?MASTER_REALM_URI, State#state.ref),
-
-    _ = bondy_broker:publish(
-        ReqId, #{}, ?BONDY_BACKUP_RESTORE_FINISHED, [Args], #{}, Ctxt
-    ),
-    {ok, State};
-
-handle_event({backup_restore_failed, Args}, State) ->
-    Uri = ?BONDY_BACKUP_RESTORE_FAILED,
-
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Ctxt = bondy_context:local_context(?MASTER_REALM_URI, State#state.ref),
-
-    _ = bondy_broker:publish(ReqId, #{}, Uri, Args, #{}, Ctxt),
-    {ok, State};
-
-%% REGISTRATION META API
-
-handle_event({registration_created, Entry}, State) ->
-    RealmUri = bondy_registry_entry:realm_uri(Entry),
-    SessionId = bondy_utils:external_session_id(
-        bondy_registry_entry:session_id(Entry)
-    ),
-
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    RegId = bondy_registry_entry:id(Entry),
-    Uri = ?WAMP_REG_ON_CREATE,
-    Args = [SessionId, RegId],
-    KWArgs = bondy_registry_entry:to_details_map(Entry),
-
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-    {ok, _} = bondy_broker:publish(ReqId, #{}, Uri, Args, KWArgs, Ctxt),
-
-    {ok, State};
-
-handle_event({registration_added, Entry}, State) ->
-    RealmUri = bondy_registry_entry:realm_uri(Entry),
-    SessionId = bondy_utils:external_session_id(
-        bondy_registry_entry:session_id(Entry)
-    ),
-
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    RegId = bondy_registry_entry:id(Entry),
-    Uri = ?WAMP_REG_ON_REGISTER,
-    Args = [SessionId, RegId],
-    KWArgs = bondy_registry_entry:to_details_map(Entry),
-
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-    {ok, _} = bondy_broker:publish(ReqId, #{}, Uri, Args, KWArgs, Ctxt),
-
-    {ok, State};
-
-handle_event({registration_deleted, Entry}, State) ->
-    RealmUri = bondy_registry_entry:realm_uri(Entry),
-    SessionId = bondy_utils:external_session_id(
-        bondy_registry_entry:session_id(Entry)
-    ),
-
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    RegId = bondy_registry_entry:id(Entry),
-    Uri = ?WAMP_REG_ON_DELETE,
-    Args = [SessionId, RegId],
-    KWArgs = bondy_registry_entry:to_details_map(Entry),
-
-
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-    {ok, _} = bondy_broker:publish(ReqId, #{}, Uri, Args, KWArgs, Ctxt),
-
-    {ok, State};
-
-handle_event({registration_removed, Entry}, State) ->
-    RealmUri = bondy_registry_entry:realm_uri(Entry),
-    SessionId = bondy_utils:external_session_id(
-        bondy_registry_entry:session_id(Entry)
-    ),
-
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    RegId = bondy_registry_entry:id(Entry),
-    Uri = ?WAMP_REG_ON_UNREGISTER,
-    Args = [SessionId, RegId],
-    KWArgs = bondy_registry_entry:to_details_map(Entry),
-
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-    {ok, _} = bondy_broker:publish(ReqId, #{}, Uri, Args, KWArgs, Ctxt),
-
-    {ok, State};
-
-%% SUBSCRIPTION META API
-
-handle_event({subscription_created, Entry}, State) ->
-    RealmUri = bondy_registry_entry:realm_uri(Entry),
-    ExtId = bondy_utils:external_session_id(
-        bondy_registry_entry:session_id(Entry)
-    ),
-
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Uri = ?WAMP_SUBSCRIPTION_ON_CREATE,
-    Opts = #{},
-    Args = [
-        ExtId,
-        bondy_registry_entry:to_details_map(Entry)
-    ],
-    KWArgs = #{},
-
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-    _ = bondy_broker:publish(ReqId, Opts, Uri, Args, KWArgs, Ctxt),
-
-    {ok, State};
-
-handle_event({subscription_added, Entry}, State) ->
-    RealmUri = bondy_registry_entry:realm_uri(Entry),
-    ExtId = bondy_utils:external_session_id(
-        bondy_registry_entry:session_id(Entry)
-    ),
-
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Uri = ?WAMP_SUBSCRIPTION_ON_SUBSCRIBE,
-    Opts = #{},
-    Args = [
-        ExtId,
-        bondy_registry_entry:to_details_map(Entry)
-    ],
-    KWArgs = #{},
-
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-    _ = bondy_broker:publish(ReqId, Opts, Uri, Args, KWArgs, Ctxt),
-
-    {ok, State};
-
-handle_event({subscription_removed, Entry}, State) ->
-    RealmUri = bondy_registry_entry:realm_uri(Entry),
-    ExtId = bondy_utils:external_session_id(
-        bondy_registry_entry:session_id(Entry)
-    ),
-
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Uri = ?WAMP_SUBSCRIPTION_ON_UNSUBSCRIBE,
-    Opts = #{},
-    Args = [
-        ExtId,
-        bondy_registry_entry:id(Entry)
-    ],
-    %% Based on https://github.com/wamp-proto/wamp-proto/issues/349
-    KWArgs = #{
-        <<"topic">> => bondy_registry_entry:uri(Entry)
-    },
-
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-    _ = bondy_broker:publish(ReqId, Opts, Uri, Args, KWArgs, Ctxt),
-
-    {ok, State};
-
-handle_event({subscription_deleted, Entry}, State) ->
-    RealmUri = bondy_registry_entry:realm_uri(Entry),
-    ExtId = bondy_utils:external_session_id(
-        bondy_registry_entry:session_id(Entry)
-    ),
-
-    %% We use a global ID as this is not a publishers request
-    ReqId = bondy_message_id:global(),
-    Uri = ?WAMP_SUBSCRIPTION_ON_DELETE,
-    Opts = #{},
-    Args = [
-        ExtId,
-        bondy_registry_entry:id(Entry)
-    ],
-    %% Based on https://github.com/wamp-proto/wamp-proto/issues/349
-    KWArgs = #{
-        <<"topic">> => bondy_registry_entry:uri(Entry)
-    },
-
-    Ctxt = bondy_context:local_context(RealmUri, State#state.ref),
-
-    _ = bondy_broker:publish(ReqId, Opts, Uri, Args, KWArgs, Ctxt),
-
-    {ok, State};
-
-handle_event(_, State) ->
-    {ok, State}.
+handle_event(Event, State) ->
+    %% handle_event is called by the even manager, so delegate this to jobs
+    case async_handle_event(Event, State#state.ref) of
+        ok ->
+            {ok, State};
+
+        {ok, {Fun, PartitionKey}} ->
+            ok = bondy_jobs:enqueue(Fun, PartitionKey),
+            {ok, State}
+    end.
 
 
 handle_call(Event, State) ->
@@ -510,11 +92,278 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
 
 
-%% =============================================================================
-%% API
-%% =============================================================================
+-spec async_handle_event(event(), term()) ->
+    ok | {ok, {function(), partition_key()}}.
+
+async_handle_event({[bondy, cluster, connection, Type], Node}, Ref)
+when Type == up; Type == down ->
+    Fun = fun() ->
+        %% We use a global ID as this is not a publishers request
+        ReqId = bondy_message_id:global(),
+        MyNode = bondy_config:nodestring(),
+        Ctxt = bondy_context:local_context(?MASTER_REALM_URI, Ref),
+        Topic =
+            case Type of
+                up -> ?BONDY_CLUSTER_CONN_UP;
+                down -> ?BONDY_CLUSTER_CONN_DOWN
+            end,
+        bondy_broker:publish(ReqId, #{}, Topic, [MyNode, Node], #{}, Ctxt)
+    end,
+    {ok, {Fun, undefined}};
+
+async_handle_event({[bondy, realm, created, Type], Uri}, Ref)
+when Type == created; Type == updated; Type == deleted ->
+    Fun = fun() ->
+        %% We use a global ID as this is not a publishers request
+        ReqId = bondy_message_id:global(),
+        Ctxt = bondy_context:local_context(?MASTER_REALM_URI, Ref),
+        Topic =
+            case Type of
+                created -> ?BONDY_REALM_CREATED;
+                updated -> ?BONDY_REALM_UPDATED;
+                deleted -> ?BONDY_REALM_DELETED
+            end,
+        bondy_broker:publish(ReqId, #{}, Topic, [Uri], #{}, Ctxt)
+    end,
+    {ok, {Fun, Uri}};
+
+
+async_handle_event({[bondy, session, opened], Session}, Ref) ->
+    SessionId = bondy_session:id(Session),
+    Fun = fun() ->
+        RealmUri = bondy_session:realm_uri(Session),
+        Args = [bondy_session:to_external(Session)],
+        KWArgs = #{session_guid => SessionId},
+
+        %% We use a global ID as this is not a publishers request
+        ReqId = bondy_message_id:global(),
+        Ctxt = bondy_context:local_context(RealmUri, Ref),
+        bondy_broker:publish(
+            ReqId, #{}, ?WAMP_SESSION_ON_JOIN, Args, KWArgs, Ctxt
+        )
+    end,
+    {ok, {Fun, SessionId}};
+
+async_handle_event({[bondy, session, closed], Session, _DurationSecs}, Ref) ->
+    SessionId = bondy_session:id(Session),
+    Fun = fun() ->
+        RealmUri = bondy_session:realm_uri(Session),
+        Id = bondy_session:external_id(Session),
+        Authid = bondy_session:authid(Session),
+        Authrole = bondy_session:authrole(Session),
+        Args = [Id, Authid, Authrole],
+        KWArgs = #{session_guid => bondy_session:id(Session)},
+
+        %% We use a global ID as this is not a publishers request
+        ReqId = bondy_message_id:global(),
+        Ctxt = bondy_context:local_context(RealmUri, Ref),
+
+        bondy_broker:publish(
+            ReqId, #{}, ?WAMP_SESSION_ON_LEAVE, Args, KWArgs, Ctxt
+        )
+    end,
+    {ok, {Fun, SessionId}};
+
+async_handle_event({[bondy, rbac, group, Type], RealmUri, Name}, Ref)
+when Type == added; Type == updated; Type == deleted ->
+    case Type =/= deleted orelse bondy_realm:exists(RealmUri) of
+        true ->
+            Fun = fun() ->
+                %% We use a global ID as this is not a publishers request
+                ReqId = bondy_message_id:global(),
+                Ctxt = bondy_context:local_context(RealmUri, Ref),
+                Topic =
+                    case Type of
+                        added -> ?BONDY_GROUP_ADDED;
+                        updated -> ?BONDY_GROUP_UPDATED;
+                        deleted -> ?BONDY_GROUP_DELETED
+                    end,
+                bondy_broker:publish(
+                    ReqId, #{}, Topic, [RealmUri, Name], #{}, Ctxt
+                )
+            end,
+            {ok, {Fun, RealmUri}};
+
+        false ->
+            %% Realm cascade delete, so we silence the event
+            ok
+    end;
+
+async_handle_event({[bondy, user, added], RealmUri, Username}, Ref) ->
+    Fun = fun() ->
+        %% We use a global ID as this is not a publishers request
+        ReqId = bondy_message_id:global(),
+        Ctxt = bondy_context:local_context(RealmUri, Ref),
+
+        bondy_broker:publish(
+            ReqId, #{}, ?BONDY_USER_ADDED, [Username], #{}, Ctxt
+        )
+    end,
+    {ok, {Fun, RealmUri}};
+
+async_handle_event({[bondy, user, Type], RealmUri, Username}, Ref)
+when Type == updated; Type == deleted ->
+    case Type =/= deleted orelse bondy_realm:exists(RealmUri) of
+        true ->
+            Fun = fun() ->
+                ok = bondy_ticket:revoke_all(RealmUri, Username),
+                ok = bondy_oauth2:revoke_refresh_tokens(RealmUri, Username),
+
+                %% We use a global ID as this is not a publishers request
+                ReqId = bondy_message_id:global(),
+                Ctxt = bondy_context:local_context(RealmUri, Ref),
+                Topic =
+                    case Type of
+                        updated -> ?BONDY_USER_UPDATED;
+                        deleted -> ?BONDY_USER_DELETED
+                    end,
+                bondy_broker:publish(
+                    ReqId, #{}, Topic, [RealmUri, Username], #{}, Ctxt
+                )
+                %% TODO Refresh any sessions' rbac_ctxt caches this user has in
+                %% this node for other realms.
+            end,
+            {ok, {Fun, RealmUri}};
+
+        false ->
+            %% Realm cascade delete, so we silence the event
+            ok
+    end;
+
+async_handle_event(
+    {[bondy, user, credentials, updated], RealmUri, Username}, Ref) ->
+    Fun = fun() ->
+        ok = bondy_ticket:revoke_all(RealmUri, Username),
+        ok = bondy_oauth2:revoke_refresh_tokens(RealmUri, Username),
+
+        Topic = ?BONDY_USER_CREDENTIALS_CHANGED,
+
+        %% We use a global ID as this is not a publishers request
+        ReqId = bondy_message_id:global(),
+        Ctxt = bondy_context:local_context(RealmUri, Ref),
+        bondy_broker:publish(ReqId, #{}, Topic, [RealmUri, Username], #{}, Ctxt)
+    end,
+    {ok, {Fun, RealmUri}};
+
+async_handle_event(
+    {[bondy, user, logged_in], RealmUri, Username, Meta}, Ref) ->
+    Fun = fun() ->
+        Topic = ?BONDY_USER_LOGGED_IN,
+
+        %% We use a global ID as this is not a publishers request
+        ReqId = bondy_message_id:global(),
+        Ctxt = bondy_context:local_context(RealmUri, Ref),
+        bondy_broker:publish(ReqId, #{}, Topic, [Username, Meta], #{}, Ctxt)
+    end,
+    {ok, {Fun, RealmUri}};
+
+async_handle_event({[bondy, backup, Type], #{filename := File}}, Ref)
+when Type == start; Type == stop; Type == exception ->
+    Fun = fun() ->
+        %% We use a global ID as this is not a publishers request
+        ReqId = bondy_message_id:global(),
+        Ctxt = bondy_context:local_context(?MASTER_REALM_URI, Ref),
+        Topic =
+            case Type of
+                start -> ?BONDY_BACKUP_STARTED;
+                stop -> ?BONDY_BACKUP_FINISHED;
+                exception -> ?BONDY_BACKUP_FAILED
+            end,
+        bondy_broker:publish(ReqId, #{}, Topic, [File], #{}, Ctxt)
+    end,
+    {ok, {Fun, undefined}};
+
+async_handle_event({[bondy, backup, restore, Type], #{filename := File}}, Ref)
+when Type == start; Type == stop; Type == exception ->
+    Fun = fun() ->
+        %% We use a global ID as this is not a publishers request
+        ReqId = bondy_message_id:global(),
+        Ctxt = bondy_context:local_context(?MASTER_REALM_URI, Ref),
+        Topic =
+            case Type of
+                start -> ?BONDY_BACKUP_RESTORE_STARTED;
+                stop -> ?BONDY_BACKUP_RESTORE_FINISHED;
+                exception -> ?BONDY_BACKUP_RESTORE_FAILED
+            end,
+        bondy_broker:publish(ReqId, #{}, Topic, [File], #{}, Ctxt)
+    end,
+    {ok, {Fun, undefined}};
+
+%% REGISTRATION META API
+
+async_handle_event({[bondy, dealer, registration, Type], Entry}, Ref)
+when Type == created; Type == added; Type == deleted; Type == removed ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    SessionId = bondy_registry_entry:session_id(Entry),
+
+    Fun = fun() ->
+        ExtSessionId = bondy_utils:external_session_id(SessionId),
+        %% We use a global ID as this is not a publishers request
+        ReqId = bondy_message_id:global(),
+        RegId = bondy_registry_entry:id(Entry),
+        Args =
+            case Type == created of
+                true ->
+                    [ExtSessionId, bondy_registry_entry:to_details_map(Entry)];
+                false ->
+                    [ExtSessionId, RegId]
+        end,
+        KWArgs = #{procedure => bondy_registry_entry:uri(Entry)},
+        Topic =
+            case Type of
+                created -> ?WAMP_REG_ON_CREATE;
+                added -> ?WAMP_REG_ON_REGISTER;
+                deleted -> ?WAMP_REG_ON_DELETE;
+                removed -> ?WAMP_REG_ON_UNREGISTER
+            end,
+        Ctxt = bondy_context:local_context(RealmUri, Ref),
+
+        bondy_broker:publish(ReqId, #{}, Topic, Args, KWArgs, Ctxt)
+    end,
+    {ok, {Fun, SessionId}};
+
+
+%% SUBSCRIPTION META API
+
+async_handle_event({[bondy, broker, subscription, Type], Entry}, Ref)
+when Type == created; Type == added; Type == deleted; Type == removed ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    SessionId = bondy_registry_entry:session_id(Entry),
+
+    Fun = fun() ->
+        ExtSessionId = bondy_utils:external_session_id(SessionId),
+        %% We use a global ID as this is not a publishers request
+        ReqId = bondy_message_id:global(),
+        RegId = bondy_registry_entry:id(Entry),
+        Args =
+            case Type == created of
+                true ->
+                    [ExtSessionId, bondy_registry_entry:to_details_map(Entry)];
+                false ->
+                    [ExtSessionId, RegId]
+        end,
+        %% Based on https://github.com/wamp-proto/wamp-proto/issues/349
+        KWArgs = #{topic => bondy_registry_entry:uri(Entry)},
+        Topic =
+            case Type of
+                created -> ?WAMP_SUBSCRIPTION_ON_CREATE;
+                added -> ?WAMP_SUBSCRIPTION_ON_SUBSCRIBE;
+                deleted -> ?WAMP_SUBSCRIPTION_ON_DELETE;
+                removed -> ?WAMP_SUBSCRIPTION_ON_UNSUBSCRIBE
+            end,
+        Ctxt = bondy_context:local_context(RealmUri, Ref),
+
+        bondy_broker:publish(ReqId, #{}, Topic, Args, KWArgs, Ctxt)
+    end,
+    {ok, {Fun, SessionId}};
+
+async_handle_event(_, _) ->
+    ok.
 
 
 

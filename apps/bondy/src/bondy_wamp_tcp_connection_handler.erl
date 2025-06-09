@@ -737,14 +737,14 @@ close_socket(Reason, St) ->
 
     %% We report socket stats
     ok = bondy_event_manager:notify(
-        {socket_closed, wamp, raw, St#state.peername, Seconds}
+        {[bondy, socket, closed], wamp, raw, St#state.peername, Seconds}
     ),
 
     case Reason of
         {tcp_error, _, _} ->
             %% We increase the socker error counter
             ok = bondy_event_manager:notify(
-                {socket_error, wamp, raw, St#state.peername}
+                {[bondy, socket, error], wamp, raw, St#state.peername}
             );
 
         _ ->

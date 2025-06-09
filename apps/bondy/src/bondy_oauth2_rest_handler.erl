@@ -709,7 +709,7 @@ token_response(JWT, RefreshToken, Claims, Req0) ->
 %% @private
 on_login(_RealmUri, _Username, _Meta) ->
     % bondy_event_manager:notify(
-    %     {user_log_in, RealmUri, Username, Meta}).
+    %     {[bondy, user, logged_in], RealmUri, Username, Meta}).
     ok.
 
 

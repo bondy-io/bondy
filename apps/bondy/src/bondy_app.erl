@@ -376,11 +376,11 @@ setup_event_handlers() ->
 
     %% We subscribe to partisan up and down events and republish them
     partisan_peer_service:on_up('_', fun(Node) ->
-        bondy_event_manager:notify({cluster_connection_up, Node})
+        bondy_event_manager:notify({[bondy, cluster, connection, up], Node})
     end),
 
     partisan_peer_service:on_down('_', fun(Node) ->
-        bondy_event_manager:notify({cluster_connection_down, Node})
+        bondy_event_manager:notify({[bondy, cluster, connection, down], Node})
     end),
 
     % Used for debugging

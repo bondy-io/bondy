@@ -716,7 +716,7 @@ notify_backup_started(File) ->
         description => "Started backup",
         filename => File
     }),
-    bondy_event_manager:notify({backup_started, File}).
+    bondy_event_manager:notify({[bondy, backup, start], File}).
 
 
 %% @private
@@ -726,7 +726,7 @@ notify_backup_finished([Filename, Time] = Args) ->
         filename => Filename,
         elapsed_time_secs => Time
     }),
-    bondy_event_manager:notify({backup_finished, Args}).
+    bondy_event_manager:notify({[bondy, backup, stop], Args}).
 
 
 %% @private
@@ -737,7 +737,7 @@ notify_backup_error([Reason, Filename, Time] = Args)  ->
         reason => Reason,
         elapsed_time_secs => Time
     }),
-    bondy_event_manager:notify({backup_failed, Args}).
+    bondy_event_manager:notify({[bondy, backup, exception], Args}).
 
 
 %% @private
@@ -748,7 +748,7 @@ notify_restore_started([Filename, Rec, Bad]) ->
         recovered => Rec,
         bad_bytes => Bad
     }),
-    bondy_event_manager:notify({backup_restore_started, Filename}).
+    bondy_event_manager:notify({[bondy, backup, restore, start], Filename}).
 
 
 %% @private
@@ -760,7 +760,7 @@ notify_restore_finished([Filename, Time, Read, Merged] = Args) ->
         read_count => Read,
         merged_count => Merged
     }),
-    bondy_event_manager:notify({backup_restore_finished, Args}).
+    bondy_event_manager:notify({[bondy, backup, restore, stop], Args}).
 
 
 %% @private
@@ -771,4 +771,4 @@ notify_restore_error([Filename, Reason, Time] = Args) ->
         reason => Reason,
         elapsed_time_secs => Time
     }),
-    bondy_event_manager:notify({backup_restore_failed, Args}).
+    bondy_event_manager:notify({[bondy, backup, restore, exception], Args}).

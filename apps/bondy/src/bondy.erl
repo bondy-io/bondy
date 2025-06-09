@@ -506,7 +506,7 @@ check_response(Uri, ReqId, Timeout, Ctxt) ->
                 ErrorArgs,
                 ErrorKWArgs
             ),
-            ok = bondy_event_manager:notify({wamp, Error, Ctxt}),
+            ok = bondy_event_manager:notify({[bondy, wamp, message], Error, Ctxt}),
             {error, message_to_map(Error)}
     end.
 
@@ -547,12 +547,12 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
                 ?CALL, ReqId, #{}, ?BONDY_ERROR_INCONSISTENCY_ERROR,
                 [<<"Inconsistency error">>]
             ),
-            ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
+            ok = bondy_event_manager:notify({[bondy, wamp, message], Error, Ctxt1}),
             {error, message_to_map(Error)};
 
         {stop, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
-            ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
+            ok = bondy_event_manager:notify({[bondy, wamp, message], Error, Ctxt1}),
             {error, message_to_map(Error)};
 
         {stop, _, Ctxt1} ->
@@ -561,7 +561,7 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
                 ?CALL, ReqId, #{}, ?BONDY_ERROR_INCONSISTENCY_ERROR,
                 [<<"Inconsistency error">>]
             ),
-            ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
+            ok = bondy_event_manager:notify({[bondy, wamp, message], Error, Ctxt1}),
             {error, message_to_map(Error)}
     end.
 

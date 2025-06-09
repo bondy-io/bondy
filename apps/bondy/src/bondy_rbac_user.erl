@@ -1146,7 +1146,7 @@ on_merge({?PLUMDB_PREFIX(RealmUri), Username}, New, Old) ->
         end
     end,
 
-    bondy_jobs:enqueue(RealmUri, Fun).
+    bondy_jobs:enqueue(Fun, RealmUri).
 
 
 %% -----------------------------------------------------------------------------
@@ -1160,7 +1160,10 @@ on_update({?PLUMDB_PREFIX(RealmUri), Username}, _New, Old) ->
 
     case IsCreate of
         true ->
-            ok = bondy_event_manager:notify({user_added, RealmUri, Username});
+            bondy_event_manager:notify(
+                {[bondy, user, added], RealmUri, Username}
+            );
+
         false ->
             %% 1. We need to revoke all auth tokens/tickets
             ok = revoke_tickets(RealmUri, Username),
@@ -1173,7 +1176,9 @@ on_update({?PLUMDB_PREFIX(RealmUri), Username}, _New, Old) ->
             %% process so no bondy metadata present). We do it on the update
             %% operation.
             %% 4. Finally we publish the event
-            ok = bondy_event_manager:notify({user_updated, RealmUri, Username})
+            bondy_event_manager:notify(
+                {[bondy, user, updated], RealmUri, Username}
+            )
     end.
 
 
@@ -1188,7 +1193,7 @@ on_delete({?PLUMDB_PREFIX(RealmUri), Username}, _Old) ->
     %% 3. Close all sessions in this node.
     ok = close_sessions(RealmUri, Username, ?BONDY_USER_DELETED),
     %% 4. Finally we publish the event
-    ok = bondy_event_manager:notify({user_deleted, RealmUri, Username}).
+    bondy_event_manager:notify({[bondy, user, deleted], RealmUri, Username}).
 
 
 %% -----------------------------------------------------------------------------
@@ -1699,8 +1704,8 @@ on_credentials_change(RealmUri, User) ->
     Username = maps:get(username, User),
 
     %% on_update/3 will be called by plum_db
-    ok = bondy_event_manager:notify(
-        {user_credentials_updated, RealmUri, Username}
+    bondy_event_manager:notify(
+        {[bondy, user, credentials, updated], RealmUri, Username}
     ),
 
     Reason = ?BONDY_USER_CREDENTIALS_CHANGED,
@@ -1717,9 +1722,10 @@ on_credentials_change(RealmUri, User) ->
 %% @private
 revoke_tickets(RealmUri, Username) ->
     bondy_jobs:enqueue(
-        RealmUri, fun() ->
+        fun() ->
             bondy_ticket:revoke_all(RealmUri, Username)
-        end
+        end,
+        RealmUri
     ).
 
 

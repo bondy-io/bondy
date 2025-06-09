@@ -1886,20 +1886,22 @@ call_opts(_) -> #{}.
 
 %% @private
 on_register(true, Entry) ->
-    bondy_event_manager:notify({registration_created, Entry});
+    bondy_event_manager:notify({[bondy, dealer, registration, created], Entry});
 
+
+%% @private
 on_register(false, Entry) ->
-    bondy_event_manager:notify({registration_added, Entry}).
+    bondy_event_manager:notify({[bondy, dealer, registration, added], Entry}).
 
 
 %% @private
 on_unregister(Entry) ->
-    bondy_event_manager:notify({registration_removed, Entry}).
+    bondy_event_manager:notify({[bondy, dealer, registration, removed], Entry}).
 
 
 %% @private
 on_delete(Entry) ->
-    bondy_event_manager:notify({registration_deleted, Entry}).
+    bondy_event_manager:notify({[bondy, dealer, registration, deleted], Entry}).
 
 
 %% %% @private

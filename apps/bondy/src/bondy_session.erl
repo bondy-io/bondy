@@ -305,7 +305,7 @@ store(#session{} = S0) ->
         true == ets:insert_new(Tab, S)
             orelse error({integrity_constraint_violation, Id}),
 
-        ok = bondy_event_manager:notify({session_opened, S}),
+        ok = bondy_event_manager:notify({[bondy, session, opened], S}),
 
         {ok, S}
 
@@ -355,7 +355,7 @@ when is_binary(Reason) orelse Reason == undefined ->
 
     %% Notify internally
     Secs = erlang:system_time(second) - S#session.created,
-    ok = bondy_event_manager:notify({session_closed, S, Secs}),
+    ok = bondy_event_manager:notify({[bondy, session, closed], S, Secs}),
 
     ?LOG_DEBUG(#{
         description => "Session closed",

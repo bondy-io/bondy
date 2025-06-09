@@ -168,13 +168,13 @@ init([]) ->
     {ok, State}.
 
 
-handle_event({socket_open, Procotol, Transport, _Peername}, State) ->
+handle_event({[bondy, socket, open], Procotol, Transport, _Peername}, State) ->
     Labels = get_socket_labels(Procotol, Transport),
     ok = prometheus_counter:inc(bondy_sockets_opened_total, Labels),
     ok = prometheus_gauge:inc(bondy_sockets_total, Labels),
     {ok, State};
 
-handle_event({socket_closed, Procotol, Transport, _Peername, Secs}, State) ->
+handle_event({[bondy, socket, closed], Procotol, Transport, _Peername, Secs}, State) ->
     Labels = get_socket_labels(Procotol, Transport),
     ok = prometheus_counter:inc(bondy_sockets_closed_total, Labels),
     ok = prometheus_gauge:dec(bondy_sockets_total, Labels),
@@ -182,20 +182,20 @@ handle_event({socket_closed, Procotol, Transport, _Peername, Secs}, State) ->
         bondy_socket_duration_seconds, Labels, Secs),
     {ok, State};
 
-handle_event({socket_error, Procotol, Transport, _Peername}, State) ->
+handle_event({[bondy, socket, error], Procotol, Transport, _Peername}, State) ->
     Labels = get_socket_labels(Procotol, Transport),
     ok = prometheus_counter:inc(bondy_socket_errors_total, Labels),
     ok = prometheus_gauge:dec(bondy_sockets_total, Labels),
     {ok, State};
 
-handle_event({session_opened, Session}, State) ->
+handle_event({[bondy, session, opened], Session}, State) ->
     RealmUri = bondy_session:realm_uri(Session),
     Labels = get_session_labels(RealmUri),
     ok = prometheus_counter:inc(bondy_sessions_opened_total, Labels),
     ok = prometheus_gauge:inc(bondy_sessions_total, Labels),
     {ok, State};
 
-handle_event({session_closed, Session, DurationSecs}, State) ->
+handle_event({[bondy, session, closed], Session, DurationSecs}, State) ->
     RealmUri = bondy_session:realm_uri(Session),
     Labels = get_session_labels(RealmUri),
     ok = prometheus_counter:inc(bondy_sessions_closed_total, Labels),
@@ -205,99 +205,102 @@ handle_event({session_closed, Session, DurationSecs}, State) ->
     ),
     {ok, State};
 
-handle_event({wamp, #abort{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #abort{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_abort_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #authenticate{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #authenticate{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_authenticate_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #call{procedure_uri = Val} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #call{procedure_uri = Val} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_call_messages_total, M, [Val], Ctxt),
     {ok, State};
 
-handle_event({wamp, #cancel{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #cancel{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_cancel_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #challenge{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #challenge{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_challenge_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #error{error_uri = Val} = M, Ctxt}, State) ->
+handle_event(
+    {[bondy, wamp, message], #error{error_uri = Val} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_error_messages_total, M, [Val], Ctxt),
     {ok, State};
 
-handle_event({wamp, #event{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #event{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_event_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #goodbye{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #goodbye{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_goodbye_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #hello{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #hello{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_hello_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #interrupt{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #interrupt{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_interrupt_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #invocation{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #invocation{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_invocation_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #publish{topic_uri = Val} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #publish{topic_uri = Val} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_publish_messages_total, M, [Val], Ctxt),
     {ok, State};
 
-handle_event({wamp, #published{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #published{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_published_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #register{procedure_uri = Val} = M, Ctxt}, State) ->
+handle_event(
+    {[bondy, wamp, message], #register{procedure_uri = Val} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_register_messages_total, M, [Val], Ctxt),
     {ok, State};
 
-handle_event({wamp, #registered{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #registered{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_registered_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #result{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #result{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_result_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #subscribe{topic_uri = Val} = M, Ctxt}, State) ->
+handle_event(
+    {[bondy, wamp, message], #subscribe{topic_uri = Val} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_subscribe_messages_total, M, [Val], Ctxt),
     {ok, State};
 
-handle_event({wamp, #subscribed{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #subscribed{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_subscribed_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #unregister{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #unregister{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_unregister_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #unregistered{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #unregistered{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_unregistered_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #unsubscribe{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #unsubscribe{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_unsubscribe_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #unsubscribed{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #unsubscribed{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_unsubscribed_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #welcome{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #welcome{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_welcome_messages_total, M, [], Ctxt),
     {ok, State};
 
-handle_event({wamp, #yield{} = M, Ctxt}, State) ->
+handle_event({[bondy, wamp, message], #yield{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_yield_messages_total, M, [], Ctxt),
     {ok, State};
 

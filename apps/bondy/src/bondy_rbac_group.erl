@@ -665,9 +665,13 @@ on_update({?PLUMDB_PREFIX(RealmUri), Name}, _New, Old) ->
 
     case IsCreate of
         true ->
-            ok = bondy_event_manager:notify({group_added, RealmUri, Name});
+            bondy_event_manager:notify(
+                {[bondy, rbac, group, added], RealmUri, Name}
+            );
         false ->
-            ok = bondy_event_manager:notify({group_updated, RealmUri, Name})
+            bondy_event_manager:notify(
+                {[bondy, rbac, group, updated], RealmUri, Name}
+            )
     end.
 
 
@@ -676,7 +680,7 @@ on_update({?PLUMDB_PREFIX(RealmUri), Name}, _New, Old) ->
 %% @end
 %% -----------------------------------------------------------------------------
 on_delete({?PLUMDB_PREFIX(RealmUri), Name}, _Old) ->
-    ok = bondy_event_manager:notify({group_deleted, RealmUri, Name}).
+    bondy_event_manager:notify({[bondy, rbac, group, deleted], RealmUri, Name}).
 
 
 %% -----------------------------------------------------------------------------

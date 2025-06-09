@@ -2186,19 +2186,17 @@ fold_props(_, _, Realm) ->
 
 %% @private
 on_create(Realm) ->
-    ok = bondy_event_manager:notify({realm_created, Realm#realm.uri}),
-    ok.
+    bondy_event_manager:notify({[bondy, realm, created], Realm#realm.uri}).
 
 
 %% @private
 on_update(Realm) ->
-    ok = bondy_event_manager:notify({realm_updated, Realm#realm.uri}),
-    ok.
+    bondy_event_manager:notify({[bondy, realm, updated], Realm#realm.uri}).
 
 
 %% @private
 on_delete(Uri) ->
-    ok = bondy_event_manager:notify({realm_deleted, Uri}).
+    bondy_event_manager:notify({[bondy, realm, deleted], Uri}).
 
 
 %% @private
