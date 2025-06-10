@@ -31,7 +31,7 @@
 -module(bondy_context).
 -behaviour(bondy_sensitive).
 -include("bondy.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include_lib("partisan/include/partisan_util.hrl").
 
 -type subprotocol_2()        ::  subprotocol()

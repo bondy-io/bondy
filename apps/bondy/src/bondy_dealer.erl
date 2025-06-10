@@ -290,7 +290,7 @@
 -module(bondy_dealer).
 
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
 
@@ -602,7 +602,7 @@ forward(M, Ctxt) ->
 
     catch
         _:{not_authorized, Reason} ->
-            Reply = wamp_message:error_from(
+            Reply = bondy_wamp_message:error_from(
                 M,
                 #{},
                 ?WAMP_NOT_AUTHORIZED,
@@ -923,7 +923,7 @@ do_forward(#yield{} = M, Ctxt0) ->
             %% a call_promise.
             %% If Caller is local, then we are done (as we only created one
             %% promise).
-            Result = wamp_message:result(
+            Result = bondy_wamp_message:result(
                 CallId,
                 %% We fwd all yield options (we know we should at least forward
                 %% all ppt_* attributes in Options)
@@ -1022,7 +1022,7 @@ apply_static_callback(#call{} = M0, Ctxt, Mod) ->
 
     catch
         throw:no_such_procedure ->
-            Error = bondy_wamp_utils:no_such_procedure_error(M0),
+            Error = bondy_wamp_api_utils:no_such_procedure_error(M0),
             bondy:send(RealmUri, Caller, Error);
 
         Class:Reason:Stacktrace ->
@@ -1036,7 +1036,7 @@ apply_static_callback(#call{} = M0, Ctxt, Mod) ->
             }),
             %% We catch any exception from handle/3 and turn it
             %% into a WAMP Error
-            Error = bondy_wamp_utils:maybe_error({error, Reason}, M0),
+            Error = bondy_wamp_api_utils:maybe_error({error, Reason}, M0),
             bondy:send(RealmUri, Caller, Error)
     end.
 
@@ -1054,7 +1054,7 @@ apply_dynamic_callback(#call{} = Msg, Callee) ->
     wamp_result() | wamp_error().
 
 apply_dynamic_callback(#call{options = #{ppt_scheme := _}} = Msg, _, _) ->
-    wamp_message:error(
+    bondy_wamp_message:error(
         ?CALL,
         Msg#call.request_id,
         Msg#call.options,
@@ -1076,7 +1076,7 @@ apply_dynamic_callback(#call{} = Msg, Callee, CBArgs) ->
 
     try erlang:apply(M, F, A) of
         {ok, Details, Args, KWArgs} ->
-            wamp_message:result(
+            bondy_wamp_message:result(
                 CallId,
                 Details,
                 Args,
@@ -1084,7 +1084,7 @@ apply_dynamic_callback(#call{} = Msg, Callee, CBArgs) ->
             );
 
         {error, Uri, Details, Args, KWArgs} ->
-            wamp_message:error(
+            bondy_wamp_message:error(
                 ?CALL,
                 CallId,
                 Details,
@@ -1158,7 +1158,7 @@ handle_cancel(#cancel{} = M, Ctxt0, kill) ->
         SendOpts0 = #{from => Caller, via => Via},
         {To, SendOpts} = bondy:prepare_send(Callee, SendOpts0),
 
-        R = wamp_message:interrupt(InvocationId, Opts),
+        R = bondy_wamp_message:interrupt(InvocationId, Opts),
         ok = bondy:send(RealmUri, To, R, SendOpts),
 
         {ok, Ctxt1}
@@ -1187,7 +1187,7 @@ handle_cancel(#cancel{} = M, Ctxt0, killnowait) ->
         InvocationId = bondy_rpc_promise:invocation_id(Promise),
         Callee = bondy_rpc_promise:callee(Promise),
 
-        Error = wamp_message:error(
+        Error = bondy_wamp_message:error(
             ?CALL,
             CallId,
             #{},
@@ -1202,7 +1202,7 @@ handle_cancel(#cancel{} = M, Ctxt0, killnowait) ->
         ok = bondy:send(RealmUri, Caller, Error, #{}),
 
         %% But Callee might be remote
-        Interrupt = wamp_message:interrupt(InvocationId, Opts),
+        Interrupt = bondy_wamp_message:interrupt(InvocationId, Opts),
         Via = bondy_rpc_promise:via(Promise),
         SendOpts0 = #{from => Caller, via => Via},
         {To, SendOpts} = bondy:prepare_send(Callee, SendOpts0),
@@ -1230,7 +1230,7 @@ handle_cancel(#cancel{} = M, Ctxt0, skip) ->
         Uri = bondy_rpc_promise:procedure_uri(Promise),
         ok = bondy_rbac:authorize(<<"wamp.cancel">>, Uri, Ctxt1),
 
-        Error = wamp_message:error(
+        Error = bondy_wamp_message:error(
             ?CANCEL,
             CallId,
             #{},
@@ -1276,7 +1276,7 @@ handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
         {ok, Entry, IsFirst} ->
             ok = on_register(IsFirst, Entry),
             Id = bondy_registry_entry:id(Entry),
-            Reply = wamp_message:registered(ReqId, Id),
+            Reply = bondy_wamp_message:registered(ReqId, Id),
             bondy:send(RealmUri, Ref, Reply);
 
         {error, {already_exists, Entry}} ->
@@ -1293,7 +1293,7 @@ handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
                 "The procedure is already registered by ", Who/binary,
                 " with policy ", $', Policy/binary, $', $.
             >>,
-            Reply = wamp_message:error(
+            Reply = bondy_wamp_message:error(
                 ?REGISTER,
                 ReqId,
                 #{},
@@ -1344,7 +1344,7 @@ unregister(Uri, M, Ctxt) ->
         registration, M#unregister.registration_id, Ctxt, fun on_unregister/1
     ),
 
-    Reply = wamp_message:unregistered(M#unregister.request_id),
+    Reply = bondy_wamp_message:unregistered(M#unregister.request_id),
 
     bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply).
 
@@ -1521,7 +1521,7 @@ handle_call(Msg, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
             %% unreachable)
             Error = case format_error(no_such_procedure, Opts) of
                 undefined ->
-                    bondy_wamp_utils:no_such_procedure_error(
+                    bondy_wamp_api_utils:no_such_procedure_error(
                         ProcUri, ?CALL, CallId
                     );
                 Value ->
@@ -1538,7 +1538,7 @@ handle_call(Msg, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
 
             ErrorOpts = maps:with(?WAMP_PPT_ATTRS, Msg#call.options),
 
-            Error = wamp_message:error(
+            Error = bondy_wamp_message:error(
                 ?CALL,
                 CallId,
                 ErrorOpts,
@@ -1771,7 +1771,7 @@ call_to_invocation(#call{options = #{'$private' := Private}} = M, ReqId) ->
     Args = M#call.args,
     KWArgs = M#call.kwargs,
 
-    wamp_message:invocation(ReqId, RegistrationId, Details, Args, KWArgs).
+    bondy_wamp_message:invocation(ReqId, RegistrationId, Details, Args, KWArgs).
 
 
 %% -----------------------------------------------------------------------------
@@ -1930,7 +1930,7 @@ on_delete(Entry) ->
 %%     Msg = <<
 %%         "There are no elibible callees for the procedure."
 %%     >>,
-%%     wamp_message:error(
+%%     bondy_wamp_message:error(
 %%         Type,
 %%         Id,
 %%         #{},
@@ -1945,7 +1945,7 @@ badarity_error(CallId, Type) ->
     Msg = <<
         "The call was made passing the wrong number of positional arguments."
     >>,
-    wamp_message:error(
+    bondy_wamp_message:error(
         Type,
         CallId,
         #{},
@@ -1959,7 +1959,7 @@ badarg_error(CallId, Type) ->
     Msg = <<
         "The call was made passing invalid arguments."
     >>,
-    wamp_message:error(
+    bondy_wamp_message:error(
         Type,
         CallId,
         #{},
@@ -1974,7 +1974,7 @@ not_found_error(M, _Ctxt) ->
         <<"There are no registered procedures matching the id ",
         $', (M#unregister.registration_id)/integer, $'>>
     ),
-    wamp_message:error(
+    bondy_wamp_message:error(
         ?UNREGISTER,
         M#unregister.request_id,
         #{},

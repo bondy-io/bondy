@@ -27,7 +27,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_rbac_group).
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_plum_db.hrl").
 

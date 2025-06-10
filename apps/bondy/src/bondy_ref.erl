@@ -38,7 +38,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_ref).
 
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
 -define(TYPES, [relay, bridge_relay, internal, client]).

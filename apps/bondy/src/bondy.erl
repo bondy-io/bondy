@@ -22,7 +22,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy).
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
 
@@ -104,7 +104,7 @@ aae_exchanges() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec request(Pid :: pid(), RealmUri :: uri(), M :: wamp_message:t()) ->
+-spec request(Pid :: pid(), RealmUri :: uri(), M :: bondy_wamp_message:t()) ->
     tuple().
 
 request(Pid, RealmUri, M) ->
@@ -148,7 +148,7 @@ send(RealmUri, Ref, M) ->
 
 send(RealmUri, To, Msg, Opts) ->
     %% We validate the message
-    wamp_message:is_message(Msg)
+    bondy_wamp_message:is_message(Msg)
         orelse error({invalid_wamp_message, Msg}),
 
     case bondy_ref:is_local(To) of
@@ -498,7 +498,7 @@ check_response(Uri, ReqId, Timeout, Ctxt) ->
                 procedure_uri => Uri,
                 timeout => Timeout
             },
-            Error = wamp_message:error(
+            Error = bondy_wamp_message:error(
                 ?CALL,
                 ReqId,
                 ErrorDetails,
@@ -531,7 +531,7 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
     %% the Call Timeout Feature
     ReqId = bondy_context:gen_message_id(Ctxt0, session),
 
-    M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, KWArgs),
+    M = bondy_wamp_message:call(ReqId, Opts, ProcedureUri, Args, KWArgs),
 
     case bondy_router:forward(M, Ctxt0) of
         {ok, _} ->
@@ -543,7 +543,7 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
 
         {reply, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
-            Error = wamp_message:error(
+            Error = bondy_wamp_message:error(
                 ?CALL, ReqId, #{}, ?BONDY_ERROR_INCONSISTENCY_ERROR,
                 [<<"Inconsistency error">>]
             ),
@@ -557,7 +557,7 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
 
         {stop, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
-            Error = wamp_message:error(
+            Error = bondy_wamp_message:error(
                 ?CALL, ReqId, #{}, ?BONDY_ERROR_INCONSISTENCY_ERROR,
                 [<<"Inconsistency error">>]
             ),

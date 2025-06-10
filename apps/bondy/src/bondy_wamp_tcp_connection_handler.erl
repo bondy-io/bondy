@@ -24,7 +24,7 @@
 -module(bondy_wamp_tcp_connection_handler).
 -behaviour(gen_server).
 -behaviour(ranch_protocol).
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
 

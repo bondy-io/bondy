@@ -408,8 +408,8 @@ setup_wamp() ->
     %% We override all those parameters which the user should not be able to
     %% set and also set other parameters which are required for Bondy to
     %% operate i.e. all dependencies, and are private.
-    ok = wamp_config:set(extended_details, ?WAMP_EXT_DETAILS),
-    ok = wamp_config:set(extended_options, ?WAMP_EXT_OPTIONS).
+    ok = bondy_wamp_config:set(extended_details, ?WAMP_EXT_DETAILS),
+    ok = bondy_wamp_config:set(extended_options, ?WAMP_EXT_OPTIONS).
 
 
 %% @private

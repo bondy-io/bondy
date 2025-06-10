@@ -147,7 +147,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_realm).
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include_lib("jose/include/jose_jwk.hrl").
 -include("bondy.hrl").
 -include("bondy_plum_db.hrl").

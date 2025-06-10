@@ -45,7 +45,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_ws_connection_handler).
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("http_api.hrl").
 -include("bondy.hrl").
 

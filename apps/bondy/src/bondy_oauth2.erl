@@ -33,7 +33,7 @@
 -module(bondy_oauth2).
 
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
 -define(FOLD_OPTS, [{resolver, lww}]).
@@ -542,7 +542,7 @@ verify_jwt(RealmUri, JWT, MatchSpec) ->
 
 %% @private
 do_issue_token(Realm, Data0, RefreshTokenFlag) ->
-    Id = wamp_utils:rand_uniform(),
+    Id = bondy_wamp_utils:rand_uniform(),
     Uri = bondy_realm:uri(Realm),
     Kid = bondy_realm:get_random_kid(Realm),
     Key = bondy_realm:get_private_key(Realm, Kid),

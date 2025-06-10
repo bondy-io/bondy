@@ -52,7 +52,6 @@
         telemetry,
         riak_sysmon,
         %% 3rd-party Serialization formats
-        jsone,
         msgpack,
         sidejob,
         jobs,
@@ -61,7 +60,7 @@
         %% 1st-party deps
         mops,
         art,
-        wamp,
+        bondy_wamp,
         bondy_stdlib
         %% plum_db and tuplespace are started manually by bondy_app
     ]},

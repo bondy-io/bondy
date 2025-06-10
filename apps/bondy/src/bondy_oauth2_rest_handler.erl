@@ -177,7 +177,7 @@
     realm_uri => #{
         required => true,
         allow_null => false,
-        validator => fun wamp_uri:is_valid/1
+        validator => fun bondy_wamp_uri:is_valid/1
     },
     client_id => #{
         required  => false,

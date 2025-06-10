@@ -26,7 +26,7 @@
 -module(bondy_rpc_promise).
 
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
 -define(TABLES, tuplespace:tables(bondy_rpc_promise)).

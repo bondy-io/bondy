@@ -24,7 +24,7 @@
 -module(bondy_telemetry_wamp_api).
 -behaviour(bondy_wamp_api).
 
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_uris.hrl").
 
 -export([handle_call/3]).
@@ -42,7 +42,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_call(
-    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bondy_context:t()) -> ok
+    Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) -> ok
     | continue
     | {continue, uri() | wamp_call()}
     | {continue, uri() | wamp_call(), fun(
@@ -53,9 +53,9 @@
 
 handle_call(?BONDY_TELEMETRY_METRICS, #call{} = M, _Ctxt) ->
     %% TODO
-    E = bondy_wamp_utils:no_such_procedure_error(M),
+    E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E};
 
 handle_call(_, #call{} = M, _) ->
-    E = bondy_wamp_utils:no_such_procedure_error(M),
+    E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E}.

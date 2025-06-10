@@ -69,7 +69,7 @@
 -module(bondy_broker).
 
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
 -define(MATCH_LIMIT, 100).
@@ -205,7 +205,7 @@ when is_map(Ctxt) ->
 
     try
         ok = bondy_rbac:authorize(<<"wamp.publish">>, TopicUri, Ctxt),
-        M = wamp_message:publish(ReqId, Opts, TopicUri, Args, KWArgs),
+        M = bondy_wamp_message:publish(ReqId, Opts, TopicUri, Args, KWArgs),
         do_publish(M, Ctxt)
 
     catch
@@ -441,7 +441,7 @@ forward(#publish{} = M, undefined, FwdOpts) ->
     %% We create a high order fun that will generate the event for each
     %% subscription_id
     MakeEvent = fun(SubsId) ->
-        wamp_message:event(SubsId, PubId, Details, Args, KWArgs)
+        bondy_wamp_message:event(SubsId, PubId, Details, Args, KWArgs)
     end,
 
     Fwd = fun
@@ -576,7 +576,7 @@ do_forward(#subscribe{} = M, Ctxt) ->
     case bondy_registry:add(subscription, RealmUri, Topic, Opts, Ref) of
         {ok, Entry, true} ->
             Id = bondy_registry_entry:id(Entry),
-            bondy:send(RealmUri, Ref, wamp_message:subscribed(ReqId, Id)),
+            bondy:send(RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id)),
             %% WAMP 10.3.1 A wamp.subscription.on_subscribe event MUST always
             %% be fired subsequent to a wamp.subscription.on_create event,
             %% since the first subscribe results in both the creation of the
@@ -586,12 +586,12 @@ do_forward(#subscribe{} = M, Ctxt) ->
 
         {ok, Entry, false} ->
             Id = bondy_registry_entry:id(Entry),
-            bondy:send(RealmUri, Ref, wamp_message:subscribed(ReqId, Id)),
+            bondy:send(RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id)),
             on_subscribe(Entry);
 
         {error, {already_exists, Entry}} ->
             Id = bondy_registry_entry:id(Entry),
-            bondy:send(RealmUri, Ref, wamp_message:subscribed(ReqId, Id))
+            bondy:send(RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id))
     end;
 
 do_forward(#unsubscribe{} = M, Ctxt) ->
@@ -601,7 +601,7 @@ do_forward(#unsubscribe{} = M, Ctxt) ->
     case unsubscribe(SubsId, Ctxt) of
         ok ->
             ReqId = M#unsubscribe.request_id,
-            Reply = wamp_message:unsubscribed(ReqId),
+            Reply = bondy_wamp_message:unsubscribed(ReqId),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
 
         {error, not_found} ->
@@ -629,7 +629,7 @@ do_forward(#publish{} = M, Ctxt) ->
     %% "PUBLISH.Options.acknowledge|bool"
     case maps:get(acknowledge, Opts, false) of
         true ->
-            Reply = wamp_message:published(ReqId, PubId),
+            Reply = bondy_wamp_message:published(ReqId, PubId),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
         false ->
             ok
@@ -650,7 +650,7 @@ not_found_error(M, _Ctxt) ->
             #{}
     end,
 
-    wamp_message:error(
+    bondy_wamp_message:error(
         ?UNSUBSCRIBE,
         M#unsubscribe.request_id,
         ErrorDetails,
@@ -665,7 +665,7 @@ not_found_error(M, _Ctxt) ->
 
 %% @private
 not_authorized_error(M, Reason) ->
-    wamp_message:error_from(
+    bondy_wamp_message:error_from(
         M,
         #{},
         ?WAMP_NOT_AUTHORIZED,
@@ -679,7 +679,7 @@ not_authorized_error(M, Reason) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec do_publish(M :: wamp_message:publish(), bondy_context:t()) -> {ok, id()}.
+-spec do_publish(M :: bondy_wamp_message:publish(), bondy_context:t()) -> {ok, id()}.
 
 do_publish(#publish{} = M, Ctxt) ->
     %% REVIEW We need to parallelise this based on batches.
@@ -708,12 +708,12 @@ do_publish(#publish{} = M, Ctxt) ->
 
     %% We create a high order fun that will generate the event for each
     %% subscription_id
-    Template = wamp_message:event(0, PubId, Details, Args, KWArgs),
+    Template = bondy_wamp_message:event(0, PubId, Details, Args, KWArgs),
 
     %% TODO This fun should also take a 2nd arg with the Subscriber features
     %% so that we can remove Details that are not supported e.g. disclose info
     MakeEvent = fun(SubsId) ->
-        wamp_message:copy_event(Template, SubsId)
+        bondy_wamp_message:copy_event(Template, SubsId)
     end,
 
     %% If retained options is provided the message will be retained, this is

@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 1.0.0-rc.35
+* Migration to Erlang OTP 27 (latest)
+* Move `wamp` library as part of the umbrella as `bondy_wamp`
+* New version of plum_db with solution to map encoding issue (using `deterministic` option in call to `term_to_binary/2`)
+
 ## 1.0.0-rc.34
 ## Changes
 * It is now an error to open a session to a Realm when security is disabled and using an `authmethod` other than anonymous.

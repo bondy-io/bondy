@@ -23,7 +23,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_event_handler_watcher_sup).
 -behaviour(supervisor).
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 -define(CHILD(Id, Type, Args, Restart, Timeout), #{
     id => Id,

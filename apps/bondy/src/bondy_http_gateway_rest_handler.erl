@@ -37,7 +37,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_http_gateway_rest_handler).
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_security.hrl").
 -include("bondy_uris.hrl").

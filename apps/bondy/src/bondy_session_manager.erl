@@ -20,7 +20,7 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_uris.hrl").
 -include("bondy.hrl").
 
@@ -489,7 +489,7 @@ maybe_send_goodbye(Session, ReasonUri) ->
     RealmUri = bondy_session:realm_uri(Session),
     ProcRef = bondy_session:ref(Session),
 
-    Msg = wamp_message:goodbye(
+    Msg = bondy_wamp_message:goodbye(
         #{message => <<"The session was closed by the Router.">>},
         ReasonUri
     ),

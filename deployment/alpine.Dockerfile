@@ -4,7 +4,7 @@
 # Build stage 1
 # ===========================================================================
 
-FROM erlang:26.2.5.6-alpine AS builder
+FROM erlang:27.3.4-alpine AS builder
 
 # Install build dependencies
 RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \

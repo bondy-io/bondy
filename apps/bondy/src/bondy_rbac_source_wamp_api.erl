@@ -23,7 +23,7 @@
 -module(bondy_rbac_source_wamp_api).
 -behaviour(bondy_wamp_api).
 
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_uris.hrl").
 
 -export([handle_call/3]).
@@ -40,7 +40,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_call(
-    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bondy_context:t()) ->
+    Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok
     | continue
     | {continue, uri() | wamp_call()}
@@ -50,56 +50,56 @@
     | {reply, wamp_result() | wamp_error()}.
 
 handle_call(?BONDY_SOURCE_ADD, #call{} = M, Ctxt) ->
-    [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    [Uri, Data] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_source:add(Uri, bondy_rbac_source:new_assignment(Data)) of
         {ok, Source} ->
             Ext = bondy_rbac_source:to_external(Source),
-            R = wamp_message:result(M#call.request_id, #{}, [Ext]),
+            R = bondy_wamp_message:result(M#call.request_id, #{}, [Ext]),
             {reply, R};
         {error, Reason} ->
-            E = bondy_wamp_utils:error(Reason, M),
+            E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
 
 handle_call(?BONDY_SOURCE_DELETE, #call{} = M, Ctxt) ->
-    [Uri, Username, CIDR] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+    [Uri, Username, CIDR] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 3),
 
     case bondy_rbac_source:remove(Uri, Username, CIDR) of
         ok ->
-            R = wamp_message:result(M#call.request_id, #{}),
+            R = bondy_wamp_message:result(M#call.request_id, #{}),
             {reply, R};
         {error, Reason} ->
-            E = bondy_wamp_utils:error(Reason, M),
+            E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
 
 handle_call(?BONDY_SOURCE_GET, #call{} = M, _) ->
     %% TODO
-    E = bondy_wamp_utils:no_such_procedure_error(M),
+    E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E};
 
 handle_call(?BONDY_SOURCE_LIST, #call{} = M, Ctxt) ->
-    [Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
+    [Uri] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
     Ext = [
         bondy_rbac_source:to_external(S)
         || S <- bondy_rbac_source:list(Uri)
     ],
-    R = wamp_message:result(M#call.request_id, #{}, [Ext]),
+    R = bondy_wamp_message:result(M#call.request_id, #{}, [Ext]),
     {reply, R};
 
 handle_call(?BONDY_SOURCE_MATCH, #call{} = M, Ctxt) ->
     %% [Uri, Username] or [Uri, Username, IPAddress]
-    L = bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3),
+    L = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2, 3),
     Ext = [
         bondy_rbac_source:to_external(S)
         || S <- erlang:apply(bondy_rbac_source, match, L)
     ],
-    R = wamp_message:result(M#call.request_id, #{}, [Ext]),
+    R = bondy_wamp_message:result(M#call.request_id, #{}, [Ext]),
     {reply, R};
 
 handle_call(_, #call{} = M, _) ->
-    E = bondy_wamp_utils:no_such_procedure_error(M),
+    E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E}.
 
 
