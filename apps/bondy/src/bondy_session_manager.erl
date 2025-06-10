@@ -407,7 +407,7 @@ cleanup(Session) ->
 %% @private
 do_for_worker(Fun, Key) ->
     Pid = gproc_pool:pick_worker(maps:get(name, pool()), Key),
-    ?LOG_INFO(#{
+    ?LOG_DEBUG(#{
         description => "Using worker pool",
         pid => Pid
     }),
