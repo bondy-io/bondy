@@ -142,7 +142,7 @@ open(Id, RealmOrUri, Opts) ->
         fun(ServerRef) ->
             try
                 Session = bondy_session:new(Id, RealmOrUri, Opts),
-                gen_server:call(ServerRef, {open, Session}, 10000)
+                gen_server:call(ServerRef, {open, Session}, 15000)
             catch
               exit:timeout ->
                 {error, timeout}
