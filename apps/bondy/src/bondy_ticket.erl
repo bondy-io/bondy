@@ -241,7 +241,7 @@
 -type authid()      ::  bondy_rbac_user:username().
 -type issue_error() ::  {no_such_user, authid()}
                         | {no_such_realm, uri()}
-                        | invalid_request
+                        | {invalid_request, binary()}
                         | invalid_ticket
                         | not_authorized.
 
@@ -661,7 +661,8 @@ when is_binary(Ticket) ->
             Id0 = maps:get(client_instance_id, Scope),
             Id = maps:get(client_instance_id, Opts, Id0),
 
-            undefined =:= Id0 orelse Id =:= Id0 orelse throw(invalid_request),
+            undefined =:= Id0 orelse Id =:= Id0
+                orelse throw({invalid_request, "invalid client_instance_id"}),
 
             #{
                 realm => Uri,
@@ -673,9 +674,14 @@ when is_binary(Ticket) ->
             %% TODO implement new Error standard
             error(#{
                 code => invalid_value,
-                description => <<"The value for 'client_ticket' is not valid.">>,
+                description => <<
+                    "The value for 'client_ticket' is not valid."
+                >>,
                 key => client_ticket,
-                message => <<"The value for 'client_ticket' is not either not a ticket, it has an invalid signature or it is expired.">>
+                message => <<
+                    "The value for 'client_ticket' is not either not a ticket,"
+                    " it has an invalid signature or it is expired."
+                >>
             })
     end;
 

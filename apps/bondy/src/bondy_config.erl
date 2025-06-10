@@ -135,6 +135,11 @@
         {tree_refresh, 1000},
         {relay_ttl, 5}
     ]},
+    {bondy_wamp, [
+        {json, [
+            {decode_opts, [{decoders, #{null => undefined}}]}
+        ]}
+    ]},
     %% Local in-memory storage
     {tuplespace, [
         %% Ring size is determined based on number of Erlang schedulers
@@ -355,7 +360,7 @@ set_vsn(Args) ->
 
 %% @private
 setup_mods() ->
-    ok = jose:json_module(bondy_json),
+    ok = jose:json_module(bondy_wamp_json),
     ok = configure_registry(),
     ok = configure_jobs_pool().
 

@@ -253,7 +253,7 @@ send_email(Action) ->
 
     case email:send(Email, Sender, Subject, FormattedBody, Options) of
         {ok, Res} ->
-            #{<<"id">> := Ref} = bondy_json:decode(Res),
+            #{<<"id">> := Ref} = bondy_wamp_json:decode(Res),
             {ok, Ref};
         {error, timeout} = Error ->
             Error;

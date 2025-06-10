@@ -26,6 +26,7 @@
 %% For backwards compat with jsx lib used in previous versions
 -define(DEFAULT_FLOAT_FORMAT, [{decimals, 16}]).
 -define(DEFAULT_ENCODE_OPTS, [{float_format, ?DEFAULT_FLOAT_FORMAT}]).
+-define(DEFAULT_DECODE_OPTS, [{decoders, #{null => undefined}}]).
 -define(IS_UINT(X), (is_integer(X) andalso X >= 0)).
 -define(IS_PNUM(X), (is_number(X) andalso X >= 0)).
 -define(IS_DATETIME(Y, M, D, H, Mi, S),
@@ -44,6 +45,8 @@
 
 -type encode_opt()  ::  {float_format, [float_format()]}
                         | {check_duplicate_keys, boolean()}.
+
+-type decode_opt()  ::  {decoders, json:decoders()}.
 
 %% idem erlang:float_to_binary/2 options
 -type float_format()    ::  {scientific, Decimals :: 0..249}
@@ -66,7 +69,8 @@
 -spec encode(any()) -> binary().
 
 encode(Term) ->
-    encode(Term, bondy_wamp_config:get(json, ?DEFAULT_ENCODE_OPTS)).
+    Opts = bondy_wamp_config:get([json, encode_opts], ?DEFAULT_ENCODE_OPTS),
+    encode(Term, Opts).
 
 
 -spec encode(any(), [encode_opt()]) -> iodata() | binary().
@@ -76,8 +80,11 @@ encode(Term, Opts) ->
 
 
 decode(Term) ->
-    decode(Term, []).
+    Opts = bondy_wamp_config:get([json, decode_opts], ?DEFAULT_DECODE_OPTS),
+    decode(Term, Opts).
 
+
+-spec decode(binary(), [decode_opt()]) -> term() | no_return().
 
 decode(Term, Opts) ->
      do_decode(Term, Opts).
@@ -184,8 +191,15 @@ do_encode(Term, Opts) ->
     iolist_to_binary(json:encode(Term, Fun)).
 
 %% @private
-do_decode(Term, _Opts) ->
-    json:decode(Term).
+do_decode(Term, []) ->
+    json:decode(Term);
+
+do_decode(Term, Opts) ->
+    Decoders =  key_value:get(decoders, Opts, #{}),
+    case json:decode(Term, ok, Decoders) of
+        {Value, ok, <<>>} -> Value;
+        Other -> error({badarg, Other})
+    end.
 
 
 %% =============================================================================
