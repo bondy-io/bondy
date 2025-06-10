@@ -92,11 +92,15 @@ enqueue(Fun, PartitionKey) when is_function(Fun, 0) ->
 init([PoolName, Index]) ->
     %% We create a dedicated jobs queue for the worker
     %% TODO get config
-    PoolSize = bondy_config:get([job_manager_pool, size]),
-    MaxSize = round(bondy_config:get([job_manager_queue, max_size]) / PoolSize),
+    PoolSize = bondy_config:get([job_manager_pool, size], 32),
+    MaxSize = round(
+        bondy_config:get([job_manager_queue, max_size], 20000) / PoolSize
+    ),
     QOpts = [
         {type, {passive, fifo}},
-        {max_time, bondy_config:get([job_manager_queue, ttl])},
+        {max_time, bondy_config:get(
+            [job_manager_queue, ttl], timer:minutes(10))
+        },
         {max_size, MaxSize},
         {link, self()}
     ],

@@ -83,7 +83,7 @@ init([]) ->
 shards() ->
     PoolName = ?JOBS_POOLNAME,
     WorkerMod = bondy_jobs_worker,
-    N = bondy_config:get([job_manager_pool, size]),
+    N = bondy_config:get([job_manager_pool, size], 32),
 
     %% If the supervisor restarts and we call groc_pool:new it will fail with
     %% an exception, as the pool server is managed by the gproc supervisor
