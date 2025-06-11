@@ -218,7 +218,7 @@ init([Index]) ->
 
     State = #state{
         index = Index,
-        start_ts = erlang:system_time(millisecond)
+        start_ts = erlang:system_time()
     },
 
     {ok, State, {continue, {init_storage, Index}}}.
