@@ -413,6 +413,30 @@ setup_wamp() ->
     %% We override all those parameters which the user should not be able to
     %% set and also set other parameters which are required for Bondy to
     %% operate i.e. all dependencies, and are private.
+
+    Low = memory:kibibytes(1),
+    Top = memory:kibibytes(128),
+    DynBufferKey = [wamp_websocket, dynamic_buffer],
+
+    case bondy_config:get(DynBufferKey, []) of
+        [] ->
+            bondy_config:set(DynBufferKey, false);
+
+        [{min, Min}, {max, Max}] when Min >= Low, Max =< Top ->
+            bondy_config:set(DynBufferKey, {Min, Max});
+
+        [{max, Max}, {min, Min}] when Min >= Low, Max =< Top ->
+            bondy_config:set(DynBufferKey, {Min, Max});
+
+        Other ->
+             ?LOG_ERROR(#{
+                description => "Error while preparing configuration",
+                reason => "invalid value for option 'dynamic_buffer'",
+                value => Other
+            }),
+            exit(invalid_configuration)
+    end,
+
     ok = bondy_wamp_config:set(extended_details, ?WAMP_EXT_DETAILS),
     ok = bondy_wamp_config:set(extended_options, ?WAMP_EXT_OPTIONS).
 
