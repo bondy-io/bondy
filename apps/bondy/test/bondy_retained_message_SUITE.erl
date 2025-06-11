@@ -52,7 +52,7 @@ end_per_suite(Config) ->
 put(Config0) ->
     R = <<"com.leapsight.test">>,
     T = <<"com.foo.bar.1">>,
-    Event = wamp_message:event(1, 1, #{}),
+    Event = bondy_wamp_message:event(1, 1, #{}),
     ok = bondy_retained_message:put(R, T, Event, #{}),
     ?assertEqual(
         bondy_retained_message,

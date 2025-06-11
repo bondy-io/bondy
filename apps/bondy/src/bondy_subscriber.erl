@@ -27,7 +27,7 @@
 -module(bondy_subscriber).
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
 -record(state, {

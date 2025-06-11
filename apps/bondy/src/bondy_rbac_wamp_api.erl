@@ -23,7 +23,7 @@
 -module(bondy_rbac_wamp_api).
 -behaviour(bondy_wamp_api).
 
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_uris.hrl").
 
 -export([handle_call/3]).
@@ -40,7 +40,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_call(
-    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bondy_context:t()) ->
+    Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok
     | continue
     | {continue, uri() | wamp_call()}
@@ -54,13 +54,13 @@
 %% @end
 %% -----------------------------------------------------------------------------
 handle_call(?BONDY_GRANT_CREATE, #call{} = M, Ctxt) ->
-    [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    [Uri, Data] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
     case bondy_rbac:grant(Uri, Data) of
         ok ->
-            R = wamp_message:result(M#call.request_id, #{}),
+            R = bondy_wamp_message:result(M#call.request_id, #{}),
             {reply, R};
         {error, Reason} ->
-            E = bondy_wamp_utils:error(Reason, M),
+            E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
 
@@ -69,18 +69,18 @@ handle_call(?BONDY_GRANT_CREATE, #call{} = M, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 handle_call(?BONDY_GRANT_REVOKE, #call{} = M, Ctxt) ->
-    [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    [Uri, Data] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
     case bondy_rbac:revoke(Uri, Data) of
         ok ->
-            R = wamp_message:result(M#call.request_id, #{}),
+            R = bondy_wamp_message:result(M#call.request_id, #{}),
             {reply, R};
         {error, Reason} ->
-            E = bondy_wamp_utils:error(Reason, M),
+            E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
 
 handle_call(_, #call{} = M, _) ->
-    E = bondy_wamp_utils:no_such_procedure_error(M),
+    E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E}.
 
 

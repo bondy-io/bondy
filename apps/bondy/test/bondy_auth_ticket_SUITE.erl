@@ -265,7 +265,7 @@ local_scope(Config) ->
     ),
 
     ?assertEqual(
-        {error, invalid_request},
+        {error,{invalid_request,"Self-granting ticket not allowed"}},
         bondy_ticket:issue(Session, #{client_ticket => Ticket}),
         "Nested self-issued tickets not allowed"
     ).
@@ -289,7 +289,10 @@ client_scope_with_ticket(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:external_id(AppSession)), AppSession),
+    ets:insert(
+        bondy_session:table(bondy_session:external_id(AppSession)),
+        AppSession
+    ),
 
     %% We issue a self-issued ticket
     {ok, AppTicket, _} = bondy_ticket:issue(AppSession, #{
@@ -308,7 +311,10 @@ client_scope_with_ticket(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:external_id(UserSession)), UserSession),
+    ets:insert(
+        bondy_session:table(bondy_session:external_id(UserSession)),
+        UserSession
+    ),
 
     %% We issue a self-issued ticket
     {ok, UserTicket, _} = bondy_ticket:issue(UserSession, #{

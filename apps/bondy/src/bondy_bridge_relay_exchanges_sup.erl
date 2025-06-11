@@ -24,7 +24,7 @@
 
 -behaviour(supervisor).
 
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 -define(WORKER(Id, Args, Restart, Timeout), #{
     id => Id,

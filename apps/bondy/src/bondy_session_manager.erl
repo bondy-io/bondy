@@ -20,7 +20,7 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_uris.hrl").
 -include("bondy.hrl").
 
@@ -104,13 +104,17 @@ pool() ->
 %% calling process' pid.
 %% -----------------------------------------------------------------------------
 %%
--spec open(Session :: bondy_session:t()) -> ok | no_return().
+-spec open(Session :: bondy_session:t()) -> ok | {error, timeout}.
 
 open(Session) ->
     do_for_worker(
         fun(ServerRef) ->
-            {ok, Session} = gen_server:call(ServerRef, {open, Session}, 5000),
-            ok
+            try
+                gen_server:call(ServerRef, {open, Session}, 15000)
+            catch
+              exit:timeout ->
+                {error, timeout}
+            end
         end,
         bondy_session:id(Session)
     ).
@@ -131,13 +135,18 @@ open(Session) ->
     bondy_session_id:t(),
     uri() | bondy_realm:t(),
     bondy_session:properties()) ->
-    {ok, bondy_session:t()} | no_return().
+    {ok, bondy_session:t()} | {error, timeout}.
 
 open(Id, RealmOrUri, Opts) ->
     do_for_worker(
         fun(ServerRef) ->
-            Session = bondy_session:new(Id, RealmOrUri, Opts),
-            gen_server:call(ServerRef, {open, Session}, 5000)
+            try
+                Session = bondy_session:new(Id, RealmOrUri, Opts),
+                gen_server:call(ServerRef, {open, Session}, 15000)
+            catch
+              exit:timeout ->
+                {error, timeout}
+            end
         end,
         Id
     ).
@@ -328,8 +337,12 @@ handle_info(Info, State) ->
 
 
 terminate(_Reason, State) ->
-    _ = gproc_pool:disconnect_worker(pool(), State#state.name),
-    ok.
+    try
+        gproc_pool:disconnect_worker(pool(), State#state.name)
+    catch
+        _:_ ->
+            ok
+    end.
 
 
 code_change(_OldVsn, State, _Extra) ->
@@ -394,7 +407,7 @@ cleanup(Session) ->
 %% @private
 do_for_worker(Fun, Key) ->
     Pid = gproc_pool:pick_worker(maps:get(name, pool()), Key),
-    ?LOG_INFO(#{
+    ?LOG_DEBUG(#{
         description => "Using worker pool",
         pid => Pid
     }),
@@ -476,7 +489,7 @@ maybe_send_goodbye(Session, ReasonUri) ->
     RealmUri = bondy_session:realm_uri(Session),
     ProcRef = bondy_session:ref(Session),
 
-    Msg = wamp_message:goodbye(
+    Msg = bondy_wamp_message:goodbye(
         #{message => <<"The session was closed by the Router.">>},
         ReasonUri
     ),

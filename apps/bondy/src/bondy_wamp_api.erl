@@ -23,7 +23,7 @@
 -module(bondy_wamp_api).
 -behaviour(bondy_wamp_callback).
 
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_uris.hrl").
 
 -export([handle_call/2]).
@@ -38,7 +38,7 @@
 
 -callback handle_call(
     Procedure :: uri(),
-    M :: wamp_message:call(),
+    M :: bondy_wamp_message:call(),
     Ctxt :: bondy_context:t()) ->
     ok
     | continue
@@ -61,7 +61,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_call(M :: wamp_message:call(), Ctxt :: bondy_context:t()) ->
+-spec handle_call(M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok
     | continue
     | {continue, uri() | wamp_call()}
@@ -83,7 +83,7 @@ handle_call(#call{procedure_uri = Proc} = M, Ctxt) ->
 
 %% @private
 -spec do_handle_call(
-    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bondy_context:t()) ->
+    Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok
     | continue
     | {continue, uri() | wamp_call()}
@@ -135,7 +135,7 @@ do_handle_call(<<"bondy.grant.", _/binary>> = Proc, M, Ctxt) ->
 %     do_do_handle_call(Proc, M, Ctxt);
 
 do_handle_call(<<"bondy.", _/binary>>, M, _) ->
-    E = bondy_wamp_utils:no_such_procedure_error(M),
+    E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E}.
 
 

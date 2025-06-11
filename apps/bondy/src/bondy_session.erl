@@ -38,7 +38,7 @@
 -module(bondy_session).
 -behaviour(bondy_sensitive).
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_security.hrl").
 
@@ -145,7 +145,7 @@
 
 
 %% BONDY_SENSITIVE CALLBACKS
--export([format_status/2]).
+-export([format_status/1]).
 
 %% API
 -export([agent/1]).
@@ -205,9 +205,9 @@
 
 
 
--spec format_status(Opt :: normal | terminate, Session :: t()) -> term().
+-spec format_status(Session :: t()) -> term().
 
-format_status(_Opt, #session{} = S) ->
+format_status(#session{} = S) ->
     S#session{
         authid = bondy_sensitive:wrap(S#session.authid),
         rbac_context = bondy_sensitive:wrap(S#session.rbac_context),
@@ -305,7 +305,7 @@ store(#session{} = S0) ->
         true == ets:insert_new(Tab, S)
             orelse error({integrity_constraint_violation, Id}),
 
-        ok = bondy_event_manager:notify({session_opened, S}),
+        ok = bondy_event_manager:notify({[bondy, session, opened], S}),
 
         {ok, S}
 
@@ -355,7 +355,7 @@ when is_binary(Reason) orelse Reason == undefined ->
 
     %% Notify internally
     Secs = erlang:system_time(second) - S#session.created,
-    ok = bondy_event_manager:notify({session_closed, S, Secs}),
+    ok = bondy_event_manager:notify({[bondy, session, closed], S, Secs}),
 
     ?LOG_DEBUG(#{
         description => "Session closed",

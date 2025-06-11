@@ -30,7 +30,7 @@
 -behaviour(bondy_sensitive).
 
 -include_lib("partisan/include/partisan_util.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_security.hrl").
 
@@ -67,7 +67,7 @@
 -export_type([requirements/0]).
 
 %% BONDY_SENSITIVE CALLBACKS
--export([format_status/2]).
+-export([format_status/1]).
 
 %% API
 -export([authenticate/4]).
@@ -130,9 +130,9 @@
 
 
 
--spec format_status(Opt :: normal | terminate, Ctxt :: context()) -> term().
+-spec format_status(Ctxt :: context()) -> context().
 
-format_status(_Opt, Ctxt) ->
+format_status(Ctxt) ->
     #{user_id := Id, user := User, callback_mod_state := CBModState} = Ctxt,
 
     Ctxt#{
@@ -160,14 +160,18 @@ format_status(_Opt, Ctxt) ->
     Roles :: all | binary() | [binary()] | undefined,
     SourceIP :: inet:ip_address()) ->
     {ok, context()}
-    | {error, {no_such_user, binary()} | no_such_realm | no_such_group}
+    | {error,
+        {no_such_user, binary()}
+        | {no_such_realm, binary()}
+        | no_such_group
+    }
     | no_return().
 
 init(SessionId, Uri, UserId, Roles, SourceIP)
 when is_binary(SessionId), is_binary(Uri), ?IS_IP(SourceIP) ->
     case bondy_realm:lookup(string:casefold(Uri)) of
         {error, not_found} ->
-            {error, no_such_realm};
+            {error, {no_such_realm, Uri}};
         Realm ->
             init(SessionId, Realm, UserId, Roles, SourceIP)
     end;

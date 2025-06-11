@@ -36,7 +36,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_session_id).
 
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 -define(MAX_EXT_ID, ?MAX_ID).
 -define(ENCODED_LEN, 27).

@@ -1,0 +1,19 @@
+{application, bondy_wamp,
+ [{description, "An OTP library implementing WAMP message encoding and decoding."},
+  {vsn, "1.3.0"},
+  {registered, []},
+  {mod, {bondy_wamp_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    msgpack,
+    bert,
+    utils
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {maintainers, []},
+  {licenses, []},
+  {links, []}
+ ]}.

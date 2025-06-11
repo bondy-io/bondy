@@ -27,13 +27,13 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_rbac_group).
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_plum_db.hrl").
 
 
 
--define(VALIDATOR, ?UPDATE_VALIDATOR#{
+-define(VALIDATOR, #{
     <<"name">> => #{
         alias => name,
         key => name,
@@ -112,7 +112,9 @@
                                 actor_id => term(),
                                 if_exists => fail | update
                             }.
--type add_error()       ::  no_such_realm | reserved_name | already_exists.
+-type add_error()       ::  {no_such_realm, uri()}
+                            | reserved_name
+                            | already_exists.
 -type list_opts()       ::  #{limit => pos_integer()}.
 
 -export_type([t/0]).
@@ -663,9 +665,13 @@ on_update({?PLUMDB_PREFIX(RealmUri), Name}, _New, Old) ->
 
     case IsCreate of
         true ->
-            ok = bondy_event_manager:notify({group_added, RealmUri, Name});
+            bondy_event_manager:notify(
+                {[bondy, rbac, group, added], RealmUri, Name}
+            );
         false ->
-            ok = bondy_event_manager:notify({group_updated, RealmUri, Name})
+            bondy_event_manager:notify(
+                {[bondy, rbac, group, updated], RealmUri, Name}
+            )
     end.
 
 
@@ -674,7 +680,7 @@ on_update({?PLUMDB_PREFIX(RealmUri), Name}, _New, Old) ->
 %% @end
 %% -----------------------------------------------------------------------------
 on_delete({?PLUMDB_PREFIX(RealmUri), Name}, _Old) ->
-    ok = bondy_event_manager:notify({group_deleted, RealmUri, Name}).
+    bondy_event_manager:notify({[bondy, rbac, group, deleted], RealmUri, Name}).
 
 
 %% -----------------------------------------------------------------------------

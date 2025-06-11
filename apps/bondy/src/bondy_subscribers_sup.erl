@@ -23,7 +23,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_subscribers_sup).
 -behaviour(supervisor).
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 -define(CHILD(Id, Type, Args, Restart, Timeout), #{
     id => Id,
@@ -86,11 +86,17 @@ start_link() ->
 
 
 init([]) ->
+    SupFlags = #{
+        strategy => simple_one_for_one,
+        intensity => 5, % max restarts
+        period => 10, % seconds
+        auto_shutdown => never
+    },
     Children = [
         ?CHILD(bondy_subscriber, worker, [], transient, 5000)
     ],
-    Specs = {{simple_one_for_one, 0, 1}, Children},
-    {ok, Specs}.
+
+    {ok, {SupFlags, Children}}.
 
 
 

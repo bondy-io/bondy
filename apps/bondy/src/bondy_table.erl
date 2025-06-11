@@ -72,7 +72,7 @@ when is_atom(Name), is_atom(Access), is_boolean(Managed) ->
 
     case Managed of
         true ->
-            {ok, Name} = bondy_table_owner:add(Name, Opts),
+            {ok, Name} = bondy_table_owner:add_or_claim(Name, Opts),
             Name;
         false ->
             ets:new(Name, Opts)

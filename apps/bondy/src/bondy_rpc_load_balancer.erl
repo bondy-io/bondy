@@ -55,7 +55,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_rpc_load_balancer).
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
 -define(RPC_STATE_TABLE, bondy_rpc_state).

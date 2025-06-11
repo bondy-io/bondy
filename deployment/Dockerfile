@@ -4,7 +4,7 @@
 # Build stage 1
 # ===========================================================================
 
-FROM erlang:26.2.5.6 AS builder
+FROM erlang:27.3.4 AS builder
 
 # Install build dependencies
 RUN --mount=type=cache,id=apt,sharing=locked,target=/var/cache/apt apt-get update && \
@@ -34,6 +34,7 @@ RUN rebar3 as docker tar && \
 # Build stage 2
 # ===========================================================================
 
+# debian bookworm
 FROM debian:stable-slim as runner
 
 # We define defaults

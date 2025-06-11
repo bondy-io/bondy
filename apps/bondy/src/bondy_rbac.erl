@@ -51,13 +51,13 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_rbac).
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_plum_db.hrl").
 -include("bondy_security.hrl").
 
 
--define(GRANT_REQ_VALIDATOR_V1, ?GRANT_RESOURCE_VALIDATOR#{
+-define(GRANT_REQ_VALIDATOR_V1, begin ?GRANT_RESOURCE_VALIDATOR end #{
     <<"roles">> => #{
         alias => roles,
         key => roles,
@@ -726,7 +726,7 @@ match_grants(Resource, Grants, Acc) ->
     %% and then merge in the 'any' grants, if any
     Fun = fun
         ({{Uri, Strategy}, Permissions}, IAcc) ->
-            case wamp_uri:match(Resource, Uri, Strategy) of
+            case bondy_wamp_uri:match(Resource, Uri, Strategy) of
                 true ->
                     Permissions ++ IAcc;
                 false ->
@@ -810,7 +810,7 @@ permission_denied_message(
 
 %% @private
 permission_validator(Term) ->
-    wamp_uri:is_valid(Term, loose).
+    bondy_wamp_uri:is_valid(Term, loose).
 
 
 %% @private
@@ -884,7 +884,7 @@ validate_uri_match({Uri, undefined}) ->
     {Uri, derive_strategy(Uri)};
 
 validate_uri_match({Uri, S} = P) ->
-    Uri = wamp_uri:validate(Uri, S),
+    Uri = bondy_wamp_uri:validate(Uri, S),
     P.
 
 
@@ -895,7 +895,7 @@ derive_strategy(Uri) ->
 
 %% @private
 derive_strategy(Uri, [H|T]) ->
-    case wamp_uri:is_valid(Uri, H) of
+    case bondy_wamp_uri:is_valid(Uri, H) of
         true ->
             H;
         false ->

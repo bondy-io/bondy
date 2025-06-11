@@ -20,8 +20,8 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_wamp_utils).
--include_lib("wamp/include/wamp.hrl").
+-module(bondy_wamp_api_utils).
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
 
@@ -64,7 +64,7 @@ node_spec() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc @throws wamp_message:error()
+%% @doc @throws bondy_wamp_message:error()
 %% @end
 %% -----------------------------------------------------------------------------
 validate_call_args(Msg, Ctxt, Min) ->
@@ -72,7 +72,7 @@ validate_call_args(Msg, Ctxt, Min) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc @throws wamp_message:error()
+%% @doc @throws bondy_wamp_message:error()
 %% @end
 %% -----------------------------------------------------------------------------
 validate_call_args(Msg, Ctxt, Min, Max) ->
@@ -81,7 +81,7 @@ validate_call_args(Msg, Ctxt, Min, Max) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc @throws wamp_message:error()
+%% @doc @throws bondy_wamp_message:error()
 %% @end
 %% -----------------------------------------------------------------------------
 validate_admin_call_args(Msg, Ctxt, Min) ->
@@ -89,7 +89,7 @@ validate_admin_call_args(Msg, Ctxt, Min) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc @throws wamp_message:error()
+%% @doc @throws bondy_wamp_message:error()
 %% @end
 %% -----------------------------------------------------------------------------
 validate_admin_call_args(Msg, Ctxt, Min, Max) ->
@@ -103,10 +103,10 @@ validate_admin_call_args(Msg, Ctxt, Min, Max) ->
 %% @end
 %% -----------------------------------------------------------------------------
 maybe_error(ok, M) ->
-    wamp_message:result(wamp_message:request_id(M), #{});
+    bondy_wamp_message:result(bondy_wamp_message:request_id(M), #{});
 
 maybe_error({ok, Val}, M) ->
-    wamp_message:result(wamp_message:request_id(M), #{}, [Val]);
+    bondy_wamp_message:result(bondy_wamp_message:request_id(M), #{}, [Val]);
 
 maybe_error({'EXIT', {Reason, _}}, M) ->
     maybe_error({error, Reason}, M);
@@ -121,7 +121,7 @@ maybe_error({error, Reason}, M) ->
     error(Reason, M);
 
 maybe_error(Val, M) ->
-    wamp_message:result(wamp_message:request_id(M), #{}, [Val]).
+    bondy_wamp_message:result(bondy_wamp_message:request_id(M), #{}, [Val]).
 
 
 %% -----------------------------------------------------------------------------
@@ -131,7 +131,7 @@ maybe_error(Val, M) ->
 error({not_authorized, Reason}, M) ->
     Map = bondy_error:map(Reason),
 
-    wamp_message:error_from(
+    bondy_wamp_message:error_from(
         M,
         #{},
         ?WAMP_NOT_AUTHORIZED,
@@ -141,7 +141,7 @@ error({not_authorized, Reason}, M) ->
 error(Reason, #call{} = M) ->
     #{<<"code">> := Code} = Map = bondy_error:map(Reason),
     Mssg = maps:get(<<"message">>, Map, <<>>),
-    wamp_message:error_from(
+    bondy_wamp_message:error_from(
         M,
         #{},
         bondy_error:code_to_uri(Code),
@@ -166,7 +166,7 @@ no_such_procedure_error(ProcUri, MType, ReqId) ->
         "There are no registered procedures matching the uri",
         $\s, $', ProcUri/binary, $', $.
     >>,
-    wamp_message:error(
+    bondy_wamp_message:error(
         MType,
         ReqId,
         #{},
@@ -183,7 +183,7 @@ no_such_procedure_error(ProcUri, MType, ReqId) ->
 %% @end
 %% -----------------------------------------------------------------------------
 no_such_registration_error(RegId) when is_integer(RegId) ->
-    wamp_message:error(
+    bondy_wamp_message:error(
         ?UNREGISTER,
         RegId,
         #{},
@@ -218,9 +218,9 @@ no_such_registration_error(RegId) when is_integer(RegId) ->
     AdminOnly :: boolean()) -> Args :: list() | no_return().
 
 do_validate_call_args(Msg, _, Min, _, Len, _) when Len + 1 < Min ->
-    E = wamp_message:error(
+    E = bondy_wamp_message:error(
         ?CALL,
-        wamp_message:request_id(Msg),
+        bondy_wamp_message:request_id(Msg),
         #{},
         ?WAMP_INVALID_ARGUMENT,
         [<<"Invalid number of positional arguments.">>],
@@ -234,9 +234,9 @@ do_validate_call_args(Msg, _, Min, _, Len, _) when Len + 1 < Min ->
     error(E);
 
 do_validate_call_args(Msg, _, _, Max, Len, _) when Len > Max ->
-    E = wamp_message:error(
+    E = bondy_wamp_message:error(
         ?CALL,
-        wamp_message:request_id(Msg),
+        bondy_wamp_message:request_id(Msg),
         #{},
         ?WAMP_INVALID_ARGUMENT,
         [<<"Invalid number of positional arguments.">>],
@@ -330,7 +330,7 @@ unauthorized(Type, ReqId, Ctxt) ->
         "supported when performed by a session on the Bondy Master Realm.",
         $\s, $(, $", (?MASTER_REALM_URI)/binary, $", $), $.
     >>,
-    wamp_message:error(
+    bondy_wamp_message:error(
         Type,
         ReqId,
         #{},

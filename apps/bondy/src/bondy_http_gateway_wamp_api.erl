@@ -24,7 +24,7 @@
 -module(bondy_http_gateway_wamp_api).
 -behaviour(bondy_wamp_api).
 
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_uris.hrl").
 
 
@@ -44,7 +44,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_call(
-    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bondy_context:t()) ->
+    Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok
     | continue
     | {continue, uri() | wamp_call()}
@@ -55,50 +55,50 @@
 
 
 handle_call(?BONDY_HTTP_GATEWAY_LOAD, #call{} = M, Ctxt) ->
-    [Spec] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
+    [Spec] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
 
     case bondy_http_gateway:load(Spec) of
         ok ->
-            R = wamp_message:result(M#call.request_id, #{}),
+            R = bondy_wamp_message:result(M#call.request_id, #{}),
             {reply, R};
         {error, Reason} ->
-            E = bondy_wamp_utils:error(Reason, M),
+            E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
 
 handle_call(?BONDY_HTTP_GATEWAY_LIST, #call{} = M, Ctxt) ->
-    [] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 0),
+    [] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 0),
 
     Result = bondy_http_gateway:list(),
-    R = wamp_message:result(M#call.request_id, #{}, [Result]),
+    R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
     {reply, R};
 
 handle_call(?BONDY_HTTP_GATEWAY_GET, #call{} = M, Ctxt) ->
-    [Id] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
+    [Id] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
 
     case bondy_http_gateway:lookup(Id) of
         {error, Reason} ->
-            E = bondy_wamp_utils:error(Reason, M),
+            E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E};
         Spec ->
-            R = wamp_message:result(M#call.request_id, #{}, [Spec]),
+            R = bondy_wamp_message:result(M#call.request_id, #{}, [Spec]),
             {reply, R}
     end;
 
 handle_call(?BONDY_HTTP_GATEWAY_DELETE, #call{} = M, Ctxt) ->
-    [Id] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
+    [Id] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
 
     case bondy_http_gateway:delete(Id) of
         {error, Reason} ->
-            E = bondy_wamp_utils:error(Reason, M),
+            E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E};
         Spec ->
-            R = wamp_message:result(M#call.request_id, #{}, [Spec]),
+            R = bondy_wamp_message:result(M#call.request_id, #{}, [Spec]),
             {reply, R}
     end;
 
 handle_call(_, #call{} = M, _) ->
-    E = bondy_wamp_utils:no_such_procedure_error(M),
+    E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E}.
 
 

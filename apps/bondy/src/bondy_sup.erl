@@ -50,10 +50,18 @@ start_link() ->
 
 
 init([]) ->
+    SupFlags = #{
+        strategy => one_for_one,
+        intensity => 2, % max restarts
+        period => 5, % seconds
+        auto_shutdown => never
+    },
     Children = [
-        %% We start bondy processes
+        %% ets table owner used by several other processes
         ?WORKER(bondy_table_owner, [], permanent, 5000),
+        %% supervisor for event handlers
         ?SUPERVISOR(bondy_event_handler_watcher_sup, [], permanent, infinity),
+        %% gen_event managers
         ?EVENT_MANAGER(bondy_event_manager, permanent, 5000),
         ?EVENT_MANAGER(bondy_wamp_event_manager, permanent, 5000),
         ?SUPERVISOR(bondy_jobs_sup, [], permanent, infinity),
@@ -69,4 +77,4 @@ init([]) ->
         ?WORKER(bondy_http_gateway, [], permanent, 5000),
         ?SUPERVISOR(bondy_bridge_relay_sup, [], permanent, infinity)
     ],
-    {ok, {{one_for_one, 1, 5}, Children}}.
+    {ok, {SupFlags, Children}}.

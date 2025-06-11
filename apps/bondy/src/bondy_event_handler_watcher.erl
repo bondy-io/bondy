@@ -24,7 +24,7 @@
 -module(bondy_event_handler_watcher).
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
 -export([start/2]).
@@ -97,7 +97,7 @@ start_link(Manager, Handler, Args) when is_atom(Handler) ->
 
 
 init([Manager, {swap, Old, {Handler, Args} = New}]) ->
-    ok = gen_event:swap_sup_handler(alarm_handler, Old, New),
+    ok = gen_event:swap_sup_handler(Manager, Old, New),
     {ok, #state{manager = Manager, handler = Handler, args = Args}};
 
 init([Manager, Handler, Args]) ->

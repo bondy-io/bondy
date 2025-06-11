@@ -50,6 +50,7 @@ genvars:
 	@cp config/prod/default_vars.config config/prod/vars.generated
 
 compile:
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} compile
 
 docs: xref
@@ -77,23 +78,29 @@ clean-docs:
 	rm -f apps/bondy_stdlib/doc/.build
 
 test: xref eunit
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} as test ct ${CT_SUITE_ARGS}
 
 eunit:
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} eunit
 
 xref:
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} xref skip_deps=true
 
 check: kill test xref dialyzer eqwalizer spellcheck
 
 xref: compile
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} xref skip_deps=true
 
 dialyzer: compile
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} dialyzer
 
 eqwalizer: compile
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	elp eqwalize-all
 
 spellcheck:
@@ -103,13 +110,16 @@ spellfix:
 	$(if $(CODESPELL), $(SPELLFIX), $(error "Aborting, command codespell not found in PATH"))
 
 cover: xref
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} as test ct ${CT_SUITE_ARGS}, cover
 
 dialyzer: compile
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} dialyzer
 
 release:
 	rm -rf _build/${REBAR3_PROFILE}
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} as ${REBAR3_PROFILE} release
 
 release-tar:
@@ -140,6 +150,7 @@ prodtarrun: tar
 	BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME} BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE} _build/tar/bin/bondy console
 
 node1:
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} as node1 release
 	ERL_DIST_PORT=27781 _build/node1/rel/bondy/bin/bondy console
 
@@ -147,6 +158,7 @@ node1-clean:
 	${REBAR} as node1 clean
 
 node2:
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} as node2 release
 	ERL_DIST_PORT=27782 _build/node2/rel/bondy/bin/bondy console
 
@@ -154,6 +166,7 @@ node2-clean:
 	${REBAR} as node2 clean
 
 node3:
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} as node3 release
 	ERL_DIST_PORT=27783 _build/node3/rel/bondy/bin/bondy console
 
@@ -161,6 +174,7 @@ node3-clean:
 	${REBAR} as node3 clean
 
 edge1:
+	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} as edge1 release
 	EDGE1_DEVICE1_PRIVKEY=4ffddd896a530ce5ee8c86b83b0d31835490a97a9cd718cb2f09c9fd31c4a7d71766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd \
 	ERL_DIST_PORT=27784 \
