@@ -58,7 +58,7 @@
 %% <li>`ERROR'</li>
 %% </ol>
 %%
-%% ```
+%% ```mermaid
 %%        ,------.          ,------.               ,------.
 %%        |Caller|          |Dealer|               |Callee|
 %%        `--+---'          `--+---'               `--+---'
@@ -156,7 +156,7 @@
 %%     %%{init: {'theme': 'neutral'} }%%
 %%     	autonumber
 %%       participant CALLER
-%%       participant node1
+%%       participant node1 as DEALER<br/><br/>@node1
 %%       participant CALLEE1
 %%     	note over node1: CALLEE1 seq = 99
 %%     	CALLER ->> node1:CALL.1
