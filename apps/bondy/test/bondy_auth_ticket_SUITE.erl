@@ -265,7 +265,7 @@ local_scope(Config) ->
     ),
 
     ?assertEqual(
-        {error,{invalid_request,"Nested tickets are not allowed"}},
+        {error,{invalid_request,"Self-granting ticket not allowed"}},
         bondy_ticket:issue(Session, #{client_ticket => Ticket}),
         "Nested self-issued tickets not allowed"
     ).
