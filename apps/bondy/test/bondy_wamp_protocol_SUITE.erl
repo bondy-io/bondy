@@ -116,7 +116,7 @@ validate_subprotocol(_Config) ->
 
     lists:foreach(
         fun(SubProtocolBinary) ->
-            SubProtocol = wamp_subprotocol:from_binary(SubProtocolBinary),
+            SubProtocol = bondy_wamp_subprotocol:from_binary(SubProtocolBinary),
             ValidateResult = bondy_wamp_protocol:validate_subprotocol(SubProtocolBinary),
             case lists:member(SubProtocol, ?SUPPORTED_SUB_PROTOCOLS) of
                 true ->
