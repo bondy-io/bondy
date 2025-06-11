@@ -20,7 +20,7 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 -define(DEFAULT_INTERVAL_MSECS, 1000).
 
@@ -122,7 +122,7 @@ handle_info(evict, State) ->
 
         %% We always create a CALL error, regardless of whether promise is of
         %% type call or invocation
-        Error = wamp_message:error(
+        Error = bondy_wamp_message:error(
             ?CALL,
             CallId,
             #{

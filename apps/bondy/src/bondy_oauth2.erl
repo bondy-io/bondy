@@ -33,6 +33,7 @@
 -module(bondy_oauth2).
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
 -define(FOLD_OPTS, [{resolver, lww}]).
@@ -83,7 +84,7 @@
 
 -type token_data()      ::  #bondy_oauth2_token{}.
 -type grant_type()      ::  client_credentials | password | authorization_code.
--type error()           ::  oauth2_invalid_grant | no_such_realm.
+-type error()           ::  oauth2_invalid_grant | {no_such_realm, uri()}.
 -type token_type()      ::  access_token | refresh_token.
 
 -export_type([error/0]).
@@ -170,7 +171,7 @@ issue_token(GrantType, RealmUri, Issuer, Username, Groups, Meta) ->
 issue_token(GrantType, RealmUri, Data0) ->
    case bondy_realm:lookup(RealmUri) of
         {error, not_found} ->
-           {error, no_such_realm};
+           {error, {no_such_realm, RealmUri}};
         Realm ->
             do_issue_token(Realm, Data0, supports_refresh_token(GrantType))
     end.
@@ -541,7 +542,7 @@ verify_jwt(RealmUri, JWT, MatchSpec) ->
 
 %% @private
 do_issue_token(Realm, Data0, RefreshTokenFlag) ->
-    Id = wamp_utils:rand_uniform(),
+    Id = bondy_wamp_utils:rand_uniform(),
     Uri = bondy_realm:uri(Realm),
     Kid = bondy_realm:get_random_kid(Realm),
     Key = bondy_realm:get_private_key(Realm, Kid),
@@ -720,8 +721,8 @@ do_verify_jwt(RealmUri, JWT, Match) ->
     catch
         throw:Reason ->
             {error, Reason};
-        error:no_such_realm ->
-            {error, no_such_realm};
+        error:{no_such_realm, _} = Reason ->
+            {error, Reason};
         error:_ ->
             {error, oauth2_invalid_grant}
     end.

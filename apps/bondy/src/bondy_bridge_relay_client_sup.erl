@@ -24,6 +24,8 @@
 
 -behaviour(supervisor).
 
+-include_lib("kernel/include/logger.hrl").
+
 -define(CLIENT(Id, Args, Restart, Timeout), #{
     id => Id,
     start => {bondy_bridge_relay_client, start_link, Args},
@@ -109,10 +111,10 @@ delete_child(Name) ->
 
 
 init([]) ->
-    Flags = #{
+    SupFlags = #{
         strategy => one_for_one,
-        intensity => 5,
-        period => 60,
+        intensity => 20, % max restarts
+        period => 60, % seconds
         auto_shutdown => never
     },
-    {ok, {Flags, []}}.
+    {ok, {SupFlags, []}}.

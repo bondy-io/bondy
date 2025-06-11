@@ -1,6 +1,6 @@
 -module(bondy_session_api).
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 -export([get/3]).
 

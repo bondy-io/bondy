@@ -176,8 +176,26 @@
                 "meta" : {}
             },
             {
+                "usernames" : "all",
+                "authmethod" : "ticket",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
                 "usernames" : ["anonymous"],
                 "authmethod" : "anonymous",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
+                "usernames" : "all",
+                "authmethod" : "cryptosign",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
+                "usernames" : "all",
+                "authmethod" : "oauth2",
                 "cidr" : "0.0.0.0/0",
                 "meta" : {}
             },
@@ -190,18 +208,6 @@
             {
                 "usernames" : ["device1"],
                 "authmethod" : "cryptosign",
-                "cidr" : "0.0.0.0/0",
-                "meta" : {}
-            },
-            {
-                "usernames" : "all",
-                "authmethod" : "ticket",
-                "cidr" : "0.0.0.0/0",
-                "meta" : {}
-            },
-            {
-                "usernames" : "all",
-                "authmethod" : "oauth2",
                 "cidr" : "0.0.0.0/0",
                 "meta" : {}
             }

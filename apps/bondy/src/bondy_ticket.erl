@@ -162,7 +162,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_ticket).
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_plum_db.hrl").
 -include("bondy_security.hrl").
@@ -240,8 +240,8 @@
 -type ticket_id()   ::  binary().
 -type authid()      ::  bondy_rbac_user:username().
 -type issue_error() ::  {no_such_user, authid()}
-                        | no_such_realm
-                        | invalid_request
+                        | {no_such_realm, uri()}
+                        | {invalid_request, binary()}
                         | invalid_ticket
                         | not_authorized.
 
@@ -317,6 +317,7 @@ issue(Session, Opts0) ->
     catch
         throw:Reason ->
             {error, Reason};
+
         error:{not_authorized, _} = Reason ->
             {error, Reason}
     end.
@@ -649,19 +650,19 @@ when is_binary(Ticket) ->
 
     case verify(Ticket, VerifyOpts) of
         {ok, #{scope := #{client_id := Val}}} when Val =/= undefined ->
-            %% Nested tickets are not allowed
-            throw(invalid_request);
+            throw({invalid_request, "Nested tickets are not allowed"});
 
         {ok, #{issued_by := Authid}} ->
             %% A client is requesting a ticket issued to itself using its own
             %% client_ticket.
-            throw(invalid_request);
+            throw({invalid_request, "Self-granting ticket not allowed"});
 
         {ok, #{authid := ClientId, scope := Scope}} ->
             Id0 = maps:get(client_instance_id, Scope),
             Id = maps:get(client_instance_id, Opts, Id0),
 
-            undefined =:= Id0 orelse Id =:= Id0 orelse throw(invalid_request),
+            undefined =:= Id0 orelse Id =:= Id0
+                orelse throw({invalid_request, "invalid client_instance_id"}),
 
             #{
                 realm => Uri,
@@ -673,9 +674,14 @@ when is_binary(Ticket) ->
             %% TODO implement new Error standard
             error(#{
                 code => invalid_value,
-                description => <<"The value for 'client_ticket' is not valid.">>,
+                description => <<
+                    "The value for 'client_ticket' is not valid."
+                >>,
                 key => client_ticket,
-                message => <<"The value for 'client_ticket' is not either not a ticket, it has an invalid signature or it is expired.">>
+                message => <<
+                    "The value for 'client_ticket' is not either not a ticket,"
+                    " it has an invalid signature or it is expired."
+                >>
             })
     end;
 

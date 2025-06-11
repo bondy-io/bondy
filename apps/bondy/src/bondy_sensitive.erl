@@ -26,11 +26,11 @@
 -export_type([sensitive/0]).
 
 
--export([format_status/3]).
 -export([conforms/1]).
--export([wrap/1]).
--export([unwrap/1]).
+-export([format_status/2]).
 -export([raise/3]).
+-export([unwrap/1]).
+-export([wrap/1]).
 
 
 
@@ -40,7 +40,7 @@
 
 
 
--callback format_status(Opts :: normal | terminate, State :: term()) -> term().
+-callback format_status(State :: term()) -> NewState :: term().
 
 
 
@@ -56,14 +56,14 @@
 -spec conforms(Mod :: module()) -> boolean().
 
 conforms(Mod) ->
-    erlang:function_exported(Mod, format_status, 2).
+    erlang:function_exported(Mod, format_status, 1).
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Formalises and extends the use of the callback `format_status/2'
-%% gen_server callback ([See documentation here](https://erlang.org/doc/man/gen_server.html#Module:format_status-2)) to modules.
+%% @doc Formalises and extends the use of the callback `format_status/1'
+%% gen_server callback ([See documentation here](https://erlang.org/doc/man/gen_server.html#Module:format_status-1)) to modules.
 %%
-%% {@link gen_server:format_status/2} is called by a gen_server process in the
+%% {@link gen_server:format_status/1} is called by a gen_server process in the
 %% following situations:
 %%
 %% * One of sys:get_status/1,2 is invoked to get the gen_server status. Opt is
@@ -80,18 +80,18 @@ conforms(Mod) ->
 %% restrictions on the form Status can take.
 %% @end
 %% -----------------------------------------------------------------------------
--spec format_status(
-    Opt :: normal | terminate, Mod :: module(), State :: term()) -> term().
+-spec format_status(Mod :: module(), State :: term()) -> NewState :: term().
 
-format_status(Opt, Mod, State) ->
+format_status(Mod, State) ->
      case conforms(Mod) of
         true ->
-            case catch Mod:format_status(Opt, State) of
+            case catch Mod:format_status(State) of
                 {'EXIT', _} ->
                     State;
                 Formatted ->
                     Formatted
             end;
+
         false ->
             State
     end.

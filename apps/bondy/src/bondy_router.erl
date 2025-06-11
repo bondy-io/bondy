@@ -93,13 +93,8 @@
 -module(bondy_router).
 
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
-
--define(ROUTER_ROLES, #{
-    broker => #{features => ?BROKER_FEATURES},
-    dealer => #{features => ?DEALER_FEATURES}
-}).
 
 
 -type event()       ::  {wamp_message(), bondy_context:t()}.
@@ -129,7 +124,10 @@
 -spec roles() -> #{binary() => #{binary() => boolean()}}.
 
 roles() ->
-    ?ROUTER_ROLES.
+    #{
+        broker => #{features => ?BROKER_FEATURES },
+        dealer => #{features => ?DEALER_FEATURES }
+    }.
 
 
 %% -----------------------------------------------------------------------------
@@ -275,7 +273,7 @@ forward(Msg, To, #{realm_uri := RealmUri} = Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 pre_stop() ->
-    M = wamp_message:goodbye(
+    M = bondy_wamp_message:goodbye(
         #{message => <<"Router is shutting down">>},
         ?WAMP_SYSTEM_SHUTDOWN
     ),
@@ -390,7 +388,7 @@ async_forward(M, Ctxt0) ->
             %% TODO Maybe publish metaevent
             %% REVIEW are we using the right error uri?
             ErrorMap = bondy_error:map(Reason),
-            Reply = wamp_message:error_from(
+            Reply = bondy_wamp_message:error_from(
                 M,
                 #{},
                 ?WAMP_CANCELLED,

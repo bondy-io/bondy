@@ -21,7 +21,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_oauth2_client).
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 -define(ADD_SPEC, #{
     <<"client_id">> => #{

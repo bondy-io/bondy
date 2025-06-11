@@ -1,7 +1,7 @@
 -module(bondy_wamp_callback).
 
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
 -export([conforms/1]).
@@ -16,7 +16,7 @@
 
 
 -callback handle_call(
-    M :: wamp_message:call(),
+    M :: bondy_wamp_message:call(),
     Ctxt :: bondy_context:t()) ->
     ok
     | continue

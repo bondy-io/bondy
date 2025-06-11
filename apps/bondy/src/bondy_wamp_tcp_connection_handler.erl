@@ -24,7 +24,7 @@
 -module(bondy_wamp_tcp_connection_handler).
 -behaviour(gen_server).
 -behaviour(ranch_protocol).
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
 
@@ -57,7 +57,7 @@
 -type state() :: #state{}.
 
 
--export([start_link/4]).
+-export([start_link/3]).
 
 -export([init/1]).
 -export([handle_call/3]).
@@ -65,7 +65,7 @@
 -export([handle_info/2]).
 -export([terminate/2]).
 -export([code_change/3]).
--export([format_status/2]).
+-export([format_status/1]).
 
 
 
@@ -81,11 +81,11 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec start_link(
-    Ref :: ranch:ref(), _, Transport :: module(), ProtoOpts :: any()) ->
+    Ref :: ranch:ref(), Transport :: module(), ProtoOpts :: any()) ->
     {ok, ConnPid :: pid()}
     | {ok, SupPid :: pid(), ConnPid :: pid()}.
 
-start_link(Ref, _, Transport, Opts) ->
+start_link(Ref, Transport, Opts) ->
     {ok, proc_lib:spawn_link(?MODULE, init, [{Ref, Transport, Opts}])}.
 
 
@@ -347,11 +347,14 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 
-format_status(Opt, [_PDict, #state{} = State]) ->
-    ProtocolState = bondy_sensitive:format_status(
-        Opt, bondy_wamp_protocol, State#state.protocol_state
-    ),
-    gen_format(Opt, State#state{protocol_state = ProtocolState}).
+format_status(#{state := State} = Status) ->
+    PState0 = State#state.protocol_state,
+    PState = bondy_sensitive:format_status(bondy_wamp_protocol, PState0),
+    maps:put(Status, state, State#state{protocol_state = PState});
+
+format_status(Status) ->
+    Status.
+
 
 
 %% =============================================================================
@@ -411,17 +414,6 @@ peername(Transport, Socket) ->
             error(invalid_socket)
     end.
 
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc Use format recommended by gen_server:format_status/2
-%% @end
-%% -----------------------------------------------------------------------------
-gen_format(normal, Term) ->
-    [{data, [{"State", Term}]}];
-
-gen_format(_, Term) ->
-    Term.
 
 
 %% @private
@@ -745,14 +737,14 @@ close_socket(Reason, St) ->
 
     %% We report socket stats
     ok = bondy_event_manager:notify(
-        {socket_closed, wamp, raw, St#state.peername, Seconds}
+        {[bondy, socket, closed], wamp, raw, St#state.peername, Seconds}
     ),
 
     case Reason of
         {tcp_error, _, _} ->
             %% We increase the socker error counter
             ok = bondy_event_manager:notify(
-                {socket_error, wamp, raw, St#state.peername}
+                {[bondy, socket, error], wamp, raw, St#state.peername}
             );
 
         _ ->

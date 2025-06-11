@@ -17,7 +17,7 @@
 %%  limitations under the License.
 %% =============================================================================
 -module(bondy_data_validators).
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 
 -type endpoint() :: {
@@ -425,7 +425,7 @@ existing_atom(_) ->
 -spec realm_uri(Term :: binary()) -> boolean().
 
 realm_uri(Term) ->
-    case wamp_uri:is_valid(Term, wamp_config:get(uri_strictness)) of
+    case bondy_wamp_uri:is_valid(Term, bondy_wamp_config:get(uri_strictness)) of
         true ->
             {ok, string:casefold(Term)};
         false ->

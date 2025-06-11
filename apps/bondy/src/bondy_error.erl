@@ -21,7 +21,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_error).
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("http_api.hrl").
 

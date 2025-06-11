@@ -20,9 +20,9 @@
 -module(bondy_kafka_bridge).
 -behaviour(bondy_broker_bridge).
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
--define(PRODUCE_OPTIONS_SPEC, ?BROD_OPTIONS_SPEC#{
+-define(PRODUCE_OPTIONS_SPEC, begin ?BROD_OPTIONS_SPEC end #{
     %% The brod client to be used. This should have been configured through the
     %% configuration files
     <<"client_id">> => #{

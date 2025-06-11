@@ -1,0 +1,36 @@
+{"1.2.0",
+[{<<"app_config">>,
+  {git,"https://github.com/leapsight/app_config.git",
+       {ref,"6c4aee8fc3d08b59e22183a530cb4ce29d4b348b"}},
+  1},
+ {<<"base62">>,
+  {git,"https://github.com/leapsight/base62.git",
+       {ref,"6e1c622c2e9bba51fadba44fa050d4b4ae706890"}},
+  2},
+ {<<"bert">>,
+  {git,"https://github.com/aramallo/bert.erl.git",
+       {ref,"fea74099dad2eef4cb8164f7c55a3ee60d64381d"}},
+  0},
+ {<<"key_value">>,
+  {git,"https://github.com/Leapsight/key_value.git",
+       {ref,"cf0143bf3a91c1d41ace9ef938e314307c80bd1f"}},
+  1},
+ {<<"ksuid">>,
+  {git,"https://github.com/leapsight/ksuid.git",
+       {ref,"315e954846ec5f8d300bec52b88aca60015a9bc2"}},
+  1},
+ {<<"maps_utils">>,
+  {git,"https://github.com/Leapsight/maps_utils.git",
+       {ref,"afa2da62e0e691ce33d1008cc424c994fff339bf"}},
+  1},
+ {<<"msgpack">>,{pkg,<<"msgpack">>,<<"0.8.1">>},0},
+ {<<"utils">>,
+  {git,"https://github.com/Leapsight/utils.git",
+       {ref,"cfd05ab4a02c2bfbd0ab16ae233de099a5710e21"}},
+  0}]}.
+[
+{pkg_hash,[
+ {<<"msgpack">>, <<"DEB35C13291EAFE56AD9870374C2EAA92323DC5503D50432EBCAF47052E6D343">>}]},
+{pkg_hash_ext,[
+ {<<"msgpack">>, <<"04D9A75BC6F4BED8627EE1E7AA9DF37601F510FDC786A84FE932BB21D765565F">>}]}
+].

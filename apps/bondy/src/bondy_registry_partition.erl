@@ -23,7 +23,7 @@
 -module(bondy_registry_partition).
 -behaviour(gen_server).
 
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_registry.hrl").
 
@@ -218,7 +218,7 @@ init([Index]) ->
 
     State = #state{
         index = Index,
-        start_ts = erlang:system_time(millisecond)
+        start_ts = erlang:system_time()
     },
 
     {ok, State, {continue, {init_storage, Index}}}.

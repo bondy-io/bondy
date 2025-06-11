@@ -1,6 +1,6 @@
 -module(bondy_message_id).
 
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 -define(TAB, bondy_session_counter).
 
@@ -67,7 +67,7 @@ init_session(RealmUri, Session) ->
 -spec global() -> id().
 
 global() ->
-    wamp_utils:rand_uniform().
+    bondy_wamp_utils:rand_uniform().
 
 
 %% -----------------------------------------------------------------------------

@@ -24,7 +24,6 @@
 -include_lib("kernel/include/logger.hrl").
 
 -export([init/1]).
--export([format_status/2]).
 -export([handle_event/2]).
 -export([handle_call/2]).
 -export([handle_info/2]).
@@ -65,9 +64,6 @@ handle_info(_Info, S) ->
 handle_call(_Request, S) ->
     {ok, ok, S}.
 
-
-format_status(_Opt, [_Pdict, _S]) ->
-    ok.
 
 code_change(_OldVsn, S, _Extra) ->
     {ok, S}.

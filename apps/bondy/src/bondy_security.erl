@@ -49,7 +49,7 @@ rbac_mod(_) ->
 %% @end
 %% -----------------------------------------------------------------------------
 is_enabled(RealmUri) ->
-    bondy_realm:exists(RealmUri) orelse error(no_such_realm),
+    bondy_realm:exists(RealmUri) orelse error({no_such_realm, RealmUri}),
     case plum_db:get(?STATUS_PREFIX(RealmUri), enabled) of
         true -> true;
         _ -> false
@@ -61,7 +61,7 @@ is_enabled(RealmUri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 enable(RealmUri) ->
-    bondy_realm:exists(RealmUri) orelse error(no_such_realm),
+    bondy_realm:exists(RealmUri) orelse error({no_such_realm, RealmUri}),
     plum_db:put(?STATUS_PREFIX(RealmUri), enabled, true).
 
 
@@ -70,7 +70,7 @@ enable(RealmUri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 disable(RealmUri) ->
-    bondy_realm:exists(RealmUri) orelse error(no_such_realm),
+    bondy_realm:exists(RealmUri) orelse error({no_such_realm, RealmUri}),
     plum_db:put(?STATUS_PREFIX(RealmUri), enabled, false).
 
 

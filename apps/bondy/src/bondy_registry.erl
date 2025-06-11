@@ -24,7 +24,7 @@
 %% version 2.0 match policies (exact, prefix and wildcard).
 %%
 %% The registry entries are stored in plum_db (using an in-memory prefix). The
-%% registry also uses in-memory in-memory trie-based indexed (materialised
+%% registry also uses in-memory trie-based indexed (materialised
 %% view) using {@link bondy_registry_trie}.
 %%
 %% This module also provides a singleton server to perform the initialisation
@@ -35,7 +35,7 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_registry.hrl").
 -include("bondy_plum_db.hrl").
@@ -197,7 +197,7 @@ info() ->
 add(Entry) ->
     bondy_registry_entry:is_entry(Entry)
         orelse ?ERROR(badarg, [Entry], #{
-            1 => "is not a entry()"
+            1 => "is not an entry()"
         }),
 
     bondy_registry_entry:is_proxy(Entry)
@@ -417,7 +417,7 @@ when Task == undefined orelse is_function(Task, 1) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Looks up the entry in plum_db
 %% @end
 %% -----------------------------------------------------------------------------
 -spec lookup(Type :: entry_type(), Key ::  entry_key()) ->
@@ -533,7 +533,7 @@ entries(Type, RealmUri, SessionId, Limit) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Finds entries using the trie.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec find(trie_continuation() | eot()) ->

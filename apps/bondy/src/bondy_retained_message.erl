@@ -27,7 +27,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_retained_message).
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
 -define(DB_PREFIX(Realm), {retained_messages, Realm}).
@@ -310,7 +310,7 @@ put(Realm, Topic, #event{} = Event, MatchOpts, TTL) ->
 -spec to_event(Retained :: t(), SubscriptionId :: id()) -> wamp_event().
 
 to_event(Retained, SubscriptionId) ->
-    wamp_message:event(
+    bondy_wamp_message:event(
         SubscriptionId,
         Retained#bondy_retained_message.publication_id,
         maps:put(retained, true, Retained#bondy_retained_message.details),

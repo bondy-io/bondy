@@ -47,7 +47,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_http_gateway_api_spec_parser).
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("http_api.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
@@ -852,7 +852,7 @@ end).
         allow_null => false,
         datatype => [binary, ?MOPS_PROXY_FUN_TYPE],
         validator => fun
-            (X) when is_binary(X) -> wamp_uri:is_valid(X);
+            (X) when is_binary(X) -> bondy_wamp_uri:is_valid(X);
             (X) -> mops:is_proxy(X)
         end
     },
@@ -910,7 +910,7 @@ end).
         allow_null => false,
         datatype => [binary, ?MOPS_PROXY_FUN_TYPE],
         validator => fun
-            (X) when is_binary(X) -> wamp_uri:is_valid(X);
+            (X) when is_binary(X) -> bondy_wamp_uri:is_valid(X);
             (X) -> mops:is_proxy(X)
         end
     },

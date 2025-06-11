@@ -27,7 +27,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_rbac_user).
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
 -include("bondy_plum_db.hrl").
@@ -45,7 +45,7 @@
 %% checking whether they exist.
 -define(FOLD_OPTS, [{resolver, lww}]).
 
--define(VALIDATOR, ?OPTS_VALIDATOR#{
+-define(VALIDATOR, begin ?OPTS_VALIDATOR end#{
     <<"username">> => #{
         alias => username,
         key => username,
@@ -101,7 +101,7 @@
 }).
 
 
--define(UPDATE_VALIDATOR, ?OPTS_VALIDATOR#{
+-define(UPDATE_VALIDATOR, begin ?OPTS_VALIDATOR end#{
     <<"password">> => #{
         alias => password,
         key => password,
@@ -208,9 +208,11 @@
 -type list_opts()       ::  #{
     limit => pos_integer()
 }.
--type add_error()       ::  no_such_realm | reserved_name | already_exists.
--type update_error()    ::  no_such_realm
+-type add_error()       ::  {no_such_realm, uri()}
                             | reserved_name
+                            | already_exists.
+-type update_error()    ::  reserved_name
+                            | {no_such_realm, uri()}
                             | {no_such_user, username_int()}
                             | {no_such_groups, [bondy_rbac_group:name()]}.
 
@@ -1144,7 +1146,7 @@ on_merge({?PLUMDB_PREFIX(RealmUri), Username}, New, Old) ->
         end
     end,
 
-    bondy_jobs:enqueue(RealmUri, Fun).
+    bondy_jobs:enqueue(Fun, RealmUri).
 
 
 %% -----------------------------------------------------------------------------
@@ -1158,7 +1160,10 @@ on_update({?PLUMDB_PREFIX(RealmUri), Username}, _New, Old) ->
 
     case IsCreate of
         true ->
-            ok = bondy_event_manager:notify({user_added, RealmUri, Username});
+            bondy_event_manager:notify(
+                {[bondy, user, added], RealmUri, Username}
+            );
+
         false ->
             %% 1. We need to revoke all auth tokens/tickets
             ok = revoke_tickets(RealmUri, Username),
@@ -1171,7 +1176,9 @@ on_update({?PLUMDB_PREFIX(RealmUri), Username}, _New, Old) ->
             %% process so no bondy metadata present). We do it on the update
             %% operation.
             %% 4. Finally we publish the event
-            ok = bondy_event_manager:notify({user_updated, RealmUri, Username})
+            bondy_event_manager:notify(
+                {[bondy, user, updated], RealmUri, Username}
+            )
     end.
 
 
@@ -1186,7 +1193,7 @@ on_delete({?PLUMDB_PREFIX(RealmUri), Username}, _Old) ->
     %% 3. Close all sessions in this node.
     ok = close_sessions(RealmUri, Username, ?BONDY_USER_DELETED),
     %% 4. Finally we publish the event
-    ok = bondy_event_manager:notify({user_deleted, RealmUri, Username}).
+    bondy_event_manager:notify({[bondy, user, deleted], RealmUri, Username}).
 
 
 %% -----------------------------------------------------------------------------
@@ -1697,8 +1704,8 @@ on_credentials_change(RealmUri, User) ->
     Username = maps:get(username, User),
 
     %% on_update/3 will be called by plum_db
-    ok = bondy_event_manager:notify(
-        {user_credentials_updated, RealmUri, Username}
+    bondy_event_manager:notify(
+        {[bondy, user, credentials, updated], RealmUri, Username}
     ),
 
     Reason = ?BONDY_USER_CREDENTIALS_CHANGED,
@@ -1715,9 +1722,10 @@ on_credentials_change(RealmUri, User) ->
 %% @private
 revoke_tickets(RealmUri, Username) ->
     bondy_jobs:enqueue(
-        RealmUri, fun() ->
+        fun() ->
             bondy_ticket:revoke_all(RealmUri, Username)
-        end
+        end,
+        RealmUri
     ).
 
 

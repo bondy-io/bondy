@@ -45,31 +45,32 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec start(
-    Ref :: ranch:ranch_ref(), Protocol :: module(), ProtocolOpts :: any()) -> ok.
+    Ref :: ranch:ranch_ref(), Protocol :: module(), ProtocolOpts :: any()) ->
+    ok | {error, any()}.
 
 start(Ref, Protocol, ProtocolOpts) ->
     case bondy_config:get([Ref, enabled], true) of
         true ->
             Transport = ref_to_transport(Ref),
             TransportOpts = transport_opts(Ref),
-
-
-            {ok, _} = ranch:start_listener(
+            Result = ranch:start_listener(
                 Ref,
                 Transport,
                 TransportOpts,
                 Protocol,
                 ProtocolOpts
             ),
-            ?LOG_NOTICE(#{
-                description => "Started TCP listener",
-                listener => Ref,
-                transport => Transport,
-                transport_opts => TransportOpts,
-                protocol => Protocol
-            }),
+            resulto:then(Result, fun(_OK) ->
+                 ?LOG_NOTICE(#{
+                    description => "Started TCP listener",
+                    listener => Ref,
+                    transport => Transport,
+                    transport_opts => TransportOpts,
+                    protocol => Protocol
+                }),
+                ok
+            end);
 
-            ok;
         false ->
             ok
     end.

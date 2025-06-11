@@ -36,11 +36,11 @@
 
 -define(GRANT_TYPE, <<"grant_type">>).
 
--define(HEADERS, ?CORS_HEADERS#{
+-define(HEADERS, begin ?CORS_HEADERS end#{
     <<"content-type">> => <<"application/json; charset=utf-8">>
 }).
 
--define(OPTIONS_HEADERS, ?HEADERS#{
+-define(OPTIONS_HEADERS, begin ?HEADERS end#{
     <<"access-control-allow">> => <<"HEAD,OPTIONS,POST">>
 }).
 
@@ -177,7 +177,7 @@
     realm_uri => #{
         required => true,
         allow_null => false,
-        validator => fun wamp_uri:is_valid/1
+        validator => fun bondy_wamp_uri:is_valid/1
     },
     client_id => #{
         required  => false,
@@ -631,7 +631,7 @@ prepare_meta(_, Meta, _) ->
 %% @private
 -spec reply(atom() | integer(), cowboy_req:req()) -> cowboy_req:req().
 
-reply(no_such_realm, Req) ->
+reply({no_such_realm, _}, Req) ->
     reply(oauth2_invalid_client, Req);
 
 reply({no_such_user, _}, Req) ->
@@ -709,7 +709,7 @@ token_response(JWT, RefreshToken, Claims, Req0) ->
 %% @private
 on_login(_RealmUri, _Username, _Meta) ->
     % bondy_event_manager:notify(
-    %     {user_log_in, RealmUri, Username, Meta}).
+    %     {[bondy, user, logged_in], RealmUri, Username, Meta}).
     ok.
 
 

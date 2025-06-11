@@ -147,7 +147,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_realm).
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include_lib("jose/include/jose_jwk.hrl").
 -include("bondy.hrl").
 -include("bondy_plum_db.hrl").
@@ -2186,19 +2186,17 @@ fold_props(_, _, Realm) ->
 
 %% @private
 on_create(Realm) ->
-    ok = bondy_event_manager:notify({realm_created, Realm#realm.uri}),
-    ok.
+    bondy_event_manager:notify({[bondy, realm, created], Realm#realm.uri}).
 
 
 %% @private
 on_update(Realm) ->
-    ok = bondy_event_manager:notify({realm_updated, Realm#realm.uri}),
-    ok.
+    bondy_event_manager:notify({[bondy, realm, updated], Realm#realm.uri}).
 
 
 %% @private
 on_delete(Uri) ->
-    ok = bondy_event_manager:notify({realm_deleted, Uri}).
+    bondy_event_manager:notify({[bondy, realm, deleted], Uri}).
 
 
 %% @private

@@ -58,12 +58,17 @@ start_link() ->
 
 
 init([]) ->
-    RestartStrategy = {one_for_one, 0, 1},
+    SupFlags = #{
+        strategy => one_for_one,
+        intensity => 5, % max restarts
+        period => 10, % seconds
+        auto_shutdown => never
+    },
 
-    %% Start partitions first
-    Children = partitions(),
+    %% Start shards first
+    Children = shards(),
 
-    {ok, {RestartStrategy, Children}}.
+    {ok, {SupFlags, Children}}.
 
 
 
@@ -75,32 +80,34 @@ init([]) ->
 
 
 %% @private
-partitions() ->
+shards() ->
     PoolName = ?JOBS_POOLNAME,
     WorkerMod = bondy_jobs_worker,
-    N = bondy_config:get([jobs_pool, size]),
+    N = bondy_config:get([job_manager_pool, size], 32),
 
-    ok = gproc_pool:new(PoolName, hash, [{size, N}]),
+    %% If the supervisor restarts and we call groc_pool:new it will fail with
+    %% an exception, as the pool server is managed by the gproc supervisor
+    _ = catch gproc_pool:new(PoolName, hash, [{size, N}]),
 
-    Indices = [
+    Shards = [
         begin
-            WorkerName = {WorkerMod, Index},
-            Index = gproc_pool:add_worker(PoolName, WorkerName, Index),
-            Index
+            WorkerName = {WorkerMod, Shard},
+            _ = catch gproc_pool:add_worker(PoolName, WorkerName, Shard),
+            Shard
         end
-        || Index <- lists:seq(1, N)
+        || Shard <- lists:seq(1, N)
     ],
 
     [
         #{
-            id => Index,
-            start => {WorkerMod, start_link, [Index]},
+            id => Shard,
+            start => {WorkerMod, start_link, [Shard]},
             restart => permanent,
             shutdown => 5000,
             type => worker,
             modules => [WorkerMod]
         }
-        || Index <- Indices
+        || Shard <- Shards
     ].
 
 
