@@ -798,13 +798,13 @@
 %% When enabled this option overrides the buffer option.
 %% This option is ignored when buffer is set
 {mapping, "admin_api.http.buffer.min",
-"bondy.admin_api_http.socket_opts.buffer_min", [
+"bondy.admin_api_http.dynamic_buffer.min", [
   {datatype, bytesize},
   {default, "1KB"}
 ]}.
 
 {mapping, "admin_api.http.buffer.max",
-"bondy.admin_api_http.socket_opts.buffer_max", [
+"bondy.admin_api_http.dynamic_buffer.max", [
   {datatype, bytesize},
   {default, "128KB"}
 ]}.
@@ -962,13 +962,13 @@
 %% When enabled this option overrides the buffer option.
 %% This option is ignored when buffer is set
 {mapping, "admin_api.https.buffer.min",
-"bondy.admin_api_https.socket_opts.buffer_min", [
+"bondy.admin_api_https.dynamic_buffer.min", [
   {datatype, bytesize},
   {default, "1KB"}
 ]}.
 
 {mapping, "admin_api.https.buffer.max",
-"bondy.admin_api_https.socket_opts.buffer_max", [
+"bondy.admin_api_https.dynamic_buffer.max", [
   {datatype, bytesize},
   {default, "128KB"}
 ]}.
@@ -1205,13 +1205,13 @@
 %% This option is ignored when buffer is set
 %% It is enabled by default.
 {mapping, "api_gateway.http.buffer.min",
-"bondy.api_gateway_http.socket_opts.buffer_min", [
+"bondy.api_gateway_http.dynamic_buffer.min", [
   {datatype, bytesize},
   {default, "1KB"}
 ]}.
 
 {mapping, "api_gateway.http.buffer.max",
-"bondy.api_gateway_http.socket_opts.buffer_max", [
+"bondy.api_gateway_http.dynamic_buffer.max", [
   {datatype, bytesize},
   {default, "128KB"}
 ]}.
@@ -1368,12 +1368,12 @@
 %% can be disabled by setting this option to false.
 %% This option is ignored when buffer is set
 %% It is enabled by default.
-{mapping, "api_gateway.https.buffer.min", "bondy.api_gateway_https.socket_opts.buffer_min", [
+{mapping, "api_gateway.https.buffer.min", "bondy.api_gateway_https.dynamic_buffer.min", [
   {datatype, bytesize},
   {default, "1KB"}
 ]}.
 
-{mapping, "api_gateway.https.buffer.max", "bondy.api_gateway_https.socket_opts.buffer_max", [
+{mapping, "api_gateway.https.buffer.max", "bondy.api_gateway_https.dynamic_buffer.max", [
   {datatype, bytesize},
   {default, "128KB"}
 ]}.
@@ -1979,6 +1979,7 @@
 "bondy.wamp_tcp.socket_opts.buffer", [
   {datatype, bytesize}
 ]}.
+
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.

@@ -414,32 +414,51 @@ setup_wamp() ->
     %% set and also set other parameters which are required for Bondy to
     %% operate i.e. all dependencies, and are private.
 
+    %% ROUTER
+    %% Dynamic Buffer just for HTTP and WS (not RAW TCP sockets)
+    Keys = [
+        [api_gateway_http, dynamic_buffer],
+        [api_gateway_https, dynamic_buffer],
+        [admin_api_http, dynamic_buffer],
+        [admin_api_https, dynamic_buffer],
+        %% At the moment WS goes on top of api_gateway_http/s listener
+        %% but this config should override it
+        [wamp_websocket, dynamic_buffer]
+    ],
+    ok = lists:foreach(
+        fun(Key) -> bondy_config:set(Key, dynamic_buffer(Key)) end,
+        Keys
+    ),
+
+    %% WAMP PROTOCOL LIB
+    ok = bondy_wamp_config:set(extended_details, ?WAMP_EXT_DETAILS),
+    ok = bondy_wamp_config:set(extended_options, ?WAMP_EXT_OPTIONS).
+
+
+%% @private
+dynamic_buffer(Key) ->
     Low = memory:kibibytes(1),
     Top = memory:kibibytes(128),
-    DynBufferKey = [wamp_websocket, dynamic_buffer],
 
-    case bondy_config:get(DynBufferKey, []) of
+    case bondy_config:get(Key, []) of
         [] ->
-            bondy_config:set(DynBufferKey, false);
+            false;
 
         [{min, Min}, {max, Max}] when Min >= Low, Max =< Top ->
-            bondy_config:set(DynBufferKey, {Min, Max});
+            {Min, Max};
 
         [{max, Max}, {min, Min}] when Min >= Low, Max =< Top ->
-            bondy_config:set(DynBufferKey, {Min, Max});
+            {Min, Max};
 
         Other ->
              ?LOG_ERROR(#{
                 description => "Error while preparing configuration",
-                reason => "invalid value for option 'dynamic_buffer'",
+                reason => "invalid value for configuration option",
+                key => Key,
                 value => Other
             }),
             exit(invalid_configuration)
-    end,
-
-    ok = bondy_wamp_config:set(extended_details, ?WAMP_EXT_DETAILS),
-    ok = bondy_wamp_config:set(extended_options, ?WAMP_EXT_OPTIONS).
-
+    end.
 
 %% @private
 prepare_private_config() ->
