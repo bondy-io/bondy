@@ -1470,33 +1470,48 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
             %% and will close the realm
             plum_db:delete(?PLUM_DB_PREFIX(Uri), Uri),
 
-            %% We order the removal of all associated data
-            ok = bondy_jobs:enqueue(
-                Uri, fun() ->
-                    Opts1 = Opts0#{dirty => true},
-
-                    ok = bondy_rbac:remove_all(Uri, Opts1),
-
-                    %% Delete all tickets
-                    ok = bondy_ticket:revoke_all(Uri),
-
-                    %% TODO Delete all tokens
-
-                    %% Delete all sources
-                    bondy_rbac_source:remove_all(Uri),
-
-                    %% Delete all groups
-                    bondy_rbac_group:remove_all(Uri, Opts1),
-
-                    %% Delete all users
-                    bondy_rbac_user:remove_all(Uri, Opts1),
-
-                    ok
-                end
-            ),
-
             %% We notify
-            ok = on_delete(Uri)
+            ok = on_delete(Uri),
+
+            %% We order the removal of all associated data
+            Work = fun() ->
+                Opts1 = Opts0#{dirty => true},
+
+                ok = bondy_rbac:remove_all(Uri, Opts1),
+
+                %% Delete all tickets
+                ok = bondy_ticket:revoke_all(Uri),
+
+                %% TODO Delete all tokens
+
+                %% Delete all sources
+                bondy_rbac_source:remove_all(Uri),
+
+                %% Delete all groups
+                bondy_rbac_group:remove_all(Uri, Opts1),
+
+                %% Delete all users
+                bondy_rbac_user:remove_all(Uri, Opts1),
+
+                ok
+            end,
+
+            %% We do not need any partircular order
+            PartitionKey =  bondy_wamp_utils:rand_uniform(),
+
+            case bondy_jobs:enqueue(Work, PartitionKey) of
+                ok ->
+                    ok;
+
+                {error, Reason} = Error ->
+                    ?LOG_ERROR(#{
+                        description =>
+                            "Realm data was not completed deleted. "
+                            "Try deleting the realm again later",
+                        reason => Reason
+                    }),
+                    Error
+            end
     end;
 
 delete(Uri, Opts) when is_binary(Uri) ->
