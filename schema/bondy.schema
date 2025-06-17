@@ -617,7 +617,7 @@
 
 {mapping, "load_regulation.job_manager.pool.size",
 "bondy.job_manager_pool.size", [
-  {default, 32},
+  {default, 16},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
@@ -628,7 +628,7 @@
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.job_manager.queue.size",
 "bondy.job_manager_queue.max_size", [
-  {default, 20000},
+  {default, 160000},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
@@ -638,7 +638,7 @@
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.job_manager.queue.ttl",
 "bondy.job_manager_queue.ttl", [
-  {default, "10m"},
+  {default, "1m"},
   {datatype, {duration, ms}}
 ]}.
 
