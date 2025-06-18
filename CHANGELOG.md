@@ -1,11 +1,15 @@
 # CHANGELOG
 
-## Next
-* HTTP dynamic buffers via `bondy.conf` options
+## 1.0.0-rc.37
+* Added bounded queues for job worker pool and their configuration
+    * `load_regulation.job_manager.queue.size`
+    * `load_regulation.job_manager.queue.ttl`
+* Configure HTTP dynamic buffers via `bondy.conf` options
     * `bondy.api_gateway_http.socket_opts.buffer.[min | max]`
     * `bondy.api_gateway_https.socket_opts.buffer.[min | max]`
     * `bondy.admin_api_http.socket_opts.buffer.[min | max]`
     * `bondy.admin_api_https.socket_opts.buffer.[min | max]`
+* Minor fixes and Log improvements
 
 ## 1.0.0-rc.36
 * Migration to Erlang OTP 27 (latest)
