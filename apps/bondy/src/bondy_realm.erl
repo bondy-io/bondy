@@ -1496,10 +1496,7 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
                 ok
             end,
 
-            %% We do not need any partircular order
-            PartitionKey =  bondy_wamp_utils:rand_uniform(),
-
-            case bondy_jobs:enqueue(Work, PartitionKey) of
+            case bondy_router_worker:cast(Work) of
                 ok ->
                     ok;
 
