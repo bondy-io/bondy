@@ -350,15 +350,23 @@ websocket_info(Msg, State) ->
 %% generally not useful to do any clean up as the process terminates
 %% immediately after calling this callback when using Websocket.
 terminate(normal, _Req, State) ->
+    ?LOG_INFO(#{
+        description => "Connection closed",
+        reason => normal
+    }),
     do_terminate(State);
 
 terminate(stop, _Req, State) ->
+    ?LOG_INFO(#{
+        description => "Connection closed",
+        reason => stop
+    }),
     do_terminate(State);
 
 terminate(timeout, _Req, State) ->
     Timeout = bondy_config:get([wamp_websocket, idle_timeout]),
     ?LOG_ERROR(#{
-        description => "Connection closing",
+        description => "Connection closed",
         reason => idle_timeout,
         idle_timeout => Timeout
     }),
