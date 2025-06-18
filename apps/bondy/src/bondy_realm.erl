@@ -2607,12 +2607,15 @@ when is_tuple(Term), element(1, Term) == realm, tuple_size(Term) == 13 ->
     };
 
 from_term({realm, Uri, Desc, Authmethods, PrivKeys, PubKeys, PassOpts}) ->
-    %% At the moment we will not get this one as it is store in a different prefix
+    %% At the moment we will not get this one as it is store in a different
+    %% prefix
     _PDBPrefix = {security, realms},
-    IsSecEnabled = case plum_db:get({security_status, Uri}, enabled) of
-        undefined -> false;
-        Value when is_boolean(Value) -> Value
-    end,
+    IsSecEnabled = bondy_stdlib:or_else(
+        plum_db:get({security_status, Uri}, enabled),
+        false
+    ),
+    is_boolean(IsSecEnabled) orelse throw(badarg),
+
     #realm{
         uri = Uri,
         description = Desc,

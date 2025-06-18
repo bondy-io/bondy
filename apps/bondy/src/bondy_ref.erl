@@ -481,14 +481,7 @@ callback(#bondy_ref{}) ->
 
 to_uri(#bondy_ref{} = Ref) ->
     Nodestring = Ref#bondy_ref.nodestring,
-    SessionId =
-        case Ref#bondy_ref.session_id of
-            undefined ->
-                <<>>;
-            Val ->
-                Val
-        end,
-
+    SessionId = bondy_stdlib:or_else(Ref#bondy_ref.session_id, <<>>),
     Type = atom_to_binary(Ref#bondy_ref.type),
 
     Target =
@@ -496,8 +489,10 @@ to_uri(#bondy_ref{} = Ref) ->
             {pid, PidBin} ->
                 Name = binary:replace(PidBin, [<<$<>>, <<$>>>], <<>>, [global]),
                 <<"p#", Name/binary>>;
+
             {name, Name} ->
                 <<"n#", Name/binary>>;
+
             {callback, {M, F}} ->
                 MBin = atom_to_binary(M),
                 FBin = atom_to_binary(F),

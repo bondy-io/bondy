@@ -1485,10 +1485,10 @@ password_opts(_, #{password_opts := Opts}) when is_map(Opts) ->
     Opts;
 
 password_opts(RealmUri, _) ->
-    case bondy_realm:password_opts(RealmUri) of
-        undefined -> #{};
-        Map when is_map(Map) -> Map
-    end.
+    bondy_stdlib:or_else(
+        bondy_realm:password_opts(RealmUri),
+        #{}
+    ).
 
 
 %% @private
