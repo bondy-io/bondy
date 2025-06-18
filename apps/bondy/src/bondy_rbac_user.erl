@@ -1146,7 +1146,20 @@ on_merge({?PLUMDB_PREFIX(RealmUri), Username}, New, Old) ->
         end
     end,
 
-    bondy_jobs:enqueue(Fun, RealmUri).
+    case bondy_router_worker:cast(Fun) of
+        ok ->
+            ok;
+        {error, overload} ->
+            ?LOG_NOTICE(#{
+                description =>
+                    "Dropping plum_db:on_merge/2 task due to load shedding: "
+                    "router pool at capacity",
+                pool => router_pool,
+                reason => overload
+            })
+    end.
+
+
 
 
 %% -----------------------------------------------------------------------------
@@ -1166,7 +1179,7 @@ on_update({?PLUMDB_PREFIX(RealmUri), Username}, _New, Old) ->
 
         false ->
             %% 1. We need to revoke all auth tokens/tickets
-            ok = revoke_tickets(RealmUri, Username),
+            _ = revoke_tickets(RealmUri, Username),
             %% 2. TODO revoke all OAUTH2 Tokens
             %% 3. We need to close all sessions in this node if the user changed
             %% its credentials.
@@ -1188,7 +1201,7 @@ on_update({?PLUMDB_PREFIX(RealmUri), Username}, _New, Old) ->
 %% -----------------------------------------------------------------------------
 on_delete({?PLUMDB_PREFIX(RealmUri), Username}, _Old) ->
     %% 1. We need to revoke all auth tokens/tickets
-    ok = revoke_tickets(RealmUri, Username),
+    _ = revoke_tickets(RealmUri, Username),
     %% 2. TODO revoke all OAUTH2 Tokens
     %% 3. Close all sessions in this node.
     ok = close_sessions(RealmUri, Username, ?BONDY_USER_DELETED),
@@ -1472,10 +1485,10 @@ password_opts(_, #{password_opts := Opts}) when is_map(Opts) ->
     Opts;
 
 password_opts(RealmUri, _) ->
-    case bondy_realm:password_opts(RealmUri) of
-        undefined -> #{};
-        Map when is_map(Map) -> Map
-    end.
+    bondy_stdlib:or_else(
+        bondy_realm:password_opts(RealmUri),
+        #{}
+    ).
 
 
 %% @private
@@ -1721,12 +1734,8 @@ on_credentials_change(RealmUri, User) ->
 
 %% @private
 revoke_tickets(RealmUri, Username) ->
-    bondy_jobs:enqueue(
-        fun() ->
-            bondy_ticket:revoke_all(RealmUri, Username)
-        end,
-        RealmUri
-    ).
+    Fun = fun() -> bondy_ticket:revoke_all(RealmUri, Username) end,
+    bondy_router_worker:cast(Fun).
 
 
 %% @private

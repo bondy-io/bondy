@@ -1,7 +1,7 @@
 %% =============================================================================
-%%  bondy_jobs.erl -
+%%  bondy_stdlib.hrl -
 %%
-%%  Copyright (c) 2018-2024 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2025 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -16,38 +16,29 @@
 %%  limitations under the License.
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc Load regulation
-%% @end
-%% -----------------------------------------------------------------------------
--module(bondy_jobs).
 
--include_lib("kernel/include/logger.hrl").
--include_lib("bondy_wamp/include/bondy_wamp.hrl").
--include("bondy.hrl").
-
-%% API
--export([enqueue/2]).
--export([enqueue/1]).
 
 
 
 %% =============================================================================
-%% API
+%% ERLANG VERSION MIGRATION SUPPORT
 %% =============================================================================
 
 
+-if(?OTP_RELEASE >= 27).
+    -define(MODULEDOC(Str), -moduledoc(Str)).
+    -define(DOC(Str), -doc(Str)).
+-else.
+    -define(MODULEDOC(Str), -compile([])).
+    -define(DOC(Str), -compile([])).
+-endif.
 
--spec enqueue(Fun :: function()) -> ok | {error, any()}.
 
-enqueue(Fun) ->
-    enqueue(Fun, undefined).
+%% =============================================================================
+%% TYPES
+%% =============================================================================
 
-
--spec enqueue(Fun :: function(), PartitionKey :: any()) -> ok | {error, any()}.
-
-enqueue(Fun, PartitionKey) ->
-    bondy_jobs_worker:enqueue(Fun, PartitionKey).
+-type optional(T)       ::  T | undefined.
 
 
 

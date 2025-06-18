@@ -348,8 +348,9 @@ handle_outbound(#goodbye{} = M, St0) ->
         state_name = shutting_down,
         goodbye_reason = M#goodbye.reason_uri
     },
-    %% We use a timeout to make sure we kill the connection even if the client
-    %% doesn't reply.
+    %% We stop the connection after the timeout.
+    %% This is to guarantee the client the chance to reply the
+    %% goodbye message.
     {stop, Bin, St1, ?SHUTDOWN_TIMEOUT};
 
 handle_outbound(M, St) ->

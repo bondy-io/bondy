@@ -79,15 +79,18 @@ start_pool() ->
 %% @end
 %% -----------------------------------------------------------------------------
 cast(Fun) when is_function(Fun, 0) ->
-    {_, PoolType} = lists:keyfind(type, 1, bondy_config:get(router_pool)),
+    Opts = bondy_config:get(router_pool),
+    PoolType = key_value:get(type, Opts, transient),
+
     case do_cast(PoolType, router_pool, Fun) of
         ok ->
             ok;
+
         {ok, _} ->
             ok;
+
         {error, overload} = Error ->
             Error
-
     end.
 
 
@@ -191,13 +194,18 @@ code_change(_OldVsn, State, _Extra) ->
 %% -----------------------------------------------------------------------------
 do_start_pool() ->
     Opts = bondy_config:get(router_pool),
-    {_, Size} = lists:keyfind(size, 1, Opts),
-    {_, Capacity} = lists:keyfind(capacity, 1, Opts),
-    case lists:keyfind(type, 1, Opts) of
-        {_, permanent} ->
-            sidejob:new_resource(?POOL_NAME, ?MODULE, Capacity, Size);
-        {_, transient} ->
-            sidejob:new_resource(?POOL_NAME, sidejob_supervisor, Capacity, Size)
+    Size = key_value:get(size, Opts),
+    Capacity = key_value:get(capacity, Opts),
+    PoolType = key_value:get(type, Opts, transient),
+
+    case PoolType of
+        permanent ->
+            Mod = ?MODULE,
+            sidejob:new_resource(?POOL_NAME, Mod, Capacity, Size);
+
+        transient ->
+            Mod = sidejob_supervisor,
+            sidejob:new_resource(?POOL_NAME, Mod, Capacity, Size)
     end.
 
 
@@ -211,8 +219,10 @@ do_cast(permanent, PoolName, Fun) ->
     %% We send a request to an existing permanent worker
     %% using bondy_router acting as a sidejob_worker
     case sidejob:cast(PoolName, Fun) of
-        ok -> ok;
-        overload -> {error, overload}
+        ok ->
+            ok;
+        overload ->
+            {error, overload}
     end;
 
 do_cast(transient, PoolName, Fun) ->

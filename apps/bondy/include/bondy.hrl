@@ -18,28 +18,12 @@
 
 
 
-
-
-%% =============================================================================
-%% ERLANG VERSION MIGRATION SUPPORT
-%% =============================================================================
-
-
--if(?OTP_RELEASE >= 27).
-    -define(MODULEDOC(Str), -moduledoc(Str)).
-    -define(DOC(Str), -doc(Str)).
--else.
-    -define(MODULEDOC(Str), -compile([])).
-    -define(DOC(Str), -compile([])).
--endif.
-
-
-
 %% =============================================================================
 %% DEPENDENCIES INCLUDES
 %% =============================================================================
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("bondy_stdlib/include/bondy_stdlib.hrl").
 -include_lib("plum_db/include/plum_db.hrl").
 
 
@@ -96,8 +80,6 @@
     [{error_info, #{module => ?MODULE, cause => Cause, meta => Meta}}]
 ).
 
-
--type optional(T)       ::  T | undefined.
 -type nodestring()      ::  binary().
 
 

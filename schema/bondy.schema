@@ -579,7 +579,8 @@
 %% -----------------------------------------------------------------------------
 %% @doc The size of the router process pool.
 %% The actual size will be the maximum between the configured value and
-%% the result of evaluating `erlang:system_info(schedulers)`
+%% the result of evaluating `erlang:system_info(schedulers)` which returns the
+%% number of CPU Cores visible by Erlang.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.size",
@@ -592,13 +593,14 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc The capacity of the router process pool, i.e. the maximum number of
-%% active erlang processes handling router events (default = 100000).
+%% active erlang processes handling router events (default = 2000000).
 %% Once the maximum has been reached, Bondy will respond with an overload error.
+%% Notice this is further limited by the `vm.process_limit` option.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.capacity",
 "bondy.router_pool.capacity", [
-  {default, 100000},
+  {default, 2000000},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
@@ -617,7 +619,7 @@
 
 {mapping, "load_regulation.job_manager.pool.size",
 "bondy.job_manager_pool.size", [
-  {default, 32},
+  {default, 16},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
@@ -628,7 +630,7 @@
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.job_manager.queue.size",
 "bondy.job_manager_queue.max_size", [
-  {default, 20000},
+  {default, 160000},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
@@ -638,7 +640,7 @@
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.job_manager.queue.ttl",
 "bondy.job_manager_queue.ttl", [
-  {default, "10m"},
+  {default, "1m"},
   {datatype, {duration, ms}}
 ]}.
 
@@ -738,7 +740,7 @@
 "bondy.admin_api_http.acceptors_pool_size", [
   {datatype, integer},
   {validators, ["pos_integer"]},
-  {default, 200}
+  {default, 100}
 ]}.
 
 %% The Cowboy max number of connections for the Admin API http listener
@@ -746,7 +748,7 @@
 "bondy.admin_api_http.max_connections", [
   {datatype, integer},
   {validators, ["pos_integer"]},
-  {default, 250000}
+  {default, 10000}
 ]}.
 
 
@@ -798,13 +800,13 @@
 %% When enabled this option overrides the buffer option.
 %% This option is ignored when buffer is set
 {mapping, "admin_api.http.buffer.min",
-"bondy.admin_api_http.socket_opts.buffer_min", [
+"bondy.admin_api_http.dynamic_buffer.min", [
   {datatype, bytesize},
   {default, "1KB"}
 ]}.
 
 {mapping, "admin_api.http.buffer.max",
-"bondy.admin_api_http.socket_opts.buffer_max", [
+"bondy.admin_api_http.dynamic_buffer.max", [
   {datatype, bytesize},
   {default, "128KB"}
 ]}.
@@ -900,7 +902,7 @@
 "bondy.admin_api_https.acceptors_pool_size", [
   {datatype, integer},
   {validators, ["pos_integer"]},
-  {default, 200}
+  {default, 100}
 ]}.
 
 %% The Cowboy max number of connections for the Admin API https listener
@@ -908,7 +910,7 @@
 "bondy.admin_api_https.max_connections", [
   {datatype, integer},
   {validators, ["pos_integer"]},
-  {default, 250000}
+  {default, 10000}
 ]}.
 
 %% The maximum length that the queue of pending connections can grow to.
@@ -962,13 +964,13 @@
 %% When enabled this option overrides the buffer option.
 %% This option is ignored when buffer is set
 {mapping, "admin_api.https.buffer.min",
-"bondy.admin_api_https.socket_opts.buffer_min", [
+"bondy.admin_api_https.dynamic_buffer.min", [
   {datatype, bytesize},
   {default, "1KB"}
 ]}.
 
 {mapping, "admin_api.https.buffer.max",
-"bondy.admin_api_https.socket_opts.buffer_max", [
+"bondy.admin_api_https.dynamic_buffer.max", [
   {datatype, bytesize},
   {default, "128KB"}
 ]}.
@@ -1205,13 +1207,13 @@
 %% This option is ignored when buffer is set
 %% It is enabled by default.
 {mapping, "api_gateway.http.buffer.min",
-"bondy.api_gateway_http.socket_opts.buffer_min", [
+"bondy.api_gateway_http.dynamic_buffer.min", [
   {datatype, bytesize},
   {default, "1KB"}
 ]}.
 
 {mapping, "api_gateway.http.buffer.max",
-"bondy.api_gateway_http.socket_opts.buffer_max", [
+"bondy.api_gateway_http.dynamic_buffer.max", [
   {datatype, bytesize},
   {default, "128KB"}
 ]}.
@@ -1368,12 +1370,12 @@
 %% can be disabled by setting this option to false.
 %% This option is ignored when buffer is set
 %% It is enabled by default.
-{mapping, "api_gateway.https.buffer.min", "bondy.api_gateway_https.socket_opts.buffer_min", [
+{mapping, "api_gateway.https.buffer.min", "bondy.api_gateway_https.dynamic_buffer.min", [
   {datatype, bytesize},
   {default, "1KB"}
 ]}.
 
-{mapping, "api_gateway.https.buffer.max", "bondy.api_gateway_https.socket_opts.buffer_max", [
+{mapping, "api_gateway.https.buffer.max", "bondy.api_gateway_https.dynamic_buffer.max", [
   {datatype, bytesize},
   {default, "128KB"}
 ]}.
@@ -1979,6 +1981,7 @@
 "bondy.wamp_tcp.socket_opts.buffer", [
   {datatype, bytesize}
 ]}.
+
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.

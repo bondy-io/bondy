@@ -24,6 +24,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_event_wamp_publisher).
 -behaviour(gen_event).
+
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
@@ -65,8 +66,32 @@ handle_event(Event, State) ->
         ok ->
             {ok, State};
 
-        {ok, {Fun, PartitionKey}} ->
-            ok = bondy_jobs:enqueue(Fun, PartitionKey),
+        {ok, {Fun, PartitionKey0}} ->
+
+            PartitionKey = bondy_stdlib:lazy_or_else(
+                PartitionKey0,
+                fun bondy_wamp_utils:rand_uniform/0
+            ),
+
+            case bondy_jobs:enqueue(Fun, PartitionKey) of
+                ok ->
+                    ok;
+
+                {error, full} ->
+                    ?LOG_INFO(#{
+                        description =>
+                            "Dropping event due to load shedding: "
+                            "jobs queue at capacity",
+                        event => Event
+                    });
+
+                {error, Reason} ->
+                    ?LOG_ERROR(#{
+                        description => "Unexpected error while enqueuing job",
+                        reason => Reason,
+                        event => Event
+                    })
+            end,
             {ok, State}
     end.
 

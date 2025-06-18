@@ -99,7 +99,7 @@ init([PoolName, Index]) ->
     QOpts = [
         {type, {passive, fifo}},
         {max_time, bondy_config:get(
-            [job_manager_queue, ttl], timer:minutes(10))
+            [job_manager_queue, ttl], timer:minutes(1))
         },
         {max_size, MaxSize},
         {link, self()}

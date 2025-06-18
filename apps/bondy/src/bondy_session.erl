@@ -357,7 +357,7 @@ when is_binary(Reason) orelse Reason == undefined ->
     Secs = erlang:system_time(second) - S#session.created,
     ok = bondy_event_manager:notify({[bondy, session, closed], S, Secs}),
 
-    ?LOG_DEBUG(#{
+    ?LOG_INFO(#{
         description => "Session closed",
         realm => RealmUri,
         session_id => Id,

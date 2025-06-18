@@ -608,10 +608,7 @@ find(Type, RealmUri, Uri, Opts) ->
 
     catch
         throw:non_eligible_entries when Limit =/= undefined ->
-            case maps:get(limit, Opts, undefined) of
-                undefined -> [];
-                _ -> ?EOT
-            end;
+            ?EOT;
 
         error:Reason:Stacktrace when Limit =/= undefined ->
             ?LOG_ERROR(#{
@@ -619,10 +616,7 @@ find(Type, RealmUri, Uri, Opts) ->
                 reason => Reason,
                 stacktrace => Stacktrace
             }),
-            case maps:get(limit, Opts, undefined) of
-                undefined -> [];
-                _ -> ?EOT
-            end
+            ?EOT
     end.
 
 

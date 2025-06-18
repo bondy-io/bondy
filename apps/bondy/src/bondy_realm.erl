@@ -1470,33 +1470,45 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
             %% and will close the realm
             plum_db:delete(?PLUM_DB_PREFIX(Uri), Uri),
 
-            %% We order the removal of all associated data
-            ok = bondy_jobs:enqueue(
-                Uri, fun() ->
-                    Opts1 = Opts0#{dirty => true},
-
-                    ok = bondy_rbac:remove_all(Uri, Opts1),
-
-                    %% Delete all tickets
-                    ok = bondy_ticket:revoke_all(Uri),
-
-                    %% TODO Delete all tokens
-
-                    %% Delete all sources
-                    bondy_rbac_source:remove_all(Uri),
-
-                    %% Delete all groups
-                    bondy_rbac_group:remove_all(Uri, Opts1),
-
-                    %% Delete all users
-                    bondy_rbac_user:remove_all(Uri, Opts1),
-
-                    ok
-                end
-            ),
-
             %% We notify
-            ok = on_delete(Uri)
+            ok = on_delete(Uri),
+
+            %% We order the removal of all associated data
+            Work = fun() ->
+                Opts1 = Opts0#{dirty => true},
+
+                ok = bondy_rbac:remove_all(Uri, Opts1),
+
+                %% Delete all tickets
+                ok = bondy_ticket:revoke_all(Uri),
+
+                %% TODO Delete all tokens
+
+                %% Delete all sources
+                bondy_rbac_source:remove_all(Uri),
+
+                %% Delete all groups
+                bondy_rbac_group:remove_all(Uri, Opts1),
+
+                %% Delete all users
+                bondy_rbac_user:remove_all(Uri, Opts1),
+
+                ok
+            end,
+
+            case bondy_router_worker:cast(Work) of
+                ok ->
+                    ok;
+
+                {error, Reason} = Error ->
+                    ?LOG_ERROR(#{
+                        description =>
+                            "Realm data was not completed deleted. "
+                            "Try deleting the realm again later",
+                        reason => Reason
+                    }),
+                    Error
+            end
     end;
 
 delete(Uri, Opts) when is_binary(Uri) ->
@@ -2595,12 +2607,15 @@ when is_tuple(Term), element(1, Term) == realm, tuple_size(Term) == 13 ->
     };
 
 from_term({realm, Uri, Desc, Authmethods, PrivKeys, PubKeys, PassOpts}) ->
-    %% At the moment we will not get this one as it is store in a different prefix
+    %% At the moment we will not get this one as it is store in a different
+    %% prefix
     _PDBPrefix = {security, realms},
-    IsSecEnabled = case plum_db:get({security_status, Uri}, enabled) of
-        undefined -> false;
-        Value when is_boolean(Value) -> Value
-    end,
+    IsSecEnabled = bondy_stdlib:or_else(
+        plum_db:get({security_status, Uri}, enabled),
+        false
+    ),
+    is_boolean(IsSecEnabled) orelse throw(badarg),
+
     #realm{
         uri = Uri,
         description = Desc,

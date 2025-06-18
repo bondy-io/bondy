@@ -988,10 +988,10 @@ do_grant([{Rolename, RoleType} | T], RealmUri, Resources, Permissions0, Opts) ->
     ok = lists:foreach(
         fun(Resource) ->
             %% We store the list of permissions as the value
-            Existing = case plum_db:get(Prefix, {Rolename, Resource}) of
-                undefined -> [];
-                List -> List
-            end,
+            Existing = bondy_stdlib:or_else(
+                plum_db:get(Prefix, {Rolename, Resource}),
+                []
+            ),
 
             %% We deduplicate
             Permissions1 = lists:umerge(
