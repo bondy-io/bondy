@@ -579,7 +579,8 @@
 %% -----------------------------------------------------------------------------
 %% @doc The size of the router process pool.
 %% The actual size will be the maximum between the configured value and
-%% the result of evaluating `erlang:system_info(schedulers)`
+%% the result of evaluating `erlang:system_info(schedulers)` which returns the
+%% number of CPU Cores visible by Erlang.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.size",
@@ -592,13 +593,14 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc The capacity of the router process pool, i.e. the maximum number of
-%% active erlang processes handling router events (default = 100000).
+%% active erlang processes handling router events (default = 2000000).
 %% Once the maximum has been reached, Bondy will respond with an overload error.
+%% Notice this is further limited by the `vm.process_limit` option.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.capacity",
 "bondy.router_pool.capacity", [
-  {default, 100000},
+  {default, 2000000},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
@@ -738,7 +740,7 @@
 "bondy.admin_api_http.acceptors_pool_size", [
   {datatype, integer},
   {validators, ["pos_integer"]},
-  {default, 200}
+  {default, 100}
 ]}.
 
 %% The Cowboy max number of connections for the Admin API http listener
@@ -746,7 +748,7 @@
 "bondy.admin_api_http.max_connections", [
   {datatype, integer},
   {validators, ["pos_integer"]},
-  {default, 250000}
+  {default, 10000}
 ]}.
 
 
@@ -900,7 +902,7 @@
 "bondy.admin_api_https.acceptors_pool_size", [
   {datatype, integer},
   {validators, ["pos_integer"]},
-  {default, 200}
+  {default, 100}
 ]}.
 
 %% The Cowboy max number of connections for the Admin API https listener
@@ -908,7 +910,7 @@
 "bondy.admin_api_https.max_connections", [
   {datatype, integer},
   {validators, ["pos_integer"]},
-  {default, 250000}
+  {default, 10000}
 ]}.
 
 %% The maximum length that the queue of pending connections can grow to.
