@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 1.0.0-rc.38
+* Refactoring of WAMP APIs (Modules renamed and consolidated)
+* New WAMP APIs
+    * `bondy.registry.list`
+* New standard `CALL.Options`
+    * `_disclose_session` - The callee will receive and the session information 
+    in  `INVOCATION.Details._session_info`
+    
 ## 1.0.0-rc.37
 * Added bounded queues for job worker pool and their configuration
     * `load_regulation.job_manager.queue.size`

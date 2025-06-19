@@ -334,7 +334,10 @@ when Type == created; Type == added; Type == deleted; Type == removed ->
         Args =
             case Type == created of
                 true ->
-                    [ExtSessionId, bondy_registry_entry:to_details_map(Entry)];
+                    [
+                        ExtSessionId,
+                        bondy_registry_entry:to_external(Entry, wamp_meta)
+                    ];
                 false ->
                     [ExtSessionId, RegId]
         end,
@@ -368,7 +371,10 @@ when Type == created; Type == added; Type == deleted; Type == removed ->
         Args =
             case Type == created of
                 true ->
-                    [ExtSessionId, bondy_registry_entry:to_details_map(Entry)];
+                    [
+                        ExtSessionId,
+                        bondy_registry_entry:to_external(Entry, wamp_meta)
+                    ];
                 false ->
                     [ExtSessionId, RegId]
         end,

@@ -20,7 +20,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_oauth2_wamp_api).
+-module(bondy_oauth2_api).
 -behaviour(bondy_wamp_api).
 
 

@@ -90,15 +90,29 @@
 -type eot()                 ::  ?EOT.
 -type continuation()        ::  plum_db:continuation().
 -type continuation_or_eot() ::  eot() | continuation().
-
--type details_map()     ::  #{
+-type ext()                 ::  default_ext()
+                                | wamp_meta_ext()
+                                | bridge_relay_ext().
+-type default_ext()         ::  #{
+    type             :=  entry_type(),
+    realm_uri        :=  uri(),
+    entry_id         :=  id(),
+    uri              :=  uri(),
+    match_policy     :=  binary(),
+    ref              :=  bondy_ref:t(),
+    callback_args    :=  list(term()),
+    created          :=  pos_integer(),
+    options          :=  options(),
+    origin_id        :=  optional(id()),
+    origin_ref       :=  optional(bondy_ref:t())
+}.
+-type wamp_meta_ext()     ::  #{
     id => id(),
     created => calendar:date(),
     uri => uri(),
     match => binary()
 }.
-
--type external()         ::  #{
+-type bridge_relay_ext()         ::  #{
     type             :=  entry_type(),
     realm_uri        :=  uri(),
     entry_id         :=  id(),
@@ -120,7 +134,7 @@
 -export_type([key/0]).
 -export_type([t_or_key/0]).
 -export_type([entry_type/0]).
--export_type([details_map/0]).
+-export_type([ext/0]).
 -export_type([eot/0]).
 -export_type([continuation/0]).
 -export_type([comparator/0]).
@@ -183,8 +197,8 @@
 -export([target/1]).
 -export([time_comparator/0]).
 -export([time_comparator/1]).
--export([to_details_map/1]).
 -export([to_external/1]).
+-export([to_external/2]).
 -export([type/1]).
 -export([uri/1]).
 
@@ -679,9 +693,27 @@ find_option(Key, #entry{options = Opts}) ->
 %% dictionary format.
 %% @end
 %% -----------------------------------------------------------------------------
--spec to_details_map(t()) -> details_map().
 
-to_details_map(#entry{key = Key} = E) ->
+-spec to_external(t()) -> ext().
+
+to_external(Entry) ->
+    to_external(Entry, default).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Converts the entry into a map. Certain values of type atom such as
+%% `node' are turned into binaries. This is to avoid exhausting a remote node
+%% atoms table for use cases where the entries are replicated e.g. edge-remote
+%% connections.
+%% Formats:
+%% - wamp_meta - a map according to the WAMP protocol Details dictionary format.
+%% - default - a map compatible with JSON (Bondy types converted to string)
+%% - bridge_relay - a map containing Bondy types
+%% @end
+%% -----------------------------------------------------------------------------
+-spec to_external(t(), Format :: default | bridge_relay | details_map) -> ext().
+
+to_external(#entry{key = Key} = E, wamp_meta) ->
     Details = #{
         id =>  Key#entry_key.entry_id,
         created => created_format(E#entry.created),
@@ -695,19 +727,26 @@ to_details_map(#entry{key = Key} = E) ->
             };
         _ ->
             Details
-    end.
+    end;
 
+to_external(#entry{key = Key} = E, default) ->
+    Ref = bondy_stdlib:and_then(E#entry.ref, fun bondy_ref:to_uri/1),
+    ORef = bondy_stdlib:and_then(E#entry.origin_ref, fun bondy_ref:to_uri/1),
 
-%% -----------------------------------------------------------------------------
-%% @doc Converts the entry into a map. Certain values of type atom such as
-%% `node' are turned into binaries. This is to avoid exhausting a remote node
-%% atoms table for use cases where the entries are replicated e.g. edge-remote
-%% connections.
-%% @end
-%% -----------------------------------------------------------------------------
--spec to_external(t()) -> external().
+    #{
+        type => E#entry.type,
+        realm_uri => Key#entry_key.realm_uri,
+        entry_id => Key#entry_key.entry_id,
+        uri => E#entry.uri,
+        match_policy => E#entry.match_policy,
+        ref => Ref,
+        callback_args => E#entry.callback_args,
+        created => E#entry.created,
+        options => E#entry.options,
+        origin_ref => ORef
+    };
 
-to_external(#entry{key = Key} = E) ->
+to_external(#entry{key = Key} = E, bridge_relay) ->
     #{
         type => E#entry.type,
         realm_uri => Key#entry_key.realm_uri,
@@ -732,7 +771,7 @@ to_external(#entry{key = Key} = E) ->
 %% in an edge router.
 %% @end
 %% -----------------------------------------------------------------------------
--spec proxy(Ref :: bondy_ref:bridge_relay(), Entry :: external()) -> t().
+-spec proxy(Ref :: bondy_ref:bridge_relay(), Entry :: ext()) -> t().
 
 proxy(Ref, External) ->
     #{

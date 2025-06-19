@@ -70,11 +70,11 @@
 |BONDY_REALM_SECURITY_STATUS|bondy.security.status|bondy.realm.security.status|
 |BONDY_REALM_UPDATE|bondy.security.update_realm|bondy.realm.update|
 |BONDY_REGISTRY_LIST|bondy.registry.list|bondy.wamp.registry.list|
-|BONDY_REG_MATCH|bondy.registry.match|bondy.wamp.registry.match|
+|BONDY_REGISTRY_MATCH|bondy.registry.match|bondy.wamp.registry.match|
 |BONDY_SUBSCRIPTION_LIST|bondy.subscription.list|bondy.wamp.subscription.list|
 |BONDY_TELEMETRY_METRICS|bondy.telemetry.metrics|bondy.telemetry.metrics|
 |BONDY_WAMP_CALLEE_GET|bondy.callee.get|-|
-|BONDY_WAMP_CALLEE_LIST|bondy.callee.list|-|
+|BONDY_REGISTRY_CALLEE_LIST|bondy.callee.list|-|
 
 
 

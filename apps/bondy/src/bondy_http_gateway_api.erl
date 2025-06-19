@@ -1,5 +1,6 @@
 %% =============================================================================
-%%  bondy_rbac_wamp_api.erl -
+%%  bondy_http_gateway_wamp_api.erl - the Cowboy handler for all API Gateway
+%%  requests
 %%
 %%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
 %%
@@ -20,20 +21,23 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_rbac_wamp_api).
+-module(bondy_http_gateway_api).
 -behaviour(bondy_wamp_api).
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_uris.hrl").
 
+
+
 -export([handle_call/3]).
 -export([handle_event/2]).
-
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -49,13 +53,11 @@
     }
     | {reply, wamp_result() | wamp_error()}.
 
-%% -----------------------------------------------------------------------------
-%% @doc It creates a grant for a given realm URI.
-%% @end
-%% -----------------------------------------------------------------------------
-handle_call(?BONDY_GRANT_CREATE, #call{} = M, Ctxt) ->
-    [Uri, Data] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
-    case bondy_rbac:grant(Uri, Data) of
+
+handle_call(?BONDY_HTTP_GATEWAY_LOAD, #call{} = M, Ctxt) ->
+    [Spec] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
+
+    case bondy_http_gateway:load(Spec) of
         ok ->
             R = bondy_wamp_message:result(M#call.request_id, #{}),
             {reply, R};
@@ -64,19 +66,35 @@ handle_call(?BONDY_GRANT_CREATE, #call{} = M, Ctxt) ->
             {reply, E}
     end;
 
-%% -----------------------------------------------------------------------------
-%% @doc It revokes a grant for a given realm URI.
-%% @end
-%% -----------------------------------------------------------------------------
-handle_call(?BONDY_GRANT_REVOKE, #call{} = M, Ctxt) ->
-    [Uri, Data] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
-    case bondy_rbac:revoke(Uri, Data) of
-        ok ->
-            R = bondy_wamp_message:result(M#call.request_id, #{}),
-            {reply, R};
+handle_call(?BONDY_HTTP_GATEWAY_LIST, #call{} = M, Ctxt) ->
+    [] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 0),
+
+    Result = bondy_http_gateway:list(),
+    R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
+    {reply, R};
+
+handle_call(?BONDY_HTTP_GATEWAY_GET, #call{} = M, Ctxt) ->
+    [Id] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
+
+    case bondy_http_gateway:lookup(Id) of
         {error, Reason} ->
             E = bondy_wamp_api_utils:error(Reason, M),
-            {reply, E}
+            {reply, E};
+        Spec ->
+            R = bondy_wamp_message:result(M#call.request_id, #{}, [Spec]),
+            {reply, R}
+    end;
+
+handle_call(?BONDY_HTTP_GATEWAY_DELETE, #call{} = M, Ctxt) ->
+    [Id] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
+
+    case bondy_http_gateway:delete(Id) of
+        {error, Reason} ->
+            E = bondy_wamp_api_utils:error(Reason, M),
+            {reply, E};
+        Spec ->
+            R = bondy_wamp_message:result(M#call.request_id, #{}, [Spec]),
+            {reply, R}
     end;
 
 handle_call(_, #call{} = M, _) ->
@@ -89,9 +107,9 @@ handle_call(_, #call{} = M, _) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-
-handle_event(_, _) ->
+handle_event(_, #event{}) ->
     ok.
+
 
 
 

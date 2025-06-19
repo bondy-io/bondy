@@ -19,7 +19,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_bridge_relay_wamp_api).
+-module(bondy_bridge_relay_api).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 

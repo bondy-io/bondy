@@ -1,6 +1,5 @@
 %% =============================================================================
-%%  bondy_http_gateway_wamp_api.erl - the Cowboy handler for all API Gateway
-%%  requests
+%%  bondy_ticket_wamp_api.erl -
 %%
 %%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
 %%
@@ -21,23 +20,20 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_http_gateway_wamp_api).
+-module(bondy_ticket_api).
 -behaviour(bondy_wamp_api).
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_uris.hrl").
 
-
-
 -export([handle_call/3]).
 -export([handle_event/2]).
+
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -53,49 +49,36 @@
     }
     | {reply, wamp_result() | wamp_error()}.
 
+handle_call(?BONDY_TICKET_ISSUE, #call{} = M, Ctxt) ->
+    [_Uri] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 0),
+    Session = bondy_context:session(Ctxt),
 
-handle_call(?BONDY_HTTP_GATEWAY_LOAD, #call{} = M, Ctxt) ->
-    [Spec] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
+    Opts = case M#call.kwargs of
+        undefined -> maps:new();
+        Map -> Map
+    end,
 
-    case bondy_http_gateway:load(Spec) of
-        ok ->
-            R = bondy_wamp_message:result(M#call.request_id, #{}),
+    case bondy_ticket:issue(Session, Opts) of
+        {ok, Ticket, Claims} ->
+            Resp0 = maps:with(
+                [id, expires_at, issued_at, scope], Claims
+            ),
+            Resp = maps:put(ticket, Ticket, Resp0),
+            R = bondy_wamp_message:result(M#call.request_id, #{}, [Resp]),
             {reply, R};
         {error, Reason} ->
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
 
-handle_call(?BONDY_HTTP_GATEWAY_LIST, #call{} = M, Ctxt) ->
-    [] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 0),
-
-    Result = bondy_http_gateway:list(),
-    R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
+handle_call(?BONDY_TICKET_REVOKE_ALL, #call{} = M, Ctxt) ->
+    [Uri, Authid] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
+    ok = bondy_ticket:revoke_all(Uri, Authid),
+    R = bondy_wamp_message:result(M#call.request_id, #{}),
     {reply, R};
 
-handle_call(?BONDY_HTTP_GATEWAY_GET, #call{} = M, Ctxt) ->
-    [Id] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
-
-    case bondy_http_gateway:lookup(Id) of
-        {error, Reason} ->
-            E = bondy_wamp_api_utils:error(Reason, M),
-            {reply, E};
-        Spec ->
-            R = bondy_wamp_message:result(M#call.request_id, #{}, [Spec]),
-            {reply, R}
-    end;
-
-handle_call(?BONDY_HTTP_GATEWAY_DELETE, #call{} = M, Ctxt) ->
-    [Id] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
-
-    case bondy_http_gateway:delete(Id) of
-        {error, Reason} ->
-            E = bondy_wamp_api_utils:error(Reason, M),
-            {reply, E};
-        Spec ->
-            R = bondy_wamp_message:result(M#call.request_id, #{}, [Spec]),
-            {reply, R}
-    end;
+%% TODO BONDY_TICKET_VERIFY
+%% TODO BONDY_TICKET_REVOKE
 
 handle_call(_, #call{} = M, _) ->
     E = bondy_wamp_api_utils:no_such_procedure_error(M),
@@ -107,9 +90,9 @@ handle_call(_, #call{} = M, _) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-handle_event(_, #event{}) ->
-    ok.
 
+handle_event(_, _) ->
+    ok.
 
 
 

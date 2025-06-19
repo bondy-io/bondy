@@ -125,12 +125,12 @@
 -define(BONDY_REALM_UPDATE,             <<"bondy.realm.update">>).
 
 -define(BONDY_REGISTRY_LIST,            <<"bondy.registry.list">>).
--define(BONDY_REG_MATCH,                <<"bondy.registry.match">>).
+-define(BONDY_REGISTRY_MATCH,                <<"bondy.registry.match">>).
 -define(BONDY_SUBSCRIPTION_LIST,        <<"bondy.subscription.list">>).
 -define(BONDY_REGISTRATION_LIST,        <<"bondy.registration.list">>).
 -define(BONDY_TELEMETRY_METRICS,        <<"bondy.telemetry.metrics">>).
 -define(BONDY_WAMP_CALLEE_GET,          <<"bondy.registry.callee.get">>).
--define(BONDY_WAMP_CALLEE_LIST,         <<"bondy.registry.callee.list">>).
+-define(BONDY_REGISTRY_CALLEE_LIST,         <<"bondy.registry.callee.list">>).
 
 
 %% =============================================================================
@@ -191,6 +191,12 @@
 %% =============================================================================
 
 
+
+-define(BONDY_GROUP_ADD_OLD, <<"bondy.security.add_group">>).
+-define(BONDY_GROUP_DELETE_OLD, <<"bondy.security.delete_group">>).
+-define(BONDY_GROUP_FIND_OLD, <<"bondy.security.find_group">>).
+-define(BONDY_GROUP_LIST_OLD, <<"bondy.security.list_groups">>).
+-define(BONDY_GROUP_UPDATE_OLD, <<"bondy.security.update_group">>).
 -define(BONDY_HTTP_GATEWAY_GET_OLD, <<"bondy.api_gateway.lookup">>).
 -define(BONDY_HTTP_GATEWAY_LIST_OLD, <<"bondy.api_gateway.list">>).
 -define(BONDY_HTTP_GATEWAY_LOAD_OLD, <<"bondy.api_gateway.load">>).
@@ -209,21 +215,6 @@
 -define(BONDY_OAUTH2_TOKEN_LOOKUP_OLD, <<"bondy.oauth2.lookup_token">>).
 -define(BONDY_OAUTH2_TOKEN_REVOKE_ALL_OLD, <<"bondy.oauth2.revoke_tokens">>).
 -define(BONDY_OAUTH2_TOKEN_REVOKE_OLD, <<"bondy.oauth2.revoke_token">>).
--define(BONDY_GROUP_ADD_OLD, <<"bondy.security.add_group">>).
--define(BONDY_GROUP_DELETE_OLD, <<"bondy.security.delete_group">>).
--define(BONDY_GROUP_FIND_OLD, <<"bondy.security.find_group">>).
--define(BONDY_GROUP_LIST_OLD, <<"bondy.security.list_groups">>).
--define(BONDY_GROUP_UPDATE_OLD, <<"bondy.security.update_group">>).
--define(BONDY_SOURCE_ADD_OLD, <<"bondy.security.add_source">>).
--define(BONDY_SOURCE_DELETE_OLD, <<"bondy.security.delete_source">>).
--define(BONDY_SOURCE_FIND_OLD, <<"bondy.security.find_source">>).
--define(BONDY_SOURCE_LIST_OLD, <<"bondy.security.list_sources">>).
--define(BONDY_USER_ADD_OLD, <<"bondy.security.add_user">>).
--define(BONDY_USER_CHANGE_PASSWORD_OLD, <<"bondy.security.change_password">>).
--define(BONDY_USER_DELETE_OLD, <<"bondy.security.delete_user">>).
--define(BONDY_USER_FIND_OLD, <<"bondy.security.find_user">>).
--define(BONDY_USER_LIST_OLD, <<"bondy.security.list_users">>).
--define(BONDY_USER_UPDATE_OLD, <<"bondy.security.update_user">>).
 -define(BONDY_REALM_CREATE_OLD, <<"bondy.security.create_realm">>).
 -define(BONDY_REALM_DELETE_OLD, <<"bondy.security.delete_realm">>).
 -define(BONDY_REALM_GET_OLD, <<"bondy.realm.get">>).
@@ -233,14 +224,22 @@
 -define(BONDY_REALM_SECURITY_IS_ENABLED_OLD, <<"bondy.security.is_enabled">>).
 -define(BONDY_REALM_SECURITY_STATUS_OLD, <<"bondy.security.status">>).
 -define(BONDY_REALM_UPDATE_OLD, <<"bondy.security.update_realm">>).
+-define(BONDY_REGISTRY_CALLEE_LIST_OLD, <<"bondy.callee.list">>).
 -define(BONDY_REGISTRY_LIST_OLD, <<"bondy.registry.list">>).
--define(BONDY_REG_MATCH_OLD, <<"bondy.registry.match">>).
+-define(BONDY_REGISTRY_MATCH_OLD, <<"bondy.registry.match">>).
+-define(BONDY_SOURCE_ADD_OLD, <<"bondy.security.add_source">>).
+-define(BONDY_SOURCE_DELETE_OLD, <<"bondy.security.delete_source">>).
+-define(BONDY_SOURCE_FIND_OLD, <<"bondy.security.find_source">>).
+-define(BONDY_SOURCE_LIST_OLD, <<"bondy.security.list_sources">>).
 -define(BONDY_SUBSCRIPTION_LIST_OLD, <<"bondy.subscription.list">>).
 -define(BONDY_TELEMETRY_METRICS_OLD, <<"bondy.telemetry.metrics">>).
+-define(BONDY_USER_ADD_OLD, <<"bondy.security.add_user">>).
+-define(BONDY_USER_CHANGE_PASSWORD_OLD, <<"bondy.security.change_password">>).
+-define(BONDY_USER_DELETE_OLD, <<"bondy.security.delete_user">>).
+-define(BONDY_USER_FIND_OLD, <<"bondy.security.find_user">>).
+-define(BONDY_USER_LIST_OLD, <<"bondy.security.list_users">>).
+-define(BONDY_USER_UPDATE_OLD, <<"bondy.security.update_user">>).
 -define(BONDY_WAMP_CALLEE_GET_OLD, <<"bondy.callee.get">>).
--define(BONDY_WAMP_CALLEE_LIST_OLD, <<"bondy.callee.list">>).
-
-
 
 
 %% =============================================================================

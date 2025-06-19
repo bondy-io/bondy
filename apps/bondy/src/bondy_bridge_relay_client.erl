@@ -1417,7 +1417,10 @@ add_event_handler(Session, State) when is_map(Session) ->
 
             case IsMatch of
                 true ->
-                    Msg = {Tag, bondy_registry_entry:to_external(Term)},
+                    Msg = {
+                        Tag,
+                        bondy_registry_entry:to_external(Term, bridge_relay)
+                    },
                     ok = ?MODULE:forward(MyRef, Msg);
                 false ->
                     ok
@@ -1527,7 +1530,10 @@ proxy_entry(#{id := SessionId}, State, Entry) ->
             %% We do not want to proxy our own registrations and subscriptions
             State;
         false when Type == registration ->
-            Msg = {registration_added, bondy_registry_entry:to_external(Entry)},
+            Msg = {
+                registration_added,
+                bondy_registry_entry:to_external(Entry, bridge_relay)
+            },
             case send_session_message(SessionId, Msg, State) of
                 ok ->
                     State;
@@ -1536,7 +1542,10 @@ proxy_entry(#{id := SessionId}, State, Entry) ->
             end;
 
         false when Type == subscription ->
-            Msg = {subscription_added, bondy_registry_entry:to_external(Entry)},
+            Msg = {
+                subscription_added,
+                bondy_registry_entry:to_external(Entry, bridge_relay)
+            },
             case send_session_message(SessionId, Msg, State) of
                 ok ->
                     State;

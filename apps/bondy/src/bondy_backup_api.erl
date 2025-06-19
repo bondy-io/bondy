@@ -21,7 +21,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_backup_wamp_api).
+-module(bondy_backup_api).
 -behaviour(bondy_wamp_api).
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").

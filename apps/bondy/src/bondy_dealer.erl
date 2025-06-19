@@ -1025,6 +1025,9 @@ apply_static_callback(#call{} = M0, Ctxt, Mod) ->
             Error = bondy_wamp_api_utils:no_such_procedure_error(M0),
             bondy:send(RealmUri, Caller, Error);
 
+        error:#error{} = Error ->
+            bondy:send(RealmUri, Caller, Error);
+
         Class:Reason:Stacktrace ->
             ?LOG_WARNING(#{
                 description => <<"Error while handling WAMP call">>,
@@ -1730,7 +1733,7 @@ coerce_strategy(Strategy, CallOpts) ->
 
 %% @private
 coerce_routing_key(#{rkey := Value} = CallOpts) ->
-    maps:put('x_routing_key', Value, CallOpts);
+    maps:put('_routing_key', Value, CallOpts);
 
 coerce_routing_key(CallOpts) ->
     CallOpts.
@@ -1804,7 +1807,7 @@ maybe_append_callback_args(Args0, Entry) ->
 %% as value to INVOCATION.Details.
 %% @end
 %% -----------------------------------------------------------------------------
-prepare_call_options(Options, CallId, Uri, Entry, Ctxt) ->
+prepare_call_options(Opts, CallId, Uri, Entry, Ctxt) ->
     RegistrationId =
         case bondy_registry_entry:is_proxy(Entry) of
             true ->
@@ -1816,61 +1819,64 @@ prepare_call_options(Options, CallId, Uri, Entry, Ctxt) ->
                 bondy_registry_entry:id(Entry)
         end,
 
-    %% Forward PPT attributes to INVOCATION.Details
-    Details0 = maps:with(?WAMP_PPT_ATTRS, Options),
+    EOpts = bondy_registry_entry:options(Entry),
 
-    Details1 = Details0#{
-        procedure => Uri,
-        trust_level => 0
-    },
+    %% Forward PPT attributes to INVOCATION.Details
+    Details0 = maps:with(?WAMP_PPT_ATTRS, Opts),
+    Details1 = Details0#{procedure => Uri, trust_level => 0},
+    Details2 = maybe_disclose_caller(Details1, Ctxt, EOpts, Opts),
+    Details = maybe_disclose_session(Details2, Ctxt, EOpts, Opts),
 
     %% We build the invocation details with local data, and store under
     %% CALL.options.'$private'
-
-    %% TODO disclose info only if feature is announced by Callee, Dealer
-    %% and Caller
-    %% NOTICE: The spec defines disclose_me and disclose_caller BUT Autobhan
-    %% has deprecated this in favour of a router-based authrotization which is
-    %% unfortunate as the ideal solution should be the combination of both.
-    %% So for the time being we revert this to `true'.
-    DiscloseCaller = bondy_registry_entry:get_option(
-        disclose_caller, Entry, true
-    ),
-    DiscloseMe = maps:get(disclose_me, Options, true),
-
-    Details2 = case DiscloseCaller orelse DiscloseMe of
-        true ->
-            bondy_context:caller_details(Ctxt, Details1);
-        false ->
-            Details1
-    end,
-
-    DiscloseSession = bondy_registry_entry:get_option(
-        'x_disclose_session_info', Entry, false
-    ),
-
-    Details = case DiscloseSession of
-        true ->
-            Session = bondy_context:session(Ctxt),
-            Info0 = bondy_session:to_external(Session),
-
-            %% To be deprecated, we should return Info0 on the next release
-            Info = Info0#{
-                'x_authroles' => bondy_session:authroles(Session),
-                'x_meta' => key_value:get([authextra, meta], Info0, #{})
-            },
-            Details2#{'x_session_info' => Info};
-        false ->
-            Details2
-    end,
-
-    Options#{
+    Opts#{
         '$private' => #{
             call_id => CallId,
             registration_id => RegistrationId,
             invocation_details => Details
         }
     }.
+
+
+%% @private
+%% TODO disclose info only if feature is announced by Callee, Dealer
+%% and Caller
+%% NOTICE: The spec defines disclose_me and disclose_caller BUT Autobhan
+%% has deprecated this in favour of a router-based authrotization which is
+%% unfortunate as the ideal solution should be the combination of both.
+%% So for the time being we revert this to `true'.
+maybe_disclose_caller(Acc, Ctxt, EOpts, Opts) ->
+    Disclose =
+        maps:get(disclose_caller, EOpts, true)
+        orelse maps:get(disclose_me, Opts, true),
+
+    case Disclose of
+        true ->
+            bondy_context:caller_details(Ctxt, Acc);
+
+        false ->
+            Acc
+    end.
+
+%% @private
+maybe_disclose_session(Acc, Ctxt, #{'_disclose_session_info' := true}, _) ->
+    Session = bondy_context:session(Ctxt),
+    Info = bondy_session:to_external(Session),
+    Acc#{'_session_info' => Info};
+
+maybe_disclose_session(Acc, Ctxt, #{'x_disclose_session_info' := true}, _) ->
+    %% To be deprecated
+    Session = bondy_context:session(Ctxt),
+    Info = bondy_session:to_external(Session),
+    Acc#{
+        'x_session_info' => Info#{
+            'x_authroles' => bondy_session:authroles(Session),
+            'x_meta' => key_value:get([authextra, meta], Info, #{})
+        }
+    };
+
+maybe_disclose_session(Acc, _, _, _) ->
+    Acc.
 
 
 %% @private
