@@ -366,7 +366,7 @@ get(Type, [RealmUri, RegId, _Details]) ->
             {error, not_found} ->
                 {error, bondy_wamp_api_utils:no_such_registration_error(RegId)};
             Entry ->
-                {ok, bondy_registry_entry:to_details_map(Entry)}
+                {ok, bondy_registry_entry:to_external(Entry, wamp_meta)}
         end
     catch
         Class:Reason:Stacktrace ->
