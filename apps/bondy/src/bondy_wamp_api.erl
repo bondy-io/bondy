@@ -110,7 +110,7 @@ do_handle_call(<<"bondy.http_gateway.", _/binary>> = Proc, M, Ctxt) ->
 do_handle_call(<<"bondy.oauth2.", _/binary>> = Proc, M, Ctxt) ->
     bondy_oauth2_api:handle_call(Proc, M, Ctxt);
 
-do_handle_call(<<"bondy.permission.", _/binary>> = Proc, M, Ctxt) ->
+do_handle_call(<<"bondy.rbac.", _/binary>> = Proc, M, Ctxt) ->
     bondy_rbac_api:handle_call(Proc, M, Ctxt);
 
 do_handle_call(<<"bondy.realm.", _/binary>> = Proc, M, Ctxt) ->

@@ -398,6 +398,27 @@ handle_call(?BONDY_SOURCE_MATCH, #call{} = M, Ctxt) ->
     R = bondy_wamp_message:result(M#call.request_id, #{}, [Ext]),
     {reply, R};
 
+%% -----------------------------------------------------------------------------
+%% bondy.grant.*
+%% -----------------------------------------------------------------------------
+
+handle_call(?BONDY_RBAC_AUTHORIZE, #call{} = M, Ctxt) ->
+    [AuthId, Permission, Resource] =
+        bondy_wamp_api_utils:validate_call_args(M, Ctxt, 3),
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    RBACCtxt = bondy_rbac:get_context(RealmUri, AuthId),
+    R =
+        try bondy_rbac:authorize(Permission, Resource, RBACCtxt) of
+            ok ->
+                bondy_wamp_message:result(M#call.request_id, #{}, [true])
+        catch
+            error:{not_authorized, Msg} ->
+                bondy_wamp_message:result(
+                    M#call.request_id, #{}, [false], #{message => Msg}
+                )
+        end,
+
+    {reply, R};
 
 handle_call(_, #call{} = M, _) ->
     E = bondy_wamp_api_utils:no_such_procedure_error(M),
@@ -413,5 +434,11 @@ handle_call(_, #call{} = M, _) ->
 handle_event(_, _) ->
     ok.
 
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
 
 

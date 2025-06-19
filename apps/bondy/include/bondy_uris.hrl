@@ -114,6 +114,7 @@
 -define(BONDY_USER_REMOVE_GROUPS,  <<"bondy.user.remove_groups">>).
 -define(BONDY_USER_UPDATE,         <<"bondy.user.update">>).
 
+-define(BONDY_RBAC_AUTHORIZE,       <<"bondy.rbac.authorize">>).
 -define(BONDY_REALM_CREATE,             <<"bondy.realm.create">>).
 -define(BONDY_REALM_DELETE,             <<"bondy.realm.delete">>).
 -define(BONDY_REALM_GET,                <<"bondy.realm.get">>).
