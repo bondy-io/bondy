@@ -81,6 +81,7 @@
 -define(BONDY_GROUP_GET,           <<"bondy.group.get">>).
 -define(BONDY_GROUP_LIST,          <<"bondy.group.list">>).
 -define(BONDY_GROUP_UPDATE,        <<"bondy.group.update">>).
+-define(BONDY_GROUP_GRANTS,        <<"bondy.group.grants">>).
 -define(BONDY_SOURCE_ADD,          <<"bondy.source.add">>).
 -define(BONDY_SOURCE_DELETE,       <<"bondy.source.delete">>).
 -define(BONDY_SOURCE_GET,          <<"bondy.source.get">>).
@@ -95,7 +96,6 @@
 -define(BONDY_GRANT_REVOKE,        <<"bondy.grant.revoke">>).
 
 -define(BONDY_REALM_GRANTS,        <<"bondy.realm.grants">>).
--define(BONDY_GROUP_GRANTS,        <<"bondy.group.grants">>).
 -define(BONDY_USER_GRANTS,         <<"bondy.user.grants">>).
 
 -define(BONDY_USER_ADD,            <<"bondy.user.add">>).
@@ -125,13 +125,11 @@
 -define(BONDY_REALM_SECURITY_STATUS,    <<"bondy.realm.security.status">>).
 -define(BONDY_REALM_UPDATE,             <<"bondy.realm.update">>).
 
--define(BONDY_REGISTRY_LIST,            <<"bondy.registry.list">>).
--define(BONDY_REGISTRY_MATCH,                <<"bondy.registry.match">>).
+
+-define(BONDY_REGISTRATION_LIST,    <<"bondy.registration.list">>).
+-define(BONDY_REGISTRATION_CALLEE_LIST,    <<"bondy.registration.callee.list">>).
 -define(BONDY_SUBSCRIPTION_LIST,        <<"bondy.subscription.list">>).
--define(BONDY_REGISTRATION_LIST,        <<"bondy.registration.list">>).
 -define(BONDY_TELEMETRY_METRICS,        <<"bondy.telemetry.metrics">>).
--define(BONDY_WAMP_CALLEE_GET,          <<"bondy.registry.callee.get">>).
--define(BONDY_REGISTRY_CALLEE_LIST,         <<"bondy.registry.callee.list">>).
 
 
 %% =============================================================================

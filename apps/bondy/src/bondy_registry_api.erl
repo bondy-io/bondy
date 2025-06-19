@@ -52,9 +52,9 @@
     | {reply, wamp_result() | wamp_error()}.
 
 %% -----------------------------------------------------------------------------
-%% bondy.registry.*
+%% bondy.registration.*
 %% -----------------------------------------------------------------------------
-handle_call(?BONDY_REGISTRY_LIST, M, Ctxt) ->
+handle_call(?BONDY_REGISTRATION_LIST, M, Ctxt) ->
     [RealmUri] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
     case list(registration, RealmUri) of
         {ok, Result} ->
@@ -66,11 +66,9 @@ handle_call(?BONDY_REGISTRY_LIST, M, Ctxt) ->
             {reply, E}
     end;
 
-handle_call(?BONDY_REGISTRY_CALLEE_LIST, M, Ctxt) ->
-        %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Details]
-    L = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
-
-    case list_callees(L) of
+handle_call(?BONDY_REGISTRATION_CALLEE_LIST, M, Ctxt) ->
+    Args = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1, 2),
+    case list_callees(Args) of
         {ok, Result} ->
             R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
             {reply, R};

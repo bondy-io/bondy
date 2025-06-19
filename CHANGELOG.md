@@ -7,6 +7,7 @@
 * New standard `CALL.Options`
     * `_disclose_session` - The callee will receive and the session information 
     in  `INVOCATION.Details._session_info`
+- Drop x_ prefix for RPC experimental options
     
 ## 1.0.0-rc.37
 * Added bounded queues for job worker pool and their configuration

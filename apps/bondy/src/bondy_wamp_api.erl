@@ -116,7 +116,7 @@ do_handle_call(<<"bondy.rbac.", _/binary>> = Proc, M, Ctxt) ->
 do_handle_call(<<"bondy.realm.", _/binary>> = Proc, M, Ctxt) ->
     bondy_realm_api:handle_call(Proc, M, Ctxt);
 
-do_handle_call(<<"bondy.registry.", _/binary>> = Proc, M, Ctxt) ->
+do_handle_call(<<"bondy.registration.", _/binary>> = Proc, M, Ctxt) ->
     bondy_registry_api:handle_call(Proc, M, Ctxt);
 
 do_handle_call(<<"bondy.router.bridge.", _/binary>> = Proc, M, Ctxt) ->
@@ -124,6 +124,9 @@ do_handle_call(<<"bondy.router.bridge.", _/binary>> = Proc, M, Ctxt) ->
 
 do_handle_call(<<"bondy.source.", _/binary>> = Proc, M, Ctxt) ->
     bondy_rbac_api:handle_call(Proc, M, Ctxt);
+
+do_handle_call(<<"bondy.subscription.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_registry_api:handle_call(Proc, M, Ctxt);
 
 do_handle_call(<<"bondy.telemetry.", _/binary>> = Proc, M, Ctxt) ->
     bondy_telemetry_api:handle_call(Proc, M, Ctxt);
@@ -237,18 +240,12 @@ resolve(?BONDY_REALM_SECURITY_STATUS_OLD) ->
     ?BONDY_REALM_SECURITY_STATUS;
 resolve(?BONDY_REALM_UPDATE_OLD) ->
     ?BONDY_REALM_UPDATE;
-resolve(?BONDY_REGISTRY_LIST_OLD) ->
-    ?BONDY_REGISTRY_LIST;
-resolve(?BONDY_REGISTRY_MATCH_OLD) ->
-    ?BONDY_REGISTRY_MATCH;
 resolve(?BONDY_SUBSCRIPTION_LIST_OLD) ->
     ?BONDY_SUBSCRIPTION_LIST;
 resolve(?BONDY_TELEMETRY_METRICS_OLD) ->
     ?BONDY_TELEMETRY_METRICS;
-resolve(?BONDY_WAMP_CALLEE_GET_OLD) ->
-    ?BONDY_WAMP_CALLEE_GET;
 resolve(?BONDY_REGISTRY_CALLEE_LIST_OLD) ->
-    ?BONDY_REGISTRY_CALLEE_LIST;
+    ?BONDY_REGISTRATION_CALLEE_LIST;
 resolve(Uri) ->
     Uri.
 
