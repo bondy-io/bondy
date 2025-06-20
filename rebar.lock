@@ -1,6 +1,5 @@
 {"1.2.0",
 [{<<"accept">>,{pkg,<<"accept">>,<<"0.3.6">>},2},
- {<<"acceptor_pool">>,{pkg,<<"acceptor_pool">>,<<"1.0.0">>},1},
  {<<"app_config">>,
   {git,"https://github.com/leapsight/app_config.git",
        {ref,"6c4aee8fc3d08b59e22183a530cb4ce29d4b348b"}},
@@ -80,7 +79,7 @@
  {<<"parse_trans">>,{pkg,<<"parse_trans">>,<<"3.4.1">>},0},
  {<<"partisan">>,
   {git,"http://github.com/lasp-lang/partisan.git",
-       {ref,"7fc89a6a790c36a6c94a080758b6571693e48636"}},
+       {ref,"8d4c79e98fe36aa763bbb60048a5453c06a42dd3"}},
   0},
  {<<"plum_db">>,
   {git,"https://github.com/Leapsight/plum_db.git",
@@ -119,7 +118,6 @@
 [
 {pkg_hash,[
  {<<"accept">>, <<"AD44AC7D704BF70EF8FB2E313EF5B978F9D1330BDDAC64509E93AFDA13281215">>},
- {<<"acceptor_pool">>, <<"43C20D2ACAE35F0C2BCD64F9D2BDE267E459F0F3FD23DAB26485BF518C281B21">>},
  {<<"backoff">>, <<"83B72ED2108BA1EE8F7D1C22E0B4A00CFE3593A67DBC792799E8CCE9F42F796B">>},
  {<<"base16">>, <<"283644E2B21BD5915ACB7178BED7851FB07C6E5749B8FAD68A53C501092176D9">>},
  {<<"brod">>, <<"EA33D1D8D4F26B4EE9AFA454B0292B378470EDE5CE22C2BA80457AE59699C129">>},
@@ -165,7 +163,6 @@
  {<<"uuid">>, <<"B2078D2CC814F53AFA52D36C91E08962C7E7373585C623F4C0EA6DFB04B2AF94">>}]},
 {pkg_hash_ext,[
  {<<"accept">>, <<"A5167FA1AE90315C3F1DD189446312F8A55D00EFA357E9C569BDA47736B874C3">>},
- {<<"acceptor_pool">>, <<"0CBCD83FDC8B9AD2EEE2067EF8B91A14858A5883CB7CD800E6FCD5803E158788">>},
  {<<"backoff">>, <<"CF0CFFF8995FB20562F822E5CC47D8CCF664C5ECDC26A684CBE85C225F9D7C39">>},
  {<<"base16">>, <<"02AFD0827E61A7B07093873E063575CA3A2B07520567C7F8CEC7C5D42F052D76">>},
  {<<"brod">>, <<"256E51AD30CBB6127527BFDF2E206E99B23FB423716524FC3890E276B3CE1308">>},
