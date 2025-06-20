@@ -530,11 +530,16 @@ handle_inbound(Data, State0) ->
 
 handle_outbound(M, State0) ->
     case bondy_wamp_protocol:handle_outbound(M, State0#state.protocol_state) of
+        {ok, ProtoState} ->
+            State = State0#state{protocol_state = ProtoState},
+            {noreply, State, ?TIMEOUT(State)};
+
         {ok, Bin, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
             case send(Bin, State) of
                 ok ->
                     {noreply, State, ?TIMEOUT(State)};
+
                 {error, Reason} ->
                     {stop, Reason, State}
             end;
@@ -560,6 +565,7 @@ handle_outbound(M, State0) ->
             case send(Bin, State) of
                 ok ->
                     {noreply, disable_ping(State)};
+
                 {error, Reason} ->
                     {stop, Reason, disable_ping(State)}
             end

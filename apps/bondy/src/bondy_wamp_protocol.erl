@@ -360,11 +360,15 @@ handle_outbound(M, St) ->
             ok = notify(M, St),
             Bin = bondy_wamp_encoding:encode(M, encoding(St)),
             {ok, Bin, St};
+
         false ->
-            %% RFC: WAMP implementations MUST close sessions (disposing all of
-            %% their resources such as subscriptions and registrations) on
-            %% protocol errors caused by offending peers.
-            {stop, St}
+            %% This SHOULD not happen, we drop the message
+            ?LOG_ERROR(#{
+                description =>
+                    "Invalid WAMP message dropped by protocol handler",
+                data => M
+            }),
+            {ok, St}
     end.
 
 
