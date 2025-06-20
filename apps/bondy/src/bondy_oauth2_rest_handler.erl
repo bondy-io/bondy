@@ -601,6 +601,12 @@ jwks(Req0, St) ->
     RealmUri = St#state.realm_uri,
 
     case bondy_realm:lookup(RealmUri) of
+        {ok, Realm} ->
+            #{public_keys := Keys} = bondy_realm:to_external(Realm),
+            KeySet = #{keys => Keys},
+            Req1 = prepare_request(KeySet, #{}, Req0),
+            {true, Req1, St};
+
         {error, not_found} ->
             ErrorMap = maps:without(
                 [<<"status_code">>],
@@ -610,12 +616,7 @@ jwks(Req0, St) ->
                 ?HTTP_NOT_FOUND,
                 prepare_request(ErrorMap, #{}, Req0)
             ),
-            {stop, Req1, St};
-        Realm ->
-            #{public_keys := Keys} = bondy_realm:to_external(Realm),
-            KeySet = #{keys => Keys},
-            Req1 = prepare_request(KeySet, #{}, Req0),
-            {true, Req1, St}
+            {stop, Req1, St}
     end.
 
 

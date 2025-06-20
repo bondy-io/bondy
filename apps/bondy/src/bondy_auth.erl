@@ -170,10 +170,11 @@ format_status(Ctxt) ->
 init(SessionId, Uri, UserId, Roles, SourceIP)
 when is_binary(SessionId), is_binary(Uri), ?IS_IP(SourceIP) ->
     case bondy_realm:lookup(string:casefold(Uri)) of
+        {ok, Realm} ->
+            init(SessionId, Realm, UserId, Roles, SourceIP);
+
         {error, not_found} ->
-            {error, {no_such_realm, Uri}};
-        Realm ->
-            init(SessionId, Realm, UserId, Roles, SourceIP)
+            {error, {no_such_realm, Uri}}
     end;
 
 init(SessionId, Realm, Username0, Roles0, SourceIP)

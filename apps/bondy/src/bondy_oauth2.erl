@@ -170,10 +170,11 @@ issue_token(GrantType, RealmUri, Issuer, Username, Groups, Meta) ->
 
 issue_token(GrantType, RealmUri, Data0) ->
    case bondy_realm:lookup(RealmUri) of
+        {ok, Realm} ->
+            do_issue_token(Realm, Data0, supports_refresh_token(GrantType));
+
         {error, not_found} ->
-           {error, {no_such_realm, RealmUri}};
-        Realm ->
-            do_issue_token(Realm, Data0, supports_refresh_token(GrantType))
+           {error, {no_such_realm, RealmUri}}
     end.
 
 

@@ -484,14 +484,14 @@ handle_inbound_messages(
 
     %% Lookup or create realm
     case bondy_realm:get(Uri) of
-        {error, not_found} ->
-            stop({authentication_failed, {no_such_realm, Uri}}, St);
-
-        Realm ->
+        {ok, Realm} ->
             ok = logger:update_process_metadata(#{realm => Uri}),
             maybe_open_session(
                 maybe_auth_challenge(M#hello.details, Realm, St)
-            )
+            );
+
+        {error, not_found} ->
+            stop({authentication_failed, {no_such_realm, Uri}}, St)
     end;
 
 handle_inbound_messages([#hello{} = M|_], #wamp_state{} = St, _) ->
