@@ -104,7 +104,7 @@ pool() ->
 %% calling process' pid.
 %% -----------------------------------------------------------------------------
 %%
--spec open(Session :: bondy_session:t()) -> ok | {error, timeout}.
+-spec open(Session :: bondy_session:t()) -> ok | {error, timeout | any()}.
 
 open(Session) ->
     do_for_worker(
@@ -135,7 +135,7 @@ open(Session) ->
     bondy_session_id:t(),
     uri() | bondy_realm:t(),
     bondy_session:properties()) ->
-    {ok, bondy_session:t()} | {error, timeout}.
+    {ok, bondy_session:t()} | {error, timeout | any()}.
 
 open(Id, RealmOrUri, Opts) ->
     do_for_worker(
@@ -251,7 +251,7 @@ handle_call({open, Session0}, _From, State0) ->
     %% We store the session
     {ok, Session} = bondy_session:store(Session0),
 
-    %% We init the session-sceped counters
+    %% We init the session-scoped counters
     RealmUri = bondy_session:realm_uri(Session),
     SessionId = bondy_session:id(Session),
     ok = bondy_message_id:init_session(RealmUri, SessionId),
@@ -266,18 +266,29 @@ handle_call({open, Session0}, _From, State0) ->
     %% process terminates
     Ref = erlang:monitor(process, Pid),
 
-    %% We register WAMP procedures
-    ok = register_procedures(Session),
+    %% This must be safe to avoid crashing the server as this acts as a
+    %% session supervisor
+    try
+        %% We register WAMP procedures
+        ok = register_procedures(Session),
+        Refs = State0#state.monitor_refs,
+        State = State0#state{monitor_refs = Refs#{Id => Ref, Ref => Id}},
+        {reply, {ok, Session}, State}
 
-    Refs = State0#state.monitor_refs,
+    catch
+          Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Error while registering session 'get' procedure",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            erlang:demonitor(Ref),
+            ok = cleanup(Session),
+            {reply, {error, Reason}, State0}
+    end;
 
-    State = State0#state{
-        monitor_refs = Refs#{
-            Id => Ref,
-            Ref => Id
-        }
-    },
-    {reply, {ok, Session}, State};
 
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
@@ -477,8 +488,19 @@ do_close_all(Bindings, Opts0, ReasonUri) ->
             )
     end,
 
-    Matches = bondy_session:match(Bindings, Opts),
-    ok = bondy_utils:foreach(Fun, Matches).
+    try
+        Matches = bondy_session:match(Bindings, Opts),
+        ok = bondy_utils:foreach(Fun, Matches)
+    catch
+      Class:Reason:Stacktrace ->
+        ?LOG_ERROR(#{
+            description => "Error while closing all sessions",
+            class => Class,
+            reason => Reason,
+            stacktrace => Stacktrace
+        }),
+        ok
+    end.
 
 
 %% @private
