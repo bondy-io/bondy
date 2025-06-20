@@ -585,7 +585,7 @@
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.size",
 "bondy.router_pool.size", [
-  {default, 8},
+  {default, 16},
   {validators, ["pos_integer"]},
   {datatype, integer},
   hidden
