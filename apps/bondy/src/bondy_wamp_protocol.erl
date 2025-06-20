@@ -553,8 +553,12 @@ handle_inbound_messages(
     end;
 
 handle_inbound_messages(_, #wamp_state{state_name = shutting_down} = St, _) ->
-    %% TODO should we reply with ERROR and keep on waiting for the client GOODBYE?
-    Reason = <<"Router is shutting down. You should have replied with GOODBYE message.">>,
+    %% TODO should we reply with ERROR and keep on waiting for the client
+    %% GOODBYE?
+    Reason = <<
+        "Router is shutting down. "
+        "You should have replied with GOODBYE message."
+    >>,
     stop({protocol_violation, Reason}, St);
 
 handle_inbound_messages([], St, []) ->
