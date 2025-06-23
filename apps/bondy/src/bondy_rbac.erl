@@ -907,12 +907,12 @@ derive_strategy(Uri, [H|T]) ->
     end;
 
 derive_strategy(_, []) ->
-    error(bondy_error:map({missing_required_value, <<"match">>})).
+    error(bondy_error_utils:map({missing_required_value, <<"match">>})).
 
 
 %% @private
 inconsistency_error(Keys) ->
-    error(bondy_error:map({inconsistency_error, Keys})).
+    error(bondy_error_utils:map({inconsistency_error, Keys})).
 
 
 %% -----------------------------------------------------------------------------

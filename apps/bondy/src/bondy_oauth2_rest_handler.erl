@@ -610,7 +610,7 @@ jwks(Req0, St) ->
         {error, not_found} ->
             ErrorMap = maps:without(
                 [<<"status_code">>],
-                bondy_error:map({no_such_realm, RealmUri})
+                bondy_error_utils:map({no_such_realm, RealmUri})
             ),
             Req1 = cowboy_req:reply(
                 ?HTTP_NOT_FOUND,
@@ -655,16 +655,16 @@ reply(common_name_mismatch, Req) ->
 
 reply(oauth2_invalid_client = Error, Req) ->
     Headers = #{<<"www-authenticate">> => <<"Basic">>},
-    ErrorMap = maps:without([<<"status_code">>], bondy_error:map(Error)),
+    ErrorMap = maps:without([<<"status_code">>], bondy_error_utils:map(Error)),
     cowboy_req:reply(
         ?HTTP_UNAUTHORIZED, prepare_request(ErrorMap, Headers, Req));
 
 reply(unsupported_token_type = Error, Req) ->
-    {Code, Map} = maps:take(<<"status_code">>, bondy_error:map(Error)),
+    {Code, Map} = maps:take(<<"status_code">>, bondy_error_utils:map(Error)),
     cowboy_req:reply(Code, prepare_request(Map, #{}, Req));
 
 reply(Error, Req) ->
-    Map0 = bondy_error:map(Error),
+    Map0 = bondy_error_utils:map(Error),
     {Code, Map1} = case maps:take(<<"status_code">>, Map0) of
         error ->
             {?HTTP_BAD_REQUEST, Map0};

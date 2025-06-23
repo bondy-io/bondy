@@ -129,7 +129,7 @@ maybe_error(Val, M) ->
 %% @end
 %% -----------------------------------------------------------------------------
 error({not_authorized, Reason}, M) ->
-    Map = bondy_error:map(Reason),
+    Map = bondy_error_utils:map(Reason),
 
     bondy_wamp_message:error_from(
         M,
@@ -139,12 +139,12 @@ error({not_authorized, Reason}, M) ->
     );
 
 error(Reason, #call{} = M) ->
-    #{<<"code">> := Code} = Map = bondy_error:map(Reason),
+    #{<<"code">> := Code} = Map = bondy_error_utils:map(Reason),
     Mssg = maps:get(<<"message">>, Map, <<>>),
     bondy_wamp_message:error_from(
         M,
         #{},
-        bondy_error:code_to_uri(Code),
+        bondy_error_utils:code_to_uri(Code),
         [Mssg],
         Map
     ).
