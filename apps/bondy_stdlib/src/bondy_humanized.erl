@@ -7,21 +7,6 @@
 
 -include("bondy_stdlib.hrl").
 
-?MODULEDOC("""
-Converts a list of items into a human-readable string where each item is
-enclosed in single quotes
-and the last item is preceded by the conjunction (defaults to "and").
-
-Examples:
-```
-  > bondy_humanized:join([~"apple", banana, 100]).
-  ~"'apple', 'banana' and '100'"
-  > bondy_humanized:join([~"apple"]).
-  ~"'apple'"
-```
-""").
-
-
 -export([join/1]).
 -export([join/2]).
 
@@ -32,12 +17,28 @@ Examples:
 %% =============================================================================
 
 
+-doc """
+Same as calling `join/2` with `~"and"` as `Conjunction`.
+""".
 -spec join([any()]) -> binary().
 
 join(Items) ->
     join(Items, ~"and").
 
 
+?DOC("""
+Converts a list of items into a human-readable string where each item is
+enclosed in single quotes
+and the last item is preceded by the conjunction (defaults to "and").
+
+Examples:
+```
+  > bondy_humanized:join([~"apple", banana, 100], ~"and").
+  ~"'apple', 'banana' and '100'"
+  > bondy_humanized:join([~"apple"]).
+  ~"'apple'"
+```
+""").
 -spec join([any()], Conjunction :: binary()) -> binary().
 
 join([], _) ->
