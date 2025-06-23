@@ -249,7 +249,7 @@ websocket_handle({T, Data}, #state{frame_type = T} = State0) ->
     ProtoState0 = State0#state.protocol_state,
 
     case bondy_wamp_protocol:handle_inbound(Data, ProtoState0) of
-        {ok, ProtoState} ->
+        {noreply, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
             {[], reset_ping(State)};
 

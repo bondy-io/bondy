@@ -259,10 +259,11 @@ validate_subprotocol(_) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_inbound(binary(), state()) ->
-    {ok, state()}
+    {noreply, state()}
+    | {reply, [binary()], state()}
     | {stop, state()}
     | {stop, [binary()], state()}
-    | {reply, [binary()], state()}.
+    | {stop, Reason :: any(), [binary()], state()}.
 
 handle_inbound(Data, St) ->
     try bondy_wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
@@ -380,7 +381,7 @@ handle_outbound(M, St) ->
 
 
 -spec handle_inbound_messages([raw_wamp_message()], state()) ->
-    {ok, state()}
+    {noreply, state()}
     | {reply, [binary()], state()}
     | {stop, state()}
     | {stop, [binary()], state()}
@@ -414,37 +415,33 @@ handle_inbound_messages(Messages, St) ->
 %% -----------------------------------------------------------------------------
 -spec handle_inbound_messages(
     [raw_wamp_message()], state(), Acc :: [raw_wamp_message()]) ->
-    {ok, state()}
+    {noreply, state()}
     | {stop, state()}
     | {stop, [binary()], state()}
+    | {stop, Reason :: any(), [binary()], state()}
     | {reply, [binary()], state()}.
 
 handle_inbound_messages(
-    [#abort{} = M|_], #wamp_state{state_name = Name} = St0, [])
-    when Name =/= established ->
-    %% Client aborting, we ignore any subsequent messages
-    Uri = M#abort.reason_uri,
-    Details = M#abort.details,
+    [#abort{} = M|_], #wamp_state{state_name = established} = St0, []) ->
     ?LOG_INFO(#{
         description => "Client aborted",
-        reason => Uri,
-        state_name => Name,
-        details => Details
+        reason => M#abort.reason_uri,
+        details => M#abort.details
     }),
     ok = notify(M, St0),
     St1 = St0#wamp_state{state_name = closed},
+
     {stop, St1};
 
 handle_inbound_messages(
     [#goodbye{} = M|_], #wamp_state{state_name = established} = St0, Acc) ->
-    %% Client initiated a goodbye, we ignore any subsequent messages
+    %% Client initiated goodbye, we ignore any subsequent messages
     %% We reply with all previous messages plus a goodbye and stop
     Reply = bondy_wamp_message:goodbye(
         #{message => <<"Session closed by client.">>},
         ?WAMP_GOODBYE_AND_OUT
     ),
     Bin = bondy_wamp_encoding:encode(Reply, encoding(St0)),
-
     St1 = St0#wamp_state{
         state_name = closed,
         goodbye_reason = M#goodbye.reason_uri
@@ -460,18 +457,24 @@ handle_inbound_messages(
     %% We reply all previous messages and close
     ok = notify(M, St0),
     St1 = St0#wamp_state{state_name = closed},
+
     {stop, shutdown, lists:reverse(Acc), St1};
 
 handle_inbound_messages(
     [#hello{} = M|_], #wamp_state{context = #{session := _}} = St, Acc) ->
     %% Client already has a session!
-    %% RFC: It is a protocol error to receive a second "HELLO" message during
+    %% RFC:
+    %% It is a protocol error to receive a second "HELLO" message during
     %% the lifetime of the session and the _Peer_ must fail the session if that
     %% happens.
     %% We reply all previous messages plus an abort message and close
     %% state_name might be 'close' already
     ok = notify(M, St),
-    Reason = <<"You've sent a HELLO when the session is already established.">>,
+    Reason = <<
+        "Duplicate Session Initialization. "
+        "You've attempted to send a HELLO message when you already "
+        "have an active session established."
+    >>,
     stop({protocol_violation, Reason}, Acc, St);
 
 handle_inbound_messages(
@@ -567,7 +570,7 @@ handle_inbound_messages(_, #wamp_state{state_name = shutting_down} = St, _) ->
 
 handle_inbound_messages([], St, []) ->
     %% We have no replies
-    {ok, St};
+    {noreply, St};
 
 handle_inbound_messages([], St, Acc) ->
     {reply, lists:reverse(Acc), St};
