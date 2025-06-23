@@ -852,7 +852,7 @@ proxy_details(#entry{} = E) ->
 %% It will also called the `on_update/3' callback if enabled.
 %% @end
 %% -----------------------------------------------------------------------------
--spec store(Entry :: t()) -> ok.
+-spec store(Entry :: t()) -> ok | {error, any()}.
 
 store(#entry{} = Entry) ->
     PDBPrefix = pdb_prefix(Entry),
