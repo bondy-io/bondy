@@ -216,11 +216,12 @@ when is_map(Ctxt) ->
             %% Realm doesn't exist
             {error, Reason};
 
-        _:Reason:Stacktrace->
+        Class:Reason:Stacktrace->
             SessionId = bondy_context:session_id(Ctxt),
             ExtId = bondy_utils:external_session_id(SessionId),
             ?LOG_WARNING(#{
                 description => "Error while publishing",
+                class => Class,
                 reason => Reason,
                 protocol_session_id => ExtId,
                 session_id => SessionId,
@@ -294,7 +295,10 @@ subscribe(RealmUri, Opts, Topic, Ref)  ->
             {ok, bondy_registry_entry:id(Entry)};
 
         {error, {already_exists, _Entry}} ->
-            {error, already_exists}
+            {error, already_exists};
+
+        {error, _} = Error ->
+            Error
     end.
 
 
@@ -317,7 +321,8 @@ unsubscribe(Subscriber) when is_pid(Subscriber) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec unsubscribe(id(), bondy_context:t() | uri()) -> ok | {error, not_found}.
+-spec unsubscribe(id(), bondy_context:t() | uri()) ->
+    ok | {error, not_found | any()}.
 
 unsubscribe(SubsId, RealmUri) when is_integer(SubsId), is_binary(RealmUri) ->
     unsubscribe(SubsId, bondy_context:local_context(RealmUri));
@@ -348,7 +353,7 @@ unsubscribe(SubsId, Ctxt) when is_integer(SubsId) ->
                     Error
             end;
 
-        {error, not_found} = Error ->
+        {error, _} = Error ->
             Error
     end.
 
