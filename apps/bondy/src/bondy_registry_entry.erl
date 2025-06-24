@@ -610,7 +610,6 @@ origin_id(#entry{origin_id = Val}) ->
     Val.
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Returns the uri this entry is about i.e. either a subscription topic_uri or
