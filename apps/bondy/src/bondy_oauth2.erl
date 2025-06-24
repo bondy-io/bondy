@@ -78,7 +78,7 @@
     meta = #{}              ::  map(),
     expires_in              ::  pos_integer(),
     issued_at               ::  pos_integer(),
-    is_active = true        ::  boolean
+    is_active = true        ::  boolean()
 }).
 
 
