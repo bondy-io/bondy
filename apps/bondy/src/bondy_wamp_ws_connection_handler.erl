@@ -64,7 +64,6 @@
     ping_tref               ::  optional(reference()),
     ping_payload            ::  binary(),
     ping_retry              ::  optional(bondy_retry:t()),
-    hibernate = false       ::  boolean(),
     protocol_state          ::  optional(bondy_wamp_protocol:state())
 }).
 
@@ -209,7 +208,7 @@ websocket_init(#state{protocol_state = PSt} = State) ->
 
     ?LOG_INFO(#{description => "Established connection with client."}),
 
-    {[], reset_ping(State)}.
+    {[], reset_ping(State), hibernate}.
 
 
 %% -----------------------------------------------------------------------------
@@ -233,17 +232,17 @@ websocket_handle(ping, State) ->
 
 websocket_handle({ping, _}, State) ->
     %% Cowboy already replies to pings for us, we return nothing
-    {[], reset_ping(State)};
+    {[], reset_ping(State), hibernate};
 
 websocket_handle(pong, State) ->
     %% https://datatracker.ietf.org/doc/html/rfc6455#page-37
     %% A Pong frame MAY be sent unsolicited.  This serves as a unidirectional
     %% heartbeat. A response to an unsolicited Pong frame is not expected.
-    {[], reset_ping(State)};
+    {[], reset_ping(State), hibernate};
 
 websocket_handle({pong, Data}, #state{ping_payload = Data} = State) ->
     %% We've got an answer to a Bondy-initiated ping.
-    {[], reset_ping(State)};
+    {[], reset_ping(State), hibernate};
 
 websocket_handle({T, Data}, #state{frame_type = T} = State0) ->
     ProtoState0 = State0#state.protocol_state,
@@ -251,15 +250,15 @@ websocket_handle({T, Data}, #state{frame_type = T} = State0) ->
     case bondy_wamp_protocol:handle_inbound(Data, ProtoState0) of
         {noreply, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
-            {[], reset_ping(State)};
+            {[], reset_ping(State), hibernate};
 
         {reply, L, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
-            {data_frames(T, L), reset_ping(State)};
+            {data_frames(T, L), reset_ping(State), hibernate};
 
         {stop, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
-            {[close], disable_ping(State)};
+            {[close], disable_ping(State), hibernate};
 
         {stop, L, ProtoState} ->
             self() ! {stop, normal},
@@ -280,7 +279,7 @@ websocket_handle(Data, State) ->
         description => "Received unsupported message",
         data => Data
     }),
-    {[], State}.
+    {[], State, hibernate}.
 
 
 %% -----------------------------------------------------------------------------
@@ -323,7 +322,7 @@ websocket_info({timeout, Ref, Msg}, State) ->
         message => Msg,
         ref => Ref
     }),
-    {[], State};
+    {[], State, hibernate};
 
 websocket_info({stop, Reason}, State) ->
     ?LOG_INFO(#{
@@ -337,7 +336,7 @@ websocket_info(Msg, State) ->
         description => "Received unknown message",
         message => Msg
     }),
-    {[], State}.
+    {[], State, hibernate}.
 
 
 %% -----------------------------------------------------------------------------
@@ -451,7 +450,7 @@ terminate(Other, _Req, State) ->
 handle_outbound(T, M, State) ->
     case bondy_wamp_protocol:handle_outbound(M, State#state.protocol_state) of
         {ok, Bin, PSt} ->
-            {data_frames(T, Bin), State#state{protocol_state = PSt}};
+            {data_frames(T, Bin), State#state{protocol_state = PSt}, hibernate};
 
         {stop, PSt} ->
             {[close], State#state{protocol_state = PSt}};
