@@ -160,7 +160,7 @@ flush(RealmUri, Ref) ->
     catch
         Class:Reason:Stacktrace ->
         ?LOG_DEBUG(#{
-            description => "Error while flushin subscriptions",
+            description => "Error while flushing subscriptions",
             class => Class,
             reason => Reason,
             stacktrace => Stacktrace,
