@@ -16,28 +16,29 @@
 %%  limitations under the License.
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc A materialized view of the elements stored in the registry main store
-%% (plum_db) that is used to match RPC procedures and Pub/Sub topics during the
-%% registration/subscription and call/publish operations respectively.
-%%
-%% The trie consists of a number of a set of `ets' tables and `art' tries.
-%%
-%% == Local vs Remote Subscriptions ==
-%% WARNING:In the case of remote exact matching subscriptions the trie only
-%% stores the node. But in the case of remote pattern subscriptions it stores
-%% the whole entry and on return projects only the node (by deduplicating
-%% them). This means that if you are using limits (continuations) you might get
-%% duplicates.
-%%
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_registry_trie).
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_registry.hrl").
+
+
+-doc("""
+A materialized view of the elements stored in the registry main store
+(plum_db) that is used to match RPC procedures and Pub/Sub topics during the
+registration/subscription and call/publish operations respectively.
+
+The trie consists of a number of a set of `ets' tables and `art' tries.
+
+## Local vs Remote Subscriptions
+
+WARNING:In the case of remote exact matching subscriptions the trie only
+stores the node. But in the case of remote pattern subscriptions it stores
+the whole entry and on return projects only the node (by deduplicating
+them). This means that if you are using limits (continuations) you might get
+duplicates.
+""").
 
 -record(bondy_registry_trie, {
     %% Stores registrations w/match_policy == exact
