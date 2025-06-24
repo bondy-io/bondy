@@ -61,7 +61,8 @@
         mops,
         art,
         bondy_wamp,
-        bondy_stdlib
+        bondy_stdlib,
+        bondy_regulator
         %% plum_db and tuplespace are started manually by bondy_app
     ]},
     {env, []},
