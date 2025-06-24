@@ -639,8 +639,10 @@ do_forward(#publish{} = M, Ctxt) ->
 %% @private
 not_found_error(M, _Ctxt) ->
     Msg = iolist_to_binary(
-        <<"There are no subcriptions matching the id ",
-        $', (M#unsubscribe.subscription_id)/integer, $'>>
+        [
+            ~"There are no subcriptions matching the id ",
+            $', M#unsubscribe.subscription_id, $'
+        ]
     ),
 
     ErrorDetails = case M of

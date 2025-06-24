@@ -1977,8 +1977,10 @@ badarg_error(CallId, Type) ->
 %% @private
 not_found_error(M, _Ctxt) ->
     Msg = iolist_to_binary(
-        <<"There are no registered procedures matching the id ",
-        $', (M#unregister.registration_id)/integer, $'>>
+        [
+            "There are no registered procedures matching the id ",
+            $', M#unregister.registration_id, $'
+        ]
     ),
     bondy_wamp_message:error(
         ?UNREGISTER,
