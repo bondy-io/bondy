@@ -57,6 +57,7 @@ init([]) ->
         auto_shutdown => never
     },
     Children = [
+        ?WORKER(bondy_system_gc, [], permanent, 5000),
         %% ets table owner used by several other processes
         ?WORKER(bondy_table_owner, [], permanent, 5000),
         %% supervisor for event handlers

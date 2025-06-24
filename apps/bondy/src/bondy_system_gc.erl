@@ -137,7 +137,7 @@ schedule_gc() ->
 
 
 do_gc() ->
-    {process_count, Count} = erlang:system_info(process_count),
+    Count = erlang:system_info(process_count),
     Ratio = bondy_config:get(gc_ratio, 0.3),
     N = round(Count * Ratio),
     L = [element(1, X) || X <- recon:proc_count(memory, N)],
