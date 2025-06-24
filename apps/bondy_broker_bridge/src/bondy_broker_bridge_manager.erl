@@ -675,7 +675,7 @@ do_subscribe(RealmUri, Opts0, Topic, Bridge, Action0, State) ->
             group_id => Bridge
         },
         %% REVIEW: Shall we pass a bondy_ref with a session ID here or use name
-        {ok, Id, Pid} = Res = bondy_broker:subscribe(
+        {ok, {Id, Pid}} = Res = bondy_broker:subscribe(
             RealmUri, Opts, Topic, Fun
         ),
 

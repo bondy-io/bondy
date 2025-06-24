@@ -236,7 +236,7 @@ when is_map(Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec subscribe(RealmUri :: uri(), Opts :: map(), Topic :: uri()) ->
-    {ok, id()} | {ok, id(), pid()} | {error, already_exists | any()}.
+    {ok, id()} | {ok, {id(), pid()}} | {error, already_exists | any()}.
 
 subscribe(RealmUri, Opts, Topic) ->
     subscribe(RealmUri, Opts, Topic, self()).
@@ -257,32 +257,24 @@ subscribe(RealmUri, Opts, Topic) ->
     Opts :: map(),
     Topic :: uri(),
     SubscriberOrFun :: pid() | function()) ->
-    {ok, id()} | {ok, id(), pid()} | {error, already_exists | any()}.
+    {ok, id()} | {ok, {id(), pid()}} | {error, already_exists | any()}.
 
 subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
     %% We preallocate an id so that we can keep the same even when the process
     %% is restarted by the supervisor.
-    Id = case maps:find(subscription_id, Opts) of
-        {ok, Value} -> Value;
-        error -> bondy_message_id:global()
-    end,
-
+    Id = bondy_stdlib:lazy_or_else(
+        maps:get(subscription_id, Opts, undefined),
+        fun bondy_message_id:global/0
+    ),
     %% subscriber will call subscribe(RealmUri, Opts, Topic, Pid)
     Result = bondy_subscribers_sup:start_subscriber(
         Id, RealmUri, Opts, Topic, Fun
     ),
-
-    case Result of
-        {ok, Pid} ->
-            {ok, Id, Pid};
-        Error ->
-            Error
-    end;
+    resulto:map(Result, fun(Pid) -> {Id, Pid} end);
 
 subscribe(RealmUri, Opts, Topic, Pid) when is_pid(Pid) ->
     %% Add a local subscription
-    Ref = bondy_ref:new(internal, Pid),
-    subscribe(RealmUri, Opts, Topic, Ref);
+    subscribe(RealmUri, Opts, Topic, bondy_ref:new(internal, Pid));
 
 subscribe(RealmUri, Opts, Topic, Ref)  ->
     bondy_ref:is_type(Ref) orelse error({badarg, Ref}),
