@@ -1,4 +1,4 @@
-![Bondy logo](https://github.com/Leapsight/bondy/blob/develop/doc/assets/bondy_bg.png?raw=true)
+![Bondy logo](https://github.com/bondy-io/bondy/blob/develop/doc/assets/bondy_bg.png?raw=true)
 
 ![Version](https://img.shields.io/badge/version-1.0.0--rc.2-blue?style=for-the-badge
 )<br>
@@ -20,7 +20,7 @@ Bondy implements the open Web Application Messaging Protocol (WAMP).
 
 <br><br>
 <p align="center">
-     <img src="https://github.com/Leapsight/bondy/blob/develop/doc/assets/bondy_cluster.png?raw=true" alt="drawing" width="600"/>
+     <img src="https://github.com/bondy-io/bondy/blob/develop/doc/assets/bondy_cluster.png?raw=true" alt="drawing" width="600"/>
 </p>
 <br><br>
 
@@ -112,7 +112,7 @@ Bondy provides a unique combination of features which sets it apart from other a
 The fastest way to get started is by using our official docker images.
 
 1. Make sure you have [Docker](https://www.docker.com/get-started) installed and running.
-2. Download the [examples/custom_config](https://github.com/Leapsight/bondy/tree/develop/examples/custom_config/etc) folder to a location of your choice, then `cd` to that location and run the following command (If you already cloned the Bondy repository then just `cd` to the location of the repo).
+2. Download the [examples/custom_config](https://github.com/bondy-io/bondy/tree/develop/examples/custom_config/etc) folder to a location of your choice, then `cd` to that location and run the following command (If you already cloned the Bondy repository then just `cd` to the location of the repo).
 
 
 ```shell
