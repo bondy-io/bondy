@@ -142,7 +142,7 @@ issued_at(#bondy_oauth2_token{issued_at = Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec issue_token(
-    token_type(), bondy_realm:uri(), binary(), binary(), [binary()], map()) ->
+    grant_type(), bondy_realm:uri(), binary(), binary(), [binary()], map()) ->
     {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()}
     | {error, any()}.
 
