@@ -497,7 +497,10 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State0) ->
             Opts0 = maps_utils:from_property_list(
                 bondy_config:get(wamp_websocket)
             ),
-            {PingOpts, Opts} = maps:take(ping, Opts0),
+            %% This works only on HTTP1, we will change this for a stratgy
+            %% based on {active, boolean()} and bondy_regulator.
+            Opts1 = maps:put(active_n, 25, Opts0),
+            {PingOpts, Opts} = maps:take(ping, Opts1),
 
             State1 = State0#state{
                 frame_type = FrameType,
