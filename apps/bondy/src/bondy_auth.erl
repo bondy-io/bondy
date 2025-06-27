@@ -686,7 +686,7 @@ get_user(RealmUri, SSORealmUri, UsernameOrAlias) ->
             %% SSOUser).
             bondy_rbac_user:resolve(User, SSOUser);
 
-        User ->
+        {ok, User} ->
             bondy_rbac_user:is_enabled(User) orelse throw(user_disabled),
             %% We call resolve so that we merge the local user to the SSO user
             %% (if any), so that we get the credentials (password and

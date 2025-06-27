@@ -1321,10 +1321,11 @@ role_groupnames(Rolename, Type, RealmProto, Seen) ->
 %% @private
 do_role_groupnames(Rolename, user, {RealmUri, _}) ->
     case bondy_rbac_user:lookup(RealmUri, Rolename) of
+        {ok, User} ->
+            bondy_rbac_user:groups(User);
+
         {error, not_found} ->
-            [];
-        User ->
-            bondy_rbac_user:groups(User)
+            []
     end;
 
 do_role_groupnames(Rolename, group, {RealmUri, ProtoUri}) ->

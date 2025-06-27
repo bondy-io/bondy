@@ -62,13 +62,14 @@ handle_call(?BONDY_USER_GET, #call{} = M, Ctxt) ->
     [Uri, Username] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_user:lookup(Uri, Username) of
-        {error, Reason} ->
-            E = bondy_wamp_api_utils:error(Reason, M),
-            {reply, E};
-        User ->
+        {ok, User} ->
             Ext = bondy_rbac_user:to_external(User),
             R = bondy_wamp_message:result(M#call.request_id, #{}, [Ext]),
-            {reply, R}
+            {reply, R};
+
+        {error, Reason} ->
+            E = bondy_wamp_api_utils:error(Reason, M),
+            {reply, E}
     end;
 
 handle_call(?BONDY_USER_IS_ENABLED, #call{} = M, Ctxt) ->
