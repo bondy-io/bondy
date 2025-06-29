@@ -714,8 +714,9 @@ prepare_request(Body, Headers, Req0) ->
 %% @private
 token_response(Token, Req0) ->
     JWT = bondy_oauth_token:to_access_token(Token),
+    %% TODO This should come from the to_access_token answer
+    Exp = bondy_config:get([oauth2, password_grant_duration]),
     RefreshToken = maps:get(refresh_token, Token, undefined),
-    Exp = maps:get(expires_in, Token),
     Authroles = maps:get(authroles, Token),
     Scope = iolist_to_binary(lists:join(<<$,>>, Authroles)),
 
