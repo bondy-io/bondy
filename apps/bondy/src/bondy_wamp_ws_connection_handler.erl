@@ -120,13 +120,14 @@ init(Req0, _) ->
                 },
 
                 do_init(Subproto, BinProto, Req0, State0);
+
             {error, Reason} ->
                 throw({Reason, ProxyProtocol})
         end
 
     catch
         throw:{{protocol_error, Message}, PP} ->
-            ?LOG_INFO(#{
+            ?LOG_NOTICE(#{
                 description =>
                     "Connection rejected. "
                     "The source IP Address couldn't be obtained "
@@ -138,38 +139,40 @@ init(Req0, _) ->
             {ok, Req1, undefined};
 
         throw:invalid_scheme ->
-            %% Returning ok will cause the handler
-            %% to stop in websocket_handle
+            ?LOG_NOTICE(#{
+                description => "Connection rejected.",
+                reason => invalid_scheme
+            }),
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined};
 
         throw:missing_subprotocol ->
-            ?LOG_INFO(#{
+            ?LOG_NOTICE(#{
                 description => "Closing WS connection",
                 reason => missing_header_value,
                 header => ?SUBPROTO_HEADER
             }),
-            %% Returning ok will cause the handler
-            %% to stop in websocket_handle
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined};
 
         throw:invalid_subprotocol ->
             %% At the moment we only support WAMP, not plain WS
-            ?LOG_INFO(#{
+            ?LOG_NOTICE(#{
                 description => "Closing WS connection",
                 reason => invalid_header_value,
                 header => ?SUBPROTO_HEADER,
                 value => Subprotocols
             }),
-            %% Returning ok will cause the handler
-            %% to stop in websocket_handle
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined};
 
-        throw:_Reason ->
-            %% Returning ok will cause the handler
-            %% to stop in websocket_handle
+        Class:EReason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Closing connection.",
+                class => Class,
+                reason => EReason,
+                stacktrace => Stacktrace
+            }),
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined}
     end.
