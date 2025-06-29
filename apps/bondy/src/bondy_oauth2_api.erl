@@ -175,30 +175,28 @@ handle_call(?BONDY_OAUTH2_TOKEN_GET, #call{} = M, _txt) ->
     E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E};
 
-handle_call(?BONDY_OAUTH2_TOKEN_LOOKUP, #call{} = M, Ctxt) ->
-    [Uri, Issuer, Token] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 3),
-    Result = bondy_oauth2:lookup_token(Uri, Issuer, Token),
-    R = bondy_wamp_api_utils:maybe_error(Result, M),
-    {reply, R};
+handle_call(?BONDY_OAUTH2_TOKEN_LOOKUP, #call{} = M, _Ctxt) ->
+    %% [Uri, ClientId, Token] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 3),
+    %% Result = bondy_oauth_token:lookup(Uri, ClientId, Token),
+    %% R = bondy_wamp_api_utils:maybe_error(Result, M),
+    %% Deprecates
+    E = bondy_wamp_api_utils:deprecated_procedure_error(M),
+    {reply, E};
 
 handle_call(?BONDY_OAUTH2_TOKEN_REVOKE, #call{} = M, Ctxt) ->
     Result =
-        case bondy_wamp_api_utils:validate_call_args(M, Ctxt, 3, 4) of
-            [Uri, Issuer, Token] ->
-                bondy_oauth2:revoke_token(refresh_token, Uri, Issuer, Token);
-
-            [Uri, Issuer, Username, DeviceId] ->
-                bondy_oauth2:revoke_token(
-                    refresh_token, Uri, Issuer, Username, DeviceId
-                )
+        case bondy_wamp_api_utils:validate_call_args(M, Ctxt, 3, 3) of
+            [RealmUri, _ClientId, RefreshToken] ->
+                bondy_oauth_token:revoke(RealmUri, RefreshToken)
         end,
 
     R = bondy_wamp_api_utils:maybe_error(Result, M),
     {reply, R};
 
 handle_call(?BONDY_OAUTH2_TOKEN_REVOKE_ALL, #call{} = M, Ctxt) ->
-    [Uri, Issuer, Username] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 3),
-    Result = bondy_oauth2:revoke_tokens(refresh_token, Uri, Issuer, Username),
+    [RealmUri, _ClientId, Authid] =
+        bondy_wamp_api_utils:validate_call_args(M, Ctxt, 3),
+    Result = bondy_oauth_token:revoke_all(RealmUri, Authid),
     R = bondy_wamp_api_utils:maybe_error(Result, M),
     {reply, R};
 

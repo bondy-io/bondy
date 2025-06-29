@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_oauth2.erl -
+%%  bondy_oauth2_deprecated.erl -
 %%
 %%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
 %%
@@ -17,7 +17,7 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc DEPRECATED
 %%
 %% The following table documents the storage layout in plum_db of the token
 %% data and its indices:
@@ -30,7 +30,7 @@
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_oauth2).
+-module(bondy_oauth2_deprecated).
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -556,15 +556,15 @@ do_issue_token(Realm, Data0, RefreshTokenFlag) ->
     %% We generate and sign the JWT
     %% TODO Refresh grants by querying the User data
     Claims = #{
-        <<"id">> => Id,
-        <<"exp">> => Secs,
-        <<"iat">> => Now,
-        <<"kid">> => Kid,
-        <<"sub">> => Sub,
-        <<"iss">> => Iss,
-        <<"aud">> => Uri,
-        <<"groups">> => Data0#bondy_oauth2_token.groups,
-        <<"meta">> => Meta
+        ~"id" => Id,
+        ~"exp" => Secs,
+        ~"iat" => Now,
+        ~"kid" => Kid,
+        ~"sub" => Sub,
+        ~"iss" => Iss,
+        ~"aud" => Uri,
+        ~"groups" => Data0#bondy_oauth2_token.groups,
+        ~"meta" => Meta
     },
     %% We create the JWT used as access token
     AccessToken = sign(Key, Claims),

@@ -303,7 +303,8 @@ handle_inbound(Data, St) ->
             stop(Reason, St);
 
         _:Reason:Stacktrace ->
-            %% Catch any error produced by handle_inbound_messages/2
+            %% WE SHOULD NEVER REACH THIS POINT AS THIS WILL STOP THE
+            %% CONNECTION.
             ?LOG_ERROR(#{
                 description => <<"Error while evaluating inbound data">>,
                 reason => Reason,
@@ -551,9 +552,11 @@ handle_inbound_messages(
     case bondy_router:forward(H, St#wamp_state.context) of
         {ok, Ctxt} ->
             handle_inbound_messages(T, update_context(Ctxt, St), Acc);
+
         {reply, M, Ctxt} ->
             Bin = bondy_wamp_encoding:encode(M, encoding(St)),
             handle_inbound_messages(T, update_context(Ctxt, St), [Bin | Acc]);
+
         {stop, M, Ctxt} ->
             Bin = bondy_wamp_encoding:encode(M, encoding(St)),
             {stop, [Bin | Acc], update_context(Ctxt, St)}

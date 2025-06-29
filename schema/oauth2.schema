@@ -50,8 +50,15 @@
 {datatype, {duration, s}}
 ]}.
 
+%% Deprecated
 {mapping, "oauth2.refresh_token.length", "bondy.oauth2.refresh_token_length",
 [
 {default, "40"},
+{datatype, bytesize}
+]}.
+
+{mapping, "oauth2.refresh_token.limit", "bondy.oauth2.max_tokens_per_user",
+[
+{default, "25"},
 {datatype, bytesize}
 ]}.

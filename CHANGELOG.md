@@ -1,4 +1,11 @@
 # CHANGELOG
+## 1.0.0-rc.39
+* Completely redesigned the OAUTH2 token storage.
+    * Tokens are now bounded by {User, Client, Device} (idem WAMP Tickets)
+    * Tokens are sharded across all partitions, allowing for more scalability
+      (idem WAMP Tickets)
+    * This is part of a roadmap to completely redesign and complete the OAuth2 
+    and OIDC capabilities in Bondy
 
 ## 1.0.0-rc.38
 * Refactoring of WAMP APIs (Modules renamed and consolidated)

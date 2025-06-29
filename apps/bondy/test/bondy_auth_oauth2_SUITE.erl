@@ -116,18 +116,37 @@ add_realm(RealmUri) ->
     ok.
 
 
-
-
-
 resource_owner_password(_) ->
     SessionId = bondy_session_id:new(),
-    Roles = [],
+    Roles = [~"group_1"],
     SourceIP = {127, 0, 0, 1},
-
-    {ok, AccessToken, _RefreshToken, _Claims} =
-        issue_token(password, ?APP1, ?U1, [<<"group_1">>]),
-
     {ok, Ctxt1} = bondy_auth:init(SessionId, ?REALM_URI, ?U1, Roles, SourceIP),
+    {ok, Token} = bondy_oauth_token:issue(password, Ctxt1, #{}),
+    JWT = bondy_oauth_token:to_access_token(Token),
+
+    ?assertMatch(
+        {ok, #{
+            ~"id" := _,
+            ~"vsn" := _,
+            ~"exp" := _,
+            ~"iat" := _,
+            ~"ion" := _,
+            ~"kid" := _,
+            ~"iss" := _,
+            ~"aud" := ?REALM_URI,
+            ~"sub" := ?U1,
+            ~"auth" := #{
+                ~"scope" := #{
+                    ~"realm" := ?REALM_URI,
+                    ~"client_id" := _,
+                    ~"device_id" := _
+                }
+            },
+            ~"meta" := _,
+            ~"groups" := _
+        }},
+        bondy_oauth_jwt:verify(?REALM_URI, JWT)
+    ),
 
     ?assertEqual(
         true,
@@ -136,7 +155,7 @@ resource_owner_password(_) ->
 
     ?assertMatch(
         {ok, _, _},
-        bondy_auth:authenticate(?WAMP_OAUTH2_AUTH, AccessToken, #{}, Ctxt1)
+        bondy_auth:authenticate(?WAMP_OAUTH2_AUTH, JWT, #{}, Ctxt1)
     ),
 
     ok.
@@ -145,21 +164,4 @@ resource_owner_password(_) ->
 client_credentials(_) ->
     ok.
 
-
-
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
-
-issue_token(GrantType, Client, Username, Groups) ->
-    bondy_oauth2:issue_token(
-        GrantType,
-        ?REALM_URI,
-        Client,
-        Username,
-        Groups,
-        #{}
-    ).
 

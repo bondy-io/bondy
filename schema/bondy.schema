@@ -798,17 +798,16 @@
 %% buffer size for the current workload. The dynamic buffer size functionality
 %% can be disabled by setting this option to false.
 %% When enabled this option overrides the buffer option.
-%% This option is ignored when buffer is set
+%% This option is ignored when buffer is set.
+%% Set min or max to 0 to disable.
 {mapping, "admin_api.http.buffer.min",
 "bondy.admin_api_http.dynamic_buffer.min", [
-  {datatype, bytesize},
-  {default, "1KB"}
+  {datatype, bytesize}
 ]}.
 
 {mapping, "admin_api.http.buffer.max",
 "bondy.admin_api_http.dynamic_buffer.max", [
-  {datatype, bytesize},
-  {default, "128KB"}
+  {datatype, bytesize}
 ]}.
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
@@ -962,17 +961,16 @@
 %% buffer size for the current workload. The dynamic buffer size functionality
 %% can be disabled by setting this option to false.
 %% When enabled this option overrides the buffer option.
-%% This option is ignored when buffer is set
+%% This option is ignored when buffer is set.
+%% Set min or max to 0 to disable.
 {mapping, "admin_api.https.buffer.min",
 "bondy.admin_api_https.dynamic_buffer.min", [
-  {datatype, bytesize},
-  {default, "1KB"}
+  {datatype, bytesize}
 ]}.
 
 {mapping, "admin_api.https.buffer.max",
 "bondy.admin_api_https.dynamic_buffer.max", [
-  {datatype, bytesize},
-  {default, "128KB"}
+  {datatype, bytesize}
 ]}.
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
@@ -1206,16 +1204,15 @@
 %% can be disabled by setting this option to false.
 %% This option is ignored when buffer is set
 %% It is enabled by default.
+%% Set min or max to 0 to disable.
 {mapping, "api_gateway.http.buffer.min",
 "bondy.api_gateway_http.dynamic_buffer.min", [
-  {datatype, bytesize},
-  {default, "1KB"}
+  {datatype, bytesize}
 ]}.
 
 {mapping, "api_gateway.http.buffer.max",
 "bondy.api_gateway_http.dynamic_buffer.max", [
-  {datatype, bytesize},
-  {default, "128KB"}
+  {datatype, bytesize}
 ]}.
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
@@ -1370,14 +1367,13 @@
 %% can be disabled by setting this option to false.
 %% This option is ignored when buffer is set
 %% It is enabled by default.
+%% Set min or max to 0 to disable.
 {mapping, "api_gateway.https.buffer.min", "bondy.api_gateway_https.dynamic_buffer.min", [
-  {datatype, bytesize},
-  {default, "1KB"}
+  {datatype, bytesize}
 ]}.
 
 {mapping, "api_gateway.https.buffer.max", "bondy.api_gateway_https.dynamic_buffer.max", [
-  {datatype, bytesize},
-  {default, "128KB"}
+  {datatype, bytesize}
 ]}.
 
 %% If on, option TCP_NODELAY is turned on for the socket, which
@@ -1714,14 +1710,12 @@
 %% This option is ignored when the socket buffer is set
 {mapping, "wamp.websocket.buffer.min",
 "bondy.wamp_websocket.dynamic_buffer.min", [
-  {datatype, bytesize},
-  {default, "1KB"}
+  {datatype, bytesize}
 ]}.
 
 {mapping, "wamp.websocket.buffer.max",
 "bondy.wamp_websocket.dynamic_buffer.max", [
-  {datatype, bytesize},
-  {default, "128KB"}
+  {datatype, bytesize}
 ]}.
 
 

@@ -161,12 +161,15 @@
             {partitions,32}
         ]},
         {oauth2,
-            [{refresh_token_length,40},
+            [
+            {max_tokens_per_user,25},
+            {refresh_token_length,40},
             {refresh_token_duration,2592000},
             {code_grant_duration,600},
             {client_credentials_grant_duration,900},
             {password_grant_duration,900},
             {config_file,"./etc/oauth2_config.json"}]},
+        {bridge_relay,[{forward,#{ack => false,retransmission => false}}]},
         {bridge_relay_tls,
             [{socket_opts,
                 [{cacertfile,"./etc/ssl/server/cacert.pem"},

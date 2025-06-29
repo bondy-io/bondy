@@ -444,6 +444,12 @@ dynamic_buffer(Key) ->
         [] ->
             false;
 
+        [{min, 0}, _] ->
+            false;
+
+        [_, {max, 0}] ->
+            false;
+
         [{min, Min}, {max, Max}] when Min >= Low, Max =< Top ->
             {Min, Max};
 

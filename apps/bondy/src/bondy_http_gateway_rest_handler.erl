@@ -331,7 +331,7 @@ is_authorized(
 
     try
         Token = parse_token(Req0),
-        Claims = bondy_oauth2:decode_jwt(Token),
+        Claims = bondy_oauth_jwt:decode(Token),
         UserId = maps:get(<<"sub">>, Claims, undefined),
 
         case bondy_auth:init(SessionId, RealmUri, UserId, all, SourceIP) of

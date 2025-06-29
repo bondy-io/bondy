@@ -292,6 +292,7 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_uris.hrl").
 
 
 -define(MATCH_LIMIT, 100).
@@ -591,7 +592,7 @@ callees(RealmUri, ProcedureUri, Opts0) ->
 %% sentt by WAMP peers connected to this Bondy node.
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(M :: wamp_message(), Ctxt :: map()) -> ok | no_return().
+-spec forward(M :: wamp_message(), Ctxt :: map()) -> ok.
 
 forward(M, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
@@ -613,6 +614,27 @@ forward(M, Ctxt) ->
 
         throw:not_found ->
             Reply = not_found_error(M, Ctxt),
+            bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
+
+        Class:Reason:Stacktrace ->
+            TraceId = bondy_utils:uuid(),
+            ?LOG_ERROR(#{
+                description =>
+                    ~"Error while evaluating inbound message. Returning ERROR",
+                reason => Reason,
+                class => Class,
+                stacktrace => Stacktrace,
+                data => M,
+                trace_id => TraceId
+            }),
+
+            Reply = bondy_wamp_message:error_from(
+                M,
+                #{},
+                ?BONDY_ERROR_INTERNAL,
+                [~"Internal system error"],
+                #{trace_id => TraceId}
+            ),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply)
     end.
 

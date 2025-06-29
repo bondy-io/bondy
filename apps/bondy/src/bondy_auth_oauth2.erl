@@ -111,7 +111,7 @@ authenticate(JWT, _, Ctxt, State) ->
     RealmUri = bondy_auth:realm_uri(Ctxt),
     UserId = bondy_auth:user_id(Ctxt),
 
-    case bondy_oauth2:verify_jwt(RealmUri, JWT) of
+    case bondy_oauth_jwt:verify(RealmUri, JWT) of
         {ok, #{<<"sub">> := UserId} = Claims} ->
             {ok, Claims, State};
 

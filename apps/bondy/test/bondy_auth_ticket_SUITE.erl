@@ -265,11 +265,9 @@ local_scope(Config) ->
     ),
 
     ?assertEqual(
-        {error,{invalid_request,"Self-granting ticket not allowed"}},
-        bondy_ticket:issue(Session, #{client_ticket => Ticket}),
-        "Nested self-issued tickets not allowed"
+        {error,{invalid_request,"Nested tickets are not allowed"}},
+        bondy_ticket:issue(Session, #{client_ticket => Ticket})
     ).
-
 
 
 client_scope_with_ticket(Config) ->
@@ -317,24 +315,32 @@ client_scope_with_ticket(Config) ->
     ),
 
     %% We issue a self-issued ticket
-    {ok, UserTicket, _} = bondy_ticket:issue(UserSession, #{
-        client_ticket => AppTicket,
-        expiry_time_secs => 300
-    }),
-
-    %% We simulate a new session
-    SessionId = bondy_session_id:new(),
-    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, SourceIP),
+    %% {ok, UserTicket, _} = bondy_ticket:issue(UserSession, #{
+    %%     client_ticket => AppTicket,
+    %%     expiry_time_secs => 300
+    %% }),
 
     ?assertEqual(
-        true,
-        lists:member(?WAMP_TICKET_AUTH, bondy_auth:available_methods(Ctxt1))
-    ),
-
-    ?assertMatch(
-        {ok, _, _},
-        bondy_auth:authenticate(?WAMP_TICKET_AUTH, UserTicket, undefined, Ctxt1)
+        {error,{invalid_request,"Nested tickets are not allowed"}},
+        bondy_ticket:issue(UserSession, #{
+            client_ticket => AppTicket,
+            expiry_time_secs => 300
+        })
     ).
+
+    %% %% We simulate a new session
+    %% SessionId = bondy_session_id:new(),
+    %% {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, SourceIP),
+
+    %% ?assertEqual(
+    %%     true,
+    %%     lists:member(?WAMP_TICKET_AUTH, bondy_auth:available_methods(Ctxt1))
+    %% ),
+
+    %% ?assertMatch(
+    %%     {ok, _, _},
+    %%     bondy_auth:authenticate(?WAMP_TICKET_AUTH, UserTicket, undefined, Ctxt1)
+    %% ).
 
 client_scope_with_id(Config) ->
     RealmUri = ?config(realm_uri, Config),

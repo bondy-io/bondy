@@ -726,12 +726,12 @@ remove_all(RealmUri, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec lookup(RealmUri :: uri(), Username :: username_int()) ->
-    t() | {error, not_found}.
+    {ok, t()} | {error, not_found}.
 
 lookup(RealmUri, Username0) ->
     case normalise_username(Username0) of
         anonymous ->
-            ?ANONYMOUS;
+            {ok, ?ANONYMOUS};
 
         Username ->
             Prefix = ?PLUMDB_PREFIX(RealmUri),
@@ -742,22 +742,25 @@ lookup(RealmUri, Username0) ->
 
                 Val0 when ?IS_ALIAS(Val0) ->
                     case lookup(RealmUri, maps:get(username, Val0)) of
-                        {error, _} = Error ->
-                            Error;
-                        Val1 when ?IS_USER(Val1) ->
-                            Val1;
-                        Val1 when ?IS_ALIAS(Val1) ->
+                        {ok, Val1} when ?IS_USER(Val1) ->
+                            {ok, Val1};
+
+                        {ok, Val1} when ?IS_ALIAS(Val1) ->
                             ?LOG_WARNING(#{
                                 description => "Recursive index for user alias",
                                 alias => Val0
                             }),
                             {error, not_found};
-                        Val1 ->
-                            from_term({Username, Val1})
+
+                        {ok, Val1} ->
+                            {ok, from_term({Username, Val1})};
+
+                        {error, _} = Error ->
+                            Error
                     end;
 
                 Val0 ->
-                    from_term({Username, Val0})
+                    {ok, from_term({Username, Val0})}
             end
     end.
 
@@ -769,7 +772,7 @@ lookup(RealmUri, Username0) ->
 -spec exists(RealmUri :: uri(), Username :: username_int()) -> boolean().
 
 exists(RealmUri, Username0) ->
-    lookup(RealmUri, Username0) =/= {error, not_found}.
+    resulto:is_ok(lookup(RealmUri, Username0)).
 
 
 %% -----------------------------------------------------------------------------
@@ -780,11 +783,11 @@ exists(RealmUri, Username0) ->
 
 fetch(RealmUri, Username) ->
     case lookup(RealmUri, Username) of
-        {error, not_found} ->
-            error({no_such_user, Username});
+        {ok, User} ->
+            User;
 
-        User ->
-            User
+        {error, not_found} ->
+            error({no_such_user, Username})
     end.
 
 
@@ -857,11 +860,11 @@ change_password(RealmUri, Username, New) ->
 
 change_password(RealmUri, Username, New, Old) ->
     case lookup(RealmUri, Username) of
-        {error, not_found} = Error ->
-            Error;
+        {ok, #{} = User} ->
+            do_change_password(RealmUri, resolve(User), New, Old);
 
-        #{} = User ->
-            do_change_password(RealmUri, resolve(User), New, Old)
+        {error, not_found} = Error ->
+            Error
     end.
 
 
@@ -1314,7 +1317,7 @@ when is_binary(SSOUri) ->
         {error, not_found} ->
             throw(not_such_user);
 
-        SSOUser ->
+        {ok, SSOUser} ->
             {SSOData, LocalData} = maps_utils:split(
                 [password_opts, password, authorized_keys], Data0
             ),
