@@ -369,11 +369,10 @@ do_is_authorized(Req0, St0) ->
         {ClientId, Password} = case Auth of
             {basic, A, B} ->
                 {A, B};
+
             _ ->
-                Txt = <<
-                    "The authorization header should use the 'basic' scheme"
-                >>,
-                throw({request_error, {header, <<"authorization">>}, Txt})
+                Msg = ~"The authorization header should use the 'basic' scheme",
+                throw({request_error, {header, ~"authorization"}, Msg})
         end,
 
         RealmUri = St0#state.realm_uri,
@@ -391,6 +390,7 @@ do_is_authorized(Req0, St0) ->
                 %% can be used. Otherwise we should differentiate between the
                 %% flows on the auth method and RBAC source
                 {true, Req0, St2};
+
             {error, Reason} ->
                 throw(Reason)
         end
@@ -482,6 +482,7 @@ token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
                 },
                 St2 = authenticate(resource_owner, Password, St1),
                 issue_token(password, Req0, St2);
+
             {error, Reason} ->
                 throw(Reason)
         end
@@ -491,7 +492,7 @@ token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
                 description =>
                     "Resource Owner login failed. The grant is invalid",
                 reason => EReason,
-                client_device_id => DeviceId,
+                device_id => DeviceId,
                 realm_uri => RealmUri,
                 cient_ip => inet_utils:ip_address_to_binary(SourceIP)
             }),
@@ -528,15 +529,16 @@ token_flow(Map, _, _) ->
 
 
 %% @private
-refresh_token(RefreshToken, Req0, St) ->
-    Realm = St#state.realm_uri,
-    Issuer = St#state.client_id,
+refresh_token(RefreshToken0, Req0, St) ->
+    RealmUri = St#state.realm_uri,
+    ClientId = St#state.client_id,
 
-    case bondy_oauth2:refresh_token(Realm, Issuer, RefreshToken) of
-        {ok, JWT, RT1, Claims} ->
-            Req1 = token_response(JWT, RT1, Claims, Req0),
-            ok = on_login(Realm, Issuer, #{}),
+    case bondy_oauth_token:refresh(RealmUri, RefreshToken0) of
+        {ok, Token} ->
+            Req1 = token_response(Token, Req0),
+            ok = on_login(RealmUri, ClientId, #{}),
             {true, Req1, St};
+
         {error, Error} ->
             Req1 = reply(Error, Req0),
             {stop, Req1, St}
@@ -555,20 +557,33 @@ auth_context(password, #state{owner_auth_ctxt = Val}) ->
 %% @private
 issue_token(Type, Req0, St0) ->
     RealmUri = St0#state.realm_uri,
-    Issuer = bondy_auth:user_id(St0#state.client_auth_ctxt),
 
     AuthCtxt = auth_context(Type, St0),
     Authid = bondy_auth:user_id(AuthCtxt),
     User = bondy_auth:user(AuthCtxt),
-    Gs = bondy_auth:roles(AuthCtxt),
     Meta0 = bondy_rbac_user:meta(User),
-    Meta = prepare_meta(Type, Meta0, St0),
 
-    case bondy_oauth2:issue_token(Type, RealmUri, Issuer, Authid, Gs, Meta) of
-        {ok, JWT, RefreshToken, Claims} ->
-            Req1 = token_response(JWT, RefreshToken, Claims, Req0),
+    {Meta, Opts0} =
+        case device_id(St0, Type) of
+            undefined ->
+                {Meta0, #{}};
+
+            DeviceId ->
+                Meta1 = maps:put(~"client_device_id", DeviceId, Meta0),
+                {Meta1, #{device_id => DeviceId}}
+        end,
+
+    Opts = Opts0#{
+        client_id => bondy_auth:user_id(St0#state.client_auth_ctxt),
+        metadata => Meta
+    },
+
+    case bondy_oauth_token:issue(Type, AuthCtxt, Opts) of
+        {ok, Token} ->
+            Req1 = token_response(Token, Req0),
             ok = on_login(RealmUri, Authid, Meta),
             {true, Req1, St0};
+
         {error, Reason} ->
             Req1 = reply(Reason, Req0),
             {stop, Req1, St0}
@@ -580,15 +595,30 @@ revoke_token_flow(Data0, Req0, St) ->
     try
         Data1 = maps_utils:validate(Data0, ?REVOKE_TOKEN_SPEC),
         RealmUri = St#state.realm_uri,
-        Issuer = St#state.client_id,
         Token = maps:get(<<"token">>, Data1),
-        Type = maps:get(<<"token_type_hint">>, Data1),
+
+        case maps:get(<<"token_type_hint">>, Data1) of
+            refresh_token ->
+                bondy_oauth_token:revoke(RealmUri, Token);
+
+            access_token ->
+                %% Not supported
+                ok
+        end,
+
         %% From https://tools.ietf.org/html/rfc7009#page-3
         %% The authorization server responds with HTTP status
         %% code 200 if the token has been revoked successfully
         %% or if the client submitted an invalid token.
         %% We set a body as Cowboy will otherwise use 204 code
-        _ = bondy_oauth2:revoke_token(Type, RealmUri, Issuer, Token),
+        %% Note: invalid tokens do not cause an error response since the client
+        %% cannot handle such an error in a reasonable way.  Moreover, the
+        %% purpose of the revocation request, invalidating the particular token,
+        %% is already achieved.
+        %% The content of the response body is ignored by the client as all
+        %% necessary information is conveyed in the response code.
+        %% An invalid token type hint value is ignored by the authorization
+        %% server and does not influence the revocation response.
         Req1 = prepare_request(true, #{}, Req0),
         {true, Req1, St}
     catch
@@ -620,13 +650,11 @@ jwks(Req0, St) ->
     end.
 
 
-%% @private
-prepare_meta(password, Meta, #state{device_id = DeviceId})
-when DeviceId =/= undefined ->
-     maps:put(<<"client_device_id">>, DeviceId, Meta);
+device_id(password, #state{device_id = DeviceId}) ->
+    DeviceId;
 
-prepare_meta(_, Meta, _) ->
-    Meta.
+device_id(_, _) ->
+    undefined.
 
 
 %% @private
@@ -684,25 +712,25 @@ prepare_request(Body, Headers, Req0) ->
 
 
 %% @private
-token_response(JWT, RefreshToken, Claims, Req0) ->
-    Scope = iolist_to_binary(
-        lists:join(<<$,>>, maps:get(<<"groups">>, Claims))),
-    Exp = maps:get(<<"exp">>, Claims),
+token_response(Token, Req0) ->
+    JWT = bondy_oauth_token:to_access_token(Token),
+    RefreshToken = maps:get(refresh_token, Token, undefined),
+    Exp = maps:get(expires_in, Token),
+    Authroles = maps:get(authroles, Token),
+    Scope = iolist_to_binary(lists:join(<<$,>>, Authroles)),
 
     Body0 = #{
-        <<"token_type">> => <<"bearer">>,
-        <<"access_token">> => JWT,
-        <<"scope">> => Scope,
-        <<"expires_in">> => Exp
+        ~"token_type" => ~"bearer",
+        ~"access_token" => JWT,
+        ~"scope" => Scope,
+        ~"expires_in" => Exp
     },
 
     Body1 = case RefreshToken =:= undefined of
         true ->
             Body0;
         false ->
-            Body0#{
-                <<"refresh_token">> => RefreshToken
-            }
+            Body0#{~"refresh_token" => RefreshToken}
     end,
     prepare_request(Body1, #{}, Req0).
 

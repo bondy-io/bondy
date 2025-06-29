@@ -50,7 +50,7 @@
 %% timestamp in seconds.</li>
 %% <li>`issued_on': the bondy nodename in which the ticket was issued.</li>
 %% <li>`scope': the scope of the ticket, consisting of</li>
-%% <li>`realm': If `undefined' the ticket grants access to all realms the user
+%% <li>`realm': If `all' the ticket grants access to all realms the user
 %% has access to by the authrealm (an SSO realm). Otherwise, the value is the
 %% realm this ticket is valid on.</li>
 %% </ul>
@@ -142,8 +142,8 @@
 %% |SSO|yes|no|no|`username()'|`claims()'|
 %% |Client-Local|no|yes|no|`client_id()'|`[{uri(), claims()}]'|
 %% |Client-Local|no|yes|yes|`client_id()'|`[{{uri(), instance_id()}, claims()}]'|
-%% |Client-SSO|yes|yes|no|`client_id()'|`[{undefined, claims()}]'|
-%% |Client-SSO|yes|yes|yes|`client_id()'|`[{{undefined, instance_id()}, claims()}]'|
+%% |Client-SSO|yes|yes|no|`client_id()'|`[{all, claims()}]'|
+%% |Client-SSO|yes|yes|yes|`client_id()'|`[{{all, instance_id()}, claims()}]'|
 %% </div>
 %%
 %% === Permissions Summary ===
@@ -168,7 +168,7 @@
 -include("bondy_security.hrl").
 
 -define(NOW, erlang:system_time(second)).
--define(LEEWAY_SECS, 120). % 2 mins
+-define(LEEWAY_SECS, 2 * 60). % 2 mins
 
 %% TODO review, using a dynamic prefix is a bad idea, turn this into
 %% {?PLUM_DB_TICKET_TAB, Realm} and use key composition which allow for
@@ -201,9 +201,9 @@
         required => false,
         datatype => binary
     },
-    <<"client_instance_id">> => #{
-        alias => client_instance_id,
-        key => client_instance_id,
+    <<"device_id">> => #{
+        alias => device_id,
+        key => device_id,
         required => false,
         datatype => binary
     }
@@ -215,7 +215,7 @@
                             allow_sso           =>  boolean(),
                             client_ticket       =>  t(),
                             client_id           =>  binary(),
-                            client_instance_id  =>  binary()
+                            device_id  =>  binary()
                         }.
 -type verify_opts() ::  #{
                             allow_not_found     =>  boolean()
@@ -223,7 +223,7 @@
 -type scope()       ::  #{
                             realm               :=  optional(uri()),
                             client_id           :=  optional(authid()),
-                            client_instance_id  :=  optional(binary())
+                            device_id  :=  optional(binary())
                         }.
 -type claims()      ::  #{
                             id                  :=  ticket_id(),
@@ -298,8 +298,8 @@
     | no_return().
 
 issue(Session, Opts0) ->
-    Opts = maps_utils:validate(Opts0, ?OPTS_VALIDATOR),
     try
+        Opts = maps_utils:validate(Opts0, ?OPTS_VALIDATOR),
         Authmethod = bondy_session:authmethod(Session),
         Allowed = bondy_config:get([security, ticket, authmethods]),
 
@@ -318,7 +318,7 @@ issue(Session, Opts0) ->
         throw:Reason ->
             {error, Reason};
 
-        error:{not_authorized, _} = Reason ->
+        _:Reason ->
             {error, Reason}
     end.
 
@@ -373,11 +373,14 @@ verify(Ticket, Opts) ->
                 case lookup(AuthRealmUri, Authid, Scope) of
                     {ok, Claims} = OK ->
                         OK;
+
                     {ok, _Other} ->
                         throw(no_match);
+
                     {error, not_found} when AllowNotFound == true ->
                         %% We trust the signed JWT
                         {ok, Claims};
+
                     {error, not_found} ->
                         %% TODO Try to retrieve from Claims.node
                         %% or use Scope to lookup indices
@@ -528,7 +531,7 @@ revoke_all(_RealmUri, _Authid, _Scope) ->
     % Prefix = ?PLUM_DB_PREFIX([RealmUri, Authid]),
     % Key = store_key(Authid, Scope),
     % Realm = maps:get(realm, Scope, undefined),
-    % InstanceId = maps:get(client_instance_id, Scope, undefined),
+    % InstanceId = maps:get(device_id, Scope, undefined),
 
     % Fun = fun
     %     ({_, ?TOMBSTONE}) ->
@@ -649,7 +652,7 @@ when is_binary(Ticket) ->
     VerifyOpts = #{allow_not_found => true},
 
     case verify(Ticket, VerifyOpts) of
-        {ok, #{scope := #{client_id := Val}}} when Val =/= undefined ->
+        {ok, #{scope := #{client_id := Val}}} when Val =/= all ->
             throw({invalid_request, "Nested tickets are not allowed"});
 
         {ok, #{issued_by := Authid}} ->
@@ -658,17 +661,13 @@ when is_binary(Ticket) ->
             throw({invalid_request, "Self-granting ticket not allowed"});
 
         {ok, #{authid := ClientId, scope := Scope}} ->
-            Id0 = maps:get(client_instance_id, Scope),
-            Id = maps:get(client_instance_id, Opts, Id0),
+            Id0 = maps:get(device_id, Scope),
+            Id = maps:get(device_id, Opts, Id0),
 
-            undefined =:= Id0 orelse Id =:= Id0
-                orelse throw({invalid_request, "invalid client_instance_id"}),
+            all =:= Id0 orelse Id =:= Id0
+                orelse throw({invalid_request, "invalid device_id"}),
 
-            #{
-                realm => Uri,
-                client_id => ClientId,
-                client_instance_id => Id
-            };
+            bondy_auth_scope:new(Uri, ClientId, Id);
 
         {error, _Reason} ->
             %% TODO implement new Error standard
@@ -687,8 +686,8 @@ when is_binary(Ticket) ->
 
 scope(Session, Opts, Uri) ->
     Authid = bondy_session:authid(Session),
-    ClientId = maps:get(client_id, Opts, undefined),
-    InstanceId = maps:get(client_instance_id, Opts, undefined),
+    ClientId = maps:get(client_id, Opts, all),
+    InstanceId = maps:get(device_id, Opts, all),
 
     %% Throw exception if client is requesting a ticket issued to itself
     Authid =/= ClientId orelse throw(invalid_request),
@@ -696,7 +695,7 @@ scope(Session, Opts, Uri) ->
     #{
         realm => Uri,
         client_id => ClientId,
-        client_instance_id => InstanceId
+        device_id => InstanceId
     }.
 
 
@@ -728,13 +727,13 @@ authorize(ScopeType, AuthCtxt) ->
     end.
 
 
-scope_type(#{realm := undefined, client_id := undefined}) ->
+scope_type(#{realm := all, client_id := all}) ->
     sso;
 
-scope_type(#{realm := undefined, client_id := _}) ->
+scope_type(#{realm := all, client_id := _}) ->
     client_sso;
 
-scope_type(#{client_id := undefined}) ->
+scope_type(#{client_id := all}) ->
     local;
 
 scope_type(#{client_id := _}) ->
@@ -752,25 +751,24 @@ store_key(Authid, Scope) ->
 
 
 %% @private
-store_key(Authid, #{client_instance_id := undefined}, sso) ->
-    {Authid, <<>>, <<>>};
-
-store_key(Authid, #{client_instance_id := Id}, sso) ->
-    {Authid, <<>>, Id};
-
-store_key(Authid, #{realm := Uri, client_instance_id := undefined}, local) ->
-    {Authid, Uri, <<>>};
-
-store_key(Authid, #{realm := Uri, client_instance_id := Id}, local) ->
-    {Authid, Uri, Id};
-
 store_key(Authid, #{client_id := ClientId}, Type)
-when ClientId =/= undefined andalso
+when ClientId =/= all andalso
 (Type == client_local orelse Type == client_sso) ->
     %% client scope or client_realm scope ticket
-    %% client_instance_id handled internally by list_key
-    {Authid, ClientId, <<>>}.
+    %% device_id handled internally by list_key
+    {Authid, ClientId, <<>>};
 
+store_key(Authid, #{device_id := all}, sso) ->
+    {Authid, <<>>, <<>>};
+
+store_key(Authid, #{device_id := Id}, sso) ->
+    {Authid, <<>>, Id};
+
+store_key(Authid, #{realm := Uri, device_id := all}, local) ->
+    {Authid, Uri, <<>>};
+
+store_key(Authid, #{realm := Uri, device_id := Id}, local) ->
+    {Authid, Uri, Id}.
 
 %% @private
 lookup_key(Authid, Scope) ->
@@ -780,15 +778,15 @@ lookup_key(Authid, Scope) ->
 %% @private
 normalise_scope(Scope) ->
     Default = #{
-        realm => undefined,
-        client_id => undefined,
-        client_instance_id => undefined
+        realm => all,
+        client_id => all,
+        device_id => all
     },
     maps:merge(Default, Scope).
 
 
 %% @private
-list_key(#{realm := Uri, client_instance_id := Id}) ->
+list_key(#{realm := Uri, device_id := Id}) ->
     {Uri, Id}.
 
 
@@ -799,7 +797,7 @@ store_ticket(AuthRealmUri, Authid, Claims) ->
     Key = store_key(Authid, Scope),
 
     case maps:get(client_id, Scope) of
-        undefined ->
+        all ->
             %% local | sso ticket scope type
             %% We just replace any existing ticket in this location
             ok = plum_db:put(Prefix, Key, Claims);
@@ -842,7 +840,7 @@ expiry_time_secs(Val) when is_integer(Val) ->
 
 
 %% @private
-issuer(Authid, #{client_id := undefined}) ->
+issuer(Authid, #{client_id := all}) ->
     Authid;
 
 issuer(_, #{client_id := ClientId}) ->
@@ -878,24 +876,24 @@ ticket_resolver(L1, L2) when is_list(L1) andalso is_list(L2) ->
         remove_expired(lists:umerge(L1, L2))
     );
 
-ticket_resolver(?TOMBSTONE, Ticket) when is_map(Ticket) ->
-    case is_expired(Ticket) of
+ticket_resolver(?TOMBSTONE, T) when is_map(T) ->
+    case is_expired(T) of
         true -> ?TOMBSTONE;
-        Ticket -> Ticket
+        T -> T
     end;
 
-ticket_resolver(Ticket, ?TOMBSTONE) when is_map(Ticket) ->
-    ticket_resolver(?TOMBSTONE, Ticket);
+ticket_resolver(T, ?TOMBSTONE) when is_map(T) ->
+    ticket_resolver(?TOMBSTONE, T);
 
-ticket_resolver(TicketA, TicketB)
-when is_map(TicketA) andalso is_map(TicketB) ->
-    case {is_expired(TicketA), is_expired(TicketB)} of
+ticket_resolver(TA, TB)
+when is_map(TA) andalso is_map(TB) ->
+    case {is_expired(TA), is_expired(TB)} of
         {true, true} -> ?TOMBSTONE;
-        {false, true} -> TicketA;
-        {true, false} -> TicketB;
+        {false, true} -> TA;
+        {true, false} -> TB;
         {false, false} ->
-            ExpA = maps:get(expires_at, TicketA),
-            ExpB = maps:get(expires_at, TicketB),
+            ExpA = maps:get(expires_at, TA),
+            ExpB = maps:get(expires_at, TB),
             case ExpA >= ExpB of
                 true -> ExpA;
                 false -> ExpB
