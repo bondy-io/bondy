@@ -319,7 +319,7 @@ to_list(#{type := ?MODULE, data := Data}) ->
 %% =============================================================================
 
 %% Mock token creation helper
-mock_token(Id, Scope, ExpiresAt) ->
+mock_token(Id, Scope, ExpiresIn) ->
     Now = erlang:system_time(second),
 
     #{
@@ -329,7 +329,7 @@ mock_token(Id, Scope, ExpiresAt) ->
         grant_type => password,
         id => Id,
         authscope => Scope,
-        expires_in => ExpiresAt,
+        refresh_expires_in => ExpiresIn,
         created_at => Now,
         refreshed_at => Now,
         issued_at => Now

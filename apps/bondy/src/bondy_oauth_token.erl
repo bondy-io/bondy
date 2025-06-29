@@ -47,13 +47,14 @@ Tokens are sharded by key and globally replicated to cluster peers.
     )
 ).
 %% TODO not supported yet
-%% -define(CLIENT_CREDENTIALS_GRANT_TTL,
-%%     bondy_config:get([oauth2, client_credentials_grant_duration])
-%% ).
+
 %% -define(CODE_GRANT_TTL,
 %%     bondy_config:get([oauth2, code_grant_duration])
 %% ).
--define(ACCESS_TOKEN_TTL, bondy_config:get([oauth2, password_grant_duration])).
+-define(CLIENT_CREDENTIALS_GRANT_TTL,
+    bondy_config:get([oauth2, client_credentials_grant_duration])
+).
+-define(PASSWORD_TOKEN_TTL, bondy_config:get([oauth2, password_grant_duration])).
 -define(REFRESH_TOKEN_TTL, bondy_config:get([oauth2, refresh_token_duration])).
 -define(REFRESH_TOKEN_LEN, bondy_config:get([oauth2, refresh_token_length])).
 -define(MAX_TOKENS, bondy_config:get([oauth2, max_tokens_per_user])).
@@ -102,7 +103,8 @@ Tokens are sharded by key and globally replicated to cluster peers.
                             id => binary(),
                             token_type := token_type(),
                             grant_type := grant_type(),
-                            expires_in := pos_integer(),
+                            refresh_expires_in := pos_integer(),
+                            access_expires_in := pos_integer(),
                             issued_at := pos_integer(),
                             issued_on := nodestring(),
                             kid := binary(),
@@ -117,7 +119,7 @@ Tokens are sharded by key and globally replicated to cluster peers.
                             created_at := pos_integer(),
                             refreshed_at := pos_integer()
                         }.
--type token_id()          ::  binary().
+-type token_id()    ::  binary().
 -type opts()        ::  #{
                             client_id => binary(),
                             allow_sso =>  boolean(),
@@ -189,7 +191,9 @@ issue(GrantType, AuthCtxt, Opts0) when ?IS_GRANT_TYPE(GrantType) ->
 
         ClientId = maps:get(client_id, Opts, all),
         %% Throw exception if client is requesting a token issued to itself
-        AuthId =/= ClientId orelse throw(invalid_request),
+        AuthId =/= ClientId
+            orelse GrantType == client_credentials
+            orelse throw(invalid_request),
 
         AuthRealm = bondy_realm:fetch(AuthRealmUri),
         Kid = bondy_realm:get_random_kid(AuthRealm),
@@ -209,18 +213,12 @@ issue(GrantType, AuthCtxt, Opts0) when ?IS_GRANT_TYPE(GrantType) ->
         AuthScope = bondy_auth_scope:new(ScopeUri, ClientId, DeviceId),
         TokenType = token_type(GrantType),
 
-        {ExpiresIn, {TokenId, RToken}} = case TokenType of
+        {TokenId, RToken} = case TokenType of
             access ->
-                {
-                    ?ACCESS_TOKEN_TTL,
-                    {bondy_uuidv7:new(), undefined}
-                };
+                {bondy_uuidv7:new(), undefined};
 
             refresh ->
-                {
-                    ?REFRESH_TOKEN_TTL,
-                    gen_refresh_token(store_key(AuthId))
-                }
+                gen_refresh_token(store_key(AuthId))
         end,
 
         T = #{
@@ -229,7 +227,8 @@ issue(GrantType, AuthCtxt, Opts0) when ?IS_GRANT_TYPE(GrantType) ->
             id => TokenId,
             grant_type => GrantType,
             token_type => TokenType,
-            expires_in => ExpiresIn,
+            refresh_expires_in => ?REFRESH_TOKEN_TTL,
+            access_expires_in => get_access_expires_in(GrantType),
             issued_on => bondy_config:nodestring(),
             issued_at => Now,
             kid => Kid,
@@ -459,7 +458,8 @@ revoke_all(RealmUri, AuthId) ->
 
 -doc """
 """.
--spec to_access_token(t()) -> binary().
+-spec to_access_token(t()) ->
+    {ok, {JWT :: binary(), ExpiresIn :: pos_integer()}}.
 
 to_access_token(#{type := ?MODULE, authrealm := RealmUri, kid := Kid} = T0) ->
     Realm = bondy_realm:fetch(RealmUri),
@@ -521,7 +521,7 @@ is_expired(#{type := ?MODULE} = T, Now) ->
     expires_at(T) + ?LEEWAY_SECS =< Now.
 
 
-expires_at(#{type := ?MODULE, issued_at := Ts, expires_in := Exp}) ->
+expires_at(#{type := ?MODULE, issued_at := Ts, refresh_expires_in := Exp}) ->
     Ts + Exp.
 
 
@@ -542,6 +542,20 @@ get_authrealm_uri(RealmUri) ->
     end).
 
 
+get_access_expires_in(client_credentials) ->
+    ?CLIENT_CREDENTIALS_GRANT_TTL;
+
+get_access_expires_in(password) ->
+    ?PASSWORD_TOKEN_TTL;
+
+%% get_access_expires_in(application_code) ->
+%%     refresh;
+
+get_access_expires_in(Grant) ->
+    throw({oauth2_unsupported_grant_type, Grant}).
+
+
+
 
 %% @private
 token_type(client_credentials) ->
@@ -558,20 +572,16 @@ token_type(Grant) ->
 
 
 %% @private
-to_access_token(#{token_type := access} = T, PrivKey) ->
-    bondy_oauth_jwt:encode(to_jwt_claims(T), PrivKey);
-
-to_access_token(#{token_type := refresh} = T0, PrivKey) ->
-    %% We modify the expires_in to generate an access token
-    T = T0#{expires_in => ?ACCESS_TOKEN_TTL},
-    bondy_oauth_jwt:encode(to_jwt_claims(T), PrivKey).
+to_access_token(#{type := ?MODULE, access_expires_in := Exp} = T, PrivKey) ->
+    JWT = bondy_oauth_jwt:encode(to_jwt_claims(T), PrivKey),
+    {ok, {JWT, Exp}}.
 
 
 %% @private
 to_jwt_claims(#{type := ?MODULE, version := ~"1.1" = Vsn} = T) ->
     #{
         id := Id,
-        expires_in := ExpiresIn,
+        access_expires_in := ExpiresIn,
         issued_at := IssuedAt,
         issued_on := IssuedOn,
         kid := Kid,
@@ -735,7 +745,7 @@ do_refresh(#{type := ?MODULE} = T0, Set0) ->
             refreshed_at => Now,
             issued_at => Now,
             issued_on => bondy_config:nodestring(),
-            expires_in => ?REFRESH_TOKEN_TTL,
+            refresh_expires_in => ?REFRESH_TOKEN_TTL,
             refresh_token => RefreshToken
         },
 
