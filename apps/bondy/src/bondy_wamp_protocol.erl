@@ -176,6 +176,7 @@ session_id(#wamp_state{context = Ctxt}) ->
 ref(#wamp_state{context = Ctxt}) ->
     bondy_context:ref(Ctxt).
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -302,11 +303,12 @@ handle_inbound(Data, St) ->
         _:{invalid_message, _} = Reason ->
             stop(Reason, St);
 
-        _:Reason:Stacktrace ->
+        Class:Reason:Stacktrace ->
             %% WE SHOULD NEVER REACH THIS POINT AS THIS WILL STOP THE
             %% CONNECTION.
             ?LOG_ERROR(#{
                 description => <<"Error while evaluating inbound data">>,
+                class => Class,
                 reason => Reason,
                 stacktrace => Stacktrace,
                 data => Data

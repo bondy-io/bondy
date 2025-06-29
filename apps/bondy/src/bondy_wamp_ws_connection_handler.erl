@@ -428,7 +428,7 @@ terminate({error, Reason}, _Req, State) ->
 terminate({crash, Class, Reason}, _Req, State) ->
     %% A crash occurred in the handler.
     ?LOG_ERROR(#{
-        description => "A crash occurred in the handler.",
+        description => "Connection closed. A crash occurred in the handler.",
         class => Class,
         reason => Reason
     }),
@@ -436,7 +436,7 @@ terminate({crash, Class, Reason}, _Req, State) ->
 
 terminate(Other, _Req, State) ->
     ?LOG_ERROR(#{
-        description => "Process crashed",
+        description => "Connection closed",
         reason => Other
     }),
     do_terminate(State).
