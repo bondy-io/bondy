@@ -60,17 +60,28 @@ verify(RealmUri, JWT, MatchSpec) ->
 
 
 %% @private
-authscope(Claims) ->
-    Scope = key_value:get([~"auth", ~"scope"], Claims),
-    ScopeRealm = maps:get(~"realm", Scope, all),
-    ClientId = maps:get(~"client_id", Scope, all),
-    DeviceId = maps:get(~"device_id", Scope, all),
-    bondy_auth_scope:new(ScopeRealm, ClientId, DeviceId).
+authscope(RealmUri, Claims) ->
+    case maps:get(~"auth", Claims, undefined) of
+        undefined ->
+            %% V1 token
+            DeviceId = key_value:get(
+                [~"meta", ~"client_device_id"], Claims, all
+            ),
+            bondy_auth_scope:new(RealmUri, all, DeviceId);
+
+        Auth ->
+            %% V1.1 Token
+            Scope = key_value:get(~"scope", Auth, #{}),
+            ScopeRealm = maps:get(~"realm", Scope, RealmUri),
+            ClientId = maps:get(~"client_id", Scope, all),
+            DeviceId = maps:get(~"device_id", Scope, all),
+            bondy_auth_scope:new(ScopeRealm, ClientId, DeviceId)
+    end.
 
 
 %% @private
 matches(RealmUri, Claims, Spec) ->
-    TokenScope = authscope(Claims),
+    TokenScope = authscope(RealmUri, Claims),
     Keys = maps:keys(Spec),
 
     maybe
@@ -119,6 +130,9 @@ do_verify(RealmUri, JWT, Spec) ->
     catch
         throw:Reason ->
             {error, Reason};
+
+        error:{not_found, Uri} ->
+            {error, {no_such_realm, Uri}};
 
         error:{no_such_realm, _} = Reason ->
             {error, Reason};
