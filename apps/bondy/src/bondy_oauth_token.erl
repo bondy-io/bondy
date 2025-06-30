@@ -37,7 +37,7 @@ Tokens are sharded by key and globally replicated to cluster peers.
 -define(VERSION, ~"1.1").
 
 -define(NOW, erlang:system_time(second)).
--define(LEEWAY_SECS, 2 * 0). % 2 mins
+-define(LEEWAY_SECS, 2 * 0). % 0 mins
 -define(EXPIRY_TIME_SECS(Ts, Secs), Ts + Secs + ?LEEWAY_SECS).
 -define(IS_GRANT_TYPE(X),
     (
@@ -129,7 +129,7 @@ Tokens are sharded by key and globally replicated to cluster peers.
                         }.
 -type token_type()      ::  access | refresh.
 -type grant_type()      ::  client_credentials | password | authorization_code.
-
+-type issue_error()     ::  any().
 
 -export_type([t/0]).
 -export_type([id/0]).
@@ -169,7 +169,7 @@ Issues a token.
     GrantType :: grant_type(),
     AuthCtxt :: bondy_auth:context(),
     Opts :: opts()) ->
-    {ok, t()} | {error, any()}.
+    {ok, t()} | {error, issue_error()}.
 
 issue(GrantType, AuthCtxt, Opts0) when ?IS_GRANT_TYPE(GrantType) ->
     %% Realm we are operating in
