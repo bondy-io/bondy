@@ -1602,9 +1602,13 @@ add_indices(Entry) ->
         bondy_registry_trie:add(E, Trie)
     end,
 
-    case ?CONCURRENT_ADD(Type) of
+    MatchPolicy = bondy_registry_entry:match_policy(Entry),
+    Decision = MatchPolicy == ?EXACT_MATCH orelse ?CONCURRENT_ADD(Type),
+
+    case Decision of
         true ->
             Add(Entry, trie(RealmUri));
+
         false ->
             Pid = bondy_registry_partition:pick(RealmUri),
             bondy_registry_partition:execute(Pid, Add, [Entry], 5000)
@@ -1621,7 +1625,10 @@ delete_indices(Entry) ->
         ok = bondy_registry_trie:delete(E, T)
     end,
 
-    case ?CONCURRENT_DELETE(Type) of
+    MatchPolicy = bondy_registry_entry:match_policy(Entry),
+    Decision = MatchPolicy == ?EXACT_MATCH orelse ?CONCURRENT_DELETE(Type),
+
+    case Decision of
         true ->
             Delete(Entry, trie(RealmUri));
         false ->

@@ -138,12 +138,12 @@
 %% <div class="markdown">
 %% |SCOPE|Allow SSO|Client Ticket|Client Instance ID|Key|Value|
 %% |---|---|---|---|---|---|
-%% |Local|no|no|no|`uri()'|`claims()'|
-%% |SSO|yes|no|no|`username()'|`claims()'|
-%% |Client-Local|no|yes|no|`client_id()'|`[{uri(), claims()}]'|
-%% |Client-Local|no|yes|yes|`client_id()'|`[{{uri(), instance_id()}, claims()}]'|
-%% |Client-SSO|yes|yes|no|`client_id()'|`[{all, claims()}]'|
-%% |Client-SSO|yes|yes|yes|`client_id()'|`[{{all, instance_id()}, claims()}]'|
+%% |Local|no|no|no|`uri()'|`t()'|
+%% |SSO|yes|no|no|`username()'|`t()'|
+%% |Client-Local|no|yes|no|`client_id()'|`[{uri(), t()}]'|
+%% |Client-Local|no|yes|yes|`client_id()'|`[{{uri(), instance_id()}, t()}]'|
+%% |Client-SSO|yes|yes|no|`client_id()'|`[{all, t()}]'|
+%% |Client-SSO|yes|yes|yes|`client_id()'|`[{{all, instance_id()}, t()}]'|
 %% </div>
 %%
 %% === Permissions Summary ===
@@ -176,56 +176,40 @@
 -define(PLUM_DB_PREFIX(Uri), {?PLUM_DB_TICKET_TAB, Uri}).
 
 -define(OPTS_VALIDATOR, #{
-    <<"expiry_time_secs">> => #{
-        alias => expiry_time_secs,
+    expiry_time_secs => #{
+        alias => ~"expiry_time_secs",
         key => expiry_time_secs,
         required => false,
         datatype => pos_integer
     },
-    <<"allow_sso">> => #{
-        alias => allow_sso,
+    allow_sso => #{
+        alias => ~"allow_sso",
         key => allow_sso,
         required => true,
         datatype => boolean,
         default => true
     },
-    <<"client_ticket">> => #{
-        alias => client_ticket,
-        key => client_ticket,
-        required => false,
-        datatype => binary
-    },
-    <<"client_id">> => #{
-        alias => client_id,
+    client_id => #{
+        alias => ~"client_id",
         key => client_id,
         required => false,
         datatype => binary
     },
-    <<"device_id">> => #{
-        alias => device_id,
+    device_id => #{
+        alias => ~"device_id",
         key => device_id,
+        required => false,
+        datatype => binary
+    },
+    client_ticket => #{
+        alias => ~"client_ticket",
+        key => client_ticket,
         required => false,
         datatype => binary
     }
 }).
 
--type t()           ::  binary().
--type opts()        ::  #{
-                            expiry_time_secs    =>  pos_integer(),
-                            allow_sso           =>  boolean(),
-                            client_ticket       =>  t(),
-                            client_id           =>  binary(),
-                            device_id  =>  binary()
-                        }.
--type verify_opts() ::  #{
-                            allow_not_found     =>  boolean()
-                        }.
--type scope()       ::  #{
-                            realm               :=  optional(uri()),
-                            client_id           :=  optional(authid()),
-                            device_id  :=  optional(binary())
-                        }.
--type claims()      ::  #{
+-type t()           ::  #{
                             id                  :=  ticket_id(),
                             authrealm           :=  uri(),
                             authid              :=  authid(),
@@ -237,6 +221,22 @@
                             scope               :=  scope(),
                             kid                 :=  binary()
                         }.
+-type opts()        ::  #{
+                            expiry_time_secs    =>  pos_integer(),
+                            allow_sso           =>  boolean(),
+                            client_ticket       =>  jwt(),
+                            client_id           =>  binary(),
+                            device_id  =>  binary()
+                        }.
+-type verify_opts() ::  #{
+                            allow_not_found     =>  boolean()
+                        }.
+-type scope()       ::  #{
+                            realm               :=  optional(uri()),
+                            client_id           :=  optional(authid()),
+                            device_id  :=  optional(binary())
+                        }.
+-type jwt()         ::  binary().
 -type ticket_id()   ::  binary().
 -type authid()      ::  bondy_rbac_user:username().
 -type issue_error() ::  {no_such_user, authid()}
@@ -247,7 +247,7 @@
 
 
 -export_type([t/0]).
--export_type([claims/0]).
+-export_type([jwt/0]).
 -export_type([ticket_id/0]).
 -export_type([scope/0]).
 -export_type([opts/0]).
@@ -293,7 +293,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec issue(Session :: bondy_session:t(), Opts :: opts()) ->
-    {ok, Ticket :: t(), Claims :: claims()}
+    {ok, Ticket :: jwt(), Claims :: t()}
     | {error, issue_error()}
     | no_return().
 
@@ -327,7 +327,7 @@ issue(Session, Opts0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec verify(Ticket :: binary()) -> {ok, claims()} | {error, expired | invalid}.
+-spec verify(Ticket :: binary()) -> {ok, t()} | {error, expired | invalid}.
 
 verify(Ticket) ->
     verify(Ticket, #{}).
@@ -338,7 +338,7 @@ verify(Ticket) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec verify(Ticket :: binary(), Opts :: verify_opts()) ->
-    {ok, claims()} | {error, expired | invalid}.
+    {ok, t()} | {error, expired | invalid}.
 
 verify(Ticket, Opts) ->
     try
@@ -409,7 +409,7 @@ verify(Ticket, Opts) ->
 -spec lookup(
     RealmUri :: uri(),
     Authid :: bondy_rbac_user:username(),
-    Scope :: scope()) -> {ok, Claims :: claims()} | {error, no_found}.
+    Scope :: scope()) -> {ok, Claims :: t()} | {error, no_found}.
 
 lookup(RealmUri, Authid, Scope) ->
     Prefix = ?PLUM_DB_PREFIX(RealmUri),
@@ -422,7 +422,7 @@ lookup(RealmUri, Authid, Scope) ->
         Claims when is_map(Claims) ->
             {ok, Claims};
         List when is_list(List) ->
-            %% List :: [claims()]
+            %% List :: [t()]
             LKey = list_key(Scope),
             case lists:keyfind(LKey, 1, List) of
                 {LKey, Claims} ->
@@ -539,7 +539,7 @@ revoke_all(_RealmUri, _Authid, _Scope) ->
     %     ({K, Claims}) when K == Key andalso is_map(Claims)->
     %         plum_db:delete(Prefix, Key);
     %     ({K, L0}) when K == Key andalso is_list(L0) ->
-    %         %% List :: [claims()]
+    %         %% List :: [t()]
     %         LKey = list_key(Scope),
     %         case lists:keyfind(LKey, 1, List) of
     %             {LKey, Claims} ->
