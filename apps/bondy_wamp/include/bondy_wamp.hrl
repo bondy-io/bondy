@@ -1630,5 +1630,5 @@ end).
 -define(WAMP_SUBSCRIPTION_ON_SUBSCRIBE,         <<"wamp.subscription.on_subscribe">>).
 -define(WAMP_SUBSCRIPTION_ON_UNSUBSCRIBE,       <<"wamp.subscription.on_unsubscribe">>).
 -define(WAMP_SYSTEM_SHUTDOWN,           <<"wamp.close.system_shutdown">>).
--define(WAMP_TIMEOUT,                   <<"wamp.error.timeout">>).
+-define(WAMP_ERROR_TIMEOUT,                   <<"wamp.error.timeout">>).
 -define(WAMP_TYPE_CHECK_ERROR,          <<"wamp.error.type_check_error">>).

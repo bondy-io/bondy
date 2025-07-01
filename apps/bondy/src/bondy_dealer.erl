@@ -789,7 +789,7 @@ forward(#error{request_type = ?CALL} = M, Caller, Opts) ->
     Key = bondy_rpc_promise:call_key_pattern(RealmUri, Caller, CallId),
 
     Status = case M#error.error_uri of
-        ?WAMP_TIMEOUT ->
+        ?WAMP_ERROR_TIMEOUT ->
             %% This is a peer node's promise manager timeout error produced
             %% while matching an expired invocation promise, so we want to
             %% match the local promise even if it is timeout to
