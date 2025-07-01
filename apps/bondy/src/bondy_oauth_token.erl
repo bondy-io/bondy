@@ -390,6 +390,9 @@ revoke(RealmUri, RefreshToken) when is_binary(RefreshToken) ->
         {error, not_found} ->
             ok;
 
+        {error, invalid_token} ->
+            ok;
+
         {error, Reason} ->
             ?LOG_ERROR(#{
                 description => "Error while revoking token",
