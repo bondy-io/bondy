@@ -1,4 +1,4 @@
-name: Bondy Debian OTP 26
+name: Bondy Debian OTP 27
 on:
   workflow_dispatch:
   push:
