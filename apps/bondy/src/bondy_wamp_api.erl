@@ -92,6 +92,10 @@ handle_call(#call{procedure_uri = Proc} = M, Ctxt) ->
     }
     | {reply, wamp_result() | wamp_error()}.
 
+do_handle_call(<<"bondy.ping">>, M, _Ctxt) ->
+    R = bondy_wamp_message:result(M#call.request_id, #{}, []),
+    {reply, R};
+
 do_handle_call(<<"bondy.backup.", _/binary>> = Proc, M, Ctxt) ->
     bondy_backup_api:handle_call(Proc, M, Ctxt);
 
