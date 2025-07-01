@@ -608,7 +608,16 @@ do_forward(#subscribe{} = M, Ctxt) ->
 
         {error, {already_exists, Entry}} ->
             Id = bondy_registry_entry:id(Entry),
-            bondy:send(RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id))
+            bondy:send(RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id));
+
+        {error, timeout} ->
+            Error = bondy_wamp_message:error_from(
+                M,
+                ?WAMP_ERROR_TIMEOUT,
+                [~"Request timed out waiting for subcription response."]
+            ),
+            bondy:send(RealmUri, Ref, Error)
+
     end;
 
 do_forward(#unsubscribe{} = M, Ctxt) ->
@@ -762,6 +771,9 @@ do_publish(#publish{} = M, Ctxt) ->
 
 
 %% @private
+do_publish(_, ?EOT, _, _, _) ->
+    ok;
+
 do_publish(RealmUri, {_, _} = MatchResult, MakeEvent, Fwd, Origin)
 when is_function(MakeEvent, 1), is_function(Fwd, 1) ->
     %% REVIEW Consider creating a Broadcast tree out of the registry trie
