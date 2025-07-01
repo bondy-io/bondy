@@ -502,7 +502,7 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State0) ->
             ),
             %% This works only on HTTP1, we will change this for a stratgy
             %% based on {active, boolean()} and bondy_regulator.
-            Opts1 = maps:put(active_n, 25, Opts0),
+            Opts1 = maps:put(active_n, 1, Opts0),
             {PingOpts, Opts} = maps:take(ping, Opts1),
 
             State1 = State0#state{
