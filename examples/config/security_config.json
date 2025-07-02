@@ -89,6 +89,11 @@
                 "description": "A test client",
                 "groups":["api_clients"]
             },
+            {
+                "username" : "client-resource-owner",
+                "password" : "123456",
+                "groups": ["api_clients", "resource_owners"]
+            },
              {
                 "username" : "alice",
                 "password" : "123456",

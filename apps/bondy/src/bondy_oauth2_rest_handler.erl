@@ -27,6 +27,7 @@
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
 -include("bondy_security.hrl").
+-include("bondy_oauth.hrl").
 
 
 
@@ -341,6 +342,10 @@ accept(Req0, St) ->
                 jwks(Req1, St)
         end
     catch
+        error:Error when is_map(Error) ->
+            Req = prepare_request(Error, #{}, Req0),
+            {false, Req, St};
+
         error:Reason:Stacktrace ->
             ?LOG_ERROR(#{
                 class => error,
@@ -348,8 +353,8 @@ accept(Req0, St) ->
                 stacktrace => Stacktrace
             }),
 
-            Req2 = reply(Reason, Req0),
-            {false, Req2, St}
+            Req = prepare_request(Reason, #{}, Req0),
+            {false, Req, St}
     end.
 
 
@@ -424,27 +429,47 @@ do_is_authorized(Req0, St0) ->
 
 %% @private
 authenticate(client, Password, #state{client_auth_ctxt = Ctxt} = St) ->
-    NewCtxt = do_authenticate(Password, Ctxt),
-    St#state{
-        client_auth_ctxt = NewCtxt
-    };
+    %% Must be member of API_CLIENTS
+    Roles = [?API_CLIENTS],
+    NewCtxt = do_authenticate(Password, Roles, Ctxt),
+    case lists:member(?API_CLIENTS, bondy_auth:roles(NewCtxt)) of
+        true ->
+           St#state{client_auth_ctxt = NewCtxt};
 
-authenticate(
-    resource_owner, Password, #state{owner_auth_ctxt = Ctxt} = St) ->
-    NewCtxt = do_authenticate(Password, Ctxt),
-    St#state{
-        owner_auth_ctxt = NewCtxt
-    }.
+        false ->
+            throw(#{
+                code => invalid_client,
+                message => ~"User doesn't have role 'api_clients'",
+                description => ~""
+            })
+    end;
+
+authenticate(resource_owner, Password, #state{owner_auth_ctxt = Ctxt} = St) ->
+    %% Must be member of RESOURCE_OWNERS but we first authenticate
+    NewCtxt = do_authenticate(Password, all, Ctxt),
+    case lists:member(?RESOURCE_OWNERS, bondy_auth:roles(NewCtxt)) of
+        true ->
+           St#state{owner_auth_ctxt = NewCtxt};
+
+        false ->
+            throw(#{
+                code => invalid_resource_owner,
+                message => ~"User doesn't have role 'resource_owners'",
+                description => ~""
+            })
+    end.
 
 
 %% @private
-do_authenticate(Password, Ctxt) ->
+do_authenticate(Password, Roles, Ctxt) ->
     %% TODO If the user configured realm authmethods with OAUTH2 but not
     %% PASSWORD this will fail.  We need to ask bondy_auth to authenticate using
     %% password even if password is not an allowed method (this)
-    case bondy_auth:authenticate(?PASSWORD_AUTH, Password, undefined, Ctxt) of
+
+    case bondy_auth:authenticate(?PASSWORD_AUTH, Password, Roles, Ctxt) of
         {ok, _, NewCtxt} ->
             NewCtxt;
+
         {error, Reason} ->
             throw(Reason)
     end.
@@ -487,6 +512,9 @@ token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
                 throw(Reason)
         end
     catch
+        throw:Error when is_map(Error) ->
+            {stop, reply(Error, Req0), St0};
+
         throw:EReason ->
             ?LOG_INFO(#{
                 description =>

@@ -190,10 +190,10 @@ issue(GrantType, AuthCtxt, Opts0) when ?IS_GRANT_TYPE(GrantType) ->
         Now = ?NOW,
 
         ClientId = maps:get(client_id, Opts, all),
-        %% Throw exception if client is requesting a token issued to itself
-        AuthId =/= ClientId
-            orelse GrantType == client_credentials
-            orelse throw(invalid_request),
+        %% %% Throw exception if client is requesting a token issued to itself
+        %% AuthId =/= ClientId
+        %%     orelse GrantType == client_credentials
+        %%     orelse throw(invalid_request),
 
         AuthRealm = bondy_realm:fetch(AuthRealmUri),
         Kid = bondy_realm:get_random_kid(AuthRealm),
