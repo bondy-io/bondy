@@ -1035,7 +1035,7 @@ dirty_delete(Type, EntryKey) ->
             %% from its root node.
             %% Every node will do the same, so if this is a node crashing we
             %% would have a tsunami of deletes being broadcasted.
-            %% We will achieve convergence via AAE.
+            %% We will achieve convergence via AAE on our next exchange.
             Opts = [{broadcast, false}],
 
             ok = plum_db:dirty_put(PDBPrefix, EntryKey, Resolved, Opts),
