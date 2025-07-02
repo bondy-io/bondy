@@ -956,19 +956,13 @@ take(Type, #entry_key{} = EntryKey) when ?IS_ENTRY_TYPE(Type) ->
 -spec delete(Entry :: t()) -> ok.
 
 delete(#entry{} = Entry) ->
-    delete(type(Entry), key(Entry)).
+    delete(Entry, #{broadcast => true}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec delete(Type :: entry_type(), EntryKey :: key()) -> ok.
+-spec delete(Entry :: t(), Opts :: map()) -> ok.
 
-delete(Type, #entry_key{} = EntryKey) when ?IS_ENTRY_TYPE(Type) ->
-    PDBPrefix = pdb_prefix(Type, EntryKey),
-    plum_db:delete(PDBPrefix, EntryKey).
-
+delete(#entry{} = Entry, Opts) ->
+    do_delete(type(Entry), key(Entry), Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -1349,6 +1343,7 @@ locality_comparator(Fun) ->
 
 
 
+
 %% @private
 pdb_prefix(#entry{} = Entry) ->
     pdb_prefix(type(Entry), realm_uri(Entry)).
@@ -1387,6 +1382,14 @@ validate_match_policy(_, Options) when is_map(Options) ->
         P ->
             error({invalid_match_policy, P})
     end.
+
+
+-spec do_delete(Type :: entry_type(), EntryKey :: key(), Opts :: map()) -> ok.
+
+do_delete(Type, #entry_key{} = EntryKey, Opts) when ?IS_ENTRY_TYPE(Type) ->
+    PDBPrefix = pdb_prefix(Type, EntryKey),
+    PDBOpts = #{broadcast => maps:get(broadcast, Opts, true)},
+    plum_db:delete(PDBPrefix, EntryKey, PDBOpts).
 
 
 %% @private

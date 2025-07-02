@@ -75,7 +75,7 @@ of the trie from the plum_db tables.
 -export([remove/4]).
 -export([remove_all/2]).
 -export([remove_all/3]).
--export([remove_all/4]).
+-export([remove_all/5]).
 -export([start_link/0]).
 -export([trie/1]).
 -export([pick/1]).
@@ -375,28 +375,32 @@ orelse is_function(Task, 1) orelse is_function(Task, 2) ->
             MaybeFun = maybe_fun(Task, Ctxt),
             MatchOpts = [{limit, 100} | ?REMOVE_MATCH_OPTS],
             Matches = bondy_registry_entry:match(Type, Pattern, MatchOpts),
-            do_remove_all(Matches, SessionId, MaybeFun)
+            do_remove_all(Matches, SessionId, MaybeFun, #{})
     end.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc Removes all registry entries of type Type, for a {RealmUri
 %% SessionId} relation.
+%%
+%% Opts
+%% - broadcast => boolean()
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove_all(
     Type :: entry_type(),
     RealmUri :: uri(),
     SessionId :: id(),
-    Task :: task() | undefined) -> [entry()].
+    Task :: task() | undefined,
+    Opts :: map()) -> [entry()].
 
-remove_all(Type, RealmUri, SessionId, Task)
+remove_all(Type, RealmUri, SessionId, Task, Opts)
 when Task == undefined orelse is_function(Task, 1) ->
     Pattern = bondy_registry_entry:key_pattern(RealmUri, SessionId, '_'),
 
     MatchOpts = [{limit, 100} | ?REMOVE_MATCH_OPTS],
     Matches = bondy_registry_entry:match(Type, Pattern, MatchOpts),
-    do_remove_all(Matches, SessionId, Task).
+    do_remove_all(Matches, SessionId, Task, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -1876,29 +1880,27 @@ maybe_execute(Fun, Entry) when is_function(Fun, 1) ->
 
 
 %% @private
-do_remove_all(Matches, SessionId, Fun) ->
-    do_remove_all(Matches, SessionId, Fun, []).
+do_remove_all(Matches, SessionId, Fun, Opts) ->
+    do_remove_all(Matches, SessionId, Fun, Opts, []).
 
 
 %% @private
-do_remove_all(?EOT, _, Fun, Acc) ->
+do_remove_all(?EOT, _, Fun, _Opts, Acc) ->
     _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
     ok;
 
-do_remove_all({[], ?EOT}, _, Fun, Acc) ->
+do_remove_all({[], ?EOT}, _, Fun, _Opts, Acc) ->
     _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
     ok;
 
-do_remove_all({[], Cont}, SessionId, Fun, Acc) ->
+do_remove_all({[], Cont}, SessionId, Fun, Opts, Acc) ->
     %% We apply the Fun here as opposed to in every iteration to minimise art
     %% trie concurrency access,
     _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
-
     Res = bondy_registry_entry:match(Cont, ?REMOVE_MATCH_OPTS),
+    do_remove_all(Res, SessionId, Fun, Opts, Acc);
 
-    do_remove_all(Res, SessionId, Fun, Acc);
-
-do_remove_all({[{_EntryKey, Entry}|T], Cont}, SessionId, Fun, Acc) ->
+do_remove_all({[{_EntryKey, Entry}|T], Cont}, SessionId, Fun, Opts, Acc) ->
     Session = bondy_registry_entry:session_id(Entry),
 
     case SessionId =:= Session orelse SessionId == '_' of
@@ -1906,9 +1908,10 @@ do_remove_all({[{_EntryKey, Entry}|T], Cont}, SessionId, Fun, Acc) ->
             ok = delete_indices(Entry),
             %% We delete the entry from plum_db.
             %% This will broadcast the delete to all nodes.
-            ok = bondy_registry_entry:delete(Entry),
+
+            ok = bondy_registry_entry:delete(Entry, Opts),
             %% We continue traversing
-            do_remove_all({T, Cont}, SessionId, Fun, [Entry|Acc]);
+            do_remove_all({T, Cont}, SessionId, Fun, Opts, [Entry|Acc]);
 
         false ->
             %% No longer our session

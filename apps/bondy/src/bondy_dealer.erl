@@ -380,7 +380,13 @@ flush(RealmUri, Ref) ->
         %% Cleanup all registrations for the ref's session
         SessionId = bondy_ref:session_id(Ref),
         bondy_registry:remove_all(
-            registration, RealmUri, SessionId, fun on_unregister/1
+            registration,
+            RealmUri,
+            SessionId,
+            fun on_unregister/1,
+            %% disable broadcast to avoid an avalanche on the other notes
+            %% they will get this delete in the next AAE exchange
+            #{broadcast => false}
         ),
 
         %% Cleanup all RPC queued invocations for Ref
