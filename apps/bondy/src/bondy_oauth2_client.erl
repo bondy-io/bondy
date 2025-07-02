@@ -22,6 +22,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_oauth2_client).
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
+-include("bondy_oauth.hrl").
 
 -define(ADD_SPEC, #{
     <<"client_id">> => #{
@@ -154,7 +155,7 @@ validate(Data0, Spec) ->
 
 %% @private
 maybe_add_groups(#{<<"groups">> := Groups0} = M) ->
-    Groups1 = [<<"api_clients">> | Groups0],
+    Groups1 = [?API_CLIENTS | Groups0],
     maps:put(<<"groups">>, lists:usort(Groups1), M);
 
 maybe_add_groups(#{} = M) ->

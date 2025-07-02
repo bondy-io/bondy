@@ -136,7 +136,7 @@
 -record(bondy_rbac_context, {
     realm_uri               ::  binary(),
     username                ::  binary(),
-    exact_grants = #{}      ::  [grant()],
+    exact_grants = #{}      ::  #{permission() => Resources :: [binary()]},
     pattern_grants          ::  [grant()],
     epoch                   ::  integer(),
     is_anonymous = false    ::  boolean()
@@ -192,9 +192,9 @@
 -export([refresh_context/1]).
 -export([remove_all/2]).
 -export([request/1]).
+-export([revoke/2]).
 -export([revoke_group/2]).
 -export([revoke_user/2]).
--export([revoke/2]).
 -export([user_grants/2]).
 
 
@@ -337,6 +337,7 @@ get_anonymous_context(RealmUri, Username) ->
 get_context(RealmUri, Username)
 when is_binary(Username) orelse Username == anonymous ->
     get_context(RealmUri, Username, grants(RealmUri, Username, user)).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -629,9 +630,12 @@ externalize_grant({{Role, {_, _} = Resource}, Permissions}) ->
 %% @doc To list the grants for a role (group or user)
 %% @end
 %% -----------------------------------------------------------------------------
+externalize_grant({{<<>>, Strategy}, Permissions}) ->
+    externalize_grant({{any, Strategy}, Permissions});
+
 externalize_grant({{Uri, Strategy}, Permissions}) ->
     #{
-        <<"resources">> => #{
+        <<"resource">> => #{
             <<"uri">> => Uri,
             <<"match">> => Strategy
         },
@@ -641,7 +645,7 @@ externalize_grant({{Uri, Strategy}, Permissions}) ->
 %% due to {<<>>, <<"prefix">>} is stored in this case matching the previous clause
 externalize_grant({any, Permissions}) ->
     #{
-        <<"resources">> => #{
+        <<"resource">> => #{
             <<"uri">> => <<"">>,
             <<"match">> => ?PREFIX_MATCH
         },
@@ -903,12 +907,12 @@ derive_strategy(Uri, [H|T]) ->
     end;
 
 derive_strategy(_, []) ->
-    error(bondy_error:map({missing_required_value, <<"match">>})).
+    error(bondy_error_utils:map({missing_required_value, <<"match">>})).
 
 
 %% @private
 inconsistency_error(Keys) ->
-    error(bondy_error:map({inconsistency_error, Keys})).
+    error(bondy_error_utils:map({inconsistency_error, Keys})).
 
 
 %% -----------------------------------------------------------------------------
@@ -1317,10 +1321,11 @@ role_groupnames(Rolename, Type, RealmProto, Seen) ->
 %% @private
 do_role_groupnames(Rolename, user, {RealmUri, _}) ->
     case bondy_rbac_user:lookup(RealmUri, Rolename) of
+        {ok, User} ->
+            bondy_rbac_user:groups(User);
+
         {error, not_found} ->
-            [];
-        User ->
-            bondy_rbac_user:groups(User)
+            []
     end;
 
 do_role_groupnames(Rolename, group, {RealmUri, ProtoUri}) ->

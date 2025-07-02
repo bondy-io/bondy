@@ -149,35 +149,38 @@ remote_index(Uri) when is_binary(Uri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec execute(Server :: pid(), Fun :: execute_fun())->
-    execute_ret().
+    execute_ret() | {error, timeout}.
 
 execute(Server, Fun) ->
     execute(Server, Fun, []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc("""
+Same as calling `execute(ServerRef, Fun, Args, 5_000)`.
+""").
 -spec execute(Server :: pid(), Fun :: execute_fun(), Args :: [any()]) ->
-    execute_ret().
+    execute_ret() | {error, timeout}.
 
 execute(Server, Fun, Args) ->
-    execute(Server, Fun, Args, infinity).
+    execute(Server, Fun, Args, 5_000).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc("""
+
+""").
 -spec execute(
     Server :: pid(),
     Fun :: execute_fun(),
     Args :: [any()],
-    Timetout :: timeout()) -> execute_ret().
+    Timetout :: timeout()) -> execute_ret() | {error, timeout}.
 
 execute(Server, Fun, Args, Timeout) when is_function(Fun, length(Args) + 1) ->
-    gen_server:call(Server, {execute, Fun, Args}, Timeout).
+    try
+        gen_server:call(Server, {execute, Fun, Args}, Timeout)
+    catch
+        exit:{timeout, _} ->
+            {error, timeout}
+    end.
 
 
 
@@ -185,8 +188,7 @@ execute(Server, Fun, Args, Timeout) when is_function(Fun, length(Args) + 1) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec async_execute(Server :: pid(), Fun :: execute_fun()) ->
-    execute_ret().
+-spec async_execute(Server :: pid(), Fun :: execute_fun()) -> ok.
 
 async_execute(Server, Fun) ->
     async_execute(Server, Fun, []).
@@ -197,7 +199,7 @@ async_execute(Server, Fun) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec async_execute(Server :: pid(), Fun :: execute_fun(), Args :: [any()]) ->
-    execute_ret().
+    ok.
 
 async_execute(Server, Fun, Args) ->
     gen_server:cast(Server, {execute, Fun, Args}).
@@ -251,27 +253,9 @@ handle_continue({init_storage, Index}, State0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-handle_call({execute, Fun, []}, _From, State) ->
-    Reply =
-        try
-            Fun(State#state.trie)
-        catch
-            _:Reason ->
-                {error, Reason}
-        end,
-
-    {reply, Reply, State};
-
 handle_call({execute, Fun, Args}, _From, State) ->
-    Reply =
-        try
-            erlang:apply(Fun, Args ++ [State#state.trie])
-        catch
-            _:Reason ->
-                {error, Reason}
-        end,
-
-    {reply, Reply, State};
+    Result = do_execute(State, Fun, Args),
+    {reply, Result, State};
 
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
@@ -286,32 +270,9 @@ handle_call(Event, From, State) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-handle_cast({execute, Fun, []}, State) ->
-    try
-        Fun(State#state.trie)
-    catch
-        _:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error during async execute",
-                reason => Reason,
-                stacktrace => Stacktrace
-            })
-    end,
-    {noreply, State};
-
 handle_cast({execute, Fun, Args}, State) ->
-    try
-        erlang:apply(Fun, Args ++ [State#state.trie])
-    catch
-        _:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                description => "Error during async execute",
-                reason => Reason,
-                stacktrace => Stacktrace
-            })
-    end,
+    _ = do_execute(State, Fun, Args),
     {noreply, State};
-
 
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
@@ -356,3 +317,38 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+do_execute(State, Fun, []) ->
+    try
+        Fun(State#state.trie)
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error during async execute",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            {error, Reason}
+    end;
+
+do_execute(State, Fun, Args) ->
+    try
+        erlang:apply(Fun, Args ++ [State#state.trie])
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error during async execute",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            })
+    end.

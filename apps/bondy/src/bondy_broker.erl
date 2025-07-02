@@ -71,6 +71,7 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_uris.hrl").
 
 -define(MATCH_LIMIT, 100).
 
@@ -154,13 +155,19 @@ flush(RealmUri, Ref) ->
         %% Cleanup all registrations for the ref's session
         SessionId = bondy_ref:session_id(Ref),
         bondy_registry:remove_all(
-            subscription, RealmUri, SessionId, fun on_unsubscribe/1
+            subscription,
+            RealmUri,
+            SessionId,
+            fun on_unsubscribe/1,
+            %% disable broadcast to avoid an avalanche on the other notes
+            %% they will get this delete in the next AAE exchange
+            #{broadcast => false}
         )
 
     catch
         Class:Reason:Stacktrace ->
         ?LOG_DEBUG(#{
-            description => "Error while flushin subscriptions",
+            description => "Error while flushing subscriptions",
             class => Class,
             reason => Reason,
             stacktrace => Stacktrace,
@@ -216,11 +223,12 @@ when is_map(Ctxt) ->
             %% Realm doesn't exist
             {error, Reason};
 
-        _:Reason:Stacktrace->
+        Class:Reason:Stacktrace->
             SessionId = bondy_context:session_id(Ctxt),
             ExtId = bondy_utils:external_session_id(SessionId),
             ?LOG_WARNING(#{
                 description => "Error while publishing",
+                class => Class,
                 reason => Reason,
                 protocol_session_id => ExtId,
                 session_id => SessionId,
@@ -236,7 +244,7 @@ when is_map(Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec subscribe(RealmUri :: uri(), Opts :: map(), Topic :: uri()) ->
-    {ok, id()} | {ok, id(), pid()} | {error, already_exists | any()}.
+    {ok, id()} | {ok, {id(), pid()}} | {error, already_exists | any()}.
 
 subscribe(RealmUri, Opts, Topic) ->
     subscribe(RealmUri, Opts, Topic, self()).
@@ -257,32 +265,24 @@ subscribe(RealmUri, Opts, Topic) ->
     Opts :: map(),
     Topic :: uri(),
     SubscriberOrFun :: pid() | function()) ->
-    {ok, id()} | {ok, id(), pid()} | {error, already_exists | any()}.
+    {ok, id()} | {ok, {id(), pid()}} | {error, already_exists | any()}.
 
 subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
     %% We preallocate an id so that we can keep the same even when the process
     %% is restarted by the supervisor.
-    Id = case maps:find(subscription_id, Opts) of
-        {ok, Value} -> Value;
-        error -> bondy_message_id:global()
-    end,
-
+    Id = bondy_stdlib:lazy_or_else(
+        maps:get(subscription_id, Opts, undefined),
+        fun bondy_message_id:global/0
+    ),
     %% subscriber will call subscribe(RealmUri, Opts, Topic, Pid)
     Result = bondy_subscribers_sup:start_subscriber(
         Id, RealmUri, Opts, Topic, Fun
     ),
-
-    case Result of
-        {ok, Pid} ->
-            {ok, Id, Pid};
-        Error ->
-            Error
-    end;
+    resulto:map(Result, fun(Pid) -> {Id, Pid} end);
 
 subscribe(RealmUri, Opts, Topic, Pid) when is_pid(Pid) ->
     %% Add a local subscription
-    Ref = bondy_ref:new(internal, Pid),
-    subscribe(RealmUri, Opts, Topic, Ref);
+    subscribe(RealmUri, Opts, Topic, bondy_ref:new(internal, Pid));
 
 subscribe(RealmUri, Opts, Topic, Ref)  ->
     bondy_ref:is_type(Ref) orelse error({badarg, Ref}),
@@ -302,7 +302,10 @@ subscribe(RealmUri, Opts, Topic, Ref)  ->
             {ok, bondy_registry_entry:id(Entry)};
 
         {error, {already_exists, _Entry}} ->
-            {error, already_exists}
+            {error, already_exists};
+
+        {error, _} = Error ->
+            Error
     end.
 
 
@@ -325,7 +328,8 @@ unsubscribe(Subscriber) when is_pid(Subscriber) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec unsubscribe(id(), bondy_context:t() | uri()) -> ok | {error, not_found}.
+-spec unsubscribe(id(), bondy_context:t() | uri()) ->
+    ok | {error, not_found | any()}.
 
 unsubscribe(SubsId, RealmUri) when is_integer(SubsId), is_binary(RealmUri) ->
     unsubscribe(SubsId, bondy_context:local_context(RealmUri));
@@ -356,7 +360,7 @@ unsubscribe(SubsId, Ctxt) when is_integer(SubsId) ->
                     Error
             end;
 
-        {error, not_found} = Error ->
+        {error, _} = Error ->
             Error
     end.
 
@@ -369,8 +373,7 @@ unsubscribe(SubsId, Ctxt) when is_integer(SubsId) ->
 %% message to the broker worker pool).
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(M :: wamp_message(), Ctxt :: bondy_context:t()) ->
-    ok | no_return().
+-spec forward(M :: wamp_message(), Ctxt :: bondy_context:t()) -> ok.
 
 forward(M, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
@@ -394,6 +397,26 @@ forward(M, Ctxt) ->
 
         throw:not_found ->
             Reply = not_found_error(M, Ctxt),
+            bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
+
+        Class:Reason:Stacktrace ->
+            TraceId = bondy_utils:uuid(),
+             ?LOG_ERROR(#{
+                description =>
+                    ~"Error while evaluating inbound message. Returning ERROR",
+                reason => Reason,
+                class => Class,
+                stacktrace => Stacktrace,
+                data => M
+            }),
+
+            Reply = bondy_wamp_message:error_from(
+                M,
+                #{},
+                ?BONDY_ERROR_INTERNAL,
+                [~"Internal system error"],
+                #{trace_id => TraceId}
+            ),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply)
     end.
 
@@ -591,7 +614,16 @@ do_forward(#subscribe{} = M, Ctxt) ->
 
         {error, {already_exists, Entry}} ->
             Id = bondy_registry_entry:id(Entry),
-            bondy:send(RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id))
+            bondy:send(RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id));
+
+        {error, timeout} ->
+            Error = bondy_wamp_message:error_from(
+                M,
+                ?WAMP_ERROR_TIMEOUT,
+                [~"Request timed out waiting for subcription response."]
+            ),
+            bondy:send(RealmUri, Ref, Error)
+
     end;
 
 do_forward(#unsubscribe{} = M, Ctxt) ->
@@ -745,6 +777,9 @@ do_publish(#publish{} = M, Ctxt) ->
 
 
 %% @private
+do_publish(_, ?EOT, _, _, _) ->
+    ok;
+
 do_publish(RealmUri, {_, _} = MatchResult, MakeEvent, Fwd, Origin)
 when is_function(MakeEvent, 1), is_function(Fwd, 1) ->
     %% REVIEW Consider creating a Broadcast tree out of the registry trie

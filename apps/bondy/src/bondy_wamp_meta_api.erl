@@ -165,32 +165,6 @@ handle_call(#call{procedure_uri = ?WAMP_COUNT_CALLEES} = M, Ctxt) ->
             {reply, E}
     end;
 
-
-handle_call(#call{procedure_uri = ?BONDY_REGISTRY_LIST} = M, Ctxt) ->
-    [RealmUri] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
-    case list(registration, RealmUri) of
-        {ok, Result} ->
-            R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
-            {reply, R};
-        {error, Reason} ->
-            E = bondy_wamp_api_utils:error(Reason, M),
-            {reply, E}
-    end;
-
-
-handle_call(#call{procedure_uri = ?BONDY_WAMP_CALLEE_LIST} = M, Ctxt) ->
-        %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Details]
-    L = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
-
-    case list_callees(L) of
-        {ok, Result} ->
-            R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
-            {reply, R};
-        {error, Reason} ->
-            E = bondy_wamp_api_utils:error(Reason, M),
-            {reply, E}
-    end;
-
 handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LIST} = M, Ctxt) ->
     [RealmUri] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
     case summary(subscription, RealmUri) of
@@ -271,17 +245,6 @@ handle_call(
             {reply, E}
     end;
 
-handle_call(#call{procedure_uri = ?BONDY_SUBSCRIPTION_LIST} = M, Ctxt) ->
-    [RealmUri] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
-    case list(subscription, RealmUri) of
-        {ok, Result} ->
-            R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
-            {reply, R};
-        {error, Reason} ->
-            E = bondy_wamp_api_utils:error(Reason, M),
-            {reply, E}
-    end;
-
 handle_call(#call{} = M, _) ->
     E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E}.
@@ -296,7 +259,7 @@ handle_invocation(#invocation{} = M, Ctxt) ->
     do_handle_invocation(M, Ctxt, Procedure).
 
 
-
+%% To be replaced by RPC
 do_handle_invocation(M, Ctxt, <<"wamp.session.", Part:16/binary, ".get">>) ->
     Args = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
     [RealmUri, SessionId] = Args,
@@ -351,28 +314,6 @@ no_such_session_error(Type, ReqId) when Type == ?CALL; Type == ?INVOCATION ->
     ).
 
 
-list(Type, RealmUri) ->
-    list(Type, RealmUri, fun bondy_registry_entry:to_external/1).
-
-
-list(Type, RealmUri, Fun) ->
-    try
-        case bondy_registry:entries(Type, RealmUri, '_') of
-            [] ->
-                {ok, []};
-            Entries ->
-                {ok, [Fun(E) || E <- Entries]}
-        end
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            {error, Reason}
-    end.
-
 
 %% -----------------------------------------------------------------------------
 %% @private
@@ -425,7 +366,7 @@ get(Type, [RealmUri, RegId, _Details]) ->
             {error, not_found} ->
                 {error, bondy_wamp_api_utils:no_such_registration_error(RegId)};
             Entry ->
-                {ok, bondy_registry_entry:to_details_map(Entry)}
+                {ok, bondy_registry_entry:to_external(Entry, wamp_meta)}
         end
     catch
         Class:Reason:Stacktrace ->
@@ -484,42 +425,6 @@ match(Type, [RealmUri, Uri, Opts]) ->
     end.
 
 
-%% @private
-list_callees([RealmUri]) ->
-    try
-        case bondy_dealer:callees(RealmUri) of
-            [] ->
-                {ok, []};
-            Callees ->
-                {ok, Callees}
-        end
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            {error, Reason}
-    end;
-
-list_callees([RealmUri, ProcedureUri]) ->
-    try
-        case bondy_dealer:callees(RealmUri, ProcedureUri) of
-            [] ->
-                {ok, []};
-            Callees ->
-                {ok, Callees}
-        end
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            {error, Reason}
-    end.
 
 
 %% @private

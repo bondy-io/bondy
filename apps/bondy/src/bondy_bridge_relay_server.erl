@@ -982,7 +982,14 @@ add_registry_entry(SessionId, ExtEntry, State) ->
             State#state{registrations = Index};
 
         {error, already_exists} ->
-            ok
+            State;
+
+        {error, timeout} ->
+            ?LOG_ERROR(#{
+                description => "Failed while adding registry entry",
+                reason => timeout
+            }),
+            State
     end.
 
 

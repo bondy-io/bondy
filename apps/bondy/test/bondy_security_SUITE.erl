@@ -208,7 +208,7 @@ api_client_add(Config) ->
     ),
 
     ?assertMatch(
-        #{type := user},
+        {ok, #{type := user}},
         bondy_rbac_user:lookup(Uri, ClientId)
     ),
 
@@ -321,7 +321,7 @@ resource_owner_update(Config) ->
     RealmUri = ?config(realm_uri, Prev),
     Username = ?config(username, Prev),
     Pass = <<"New-Password">>,
-    #{groups := Gs} = bondy_rbac_user:lookup(RealmUri, Username),
+    {ok, #{groups := Gs}} = bondy_rbac_user:lookup(RealmUri, Username),
     {ok, _} = bondy_oauth2_resource_owner:update(
         RealmUri,
         Username,
@@ -330,7 +330,7 @@ resource_owner_update(Config) ->
             <<"meta">> => #{<<"foo">> => <<"bar">>}
         }
     ),
-    #{groups := Gs} = bondy_rbac_user:lookup(RealmUri, Username),
+    {ok, #{groups := Gs}} = bondy_rbac_user:lookup(RealmUri, Username),
     {save_config, Prev}.
 
 resource_owner_change_password(Config) ->
@@ -338,12 +338,12 @@ resource_owner_change_password(Config) ->
     RealmUri = ?config(realm_uri, Prev),
     Username = ?config(username, Prev),
     OldPass = ?config(password, Prev),
-    User1 = bondy_rbac_user:lookup(RealmUri, Username),
+    {ok, User1} = bondy_rbac_user:lookup(RealmUri, Username),
     NewPass = <<"New-Password2">>,
     ok = bondy_rbac_user:change_password(
         RealmUri, Username, NewPass, OldPass),
     %% Validate that we have only changed the password
-    User2 = bondy_rbac_user:lookup(RealmUri, Username),
+    {ok, User2} = bondy_rbac_user:lookup(RealmUri, Username),
     %% error([User1, User2]),
     true = User1 =/= User2,
     {save_config,
@@ -501,34 +501,85 @@ password_token_crud_1(Config) ->
     },
     {ok, _} = bondy_oauth2_client:add(Uri, Client),
     U = <<"ale">>,
+    Roles = [],
     R = #{
         <<"username">> => U,
         <<"password">> => <<"123456">>,
         <<"meta">> => #{},
-        <<"groups">> => []
+        <<"groups">> => Roles
     },
     {ok, _} = bondy_oauth2_resource_owner:add(Uri, R),
 
-    {ok, _JWT0, RToken0, _Claims0} = bondy_oauth2:issue_token(
-        password, Uri, ClientId, U, [], #{}
-    ),
-    Data0 = bondy_oauth2:lookup_token(Uri, ClientId, RToken0),
-    Ts0 = bondy_oauth2:issued_at(Data0),
-    timer:sleep(2000), % issued_at is seconds
-    {ok, _JWT1, RToken1, _Claims1} = bondy_oauth2:refresh_token(
-        Uri, ClientId, RToken0
-    ),
-    Data1 = bondy_oauth2:lookup_token(Uri, ClientId, RToken1),
-    {error, not_found} = bondy_oauth2:lookup_token(Uri, ClientId, RToken0),
-    %% Revoke token should never fail, even if the token was already revoked
-    ok = bondy_oauth2:revoke_token(refresh_token, Uri, ClientId, RToken0),
-    Ts1 = bondy_oauth2:issued_at(Data1),
-    true = Ts0 < Ts1,
 
-    ok = bondy_oauth2:revoke_tokens(refresh_token, Uri, U),
-    {error, not_found} = bondy_oauth2:lookup_token(Uri, ClientId, RToken1),
-    %% Revoke token should never fail, even if the token was already revoked
-    ok = bondy_oauth2:revoke_token(refresh_token, Uri, ClientId, RToken1),
+    SessionId = bondy_session_id:new(),
+    SourceIP = {127, 0, 0, 1},
+    {ok, AuthCtxt} = bondy_auth:init(SessionId, Uri, U, Roles, SourceIP),
+
+    Opts = #{client_id => ClientId},
+    {ok, Token0} = bondy_oauth_token:issue(password, AuthCtxt, Opts),
+    RToken0 = bondy_oauth_token:to_refresh_token(Token0),
+    Ts0 = maps:get(issued_at, Token0),
+
+
+    ?assertEqual(
+        {ok, Token0},
+        bondy_oauth_token:lookup(Uri, RToken0)
+    ),
+
+    timer:sleep(2000), % issued_at is seconds
+
+    {ok, Token1} = bondy_oauth_token:refresh(Uri, RToken0),
+    RToken1 = bondy_oauth_token:to_refresh_token(Token1),
+    Scope1 = bondy_oauth_token:authscope(Token1),
+    Ts1 = maps:get(issued_at, Token1),
+
+    ?assertEqual(
+        {error, not_found},
+        bondy_oauth_token:lookup(Uri, RToken0)
+    ),
+    ?assert(Token0 =/= Token1),
+    ?assert(RToken0 =/= RToken1),
+    ?assert(Ts0 < Ts1),
+
+    ?assertEqual(
+        {ok, Token1},
+        bondy_oauth_token:lookup(Uri, U, Scope1)
+    ),
+
+
+    ?assertEqual(
+        {ok, Token1},
+        bondy_oauth_token:lookup(Uri, RToken1)
+    ),
+
+
+
+    ?assertEqual(
+        ok,
+        bondy_oauth_token:revoke(Uri, RToken0),
+        "Revoke token should never fail, even if the token was already deleted"
+    ),
+
+    ?assertEqual(
+        ok,
+        bondy_oauth_token:revoke_all(Uri, U)
+    ),
+
+    ?assertEqual(
+        {error, not_found},
+        bondy_oauth_token:lookup(Uri, RToken1),
+        "Should have been revoked i.e. deleted"
+    ),
+    ?assertEqual(
+        ok,
+        bondy_oauth_token:revoke(Uri, RToken0),
+        "Revoke token should never fail, even if the token was already deleted"
+    ),
+    ?assertEqual(
+        ok,
+        bondy_oauth_token:revoke(Uri, RToken1),
+        "Revoke token should never fail, even if the token was already deleted"
+    ),
 
     {save_config, [{client_id, ClientId}, {username, U} | Config]}.
 
@@ -539,31 +590,54 @@ issue_revoke_by_device_id(Config) ->
     C = ?config(client_id, Prev),
     U = ?config(username, Prev),
     D = <<"1">>,
+    Roles = [],
 
-    {ok, _JWT0, RToken0, _Claims0} = bondy_oauth2:issue_token(
-        password, Uri, C, U, [], #{<<"client_device_id">> => D}
+
+    SessionId = bondy_session_id:new(),
+    SourceIP = {127, 0, 0, 1},
+    {ok, AuthCtxt} = bondy_auth:init(SessionId, Uri, U, Roles, SourceIP),
+    Opts = #{client_device_id => D},
+    {ok, Token0} = bondy_oauth_token:issue(password, AuthCtxt, Opts),
+    RToken0 = bondy_oauth_token:to_refresh_token(Token0),
+
+    ?assertEqual(
+        {ok, Token0},
+        bondy_oauth_token:lookup(Uri, RToken0)
     ),
-    ok = bondy_oauth2:revoke_token(refresh_token, Uri, C, U, D),
-    {error, not_found} = bondy_oauth2:lookup_token(Uri, C, RToken0),
+
+    ok = bondy_oauth_token:revoke(Uri, RToken0),
+
+
+    ?assertEqual(
+        {error, not_found},
+        bondy_oauth_token:lookup(Uri, RToken0)
+    ),
     {save_config, [{client_id, C}, {username, U} | Config]}.
 
 
 issue_refresh_revoke_by_device_id(Config) ->
     {issue_revoke_by_device_id, Prev} = ?config(saved_config, Config),
     Uri = ?config(realm_uri, Prev),
-    C = ?config(client_id, Prev),
     U = ?config(username, Prev),
     D = <<"1">>,
+    Roles = [],
 
-    {ok, _, RToken0, _} = bondy_oauth2:issue_token(
-        password, Uri, C, U, [], #{<<"client_device_id">> => D}
-    ),
+    SessionId = bondy_session_id:new(),
+    SourceIP = {127, 0, 0, 1},
+
+    {ok, AuthCtxt} = bondy_auth:init(SessionId, Uri, U, Roles, SourceIP),
+    Opts = #{client_device_id => D},
+    {ok, Token0} = bondy_oauth_token:issue(password, AuthCtxt, Opts),
+    RToken0 = bondy_oauth_token:to_refresh_token(Token0),
     timer:sleep(2000),
-    {ok, _, RToken1, _} = bondy_oauth2:refresh_token(Uri, C, RToken0),
-    {error, not_found} = bondy_oauth2:lookup_token(Uri, C, RToken0),
-    ok = bondy_oauth2:revoke_token(refresh_token, Uri, C, U, D),
-    {error, not_found} = bondy_oauth2:lookup_token(Uri, C, RToken1).
-
+    {ok, Token1} = bondy_oauth_token:refresh(Uri, RToken0),
+    RToken1 = bondy_oauth_token:to_refresh_token(Token1),
+    {error, not_found} = bondy_oauth_token:lookup(Uri, RToken0),
+    ok = bondy_oauth_token:revoke(Uri, RToken1),
+    ?assertEqual(
+        {error, not_found},
+        bondy_oauth_token:lookup(Uri, RToken1)
+    ).
 
 
 authenticate(Uri, Username, Secret) ->
@@ -576,9 +650,11 @@ do_authenticate(Uri, Username, Secret) ->
     SessionId = bondy_session_id:new(),
     Roles = [],
     SourceIP = {127,0,0,1},
-    {ok, Ctxt} = bondy_auth:init(SessionId, Uri, Username, Roles, SourceIP),
+
+    {ok, AuthCtxt} = bondy_auth:init(SessionId, Uri, Username, Roles, SourceIP),
+
     ?assertEqual(
         true,
-        lists:member(?PASSWORD_AUTH, bondy_auth:available_methods(Ctxt))
+        lists:member(?PASSWORD_AUTH, bondy_auth:available_methods(AuthCtxt))
     ),
-    bondy_auth:authenticate(?PASSWORD_AUTH, Secret, #{}, Ctxt).
+    bondy_auth:authenticate(?PASSWORD_AUTH, Secret, #{}, AuthCtxt).

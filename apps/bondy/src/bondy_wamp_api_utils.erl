@@ -27,6 +27,7 @@
 
 -export([error/2]).
 -export([maybe_error/2]).
+-export([deprecated_procedure_error/1]).
 -export([no_such_procedure_error/1]).
 -export([no_such_procedure_error/3]).
 -export([no_such_registration_error/1]).
@@ -129,7 +130,7 @@ maybe_error(Val, M) ->
 %% @end
 %% -----------------------------------------------------------------------------
 error({not_authorized, Reason}, M) ->
-    Map = bondy_error:map(Reason),
+    Map = bondy_error_utils:map(Reason),
 
     bondy_wamp_message:error_from(
         M,
@@ -139,15 +140,21 @@ error({not_authorized, Reason}, M) ->
     );
 
 error(Reason, #call{} = M) ->
-    #{<<"code">> := Code} = Map = bondy_error:map(Reason),
+    #{<<"code">> := Code} = Map = bondy_error_utils:map(Reason),
     Mssg = maps:get(<<"message">>, Map, <<>>),
     bondy_wamp_message:error_from(
         M,
         #{},
-        bondy_error:code_to_uri(Code),
+        bondy_error_utils:code_to_uri(Code),
         [Mssg],
         Map
     ).
+
+deprecated_procedure_error(#call{procedure_uri = Uri} = M) ->
+    do_deprecated_procedure_error(M, Uri);
+
+deprecated_procedure_error(#invocation{details = #{procedure := Uri}} = M) ->
+    do_deprecated_procedure_error(M, Uri).
 
 
 %% -----------------------------------------------------------------------------
@@ -353,3 +360,17 @@ args_len(L) when is_list(L) -> length(L).
 %% @private
 to_list(undefined) -> [];
 to_list(L) when is_list(L) -> L.
+
+
+
+do_deprecated_procedure_error(M, Uri) ->
+    Reason = <<"The procedure '", Uri/binary, "' has been deprecated.">>,
+    bondy_wamp_message:error_from(
+        M,
+        #{},
+        ~"bondy.error.deprecated_procedure",
+        [Reason],
+        #{
+            message => Reason
+        }
+    ).

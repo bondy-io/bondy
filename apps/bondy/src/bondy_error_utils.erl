@@ -20,7 +20,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_error).
+-module(bondy_error_utils).
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("http_api.hrl").
@@ -40,10 +40,15 @@
 %%     }]
 %% }.
 
+
 -export([map/1]).
 -export([map/2]).
 -export([code_to_uri/1]).
 -export([format_error/2]).
+
+
+%% -compile({no_auto_import, [error/1]}).
+%% -compile({no_auto_import, [error/2]}).
 
 
 

@@ -292,6 +292,7 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_uris.hrl").
 
 
 -define(MATCH_LIMIT, 100).
@@ -379,7 +380,13 @@ flush(RealmUri, Ref) ->
         %% Cleanup all registrations for the ref's session
         SessionId = bondy_ref:session_id(Ref),
         bondy_registry:remove_all(
-            registration, RealmUri, SessionId, fun on_unregister/1
+            registration,
+            RealmUri,
+            SessionId,
+            fun on_unregister/1,
+            %% disable broadcast to avoid an avalanche on the other notes
+            %% they will get this delete in the next AAE exchange
+            #{broadcast => false}
         ),
 
         %% Cleanup all RPC queued invocations for Ref
@@ -591,7 +598,7 @@ callees(RealmUri, ProcedureUri, Opts0) ->
 %% sentt by WAMP peers connected to this Bondy node.
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(M :: wamp_message(), Ctxt :: map()) -> ok | no_return().
+-spec forward(M :: wamp_message(), Ctxt :: map()) -> ok.
 
 forward(M, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
@@ -613,6 +620,27 @@ forward(M, Ctxt) ->
 
         throw:not_found ->
             Reply = not_found_error(M, Ctxt),
+            bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
+
+        Class:Reason:Stacktrace ->
+            TraceId = bondy_utils:uuid(),
+            ?LOG_ERROR(#{
+                description =>
+                    ~"Error while evaluating inbound message. Returning ERROR",
+                reason => Reason,
+                class => Class,
+                stacktrace => Stacktrace,
+                data => M,
+                trace_id => TraceId
+            }),
+
+            Reply = bondy_wamp_message:error_from(
+                M,
+                #{},
+                ?BONDY_ERROR_INTERNAL,
+                [~"Internal system error"],
+                #{trace_id => TraceId}
+            ),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply)
     end.
 
@@ -767,7 +795,7 @@ forward(#error{request_type = ?CALL} = M, Caller, Opts) ->
     Key = bondy_rpc_promise:call_key_pattern(RealmUri, Caller, CallId),
 
     Status = case M#error.error_uri of
-        ?WAMP_TIMEOUT ->
+        ?WAMP_ERROR_TIMEOUT ->
             %% This is a peer node's promise manager timeout error produced
             %% while matching an expired invocation promise, so we want to
             %% match the local promise even if it is timeout to
@@ -1023,6 +1051,9 @@ apply_static_callback(#call{} = M0, Ctxt, Mod) ->
     catch
         throw:no_such_procedure ->
             Error = bondy_wamp_api_utils:no_such_procedure_error(M0),
+            bondy:send(RealmUri, Caller, Error);
+
+        error:#error{} = Error ->
             bondy:send(RealmUri, Caller, Error);
 
         Class:Reason:Stacktrace ->
@@ -1730,7 +1761,7 @@ coerce_strategy(Strategy, CallOpts) ->
 
 %% @private
 coerce_routing_key(#{rkey := Value} = CallOpts) ->
-    maps:put('x_routing_key', Value, CallOpts);
+    maps:put('_routing_key', Value, CallOpts);
 
 coerce_routing_key(CallOpts) ->
     CallOpts.
@@ -1804,7 +1835,7 @@ maybe_append_callback_args(Args0, Entry) ->
 %% as value to INVOCATION.Details.
 %% @end
 %% -----------------------------------------------------------------------------
-prepare_call_options(Options, CallId, Uri, Entry, Ctxt) ->
+prepare_call_options(Opts, CallId, Uri, Entry, Ctxt) ->
     RegistrationId =
         case bondy_registry_entry:is_proxy(Entry) of
             true ->
@@ -1816,61 +1847,64 @@ prepare_call_options(Options, CallId, Uri, Entry, Ctxt) ->
                 bondy_registry_entry:id(Entry)
         end,
 
-    %% Forward PPT attributes to INVOCATION.Details
-    Details0 = maps:with(?WAMP_PPT_ATTRS, Options),
+    EOpts = bondy_registry_entry:options(Entry),
 
-    Details1 = Details0#{
-        procedure => Uri,
-        trust_level => 0
-    },
+    %% Forward PPT attributes to INVOCATION.Details
+    Details0 = maps:with(?WAMP_PPT_ATTRS, Opts),
+    Details1 = Details0#{procedure => Uri, trust_level => 0},
+    Details2 = maybe_disclose_caller(Details1, Ctxt, EOpts, Opts),
+    Details = maybe_disclose_session(Details2, Ctxt, EOpts, Opts),
 
     %% We build the invocation details with local data, and store under
     %% CALL.options.'$private'
-
-    %% TODO disclose info only if feature is announced by Callee, Dealer
-    %% and Caller
-    %% NOTICE: The spec defines disclose_me and disclose_caller BUT Autobhan
-    %% has deprecated this in favour of a router-based authrotization which is
-    %% unfortunate as the ideal solution should be the combination of both.
-    %% So for the time being we revert this to `true'.
-    DiscloseCaller = bondy_registry_entry:get_option(
-        disclose_caller, Entry, true
-    ),
-    DiscloseMe = maps:get(disclose_me, Options, true),
-
-    Details2 = case DiscloseCaller orelse DiscloseMe of
-        true ->
-            bondy_context:caller_details(Ctxt, Details1);
-        false ->
-            Details1
-    end,
-
-    DiscloseSession = bondy_registry_entry:get_option(
-        'x_disclose_session_info', Entry, false
-    ),
-
-    Details = case DiscloseSession of
-        true ->
-            Session = bondy_context:session(Ctxt),
-            Info0 = bondy_session:to_external(Session),
-
-            %% To be deprecated, we should return Info0 on the next release
-            Info = Info0#{
-                'x_authroles' => bondy_session:authroles(Session),
-                'x_meta' => key_value:get([authextra, meta], Info0, #{})
-            },
-            Details2#{'x_session_info' => Info};
-        false ->
-            Details2
-    end,
-
-    Options#{
+    Opts#{
         '$private' => #{
             call_id => CallId,
             registration_id => RegistrationId,
             invocation_details => Details
         }
     }.
+
+
+%% @private
+%% TODO disclose info only if feature is announced by Callee, Dealer
+%% and Caller
+%% NOTICE: The spec defines disclose_me and disclose_caller BUT Autobhan
+%% has deprecated this in favour of a router-based authrotization which is
+%% unfortunate as the ideal solution should be the combination of both.
+%% So for the time being we revert this to `true'.
+maybe_disclose_caller(Acc, Ctxt, EOpts, Opts) ->
+    Disclose =
+        maps:get(disclose_caller, EOpts, true)
+        orelse maps:get(disclose_me, Opts, true),
+
+    case Disclose of
+        true ->
+            bondy_context:caller_details(Ctxt, Acc);
+
+        false ->
+            Acc
+    end.
+
+%% @private
+maybe_disclose_session(Acc, Ctxt, #{'_disclose_session_info' := true}, _) ->
+    Session = bondy_context:session(Ctxt),
+    Info = bondy_session:to_external(Session),
+    Acc#{'_session_info' => Info};
+
+maybe_disclose_session(Acc, Ctxt, #{'x_disclose_session_info' := true}, _) ->
+    %% To be deprecated
+    Session = bondy_context:session(Ctxt),
+    Info = bondy_session:to_external(Session),
+    Acc#{
+        'x_session_info' => Info#{
+            'x_authroles' => bondy_session:authroles(Session),
+            'x_meta' => key_value:get([authextra, meta], Info, #{})
+        }
+    };
+
+maybe_disclose_session(Acc, _, _, _) ->
+    Acc.
 
 
 %% @private
@@ -1971,8 +2005,10 @@ badarg_error(CallId, Type) ->
 %% @private
 not_found_error(M, _Ctxt) ->
     Msg = iolist_to_binary(
-        <<"There are no registered procedures matching the id ",
-        $', (M#unregister.registration_id)/integer, $'>>
+        [
+            "There are no registered procedures matching the id ",
+            $', M#unregister.registration_id, $'
+        ]
     ),
     bondy_wamp_message:error(
         ?UNREGISTER,

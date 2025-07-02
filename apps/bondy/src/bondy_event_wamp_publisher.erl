@@ -237,7 +237,7 @@ when Type == updated; Type == deleted ->
         true ->
             Fun = fun() ->
                 ok = bondy_ticket:revoke_all(RealmUri, Username),
-                ok = bondy_oauth2:revoke_refresh_tokens(RealmUri, Username),
+                ok = bondy_oauth_token:revoke_all(RealmUri, Username),
 
                 %% We use a global ID as this is not a publishers request
                 ReqId = bondy_message_id:global(),
@@ -264,7 +264,7 @@ async_handle_event(
     {[bondy, user, credentials, updated], RealmUri, Username}, Ref) ->
     Fun = fun() ->
         ok = bondy_ticket:revoke_all(RealmUri, Username),
-        ok = bondy_oauth2:revoke_refresh_tokens(RealmUri, Username),
+        ok = bondy_oauth_token:revoke_all(RealmUri, Username),
 
         Topic = ?BONDY_USER_CREDENTIALS_CHANGED,
 
@@ -334,7 +334,10 @@ when Type == created; Type == added; Type == deleted; Type == removed ->
         Args =
             case Type == created of
                 true ->
-                    [ExtSessionId, bondy_registry_entry:to_details_map(Entry)];
+                    [
+                        ExtSessionId,
+                        bondy_registry_entry:to_external(Entry, wamp_meta)
+                    ];
                 false ->
                     [ExtSessionId, RegId]
         end,
@@ -368,7 +371,10 @@ when Type == created; Type == added; Type == deleted; Type == removed ->
         Args =
             case Type == created of
                 true ->
-                    [ExtSessionId, bondy_registry_entry:to_details_map(Entry)];
+                    [
+                        ExtSessionId,
+                        bondy_registry_entry:to_external(Entry, wamp_meta)
+                    ];
                 false ->
                     [ExtSessionId, RegId]
         end,

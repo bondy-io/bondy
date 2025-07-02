@@ -145,7 +145,7 @@ test_1(Config) ->
 
     {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, SourceIP),
 
-    User = bondy_rbac_user:lookup(RealmUri, ?U1),
+    {ok, User} = bondy_rbac_user:lookup(RealmUri, ?U1),
 
     ?assertEqual(
         scram,

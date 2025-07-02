@@ -129,7 +129,7 @@ handle_info(evict, State) ->
                 procedure_uri => ProcUri,
                 timeout => Timeout
             },
-            ?WAMP_TIMEOUT,
+            ?WAMP_ERROR_TIMEOUT,
             [Mssg]
         ),
 

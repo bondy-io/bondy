@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_realm_wamp_api.erl -
+%%  bondy_wamp_api.erl -
 %%
 %%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
 %%
@@ -92,47 +92,54 @@ handle_call(#call{procedure_uri = Proc} = M, Ctxt) ->
     }
     | {reply, wamp_result() | wamp_error()}.
 
+do_handle_call(<<"bondy.ping">>, M, _Ctxt) ->
+    R = bondy_wamp_message:result(M#call.request_id, #{}, []),
+    {reply, R};
+
 do_handle_call(<<"bondy.backup.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_backup_wamp_api:handle_call(Proc, M, Ctxt);
+    bondy_backup_api:handle_call(Proc, M, Ctxt);
 
 do_handle_call(<<"bondy.cluster.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_cluster_wamp_api:handle_call(Proc, M, Ctxt);
-
-do_handle_call(<<"bondy.router.bridge.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_bridge_relay_wamp_api:handle_call(Proc, M, Ctxt);
-
-do_handle_call(<<"bondy.realm.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_realm_wamp_api:handle_call(Proc, M, Ctxt);
-
-do_handle_call(<<"bondy.user.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_rbac_user_wamp_api:handle_call(Proc, M, Ctxt);
-
-do_handle_call(<<"bondy.group.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_rbac_group_wamp_api:handle_call(Proc, M, Ctxt);
-
-do_handle_call(<<"bondy.source.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_rbac_source_wamp_api:handle_call(Proc, M, Ctxt);
-
-do_handle_call(<<"bondy.permission.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_rbac_wamp_api:handle_call(Proc, M, Ctxt);
-
-do_handle_call(<<"bondy.ticket.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_ticket_wamp_api:handle_call(Proc, M, Ctxt);
-
-do_handle_call(<<"bondy.http_gateway.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_http_gateway_wamp_api:handle_call(Proc, M, Ctxt);
-
-do_handle_call(<<"bondy.oauth2.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_oauth2_wamp_api:handle_call(Proc, M, Ctxt);
-
-do_handle_call(<<"bondy.telemetry.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_telemetry_wamp_api:handle_call(Proc, M, Ctxt);
+    bondy_cluster_api:handle_call(Proc, M, Ctxt);
 
 do_handle_call(<<"bondy.grant.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_rbac_wamp_api:handle_call(Proc, M, Ctxt);
+    bondy_rbac_api:handle_call(Proc, M, Ctxt);
 
-% do_handle_call(<<"bondy.registry.", _/binary>> = Proc, M, Ctxt) ->
-%     do_do_handle_call(Proc, M, Ctxt);
+do_handle_call(<<"bondy.group.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_rbac_api:handle_call(Proc, M, Ctxt);
+
+do_handle_call(<<"bondy.http_gateway.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_http_gateway_api:handle_call(Proc, M, Ctxt);
+
+do_handle_call(<<"bondy.oauth2.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_oauth2_api:handle_call(Proc, M, Ctxt);
+
+do_handle_call(<<"bondy.rbac.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_rbac_api:handle_call(Proc, M, Ctxt);
+
+do_handle_call(<<"bondy.realm.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_realm_api:handle_call(Proc, M, Ctxt);
+
+do_handle_call(<<"bondy.registration.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_registry_api:handle_call(Proc, M, Ctxt);
+
+do_handle_call(<<"bondy.router.bridge.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_bridge_relay_api:handle_call(Proc, M, Ctxt);
+
+do_handle_call(<<"bondy.source.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_rbac_api:handle_call(Proc, M, Ctxt);
+
+do_handle_call(<<"bondy.subscription.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_registry_api:handle_call(Proc, M, Ctxt);
+
+do_handle_call(<<"bondy.telemetry.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_telemetry_api:handle_call(Proc, M, Ctxt);
+
+do_handle_call(<<"bondy.ticket.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_ticket_api:handle_call(Proc, M, Ctxt);
+
+do_handle_call(<<"bondy.user.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_rbac_api:handle_call(Proc, M, Ctxt);
 
 do_handle_call(<<"bondy.", _/binary>>, M, _) ->
     E = bondy_wamp_api_utils:no_such_procedure_error(M),
@@ -237,18 +244,12 @@ resolve(?BONDY_REALM_SECURITY_STATUS_OLD) ->
     ?BONDY_REALM_SECURITY_STATUS;
 resolve(?BONDY_REALM_UPDATE_OLD) ->
     ?BONDY_REALM_UPDATE;
-resolve(?BONDY_REGISTRY_LIST_OLD) ->
-    ?BONDY_REGISTRY_LIST;
-resolve(?BONDY_REG_MATCH_OLD) ->
-    ?BONDY_REG_MATCH;
 resolve(?BONDY_SUBSCRIPTION_LIST_OLD) ->
     ?BONDY_SUBSCRIPTION_LIST;
 resolve(?BONDY_TELEMETRY_METRICS_OLD) ->
     ?BONDY_TELEMETRY_METRICS;
-resolve(?BONDY_WAMP_CALLEE_GET_OLD) ->
-    ?BONDY_WAMP_CALLEE_GET;
-resolve(?BONDY_WAMP_CALLEE_LIST_OLD) ->
-    ?BONDY_WAMP_CALLEE_LIST;
+resolve(?BONDY_REGISTRY_CALLEE_LIST_OLD) ->
+    ?BONDY_REGISTRATION_CALLEE_LIST;
 resolve(Uri) ->
     Uri.
 

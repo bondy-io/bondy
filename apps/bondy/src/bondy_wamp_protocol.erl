@@ -176,6 +176,7 @@ session_id(#wamp_state{context = Ctxt}) ->
 ref(#wamp_state{context = Ctxt}) ->
     bondy_context:ref(Ctxt).
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -259,10 +260,11 @@ validate_subprotocol(_) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_inbound(binary(), state()) ->
-    {ok, state()}
+    {noreply, state()}
+    | {reply, [binary()], state()}
     | {stop, state()}
     | {stop, [binary()], state()}
-    | {reply, [binary()], state()}.
+    | {stop, Reason :: any(), [binary()], state()}.
 
 handle_inbound(Data, St) ->
     try bondy_wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
@@ -301,10 +303,12 @@ handle_inbound(Data, St) ->
         _:{invalid_message, _} = Reason ->
             stop(Reason, St);
 
-        _:Reason:Stacktrace ->
-            %% Catch any error produced by handle_inbound_messages/2
+        Class:Reason:Stacktrace ->
+            %% WE SHOULD NEVER REACH THIS POINT AS THIS WILL STOP THE
+            %% CONNECTION.
             ?LOG_ERROR(#{
                 description => <<"Error while evaluating inbound data">>,
+                class => Class,
                 reason => Reason,
                 stacktrace => Stacktrace,
                 data => Data
@@ -320,6 +324,7 @@ handle_inbound(Data, St) ->
 %% -----------------------------------------------------------------------------
 -spec handle_outbound(bondy_wamp_message:message(), state()) ->
     {ok, binary(), state()}
+    | {error, any(), state()}
     | {stop, state()}
     | {stop, binary(), state()}
     | {stop, binary(), state(), After :: non_neg_integer()}.
@@ -327,14 +332,14 @@ handle_inbound(Data, St) ->
 
 handle_outbound(#result{} = M, St0) ->
     Ctxt0 = St0#wamp_state.context,
-    ok = bondy_event_manager:notify({[bondy, wamp, message], M, Ctxt0}),
+    ok = notify(M, St0),
     St1 = update_context(bondy_context:reset(Ctxt0), St0),
     Bin = bondy_wamp_encoding:encode(M, encoding(St1)),
     {ok, Bin, St1};
 
 handle_outbound(#error{request_type = ?CALL} = M, St0) ->
     Ctxt0 = St0#wamp_state.context,
-    ok = bondy_event_manager:notify({[bondy, wamp, message], M, Ctxt0}),
+    ok = notify(M, St0),
     St1 = update_context(bondy_context:reset(Ctxt0), St0),
     Bin = bondy_wamp_encoding:encode(M, encoding(St1)),
     {ok, Bin, St1};
@@ -342,7 +347,7 @@ handle_outbound(#error{request_type = ?CALL} = M, St0) ->
 handle_outbound(#goodbye{} = M, St0) ->
     %% Bondy is shutting_down this session, we will stop when we
     %% get the client's goodbye response
-    ok = bondy_event_manager:notify({[bondy, wamp, message], M, St0#wamp_state.context}),
+    ok = notify(M, St0),
     Bin = bondy_wamp_encoding:encode(M, encoding(St0)),
     St1 = St0#wamp_state{
         state_name = shutting_down,
@@ -356,14 +361,18 @@ handle_outbound(#goodbye{} = M, St0) ->
 handle_outbound(M, St) ->
     case bondy_wamp_message:is_message(M) of
         true ->
-            ok = bondy_event_manager:notify({[bondy, wamp, message], M, St#wamp_state.context}),
+            ok = notify(M, St),
             Bin = bondy_wamp_encoding:encode(M, encoding(St)),
             {ok, Bin, St};
+
         false ->
-            %% RFC: WAMP implementations MUST close sessions (disposing all of
-            %% their resources such as subscriptions and registrations) on
-            %% protocol errors caused by offending peers.
-            {stop, St}
+            %% This SHOULD not happen, we drop the message
+            ?LOG_ERROR(#{
+                description =>
+                    "Invalid WAMP message dropped by protocol handler",
+                data => M
+            }),
+            {ok, St}
     end.
 
 
@@ -375,7 +384,7 @@ handle_outbound(M, St) ->
 
 
 -spec handle_inbound_messages([raw_wamp_message()], state()) ->
-    {ok, state()}
+    {noreply, state()}
     | {reply, [binary()], state()}
     | {stop, state()}
     | {stop, [binary()], state()}
@@ -409,43 +418,39 @@ handle_inbound_messages(Messages, St) ->
 %% -----------------------------------------------------------------------------
 -spec handle_inbound_messages(
     [raw_wamp_message()], state(), Acc :: [raw_wamp_message()]) ->
-    {ok, state()}
+    {noreply, state()}
     | {stop, state()}
     | {stop, [binary()], state()}
+    | {stop, Reason :: any(), [binary()], state()}
     | {reply, [binary()], state()}.
 
 handle_inbound_messages(
-    [#abort{} = M|_], #wamp_state{state_name = Name} = St0, [])
-    when Name =/= established ->
-    %% Client aborting, we ignore any subsequent messages
-    Uri = M#abort.reason_uri,
-    Details = M#abort.details,
+    [#abort{} = M|_], #wamp_state{state_name = established} = St0, []) ->
     ?LOG_INFO(#{
         description => "Client aborted",
-        reason => Uri,
-        state_name => Name,
-        details => Details
+        reason => M#abort.reason_uri,
+        details => M#abort.details
     }),
-    ok = bondy_event_manager:notify({[bondy, wamp, message], M, St0#wamp_state.context}),
+    ok = notify(M, St0),
     St1 = St0#wamp_state{state_name = closed},
+
     {stop, St1};
 
 handle_inbound_messages(
     [#goodbye{} = M|_], #wamp_state{state_name = established} = St0, Acc) ->
-    %% Client initiated a goodbye, we ignore any subsequent messages
+    %% Client initiated goodbye, we ignore any subsequent messages
     %% We reply with all previous messages plus a goodbye and stop
     Reply = bondy_wamp_message:goodbye(
         #{message => <<"Session closed by client.">>},
         ?WAMP_GOODBYE_AND_OUT
     ),
     Bin = bondy_wamp_encoding:encode(Reply, encoding(St0)),
-
     St1 = St0#wamp_state{
         state_name = closed,
         goodbye_reason = M#goodbye.reason_uri
     },
 
-    ok = bondy_event_manager:notify({[bondy, wamp, message], Reply, St1#wamp_state.context}),
+    ok = notify(Reply, St1),
 
     {stop, normal, lists:reverse([Bin|Acc]), St1};
 
@@ -453,20 +458,26 @@ handle_inbound_messages(
     [#goodbye{} = M|_], #wamp_state{state_name = shutting_down} = St0, Acc) ->
     %% Client is replying to our goodbye, we ignore any subsequent messages
     %% We reply all previous messages and close
-    ok = bondy_event_manager:notify({[bondy, wamp, message], M, St0#wamp_state.context}),
+    ok = notify(M, St0),
     St1 = St0#wamp_state{state_name = closed},
+
     {stop, shutdown, lists:reverse(Acc), St1};
 
 handle_inbound_messages(
     [#hello{} = M|_], #wamp_state{context = #{session := _}} = St, Acc) ->
     %% Client already has a session!
-    %% RFC: It is a protocol error to receive a second "HELLO" message during
+    %% RFC:
+    %% It is a protocol error to receive a second "HELLO" message during
     %% the lifetime of the session and the _Peer_ must fail the session if that
     %% happens.
     %% We reply all previous messages plus an abort message and close
     %% state_name might be 'close' already
-    ok = bondy_event_manager:notify({[bondy, wamp, message], M, St#wamp_state.context}),
-    Reason = <<"You've sent a HELLO when the session is already established.">>,
+    ok = notify(M, St),
+    Reason = <<
+        "Duplicate Session Initialization. "
+        "You've attempted to send a HELLO message when you already "
+        "have an active session established."
+    >>,
     stop({protocol_violation, Reason}, Acc, St);
 
 handle_inbound_messages(
@@ -476,36 +487,35 @@ handle_inbound_messages(
     %% This will return either reply with
     %% wamp_welcome() | wamp_challenge() | wamp_abort()
     Ctxt0 = St0#wamp_state.context,
-    ok = bondy_event_manager:notify({[bondy, wamp, message], M, Ctxt0}),
-
+    ok = notify(M, St0),
     Ctxt1 = bondy_context:set_realm_uri(Ctxt0, Uri),
     St1 = update_context(Ctxt1, St0),
     St = set_next_state(establishing, St1),
 
     %% Lookup or create realm
     case bondy_realm:get(Uri) of
-        {error, not_found} ->
-            stop({authentication_failed, {no_such_realm, Uri}}, St);
-
-        Realm ->
+        {ok, Realm} ->
             ok = logger:update_process_metadata(#{realm => Uri}),
             maybe_open_session(
                 maybe_auth_challenge(M#hello.details, Realm, St)
-            )
+            );
+
+        {error, not_found} ->
+            stop({authentication_failed, {no_such_realm, Uri}}, St)
     end;
 
 handle_inbound_messages([#hello{} = M|_], #wamp_state{} = St, _) ->
     %% Client does not have a session but we already received a HELLO message
     %% once, otherwise we would be in the 'close' state and match the previous
     %% clause
-    ok = bondy_event_manager:notify({[bondy, wamp, message], M, St#wamp_state.context}),
+    ok = notify(M, St),
     Reason = <<"You've sent a HELLO message more than once.">>,
     stop({protocol_violation, Reason}, St);
 
 handle_inbound_messages(
     [#authenticate{} = M|_],
     #wamp_state{state_name = established, context = #{session := _}} = St, _) ->
-    ok = bondy_event_manager:notify({[bondy, wamp, message], M, St#wamp_state.context}),
+    ok = notify(M, St),
     %% Client already has a session so is already authenticated.
     Reason = <<"You've sent an AUTHENTICATE message more than once.">>,
     stop({protocol_violation, Reason}, St);
@@ -513,7 +523,7 @@ handle_inbound_messages(
 handle_inbound_messages(
     [#authenticate{} = M|_], #wamp_state{state_name = challenging} = St0, _) ->
     %% Client is responding to a challenge
-    ok = bondy_event_manager:notify({[bondy, wamp, message], M, St0#wamp_state.context}),
+    ok = notify(M, St0),
 
     AuthMethod = St0#wamp_state.authmethod,
     AuthCtxt0 = St0#wamp_state.auth_context,
@@ -532,7 +542,7 @@ handle_inbound_messages(
     [#authenticate{} = M|_], #wamp_state{state_name = Name} = St, _)
     when Name =/= challenging ->
     %% Client has not been sent a challenge
-    ok = bondy_event_manager:notify({[bondy, wamp, message], M, St#wamp_state.context}),
+    ok = notify(M, St),
     Reason = <<"You need to establish a session first.">>,
     stop({protocol_violation, Reason}, St);
 
@@ -544,22 +554,28 @@ handle_inbound_messages(
     case bondy_router:forward(H, St#wamp_state.context) of
         {ok, Ctxt} ->
             handle_inbound_messages(T, update_context(Ctxt, St), Acc);
+
         {reply, M, Ctxt} ->
             Bin = bondy_wamp_encoding:encode(M, encoding(St)),
             handle_inbound_messages(T, update_context(Ctxt, St), [Bin | Acc]);
+
         {stop, M, Ctxt} ->
             Bin = bondy_wamp_encoding:encode(M, encoding(St)),
             {stop, [Bin | Acc], update_context(Ctxt, St)}
     end;
 
 handle_inbound_messages(_, #wamp_state{state_name = shutting_down} = St, _) ->
-    %% TODO should we reply with ERROR and keep on waiting for the client GOODBYE?
-    Reason = <<"Router is shutting down. You should have replied with GOODBYE message.">>,
+    %% TODO should we reply with ERROR and keep on waiting for the client
+    %% GOODBYE?
+    Reason = <<
+        "Router is shutting down. "
+        "You should have replied with GOODBYE message."
+    >>,
     stop({protocol_violation, Reason}, St);
 
 handle_inbound_messages([], St, []) ->
     %% We have no replies
-    {ok, St};
+    {noreply, St};
 
 handle_inbound_messages([], St, Acc) ->
     {reply, lists:reverse(Acc), St};
@@ -579,7 +595,7 @@ handle_inbound_messages(_, St, _) ->
 %% @private
 maybe_open_session({send_challenge, AuthMethod, Challenge, St0}) ->
     M = bondy_wamp_message:challenge(AuthMethod, Challenge),
-    ok = bondy_event_manager:notify({[bondy, wamp, message], M, St0#wamp_state.context}),
+    ok = notify(M, St0),
     Bin = bondy_wamp_encoding:encode(M, encoding(St0)),
     St1 = St0#wamp_state{
         state_name = challenging,
@@ -666,7 +682,7 @@ open_session(Extra, St0) when is_map(Extra) ->
                 roles => bondy_router:roles()
             }
         ),
-        ok = bondy_event_manager:notify({[bondy, wamp, message], Welcome, Ctxt1}),
+        ok = notify(Welcome, St1),
         Bin = bondy_wamp_encoding:encode(Welcome, encoding(St1)),
 
         %% We define the process metadata and which keys are exposed as logger
@@ -858,7 +874,7 @@ stop(Reason, St) ->
 
 %% @private
 stop(#abort{reason_uri = Uri} = M, Acc, St0) ->
-    ok = bondy_event_manager:notify({[bondy, wamp, message], M, St0#wamp_state.context}),
+    ok = notify(M, St0),
     Bin = bondy_wamp_encoding:encode(M, encoding(St0)),
 
     %% We reply all previous messages plus an abort message and close
@@ -1112,3 +1128,8 @@ update_process_metadata(#wamp_state{} = State) ->
         peername => bondy_context:peername(Ctxt)
     }).
 
+
+notify(M, State) ->
+    bondy_event_manager:notify(
+        {[bondy, wamp, message], M, State#wamp_state.context}
+    ).

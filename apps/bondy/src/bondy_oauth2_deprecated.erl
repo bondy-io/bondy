@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_oauth2.erl -
+%%  bondy_oauth2_deprecated.erl -
 %%
 %%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
 %%
@@ -17,7 +17,7 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc DEPRECATED
 %%
 %% The following table documents the storage layout in plum_db of the token
 %% data and its indices:
@@ -30,7 +30,7 @@
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_oauth2).
+-module(bondy_oauth2_deprecated).
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -78,7 +78,7 @@
     meta = #{}              ::  map(),
     expires_in              ::  pos_integer(),
     issued_at               ::  pos_integer(),
-    is_active = true        ::  boolean
+    is_active = true        ::  boolean()
 }).
 
 
@@ -142,7 +142,7 @@ issued_at(#bondy_oauth2_token{issued_at = Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec issue_token(
-    token_type(), bondy_realm:uri(), binary(), binary(), [binary()], map()) ->
+    grant_type(), bondy_realm:uri(), binary(), binary(), [binary()], map()) ->
     {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()}
     | {error, any()}.
 
@@ -170,10 +170,11 @@ issue_token(GrantType, RealmUri, Issuer, Username, Groups, Meta) ->
 
 issue_token(GrantType, RealmUri, Data0) ->
    case bondy_realm:lookup(RealmUri) of
+        {ok, Realm} ->
+            do_issue_token(Realm, Data0, supports_refresh_token(GrantType));
+
         {error, not_found} ->
-           {error, {no_such_realm, RealmUri}};
-        Realm ->
-            do_issue_token(Realm, Data0, supports_refresh_token(GrantType))
+           {error, {no_such_realm, RealmUri}}
     end.
 
 
@@ -555,15 +556,15 @@ do_issue_token(Realm, Data0, RefreshTokenFlag) ->
     %% We generate and sign the JWT
     %% TODO Refresh grants by querying the User data
     Claims = #{
-        <<"id">> => Id,
-        <<"exp">> => Secs,
-        <<"iat">> => Now,
-        <<"kid">> => Kid,
-        <<"sub">> => Sub,
-        <<"iss">> => Iss,
-        <<"aud">> => Uri,
-        <<"groups">> => Data0#bondy_oauth2_token.groups,
-        <<"meta">> => Meta
+        ~"id" => Id,
+        ~"exp" => Secs,
+        ~"iat" => Now,
+        ~"kid" => Kid,
+        ~"sub" => Sub,
+        ~"iss" => Iss,
+        ~"aud" => Uri,
+        ~"groups" => Data0#bondy_oauth2_token.groups,
+        ~"meta" => Meta
     },
     %% We create the JWT used as access token
     AccessToken = sign(Key, Claims),

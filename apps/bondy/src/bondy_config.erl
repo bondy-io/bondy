@@ -45,17 +45,17 @@
 
 -define(WAMP_EXT_OPTIONS, [
     {call, [
-        'x_routing_key'
+        '_routing_key'
     ]},
     {cancel, [
-        'x_routing_key'
+        '_routing_key'
     ]},
     {interrupt, [
-        'x_session_info'
+        'x_session_info', '_session_info'
     ]},
     {register, [
-        'x_disclose_session_info',
-        'x_prefer_local',
+        'x_disclose_session_info', '_disclose_session_info',
+        '_prefer_local', '_prefer_local',
         %% number of concurrent, outstanding calls that can exist
         %% for a single endpoint
         'x_concurrency',
@@ -68,10 +68,10 @@
     {publish, [
         %% The ttl for retained events
         '_retained_ttl',
-        'x_routing_key'
+        '_routing_key'
     ]},
     {subscribe, [
-        'x_disclose_session_info'
+        'x_disclose_session_info', '_disclose_session_info'
     ]},
     {yield, [
     ]}
@@ -80,22 +80,22 @@
     {abort, [
     ]},
     {hello, [
-        'x_authroles'
+        'x_authroles', '_authroles'
     ]},
     {welcome, [
-        'x_authroles'
+        'x_authroles', '_authroles'
     ]},
     {goodbye, [
     ]},
     {error, [
     ]},
     {event, [
-        'x_session_info'
+        'x_session_info', '_session_info'
     ]},
     {call, [
     ]},
     {invocation, [
-        'x_session_info'
+        'x_session_info', '_session_info'
     ]},
     {result, [
     ]}
@@ -442,6 +442,12 @@ dynamic_buffer(Key) ->
 
     case bondy_config:get(Key, []) of
         [] ->
+            false;
+
+        [{min, 0}, _] ->
+            false;
+
+        [_, {max, 0}] ->
             false;
 
         [{min, Min}, {max, Max}] when Min >= Low, Max =< Top ->

@@ -35,14 +35,16 @@
 -include("bondy_security.hrl").
 
 -type context()         ::  #{
-    session_id := bondy_session_id:t() | undefined,
     realm_uri := uri(),
-    user := bondy_rbac_user:t() | undefined,
-    user_id := binary() | undefined,
+    sso_realm_uri := uri(),
+    session_id := optional(bondy_session_id:t()),
+    user := optional(bondy_rbac_user:t()),
+    user_id := optional(binary()),
     available_methods := [binary()],
     role := binary(),
     roles := [binary()],
     source_ip := inet:ip_address(),
+    host := optional(binary()),
     provider => binary(),
     method => binary(),
     callback_mod => module(),
@@ -62,6 +64,7 @@
     any => requirements(),
     all => requirements()
 }.
+-type opts()            ::  #{host => binary()}.
 
 -export_type([context/0]).
 -export_type([requirements/0]).
@@ -75,8 +78,10 @@
 -export([available_methods/1]).
 -export([available_methods/2]).
 -export([challenge/3]).
--export([source_ip/1]).
+-export([host/1]).
 -export([init/5]).
+-export([init/6]).
+-export([issuer/1]).
 -export([method/1]).
 -export([method_info/0]).
 -export([method_info/1]).
@@ -86,6 +91,7 @@
 -export([role/1]).
 -export([roles/1]).
 -export([session_id/1]).
+-export([source_ip/1]).
 -export([sso_realm_uri/1]).
 -export([user/1]).
 -export([user_id/1]).
@@ -148,7 +154,6 @@ format_status(Ctxt) ->
 %% =============================================================================
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -167,17 +172,41 @@ format_status(Ctxt) ->
     }
     | no_return().
 
-init(SessionId, Uri, UserId, Roles, SourceIP)
+init(SessionId, Uri, UserId, Roles, SourceIP) ->
+    init(SessionId, Uri, UserId, Roles, SourceIP, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec init(
+    SessionId :: bondy_session_id:t(),
+    Realm :: bondy_realm:t() | uri(),
+    UserId :: binary() | anonymous,
+    Roles :: all | binary() | [binary()] | undefined,
+    SourceIP :: inet:ip_address(),
+    Opts :: opts()) ->
+    {ok, context()}
+    | {error,
+        {no_such_user, binary()}
+        | {no_such_realm, binary()}
+        | no_such_group
+    }
+    | no_return().
+
+init(SessionId, Uri, UserId, Roles, SourceIP, Opts)
 when is_binary(SessionId), is_binary(Uri), ?IS_IP(SourceIP) ->
     case bondy_realm:lookup(string:casefold(Uri)) of
+        {ok, Realm} ->
+            init(SessionId, Realm, UserId, Roles, SourceIP, Opts);
+
         {error, not_found} ->
-            {error, {no_such_realm, Uri}};
-        Realm ->
-            init(SessionId, Realm, UserId, Roles, SourceIP)
+            {error, {no_such_realm, Uri}}
     end;
 
-init(SessionId, Realm, Username0, Roles0, SourceIP)
-when is_binary(SessionId), is_tuple(Realm), ?IS_IP(SourceIP) ->
+init(SessionId, Realm, Username0, Roles0, SourceIP, Opts)
+when is_binary(SessionId), is_tuple(Realm), ?IS_IP(SourceIP), is_map(Opts) ->
     try
         RealmUri = bondy_realm:uri(Realm),
         SSORealmUri = bondy_realm:sso_realm_uri(Realm),
@@ -197,7 +226,8 @@ when is_binary(SessionId), is_tuple(Realm), ?IS_IP(SourceIP) ->
             user => User,
             role => Role,
             roles => Roles,
-            source_ip => SourceIP
+            source_ip => SourceIP,
+            host => maps:get(host, Opts, undefined)
         },
         Methods = compute_available_methods(Realm, Ctxt),
         {ok, maps:put(available_methods, Methods, Ctxt)}
@@ -377,6 +407,29 @@ authrealm(#{sso_realm_uri := Value}) ->
 source_ip(#{source_ip := Value}) ->
     Value.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec host(context()) -> optional(binary()).
+
+host(#{host := Value}) ->
+    Value.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec issuer(context()) -> binary().
+
+issuer(#{host := undefined} = T) ->
+    authrealm(T);
+
+issuer(#{host := Host} = T) ->
+    Uri = authrealm(T),
+    <<Host/binary, "/", Uri/binary>>.
 
 
 %% -----------------------------------------------------------------------------
@@ -685,7 +738,7 @@ get_user(RealmUri, SSORealmUri, UsernameOrAlias) ->
             %% SSOUser).
             bondy_rbac_user:resolve(User, SSOUser);
 
-        User ->
+        {ok, User} ->
             bondy_rbac_user:is_enabled(User) orelse throw(user_disabled),
             %% We call resolve so that we merge the local user to the SSO user
             %% (if any), so that we get the credentials (password and

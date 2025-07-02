@@ -1,38 +1,21 @@
 %% =============================================================================
-%%  bondy_registry.erl -
-%%
-%%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
-%%
-%%  Licensed under the Apache License, Version 2.0 (the "License");
-%%  you may not use this file except in compliance with the License.
-%%  You may obtain a copy of the License at
-%%
-%%     http://www.apache.org/licenses/LICENSE-2.0
-%%
-%%  Unless required by applicable law or agreed to in writing, software
-%%  distributed under the License is distributed on an "AS IS" BASIS,
-%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-%%  See the License for the specific language governing permissions and
-%%  limitations under the License.
+%% SPDX-FileCopyrightText: 2016 - 2025 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% An in-memory registry for PubSub subscriptions and Routed RPC registrations,
-%% providing pattern matching capabilities including support for WAMP's
-%% version 2.0 match policies (exact, prefix and wildcard).
-%%
-%% The registry entries are stored in plum_db (using an in-memory prefix). The
-%% registry also uses in-memory trie-based indexed (materialised
-%% view) using {@link bondy_registry_trie}.
-%%
-%% This module also provides a singleton server to perform the initialisation
-%% of the trie from the plum_db tables.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_registry).
 -behaviour(gen_server).
+
+-doc("""
+An in-memory registry for PubSub subscriptions and Routed RPC registrations,
+providing pattern matching capabilities including support for WAMP's
+version 2.0 match policies (exact, prefix and wildcard).
+The registry entries are stored in plum_db (using an in-memory prefix). The
+registry also uses in-memory trie-based indexed (materialised
+view) using {@link bondy_registry_trie}.
+This module also provides a singleton server to perform the initialisation
+of the trie from the plum_db tables.
+""").
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -92,7 +75,7 @@
 -export([remove/4]).
 -export([remove_all/2]).
 -export([remove_all/3]).
--export([remove_all/4]).
+-export([remove_all/5]).
 -export([start_link/0]).
 -export([trie/1]).
 -export([pick/1]).
@@ -287,7 +270,7 @@ add(Type, RealmUri, Uri, Opts, Ref) ->
             %% partitions.
             Pid = bondy_registry_partition:pick(RealmUri),
             Args = [Type, RealmUri, Uri, Opts, Ref], % ++ [Trie]
-            bondy_registry_partition:execute(Pid, fun add/6, Args, 5000)
+            bondy_registry_partition:execute(Pid, fun add/6, Args, 5_000)
     end.
 
 
@@ -392,28 +375,32 @@ orelse is_function(Task, 1) orelse is_function(Task, 2) ->
             MaybeFun = maybe_fun(Task, Ctxt),
             MatchOpts = [{limit, 100} | ?REMOVE_MATCH_OPTS],
             Matches = bondy_registry_entry:match(Type, Pattern, MatchOpts),
-            do_remove_all(Matches, SessionId, MaybeFun)
+            do_remove_all(Matches, SessionId, MaybeFun, #{})
     end.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc Removes all registry entries of type Type, for a {RealmUri
 %% SessionId} relation.
+%%
+%% Opts
+%% - broadcast => boolean()
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove_all(
     Type :: entry_type(),
     RealmUri :: uri(),
     SessionId :: id(),
-    Task :: task() | undefined) -> [entry()].
+    Task :: task() | undefined,
+    Opts :: map()) -> [entry()].
 
-remove_all(Type, RealmUri, SessionId, Task)
+remove_all(Type, RealmUri, SessionId, Task, Opts)
 when Task == undefined orelse is_function(Task, 1) ->
     Pattern = bondy_registry_entry:key_pattern(RealmUri, SessionId, '_'),
 
     MatchOpts = [{limit, 100} | ?REMOVE_MATCH_OPTS],
     Matches = bondy_registry_entry:match(Type, Pattern, MatchOpts),
-    do_remove_all(Matches, SessionId, Task).
+    do_remove_all(Matches, SessionId, Task, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -1619,9 +1606,13 @@ add_indices(Entry) ->
         bondy_registry_trie:add(E, Trie)
     end,
 
-    case ?CONCURRENT_ADD(Type) of
+    MatchPolicy = bondy_registry_entry:match_policy(Entry),
+    Decision = MatchPolicy == ?EXACT_MATCH orelse ?CONCURRENT_ADD(Type),
+
+    case Decision of
         true ->
             Add(Entry, trie(RealmUri));
+
         false ->
             Pid = bondy_registry_partition:pick(RealmUri),
             bondy_registry_partition:execute(Pid, Add, [Entry], 5000)
@@ -1638,7 +1629,10 @@ delete_indices(Entry) ->
         ok = bondy_registry_trie:delete(E, T)
     end,
 
-    case ?CONCURRENT_DELETE(Type) of
+    MatchPolicy = bondy_registry_entry:match_policy(Entry),
+    Decision = MatchPolicy == ?EXACT_MATCH orelse ?CONCURRENT_DELETE(Type),
+
+    case Decision of
         true ->
             Delete(Entry, trie(RealmUri));
         false ->
@@ -1659,7 +1653,7 @@ trie_find(Type, RealmUri, Uri, Opts) ->
 
         false ->
             Pid = bondy_registry_partition:pick(RealmUri),
-            bondy_registry_partition:execute(Pid, Match, [], 15000)
+            bondy_registry_partition:execute(Pid, Match, [], 5_000)
     end.
 
 
@@ -1682,7 +1676,7 @@ trie_find(Cont) ->
             Find = fun(_Trie) ->
                 bondy_registry_trie:find(Cont)
             end,
-            bondy_registry_partition:execute(Pid, Find, [], 15000)
+            bondy_registry_partition:execute(Pid, Find, [], 5_000)
     end.
 
 
@@ -1700,7 +1694,7 @@ trie_match(Type, RealmUri, Uri, Opts0) ->
 
         false ->
             Pid = bondy_registry_partition:pick(RealmUri),
-            bondy_registry_partition:execute(Pid, Match, [], 15000)
+            bondy_registry_partition:execute(Pid, Match, [], 5_000)
     end.
 
 
@@ -1723,7 +1717,7 @@ trie_match(Cont) ->
             Match = fun(_Trie) ->
                 bondy_registry_trie:match(Cont)
             end,
-            bondy_registry_partition:execute(Pid, Match, [], 15000)
+            bondy_registry_partition:execute(Pid, Match, [], 5_000)
     end.
 
 
@@ -1886,29 +1880,27 @@ maybe_execute(Fun, Entry) when is_function(Fun, 1) ->
 
 
 %% @private
-do_remove_all(Matches, SessionId, Fun) ->
-    do_remove_all(Matches, SessionId, Fun, []).
+do_remove_all(Matches, SessionId, Fun, Opts) ->
+    do_remove_all(Matches, SessionId, Fun, Opts, []).
 
 
 %% @private
-do_remove_all(?EOT, _, Fun, Acc) ->
+do_remove_all(?EOT, _, Fun, _Opts, Acc) ->
     _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
     ok;
 
-do_remove_all({[], ?EOT}, _, Fun, Acc) ->
+do_remove_all({[], ?EOT}, _, Fun, _Opts, Acc) ->
     _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
     ok;
 
-do_remove_all({[], Cont}, SessionId, Fun, Acc) ->
+do_remove_all({[], Cont}, SessionId, Fun, Opts, Acc) ->
     %% We apply the Fun here as opposed to in every iteration to minimise art
     %% trie concurrency access,
     _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
-
     Res = bondy_registry_entry:match(Cont, ?REMOVE_MATCH_OPTS),
+    do_remove_all(Res, SessionId, Fun, Opts, Acc);
 
-    do_remove_all(Res, SessionId, Fun, Acc);
-
-do_remove_all({[{_EntryKey, Entry}|T], Cont}, SessionId, Fun, Acc) ->
+do_remove_all({[{_EntryKey, Entry}|T], Cont}, SessionId, Fun, Opts, Acc) ->
     Session = bondy_registry_entry:session_id(Entry),
 
     case SessionId =:= Session orelse SessionId == '_' of
@@ -1916,9 +1908,10 @@ do_remove_all({[{_EntryKey, Entry}|T], Cont}, SessionId, Fun, Acc) ->
             ok = delete_indices(Entry),
             %% We delete the entry from plum_db.
             %% This will broadcast the delete to all nodes.
-            ok = bondy_registry_entry:delete(Entry),
+
+            ok = bondy_registry_entry:delete(Entry, Opts),
             %% We continue traversing
-            do_remove_all({T, Cont}, SessionId, Fun, [Entry|Acc]);
+            do_remove_all({T, Cont}, SessionId, Fun, Opts, [Entry|Acc]);
 
         false ->
             %% No longer our session

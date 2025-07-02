@@ -1,5 +1,20 @@
 # CHANGELOG
-
+## 1.0.0-rc.38
+* Completely redesigned the OAUTH2 token storage.
+    * Tokens are now bounded by {User, Client, Device} (idem WAMP Tickets)
+    * Tokens are sharded across all partitions, allowing for more scalability
+      (idem WAMP Tickets)
+    * This is part of a roadmap to completely redesign and complete the OAuth2 
+    and OIDC capabilities in Bondy
+* OTP/Partisan compatibiliey issue fixes in PlumDB
+* Refactoring of WAMP APIs (Modules renamed and consolidated)
+* New WAMP APIs
+    * `bondy.registry.list`
+* New standard `CALL.Options`
+    * `_disclose_session` - The callee will receive and the session information 
+    in  `INVOCATION.Details._session_info`
+- Drop x_ prefix for RPC experimental options
+    
 ## 1.0.0-rc.37
 * Added bounded queues for job worker pool and their configuration
     * `load_regulation.job_manager.queue.size`

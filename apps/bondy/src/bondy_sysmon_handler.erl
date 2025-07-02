@@ -75,7 +75,7 @@ when Type == long_gc; Type == large_heap; Type == long_schedule ->
         status
     ]),
 
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "System event received.",
         pid => Pid,
         type => Type,
@@ -85,7 +85,7 @@ when Type == long_gc; Type == large_heap; Type == long_schedule ->
     {ok, State};
 
 handle_event({monitor, Pid, Type, Info}, #state{} = State) ->
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "System event received.",
         pid => Pid,
         type => Type,

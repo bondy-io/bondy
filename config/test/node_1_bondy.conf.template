@@ -68,7 +68,7 @@ cluster.parallelism = 1
 cluster.peer_port = 18086
 cluster.peer_discovery.enabled = off
 
-cluster.tls.enabled = on
+cluster.tls.enabled = off
 cluster.tls.server.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
 cluster.tls.server.certfile = ${BONDY_ETC_DIR}/ssl/server/keycert.pem
 cluster.tls.server.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem

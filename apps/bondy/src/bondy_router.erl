@@ -387,7 +387,7 @@ async_forward(M, Ctxt0) ->
         error:Reason when Acknowledge == true ->
             %% TODO Maybe publish metaevent
             %% REVIEW are we using the right error uri?
-            ErrorMap = bondy_error:map(Reason),
+            ErrorMap = bondy_error_utils:map(Reason),
             Reply = bondy_wamp_message:error_from(
                 M,
                 #{},

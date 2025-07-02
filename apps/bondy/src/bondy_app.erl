@@ -307,8 +307,6 @@ configure_services() ->
     %% if it does not exist.
     _ = bondy_realm:get(?MASTER_REALM_URI),
     ok = bondy_realm:apply_config(),
-
-    %% ok = bondy_oauth2:apply_config(),
     ok = bondy_http_gateway:apply_config().
 
 

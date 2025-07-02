@@ -10,6 +10,24 @@
 -module(bondy_wamp_message).
 -include("bondy_wamp.hrl").
 
+-type t()               ::  wamp_call()
+                            | wamp_cancel()
+                            | wamp_error()
+                            | wamp_interrupt()
+                            | wamp_invocation()
+                            | wamp_publish()
+                            | wamp_published()
+                            | wamp_register()
+                            | wamp_registered()
+                            | wamp_result()
+                            | wamp_subscribe()
+                            | wamp_subscribed()
+                            | wamp_unregister()
+                            | wamp_unregistered()
+                            | wamp_unsubscribe()
+                            | wamp_unsubscribed()
+                            | wamp_yield().
+
 -type error_source()    ::  wamp_subscribe()
                             | wamp_unsubscribe()
                             | wamp_publish()
@@ -19,6 +37,7 @@
                             | wamp_invocation()
                             | wamp_cancel().
 
+-export_type([t/0]).
 -export_type([error_source/0]).
 
 
@@ -57,6 +76,7 @@
 -export([register/3]).
 -export([registered/2]).
 -export([request_id/1]).
+-export([request_type/1]).
 -export([result/2]).
 -export([result/3]).
 -export([result/4]).
@@ -816,25 +836,7 @@ details(_) ->
 
 
 
--spec request_id(
-    wamp_call()
-    | wamp_cancel()
-    | wamp_error()
-    | wamp_interrupt()
-    | wamp_invocation()
-    | wamp_publish()
-    | wamp_published()
-    | wamp_register()
-    | wamp_registered()
-    | wamp_result()
-    | wamp_subscribe()
-    | wamp_subscribed()
-    | wamp_unregister()
-    | wamp_unregistered()
-    | wamp_unsubscribe()
-    | wamp_unsubscribed()
-    | wamp_yield()
-    ) -> map() | no_return().
+-spec request_id(t()) -> map() | no_return().
 
 request_id(#call{request_id = Val}) -> Val;
 request_id(#cancel{request_id = Val}) -> Val;
@@ -854,6 +856,30 @@ request_id(#unsubscribe{request_id = Val}) -> Val;
 request_id(#unsubscribed{request_id = Val}) -> Val;
 request_id(#yield{request_id = Val}) -> Val;
 request_id(_) ->
+    error(badarg).
+
+
+
+-spec request_type(t()) -> map() | no_return().
+
+request_type(#call{}) -> ?CALL;
+request_type(#cancel{}) -> ?CANCEL;
+request_type(#error{}) -> ?ERROR;
+request_type(#interrupt{}) -> ?INTERRUPT;
+request_type(#invocation{}) -> ?INVOCATION;
+request_type(#publish{}) -> ?PUBLISH;
+request_type(#published{}) -> ?PUBLISHED;
+request_type(#register{}) -> ?REGISTER;
+request_type(#registered{}) -> ?REGISTERED;
+request_type(#result{}) -> ?RESULT;
+request_type(#subscribe{}) -> ?SUBSCRIBE;
+request_type(#subscribed{}) -> ?SUBSCRIBED;
+request_type(#unregister{}) -> ?UNREGISTER;
+request_type(#unregistered{}) -> ?UNREGISTERED;
+request_type(#unsubscribe{}) -> ?UNSUBSCRIBE;
+request_type(#unsubscribed{}) -> ?UNSUBSCRIBED;
+request_type(#yield{}) -> ?YIELD;
+request_type(_) ->
     error(badarg).
 
 

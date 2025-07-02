@@ -21,8 +21,9 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_oauth2_resource_owner).
--include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
+-include("bondy_oauth.hrl").
 
 -define(VALIDATE_USERNAME, fun
         (<<"all">>) ->
@@ -163,7 +164,7 @@ validate(Data0, Spec) ->
 
 %% @private
 maybe_add_groups(#{<<"groups">> := Groups0} = M) ->
-    Groups1 = [<<"resource_owners">> | Groups0],
+    Groups1 = [?RESOURCE_OWNERS | Groups0],
     maps:put(<<"groups">>, lists:usort(Groups1), M);
 
 maybe_add_groups(#{} = M) ->

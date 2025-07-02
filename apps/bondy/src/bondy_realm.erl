@@ -1283,7 +1283,7 @@ get_random_encryption_kid(Uri) when is_binary(Uri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec info(t() | uri()) ->  map().
+-spec info(t() | uri()) ->  map() | no_return().
 
 info(#realm{info = Info}) ->
     Info;
@@ -1299,7 +1299,7 @@ info(Uri) when is_binary(Uri) ->
 -spec exists(uri()) -> boolean().
 
 exists(Uri) ->
-    do_lookup(string:casefold(Uri)) =/= {error, not_found}.
+    resulto:is_ok(lookup(Uri)).
 
 
 %% -----------------------------------------------------------------------------
@@ -1308,15 +1308,10 @@ exists(Uri) ->
 %% if it doesn't exist.
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(uri()) -> t() | {error, not_found}.
+-spec lookup(uri()) -> {ok, t()} | {error, not_found}.
 
 lookup(Uri) ->
-    case do_lookup(string:casefold(Uri))  of
-        #realm{} = Realm ->
-            Realm;
-        Error ->
-            Error
-    end.
+    do_lookup(string:casefold(Uri)).
 
 
 %% -----------------------------------------------------------------------------
@@ -1325,15 +1320,16 @@ lookup(Uri) ->
 %% does not exist it fails with reason '{badarg, Uri}'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec fetch(uri()) -> t().
+-spec fetch(uri()) -> t() | no_return().
 
 fetch(?CONTROL_REALM_URI) ->
     ?CONTROL_REALM;
 
 fetch(Uri) ->
     case lookup(Uri) of
-        #realm{} = Realm ->
+        {ok, #realm{} = Realm} ->
             Realm;
+
         {error, not_found} ->
             error({not_found, Uri})
     end.
@@ -1345,7 +1341,7 @@ fetch(Uri) ->
 %% new one for Uri with the default configuration options.
 %% @end
 %% -----------------------------------------------------------------------------
--spec get(uri()) ->  t() | {error, not_found}.
+-spec get(uri()) -> {ok, t()} | {error, not_found}.
 
 get(Uri) ->
     get(Uri, #{}).
@@ -1358,17 +1354,23 @@ get(Uri) ->
 %% new one for Uri with configuration options `Opts'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec get(uri(), map()) ->  t() | {error, not_found}.
+-spec get(uri(), map()) -> {ok, t()} | {error, not_found | any()}.
 
 get(Uri, Opts) ->
-    case lookup(Uri) of
-        #realm{} = Realm ->
-            Realm;
-        {error, not_found} when Uri == ?MASTER_REALM_URI ->
-            add_master_realm();
-        {error, not_found} ->
-            maybe_create(Uri, Opts)
-    end.
+    Result = lookup(Uri),
+    resulto:then_recover(
+        Result,
+        fun
+            (not_found) when Uri == ?MASTER_REALM_URI ->
+                resulto:result(add_master_realm());
+
+            (not_found) ->
+                resulto:result(maybe_create(Uri, Opts));
+
+            (Reason) ->
+                {error, Reason}
+        end
+    ).
 
 
 %% -----------------------------------------------------------------------------
@@ -1512,12 +1514,10 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
     end;
 
 delete(Uri, Opts) when is_binary(Uri) ->
-    case lookup(Uri) of
-        #realm{} = Realm ->
-            delete(Realm, Opts);
-        {error, not_found} = Error ->
-            Error
-    end.
+    resulto:then(
+        lookup(Uri),
+        fun(#realm{} = Realm) -> delete(Realm, Opts) end
+    ).
 
 
 %% -----------------------------------------------------------------------------
@@ -2019,7 +2019,7 @@ maybe_create(Uri, Opts) ->
 %% @private
 add_or_update(#{<<"uri">> := Uri} = Data0, Opts) ->
     case lookup(Uri) of
-        #realm{} = Realm ->
+        {ok, #realm{} = Realm} ->
             Data = validate(Data0, ?REALM_UPDATE_VALIDATOR),
             do_update(Realm, Data, Opts);
 
@@ -2038,23 +2038,26 @@ do_create(#{uri := Uri} = Map, Opts) ->
 
 
 %% @private
--spec do_lookup(uri()) -> t() | {error, not_found}.
+-spec do_lookup(uri()) -> {ok, t()} | {error, not_found}.
 
 do_lookup(Uri) ->
     case plum_db:get(?PLUM_DB_PREFIX(Uri), Uri) of
         #realm{} = Realm ->
-            Realm;
+            {ok, Realm};
+
         undefined ->
             {error, not_found};
+
         Term ->
             try
                 Realm = from_term(Term),
                 ok = plum_db:put(?PLUM_DB_PREFIX(Uri), Uri, Realm),
-                Realm
+                {ok, Realm}
+
             catch
                 throw:badarg ->
                     ?LOG_WARNING(#{
-                        description => "Invalid realm data retrieved from store",
+                        description => "Invalid data retrieved from store",
                         data => Term
                     }),
                     {error, not_found}
@@ -2557,12 +2560,14 @@ check_realm_type(undefined, _) ->
 
 check_realm_type(Uri, Type) ->
     _ = case lookup(Uri) of
-        {error, not_found = Reason} ->
-            error(badarg(Uri, Type, Reason));
-        Realm when Type == sso ->
+        {ok, Realm} when Type == sso ->
             is_sso_realm(Realm) orelse error(badarg(Uri, Type, badtype));
-        Realm when Type == prototype ->
-            is_prototype(Realm) orelse error(badarg(Uri, Type, badtype))
+
+        {ok, Realm} when Type == prototype ->
+            is_prototype(Realm) orelse error(badarg(Uri, Type, badtype));
+
+        {error, not_found = Reason} ->
+            error(badarg(Uri, Type, Reason))
     end,
     ok.
 

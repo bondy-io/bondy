@@ -64,7 +64,6 @@
     ping_tref               ::  optional(reference()),
     ping_payload            ::  binary(),
     ping_retry              ::  optional(bondy_retry:t()),
-    hibernate = false       ::  boolean(),
     protocol_state          ::  optional(bondy_wamp_protocol:state())
 }).
 
@@ -121,13 +120,14 @@ init(Req0, _) ->
                 },
 
                 do_init(Subproto, BinProto, Req0, State0);
+
             {error, Reason} ->
                 throw({Reason, ProxyProtocol})
         end
 
     catch
         throw:{{protocol_error, Message}, PP} ->
-            ?LOG_INFO(#{
+            ?LOG_NOTICE(#{
                 description =>
                     "Connection rejected. "
                     "The source IP Address couldn't be obtained "
@@ -139,38 +139,40 @@ init(Req0, _) ->
             {ok, Req1, undefined};
 
         throw:invalid_scheme ->
-            %% Returning ok will cause the handler
-            %% to stop in websocket_handle
+            ?LOG_NOTICE(#{
+                description => "Connection rejected.",
+                reason => invalid_scheme
+            }),
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined};
 
         throw:missing_subprotocol ->
-            ?LOG_INFO(#{
+            ?LOG_NOTICE(#{
                 description => "Closing WS connection",
                 reason => missing_header_value,
                 header => ?SUBPROTO_HEADER
             }),
-            %% Returning ok will cause the handler
-            %% to stop in websocket_handle
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined};
 
         throw:invalid_subprotocol ->
             %% At the moment we only support WAMP, not plain WS
-            ?LOG_INFO(#{
+            ?LOG_NOTICE(#{
                 description => "Closing WS connection",
                 reason => invalid_header_value,
                 header => ?SUBPROTO_HEADER,
                 value => Subprotocols
             }),
-            %% Returning ok will cause the handler
-            %% to stop in websocket_handle
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined};
 
-        throw:_Reason ->
-            %% Returning ok will cause the handler
-            %% to stop in websocket_handle
+        Class:EReason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Closing connection.",
+                class => Class,
+                reason => EReason,
+                stacktrace => Stacktrace
+            }),
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined}
     end.
@@ -209,7 +211,7 @@ websocket_init(#state{protocol_state = PSt} = State) ->
 
     ?LOG_INFO(#{description => "Established connection with client."}),
 
-    {[], reset_ping(State)}.
+    {[], reset_ping(State), hibernate}.
 
 
 %% -----------------------------------------------------------------------------
@@ -233,33 +235,33 @@ websocket_handle(ping, State) ->
 
 websocket_handle({ping, _}, State) ->
     %% Cowboy already replies to pings for us, we return nothing
-    {[], reset_ping(State)};
+    {[], reset_ping(State), hibernate};
 
 websocket_handle(pong, State) ->
     %% https://datatracker.ietf.org/doc/html/rfc6455#page-37
     %% A Pong frame MAY be sent unsolicited.  This serves as a unidirectional
     %% heartbeat. A response to an unsolicited Pong frame is not expected.
-    {[], reset_ping(State)};
+    {[], reset_ping(State), hibernate};
 
 websocket_handle({pong, Data}, #state{ping_payload = Data} = State) ->
     %% We've got an answer to a Bondy-initiated ping.
-    {[], reset_ping(State)};
+    {[], reset_ping(State), hibernate};
 
 websocket_handle({T, Data}, #state{frame_type = T} = State0) ->
     ProtoState0 = State0#state.protocol_state,
 
     case bondy_wamp_protocol:handle_inbound(Data, ProtoState0) of
-        {ok, ProtoState} ->
+        {noreply, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
-            {[], reset_ping(State)};
+            {[], reset_ping(State), hibernate};
 
         {reply, L, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
-            {data_frames(T, L), reset_ping(State)};
+            {data_frames(T, L), reset_ping(State), hibernate};
 
         {stop, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
-            {[close], disable_ping(State)};
+            {[close], disable_ping(State), hibernate};
 
         {stop, L, ProtoState} ->
             self() ! {stop, normal},
@@ -280,7 +282,7 @@ websocket_handle(Data, State) ->
         description => "Received unsupported message",
         data => Data
     }),
-    {[], State}.
+    {[], State, hibernate}.
 
 
 %% -----------------------------------------------------------------------------
@@ -323,7 +325,7 @@ websocket_info({timeout, Ref, Msg}, State) ->
         message => Msg,
         ref => Ref
     }),
-    {[], State};
+    {[], State, hibernate};
 
 websocket_info({stop, Reason}, State) ->
     ?LOG_INFO(#{
@@ -337,7 +339,7 @@ websocket_info(Msg, State) ->
         description => "Received unknown message",
         message => Msg
     }),
-    {[], State}.
+    {[], State, hibernate}.
 
 
 %% -----------------------------------------------------------------------------
@@ -426,7 +428,7 @@ terminate({error, Reason}, _Req, State) ->
 terminate({crash, Class, Reason}, _Req, State) ->
     %% A crash occurred in the handler.
     ?LOG_ERROR(#{
-        description => "A crash occurred in the handler.",
+        description => "Connection closed. A crash occurred in the handler.",
         class => Class,
         reason => Reason
     }),
@@ -434,7 +436,7 @@ terminate({crash, Class, Reason}, _Req, State) ->
 
 terminate(Other, _Req, State) ->
     ?LOG_ERROR(#{
-        description => "Process crashed",
+        description => "Connection closed",
         reason => Other
     }),
     do_terminate(State).
@@ -451,7 +453,7 @@ terminate(Other, _Req, State) ->
 handle_outbound(T, M, State) ->
     case bondy_wamp_protocol:handle_outbound(M, State#state.protocol_state) of
         {ok, Bin, PSt} ->
-            {data_frames(T, Bin), State#state{protocol_state = PSt}};
+            {data_frames(T, Bin), State#state{protocol_state = PSt}, hibernate};
 
         {stop, PSt} ->
             {[close], State#state{protocol_state = PSt}};
@@ -498,7 +500,10 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State0) ->
             Opts0 = maps_utils:from_property_list(
                 bondy_config:get(wamp_websocket)
             ),
-            {PingOpts, Opts} = maps:take(ping, Opts0),
+            %% This works only on HTTP1, we will change this for a stratgy
+            %% based on {active, boolean()} and bondy_regulator.
+            Opts1 = maps:put(active_n, 1, Opts0),
+            {PingOpts, Opts} = maps:take(ping, Opts1),
 
             State1 = State0#state{
                 frame_type = FrameType,

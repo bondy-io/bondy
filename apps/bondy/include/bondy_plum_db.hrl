@@ -13,6 +13,7 @@
 -define(PLUM_DB_USER_GRANT_TAB, security_user_grants).
 -define(PLUM_DB_SOURCE_TAB, security_sources).
 -define(PLUM_DB_TICKET_TAB, bondy_ticket).
+-define(PLUM_DB_OAUTH_TOKEN_TAB, bondy_oauth_token).
 -define(PLUM_DB_REGISTRY_ACTOR, '$bondy_registry').
 
 %% REGISTRY
@@ -117,9 +118,11 @@
         shard_by => key,
         callbacks => #{}
     }},
-    {oauth2_refresh_tokens, #{
+    {?PLUM_DB_OAUTH_TOKEN_TAB, #{
         type => disk,
-        shard_by => prefix,
+        %% We shard by key as we prioritise token creation and lookup over
+        %% listing and range operations.
+        shard_by => key,
         callbacks => #{}
     }},
     {bondy_bridge_relay, #{
