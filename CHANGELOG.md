@@ -1,4 +1,6 @@
 # CHANGELOG
+## 1.0.0-rc.39
+
 ## 1.0.0-rc.38
 * Completely redesigned the OAUTH2 token storage.
     * Tokens are now bounded by {User, Client, Device} (idem WAMP Tickets)

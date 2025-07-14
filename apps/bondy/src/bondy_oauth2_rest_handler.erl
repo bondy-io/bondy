@@ -440,7 +440,10 @@ authenticate(client, Password, #state{client_auth_ctxt = Ctxt} = St) ->
             throw(#{
                 code => invalid_client,
                 message => ~"User doesn't have role 'api_clients'",
-                description => ~""
+                description => <<
+                    "To use the OAUTH2 Client Credentials Flow, ",
+                    "your user account must have the 'api_clients' role."
+                >>
             })
     end;
 
@@ -455,8 +458,11 @@ authenticate(resource_owner, Password, #state{owner_auth_ctxt = Ctxt} = St) ->
             throw(#{
                 code => invalid_resource_owner,
                 message => ~"User doesn't have role 'resource_owners'",
-                description => ~""
-            })
+                description => <<
+                    "To use the OAUTH2 Reource Owner Password Flow, ",
+                    "your user account must have the 'resource_owners' role."
+                >>
+        })
     end.
 
 
