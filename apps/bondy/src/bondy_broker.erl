@@ -619,6 +619,7 @@ do_forward(#subscribe{} = M, Ctxt) ->
         {error, timeout} ->
             Error = bondy_wamp_message:error_from(
                 M,
+                #{},
                 ?WAMP_ERROR_TIMEOUT,
                 [~"Request timed out waiting for subcription response."]
             ),
