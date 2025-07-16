@@ -388,14 +388,14 @@ get_message(#{args := L}) when is_list(L) ->
 get_message(#{kwargs := undefined}) ->
     <<>>;
 
-get_message(#{kwargs := #{}}) ->
-    <<>>;
-
 get_message(#{kwargs := #{<<"error">> := Map}}) when is_map(Map) ->
     case maps:find(<<"message">>, Map) of
         {ok, Val} -> Val;
         error -> <<>>
     end;
+
+get_message(#{kwargs := #{}}) ->
+    <<>>;
 
 get_message(_) ->
     <<>>.
