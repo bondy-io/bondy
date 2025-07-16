@@ -28,7 +28,7 @@
 -include("bondy_uris.hrl").
 
 
-
+-define(DISPATCH_KEY(Name), {?MODULE, dispatch, Name}).
 -define(PREFIX, {api_gateway, api_specs}).
 -define(HTTP, api_gateway_http).
 -define(HTTPS, api_gateway_https).
@@ -740,10 +740,12 @@ maybe_start_http(Routes, Name) ->
 -spec start_http(list(), atom()) -> ok | {error, any()}.
 
 start_http(Routes, Name) ->
-    {TransportOpts, ProtoOpts} = cowboy_opts(Routes, Name),
+    TransportOpts = listener_transport_opts(Name),
+    ProtoOpts = listener_protocol_opts(Routes, Name),
     LogMeta = #{
         listener => Name,
-        transport_opts => TransportOpts
+        transport_opts => TransportOpts,
+        protocol_opts => maps:without([env], ProtoOpts)
     },
 
     case cowboy:start_clear(Name, TransportOpts, ProtoOpts) of
@@ -777,9 +779,11 @@ maybe_start_https(Routes, Name) ->
     end.
 
 
-cowboy_opts(Routes, Name) ->
-    {TransportOpts, _OtherTransportOpts} = transport_opts(Name),
-    ProtocolOpts = #{
+listener_protocol_opts(Routes, Name) ->
+    ProtocolOpts0 = bondy_config:listener_protocol_opts(Name),
+    ok = compile_dispatch(Routes, Name),
+
+    ProtocolOpts0#{
         env => #{
             bondy => #{
                 auth => #{
@@ -787,7 +791,7 @@ cowboy_opts(Routes, Name) ->
                     schemes => [basic, bearer]
                 }
             },
-            dispatch => cowboy_router:compile(Routes)
+            dispatch => {persistent_term, ?DISPATCH_KEY(Name)}
         },
         metrics_callback => fun bondy_prometheus_cowboy_collector:observe/1,
         %% cowboy_metrics_h must be first on the list
@@ -799,9 +803,10 @@ cowboy_opts(Routes, Name) ->
         middlewares => [
             cowboy_router,
             cowboy_handler
-        ]
-    },
-    {TransportOpts, ProtocolOpts}.
+        ],
+        hibernate => true,
+        protocols => [http]
+    }.
 
 
 
@@ -812,10 +817,12 @@ cowboy_opts(Routes, Name) ->
 -spec start_https(list(), atom()) -> ok | {error, any()}.
 
 start_https(Routes, Name) ->
-    {TransportOpts, ProtoOpts} = cowboy_opts(Routes, Name),
+    TransportOpts = listener_transport_opts(Name),
+    ProtoOpts = listener_protocol_opts(Routes, Name),
     LogMeta = #{
         listener => Name,
-        transport_opts => TransportOpts
+        transport_opts => TransportOpts,
+        protocol_opts => maps:without([env], ProtoOpts)
     },
 
     case cowboy:start_tls(Name, TransportOpts, ProtoOpts) of
@@ -911,6 +918,10 @@ load_dispatch_tables() ->
     end.
 
 
+compile_dispatch(Routes, Name) ->
+    _ = persistent_term:put(?DISPATCH_KEY(Name), cowboy_router:compile(Routes)),
+    ok.
+
 
 %% -----------------------------------------------------------------------------
 %% @private
@@ -928,7 +939,8 @@ rebuild_dispatch_table(https, Routes) ->
 rebuild_dispatch_table(<<"http">>, Routes) ->
     case bondy_config:get([?HTTP, enabled], true) of
         true ->
-            cowboy:set_env(?HTTP, dispatch, cowboy_router:compile(Routes));
+            compile_dispatch(Routes, ?HTTP);
+
         false ->
             ok
     end;
@@ -936,7 +948,8 @@ rebuild_dispatch_table(<<"http">>, Routes) ->
 rebuild_dispatch_table(<<"https">>, Routes) ->
     case bondy_config:get([?HTTPS, enabled], true) of
         true ->
-            cowboy:set_env(?HTTPS, dispatch, cowboy_router:compile(Routes));
+            compile_dispatch(Routes, ?HTTPS);
+
         false ->
             ok
     end.
@@ -1059,69 +1072,58 @@ maybe_init_groups(RealmUri) ->
     ok.
 
 
-transport_opts(Name) ->
-    Opts = bondy_config:get(Name),
-    %% Default to listen on any i.e. 0.0.0.0 or ::1 depending on IPVer
-    IP0 = key_value:get(ip, Opts, any),
-    Family0 = key_value:get(ip_version, Opts, inet),
-    {IP, Family} = bondy_utils:get_ipaddr_family(IP0, Family0),
-    Port = key_value:get(port, Opts),
-    PoolSize = key_value:get(acceptors_pool_size, Opts),
-    MaxConnections = key_value:get(max_connections, Opts),
+listener_transport_opts(Name) ->
+    Opts0 = bondy_config:listener_transport_opts(Name),
+    MaxConnections = key_value:get(max_connections, Opts0),
 
-    %% In ranch 2.0 we will need to use socket_opts directly
-    {SocketOpts, OtherSocketOpts} =
-        case lists:keyfind(socket_opts, 1, Opts) of
-            {socket_opts, L} -> normalise(L);
-            false -> {[], []}
-        end,
+    Threshold75 = trunc(MaxConnections * 0.75),
+    Threshold90 = trunc(MaxConnections * 0.90),
 
-    TransportOpts = #{
-        num_acceptors => PoolSize,
-        max_connections =>  MaxConnections,
-        socket_opts => [
-            Family,
-            {ip, IP},
-            {port, Port} | SocketOpts
-        ]
+    Opts = Opts0#{
+        alarms => #{
+            num_connections_70 => #{
+                type => num_connections,
+                threshold => Threshold75,
+                cooldown => timer:seconds(5),
+                callback => fun(LName, AlarmName, _SupPid, Pids) ->
+                    ?LOG_WARNING(#{
+                        description => "Connection 75% threshold exceeded",
+                        listener => LName,
+                        alarm_name => AlarmName,
+                        connections => length(Pids)
+                    })
+                end
+            },
+            num_connections_90 => #{
+                type => num_connections,
+                threshold => Threshold90,
+                cooldown => timer:seconds(5),
+                callback => fun(LName, AlarmName, _SupPid, Pids) ->
+                    ?LOG_ALERT(#{
+                        description => "Connection 90% threshold exceeded",
+                        listener => LName,
+                        alarm_name => AlarmName,
+                        connections => length(Pids)
+                    })
+                end
+            }
+        }
     },
-    {TransportOpts, OtherSocketOpts}.
 
+    SocketOpts = key_value:get(socket_opts, Opts),
 
-    %% #{
-    %%     port => Port,
-    %%     num_acceptors => PoolSize,
-    %%     max_connections => MaxConnections,
-    %%     %% handshake_timeout => timeout(),
-    %%     %% logger => module(),
-    %%     %% num_conns_sups => pos_integer(),
-    %%     %% num_listen_sockets => pos_integer(),
-    %%     %% shutdown => timeout() | brutal_kill,
-    %%     socket_opts => SocketOpts
-    %% }.
-
-
-normalise(Opts0) ->
-    Sndbuf = lists:keyfind(sndbuf, 1, Opts0),
-    Recbuf = lists:keyfind(recbuf, 1, Opts0),
-
-    Opts1 = case Sndbuf =/= false andalso Recbuf =/= false of
+    case key_value:get(reuseaddr, SocketOpts, false) of
         true ->
-            Buffer0 = lists:keyfind(buffer, 1, Opts0),
-            Buffer1 = max(Buffer0, max(Sndbuf, Recbuf)),
-            lists:keystore(buffer, 1, Opts0, {buffer, Buffer1});
-        false ->
-            Opts0
-    end,
+            %% 15 acceptors per listen socket with at least 1 per scheduler
+            NumAcceptors = key_value:get(num_acceptors, Opts),
+            Schedulers = erlang:system_info(schedulers),
+            Opts#{
+                num_listen_sockets => max(Schedulers, trunc(NumAcceptors / 15))
+            };
 
-    lists:splitwith(
-        fun
-            ({nodelay, _}) -> false;
-            ({keepalive, _}) -> false;
-            ({_, _}) -> true
-        end,
-        Opts1
-    ).
+        false ->
+            Opts
+    end.
 
 
 
