@@ -1112,7 +1112,7 @@ listener_transport_opts(Name) ->
 
     SocketOpts = key_value:get(socket_opts, Opts),
 
-    case key_value:get(reuseaddr, SocketOpts, false) of
+    case key_value:get(reuseport, SocketOpts, false) of
         true ->
             %% 15 acceptors per listen socket with at least 1 per scheduler
             NumAcceptors = key_value:get(num_acceptors, Opts),
