@@ -609,7 +609,10 @@ normalise_socket_opts(SocketOpts0) ->
     %% This is for non-HTTP listeners. For HTTP we have the linger_timeout
     %% option at the ProtoOpts
     SocketOpts =
-        case take(linger_timeout, SocketOpts3, -1) of
+        case take(linger_timeout, SocketOpts3, undefined) of
+            {undefined, SocketOpts4} ->
+                SocketOpts4;
+
             {-1, SocketOpts4} ->
                 Linger = {false, 0},
                 key_value:put(linger, Linger, SocketOpts4);
