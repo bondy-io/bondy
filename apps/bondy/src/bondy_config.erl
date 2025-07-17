@@ -606,10 +606,18 @@ normalise_socket_opts(SocketOpts0) ->
     {IP, Family} = bondy_utils:get_ipaddr_family(IP0, Family0),
     SocketOpts3 = key_value:put(ip, IP, SocketOpts2),
 
-    {LingerEnabled, SocketOpts4} = take(linger_enabled, SocketOpts3, true),
-    {LingerTimeout, SocketOpts5} = take(linger_timeout, SocketOpts4, 0),
-    Linger = {LingerEnabled, LingerTimeout},
-    SocketOpts = key_value:put(linger, Linger, SocketOpts5),
+    %% This is for non-HTTP listeners. For HTTP we have the linger_timeout
+    %% option at the ProtoOpts
+    SocketOpts =
+        case take(linger_timeout, SocketOpts3, -1) of
+            {-1, SocketOpts4} ->
+                Linger = {false, 0},
+                key_value:put(linger, Linger, SocketOpts4);
+
+            {Timeout, SocketOpts4} ->
+                Linger = {true, Timeout},
+                key_value:put(linger, Linger, SocketOpts4)
+    end,
 
     [Family | SocketOpts].
 

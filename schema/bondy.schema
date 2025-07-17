@@ -773,20 +773,6 @@
   {default, off}
 ]}.
 
-
-{mapping, "admin_api.http.linger.enabled",
-"bondy.admin_api_http.transport_opts.socket_opts.linger_enabled", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
-
-
-{mapping, "admin_api.http.linger.timeout",
-"bondy.admin_api_http.transport_opts.socket_opts.linger_timeout", [
-  {default, "1s"},
-  {datatype, [{duration, ms}, integer]}
-]}.
-
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
 {mapping, "admin_api.http.nodelay",
@@ -886,7 +872,7 @@
 %% Time in ms that Cowboy will wait when closing the connection. This is
 %% necessary to avoid the TCP reset problem as described in the section 6.6 of
 %% RFC7230.
-{mapping, "admin_api.http.linger_timeout",
+{mapping, "admin_api.http.linger.timeout",
 "bondy.admin_api_http.protocol_opts.linger_timeout", [
   {default, "1s"},
   {datatype, {duration, ms}}
@@ -1090,18 +1076,6 @@
   {default, off}
 ]}.
 
-{mapping, "admin_api.https.linger.enabled",
-"bondy.admin_api_https.transport_opts.socket_opts.linger_enabled", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
-
-
-{mapping, "admin_api.https.linger.timeout",
-"bondy.admin_api_https.transport_opts.socket_opts.linger_timeout", [
-  {default, "1s"},
-  {datatype, {duration, ms}}
-]}.
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
@@ -1202,7 +1176,7 @@
 %% Time in ms that Cowboy will wait when closing the connection. This is
 %% necessary to avoid the TCP reset problem as described in the section 6.6 of
 %% RFC7230.
-{mapping, "admin_api.https.linger_timeout",
+{mapping, "admin_api.https.linger.timeout",
 "bondy.admin_api_https.protocol_opts.linger_timeout", [
   {default, "1s"},
   {datatype, {duration, ms}}
@@ -1487,18 +1461,6 @@
   {default, off}
 ]}.
 
-{mapping, "api_gateway.http.linger.enabled",
-"bondy.api_gateway_http.transport_opts.socket_opts.linger_enabled", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
-
-
-{mapping, "api_gateway.http.linger.timeout",
-"bondy.api_gateway_http.transport_opts.socket_opts.linger_timeout", [
-  {default, "1s"},
-  {datatype, {duration, ms}}
-]}.
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
@@ -1596,7 +1558,7 @@
 %% Time in ms that Cowboy will wait when closing the connection. This is
 %% necessary to avoid the TCP reset problem as described in the section 6.6 of
 %% RFC7230.
-{mapping, "api_gateway.http.linger_timeout",
+{mapping, "api_gateway.http.linger.timeout",
 "bondy.api_gateway_http.protocol_opts.linger_timeout", [
   {default, "1s"},
   {datatype, {duration, ms}}
@@ -1800,18 +1762,6 @@
   {default, off}
 ]}.
 
-{mapping, "api_gateway.https.linger.enabled",
-"bondy.api_gateway_https.transport_opts.socket_opts.linger_enabled", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
-
-
-{mapping, "api_gateway.https.linger.timeout",
-"bondy.api_gateway_https.transport_opts.socket_opts.linger_timeout", [
-  {default, "1s"},
-  {datatype, {duration, ms}}
-]}.
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
@@ -1908,7 +1858,7 @@
 %% Time in ms that Cowboy will wait when closing the connection. This is
 %% necessary to avoid the TCP reset problem as described in the section 6.6 of
 %% RFC7230.
-{mapping, "api_gateway.https.linger_timeout",
+{mapping, "api_gateway.https.linger.timeout",
 "bondy.api_gateway_https.protocol_opts.linger_timeout", [
   {default, "1s"},
   {datatype, {duration, ms}}
@@ -2569,17 +2519,11 @@
   {default, on}
 ]}.
 
-{mapping, "wamp.tcp.linger.enabled",
-"bondy.wamp_tcp.transport_opts.socket_opts.linger_enabled", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
-
-
 {mapping, "wamp.tcp.linger.timeout",
 "bondy.wamp_tcp.transport_opts.socket_opts.linger_timeout", [
   {default, "1s"},
-  {datatype, {duration, ms}}
+  {validators, ["duration or -1..0"]},
+  {datatype, [{duration, ms}, integer]}
 ]}.
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
@@ -2807,17 +2751,11 @@
 ]}.
 
 
-{mapping, "wamp.tls.linger.enabled",
-"bondy.wamp_tls.transport_opts.socket_opts.linger_enabled", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
-
-
 {mapping, "wamp.tls.linger.timeout",
 "bondy.wamp_tls.transport_opts.socket_opts.linger_timeout", [
   {default, "1s"},
-  {datatype, {duration, ms}}
+  {validators, ["duration or -1..0"]},
+  {datatype, [{duration, ms}, integer]}
 ]}.
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
@@ -3718,6 +3656,12 @@ end}.
 %% VALIDATORS
 %% =============================================================================
 
+
+{validator,
+  "duration or -1..0",
+  "a duration string or -1",
+  fun(N) -> N >= -1 end
+}.
 
 {validator,
   "non_neg_integer",

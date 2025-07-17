@@ -15,8 +15,7 @@ admin_api.http.max_connections = 500000
 admin_api.http.backlog = 65535
 admin_api.http.keepalive = off
 admin_api.http.max_keepalive = 1000
-admin_api.http.linger.enabled = on
-admin_api.http.linger.timeout = 0
+admin_api.http.linger.timeout = 1s
 admin_api.http.dynamic_buffer.min = 1KB
 admin_api.http.dynamic_buffer.max = 128KB
 admin_api.http.reuseaddr = on
@@ -42,6 +41,7 @@ api_gateway.http.nodelay = on
 api_gateway.http.port = 18080
 #api_gateway.http.ip = ::1
 #api_gateway.http.ip_version = 6
+
 
 
 api_gateway.https.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
@@ -114,6 +114,7 @@ wamp.tcp.keepalive = on
 wamp.tcp.max_connections = 100000
 wamp.tcp.nodelay = on
 wamp.tcp.port = 18082
+wamp.tcp.linger.timeout = 0
 
 wamp.tls.enabled = on
 wamp.tls.port = 18085
