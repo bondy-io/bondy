@@ -12,13 +12,15 @@ admin_api.http.enabled = on
 admin_api.http.port = 18081
 admin_api.http.acceptors_pool_size = 200
 admin_api.http.max_connections = 500000
-admin_api.http.backlog = 1024
+admin_api.http.backlog = 65535
 admin_api.http.keepalive = off
 admin_api.http.max_keepalive = 1000
 admin_api.http.linger.enabled = on
 admin_api.http.linger.timeout = 0
 admin_api.http.dynamic_buffer.min = 1KB
 admin_api.http.dynamic_buffer.max = 128KB
+admin_api.http.reuseaddr = on
+admin_api.http.reuseport = on
 
 admin_api.https.enabled = on
 admin_api.https.port= 18084
