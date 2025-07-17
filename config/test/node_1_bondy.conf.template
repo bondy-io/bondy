@@ -7,18 +7,24 @@ aae.exchange_timer = 1m
 aae.hashtree_timer = 10s
 aae.hashtree_ttl = 1w
 
-admin_api.http.acceptors_pool_size = 200
-admin_api.http.backlog = 1024
+
 admin_api.http.enabled = on
-admin_api.http.keepalive = off
-admin_api.http.max_connections = 250000
-admin_api.http.nodelay = on
 admin_api.http.port = 18081
+admin_api.http.acceptors_pool_size = 200
+admin_api.http.max_connections = 500000
+admin_api.http.backlog = 65535
+admin_api.http.keepalive = off
+admin_api.http.max_keepalive = 1000
+admin_api.http.linger.timeout = 1s
+admin_api.http.dynamic_buffer.min = 1KB
+admin_api.http.dynamic_buffer.max = 128KB
+admin_api.http.reuseaddr = on
+admin_api.http.reuseport = on
 
 admin_api.https.enabled = on
 admin_api.https.port= 18084
 admin_api.https.acceptors_pool_size = 200
-admin_api.http.backlog = 1024
+admin_api.https.backlog = 1024
 admin_api.https.keepalive = off
 admin_api.https.max_connections = 250000
 admin_api.https.backlog = 4096
@@ -36,13 +42,8 @@ api_gateway.http.port = 18080
 #api_gateway.http.ip = ::1
 #api_gateway.http.ip_version = 6
 
-api_gateway.https.enabled = on
-api_gateway.https.port = 18083
-api_gateway.https.acceptors_pool_size = 200
-api_gateway.https.backlog = 4096
-api_gateway.https.keepalive = off
-api_gateway.https.max_connections = 500000
-api_gateway.https.nodelay = on
+
+
 api_gateway.https.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
 api_gateway.https.certfile = ${BONDY_ETC_DIR}/ssl/server/keycert.pem
 api_gateway.https.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
@@ -113,6 +114,7 @@ wamp.tcp.keepalive = on
 wamp.tcp.max_connections = 100000
 wamp.tcp.nodelay = on
 wamp.tcp.port = 18082
+wamp.tcp.linger.timeout = 0
 
 wamp.tls.enabled = on
 wamp.tls.port = 18085

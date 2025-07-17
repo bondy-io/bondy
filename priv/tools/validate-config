@@ -142,7 +142,7 @@ vm_extra_check(EtcDir, AllFiles) ->
         [File] ->
             ?LOG_INFO(
                 "VM Extra configuration file ~p was found in ~p directory. "
-                "Chedking file and removing any usage of -sname, -name and "
+                "Checking file and removing any usage of -sname, -name and "
                 "-setcookie options as these are dynamically added by Bondy "
                 "based on the 'bondy.config' filed and environment variables.",
                 [File, EtcDir]

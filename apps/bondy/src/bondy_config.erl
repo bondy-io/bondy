@@ -211,6 +211,8 @@
 -export([node/0]).
 -export([nodestring/0]).
 -export([node_spec/0]).
+-export([listener_transport_opts/1]).
+-export([listener_protocol_opts/1]).
 
 
 -compile({no_auto_import, [get/1]}).
@@ -334,6 +336,26 @@ nodestring() ->
 node_spec() ->
     partisan:node_spec().
 
+
+
+-spec listener_transport_opts(ListenerName :: atom()) -> map().
+
+listener_transport_opts(Name) ->
+    Opts = key_value:to_map(get([Name, transport_opts])),
+    NumAcceptors = key_value:get(num_acceptors, Opts),
+    SocketOpts = normalise_socket_opts(key_value:get(socket_opts, Opts, [])),
+
+    Opts#{
+        %% connection_type => worker,
+        num_conns_sups => NumAcceptors, % the default, made explicit
+        socket_opts => SocketOpts
+    }.
+
+
+-spec listener_protocol_opts(ListenerName :: atom()) -> map().
+
+listener_protocol_opts(Name) ->
+    key_value:to_map(get([Name, protocol_opts])).
 
 
 %% =============================================================================
@@ -568,3 +590,64 @@ apply_private_config({ok, Config}) ->
             exit(Reason)
     end.
 
+
+
+%% @private
+-spec normalise_socket_opts(SocketOpts :: [{atom(), any()}]) ->
+    SocketOpts :: [atom() | {atom(), any()}].
+
+normalise_socket_opts(SocketOpts0) ->
+    %% We normlise the buffer option
+    SocketOpts1 = normalise_socket_buffer(SocketOpts0),
+
+    %% We default to listen on any i.e. 0.0.0.0 or ::1 depending on IPVer
+    IP0 = key_value:get(ip, SocketOpts1, any),
+    {Family0, SocketOpts2} = take(ip_version, SocketOpts1, any),
+    {IP, Family} = bondy_utils:get_ipaddr_family(IP0, Family0),
+    SocketOpts3 = key_value:put(ip, IP, SocketOpts2),
+
+    %% This is for non-HTTP listeners. For HTTP we have the linger_timeout
+    %% option at the ProtoOpts
+    SocketOpts =
+        case take(linger_timeout, SocketOpts3, -1) of
+            {-1, SocketOpts4} ->
+                Linger = {false, 0},
+                key_value:put(linger, Linger, SocketOpts4);
+
+            {Timeout, SocketOpts4} ->
+                Linger = {true, Timeout},
+                key_value:put(linger, Linger, SocketOpts4)
+    end,
+
+    [Family | SocketOpts].
+
+
+%% @private
+-spec normalise_socket_buffer([{atom(), any()}]) -> [{atom(), any()}].
+
+normalise_socket_buffer([]) ->
+    [];
+
+normalise_socket_buffer(Opts) when is_list(Opts) ->
+    Sndbuf = key_value:get(sndbuf, Opts, 0),
+    Recbuf = key_value:get(recbuf, Opts, 0),
+
+    case Sndbuf > 0 andalso Recbuf > 0 of
+        true ->
+            Buffer0 = key_value:get(buffer, Opts, 0),
+            Buffer1 = max(Buffer0, max(Sndbuf, Recbuf)),
+            key_value:put(buffer, Buffer1, Opts);
+
+        false ->
+            Opts
+    end.
+
+
+
+take(Key, KV0, Default) ->
+    case key_value:take(Key, KV0) of
+        error ->
+            {Default, KV0};
+        {_, _} = Result ->
+            Result
+    end.

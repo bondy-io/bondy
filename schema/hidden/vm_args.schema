@@ -26,11 +26,10 @@
 %% the driver_async() functionality. Notice that the value passed is only a
 %% suggestion, and it can even be ignored on some platforms.
 %% More information at: http://erlang.org/doc/man/erl.html
-{mapping, "vm.async_threads.stack_size", "vm_args.+a", [
+{mapping, "vm.async_thread.stack_size", "vm_args.+a", [
   {datatype, integer},
-  {commented, 16},
-  {validators, ["range:16-8192"]},
-  hidden
+  {default, 16},
+  {validators, ["range:16-8192"]}
 ]}.
 
 
@@ -40,12 +39,10 @@
 %% the default Erlang/OTP distribution that uses the async thread pool. Most of
 %% them have been migrated to dirty IO schedulers. Defaults to 1.
 %% More information at: http://erlang.org/doc/man/erl.html
-{mapping, "vm.async_threads", "vm_args.+A", [
+{mapping, "vm.async_thread.number", "vm_args.+A", [
   {datatype, integer},
   {default, 10},
-  {commented, 1},
-  {validators, ["range:0-1024"]},
-  hidden
+  {validators, ["range:1-1024"]}
 ]}.
 
 
@@ -53,8 +50,7 @@
 %% More information: http://erlang.org/doc/man/erl.html#emulator-flags
 {mapping, "vm.time_correction", "vm_args.+c", [
   {default, on},
-  {datatype, flag},
-  hidden
+  {datatype, flag}
 ]}.
 
 
@@ -62,16 +58,16 @@
 %% More information: http://erlang.org/doc/man/erl.html#emulator-flags
 {mapping, "vm.time_correction.warp_mode", "vm_args.+C", [
   {default, multi_time_warp},
-  {datatype, {enum, [no_time_warp, single_time_warp, multi_time_warp]}},
-  hidden
+  {datatype, {enum, [no_time_warp, single_time_warp, multi_time_warp]}}
 ]}.
 
 
 %% @doc Sets the maximum number of ETS tables.
-%% This limit is partially obsolete (http://erlang.org/doc/man/ets.html#max_ets_tables).
-{mapping, "vm.max_ets_tables", "vm_args.+e", [
+%% This limit is partially obsolete but usefull to be set anyways.
+%% See http://erlang.org/doc/man/ets.html#max_ets_tables
+{mapping, "vm.ets.max_tables", "vm_args.+e", [
   {datatype, integer},
-  {commented, 256000},
+  {default, 256000},
   hidden
 ]}.
 
@@ -80,19 +76,17 @@
 %% is only used on platforms that support concurrent updates of a pollset,
 %% otherwise the same number of pollsets are used as IO poll threads. The
 %% default is 1.
-{mapping, "vm.poolsets.number", "vm_args.+IOp", [
+{mapping, "vm.io.poolset.number", "vm_args.+IOp", [
   {datatype, integer},
-  {comment, 1},
-  hidden
+  {commented, 1}
 ]}.
 
 
 %% @doc Similar to +IOp but uses percentages to set the number of IO pollsets to
 %% create, based on the number of poll threads configured. If both +IOPp and
 %% +IOp are used, +IOPp is ignored.
-{mapping, "vm.poolsets.percentage", "vm_args.+IOpp", [
-{datatype, integer},
-hidden
+{mapping, "vm.io.poolset.percentage", "vm_args.+IOpp", [
+{datatype, integer}
 ]}.
 
 
@@ -101,19 +95,18 @@ hidden
 %% A good way to check if more IO poll threads are needed is to use microstate
 %% accounting and see what the load of the IO poll thread is. If it is high it
 %% could be a good idea to add more threads.
-{mapping, "vm.poolthreads.number", "vm_args.+IOt", [
+{mapping, "vm.io.pool_thread.number", "vm_args.+IOt", [
 {datatype, integer},
-{comment, 1},
-hidden
+{validators, ["range:1-1024"]},
+{commented, 1}
 ]}.
 
 
 %% @doc Similar to +IOt but uses percentages to set the number of IO poll
 %% threads to create, based on the number of schedulers configured. If both
 %% +IOPt and +IOt are used, +IOPt is ignored.
-{mapping, "vm.poolthreads.percentage", "vm_args.+IOtp", [
-{datatype, integer},
-hidden
+{mapping, "vm.io.pool_thread.percentage", "vm_args.+IOtp", [
+{datatype, integer}
 ]}.
 
 
@@ -126,11 +119,10 @@ hidden
 %% This might, however, be changed in the future.
 %% The actual value chosen can be checked by calling erlang:system_info
 %% (process_limit).
-{mapping, "vm.process_limit", "vm_args.+P", [
+{mapping, "vm.process.limit", "vm_args.+P", [
   {datatype, integer},
   {default, 2097152},
-  {validators, ["process_limit"]},
-  hidden
+  {validators, ["process_limit"]}
 ]}.
 
 
@@ -148,11 +140,10 @@ hidden
 %% opened.
 %%% On Windows the default value is set to 8196 because the normal OS limitations
 %%% are set higher than most machines can handle.
-{mapping, "vm.port_limit", "vm_args.+Q", [
+{mapping, "vm.port.limit", "vm_args.+Q", [
   {datatype, integer},
   {default, 2097152},
-  {validators, ["port_limit"]},
-  hidden
+  {validators, ["port_limit"]}
 ]}.
 
 
@@ -172,26 +163,24 @@ hidden
 %%% processors available, respectively.
 %%% Specifying value 0 for Schedulers or SchedulersOnline resets the number of scheduler
 %%% threads or scheduler threads online, respectively, to its default value.
-{mapping, "vm.cpu.schedulers.total", "vm_args.+S", [
+{mapping, "vm.cpu.scheduler.total", "vm_args.+S", [
   {datatype, integer},
   {commented, 0},
-  {validators, ["=<1024"]},
-  hidden
+  {validators, ["=<1024"]}
 ]}.
 
 
 %% @see vm.schedulers.total
-{mapping, "vm.cpu.schedulers.online", "vm_args.+S", [
+{mapping, "vm.cpu.scheduler.online", "vm_args.+S", [
   {datatype, integer},
   {commented, 0},
-  {validators, ["=<1024"]},
-  hidden
+  {validators, ["=<1024"]}
 ]}.
 
 {translation, "vm_args.+S",
      fun(Conf) ->
-      Total0 = cuttlefish:conf_get("vm.cpu.schedulers.total", Conf, undefined),
-      Online0 = cuttlefish:conf_get("vm.cpu.schedulers.online", Conf, undefined),
+      Total0 = cuttlefish:conf_get("vm.cpu.scheduler.total", Conf, undefined),
+      Online0 = cuttlefish:conf_get("vm.cpu.scheduler.online", Conf, undefined),
       case {Total0, Online0} of
           {undefined, undefined} ->
               cuttlefish:unset();
@@ -211,10 +200,9 @@ hidden
 %% The threshold determines how long schedulers are to busy wait when
 %% running out of work before going to sleep.
 %% Note: This flag can be removed or changed at any time without prior notice.
-{mapping, "vm.cpu.schedulers.busy_wait_threshold", "vm_args.+sbwt", [
+{mapping, "vm.cpu.scheduler.busy_wait_threshold", "vm_args.+sbwt", [
   {datatype, {enum, [none, very_short, short, medium, long, very_long]}},
-  {default, short},
-  hidden
+  {default, short}
 ]}.
 
 
@@ -228,10 +216,9 @@ hidden
 %% native code that do not bump reductions properly.
 %%
 %% More information: http://www.erlang.org/doc/man/erl.html#+sfwi
-{mapping, "vm.cpu.schedulers.force_wakeup_interval", "vm_args.+sfwi", [
-  {commented, 500},
-  {datatype, integer},
-  hidden
+{mapping, "vm.cpu.scheduler.force_wakeup_interval", "vm_args.+sfwi", [
+  {default, 0},
+  {datatype, integer}
 ]}.
 
 
@@ -247,10 +234,9 @@ hidden
 %% load balancing logic.
 %%
 %% More information: http://www.erlang.org/doc/man/erl.html#+scl
-{mapping, "vm.cpu.schedulers.compaction_of_load", "vm_args.+scl", [
-  {commented, "false"},
-  {datatype, {enum, [true, false]}},
-  hidden
+{mapping, "vm.cpu.scheduler.compaction_of_load", "vm_args.+scl", [
+  {default, on},
+  {datatype, flag}
 ]}.
 
 %% @doc Enable or disable scheduler utilization balancing of load. By
@@ -263,10 +249,9 @@ hidden
 %% strive for equal scheduler utilization on all schedulers.
 %%
 %% More information: http://www.erlang.org/doc/man/erl.html#+sub
-{mapping, "vm.cpu.schedulers.utilization_balancing", "vm_args.+sub", [
-  {commented, "true"},
-  {datatype, {enum, [true, false]}},
-  hidden
+{mapping, "vm.cpu.scheduler.utilization_balancing", "vm_args.+sub", [
+  {default, off},
+  {datatype, flag}
 ]}.
 
 %% @doc Sets the number of dirty CPU scheduler threads to create and dirty CPU
@@ -297,28 +282,26 @@ hidden
 %%
 %% You can use msacc(3) in order to see the current load of the dirty CPU
 %% schedulers threads and adjust the number used accordingly.
-{mapping, "vm.cpu.dirty_schedulers.total", "vm_args.+SDcpu", [
+{mapping, "vm.cpu.dirty_scheduler.number", "vm_args.+SDcpu", [
   {datatype, integer},
   {commented, 0},
-  {validators, ["=<1024"]},
-  hidden
+  {validators, ["=<1024"]}
 ]}.
 
-%% @see vm.cpu.dirty_schedulers.total
-{mapping, "vm.cpu.dirty_schedulers.online", "vm_args.+SDcpu", [
+%% @see vm.cpu.dirty_scheduler.number
+{mapping, "vm.cpu.dirty_scheduler.online", "vm_args.+SDcpu", [
   {datatype, integer},
   {commented, 0},
-  {validators, ["=<1024"]},
-  hidden
+  {validators, ["=<1024"]}
 ]}.
 
 {translation, "vm_args.+SDcpu",
  fun(Conf) ->
   Total0 = cuttlefish:conf_get(
-    "vm.cpu.dirty_schedulers.total", Conf, undefined
+    "vm.cpu.dirty_scheduler.number", Conf, undefined
   ),
   Online0 = cuttlefish:conf_get(
-    "vm.cpu.dirty_schedulers.online", Conf, undefined
+    "vm.cpu.dirty_scheduler.online", Conf, undefined
   ),
   case {Total0, Online0} of
       {undefined, undefined} ->
@@ -334,10 +317,9 @@ hidden
 }.
 
 %% @doc As +sbwt but affects dirty CPU schedulers. Defaults to short.
-{mapping, "vm.cpu.dirty_schedulers.busy_wait_threshold", "vm_args.+sbwtdcpu", [
+{mapping, "vm.cpu.dirty_scheduler.busy_wait_threshold", "vm_args.+sbwtdcpu", [
   {datatype, {enum, [none, very_short, short, medium, long, very_long]}},
-  {default, short},
-  hidden
+  {default, short}
 ]}.
 
 
@@ -355,21 +337,29 @@ hidden
 %%
 %% You can use msacc(3) in order to see the current load of the dirty IO
 %% schedulers threads and adjust the number used accordingly.
-{mapping, "vm.io.dirty_schedulers", "vm_args.+SDio", [
+{mapping, "vm.io.dirty_scheduler.number", "vm_args.+SDio", [
   {datatype, integer},
-  {commented, 10},
-  {validators, ["=<1024"]},
-  hidden
+  {default, 128},
+  {validators, ["range:1-1024"]}
+]}.
+
+%% GPU Executions run in dirty IO threads, which have a considerable smaller
+%% stack size than regular scheduler threads. This may lead to problems with
+%% certain CUDA or cuDNN versions, leading to segmentation fails.
+%% We increase the stack size of dirty IO threads from 40 kilowords to 128
+%% kilowords.
+{mapping, "vm.io.dirty_scheduler.stack_size", "vm_args.+sssdio", [
+  {datatype, integer},
+  {default, 40},
+  {validators, ["=<128"]}
 ]}.
 
 
 %% @doc As +sbwt but affects dirty IO schedulers. Defaults to short.
-{mapping, "vm.io.dirty_schedulers.busy_wait_threshold", "vm_args.+sbwtdio", [
+{mapping, "vm.io.dirty_scheduler.busy_wait_threshold", "vm_args.+sbwtdio", [
   {datatype, {enum, [none, very_short, short, medium, long, very_long]}},
-  {default, short},
-  hidden
+  {default, short}
 ]}.
-
 
 
 %% @doc Sets the mapping of warning messages for error_logger.
@@ -380,27 +370,26 @@ hidden
 %% see error_logger:warning_map/0 in Kernel.
 {mapping, "vm.W", "vm_args.+W", [
   {datatype, {enum, [w, i, e]}},
-  {default, w},
-  hidden
+  {default, w}
 ]}.
 
 %% @doc Suggested stack size, in kilowords, for threads in the async thread pool.
 %% Valid range is 16-8192 kilowords.
 %% The default suggested stack size is 16 kilowords, that is, 64 kilobyte on
-%% 32-bit architectures. This small default size has been chosen because the number
-%% of async threads can be large. The default size is enough for drivers delivered
-%% with Erlang/OTP, but might not be large enough for other dynamically linked-in
-%% drivers that use the driver_async() functionality. Notice that the value passed
-%% is only a suggestion, and it can even be ignored on some platforms.
-{mapping, "vm.async_threads.stack_size", "vm_args.+a", [
+%% 32-bit architectures. This small default size has been chosen because the
+%% number of async threads can be large. The default size is enough for drivers
+%% delivered with Erlang/OTP, but might not be large enough for other
+%% dynamically linked-in drivers that use the driver_async() functionality.
+%% Notice that the value passed is only a suggestion, and it can even be ignored
+%% on some platforms.
+{mapping, "vm.async_thread.stack_size", "vm_args.+a", [
   {datatype, bytesize},
-  {validators, [ "stack-size-divisible", "stack-size-range"]},
-  hidden
+  {validators, [ "stack-size-divisible", "stack-size-range"]}
 ]}.
 
 {translation, "vm_args.+a",
      fun(Conf) ->
-       RawValue = cuttlefish:conf_get("vm.async_threads.stack_size", Conf),
+       RawValue = cuttlefish:conf_get("vm.async_thread.stack_size", Conf),
        RawValue div (1024 * erlang:system_info({wordsize, external}))
      end
 }.
@@ -506,8 +495,7 @@ hidden
 {mapping, "vm.distribution.interface", "kernel.inet_dist_use_interface", [
   {commented, "true"},
   {datatype, string},
-  {validators, ["ip_strict"]},
-  hidden
+  {validators, ["ip_strict"]}
 ]}.
 
 {translation, "kernel.inet_dist_use_interface",
@@ -547,8 +535,7 @@ hidden
 %% @doc Set the location of crash dumps
 {mapping, "vm.crash_dump", "vm_args.-env ERL_CRASH_DUMP", [
   {datatype, file},
-  {commented, ""},
-  hidden
+  {commented, ""}
 ]}.
 
 
@@ -570,8 +557,13 @@ hidden
 %% carrier when the super carrier is full.
 {mapping, "vm.memory_allocators.super_carrier_only", "vm_args.+MMsco", [
   {datatype, flag},
-  {default, off},
-  hidden
+  {default, off}
+]}.
+
+%% ## Turn on allocation tagging so that we can see NIF info
+{mapping, "vm.memory_allocators.allocation_tagging", "vm_args.+Muatags", [
+  {datatype, flag},
+  {default, on}
 ]}.
 
 %% @doc Sets super carrier size (in MB). Defaults to 0, that is, the super
@@ -582,8 +574,7 @@ hidden
 %% see vm.memory_allocators.super_carrier_only.
 {mapping, "vm.memory_allocators.super_carrier_size", "vm_args.+MMscs", [
   {datatype, bytesize},
-  {default, "0MB"},
-  hidden
+  {default, "0MB"}
 ]}.
 
 {translation, "vm_args.+MMscs",
@@ -609,8 +600,12 @@ hidden
         X =< 1024
      end}.
 
-{validator, "range:0-1024", "must be 0 to 1024",
- fun(X) -> X >= 0 andalso X =< 1024 end}.
+{validator, "range:40-128", "must be 40 to 128",
+ fun(X) -> X >= 40 andalso X =< 128 end}.
+
+
+{validator, "range:1-1024", "must be 1 to 1024",
+ fun(X) -> X >= 1 andalso X =< 1024 end}.
 
 {validator, "range:16-8192", "must be 0 to 1024",
  fun(X) -> X >= 16 andalso X =< 8192 end}.

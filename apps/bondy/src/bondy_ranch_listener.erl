@@ -128,7 +128,7 @@ connections(Ref) ->
 %% - Ref
 %%     - ip
 %%     - port
-%%     - acceptors_pool_size
+%%     - num_acceptors
 %%     - max_connections
 %%     - backlog
 %%     - max_connections
@@ -147,29 +147,7 @@ connections(Ref) ->
 %% -----------------------------------------------------------------------------
 
 transport_opts(Ref) ->
-    Opts = bondy_config:get(Ref),
-    IP0 = key_value:get(ip, Opts, any),
-    Family0 = key_value:get(ip_version, Opts, inet),
-    {IP, Family} = bondy_utils:get_ipaddr_family(IP0, Family0),
-    Port = key_value:get(port, Opts),
-    PoolSize = key_value:get(acceptors_pool_size, Opts),
-    MaxConnections = key_value:get(max_connections, Opts),
-
-    %% In ranch 2.0 we will need to use socket_opts directly
-    SocketOpts = normalise(key_value:get(socket_opts, Opts, [])),
-
-    TLSOpts = key_value:get(tls_opts, Opts, []),
-
-    #{
-        num_acceptors => PoolSize,
-        max_connections => MaxConnections,
-        socket_opts => [
-            Family,
-            {ip, IP},
-            {port, Port} | SocketOpts ++ TLSOpts
-        ]
-    }.
-
+    bondy_config:listener_transport_opts(Ref).
 
 
 %% =============================================================================
@@ -187,19 +165,3 @@ ref_to_transport(wamp_tcp) -> ranch_tcp;
 ref_to_transport(wamp_tls) -> ranch_ssl.
 
 
-%% @private
-normalise([]) ->
-    [];
-
-normalise(Opts) ->
-    Sndbuf = lists:keyfind(sndbuf, 1, Opts),
-    Recbuf = lists:keyfind(recbuf, 1, Opts),
-
-    case Sndbuf =/= false andalso Recbuf =/= false of
-        true ->
-            Buffer0 = lists:keyfind(buffer, 1, Opts),
-            Buffer1 = max(Buffer0, max(Sndbuf, Recbuf)),
-            lists:keystore(buffer, 1, Opts, {buffer, Buffer1});
-        false ->
-            Opts
-    end.
