@@ -1,7 +1,14 @@
 # CHANGELOG
-## 1.0.0-rc.39
+## 1.0.0-rc.40
+- Major HTTP API Gateway bottleneck removed and memory usage reduced
+    - Avoid Cowboy to close over the dispatch table when compiling the routing 
+    logic and passing it into the request handling process.
+    - Uses new `persistent_term` capability from Cowboy to store the dispatch 
+    table
+- Major refactoring of protocol/transport options for better reuse
+- Added almost all options to configuration schemas
 
-## 1.0.0-rc.38
+## 1.0.0-rc.39
 * Completely redesigned the OAUTH2 token storage.
     * Tokens are now bounded by {User, Client, Device} (idem WAMP Tickets)
     * Tokens are sharded across all partitions, allowing for more scalability
@@ -16,7 +23,10 @@
     * `_disclose_session` - The callee will receive and the session information 
     in  `INVOCATION.Details._session_info`
 - Drop x_ prefix for RPC experimental options
-    
+
+## 1.0.0-rc.38
+- Failed tag
+
 ## 1.0.0-rc.37
 * Added bounded queues for job worker pool and their configuration
     * `load_regulation.job_manager.queue.size`
