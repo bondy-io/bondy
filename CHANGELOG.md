@@ -1,4 +1,7 @@
 # CHANGELOG
+## 1.0.0-rc.41
+- Minor fix to new listener `liner.timeout` option to avoid confusion between protocol and socket options.
+- 
 ## 1.0.0-rc.40
 - Major HTTP API Gateway bottleneck removed and memory usage reduced
     - Avoid Cowboy to close over the dispatch table when compiling the routing 
