@@ -122,7 +122,7 @@ resource_owner_password(_) ->
     SourceIP = {127, 0, 0, 1},
     {ok, Ctxt1} = bondy_auth:init(SessionId, ?REALM_URI, ?U1, Roles, SourceIP),
     {ok, Token} = bondy_oauth_token:issue(password, Ctxt1, #{}),
-    JWT = bondy_oauth_token:to_access_token(Token),
+    {ok, {JWT, _}} = bondy_oauth_token:to_access_token(Token),
 
     ?assertMatch(
         {ok, #{
