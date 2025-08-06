@@ -44,14 +44,14 @@
 
 
 
-?DOC("""
+-doc """
 If `Value` is the atom `undefined`, return `undefined`, otherwise apply `Fun` to
 `Value`.
 
 Conceptually the dual of `or_else/2`:
 * `or_else/2`  – provide an *alternative* when the value is missing.
 * `and_then/2` – continue the computation when the value is present.
-""").
+""".
 -spec and_then(optional(T), fun((T) -> R)) -> optional(R).
 
 and_then(undefined, _Fun) ->
@@ -61,9 +61,9 @@ and_then(Value, Fun) when is_function(Fun, 1) ->
     Fun(Value).
 
 
-?DOC("""
+-doc """
 Returns the first argument if it is not the atom `undefined`, otherwise the second.
-""").
+""".
 -spec or_else(optional(any()), any()) -> any().
 
 or_else(undefined, Default) ->
@@ -73,9 +73,9 @@ or_else(Value, _) ->
     Value.
 
 
-?DOC("""
+-doc """
 Returns the first argument if it is not the atom `undefined`, otherwise calls the second argument.
-""").
+""".
 -spec lazy_or_else(optional(any()), function()) -> any().
 
 lazy_or_else(undefined, Fun) when is_function(Fun, 0) ->
@@ -86,30 +86,30 @@ lazy_or_else(Value, _) ->
 
 
 
-?DOC("""
+-doc """
 Increment an integer exponentially
-""").
+""".
 -spec increment(pos_integer()) -> pos_integer().
 
 increment(N) when is_integer(N) ->
     N bsl 1.
 
 
-?DOC("""
+-doc """
 Increment an integer exponentially within a range.
-""").
+""".
 -spec increment(N :: pos_integer(), Max :: pos_integer()) -> pos_integer().
 
 increment(N, Max) ->
     min(increment(N), Max).
 
-?DOC("""
+-doc """
 Increment an integer exponentially with randomness or jitter.-behaviour(behaviour).
 Chooses a delay uniformly from `[0.5 * Time, 1.5 * Time]' as recommended in:
 [Sally Floyd and Van Jacobson, The Synchronization of Periodic Routing Messages,
 April 1994 IEEE/ACM Transactions on Networking](http://ee.lbl.gov/papers/sync_94.pdf).
 Implementation borrowed from Hex package [backoff](https://hex.pm/packages/backoff) (MIT Licence, Copyright (c) 2013 Heroku <mononcqc@ferd.ca>).
-""").
+""".
 -spec rand_increment(N :: pos_integer()) -> pos_integer().
 
 rand_increment(N) ->
@@ -118,14 +118,14 @@ rand_increment(N) ->
     N + rand:uniform(Width + 1) - 1.
 
 
-?DOC("""
+-doc """
 Increment an integer exponentially with randomness or jitter within a range.
 
 Chooses a delay uniformly from `[0.5 * Time, 1.5 * Time]' as recommended in:
 [Sally Floyd and Van Jacobson, The Synchronization of Periodic Routing Messages,
 April 1994 IEEE/ACM Transactions on Networking](http://ee.lbl.gov/papers/sync_94.pdf).
 Implementation borrowed from Hex package [backoff](https://hex.pm/packages/backoff) (MIT Licence, Copyright (c) 2013 Heroku <mononcqc@ferd.ca>).
-""").
+""".
 -spec rand_increment(N :: pos_integer(), Max :: pos_integer()) -> pos_integer().
 
 rand_increment(N, Max) ->
@@ -145,21 +145,21 @@ rand_increment(N, Max) ->
     end.
 
 
-?DOC("""
+-doc """
 Calls retry/2 with the default the follwing default options:
 
 - `max_retries` = 3,
 - `base_delay` = 100 i.e. 100 milliseconds
 - `max_delay` = 5000 i.e. 5 seconds
 - `mode` = jitter
-""").
+""".
 -spec retry(fun(() -> resulto:t())) -> resulto:t().
 
 retry(Fun) ->
     retry(Fun, ?DEFAULT_RETRY_OPTS).
 
 
-?DOC("""
+-doc """
 Retries a function with full control over timing parameters.
 
 Implements exponential backoff with jitter:
@@ -199,7 +199,7 @@ end, 10, 1000, 30000).
 
 Notice this function will not catch exceptions and thus there will be no retries
 in that scenario.
-""").
+""".
 -spec retry(fun(() -> resulto:t()), retry_opts()) -> resulto:t().
 
 retry(Fun, Opts) ->

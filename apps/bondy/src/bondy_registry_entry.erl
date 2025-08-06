@@ -1,40 +1,22 @@
 %% =============================================================================
-%%  bondy_registry_entry.erl -
-%%
-%%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
-%%
-%%  Licensed under the Apache License, Version 2.0 (the "License");
-%%  you may not use this file except in compliance with the License.
-%%  You may obtain a copy of the License at
-%%
-%%     http://www.apache.org/licenses/LICENSE-2.0
-%%
-%%  Unless required by applicable law or agreed to in writing, software
-%%  distributed under the License is distributed on an "AS IS" BASIS,
-%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-%%  See the License for the specific language governing permissions and
-%%  limitations under the License.
+%% SPDX-FileCopyrightText: 2016 - 2025 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc An entry is a record of a RPC registration or PubSub subscription. It
-%% is stored in-memory in the Registry {@link bondy_registry} and replicated
-%% globally. Entries are immutable.
-%%
-%% @TODO Because entries is replicated (even if only in memory), changes to
-%% the data structure MUST be managed to be able to support rolling cluster
-%% updates.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_registry_entry).
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
--include("bondy_registry.hrl").
 -include("bondy_plum_db.hrl").
 
+-moduledoc """
+An entry is a record of a RPC registration or PubSub subscription. It
+is stored in-memory in the Registry {@link bondy_registry} and replicated
+globally (for now). Entries are immutable.
+""".
 
--define(MATCH_OPTS, [
+-define(IS_TYPE(X), (X == registration orelse X == subscription)).
+-define(PDB_MATCH_OPTS, [
     {resolver, lww},
     {remove_tombstones, true}
 ]).
@@ -84,12 +66,6 @@
                                 A :: optional([term()])
                             }.
 -type options()         ::  map().
--type match_result()        ::  [t()]
-                                | {[t()], continuation_or_eot()}
-                                | eot().
--type eot()                 ::  ?EOT.
--type continuation()        ::  plum_db:continuation().
--type continuation_or_eot() ::  eot() | continuation().
 -type ext()                 ::  default_ext()
                                 | wamp_meta_ext()
                                 | bridge_relay_ext().
@@ -135,22 +111,13 @@
 -export_type([t_or_key/0]).
 -export_type([entry_type/0]).
 -export_type([ext/0]).
--export_type([eot/0]).
--export_type([continuation/0]).
 -export_type([comparator/0]).
 
 -export([callback/1]).
 -export([callback_args/1]).
 -export([created/1]).
--export([delete/1]).
--export([delete/2]).
--export([dirty_delete/1]).
--export([dirty_delete/2]).
 -export([field_index/1]).
 -export([find_option/2]).
--export([fold/4]).
--export([fold/5]).
--export([foreach/4]).
 -export([get_option/3]).
 -export([id/1]).
 -export([invocation_policy/1]).
@@ -167,12 +134,6 @@
 -export([key_pattern/3]).
 -export([locality_comparator/0]).
 -export([locality_comparator/1]).
--export([lookup/2]).
--export([lookup/3]).
--export([lookup/4]).
--export([match/1]).
--export([match/2]).
--export([match/3]).
 -export([match_policy/1]).
 -export([mg_comparator/0]).
 -export([mg_comparator/1]).
@@ -191,9 +152,6 @@
 -export([realm_uri/1]).
 -export([ref/1]).
 -export([session_id/1]).
--export([store/1]).
--export([take/1]).
--export([take/2]).
 -export([target/1]).
 -export([time_comparator/0]).
 -export([time_comparator/1]).
@@ -228,7 +186,7 @@ new(Type, RealmUri, Ref, Uri, Opts) ->
 -spec new(entry_type(), id(), uri(), bondy_ref:t(), uri(), map()) -> t().
 
 new(Type, RegId, RealmUri, Ref, Uri, Opts0)
-when is_binary(Uri) andalso is_map(Opts0) andalso ?IS_ENTRY_TYPE(Type) ->
+when is_binary(Uri) andalso is_map(Opts0) andalso ?IS_TYPE(Type) ->
     SessionId = bondy_ref:session_id(Ref),
 
     Key = #entry_key{
@@ -846,295 +804,6 @@ proxy_details(#entry{} = E) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Inserts the entry in plum_db. This will broadcast the delete amongst
-%% the nodes in the cluster.
-%% It will also called the `on_update/3' callback if enabled.
-%% @end
-%% -----------------------------------------------------------------------------
--spec store(Entry :: t()) -> ok | {error, any()}.
-
-store(#entry{} = Entry) ->
-    PDBPrefix = pdb_prefix(Entry),
-    Key = key(Entry),
-
-    plum_db:put(PDBPrefix, Key, Entry).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec lookup(Type :: entry_type(), EntryKey :: key()) ->
-    {ok, Entry :: t()} | {error, not_found}.
-
-lookup(Type, #entry_key{} = EntryKey) when ?IS_ENTRY_TYPE(Type) ->
-    PDBPrefix = pdb_prefix(Type, EntryKey),
-
-    case plum_db:get(PDBPrefix, EntryKey) of
-        #entry{} = Entry ->
-            {ok, Entry};
-        undefined ->
-            {error, not_found}
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec lookup(Type :: entry_type(), EntryKey :: key(), Opts :: map()) ->
-    {ok, Entry :: t()} | {error, not_found}.
-
-lookup(Type, #entry_key{} = EntryKey, Opts) when ?IS_ENTRY_TYPE(Type) ->
-    PDBPrefix = pdb_prefix(Type, EntryKey),
-
-    case plum_db:get(PDBPrefix, EntryKey, Opts) of
-        #entry{} = Entry ->
-            {ok, Entry};
-        undefined ->
-            {error, not_found}
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec lookup(
-    Type :: entry_type(), RealmUri :: uri(), EntryId :: id(), Opts :: map()) ->
-    {ok, Entry :: t()} | {error, not_found}.
-
-lookup(Type, RealmUri, EntryId, Opts0) when ?IS_ENTRY_TYPE(Type) ->
-
-    PDBPrefix = pdb_prefix(Type, RealmUri),
-    Pattern = key_pattern(RealmUri, '_', EntryId),
-    Default = [{remove_tombstones, true}, {resolver, lww}],
-    Opts = lists:keymerge(1, lists:sort(Opts0), Default),
-
-    case plum_db:match(PDBPrefix, Pattern, Opts) of
-        [] ->
-            {error, not_found};
-
-        [{_, Entry}] ->
-            {ok, Entry}
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec take(Entry :: t()) -> {ok, StoredEntry :: t()} | {error, not_found}.
-
-take(#entry{} = Entry) ->
-    take(type(Entry), key(Entry)).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec take(Type :: entry_type(), EntryKey :: key()) ->
-    {ok, StoredEntry :: t()} | {error, not_found}.
-
-take(Type, #entry_key{} = EntryKey) when ?IS_ENTRY_TYPE(Type) ->
-    PDBPrefix = pdb_prefix(Type, EntryKey),
-
-    case plum_db:take(PDBPrefix, EntryKey) of
-        #entry{} = Entry ->
-            {ok, Entry};
-
-        undefined ->
-            {error, not_found}
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec delete(Entry :: t()) -> ok.
-
-delete(#entry{} = Entry) ->
-    delete(Entry, #{broadcast => true}).
-
-
--spec delete(Entry :: t(), Opts :: map()) -> ok.
-
-delete(#entry{} = Entry, Opts) ->
-    do_delete(type(Entry), key(Entry), Opts).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc WARNING: Never use this unless you know exactly what you are doing!
-%% We use this only when we want to remove a remote entry from the registry as
-%% a result of the owner node being down.
-%% We want to achieve the following:
-%% 1. The delete has to be idempotent, so that we avoid having to merge N
-%% versions either during broadcast or AAE exchange. We can use the owners
-%% ActorID and Timestamp for this, manipulating the plum_db_object, a little
-%% bit nasty but effective and almost harmless as entries are immutable anyway.
-%% 2. If we can achieve (1) then we could disable broadcast, as all nodes
-%% will be doing (1).
-%% 3. We still have the AAE exchange, so (1) has to ensure that the hash of
-%% the object is the same in all nodes. I think that comes naturally from
-%% doing (1) anyway, but we need to check, e.g. timestamp differences?
-%% @end
-%% -----------------------------------------------------------------------------
--spec dirty_delete(Type :: t()) -> t() | undefined.
-
-dirty_delete(#entry{type = Type, key = Key}) ->
-    dirty_delete(Type, Key).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc WARNING: Never use this unless you know exactly what you are doing!
-%% We use this only when we want to remove a remote entry from the registry as
-%% a result of the owner node being down.
-%% We want to achieve the following:
-%% 1. The delete has to be idempotent, so that we avoid having to merge N
-%% versions either during broadcast or AAE exchange. We can use the owners
-%% ActorID and Timestamp for this, manipulating the plum_db_object, a little
-%% bit nasty but effective and almost harmless as entries are immutable anyway.
-%% 2. If we can achieve (1) then we could disable broadcast, as all nodes
-%% will be doing (1).
-%% 3. We still have the AAE exchange, so (1) has to ensure that the hash of
-%% the object is the same in all nodes. I think that comes naturally from
-%% doing (1) anyway, but we need to check, e.g. timestamp differences?
-%% @end
-%% -----------------------------------------------------------------------------
--spec dirty_delete(Type :: entry_type(), EntryKey :: key()) ->
-    t() | undefined.
-
-dirty_delete(Type, EntryKey) ->
-    PDBPrefix = pdb_prefix(Type, EntryKey),
-
-    case plum_db:get_object({PDBPrefix, EntryKey}) of
-        {ok, {object, Clock} = Obj0} ->
-            %% We use a static fake ActorID and the original timestamp so that
-            %% the tombstone is deterministic.
-            %% This allows the operation to be idempotent when performed
-            %% concurrently by multiple nodes. Idempotency is a requirement so
-            %% that the hash of the object compares equal between nodes
-            %% irrespective of which created it.
-            %% Also the ActorID helps us determine this is a dirty delete.
-            Partition = plum_db:get_partition({PDBPrefix, EntryKey}),
-            ActorId = {Partition, ?PLUM_DB_REGISTRY_ACTOR},
-            Context = plum_db_object:context(Obj0),
-            [{_, Timestamp}] = plum_db_dvvset:values(Clock),
-            InsertRec = plum_db_dvvset:new(Context, {?TOMBSTONE, Timestamp}),
-
-            %% We create a new object
-            Obj = {object, plum_db_dvvset:update(InsertRec, Clock, ActorId)},
-
-            %% We must resolve the object before calling dirty_put/4.
-            Resolved = plum_db_object:resolve(Obj, lww),
-
-            %% Avoid broadcasting, the primary objective of this delete is to
-            %% remove the local replica of an entry when we get disconnected
-            %% from its root node.
-            %% Every node will do the same, so if this is a node crashing we
-            %% would have a tsunami of deletes being broadcasted.
-            %% We will achieve convergence via AAE on our next exchange.
-            Opts = [{broadcast, false}],
-
-            ok = plum_db:dirty_put(PDBPrefix, EntryKey, Resolved, Opts),
-
-            %% We return the original value
-            plum_db_object:value(Obj0);
-
-        {error, not_found} ->
-            undefined;
-
-        {error, _} ->
-            undefined
-
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec match(continuation()) -> match_result().
-
-match(Cont) ->
-    match(Cont, ?MATCH_OPTS).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec match
-    (entry_type(), key()) -> [t()];
-    (continuation(), plum_db:match_opts()) -> match_result().
-
-match(Type, #entry_key{} = Pattern) when ?IS_ENTRY_TYPE(Type) ->
-    match(Type, Pattern, ?MATCH_OPTS);
-
-match(Cont, Opts) when is_list(Opts) ->
-    plum_db:match(Cont, Opts).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec match(entry_type(), key(), plum_db:match_opts()) -> match_result().
-
-match(Type, #entry_key{} = Pattern, Opts) when ?IS_ENTRY_TYPE(Type) ->
-    PDBPrefix = pdb_prefix(Type, realm_uri(Pattern)),
-    plum_db:match(PDBPrefix, Pattern, Opts).
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec fold(
-    Type :: entry_type(),
-    RealmUri :: wildcard(uri()),
-    Fun :: plum_db:fold_fun(),
-    Acc :: any(),
-    Opts :: plum_db:fold_opts()) -> any() | {any(), continuation_or_eot()}.
-
-fold(Type, RealmUri, Fun, Acc, Opts) when ?IS_ENTRY_TYPE(Type) ->
-    PDBPrefix = pdb_prefix(Type, RealmUri),
-    plum_db:fold(Fun, Acc, PDBPrefix, Opts).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec fold(
-    Fun :: plum_db:fold_fun(),
-    Acc :: any(),
-    Cont :: continuation(),
-    Opts :: plum_db:fold_opts()) -> any() | {any(), continuation_or_eot()}.
-
-fold(Fun, Acc, Cont, Opts) ->
-    plum_db:fold(Fun, Acc, Cont, Opts).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec foreach(
-    Type :: entry_type(),
-    RealmUri :: uri(),
-    Fun :: plum_db:foreach_fun(),
-    Opts :: plum_db:fold_opts()) -> ok.
-
-foreach(Type, RealmUri, Fun, Opts) when ?IS_ENTRY_TYPE(Type) ->
-    PDBPrefix = pdb_prefix(Type, RealmUri),
-    plum_db:foreach(Fun, PDBPrefix, Opts).
-
-
-%% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
@@ -1219,7 +888,7 @@ mg_comparator() ->
 
 mg_comparator(Fun) ->
     fun
-        (#entry{match_policy = P} = A ,#entry{match_policy = P} = B)
+        (#entry{match_policy = P} = A, #entry{match_policy = P} = B)
         when P == ?EXACT_MATCH ->
             Fun(A, B);
 
@@ -1343,25 +1012,6 @@ locality_comparator(Fun) ->
 
 
 
-
-%% @private
-pdb_prefix(#entry{} = Entry) ->
-    pdb_prefix(type(Entry), realm_uri(Entry)).
-
-
-%% @private
-pdb_prefix(Type, #entry_key{} = Key) ->
-    pdb_prefix(Type, Key#entry_key.realm_uri);
-
-pdb_prefix(registration, RealmUri)
-when is_binary(RealmUri) orelse RealmUri == '_' ->
-    ?PLUM_DB_REGISTRATION_PREFIX(RealmUri);
-
-pdb_prefix(subscription, RealmUri)
-when is_binary(RealmUri) orelse RealmUri == '_' ->
-    ?PLUM_DB_SUBSCRIPTION_PREFIX(RealmUri).
-
-
 %% @private
 validate_match_policy(Options) ->
     validate_match_policy(key, Options).
@@ -1382,14 +1032,6 @@ validate_match_policy(_, Options) when is_map(Options) ->
         P ->
             error({invalid_match_policy, P})
     end.
-
-
--spec do_delete(Type :: entry_type(), EntryKey :: key(), Opts :: map()) -> ok.
-
-do_delete(Type, #entry_key{} = EntryKey, Opts) when ?IS_ENTRY_TYPE(Type) ->
-    PDBPrefix = pdb_prefix(Type, EntryKey),
-    PDBOpts = #{broadcast => maps:get(broadcast, Opts, true)},
-    plum_db:delete(PDBPrefix, EntryKey, PDBOpts).
 
 
 %% @private

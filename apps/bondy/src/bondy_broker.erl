@@ -74,6 +74,7 @@
 -include("bondy_uris.hrl").
 
 -define(MATCH_LIMIT, 100).
+-define(EOT, '$end_of_table').
 
 -define(GET_REALM_URI(Map),
     case maps:find(realm_uri, Map) of
@@ -91,10 +92,10 @@
 
 -type match_cont() ::    {
                             {[bondy_registry_entry:t()], [node()]},
-                            bondy_registry_trie:continuation()
-                            | bondy_registry_trie:eot()
+                            bondy_registry_store:continuation()
+                            | bondy_registry_store:eot()
                         }
-                        | bondy_registry_trie:eot().
+                        | bondy_registry_store:eot().
 
 %% API
 -export([features/0]).
@@ -288,7 +289,7 @@ subscribe(RealmUri, Opts, Topic, Ref)  ->
     bondy_ref:is_type(Ref) orelse error({badarg, Ref}),
 
     case bondy_registry:add(subscription, RealmUri, Topic, Opts, Ref) of
-        {ok, Entry, true} ->
+        {ok, {Entry, true}} ->
             %% WAMP 10.3.1 A wamp.subscription.on_subscribe event MUST always
             %% be fired subsequent to a wamp.subscription.on_create event,
             %% since the first subscribe results in both the creation of the
@@ -297,7 +298,7 @@ subscribe(RealmUri, Opts, Topic, Ref)  ->
             ok = on_subscribe(Entry),
             {ok, bondy_registry_entry:id(Entry)};
 
-        {ok, Entry, false} ->
+        {ok, {Entry, false}} ->
             on_subscribe(Entry),
             {ok, bondy_registry_entry:id(Entry)};
 
@@ -546,7 +547,7 @@ subscriptions(RealmUri, SessionId, Limit) ->
 
 match_subscriptions(TopicUri, RealmUri) ->
     Opts = #{limit => ?MATCH_LIMIT},
-    bondy_registry:match(subscription, RealmUri, TopicUri, Opts).
+    bondy_registry:find_matches(subscription, RealmUri, TopicUri, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -557,7 +558,7 @@ match_subscriptions(TopicUri, RealmUri) ->
     {[bondy_registry_entry:t()], [node()]} | match_cont().
 
 match_subscriptions(TopicUri, RealmUri, Opts) ->
-    bondy_registry:match(subscription, RealmUri, TopicUri, Opts).
+    bondy_registry:find_matches(subscription, RealmUri, TopicUri, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -565,14 +566,14 @@ match_subscriptions(TopicUri, RealmUri, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match_subscriptions(
-    bondy_registry_trie:continuation() | bondy_registry_trie:eot()
+    bondy_registry_store:continuation() | bondy_registry_store:eot()
     ) -> match_cont().
 
 match_subscriptions(?EOT) ->
     ?EOT;
 
 match_subscriptions(Cont) ->
-    ets:select(Cont).
+    bondy_registry:find_matches(Cont).
 
 
 %% =============================================================================
@@ -597,7 +598,7 @@ do_forward(#subscribe{} = M, Ctxt) ->
     ReqId = M#subscribe.request_id,
 
     case bondy_registry:add(subscription, RealmUri, Topic, Opts, Ref) of
-        {ok, Entry, true} ->
+        {ok, {Entry, true}} ->
             Id = bondy_registry_entry:id(Entry),
             bondy:send(RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id)),
             %% WAMP 10.3.1 A wamp.subscription.on_subscribe event MUST always
@@ -607,7 +608,7 @@ do_forward(#subscribe{} = M, Ctxt) ->
             ok = on_create(Entry),
             on_subscribe(Entry);
 
-        {ok, Entry, false} ->
+        {ok, {Entry, false}} ->
             Id = bondy_registry_entry:id(Entry),
             bondy:send(RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id)),
             on_subscribe(Entry);

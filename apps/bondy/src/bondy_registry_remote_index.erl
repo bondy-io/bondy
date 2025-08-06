@@ -25,10 +25,11 @@
 -include("bondy.hrl").
 -include("bondy_registry.hrl").
 
+-define(EOT, '$end_of_table').
 
 -type t()               ::  ets:tab().
 -type eot()             ::  ?EOT.
--type match_res()       ::  [{entry_type(), entry_key()}]
+-type match_result()    ::  [{entry_type(), entry_key()}]
                             |   {
                                     [{entry_type(), entry_key()}],
                                     eot() | ets:continuation()
@@ -42,7 +43,7 @@
 
 -export_type([t/0]).
 -export_type([eot/0]).
--export_type([match_res/0]).
+-export_type([match_result/0]).
 
 
 %% API
@@ -78,7 +79,7 @@ new(Index) ->
         {write_concurrency, true},
         {decentralized_counters, true}
     ],
-    {ok, Tab} = bondy_table_owner:add_or_claim(Tab, Opts),
+    {ok, Tab} = bondy_table_manager:add_or_claim(Tab, Opts),
     Tab.
 
 
@@ -108,7 +109,7 @@ delete(Entry, T) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match(Node :: node(), Limit :: pos_integer(), T :: t()) ->
-    match_res().
+    match_result().
 
 match(Node, Limit, T) when is_atom(Node), is_integer(Limit) ->
 
@@ -127,7 +128,7 @@ match(Node, Limit, T) when is_atom(Node), is_integer(Limit) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match(ets:continuation() | eot()) -> match_res().
+-spec match(ets:continuation() | eot()) -> match_result().
 
 match(?EOT) ->
     ?EOT;

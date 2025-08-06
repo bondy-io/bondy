@@ -32,7 +32,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_oauth2_deprecated).
 
--include_lib("kernel/include/logger.hrl").
+-include_lib("plum_db/include/plum_db.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
