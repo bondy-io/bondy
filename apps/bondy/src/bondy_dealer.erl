@@ -292,6 +292,7 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_plum_db.hrl").
 -include("bondy_uris.hrl").
 
 
@@ -320,8 +321,8 @@
                         ).
 %% Aliases
 -type entry()                   ::  bondy_registry_entry:t().
--type trie_continuation()       ::  bondy_registry_trie:continuation().
--type eot()                     ::  bondy_registry_trie:eot().
+-type trie_continuation()       ::  bondy_registry_store:continuation().
+-type eot()                     ::  bondy_registry_store:eot().
 
 %% API
 -export([callees/1]).
@@ -457,7 +458,7 @@ register(Procedure, Opts0, RealmUri, Ref) ->
         end,
 
     case bondy_registry:add(registration, RealmUri, Procedure, Opts, Ref) of
-        {ok, Entry, _} ->
+        {ok, {Entry, _}} ->
             {ok, bondy_registry_entry:id(Entry)};
 
         {error, {already_exists, _}} ->
@@ -501,14 +502,18 @@ unregister(RegId, Ctxt) ->
     case bondy_registry:lookup(registration, RealmUri, RegId) of
         {error, not_found} = Error ->
             Error;
+
         {ok, Entry} ->
             case bondy_registry:remove(Entry) of
                 ok ->
                     on_unregister(Entry);
+
                 {ok, false} ->
                     on_unregister(Entry);
+
                 {ok, true} ->
                     on_delete(Entry);
+
                 Error ->
                     Error
             end
@@ -524,9 +529,10 @@ unregister(RegId, Ctxt) ->
 callees(RealmUri) ->
     %% TODO paginate and groupBy sessionID, so that we call
     %% bondy_session_id:to_external only once per session.
-    case bondy_registry:find(registration, RealmUri, '_') of
+    case bondy_registry:match(registration, RealmUri, '_') of
         [] ->
             [];
+
         List ->
             Set = lists:foldl(
                 fun(E, Acc) ->
@@ -570,9 +576,10 @@ callees(RealmUri, ProcedureUri, Opts0) ->
     %% We do not support limits yet
     Opts = maps:without([limit], Opts0),
 
-    case bondy_registry:find(registration, RealmUri, ProcedureUri, Opts) of
+    case bondy_registry:match(registration, RealmUri, ProcedureUri, Opts) of
         [] ->
             [];
+
         List ->
             Set = lists:foldl(
                 fun(E, Acc) ->
@@ -1304,7 +1311,7 @@ handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
     Ref = bondy_context:ref(Ctxt),
 
     case bondy_registry:add(registration, RealmUri, Uri, Opts, Ref) of
-        {ok, Entry, IsFirst} ->
+        {ok, {Entry, IsFirst}} ->
             ok = on_register(IsFirst, Entry),
             Id = bondy_registry_entry:id(Entry),
             Reply = bondy_wamp_message:registered(ReqId, Id),
@@ -1541,7 +1548,9 @@ handle_call(Msg, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     %% choose/2 expects a match result w/continuations
     MatchOpts = #{limit => ?MATCH_LIMIT},
-    Matches = bondy_registry:match(registration, RealmUri, ProcUri, MatchOpts),
+    Matches = bondy_registry:find_matches(
+        registration, RealmUri, ProcUri, MatchOpts
+    ),
 
     case choose(Matches, Opts) of
         {ok, Entry} ->
@@ -1690,7 +1699,7 @@ choose([], _, _, [], ?EOT) ->
     {error, noproc};
 
 choose([], CallOpts, _, [], Cont) ->
-    choose(bondy_registry:match(Cont), CallOpts);
+    choose(bondy_registry:find_matches(Cont), CallOpts);
 
 choose([], CallOpts, {_, _, Invoke}, Acc, Cont) ->
     L = lists:reverse(Acc),
@@ -1700,7 +1709,7 @@ choose([], CallOpts, {_, _, Invoke}, Acc, Cont) ->
         {ok, _} = OK ->
             OK;
         {error, noproc} ->
-            choose(bondy_registry:match(Cont), CallOpts);
+            choose(bondy_registry:find_matches(Cont), CallOpts);
         Error ->
             Error
     end;

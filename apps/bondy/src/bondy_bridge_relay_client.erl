@@ -1508,12 +1508,11 @@ proxy_existing(Session, State0) ->
 
 
 %% @private
-proxy_existing(_, State, _, ?EOT) ->
+proxy_existing(_, State, _, '$end_of_table') ->
     State;
 
 proxy_existing(Session, State, Get, {[], Cont}) ->
     proxy_existing(Session, State, Get, Get(Cont));
-
 
 proxy_existing(Session, State0, Get, {[H|T], Cont}) ->
     State = proxy_entry(Session, State0, H),

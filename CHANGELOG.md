@@ -1,7 +1,14 @@
 # CHANGELOG
+
+## 1.0.0-rc.42
+### Changes
+- **Partial Registry concurrency improvement** - As we prepare to formalize our battle-tested platform with a `1.0.0` release, we've enhanced the registry with a more scalable and concurrent solution for EXACT matching registrations and subscriptions. PREFIX and WILDCARD matching support retain their existing concurrency limitations. In the next release candidate, we'll implement a more scalable solution for these features alongside a new replication mechanism - the final step to complete the implementation.
+- `bondy.ping` added to be used as connection hearbeats where the client doesn't
+support transport level hearbeats e.g. Web Browser Websocket pings. The RPC replies a single positional argument `"pong"` and it is always authorised to be called by all sessions.
+
 ## 1.0.0-rc.41
 - Minor fix to new listener `liner.timeout` option to avoid confusion between protocol and socket options.
-- 
+
 ## 1.0.0-rc.40
 - Major HTTP API Gateway bottleneck removed and memory usage reduced
     - Avoid Cowboy to close over the dispatch table when compiling the routing 
@@ -124,7 +131,7 @@
 ### Changes
 **BREAKING CHANGE NOTICE**
 * This version replaces Leveldb with Rocksdb - Rocksdb storage is incompatible with Leveldb so if you rely on Bondy storing real information (realms, users, groups, grants, etc), you will need to export/import them using the `bondy.backup.create` and `bondy.backup.restore` WAMP procedures.
-* Bug fix in `bondy_resgistry_entry:dirty_delete/1`
+* Bug fix in `bondy_registry_entry:dirty_delete/1`
 
 ## 1.0.0-rc.22
 * Fix CI for OTP26 docker variant

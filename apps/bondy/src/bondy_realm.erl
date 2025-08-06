@@ -631,7 +631,9 @@
     allow_connections               ::  optional(boolean()),
     authmethods                     ::  optional([binary()]),
     security_enabled                ::  optional(boolean()),
-    password_opts                   ::  optional(bondy_password:opts()),
+    password_opts                   ::  optional(
+                                            bondy_password:opts()
+                                        ),
     %% it can be undefined when we strip the value only.
     %% See strip_private_keys
     private_keys = #{}              ::  optional(keymap()),

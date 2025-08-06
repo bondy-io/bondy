@@ -26,6 +26,7 @@
 %% We renamed the default plum_db data channel
 -define(PLUM_DB_DATA_CHANNEL, data).
 -define(WAMP_RELAY_CHANNEL, wamp_relay).
+-define(BONDY_AAE_CHANNEL, bondy_aae).
 
 -include_lib("kernel/include/logger.hrl").
 -include("bondy_plum_db.hrl").
@@ -251,7 +252,6 @@ init(Args) ->
 
     ok = apply_private_config(prepare_private_config()),
 
-
     ?LOG_NOTICE(#{description => "Bondy configuration finished"}),
     ok.
 
@@ -390,12 +390,14 @@ setup_mods() ->
 setup_partisan_channels() ->
     DefaultChannels = #{
         ?PLUM_DB_DATA_CHANNEL => #{parallelism => 2, compression => false},
-        ?WAMP_RELAY_CHANNEL => #{parallelism => 2, compression => false}
+        ?WAMP_RELAY_CHANNEL => #{parallelism => 2, compression => false},
+        ?BONDY_AAE_CHANNEL => #{parallelism => 2, compression => false}
     },
     Channels =
         case application:get_env(bondy, channels, []) of
             [] ->
                 DefaultChannels;
+
             Channels0 ->
                 Channels1 = lists:foldl(
                     fun
@@ -427,7 +429,8 @@ setup_partisan() ->
     ok = partisan_config:init(),
 
     %% We add the wamp_relay channel
-    ok = bondy_config:set(wamp_peer_channel, wamp_relay).
+    ok = bondy_config:set(aae_channel, ?BONDY_AAE_CHANNEL),
+    ok = bondy_config:set(wamp_peer_channel, ?WAMP_RELAY_CHANNEL).
 
 
 %% @private
