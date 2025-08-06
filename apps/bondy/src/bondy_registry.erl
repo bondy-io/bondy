@@ -1599,7 +1599,7 @@ prune(Node) when is_atom(Node) ->
 %% @end
 %% -----------------------------------------------------------------------------
 do_prune(Node, Index, From) when is_atom(Node) ->
-    case bondy_registry_remote_index:match(Node, 100, Index) of
+    case bondy_registry_remote_index:match(Index, Node, 100) of
         ?EOT ->
             From ! {prune_finished, Node};
 

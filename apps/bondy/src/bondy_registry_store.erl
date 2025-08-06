@@ -278,7 +278,7 @@ new(PartitionIndex) ->
     %% Common
     {ok, C1} = bondy_table_manager:add_or_claim(
         gen_name(counters_tab, PartitionIndex),
-        [set, {keypos, 1} | Opts]
+        [set | key_value:put(keypos, 1, Opts)]
     ),
 
     #bondy_registry_store{
@@ -475,7 +475,7 @@ will be doing (1).
 the object is the same in all nodes. I think that comes naturally from
 doing (1) anyway, but we need to check, e.g. timestamp differences?
 """.
--spec dirty_delete(t(), entry()) -> entry() | undefined.
+-spec dirty_delete(t(), entry()) -> {ok, entry()} | {error, not_found | any()}.
 
 dirty_delete(#bondy_registry_store{} = Store, Entry) ->
     dirty_delete(
@@ -1330,8 +1330,6 @@ store_indices(#bondy_registry_store{} = Store, Entry) ->
     MatchPolicy = bondy_registry_entry:match_policy(Entry),
     IsLocal = bondy_registry_entry:is_local(Entry),
 
-    ok = maybe_do_for_all_remote_idx(Store, Entry, add),
-
     case {Type, MatchPolicy, IsLocal} of
         {registration, ?EXACT_MATCH, _} ->
             add_exact_registration_index(Store, Entry);
@@ -1364,8 +1362,6 @@ delete_indices(Store, Entry) ->
     MatchPolicy = bondy_registry_entry:match_policy(Entry),
     IsLocal = bondy_registry_entry:is_local(Entry),
 
-    ok = maybe_do_for_all_remote_idx(Store, Entry, delete),
-
     case {Type, MatchPolicy, IsLocal} of
         {registration, ?EXACT_MATCH, _} ->
             del_exact_registration_index(Store, Entry);
@@ -1387,37 +1383,6 @@ delete_indices(Store, Entry) ->
 
         {subscription, ?WILDCARD_MATCH, _} ->
             del_wildcard_subscription_index(Store, Entry)
-    end.
-
-
-%% If Entry is remote, it adds it to the remote_tab index.
-%% This index is solely used by find_by_node/3 function.
-maybe_do_for_all_remote_idx(Store, Entry, Op) ->
-    Tab = Store#bondy_registry_store.sub_remote_exact_idx_tab,
-
-    case bondy_registry_entry:is_local(Entry) of
-        true ->
-            ok;
-
-        false ->
-            Node = bondy_registry_entry:node(Entry),
-            Type = bondy_registry_entry:type(Entry),
-            EntryKey = bondy_registry_entry:key(Entry),
-
-            %% Entry is the value we are interested in but we use it as part of
-            %% the key to disambiguate, and avoid adding more elements to the
-            %% tuple.
-            Key = {Node, Type, EntryKey},
-
-            case Op of
-                add ->
-                    Object = {Key},
-                    true = ets:insert(Tab, Object);
-
-                delete ->
-                    true = ets:match_delete(Tab, Key)
-            end,
-            ok
     end.
 
 

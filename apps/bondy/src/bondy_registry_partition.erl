@@ -159,12 +159,12 @@ info(Partition) when is_pid(Partition) ->
 remote_index(Index) when is_integer(Index) ->
     persistent_term:get(?REGISTRY_REMOTE_IDX_KEY(Index), undefined);
 
-remote_index(Uri) when is_binary(Uri) ->
+remote_index(Nodestring) when is_binary(Nodestring) ->
     %% This is the same hashing algorithm used by gproc_pool but using
     %% gproc_pool:pick to determine the Index is 2x slower.
     %% We assume there gproc will not stop using phash2.
     N = bondy_config:get([registry, partitions]),
-    Index = erlang:phash2(Uri, N) + 1,
+    Index = erlang:phash2(Nodestring, N) + 1,
     remote_index(Index).
 
 
@@ -227,7 +227,12 @@ Fails with `badarg` if  `Entry` is not a proxy entry.
     {ok, IsFirstEntry :: boolean()} | {error, any()}.
 
 add(Partition, Entry) when is_pid(Partition) ->
-    bondy_registry_store:add(store(Partition), Entry).
+    Result = bondy_registry_store:add(store(Partition), Entry),
+    resulto:then(Result, fun(Value) ->
+        _ = add_remote_index(Entry),
+        {ok, Value}
+
+    end).
 
 
 -doc """
@@ -249,14 +254,18 @@ through a trie server.
     ok | {error, Reason :: any()} | no_return().
 
 add_indices(Partition, Entry) when is_pid(Partition) ->
-    bondy_registry_store:add_indices(store(Partition), Entry).
+    Result = bondy_registry_store:add_indices(store(Partition), Entry),
+    resulto:then(Result, fun(undefined) ->
+        _ = add_remote_index(Entry),
+        ok
+    end).
 
 
 -doc "".
 -spec remove(Partition :: pid(), Entry :: entry()) -> ok.
 
 remove(Partition, Entry) when is_pid(Partition) ->
-    bondy_registry_store:remove(store(Partition), Entry, #{broadcast => true}).
+    remove(Partition, Entry, #{broadcast => true}).
 
 
 
@@ -277,18 +286,25 @@ through a trie server.
 """.
 -spec remove(Partition :: pid(), Entry :: entry(), Opts :: key_value:t()) -> ok.
 
-remove(Partition, Entry, Opts) when is_pid(Partition) ->
-    bondy_registry_store:remove(
-        store(Partition), Entry, key_value:put(broadcast, true, Opts)
-    ).
-
+remove(Partition, Entry, Opts0) when is_pid(Partition) ->
+    Store = store(Partition),
+    Opts = key_value:put(broadcast, true, Opts0),
+    Result = bondy_registry_store:remove(Store, Entry, Opts),
+    resulto:then(Result, fun(undefined) ->
+        delete_remote_index(Entry)
+    end).
 
 -doc "Removes an entry (and its indices) from the store returning it.".
 -spec take(Partition :: pid(), Entry :: entry()) ->
     {ok, StoredEntry :: entry()} | {error, not_found}.
 
 take(Partition, Entry) when is_pid(Partition) ->
-    bondy_registry_store:take(store(Partition), Entry).
+    Store = store(Partition),
+    Result = bondy_registry_store:take(Store, Entry),
+    resulto:then(Result, fun(Value) ->
+        ok = delete_remote_index(Value),
+        {ok, Value}
+    end).
 
 
 -doc """
@@ -309,7 +325,11 @@ doing (1) anyway, but we need to check, e.g. timestamp differences?
 -spec dirty_delete(Partition :: pid(), entry()) -> entry() | undefined.
 
 dirty_delete(Partition, Entry) when is_pid(Partition) ->
-    bondy_registry_store:dirty_delete(store(Partition), Entry).
+    Result = bondy_registry_store:dirty_delete(store(Partition), Entry),
+    resulto:then(Result, fun(Value) ->
+        ok = delete_remote_index(Entry),
+        {ok, Value}
+    end).
 
 
 -doc """
@@ -332,7 +352,12 @@ doing (1) anyway, but we need to check, e.g. timestamp differences?
     {ok, entry()} | {error, not_found | any()}.
 
 dirty_delete(Partition, Type, EntryKey) when is_pid(Partition) ->
-    bondy_registry_store:dirty_delete(store(Partition), Type, EntryKey).
+    Store = store(Partition),
+    Result = bondy_registry_store:dirty_delete(Store, Type, EntryKey),
+    resulto:then(Result, fun(Entry) ->
+        ok = delete_remote_index(Entry),
+        {ok, Entry}
+    end).
 
 
 -doc "".
@@ -386,6 +411,7 @@ lookup(Partition, Type, RealmUri, EntryId, Opts) ->
 
 find(Cont) ->
     bondy_registry_store:find(Cont).
+
 
 -doc """
 Finds entries in the registry using a pattern.
@@ -668,4 +694,23 @@ do_execute(_State, Fun, Args) ->
                 reason => Reason,
                 stacktrace => Stacktrace
             })
+    end.
+
+add_remote_index(Entry) ->
+    try
+        Idx = remote_index(bondy_registry_entry:nodestring(Entry)),
+        bondy_registry_remote_index:add(Idx, Entry)
+    catch
+        _:_ ->
+            ok
+    end.
+
+
+delete_remote_index(Entry) ->
+    try
+        Idx = remote_index(bondy_registry_entry:nodestring(Entry)),
+        bondy_registry_remote_index:delete(Idx, Entry)
+    catch
+        _:_ ->
+            ok
     end.
