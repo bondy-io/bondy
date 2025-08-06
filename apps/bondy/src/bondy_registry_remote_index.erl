@@ -25,10 +25,11 @@
 -include("bondy.hrl").
 -include("bondy_registry.hrl").
 
+-define(EOT, '$end_of_table').
 
 -type t()               ::  ets:tab().
 -type eot()             ::  ?EOT.
--type match_res()       ::  [{entry_type(), entry_key()}]
+-type match_result()    ::  [{entry_type(), entry_key()}]
                             |   {
                                     [{entry_type(), entry_key()}],
                                     eot() | ets:continuation()
@@ -42,7 +43,7 @@
 
 -export_type([t/0]).
 -export_type([eot/0]).
--export_type([match_res/0]).
+-export_type([match_result/0]).
 
 
 %% API
@@ -78,7 +79,7 @@ new(Index) ->
         {write_concurrency, true},
         {decentralized_counters, true}
     ],
-    {ok, Tab} = bondy_table_owner:add_or_claim(Tab, Opts),
+    {ok, Tab} = bondy_table_manager:add_or_claim(Tab, Opts),
     Tab.
 
 
@@ -86,38 +87,35 @@ new(Index) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(Entry :: entry(), T :: t()) -> ok.
+-spec add(T :: t(), Entry :: entry()) -> ok.
 
-add(Entry, T) ->
-    do(add, Entry, T).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec delete(Entry :: entry(), T :: t()) -> ok.
-
-delete(Entry, T) ->
-    do(delete, Entry, T).
-
+add(T, Entry) ->
+    do(T, Entry, add).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match(Node :: node(), Limit :: pos_integer(), T :: t()) ->
-    match_res().
+-spec delete(T :: t(), Entry :: entry()) -> ok.
 
-match(Node, Limit, T) when is_atom(Node), is_integer(Limit) ->
+delete(T, Entry) ->
+    do(T, Entry, delete).
 
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec match(T :: t(), Node :: node(), Limit :: pos_integer()) ->
+    match_result().
+
+match(T, Node, Limit) when is_atom(Node), is_integer(Limit) ->
     %% Key = {node(), entry_type(), entry_key()}.
     Key = {Node, '$1', '$2'},
-
     %% We use a 1-tuple
     Pattern = {Key},
-
     MS = [{Pattern, [], [{{'$1', '$2'}}]}],
 
     ets:select(T, MS, Limit).
@@ -127,7 +125,7 @@ match(Node, Limit, T) when is_atom(Node), is_integer(Limit) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match(ets:continuation() | eot()) -> match_res().
+-spec match(ets:continuation() | eot()) -> match_result().
 
 match(?EOT) ->
     ?EOT;
@@ -150,7 +148,7 @@ match(Cont) ->
 %% @end
 %% -----------------------------------------------------------------------------
 gen_table_name(Index) when is_integer(Index) ->
-    list_to_atom("bondy_registry_remote_tab_" ++ integer_to_list(Index)).
+    list_to_atom("bondy_registry_remote_idx_tab_" ++ integer_to_list(Index)).
 
 
 %% -----------------------------------------------------------------------------

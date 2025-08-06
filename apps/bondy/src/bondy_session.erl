@@ -43,6 +43,7 @@
 -include("bondy_security.hrl").
 
 -define(SESSION_SPACE, ?MODULE).
+-define(EOT, '$end_of_table').
 
 -record(session, {
     id                              ::  bondy_session_id:t(),

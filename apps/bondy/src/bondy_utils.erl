@@ -21,7 +21,9 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_utils).
+
 -include("bondy.hrl").
+-include("bondy_plum_db.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 

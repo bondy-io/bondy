@@ -89,7 +89,7 @@ partitions() ->
     WorkerMod = bondy_registry_partition,
     N = bondy_config:get([registry, partitions]),
 
-      %% If the supervisor restarts and we call groc_pool:new it will fail with
+    %% If the supervisor restarts and we call groc_pool:new it will fail with
     %% an exception
     _ = catch gproc_pool:new(?REGISTRY_POOL, hash, [{size, N}]),
 
