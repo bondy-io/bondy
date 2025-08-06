@@ -1588,7 +1588,7 @@ prune(Node) when is_atom(Node) ->
     Index = bondy_registry_partition:remote_index(Nodestring),
     %% TODO use bondy_worker pool
     From = self(),
-    Fun = fun() -> do_prune(Node, Index, From) end,
+    Fun = fun() -> do_prune(Index, Node, From) end,
     {_Pid, _Ref} = erlang:spawn_monitor(Fun),
     ok.
 
@@ -1598,18 +1598,18 @@ prune(Node) when is_atom(Node) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-do_prune(Node, Index, From) when is_atom(Node) ->
+do_prune(Index, Node, From) when is_atom(Node) ->
     case bondy_registry_remote_index:match(Index, Node, 100) of
         ?EOT ->
             From ! {prune_finished, Node};
 
         {L, ?EOT} ->
-            ok = do_prune(Node, Index, From, L),
+            ok = do_prune(Index, Node, From, L),
             From ! {prune_finished, Node};
 
         {L, ETSCont} ->
-            ok = do_prune(Node, Index, From, L),
-            do_prune(Node, Index, From, ETSCont)
+            ok = do_prune(Index, Node, From, L),
+            do_prune(Index, Node, From, ETSCont)
     end.
 
 
@@ -1618,7 +1618,7 @@ do_prune(Node, Index, From) when is_atom(Node) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-do_prune(_Node, _Index, _From, L) when is_list(L) ->
+do_prune(_Index, _Node, _From, L) when is_list(L) ->
     %% Delete them from Plum_db
     lists:foreach(
         fun({Type, EntryKey}) ->
@@ -1652,18 +1652,18 @@ do_prune(_Node, _Index, _From, L) when is_list(L) ->
         L
     );
 
-do_prune(Node, Index, From, ETSCont0) ->
+do_prune(Index, Node, From, ETSCont0) ->
     case bondy_registry_remote_index:match(ETSCont0) of
         ?EOT ->
             From ! {prune_finished, Node};
 
         {L, ?EOT} ->
-            ok = do_prune(Node, Index, From, L),
+            ok = do_prune(Index, Node, From, L),
             From ! {prune_finished, Node};
 
         {L, ETSCont} ->
-            ok = do_prune(Node, Index, From, L),
-            do_prune(Node, Index, From, ETSCont)
+            ok = do_prune(Index, Node, From, L),
+            do_prune(Index, Node, From, ETSCont)
     end.
 
 

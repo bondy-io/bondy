@@ -153,19 +153,18 @@ info(Partition) when is_pid(Partition) ->
     bondy_registry_store:info(store(Partition)).
 
 
--spec remote_index(Arg :: integer() | nodestring()) ->
+-spec remote_index(Arg :: pid() | nodestring() | node()) ->
     bondy_registry_remote_index:t() | undefined.
 
-remote_index(Index) when is_integer(Index) ->
-    persistent_term:get(?REGISTRY_REMOTE_IDX_KEY(Index), undefined);
+remote_index(Pid) when is_pid(Pid) ->
+    persistent_term:get(?REGISTRY_REMOTE_IDX_KEY(Pid), undefined);
 
-remote_index(Nodestring) when is_binary(Nodestring) ->
-    %% This is the same hashing algorithm used by gproc_pool but using
-    %% gproc_pool:pick to determine the Index is 2x slower.
-    %% We assume there gproc will not stop using phash2.
-    N = bondy_config:get([registry, partitions]),
-    Index = erlang:phash2(Nodestring, N) + 1,
-    remote_index(Index).
+remote_index(Node) when is_atom(Node) ->
+    remote_index(atom_to_binary(Node, utf8));
+
+remote_index(Arg) when is_binary(Arg) ->
+    remote_index(pick(Arg)).
+
 
 
 -spec execute(Partition :: pid(), Fun :: execute_fun()) ->
