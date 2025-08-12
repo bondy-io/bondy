@@ -2381,7 +2381,7 @@ art_find_matches(Store, Type, RealmUri, Uri, Opts, ART) ->
 
 
 %% @private
--spec project(t(), [index_entry()]) -> [entry()].
+-spec project(t(), [index_entry()]) -> [entry() | node()].
 
 project(Store, L) when is_list(L) ->
     lists:filtermap(
@@ -2405,6 +2405,9 @@ project(Store, L) when is_list(L) ->
                         }),
                         false
                 end;
+
+            (Node) when is_atom(Node) ->
+                {true, Node};
 
             (Term) ->
                 error({badarg, Term})
