@@ -78,7 +78,7 @@ handle_event(Event, State) ->
                     ok;
 
                 {error, full} ->
-                    ?LOG_INFO(#{
+                    ?LOG_DEBUG(#{
                         description =>
                             "Dropping event due to load shedding: "
                             "jobs queue at capacity",

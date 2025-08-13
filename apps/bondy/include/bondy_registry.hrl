@@ -1,5 +1,4 @@
 -define(REGISTRY_POOL, {bondy_registry, pool}).
-
 %% At the moment certain operations on the bondy_registrie_trie rely on art
 %% tries which do not offer concurrent reads (it will never offer concurrent
 %% writes). So we use this macro to disable concurrent reads till we fix it.
@@ -15,4 +14,3 @@
         not bondy_config:get([dealer, pattern_based_registration], true)
     )
 ).
--define(IS_ENTRY_TYPE(X), (X == registration orelse X == subscription)).

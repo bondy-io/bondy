@@ -2,11 +2,12 @@
 
 -include("bondy.hrl").
 
--type t()       ::  #{
-                        realm       :=  binary() | all,
-                        client_id   :=  binary() | all,
-                        device_id   :=  binary() | all
-                    }.
+-type t()           ::  #{
+                            realm       :=  binary() | all,
+                            client_id   :=  binary() | all,
+                            device_id   :=  binary() | all
+                        }.
+
 -export_type([t/0]).
 
 

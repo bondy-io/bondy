@@ -2,6 +2,8 @@
 %% PLUM_DB
 %% =============================================================================
 
+-include_lib("plum_db/include/plum_db.hrl").
+
 %% These values MUST not be changed as they impact the layout of the data
 %% on PlumDB.
 %% Changing them requires the migration of any existing on-disk data.

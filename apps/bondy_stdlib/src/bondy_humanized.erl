@@ -5,7 +5,6 @@
 
 -module(bondy_humanized).
 
--include("bondy_stdlib.hrl").
 
 -export([join/1]).
 -export([join/2]).
@@ -26,7 +25,7 @@ join(Items) ->
     join(Items, ~"and").
 
 
-?DOC("""
+-doc """
 Converts a list of items into a human-readable string where each item is
 enclosed in single quotes
 and the last item is preceded by the conjunction (defaults to "and").
@@ -38,7 +37,7 @@ Examples:
   > bondy_humanized:join([~"apple"]).
   ~"'apple'"
 ```
-""").
+""".
 -spec join([any()], Conjunction :: binary()) -> binary().
 
 join([], _) ->

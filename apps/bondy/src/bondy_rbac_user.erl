@@ -805,7 +805,9 @@ list(RealmUri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec list(RealmUri :: uri(), Opts :: list_opts()) -> list(t()).
+-spec list(RealmUri :: uri(), Opts :: list_opts()) ->
+    [t()]
+    | {[t()], plum_db:continuation()}.
 
 list(RealmUri, Opts) ->
     Prefix = ?PLUMDB_PREFIX(RealmUri),
@@ -813,6 +815,7 @@ list(RealmUri, Opts) ->
     FoldOpts = case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
         undefined ->
             ?FOLD_OPTS;
+
         Limit ->
             [{limit, Limit} | ?FOLD_OPTS]
     end,
