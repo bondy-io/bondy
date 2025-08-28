@@ -2676,8 +2676,9 @@
 %% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
 %% exposing the WAMP raw socket transport
 {mapping, "wamp.tls.port",
-"bondy.wamp_tls.port", [
+"bondy.wamp_tls.transport_opts.socket_opts.port", [
   {default, 18085},
+  {validators, ["port_number"]},
   {datatype, integer}
 ]}.
 
@@ -2685,7 +2686,7 @@
 %% exposing the WAMP raw socket transport. When the host has many network
 %% interfaces, this option specifies which one to listen on.
 {mapping, "wamp.tls.ip",
-"bondy.wamp_tls.ip", [
+"bondy.wamp_tls.transport_opts.ip", [
   {datatype, string},
   {validators, ["ip_address"]}
 ]}.
@@ -2800,14 +2801,6 @@
 {mapping, "wamp.tls.buffer",
 "bondy.wamp_tls.transport_opts.socket_opts.buffer", [
   {datatype, bytesize}
-]}.
-
-%% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
-%% means that also small amounts of data are sent immediately.
-{mapping, "wamp.tls.nodelay",
-"bondy.wamp_tls.transport_opts.socket_opts.nodelay", [
-  {datatype, {flag, on, off}},
-  {default, on}
 ]}.
 
 
@@ -2930,6 +2923,12 @@
   end
 }.
 
+%% @doc SSL verification mode for WAMP TLS connections
+{mapping, "wamp.tls.verify",
+"bondy.wamp_tls.transport_opts.socket_opts.verify", [
+  {datatype, {enum, [verify_peer, verify_none]}},
+  {default, verify_none}
+]}.
 
 %% @doc Enables or disables the TCP Proxy Protocol. This is used to capture
 %% the source IP address which will be used for matching against RBAC Source
