@@ -43,7 +43,7 @@ api_gateway.http.port = 18080
 #api_gateway.http.ip_version = 6
 
 
-
+api_gateway.https.enabled = on
 api_gateway.https.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
 api_gateway.https.certfile = ${BONDY_ETC_DIR}/ssl/server/keycert.pem
 api_gateway.https.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
@@ -107,6 +107,7 @@ store.shard_by = prefix
 startup.wait_for_store_partitions = on
 startup.wait_for_store_hashtrees = on
 startup.wait_for_store_aae_exchange = off
+
 wamp.tcp.acceptors_pool_size = 200
 wamp.tcp.backlog = 1024
 wamp.tcp.enabled = on
@@ -126,7 +127,8 @@ wamp.tls.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
 wamp.tls.keepalive = on
 wamp.tls.max_connections = 100000
 wamp.tls.nodelay = on
-wamp.tls.versions= 1.2,1.3
+wamp.tls.versions = 1.2,1.3
+wamp.tls.verify = verify_none
 
 
 wamp.websocket.compression_enabled=on
