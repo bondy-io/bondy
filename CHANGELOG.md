@@ -1,4 +1,6 @@
 # CHANGELOG
+## 1.0.0-rc.43
+* Fixed TLS support for Rawsocket listener
 
 ## 1.0.0-rc.42
 ### Changes
