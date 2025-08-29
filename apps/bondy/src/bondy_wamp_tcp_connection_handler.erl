@@ -167,9 +167,11 @@ handle_cast(Event, State) ->
     {noreply, State, ?TIMEOUT(State)}.
 
 
+%% Handle TCP & SSL handshake
 handle_info(
-    {tcp, Socket, <<?RAW_MAGIC:8, MaxLen:4, Encoding:4, _:16>>},
-    #state{socket = Socket, protocol_state = undefined} = State0) ->
+    {Transport, Socket, <<?RAW_MAGIC:8, MaxLen:4, Encoding:4, _:16>>},
+    #state{socket = Socket, protocol_state = undefined} = State0)
+when Transport =:= tcp orelse Transport =:= ssl ->
     case handle_handshake(MaxLen, Encoding, State0) of
         {ok, State} ->
             case maybe_active_once(State) of
@@ -182,9 +184,11 @@ handle_info(
             {stop, Reason, State}
     end;
 
+%% Handle invalid TCP % SSL handshake
 handle_info(
-    {tcp, Socket, Data},
-    #state{socket = Socket, protocol_state = undefined} = St) ->
+    {Transport, Socket, Data},
+    #state{socket = Socket, protocol_state = undefined} = St)
+when Transport =:= tcp orelse Transport =:= ssl ->
     %% RFC: After a _Client_ has connected to a _Router_, the _Router_ will
     %% first receive the 4 octets handshake request from the _Client_.
     %% If the _first octet_ differs from "0x7F", it is not a WAMP-over-
@@ -198,7 +202,9 @@ handle_info(
     }),
     {stop, invalid_handshake, St};
 
-handle_info({tcp, Socket, Data}, #state{socket = Socket} = State0) ->
+%% Handle TCP & SSL data
+handle_info({Transport, Socket, Data}, #state{socket = Socket} = State0)
+when Transport =:= tcp orelse Transport =:= ssl ->
     %% We append the newly received data to the existing buffer
     Buffer = State0#state.buffer,
     State1 = State0#state{buffer = <<>>},
@@ -224,6 +230,18 @@ handle_info({tcp_closed, _Socket}, State) ->
     {stop, normal, State};
 
 handle_info({tcp_error, _, _} = Reason, State) ->
+    {stop, Reason, State};
+
+%% SSL control message handlers
+handle_info({ssl_passive, Socket}, #state{socket = Socket} = State) ->
+    %% We are using {active, N} and we consumed N messages from the socket
+    ok = reset_inet_opts(State),
+    {noreply, State, ?TIMEOUT(State)};
+
+handle_info({ssl_closed, _Socket}, State) ->
+    {stop, normal, State};
+
+handle_info({ssl_error, _, _} = Reason, State) ->
     {stop, Reason, State};
 
 handle_info({?BONDY_REQ, Pid, _RealmUri, M}, St) when Pid =:= self() ->
@@ -806,7 +824,8 @@ maybe_exit(Term) ->
 
 %% @private
 maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
-    IdleTimeout = maps:get(idle_timeout, PingOpts),
+    %% Use the listener's idle_timeout, not from ping options
+    IdleTimeout = State#state.idle_timeout,
     Timeout = maps:get(timeout, PingOpts),
     Attempts = maps:get(max_attempts, PingOpts),
 
