@@ -2454,11 +2454,11 @@
 %% connection when a client attempts to send a frame that goes over this limit.
 %% For fragmented frames this applies to the size of the reconstituted frame.
 %%
-%% A value of cero means un unbounded size (internally translated to 'infinity')
+%% A value of zero means un unbounded size (internally translated to 'infinity')
 {mapping, "wamp.websocket.max_frame_size",
 "bondy.wamp_websocket.max_frame_size", [
-  {default, infinity},
-  {datatype, [{atom, infinity}, integer]}
+  {default, "4MB"},
+  {datatype, bytesize}
 ]}.
 
 
