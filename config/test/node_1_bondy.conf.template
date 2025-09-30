@@ -131,6 +131,10 @@ wamp.tls.versions = 1.2,1.3
 wamp.tls.verify = verify_none
 
 
+wamp.dealer.pattern_based_registration = on
+wamp.broker.pattern_based_subscription = on
+
+
 wamp.websocket.compression_enabled=on
 
 bridge.listener.tcp = off
