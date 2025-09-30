@@ -355,17 +355,25 @@
 -spec features() -> map().
 
 features() ->
-    ?DEALER_FEATURES.
+    maps:from_list(bondy_config:get([wamp, dealer, features])).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_feature_enabled(binary()) -> boolean().
+-spec is_feature_enabled(binary() | atom()) -> boolean().
 
 is_feature_enabled(F) when is_binary(F) ->
-    maps:get(F, ?DEALER_FEATURES, false).
+    try
+        is_feature_enabled(binary_to_existing_atom(F))
+    catch
+        _:_ ->
+            false
+    end;
+
+is_feature_enabled(F) when is_atom(F) ->
+    bondy_config:get([wamp, dealer, features, F], false).
 
 
 %% -----------------------------------------------------------------------------
@@ -1338,6 +1346,20 @@ handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
                 ?WAMP_PROCEDURE_ALREADY_EXISTS,
                 [Msg]
             ),
+            bondy:send(RealmUri, Ref, Reply);
+
+        {error, Reason} when is_atom(Reason) ->
+            Msg = <<
+                "Failed to register procedure, reason:",
+                (atom_to_binary(Reason))/binary
+            >>,
+            Reply = bondy_wamp_message:error(
+                ?REGISTER,
+                ReqId,
+                #{},
+                ?BONDY_ERROR_INTERNAL,
+                [Msg]
+            ),
             bondy:send(RealmUri, Ref, Reply)
     end.
 
@@ -1547,7 +1569,15 @@ handle_call(Msg, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
     CallId = Msg#call.request_id,
     RealmUri = bondy_context:realm_uri(Ctxt),
     %% choose/2 expects a match result w/continuations
-    MatchOpts = #{limit => ?MATCH_LIMIT},
+    MatchOpts =
+        case bondy_config:get([wamp, dealer, features, pattern_based_registration]) of
+            true ->
+                #{limit => ?MATCH_LIMIT, match => '_'};
+
+            false ->
+                #{limit => ?MATCH_LIMIT, match => ?EXACT_MATCH}
+        end,
+
     Matches = bondy_registry:find_matches(
         registration, RealmUri, ProcUri, MatchOpts
     ),

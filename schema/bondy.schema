@@ -2138,6 +2138,202 @@
 ]}.
 
 
+{mapping, "wamp.broker.acknowledge_event_received",
+"bondy.wamp.broker.features.acknowledge_event_received", [
+  {default, false},
+    %% Disabled until implemented
+  {datatype, {flag, off, off}},
+  hidden
+]}.
+{mapping, "wamp.broker.acknowledge_subscriber_received",
+"bondy.wamp.broker.features.acknowledge_subscriber_received", [
+  {default, false},
+    %% Disabled until implemented
+  {datatype, {flag, off, off}},
+  hidden
+]}.
+{mapping, "wamp.broker.event_history",
+"bondy.wamp.broker.features.event_history", [
+  {default, false},
+    %% Disabled until implemented
+  {datatype, {flag, off, off}},
+  hidden
+]}.
+{mapping, "wamp.broker.event_retention",
+"bondy.wamp.broker.features.event_retention", [
+  {default, true},
+  {datatype, flag}
+]}.
+{mapping, "wamp.broker.pattern_based_subscription",
+"bondy.wamp.broker.features.pattern_based_subscription", [
+  {default, true},
+  {datatype, {flag, on, off}}
+]}.
+{mapping, "wamp.broker.payload_passthru_mode",
+"bondy.wamp.broker.features.payload_passthru_mode", [
+  {default, false},
+    %% Disabled until implemented
+  {datatype, {flag, off, off}},
+  hidden
+]}.
+{mapping, "wamp.broker.publication_trustlevels",
+"bondy.wamp.broker.features.publication_trustlevels", [
+  {default, false},
+    %% Disabled until implemented
+  {datatype, {flag, off, off}},
+  hidden
+]}.
+{mapping, "wamp.broker.publisher_exclusion",
+"bondy.wamp.broker.features.publisher_exclusion", [
+  {default, true},
+  {datatype, flag}
+]}.
+{mapping, "wamp.broker.publisher_identification",
+"bondy.wamp.broker.features.publisher_identification", [
+  {default, true},
+  {datatype, flag}
+]}.
+{mapping, "wamp.broker.reflection",
+"bondy.wamp.broker.features.reflection", [
+  {default, true},
+  {datatype, flag}
+]}.
+{mapping, "wamp.broker.session_meta_api",
+"bondy.wamp.broker.features.session_meta_api", [
+  {default, true},
+  {datatype, flag}
+]}.
+{mapping, "wamp.broker.sharded_subscription",
+"bondy.wamp.broker.features.sharded_subscription", [
+  {default, false},
+    %% Disabled until implemented
+  {datatype, {flag, off, off}},
+  hidden
+]}.
+{mapping, "wamp.broker.subscriber_blackwhite_listing",
+"bondy.wamp.broker.features.subscriber_blackwhite_listing", [
+  {default, true},
+  {datatype, flag}
+]}.
+{mapping, "wamp.broker.subscription_meta_api",
+"bondy.wamp.broker.features.subscription_meta_api", [
+  {default, false},
+    %% Disabled until implemented
+  {datatype, {flag, off, off}},
+  hidden
+]}.
+{mapping, "wamp.broker.subscription_revocation",
+"bondy.wamp.broker.features.subscription_revocation", [
+  {default, false},
+    %% Disabled until implemented
+  {datatype, {flag, off, off}},
+  hidden
+]}.
+
+
+{mapping, "wamp.dealer.call_canceling",
+"bondy.wamp.dealer.features.call_canceling", [
+  {default, true},
+  {datatype, flag}
+]}.
+{mapping, "wamp.dealer.call_reroute",
+"bondy.wamp.dealer.features.call_reroute", [
+  {default, true},
+    %% Disabled until implemented
+  {datatype, {flag, off, off}},
+  hidden
+]}.
+{mapping, "wamp.dealer.call_timeout",
+"bondy.wamp.dealer.features.call_timeout", [
+  {default, true},
+  {datatype, flag}
+]}.
+{mapping, "wamp.dealer.call_trustlevels",
+"bondy.wamp.dealer.features.call_trustlevels", [
+  {default, false},
+  {datatype, flag}
+]}.
+{mapping, "wamp.dealer.caller_auth_claims",
+"bondy.wamp.dealer.features.caller_auth_claims", [
+  {default, true},
+  {datatype, flag}
+]}.
+{mapping, "wamp.dealer.caller_identification",
+"bondy.wamp.dealer.features.caller_identification", [
+  {default, true},
+  {datatype, flag}
+]}.
+{mapping, "wamp.dealer.pattern_based_registration",
+"bondy.wamp.dealer.features.pattern_based_registration", [
+  {default, true},
+  {datatype, {flag, on, off}}
+]}.
+{mapping, "wamp.dealer.payload_passthru_mode",
+"bondy.wamp.dealer.features.payload_passthru_mode", [
+  {default, false},
+  %% Disabled until implemented
+  {datatype, {flag, off, off}},
+  hidden
+]}.
+{mapping, "wamp.dealer.progressive_call_results",
+"bondy.wamp.dealer.features.progressive_call_results", [
+  {default, false},
+    %% Disabled until implemented
+  {datatype, {flag, off, off}},
+  hidden
+]}.
+{mapping, "wamp.dealer.progressive_calls",
+"bondy.wamp.dealer.features.progressive_calls", [
+  {default, false},
+    %% Disabled until implemented
+  {datatype, {flag, off, off}},
+  hidden
+]}.
+{mapping, "wamp.dealer.reflection",
+"bondy.wamp.dealer.features.reflection", [
+  {default, false},
+    %% Disabled until implemented
+  {datatype, {flag, off, off}},
+  hidden
+]}.
+{mapping, "wamp.dealer.registration_meta_api",
+"bondy.wamp.dealer.features.registration_meta_api", [
+  {default, true},
+  {datatype, flag}
+]}.
+{mapping, "wamp.dealer.registration_revocation",
+"bondy.wamp.dealer.features.registration_revocation", [
+  {default, false},
+    %% Disabled until implemented
+  {datatype, {flag, off, off}},
+  hidden
+]}.
+{mapping, "wamp.dealer.session_meta_api",
+"bondy.wamp.dealer.features.session_meta_api", [
+  {default, true},
+  {datatype, flag}
+]}.
+{mapping, "wamp.dealer.sharded_registration",
+"bondy.wamp.dealer.features.sharded_registration", [
+  {default, false},
+    %% Disabled until implemented
+  {datatype, {flag, off, off}},
+  hidden
+]}.
+{mapping, "wamp.dealer.shared_registration",
+"bondy.wamp.dealer.features.shared_registration", [
+  {default, true},
+  {datatype, flag}
+]}.
+{mapping, "wamp.dealer.testament_meta_api",
+"bondy.wamp.dealer.features.testament_meta_api", [
+  {default, false},
+    %% Disabled until implemented
+  {datatype, {flag, off, off}},
+  hidden
+]}.
+
+
 %% In addition to JSON and Msgpack, Bondy supports Erlang External Term Format
 %% ("erl") and BERT ("bert") serializations.
 %%

@@ -125,8 +125,8 @@
 
 roles() ->
     #{
-        broker => #{features => ?BROKER_FEATURES },
-        dealer => #{features => ?DEALER_FEATURES }
+        broker => #{features => bondy_broker:features()},
+        dealer => #{features => bondy_dealer:features()}
     }.
 
 

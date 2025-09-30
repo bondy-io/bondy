@@ -1028,7 +1028,7 @@ maybe_add_registration(RealmUri, Uri, Opts, Ref, Partition) ->
     Invoke = maps:get(invoke, Opts, ?INVOKE_SINGLE),
     Shared = maps:get(shared_registration, Opts, false),
     Match = maps:get(match, Opts, ?EXACT_MATCH),
-    PBR = bondy_config:get([dealer, pattern_based_registration], true),
+    PBR = bondy_config:get([wamp, dealer, features, pattern_based_registration]),
 
     try
 
