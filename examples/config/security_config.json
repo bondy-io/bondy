@@ -783,5 +783,399 @@
                 }
             }
         ]
+    },
+     {
+        "uri": "com.pae.upstream",
+        "description": "The Upstream realm for PAE",
+        "authmethods": [
+            "cryptosign",
+            "ticket",
+            "oauth2",
+            "wampcra",
+            "anonymous"
+        ],
+        "security_enabled": true,
+        "users": [
+            {
+                "username": "user_service",
+                "authorized_keys": [
+                    "1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd"
+                ],
+                "groups": [
+                    "urn:group:core_service"
+                ]
+            },
+            {
+                "username": "trash_service",
+                "authorized_keys": [
+                    "1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd"
+                ],
+                "groups": [
+                    "urn:group:core_service"
+                ]
+            },
+            {
+                "username": "alarm_service",
+                "authorized_keys": [
+                    "1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd"
+                ],
+                "groups": [
+                    "urn:group:core_service"
+                ]
+            },
+            {
+                "username": "notification_service",
+                "authorized_keys": [
+                    "1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd"
+                ],
+                "groups": [
+                    "urn:group:core_service"
+                ]
+            },
+            {
+                "username": "planning_service",
+                "authorized_keys": [
+                    "1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd"
+                ],
+                "groups": [
+                    "urn:group:core_service"
+                ]
+            },
+            {
+                "username": "trent@pan-energy.com",
+                "password": "123456789",
+                "authorized_keys": [
+                    "1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd"
+                ],
+                "groups": [
+                    "urn:group:administrator"
+                ],
+                "meta": {
+                    "description": "Trent is the account administrator.",
+                    "account": {
+                        "id": "8d9b6050-b254-44f5-9080-ca7b61b1c4d5",
+                        "name": "PAE",
+                        "organizations": [
+                            {
+                                "id": "7cb2f964-f369-44de-bb61-90d8d043ee2d",
+                                "name": "GSJ",
+                                "roles": ["urn:group:administrator"]
+                            },
+                            {
+                                "id": "3f961816-d6be-422a-a467-5ffd7d0c9e14",
+                                "name": "NQN",
+                                "roles": ["urn:group:administrator"]
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "username": "bob@pan-energy.com",
+                "password": "123456789",
+                "authorized_keys": [
+                    "1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd"
+                ],
+                "groups": [
+                    "urn:group:company_rep"
+                ],
+                "meta": {
+                    "description": "Bob is a company representative.",
+                    "account": {
+                        "id": "8d9b6050-b254-44f5-9080-ca7b61b1c4d5",
+                        "name": "PAE",
+                        "organizations": [
+                            {
+                                "id": "7cb2f964-f369-44de-bb61-90d8d043ee2d",
+                                "name": "GSJ",
+                                "roles": ["urn:group:company_rep"]
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "username": "alice@pan-energy.com",
+                "password": "123456789",
+                "authorized_keys": [
+                    "1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd"
+                ],
+                "groups": [
+                    "urn:group:programmer"
+                ],
+                "meta": {
+                    "description": "Alice is a programmer.",
+                    "account": {
+                        "id": "8d9b6050-b254-44f5-9080-ca7b61b1c4d5",
+                        "name": "PAE",
+                        "organizations": [
+                            {
+                                "id": "7cb2f964-f369-44de-bb61-90d8d043ee2d",
+                                "name": "GSJ",
+                                "roles": ["urn:group:programmer"]
+                            }
+                        ]
+                    }
+                }
+            }
+        ],
+        "groups": [
+            {
+                "name": "urn:group:administrator",
+                "groups": [],
+                "meta": {}
+            },
+            {
+                "name": "urn:group:company_rep",
+                "groups": ["urn:group:person"],
+                "meta": {}
+            },
+            {
+                "name": "urn:group:programmer",
+                "groups": ["urn:group:person"],
+                "meta": {}
+            },
+            {
+                "name": "urn:group:planner",
+                "groups": ["urn:group:person"],
+                "meta": {}
+            },
+            {
+                "name": "urn:group:core_service",
+                "groups": ["urn:group:service"],
+                "meta": {}
+            },
+            {
+                "name": "urn:group:adapter",
+                "groups": ["urn:group:service"],
+                "meta": {}
+            },
+            {
+                "name": "urn:group:webapp",
+                "groups": [],
+                "meta": {}
+            },
+            {
+                "name": "urn:group:person",
+                "groups": [],
+                "meta": {}
+            },
+            {
+                "name": "urn:group:service",
+                "groups": [],
+                "meta": {}
+            },
+            {
+                "name": "resource_owners",
+                "groups": [],
+                "meta": {
+                    "description": "OAuth2 Resource Owners. An entity capable of authorizing access to a protected resource. This is used by Bondy HTTP Gateway."
+                }
+            },
+            {
+                "name": "api_clients",
+                "groups": [],
+                "meta": {
+                    "description": "OAuth2 confidential client. A third-party application that wants access to the private resources of the Resource Owner. The OAuth client can make protected resource requests on behalf of the Resource Owner after the latter grants it authorization."
+                }
+            }
+        ],
+        "grants": [
+            {
+                "meta": {
+                    "description": "Allows the roles to issue a ticket. This is used by Bondy HTTP Gateway."
+                },
+                "permissions": [
+                    "bondy.issue"
+                ],
+                "resources": [
+                    {
+                        "uri": "bondy.ticket.scope.",
+                        "match": "prefix"
+                    }
+                ],
+                "roles": [
+                    "urn:group:company_rep",
+                    "urn:group:core_service",
+                    "urn:group:planner",
+                    "urn:group:programmer"
+                ]
+            },
+            {
+                "meta": {
+                    "description": "Allows the roles use the bondy.*, wamp.* and com.wellos.* APIs"
+                },
+                "permissions": [
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.subscribe",
+                    "wamp.unsubscribe"
+                ],
+                "resources": [
+                    {
+                        "uri": "bondy.",
+                        "match": "prefix"
+                    },
+                    {
+                        "uri": "wamp.",
+                        "match": "prefix"
+                    },
+                    {
+                        "uri": "com.wellos.",
+                        "match": "prefix"
+                    }
+                ],
+                "roles": [
+                    "urn:group:company_rep",
+                    "urn:group:core_service",
+                    "urn:group:planner",
+                    "urn:group:programmer"
+                ]
+            },
+            {
+                "meta": {
+                    "description": "Allows the roles to use and define the com.wellos.* APIs"
+                },
+                "permissions": [
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish",
+                    "wamp.register",
+                    "wamp.subscribe",
+                    "wamp.unregister",
+                    "wamp.unsubscribe"
+                ],
+                "resources": [
+                    {
+                        "uri": "com.wellos.",
+                        "match": "prefix"
+                    }
+                ],
+                "roles": [
+                    "urn:group:core_service"
+                ]
+            },
+            {
+                "permissions": [
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish",
+                    "wamp.subscribe",
+                    "wamp.unsubscribe"
+                ],
+                "resources": [
+                    {
+                        "uri": "com.wellos.",
+                        "match": "prefix"
+                    }
+                ],
+                "roles": [
+                    "urn:group:administrator"
+                ]
+            },
+            {
+                "permissions": [
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish",
+                    "wamp.subscribe",
+                    "wamp.unsubscribe"
+                ],
+                "resources": [
+                    {
+                        "uri": "com.wellos.",
+                        "match": "prefix"
+                    }
+                ],
+                "roles": [
+                    "urn:group:person"
+                ]
+            },
+            {
+                "permissions": [
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish",
+                    "wamp.subscribe",
+                    "wamp.unsubscribe"
+                ],
+                "resources": [
+                    {
+                        "uri": "com.wellos.",
+                        "match": "prefix"
+                    }
+                ],
+                "roles": [
+                    "api_clients",
+                    "resource_owners"
+                ]
+            },
+            {
+                "permissions" : [
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish"
+                ],
+                "uri" : "",
+                "match" : "prefix",
+                "roles" : "all"
+            },
+            {
+                "permissions" : [
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish"
+                ],
+                "uri" : "",
+                "match" : "prefix",
+                "roles" : ["anonymous"]
+            }
+        ],
+        "sources": [
+            {
+                "usernames": "all",
+                "authmethod": "cryptosign",
+                "cidr": "0.0.0.0/0",
+                "meta": {
+                    "description": "Allows all users to authenticate using 'cryptosign' authentication method."
+                }
+            },
+            {
+                "usernames": "all",
+                "authmethod": "wampcra",
+                "cidr": "0.0.0.0/0",
+                "meta": {
+                    "description": "Allows all users from any network authenticate using password authentication method."
+                }
+            },
+            {
+                "usernames": "all",
+                "authmethod": "ticket",
+                "cidr": "0.0.0.0/0",
+                "meta": {
+                    "description": "Allows all users from any network authenticate using password credentials. This covers OAuth2 Client Credentials and Resource Owner Password flows."
+                }
+            },
+            {
+                "usernames": "all",
+                "authmethod": "oauth2",
+                "cidr": "0.0.0.0/0",
+                "meta": {
+                    "description": "Allows all users from any network authenticate using password credentials. This covers OAuth2 Client Credentials and Resource Owner Password flows."
+                }
+            },
+            {
+                "usernames" : ["anonymous"],
+                "authmethod" : "anonymous",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {
+                "description" : "Allows all users from any network authenticate as anonymous."
+                }
+            }
+        ]
     }
 ]
