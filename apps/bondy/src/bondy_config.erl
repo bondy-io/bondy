@@ -363,7 +363,6 @@ listener_protocol_opts(Name) ->
 %% =============================================================================
 
 
-
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc A utility function we use to extract the version name that is
@@ -543,6 +542,7 @@ configure_registry() ->
             N = min(16, erlang:system_info(schedulers)),
             bondy_config:set(KeyPath, N),
             ok;
+
         _ ->
             ok
     end,
@@ -565,6 +565,7 @@ configure_jobs_pool() ->
             N = min(16, erlang:system_info(schedulers)),
             bondy_config:set(KeyPath, N),
             ok;
+
         _ ->
             ok
     end.
@@ -586,7 +587,8 @@ apply_private_config({ok, Config}) ->
     catch
         error:Reason:Stacktrace ->
             ?LOG_ERROR(#{
-                description => "Error while applying private configuration options",
+                description =>
+                    "Error while applying private configuration options",
                 reason => Reason,
                 stacktrace => Stacktrace
             }),

@@ -11,6 +11,6 @@
     ?TRIE_CONCURRENT_MATCH
     orelse (
         Type == registration andalso
-        not bondy_config:get([dealer, pattern_based_registration], true)
+        not bondy_config:get([wamp, dealer, features, pattern_based_registration])
     )
 ).

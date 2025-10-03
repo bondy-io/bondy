@@ -130,17 +130,25 @@
 -spec features() -> map().
 
 features() ->
-    ?BROKER_FEATURES.
+    maps:from_list(bondy_config:get([wamp, broker, features])).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns true if feature F is enabled by the broker.
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_feature_enabled(binary()) -> boolean().
+-spec is_feature_enabled(binary() | atom()) -> boolean().
 
 is_feature_enabled(F) when is_binary(F) ->
-    maps:get(F, ?BROKER_FEATURES, false).
+    try
+        is_feature_enabled(binary_to_existing_atom(F))
+    catch
+        _:_ ->
+            false
+    end;
+
+is_feature_enabled(F) when is_atom(F) ->
+    bondy_config:get([wamp, broker, features, F], false).
 
 
 %% -----------------------------------------------------------------------------
@@ -547,7 +555,7 @@ subscriptions(RealmUri, SessionId, Limit) ->
 
 match_subscriptions(TopicUri, RealmUri) ->
     Opts = #{limit => ?MATCH_LIMIT},
-    bondy_registry:find_matches(subscription, RealmUri, TopicUri, Opts).
+    match_subscriptions(TopicUri, RealmUri, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -889,14 +897,26 @@ make_match_opts(SessionId, Opts) ->
     MatchOpts0 = #{exclude => Exclusions},
 
     %% Subscriber Eligibility: we only support sessionIds for now
-    case maps:find(eligible, Opts) of
-        error ->
-            MatchOpts0;
-        {ok, L} when is_list(L) ->
-            Eligible = sets:subtract(
-                sets:from_list(L), sets:from_list(Exclusions)
-            ),
-            MatchOpts0#{eligible => sets:to_list(Eligible)}
+    MatchOpts1 =
+        case maps:find(eligible, Opts) of
+            error ->
+                MatchOpts0;
+
+            {ok, L} when is_list(L) ->
+                Eligible = sets:subtract(
+                    sets:from_list(L), sets:from_list(Exclusions)
+                ),
+                MatchOpts0#{eligible => sets:to_list(Eligible)}
+        end,
+
+    case
+        bondy_config:get([wamp, broker, features, pattern_based_subscription])
+    of
+        true ->
+            MatchOpts1;
+
+        false ->
+            MatchOpts1#{match => ?EXACT_MATCH}
     end.
 
 

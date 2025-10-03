@@ -405,7 +405,7 @@ handle_inbound_messages(Messages, St) ->
                 state_name => St#wamp_state.state_name
             }),
             %% REVIEW shouldn't we call stop({system_failure, Reason}) to abort?
-            error(Reason)
+            error({system_failure, Reason})
     end.
 
 
