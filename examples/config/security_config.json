@@ -553,7 +553,7 @@
             }
         ]
     },
-        {
+    {
         "uri": "com.market.demo",
         "description": "The market realm",
         "authmethods": [
