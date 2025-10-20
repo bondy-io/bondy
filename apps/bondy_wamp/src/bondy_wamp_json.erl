@@ -3,12 +3,13 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc A utility module that offers some customisation options over the jsone
-%% module.
-%% @end
-%% -----------------------------------------------------------------------------
+
 -module(bondy_wamp_json).
+
+-moduledoc """
+A utility module that offers partial encoding/decoding and some customisation
+options over the Erlang `json` module.
+""".
 
 -include("bondy_wamp.hrl").
 
@@ -74,9 +75,11 @@ encode(Term, Opts) ->
     do_encode(Term, Opts).
 
 
-
--spec encode_with_tail(Elements :: [term()], Tail :: binary()) ->
-    binary().
+-doc """
+Encodes a list of elements (WAMP message) together with a tail obtained
+previously using `decode_partial/1`.
+""".
+-spec encode_with_tail(Elements :: [term()], Tail :: binary()) -> binary().
 
 %% Encode new elements and concatenate with the preserved tail
 encode_with_tail(Elements, TailBin) when is_list(Elements), is_binary(TailBin) ->
