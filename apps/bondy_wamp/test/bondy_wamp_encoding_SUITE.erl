@@ -215,10 +215,11 @@ call_json_3_test(_) ->
     {[M], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin).
 
 call_json_4_test(_) ->
-    Args = [
-        [{bar, pid_to_list(self())}]
-    ],
-    M0 = bondy_wamp_message:call(1, #{}, <<"foo">>, Args, #{}),
+    M0 = bondy_wamp_message:call(
+        1, #{}, <<"foo">>,
+        [#{bar => pid_to_list(self())}],
+        #{baz => [#{1 => 2}]}
+    ),
     Bin = bondy_wamp_encoding:encode(M0, json),
     call = bondy_wamp_encoding:decode_message_name(
         {ws, text, json}, Bin),
@@ -226,7 +227,11 @@ call_json_4_test(_) ->
         {ws, text, json}, Bin, #{partial_decode => false}
     ),
     ?assertMatch(
-        {call, 1, _, <<"foo">>, [#{<<"bar">> := _}], undefined, undefined},
+        {call, 1, _, <<"foo">>,
+            [#{<<"bar">> := _}],
+            #{<<"baz">> := [#{<<"1">> := 2}]},
+            undefined
+        },
         M1
     ),
     {[M2], <<>>} = bondy_wamp_encoding:decode(
@@ -235,6 +240,10 @@ call_json_4_test(_) ->
     ?assertMatch(
         {call, 1, _, <<"foo">>, undefined, undefined, {json, _}},
         M2
+    ),
+    ?assertEqual(
+        bondy_wamp_encoding:encode(M1, json),
+        bondy_wamp_encoding:encode(M2, json)
     ).
 
 cancel_json_test(_) ->
