@@ -23,6 +23,8 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_json).
 
+-include("bondy_wamp.hrl").
+
 %% For backwards compat with jsx lib used in previous versions
 -define(DEFAULT_FLOAT_FORMAT, [{decimals, 16}]).
 -define(DEFAULT_ENCODE_OPTS, [{float_format, ?DEFAULT_FLOAT_FORMAT}]).
@@ -56,8 +58,12 @@
 
 -export([decode/1]).
 -export([decode/2]).
+-export([decode_head/2]).
+-export([decode_tail/1]).
+-export([decode_tail/2]).
 -export([encode/1]).
 -export([encode/2]).
+-export([encode_with_tail/2]).
 -export([try_decode/1]).
 -export([try_decode/2]).
 -export([validate_opts/1]).
@@ -66,6 +72,8 @@
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
 -spec encode(any()) -> binary().
 
 encode(Term) ->
@@ -79,6 +87,36 @@ encode(Term, Opts) ->
     do_encode(Term, Opts).
 
 
+
+-spec encode_with_tail(Elements :: [term()], Tail :: binary()) ->
+    binary().
+
+%% Encode new elements and concatenate with the preserved tail
+encode_with_tail(Elements, TailBin) when is_list(Elements), is_binary(TailBin) ->
+    IOList0 = json:encode(Elements),
+
+    %% Remove the closing bracket from the encoded elements
+    IOList1 = lists:droplast(IOList0),
+
+    %% Concatenate, ensuring proper comma placement
+    IOList = case TailBin of
+        <<",", _/binary>> ->
+            %% Tail already has comma
+            [IOList1, TailBin];
+
+        <<"]", _/binary>> ->
+            %% Tail is just the closing bracket
+            [IOList1, TailBin];
+
+        _ ->
+            %% Need to add comma
+            [IOList1, ",", TailBin]
+    end,
+    iolist_to_binary(IOList).
+
+
+-spec decode(binary()) -> term() | no_return().
+
 decode(Term) ->
     Opts = bondy_wamp_config:get([json, decode_opts], ?DEFAULT_DECODE_OPTS),
     decode(Term, Opts).
@@ -87,7 +125,71 @@ decode(Term) ->
 -spec decode(binary(), [decode_opt()]) -> term() | no_return().
 
 decode(Term, Opts) ->
-     do_decode(Term, Opts).
+    do_decode(Term, Opts).
+
+
+-doc """
+Decodes only the first N control elements WAMP messages containing payloads,
+keeping the rest as binary.
+""".
+decode_head(<<"[", Rest/binary>>, NumElements)
+when is_integer(NumElements), NumElements > 0 ->
+    case extract_elements(Rest, NumElements, []) of
+        {Elements, <<"]">>} ->
+            %% Closing bracket, end of JSON term
+            Elements;
+
+        {_, _} = Term ->
+            Term
+    end;
+
+decode_head(Term, NumElements) ->
+    error(
+        bondy_stdlib_error:new(#{
+            type => badarg,
+            details => #{1 => Term, 2 => NumElements}
+        })
+    ).
+
+-spec decode_tail(binary()) -> term() | no_return().
+
+decode_tail(Term) ->
+    Opts = bondy_wamp_config:get([json, decode_opts], ?DEFAULT_DECODE_OPTS),
+    decode_tail(Term, Opts).
+
+
+-doc "Decode the JSON tail binary back into Erlang terms.".
+-spec decode_tail(binary(), key_value:t()) -> term() | no_return().
+
+decode_tail(Bin0, Opts) when is_binary(Bin0) ->
+    %% The tail might be one of:
+    %% 1. `, elem1, elem2, ...]`  (with leading comma)
+    %% 2. `]` (just closing bracket)
+    %% 3. `elem1, elem2, ...]` (without comma)
+
+    case skip_whitespace(Bin0) of
+        %% <<"]">> ->
+        %%     %% Empty tail, no more elements
+        %%     {ok, []};
+
+        <<",", Rest/binary>> ->
+            %% Has leading comma, make it a valid JSON array
+            Bin = <<"[", Rest/binary>>,
+            do_decode(Bin, Opts);
+
+        Bin ->
+            %% No leading comma, should already have elements
+            %% Wrap in array brackets if needed
+            case binary:match(Bin, <<"]">>) of
+                {Pos, 1} when Pos == byte_size(Bin) - 1 ->
+                    %% Already has closing bracket
+                    do_decode(<<"[", Bin/binary>>, Opts);
+
+                nomatch ->
+                    %% No closing bracket, add both brackets
+                    do_decode(<<"[", Bin/binary, "]">>, Opts)
+            end
+    end.
 
 
 try_decode(Term) ->
@@ -105,7 +207,6 @@ try_decode(Term, Opts) ->
 
 validate_opts(List) when is_list(List) ->
     lists:map(fun validate_opt/1, List).
-
 
 
 %% =============================================================================
@@ -196,9 +297,13 @@ do_decode(Term, []) ->
 
 do_decode(Term, Opts) ->
     Decoders =  key_value:get(decoders, Opts, #{}),
+
     case json:decode(Term, ok, Decoders) of
-        {Value, ok, <<>>} -> Value;
-        Other -> error({badarg, Other})
+        {Value, ok, <<>>} ->
+            Value;
+
+        Other ->
+            error({badarg, Other})
     end.
 
 
@@ -286,4 +391,134 @@ format_seconds(S) when is_integer(S) ->
 format_seconds(S) when is_float(S) ->
     io_lib:format("~6.3.0f", [S]).
 
+
+
+%% =============================================================================
+%% PRIVATE: PARTIAL DECODING/ENCODING
+%% =============================================================================
+
+
+
+%% Extract N elements from the JSON array
+extract_elements(Bin, 0, Acc) ->
+    %% We've extracted enough elements, find where to cut
+    {lists:reverse(Acc), find_tail_position(Bin)};
+
+extract_elements(Bin, N, Acc) ->
+    %% Skip whitespace
+    Bin1 = skip_whitespace(Bin),
+
+    %% Find the end of this JSON element
+    case find_element_end(Bin1) of
+        {ok, ElementBin, Rest} ->
+            %% Decode this element
+            Element = json:decode(ElementBin),
+
+            %% Skip comma if present
+            Rest1 = skip_whitespace(Rest),
+            Rest2 = case Rest1 of
+                <<",", R/binary>> -> R;
+                R -> R
+            end,
+
+            extract_elements(Rest2, N - 1, [Element | Acc]);
+
+        error ->
+            {lists:reverse(Acc), Bin1}
+    end.
+
+%% Find where the current JSON element ends
+find_element_end(Bin) ->
+    find_element_end(Bin, 0, 0, false, <<>>).
+
+find_element_end(<<>>, _, _, _, _) ->
+    error;
+
+find_element_end(<<"\"", Rest/binary>>, BraceDepth, BracketDepth, InString, Acc) ->
+    %% Toggle string state (simplified - doesn't handle escapes)
+    find_element_end(
+        Rest, BraceDepth, BracketDepth, not InString, <<Acc/binary, "\"">>
+    );
+
+find_element_end(<<"\\", C, Rest/binary>>, BraceDepth, BracketDepth, true, Acc) ->
+    %% Handle escaped character in string
+    find_element_end(
+        Rest, BraceDepth, BracketDepth, true, <<Acc/binary, "\\", C>>
+    );
+
+find_element_end(<<"{", Rest/binary>>, BraceDepth, BracketDepth, false, Acc) ->
+    find_element_end(
+        Rest, BraceDepth + 1, BracketDepth, false, <<Acc/binary, "{">>
+    );
+
+find_element_end(<<"}", Rest/binary>>, BraceDepth, BracketDepth, false, Acc)
+when BraceDepth > 0 ->
+    NewDepth = BraceDepth - 1,
+    NewAcc = <<Acc/binary, "}">>,
+    case {NewDepth, BracketDepth} of
+        {0, 0} ->
+            {ok, NewAcc, Rest};
+
+        _ ->
+            find_element_end(Rest, NewDepth, BracketDepth, false, NewAcc)
+    end;
+
+find_element_end(<<"[", Rest/binary>>, BraceDepth, BracketDepth, false, Acc) ->
+    find_element_end(
+        Rest, BraceDepth, BracketDepth + 1, false, <<Acc/binary, "[">>
+    );
+
+find_element_end(<<"]", Rest/binary>>, BraceDepth, BracketDepth, false, Acc)
+when BracketDepth > 0 ->
+    NewDepth = BracketDepth - 1,
+    NewAcc = <<Acc/binary, "]">>,
+
+    case {BraceDepth, NewDepth} of
+        {0, 0} ->
+            {ok, NewAcc, Rest};
+        _ ->
+            find_element_end(Rest, BraceDepth, NewDepth, false, NewAcc)
+    end;
+
+find_element_end(<<",", Rest/binary>>, 0, 0, false, Acc) ->
+    %% Found element boundary at top level
+    {ok, Acc, <<",", Rest/binary>>};
+
+find_element_end(<<"]", Rest/binary>>, 0, 0, false, Acc) ->
+    %% Found array end at top level
+    {ok, Acc, <<"]", Rest/binary>>};
+
+find_element_end(<<C, Rest/binary>>, BraceDepth, BracketDepth, InString, Acc) ->
+    find_element_end(
+        Rest, BraceDepth, BracketDepth, InString, <<Acc/binary, C>>
+    ).
+
+%% Find the position where the tail starts (including comma)
+find_tail_position(Bin) ->
+    Bin1 = skip_whitespace(Bin),
+    case Bin1 of
+        <<",", Rest/binary>> ->
+            %% Include the comma in the tail for later joining
+            <<",", Rest/binary>>;
+
+        _ ->
+            Bin1
+    end.
+
+
+%% Skip whitespace characters
+skip_whitespace(<<" ", Rest/binary>>) ->
+    skip_whitespace(Rest);
+
+skip_whitespace(<<"\t", Rest/binary>>) ->
+    skip_whitespace(Rest);
+
+skip_whitespace(<<"\n", Rest/binary>>) ->
+    skip_whitespace(Rest);
+
+skip_whitespace(<<"\r", Rest/binary>>) ->
+    skip_whitespace(Rest);
+
+skip_whitespace(Bin) ->
+    Bin.
 

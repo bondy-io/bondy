@@ -114,8 +114,23 @@ decode({raw, binary, Enc}, Data, Opts) ->
 %% -----------------------------------------------------------------------------
 -spec encode(wamp_message() | list(), encoding()) -> binary() | no_return().
 
-encode(Message, Enc) when is_tuple(Message) ->
-    encode(pack(Message), Enc);
+encode(Message0, Enc) when is_tuple(Message0) ->
+    case bondy_wamp_message:partial(Message0) of
+        undefined ->
+            encode(pack(Message0), Enc);
+
+        %% We currently only support JSON partials
+        {json, Tail} when Enc == json ->
+            Head = pack(Message0),
+            bondy_wamp_json:encode_with_tail(Head, Tail);
+
+        {json, Tail} when Enc =/= json ->
+            DecOpts = opts(Enc, decode),
+            {Args, KWArgs} = bondy_wamp_json:decode_tail(Tail, DecOpts),
+            Message1 = bondy_wamp_message:set_args(Message0, Args),
+            Message = bondy_wamp_message:set_kwargs(Message1, KWArgs),
+            encode(pack(Message), Enc)
+    end;
 
 encode(Message, erl = Enc) when is_list(Message) ->
     encode(Message, Enc, opts(Enc, encode));
@@ -451,7 +466,6 @@ unpack([?RESULT, ReqId, Details, Args]) ->
 unpack([?RESULT, ReqId, Details, Args, KWArgs]) ->
     bondy_wamp_message:result(ReqId, Details, Args, KWArgs);
 
-
 unpack([?REGISTER, ReqId, Options, ProcedureUri]) ->
     bondy_wamp_message:register(ReqId, Options, ProcedureUri);
 
@@ -511,6 +525,11 @@ unpack([?YIELD, ReqId, Options, Args, KWArgs]) ->
         Args,
         KWArgs
     );
+
+unpack({Head, {json, _} = Partial}) ->
+    %% For now we support just json partial coding
+    M = unpack(Head),
+    bondy_wamp_message:set_partial(M, Partial);
 
 unpack(M) ->
     error({invalid_message, M}).
@@ -620,7 +639,7 @@ decode_binary(Data, Enc, Opts, Acc) ->
 
 decode_message(Data, json, Opts, Acc) ->
     %% Decode might failed with badarg exception if not a proper JSON
-    M = bondy_wamp_json:decode(Data, Opts),
+    M = json_decode(Data, Opts),
     unpack(M, Acc);
 
 decode_message(Data, msgpack, Opts, Acc) ->
@@ -798,3 +817,51 @@ message_name(?UNREGISTERED) -> unregistered;
 message_name(?INVOCATION) -> invocation;
 message_name(?INTERRUPT) -> interrupt;
 message_name(?YIELD) -> yield.
+
+
+%% @private
+-spec json_decode(binary(), [bondy_wamp_json:decode_opt()]) ->
+    list()
+    | {Head :: list(), {encoding(), Tail :: binary()}}
+    | no_return().
+
+json_decode(Term, Opts) ->
+    case key_value:get(partial_decode, Opts, true) of
+        true ->
+            case maybe_partial_decode(Term, Opts) of
+                {H, T} ->
+                    {H, {json, T}};
+
+                L when is_list(L) ->
+                    L
+            end;
+
+        false ->
+            bondy_wamp_json:decode(Term, Opts)
+    end.
+
+
+%% @private
+maybe_partial_decode(<<"[", ?ERROR_CODE_CHARS, _/binary>> = Bin, _) ->
+    bondy_wamp_json:decode_head(Bin, #error.args - 1);
+
+maybe_partial_decode(<<"[", ?PUBLISH_CODE_CHARS, _/binary>> = Bin, _) ->
+    bondy_wamp_json:decode_head(Bin, #publish.args - 1);
+
+maybe_partial_decode(<<"[", ?EVENT_CODE_CHARS, _/binary>> = Bin, _) ->
+    bondy_wamp_json:decode_head(Bin, #event.args - 1);
+
+maybe_partial_decode(<<"[", ?CALL_CODE_CHARS, _/binary>> = Bin, _) ->
+    bondy_wamp_json:decode_head(Bin, #call.args - 1);
+
+maybe_partial_decode(<<"[", ?RESULT_CODE_CHARS, _/binary>> = Bin, _) ->
+    bondy_wamp_json:decode_head(Bin, #result.args - 1);
+
+maybe_partial_decode(<<"[", ?INVOCATION_CODE_CHARS, _/binary>> = Bin, _) ->
+    bondy_wamp_json:decode_head(Bin, #invocation.args - 1);
+
+maybe_partial_decode(<<"[", ?YIELD_CODE_CHARS, _/binary>> = Bin, _) ->
+    bondy_wamp_json:decode_head(Bin, #yield.args - 1);
+
+maybe_partial_decode(Bin, Opts) when is_binary(Bin) ->
+    bondy_wamp_json:decode(Bin, Opts).

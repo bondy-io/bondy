@@ -100,8 +100,7 @@ goodbye_json_test(_) ->
 error_json_test(_) ->
     M = bondy_wamp_message:error(0, 1, #{}, <<"wamp.error.foo">>),
     Bin = bondy_wamp_encoding:encode(M, json),
-    error = bondy_wamp_encoding:decode_message_name(
-        {ws, text, json}, Bin),
+    error = bondy_wamp_encoding:decode_message_name({ws, text, json}, Bin),
     {[M], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin).
 
 error_json_2_test(_) ->
@@ -223,11 +222,19 @@ call_json_4_test(_) ->
     Bin = bondy_wamp_encoding:encode(M0, json),
     call = bondy_wamp_encoding:decode_message_name(
         {ws, text, json}, Bin),
-    {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
+    {[M1], <<>>} = bondy_wamp_encoding:decode(
+        {ws, text, json}, Bin, #{partial_decode => false}
+    ),
     ?assertMatch(
-        {call, 1, _, <<"foo">>, [#{<<"bar">> := _}],
-        undefined},
+        {call, 1, _, <<"foo">>, [#{<<"bar">> := _}], undefined, undefined},
         M1
+    ),
+    {[M2], <<>>} = bondy_wamp_encoding:decode(
+        {ws, text, json}, Bin, #{partial_decode => true}
+    ),
+    ?assertMatch(
+        {call, 1, _, <<"foo">>, undefined, undefined, {json, _}},
+        M2
     ).
 
 cancel_json_test(_) ->
@@ -1022,7 +1029,7 @@ call_erl_4_test(_) ->
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, binary, erl}, Bin),
     ?assertMatch(
         {call, 1, _, <<"foo">>, [#{<<"bar">> := _}],
-        undefined},
+        undefined, undefined},
         M1
     ).
 
@@ -1094,7 +1101,7 @@ result_erl_4_test(_) ->
             }
         }
     },
-    {[{result, 1, #{}, [ResultArg], undefined}], <<>>} = bondy_wamp_encoding:decode(
+    {[{result, 1, #{}, [ResultArg], undefined, undefined}], <<>>} = bondy_wamp_encoding:decode(
         {ws, binary, erl}, Bin
     ),
 

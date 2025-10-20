@@ -92,6 +92,12 @@
 -export([yield/3]).
 -export([yield/4]).
 
+-export([is_partial/1]).
+-export([partial/1]).
+-export([set_partial/2]).
+-export([set_args/2]).
+-export([set_kwargs/2]).
+
 
 
 %% =============================================================================
@@ -787,6 +793,7 @@ yield(ReqId, Options0, Args0, KWArgs0) ->
     }.
 
 
+
 -spec options(
     wamp_call()
     | wamp_cancel()
@@ -880,6 +887,102 @@ request_type(#unsubscribe{}) -> ?UNSUBSCRIBE;
 request_type(#unsubscribed{}) -> ?UNSUBSCRIBED;
 request_type(#yield{}) -> ?YIELD;
 request_type(_) ->
+    error(badarg).
+
+
+-spec is_partial(t()) -> boolean().
+
+is_partial(#call{partial = Val}) -> Val =/= undefined;
+is_partial(#error{partial = Val}) -> Val =/= undefined;
+is_partial(#invocation{partial = Val}) -> Val =/= undefined;
+is_partial(#publish{partial = Val}) -> Val =/= undefined;
+is_partial(#result{partial = Val}) -> Val =/= undefined;
+is_partial(#yield{partial = Val}) -> Val =/= undefined;
+is_partial(_) ->
+    error(badarg).
+
+
+-spec partial(t()) -> {encoding(), binary()} | undefined.
+
+partial(#call{partial = Val}) -> Val;
+partial(#error{partial = Val}) -> Val;
+partial(#invocation{partial = Val}) -> Val;
+partial(#publish{partial = Val}) -> Val;
+partial(#result{partial = Val}) -> Val;
+partial(#yield{partial = Val}) -> Val;
+partial(_) -> undefined.
+
+
+%% Only support json partials for now
+-spec set_partial(t(), {json, binary()}) -> t().
+
+set_partial(#call{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+    M#call{partial = Partial};
+
+set_partial(#error{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+    M#error{partial = Partial};
+
+set_partial(#invocation{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+    M#invocation{partial = Partial};
+
+set_partial(#publish{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+    M#publish{partial = Partial};
+
+set_partial(#result{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+    M#result{partial = Partial};
+
+set_partial(#yield{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+    M#yield{partial = Partial};
+
+set_partial(_, _) ->
+    error(badarg).
+
+
+-spec set_args(t(), list()) -> t().
+
+set_args(#call{} = M, Args) when is_list(Args) ->
+    M#call{args = Args};
+
+set_args(#error{} = M, Args) when is_list(Args) ->
+    M#error{args = Args};
+
+set_args(#invocation{} = M, Args) when is_list(Args) ->
+    M#invocation{args = Args};
+
+set_args(#publish{} = M, Args) when is_list(Args) ->
+    M#publish{args = Args};
+
+set_args(#result{} = M, Args) when is_list(Args) ->
+    M#result{args = Args};
+
+set_args(#yield{} = M, Args) when is_list(Args) ->
+    M#yield{args = Args};
+
+set_args(_, _) ->
+    error(badarg).
+
+
+-spec set_kwargs(t(), map()) -> t().
+
+set_kwargs(#call{} = M, KWArgs) when is_map(KWArgs) ->
+    M#call{kwargs = KWArgs};
+
+set_kwargs(#error{} = M, KWArgs) when is_map(KWArgs) ->
+    M#error{kwargs = KWArgs};
+
+set_kwargs(#invocation{} = M, KWArgs) when is_map(KWArgs) ->
+    M#invocation{kwargs = KWArgs};
+
+set_kwargs(#publish{} = M, KWArgs) when is_map(KWArgs) ->
+    M#publish{kwargs = KWArgs};
+
+set_kwargs(#result{} = M, KWArgs) when is_map(KWArgs) ->
+    M#result{kwargs = KWArgs};
+
+set_kwargs(#yield{} = M, KWArgs) when is_map(KWArgs) ->
+    M#yield{kwargs = KWArgs};
+
+set_kwargs(_, _) ->
     error(badarg).
 
 
