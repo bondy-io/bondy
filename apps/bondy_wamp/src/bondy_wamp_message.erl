@@ -972,6 +972,7 @@ request_type(_) ->
 
 is_partial(#call{partial = Val}) -> Val =/= undefined;
 is_partial(#error{partial = Val}) -> Val =/= undefined;
+is_partial(#event{partial = Val}) -> Val =/= undefined;
 is_partial(#invocation{partial = Val}) -> Val =/= undefined;
 is_partial(#publish{partial = Val}) -> Val =/= undefined;
 is_partial(#result{partial = Val}) -> Val =/= undefined;
@@ -984,6 +985,7 @@ is_partial(_) ->
 
 partial(#call{partial = Val}) -> Val;
 partial(#error{partial = Val}) -> Val;
+partial(#event{partial = Val}) -> Val;
 partial(#invocation{partial = Val}) -> Val;
 partial(#publish{partial = Val}) -> Val;
 partial(#result{partial = Val}) -> Val;
@@ -999,6 +1001,9 @@ set_partial(#call{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
 
 set_partial(#error{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
     M#error{partial = Partial};
+
+set_partial(#event{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+    M#event{partial = Partial};
 
 set_partial(#invocation{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
     M#invocation{partial = Partial};
@@ -1025,6 +1030,9 @@ decode_partial(#call{partial = Partial} = M) when Partial =/= undefined ->
 decode_partial(#error{partial = Partial} = M) when Partial =/= undefined ->
     do_decode_partial(M, Partial);
 
+decode_partial(#event{partial = Partial} = M) when Partial =/= undefined ->
+    do_decode_partial(M, Partial);
+
 decode_partial(#invocation{partial = Partial} = M) when Partial =/= undefined ->
     do_decode_partial(M, Partial);
 
@@ -1049,6 +1057,9 @@ set_args(#call{} = M, Args) when is_list(Args) ->
 set_args(#error{} = M, Args) when is_list(Args) ->
     M#error{args = Args};
 
+set_args(#event{} = M, Args) when is_list(Args) ->
+    M#event{args = Args};
+
 set_args(#invocation{} = M, Args) when is_list(Args) ->
     M#invocation{args = Args};
 
@@ -1072,6 +1083,9 @@ set_kwargs(#call{} = M, KWArgs) when is_map(KWArgs) ->
 
 set_kwargs(#error{} = M, KWArgs) when is_map(KWArgs) ->
     M#error{kwargs = KWArgs};
+
+set_kwargs(#event{} = M, KWArgs) when is_map(KWArgs) ->
+    M#event{kwargs = KWArgs};
 
 set_kwargs(#invocation{} = M, KWArgs) when is_map(KWArgs) ->
     M#invocation{kwargs = KWArgs};
