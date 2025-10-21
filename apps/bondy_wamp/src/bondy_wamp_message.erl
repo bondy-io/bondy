@@ -666,7 +666,7 @@ result(ReqId, Details0, Args0, KWArgs0) when is_map(Details0) ->
 result_from(#yield{} = M, RegId, Details0) ->
     Details = bondy_wamp_details:new(result, Details0),
 
-    #invocation{
+    #result{
         request_id = bondy_wamp_utils:validate_id(RegId),
         details = Details,
         args = M#yield.args,
