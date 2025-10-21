@@ -121,14 +121,15 @@ encode(Message0, Enc) when is_tuple(Message0) ->
 
         %% We currently only support JSON partials
         {json, Tail} when Enc == json ->
+            %% Here is where the magic happens, we just encode the Head and
+            %% append the Tail (which contains the payload).
             Head = pack(Message0),
             bondy_wamp_json:encode_with_tail(Head, Tail);
 
-        {json, Tail} when Enc =/= json ->
-            DecOpts = opts(Enc, decode),
-            {Args, KWArgs} = bondy_wamp_json:decode_tail(Tail, DecOpts),
-            Message1 = bondy_wamp_message:set_args(Message0, Args),
-            Message = bondy_wamp_message:set_kwargs(Message1, KWArgs),
+        {json, _Tail} when Enc =/= json ->
+            %% Here we are forced to decode (what we avoided before) and
+            %% encode in a different format.
+            Message = bondy_wamp_message:decode_partial(Message0),
             encode(pack(Message), Enc)
     end;
 
