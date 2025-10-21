@@ -202,7 +202,7 @@
 %% Note: This flag can be removed or changed at any time without prior notice.
 {mapping, "vm.cpu.scheduler.busy_wait_threshold", "vm_args.+sbwt", [
   {datatype, {enum, [none, very_short, short, medium, long, very_long]}},
-  {default, short}
+  {default, none}
 ]}.
 
 
@@ -319,7 +319,7 @@
 %% @doc As +sbwt but affects dirty CPU schedulers. Defaults to short.
 {mapping, "vm.cpu.dirty_scheduler.busy_wait_threshold", "vm_args.+sbwtdcpu", [
   {datatype, {enum, [none, very_short, short, medium, long, very_long]}},
-  {default, short}
+  {default, none}
 ]}.
 
 
@@ -358,7 +358,7 @@
 %% @doc As +sbwt but affects dirty IO schedulers. Defaults to short.
 {mapping, "vm.io.dirty_scheduler.busy_wait_threshold", "vm_args.+sbwtdio", [
   {datatype, {enum, [none, very_short, short, medium, long, very_long]}},
-  {default, short}
+  {default, none}
 ]}.
 
 
