@@ -138,10 +138,11 @@ pick_partition(Arg) ->
 info() ->
     {Size, Mem} = lists:foldl(
         fun(Partition, {S, M}) ->
+            {{bondy_registry_partition, _N}, Pid} = Partition,
             #{
                 size := Size,
                 memory := Mem
-            } = bondy_registry_partition:info(Partition),
+            } = bondy_registry_partition:info(Pid),
 
             {S + Size, M + Mem}
         end,
