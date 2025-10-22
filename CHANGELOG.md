@@ -1,9 +1,8 @@
 # CHANGELOG
-## 1.0.0-rc.44
-- Make wamp router features configurable and prevent using pattern matching when not enabled
-- Define a sensible default of 4MB for max_frame_size
+## 1.0.0-rc.45
+- Fix bug in calculation of prometheus metrics preventing /metrics to complete
 
-## 1.0.0-rc.43
+## 1.0.0-rc.45
 * Fixed TLS support for Rawsocket listener
 
 ## 1.0.0-rc.42
