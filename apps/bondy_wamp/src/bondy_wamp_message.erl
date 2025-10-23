@@ -37,10 +37,23 @@
                             | wamp_invocation()
                             | wamp_cancel().
 
+%% -type payload_opts()    ::  [payload_opt()]
+%%                             | #{
+%%                                 args => list(),
+%%                                 kwargs => map(),
+%%                                 partial => {encoding(), binary()}
+%%                             }.
+%% -type payload_opt()     ::  {args, list()}
+%%                             | {kwargs, map()}
+%%                             | {partial, {encoding(), binary()}}.
+
+-type partial()        :: {encoding(), binary()}.
+
 -export_type([t/0]).
+-export_type([partial/0]).
 -export_type([error_source/0]).
 
-
+%% Message types
 -export([abort/2]).
 -export([authenticate/2]).
 -export([call/3]).
@@ -48,14 +61,12 @@
 -export([call/5]).
 -export([cancel/2]).
 -export([challenge/2]).
--export([details/1]).
 -export([error/4]).
 -export([error/5]).
 -export([error/6]).
 -export([error_from/3]).
 -export([error_from/4]).
 -export([error_from/5]).
--export([copy_event/2]).
 -export([event/3]).
 -export([event/4]).
 -export([event/5]).
@@ -92,7 +103,18 @@
 -export([yield/3]).
 -export([yield/4]).
 
-
+%% Utils
+-export([copy_event/2]).
+-export([decode_partial/1]).
+-export([details/1]).
+-export([event_from/4]).
+-export([is_partial/1]).
+-export([partial/1]).
+-export([set_args/2]).
+-export([set_kwargs/2]).
+-export([set_partial/2]).
+-export([invocation_from/4]).
+-export([result_from/3]).
 
 %% =============================================================================
 %% API
@@ -228,11 +250,16 @@ error(ReqType, ReqId, Details, ErrorUri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec error(pos_integer(), id(), map(), uri(), list()) ->
+-spec error(pos_integer(), id(), map(), uri(), list() | partial()) ->
     wamp_error() | no_return().
 
 error(ReqType, ReqId, Details, ErrorUri, Args) when is_list(Args) ->
-    error(ReqType, ReqId, Details, ErrorUri, Args, undefined).
+    error(ReqType, ReqId, Details, ErrorUri, Args, undefined);
+
+error(ReqType, ReqId, Details, ErrorUri, {Enc, Bin} = Partial)
+when is_atom(Enc), is_binary(Bin) ->
+    M = error(ReqType, ReqId, Details, ErrorUri),
+    M#error{partial = Partial}.
 
 
 %% -----------------------------------------------------------------------------
@@ -478,13 +505,32 @@ event(SubsId, PubId, Details0, Args0, KWArgs0) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @deprecated
+%% %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 -spec copy_event(wamp_event(), SubsId :: id()) ->  wamp_event() | no_return().
 
 copy_event(#event{} = Event, SubsId) ->
     Event#event{subscription_id = bondy_wamp_utils:validate_id(SubsId)}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec event_from(wamp_publish(), id(), id(), map()) ->
+    wamp_event() | no_return().
+
+event_from(#publish{} = M, SubsId, PubId, Details) ->
+    #event{
+        subscription_id = SubsId,
+        publication_id = PubId,
+        details = Details,
+        args = M#publish.args,
+        kwargs = M#publish.kwargs,
+        partial =  M#publish.partial
+    }.
 
 
 %% -----------------------------------------------------------------------------
@@ -615,6 +661,23 @@ result(ReqId, Details0, Args0, KWArgs0) when is_map(Details0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec result_from(wamp_yield(), id(), map()) -> wamp_result() | no_return().
+
+result_from(#yield{} = M, RegId, Details0) ->
+    Details = bondy_wamp_details:new(result, Details0),
+
+    #result{
+        request_id = bondy_wamp_utils:validate_id(RegId),
+        details = Details,
+        args = M#yield.args,
+        kwargs = M#yield.kwargs,
+        partial = M#yield.partial
+    }.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec register(id(), map(), uri()) -> wamp_register() | no_return().
 
 register(ReqId0, Options0, ProcedureUri) ->
@@ -739,6 +802,27 @@ invocation(ReqId, RegId, Details0, Args0, KWArgs0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec invocation_from(wamp_call(), id(), id(), map()) ->
+    wamp_invocation() | no_return().
+
+invocation_from(#call{} = M, ReqId, RegId, Details0) ->
+    Details = bondy_wamp_details:new(invocation, Details0),
+
+    #invocation{
+        request_id = bondy_wamp_utils:validate_id(ReqId),
+        registration_id = bondy_wamp_utils:validate_id(RegId),
+        details = Details,
+        args = M#call.args,
+        kwargs = M#call.kwargs,
+        partial = M#call.partial
+    }.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec interrupt(id(), map()) -> wamp_interrupt() | no_return().
 
 interrupt(ReqId, Options) ->
@@ -785,6 +869,7 @@ yield(ReqId, Options0, Args0, KWArgs0) ->
         args = Args,
         kwargs = KWArgs
     }.
+
 
 
 -spec options(
@@ -883,6 +968,141 @@ request_type(_) ->
     error(badarg).
 
 
+-spec is_partial(t()) -> boolean().
+
+is_partial(#call{partial = Val}) -> Val =/= undefined;
+is_partial(#error{partial = Val}) -> Val =/= undefined;
+is_partial(#event{partial = Val}) -> Val =/= undefined;
+is_partial(#invocation{partial = Val}) -> Val =/= undefined;
+is_partial(#publish{partial = Val}) -> Val =/= undefined;
+is_partial(#result{partial = Val}) -> Val =/= undefined;
+is_partial(#yield{partial = Val}) -> Val =/= undefined;
+is_partial(_) ->
+    error(badarg).
+
+
+-spec partial(t()) -> {encoding(), binary()} | undefined.
+
+partial(#call{partial = Val}) -> Val;
+partial(#error{partial = Val}) -> Val;
+partial(#event{partial = Val}) -> Val;
+partial(#invocation{partial = Val}) -> Val;
+partial(#publish{partial = Val}) -> Val;
+partial(#result{partial = Val}) -> Val;
+partial(#yield{partial = Val}) -> Val;
+partial(_) -> undefined.
+
+
+%% Only support json partials for now
+-spec set_partial(t(), {json, binary()}) -> t().
+
+set_partial(#call{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+    M#call{partial = Partial};
+
+set_partial(#error{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+    M#error{partial = Partial};
+
+set_partial(#event{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+    M#event{partial = Partial};
+
+set_partial(#invocation{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+    M#invocation{partial = Partial};
+
+set_partial(#publish{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+    M#publish{partial = Partial};
+
+set_partial(#result{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+    M#result{partial = Partial};
+
+set_partial(#yield{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+    M#yield{partial = Partial};
+
+set_partial(_, _) ->
+    error(badarg).
+
+
+%% Only support json partials for now
+-spec decode_partial(t()) -> t().
+
+decode_partial(#call{partial = Partial} = M) when Partial =/= undefined ->
+    do_decode_partial(M, Partial);
+
+decode_partial(#error{partial = Partial} = M) when Partial =/= undefined ->
+    do_decode_partial(M, Partial);
+
+decode_partial(#event{partial = Partial} = M) when Partial =/= undefined ->
+    do_decode_partial(M, Partial);
+
+decode_partial(#invocation{partial = Partial} = M) when Partial =/= undefined ->
+    do_decode_partial(M, Partial);
+
+decode_partial(#publish{partial = Partial} = M) when Partial =/= undefined ->
+    do_decode_partial(M, Partial);
+
+decode_partial(#result{partial = Partial} = M) when Partial =/= undefined ->
+    do_decode_partial(M, Partial);
+
+decode_partial(#yield{partial = Partial} = M) when Partial =/= undefined ->
+    do_decode_partial(M, Partial);
+
+decode_partial(M) ->
+    M.
+
+
+-spec set_args(t(), list()) -> t().
+
+set_args(#call{} = M, Args) when is_list(Args) ->
+    M#call{args = Args};
+
+set_args(#error{} = M, Args) when is_list(Args) ->
+    M#error{args = Args};
+
+set_args(#event{} = M, Args) when is_list(Args) ->
+    M#event{args = Args};
+
+set_args(#invocation{} = M, Args) when is_list(Args) ->
+    M#invocation{args = Args};
+
+set_args(#publish{} = M, Args) when is_list(Args) ->
+    M#publish{args = Args};
+
+set_args(#result{} = M, Args) when is_list(Args) ->
+    M#result{args = Args};
+
+set_args(#yield{} = M, Args) when is_list(Args) ->
+    M#yield{args = Args};
+
+set_args(_, _) ->
+    error(badarg).
+
+
+-spec set_kwargs(t(), map()) -> t().
+
+set_kwargs(#call{} = M, KWArgs) when is_map(KWArgs) ->
+    M#call{kwargs = KWArgs};
+
+set_kwargs(#error{} = M, KWArgs) when is_map(KWArgs) ->
+    M#error{kwargs = KWArgs};
+
+set_kwargs(#event{} = M, KWArgs) when is_map(KWArgs) ->
+    M#event{kwargs = KWArgs};
+
+set_kwargs(#invocation{} = M, KWArgs) when is_map(KWArgs) ->
+    M#invocation{kwargs = KWArgs};
+
+set_kwargs(#publish{} = M, KWArgs) when is_map(KWArgs) ->
+    M#publish{kwargs = KWArgs};
+
+set_kwargs(#result{} = M, KWArgs) when is_map(KWArgs) ->
+    M#result{kwargs = KWArgs};
+
+set_kwargs(#yield{} = M, KWArgs) when is_map(KWArgs) ->
+    M#yield{kwargs = KWArgs};
+
+set_kwargs(_, _) ->
+    error(badarg).
+
+
 
 %% =============================================================================
 %% PRIVATE
@@ -924,3 +1144,19 @@ maybe_merge_details(MessageAttrs, Details) ->
     Attrs = [ppt_cipher, ppt_keyid, ppt_scheme, ppt_serializer],
     maps:merge(Details, maps:with(Attrs, MessageAttrs)).
 
+
+%% @private
+do_decode_partial(M0, {json, Bin}) ->
+    case bondy_wamp_json:decode_tail(Bin) of
+        [] ->
+            set_partial(M0, undefined);
+
+        [Args] ->
+            M1 = set_partial(M0, undefined),
+            set_args(M1, Args);
+
+        [Args, KWArgs] ->
+            M1 = set_partial(M0, undefined),
+            M2 = set_args(M1, Args),
+            set_kwargs(M2, KWArgs)
+    end.

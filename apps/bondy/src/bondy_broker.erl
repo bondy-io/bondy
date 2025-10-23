@@ -452,8 +452,6 @@ forward(#publish{} = M, undefined, FwdOpts) ->
     RealmUri = ?GET_REALM_URI(FwdOpts),
     SessionId = bondy_ref:session_id(Publisher),
     TopicUri = M#publish.topic_uri,
-    Args = M#publish.args,
-    KWArgs = M#publish.kwargs,
 
     MatchOpts0 = make_match_opts(SessionId, M#publish.options),
 
@@ -472,8 +470,10 @@ forward(#publish{} = M, undefined, FwdOpts) ->
 
     %% We create a high order fun that will generate the event for each
     %% subscription_id
+    %% @TODO we should accept a 2nd argument with the subscription options to
+    %% remove unwanted info in Details
     MakeEvent = fun(SubsId) ->
-        bondy_wamp_message:event(SubsId, PubId, Details, Args, KWArgs)
+        bondy_wamp_message:event_from(M, SubsId, PubId, Details)
     end,
 
     Fwd = fun
@@ -736,8 +736,6 @@ do_publish(#publish{} = M, Ctxt) ->
 
     TopicUri = M#publish.topic_uri,
     Opts = M#publish.options,
-    Args = M#publish.args,
-    KWArgs = M#publish.kwargs,
 
     %% We find matching subscriptions
     MatchOpts = make_match_opts(SessionId, Opts),
@@ -750,14 +748,10 @@ do_publish(#publish{} = M, Ctxt) ->
     %% to forward to the remote nodes (See FwdOpts below)
     Details = make_event_details(TopicUri, Opts, Ctxt),
 
-    %% We create a high order fun that will generate the event for each
-    %% subscription_id
-    Template = bondy_wamp_message:event(0, PubId, Details, Args, KWArgs),
-
-    %% TODO This fun should also take a 2nd arg with the Subscriber features
-    %% so that we can remove Details that are not supported e.g. disclose info
+    %% @TODO we should accept a 2nd argument with the subscription options to
+    %% remove unwanted info in Details
     MakeEvent = fun(SubsId) ->
-        bondy_wamp_message:copy_event(Template, SubsId)
+        bondy_wamp_message:event_from(M, SubsId, PubId, Details)
     end,
 
     %% If retained options is provided the message will be retained, this is
@@ -777,6 +771,7 @@ do_publish(#publish{} = M, Ctxt) ->
     Fwd = fun
         (Node) when is_atom(Node) ->
             ok = forward_using_relay(M, FwdOpts, Node);
+
         (Relay) ->
             ok = forward_using_bridge_relay(M, FwdOpts, Relay)
     end,
@@ -821,7 +816,8 @@ when is_function(MakeEvent, 1), is_function(Fwd, 1) ->
 
             case {Publish, IsCallback} of
                 {true, true} ->
-                    ?LOG_INFO(#{description => "CB Subscriber!!!!!!"}),
+                    %% @TODO we should pass a 2nd argument with the subscription
+                    %% options to remove unwanted info in Details
                     Event = MakeEvent(EntryId),
                     CBArgs = bondy_registry_entry:callback_args(Entry),
                     ok = apply_dynamic_callback(Event, Subscriber, CBArgs);
@@ -838,6 +834,9 @@ when is_function(MakeEvent, 1), is_function(Fwd, 1) ->
                             Fwd(Subscriber);
 
                         false ->
+                            %% @TODO we should pass a 2nd argument with the
+                            %% subscription options to remove unwanted info in
+                            %% Details
                             Event = MakeEvent(EntryId),
                             ok = bondy:send(RealmUri, Subscriber, Event)
                     end;
@@ -1065,6 +1064,8 @@ maybe_retain(#{retain := true} = Opts, Realm, Topic, MatchOpts, MakeEvent) ->
     %% We treat it as a template passing 0
     %% as the real SubsId will be provided by the user in
     %% bondy_retained_message:to_event/2 when retrieving it
+    %% @TODO we should pass a 2nd argument with the subscription
+    %% options to remove unwanted info in Details
     Event = MakeEvent(0),
     TTL = maps:get('_retained_ttl', Opts, undefined),
     bondy_retained_message_manager:put(Realm, Topic, Event, MatchOpts, TTL);

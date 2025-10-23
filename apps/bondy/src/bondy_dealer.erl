@@ -966,13 +966,12 @@ do_forward(#yield{} = M, Ctxt0) ->
             %% a call_promise.
             %% If Caller is local, then we are done (as we only created one
             %% promise).
-            Result = bondy_wamp_message:result(
+            Result = bondy_wamp_message:result_from(
+                M,
                 CallId,
                 %% We fwd all yield options (we know we should at least forward
                 %% all ppt_* attributes in Options)
-                M#yield.options,
-                M#yield.args,
-                M#yield.kwargs
+                M#yield.options
             ),
 
             bondy:send(RealmUri, To, Result, SendOpts);
@@ -1105,7 +1104,7 @@ apply_dynamic_callback(#call{options = #{ppt_scheme := _}} = Msg, _, _) ->
         Msg#call.request_id,
         Msg#call.options,
         ?WAMP_INVALID_ARGUMENT,
-        [<<"Payload Passthru Mode not supported on Router APIs.">>]
+        [~"Payload Passthru Mode is not supported on Bondy Meta API."]
     );
 
 apply_dynamic_callback(#call{} = Msg, Callee, CBArgs) ->
@@ -1838,10 +1837,7 @@ call_to_invocation(#call{} = M, Uri, Entry, Ctxt) ->
 call_to_invocation(#call{options = #{'$private' := Private}} = M, ReqId) ->
     RegistrationId = maps:get(registration_id, Private),
     Details = maps:get(invocation_details, Private),
-    Args = M#call.args,
-    KWArgs = M#call.kwargs,
-
-    bondy_wamp_message:invocation(ReqId, RegistrationId, Details, Args, KWArgs).
+    bondy_wamp_message:invocation_from(M, ReqId, RegistrationId, Details).
 
 
 %% -----------------------------------------------------------------------------

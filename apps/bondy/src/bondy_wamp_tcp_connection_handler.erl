@@ -749,8 +749,9 @@ error_number(maximum_connection_count_reached) -> ?RAW_ERROR(4).
 
 %% @private
 socket_opened(St) ->
-    Event = {socket_open, wamp, raw, St#state.peername},
-    bondy_event_manager:notify(Event).
+    bondy_event_manager:notify(
+        {[bondy, socket, open], wamp, raw, St#state.peername}
+    ).
 
 
 %% @private
