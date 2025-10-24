@@ -448,6 +448,7 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
 %% -----------------------------------------------------------------------------
 %% @doc
 %% A blocking call.
+%% Notice this decodes payload partials to Erlang terms, returning a `map()`.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec call(
@@ -467,6 +468,7 @@ call(Uri, Opts, Args, KWArgs, Ctxt0) ->
     case cast(Uri, Opts, Args, KWArgs, Ctxt0) of
         {ok, ReqId} ->
             check_response(Uri, ReqId, Timeout, Ctxt0);
+
         {error, _} = Error ->
             Error
     end.
@@ -478,10 +480,12 @@ check_response(Uri, ReqId, Timeout, Ctxt) ->
         when R#result.request_id == ReqId ->
             %% ok = bondy:ack(Pid, Ref),
             {ok, message_to_map(R)};
+
         {?BONDY_REQ, _Pid, _RealmUri, #error{} = R}
         when R#error.request_id == ReqId ->
             %% ok = bondy:ack(Pid, Ref),
             {error, message_to_map(R)};
+
         Other ->
             {error, Other}
     after
@@ -658,7 +662,10 @@ maybe_enqueue(_SessionId, _M, _Opts) ->
 
 
 %% @private
-message_to_map(#result{} = M) ->
+message_to_map(#result{} = M0) ->
+
+    M = bondy_wamp_message:decode_partial(M0),
+
     #result{
         request_id = Id,
         details = Details,
