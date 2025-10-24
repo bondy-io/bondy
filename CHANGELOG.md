@@ -1,8 +1,18 @@
 # CHANGELOG
-## 1.0.0-rc.45
-- Fix bug in calculation of prometheus metrics preventing /metrics to complete
+## 1.0.0-rc.46
+### Fixes
+- Fixes a bug in the OAUTH2 rest handler which would prevent the `client_device_id` option to be considered when obtaining a new token. This was introduced with the new token subsystem. This issue limites teh token scope to {realm, client} as opposed to {realm, client, device_id}.
 
 ## 1.0.0-rc.45
+### Fixes
+- Fix bug in calculation of prometheus metrics preventing /metrics to complete
+
+## 1.0.0-rc.44
+### Changes
+- Make wamp router features configurable and prevent using pattern matching when not enabled
+- Define a sensible default of 4MB for max_frame_size
+
+## 1.0.0-rc.43
 * Fixed TLS support for Rawsocket listener
 
 ## 1.0.0-rc.42

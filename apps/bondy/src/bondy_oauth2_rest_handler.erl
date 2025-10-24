@@ -684,7 +684,7 @@ jwks(Req0, St) ->
     end.
 
 
-device_id(password, #state{device_id = DeviceId}) ->
+device_id(#state{device_id = DeviceId}, password) ->
     DeviceId;
 
 device_id(_, _) ->
