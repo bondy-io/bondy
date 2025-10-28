@@ -151,6 +151,9 @@ decode_tail(Term) ->
 -doc "Decode the JSON tail binary back into Erlang terms.".
 -spec decode_tail(binary(), key_value:t()) -> term() | no_return().
 
+decode_tail(<<>>, _) ->
+    [];
+
 decode_tail(Bin0, Opts) when is_binary(Bin0) ->
     %% The tail might be one of:
     %% 1. `, elem1, elem2, ...]`  (with leading comma)
@@ -158,9 +161,8 @@ decode_tail(Bin0, Opts) when is_binary(Bin0) ->
     %% 3. `elem1, elem2, ...]` (without comma)
 
     case skip_whitespace(Bin0) of
-        %% <<"]">> ->
-        %%     %% Empty tail, no more elements
-        %%     {ok, []};
+        <<>> ->
+            [];
 
         <<",", Rest/binary>> ->
             %% Has leading comma, make it a valid JSON array
@@ -170,12 +172,12 @@ decode_tail(Bin0, Opts) when is_binary(Bin0) ->
         Bin ->
             %% No leading comma, should already have elements
             %% Wrap in array brackets if needed
-            case binary:match(Bin, <<"]">>) of
-                {Pos, 1} when Pos == byte_size(Bin) - 1 ->
+            case binary:part(Bin, byte_size(Bin) - 1, 1) of
+                <<"]">> ->
                     %% Already has closing bracket
                     do_decode(<<"[", Bin/binary>>, Opts);
 
-                nomatch ->
+                _ ->
                     %% No closing bracket, add both brackets
                     do_decode(<<"[", Bin/binary, "]">>, Opts)
             end
