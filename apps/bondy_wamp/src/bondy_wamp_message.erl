@@ -1149,14 +1149,37 @@ maybe_merge_details(MessageAttrs, Details) ->
 do_decode_partial(M0, {json, Bin}) ->
     case bondy_wamp_json:decode_tail(Bin) of
         [] ->
-            set_partial(M0, undefined);
+            clear_partial(M0);
 
         [Args] ->
-            M1 = set_partial(M0, undefined),
+            M1 = clear_partial(M0),
             set_args(M1, Args);
 
         [Args, KWArgs] ->
-            M1 = set_partial(M0, undefined),
+            M1 = clear_partial(M0),
             M2 = set_args(M1, Args),
             set_kwargs(M2, KWArgs)
     end.
+
+
+%% @private
+clear_partial(#error{} = M) ->
+    M#error{partial = undefined};
+
+clear_partial(#event{} = M) ->
+    M#event{partial = undefined};
+
+clear_partial(#invocation{} = M) ->
+    M#invocation{partial = undefined};
+
+clear_partial(#publish{} = M) ->
+    M#publish{partial = undefined};
+
+clear_partial(#result{} = M) ->
+    M#result{partial = undefined};
+
+clear_partial(#yield{} = M) ->
+    M#yield{partial = undefined};
+
+clear_partial(M) ->
+    M.
