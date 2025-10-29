@@ -1,9 +1,9 @@
 # CHANGELOG
-## Develop
-
+    
+## 1.0.0-rc.47
 ### Changes
 - Implementation of JSON partial decoding/encoding for WAMP messages. 
-    - Bondy now decodes/encodes only the control message data (head of the WAMP message) preserving the payload in its JSON format. This improves performance as the payload is never decoded unless a destination peer requires a different encoding. For networks using JSON you should see important performance improvements.
+    - Bondy now decodes/encodes only the control message data (head of the WAMP message) preserving the payload (tail) in JSON format. This improves performance as the payload is never decoded unless a destination peer requires a different encoding. For networks using JSON end-to-end you should see important performance improvements.
     
 ## 1.0.0-rc.46
 ### Fixes
