@@ -70,7 +70,19 @@
     }
     | {reply, wamp_result() | wamp_error()}.
 
-handle_call(#call{procedure_uri = Proc} = M, Ctxt) ->
+handle_call(#call{options = #{ppt_scheme := _}} = Msg, _) ->
+    Error = bondy_wamp_message:error(
+        ?CALL,
+        Msg#call.request_id,
+        Msg#call.options,
+        ?WAMP_INVALID_ARGUMENT,
+        [~"Payload Passthru Mode is not supported on Bondy Meta API."]
+    ),
+    {reply, Error};
+
+handle_call(#call{procedure_uri = Proc} = M0, Ctxt) ->
+    %% We make sure the partial payload is decoded (if any)
+    M = bondy_wamp_message:decode_partial(M0),
     do_handle_call(resolve(Proc), M, Ctxt).
 
 

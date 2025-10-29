@@ -41,6 +41,7 @@
     details             ::  map(),
     args                ::  list() | undefined,
     kwargs              ::  map() | undefined,
+    partial             ::  bondy_wamp_message:partial(),
     %% Encoded payload
     payload             ::  binary() | undefined
 }).
@@ -311,14 +312,15 @@ put(Realm, Topic, #event{} = Event, MatchOpts, TTL) ->
 -spec to_event(Retained :: t(), SubscriptionId :: id()) -> wamp_event().
 
 to_event(Retained, SubscriptionId) ->
-    bondy_wamp_message:event(
-        SubscriptionId,
-        Retained#bondy_retained_message.publication_id,
-        maps:put(retained, true, Retained#bondy_retained_message.details),
-        Retained#bondy_retained_message.args,
-        Retained#bondy_retained_message.kwargs
-    ).
-
+    Details = maps:put(retained, true, Retained#bondy_retained_message.details),
+    #event{
+        subscription_id = SubscriptionId,
+        publication_id = Retained#bondy_retained_message.publication_id,
+        details = Details,
+        args = Retained#bondy_retained_message.args,
+        kwargs = Retained#bondy_retained_message.kwargs,
+        partial = Retained#bondy_retained_message.partial
+    }.
 
 %% -----------------------------------------------------------------------------
 %% @doc Evict expired retained messages from all realms.
@@ -384,7 +386,8 @@ when is_map(MatchOps) andalso is_integer(TTL) andalso TTL >= 0 ->
         match_opts = MatchOps,
         details = Event#event.details,
         args = Event#event.args,
-        kwargs = Event#event.kwargs
+        kwargs = Event#event.kwargs,
+        partial = Event#event.partial
     }.
 
 

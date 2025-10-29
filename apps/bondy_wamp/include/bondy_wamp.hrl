@@ -500,6 +500,14 @@
 -define(GOODBYE, 6).
 -define(ERROR, 8).
 
+-define(HELLO_CODE_CHARS, "1").
+-define(WELCOME_CODE_CHARS, "2").
+-define(ABORT_CODE_CHARS, "3").
+-define(CHALLENGE_CODE_CHARS, "4").
+-define(AUTHENTICATE_CODE_CHARS, "5").
+-define(GOODBYE_CODE_CHARS, "6").
+-define(ERROR_CODE_CHARS, "8").
+
 %% -----------------------------------------------------------------------------
 %% PUSUB
 %% -----------------------------------------------------------------------------
@@ -512,6 +520,17 @@
 -define(EVENT, 36).
 -define(EVENT_RECEIVED, 37).
 -define(SUBSCRIBER_RECEIVED, 38).
+
+-define(PUBLISH_CODE_CHARS, "16").
+-define(PUBLISHED_CODE_CHARS, "17").
+-define(SUBSCRIBE_CODE_CHARS, "32").
+-define(SUBSCRIBED_CODE_CHARS, "33").
+-define(UNSUBSCRIBE_CODE_CHARS, "34").
+-define(UNSUBSCRIBED_CODE_CHARS, "35").
+-define(EVENT_CODE_CHARS, "36").
+-define(EVENT_RECEIVED_CODE_CHARS, "37").
+-define(SUBSCRIBER_RECEIVED_CODE_CHARS, "38").
+
 
 %% -----------------------------------------------------------------------------
 %% RPC
@@ -526,6 +545,17 @@
 -define(INVOCATION, 68).
 -define(INTERRUPT, 69).
 -define(YIELD, 70).
+
+-define(CALL_CODE_CHARS, "48").
+-define(CANCEL_CODE_CHARS, "49").
+-define(RESULT_CODE_CHARS, "50").
+-define(REGISTER_CODE_CHARS, "64").
+-define(REGISTERED_CODE_CHARS, "65").
+-define(UNREGISTER_CODE_CHARS, "66").
+-define(UNREGISTERED_CODE_CHARS, "67").
+-define(INVOCATION_CODE_CHARS, "68").
+-define(INTERRUPT_CODE_CHARS, "69").
+-define(YIELD_CODE_CHARS, "70").
 
 -type message_name()    ::  hello
                             | welcome
@@ -913,7 +943,8 @@ end).
     details         ::  map(),
     error_uri       ::  uri(),
     args            ::  list() | undefined,
-    kwargs          ::  map() | undefined
+    kwargs          ::  map() | undefined,
+    partial         ::  binary() | undefined
 }).
 -type wamp_error()       ::  #error{}.
 
@@ -929,7 +960,8 @@ end).
     options         ::  map(),
     topic_uri       ::  uri(),
     args            ::  list() | undefined,
-    kwargs          ::  map() | undefined
+    kwargs          ::  map() | undefined,
+    partial         ::  binary() | undefined
 }).
 
 -type wamp_publish()       ::  #publish{}.
@@ -1080,7 +1112,8 @@ end).
     publication_id  ::  id(),
     details         ::  map(),
     args            ::  list() | undefined,
-    kwargs          ::  map() | undefined
+    kwargs          ::  map() | undefined,
+    partial         ::  {encoding(), binary()} | undefined
 }).
 
 -type wamp_event()       ::  #event{}.
@@ -1180,7 +1213,8 @@ end).
     options         ::  map(),
     procedure_uri   ::  uri(),
     args            ::  list() | undefined,
-    kwargs          ::  map() | undefined
+    kwargs          ::  map() | undefined,
+    partial         ::  binary() | undefined
 }).
 
 -type wamp_call()       ::  #call{}.
@@ -1317,7 +1351,8 @@ end).
     request_id      ::  id(),
     details         ::  map(),
     args            ::  list() | undefined,
-    kwargs          ::  map() | undefined
+    kwargs          ::  map() | undefined,
+    partial         ::  binary() | undefined
 }).
 
 -type wamp_result()       ::  #result{}.
@@ -1461,7 +1496,8 @@ end).
     registration_id ::  id(),
     details         ::  map(),
     args            ::  list() | undefined,
-    kwargs          ::  map() | undefined
+    kwargs          ::  map() | undefined,
+    partial         ::  binary() | undefined
 }).
 
 -type wamp_invocation()       ::  #invocation{}.
@@ -1536,7 +1572,8 @@ end).
     request_id      ::  id(),
     options         ::  map(),
     args            ::  list() | undefined,
-    kwargs          ::  map() | undefined
+    kwargs          ::  map() | undefined,
+    partial         ::  binary() | undefined
 }).
 
 -type wamp_yield()  ::  #yield{}.
