@@ -1,5 +1,9 @@
 # CHANGELOG
-    
+
+## DEVELOP
+- Upgraded to latest PlumDB wich contains fixes to the RocksDB defaults (the previous valus might cause issues due to excessive compaction)
+- RocksDB can be configured via `bondy.conf` using `store.*` options.
+
 ## 1.0.0-rc.47
 ### Changes
 - Implementation of JSON partial decoding/encoding for WAMP messages. 
