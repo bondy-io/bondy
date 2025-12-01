@@ -3847,6 +3847,228 @@ end}.
 
 
 
+
+%% =============================================================================
+%% DATA STORE / ROCKSDB
+%% =============================================================================
+
+
+%% @doc Enables or disables the verification of the data fetched from
+%% RocksDB against internal checksums.
+{mapping, "store.verify_checksums",
+"plum_db.rocksdb.read.verify_checksums", [
+  {default, on},
+  {datatype, flag}
+]}.
+
+
+{mapping, "store.num_levels",
+"plum_db.rocksdb.open.num_levels", [
+  {default, 7},
+  {datatype, integer}
+]}.
+
+{mapping, "store.write_buffer_size",
+"plum_db.rocksdb.open.write_buffer_size", [
+{default, "64MB"},
+{datatype, bytesize}
+]}.
+
+{mapping, "store.max_write_buffer_number",
+  "plum_db.rocksdb.open.max_write_buffer_number", [
+  {default, 2},
+  {datatype, integer}
+]}.
+
+{mapping, "store.min_write_buffer_number_to_merge",
+"plum_db.rocksdb.open.min_write_buffer_number_to_merge", [
+  {default, 1},
+  {datatype, integer}
+]}.
+
+
+%% @doc Whether Rocksdb will flush after every write. Note: If you are
+%% familiar with fsync, this is analagous to calling fsync after every
+%% write.
+{mapping, "store.sync_on_write",
+"plum_db.rocksdb.open.sync", [
+  {default, off},
+  {datatype, flag}
+]}.
+
+
+%% @doc Each database .sst table file can include an optional "bloom
+%% filter" that is highly effective in shortcutting data queries that
+%% are destined to not find the requested key. The Bloom filter
+%% typically increases the size of an .sst table file by about
+%% 2%.
+{mapping, "store.bloom_filter_policy", "plum_db.rocksdb.open.block_based_table_options.bloom_filter_policy", [
+  {default, 10},
+  {datatype, integer}
+]}.
+
+%% write.
+{mapping, "store.cache_index_and_filter_blocks", "plum_db.rocksdb.open.block_based_table_options.cache_index_and_filter_blocks", [
+  {default, off},
+  {datatype, flag}
+]}.
+
+
+
+%% @doc Defines the size threshold for a block / chunk of data within
+%% one .sst table file. Each new block gets an index entry in the .sst
+%% table file's master index.
+{mapping, "store.block.size",
+"plum_db.rocksdb.open.block_based_table_options.block_size", [
+  {default, "4KB"},
+  {datatype, bytesize}
+]}.
+
+%% @doc Defines the size threshold for a block / chunk of data within
+%% one .sst table file. Each new block gets an index entry in the .sst
+%% table file's master index.
+%% (globally shared by all PDB partitions)
+{mapping, "store.block_cache.size",
+"plum_db.rocksdb.open.block_based_table_options.block_cache_size", [
+  {default, "2GB"},
+  {datatype, bytesize}
+]}.
+
+
+
+%% @doc The number of worker threads performing RocksDB operations
+%% (per partition instance)
+{mapping, "store.threads",
+"plum_db.rocksdb.open.total_threads", [
+  {default, 2},
+  {datatype, integer}
+]}.
+
+
+{mapping, "store.wal.size",
+"plum_db.rocksdb.open.max_total_wal_size", [
+  {default, "512MB"},
+  {datatype, bytesize}
+]}.
+
+{mapping, "store.wal.ttl_seconds",
+"plum_db.rocksdb.open.wal_ttl_seconds", [
+  {default, 2592000}, % 30 days
+  {datatype, integer}
+]}.
+
+
+{mapping, "store.max_background_jobs",
+"plum_db.rocksdb.open.max_background_jobs", [
+  {default, 1},
+  {datatype, integer}
+]}.
+
+{mapping, "store.max_background_compactions",
+"plum_db.rocksdb.open.max_background_compactions", [
+  {default, 1},
+  {datatype, integer}
+]}.
+
+{mapping, "store.max_background_flushes",
+"plum_db.rocksdb.open.max_background_flushes", [
+  {default, 1},
+  {datatype, integer}
+]}.
+
+%% Threads per compaction job
+{mapping, "store.max_subcompactions",
+"plum_db.rocksdb.open.max_subcompactions", [
+  {default, 1},
+  {datatype, integer}
+]}.
+
+{mapping, "store.level0_file_num_compaction_trigger",
+"plum_db.rocksdb.open.level0_file_num_compaction_trigger", [
+  {default, 4},
+  {datatype, integer}
+]}.
+
+%% Default: 24 hours
+{mapping, "store.periodic_compaction_seconds",
+"plum_db.rocksdb.open.periodic_compaction_seconds", [
+  {default, 604800},
+  {datatype, integer}
+]}.
+
+
+
+%% @doc Enables or disables the compression of data on disk.
+%% Enabling (default) saves disk space.  Disabling may reduce read
+%% latency but increase overall disk activity.  Option can be
+%% changed at any time, but will not impact data on disk until
+%% next time a file requires compaction.
+{mapping, "store.compression",
+"plum_db.rocksdb.open.compression", [
+  {default, lz4},
+  {datatype, {enum, [snappy, lz4, none]}}
+]}.
+
+{mapping, "store.compression.enabled",
+"plum_db.rocksdb.open.compression_opts.enabled", [
+  {default, on},
+  {datatype, flag}
+]}.
+
+{mapping, "store.bottommost_compression",
+"plum_db.rocksdb.open.bottommost_compression", [
+  {default, none},
+  {datatype, {enum, [zstd, snappy, lz4, none]}}
+]}.
+
+{mapping, "store.bottommost_compression.enabled",
+"plum_db.rocksdb.open.bottommost_compression_opts.enabled", [
+  {default, off},
+  {datatype, flag}
+]}.
+
+
+{mapping, "store.use_direct_reads",
+"plum_db.rocksdb.open.use_direct_reads", [
+  {default, off},
+  {datatype, flag}
+]}.
+
+
+{mapping, "store.use_direct_io_for_flush_and_compaction", "plum_db.rocksdb.open.use_direct_io_for_flush_and_compaction", [
+  {default, on},
+  {datatype, flag}
+]}.
+
+{mapping, "store.allow_concurrent_memtable_write",
+  "plum_db.rocksdb.open.allow_concurrent_memtable_write", [
+  {default, on},
+  {datatype, flag}
+]}.
+
+{mapping, "store.enable_write_thread_adaptive_yield",
+  "plum_db.rocksdb.open.enable_write_thread_adaptive_yield", [
+  {default, on},
+  {datatype, flag}
+]}.
+
+
+{mapping, "store.max_bytes_for_level_base", "plum_db.rocksdb.open.max_bytes_for_level_base", [
+{default, "512MB"},
+{datatype, bytesize}
+]}.
+
+{mapping, "store.max_bytes_for_level_multiplier", "plum_db.rocksdb.open.max_bytes_for_level_multiplier", [
+{default, 10},
+{datatype, integer}
+]}.
+
+{mapping, "store.level_compaction_dynamic_level_bytes", "plum_db.rocksdb.open.level_compaction_dynamic_level_bytes", [
+  {default, on},
+  {datatype, flag}
+]}.
+
+
 %% =============================================================================
 %% VALIDATORS
 %% =============================================================================
