@@ -72,7 +72,7 @@ ENV HOME "/bondy"
 # We also create the /bondy/etc dir to avoid an issue when deploying in K8s
 # where the permissions are not assigned to the directory and Bondy will not
 # have permission to write.
-RUN apt-get update && \
+RUN apt-get update && apt-get upgrade \
     apt-get -y install --no-install-recommends \
     sudo bash procps iproute2 net-tools dnsutils curl jq nano \
     openssl libsnappy-dev\
