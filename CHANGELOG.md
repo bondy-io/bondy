@@ -1,4 +1,6 @@
 # CHANGELOG
+## 1.0.0-rc.49
+* Fix dockerfile mistake
 
 ## 1.0.0-rc.48
 - Upgraded to latest PlumDB wich contains fixes to the RocksDB defaults (the previous valus might cause issues due to excessive compaction)
