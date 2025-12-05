@@ -91,7 +91,7 @@
   0},
  {<<"plum_db">>,
   {git,"https://github.com/Leapsight/plum_db.git",
-       {ref,"014e989180366739febe74108ce12d7cfa1b9816"}},
+       {ref,"744828c7727b7362a7ca9e5ca752d46395f6037d"}},
   0},
  {<<"prometheus">>,{pkg,<<"prometheus">>,<<"4.11.0">>},0},
  {<<"prometheus_cowboy">>,{pkg,<<"prometheus_cowboy">>,<<"0.1.9">>},0},
