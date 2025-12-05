@@ -782,11 +782,11 @@
 ]}.
 
 
-{mapping, "admin_api.http.reuseaddr",
-"bondy.admin_api_http.transport_opts.socket_opts.reuseaddr", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
+%% {mapping, "admin_api.http.reuseaddr",
+%% "bondy.admin_api_http.transport_opts.socket_opts.reuseaddr", [
+%%   {datatype, {flag, on, off}},
+%%   {default, on}
+%% ]}.
 
 {mapping, "admin_api.http.reuseport",
 "bondy.admin_api_http.transport_opts.socket_opts.reuseport", [
@@ -1086,11 +1086,11 @@
 ]}.
 
 
-{mapping, "admin_api.https.reuseaddr",
-"bondy.admin_api_https.transport_opts.socket_opts.reuseaddr", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
+%% {mapping, "admin_api.https.reuseaddr",
+%% "bondy.admin_api_https.transport_opts.socket_opts.reuseaddr", [
+%%   {datatype, {flag, on, off}},
+%%   {default, on}
+%% ]}.
 
 {mapping, "admin_api.https.reuseport",
 "bondy.admin_api_https.transport_opts.socket_opts.reuseport", [
@@ -1470,11 +1470,11 @@
   {default, on}
 ]}.
 
-{mapping, "api_gateway.http.reuseaddr",
-"bondy.api_gateway_http.transport_opts.socket_opts.reuseaddr", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
+%% {mapping, "api_gateway.http.reuseaddr",
+%% "bondy.api_gateway_http.transport_opts.socket_opts.reuseaddr", [
+%%   {datatype, {flag, on, off}},
+%%   {default, on}
+%% ]}.
 
 {mapping, "api_gateway.http.reuseport",
 "bondy.api_gateway_http.transport_opts.socket_opts.reuseport", [
@@ -1771,11 +1771,11 @@
   {default, on}
 ]}.
 
-{mapping, "api_gateway.https.reuseaddr",
-"bondy.api_gateway_https.transport_opts.socket_opts.reuseaddr", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
+%% {mapping, "api_gateway.https.reuseaddr",
+%% "bondy.api_gateway_https.transport_opts.socket_opts.reuseaddr", [
+%%   {datatype, {flag, on, off}},
+%%   {default, on}
+%% ]}.
 
 {mapping, "api_gateway.https.reuseport",
 "bondy.api_gateway_https.transport_opts.socket_opts.reuseport", [
@@ -2731,11 +2731,11 @@
 ]}.
 
 
-{mapping, "wamp.tcp.reuseaddr",
-"bondy.wamp_tcp.transport_opts.socket_opts.reuseaddr", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
+%% {mapping, "wamp.tcp.reuseaddr",
+%% "bondy.wamp_tcp.transport_opts.socket_opts.reuseaddr", [
+%%   {datatype, {flag, on, off}},
+%%   {default, on}
+%% ]}.
 
 {mapping, "wamp.tcp.reuseport",
 "bondy.wamp_tcp.transport_opts.socket_opts.reuseport", [
@@ -2964,11 +2964,11 @@
 ]}.
 
 
-{mapping, "wamp.tls.reuseaddr",
-"bondy.wamp_tls.transport_opts.socket_opts.reuseaddr", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
+%% {mapping, "wamp.tls.reuseaddr",
+%% "bondy.wamp_tls.transport_opts.socket_opts.reuseaddr", [
+%%   {datatype, {flag, on, off}},
+%%   {default, on}
+%% ]}.
 
 {mapping, "wamp.tls.reuseport",
 "bondy.wamp_tls.transport_opts.socket_opts.reuseport", [
