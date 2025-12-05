@@ -1,0 +1,31 @@
+name: ORT compliance
+
+on:
+  push:
+    branches: [ develop, main, master ]
+  pull_request:
+
+jobs:
+  ort:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Use HTTPS instead of SSH for Git cloning
+        run: git config --global url.https://github.com/.insteadOf ssh://git@github.com/
+
+      - name: Checkout project
+        uses: actions/checkout@v5
+
+      # Optional: run your normal build / tests here
+      # - uses: erlef/setup-beam@v1
+      # - run: make test
+
+      - name: Run ORT (analyze + scan + reports)
+        uses: oss-review-toolkit/ort-ci-github-action@v1
+        with:
+          # Treat everything as 'Unmanaged' instead of trying Node/Maven/etc.
+          ort-cli-args: >
+            -P ort.analyzer.enabledPackageManagers=Unmanaged
+
+          # Fail the job if policy violations are found (once you add rules)
+          fail-on: 'violations'
