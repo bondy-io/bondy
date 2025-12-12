@@ -9,7 +9,7 @@ COMPANY="Leapsight"
 # Define a header template for new files. This uses a year range (both dates the same initially).
 HEADER_TEMPLATE=$(cat <<EOF
 %% =============================================================================
-%% SPDX-FileCopyrightText: $CURRENT_YEAR $COMPANY
+%% SPDX-FileCopyrightText: 2016 - $CURRENT_YEAR $COMPANY
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 EOF

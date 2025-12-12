@@ -1,3 +1,9 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+
 %% From https://github.com/ferd/flatlog
 %% https://ferd.ca/erlang-otp-21-s-new-logger.html
 %%% @doc

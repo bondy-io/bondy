@@ -1,3 +1,9 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+
 {application, bondy_regulator, [
     {description, "An OTP application"},
     {vsn, "0.1.0"},

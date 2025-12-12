@@ -1,3 +1,8 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
 -module(bondy_sysmon_handler).
 
 -behaviour(gen_event).

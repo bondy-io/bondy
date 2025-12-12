@@ -1,3 +1,8 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
 %% @doc
 %% Collects Cowboy metrics using
 %% <a href="https://github.com/ninenines/cowboy/blob/master/src/cowboy_metrics_h.erl">
