@@ -20,17 +20,20 @@
 
 -define(BONDY_AUTH_PROVIDER, <<"com.leapsight.bondy.rbac">>).
 
--define(WAMP_ANON_AUTH,         <<"anonymous">>).
 -define(PASSWORD_AUTH,          <<"password">>).
 -define(OAUTH2_AUTH,            <<"oauth2">>).
+-define(OIDC_AUTH,              <<"oidc">>).
+-define(OIDCRP_AUTH,           <<"oidcrp">>).
 -define(TRUST_AUTH,             <<"trust">>).
+
+-define(WAMP_ANON_AUTH,         <<"anonymous">>).
 -define(WAMP_COOKIE_AUTH,       <<"cookie">>).
 -define(WAMP_CRA_AUTH,          <<"wampcra">>).
 -define(WAMP_CRYPTOSIGN_AUTH,   <<"cryptosign">>).
--define(WAMP_OAUTH2_AUTH,       ?OAUTH2_AUTH).
 -define(WAMP_SCRAM_AUTH,        <<"wamp-scram">>).
 -define(WAMP_TICKET_AUTH,       <<"ticket">>).
 -define(WAMP_TLS_AUTH,          <<"tls">>).
+-define(WAMP_OAUTH2_AUTH,       ?OAUTH2_AUTH).
 
 -define(BONDY_AUTHMETHODS_INFO, #{
     ?WAMP_ANON_AUTH => #{
@@ -47,6 +50,12 @@
     },
     ?OAUTH2_AUTH => #{
         callback_mod => bondy_auth_oauth2
+    },
+    ?OIDC_AUTH => #{
+        callback_mod => bondy_auth_oidc
+    },
+    ?OIDCRP_AUTH => #{
+        callback_mod => bondy_auth_oidcrp
     },
     ?WAMP_COOKIE_AUTH => #{
         callback_mod => undefined

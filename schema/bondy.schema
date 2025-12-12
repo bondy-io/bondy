@@ -518,7 +518,8 @@
             <<"tls">>,
             <<"trust">>,
             <<"wamp-scram">>,
-            <<"wampcra">>
+            <<"wampcra">>,
+            <<"oidc">>
           ]),
           try
             Requested = ordsets:from_list([
@@ -548,6 +549,77 @@
   end
 }.
 
+{mapping, "security.oidc.providers.enabled",
+"bondy.security.oidc.providers.enabled", [
+    {default, off},
+    {datatype, flag}
+]}.
+
+%% $provider_id will be used together with login_path and redirect_path to build
+%% the login and redirect callbacks.
+{mapping, "security.oidc.providers.$provider_id.issuer",
+"bondy.security.oidc.providers", [
+  {datatype, string}
+]}.
+
+{mapping, "security.oidc.providers.$provider_id.client_id",
+"bondy.security.oidc.providers", [
+  {datatype, string}
+]}.
+
+{mapping, "security.oidc.providers.$provider_id.client_secret",
+"bondy.security.oidc.providers", [
+  {datatype, string}
+]}.
+
+%% Example:  /oidc/aws_cognito/login
+{mapping, "security.oidc.providers.$provider_id.login_path",
+"bondy.security.oidc.providers", [
+    {datatype, string}
+]}.
+
+%% Example:  security.oidc.providers.aws.client_id = /oidc/aws_cognito/callback
+{mapping, "security.oidc.providers.$provider_id.redirect_path",
+"bondy.security.oidc.providers", [
+    {datatype, string}
+]}.
+
+
+{translation, "bondy.security.oidc.providers", fun(Conf0) ->
+    Conf = cuttlefish_variable:filter_by_prefix("security.oidc.providers", Conf0),
+
+    {Enabled, Providers0} = lists:foldl(
+        fun
+            ({["security", "oidc", "providers", "enabled" = Key], Value}, {Flag, Map}) ->
+                {Value, Map};
+
+            ({["security", "oidc", "providers", ProviderId0, Key], Value}, {Flag, Map0})
+            when Key == "client_id" orelse
+            Key == "client_secret" orelse
+            Key == "login_path" orelse
+            Key == "redirect_path" ->
+                ProviderId = list_to_binary(ProviderId0),
+                Update = #{list_to_atom(Key) => list_to_binary(Value)},
+                Map = maps:update_with(
+                    ProviderId,
+                    fun(ProviderConf) -> maps:merge(ProviderConf, Update) end,
+                    Update,
+                    Map0
+                ),
+                {Flag, Map}
+        end,
+        {false, maps:new()},
+        Conf
+    ),
+    Providers = maps:fold(
+        fun(ProviderId, ProviderConf, Acc) ->
+            [#{id => ProviderId, config => ProviderConf} | Acc]
+        end,
+        [],
+        Providers0
+    ),
+    #{enabled => Enabled, providers => Providers}
+end}.
 
 %% =============================================================================
 %% OVERLOAD PROTECTION AND LOAD REGULATION
