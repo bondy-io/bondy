@@ -1,4 +1,10 @@
 # CHANGELOG
+## DEVELOPER (1.0.0-rc.50 WIP)
+* Upgraded PlumDB with:
+    * Fixes to configuration of shared write buffer and block cache
+    * Latest version of RocksDB (10.7.5)
+* set option `store.use_direct_io_for_flush_and_compaction` default to `false`
+
 ## 1.0.0-rc.49
 * Fix dockerfile mistake
 
