@@ -4108,7 +4108,7 @@ end}.
 
 
 {mapping, "store.use_direct_io_for_flush_and_compaction", "plum_db.rocksdb.open.use_direct_io_for_flush_and_compaction", [
-  {default, on},
+  {default, off},
   {datatype, flag}
 ]}.
 
