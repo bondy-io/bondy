@@ -1,5 +1,5 @@
 # CHANGELOG
-## DEVELOPER (1.0.0-rc.50 WIP)
+## 1.0.0-rc.50
 * Upgraded PlumDB with:
     * Fixes to configuration of shared write buffer and block cache
     * Latest version of RocksDB (10.7.5)
