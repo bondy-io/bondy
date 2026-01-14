@@ -1,3 +1,8 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
 {application, bondy_broker_bridge, [
     {description,
         "Bondy Broker Bridge is an application that is part of Bondy and provides a way to integrate Events with external brokers and systems."

@@ -41,7 +41,7 @@
 %% More information at: http://erlang.org/doc/man/erl.html
 {mapping, "vm.async_thread.number", "vm_args.+A", [
   {datatype, integer},
-  {default, 10},
+  {default, 1},
   {validators, ["range:1-1024"]}
 ]}.
 

@@ -1,3 +1,9 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+
 -module(bondy_message_id).
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").

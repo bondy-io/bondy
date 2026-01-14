@@ -157,3 +157,7 @@ admin_api.http.proxy_protocol.mode = relaxed
 
 
 vm.io.dirty_schedulers = 128
+
+
+security.oidc.providers.msft.client_id=foo
+security.oidc.providers.msft.client_secret=bar
