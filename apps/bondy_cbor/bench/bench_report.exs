@@ -2,7 +2,7 @@
 #
 # Run with: mix run bench_report.exs
 #
-# This generates detailed HTML reports in the bench/output directory
+# This generates detailed HTML reports in the bench/_output directory
 
 IO.puts("\n" <> String.duplicate("=", 60))
 IO.puts("CBOR vs MsgPack vs JSON Benchmark (Full Report)")
@@ -11,7 +11,7 @@ IO.puts(String.duplicate("=", 60) <> "\n")
 Application.ensure_all_started(:bondy_cbor)
 
 # Create output directory
-File.mkdir_p!("output")
+File.mkdir_p!("_output")
 
 ################################################################################
 # Test Data
@@ -148,10 +148,10 @@ Benchee.run(
   memory_time: 2,
   formatters: [
     Benchee.Formatters.Console,
-    {Benchee.Formatters.HTML, file: "output/encoding_benchmark.html"},
-    {Benchee.Formatters.Markdown, file: "output/encoding_benchmark.md"}
+    {Benchee.Formatters.HTML, file: "_output/encoding_benchmark.html"},
+    {Benchee.Formatters.Markdown, file: "_output/encoding_benchmark.md"}
   ],
-  save: [path: "output/encoding_results.benchee", tag: "encoding"]
+  save: [path: "_output/encoding_results.benchee", tag: "encoding"]
 )
 
 ################################################################################
@@ -181,10 +181,10 @@ Benchee.run(
   memory_time: 2,
   formatters: [
     Benchee.Formatters.Console,
-    {Benchee.Formatters.HTML, file: "output/decoding_benchmark.html"},
-    {Benchee.Formatters.Markdown, file: "output/decoding_benchmark.md"}
+    {Benchee.Formatters.HTML, file: "_output/decoding_benchmark.html"},
+    {Benchee.Formatters.Markdown, file: "_output/decoding_benchmark.md"}
   ],
-  save: [path: "output/decoding_results.benchee", tag: "decoding"]
+  save: [path: "_output/decoding_results.benchee", tag: "decoding"]
 )
 
 ################################################################################
@@ -214,8 +214,8 @@ Benchee.run(
   memory_time: 2,
   formatters: [
     Benchee.Formatters.Console,
-    {Benchee.Formatters.HTML, file: "output/roundtrip_benchmark.html"},
-    {Benchee.Formatters.Markdown, file: "output/roundtrip_benchmark.md"}
+    {Benchee.Formatters.HTML, file: "_output/roundtrip_benchmark.html"},
+    {Benchee.Formatters.Markdown, file: "_output/roundtrip_benchmark.md"}
   ]
 )
 
@@ -259,5 +259,5 @@ end)
 IO.puts("\nSavings = reduction vs JSON (positive = smaller than JSON)")
 
 IO.puts("\n" <> String.duplicate("=", 70))
-IO.puts("Benchmark Complete! Results saved to bench/output/")
+IO.puts("Benchmark Complete! Results saved to bench/_output/")
 IO.puts(String.duplicate("=", 70) <> "\n")

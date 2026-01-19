@@ -19,7 +19,7 @@ IO.puts("""
 """)
 
 Application.ensure_all_started(:bondy_cbor)
-File.mkdir_p!("output")
+File.mkdir_p!("_output")
 
 ################################################################################
 # Test Data Generator
@@ -346,10 +346,10 @@ Benchee.run(
   reduction_time: 2,
   formatters: [
     {Benchee.Formatters.Console, extended_statistics: true},
-    {Benchee.Formatters.HTML, file: "output/encoding.html", auto_open: false},
-    {Benchee.Formatters.Markdown, file: "output/encoding.md"}
+    {Benchee.Formatters.HTML, file: "_output/encoding.html", auto_open: false},
+    {Benchee.Formatters.Markdown, file: "_output/encoding.md"}
   ],
-  save: [path: "output/encoding.benchee"]
+  save: [path: "_output/encoding.benchee"]
 )
 
 ################################################################################
@@ -385,10 +385,10 @@ Benchee.run(
   reduction_time: 2,
   formatters: [
     {Benchee.Formatters.Console, extended_statistics: true},
-    {Benchee.Formatters.HTML, file: "output/decoding.html", auto_open: false},
-    {Benchee.Formatters.Markdown, file: "output/decoding.md"}
+    {Benchee.Formatters.HTML, file: "_output/decoding.html", auto_open: false},
+    {Benchee.Formatters.Markdown, file: "_output/decoding.md"}
   ],
-  save: [path: "output/decoding.benchee"]
+  save: [path: "_output/decoding.benchee"]
 )
 
 ################################################################################
@@ -421,10 +421,10 @@ Benchee.run(
   reduction_time: 2,
   formatters: [
     {Benchee.Formatters.Console, extended_statistics: true},
-    {Benchee.Formatters.HTML, file: "output/roundtrip.html", auto_open: false},
-    {Benchee.Formatters.Markdown, file: "output/roundtrip.md"}
+    {Benchee.Formatters.HTML, file: "_output/roundtrip.html", auto_open: false},
+    {Benchee.Formatters.Markdown, file: "_output/roundtrip.md"}
   ],
-  save: [path: "output/roundtrip.benchee"]
+  save: [path: "_output/roundtrip.benchee"]
 )
 
 ################################################################################
@@ -463,7 +463,7 @@ Benchee.run(
   reduction_time: 2,
   formatters: [
     {Benchee.Formatters.Console, extended_statistics: true},
-    {Benchee.Formatters.HTML, file: "output/batch.html", auto_open: false}
+    {Benchee.Formatters.HTML, file: "_output/batch.html", auto_open: false}
   ]
 )
 
@@ -519,7 +519,7 @@ IO.puts("""
                               BENCHMARK COMPLETE
 ================================================================================
 
-Reports generated in bench/output/:
+Reports generated in bench/_output/:
   - encoding.html      - Encoding performance with graphs
   - decoding.html      - Decoding performance with graphs
   - roundtrip.html     - Round-trip performance with graphs
@@ -528,7 +528,7 @@ Reports generated in bench/output/:
   - *.benchee          - Raw benchmark data for comparison
 
 To compare results over time:
-  mix run -e 'Benchee.report(load: ["output/encoding.benchee"])'
+  mix run -e 'Benchee.report(load: ["_output/encoding.benchee"])'
 
 ================================================================================
 """)

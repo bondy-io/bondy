@@ -41,7 +41,7 @@ Generates detailed HTML reports with graphs:
 mix run bench_report.exs
 ```
 
-Reports are saved to `bench/output/`:
+Reports are saved to `bench/_output/`:
 - `encoding_benchmark.html`
 - `decoding_benchmark.html`
 - `roundtrip_benchmark.html`
@@ -108,7 +108,7 @@ Erlang VM work units. Proxy for CPU usage. Lower is better.
 After running `bench_comprehensive.exs`:
 
 ```
-bench/output/
+bench/_output/
 ├── encoding.html       # Encoding benchmark graphs
 ├── encoding.md         # Encoding results markdown
 ├── encoding.benchee    # Raw data for comparison
@@ -127,7 +127,7 @@ Save and compare benchmark results:
 
 ```elixir
 # Load and compare saved results
-mix run -e 'Benchee.report(load: ["output/encoding.benchee"])'
+mix run -e 'Benchee.report(load: ["_output/encoding.benchee"])'
 ```
 
 ## Notes
