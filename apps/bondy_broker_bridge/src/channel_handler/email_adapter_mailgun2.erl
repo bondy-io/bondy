@@ -17,6 +17,22 @@
 %%% @end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 -module(email_adapter_mailgun2).
+
+-moduledoc """
+`email_adapter` implementation for the Mailgun v3 Messages API.
+
+Sends emails via `httpc` POST with Basic authentication (`api:<apikey>`)
+and `application/x-www-form-urlencoded` body encoding.
+
+## HTTP status handling
+
+| Status | Interpretation |
+|--------|---------------|
+| 200 | Success — returns raw response payload |
+| Other | Error — returns `{error, {Status, Payload}}` |
+| Timeout | Returns `{error, timeout}` |
+""".
+
 -behaviour(email_adapter).
 
 
@@ -58,18 +74,17 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Start the adapter with default options.".
 start() ->
     start([]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Start the adapter.
+
+`Options` is a proplist with `domain`, `apiurl`, and `apikey` keys.
+Starts required SSL/crypto applications.
+""".
 start(Options) ->
     %% TODO: I think that this starts are not required in this context
     application:start(inets),
@@ -77,26 +92,25 @@ start(Options) ->
     application:start(asn1),
     application:start(public_key),
     application:start(ssl),
-    
+
     Domain = proplists:get_value(domain, Options),
     ApiUrl = proplists:get_value(apiurl, Options),
     ApiKey = proplists:get_value(apikey, Options),
-    
+
     {ok, #state{apiurl=ApiUrl ++ "/" ++ Domain, apikey=ApiKey}}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc false.
 stop(_Conn) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Send an email through the Mailgun API.
+
+Constructs a form-encoded POST request with Basic authentication and
+sends it via `httpc`.
+""".
 send(Conn, {ToEmail, ToEmail}, {FromName, FromEmail}, Subject, Message, Opt) ->
     send(Conn, {<<>>, ToEmail}, {FromName, FromEmail}, Subject, Message, Opt);
 

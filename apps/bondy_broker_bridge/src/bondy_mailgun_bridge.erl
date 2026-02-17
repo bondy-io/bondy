@@ -4,8 +4,30 @@
 %% =============================================================================
 
 -module(bondy_mailgun_bridge).
--behaviour(bondy_broker_bridge).
 
+-moduledoc """
+Bridge implementation that sends emails via the Mailgun API.
+
+Uses the `email` application with the `email_adapter_mailgun2` adapter.
+Supports `text/plain` and `text/html` body content (no template support).
+
+## Action specification
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `<<"email_address">>` | binary | Recipient address |
+| `<<"sender">>` | binary | Sender address |
+| `<<"subject">>` | binary | Email subject |
+| `<<"body">>` | map | `<<"text/plain">>` and/or `<<"text/html">>` |
+| `<<"options">>` | map | Additional options (optional) |
+
+## Configuration
+
+The `email_sender` key in the bridge config is injected into the `mops`
+context so that action templates can reference `{{email_sender}}`.
+""".
+
+-behaviour(bondy_broker_bridge).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -80,10 +102,11 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Initialises the mailgun module with the provided configuration.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Configure and start the `email` application for Mailgun.
+
+Extracts `email_sender` from config and returns it as the bridge context.
+""".
 init(Config) ->
 
     ?LOG_DEBUG(#{
@@ -116,16 +139,7 @@ init(Config) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Validates the action specification.
-%% An action spec is a map containing the following keys:
-%%
-%% * `email_address :: binary()' - the email address to send the email.
-%% * `subject :: binary()' - the email subject
-%% * `body :: binary()' - the email body
-%% * `options :: map()' - options
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Validate a Mailgun email action spec.".
 validate_action(Action0) ->
     try maps_utils:validate(Action0, ?PRODUCE_ACTION_SPEC) of
         Action1 ->
@@ -136,11 +150,7 @@ validate_action(Action0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Evaluates the action specification `Action' against the context
-%% `Ctxt' using `mops' and send the message to Mailgun.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Send an email via Mailgun.".
 apply_action(Action) ->
 
     ?LOG_DEBUG(#{
@@ -177,10 +187,7 @@ apply_action(Action) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Stop the `email` application.".
 terminate(_Reason, _State) ->
     _  = application:stop(email),
     ok.

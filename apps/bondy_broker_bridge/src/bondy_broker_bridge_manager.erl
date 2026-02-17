@@ -3,86 +3,89 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc This module provides event bridging functionality, allowing
-%% a supervised process (implemented via bondy_subscriber) to subscribe to WAMP
-%% events and process and/or forward those events to an external system,
-%% e.g. publish to another message broker.
-%%
-%% A subscription can be created at runtime using the `subscribe/5',
-%% or at system boot time by setting the application's `config_file'
-%% environment variable which should have the filename of a valid
-%% Broker Bridge Specification File.
-%%
-%% Each broker bridge is implemented as a module implementing the
-%% bondy_broker_bridge behaviour.
-%%
-%% ## Action Specification Map.
-%%
-%% ## `mops' Evaluation Context
-%%
-%% The mops context is map containing the following:
-%%
-%% ```erlang
-%% #{
-%%     <<"broker">> => #{
-%%         <<"node">> => binary()
-%%         <<"agent">> => binary()
-%%     },
-%%     <<"event">> => #{
-%%         <<"realm">> => uri(),
-%%         <<"topic">> => uri(),
-%%         <<"subscription_id">> => integer(),
-%%         <<"publication_id">> => integer(),
-%%         <<"details">> => map(), % WAMP EVENT.details
-%%         <<"args">> => list(),
-%%         <<"kwargs">> => map(),
-%%         <<"ingestion_timestamp">> => integer()
-%%     }
-%% }.
-%% '''
-%%
-%% ## Broker Bridge Specification File.
-%%
-%% Example:
-%%
-%% ```json
-%% {
-%%     "id":"com.leapsight.test",
-%%     "meta":{},
-%%     "subscriptions" : [
-%%         {
-%%             "bridge": "bondy_kafka_bridge",
-%%             "match": {
-%%                 "realm": "com.leapsight.test",
-%%                 "topic" : "com.leapsight.example_event",
-%%                 "options": {"match": "exact"}
-%%             },
-%%             "action": {
-%%                 "type": "produce_sync",
-%%                 "topic": "{{kafka.topics.wamp_events}}",
-%%                 "key": "\"{{event.topic}}/{{event.publication_id}}\"",
-%%                 "value": "{{event}}",
-%%                 "options" : {
-%%                     "client_id": "default",
-%%                     "acknowledge": true,
-%%                     "required_acks": "all",
-%%                     "partition": null,
-%%                     "partitioner": {
-%%                         "algorithm": "fnv32a",
-%%                         "value": "\"{{event.topic}}/{{event.publication_id}}\""
-%%                     },
-%%                     "encoding": "json"
-%%                 }
-%%             }
-%%         }
-%%     ]
-%% }
-%% '''
-%%
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_broker_bridge_manager).
+
+-moduledoc """
+gen_server that orchestrates all broker bridge subscriptions.
+
+Manages the lifecycle of bridge modules and their WAMP subscriptions.
+Each subscription is backed by a supervised `bondy_subscriber` process
+that receives WAMP events, evaluates a `mops` action template against
+the event context, and delegates to the bridge callback to forward the
+event to the external system.
+
+## Creating subscriptions
+
+Subscriptions can be created:
+
+- **At boot** — set the `config_file` application env to a JSON file path
+- **At runtime** — call `subscribe/5`
+
+## `mops` evaluation context
+
+Every action template is evaluated with the following context:
+
+```erlang
+#{
+    <<"broker">> => #{
+        <<"node">> => binary(),
+        <<"agent">> => binary()
+    },
+    <<"event">> => #{
+        <<"realm">> => uri(),
+        <<"topic">> => uri(),
+        <<"subscription_id">> => integer(),
+        <<"publication_id">> => integer(),
+        <<"details">> => map(),
+        <<"args">> => list(),
+        <<"kwargs">> => map(),
+        <<"ingestion_timestamp">> => integer()
+    }
+}
+```
+
+Bridge-specific keys (e.g. `<<"kafka">>`) are merged from the context
+map returned by `Bridge:init/1`.
+
+## Specification file format
+
+```json
+{
+    "id": "com.example.bridges",
+    "kind": "broker_bridge",
+    "version": "v1.0",
+    "meta": {},
+    "subscriptions": [
+        {
+            "bridge": "bondy_kafka_bridge",
+            "match": {
+                "realm": "com.example.realm",
+                "topic": "com.example.topic",
+                "options": {"match": "exact"}
+            },
+            "action": {
+                "type": "produce_sync",
+                "topic": "{{kafka.topics.wamp_events}}",
+                "key": "\"{{event.topic}}/{{event.publication_id}}\"",
+                "value": "{{event}}",
+                "options": {
+                    "client_id": "default",
+                    "acknowledge": true,
+                    "required_acks": "all",
+                    "partition": null,
+                    "partitioner": {
+                        "algorithm": "fnv32a",
+                        "value": "\"{{event.topic}}/{{event.publication_id}}\""
+                    },
+                    "encoding": "json"
+                }
+            }
+        }
+    ]
+}
+```
+""".
+
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -242,37 +245,29 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Internal function called by bondy_broker_bridge_sup.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Start the manager, registered locally. Called by the supervisor.".
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Lists all the configured bridge configurations.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Return all configured bridge maps.".
 -spec bridges() -> [bridge()].
 bridges() ->
     gen_server:call(?MODULE, bridges, 10000).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the bridge configuration identified by its module name.
-%% @end
-%% -----------------------------------------------------------------------------
--spec bridge(module()) -> [bridge()].
+-doc "Return the bridge configuration for `Mod`, or `undefined`.".
+-spec bridge(module()) -> bridge() | undefined.
 bridge(Mod) ->
     gen_server:call(?MODULE, {bridge, Mod}, 10000).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Parses the provided Broker Bridge Specification and creates all the
-%% provided subscriptions.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Load a broker bridge specification.
+
+Accepts either a map (already parsed) or a filename (JSON). Validates the
+specification and creates all declared subscriptions for enabled bridges.
+""".
 -spec load(file:filename() | map()) ->
     ok | {error, invalid_specification_format | any()}.
 
@@ -280,16 +275,13 @@ load(Term) when is_map(Term) orelse is_list(Term) ->
     gen_server:call(?MODULE, {load, Term}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Creates a subscription using bondy_broker.
-%% This results in a new supervised bondy_subscriber processed that subscribes
-%% to {Realm, Topic} and forwards any received publication (event) to the
-%% bridge identified by `Bridge'.
-%%
-%% Returns the tuple {ok, Pid} where Pid is the pid() of the supervised process
-%% or the tuple {error, Reason}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Subscribe to a WAMP topic and bridge events to an external system.
+
+Creates a supervised `bondy_subscriber` that subscribes to `{RealmUri,
+Topic}` and forwards every received publication to `Bridge` after
+evaluating the action `Spec` with `mops`.
+""".
 -spec subscribe(uri(), map(), uri(), Bridge :: module(), Spec :: map()) ->
     {ok, id()} | {error, already_exists}.
 
@@ -298,30 +290,25 @@ subscribe(RealmUri, Opts, Topic, Bridge, Spec) ->
         ?MODULE, {subscribe, RealmUri, Opts, Topic, Bridge, Spec}, ?TIMEOUT).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Remove a bridge subscription by its subscriber pid.".
 -spec unsubscribe(pid()) -> ok | {error, not_found}.
 
 unsubscribe(Pid) ->
     gen_server:call(?MODULE, {unsubscribe, Pid}, ?TIMEOUT).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Return subscription details for all subscribers of `BridgeId`.".
 -spec subscriptions(BridgeId :: bridge()) -> [subscription_detail()].
 
 subscriptions(BridgeId) ->
     gen_server:call(?MODULE, {subscriptions, BridgeId}, 10000).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Validate a broker bridge specification map.
+
+Returns `{ok, Validated}` or `{error, Reason}`.
+""".
 -spec validate_spec(map()) -> {ok, map()} | {error, any()}.
 
 validate_spec(Map) ->
@@ -357,7 +344,7 @@ init([]) ->
     {ok, State0, {continue, init_bridges}}.
 
 
-
+-doc false.
 handle_continue(init_bridges, State0) ->
     %% At the moment we are assuming bridges are only configured on startup
     %% through a config file.
@@ -378,6 +365,7 @@ handle_continue(init_bridges, State0) ->
     end.
 
 
+-doc false.
 handle_call(bridges, _From, State) ->
     Res = bridges(State),
     {reply, Res, State};
@@ -416,6 +404,7 @@ handle_call(Event, From, State) ->
     {noreply, State}.
 
 
+-doc false.
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -423,6 +412,7 @@ handle_cast(Event, State) ->
     }),
     {noreply, State}.
 
+-doc false.
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     ?LOG_DEBUG(#{
         description => "Subscriber down",
@@ -442,6 +432,7 @@ handle_info(Info, State) ->
     {noreply, State}.
 
 
+-doc false.
 terminate(normal, State) ->
     do_terminate(normal, State);
 
@@ -455,6 +446,7 @@ terminate(Reason, State) ->
     do_terminate(Reason, State).
 
 
+-doc false.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
@@ -466,7 +458,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 
-%% @private
+
 init_bridges(State) ->
     try
         Bridges0 = State#state.bridges,
@@ -497,7 +489,7 @@ init_bridges(State) ->
     end.
 
 
-%% @private
+
 terminate_bridges(Reason, #state{bridges = Map} = State) ->
     Fun = fun(Bridge, _Config, Acc) ->
         ok = Bridge:terminate(Reason),
@@ -506,12 +498,12 @@ terminate_bridges(Reason, #state{bridges = Map} = State) ->
     maps:fold(Fun, State, Map).
 
 
-%% @private
+
 get_bridge(Mod, State) ->
     maps:get(Mod, State#state.bridges, undefined).
 
 
-%% @private
+
 do_terminate(Reason, State) ->
     %% ok = plum_db_unsubscribe(),
     _ = unsubscribe_all(State),
@@ -519,7 +511,7 @@ do_terminate(Reason, State) ->
     ok.
 
 
-%% @private
+
 load_config(Map, State) when is_map(Map) ->
     case validate_spec(Map) of
         {ok, Spec} ->
@@ -581,11 +573,6 @@ load_config(_, State) ->
     {{error, badarg}, State}.
 
 
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 mops_ctxt(Event, RealmUri, _Opts, Topic, Bridge, State) ->
     %% mops require binary keys
     Base = maps:get(ctxt, bridge(Bridge)),
@@ -600,11 +587,6 @@ mops_ctxt(Event, RealmUri, _Opts, Topic, Bridge, State) ->
     }.
 
 
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 do_subscribe(Subscription, State) ->
     #{
         <<"bridge">> := Bridge,
@@ -628,11 +610,6 @@ do_subscribe(Subscription, State) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 do_subscribe(RealmUri, Opts0, Topic, Bridge, Action0, State) ->
     try
         %% We build the fun that we will use for the subscriber
@@ -687,24 +664,24 @@ do_subscribe(RealmUri, Opts0, Topic, Bridge, Action0, State) ->
 
 
 
-%% @private
+
 unsubscribe_all(State) ->
     _ = [bondy_broker:unsubscribe(Pid) || Pid <- all_subscribers(State)],
     ok.
 
 
-%% @private
+
 bridges(State) ->
     maps:values(State#state.bridges).
 
 
-%% @private
+
 all_subscribers(State) ->
     Ids = maps:keys(State#state.bridges),
     lists:append([subscribers(Id) || Id <- Ids]).
 
 
-%% @private
+
 subscribers(Bridge) ->
     %% {{{p,l,bondy_broker_bridge},<0.2738.0>},<0.2738.0>,Bridge},
     MatchSpec = [{
@@ -715,7 +692,7 @@ subscribers(Bridge) ->
     bondy_gproc:select(MatchSpec).
 
 
-%% @private
+
 get_subscriptions(Bridge) ->
     [bondy_subscriber:info(Pid) || Pid <- subscribers(Bridge)].
 

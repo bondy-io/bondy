@@ -4,8 +4,22 @@
 %% =============================================================================
 
 -module(bondy_aws_sns_bridge).
--behaviour(bondy_broker_bridge).
 
+-moduledoc """
+Bridge implementation that sends SMS messages via AWS SNS.
+
+Uses `erlcloud_sns:publish_to_phone/2` to deliver SMS. The erlcloud
+application is configured and started during `init/1`.
+
+## Action specification
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `<<"phone_number">>` | binary | Recipient phone number (E.164 format) |
+| `<<"text_message">>` | binary | SMS text content |
+""".
+
+-behaviour(bondy_broker_bridge).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -41,10 +55,7 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Initialises the erlcloud module with the provided configuration.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Configure and start the `erlcloud` application with the provided config.".
 init(Config) ->
 
     ?LOG_DEBUG(#{
@@ -72,14 +83,7 @@ init(Config) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Validates the action specification.
-%% An action spec is a map containing the following keys:
-%%
-%% * `phone_number :: binary()' - the phone number to send the sms.
-%% * `text_message :: binary()' - the sms text
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Validate an SNS SMS action spec (`phone_number`, `text_message`).".
 validate_action(Action0) ->
     try maps_utils:validate(Action0, ?PRODUCE_ACTION_SPEC) of
         Action1 ->
@@ -90,11 +94,7 @@ validate_action(Action0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Evaluates the action specification `Action' against the context
-%% `Ctxt' using `mops' and send the message to Amazon SNS.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Send an SMS via `erlcloud_sns:publish_to_phone/2`.".
 apply_action(Action) ->
 
     ?LOG_DEBUG(#{
@@ -131,10 +131,7 @@ apply_action(Action) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Stop the `erlcloud` application.".
 terminate(_Reason, _State) ->
     _  = application:stop(erlcloud),
     ok.

@@ -3,22 +3,32 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc This module defines the behaviour for providing event bridging
-%% functionality, allowing
-%% a supervised process (implemented via bondy_subscriber) to consume WAMP
-%% events based on a normal subscription to publish (or
-%% produce) those events to an external system, e.g. another message broker, by
-%% previously applying a transformation specification based on a templating
-%% language..
-%%
-%% Each broker bridge is implemented as a callback module exporting a
-%% predefined set of callback functions.
-%%
-%%
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_broker_bridge).
+
+-moduledoc """
+Behaviour for event bridge implementations.
+
+A broker bridge consumes WAMP events via a supervised `bondy_subscriber`
+process and forwards them to an external system (message broker, email
+service, SMS gateway, etc.) after applying a `mops` template
+transformation to the action specification.
+
+Each bridge implementation exports four callbacks:
+
+- `init/1` — set up connections and return a context map for `mops`
+- `validate_action/1` — parse and validate an action spec before execution
+- `apply_action/1` — execute the action (produce to Kafka, send email, etc.)
+- `terminate/2` — tear down connections and stop dependent applications
+
+## Shipped implementations
+
+| Module | Sink |
+|--------|------|
+| `bondy_kafka_bridge` | Apache Kafka (via `brod`) |
+| `bondy_aws_sns_bridge` | AWS SNS SMS (via `erlcloud`) |
+| `bondy_sendgrid_bridge` | SendGrid email (via `email`) |
+| `bondy_mailgun_bridge` | Mailgun email (via `email`) |
+""".
 
 
 
@@ -27,39 +37,46 @@
 %% =============================================================================
 
 
+-doc """
+Initialise the external broker or system as an event sink.
 
-%% -----------------------------------------------------------------------------
-%% Initialises the external broker or system as an event sink.
-%% An implementation should use this callback for example to setup the
-%% environment, load any plugin code and connect to any external system.
-%% -----------------------------------------------------------------------------
+Use this callback to set up the environment, load any plugin code, and
+connect to the external system. The returned context map is merged into
+the `mops` evaluation context under the bridge's namespace key so that
+action templates can reference bridge-specific values.
+""".
 -callback init(Config :: any()) ->
     {ok, Ctxt :: #{binary() => any()}} | {error, Reason :: any()}.
 
 
-%% -----------------------------------------------------------------------------
-%% Parses and validates the action `Action'.
-%% This function is called before calling `apply_action/1`
-%%
-%% Use this function to define any default values required before
-%% `apply_action/1` gets called.
-%% -----------------------------------------------------------------------------
+-doc """
+Parse and validate the action `Action`.
+
+Called after `mops:eval/2` has expanded template expressions but before
+`apply_action/1`. Use this callback to set defaults, coerce types, and
+reject malformed actions early.
+""".
 -callback validate_action(Action :: map()) ->
     {ok, ValidAction :: map()} | {error, Reason :: any()}.
 
 
-%% -----------------------------------------------------------------------------
-%% Evaluates the action `Action'.
-%% -----------------------------------------------------------------------------
+-doc """
+Execute the action `Action`.
+
+Returns `ok` on success, `{retry, Reason}` to request automatic retry
+(e.g. transient connection loss), or `{error, Reason}` for permanent
+failures.
+""".
 -callback apply_action(Action :: map()) ->
     ok
     | {retry, Reason :: any()}
     | {error, Reason :: any()}.
 
 
-%% -----------------------------------------------------------------------------
-%% Terminates the broker bridge and all its subscribers.
-%% An implementer should use this call to cleanup the environment, tear down
-%% any plugin code and disconnect from external systems.
-%% -----------------------------------------------------------------------------
+-doc """
+Terminate the bridge and clean up resources.
+
+Called during manager shutdown. Implementations should stop dependent
+applications, close connections, and release any external resources.
+""".
 -callback terminate(Reason :: any(), State :: any()) -> ok.
