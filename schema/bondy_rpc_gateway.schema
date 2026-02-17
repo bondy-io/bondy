@@ -1,0 +1,1032 @@
+%% =============================================================================
+%%  bondy_rpc_gateway.schema - Bondy RPC Gateway configuration schema
+%%                             for Cuttlefish
+%%
+%%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
+%%
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
+
+%% =============================================================================
+%% VALIDATORS
+%% =============================================================================
+
+{validator, "positive_integer", "must be a positive integer",
+  fun(V) -> is_integer(V) andalso V > 0 end
+}.
+
+{validator, "non_negative_integer", "must be a non-negative integer",
+  fun(V) -> is_integer(V) andalso V >= 0 end
+}.
+
+
+%% =============================================================================
+%% SERVICE CONFIGURATION
+%%
+%% Each service is identified by a unique name (the $service variable).
+%% A service defines how the gateway authenticates with and proxies
+%% requests to an upstream HTTP endpoint.
+%%
+%% Configuration file example:
+%%
+%%   rpc_gateway.services.billing.base_url = https://billing.example.com/api
+%%   rpc_gateway.services.billing.prefix = /billing
+%%   rpc_gateway.services.billing.timeout = 15s
+%%   rpc_gateway.services.billing.retries = 2
+%%
+%%   rpc_gateway.services.billing.auth.fetch.method = post
+%%   rpc_gateway.services.billing.auth.fetch.url = https://idp.example.com/token
+%%   rpc_gateway.services.billing.auth.fetch.body_encoding = form
+%%   rpc_gateway.services.billing.auth.fetch.token_path = access_token
+%%   rpc_gateway.services.billing.auth.fetch.expires_in_path = expires_in
+%%
+%%   rpc_gateway.services.billing.auth.fetch.body.grant_type = client_credentials
+%%   rpc_gateway.services.billing.auth.fetch.body.client_id = my-app
+%%   rpc_gateway.services.billing.auth.fetch.body.client_secret = s3cret
+%%
+%%   rpc_gateway.services.billing.auth.fetch.basic_auth.username = {{client_id}}
+%%   rpc_gateway.services.billing.auth.fetch.basic_auth.password = {{client_secret}}
+%%
+%%   rpc_gateway.services.billing.auth.apply.placement = header
+%%   rpc_gateway.services.billing.auth.apply.name = Authorization
+%%   rpc_gateway.services.billing.auth.apply.format = Bearer {{token}}
+%%
+%%   rpc_gateway.services.billing.auth.vars.client_id = my-app
+%%   rpc_gateway.services.billing.auth.vars.client_secret = s3cret
+%%
+%%   rpc_gateway.services.billing.auth.cache.default_ttl = 1h
+%%   rpc_gateway.services.billing.auth.cache.refresh_margin = 2m
+%%
+%%   ## WAMP procedure mappings (optional)
+%%
+%%   rpc_gateway.services.billing.procedures.get_invoice.uri = com.myapp.billing.get_invoice
+%%   rpc_gateway.services.billing.procedures.get_invoice.realm = com.myapp.realm
+%%   rpc_gateway.services.billing.procedures.get_invoice.method = get
+%%   rpc_gateway.services.billing.procedures.get_invoice.path = /invoices/{{id}}
+%%
+%%   rpc_gateway.services.billing.procedures.create_invoice.uri = com.myapp.billing.create_invoice
+%%   rpc_gateway.services.billing.procedures.create_invoice.realm = com.myapp.realm
+%%   rpc_gateway.services.billing.procedures.create_invoice.method = post
+%%   rpc_gateway.services.billing.procedures.create_invoice.path = /invoices
+%%
+%% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc The base URL of the upstream service to proxy requests to.
+%% Supports {{var}} interpolation using variables defined in the vars section.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.base_url",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The path prefix to strip from incoming request paths before forwarding.
+%% For example, if prefix is "/billing", a request to "/billing/invoices"
+%% will be forwarded as "/invoices".
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.prefix",
+          "bondy_rpc_gateway.services", [
+  {datatype, string},
+  {default, "/"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The auth module to use for token acquisition.
+%% Currently only 'generic' is supported, which maps to
+%% bondy_rpc_gateway_auth_generic.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth_mod",
+          "bondy_rpc_gateway.services", [
+  {datatype, {enum, [generic]}},
+  {default, generic}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Timeout for upstream HTTP requests, in milliseconds.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.timeout",
+          "bondy_rpc_gateway.services", [
+  {datatype, {duration, ms}},
+  {default, "30s"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Number of retry attempts for failed upstream HTTP requests.
+%% Uses exponential backoff between retries.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.retries",
+          "bondy_rpc_gateway.services", [
+  {datatype, integer},
+  {default, 3},
+  {validators, ["non_negative_integer"]}
+]}.
+
+
+%% =============================================================================
+%% CONNECTION POOL
+%%
+%% Each service gets its own named hackney connection pool, keyed by the
+%% service name. This keeps connections alive per upstream endpoint and
+%% lets you tune concurrency and idle timeouts independently.
+%%
+%% Configuration file example:
+%%
+%%   rpc_gateway.services.billing.pool.size = 50
+%%   rpc_gateway.services.billing.pool.timeout = 5m
+%%
+%% =============================================================================
+
+%% -----------------------------------------------------------------------------
+%% @doc Maximum number of connections in the service's hackney pool.
+%% Maps to hackney's `max_connections` option.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.pool.size",
+          "bondy_rpc_gateway.services", [
+  {datatype, integer},
+  {default, 25},
+  {validators, ["positive_integer"]}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.pool.checkout_timeout",
+          "bondy_rpc_gateway.services", [
+  {datatype, {duration, s}},
+  {default, "5s"}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.pool.connect_timeout",
+          "bondy_rpc_gateway.services", [
+  {datatype, {duration, s}},
+  {default, "8s"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How long idle connections stay open in the service's pool.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.pool.idle_timeout",
+          "bondy_rpc_gateway.services", [
+  {datatype, {duration, s}},
+  {default, "5m"}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.pool.recv_timeout",
+          "bondy_rpc_gateway.services", [
+  {datatype, {duration, s}},
+  {default, "60s"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.pool.follow_redirect",
+          "bondy_rpc_gateway.services", [
+  {datatype, {flag, on, off}},
+  {default, off}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.pool.max_redirect",
+          "bondy_rpc_gateway.services", [
+  {datatype, integer},
+  {default, 5},
+  {validators, ["positive_integer"]}
+]}.
+
+
+
+
+%% =============================================================================
+%% PROCEDURES (WAMP-to-HTTP Procedure Mappings)
+%%
+%% Each service can expose one or more WAMP procedures that translate
+%% WAMP calls into upstream HTTP requests. Procedures inherit the
+%% service's auth configuration (token acquisition and injection),
+%% timeout, and retries.
+%%
+%% When a WAMP client calls a registered procedure, the gateway:
+%%   1. Interpolates {{var}} placeholders in the path using caller kwargs
+%%   2. Routes remaining kwargs by HTTP method:
+%%      - GET/DELETE/HEAD → query parameters
+%%      - POST/PUT/PATCH  → JSON request body
+%%   3. Acquires a token via the service's auth config
+%%   4. Makes the upstream HTTP request
+%%   5. Returns the HTTP response as a WAMP result or error
+%%
+%% Configuration file example:
+%%
+%%   ## A GET procedure with a path variable.
+%%   ## Calling with kwargs #{<<"id">> => <<"INV-001">>, <<"status">> => <<"paid">>}
+%%   ## results in: GET /invoices/INV-001?status=paid
+%%
+%%   rpc_gateway.services.billing.procedures.get_invoice.uri = com.myapp.billing.get_invoice
+%%   rpc_gateway.services.billing.procedures.get_invoice.realm = com.myapp.realm
+%%   rpc_gateway.services.billing.procedures.get_invoice.method = get
+%%   rpc_gateway.services.billing.procedures.get_invoice.path = /invoices/{{id}}
+%%
+%%   ## A POST procedure — all kwargs become the JSON request body.
+%%   ## Calling with kwargs #{<<"customer">> => <<"CUST-1">>, <<"amount">> => 99}
+%%   ## results in: POST /invoices  body: {"customer":"CUST-1","amount":99}
+%%
+%%   rpc_gateway.services.billing.procedures.create_invoice.uri = com.myapp.billing.create_invoice
+%%   rpc_gateway.services.billing.procedures.create_invoice.realm = com.myapp.realm
+%%   rpc_gateway.services.billing.procedures.create_invoice.method = post
+%%   rpc_gateway.services.billing.procedures.create_invoice.path = /invoices
+%%
+%%   ## A DELETE procedure with a path variable.
+%%   ## Calling with kwargs #{<<"id">> => <<"INV-001">>}
+%%   ## results in: DELETE /invoices/INV-001
+%%
+%%   rpc_gateway.services.billing.procedures.delete_invoice.uri = com.myapp.billing.delete_invoice
+%%   rpc_gateway.services.billing.procedures.delete_invoice.realm = com.myapp.realm
+%%   rpc_gateway.services.billing.procedures.delete_invoice.method = delete
+%%   rpc_gateway.services.billing.procedures.delete_invoice.path = /invoices/{{id}}
+%%
+%%   ## A GET procedure with no path variables — all kwargs become query params.
+%%   ## The default path is "/" and the default method is "get".
+%%
+%%   rpc_gateway.services.billing.procedures.list_invoices.uri = com.myapp.billing.list_invoices
+%%   rpc_gateway.services.billing.procedures.list_invoices.realm = com.myapp.realm
+%%   rpc_gateway.services.billing.procedures.list_invoices.path = /invoices
+%%
+%% =============================================================================
+
+%% -----------------------------------------------------------------------------
+%% @doc The WAMP procedure URI to register with the dealer.
+%% This is the fully qualified URI that WAMP clients will use to call
+%% the procedure (e.g. "com.myapp.billing.get_invoice").
+%% Required for each procedure definition.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.procedures.$proc.uri",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The Bondy realm in which to register this procedure.
+%% Required for each procedure definition.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.procedures.$proc.realm",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The HTTP method to use for the upstream request.
+%% Determines how remaining kwargs (after path interpolation) are routed:
+%%   - get, delete, head: kwargs become URL query parameters
+%%   - post, put, patch: kwargs become a JSON request body
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.procedures.$proc.method",
+          "bondy_rpc_gateway.services", [
+  {datatype, {enum, [get, post, put, patch, delete, head]}},
+  {default, get}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The path template for the upstream request.
+%% Supports {{var}} interpolation using kwargs from the WAMP call.
+%% Variables are consumed from kwargs before routing the remainder.
+%%
+%% Example:
+%%   path = /invoices/{{id}}
+%%
+%% A call with kwargs #{<<"id">> => <<"INV-001">>, <<"status">> => <<"paid">>}
+%% produces path "/invoices/INV-001" with <<"status">> routed as a query param
+%% (for GET) or in the JSON body (for POST).
+%%
+%% Missing path variables cause a wamp.error.invalid_argument error.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.procedures.$proc.path",
+          "bondy_rpc_gateway.services", [
+  {datatype, string},
+  {default, "/"}
+]}.
+
+
+%% =============================================================================
+%% AUTH — FETCH (Token Acquisition)
+%% =============================================================================
+
+%% -----------------------------------------------------------------------------
+%% @doc The HTTP method used to request a token from the identity provider.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.fetch.method",
+          "bondy_rpc_gateway.services", [
+  {datatype, {enum, [get, post]}},
+  {default, post}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The URL of the token endpoint. Supports {{var}} interpolation.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.fetch.url",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Body encoding for the token request.
+%%   - form: application/x-www-form-urlencoded
+%%   - json: application/json
+%%   - none: no body
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.fetch.body_encoding",
+          "bondy_rpc_gateway.services", [
+  {datatype, {enum, [form, json, none]}},
+  {default, none}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc A key-value pair in the token request body.
+%% Multiple body parameters can be set using different $key values.
+%% Values support {{var}} interpolation.
+%%
+%% Example:
+%%   rpc_gateway.services.billing.auth.fetch.body.grant_type = client_credentials
+%%   rpc_gateway.services.billing.auth.fetch.body.scope = billing.read
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.fetch.body.$key",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc A key-value pair in the token request headers.
+%% Multiple headers can be set using different $key values.
+%% Values support {{var}} interpolation.
+%%
+%% Example:
+%%   rpc_gateway.services.billing.auth.fetch.headers.Accept = application/json
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.fetch.headers.$key",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc JSON path (dot-separated) to the token in the endpoint response.
+%% Each segment is a key to traverse in the JSON object.
+%%
+%% Example:
+%%   token_path = access_token           →  [<<"access_token">>]
+%%   token_path = data.credentials.token →  [<<"data">>,<<"credentials">>,<<"token">>]
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.fetch.token_path",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Optional JSON path (dot-separated) to an error message in the
+%% endpoint response. When the value at this path is present, the response
+%% is treated as an error.
+%%
+%% Example:
+%%   error_path = error.message
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.fetch.error_path",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Optional JSON path (dot-separated) to the token TTL (in seconds)
+%% in the endpoint response. When present, this value is used to schedule
+%% preemptive token refresh. Otherwise the cache.default_ttl is used.
+%%
+%% Example:
+%%   expires_in_path = expires_in
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.fetch.expires_in_path",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Username for HTTP Basic authentication on the token request itself.
+%% Only used when both username and password are set. Supports {{var}}
+%% interpolation.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.fetch.basic_auth.username",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Password for HTTP Basic authentication on the token request itself.
+%% Only used when both username and password are set. Supports {{var}}
+%% interpolation.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.fetch.basic_auth.password",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+
+%% =============================================================================
+%% AUTH — APPLY (Token Placement on Forwarded Requests)
+%% =============================================================================
+
+%% -----------------------------------------------------------------------------
+%% @doc Where to place the token on outgoing proxied requests.
+%%   - query_param: appended as a URL query parameter
+%%   - header: added as an HTTP header
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.apply.placement",
+          "bondy_rpc_gateway.services", [
+  {datatype, {enum, [query_param, header]}},
+  {default, header}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The name of the query parameter or HTTP header to use.
+%% For example, "Authorization" for a Bearer header or "token" for a
+%% query parameter.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.apply.name",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Optional format template for the token value. Use {{token}} as
+%% a placeholder for the actual token.
+%%
+%% Example:
+%%   format = Bearer {{token}}
+%%
+%% If not set, the raw token value is used.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.apply.format",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+
+%% =============================================================================
+%% AUTH — VARS (Variable Bindings for Interpolation)
+%% =============================================================================
+
+%% -----------------------------------------------------------------------------
+%% @doc A variable binding used for {{var}} interpolation in the fetch URL,
+%% headers, body, and basic_auth fields.
+%%
+%% Example:
+%%   rpc_gateway.services.billing.auth.vars.client_id = my-app
+%%   rpc_gateway.services.billing.auth.vars.client_secret = s3cret
+%%
+%% Then use {{client_id}} and {{client_secret}} in fetch.url, fetch.body, etc.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.vars.$var",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+
+%% =============================================================================
+%% AUTH — SECRETS (External Secret Resolution)
+%%
+%% Secrets can be fetched from an external provider (e.g. AWS Secrets Manager)
+%% and mapped into auth vars at startup. Secret vars override static vars.
+%%
+%% Configuration file example:
+%%
+%%   rpc_gateway.services.billing.auth.secrets.provider = aws_sm
+%%   rpc_gateway.services.billing.auth.secrets.secret_id = /integrations/credentials/billing
+%%   rpc_gateway.services.billing.auth.secrets.region = sa-east-1
+%%
+%%   rpc_gateway.services.billing.auth.secrets.vars.client_id.field = AUTHORIZATION_HEADER
+%%   rpc_gateway.services.billing.auth.secrets.vars.client_id.transform = basic_username
+%%
+%%   rpc_gateway.services.billing.auth.secrets.vars.client_secret.field = AUTHORIZATION_HEADER
+%%   rpc_gateway.services.billing.auth.secrets.vars.client_secret.transform = basic_password
+%%
+%%   rpc_gateway.services.billing.auth.secrets.vars.token_endpoint.field = WSO2_TOKEN_ENDPOINT
+%%
+%% =============================================================================
+
+%% -----------------------------------------------------------------------------
+%% @doc The secrets provider to use.
+%% Currently only 'aws_sm' (AWS Secrets Manager) is supported.
+%% When set, secret_id and region become required.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.secrets.provider",
+          "bondy_rpc_gateway.services", [
+  {datatype, {enum, [aws_sm]}}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The secret identifier in the provider (e.g. ARN or name for AWS SM).
+%% Required when provider is set.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.secrets.secret_id",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The AWS region for the Secrets Manager endpoint.
+%% Required when provider is aws_sm.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.secrets.region",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The JSON field name in the secret to read for this variable.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.secrets.vars.$var.field",
+          "bondy_rpc_gateway.services", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Transform to apply to the secret field value before storing as a var.
+%%   - none: use the raw value (default)
+%%   - basic_username: decode "Basic base64(user:pass)", return user
+%%   - basic_password: decode "Basic base64(user:pass)", return pass
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.secrets.vars.$var.transform",
+          "bondy_rpc_gateway.services", [
+  {datatype, {enum, [none, basic_username, basic_password]}},
+  {default, none}
+]}.
+
+
+%% =============================================================================
+%% AUTH — CACHE (Token Caching and Preemptive Refresh)
+%% =============================================================================
+
+%% -----------------------------------------------------------------------------
+%% @doc Default time-to-live for cached tokens.
+%% Used when the token endpoint response does not include an expiry
+%% (i.e., no expires_in_path configured or the path is absent in the
+%% response).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.cache.default_ttl",
+          "bondy_rpc_gateway.services", [
+  {datatype, {duration, s}},
+  {default, "1h"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How many seconds before token expiry to preemptively refresh.
+%% The cache will fetch a new token in the background this many seconds
+%% before the current token expires, so requests are never served an
+%% expired token.
+%%
+%% Set to 0 to disable preemptive refresh (tokens will be re-fetched
+%% synchronously on the first request after expiry).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.auth.cache.refresh_margin",
+          "bondy_rpc_gateway.services", [
+  {datatype, {duration, s}},
+  {default, "1m"}
+]}.
+
+
+%% =============================================================================
+%% TRANSLATION
+%%
+%% Assembles the flat Cuttlefish key-value pairs into the nested Erlang
+%% map structure expected by bondy_rpc_gateway_service and
+%% bondy_rpc_gateway_auth_generic.
+%%
+%% The resulting term is a list of service configuration maps:
+%%
+%%   [
+%%     #{
+%%       name     => <<"billing">>,
+%%       base_url => <<"https://billing.example.com/api">>,
+%%       prefix   => <<"/billing">>,
+%%       auth_mod => bondy_rpc_gateway_auth_generic,
+%%       auth_conf => #{
+%%         fetch => #{
+%%           method          => post,
+%%           url             => <<"https://idp.example.com/token">>,
+%%           body_encoding   => form,
+%%           body            => #{<<"grant_type">> => <<"client_credentials">>},
+%%           headers         => [],
+%%           token_path      => [<<"access_token">>],
+%%           error_path      => [<<"error">>, <<"message">>],
+%%           expires_in_path => [<<"expires_in">>],
+%%           auth            => #{type => basic,
+%%                                username => <<"{{client_id}}">>,
+%%                                password => <<"{{client_secret}}">>}
+%%         },
+%%         apply => #{
+%%           placement => header,
+%%           name      => <<"Authorization">>,
+%%           format    => <<"Bearer {{token}}">>
+%%         },
+%%         vars => #{
+%%           client_id     => <<"my-app">>,
+%%           client_secret => <<"s3cret">>
+%%         },
+%%         cache => #{
+%%           default_ttl    => 3600,
+%%           refresh_margin => 60
+%%         }
+%%       },
+%%       timeout => 30000,
+%%       retries => 2,
+%%       pool => #{size => ..., timeout => ...}
+%%       procedures => %{
+%%         ProcName => %{
+%%         uri    => ...,
+%%         realm  => ...,
+%%         method => ...,
+%%         path   => ...
+%%         }}
+%%       ]
+%%     },
+%%     ...
+%%   ]
+%% =============================================================================
+
+{translation, "bondy_rpc_gateway.services",
+fun(Conf0) ->
+    Conf = cuttlefish_variable:filter_by_prefix("rpc_gateway.services", Conf0),
+
+    %% Collect unique service names
+    ServiceNames = lists:usort(
+        lists:filtermap(
+            fun({[_, _, Name | _], _}) -> {true, Name};
+               (_) -> false
+            end,
+            Conf
+        )
+    ),
+
+    ToBin = fun(V) -> list_to_binary(V) end,
+
+    ParseDotPath = fun(PathStr) ->
+        [ToBin(Seg) || Seg <- string:tokens(PathStr, ".")]
+    end,
+
+    AuthModAtom = fun
+        (generic) -> bondy_rpc_gateway_auth_generic;
+        (Other) -> Other
+    end,
+
+    Get = fun(Key, Default) ->
+        case cuttlefish:conf_get(Key, Conf, Default) of
+            undefined when Default == '$error' ->
+                cuttlefish:invalid(
+                    "Key: " ++ Key ++ " should have a defined default"
+                );
+            undefined -> Default;
+            Value -> Value
+        end
+    end,
+
+    lists:map(
+        fun(Name) ->
+            Pfx = "rpc_gateway.services." ++ Name,
+
+            %% --- Top-level service fields ---
+            BaseUrl = ToBin(Get(Pfx ++ ".base_url", "")),
+            Prefix = ToBin(Get(Pfx ++ ".prefix", "/")),
+            AuthMod = AuthModAtom(Get(Pfx ++ ".auth_mod", generic)),
+            Timeout = Get(Pfx ++ ".timeout", 30000),
+            Retries = Get(Pfx ++ ".retries", 3),
+
+            %% --- Fetch section ---
+            FetchMethod = Get(Pfx ++ ".auth.fetch.method", post),
+            FetchUrl = ToBin(Get(Pfx ++ ".auth.fetch.url", "")),
+            BodyEncoding = Get(Pfx ++ ".auth.fetch.body_encoding", none),
+
+            %% Body key-value pairs
+            BodyConf = cuttlefish_variable:filter_by_prefix(
+                Pfx ++ ".auth.fetch.body", Conf
+            ),
+            BodyMap = maps:from_list(
+                [{ToBin(K), ToBin(V)}
+                 || {[_, _, _, _, _, _, K], V} <- BodyConf]
+            ),
+
+            %% Headers key-value pairs
+            HeadersConf = cuttlefish_variable:filter_by_prefix(
+                Pfx ++ ".auth.fetch.headers", Conf
+            ),
+            HeadersList = [{ToBin(K), ToBin(V)}
+                           || {[_, _, _, _, _, _, K], V} <- HeadersConf],
+
+            %% Token / error / expires_in paths
+            TokenPathStr = Get(Pfx ++ ".auth.fetch.token_path", undefined),
+            TokenPath = case TokenPathStr of
+                undefined -> cuttlefish:invalid("token_path is required for service " ++ Name);
+                _ -> ParseDotPath(TokenPathStr)
+            end,
+
+            ErrorPathStr = Get(Pfx ++ ".auth.fetch.error_path", undefined),
+            ErrorPath = case ErrorPathStr of
+                undefined -> undefined;
+                _ -> ParseDotPath(ErrorPathStr)
+            end,
+
+            ExpiresInPathStr = Get(Pfx ++ ".auth.fetch.expires_in_path", undefined),
+            ExpiresInPath = case ExpiresInPathStr of
+                undefined -> undefined;
+                _ -> ParseDotPath(ExpiresInPathStr)
+            end,
+
+            %% Basic auth on the token request
+            BasicUser = Get(Pfx ++ ".auth.fetch.basic_auth.username", undefined),
+            BasicPass = Get(Pfx ++ ".auth.fetch.basic_auth.password", undefined),
+            FetchAuth = case {BasicUser, BasicPass} of
+                {undefined, _} -> undefined;
+                {_, undefined} -> undefined;
+                {U, P} -> #{
+                    type => basic,
+                    username => ToBin(U),
+                    password => ToBin(P)
+                }
+            end,
+
+            %% Build fetch map
+            Fetch0 = #{
+                method        => FetchMethod,
+                url           => FetchUrl,
+                body_encoding => BodyEncoding,
+                body          => BodyMap,
+                headers       => HeadersList,
+                token_path    => TokenPath
+            },
+            Fetch1 = case ErrorPath of
+                undefined -> Fetch0;
+                _ -> Fetch0#{error_path => ErrorPath}
+            end,
+            Fetch2 = case ExpiresInPath of
+                undefined -> Fetch1;
+                _ -> Fetch1#{expires_in_path => ExpiresInPath}
+            end,
+            Fetch = case FetchAuth of
+                undefined -> Fetch2;
+                _ -> Fetch2#{auth => FetchAuth}
+            end,
+
+            %% --- Apply section ---
+            Placement = Get(Pfx ++ ".auth.apply.placement", header),
+            ApplyName = ToBin(Get(Pfx ++ ".auth.apply.name", "Authorization")),
+            ApplyFormat = Get(Pfx ++ ".auth.apply.format", undefined),
+
+            Apply0 = #{
+                placement => Placement,
+                name => ApplyName
+            },
+            Apply = case ApplyFormat of
+                undefined -> Apply0;
+                _ -> Apply0#{format => ToBin(ApplyFormat)}
+            end,
+
+            %% --- Vars section ---
+            VarsConf = cuttlefish_variable:filter_by_prefix(
+                Pfx ++ ".auth.vars", Conf
+            ),
+            Vars = maps:from_list(
+                [{list_to_atom(K), ToBin(V)}
+                 || {[_, _, _, _, _, K], V} <- VarsConf]
+            ),
+
+            %% --- Secrets section ---
+            SecretsProvider = Get(
+                Pfx ++ ".auth.secrets.provider", undefined
+            ),
+            Secrets = case SecretsProvider of
+                undefined ->
+                    undefined;
+                Provider ->
+                    SecretId = case Get(
+                        Pfx ++ ".auth.secrets.secret_id", undefined
+                    ) of
+                        undefined ->
+                            cuttlefish:invalid(
+                                "secret_id is required when secrets.provider "
+                                "is set for service " ++ Name
+                            );
+                        SId -> ToBin(SId)
+                    end,
+                    Region = case Get(
+                        Pfx ++ ".auth.secrets.region", undefined
+                    ) of
+                        undefined ->
+                            cuttlefish:invalid(
+                                "region is required when secrets.provider "
+                                "is set for service " ++ Name
+                            );
+                        R -> ToBin(R)
+                    end,
+
+                    %% Secret var mappings: 8-segment keys
+                    %% [rpc_gateway, services, Name, auth, secrets, vars, VarName, field|transform]
+                    SecretVarsConf = cuttlefish_variable:filter_by_prefix(
+                        Pfx ++ ".auth.secrets.vars", Conf
+                    ),
+                    SecretVarNames = lists:usort(
+                        lists:filtermap(
+                            fun({Key, _}) ->
+                                case Key of
+                                    [_, _, _, _, _, _, VName, _] ->
+                                        {true, VName};
+                                    _ ->
+                                        false
+                                end
+                            end,
+                            SecretVarsConf
+                        )
+                    ),
+                    SecretVars = maps:from_list(lists:filtermap(
+                        fun(VName) ->
+                            VPfx = Pfx ++ ".auth.secrets.vars." ++ VName,
+                            case Get(VPfx ++ ".field", undefined) of
+                                undefined ->
+                                    false;
+                                FieldStr ->
+                                    Transform = Get(
+                                        VPfx ++ ".transform", none
+                                    ),
+                                    {true, {
+                                        list_to_atom(VName),
+                                        #{
+                                            field => ToBin(FieldStr),
+                                            transform => Transform
+                                        }
+                                    }}
+                            end
+                        end,
+                        SecretVarNames
+                    )),
+
+                    #{
+                        provider  => Provider,
+                        secret_id => SecretId,
+                        region    => Region,
+                        vars      => SecretVars
+                    }
+            end,
+
+            %% --- Cache section ---
+            DefaultTTL = Get(Pfx ++ ".auth.cache.default_ttl", 3600),
+            RefreshMargin = Get(Pfx ++ ".auth.cache.refresh_margin", 60),
+
+            Cache = #{
+                default_ttl => DefaultTTL,
+                refresh_margin => RefreshMargin
+            },
+
+            %% --- Pool section ---
+
+            PoolCheckTO = Get(Pfx ++ ".pool.checkout_timeout", '$error'),
+            PoolConnTO = Get(Pfx ++ ".pool.connect_timeout", '$error'),
+            PoolIdleTO = Get(Pfx ++ ".pool.idle_timeout", '$error'),
+            PoolRecvTO = Get(Pfx ++ ".pool.recv_timeout", '$error'),
+            PoolFRTO = Get(Pfx ++ ".pool.follow_redirect", '$error'),
+            PoolMaxRTO = Get(Pfx ++ ".pool.max_redirect", '$error'),
+            PoolSize = Get(Pfx ++ ".pool.size", '$error'),
+
+            Pool = #{
+                checkout_timeout => PoolCheckTO,
+                connect_timeout => PoolConnTO,
+                idle_timeout => PoolIdleTO,
+                recv_timeout => PoolRecvTO,
+                max_redirect => PoolMaxRTO,
+                follow_redirect => PoolFRTO,
+                size => PoolSize
+            },
+
+            %% --- Procedures section ---
+            %% ProcConf = cuttlefish_variable:filter_by_prefix(
+            %%     Pfx ++ ".procedures", Conf
+            %% ),
+            ProcConf = cuttlefish_variable:filter_by_prefix(
+                Pfx, Conf
+            ),
+            ProcMatches = cuttlefish_variable:fuzzy_matches(
+                  cuttlefish_variable:tokenize(Pfx)
+                  ++ ["procedures", "$proc", "uri"],
+                  Conf
+            ),
+            ProcNames = [X || {"@proc", X} <- ProcMatches],
+            Procedures = maps:from_list(lists:map(
+                fun(PName) ->
+                    PPfx = Pfx ++ ".procedures." ++ PName,
+                    PUri = case Get(PPfx ++ ".uri", undefined) of
+                        undefined ->
+                            cuttlefish:invalid(
+                                "uri is required for procedure " ++
+                                PName ++ " in service " ++ Name
+                            );
+                        V -> ToBin(V)
+                    end,
+                    PRealm = case Get(PPfx ++ ".realm", undefined) of
+                        undefined ->
+                            cuttlefish:invalid(
+                                "realm is required for procedure " ++
+                                PName ++ " in service " ++ Name
+                            );
+                        V2 -> ToBin(V2)
+                    end,
+                    PMethod = Get(PPfx ++ ".method", get),
+                    PPath = ToBin(Get(PPfx ++ ".path", "/")),
+                    {ToBin(PName), #{
+                        uri    => PUri,
+                        realm  => PRealm,
+                        method => PMethod,
+                        path   => PPath
+                    }}
+                end,
+                ProcNames
+            )),
+
+            %% --- Assemble service config ---
+            AuthConf0 = #{
+                fetch => Fetch,
+                apply => Apply,
+                vars  => Vars,
+                cache => Cache
+            },
+            AuthConf = case Secrets of
+                undefined -> AuthConf0;
+                _         -> AuthConf0#{secrets => Secrets}
+            end,
+
+            #{
+                name      => ToBin(Name),
+                base_url  => BaseUrl,
+                prefix    => Prefix,
+                auth_mod  => AuthMod,
+                auth_conf => AuthConf,
+                timeout => Timeout,
+                retries => Retries,
+                pool => Pool,
+                procedures => Procedures
+            }
+        end,
+        ServiceNames
+    )
+end}.
