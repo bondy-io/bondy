@@ -554,6 +554,40 @@
         ]
     },
     {
+        "uri": "com.leapsight.longpoll",
+        "description": "A realm for testing longpoll and SSE transports",
+        "authmethods": ["anonymous"],
+        "security_enabled": true,
+        "allow_connections": true,
+        "sources": [
+            {
+                "usernames": ["anonymous"],
+                "authmethod": "anonymous",
+                "cidr": "0.0.0.0/0",
+                "meta": {
+                    "description": "Allows anonymous connections for transport testing."
+                }
+            }
+        ],
+        "groups": [],
+        "grants": [
+            {
+                "permissions": [
+                    "wamp.register",
+                    "wamp.unregister",
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish"
+                ],
+                "uri": "",
+                "match": "prefix",
+                "roles": ["anonymous"]
+            }
+        ]
+    },
+    {
         "uri": "com.market.demo",
         "description": "The market realm",
         "authmethods": [

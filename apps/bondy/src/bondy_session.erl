@@ -59,11 +59,15 @@
     %% Expiration and Limits
     created                         ::  pos_integer(),
     expires_at                      ::  pos_integer() | infinity,
-    meta = #{}                      ::  map()
+    meta = #{}                      ::  map(),
+    %% Transport
+    transport_type                  ::  optional(transport_type()),
+    transport_id                    ::  optional(binary())
 }).
 
 -type peer()                    ::  {inet:ip_address(), inet:port_number()}.
 -type peer_role()               ::  caller | callee | subscriber | publisher.
+-type transport_type()          ::  websocket | tcp | http_sse | http_longpoll.
 -type t()                       ::  #session{}.
 -type t_or_id()                 ::  t() | bondy_session_id:t().
 -type authmethod_details()      ::  #{
@@ -101,7 +105,9 @@
                                             inet:port_number()
                                         },
                                         roles => peer(),
-                                        type => bondy_ref:ref_type()
+                                        type => bondy_ref:ref_type(),
+                                        transport_type => transport_type(),
+                                        transport_id => binary()
                                     }.
 -type match_opts()              ::  #{
                                         limit => pos_integer(),
@@ -129,6 +135,7 @@
 -export_type([peer_role/0]).
 -export_type([properties/0]).
 -export_type([external/0]).
+-export_type([transport_type/0]).
 
 
 
@@ -173,6 +180,8 @@
 -export([size/0]).
 -export([store/1]).
 -export([to_external/1]).
+-export([transport_id/1]).
+-export([transport_type/1]).
 -export([type/1]).
 -export([update/1]).
 -export([user/1]).
@@ -199,7 +208,8 @@ format_status(#session{} = S) ->
     S#session{
         authid = bondy_sensitive:wrap(S#session.authid),
         rbac_context = bondy_sensitive:wrap(S#session.rbac_context),
-        meta = bondy_sensitive:wrap(S#session.meta)
+        meta = bondy_sensitive:wrap(S#session.meta),
+        transport_id = bondy_sensitive:wrap(S#session.transport_id)
     }.
 
 
@@ -262,6 +272,32 @@ new(Id, Realm, Opts) when is_binary(Id) andalso is_map(Opts) ->
 
 type(#session{type = Val}) ->
     Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the transport type for this session, or `undefined` if not set.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec transport_type(t_or_id()) -> optional(transport_type()).
+
+transport_type(#session{transport_type = Val}) ->
+    Val;
+
+transport_type(Id) when is_binary(Id) ->
+    lookup_field(Id, #session.transport_type).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the transport id for this session, or `undefined` if not set.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec transport_id(t_or_id()) -> optional(binary()).
+
+transport_id(#session{transport_id = Val}) ->
+    Val;
+
+transport_id(Id) when is_binary(Id) ->
+    lookup_field(Id, #session.transport_id).
 
 
 %% -----------------------------------------------------------------------------
@@ -942,6 +978,13 @@ parse_properties(type, V, Session) ->
         orelse error({invalid_options, type}),
 
     Session#session{type = V};
+
+parse_properties(transport_type, V, Session)
+when V =:= websocket; V =:= tcp; V =:= http_sse; V =:= http_longpoll ->
+    Session#session{transport_type = V};
+
+parse_properties(transport_id, V, Session) when is_binary(V) ->
+    Session#session{transport_id = V};
 
 parse_properties(_, _, Session) ->
     Session.

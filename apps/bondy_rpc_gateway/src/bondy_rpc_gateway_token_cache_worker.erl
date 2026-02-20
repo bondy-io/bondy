@@ -118,19 +118,23 @@ start_link(PoolName, WorkerName) ->
         {local, WorkerName}, ?MODULE, [PoolName, WorkerName], []
     ).
 
--doc "Returns a token from the ets cache concurrently. If it is not found, call the server to obtain a new token.".
+
+-doc """
+Returns a token from the ets cache concurrently. If it is not found, call the
+server to obtain a new token.
+""".
 -spec get_token(atom(), binary(), module(), map()) ->
     {ok, binary()} | {error, not_found}.
 
 get_token(WorkerName, ServiceName, AuthMod, AuthConf) when is_atom(WorkerName) ->
-    Result = ets:lookup_element(
-        WorkerName, ServiceName, #rpc_gateway_token.token, undefined
-    ),
-    case Result of
+    Default = undefined,
+    Pos = #rpc_gateway_token.token,
+
+    case ets:lookup_element(WorkerName, ServiceName, Pos, Default) of
         undefined ->
-            gen_server:call(
-                WorkerName, {get_token, ServiceName, AuthMod, AuthConf}
-            );
+            Cmd = {get_token, ServiceName, AuthMod, AuthConf},
+            gen_server:call(WorkerName, Cmd);
+
         Token ->
             {ok, Token}
     end.

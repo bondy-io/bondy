@@ -1,0 +1,103 @@
+{
+    "id": "com.leapsight.longpoll",
+    "name": "Longpoll & SSE Test API",
+    "host": "_",
+    "realm_uri": "com.leapsight.longpoll",
+    "status_codes": {
+        "bondy.error.badarg": 400,
+        "bondy.error.not_found": 404,
+        "bondy.error.already_exists": 400,
+        "wamp.error.no_such_procedure": 404
+    },
+    "variables": {
+        "schemes": [
+            "http",
+            "https"
+        ],
+        "headers": {
+            "access-control-allow-origin": "*",
+            "access-control-allow-credentials": "true",
+            "access-control-allow-methods": "GET,HEAD,PUT,PATCH,POST,DELETE",
+            "access-control-allow-headers": "origin,x-requested-with,content-type,accept",
+            "access-control-max-age": "86400"
+        }
+    },
+    "defaults": {
+        "retries": 0,
+        "timeout": 15000,
+        "connect_timeout": 5000,
+        "schemes": "{{variables.schemes}}",
+        "headers": "{{variables.headers}}"
+    },
+    "versions": {
+        "1.0.0": {
+            "base_path": "/longpoll-test/[v1.0]",
+            "variables": {},
+            "defaults": {
+                "timeout": 20000
+            },
+            "languages": [
+                "en"
+            ],
+            "paths": {
+                "/call": {
+                    "summary": "Perform an arbitrary WAMP call via the API Gateway.",
+                    "description": "Useful for testing longpoll and SSE transports by triggering WAMP RPC procedures.",
+                    "is_collection": false,
+                    "post": {
+                        "action": {
+                            "type": "wamp_call",
+                            "procedure": "{{request.body.procedure}}",
+                            "options": "{{request.body.options}}",
+                            "args": "{{request.body.args}}",
+                            "kwargs": "{{request.body.kwargs}}"
+                        },
+                        "response": {
+                            "on_error": {
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body": {
+                                    "error_uri": "{{action.error.error_uri}}",
+                                    "args": "{{action.error.args}}",
+                                    "kwargs": "{{action.error.kwargs}}",
+                                    "details": "{{action.error.details}}"
+                                }
+                            },
+                            "on_result": {
+                                "body": {
+                                    "args": "{{action.result.args}}",
+                                    "kwargs": "{{action.result.kwargs}}",
+                                    "details": "{{action.result.details}}"
+                                }
+                            }
+                        }
+                    }
+                },
+                "/publish": {
+                    "summary": "Publish a WAMP event via the API Gateway.",
+                    "description": "Useful for testing event delivery over longpoll and SSE transports.",
+                    "is_collection": false,
+                    "post": {
+                        "action": {
+                            "type": "wamp_publish",
+                            "topic": "{{request.body.topic}}",
+                            "options": "{{request.body.options}}",
+                            "args": "{{request.body.args}}",
+                            "kwargs": "{{request.body.kwargs}}"
+                        },
+                        "response": {
+                            "on_error": {
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body": {
+                                    "error_uri": "{{action.error.error_uri}}"
+                                }
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

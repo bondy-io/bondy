@@ -16,6 +16,7 @@
 -define(WAMP2_JSON_BATCHED,<<"wamp.2.json.batched">>).
 -define(WAMP2_BERT_BATCHED,<<"wamp.2.bert.batched">>).
 -define(WAMP2_ERL_BATCHED,<<"wamp.2.erl.batched">>).
+-define(WAMP2_JSON_SSE, <<"wamp.2.json.sse">>).
 
 -define(WAMP_ENCODINGS, [
     json,
@@ -40,7 +41,7 @@
                             | erl_batched.
 
 -type frame_type()      ::  text | binary.
--type transport()       ::  ws | raw.
+-type transport()       ::  ws | raw | http_sse | http_longpoll.
 -type subprotocol()     ::  {transport(), frame_type(), encoding()}.
 
 

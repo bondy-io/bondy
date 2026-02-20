@@ -20,7 +20,9 @@
 -include_lib("partisan/include/partisan_util.hrl").
 
 -type subprotocol_2()        ::  subprotocol()
-                                | {http, text, json | msgpack}.
+                                | {http, text, json | msgpack}
+                                | {http_sse, text, json}
+                                | {http_longpoll, text, json}.
 
 
 -type t()       ::  #{

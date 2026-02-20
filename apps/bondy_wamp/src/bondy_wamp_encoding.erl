@@ -85,7 +85,13 @@ decode({ws, binary, Enc}, Data) ->
     decode_binary(Data, Enc, opts(Enc, decode), []);
 
 decode({raw, binary, Enc}, Data) ->
-    decode_binary(Data, Enc, opts(Enc, decode), []).
+    decode_binary(Data, Enc, opts(Enc, decode), []);
+
+decode({http_sse, text, json = Enc}, Data) ->
+    decode({http_sse, text, json}, Data, opts(Enc, decode));
+
+decode({http_longpoll, text, json = Enc}, Data) ->
+    decode({http_longpoll, text, json}, Data, opts(Enc, decode)).
 
 
 %% -----------------------------------------------------------------------------
@@ -105,7 +111,13 @@ decode({ws, binary, Enc}, Data, Opts) ->
     decode_binary(Data, Enc, Opts, []);
 
 decode({raw, binary, Enc}, Data, Opts) ->
-    decode_binary(Data, Enc, Opts, []).
+    decode_binary(Data, Enc, Opts, []);
+
+decode({http_sse, text, json}, Data, Opts) ->
+    decode_text(Data, json, Opts, []);
+
+decode({http_longpoll, text, json}, Data, Opts) ->
+    decode_text(Data, json, Opts, []).
 
 
 

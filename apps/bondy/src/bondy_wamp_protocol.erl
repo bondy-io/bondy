@@ -11,7 +11,9 @@
 -include("bondy_security.hrl").
 
 -define(SHUTDOWN_TIMEOUT, 5000).
--define(IS_TRANSPORT(X), (T =:= ws orelse T =:= raw)).
+-define(IS_TRANSPORT(X),
+    (X =:= ws orelse X =:= raw orelse X =:= http_sse orelse X =:= http_longpoll)
+).
 
 -record(wamp_state, {
     subprotocol             ::  subprotocol() | undefined,
@@ -222,6 +224,10 @@ validate_subprotocol({ws, binary, erl_batched} = S) ->
 validate_subprotocol({raw, binary, json} = S) ->
     {ok, S};
 validate_subprotocol({raw, binary, erl} = S) ->
+    {ok, S};
+validate_subprotocol({http_sse, text, json} = S) ->
+    {ok, S};
+validate_subprotocol({http_longpoll, text, json} = S) ->
     {ok, S};
 validate_subprotocol({T, binary, msgpack} = S) when ?IS_TRANSPORT(T) ->
     {ok, S};
@@ -1064,6 +1070,7 @@ subprotocol(?WAMP2_BERT) ->                 {ws, binary, bert};
 subprotocol(?WAMP2_ERL) ->                  {ws, binary, erl};
 subprotocol(?WAMP2_BERT_BATCHED) ->         {ws, binary, bert_batched};
 subprotocol(?WAMP2_ERL_BATCHED) ->          {ws, binary, erl_batched};
+subprotocol(?WAMP2_JSON_SSE) ->             {http_sse, text, json};
 subprotocol(_) ->                           {error, invalid_subprotocol}.
 
 

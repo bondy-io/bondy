@@ -1034,10 +1034,26 @@ handle_spec_updates(#state{updated_specs = L}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 base_routes() ->
-    %% The WS entrypoint required for WAMP WS subprotocol
+    %% The WS entrypoint required for WAMP WS subprotocol,
+    %% SSE transport endpoints, and Longpoll transport endpoints
     [
         {'_', [
-            {"/ws", bondy_wamp_ws_connection_handler, #{}}
+            {"/ws", bondy_wamp_ws_connection_handler, #{}},
+            {"/wamp/sse/open", bondy_http_sse_handler, #{action => open}},
+            {"/wamp/sse/:transport_id/receive",
+                bondy_http_sse_stream_handler, #{}},
+            {"/wamp/sse/:transport_id/send",
+                bondy_http_sse_handler, #{action => send}},
+            {"/wamp/sse/:transport_id/close",
+                bondy_http_sse_handler, #{action => close}},
+            {"/wamp/longpoll/open",
+                bondy_http_longpoll_handler, #{action => open}},
+            {"/wamp/longpoll/:transport_id/receive",
+                bondy_http_longpoll_handler, #{action => receive_msgs}},
+            {"/wamp/longpoll/:transport_id/send",
+                bondy_http_longpoll_handler, #{action => send}},
+            {"/wamp/longpoll/:transport_id/close",
+                bondy_http_longpoll_handler, #{action => close}}
         ]}
     ].
 
