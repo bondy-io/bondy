@@ -3,24 +3,66 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% This module implements a generic Cowboy rest handler that handles a resource
-%% specified using the Bondy API Gateway Specification Format (BAGS),
-%% a JSON-based format for describing, producing and consuming
-%% RESTful Web Services using Bondy.
-%%
-%% For every path defined in a BAGS file, Bondy will configure and install a
-%% Cowboy route using this module. The initial state of the module responds to
-%% a contract between this module and the {@link bondy_http_gateway_api_spec_parser}
-%% and contains the parsed and preprocessed definition of the paths
-%% specification which this module uses to dynamically implement its behaviour.
-%%
-%% See {@link bondy_http_gateway} for a detail description of the
-%% Bondy API Gateway Specification Format.
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_http_gateway_rest_handler).
+
+-moduledoc """
+Generic Cowboy REST handler driven by the Bondy API Gateway Specification.
+
+For every path defined in a BAGS (Bondy API Gateway Specification) JSON
+document, `bondy_http_gateway` installs a Cowboy route that dispatches
+to this module. The handler's initial state is the parsed and
+pre-processed path specification produced by
+`bondy_http_gateway_api_spec_parser`, which this module uses to
+dynamically implement all Cowboy REST callbacks at runtime.
+
+## Request lifecycle
+
+```
+Cowboy REST
+  init/2                  → build request context (id, method, path, headers, ...)
+  is_authorized/2         → validate OAuth2 / API-key / anonymous
+  resource_exists/2       → collection awareness (POST on collection → 201)
+  content_types_*/2       → from parsed spec (accepts / provides)
+  allowed_methods/2       → from parsed spec
+  provide/2  (GET/HEAD)   → perform_action → evaluate on_result MOPS template
+  do_accept/2 (POST/PUT/PATCH) → read body → perform_action → on_result
+  delete_resource/2       → perform_action → on_result
+```
+
+## Action execution
+
+Each HTTP method section in the spec contains an action that is executed
+when that method is called:
+
+- `wamp_call` — calls a WAMP RPC procedure via `bondy:call/5` and maps
+  the WAMP result/error through the `on_result`/`on_error` MOPS
+  response templates
+- `wamp_publish` — publishes to a WAMP topic via
+  `bondy_broker:publish/5`
+- `forward` — proxies the request to an upstream HTTP service via
+  hackney and maps the HTTP response through the response templates
+- `static` — returns a statically defined body and headers
+
+## MOPS context
+
+A context map is threaded through the request and made available to all
+MOPS expressions:
+
+- `request` — method, scheme, path, host, headers, query_params,
+  bindings, body, body_length
+- `action.result` — populated after a successful action
+- `action.error` — populated after a failed action
+- `security` — populated after OAuth2 authentication (realm_uri,
+  session, authid, groups, etc.)
+
+## WAMP error → HTTP status code
+
+WAMP error URIs are mapped to HTTP status codes. The spec's
+`status_codes` map can override the defaults. Built-in mappings
+include `wamp.error.not_found` → 404, `wamp.error.not_authorized` →
+401, `wamp.error.invalid_argument` → 400, etc.
+""".
+
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
@@ -73,8 +115,13 @@
 %% =============================================================================
 
 
-%% TODO The value for 'body' is not a of type '[map,binary,tuple]' (return body)
+-doc """
+Initialises the Cowboy REST handler.
 
+Builds the initial API context from the request (method, path, headers,
+query params, bindings) and stores it in the handler state alongside
+the parsed API spec received from the dispatch table.
+""".
 init(Req, St0) ->
     %% TODO Set session will now be required by bondy_auth:init
     Session = undefined, %TODO
@@ -92,22 +139,33 @@ init(Req, St0) ->
     {cowboy_rest, Req, St1}.
 
 
+-doc "Returns the list of allowed HTTP methods from the parsed API spec.".
 allowed_methods(Req, #{api_spec := Spec} = St) ->
     {maps:get(<<"allowed_methods">>, Spec), Req, St}.
 
 
+-doc "Returns the list of supported languages from the API version spec.".
 languages_provided(Req, #{languages := L} = St) ->
     {L, Req, St}.
 
 
+-doc "Returns the accepted content types from the parsed API spec.".
 content_types_accepted(Req, #{api_spec := Spec} = St) ->
     {maps:get(<<"content_types_accepted">>, Spec), Req, St}.
 
 
+-doc "Returns the provided content types from the parsed API spec.".
 content_types_provided(Req, #{api_spec := Spec} = St) ->
     {maps:get(<<"content_types_provided">>, Spec), Req, St}.
 
 
+-doc """
+Handles an OPTIONS request.
+
+Returns the allowed methods in the `Allow` and
+`Access-Control-Allow-Methods` response headers, along with any
+headers defined in the spec's error response template.
+""".
 options(Req, #{api_spec := Spec} = St) ->
     Allowed = iolist_to_binary(
         lists:join(<<$,>>, maps:get(<<"allowed_methods">>, Spec))
@@ -123,6 +181,20 @@ options(Req, #{api_spec := Spec} = St) ->
     {ok, set_resp_headers(Headers2, Req), St}.
 
 
+-doc """
+Authenticates the request based on the path's security configuration.
+
+Behaviour depends on the security type in the spec:
+
+- `oauth2` — extracts a Bearer token, decodes the JWT, and
+  authenticates via `bondy_auth`. On success the security claims are
+  added to the MOPS context. On failure a `401 Unauthorized` response
+  is returned with a `WWW-Authenticate` header.
+- `api_key` — currently unsupported; returns `false`.
+- No security / empty — the request is treated as anonymous.
+
+Also initialises the proxy protocol and extracts the source IP.
+""".
 is_authorized(Req0, St0) ->
     try
 
@@ -191,23 +263,34 @@ is_authorized(Req0, St0) ->
     end.
 
 
+-doc "Always returns `false`; authorisation happens during action execution.".
 forbidden(Req, St) ->
     %% TODO add feature to spec
     %% At the moment authorizacion happens during action execution
     {false, Req, St}.
 
 
+-doc "Always returns `false`; expiration is not yet configurable via the spec.".
 expires(Req, St) ->
     %% TODO add feature to spec
     {false, Req, St}.
 
 
+-doc "Always returns `false`; rate limiting is not yet implemented.".
 rate_limited(Req, St) ->
     %% TODO implement this callback
     %% Result :: false | {true, RetryAfter}
     {false, Req, St}.
 
 
+-doc """
+Determines whether the resource exists.
+
+For collection resources (`is_collection` is `true`), returns `false`
+on POST (so Cowboy returns `201 Created`) and `true` otherwise. For
+non-collection resources, always returns `true` and defers the real
+existence check to the action (which may return a 404).
+""".
 resource_exists(Req, #{api_spec := Spec} = St) ->
     IsCollection = maps:get(<<"is_collection">>, Spec, false),
     Method = cowboy_req:method(Req),
@@ -230,11 +313,19 @@ resource_exists(Req, #{api_spec := Spec} = St) ->
     {Resp, Req, St}.
 
 
+-doc "Always returns `false`; tombstone tracking is not yet implemented.".
 previously_existed(Req, St) ->
     %% TODO
     {false, Req, St}.
 
 
+-doc """
+Handles a DELETE request by executing the configured action.
+
+Evaluates the action for the `delete` method in the API spec and
+returns the result. On success sets response headers; on error replies
+with the mapped HTTP status code.
+""".
 delete_resource(Req0, #{api_spec := Spec} = St0) ->
     Method = method(Req0),
     Enc = json,
@@ -260,34 +351,38 @@ delete_resource(Req0, #{api_spec := Spec} = St0) ->
     end.
 
 
+-doc "Always returns `true`; deletes are assumed to be final and synchronous.".
 delete_completed(Req, St) ->
-    %% Called after delete_resource
-    %% We assume deletes are final and synchronous
     {true, Req, St}.
 
 
+-doc "Provides the resource representation as JSON for GET/HEAD requests.".
 to_json(Req, St) ->
     provide(Req, St#{encoding => json}).
 
 
+-doc "Provides the resource representation as MessagePack for GET/HEAD requests.".
 to_msgpack(Req, St) ->
     provide(Req, St#{encoding => msgpack}).
 
 
+-doc "Accepts a JSON request body for POST/PUT/PATCH requests.".
 from_json(Req, St) ->
     do_accept(Req, St#{encoding => json}).
 
 
+-doc "Accepts a MessagePack request body for POST/PUT/PATCH requests.".
 from_msgpack(Req, St) ->
     do_accept(Req, St#{encoding => msgpack}).
 
 
+-doc "Accepts a URL-encoded form body for POST/PUT/PATCH requests.".
 from_form_urlencoded(Req, St) ->
     do_accept(Req, St#{encoding => urlencoded}).
 
 
+-doc "Accepts a request body with a content type not matched by the specific handlers.".
 accept(Req0, St0) ->
-    %% Encoding is not JSON, MSGPACK or URLEncoded
     ContentType = cowboy_req:header(<<"content-type">>, Req0),
     do_accept(Req0, St0#{encoding => ContentType}).
 
@@ -391,13 +486,14 @@ authenticate(Token, Ctxt0, Req0, St0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Provides the resource representation for a GET or HEAD
-%% executing the configured action
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Provides the resource representation for a GET or HEAD request.
+
+Executes the configured action for the current HTTP method, then
+evaluates the `on_result` MOPS response template to produce the
+response body and headers. On error, evaluates the `on_error`
+template and replies with the mapped HTTP status code.
+""".
 provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
     Method = method(Req0),
     try perform_action(Method, maps:get(Method, Spec), St0) of
