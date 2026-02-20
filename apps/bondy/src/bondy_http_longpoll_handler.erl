@@ -49,7 +49,6 @@ same identifiers as the WAMP spec. The handler determines the transport type
 
 
 init(Req0, #{action := open} = State) ->
-    io:format(">>>>>>>>>>>>>>>>>> Open\n ~p", [Req0]),
     handle_open(Req0, State);
 
 init(Req0, #{action := send} = State) ->
