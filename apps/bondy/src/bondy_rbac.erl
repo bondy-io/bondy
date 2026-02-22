@@ -169,6 +169,7 @@
 -export([get_anonymous_context/2]).
 -export([get_context/1]).
 -export([get_context/2]).
+-export([get_metadata/2]).
 -export([grant/2]).
 -export([grant/3]).
 -export([grants/2]).
@@ -324,6 +325,25 @@ get_context(RealmUri, Username)
 when is_binary(Username) orelse Username == anonymous ->
     get_context(RealmUri, Username, grants(RealmUri, Username, user)).
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+get_metadata(_, anonymous) ->
+    #{};
+
+get_metadata(RealmUri, Username) ->
+    case bondy_rbac_user:lookup(RealmUri, Username) of
+        {ok, User} ->
+            Acc = bondy_rbac_user:meta(User),
+            ProtoUri = bondy_realm:prototype_uri(RealmUri),
+            RealmProto = {RealmUri, ProtoUri},
+            do_get_metadata(bondy_rbac_user:groups(User), RealmProto, Acc);
+
+        {error, not_found} ->
+            #{}
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -790,6 +810,27 @@ permission_denied_message(
         utf8
     ).
 
+
+
+%% @private
+do_get_metadata([H|T] = L , {RealmUri, ProtoUri} = RealmProto, Acc0) ->
+    case bondy_rbac_group:lookup(RealmUri, H) of
+        {error, not_found} when ProtoUri == undefined ->
+            Acc0;
+
+        {error, not_found} ->
+            do_get_metadata(L, RealmProto, Acc0);
+
+        Group ->
+            %% TODO: Make bondy_rbac_group:lookup/2 return a result
+            Acc = maps:merge(Acc0, bondy_rbac_group:meta(Group)),
+            do_get_metadata(
+                T ++ bondy_rbac_group:groups(Group), RealmProto, Acc
+            )
+    end;
+
+do_get_metadata([], _, Acc) ->
+    Acc.
 
 
 %% =============================================================================

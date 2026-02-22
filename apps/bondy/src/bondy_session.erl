@@ -55,6 +55,7 @@
     security_enabled = true         ::  boolean(),
     is_anonymous = false            ::  boolean(),
     rbac_context                    ::  optional(bondy_rbac:context()),
+    rbac_metadata                   ::  optional(map()),
     is_persistent = false           ::  boolean(),
     %% Expiration and Limits
     created                         ::  pos_integer(),
@@ -173,6 +174,7 @@
 -export([peer/1]).
 -export([pid/1]).
 -export([rbac_context/1]).
+-export([rbac_metadata/1]).
 -export([realm_uri/1]).
 -export([ref/1]).
 -export([refresh_rbac_context/1]).
@@ -676,6 +678,36 @@ rbac_context(Id) when is_binary(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec rbac_metadata(t_or_id()) -> map().
+
+rbac_metadata(#session{id = Id} = Session) ->
+    %% We force the lookup to go to ets by passing Id as we want the latest
+    %% updated value
+    try lookup_field(Id, #session.rbac_metadata) of
+        undefined ->
+            Meta = get_rbac_metadata(Session),
+            ok = update_rbac_metadata(Id, Meta),
+            Meta;
+        Meta ->
+            Meta
+    catch
+        error:badarg ->
+            %% Session not in ets, the case for an HTTP session
+            get_rbac_metadata(Session)
+    end;
+
+rbac_metadata(Id) when is_binary(Id) ->
+    case lookup_field(Id, #session.rbac_metadata) of
+        undefined ->
+            rbac_metadata(fetch(Id));
+        Meta ->
+            Meta
+    end.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec refresh_rbac_context(t_or_id()) -> bondy_rbac:context().
 
 refresh_rbac_context(#session{id = Id} = Session) ->
@@ -842,7 +874,7 @@ to_external(#session{} = S) ->
         true ->
             #{};
         false ->
-            #{meta => bondy_rbac_user:meta(user(S))}
+            #{meta => S#session.rbac_metadata}
     end,
 
     #{
@@ -1083,6 +1115,11 @@ update_rbac_context(Id, Context) ->
     _ = ets:update_element(Tab, Id, {#session.rbac_context, Context}),
     ok.
 
+%% @private
+update_rbac_metadata(Id, Meta) ->
+    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
+    _ = ets:update_element(Tab, Id, {#session.rbac_metadata, Meta}),
+    ok.
 
 %% @private
 do_match(Tabs, Bindings, Opts0) ->
@@ -1248,6 +1285,14 @@ get_rbac_context(#session{is_anonymous = true, realm_uri = Uri}) ->
 
 get_rbac_context(#session{authid = Authid, realm_uri = Uri}) ->
     bondy_rbac:get_context(Uri, Authid).
+
+
+%% @private
+get_rbac_metadata(#session{is_anonymous = true, realm_uri = Uri}) ->
+    bondy_rbac:get_metadata(Uri, anonymous);
+
+get_rbac_metadata(#session{authid = Authid, realm_uri = Uri}) ->
+    bondy_rbac:get_metadata(Uri, Authid).
 
 
 %% @private
