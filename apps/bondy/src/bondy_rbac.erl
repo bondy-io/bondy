@@ -336,9 +336,9 @@ get_metadata(_, anonymous) ->
 get_metadata(RealmUri, Username) ->
     case bondy_rbac_user:lookup(RealmUri, Username) of
         {ok, User} ->
-            Acc = bondy_rbac_user:meta(User),
             ProtoUri = bondy_realm:prototype_uri(RealmUri),
             RealmProto = {RealmUri, ProtoUri},
+            Acc = maps:to_list(bondy_rbac_user:meta(User)),
             do_get_metadata(bondy_rbac_user:groups(User), RealmProto, Acc);
 
         {error, not_found} ->
@@ -811,26 +811,29 @@ permission_denied_message(
     ).
 
 
-
 %% @private
-do_get_metadata([H|T] = L , {RealmUri, ProtoUri} = RealmProto, Acc0) ->
+do_get_metadata([H|T] = L0 , {RealmUri, ProtoUri} = RealmProto, Acc0) ->
     case bondy_rbac_group:lookup(RealmUri, H) of
         {error, not_found} when ProtoUri == undefined ->
             Acc0;
 
         {error, not_found} ->
-            do_get_metadata(L, RealmProto, Acc0);
+            %% Swap realm
+            do_get_metadata(L0, RealmProto, Acc0);
 
         Group ->
             %% TODO: Make bondy_rbac_group:lookup/2 return a result
-            Acc = maps:merge(Acc0, bondy_rbac_group:meta(Group)),
-            do_get_metadata(
-                T ++ bondy_rbac_group:groups(Group), RealmProto, Acc
-            )
+            Acc = [maps:to_list(bondy_rbac_group:meta(Group)) | Acc0],
+            L = T ++ bondy_rbac_group:groups(Group),
+            do_get_metadata(L, RealmProto, Acc)
     end;
 
 do_get_metadata([], _, Acc) ->
-    Acc.
+    maps:groups_from_list(
+        fun({K, _}) -> K end,
+        fun({_, V}) -> V end,
+        lists:flatten(Acc)
+    ).
 
 
 %% =============================================================================
