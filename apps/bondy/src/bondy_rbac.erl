@@ -122,6 +122,7 @@
 -record(bondy_rbac_context, {
     realm_uri               ::  binary(),
     username                ::  binary(),
+    explicit_groups = []    ::  [binary()],
     exact_grants = #{}      ::  #{permission() => Resources :: [binary()]},
     pattern_grants          ::  [grant()],
     epoch                   ::  integer(),
@@ -169,7 +170,9 @@
 -export([get_anonymous_context/2]).
 -export([get_context/1]).
 -export([get_context/2]).
+-export([get_context/3]).
 -export([get_metadata/2]).
+-export([get_metadata/3]).
 -export([grant/2]).
 -export([grant/3]).
 -export([grants/2]).
@@ -281,7 +284,13 @@ refresh_context(#bondy_rbac_context{realm_uri = Uri} = Context) ->
             {true, Ctxt};
         false ->
             %% context has expired
-            Ctxt = get_context(Uri, Context#bondy_rbac_context.username),
+            Username = Context#bondy_rbac_context.username,
+            Ctxt = case Context#bondy_rbac_context.explicit_groups of
+                [_ | _] = Groups ->
+                    get_context(Uri, Username, Groups);
+                _ ->
+                    get_context(Uri, Username)
+            end,
             {true, Ctxt};
         _ ->
             {false, Context}
@@ -310,7 +319,7 @@ get_anonymous_context(Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 get_anonymous_context(RealmUri, Username) ->
-    Ctxt = get_context(RealmUri, Username, grants(RealmUri, anonymous, group)),
+    Ctxt = build_context(RealmUri, Username, grants(RealmUri, anonymous, group)),
     Ctxt#bondy_rbac_context{is_anonymous = true}.
 
 
@@ -323,7 +332,49 @@ get_anonymous_context(RealmUri, Username) ->
 
 get_context(RealmUri, Username)
 when is_binary(Username) orelse Username == anonymous ->
-    get_context(RealmUri, Username, grants(RealmUri, Username, user)).
+    build_context(RealmUri, Username, grants(RealmUri, Username, user)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns an RBAC context for `Username' with explicit group memberships.
+%%
+%% Used for claim-based sessions (e.g. OIDC) where the user may not have a
+%% local `bondy_rbac_user' record but carries group memberships from the
+%% Identity Provider. The explicit groups are traversed for their grants in
+%% addition to the `all' group and any direct user grants.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_context(
+    RealmUri :: uri(),
+    Username :: binary() | anonymous,
+    ExplicitGroups :: [binary()]
+) -> context().
+
+get_context(RealmUri, Username, ExplicitGroups)
+when (is_binary(Username) orelse Username == anonymous)
+andalso is_list(ExplicitGroups) ->
+    ProtoUri = bondy_realm:prototype_uri(RealmUri),
+    RealmProto = {RealmUri, ProtoUri},
+
+    %% 'all' grants always apply
+    Acc0 = lists:map(
+        fun({{all, Resource}, Permissions}) ->
+            {{<<"group/all">>, Resource}, Permissions}
+        end,
+        lists:append(
+            find_grants(RealmUri, {all, '_'}, group),
+            find_grants(ProtoUri, {all, '_'}, group)
+        )
+    ),
+
+    %% Traverse explicit groups (from IdP claims) for their grants
+    {Acc1, Seen1} = acc_grants(ExplicitGroups, group, RealmProto, [], Acc0),
+
+    %% Also gather direct user grants (if any exist in grant tables)
+    {Acc2, _} = acc_grants([Username], user, RealmProto, Seen1, Acc1),
+
+    build_context(
+        RealmUri, Username, group_grants(lists:flatten(Acc2)), ExplicitGroups).
 
 
 %% -----------------------------------------------------------------------------
@@ -343,6 +394,21 @@ get_metadata(RealmUri, Username) ->
 
         {error, not_found} ->
             #{}
+    end.
+
+
+get_metadata(RealmUri, Username, Groups) ->
+    ProtoUri = bondy_realm:prototype_uri(RealmUri),
+    RealmProto = {RealmUri, ProtoUri},
+
+    case bondy_rbac_user:lookup(RealmUri, Username) of
+        {ok, User} ->
+            Acc = maps:to_list(bondy_rbac_user:meta(User)),
+            do_get_metadata(Groups, RealmProto, Acc);
+
+        {error, not_found} ->
+            %% When IDP is not Bondy
+            do_get_metadata(Groups, RealmProto, [])
     end.
 
 
@@ -681,7 +747,12 @@ check_permission_pattern({Action, Resource}, Ctxt) ->
 
 
 %% @private
-get_context(RealmUri, Username, Grants) ->
+build_context(RealmUri, Username, Grants) ->
+    build_context(RealmUri, Username, Grants, []).
+
+
+%% @private
+build_context(RealmUri, Username, Grants, ExplicitGroups) ->
     {Exact, Pattern} = lists:foldl(
         fun
             ({any, Permissions}, {Map, L}) ->
@@ -697,6 +768,7 @@ get_context(RealmUri, Username, Grants) ->
     #bondy_rbac_context{
         realm_uri = RealmUri,
         username = Username,
+        explicit_groups = ExplicitGroups,
         exact_grants = Exact,
         pattern_grants = Pattern,
         epoch = erlang:system_time(second),

@@ -73,7 +73,16 @@
 -type t_or_id()                 ::  t() | bondy_session_id:t().
 -type authmethod_details()      ::  #{
                                         id => bondy_ticket:ticket_id(),
-                                        scope => bondy_ticket:scope()
+                                        authrealm => uri(),
+                                        scope => bondy_ticket:scope(),
+                                        oidc_provider =>
+                                            optional(binary()),
+                                        oidc_refresh_token =>
+                                            optional(binary()),
+                                        oidc_access_token_expires_at =>
+                                            optional(pos_integer()),
+                                        oidc_refresh_entry_id =>
+                                            optional(binary())
                                     }.
 -type external()                ::  #{
                                         session => id(),
@@ -97,6 +106,8 @@
                                         agent => binary(),
                                         authid => binary(),
                                         authmethod => binary(),
+                                        authmethod_details =>
+                                            authmethod_details(),
                                         authrealm => uri(),
                                         authrole => binary(),
                                         authroles => [binary()],
@@ -186,6 +197,7 @@
 -export([transport_type/1]).
 -export([type/1]).
 -export([update/1]).
+-export([update_authmethod_details/2]).
 -export([user/1]).
 
 -ifdef(TEST).
@@ -350,6 +362,22 @@ store(#session{} = S0) ->
 update(#session{id = Id} = S) ->
     Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
     true = ets:insert(Tab, S),
+    ok.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Updates the `authmethod_details` for the session identified by `Id`
+%% directly in ETS.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec update_authmethod_details(
+    bondy_session_id:t(), authmethod_details()
+) -> ok.
+
+update_authmethod_details(Id, Details)
+when is_binary(Id) andalso is_map(Details) ->
+    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
+    _ = ets:update_element(Tab, Id, {#session.authmethod_details, Details}),
     ok.
 
 
@@ -624,7 +652,7 @@ authmethod(Session) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec authmethod_details(t_or_id()) -> optional(binary()).
+-spec authmethod_details(t_or_id()) -> optional(authmethod_details()).
 
 authmethod_details(Session) ->
     lookup_field(Session, #session.authmethod_details).
@@ -1018,6 +1046,9 @@ when V =:= websocket; V =:= tcp; V =:= http_sse; V =:= http_longpoll ->
 parse_properties(transport_id, V, Session) when is_binary(V) ->
     Session#session{transport_id = V};
 
+parse_properties(authmethod_details, V, Session) when is_map(V) ->
+    Session#session{authmethod_details = V};
+
 parse_properties(_, _, Session) ->
     Session.
 
@@ -1283,6 +1314,11 @@ maybe_and(Clauses) ->
 get_rbac_context(#session{is_anonymous = true, realm_uri = Uri}) ->
     bondy_rbac:get_context(Uri, anonymous);
 
+get_rbac_context(#session{
+    authid = Authid, realm_uri = Uri, authroles = Roles
+}) when is_list(Roles), Roles =/= [] ->
+    bondy_rbac:get_context(Uri, Authid, Roles);
+
 get_rbac_context(#session{authid = Authid, realm_uri = Uri}) ->
     bondy_rbac:get_context(Uri, Authid).
 
@@ -1305,6 +1341,24 @@ maybe_revoke_tickets(Session, ?WAMP_CLOSE_LOGOUT) ->
                 scope := Scope
             } = authmethod_details(Session),
             bondy_ticket:revoke(Authrealm, Authid, Scope);
+
+        ?OIDCRP_AUTH ->
+            case authmethod_details(Session) of
+                #{id := TicketId, authrealm := Authrealm, scope := Scope}
+                = Details
+                when TicketId =/= undefined ->
+                    %% Remove from refresh queue
+                    case maps:find(oidc_refresh_entry_id, Details) of
+                        {ok, EntryId} when is_binary(EntryId) ->
+                            bondy_oidc_refresh_worker:remove_entry(EntryId);
+                        _ ->
+                            ok
+                    end,
+                    Authid = authid(Session),
+                    bondy_ticket:revoke(Authrealm, Authid, Scope);
+                _ ->
+                    ok
+            end;
 
         ?WAMP_OAUTH2_AUTH ->
             %% TODO remove token for sessionID

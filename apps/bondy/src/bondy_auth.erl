@@ -25,14 +25,14 @@
     realm_uri := uri(),
     sso_realm_uri := uri(),
     session_id := optional(bondy_session_id:t()),
-    user := optional(bondy_rbac_user:t()),
-    user_id := optional(binary()),
-    available_methods := [binary()],
-    role := binary(),
-    roles := [binary()],
     source_ip := inet:ip_address(),
+    user_id := binary(),
+    user := optional(bondy_rbac_user:t()),
+    available_methods := [binary()],
+    role := optional(binary()),
+    roles := optional([binary()]),
     host := optional(binary()),
-    provider => binary(),
+    provider => optional(binary()),
     method => binary(),
     callback_mod => module(),
     callback_mod_state => term()
@@ -66,6 +66,8 @@
 -export([available_methods/2]).
 -export([challenge/3]).
 -export([host/1]).
+-export([init/3]).
+-export([init/4]).
 -export([init/5]).
 -export([init/6]).
 -export([issuer/1]).
@@ -140,15 +142,85 @@ format_status(Ctxt) ->
 %% API
 %% =============================================================================
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Only valid for transport-level authentication e.g. cookie
+""".
 -spec init(
     SessionId :: bondy_session_id:t(),
     Realm :: bondy_realm:t() | uri(),
-    UserId :: binary() | anonymous,
+    SourceIP :: inet:ip_address()) ->
+    {ok, context()}
+    | {error,
+        {no_such_user, binary()}
+        | {no_such_realm, binary()}
+        | no_such_group
+    }
+    | no_return().
+
+init(SessionId, Uri, SourceIP) ->
+    init(SessionId, Uri, SourceIP, #{}).
+
+
+-doc """
+Only valid for transport-level authentication e.g. cookie
+""".
+-spec init(
+    SessionId :: bondy_session_id:t(),
+    Realm :: bondy_realm:t() | uri(),
+    SourceIP :: inet:ip_address(),
+    Opts :: opts()) ->
+    {ok, context()}
+    | {error,
+        {no_such_user, binary()}
+        | {no_such_realm, binary()}
+        | no_such_group
+    }
+    | no_return().
+
+init(SessionId, Uri, SourceIP, Opts)
+when is_binary(SessionId), is_binary(Uri), ?IS_IP(SourceIP) ->
+    case bondy_realm:lookup(string:casefold(Uri)) of
+        {ok, Realm} ->
+            init(SessionId, Realm, SourceIP, Opts);
+
+        {error, not_found} ->
+            {error, {no_such_realm, Uri}}
+    end;
+
+init(SessionId, Realm, SourceIP, Opts)
+when is_binary(SessionId), is_tuple(Realm), ?IS_IP(SourceIP), is_map(Opts) ->
+    try
+        RealmUri = bondy_realm:uri(Realm),
+        SSORealmUri = bondy_realm:sso_realm_uri(Realm),
+
+        Ctxt = #{
+            provider => ?BONDY_AUTH_PROVIDER,
+            session_id => SessionId,
+            realm_uri => RealmUri,
+            sso_realm_uri => SSORealmUri,
+            source_ip => SourceIP,
+            host => maps:get(host, Opts, undefined),
+            user_id => undefined,
+            user => undefined,
+            role => undefined,
+            roles => undefined
+        },
+        Methods = compute_available_methods(Realm, Ctxt),
+        {ok, maps:put(available_methods, Methods, Ctxt)}
+
+    catch
+        throw:Reason ->
+            {error, Reason}
+    end.
+
+
+-doc """
+WAMP-level authentication.
+""".
+-spec init(
+    SessionId :: bondy_session_id:t(),
+    Realm :: bondy_realm:t() | uri(),
+    UserId :: binary() | anonymous | undefined,
     Roles :: all | binary() | [binary()] | undefined,
     SourceIP :: inet:ip_address()) ->
     {ok, context()}
@@ -170,7 +242,7 @@ init(SessionId, Uri, UserId, Roles, SourceIP) ->
 -spec init(
     SessionId :: bondy_session_id:t(),
     Realm :: bondy_realm:t() | uri(),
-    UserId :: binary() | anonymous,
+    UserId :: binary() | anonymous | undefined,
     Roles :: all | binary() | [binary()] | undefined,
     SourceIP :: inet:ip_address(),
     Opts :: opts()) ->
@@ -198,26 +270,20 @@ when is_binary(SessionId), is_tuple(Realm), ?IS_IP(SourceIP), is_map(Opts) ->
         RealmUri = bondy_realm:uri(Realm),
         SSORealmUri = bondy_realm:sso_realm_uri(Realm),
 
-        %% Username1 can be an alias
-        Username1 = casefold(Username0),
-        User = get_user(RealmUri, SSORealmUri, Username1),
-        Username = bondy_rbac_user:username(User),
-        {Role, Roles} = valid_roles(Roles0, User),
-
-        Ctxt = #{
-            provider => ?BONDY_AUTH_PROVIDER,
-            session_id => SessionId,
-            realm_uri => RealmUri,
-            sso_realm_uri => SSORealmUri,
-            user_id => Username,
-            user => User,
-            role => Role,
-            roles => Roles,
-            source_ip => SourceIP,
-            host => maps:get(host, Opts, undefined)
-        },
-        Methods = compute_available_methods(Realm, Ctxt),
-        {ok, maps:put(available_methods, Methods, Ctxt)}
+        case maps:find(claims, Opts) of
+            {ok, _Claims} ->
+                %% Transport-level auth with claims — tolerate missing user
+                init_from_claims(
+                    SessionId, Realm, RealmUri, SSORealmUri,
+                    Username0, Roles0, SourceIP, Opts
+                );
+            error ->
+                %% Standard WAMP auth — user lookup required
+                init_from_user(
+                    SessionId, Realm, RealmUri, SSORealmUri,
+                    Username0, Roles0, SourceIP, Opts
+                )
+        end
 
     catch
         throw:Reason ->
@@ -625,10 +691,14 @@ compute_available_methods(Realm, Ctxt) ->
 
 
 %% @private
-do_compute_available_methods(Ctxt, RealmAllowed) ->
+
+do_compute_available_methods(#{user := undefined}, RealmAllowed) ->
+    %% Not perfect, this is the case of cookies.
+    RealmAllowed;
+
+do_compute_available_methods(#{user_id := UserId} = Ctxt, RealmAllowed) ->
     #{
         realm_uri := RealmUri,
-        user_id := UserId,
         source_ip := IPAddress
     } = Ctxt,
 
@@ -708,7 +778,9 @@ matches_requirements(Method, #{user_id := UserId, user := User}) ->
 get_user(_, _, undefined) ->
     undefined;
 
-get_user(RealmUri, SSORealmUri, UsernameOrAlias) ->
+get_user(RealmUri, SSORealmUri, UsernameOrAlias0) ->
+    UsernameOrAlias = casefold(UsernameOrAlias0),
+
     case bondy_rbac_user:lookup(RealmUri, UsernameOrAlias) of
         {error, not_found} when SSORealmUri =:= undefined ->
             throw({no_such_user, UsernameOrAlias});
@@ -734,6 +806,69 @@ get_user(RealmUri, SSORealmUri, UsernameOrAlias) ->
             %% credentials, they will be overridden by those from the SSO.
             bondy_rbac_user:resolve(User)
     end.
+
+
+%% @private
+init_from_claims(
+    SessionId, Realm, RealmUri, SSORealmUri,
+    Username, Roles, SourceIP, Opts
+) ->
+    %% Try to find the user but don't fail if not found
+    User = try
+        get_user(RealmUri, SSORealmUri, Username)
+    catch
+        throw:{no_such_user, _} -> undefined
+    end,
+
+    %% For claims-based auth, we trust the provided roles even without
+    %% a user record. If the user exists, we validate against their groups.
+    {Role, ValidRoles} = case User of
+        undefined ->
+            {undefined, Roles};
+        _ ->
+            valid_roles(Roles, User)
+    end,
+
+    Ctxt = #{
+        provider => ?BONDY_AUTH_PROVIDER,
+        session_id => SessionId,
+        realm_uri => RealmUri,
+        sso_realm_uri => SSORealmUri,
+        user_id => Username,
+        user => User,
+        role => Role,
+        roles => ValidRoles,
+        source_ip => SourceIP,
+        host => maps:get(host, Opts, undefined)
+    },
+    Methods = compute_available_methods(Realm, Ctxt),
+    {ok, maps:put(available_methods, Methods, Ctxt)}.
+
+
+%% @private
+init_from_user(
+    SessionId, Realm, RealmUri, SSORealmUri,
+    Username0, Roles0, SourceIP, Opts
+) ->
+    %% Username0 can be an alias, undefined or anonymous
+    User = get_user(RealmUri, SSORealmUri, Username0),
+    Username = bondy_rbac_user:username(User),
+    {Role, Roles} = valid_roles(Roles0, User),
+
+    Ctxt = #{
+        provider => ?BONDY_AUTH_PROVIDER,
+        session_id => SessionId,
+        realm_uri => RealmUri,
+        sso_realm_uri => SSORealmUri,
+        user_id => Username,
+        user => User,
+        role => Role,
+        roles => Roles,
+        source_ip => SourceIP,
+        host => maps:get(host, Opts, undefined)
+    },
+    Methods = compute_available_methods(Realm, Ctxt),
+    {ok, maps:put(available_methods, Methods, Ctxt)}.
 
 
 %% @private

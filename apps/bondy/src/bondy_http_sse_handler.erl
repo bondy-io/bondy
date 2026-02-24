@@ -18,8 +18,11 @@ Handles three actions:
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("http_api.hrl").
 
+-behaviour(cowboy_loop).
 
 -export([init/2]).
+-export([info/3]).
+-export([terminate/3]).
 
 
 -define(SUPPORTED_PROTOCOLS, [?WAMP2_JSON_SSE]).
@@ -32,14 +35,24 @@ Handles three actions:
 
 
 
-init(Req0, #{action := open} = State) ->
-    handle_open(Req0, State);
+init(Req0, State) ->
+    Req = cowboy_req:set_resp_headers(cors_headers(Req0), Req0),
+    case cowboy_req:method(Req) of
+        <<"OPTIONS">> ->
+            Req1 = cowboy_req:reply(?HTTP_OK, #{}, <<>>, Req),
 
-init(Req0, #{action := send} = State) ->
-    handle_send(Req0, State);
+            {ok, Req1, State};
+        _ ->
+            dispatch(Req, State)
+    end.
 
-init(Req0, #{action := close} = State) ->
-    handle_close(Req0, State).
+
+info(_Msg, Req, State) ->
+    {ok, Req, State}.
+
+
+terminate(_Reason, _Req, _State) ->
+    ok.
 
 
 
@@ -47,6 +60,17 @@ init(Req0, #{action := close} = State) ->
 %% PRIVATE
 %% =============================================================================
 
+
+
+%% @private
+dispatch(Req0, #{action := open} = State) ->
+    handle_open(Req0, State);
+
+dispatch(Req0, #{action := send} = State) ->
+    handle_send(Req0, State);
+
+dispatch(Req0, #{action := close} = State) ->
+    handle_close(Req0, State).
 
 
 %% @private
@@ -62,6 +86,19 @@ handle_open(Req0, State) ->
 
 %% @private
 do_handle_open(Req0, State) ->
+    case validate_csrf(Req0) of
+        {error, forbidden} ->
+            Req1 = reply_error(
+                ?HTTP_FORBIDDEN, <<"csrf_validation_failed">>, Req0
+            ),
+            {ok, Req1, State};
+        ok ->
+            do_handle_open_body(Req0, State)
+    end.
+
+
+%% @private
+do_handle_open_body(Req0, State) ->
     {ok, Body, Req1} = cowboy_req:read_body(Req0),
 
     try json:decode(Body) of
@@ -121,6 +158,8 @@ open_session(Protocol, Req0, State) ->
                 Pid, Subprotocol, Peer
             ) of
                 ok ->
+                    %% Pass bondy_ticket cookie if present
+                    ok = maybe_set_auth_ticket(Pid, Req0),
                     ReplyBody = json:encode(#{
                         <<"protocol">> => Protocol,
                         <<"transport">> => TransportId
@@ -173,6 +212,19 @@ handle_send(Req0, State) ->
 
 %% @private
 do_handle_send(Req0, State) ->
+    case validate_csrf(Req0) of
+        {error, forbidden} ->
+            Req1 = reply_error(
+                ?HTTP_FORBIDDEN, <<"csrf_validation_failed">>, Req0
+            ),
+            {ok, Req1, State};
+        ok ->
+            do_handle_send_body(Req0, State)
+    end.
+
+
+%% @private
+do_handle_send_body(Req0, State) ->
     TransportId = cowboy_req:binding(transport_id, Req0),
 
     case bondy_http_transport_session:whereis(TransportId) of
@@ -180,25 +232,38 @@ do_handle_send(Req0, State) ->
             Req1 = reply_error(?HTTP_NOT_FOUND, <<"transport_not_found">>, Req0),
             {ok, Req1, State};
         Pid ->
-            {ok, Body, Req1} = cowboy_req:read_body(Req0),
-            bondy_http_transport_session:touch(Pid),
-
-            case bondy_http_transport_session:handle_client_message(Pid, Body) of
-                ok ->
-                    Req2 = cowboy_req:reply(?HTTP_ACCEPTED, #{}, <<>>, Req1),
-                    {ok, Req2, State};
-                {error, Reason} ->
-                    ?LOG_WARNING(#{
-                        description => "Error handling client message",
-                        transport_id => TransportId,
-                        reason => Reason
-                    }),
-                    Req2 = reply_error(
-                        ?HTTP_BAD_REQUEST,
-                        <<"message_error">>,
-                        Req1
+            case validate_auth_ticket(Pid, Req0) of
+                {error, unauthorized} ->
+                    Req1 = reply_error(
+                        ?HTTP_UNAUTHORIZED, <<"unauthorized">>, Req0
                     ),
-                    {ok, Req2, State}
+                    {ok, Req1, State};
+                ok ->
+                    {ok, Body, Req1} = cowboy_req:read_body(Req0),
+                    bondy_http_transport_session:touch(Pid),
+
+                    case bondy_http_transport_session:handle_client_message(
+                        Pid, Body
+                    ) of
+                        ok ->
+                            Req2 = cowboy_req:reply(
+                                ?HTTP_ACCEPTED, #{}, <<>>, Req1
+                            ),
+                            {ok, Req2, State};
+                        {error, Reason} ->
+                            ?LOG_WARNING(#{
+                                description =>
+                                    "Error handling client message",
+                                transport_id => TransportId,
+                                reason => Reason
+                            }),
+                            Req2 = reply_error(
+                                ?HTTP_BAD_REQUEST,
+                                <<"message_error">>,
+                                Req1
+                            ),
+                            {ok, Req2, State}
+                    end
             end
     end.
 
@@ -216,10 +281,40 @@ handle_close(Req0, State) ->
 
 %% @private
 do_handle_close(Req0, State) ->
+    case validate_csrf(Req0) of
+        {error, forbidden} ->
+            Req1 = reply_error(
+                ?HTTP_FORBIDDEN, <<"csrf_validation_failed">>, Req0
+            ),
+            {ok, Req1, State};
+        ok ->
+            do_handle_close_body(Req0, State)
+    end.
+
+
+%% @private
+do_handle_close_body(Req0, State) ->
     TransportId = cowboy_req:binding(transport_id, Req0),
-    bondy_http_transport_session:close(TransportId),
-    Req1 = cowboy_req:reply(?HTTP_ACCEPTED, #{}, <<>>, Req0),
-    {ok, Req1, State}.
+
+    case bondy_http_transport_session:whereis(TransportId) of
+        undefined ->
+            Req1 = cowboy_req:reply(?HTTP_ACCEPTED, #{}, <<>>, Req0),
+            {ok, Req1, State};
+        Pid ->
+            case validate_auth_ticket(Pid, Req0) of
+                {error, unauthorized} ->
+                    Req1 = reply_error(
+                        ?HTTP_UNAUTHORIZED, <<"unauthorized">>, Req0
+                    ),
+                    {ok, Req1, State};
+                ok ->
+                    bondy_http_transport_session:close(Pid),
+                    Req1 = cowboy_req:reply(
+                        ?HTTP_ACCEPTED, #{}, <<>>, Req0
+                    ),
+                    {ok, Req1, State}
+            end
+    end.
 
 
 %% @private
@@ -233,6 +328,88 @@ select_protocol(ClientProtocols) when is_list(ClientProtocols) ->
 
 select_protocol(_) ->
     {error, no_supported_protocol}.
+
+
+%% @private
+maybe_set_auth_ticket(Pid, Req) ->
+    Cookies = cowboy_req:parse_cookies(Req),
+    case lists:keyfind(<<"bondy_ticket">>, 1, Cookies) of
+        {_, Ticket} when is_binary(Ticket) andalso Ticket =/= <<>> ->
+            case bondy_ticket:verify(Ticket) of
+                {ok, Claims} ->
+                    bondy_http_transport_session:set_auth_claims(Pid, Claims);
+                {error, Reason} ->
+                    ?LOG_WARNING(#{
+                        description =>
+                            "Invalid bondy_ticket cookie at /open",
+                        reason => Reason
+                    }),
+                    ok
+            end;
+        _ ->
+            ok
+    end.
+
+
+%% @private
+validate_csrf(Req) ->
+    Cookies = cowboy_req:parse_cookies(Req),
+    case lists:keyfind(<<"bondy_ticket">>, 1, Cookies) of
+        false ->
+            %% No ticket cookie — non-OIDC flow, skip CSRF
+            ok;
+        _ ->
+            CsrfHeader = cowboy_req:header(
+                <<"x-csrf-token">>, Req, undefined
+            ),
+            CsrfCookie = case lists:keyfind(<<"bondy_csrf">>, 1, Cookies) of
+                {_, V} -> V;
+                false -> undefined
+            end,
+            case is_binary(CsrfHeader) andalso is_binary(CsrfCookie)
+                    andalso CsrfHeader =:= CsrfCookie of
+                true -> ok;
+                false -> {error, forbidden}
+            end
+    end.
+
+
+%% @private
+validate_auth_ticket(Pid, Req) ->
+    case bondy_http_transport_session:auth_claims(Pid) of
+        undefined ->
+            %% No OIDC claims — non-cookie flow, skip validation
+            ok;
+        StoredClaims ->
+            Cookies = cowboy_req:parse_cookies(Req),
+            case lists:keyfind(<<"bondy_ticket">>, 1, Cookies) of
+                false ->
+                    {error, unauthorized};
+                {_, Ticket} ->
+                    case bondy_ticket:verify(Ticket) of
+                        {ok, #{
+                            authid := Authid, authrealm := Authrealm
+                        }} ->
+                            #{
+                                authid := ExpAuthid,
+                                authrealm := ExpAuthrealm
+                            } = StoredClaims,
+                            case Authid =:= ExpAuthid
+                                    andalso Authrealm =:= ExpAuthrealm of
+                                true -> ok;
+                                false -> {error, unauthorized}
+                            end;
+                        {error, _} ->
+                            {error, unauthorized}
+                    end
+            end
+    end.
+
+
+%% @private
+cors_headers(Req) ->
+    Origin = cowboy_req:header(<<"origin">>, Req, <<"*">>),
+    begin ?CORS_HEADERS end#{<<"access-control-allow-origin">> => Origin}.
 
 
 %% @private

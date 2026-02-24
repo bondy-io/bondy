@@ -308,6 +308,104 @@
         required => true,
         default => fun gen_encryption_keys/0,
         validator => fun validate_encryption_keys/1
+    },
+    <<"info">> => #{
+        alias => info,
+        key => info,
+        required => false,
+        default => #{},
+        validator => ?INFO_VALIDATOR
+    }
+}).
+
+-define(INFO_VALIDATOR, #{
+    <<"oidc_providers">> => #{
+        alias => oidc_providers,
+        key => oidc_providers,
+        required => false,
+        validator => {map, {binary, ?OIDC_PROVIDER}}
+    }
+}).
+
+-define(OIDC_PROVIDER, #{
+    <<"authid_claim">> => #{
+        alias => authid_claim,
+        key => authid_claim,
+        required => true,
+        default => <<"preferred_username">>,
+        datatype => binary
+    },
+    <<"auto_provision">> => #{
+        alias => auto_provision,
+        key => auto_provision,
+        required => true,
+        default => true,
+        datatype => boolean
+    },
+    <<"client_id">> => #{
+        alias => client_id,
+        key => client_id,
+        required => true,
+        datatype => binary
+    },
+    <<"client_secret">> => #{
+        alias => client_secret,
+        key => client_secret,
+        required => true,
+        datatype => binary
+    },
+    <<"issuer">> => #{
+        alias => issuer,
+        key => issuer,
+        required => true,
+        datatype => binary
+    },
+    <<"redirect_uri">> => #{
+        alias => redirect_uri,
+        key => redirect_uri,
+        required => true,
+        datatype => binary
+    },
+    <<"scopes">> => #{
+        alias => scopes,
+        key => scopes,
+        required => true,
+        default => [<<"openid">>,<<"profile">>,<<"email">>],
+        datatype => {list, binary}
+    },
+    <<"role_claim">> => #{
+        alias => role_claim,
+        key => role_claim,
+        required => true,
+        default => <<"roles">>,
+        datatype => binary
+    },
+    <<"role_claim_fallback">> => #{
+        alias => role_claim_fallback,
+        key => role_claim_fallback,
+        required => true,
+        default => <<"role">>,
+        datatype => binary
+    },
+    <<"role_mapping">> => #{
+        alias => role_mapping,
+        key => role_mapping,
+        required => false,
+        default => #{},
+        datatype => map
+    },
+    <<"ticket_expiry_secs">> => #{
+        alias => ticket_expiry_secs,
+        key => ticket_expiry_secs,
+        required => false,
+        datatype => integer
+    },
+    <<"allow_unsafe_http">> => #{
+        alias => allow_unsafe_http,
+        key => allow_unsafe_http,
+        required => true,
+        default => false,
+        datatype => boolean
     }
 }).
 
@@ -417,6 +515,13 @@
         key => encryption_keys,
         required => false,
         validator => fun validate_encryption_keys/1
+    },
+    <<"info">> => #{
+        alias => info,
+        key => info,
+        required => false,
+        default => #{},
+        validator => ?INFO_VALIDATOR
     }
 }).
 
@@ -670,10 +775,12 @@
 -export([get_public_key/2]).
 -export([get_random_encryption_kid/1]).
 -export([get_random_kid/1]).
+-export([get_oidc_provider/2]).
 -export([info/1]).
 -export([is_allowed_authmethod/2]).
 -export([is_allowed_sso_realm/2]).
 -export([is_prototype/1]).
+-export([oidc_providers/1]).
 -export([is_security_enabled/1]).
 -export([is_sso_realm/1]).
 -export([is_type/1]).
@@ -1278,6 +1385,49 @@ info(#realm{info = Info}) ->
 
 info(Uri) when is_binary(Uri) ->
     info(fetch(Uri)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the OIDC providers configuration map for the given realm.
+%% Returns an empty map if no providers are configured.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec oidc_providers(Realm :: t() | uri()) -> [map()].
+
+oidc_providers(#realm{info = Info}) ->
+    maps:get(oidc_providers, Info, []);
+
+oidc_providers(Uri) when is_binary(Uri) ->
+    oidc_providers(fetch(Uri)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Looks up a specific OIDC provider configuration by name.
+%% Returns `{ok, Config}' or `{error, not_found}'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_oidc_provider(Realm :: t() | uri(), ProviderName :: binary()) ->
+    {ok, map()} | {error, not_found}.
+
+get_oidc_provider(Realm, ProviderName) when is_binary(ProviderName) ->
+    case maps:get(ProviderName, oidc_providers(Realm), not_found) of
+        not_found ->
+            {error, not_found};
+        Value ->
+            {ok, maybe_migrate_provider_config(Value)}
+    end.
+
+
+%% @private
+%% Removes ticket_expiry_secs from provider configs where the value matches
+%% the old hardcoded validator default (3600). This allows the handler to
+%% fall through to the global bondy.conf setting. Explicitly set values
+%% (different from the old default) are preserved.
+maybe_migrate_provider_config(#{ticket_expiry_secs := 3600} = Config) ->
+    maps:remove(ticket_expiry_secs, Config);
+
+maybe_migrate_provider_config(Config) ->
+    Config.
 
 
 %% -----------------------------------------------------------------------------
@@ -2180,6 +2330,9 @@ fold_props(private_keys, V, Realm) ->
 
 fold_props(encryption_keys, V, Realm) ->
     set_encryption_keys(Realm, V);
+
+fold_props(info, V, Realm) ->
+    Realm#realm{info = V};
 
 fold_props(_, _, Realm) ->
     %% We ignote the rest of the properties.

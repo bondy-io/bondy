@@ -31,7 +31,7 @@ admin_api.https.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
 admin_api.https.certfile = ${BONDY_ETC_DIR}/ssl/server/keycert.pem
 admin_api.https.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
 
-api_gateway.config_file = ${BONDY_ETC_DIR}/api_gateway_config.json
+api_gateway.config_file = ${BONDY_ETC_DIR}/api_spec.json
 api_gateway.http.acceptors_pool_size = 200
 api_gateway.http.backlog = 4096
 api_gateway.http.keepalive = off
@@ -159,5 +159,16 @@ admin_api.http.proxy_protocol.mode = relaxed
 vm.io.dirty_schedulers = 128
 
 
-security.oidc.providers.msft.client_id=foo
-security.oidc.providers.msft.client_secret=bar
+security.ticket.max_expiry_time = 30d
+security.ticket.expiry_time = 30d
+security.ticket.scope.local.persistence = on
+security.ticket.scope.sso.persistence = on
+security.ticket.scope.client_local.persistence = on
+security.ticket.scope.client_sso.persistence = on
+security.ticket.allow_not_found = on
+security.ticket.authmethods = all
+
+security.oidc.providers.oidc-mock.client_id=${OIDC_CLIENT_ID}
+security.oidc.providers.oidc-mock.client_secret=${OIDC_CLIENT_SECRET}
+security.oidc.providers.oidc-mock.redirect_path=/oidc/oidc-mock/callback
+security.oidc.providers.oidc-mock.login_path=/oidc/login

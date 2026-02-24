@@ -416,6 +416,26 @@ mappings is always present (e.g. `wamp.error.not_found` → 404,
     }
 }).
 
+-define(OIDC_SPEC, #{
+    <<"type">> => #{
+        alias => type,
+        required => true,
+        allow_null => false,
+        datatype => {in, [<<"oidc">>]}
+    },
+    <<"provider">> => #{
+        alias => provider,
+        required => true,
+        allow_null => false,
+        datatype => binary
+    },
+    <<"description">> => #{
+        alias => description,
+        required => false,
+        datatype => binary
+    }
+}).
+
 -define(OAUTH2_SPEC, #{
     <<"type">> => #{
         alias => type,
@@ -520,6 +540,8 @@ mappings is always present (e.g. `wamp.error.not_found` → 404,
         validator => fun
             (#{<<"type">> := <<"oauth2">>} = V) ->
                 {ok, maps_utils:validate(V, ?OAUTH2_SPEC)};
+            (#{<<"type">> := <<"oidc">>} = V) ->
+                {ok, maps_utils:validate(V, ?OIDC_SPEC)};
             (#{<<"type">> := <<"basic">>} = V) ->
                 {ok, maps_utils:validate(V, ?BASIC)};
             (#{<<"type">> := <<"api_key">>} = V) ->
@@ -1678,6 +1700,29 @@ security_scheme_rules(
         {S, Host, Realm, <<BasePath/binary, Revoke/binary>>, Mod, St},
         %% Json Web Key Set path, in which we publish the public
         {S, Host, Realm, <<BasePath/binary, "/oauth/jwks">>, Mod, St}
+    ];
+
+security_scheme_rules(
+    S, Host, BasePath, Realm,
+    #{<<"type">> := <<"oidc">>, <<"provider">> := Provider}) ->
+
+    St = #{
+        realm_uri => Realm,
+        provider => Provider,
+        base_path => BasePath
+    },
+
+    Mod = bondy_oidc_handler,
+    [
+        {S, Host, Realm,
+            <<BasePath/binary, "/oidc/login">>,
+            Mod, St#{action => login}},
+        {S, Host, Realm,
+            <<BasePath/binary, "/oidc/", Provider/binary, "/callback">>,
+            Mod, St#{action => callback}},
+        {S, Host, Realm,
+            <<BasePath/binary, "/oidc/logout">>,
+            Mod, St#{action => logout}}
     ];
 
 security_scheme_rules(_, _, _, _, _) ->

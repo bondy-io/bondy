@@ -53,55 +53,88 @@ intermediaries from closing the connection.
 
 
 init(Req0, Opts) ->
-    TransportId = cowboy_req:binding(transport_id, Req0),
+    Req1 = cowboy_req:set_resp_headers(cors_headers(Req0), Req0),
+    TransportId = cowboy_req:binding(transport_id, Req1),
 
     case bondy_http_transport_session:whereis(TransportId) of
         undefined ->
             ReplyBody = json:encode(#{
                 <<"error">> => <<"transport_not_found">>
             }),
-            Req1 = cowboy_req:reply(
+            Req = cowboy_req:reply(
                 ?HTTP_NOT_FOUND,
                 #{<<"content-type">> => <<"application/json">>},
                 ReplyBody,
-                Req0
+                Req1
             ),
-            {ok, Req1, Opts};
+            {ok, Req, Opts};
 
         SessionPid ->
-            %% Register as SSE stream with the transport session
-            ok = bondy_http_transport_session:register_sse_stream(
-                SessionPid, self()
-            ),
+            case validate_sse_auth(SessionPid, Req1) of
+                {error, unauthorized} ->
+                    ReplyBody = json:encode(#{
+                        <<"error">> => <<"unauthorized">>
+                    }),
+                    Req = cowboy_req:reply(
+                        ?HTTP_UNAUTHORIZED,
+                        #{<<"content-type">> => <<"application/json">>},
+                        ReplyBody,
+                        Req1
+                    ),
+                    {ok, Req, Opts};
+                ok ->
+                    %% Register as SSE stream with the transport session
+                    ok = bondy_http_transport_session:register_sse_stream(
+                        SessionPid, self()
+                    ),
 
-            %% Monitor the session process
-            MonRef = erlang:monitor(process, SessionPid),
+                    %% Monitor the session process
+                    MonRef = erlang:monitor(process, SessionPid),
 
-            %% Get encoding for this transport
-            Encoding = bondy_http_transport_session:encoding(SessionPid),
+                    %% Get encoding for this transport
+                    Encoding = bondy_http_transport_session:encoding(
+                        SessionPid
+                    ),
 
-            %% Start SSE stream response
-            Headers = #{
-                <<"content-type">> =>
-                    <<"text/event-stream; charset=utf-8">>,
-                <<"cache-control">> => <<"no-cache">>,
-                <<"x-accel-buffering">> => <<"no">>
-            },
-            Req1 = cowboy_req:stream_reply(200, Headers, Req0),
+                    %% Start SSE stream response
+                    Headers = #{
+                        <<"content-type">> =>
+                            <<"text/event-stream; charset=utf-8">>,
+                        <<"cache-control">> => <<"no-cache">>,
+                        <<"x-accel-buffering">> => <<"no">>
+                    },
+                    Req = cowboy_req:stream_reply(200, Headers, Req1),
 
-            %% Schedule initial drain and keepalive
-            self() ! drain_queue,
-            KeepaliveRef = schedule_keepalive(),
+                    IdleTimeout = bondy_config:get(
+                        [wamp_sse, idle_timeout],
+                        timer:minutes(10)
+                    ),
+                    ResetOnSend = bondy_config:get(
+                        [wamp_sse, reset_idle_timeout_on_send],
+                        true
+                    ),
+                    ok = cowboy_req:cast(
+                        {set_options, #{
+                          idle_timeout => IdleTimeout,
+                          reset_idle_timeout_on_send => ResetOnSend
+                        }},
+                        Req
+                    ),
 
-            State = #state{
-                transport_id = TransportId,
-                session_pid = SessionPid,
-                session_mon = MonRef,
-                encoding = Encoding,
-                keepalive_ref = KeepaliveRef
-            },
+                    %% Schedule initial drain and keepalive
+                    self() ! drain_queue,
+                    KeepaliveRef = schedule_keepalive(),
 
-            {cowboy_loop, Req1, State}
+                    State = #state{
+                        transport_id = TransportId,
+                        session_pid = SessionPid,
+                        session_mon = MonRef,
+                        encoding = Encoding,
+                        keepalive_ref = KeepaliveRef
+                    },
+
+                    {cowboy_loop, Req, State}
+            end
     end.
 
 
@@ -181,6 +214,37 @@ terminate(_Reason, _Req, _State) ->
 
 
 %% @private
+validate_sse_auth(SessionPid, Req) ->
+    case bondy_http_transport_session:auth_claims(SessionPid) of
+        undefined ->
+            ok;
+        StoredClaims ->
+            Cookies = cowboy_req:parse_cookies(Req),
+            case lists:keyfind(<<"bondy_ticket">>, 1, Cookies) of
+                false ->
+                    {error, unauthorized};
+                {_, Ticket} ->
+                    case bondy_ticket:verify(Ticket) of
+                        {ok, #{
+                            authid := Authid, authrealm := Authrealm
+                        }} ->
+                            #{
+                                authid := ExpAuthid,
+                                authrealm := ExpAuthrealm
+                            } = StoredClaims,
+                            case Authid =:= ExpAuthid
+                                    andalso Authrealm =:= ExpAuthrealm of
+                                true -> ok;
+                                false -> {error, unauthorized}
+                            end;
+                        {error, _} ->
+                            {error, unauthorized}
+                    end
+            end
+    end.
+
+
+%% @private
 schedule_keepalive() ->
     Interval = bondy_config:get(
         [http_sse, keepalive_interval], ?DEFAULT_KEEPALIVE_INTERVAL
@@ -201,3 +265,9 @@ send_wamp_events(Messages, Req, #state{encoding = Encoding}) ->
         Messages
     ),
     cowboy_req:stream_events(Events, nofin, Req).
+
+
+%% @private
+cors_headers(Req) ->
+    Origin = cowboy_req:header(<<"origin">>, Req, <<"*">>),
+    begin ?CORS_HEADERS end#{<<"access-control-allow-origin">> => Origin}.

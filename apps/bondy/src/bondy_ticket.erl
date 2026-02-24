@@ -200,13 +200,19 @@
                             id                  :=  ticket_id(),
                             authrealm           :=  uri(),
                             authid              :=  authid(),
+                            authroles           :=  [binary()],
                             authmethod          :=  binary(),
                             issued_by           :=  authid(),
                             issued_on           :=  node(),
                             issued_at           :=  pos_integer(),
                             expires_at          :=  pos_integer(),
                             scope               :=  scope(),
-                            kid                 :=  binary()
+                            kid                 :=  binary(),
+                            %% Optional OIDC fields
+                            oidc_provider       =>  binary(),
+                            oidc_refresh_token  =>  binary(),
+                            oidc_access_token_expires_at
+                                                =>  pos_integer()
                         }.
 -type opts()        ::  #{
                             expiry_time_secs    =>  pos_integer(),
@@ -248,6 +254,8 @@
 -export([revoke_all/1]).
 -export([revoke_all/2]).
 -export([revoke_all/3]).
+-export([store_ticket/3]).
+-export([update_claims/3]).
 -export([verify/1]).
 
 
@@ -560,6 +568,38 @@ remove_expired() ->
     % plum_db:fold_elements(Fun, ok, Prefix, Opts).
 
     ok.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Updates the claims stored in PlumDB for an existing ticket. This is used
+%% by the OIDC refresh worker to update OIDC tokens (refresh_token,
+%% access_token_expires_at) without re-issuing the ticket.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec update_claims(
+    AuthRealmUri :: uri(),
+    Authid :: bondy_rbac_user:username(),
+    UpdateFun :: fun((t()) -> t())
+) -> ok | {error, not_found}.
+
+update_claims(AuthRealmUri, Authid, UpdateFun)
+when is_binary(AuthRealmUri) andalso is_binary(Authid)
+andalso is_function(UpdateFun, 1) ->
+    Scope = #{realm => all, client_id => all, device_id => all},
+    Prefix = ?PLUM_DB_PREFIX(AuthRealmUri),
+    Key = lookup_key(Authid, Scope),
+    Opts = [{resolver, fun ticket_resolver/2}, {allow_put, true}],
+
+    case plum_db:get(Prefix, Key, Opts) of
+        undefined ->
+            {error, not_found};
+        Claims when is_map(Claims) ->
+            UpdatedClaims = UpdateFun(Claims),
+            ok = plum_db:put(Prefix, Key, UpdatedClaims);
+        _List ->
+            %% For list-type entries (client-scoped), not supported for OIDC
+            {error, not_found}
+    end.
 
 
 %% ===========================================================================

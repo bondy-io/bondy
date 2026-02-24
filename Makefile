@@ -152,6 +152,9 @@ prodtarrun: tar
 node1:
 	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} as node1 release
+	@set -a && \
+    [ -f .env ] && . .env && \
+    set +a && \
 	ERL_DIST_PORT=27781 _build/node1/rel/bondy/bin/bondy console
 
 node1-clean:

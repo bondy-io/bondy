@@ -50,6 +50,10 @@ init([]) ->
         ?EVENT_MANAGER(bondy_wamp_event_manager, permanent, 5000),
         ?SUPERVISOR(bondy_jobs_sup, [], permanent, infinity),
         ?SUPERVISOR(bondy_registry_sup, [], permanent, infinity),
+        %% OIDC support
+        ?WORKER(bondy_oidc_state, [], permanent, 5000),
+        ?SUPERVISOR(bondy_oidc_provider_sup, [], permanent, infinity),
+        ?SUPERVISOR(bondy_oidc_refresh_sup, [], permanent, infinity),
         ?SUPERVISOR(bondy_session_manager_sup, [], permanent, infinity),
         ?WORKER(bondy_rpc_promise_manager, [], permanent, 5000),
         ?WORKER(bondy_transport_queue_manager, [], permanent, 5000),

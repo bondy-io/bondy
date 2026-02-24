@@ -42,9 +42,7 @@ init(Ctxt) ->
 
         User = bondy_auth:user(Ctxt),
         User =/= undefined orelse throw(invalid_context),
-
         {ok, maps:new()}
-
     catch
         throw:Reason ->
             {error, Reason}
@@ -99,10 +97,11 @@ authenticate(Ticket, _, Ctxt, State) ->
     RealmUri = bondy_auth:realm_uri(Ctxt),
     UserId = bondy_auth:user_id(Ctxt),
 
-    % Opts = #{},
-
     case bondy_ticket:verify(Ticket) of
-        {ok, #{authid := UserId, scope := #{realm := Uri}} = Claims}
+        {ok, #{
+            authid := UserId,
+            scope := #{realm := Uri}
+        } = Claims}
         when Uri == undefined orelse Uri == RealmUri ->
             Extra = #{
                 authmethod_details => #{

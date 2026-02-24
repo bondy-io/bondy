@@ -74,7 +74,7 @@
     {
         "uri" : "com.leapsight.test",
         "description" : "A test realm",
-        "authmethods" : ["cryptosign", "wampcra", "anonymous", "oauth2", "password", "trust", "ticket"],
+        "authmethods" : ["cryptosign", "wampcra", "oauth2", "password", "trust", "ticket", "oidcrp", "cookie"],
         "security_enabled" : true,
         "allow_connections": true,
         "private_keys": [
@@ -139,12 +139,12 @@
             {
                 "name" : "resource_owners",
                 "groups" : [],
-                "meta" : {}
+                "meta" : {"baz": 100}
             },
             {
                 "name" : "microservices",
                 "groups" : [],
-                "meta" : {}
+                "meta" : {"foo": 200}
             },
             {
                 "name" : "applications",
@@ -164,7 +164,7 @@
             {
                 "name" : "account_user",
                 "groups" : [],
-                "meta" : {}
+                "meta" : {"bar": 100}
             }
         ],
         "sources" : [
@@ -291,7 +291,26 @@
                     {"uri" : "bondy.", "match": "prefix"}
                 ]
             }
-        ]
+        ],
+        "info": {
+            "oidc_providers": {
+                "${OIDC_PROVIDER_ID}": {
+                    "issuer": "${OIDC_PROVIDER_URL}",
+                    "client_id": "${OIDC_CLIENT_ID}",
+                    "client_secret": "${OIDC_CLIENT_SECRET}",
+                    "redirect_uri": "${OIDC_REDIRECT_URI}",
+                    "scopes": ["openid", "profile", "email", "roles"],
+                    "authid_claim": "preferred_username",
+                    "auto_provision": false,
+                    "ticket_expiry_secs": 2592000,
+                    "allow_unsafe_http": true,
+                    "role_mapping": {
+                        "AZURE_WellIOS_ServiceProgrammer": "resource_owners",
+                        "AZURE_WellOS_MU_GSJ": "api_clients"
+                    }
+                }
+            }
+        }
     },
     {
         "uri" : "com.leapsight.test_1",
@@ -550,40 +569,6 @@
                 "authorized_keys": ["1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd"],
                 "groups" : ["apps"],
                 "comment": "for testing the corresponding priv key is '4ffddd896a530ce5ee8c86b83b0d31835490a97a9cd718cb2f09c9fd31c4a7d71766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd'"
-            }
-        ]
-    },
-    {
-        "uri": "com.leapsight.longpoll",
-        "description": "A realm for testing longpoll and SSE transports",
-        "authmethods": ["anonymous"],
-        "security_enabled": true,
-        "allow_connections": true,
-        "sources": [
-            {
-                "usernames": ["anonymous"],
-                "authmethod": "anonymous",
-                "cidr": "0.0.0.0/0",
-                "meta": {
-                    "description": "Allows anonymous connections for transport testing."
-                }
-            }
-        ],
-        "groups": [],
-        "grants": [
-            {
-                "permissions": [
-                    "wamp.register",
-                    "wamp.unregister",
-                    "wamp.subscribe",
-                    "wamp.unsubscribe",
-                    "wamp.call",
-                    "wamp.cancel",
-                    "wamp.publish"
-                ],
-                "uri": "",
-                "match": "prefix",
-                "roles": ["anonymous"]
             }
         ]
     },
