@@ -53,6 +53,7 @@ groups() ->
     ]}].
 
 init_per_suite(Config) ->
+    _ = application:ensure_all_started(gproc),
     Config.
 
 end_per_suite(_Config) ->
@@ -190,15 +191,15 @@ worker_crash_cleans_registry(_Config) ->
         <<"crash-svc">>, bondy_rpc_gateway_mock_auth, auth_conf()
     ),
 
-    %% Find the worker pid and kill it
-    [{_, Pid}] = ets:lookup(bondy_rpc_gateway_token_cache, <<"crash-svc">>),
+    %% Find the worker pid via the pool and kill it
+    PoolName = {bondy_rpc_gateway_token_cache, pool},
+    Pid = gproc_pool:pick_worker(PoolName, <<"crash-svc">>),
+    ?assert(is_pid(Pid)),
     exit(Pid, kill),
-    timer:sleep(50),
+    timer:sleep(100),
 
-    %% Registry should have cleaned up
-    ?assertEqual([], ets:lookup(bondy_rpc_gateway_token_cache, <<"crash-svc">>)),
-
-    %% A new get_token should create a new worker
+    %% The supervisor restarts the worker with a fresh ETS table,
+    %% so the cached token is gone. A new get should fetch fresh.
     bondy_rpc_gateway_mock_auth:set_token(<<"new-crash-tok">>),
     {ok, Token} = bondy_rpc_gateway_token_cache:get(
         <<"crash-svc">>, bondy_rpc_gateway_mock_auth, auth_conf()

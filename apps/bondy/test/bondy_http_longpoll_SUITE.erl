@@ -92,9 +92,10 @@ encoding_roundtrip(_Config) ->
     Bin = bondy_wamp_encoding:encode(Msg, json),
     ?assert(is_binary(Bin)),
 
-    %% Decode using the http_longpoll subprotocol
+    %% Decode using the http_longpoll subprotocol (disable partial decode
+    %% so the args are fully decoded for comparison)
     {[DecodedMsg], <<>>} = bondy_wamp_encoding:decode(
-        {http_longpoll, text, json}, Bin
+        {http_longpoll, text, json}, Bin, [{partial_decode, false}]
     ),
     ?assertEqual(Msg, DecodedMsg).
 

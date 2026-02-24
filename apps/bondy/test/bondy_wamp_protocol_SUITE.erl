@@ -42,14 +42,15 @@ format_status(_Config) ->
 
     % No sensitive info at wamp_state level, the reformatting is delegated to other modules.
     lists:foreach(
-        fun({SubProtocol, AuthMethod, AuthContext, AuthTime, Name, Context, Reason}) ->
-            State = {wamp_state, SubProtocol, AuthMethod, AuthContext, AuthTime, Name, Context, Reason},
+        fun({SubProtocol, AuthMethod, AuthClaims, AuthContext, AuthTime, Name, Context, Reason}) ->
+            State = {wamp_state, SubProtocol, AuthMethod, AuthClaims, AuthContext, AuthTime, Name, Context, Reason},
             NewState = bondy_wamp_protocol:format_status(State),
             ?assertEqual(State, NewState)
         end,
-        [{SP, AM, AC, AT, SN, Co, Re} ||
+        [{SP, AM, ACl, AC, AT, SN, Co, Re} ||
             SP <- [undefined, {raw, binary, json}],
             AM <- [undefined, cryptosign],
+            ACl <- [undefined, #{}],
             AC <- [undefined, #{}],
             AT <- [undefined, 123],
             SN <- [closed, establishing],
@@ -153,7 +154,7 @@ terminate(_Config) ->
     SubProtocol = {raw, binary, erl},
 
     % undefined context
-    StateNoContext = {wamp_state, SubProtocol, cryptosign, #{}, 123, failed, undefined, normal},
+    StateNoContext = {wamp_state, SubProtocol, cryptosign, undefined, #{}, 123, failed, undefined, normal},
     ?assertEqual(undefined, bondy_wamp_protocol:context(StateNoContext)),
     ?assertEqual(ok, bondy_wamp_protocol:terminate(StateNoContext)),
 
@@ -173,7 +174,7 @@ handle_inbound(_Config) ->
     % Unsupported protocol
     EncodingUnsupported = unsupported,
     SubProtocolInvalid = {ws, text, EncodingUnsupported},
-    StateInvalidSP = {wamp_state, SubProtocolInvalid, wampcra, #{}, 123, establishing, undefined, normal},
+    StateInvalidSP = {wamp_state, SubProtocolInvalid, wampcra, undefined, #{}, 123, establishing, undefined, normal},
     Error = {unsupported_encoding, EncodingUnsupported},
     ?assertError(Error, bondy_wamp_protocol:handle_inbound(<<>>, StateInvalidSP)).
 

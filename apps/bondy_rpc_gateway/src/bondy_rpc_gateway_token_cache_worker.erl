@@ -181,8 +181,8 @@ handle_call(_Request, _From, State) ->
 
 -doc false.
 handle_cast({invalidate, ServiceName}, #state{} = State) ->
-    Reply = clear_token(ServiceName, State),
-    {noreply, Reply, State};
+    _ = clear_token(ServiceName, State),
+    {noreply, State};
 
 handle_cast(_Msg, State) ->
     {noreply, State}.

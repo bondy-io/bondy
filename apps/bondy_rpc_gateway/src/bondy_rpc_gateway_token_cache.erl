@@ -253,8 +253,7 @@ do_for_worker(Fun, Key) ->
         false ->
             Fun(noproc);
 
-        WorkerName ->
-            %% Pid = gproc_pool:pick_worker(?POOLNAME, Key),
+        {_, _, [gproc_pool, _, _, WorkerName]} ->
             Fun(WorkerName)
     end.
 
