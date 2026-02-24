@@ -902,7 +902,7 @@ to_external(#session{} = S) ->
         true ->
             #{};
         false ->
-            #{meta => S#session.rbac_metadata}
+            #{meta => rbac_metadata(S)}
     end,
 
     #{
@@ -1326,6 +1326,11 @@ get_rbac_context(#session{authid = Authid, realm_uri = Uri}) ->
 %% @private
 get_rbac_metadata(#session{is_anonymous = true, realm_uri = Uri}) ->
     bondy_rbac:get_metadata(Uri, anonymous);
+
+get_rbac_metadata(#session{
+    authid = Authid, realm_uri = Uri, authroles = Roles
+}) when is_list(Roles), Roles =/= [] ->
+    bondy_rbac:get_metadata(Uri, Authid, Roles);
 
 get_rbac_metadata(#session{authid = Authid, realm_uri = Uri}) ->
     bondy_rbac:get_metadata(Uri, Authid).
