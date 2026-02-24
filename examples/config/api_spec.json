@@ -26,7 +26,7 @@
             "https"
         ],
         "headers": {
-            "access-control-allow-origin": "http://localhost:8080",
+            "access-control-allow-origin": "*",
             "access-control-allow-credentials": "true",
             "access-control-allow-methods": "GET,HEAD,PUT,PATCH,POST,DELETE",
             "access-control-allow-headers": "origin,x-requested-with,content-type,accept,x-csrf-token",
