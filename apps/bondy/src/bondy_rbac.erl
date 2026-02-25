@@ -901,19 +901,18 @@ do_get_metadata([H|T] = L0 , {RealmUri, ProtoUri} = RealmProto, Acc0) ->
     end;
 
 do_get_metadata([], _, Acc) ->
-    maps:groups_from_list(
-        fun({K, _}) -> K end,
-        fun
-            ({_, V}) when is_list(V) ->
-                case lists:flatten(V) of
-                    [V1] -> V1;
-                    L -> L
-                end;
-
-            ({_, V}) ->
-                V
+    Map =
+        maps:groups_from_list(
+            fun({K, _}) -> K end,
+            fun({_, V}) -> V end,
+            lists:flatten(Acc)
+        ),
+    maps:map(
+        fun (_, L) when is_list(L) ->
+            %% Flatten and dedup
+            sets:to_list(sets:from_list(lists:flatten(L)))
         end,
-        lists:flatten(Acc)
+        Map
     ).
 
 
