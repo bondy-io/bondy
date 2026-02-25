@@ -908,9 +908,15 @@ do_get_metadata([], _, Acc) ->
             lists:flatten(Acc)
         ),
     maps:map(
-        fun (_, L) when is_list(L) ->
+        fun (_, L0) when is_list(L0) ->
             %% Flatten and dedup
-            sets:to_list(sets:from_list(lists:flatten(L)))
+            case sets:to_list(sets:from_list(lists:flatten(L0))) of
+                [V] ->
+                    % Unwrap if singleton
+                    V;
+                L when is_list(L) ->
+                    L
+            end
         end,
         Map
     ).

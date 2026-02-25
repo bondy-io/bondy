@@ -7,10 +7,10 @@
     * HTTP SSE, a variation on Longpoll that uses Server Sent Events (SSE) for `receive` (This only works with JSON encoding only at the moment)
 * Support for Cookie-based authentication in combination with OpenID Connect, where Bondy acts as OIDC Relaying Party (`oidcrp` authentication method). Configuration done at the realm level. This requires the definition of an HTTP API using Bondy API Gateway.
 * Experimental implementation of RPC Gateway that allows for the definition of WAMP to HTTP routing, taking care of Secret Management and Token flows and caching. This is entirely configured on the `bondy.conf` file.
-* CBOR Encoding
+
 
 ### Changes
-* Session `authextra.meta` map now collects metadata from the User object as well as all the groups this user belongs to directly or indirectly (transitive closure). As a result both keys in `HELLO.Details.authextra.meta` and `Details._session_info.meta` are now lists (arrays) of values.
+* Session `authextra.meta` map now collects metadata from the User object as well as all the groups this user belongs to directly or indirectly (transitive closure). As a result both keys in `HELLO.Details.authextra.meta` and `Details._session_info.meta` can return lists (arrays) when 2 or more values have been collected for that key.
 
 ## 1.0.0-rc.50
 * Upgraded PlumDB with:
