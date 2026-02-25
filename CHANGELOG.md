@@ -10,7 +10,7 @@
 
 
 ### Changes
-* Session `authextra.meta` map now collects metadata from the User object as well as all the groups this user belongs to directly or indirectly (transitive closure). As a result both keys in `HELLO.Details.authextra.meta` and `Details._session_info.meta` can return lists (arrays) when 2 or more values have been collected for that key.
+* Session `authextra.meta` map now collects metadata from the User object as well as all the groups this user belongs to directly or indirectly (transitive closure). As a result both keys in `HELLO.Details.authextra.meta` and `Details._session_info.meta` can return lists (arrays) when 2 or more values have been collected for that key or when any of the values was originally a key.
 
 ## 1.0.0-rc.50
 * Upgraded PlumDB with:

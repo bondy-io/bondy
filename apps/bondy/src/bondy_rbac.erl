@@ -188,8 +188,6 @@
 -export([user_grants/2]).
 
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
@@ -905,18 +903,23 @@ do_get_metadata([], _, Acc) ->
         maps:groups_from_list(
             fun({K, _}) -> K end,
             fun({_, V}) -> V end,
-            lists:flatten(Acc)
+            Acc
         ),
     maps:map(
-        fun (_, L0) when is_list(L0) ->
-            %% Flatten and dedup
-            case sets:to_list(sets:from_list(lists:flatten(L0))) of
-                [V] ->
-                    % Unwrap if singleton
-                    V;
-                L when is_list(L) ->
-                    L
-            end
+        fun
+            (_, [[_|_] = V]) ->
+                %% If a singleton containing a list, we return the list
+                V;
+            (_, L0) when is_list(L0) ->
+                IsList = lists:any(fun is_list/1, L0),
+                %% Flatten and dedup
+                case sets:to_list(sets:from_list(lists:flatten(L0))) of
+                    [V] when IsList == false ->
+                        % Unwrap if singleton
+                        V;
+                    L when is_list(L) ->
+                        L
+                end
         end,
         Map
     ).
