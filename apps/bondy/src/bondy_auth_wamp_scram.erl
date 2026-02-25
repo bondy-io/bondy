@@ -133,46 +133,25 @@ challenge(Details, Ctxt, State0) ->
     {ok, DataOut :: map(), CBState :: state()}
     | {error, Reason :: any(), CBState :: state()}.
 
-authenticate(Signature, _Extra, Ctxt, State) ->
+authenticate(Signature, Extra, Ctxt, State) ->
     try
-        %% Signature: The base64-encoded ClientProof
-        %% nonce: The concatenated client-server nonce from the previous
-        %% CHALLENGE message.
-        %% channel_binding: Optional string containing the channel binding type
-        %% that was sent in the original HELLO message.
-        %% cbind_data: Optional base64-encoded channel binding data. MUST be
-        %% present if and only if channel_binding is not null. The format of the
-        %% binding data is dependent on the binding type.
-
-        %% We need to check that:
-        %% - The `AUTHENTICATE` message was received in due time (should be done
-        %% already by bondy_wamp_protocol
-        %% - nonce matches the one previously sent via CHALLENGE.
-        %% - The channel_binding matches the one sent in the HELLO message.
-        %% - The cbind_data sent by the client matches the channel binding data
-        %% that the server sees on its side of the channel.
         ClientProof = base64_decode(Signature),
-        % ClientNonce = base64:encode(maps:get(client_nonce, State)),
-        % ServerNonce = base64:encode(maps:get(server_nonce, State)),
-        % CBindType = maps:get(channel_binding, State),
-        % CBindData = undefined, % We do not support channel binding yet
-        %
-        % RNonce = base64_decode(maps:get(<<"nonce">>, Extra, undefined)),
-        % RNonce == ServerNonce orelse throw(invalid_nonce),
 
-        % RCBindType = maps:get(<<"channel_binding">>, Extra, undefined),
-        % RCBindType == CBindType orelse throw(invalid_channel_binding_type),
+        %% Validate nonce from AUTHENTICATE.Extra matches CHALLENGE nonce
+        ServerNonce = maps:get(server_nonce, State),
+        ExpectedNonce = base64:encode(ServerNonce),
+        RNonce = maps:get(<<"nonce">>, Extra, undefined),
+        RNonce =:= ExpectedNonce orelse throw(invalid_nonce),
 
-        % RCBindData = validate_cbind_data(RCBindType, CBindData),
-        % RCBindData =:= CBindData orelse throw(invalid_channel_binding_data),
+        %% Validate channel_binding matches HELLO
+        CBindType = maps:get(channel_binding, State),
+        RCBindType = maps:get(<<"channel_binding">>, Extra, undefined),
+        RCBindType =:= CBindType orelse throw(invalid_channel_binding_type),
 
-
-        %% - The ClientProof is validated against the StoredKey and ServerKey
-        %% stored in the User's password object
         do_authenticate(ClientProof, Ctxt, State)
     catch
         throw:Reason ->
-            {error, Reason}
+            {error, Reason, State}
     end.
 
 
@@ -269,7 +248,7 @@ do_authenticate(ClientProof, Ctxt, State) ->
         AuthId, ClientNonce, ServerNonce, Salt, Iterations, CBindType, CBindData
     ),
     ClientSignature = bondy_password_scram:client_signature(
-        ServerKey, AuthMessage
+        StoredKey, AuthMessage
     ),
     RecClientKey = bondy_password_scram:recovered_client_key(
         ClientProof, ClientSignature
@@ -282,18 +261,12 @@ do_authenticate(ClientProof, Ctxt, State) ->
                 ServerKey, AuthMessage
             ),
             AuthExtra = #{
-                verifier => base64:encode(ServerSignature)
+                verifier => <<"v=", (base64:encode(ServerSignature))/binary>>
             },
             {ok, AuthExtra, State};
         _ ->
             {error, authentication_failed, State}
     end.
-
-
-% validate_cbind_data(undefined, undefined) ->
-%     %% Not implemented yet
-%     ok.
-
 
 
 %% TODO
