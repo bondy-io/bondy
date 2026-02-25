@@ -187,6 +187,7 @@
 -export([revoke_user/2]).
 -export([user_grants/2]).
 
+-export([do_get_metadata/3]).
 
 %% =============================================================================
 %% API
@@ -898,12 +899,15 @@ do_get_metadata([H|T] = L0 , {RealmUri, ProtoUri} = RealmProto, Acc0) ->
             do_get_metadata(L, RealmProto, Acc)
     end;
 
+do_get_metadata([], _, []) ->
+    #{};
+
 do_get_metadata([], _, Acc) ->
     Map =
         maps:groups_from_list(
             fun({K, _}) -> K end,
             fun({_, V}) -> V end,
-            Acc
+            lists:flatten(Acc)
         ),
     maps:map(
         fun
