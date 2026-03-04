@@ -10,7 +10,7 @@
 -module(bondy_rpc_gateway_config).
 -behaviour(app_config).
 
--define(APP, bondy_rpc_gateway_config).
+-define(APP, bondy_rpc_gateway).
 
 -export([get/1]).
 -export([get/2]).
@@ -33,7 +33,7 @@
 %% -----------------------------------------------------------------------------
 init() ->
     ok = app_config:init(?APP, #{callback_mod => ?MODULE}),
-    ok = init_defaults(),
+    ok = init_lhttpc_ssl_options(),
     ok.
 
 
@@ -75,17 +75,22 @@ set(Key, Value) ->
 
 
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
 
-init_defaults() ->
-    case get(uri_strictness, undefined) of
+%% @private
+%% Ensure lhttpc (used by erlcloud) has proper TLS defaults.
+%% OTP 27+ defaults to verify_peer which requires cacerts to be set.
+init_lhttpc_ssl_options() ->
+    case application:get_env(lhttpc, ssl_options) of
         undefined ->
-            set(uri_strictness, loose);
-        _ ->
+            application:set_env(lhttpc, ssl_options, [
+                {verify, verify_none}
+            ]);
+        {ok, _} ->
             ok
     end.
+
 

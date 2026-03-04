@@ -971,7 +971,8 @@ fun(Conf0) ->
                   ++ ["procedures", "$proc", "uri"],
                   Conf
             ),
-            ProcNames = [X || {"@proc", X} <- ProcMatches],
+
+            ProcNames = [X || {"$proc", X} <- ProcMatches],
             Procedures = maps:from_list(lists:map(
                 fun(PName) ->
                     PPfx = Pfx ++ ".procedures." ++ PName,

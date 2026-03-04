@@ -318,7 +318,7 @@ start_http_pools(Services) ->
     {ok, Map}.
 
 pool_name(ServiceName) ->
-    binary_to_atom(<<"bondy_rpc_gateway_http_pool", ServiceName/binary>>).
+    binary_to_atom(<<"bondy_rpc_gateway_http_pool_", ServiceName/binary>>).
 
 %% For every service(procs) we return => [{realm, service(realm_procs)}]
 callee_params(State) ->

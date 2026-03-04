@@ -66,11 +66,17 @@ Used by the manager for resilient startup with retry.
 resolve_service_secrets(SecretsSpec, ServiceName) ->
     try
         SecretMap = fetch_secret(SecretsSpec, ServiceName),
+        ?LOG_WARNING(#{got => SecretMap}),
         VarMappings = maps:get(vars, SecretsSpec, #{}),
         ResolvedVars = resolve_var_mappings(VarMappings, SecretMap, ServiceName),
         {ok, ResolvedVars}
     catch
         error:Reason ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Error when resolving RPC Gateway service secrets",
+                reason => Reason
+            }),
             {error, Reason}
     end.
 
@@ -122,6 +128,7 @@ decode_basic_auth(Value0) ->
 resolve_service(#{auth_conf := #{secrets := SecretsSpec} = AuthConf} = Service) ->
     ServiceName = maps:get(name, Service, <<"unknown">>),
     SecretMap = fetch_secret(SecretsSpec, ServiceName),
+    ?LOG_NOTICE(#{secret => SecretMap}),
     VarMappings = maps:get(vars, SecretsSpec, #{}),
     ResolvedVars = resolve_var_mappings(VarMappings, SecretMap, ServiceName),
 
@@ -137,7 +144,7 @@ resolve_service(Service) ->
 
 fetch_secret(#{provider := aws_sm, secret_id := SecretId, region := Region},
              ServiceName) ->
-    Config0 = erlcloud_aws:default_config(),
+    {ok, Config0} = erlcloud_aws:auto_config(),
     Config = erlcloud_aws:service_config(
         <<"sm">>, binary_to_list(Region), Config0
     ),

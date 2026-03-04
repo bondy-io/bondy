@@ -220,7 +220,7 @@ request_opts(Name, Opts) ->
         {ok, SslOpts} ->
             [{ssl_options, SslOpts}];
         error ->
-            []
+            [{ssl_options, default_ssl_options()}]
     end,
     MaybeProxy = case maps:find(proxy, Opts) of
         {ok, Proxy} ->
@@ -248,14 +248,20 @@ try_start_pool(#state{name = Name, endpoint = Endpoint} = State0) ->
     catch hackney_pool:stop_pool(Name),
     hackney_pool:start_pool(Name, State0#state.pool_opts),
 
-    %% Health check with minimal timeouts
-    HealthOpts = [
+    %% Health check with minimal timeouts, reusing the pool's SSL opts
+    HealthOpts0 = [
         {pool, Name},
         {connect_timeout, 5_000},
         {recv_timeout, 5_000}
     ],
+    HealthOpts = case proplists:get_value(ssl_options, State0#state.req_opts) of
+        undefined -> HealthOpts0;
+        SslOpts -> [{ssl_options, SslOpts} | HealthOpts0]
+    end,
 
     case hackney:request(head, Endpoint, [], <<>>, HealthOpts) of
+        {ok, _Status, _Headers} ->
+            mark_up(State0);
         {ok, _Status, _Headers, Ref} when is_reference(Ref) ->
             hackney:close(Ref),
             mark_up(State0);
@@ -291,6 +297,11 @@ do_mark_down(#state{} = State) ->
     catch hackney_pool:stop_pool(State#state.name),
     schedule_retry(State#state{status = down}).
 
+
+
+%% @private
+default_ssl_options() ->
+    [{verify, verify_none}].
 
 
 schedule_retry(#state{retry = Retry0} = State) ->

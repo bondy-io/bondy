@@ -25,6 +25,8 @@ bondy_rpc_gateway_sup (rest_for_one)
 
 -behaviour(supervisor).
 
+-include_lib("kernel/include/logger.hrl").
+
 -export([start_link/0]).
 -export([init/1]).
 
@@ -34,6 +36,15 @@ bondy_rpc_gateway_sup (rest_for_one)
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
+
+
+
+%% =============================================================================
+%% CALLBACKS
+%% =============================================================================
+
+
+
 -doc false.
 init([]) ->
     SupFlags = #{
@@ -41,10 +52,41 @@ init([]) ->
         intensity => 5,
         period => 10
     },
-    Children = [
+
+    Children =
+        case bondy_rpc_gateway_config:get(services, []) of
+            [] ->
+                ?LOG_NOTICE(#{
+                    description => "No services configured, skipping startup"
+                }),
+                [];
+
+            L when is_list(L) ->
+                ?LOG_NOTICE(#{
+                    description => io_lib:format(
+                        ~"Starting RPC Gateway (~p services)",
+                        [length(L)]
+                    )
+                }),
+                children()
+        end,
+
+    {ok, {SupFlags, Children}}.
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+children() ->
+     [
         #{
             id => bondy_rpc_gateway_token_cache_sup,
-            start => {bondy_rpc_gateway_token_cache_sup, start_link, []},
+            start => {
+                bondy_rpc_gateway_token_cache_sup, start_link, []
+            },
             restart => permanent,
             shutdown => infinity,
             type => supervisor,
@@ -82,5 +124,6 @@ init([]) ->
             type => worker,
             modules => [bondy_rpc_gateway_manager]
         }
-    ],
-    {ok, {SupFlags, Children}}.
+    ].
+
+

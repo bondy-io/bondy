@@ -10,7 +10,8 @@
     {mod, {bondy_rpc_gateway_app, []}},
     {applications, [
         kernel,
-        stdlib
+        stdlib,
+        erlcloud
     ]},
     {env, []},
     {modules, []},

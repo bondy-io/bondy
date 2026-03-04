@@ -163,7 +163,7 @@ register_procedures(State, Acc) ->
                 realm => RealmUri
             },
 
-            MF = {bondy_rpc_gateway_callee_handler, handle_call},
+            MF = {bondy_rpc_gateway_callee_handler, handle_wamp_call},
             Ref = bondy_ref:new(internal, MF, SessionId),
             Opts = #{
                 match => ~"exact",

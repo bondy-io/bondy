@@ -168,16 +168,20 @@ fetch_token(#{fetch := FetchConf} = Conf) ->
 
     case hackney:request(Method, Url, Headers, Body, Opts) of
         {ok, 200, _RH, RespBody} ->
-            Data = json:decode(RespBody),
-            case check_error(Data, ErrorPath) of
-                ok ->
-                    case walk_path(Data, TokenPath) of
-                        {ok, T} when is_binary(T), byte_size(T) > 0 ->
-                            make_token_result(T, Data, ExpiresInPath);
-                        _ ->
-                            {error, no_token_in_response}
-                    end;
+            case decode_json(RespBody) of
+                {ok, Data} ->
+                    case check_error(Data, ErrorPath) of
+                        ok ->
+                            case walk_path(Data, TokenPath) of
+                                {ok, T} when is_binary(T), byte_size(T) > 0 ->
+                                    make_token_result(T, Data, ExpiresInPath);
+                                _ ->
+                                    {error, no_token_in_response}
+                            end;
 
+                        {error, _} = Err ->
+                            Err
+                    end;
                 {error, _} = Err ->
                     Err
             end;
@@ -310,6 +314,19 @@ apply_request_auth(
     Pass = interpolate(PassTpl, Vars),
     Cred = base64:encode(<<User/binary, ":", Pass/binary>>),
     [{<<"Authorization">>, <<"Basic ", Cred/binary>>} | Headers].
+
+decode_json(Body) ->
+    try
+        {ok, json:decode(Body)}
+    catch
+        error:Reason ->
+            ?LOG_ERROR(#{
+                description => "Token endpoint returned non-JSON response",
+                reason => Reason,
+                body_prefix => binary:part(Body, 0, min(200, byte_size(Body)))
+            }),
+            {error, {invalid_json_response, Reason}}
+    end.
 
 check_error(_Data, undefined) ->
     ok;
