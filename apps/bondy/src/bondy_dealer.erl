@@ -1093,7 +1093,10 @@ apply_dynamic_callback(#call{options = #{ppt_scheme := _}} = Msg, _, _) ->
         [~"Payload Passthru Mode is not supported on Bondy Meta API."]
     );
 
-apply_dynamic_callback(#call{} = Msg, Callee, CBArgs) ->
+apply_dynamic_callback(#call{} = Msg0, Callee, CBArgs) ->
+
+    Msg = bondy_wamp_message:decode_partial(Msg0),
+
     CallId = Msg#call.request_id,
 
     A = lists:append([
