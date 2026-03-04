@@ -37,7 +37,8 @@ For our work-in-progress documentation for v1.0.0 go to [https://developer.bondy
 * [x] Ticket
 * [x] WAMP-CRA
 * [ ] WAMP-SCRAM (WIP)
-* [ ] Cookie
+* [x] Cookie (Using Ticket)
+
 
 In addition Bondy provides:
 
@@ -45,6 +46,7 @@ In addition Bondy provides:
 * [x] HTTP Password
 * [x] Same Sign-on -- use a single set of credentials to sign on to multiple realms
 * [x] Single Sign-on -- combines Same Sign-on with Ticket authentication. The resulting ticket can be used to sign on to multiple realms.
+* [X] OpenID Connect (Relaying Party) - integrated with Cookie/Ticket
 
 ### Advanced RPC features
 * [x] Call Canceling
@@ -76,16 +78,22 @@ In addition Bondy provides:
 * [ ] Sharded Subscriptions
 * [ ] Subscription Revocation
 
-### Transport
+### WAMP Transports
 
 * [x] WebSockets
 * [x] RawSockets
+* [x] HTTP Longpoll
 * [ ] E2E encryption
+
+In addition Bondy provides:
+
+* [x] HTTP SSE a variation on HTTP Longpoll transport were Server Sent Events (SSE) for `receive`
 
 ### Transport Serialization
 
 * [x] JSON
 * [x] Msgpack
+* [x] CBOR
 * [x] BERT
 * [x] Erlang (subset)
 * [ ] JSON batched

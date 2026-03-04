@@ -230,6 +230,8 @@ validate_subprotocol({ws, text, json} = S) ->
     {ok, S};
 validate_subprotocol({ws, text, json_batched} = S) ->
     {ok, S};
+validate_subprotocol({ws, binary, cbor_batched} = S) ->
+    {ok, S};
 validate_subprotocol({ws, binary, msgpack_batched} = S) ->
     {ok, S};
 validate_subprotocol({ws, binary, bert_batched} = S) ->
@@ -243,6 +245,8 @@ validate_subprotocol({raw, binary, erl} = S) ->
 validate_subprotocol({http_sse, text, json} = S) ->
     {ok, S};
 validate_subprotocol({http_longpoll, text, json} = S) ->
+    {ok, S};
+validate_subprotocol({T, binary, cbor} = S) when ?IS_TRANSPORT(T) ->
     {ok, S};
 validate_subprotocol({T, binary, msgpack} = S) when ?IS_TRANSPORT(T) ->
     {ok, S};
@@ -1130,8 +1134,10 @@ abort_message({Code, Term}) when is_atom(Term) ->
     bondy_wamp_protocol:subprotocol() | {error, invalid_subprotocol}.
 
 subprotocol(?WAMP2_JSON) ->                 {ws, text, json};
+subprotocol(?WAMP2_CBOR) ->                 {ws, binary, cbor};
 subprotocol(?WAMP2_MSGPACK) ->              {ws, binary, msgpack};
 subprotocol(?WAMP2_JSON_BATCHED) ->         {ws, text, json_batched};
+subprotocol(?WAMP2_CBOR_BATCHED) ->         {ws, binary, cbor_batched};
 subprotocol(?WAMP2_MSGPACK_BATCHED) ->      {ws, binary, msgpack_batched};
 subprotocol(?WAMP2_BERT) ->                 {ws, binary, bert};
 subprotocol(?WAMP2_ERL) ->                  {ws, binary, erl};

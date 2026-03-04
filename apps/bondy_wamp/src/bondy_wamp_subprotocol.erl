@@ -29,8 +29,10 @@
 -spec from_binary(binary()) -> subprotocol() | {error, invalid_subprotocol}.
 
 from_binary(?WAMP2_JSON) ->                 {ws, text, json};
+from_binary(?WAMP2_CBOR) ->                 {ws, binary, cbor};
 from_binary(?WAMP2_MSGPACK) ->              {ws, binary, msgpack};
 from_binary(?WAMP2_JSON_BATCHED) ->         {ws, text, json_batched};
+from_binary(?WAMP2_CBOR_BATCHED) ->         {ws, binary, cbor_batched};
 from_binary(?WAMP2_MSGPACK_BATCHED) ->      {ws, binary, msgpack_batched};
 from_binary(?WAMP2_BERT) ->                 {ws, binary, bert};
 from_binary(?WAMP2_ERL) ->                  {ws, binary, erl};
@@ -56,6 +58,8 @@ validate({ws, text, json} = S) ->
     {ok, S};
 validate({ws, text, json_batched} = S) ->
     {ok, S};
+validate({ws, binary, cbor_batched} = S) ->
+    {ok, S};
 validate({ws, binary, msgpack_batched} = S) ->
     {ok, S};
 validate({ws, binary, bert_batched} = S) ->
@@ -66,6 +70,8 @@ validate({raw, binary, json} = S) ->
     {ok, S};
 validate({T, binary, erl} = S) when ?IS_WAMP_TRANSPORT(T) ->
     {ok, S};
+validate({T, binary, cbor} = S) when ?IS_WAMP_TRANSPORT(T) ->
+    {ok, S};
 validate({T, binary, msgpack} = S) when ?IS_WAMP_TRANSPORT(T) ->
     {ok, S};
 validate({T, binary, bert} = S) when ?IS_WAMP_TRANSPORT(T) ->
@@ -75,17 +81,3 @@ validate(_) ->
 
 
 
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
-
-
-%% is_transport(ws) -> true;
-%% is_transport(wss) -> true;
-%% is_transport(raw) -> true;
-%% is_transport(raws) -> true;
-%% is_transport(tcp) -> true;
-%% is_transport(tls) -> true;
-%% is_transport(ssl) -> false.

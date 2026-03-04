@@ -64,25 +64,30 @@ format_status(_Config) ->
 
 -define(PROTOCOLS, [raw, ws]).
 -define(FRAMES, [binary, text]).
--define(ENCODINGS, [bert, bert_batched, erl, erl_batched, json, json_batched, msgpack, msgpack_batched]).
+-define(ENCODINGS, [bert, bert_batched, erl, erl_batched, json, json_batched, msgpack, msgpack_batched, cbor, cbor_batched]).
 -define(SUPPORTED_SUB_PROTOCOLS, [
     {raw, binary, bert},
     {raw, binary, erl},
     {raw, binary, json},
+    {raw, binary, cbor},
     {raw, binary, msgpack},
     {ws, binary, bert_batched},
     {ws, binary, bert},
     {ws, binary, erl_batched},
     {ws, binary, msgpack_batched},
     {ws, binary, msgpack},
+    {ws, binary, cbor_batched},
+    {ws, binary, cbor},
     {ws, text, json_batched},
     {ws, text, json}
 ]).
 -define(WAMP2_ENCODINGS, [
     ?WAMP2_JSON,
     ?WAMP2_MSGPACK,
+    ?WAMP2_CBOR,
     ?WAMP2_BERT,
     ?WAMP2_ERL, % not supported
+    ?WAMP2_CBOR_BATCHED,
     ?WAMP2_MSGPACK_BATCHED,
     ?WAMP2_JSON_BATCHED,
     ?WAMP2_BERT_BATCHED,

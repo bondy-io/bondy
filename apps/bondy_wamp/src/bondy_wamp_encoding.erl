@@ -49,6 +49,7 @@
 is_encoding(bert) -> true;
 is_encoding(erl) -> true;
 is_encoding(json) -> true;
+is_encoding(cbor) -> true;
 is_encoding(msgpack) -> true;
 %% is_encoding(bert_batched) -> true;
 %% is_encoding(erl_batched) -> true;
@@ -132,14 +133,17 @@ encode(Message0, Enc) when is_tuple(Message0) ->
         undefined ->
             encode(pack(Message0), Enc);
 
-        %% We currently only support JSON partials
-        {json, Tail} when Enc == json ->
-            %% Here is where the magic happens, we just encode the Head and
-            %% append the Tail (which contains the payload).
+        %% We currently only support JSON and CBOR partials
+        %% Here is where the magic happens, we just encode the Head and
+        %% append the Tail (which contains the payload).
+        {Enc, Tail} ->
             Head = pack(Message0),
-            bondy_wamp_json:encode_with_tail(Head, Tail);
+            case Enc of
+                json -> bondy_wamp_json:encode_with_tail(Head, Tail);
+                cbor -> bondy_wamp_cbor:encode_with_tail(Head, Tail)
+            end;
 
-        {json, _Tail} when Enc =/= json ->
+        {OtherEnc, _Tail} when Enc =/= OtherEnc ->
             %% Here we are forced to decode (what we avoided before) and
             %% encode in a different format.
             Message = bondy_wamp_message:decode_partial(Message0),
@@ -151,6 +155,10 @@ encode(Message, erl = Enc) when is_list(Message) ->
 
 encode(Message, json = Enc) when is_list(Message) ->
     encode(Message, Enc, opts(Enc, encode));
+
+encode(Message, cbor = Enc) when is_list(Message) ->
+    %% We want binary keys always
+    encode(Message, cbor, opts(Enc, encode));
 
 encode(Message, msgpack = Enc) when is_list(Message) ->
     %% We want binary keys always
@@ -182,6 +190,9 @@ encode(Message, bert, _) when is_list(Message) ->
 
 encode(Message, json, Opts) when is_list(Message) ->
     bondy_wamp_json:encode(Message, Opts);
+
+encode(Message, cbor, Opts) when is_list(Message) ->
+    bondy_wamp_cbor:encode(Message, Opts);
 
 encode(Message, msgpack, Opts) when is_list(Message) ->
     msgpack:pack(Message, Opts);
@@ -545,6 +556,10 @@ unpack({Head, {json, _} = Partial}) ->
     M = unpack(Head),
     bondy_wamp_message:set_partial(M, Partial);
 
+unpack({Head, {cbor, _} = Partial}) ->
+    M = unpack(Head),
+    bondy_wamp_message:set_partial(M, Partial);
+
 unpack(M) ->
     error({invalid_message, M}).
 
@@ -575,7 +590,13 @@ opts(msgpack, encode) ->
     [{map_format, map}, {pack_str, from_binary}];
 
 opts(msgpack, decode) ->
-    [{map_format, map}, {unpack_str, as_binary}].
+    [{map_format, map}, {unpack_str, as_binary}];
+
+opts(cbor, encode) ->
+    [];
+
+opts(cbor, decode) ->
+    [].
 
 
 
@@ -604,6 +625,11 @@ do_decode_message_name(<<"[", Rest/binary>>, json) ->
     end;
 
 do_decode_message_name(_, json) ->
+    error(badarg);
+
+
+do_decode_message_name(_, cbor) ->
+    %% TODO using bondy_wamp_cbor?
     error(badarg);
 
 do_decode_message_name(<<2#101:3, _:5, 0:1, V:7, _/binary>>, msgpack) ->
@@ -654,6 +680,10 @@ decode_binary(Data, Enc, Opts, Acc) ->
 decode_message(Data, json, Opts, Acc) ->
     %% Decode might failed with badarg exception if not a proper JSON
     M = json_decode(Data, Opts),
+    unpack(M, Acc);
+
+decode_message(Data, cbor, Opts, Acc) ->
+    M = cbor_decode(Data, Opts),
     unpack(M, Acc);
 
 decode_message(Data, msgpack, Opts, Acc) ->
@@ -842,7 +872,7 @@ message_name(?YIELD) -> yield.
 json_decode(Term, Opts) ->
     case key_value:get(partial_decode, Opts, true) of
         true ->
-            case maybe_partial_decode(Term, Opts) of
+            case maybe_partial_json_decode(Term, Opts) of
                 {H, T} ->
                     {H, {json, T}};
 
@@ -856,26 +886,85 @@ json_decode(Term, Opts) ->
 
 
 %% @private
-maybe_partial_decode(<<"[", ?ERROR_CODE_CHARS, _/binary>> = Bin, _) ->
+maybe_partial_json_decode(<<"[", ?ERROR_CODE_CHARS, _/binary>> = Bin, _) ->
     bondy_wamp_json:decode_head(Bin, #error.args - 1);
 
-maybe_partial_decode(<<"[", ?PUBLISH_CODE_CHARS, _/binary>> = Bin, _) ->
+maybe_partial_json_decode(<<"[", ?PUBLISH_CODE_CHARS, _/binary>> = Bin, _) ->
     bondy_wamp_json:decode_head(Bin, #publish.args - 1);
 
-maybe_partial_decode(<<"[", ?EVENT_CODE_CHARS, _/binary>> = Bin, _) ->
+maybe_partial_json_decode(<<"[", ?EVENT_CODE_CHARS, _/binary>> = Bin, _) ->
     bondy_wamp_json:decode_head(Bin, #event.args - 1);
 
-maybe_partial_decode(<<"[", ?CALL_CODE_CHARS, _/binary>> = Bin, _) ->
+maybe_partial_json_decode(<<"[", ?CALL_CODE_CHARS, _/binary>> = Bin, _) ->
     bondy_wamp_json:decode_head(Bin, #call.args - 1);
 
-maybe_partial_decode(<<"[", ?RESULT_CODE_CHARS, _/binary>> = Bin, _) ->
+maybe_partial_json_decode(<<"[", ?RESULT_CODE_CHARS, _/binary>> = Bin, _) ->
     bondy_wamp_json:decode_head(Bin, #result.args - 1);
 
-maybe_partial_decode(<<"[", ?INVOCATION_CODE_CHARS, _/binary>> = Bin, _) ->
+maybe_partial_json_decode(<<"[", ?INVOCATION_CODE_CHARS, _/binary>> = Bin, _) ->
     bondy_wamp_json:decode_head(Bin, #invocation.args - 1);
 
-maybe_partial_decode(<<"[", ?YIELD_CODE_CHARS, _/binary>> = Bin, _) ->
+maybe_partial_json_decode(<<"[", ?YIELD_CODE_CHARS, _/binary>> = Bin, _) ->
     bondy_wamp_json:decode_head(Bin, #yield.args - 1);
 
-maybe_partial_decode(Bin, Opts) when is_binary(Bin) ->
+maybe_partial_json_decode(Bin, Opts) when is_binary(Bin) ->
     bondy_wamp_json:decode(Bin, Opts).
+
+
+%% @private
+-spec cbor_decode(binary(), [bondy_wamp_json:decode_opt()]) ->
+    list()
+    | {Head :: list(), {encoding(), Tail :: binary()}}
+    | no_return().
+
+cbor_decode(Term, Opts) ->
+    case key_value:get(partial_decode, Opts, true) of
+        true ->
+            case maybe_partial_cbor_decode(Term, Opts) of
+                {H, T} ->
+                    {H, {cbor, T}};
+
+                L when is_list(L) ->
+                    L
+            end;
+
+        false ->
+            bondy_wamp_cbor:decode(Term, Opts)
+    end.
+
+
+%% @private
+%% Match CBOR binary format: array header (major type 4, length < 24)
+%% followed by the message type as a CBOR unsigned integer.
+%% Message types < 24 are encoded as a single byte.
+maybe_partial_cbor_decode(<<4:3, Len:5, ?ERROR, _/binary>> = Bin, _)
+when Len < 24 ->
+    bondy_wamp_cbor:decode_head(Bin, #error.args - 1);
+
+maybe_partial_cbor_decode(<<4:3, Len:5, ?PUBLISH, _/binary>> = Bin, _)
+when Len < 24 ->
+    bondy_wamp_cbor:decode_head(Bin, #publish.args - 1);
+
+%% Message types >= 24 are encoded as two bytes: <<24, Value>>.
+maybe_partial_cbor_decode(<<4:3, Len:5, 24, ?EVENT, _/binary>> = Bin, _)
+when Len < 24 ->
+    bondy_wamp_cbor:decode_head(Bin, #event.args - 1);
+
+maybe_partial_cbor_decode(<<4:3, Len:5, 24, ?CALL, _/binary>> = Bin, _)
+when Len < 24 ->
+    bondy_wamp_cbor:decode_head(Bin, #call.args - 1);
+
+maybe_partial_cbor_decode(<<4:3, Len:5, 24, ?RESULT, _/binary>> = Bin, _)
+when Len < 24 ->
+    bondy_wamp_cbor:decode_head(Bin, #result.args - 1);
+
+maybe_partial_cbor_decode(<<4:3, Len:5, 24, ?INVOCATION, _/binary>> = Bin, _)
+when Len < 24 ->
+    bondy_wamp_cbor:decode_head(Bin, #invocation.args - 1);
+
+maybe_partial_cbor_decode(<<4:3, Len:5, 24, ?YIELD, _/binary>> = Bin, _)
+when Len < 24 ->
+    bondy_wamp_cbor:decode_head(Bin, #yield.args - 1);
+
+maybe_partial_cbor_decode(Bin, Opts) when is_binary(Bin) ->
+    bondy_wamp_cbor:decode(Bin, Opts).
