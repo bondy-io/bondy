@@ -34,6 +34,10 @@
              hostname = "host.example.com"}).
 
 %% Added for escript
+main(["--hostname", Hostname, DataDir, PrivDir]) ->
+    all(DataDir, PrivDir, [{hostname, Hostname}]);
+main([DataDir, PrivDir]) ->
+    all(DataDir, PrivDir);
 main([]) ->
     all("./_ssl/", "./_ssl").
 
