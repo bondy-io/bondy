@@ -116,6 +116,9 @@ do_handle_call(<<"bondy.rbac.", _/binary>> = Proc, M, Ctxt) ->
 do_handle_call(<<"bondy.realm.", _/binary>> = Proc, M, Ctxt) ->
     bondy_realm_api:handle_call(Proc, M, Ctxt);
 
+do_handle_call(<<"bondy.session.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_session_api:handle_call(Proc, M, Ctxt);
+
 do_handle_call(<<"bondy.registration.", _/binary>> = Proc, M, Ctxt) ->
     bondy_registry_api:handle_call(Proc, M, Ctxt);
 
