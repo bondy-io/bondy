@@ -218,22 +218,23 @@ validate_sse_auth(SessionPid, Req) ->
     case bondy_http_transport_session:auth_claims(SessionPid) of
         undefined ->
             ok;
-        StoredClaims ->
+        #{authrealm := Authrealm} = StoredClaims ->
             Cookies = cowboy_req:parse_cookies(Req),
-            case lists:keyfind(<<"bondy_ticket">>, 1, Cookies) of
+            CookieName = <<?TICKET_COOKIE_PREFIX/binary, Authrealm/binary>>,
+            case lists:keyfind(CookieName, 1, Cookies) of
                 false ->
                     {error, unauthorized};
                 {_, Ticket} ->
                     case bondy_ticket:verify(Ticket) of
                         {ok, #{
-                            authid := Authid, authrealm := Authrealm
+                            authid := Authid, authrealm := Authrealm2
                         }} ->
                             #{
                                 authid := ExpAuthid,
                                 authrealm := ExpAuthrealm
                             } = StoredClaims,
                             case Authid =:= ExpAuthid
-                                    andalso Authrealm =:= ExpAuthrealm of
+                                    andalso Authrealm2 =:= ExpAuthrealm of
                                 true -> ok;
                                 false -> {error, unauthorized}
                             end;

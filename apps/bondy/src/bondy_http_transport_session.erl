@@ -9,26 +9,83 @@
 A gen_server implementing a per-transport session process for HTTP transports
 (longpoll/SSE).
 
-The transport session acts as the stable message target for HTTP transports. It
-persists across individual HTTP requests, manages its lifecycle (gproc
-registration, queue init/cleanup, timeout), and enables `bondy:do_send/3` to
-enqueue messages instead of sending them directly to a process mailbox.
+== Motivation ==
 
-Each transport session is identified by a `TransportId` (binary) and registered
-with gproc as `{http_transport, TransportId}`. An inactivity timer auto-closes
-the session if no HTTP request touches it within the configured
-`transport_ttl` window.
+WebSocket and TCP transports have a long-lived connection process whose pid
+serves as the stable identity for the WAMP session. HTTP transports (longpoll,
+SSE) do not — each HTTP request is handled by an ephemeral Cowboy process. This
+module provides the persistent process that fills that role.
+
+== Relationship with `bondy_session' and `bondy_session_manager' ==
+
+<ul>
+<li>`bondy_session' is a pure data module (no process). It defines the
+`#session{}' record and provides ETS-backed storage, accessors, and matching.
+It has no lifecycle management.</li>
+<li>`bondy_session_manager' is a `gen_server' pool that owns session lifecycle:
+it stores sessions, monitors the owning connection process, registers WAMP
+procedures, and cleans up on crash or close.</li>
+<li>`bondy_http_transport_session' (this module) is the process that
+`bondy_session_manager' monitors for HTTP transports. It is the HTTP-transport
+equivalent of the WebSocket/TCP connection handler pid.</li>
+</ul>
+
+The interaction flow on session creation:
+
+```
+HTTP Request (WAMP HELLO)
+    |
+    v
+bondy_http_transport_session:handle_client_message/2
+    |  (gen_server:call -> handle_call({client_message, Data}))
+    |
+    v
+bondy_wamp_protocol:handle_inbound/2
+    |  (runs inside this gen_server's process)
+    |
+    +---> bondy_session_manager:open/3
+    |        |
+    |        +---> bondy_session:store(Session)       <- persists to ETS
+    |        +---> monitor(process, self())            <- monitors this pid
+    |        +---> register WAMP procedures
+    |
+    v
+WELCOME reply returned to client
+```
+
+Note that `bondy_session_manager:open/3' is called by `bondy_wamp_protocol',
+not by this module directly. However, because `bondy_wamp_protocol' runs
+inside this gen_server's process, `bondy_session_manager' ends up monitoring
+this pid — making it the crash-safety anchor for the WAMP session.
+
+If this process dies (inactivity timeout, crash), `bondy_session_manager'
+detects the `DOWN' signal and cleans up the WAMP session automatically.
+
+== Transport identity ==
+
+Each transport session is identified by a `TransportId' (binary) and registered
+with gproc as `{http_transport, TransportId}'. This maps to the `transport_id'
+field in the `#session{}' record. An inactivity timer auto-closes the session
+if no HTTP request touches it within the configured `transport_ttl' window.
+
+== Protocol and message handling ==
+
+This gen_server holds the `bondy_wamp_protocol' state and routes inbound
+client messages via `handle_client_message/2'. Outbound messages are delivered
+through `bondy_transport_queue'.
 
 For SSE transports, the gen_server additionally manages:
-- WAMP protocol state (`bondy_wamp_protocol`)
-- SSE stream pid registration and monitoring
-- Reply buffering for sync replies before the SSE stream connects
-- Queue-ready notifications forwarded to the SSE stream pid
+<ul>
+<li>SSE stream pid registration and monitoring</li>
+<li>Reply buffering for sync replies before the SSE stream connects</li>
+<li>Queue-ready notifications forwarded to the SSE stream pid</li>
+</ul>
 
 For Longpoll transports, the gen_server additionally manages:
-- WAMP protocol state (`bondy_wamp_protocol`)
-- Blocking poll_receive calls with configurable timeout
-- Reply buffering for sync replies before a poll_receive call arrives
+<ul>
+<li>Blocking `poll_receive' calls with configurable timeout</li>
+<li>Reply buffering for sync replies before a poll_receive call arrives</li>
+</ul>
 """.
 
 -behaviour(gen_server).

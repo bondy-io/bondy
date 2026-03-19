@@ -25,9 +25,6 @@ Dispatches on the `action` key in the handler state:
 -export([init/2]).
 
 
-%% Default cookie name
--define(COOKIE_NAME, <<"bondy_ticket">>).
-
 %% Default post-login redirect
 -define(DEFAULT_REDIRECT, <<"/">>).
 
@@ -39,20 +36,33 @@ Dispatches on the `action` key in the handler state:
 
 
 
-init(Req0, #{action := login} = State) ->
-    handle_login(Req0, State);
-
-init(Req0, #{action := callback} = State) ->
-    handle_callback(Req0, State);
-
-init(Req0, #{action := logout} = State) ->
-    handle_logout(Req0, State).
+init(Req0, State) ->
+    Req = cowboy_req:set_resp_headers(cors_headers(Req0), Req0),
+    case cowboy_req:method(Req) of
+        <<"OPTIONS">> ->
+            Req1 = cowboy_req:reply(?HTTP_OK, #{}, <<>>, Req),
+            {ok, Req1, State};
+        _ ->
+            dispatch(Req, State)
+    end.
 
 
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+
+
+%% @private
+dispatch(Req, #{action := login} = State) ->
+    handle_login(Req, State);
+
+dispatch(Req, #{action := callback} = State) ->
+    handle_callback(Req, State);
+
+dispatch(Req, #{action := logout} = State) ->
+    handle_logout(Req, State).
 
 
 
@@ -135,6 +145,7 @@ do_login_redirect(Req0, State, RealmUri, Provider, Config) ->
                         description => "Failed to create OIDC redirect URL",
                         realm_uri => RealmUri,
                         provider => Provider,
+                        redirect_uri => RedirectUri,
                         reason => Reason
                     }),
                     Req1 = reply_json_error(
@@ -295,7 +306,7 @@ handle_token_success(
         refresh = RefreshToken
     } = Token,
 
-    #oidcc_token_id{claims = IdClaims} = IdToken,
+    #oidcc_token_id{token = IdTokenJWT, claims = IdClaims} = IdToken,
 
     %% Fetch full claims from the userinfo endpoint. Many IdPs only include
     %% minimal claims in the ID token and serve custom claims (e.g. roles)
@@ -339,7 +350,7 @@ handle_token_success(
             Authroles = extract_roles(AllClaims, AccessToken, Config),
             do_issue_ticket(
                 Req0, State, RealmUri, Provider, Config,
-                Authid, Authroles, AccessToken, RefreshToken,
+                Authid, Authroles, IdTokenJWT, AccessToken, RefreshToken,
                 SpaRedirect, TicketScope
             )
     end.
@@ -348,7 +359,7 @@ handle_token_success(
 %% @private
 do_issue_ticket(
     Req0, State, RealmUri, Provider, Config,
-    Authid, Authroles, AccessToken, RefreshToken,
+    Authid, Authroles, IdTokenJWT, AccessToken, RefreshToken,
     SpaRedirect, TicketScope
 ) ->
     %% Optionally provision a local user record
@@ -360,7 +371,7 @@ do_issue_ticket(
     end,
 
     %% Build OIDC tokens map for the ticket
-    OidcTokensMap = build_oidc_tokens_map(AccessToken, RefreshToken),
+    OidcTokensMap = build_oidc_tokens_map(IdTokenJWT, AccessToken, RefreshToken),
 
     %% Per-provider ticket_expiry_secs overrides the global default.
     %% We use maps:find/2 so that legacy configs with the old hardcoded
@@ -391,8 +402,12 @@ do_issue_ticket(
             BasePath = maps:get(base_path, State, <<>>),
             IsSecure = cowboy_req:scheme(Req0) =:= <<"https">>,
             CsrfToken = bondy_utils:uuid(),
-            Req1 = set_ticket_cookie(Req0, JWT, BasePath, ExpirySecs, IsSecure),
-            Req2 = set_csrf_cookie(Req1, CsrfToken, BasePath, ExpirySecs, IsSecure),
+            Req1 = set_ticket_cookie(
+                Req0, RealmUri, JWT, BasePath, ExpirySecs, IsSecure
+            ),
+            Req2 = set_csrf_cookie(
+                Req1, RealmUri, CsrfToken, BasePath, ExpirySecs, IsSecure
+            ),
             Req3 = cowboy_req:reply(
                 302,
                 #{<<"location">> => SpaRedirect},
@@ -420,6 +435,8 @@ do_issue_ticket(
 %% @private
 handle_logout(Req0, State) ->
     case cowboy_req:method(Req0) of
+        <<"GET">> ->
+            do_handle_logout(Req0, State);
         <<"POST">> ->
             do_handle_logout(Req0, State);
         _ ->
@@ -429,21 +446,49 @@ handle_logout(Req0, State) ->
 
 
 %% @private
-do_handle_logout(Req0, State) ->
+do_handle_logout(Req0, #{realm_uri := RealmUri} = State) ->
     Cookies = cowboy_req:parse_cookies(Req0),
     BasePath = maps:get(base_path, State, <<>>),
+    QsVals = cowboy_req:parse_qs(Req0),
+    RedirectUri = proplists:get_value(
+        <<"redirect_uri">>, QsVals, ?DEFAULT_REDIRECT
+    ),
 
-    case lists:keyfind(?COOKIE_NAME, 1, Cookies) of
+    %% Find the realm-prefixed ticket cookie and revoke it.
+    %% The cookie is named bondy_ticket_<RealmUri>.
+    TicketCookieName = ticket_cookie_name(RealmUri),
+    OidcClaims = case lists:keyfind(TicketCookieName, 1, Cookies) of
         {_, JWT} ->
-            _ = bondy_ticket:revoke(JWT);
+            case bondy_ticket:verify(JWT) of
+                {ok, Claims} ->
+                    _ = bondy_ticket:revoke(Claims),
+                    Claims;
+                {error, _} ->
+                    _ = bondy_ticket:revoke(JWT),
+                    #{}
+            end;
         false ->
-            ok
+            #{}
     end,
 
+    %% Clear realm-prefixed cookies
     IsSecure = cowboy_req:scheme(Req0) =:= <<"https">>,
-    Req1 = clear_ticket_cookie(Req0, BasePath, IsSecure),
-    Req2 = clear_csrf_cookie(Req1, BasePath, IsSecure),
-    Req3 = cowboy_req:reply(?HTTP_OK, #{}, <<>>, Req2),
+    Req1 = clear_ticket_cookie(Req0, RealmUri, BasePath, IsSecure),
+    Req2 = clear_csrf_cookie(Req1, RealmUri, BasePath, IsSecure),
+
+    %% Build the redirect target. If the ticket contains OIDC claims, attempt
+    %% RP-Initiated Logout at the IdP's end_session_endpoint so that both the
+    %% Bondy session and the IdP session are terminated.
+    Location = maybe_idp_logout_url(
+        RealmUri, OidcClaims, RedirectUri
+    ),
+
+    Req3 = cowboy_req:reply(
+        302,
+        #{<<"location">> => Location},
+        <<>>,
+        Req2
+    ),
     {ok, Req3, State}.
 
 
@@ -584,8 +629,11 @@ map_roles(Roles, RoleMapping) ->
 
 
 %% @private
-build_oidc_tokens_map(AccessToken, RefreshToken) ->
-    Map0 = #{},
+build_oidc_tokens_map(IdTokenJWT, AccessToken, RefreshToken) ->
+    Map0 = case is_binary(IdTokenJWT) of
+        true -> #{id_token => IdTokenJWT};
+        false -> #{}
+    end,
     Map1 = case RefreshToken of
         #oidcc_token_refresh{token = RT} when is_binary(RT) ->
             Map0#{refresh_token => RT};
@@ -606,10 +654,20 @@ build_oidc_tokens_map(AccessToken, RefreshToken) ->
 
 
 %% @private
-set_ticket_cookie(Req, JWT, _BasePath, MaxAgeSecs, IsSecure) ->
+ticket_cookie_name(RealmUri) ->
+    <<?TICKET_COOKIE_PREFIX/binary, RealmUri/binary>>.
+
+
+%% @private
+csrf_cookie_name(RealmUri) ->
+    <<?CSRF_COOKIE_PREFIX/binary, RealmUri/binary>>.
+
+
+%% @private
+set_ticket_cookie(Req, RealmUri, JWT, _BasePath, MaxAgeSecs, IsSecure) ->
     Path = <<"/">>,
     cowboy_req:set_resp_cookie(
-        ?COOKIE_NAME, JWT, Req,
+        ticket_cookie_name(RealmUri), JWT, Req,
         #{
             http_only => true,
             secure => IsSecure,
@@ -621,10 +679,10 @@ set_ticket_cookie(Req, JWT, _BasePath, MaxAgeSecs, IsSecure) ->
 
 
 %% @private
-clear_ticket_cookie(Req, _BasePath, IsSecure) ->
+clear_ticket_cookie(Req, RealmUri, _BasePath, IsSecure) ->
     Path = <<"/">>,
     cowboy_req:set_resp_cookie(
-        ?COOKIE_NAME, <<>>, Req,
+        ticket_cookie_name(RealmUri), <<>>, Req,
         #{
             http_only => true,
             secure => IsSecure,
@@ -636,14 +694,14 @@ clear_ticket_cookie(Req, _BasePath, IsSecure) ->
 
 
 %% @private
-set_csrf_cookie(Req, CsrfToken, _BasePath, MaxAgeSecs, IsSecure) ->
+set_csrf_cookie(Req, RealmUri, CsrfToken, _BasePath, MaxAgeSecs, IsSecure) ->
     Path = <<"/">>,
     cowboy_req:set_resp_cookie(
-        <<"bondy_csrf">>, CsrfToken, Req,
+        csrf_cookie_name(RealmUri), CsrfToken, Req,
         #{
             http_only => false,
             secure => IsSecure,
-            same_site => strict,
+            same_site => lax,
             path => Path,
             max_age => MaxAgeSecs
         }
@@ -651,18 +709,67 @@ set_csrf_cookie(Req, CsrfToken, _BasePath, MaxAgeSecs, IsSecure) ->
 
 
 %% @private
-clear_csrf_cookie(Req, _BasePath, IsSecure) ->
+clear_csrf_cookie(Req, RealmUri, _BasePath, IsSecure) ->
     Path = <<"/">>,
     cowboy_req:set_resp_cookie(
-        <<"bondy_csrf">>, <<>>, Req,
+        csrf_cookie_name(RealmUri), <<>>, Req,
         #{
             http_only => false,
             secure => IsSecure,
-            same_site => strict,
+            same_site => lax,
             path => Path,
             max_age => 0
         }
     ).
+
+
+%% @private
+%% @doc Attempts to build an RP-Initiated Logout URL for the IdP. If the ticket
+%% contains OIDC claims (provider name and id_token), uses
+%% `oidcc_logout:initiate_url/3' to redirect to the IdP's end_session_endpoint
+%% with the `post_logout_redirect_uri' pointing back to the SPA.
+%%
+%% Falls back to `RedirectUri' (direct SPA redirect) when:
+%% - No OIDC provider is in the claims (non-OIDC session)
+%% - The provider's client context cannot be obtained
+%% - The IdP does not support `end_session_endpoint'
+maybe_idp_logout_url(RealmUri, Claims, RedirectUri) ->
+    case Claims of
+        #{oidc_provider := Provider} when is_binary(Provider) ->
+            IdTokenHint = maps:get(oidc_id_token, Claims, undefined),
+            case bondy_oidc_provider:get_client_context(RealmUri, Provider) of
+                {ok, ClientCtx} ->
+                    Opts = #{post_logout_redirect_uri => RedirectUri},
+                    case oidcc_logout:initiate_url(
+                        IdTokenHint, ClientCtx, Opts
+                    ) of
+                        {ok, LogoutUrl} ->
+                            LogoutUrl;
+                        {error, end_session_endpoint_not_supported} ->
+                            ?LOG_INFO(#{
+                                description =>
+                                    "IdP does not support "
+                                    "end_session_endpoint, "
+                                    "skipping RP-Initiated Logout",
+                                provider => Provider,
+                                realm_uri => RealmUri
+                            }),
+                            RedirectUri
+                    end;
+                {error, Reason} ->
+                    ?LOG_WARNING(#{
+                        description =>
+                            "Failed to get OIDC client context for "
+                            "RP-Initiated Logout",
+                        provider => Provider,
+                        realm_uri => RealmUri,
+                        reason => Reason
+                    }),
+                    RedirectUri
+            end;
+        _ ->
+            RedirectUri
+    end.
 
 
 %% @private
@@ -674,3 +781,9 @@ reply_json_error(StatusCode, ErrorBin, Req) ->
         ReplyBody,
         Req
     ).
+
+
+%% @private
+cors_headers(Req) ->
+    Origin = cowboy_req:header(<<"origin">>, Req, <<"*">>),
+    begin ?CORS_HEADERS end#{<<"access-control-allow-origin">> => Origin}.

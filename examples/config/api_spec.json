@@ -44,7 +44,7 @@
     },
     "versions": {
         "1.0.0": {
-            "base_path": "/[v1.0]",
+            "base_path": "/api/[v1.0]",
             "variables": {},
             "defaults": {
                 "timeout": 20000

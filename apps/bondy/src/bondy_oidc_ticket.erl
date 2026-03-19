@@ -72,6 +72,7 @@ andalso is_map(Opts) ->
         },
 
         %% Extract OIDC token fields
+        IdToken = maps:get(id_token, OidcTokens, undefined),
         RefreshToken = maps:get(refresh_token, OidcTokens, undefined),
         AccessTokenExpiresAt = maps:get(
             access_token_expires_at, OidcTokens, undefined
@@ -94,14 +95,19 @@ andalso is_map(Opts) ->
         },
 
         %% Add optional OIDC fields
-        Claims1 = case RefreshToken of
+        Claims1 = case IdToken of
             undefined -> Claims0;
-            _ -> Claims0#{oidc_refresh_token => RefreshToken}
+            _ -> Claims0#{oidc_id_token => IdToken}
+        end,
+
+        Claims2 = case RefreshToken of
+            undefined -> Claims1;
+            _ -> Claims1#{oidc_refresh_token => RefreshToken}
         end,
 
         Claims = case AccessTokenExpiresAt of
-            undefined -> Claims1;
-            _ -> Claims1#{oidc_access_token_expires_at => AccessTokenExpiresAt}
+            undefined -> Claims2;
+            _ -> Claims2#{oidc_access_token_expires_at => AccessTokenExpiresAt}
         end,
 
         JWT = jose_jwt:from(Claims),

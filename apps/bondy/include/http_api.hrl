@@ -179,6 +179,10 @@
 
 
 
+-define(TICKET_COOKIE_PREFIX, <<"bondy_ticket_">>).
+-define(CSRF_COOKIE_PREFIX, <<"bondy_csrf_">>).
+
+
 -define(CORS_HEADERS, #{
     <<"access-control-allow-origin">> => <<"*">>,
     <<"access-control-allow-credentials">> => <<"true">>,

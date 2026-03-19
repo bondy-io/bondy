@@ -437,8 +437,8 @@ to_longpoll_subprotocol(?WAMP2_JSON) ->
 %% @private
 maybe_set_auth_ticket(Pid, Req) ->
     Cookies = cowboy_req:parse_cookies(Req),
-    case lists:keyfind(<<"bondy_ticket">>, 1, Cookies) of
-        {_, Ticket} when is_binary(Ticket) andalso Ticket =/= <<>> ->
+    case find_ticket_cookie(Cookies) of
+        {value, {_, Ticket}} when Ticket =/= <<>> ->
             case bondy_ticket:verify(Ticket) of
                 {ok, Claims} ->
                     bondy_http_transport_session:set_auth_claims(Pid, Claims);
@@ -458,15 +458,19 @@ maybe_set_auth_ticket(Pid, Req) ->
 %% @private
 validate_csrf(Req) ->
     Cookies = cowboy_req:parse_cookies(Req),
-    case lists:keyfind(<<"bondy_ticket">>, 1, Cookies) of
+    case find_ticket_cookie(Cookies) of
         false ->
             %% No ticket cookie — non-OIDC flow, skip CSRF
             ok;
-        _ ->
+        {value, {Name, _}} ->
+            %% Extract realm suffix and look up the matching CSRF cookie
+            PrefixLen = byte_size(?TICKET_COOKIE_PREFIX),
+            RealmUri = binary:part(Name, PrefixLen, byte_size(Name) - PrefixLen),
+            CsrfName = <<?CSRF_COOKIE_PREFIX/binary, RealmUri/binary>>,
             CsrfHeader = cowboy_req:header(
                 <<"x-csrf-token">>, Req, undefined
             ),
-            CsrfCookie = case lists:keyfind(<<"bondy_csrf">>, 1, Cookies) of
+            CsrfCookie = case lists:keyfind(CsrfName, 1, Cookies) of
                 {_, V} -> V;
                 false -> undefined
             end,
@@ -484,22 +488,23 @@ validate_auth_ticket(Pid, Req) ->
         undefined ->
             %% No OIDC claims — non-cookie flow, skip validation
             ok;
-        StoredClaims ->
+        #{authrealm := Authrealm} = StoredClaims ->
             Cookies = cowboy_req:parse_cookies(Req),
-            case lists:keyfind(<<"bondy_ticket">>, 1, Cookies) of
+            CookieName = <<?TICKET_COOKIE_PREFIX/binary, Authrealm/binary>>,
+            case lists:keyfind(CookieName, 1, Cookies) of
                 false ->
                     {error, unauthorized};
                 {_, Ticket} ->
                     case bondy_ticket:verify(Ticket) of
                         {ok, #{
-                            authid := Authid, authrealm := Authrealm
+                            authid := Authid, authrealm := Authrealm2
                         }} ->
                             #{
                                 authid := ExpAuthid,
                                 authrealm := ExpAuthrealm
                             } = StoredClaims,
                             case Authid =:= ExpAuthid
-                                    andalso Authrealm =:= ExpAuthrealm of
+                                    andalso Authrealm2 =:= ExpAuthrealm of
                                 true -> ok;
                                 false -> {error, unauthorized}
                             end;
@@ -508,6 +513,19 @@ validate_auth_ticket(Pid, Req) ->
                     end
             end
     end.
+
+
+%% @private
+%% Scans cookies for the first one matching the bondy_ticket_ prefix.
+find_ticket_cookie(Cookies) ->
+    lists:search(
+        fun({Name, _}) ->
+            PrefixLen = byte_size(?TICKET_COOKIE_PREFIX),
+            byte_size(Name) > PrefixLen andalso
+            binary:part(Name, 0, PrefixLen) =:= ?TICKET_COOKIE_PREFIX
+        end,
+        Cookies
+    ).
 
 
 %% @private
