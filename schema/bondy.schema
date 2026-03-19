@@ -493,6 +493,8 @@
 %% - "trust"
 %% - "wamp-scram"
 %% - "wampcra"
+%% - "oidc"
+%% - "oidcrp"
 %%
 %% The option also allows a single value "all" in which case all the methods
 %% above will be allowed.
@@ -519,7 +521,8 @@
             <<"trust">>,
             <<"wamp-scram">>,
             <<"wampcra">>,
-            <<"oidc">>
+            <<"oidc">>,
+            <<"oidcrp">>
           ]),
           try
             Requested = ordsets:from_list([
@@ -2099,6 +2102,8 @@ end}.
     end
   end
 }.
+
+
 %% =============================================================================
 %% WAMP
 %% =============================================================================
@@ -2692,6 +2697,105 @@ end}.
   end
  end
 }.
+
+%% Max queued messages per transport
+{mapping, "wamp.transport_queue.max_messages",
+"bondy.transport_queue.max_messages", [
+    {default, 1000},
+    {datatype, integer},
+    {validators, ["pos_integer"]}
+]}.
+
+%% Max queued bytes per transport
+{mapping, "wamp.transport_queue.max_bytes",
+"bondy.transport_queue.max_bytes", [
+    {default, "10MB"},
+    {datatype, bytesize}
+]}.
+
+%% TTL for individual messages
+{mapping, "wamp.transport_queue.message_ttl",
+"bondy.transport_queue.message_ttl", [
+  {default, "5m"},
+  {datatype, {duration, ms}}
+]}.
+
+%% Session idle timeout — auto-closes the transport session if no HTTP request
+%% touches it within this window
+{mapping, "wamp.transport_queue.transport_ttl",
+"bondy.transport_queue.transport_ttl", [
+  {default, "1h"},
+  {datatype, {duration, ms}}
+]}.
+
+%% How often the TTL eviction sweep runs
+{mapping, "wamp.transport_queue.eviction_interval",
+"bondy.transport_queue.eviction_interval", [
+  {default, "5s"},
+  {datatype, {duration, ms}}
+]}.
+
+%% How often the TTL eviction sweep runs
+{mapping, "wamp.transport_queue.partitions",
+"bondy.transport_queue.partitions", [
+    {datatype, integer},
+    {validators, ["pos_integer"]}
+]}.
+
+%% What to do when queue limits are exceeded
+{mapping, "wamp.transport_queue.overflow_strategy",
+"bondy.transport_queue.overflow_strategy", [
+  {default, drop_oldest},
+  {datatype, {enum, [drop_oldest]}}
+]}.
+
+%% =============================================================================
+%% WAMP LONGPOLLSSE
+%% =============================================================================
+
+%% How long a `/receive` request blocks waiting for messages before returning an
+%% empty 200
+{mapping, "wamp.longpoll.idle_timeout",
+"bondy.wamp_longpoll.idle_timeout", [
+  {default, "10m"},
+  {datatype, {duration, ms}}
+]}.
+
+{mapping, "wamp.longpoll.reset_idle_timeout_on_send",
+"bondy.wamp_longpoll.reset_idle_timeout_on_send", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+%% =============================================================================
+%% WAMP SSE
+%% =============================================================================
+
+{mapping, "wamp.sse.ping.enabled",
+"bondy.wamp_sse.ping.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+%% Interval between SSE keepalive comments (`:keepalive\n\n`) sent to prevent
+%% intermediary timeouts
+{mapping, "wamp.sse.ping.interval",
+"bondy.wamp_sse.ping.interval", [
+  {default, "20s"},
+  {datatype, {duration, ms}}
+]}.
+
+{mapping, "wamp.sse.idle_timeout",
+"bondy.wamp_sse.idle_timeout", [
+  {default, "10m"},
+  {datatype, {duration, ms}}
+]}.
+
+{mapping, "wamp.sse.reset_idle_timeout_on_send",
+"bondy.wamp_sse.reset_idle_timeout_on_send", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
 
 
 

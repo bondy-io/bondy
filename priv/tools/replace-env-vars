@@ -107,10 +107,10 @@ replace(Dir, Files) ->
                             [Filename, Varname]
                         ),
                         false;
-                    _:EReason ->
+                    _:EReason:Stacktrace ->
                         ?LOG_ERROR(
-                            "Replacement failed for file ~p. Reason: ~p",
-                            [Filename, EReason]
+                            "Replacement failed for file ~p. Reason: ~p\nStacktrace: ~p",
+                            [Filename, EReason, Stacktrace]
                         ),
                         false
                 end;

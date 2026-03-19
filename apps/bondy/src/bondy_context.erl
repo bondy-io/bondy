@@ -20,7 +20,9 @@
 -include_lib("partisan/include/partisan_util.hrl").
 
 -type subprotocol_2()        ::  subprotocol()
-                                | {http, text, json | msgpack}.
+                                | {http, text, json | msgpack}
+                                | {http_sse, text, json}
+                                | {http_longpoll, text, json}.
 
 
 -type t()       ::  #{
@@ -34,7 +36,7 @@
     authid => binary(),
     is_anonymous => boolean(),
     roles => map(),
-    request_details => map(),
+    request_details => optional(map()),
     %% Metadata
     user_info => map()
 }.
@@ -127,7 +129,8 @@ new() ->
     #{
         session_id => bondy_session_id:new(),
         call_timeout => bondy_config:get(wamp_call_timeout, undefined),
-        request_timeout => bondy_config:get(request_timeout, undefined)
+        request_timeout => bondy_config:get(request_timeout, undefined),
+        request_details => undefined
     }.
 
 
@@ -763,6 +766,12 @@ set_property(source_ip, Val, Ctxt) ->
 
 set_property(user_info, Val, Ctxt) ->
     Ctxt#{user_info => Val};
+
+set_property(transport_id, Val, Ctxt) when is_binary(Val) ->
+    Ctxt#{transport_id => Val};
+
+set_property(transport_type, Val, Ctxt) when is_atom(Val) ->
+    Ctxt#{transport_type => Val};
 
 set_property(_, _, Ctxt) ->
     %% Unknown property

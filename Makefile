@@ -152,6 +152,9 @@ prodtarrun: tar
 node1:
 	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} as node1 release
+	@set -a && \
+    [ -f .env ] && . .env && \
+    set +a && \
 	ERL_DIST_PORT=27781 _build/node1/rel/bondy/bin/bondy console
 
 node1-clean:
@@ -252,4 +255,9 @@ docker-run-prod:
 docker-scan-prod:
 	docker scan bondy-prod
 
-
+.PHONY: load-longpoll
+load-longpoll:
+	curl -X "POST" "http://localhost:18081/services/load_api_spec" \
+	-H 'Content-Type: application/json; charset=utf-8' \
+	-H 'Accept: application/json; charset=utf-8' \
+	-d @examples/config/longpoll_api_spec.json

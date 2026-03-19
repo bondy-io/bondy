@@ -55,20 +55,34 @@
     security_enabled = true         ::  boolean(),
     is_anonymous = false            ::  boolean(),
     rbac_context                    ::  optional(bondy_rbac:context()),
+    rbac_metadata                   ::  optional(map()),
     is_persistent = false           ::  boolean(),
     %% Expiration and Limits
     created                         ::  pos_integer(),
     expires_at                      ::  pos_integer() | infinity,
-    meta = #{}                      ::  map()
+    meta = #{}                      ::  map(),
+    %% Transport
+    transport_type                  ::  optional(transport_type()),
+    transport_id                    ::  optional(binary())
 }).
 
 -type peer()                    ::  {inet:ip_address(), inet:port_number()}.
 -type peer_role()               ::  caller | callee | subscriber | publisher.
+-type transport_type()          ::  websocket | tcp | http_sse | http_longpoll.
 -type t()                       ::  #session{}.
 -type t_or_id()                 ::  t() | bondy_session_id:t().
 -type authmethod_details()      ::  #{
                                         id => bondy_ticket:ticket_id(),
-                                        scope => bondy_ticket:scope()
+                                        authrealm => uri(),
+                                        scope => bondy_ticket:scope(),
+                                        oidc_provider =>
+                                            optional(binary()),
+                                        oidc_refresh_token =>
+                                            optional(binary()),
+                                        oidc_access_token_expires_at =>
+                                            optional(pos_integer()),
+                                        oidc_refresh_entry_id =>
+                                            optional(binary())
                                     }.
 -type external()                ::  #{
                                         session => id(),
@@ -92,6 +106,8 @@
                                         agent => binary(),
                                         authid => binary(),
                                         authmethod => binary(),
+                                        authmethod_details =>
+                                            authmethod_details(),
                                         authrealm => uri(),
                                         authrole => binary(),
                                         authroles => [binary()],
@@ -101,7 +117,9 @@
                                             inet:port_number()
                                         },
                                         roles => peer(),
-                                        type => bondy_ref:ref_type()
+                                        type => bondy_ref:ref_type(),
+                                        transport_type => transport_type(),
+                                        transport_id => binary()
                                     }.
 -type match_opts()              ::  #{
                                         limit => pos_integer(),
@@ -129,6 +147,7 @@
 -export_type([peer_role/0]).
 -export_type([properties/0]).
 -export_type([external/0]).
+-export_type([transport_type/0]).
 
 
 
@@ -166,6 +185,7 @@
 -export([peer/1]).
 -export([pid/1]).
 -export([rbac_context/1]).
+-export([rbac_metadata/1]).
 -export([realm_uri/1]).
 -export([ref/1]).
 -export([refresh_rbac_context/1]).
@@ -173,8 +193,11 @@
 -export([size/0]).
 -export([store/1]).
 -export([to_external/1]).
+-export([transport_id/1]).
+-export([transport_type/1]).
 -export([type/1]).
 -export([update/1]).
+-export([update_authmethod_details/2]).
 -export([user/1]).
 
 -ifdef(TEST).
@@ -199,7 +222,8 @@ format_status(#session{} = S) ->
     S#session{
         authid = bondy_sensitive:wrap(S#session.authid),
         rbac_context = bondy_sensitive:wrap(S#session.rbac_context),
-        meta = bondy_sensitive:wrap(S#session.meta)
+        meta = bondy_sensitive:wrap(S#session.meta),
+        transport_id = bondy_sensitive:wrap(S#session.transport_id)
     }.
 
 
@@ -265,6 +289,32 @@ type(#session{type = Val}) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Returns the transport type for this session, or `undefined` if not set.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec transport_type(t_or_id()) -> optional(transport_type()).
+
+transport_type(#session{transport_type = Val}) ->
+    Val;
+
+transport_type(Id) when is_binary(Id) ->
+    lookup_field(Id, #session.transport_type).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the transport id for this session, or `undefined` if not set.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec transport_id(t_or_id()) -> optional(binary()).
+
+transport_id(#session{transport_id = Val}) ->
+    Val;
+
+transport_id(Id) when is_binary(Id) ->
+    lookup_field(Id, #session.transport_id).
+
+
+%% -----------------------------------------------------------------------------
 %% @doc
 %% Creates a new session provided the RealmUri exists or can be dynamically
 %% created.
@@ -312,6 +362,22 @@ store(#session{} = S0) ->
 update(#session{id = Id} = S) ->
     Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
     true = ets:insert(Tab, S),
+    ok.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Updates the `authmethod_details` for the session identified by `Id`
+%% directly in ETS.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec update_authmethod_details(
+    bondy_session_id:t(), authmethod_details()
+) -> ok.
+
+update_authmethod_details(Id, Details)
+when is_binary(Id) andalso is_map(Details) ->
+    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
+    _ = ets:update_element(Tab, Id, {#session.authmethod_details, Details}),
     ok.
 
 
@@ -586,7 +652,7 @@ authmethod(Session) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec authmethod_details(t_or_id()) -> optional(binary()).
+-spec authmethod_details(t_or_id()) -> optional(authmethod_details()).
 
 authmethod_details(Session) ->
     lookup_field(Session, #session.authmethod_details).
@@ -635,6 +701,36 @@ rbac_context(Id) when is_binary(Id) ->
             refresh_rbac_context(Id, Ctxt)
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec rbac_metadata(t_or_id()) -> map().
+
+rbac_metadata(#session{id = Id} = Session) ->
+    %% We force the lookup to go to ets by passing Id as we want the latest
+    %% updated value
+    try lookup_field(Id, #session.rbac_metadata) of
+        undefined ->
+            Meta = get_rbac_metadata(Session),
+            ok = update_rbac_metadata(Id, Meta),
+            Meta;
+        Meta ->
+            Meta
+    catch
+        error:badarg ->
+            %% Session not in ets, the case for an HTTP session
+            get_rbac_metadata(Session)
+    end;
+
+rbac_metadata(Id) when is_binary(Id) ->
+    case lookup_field(Id, #session.rbac_metadata) of
+        undefined ->
+            rbac_metadata(fetch(Id));
+        Meta ->
+            Meta
+    end.
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -806,7 +902,7 @@ to_external(#session{} = S) ->
         true ->
             #{};
         false ->
-            #{meta => bondy_rbac_user:meta(user(S))}
+            #{meta => rbac_metadata(S)}
     end,
 
     #{
@@ -943,6 +1039,16 @@ parse_properties(type, V, Session) ->
 
     Session#session{type = V};
 
+parse_properties(transport_type, V, Session)
+when V =:= websocket; V =:= tcp; V =:= http_sse; V =:= http_longpoll ->
+    Session#session{transport_type = V};
+
+parse_properties(transport_id, V, Session) when is_binary(V) ->
+    Session#session{transport_id = V};
+
+parse_properties(authmethod_details, V, Session) when is_map(V) ->
+    Session#session{authmethod_details = V};
+
 parse_properties(_, _, Session) ->
     Session.
 
@@ -1040,6 +1146,11 @@ update_rbac_context(Id, Context) ->
     _ = ets:update_element(Tab, Id, {#session.rbac_context, Context}),
     ok.
 
+%% @private
+update_rbac_metadata(Id, Meta) ->
+    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
+    _ = ets:update_element(Tab, Id, {#session.rbac_metadata, Meta}),
+    ok.
 
 %% @private
 do_match(Tabs, Bindings, Opts0) ->
@@ -1203,8 +1314,26 @@ maybe_and(Clauses) ->
 get_rbac_context(#session{is_anonymous = true, realm_uri = Uri}) ->
     bondy_rbac:get_context(Uri, anonymous);
 
+get_rbac_context(#session{
+    authid = Authid, realm_uri = Uri, authroles = Roles
+}) when is_list(Roles), Roles =/= [] ->
+    bondy_rbac:get_context(Uri, Authid, Roles);
+
 get_rbac_context(#session{authid = Authid, realm_uri = Uri}) ->
     bondy_rbac:get_context(Uri, Authid).
+
+
+%% @private
+get_rbac_metadata(#session{is_anonymous = true, realm_uri = Uri}) ->
+    bondy_rbac:get_metadata(Uri, anonymous);
+
+get_rbac_metadata(#session{
+    authid = Authid, realm_uri = Uri, authroles = Roles
+}) when is_list(Roles), Roles =/= [] ->
+    bondy_rbac:get_metadata(Uri, Authid, Roles);
+
+get_rbac_metadata(#session{authid = Authid, realm_uri = Uri}) ->
+    bondy_rbac:get_metadata(Uri, Authid).
 
 
 %% @private
@@ -1217,6 +1346,24 @@ maybe_revoke_tickets(Session, ?WAMP_CLOSE_LOGOUT) ->
                 scope := Scope
             } = authmethod_details(Session),
             bondy_ticket:revoke(Authrealm, Authid, Scope);
+
+        ?OIDCRP_AUTH ->
+            case authmethod_details(Session) of
+                #{id := TicketId, authrealm := Authrealm, scope := Scope}
+                = Details
+                when TicketId =/= undefined ->
+                    %% Remove from refresh queue
+                    case maps:find(oidc_refresh_entry_id, Details) of
+                        {ok, EntryId} when is_binary(EntryId) ->
+                            bondy_oidc_refresh_worker:remove_entry(EntryId);
+                        _ ->
+                            ok
+                    end,
+                    Authid = authid(Session),
+                    bondy_ticket:revoke(Authrealm, Authid, Scope);
+                _ ->
+                    ok
+            end;
 
         ?WAMP_OAUTH2_AUTH ->
             %% TODO remove token for sessionID

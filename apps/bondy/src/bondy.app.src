@@ -33,6 +33,7 @@
         cowboy,
         hackney,
         backoff,
+        oidcc,
         %% 3rd-party Utils
         %% 3rd-party Instrumentation
         prometheus,

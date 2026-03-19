@@ -370,7 +370,8 @@ set_vsn(Args) ->
 setup_mods() ->
     ok = jose:json_module(bondy_wamp_json),
     ok = configure_registry(),
-    ok = configure_jobs_pool().
+    ok = configure_jobs_pool(),
+    ok = configure_transport_queue().
 
 
 setup_partisan_channels() ->
@@ -556,6 +557,32 @@ configure_jobs_pool() ->
         _ ->
             ok
     end.
+
+
+%% @private
+configure_transport_queue() ->
+    Defaults = [
+        {max_messages, 1000},
+        {max_bytes, 10485760},
+        {message_ttl, 300000},
+        {transport_ttl, 3600000},
+        {overflow_strategy, drop_oldest},
+        {eviction_interval, 5000},
+        {partitions, erlang:system_info(schedulers)}
+    ],
+    lists:foreach(
+        fun({Key, Default}) ->
+            KeyPath = [transport_queue, Key],
+            case bondy_config:get(KeyPath, undefined) of
+                undefined ->
+                    bondy_config:set(KeyPath, Default);
+                _ ->
+                    ok
+            end
+        end,
+        Defaults
+    ),
+    ok.
 
 
 %% @private

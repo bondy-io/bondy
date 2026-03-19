@@ -37,3 +37,5 @@ examples/st
 examples/custom_config/etc/bondy.conf
 examples/custom_config/etc/disabled/
 examples/custom_config/etc/generated/
+apps/bondy_cbor/bench/output/*
+/.vscode/settings.json

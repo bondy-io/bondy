@@ -4,6 +4,25 @@
 %% =============================================================================
 
 -module(email_adapter_sendgrid).
+
+-moduledoc """
+`email_adapter` implementation for the SendGrid v3 Mail Send API.
+
+Sends emails via `httpc` POST to `https://<apiurl>/mail/send` with
+Bearer token authentication. Supports both content-based and
+dynamic-template-based emails.
+
+## HTTP status handling
+
+| Status | Interpretation |
+|--------|---------------|
+| 202 | Accepted — returns message ID from `x-message-id` header |
+| 400, 413 | Bad request — returns decoded error body |
+| 401, 403, 404 | Auth/routing error — returns `{error, {Status, Body}}` |
+| 408, 504 | Timeout — returns `{error, timeout}` |
+| Other | Server error — returns `{error, {Status, server_error}}` |
+""".
+
 -behaviour(email_adapter).
 
 
@@ -73,18 +92,16 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Start the adapter with default options.".
 start() ->
     start([]).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Start the adapter.
+
+`Options` is a proplist with `apiurl` and `apikey` keys.
+""".
 start(Options) ->
     ApiUrl = proplists:get_value(apiurl, Options),
     ApiKey = proplists:get_value(apikey, Options),
@@ -92,18 +109,17 @@ start(Options) ->
     {ok, #state{apiurl=ApiUrl, apikey=ApiKey}}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc false.
 stop(_Conn) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Send an email through the SendGrid API.
+
+Constructs a JSON payload (content-based or template-based depending on
+`Opt`) and POSTs it to the SendGrid v3 endpoint.
+""".
 send(Conn, {ToEmail, ToEmail}, {FromName, FromEmail}, Subject, Message, Opt) ->
     send(Conn, {<<>>, ToEmail}, {FromName, FromEmail}, Subject, Message, Opt);
 

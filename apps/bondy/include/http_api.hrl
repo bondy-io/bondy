@@ -179,10 +179,14 @@
 
 
 
+-define(TICKET_COOKIE_PREFIX, <<"bondy_ticket_">>).
+-define(CSRF_COOKIE_PREFIX, <<"bondy_csrf_">>).
+
+
 -define(CORS_HEADERS, #{
     <<"access-control-allow-origin">> => <<"*">>,
     <<"access-control-allow-credentials">> => <<"true">>,
     <<"access-control-allow-methods">> => <<"HEAD,OPTIONS,POST">>,
-    <<"access-control-allow-headers">> => <<"origin,x-requested-with,content-type,accept,authorization,accept-language">>,
+    <<"access-control-allow-headers">> => <<"origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token">>,
     <<"access-control-max-age">> => <<"86400">>
 }).

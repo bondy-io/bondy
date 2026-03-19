@@ -690,7 +690,8 @@ validate_max_len(_) ->
 %% 0: illegal
 %% 1: JSON
 %% 2: MessagePack
-%% 3 - 15: reserved for future serializers
+%% 3: CBOR
+%% 4 - 15: reserved for future serializers
 %% @end
 %% -----------------------------------------------------------------------------
 validate_encoding(1) ->
@@ -698,6 +699,9 @@ validate_encoding(1) ->
 
 validate_encoding(2) ->
     {binary, msgpack};
+
+validate_encoding(3) ->
+    {binary, cbor};
 
 validate_encoding(N) ->
     case lists:keyfind(N, 2, bondy_config:get(wamp_serializers, [])) of

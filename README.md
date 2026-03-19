@@ -5,7 +5,7 @@
 ![Docker Pulls](https://img.shields.io/docker/pulls/leapsight/bondy?style=for-the-badge)
 ![Docker Build (master)](https://img.shields.io/github/actions/workflow/status/bondy-io/bondy/docker_image_build.yaml?&branch=master&label=docker-master&style=for-the-badge)
 ![Docker Build (develop)](https://img.shields.io/github/actions/workflow/status/bondy-io/bondy/docker_image_build.yaml?&branch=develop&label=docker-develop&style=for-the-badge)
-![Docker Build (latest-tag)](https://img.shields.io/github/actions/workflow/status/bondy-io/bondy/docker_image_build.yaml?&tag=version-1.0.0-rc.50&label=docker-1.0.0-rc.50&style=for-the-badge)
+![Docker Build (latest-tag)](https://img.shields.io/github/actions/workflow/status/bondy-io/bondy/docker_image_build.yaml?&tag=version-1.0.0-rc.51&label=docker-1.0.0-rc.51&style=for-the-badge)
 <br>![Architectures](https://img.shields.io/badge/architecture-linux%2Famd64%20%7C%20linux%2Farm64%20%7C%20macOS%2Fintel%20%7C%20macOS%2FM1-lightgrey?style=for-the-badge)
 
 
@@ -37,7 +37,8 @@ For our work-in-progress documentation for v1.0.0 go to [https://developer.bondy
 * [x] Ticket
 * [x] WAMP-CRA
 * [ ] WAMP-SCRAM (WIP)
-* [ ] Cookie
+* [x] Cookie (Using Ticket)
+
 
 In addition Bondy provides:
 
@@ -45,6 +46,7 @@ In addition Bondy provides:
 * [x] HTTP Password
 * [x] Same Sign-on -- use a single set of credentials to sign on to multiple realms
 * [x] Single Sign-on -- combines Same Sign-on with Ticket authentication. The resulting ticket can be used to sign on to multiple realms.
+* [X] OpenID Connect (Relaying Party) - integrated with Cookie/Ticket
 
 ### Advanced RPC features
 * [x] Call Canceling
@@ -76,16 +78,22 @@ In addition Bondy provides:
 * [ ] Sharded Subscriptions
 * [ ] Subscription Revocation
 
-### Transport
+### WAMP Transports
 
 * [x] WebSockets
 * [x] RawSockets
+* [x] HTTP Longpoll
 * [ ] E2E encryption
+
+In addition Bondy provides:
+
+* [x] HTTP SSE a variation on HTTP Longpoll transport were Server Sent Events (SSE) for `receive`
 
 ### Transport Serialization
 
 * [x] JSON
 * [x] Msgpack
+* [x] CBOR
 * [x] BERT
 * [x] Erlang (subset)
 * [ ] JSON batched
@@ -157,7 +165,7 @@ make release
 Untar and copy the resulting tarball to the location where you want to install Bondy e.g. `~/tmp/bondy`.
 
 ```shell
-tar -zxvf _build/prod/rel/bondy-1.0.0-rc.50.tar.qz -C ~/tmp/bondy
+tar -zxvf _build/prod/rel/bondy-1.0.0-rc.51.tar.qz -C ~/tmp/bondy
 ```
 
 #### Running

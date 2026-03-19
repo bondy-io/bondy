@@ -1,4 +1,24 @@
 # CHANGELOG
+
+## 1.0.0-rc.51 (DEVELOP)
+### New Features
+* Experimental implementation of 2 additional WAMP Transports:
+    * HTTP Longpoll according to the WAMP Spec.
+    * HTTP SSE, a variation on Longpoll that uses Server Sent Events (SSE) for `receive` (This only works with JSON encoding only at the moment)
+* Support for Cookie-based authentication in combination with OpenID Connect, where Bondy acts as OIDC Relaying Party (`oidcrp` authentication method). Configuration done at the realm level. This requires the definition of an HTTP API using Bondy API Gateway.
+* RP-Initiated Logout for OIDC sessions. The `/oidc/logout` endpoint now performs a two-step logout: revokes the Bondy ticket and clears cookies, then redirects to the IdP's `end_session_endpoint` (with `id_token_hint` and `post_logout_redirect_uri`) to terminate the IdP session as well. Falls back to a direct SPA redirect if the IdP does not support `end_session_endpoint`. The `post_logout_redirect_uri` must be registered in the IdP's client configuration.
+* Experimental implementation of RPC Gateway that allows for the definition of WAMP to HTTP routing, taking care of Secret Management and Token flows and caching. This is entirely configured on the `bondy.conf` file.
+* Cookies now have the realm as suffix e.g. `bondy_ticket_my_realm`
+* New `bondy.session.self` RPC that returns the caller's session information (usefull when using cookie-based authentication as the cookie cannot be read by the client code).
+
+### Fixes
+* Fixed CORS headers missing from OIDC handler endpoints (`/oidc/login`, `/oidc/callback`, `/oidc/logout`). Cross-origin requests from SPAs were blocked by the browser. The handler now sets CORS headers on all responses and handles `OPTIONS` preflight requests.
+* Fixed `bondy_csrf` cookie never being set during the OIDC callback. The cookie used `SameSite=Strict` which prevented the browser from accepting it on the cross-site redirect from the IdP. Changed to `SameSite=Lax` to match `bondy_ticket`.
+* Fixed `/oidc/logout` not clearing the `bondy_ticket` cookie in cross-site deployments. The endpoint now accepts `GET` requests (in addition to `POST`) so the SPA can use a top-level navigation, which allows the browser to both send and clear `SameSite=Lax` cookies. The response is a `302` redirect instead of `200 OK`.
+
+### Changes
+* Session `authextra.meta` map now collects metadata from the User object as well as all the groups this user belongs to directly or indirectly (transitive closure). As a result both keys in `HELLO.Details.authextra.meta` and `Details._session_info.meta` can return lists (arrays) when 2 or more values have been collected for that key or when any of the values was originally a list.
+
 ## 1.0.0-rc.50
 * Upgraded PlumDB with:
     * Fixes to configuration of shared write buffer and block cache

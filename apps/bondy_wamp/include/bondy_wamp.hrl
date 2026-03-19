@@ -12,10 +12,13 @@
 -define(WAMP2_MSGPACK, <<"wamp.2.msgpack">>).
 -define(WAMP2_BERT, <<"wamp.2.bert">>).
 -define(WAMP2_ERL, <<"wamp.2.erl">>).
+-define(WAMP2_CBOR, <<"wamp.2.cbor">>).
+-define(WAMP2_CBOR_BATCHED,<<"wamp.2.cbor.batched">>).
 -define(WAMP2_MSGPACK_BATCHED,<<"wamp.2.msgpack.batched">>).
 -define(WAMP2_JSON_BATCHED,<<"wamp.2.json.batched">>).
 -define(WAMP2_BERT_BATCHED,<<"wamp.2.bert.batched">>).
 -define(WAMP2_ERL_BATCHED,<<"wamp.2.erl.batched">>).
+-define(WAMP2_JSON_SSE, <<"wamp.2.json.sse">>).
 
 -define(WAMP_ENCODINGS, [
     json,
@@ -40,7 +43,7 @@
                             | erl_batched.
 
 -type frame_type()      ::  text | binary.
--type transport()       ::  ws | raw.
+-type transport()       ::  ws | raw | http_sse | http_longpoll.
 -type subprotocol()     ::  {transport(), frame_type(), encoding()}.
 
 

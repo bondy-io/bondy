@@ -4,6 +4,44 @@
 %% =============================================================================
 
 -module(bondy_kafka_bridge).
+
+-moduledoc """
+Bridge implementation that forwards WAMP events to Apache Kafka.
+
+Uses `brod` as the Kafka client. On initialisation, starts the configured
+brod clients and exposes a `<<"kafka">>` context key containing topic
+mappings for use in `mops` templates.
+
+## Action specification
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `<<"type">>` | `<<"produce_sync">>` | Production mode (sync only for now) |
+| `<<"topic">>` | binary | Kafka topic name |
+| `<<"key">>` | binary \| null | Message key |
+| `<<"value">>` | any | Message value (encoded per `encoding`) |
+| `<<"options">>` | map | Brod producer options (see below) |
+
+### Producer options
+
+- `<<"client_id">>` — brod client name (atom or binary)
+- `<<"acknowledge">>` — whether to wait for ack (boolean)
+- `<<"required_acks">>` — `0` (none), `1` (leader), `-1` (all)
+- `<<"ack_timeout">>` — timeout in ms (default 10000)
+- `<<"partition">>` — explicit partition number, or `null`
+- `<<"partitioner">>` — `#{<<"algorithm">> => ..., <<"value">> => ...}`
+- `<<"encoding">>` — `json` | `msgpack` | `erl` | `bert`
+- `<<"compression">>` — `no_compression` | `gzip` | `snappy`
+- Plus brod tuning: `max_batch_size`, `max_retries`, `retry_backoff_ms`,
+  `max_linger_ms`, `max_linger_count`, `partition_buffer_limit`,
+  `partition_onwire_limit`
+
+### Partitioner algorithms
+
+`random`, `hash`, `fnv32`, `fnv32a`, `fnv32m`, `fnv64`, `fnv64a`,
+`fnv128`, `fnv128a`.
+""".
+
 -behaviour(bondy_broker_bridge).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -300,10 +338,13 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Initialises the Kafka clients provided by the configuration.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Initialise the Kafka bridge.
+
+Sets up brod clients from `Config`, starts the `hash` and `brod`
+applications, and returns a context map with topic mappings under
+`<<"kafka">> => #{<<"topics">> => ...}`.
+""".
 init(Config) ->
     _ = [application:set_env(brod, K, V) || {K, V} <- Config, K =:= clients],
 
@@ -335,37 +376,7 @@ init(Config) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Validates the action specification.
-%% An action spec is a map containing the following keys:
-%%
-%% * `type :: binary()' - `<<"produce_sync">>'. Optional, the default value is `<<"produce_sync">>'.
-%% * `topic :: binary()' - the Kafka topic we should produce to.
-%% * `key :: binary()' - the kafka message's key
-%% * `value :: any()' - the kafka message's value
-%% * `options :: map()' - a map containing the following keys
-%%
-%% ```erlang
-%% #{
-%%     <<"type">> <<"produce">>,
-%%     <<"topic": <<"com.magenta.wamp_events",
-%%     <<"key": "\"{{event.topic}}/{{event.publication_id}}\"",
-%%     <<"value": "{{event}}",
-%%     <<"options" : {
-%%         <<"client_id": "default",
-%%         <<"acknowledge": true,
-%%         <<"required_acks": "all",
-%%         <<"partition": null,
-%%         <<"partitioner": {
-%%             "algorithm": "fnv32a",
-%%             "value": "\"{{event.topic}}/{{event.publication_id}}\""
-%%         },
-%%         <<"encoding">>: <<"json">>
-%%     }
-%% }
-%% '''
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Validate a Kafka produce action spec against `PRODUCE_ACTION_SPEC`.".
 validate_action(Action0) ->
     %% maps_utils:validate(Action0, ?PRODUCE_ACTION_SPEC).
     try maps_utils:validate(Action0, ?PRODUCE_ACTION_SPEC) of
@@ -377,11 +388,12 @@ validate_action(Action0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Evaluates the action specification `Action' against the context
-%% `Ctxt' using `mops' and produces to Kafka.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Execute the action by producing a message to Kafka via `brod:produce_sync/5`.
+
+Returns `{retry, client_down}` if the brod client is temporarily
+unavailable.
+""".
 apply_action(Action) ->
     try
         #{
@@ -428,6 +440,7 @@ apply_action(Action) ->
     end.
 
 
+-doc "Stop the `hash` and `brod` applications.".
 terminate(_Reason, _State) ->
     _  = application:stop(hash),
     _  = application:stop(brod),

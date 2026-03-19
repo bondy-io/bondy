@@ -4,8 +4,39 @@
 %% =============================================================================
 
 -module(bondy_sendgrid_bridge).
--behaviour(bondy_broker_bridge).
 
+-moduledoc """
+Bridge implementation that sends emails via the SendGrid API.
+
+Uses the `email` application with the `email_adapter_sendgrid` adapter.
+Supports both content-based and template-based emails. Failed sends are
+retried up to 3 times with a 2 s backoff.
+
+## Action specification
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `<<"email_address">>` | binary | Recipient address |
+| `<<"sender">>` | binary | Sender address |
+| `<<"subject">>` | binary | Email subject |
+| `<<"body">>` | map | Body content (see below) |
+| `<<"options">>` | map | Additional options (optional) |
+
+### Body content
+
+Provide one of:
+
+- `<<"text/plain">>` — plain-text content
+- `<<"text/html">>` — HTML content
+- `<<"template_id">>` + `<<"template_data">>` — SendGrid dynamic template
+
+## Configuration
+
+The `email_sender` key in the bridge config is injected into the `mops`
+context so that action templates can reference `{{email_sender}}`.
+""".
+
+-behaviour(bondy_broker_bridge).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -98,10 +129,11 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Initialises the sendgrid module with the provided configuration.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Configure and start the `email` application for SendGrid.
+
+Extracts `email_sender` from config and returns it as the bridge context.
+""".
 init(Config) ->
 
     ?LOG_DEBUG(#{
@@ -135,16 +167,7 @@ init(Config) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Validates the action specification.
-%% An action spec is a map containing the following keys:
-%%
-%% * `email_address :: binary()' - the email address to send the email.
-%% * `subject :: binary()' - the email subject
-%% * `body :: binary()' - the email body
-%% * `options :: map()' - options
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Validate a SendGrid email action spec.".
 validate_action(Action0) ->
     try maps_utils:validate(Action0, ?PRODUCE_ACTION_SPEC) of
         Action1 ->
@@ -155,11 +178,7 @@ validate_action(Action0) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Evaluates the action specification `Action' against the context
-%% `Ctxt' using `mops' and send the message to Sendgrid.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Send an email via SendGrid with up to 3 retries on timeout.".
 apply_action(Action) ->
 
     ?LOG_DEBUG(#{
@@ -196,10 +215,7 @@ apply_action(Action) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc false.
 terminate(_Reason, _State) ->
     ok.
 

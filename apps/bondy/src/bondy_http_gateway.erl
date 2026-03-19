@@ -3,11 +3,89 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_http_gateway).
+
+-moduledoc """
+Manages Cowboy HTTP/HTTPS listeners and the API Gateway dispatch tables.
+
+This gen_server is responsible for the full lifecycle of the Bondy HTTP
+API Gateway: loading API specification documents, storing them in plum_db,
+compiling them into Cowboy dispatch tables, and starting/stopping/suspending
+the underlying Ranch/Cowboy listeners.
+
+## Listeners
+
+Four listener names are supported:
+
+| Name | Description |
+|---|---|
+| `api_gateway_http` | Public HTTP listener |
+| `api_gateway_https` | Public HTTPS listener |
+| `admin_api_http` | Admin HTTP listener |
+| `admin_api_https` | Admin HTTPS listener |
+
+Each listener can be independently started, stopped, suspended and resumed
+via the corresponding public API functions.
+
+## API specifications
+
+API specs are JSON documents parsed by `bondy_http_gateway_api_spec_parser`.
+They are stored in plum_db under the `{api_gateway, api_specs}` prefix so
+they are replicated across cluster nodes. When a spec is loaded:
+
+1. The JSON document is validated and parsed
+2. The parsed spec is compiled into a Cowboy dispatch table
+   (`cowboy_router:compile/1`) to verify correctness
+3. The **source JSON** (not the parsed form) is persisted in plum_db —
+   parsed specs can contain `mops` proxy funs that become invalid after a
+   code upgrade, so we always re-parse from source
+4. The dispatch tables are rebuilt for all active listeners
+
+## Cluster replication
+
+The server subscribes to three plum_db event classes:
+
+- `exchange_started` — a new AAE exchange has begun with a peer node
+- `exchange_finished` — the exchange completed; the server rebuilds
+  dispatch tables from any specs updated during the exchange
+- `object_update` — an individual API spec was replicated from another
+  node; if the system is in `ready` state the dispatch tables are
+  rebuilt immediately, otherwise the update is buffered until the next
+  exchange completes
+
+This batching avoids redundant rebuilds during initial startup when many
+specs may arrive in quick succession.
+
+## WAMP subscriptions
+
+The server subscribes to `bondy.realm.deleted` on the master realm. When
+a realm is deleted the server can tear down all API specs associated with
+that realm (currently a placeholder).
+
+## Base routes
+
+Every listener includes a base set of routes that are always present
+regardless of loaded API specs:
+
+- Public listeners: `/ws` (WAMP WebSocket endpoint)
+- Admin listeners: `/ws`, `/ping`, `/ready`, `/metrics/[:registry]`
+
+## Configuration
+
+- `bondy.api_gateway.config_file` — optional path to a JSON file
+  containing one or more API spec documents, loaded at startup via
+  `apply_config/0`
+
+## Connection alarms
+
+Listeners are configured with two connection-count alarms:
+
+- **75% threshold** — logs a warning when 75% of `max_connections` is
+  reached
+- **90% threshold** — logs an alert when 90% of `max_connections` is
+  reached
+""".
+
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -70,105 +148,101 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+
+-doc "Starts the gen_server and registers it as `bondy_http_gateway`.".
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Conditionally start the public http and https listeners based on the
-%% configuration. This will load any default Bondy api specs.
-%% Notice this is not the way to start the admin api listeners see
-%% {@link start_admin_listeners()} for that.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Starts the public HTTP and HTTPS listeners based on the configuration.
+
+Loads all API specs from the metadata store, compiles them into Cowboy
+dispatch tables, and starts the `api_gateway_http` and `api_gateway_https`
+Ranch listeners (when enabled). This does not start the admin listeners;
+use `start_admin_listeners/0` for that.
+""".
 -spec start_listeners() -> ok | {error, any()}.
 
 start_listeners() ->
     gen_server:call(?MODULE, {start_listeners, public}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Suspends the public HTTP and HTTPS listeners.
+
+Suspended listeners stop accepting new connections but keep existing
+connections alive.
+""".
 -spec suspend_listeners() -> ok.
 
 suspend_listeners() ->
     gen_server:call(?MODULE, {suspend_listeners, public}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Resumes the public HTTP and HTTPS listeners after a suspension.".
 -spec resume_listeners() -> ok.
 
 resume_listeners() ->
     gen_server:call(?MODULE, {resume_listeners, public}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Stops the public HTTP and HTTPS listeners and closes all connections.".
 -spec stop_listeners() -> ok.
 
 stop_listeners() ->
     gen_server:call(?MODULE, {stop_listeners, public}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Starts the admin HTTP and HTTPS listeners.
+
+Loads the built-in admin API spec from `priv/specs/bondy_admin_api.json`,
+compiles the dispatch table, and starts the `admin_api_http` and
+`admin_api_https` Ranch listeners (when enabled). The admin listeners
+include the `/ping`, `/ready` and `/metrics` endpoints in addition to
+the WAMP WebSocket endpoint.
+""".
 -spec start_admin_listeners() -> ok | {error, any()}.
 
 start_admin_listeners() ->
     gen_server:call(?MODULE, {start_listeners, admin}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Stops the admin HTTP and HTTPS listeners and closes all connections.".
 -spec stop_admin_listeners() -> ok.
 
 stop_admin_listeners() ->
     gen_server:call(?MODULE, {stop_listeners, admin}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Suspends the admin HTTP and HTTPS listeners.
+
+Suspended listeners stop accepting new connections but keep existing
+connections alive.
+""".
 -spec suspend_admin_listeners() -> ok.
 
 suspend_admin_listeners() ->
     gen_server:call(?MODULE, {suspend_listeners, admin}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Resumes the admin HTTP and HTTPS listeners after a suspension.".
 -spec resume_admin_listeners() -> ok.
 
 resume_admin_listeners() ->
     gen_server:call(?MODULE, {resume_listeners, admin}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Parses the apis provided by the configuration file
-%% ('bondy.api_gateway.config_file'), stores the apis in the metadata store.
-%% This call does not load the spec in the HTTP server dispatch tables.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Loads API specs from the configuration file into the metadata store.
+
+Reads the JSON file at `bondy.api_gateway.config_file`, parses each
+spec, validates it, and stores it in plum_db. Does **not** rebuild the
+Cowboy dispatch tables — call `rebuild_dispatch_tables/0` or `load/1`
+for that.
+""".
 -spec apply_config() ->
     ok | {error, invalid_specification_format | any()}.
 
@@ -176,12 +250,15 @@ apply_config() ->
     gen_server:call(?MODULE, apply_config).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Parses the provided Spec, adds it to the store and calls
-%% rebuild_dispatch_tables/0.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Parses an API spec, stores it in plum_db, and rebuilds dispatch tables.
+
+Accepts either a map (a single parsed JSON spec) or a list of maps.
+The spec is validated by compiling it through
+`bondy_http_gateway_api_spec_parser` and `cowboy_router:compile/1`
+before being persisted. On success the Cowboy dispatch tables for all
+active listeners are rebuilt immediately.
+""".
 -spec load(file:filename() | map()) ->
     ok | {error, invalid_specification_format | any()}.
 
@@ -189,11 +266,12 @@ load(Term) when is_map(Term) orelse is_list(Term) ->
     gen_server:call(?MODULE, {load, Term}).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the current dispatch configured in Cowboy for the
-%% given Listener.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the current Cowboy dispatch table for the given listener.
+
+Retrieves the compiled dispatch rules from Ranch's protocol options
+for `Listener`.
+""".
 -spec dispatch_table(listener()) -> any().
 
 dispatch_table(Listener) ->
@@ -201,13 +279,14 @@ dispatch_table(Listener) ->
     maps_utils:get_path([env, dispatch], Map).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Loads all configured API specs from the metadata store and rebuilds the
-%% Cowboy dispatch table by calling cowboy_router:compile/1 and updating the
-%% environment.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Rebuilds the Cowboy dispatch tables for all active public listeners.
+
+Loads every API spec from plum_db, re-parses them, compiles the
+dispatch table via `cowboy_router:compile/1`, and stores the result
+in `persistent_term` for each enabled listener (`api_gateway_http`,
+`api_gateway_https`).
+""".
 rebuild_dispatch_tables() ->
     ?LOG_NOTICE(#{
         description => "Rebuilding HTTP Gateway dispatch tables"
@@ -219,10 +298,12 @@ rebuild_dispatch_tables() ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the API Specification object identified by `Id'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the API specification stored under `Id`, or `{error, not_found}`.
+
+The returned map is the **source JSON** as originally loaded, not the
+parsed form.
+""".
 -spec lookup(binary()) -> map() | {error, not_found}.
 
 lookup(Id) ->
@@ -234,10 +315,7 @@ lookup(Id) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the list of all stored API Specification objects.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns the list of all stored API specification objects.".
 -spec list() -> [ParsedSpec :: map()].
 
 list() ->
@@ -245,11 +323,12 @@ list() ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Deletes the API Specification object identified by `Id'.
-%% Notice: Triggers a rebuild of the Cowboy dispatch tables.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Deletes the API specification identified by `Id` and rebuilds dispatch tables.
+
+The spec is removed from plum_db and the Cowboy dispatch tables are
+recompiled to reflect the removal.
+""".
 -spec delete(binary()) -> ok.
 
 delete(Id) when is_binary(Id) ->
@@ -635,9 +714,9 @@ do_apply_config(FName) ->
 %% @private
 load_spec(Map) when is_map(Map) ->
     case validate_spec(Map) of
-        {ok, #{<<"id">> := Id} = Spec} ->
+        {ok, #{~"id" := Id} = Spec} ->
             %% We store the source specification, see add/2 for an explanation
-            ok = maybe_init_groups(maps:get(<<"realm_uri">>, Spec)),
+            ok = maybe_init_groups(maps:get(~"realm_uri", Spec)),
             add(
                 Id,
                 maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Map)
@@ -646,7 +725,7 @@ load_spec(Map) when is_map(Map) ->
             ?LOG_ERROR(#{
                 description => "Error while loading API specification",
                 reason => Reason,
-                api_id => maps:get(<<"id">>, Map, undefined)
+                api_id => maps:get(~"id", Map, undefined)
             }),
             throw(Reason)
     end;
@@ -682,32 +761,26 @@ add(Id, Spec) when is_binary(Id), is_map(Spec) ->
     plum_db:put(?PREFIX, Id, Spec).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+
 -spec start_listener({Scheme :: binary(), [tuple()]}) -> ok.
 
-start_listener({<<"http">>, Routes}) ->
+start_listener({~"http", Routes}) ->
     ok = maybe_start_http(Routes, ?HTTP),
     ok;
 
-start_listener({<<"https">>, Routes}) ->
+start_listener({~"https", Routes}) ->
     ok = maybe_start_https(Routes, ?HTTPS),
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+
 -spec start_admin_listener({Scheme :: binary(), [tuple()]}) ->
     ok | {error, any()}.
 
-start_admin_listener({<<"http">>, Routes}) ->
+start_admin_listener({~"http", Routes}) ->
     maybe_start_http(Routes, ?ADMIN_HTTP);
 
-start_admin_listener({<<"https">>, Routes}) ->
+start_admin_listener({~"https", Routes}) ->
     maybe_start_https(Routes, ?ADMIN_HTTPS).
 
 
@@ -720,10 +793,7 @@ maybe_start_http(Routes, Name) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+
 -spec start_http(list(), atom()) -> ok | {error, any()}.
 
 start_http(Routes, Name) ->
@@ -797,10 +867,7 @@ listener_protocol_opts(Routes, Name) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+
 -spec start_https(list(), atom()) -> ok | {error, any()}.
 
 start_https(Routes, Name) ->
@@ -869,8 +936,8 @@ load_dispatch_tables() ->
                     description =>
                         "Loading and parsing API Gateway specification "
                         "from store",
-                    name => maps:get(<<"name">>, V),
-                    id => maps:get(<<"id">>, V),
+                    name => maps:get(~"name", V),
+                    id => maps:get(~"id", V),
                     timestamp => Ts
                 }),
                 {K, Ts, Parsed}
@@ -897,8 +964,8 @@ load_dispatch_tables() ->
     case Result of
         [] ->
             [
-                {<<"http">>, base_routes()},
-                {<<"https">>, base_routes()}
+                {~"http", base_routes()},
+                {~"https", base_routes()}
             ];
         _ ->
             Result
@@ -918,12 +985,12 @@ compile_dispatch(Routes, Name) ->
 -spec rebuild_dispatch_table(atom() | binary(), list()) -> ok.
 
 rebuild_dispatch_table(http, Routes) ->
-    rebuild_dispatch_table(<<"http">>, Routes);
+    rebuild_dispatch_table(~"http", Routes);
 
 rebuild_dispatch_table(https, Routes) ->
-    rebuild_dispatch_table(<<"https">>, Routes);
+    rebuild_dispatch_table(~"https", Routes);
 
-rebuild_dispatch_table(<<"http">>, Routes) ->
+rebuild_dispatch_table(~"http", Routes) ->
     case bondy_config:get([?HTTP, enabled], true) of
         true ->
             compile_dispatch(Routes, ?HTTP);
@@ -932,7 +999,7 @@ rebuild_dispatch_table(<<"http">>, Routes) ->
             ok
     end;
     
-rebuild_dispatch_table(<<"https">>, Routes) ->
+rebuild_dispatch_table(~"https", Routes) ->
     case bondy_config:get([?HTTPS, enabled], true) of
         true ->
             compile_dispatch(Routes, ?HTTPS);
@@ -967,10 +1034,26 @@ handle_spec_updates(#state{updated_specs = L}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 base_routes() ->
-    %% The WS entrypoint required for WAMP WS subprotocol
+    %% The WS entrypoint required for WAMP WS subprotocol,
+    %% SSE transport endpoints, and Longpoll transport endpoints
     [
         {'_', [
-            {"/ws", bondy_wamp_ws_connection_handler, #{}}
+            {"/ws", bondy_wamp_ws_connection_handler, #{}},
+            {"/wamp/sse/open", bondy_http_sse_handler, #{action => open}},
+            {"/wamp/sse/:transport_id/receive",
+                bondy_http_sse_stream_handler, #{}},
+            {"/wamp/sse/:transport_id/send",
+                bondy_http_sse_handler, #{action => send}},
+            {"/wamp/sse/:transport_id/close",
+                bondy_http_sse_handler, #{action => close}},
+            {"/wamp/longpoll/open",
+                bondy_http_longpoll_handler, #{action => open}},
+            {"/wamp/longpoll/:transport_id/receive",
+                bondy_http_longpoll_handler, #{action => receive_msgs}},
+            {"/wamp/longpoll/:transport_id/send",
+                bondy_http_longpoll_handler, #{action => send}},
+            {"/wamp/longpoll/:transport_id/close",
+                bondy_http_longpoll_handler, #{action => close}}
         ]}
     ].
 
@@ -1019,12 +1102,12 @@ parse_specs(Specs, BaseRoutes) ->
     case [bondy_http_gateway_api_spec_parser:parse(S) || S <- Specs] of
         [] ->
             [
-                {<<"http">>, BaseRoutes},
-                {<<"https">>, BaseRoutes}
+                {~"http", BaseRoutes},
+                {~"https", BaseRoutes}
             ];
         L ->
             _ = [
-                maybe_init_groups(maps:get(<<"realm_uri">>, Spec))
+                maybe_init_groups(maps:get(~"realm_uri", Spec))
                 || Spec <- L
             ],
             bondy_http_gateway_api_spec_parser:dispatch_table(L, BaseRoutes)
@@ -1036,20 +1119,20 @@ parse_specs(Specs, BaseRoutes) ->
 maybe_init_groups(RealmUri) ->
     Gs = [
         #{
-            <<"name">> => <<"resource_owners">>,
+            ~"name" => <<"resource_owners">>,
             <<"meta">> => #{
                 <<"description">> => <<"A group of entities capable of granting access to a protected resource. When the resource owner is a person, it is referred to as an end-user.">>
             }
         },
         #{
-            <<"name">> => <<"api_clients">>,
+            ~"name" => <<"api_clients">>,
             <<"meta">> => #{
                 <<"description">> => <<"A group of applications making protected resource requests through Bondy API Gateway by themselves or on behalf of a Resource Owner.">>
                 }
         }
     ],
     _ = [begin
-        case bondy_rbac_group:lookup(RealmUri, maps:get(<<"name">>, G)) of
+        case bondy_rbac_group:lookup(RealmUri, maps:get(~"name", G)) of
             {error, not_found} ->
                 bondy_rbac_group:add(RealmUri, bondy_rbac_group:new(G));
             _ ->

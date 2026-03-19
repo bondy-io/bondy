@@ -81,10 +81,10 @@ start(_Type, Args) ->
 
     %% Now that we have initialised the configuration we start the following
     %% dependencies
-    _ = application:ensure_all_started(tuplespace, permanent),
+    {ok, _} = application:ensure_all_started(tuplespace, permanent),
 
     %% We do not need to start partisan since plum_db will do it
-    _ = application:ensure_all_started(plum_db, permanent),
+    {ok, _} = application:ensure_all_started(plum_db, permanent),
 
     %% Now that Partisan is up we can get our nodename
     ok = logger:update_primary_config(#{metadata => #{
@@ -124,6 +124,12 @@ start(_Type, Args) ->
                 ok ?= maybe_wait_for_pdb_aae_exchange(),
                 %% Finally we allow clients to connect
                 ok ?= start_public_listeners(),
+                {ok, _} = application:ensure_all_started(
+                    bondy_rpc_gateway, permanent
+                ),
+                %% {ok, _} = application:ensure_all_started(
+                %%     bondy_broker_bridge, permanent
+                %% ),
                 {ok, Pid}
 
             else

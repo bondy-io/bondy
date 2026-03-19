@@ -74,7 +74,7 @@
     {
         "uri" : "com.leapsight.test",
         "description" : "A test realm",
-        "authmethods" : ["cryptosign", "wampcra", "anonymous", "oauth2", "password", "trust", "ticket"],
+        "authmethods" : ["cryptosign", "wampcra", "oauth2", "password", "trust", "ticket", "oidcrp", "cookie"],
         "security_enabled" : true,
         "allow_connections": true,
         "private_keys": [
@@ -139,12 +139,12 @@
             {
                 "name" : "resource_owners",
                 "groups" : [],
-                "meta" : {}
+                "meta" : {"baz": 100}
             },
             {
                 "name" : "microservices",
                 "groups" : [],
-                "meta" : {}
+                "meta" : {"foo": 200}
             },
             {
                 "name" : "applications",
@@ -164,7 +164,7 @@
             {
                 "name" : "account_user",
                 "groups" : [],
-                "meta" : {}
+                "meta" : {"bar": 100}
             }
         ],
         "sources" : [
@@ -291,7 +291,26 @@
                     {"uri" : "bondy.", "match": "prefix"}
                 ]
             }
-        ]
+        ],
+        "info": {
+            "oidc_providers": {
+                "${OIDC_PROVIDER_ID}": {
+                    "issuer": "${OIDC_PROVIDER_URL}",
+                    "client_id": "${OIDC_CLIENT_ID}",
+                    "client_secret": "${OIDC_CLIENT_SECRET}",
+                    "redirect_uri": "${OIDC_REDIRECT_URI}",
+                    "scopes": ["openid", "profile", "email", "roles"],
+                    "authid_claim": "preferred_username",
+                    "auto_provision": false,
+                    "ticket_expiry_secs": 2592000,
+                    "allow_unsafe_http": true,
+                    "role_mapping": {
+                        "AZURE_WellIOS_ServiceProgrammer": "resource_owners",
+                        "AZURE_WellOS_MU_GSJ": "api_clients"
+                    }
+                }
+            }
+        }
     },
     {
         "uri" : "com.leapsight.test_1",

@@ -8,6 +8,7 @@
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
+-include("bondy_security.hrl").
 -include("bondy_uris.hrl").
 -include("bondy.hrl").
 
@@ -260,6 +261,10 @@ handle_call({open, Session0}, _From, State0) ->
         ok = register_procedures(Session),
         Refs = State0#state.monitor_refs,
         State = State0#state{monitor_refs = Refs#{Id => Ref, Ref => Id}},
+
+        %% Schedule OIDC token refresh if this is an oidcrp session
+        ok = maybe_schedule_oidc_refresh(Session),
+
         {reply, {ok, Session}, State}
 
     catch
@@ -505,3 +510,43 @@ maybe_send_goodbye(Session, ReasonUri) ->
     _ = catch bondy:send(RealmUri, ProcRef, Msg),
     ok.
 
+
+
+%% @private
+maybe_schedule_oidc_refresh(Session) ->
+    case bondy_session:authmethod(Session) of
+        ?OIDCRP_AUTH ->
+            do_schedule_oidc_refresh(Session);
+        _ ->
+            ok
+    end.
+
+
+%% @private
+do_schedule_oidc_refresh(Session) ->
+    case bondy_session:authmethod_details(Session) of
+        #{oidc_provider := Provider, oidc_refresh_token := RT} = Details
+        when is_binary(Provider) andalso is_binary(RT) ->
+            RealmUri = bondy_session:realm_uri(Session),
+            Authid = bondy_session:authid(Session),
+            EntryId = bondy_utils:uuid(),
+            AccessExp = maps:get(
+                oidc_access_token_expires_at, Details, 0
+            ),
+            ok = bondy_oidc_refresh_worker:schedule_refresh(
+                EntryId, RealmUri, Authid, Provider,
+                #{
+                    refresh_token => RT,
+                    access_token_expires_at => AccessExp
+                }
+            ),
+            %% Store EntryId back for removal at session close
+            Updated = Details#{oidc_refresh_entry_id => EntryId},
+            SessionId = bondy_session:id(Session),
+            ok = bondy_session:update_authmethod_details(
+                SessionId, Updated
+            ),
+            ok;
+        _ ->
+            ok
+    end.

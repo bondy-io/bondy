@@ -176,6 +176,7 @@
 
 -define(BONDY_ERROR_ALREADY_EXISTS, <<"bondy.error.already_exists">>).
 -define(BONDY_ERROR_BAD_GATEWAY, <<"bondy.error.bad_gateway">>).
+-define(BONDY_ERROR_TOO_MANY_REQUESTS, <<"bondy.error.too_many_requests">>).
 -define(BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR, <<"bondy.error.http_gateway.invalid_expression">>).
 -define(BONDY_ERROR_INTERNAL, <<"bondy.error.internal_error">>).
 -define(BONDY_ERROR_NOT_FOUND, <<"bondy.error.not_found">>).

@@ -3,35 +3,74 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% This module implements a parser for the Bondy API Specification Format which
-%% is used to dynamically define one or more RESTful APIs.
-%%
-%% The parser uses maps_utils:validate and a number of validation specifications
-%% and as a result is its error reporting is not great but does its job.
-%% The plan is to replace this with an ad-hoc parser to give the user more
-%% useful error information.
-%%
-%% ## API Specification Format
-%%
-%% ### Host Spec
-%%
-%% ### API Spec
-%%
-%% ### Version Spec
-%%
-%% ### Path Spec
-%%
-%% ### Method Spec
-%%
-%% ### Action Spec
-%%
-%% ### Action Spec
-%%
-%% @end
-%% -----------------------------------------------------------------------------
 -module(bondy_http_gateway_api_spec_parser).
+
+-moduledoc """
+Parser for the Bondy HTTP API Gateway specification format.
+
+Transforms JSON API specification documents into the internal
+representation used to generate Cowboy dispatch tables. A spec defines
+one or more versioned RESTful APIs, each with paths, HTTP methods,
+actions (WAMP calls, WAMP publishes, HTTP forwards, or static
+responses), and response mappings.
+
+## Specification hierarchy
+
+An API spec is a nested structure with inheritance at each level — lower
+levels override variables, defaults and status codes from higher levels:
+
+```
+Host Spec
+├── id, name, host, realm_uri
+├── variables, defaults, status_codes   (top-level inheritance)
+└── versions
+    └── Version Spec
+        ├── base_path, is_active, is_deprecated, pool_size, languages
+        ├── variables, defaults, status_codes   (override host-level)
+        └── paths
+            └── Path Spec
+                ├── is_collection, schemes, security, accepts, provides
+                ├── variables, defaults                (override version-level)
+                └── <method> (get, post, put, patch, delete, head, options)
+                    └── Request Method Spec
+                        ├── action   → Action Spec
+                        └── response → Response Spec
+```
+
+## Action types
+
+Each HTTP method handler contains an action that defines what happens
+when the endpoint is called:
+
+- `wamp_call` — calls a WAMP procedure and returns the result
+- `wamp_publish` — publishes to a WAMP topic
+- `forward` — proxies the request to an upstream HTTP service
+- `static` — returns a static body and headers
+
+## MOPS expressions
+
+Values throughout the spec support MOPS (`mops`) template expressions
+using `{{path.to.key}}` syntax. At parse time, expressions referencing
+`variables` or `defaults` are resolved eagerly. Expressions referencing
+runtime context (`request`, `action`, `security`) are compiled into
+proxy funs that are evaluated at request time by
+`bondy_http_gateway_rest_handler`.
+
+## Validation
+
+The parser uses `maps_utils:validate/2` with the validation specs
+defined in this module (`?API_HOST`, `?API_VERSION`, `?API_PATH`,
+`?REQ_SPEC`, etc.). Invalid specs raise errors with descriptive
+messages.
+
+## WAMP error → HTTP status code mapping
+
+The spec supports a `status_codes` map at the host and version levels
+that maps WAMP error URIs to HTTP status codes. A set of default
+mappings is always present (e.g. `wamp.error.not_found` → 404,
+`wamp.error.not_authorized` → 403).
+""".
+
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("http_api.hrl").
@@ -377,6 +416,26 @@
     }
 }).
 
+-define(OIDC_SPEC, #{
+    <<"type">> => #{
+        alias => type,
+        required => true,
+        allow_null => false,
+        datatype => {in, [<<"oidc">>]}
+    },
+    <<"provider">> => #{
+        alias => provider,
+        required => true,
+        allow_null => false,
+        datatype => binary
+    },
+    <<"description">> => #{
+        alias => description,
+        required => false,
+        datatype => binary
+    }
+}).
+
 -define(OAUTH2_SPEC, #{
     <<"type">> => #{
         alias => type,
@@ -481,6 +540,8 @@
         validator => fun
             (#{<<"type">> := <<"oauth2">>} = V) ->
                 {ok, maps_utils:validate(V, ?OAUTH2_SPEC)};
+            (#{<<"type">> := <<"oidc">>} = V) ->
+                {ok, maps_utils:validate(V, ?OIDC_SPEC)};
             (#{<<"type">> := <<"basic">>} = V) ->
                 {ok, maps_utils:validate(V, ?BASIC)};
             (#{<<"type">> := <<"api_key">>} = V) ->
@@ -1038,11 +1099,12 @@ end).
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Loads a file and calls {@link parse/1}.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Reads a JSON API spec from `Filename` and parses it.
+
+Returns `{ok, ParsedSpec}` on success, or `{error, Reason}` if the file
+cannot be read, contains invalid JSON, or the spec fails validation.
+""".
 -spec from_file(file:filename()) -> {ok, any()} | {error, any()}.
 
 from_file(Filename) ->
@@ -1061,15 +1123,20 @@ from_file(Filename) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Parses the Spec map returning a new valid spec where all defaults have been
-%% applied and all variables have been replaced by either a value or a promise.
-%% Fails with `invalid_specification_format' in case the Spec is invalid.
-%%
-%% Variable replacepement is performed using our "mop" library.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Parses a JSON API spec map into the internal representation.
+
+Applies all defaults, resolves `variables` and `defaults` inheritance
+across the host → version → path hierarchy, evaluates MOPS expressions,
+and validates every section against its schema. Returns the fully parsed
+spec map on success.
+
+Runtime MOPS expressions (those referencing `request`, `action`, or
+`security`) are compiled into proxy funs rather than eagerly evaluated.
+
+Raises on invalid specs. Returns `{error, invalid_specification_format}`
+if the argument is not a map.
+""".
 -spec parse(Spec :: map()) ->
     map() | {error, invalid_specification_format} | no_return().
 
@@ -1080,12 +1147,16 @@ parse(_) ->
     {error, invalid_specification_format}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Given a valid API Spec or list of Specs returned by {@link parse/1},
-%% dynamically generates a cowboy dispatch table.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Generates a Cowboy dispatch table from one or more parsed API specs.
+
+Accepts a single parsed spec map or a list of them (as returned by
+`parse/1`). Returns a list of `{Scheme, [route_rule()]}` tuples — one
+entry per scheme (`<<"http">>`, `<<"https">>`) — ready to be compiled
+with `cowboy_router:compile/1`.
+
+Equivalent to `dispatch_table(Specs, [])` (no additional base routes).
+""".
 -spec dispatch_table([map()] | map()) ->
     [{Scheme :: binary(), [route_rule()]}] | no_return().
 
@@ -1096,14 +1167,18 @@ dispatch_table(Specs) when is_list(Specs) ->
     dispatch_table(Specs, []).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Given a list of valid API Specs returned by {@link parse/1} and
-%% dynamically generates the cowboy dispatch table.
-%% Notice this does not update the cowboy dispatch table. You will need to do
-%% that yourself.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Generates a Cowboy dispatch table, merging in additional base routes.
+
+Like `dispatch_table/1`, but appends `RulesToAdd` (a list of Cowboy
+route rules, e.g. `[{'_', [{Path, Handler, Opts}]}]`) to every scheme
+in the result. This is used to ensure base routes like the `/ws`
+WebSocket endpoint are always present.
+
+The resulting dispatch table is **not** installed into Cowboy — the
+caller must compile it with `cowboy_router:compile/1` and update the
+listener environment.
+""".
 -spec dispatch_table([map()] | map(), [route_rule()]) ->
     [{Scheme :: binary(), [route_rule()]}] | no_return().
 
@@ -1625,6 +1700,29 @@ security_scheme_rules(
         {S, Host, Realm, <<BasePath/binary, Revoke/binary>>, Mod, St},
         %% Json Web Key Set path, in which we publish the public
         {S, Host, Realm, <<BasePath/binary, "/oauth/jwks">>, Mod, St}
+    ];
+
+security_scheme_rules(
+    S, Host, BasePath, Realm,
+    #{<<"type">> := <<"oidc">>, <<"provider">> := Provider}) ->
+
+    St = #{
+        realm_uri => Realm,
+        provider => Provider,
+        base_path => BasePath
+    },
+
+    Mod = bondy_oidc_handler,
+    [
+        {S, Host, Realm,
+            <<BasePath/binary, "/oidc/login">>,
+            Mod, St#{action => login}},
+        {S, Host, Realm,
+            <<BasePath/binary, "/oidc/", Provider/binary, "/callback">>,
+            Mod, St#{action => callback}},
+        {S, Host, Realm,
+            <<BasePath/binary, "/oidc/logout">>,
+            Mod, St#{action => logout}}
     ];
 
 security_scheme_rules(_, _, _, _, _) ->

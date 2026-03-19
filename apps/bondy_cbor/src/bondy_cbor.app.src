@@ -1,0 +1,13 @@
+{application, bondy_cbor, [
+    {description, "CBOR (RFC 8949) encoder and decoder for Erlang/OTP"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {applications, [
+        kernel,
+        stdlib
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+ ]}.

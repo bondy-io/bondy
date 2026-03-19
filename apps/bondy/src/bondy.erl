@@ -636,16 +636,20 @@ do_send(To, M, #{realm_uri := RealmUri} = Opts) ->
 maybe_enqueue(undefined, _, _) ->
     false;
 
-maybe_enqueue(_SessionId, _M, _Opts) ->
-    % case maps:get(enqueue, Opts, false),
-    %     true ->
-    %         %% TODO Enqueue events only for session resumption
-    %         true;
-    %     false ->
-    %         false
-    % end.
-
-    false.
+maybe_enqueue(SessionId, M, _Opts) ->
+    case bondy_session:lookup(SessionId) of
+        {ok, Session} ->
+            case bondy_session:transport_id(Session) of
+                undefined ->
+                    false;
+                TransportId ->
+                    ok = bondy_transport_queue:enqueue(TransportId, M, #{}),
+                    bondy_http_transport_session:notify_enqueue(TransportId),
+                    true
+            end;
+        {error, not_found} ->
+            false
+    end.
 
 
 %% @private

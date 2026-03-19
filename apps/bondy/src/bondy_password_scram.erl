@@ -468,7 +468,7 @@ client_final_no_proof(CBindName, CBindData, ServerNonce) ->
     CBindFlag = channel_binding_flag(CBindName),
     CBindInput = channel_binding_input(CBindFlag, CBindData),
     [
-        "c=", CBindInput, ",",
+        "c=", base64:encode(iolist_to_binary(CBindInput)), ",",
         "r=", base64:encode(ServerNonce)
     ].
 

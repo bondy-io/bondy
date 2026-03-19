@@ -11,11 +11,14 @@
 -include("bondy_security.hrl").
 
 -define(SHUTDOWN_TIMEOUT, 5000).
--define(IS_TRANSPORT(X), (T =:= ws orelse T =:= raw)).
+-define(IS_TRANSPORT(X),
+    (X =:= ws orelse X =:= raw orelse X =:= http_sse orelse X =:= http_longpoll)
+).
 
 -record(wamp_state, {
     subprotocol             ::  subprotocol() | undefined,
     authmethod              ::  any(),
+    auth_claims             ::  map() | undefined,
     auth_context            ::  map() | undefined,
     auth_timestamp          ::  integer() | undefined,
     state_name              ::  state_name(),
@@ -56,6 +59,7 @@
 -export([context/1]).
 -export([handle_inbound/2]).
 -export([handle_outbound/2]).
+-export([set_auth_claims/2]).
 -export([terminate/1]).
 -export([validate_subprotocol/1]).
 -export([update_process_metadata/1]).
@@ -170,6 +174,19 @@ context(#wamp_state{context = Ctxt}) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Sets the auth ticket (e.g. from a `bondy_ticket` cookie) in the protocol
+%% state. Used by HTTP transport sessions to inject the ticket before WAMP
+%% HELLO processing.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_auth_claims(map() | undefined, state()) -> state().
+
+set_auth_claims(Claims, #wamp_state{} = St) ->
+    St#wamp_state{auth_claims = Claims}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 -spec terminate(state()) -> ok.
@@ -213,6 +230,8 @@ validate_subprotocol({ws, text, json} = S) ->
     {ok, S};
 validate_subprotocol({ws, text, json_batched} = S) ->
     {ok, S};
+validate_subprotocol({ws, binary, cbor_batched} = S) ->
+    {ok, S};
 validate_subprotocol({ws, binary, msgpack_batched} = S) ->
     {ok, S};
 validate_subprotocol({ws, binary, bert_batched} = S) ->
@@ -222,6 +241,12 @@ validate_subprotocol({ws, binary, erl_batched} = S) ->
 validate_subprotocol({raw, binary, json} = S) ->
     {ok, S};
 validate_subprotocol({raw, binary, erl} = S) ->
+    {ok, S};
+validate_subprotocol({http_sse, text, json} = S) ->
+    {ok, S};
+validate_subprotocol({http_longpoll, text, json} = S) ->
+    {ok, S};
+validate_subprotocol({T, binary, cbor} = S) when ?IS_TRANSPORT(T) ->
     {ok, S};
 validate_subprotocol({T, binary, msgpack} = S) when ?IS_TRANSPORT(T) ->
     {ok, S};
@@ -608,6 +633,7 @@ open_session(Extra, St0) when is_map(Extra) ->
         AuthCtxt = St0#wamp_state.auth_context,
         RealmUri = bondy_context:realm_uri(Ctxt0),
         SessionId0 = bondy_context:session_id(Ctxt0),
+
         ReqDetails = bondy_context:request_details(Ctxt0),
         ReqRoles = maps:get(roles, ReqDetails, undefined),
 
@@ -618,8 +644,15 @@ open_session(Extra, St0) when is_map(Extra) ->
         Authrole = bondy_auth:role(AuthCtxt),
         Authroles = bondy_auth:roles(AuthCtxt),
         Authprovider = bondy_auth:provider(AuthCtxt),
-        Authmethod = bondy_auth:method(AuthCtxt),
         AuthmethodDetails = maps:get(authmethod_details, Extra, undefined),
+        Authmethod = case bondy_auth:method(AuthCtxt) of
+            ?WAMP_COOKIE_AUTH = M ->
+                %% Exchange with authmethod from ticket (cookie)
+                maps:get(authmethod, AuthmethodDetails, M);
+            M ->
+                %% WAMP-level authmethod
+                M
+        end,
         Agent = maps:get(agent, ReqDetails, undefined),
         Peer = bondy_context:peer(Ctxt0),
 
@@ -635,7 +668,9 @@ open_session(Extra, St0) when is_map(Extra) ->
             authmethod => Authmethod,
             authmethod_details => AuthmethodDetails,
             authrole => Authrole,
-            authroles => Authroles
+            authroles => Authroles,
+            transport_type => maps:get(transport_type, Ctxt0, undefined),
+            transport_id => maps:get(transport_id, Ctxt0, undefined)
         },
 
         %% We open a session
@@ -694,7 +729,6 @@ open_session(Extra, St0) when is_map(Extra) ->
             stop(Reason, St0)
     end.
 
-
 %% @private
 maybe_gen_authid(anonymous) ->
     bondy_utils:uuid();
@@ -724,6 +758,45 @@ maybe_auth_challenge(disabled, #{authid := _}, _
         "You've provided and authid but the realm's security is disabled"
     >>,
     {error, {authentication_failed, Reason}, St};
+
+maybe_auth_challenge(
+    enabled, Details, Realm,
+    #wamp_state{auth_claims = Claims} = St0
+) when is_map(Claims) ->
+    %% Cookie-based authentication — identity comes from ticket claims
+    Ctxt0 = St0#wamp_state.context,
+    Ctxt1 = bondy_context:set_request_details(Ctxt0, Details),
+
+    SessionId = bondy_context:session_id(Ctxt1),
+    SourceIP = bondy_context:source_ip(Ctxt1),
+
+    %% Extract identity from ticket claims
+    Authid = maps:get(authid, Claims),
+    Authroles = maps:get(authroles, Claims, []),
+
+    Ctxt = bondy_context:set_authid(Ctxt1, Authid),
+    St1 = update_context(Ctxt, St0),
+
+    Opts = #{claims => Claims},
+
+    case bondy_auth:init(
+        SessionId, Realm, Authid, Authroles, SourceIP, Opts
+    ) of
+        {ok, AuthCtxt} ->
+            St2 = St1#wamp_state{auth_context = AuthCtxt},
+            ReqMethods = [?WAMP_COOKIE_AUTH],
+
+            case bondy_auth:available_methods(ReqMethods, AuthCtxt) of
+                [] ->
+                    {error, {no_authmethod, ReqMethods}, St2};
+
+                [Method | _] ->
+                    auth_challenge(Method, St2)
+            end;
+
+        {error, Reason} ->
+            {error, {authentication_failed, Reason}, St1}
+    end;
 
 maybe_auth_challenge(enabled, #{authid := UserId} = Details, Realm, St0) ->
     Ctxt0 = St0#wamp_state.context,
@@ -811,12 +884,15 @@ auth_challenge(Method, St0) ->
 
     case bondy_auth:challenge(Method, Details, AuthCtxt0) of
         {false, AuthCtxt1} ->
-            Result = bondy_auth:authenticate(Method, undefined, #{}, AuthCtxt0),
+            Ticket = St0#wamp_state.auth_claims,
+            Result = bondy_auth:authenticate(
+                Method, Ticket, #{}, AuthCtxt1
+            ),
 
             case Result of
-                {ok, AuthExtra, AuthCtxt1} ->
+                {ok, AuthExtra, AuthCtxt2} ->
                     St1 = St0#wamp_state{
-                        auth_context = AuthCtxt1,
+                        auth_context = AuthCtxt2,
                         auth_timestamp = erlang:system_time(millisecond)
                     },
                     {ok, AuthExtra, St1};
@@ -891,10 +967,11 @@ abort_message({no_authmethod, []}) ->
     },
     bondy_wamp_message:abort(Details, ?WAMP_NOT_AUTH_METHOD);
 
-abort_message({no_authmethod, _Opts}) ->
+abort_message({no_authmethod, ReqMethods}) ->
     Details = #{
         message => <<"The requested authentication methods are not available for this user on this realm.">>,
-        description => <<"The requested methods are either not enabled for the authenticating user or realm or they are restricted to a specific network address range that doesn't match the client's. Check the realm configuration including the user (its roles) and the assigned sources.">>
+        description => <<"The requested methods are either not enabled for the authenticating user or realm or they are restricted to a specific network address range that doesn't match the client's. Check the realm configuration including the user (its roles) and the assigned sources.">>,
+        requested_methods => ReqMethods
     },
     bondy_wamp_message:abort(Details, ?WAMP_NOT_AUTH_METHOD);
 
@@ -1057,13 +1134,16 @@ abort_message({Code, Term}) when is_atom(Term) ->
     bondy_wamp_protocol:subprotocol() | {error, invalid_subprotocol}.
 
 subprotocol(?WAMP2_JSON) ->                 {ws, text, json};
+subprotocol(?WAMP2_CBOR) ->                 {ws, binary, cbor};
 subprotocol(?WAMP2_MSGPACK) ->              {ws, binary, msgpack};
 subprotocol(?WAMP2_JSON_BATCHED) ->         {ws, text, json_batched};
+subprotocol(?WAMP2_CBOR_BATCHED) ->         {ws, binary, cbor_batched};
 subprotocol(?WAMP2_MSGPACK_BATCHED) ->      {ws, binary, msgpack_batched};
 subprotocol(?WAMP2_BERT) ->                 {ws, binary, bert};
 subprotocol(?WAMP2_ERL) ->                  {ws, binary, erl};
 subprotocol(?WAMP2_BERT_BATCHED) ->         {ws, binary, bert_batched};
 subprotocol(?WAMP2_ERL_BATCHED) ->          {ws, binary, erl_batched};
+subprotocol(?WAMP2_JSON_SSE) ->             {http_sse, text, json};
 subprotocol(_) ->                           {error, invalid_subprotocol}.
 
 

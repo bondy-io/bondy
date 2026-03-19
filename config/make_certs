@@ -204,7 +204,7 @@ remove_line_with_pattern(File, Pattern) ->
 
 gencrl(Root, CA, C) ->
     %% By default, the CRL is valid for a week from now.
-    gencrl(Root, CA, C, 24*7).
+    gencrl(Root, CA, C, 87600). % 10 years
 
 gencrl(Root, CA, C, CrlHours) ->
     CACnfFile = filename:join([Root, CA, "ca.cnf"]),

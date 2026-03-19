@@ -994,28 +994,35 @@ partial(#yield{partial = Val}) -> Val;
 partial(_) -> undefined.
 
 
-%% Only support json partials for now
--spec set_partial(t(), {json, binary()}) -> t().
+%% Only support json/cbor partials for now
+-spec set_partial(t(), {json | cbor, binary()}) -> t().
 
-set_partial(#call{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+set_partial(#call{} = M, {Enc, Bin} = Partial)
+when (Enc =:= json orelse Enc =:= cbor) andalso is_binary(Bin) ->
     M#call{partial = Partial};
 
-set_partial(#error{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+set_partial(#error{} = M, {Enc, Bin} = Partial)
+when (Enc =:= json orelse Enc =:= cbor) andalso is_binary(Bin) ->
     M#error{partial = Partial};
 
-set_partial(#event{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+set_partial(#event{} = M, {Enc, Bin} = Partial)
+when (Enc =:= json orelse Enc =:= cbor) andalso is_binary(Bin) ->
     M#event{partial = Partial};
 
-set_partial(#invocation{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+set_partial(#invocation{} = M, {Enc, Bin} = Partial)
+when (Enc =:= json orelse Enc =:= cbor) andalso is_binary(Bin) ->
     M#invocation{partial = Partial};
 
-set_partial(#publish{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+set_partial(#publish{} = M, {Enc, Bin} = Partial)
+when (Enc =:= json orelse Enc =:= cbor) andalso is_binary(Bin) ->
     M#publish{partial = Partial};
 
-set_partial(#result{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+set_partial(#result{} = M, {Enc, Bin} = Partial)
+when (Enc =:= json orelse Enc =:= cbor) andalso is_binary(Bin) ->
     M#result{partial = Partial};
 
-set_partial(#yield{} = M, {json, Bin} = Partial) when is_binary(Bin) ->
+set_partial(#yield{} = M, {Enc, Bin} = Partial)
+when (Enc =:= json orelse Enc =:= cbor) andalso is_binary(Bin) ->
     M#yield{partial = Partial};
 
 set_partial(_, _) ->
@@ -1149,6 +1156,21 @@ maybe_merge_details(MessageAttrs, Details) ->
 %% @private
 do_decode_partial(M0, {json, Bin}) ->
     case bondy_wamp_json:decode_tail(Bin) of
+        [] ->
+            clear_partial(M0);
+
+        [Args] ->
+            M1 = clear_partial(M0),
+            set_args(M1, Args);
+
+        [Args, KWArgs] ->
+            M1 = clear_partial(M0),
+            M2 = set_args(M1, Args),
+            set_kwargs(M2, KWArgs)
+    end;
+
+do_decode_partial(M0, {cbor, Bin}) ->
+    case bondy_wamp_cbor:decode_tail(Bin) of
         [] ->
             clear_partial(M0);
 
