@@ -196,10 +196,13 @@ do_start_worker(RealmUri, ProviderName, Config) ->
 
     AllowUnsafeHttp = maps:get(allow_unsafe_http, Config, false),
 
+    SslOpts = ssl_opts(Issuer, AllowUnsafeHttp),
+
     WorkerArgs = #{
         issuer => Issuer,
         name => GprocName,
         provider_configuration_opts => #{
+            request_opts => #{ssl => SslOpts},
             quirks => #{allow_unsafe_http => AllowUnsafeHttp}
         }
     },
@@ -226,6 +229,28 @@ do_start_worker(RealmUri, ProviderName, Config) ->
                 reason => Reason
             }),
             Error
+    end.
+
+
+%% @private
+%% Returns SSL options for httpc requests to the OIDC provider.
+%% We must always provide explicit ssl options because httpc computes default
+%% SSL options (including OS CA cert loading via pubkey_os_cacerts:get/0) even
+%% for plain HTTP requests. In environments without OS CA certs (e.g.
+%% containers), this causes a function_clause crash.
+ssl_opts(Issuer, _AllowUnsafeHttp) when is_binary(Issuer) ->
+    case string:prefix(Issuer, <<"https">>) of
+        nomatch ->
+            %% Plain HTTP — no cert verification needed
+            [{verify, verify_none}];
+        _ ->
+            %% HTTPS — use certifi CA bundle
+            CaCerts = certifi:cacerts(),
+            [
+                {verify, verify_peer},
+                {cacerts, CaCerts},
+                {depth, 5}
+            ]
     end.
 
 
