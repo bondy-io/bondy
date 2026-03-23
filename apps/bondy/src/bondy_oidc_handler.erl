@@ -127,7 +127,8 @@ do_login_redirect(Req0, State, RealmUri, Provider, Config) ->
                 state => StateToken,
                 nonce => Nonce,
                 pkce_verifier => CodeVerifier,
-                scopes => Scopes
+                scopes => Scopes,
+                request_opts => bondy_oidc_provider:request_opts(Config)
             },
 
             case oidcc_authorization:create_redirect_url(ClientCtx, AuthOpts) of
