@@ -22,6 +22,7 @@ periodically refreshes the provider metadata (JWKS, endpoints).
 -export([get_client_context/2]).
 -export([get_provider_config/2]).
 -export([get_refresh_jwks_fun/2]).
+-export([request_opts/1]).
 -export([start_provider_worker/3]).
 -export([stop_provider_worker/2]).
 
@@ -158,6 +159,21 @@ when is_binary(RealmUri) andalso is_binary(ProviderName) ->
     end.
 
 
+-doc """
+Returns the `request_opts` map (including SSL options) for the given provider
+config. Must be passed to every `oidcc` function that makes HTTP requests
+(`oidcc_token:retrieve/3`, `oidcc_userinfo:retrieve/3`, `oidcc_token:refresh/3`)
+because `httpc` computes default SSL options — including OS CA cert loading via
+`pubkey_os_cacerts:get/0` — even for plain HTTP requests. In environments
+without OS CA certs (e.g. containers), this causes a `function_clause` crash.
+""".
+-spec request_opts(Config :: map()) -> map().
+
+request_opts(#{issuer := Issuer} = Config) ->
+    AllowUnsafeHttp = maps:get(allow_unsafe_http, Config, false),
+    #{ssl => ssl_opts(Issuer, AllowUnsafeHttp)}.
+
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
@@ -216,8 +232,12 @@ do_start_worker(RealmUri, ProviderName, Config) ->
                 issuer => Issuer,
                 pid => Pid
             }),
-            ok = await_worker_ready(Pid, RealmUri, ProviderName),
-            {ok, Pid};
+            case await_worker_ready(Pid, RealmUri, ProviderName) of
+                ok ->
+                    {ok, Pid};
+                {error, _} = Error ->
+                    Error
+            end;
         {error, {already_started, Pid}} ->
             {ok, Pid};
         {error, Reason} = Error ->
@@ -269,7 +289,7 @@ await_worker_ready(_Pid, RealmUri, ProviderName, 0) ->
         realm_uri => RealmUri,
         provider => ProviderName
     }),
-    error({provider_not_ready, ProviderName});
+    {error, {provider_not_ready, ProviderName}};
 
 await_worker_ready(Pid, RealmUri, ProviderName, Retries) ->
     try
@@ -283,5 +303,13 @@ await_worker_ready(Pid, RealmUri, ProviderName, Retries) ->
     catch
         exit:{timeout, _} ->
             timer:sleep(500),
-            await_worker_ready(Pid, RealmUri, ProviderName, Retries - 1)
+            await_worker_ready(Pid, RealmUri, ProviderName, Retries - 1);
+        exit:Reason ->
+            ?LOG_ERROR(#{
+                description => "OIDC provider worker failed during startup",
+                realm_uri => RealmUri,
+                provider => ProviderName,
+                reason => Reason
+            }),
+            {error, {provider_unavailable, ProviderName}}
     end.

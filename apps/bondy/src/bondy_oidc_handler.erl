@@ -251,11 +251,13 @@ do_exchange_code(
                         {ok, Fun} -> Fun;
                         {error, _} -> undefined
                     end,
+                    ReqOpts = bondy_oidc_provider:request_opts(Config),
                     RetrieveOpts = #{
                         redirect_uri => RedirectUri,
                         nonce => Nonce,
                         pkce_verifier => CodeVerifier,
-                        refresh_jwks => RefreshJwks
+                        refresh_jwks => RefreshJwks,
+                        request_opts => ReqOpts
                     },
                     case oidcc_token:retrieve(Code, ClientCtx, RetrieveOpts) of
                         {ok, Token} ->
@@ -311,7 +313,8 @@ handle_token_success(
     %% Fetch full claims from the userinfo endpoint. Many IdPs only include
     %% minimal claims in the ID token and serve custom claims (e.g. roles)
     %% via userinfo.
-    AllClaims = case oidcc_userinfo:retrieve(Token, ClientCtx, #{}) of
+    UserinfoOpts = #{request_opts => bondy_oidc_provider:request_opts(Config)},
+    AllClaims = case oidcc_userinfo:retrieve(Token, ClientCtx, UserinfoOpts) of
         {ok, UserinfoClaims} ->
             maps:merge(IdClaims, UserinfoClaims);
         {error, Reason} ->

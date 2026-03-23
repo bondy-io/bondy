@@ -66,7 +66,7 @@ init([]) ->
     ChildSpec = #{
         id => oidcc_provider_configuration_worker,
         start => {oidcc_provider_configuration_worker, start_link, []},
-        restart => transient,
+        restart => temporary,
         shutdown => 5000,
         type => worker,
         modules => [oidcc_provider_configuration_worker]
