@@ -214,8 +214,15 @@ do_refresh_entry(#refresh_entry{
 
     case bondy_oidc_provider:get_client_context(RealmUri, Provider) of
         {ok, ClientCtx} ->
+            ReqOpts = case bondy_oidc_provider:get_provider_config(
+                RealmUri, Provider
+            ) of
+                {ok, Cfg} -> bondy_oidc_provider:request_opts(Cfg);
+                {error, _} -> #{}
+            end,
             RefreshOpts = #{
-                expected_subject => Authid
+                expected_subject => Authid,
+                request_opts => ReqOpts
             },
             case oidcc_token:refresh(RefreshToken, ClientCtx, RefreshOpts) of
                 {ok, #oidcc_token{

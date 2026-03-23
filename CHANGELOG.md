@@ -1,6 +1,9 @@
 # CHANGELOG
+## 1.0.0-rc.52
+## Fixes
+* SSL verification fixes for OIDC HTTP connections
 
-## 1.0.0-rc.51 (DEVELOP)
+## 1.0.0-rc.51
 ### New Features
 * Experimental implementation of 2 additional WAMP Transports:
     * HTTP Longpoll according to the WAMP Spec.
