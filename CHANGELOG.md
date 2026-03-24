@@ -1,4 +1,7 @@
 # CHANGELOG
+## 1.0.0-rc.53
+* Fixes to OIDC Handler
+
 ## 1.0.0-rc.52
 ## Fixes
 * SSL verification fixes for OIDC HTTP connections
@@ -37,9 +40,9 @@
 
 ## 1.0.0-rc.47
 ### Changes
-- Implementation of JSON partial decoding/encoding for WAMP messages. 
+- Implementation of JSON partial decoding/encoding for WAMP messages.
     - Bondy now decodes/encodes only the control message data (head of the WAMP message) preserving the payload (tail) in JSON format. This improves performance as the payload is never decoded unless a destination peer requires a different encoding. For networks using JSON end-to-end you should see important performance improvements.
-    
+
 ## 1.0.0-rc.46
 ### Fixes
 - Fixes a bug in the OAUTH2 rest handler which would prevent the `client_device_id` option to be considered when obtaining a new token. This was introduced with the new token subsystem. This issue limites teh token scope to {realm, client} as opposed to {realm, client, device_id}.
@@ -67,9 +70,9 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
 
 ## 1.0.0-rc.40
 - Major HTTP API Gateway bottleneck removed and memory usage reduced
-    - Avoid Cowboy to close over the dispatch table when compiling the routing 
+    - Avoid Cowboy to close over the dispatch table when compiling the routing
     logic and passing it into the request handling process.
-    - Uses new `persistent_term` capability from Cowboy to store the dispatch 
+    - Uses new `persistent_term` capability from Cowboy to store the dispatch
     table
 - Major refactoring of protocol/transport options for better reuse
 - Added almost all options to configuration schemas
@@ -79,14 +82,14 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
     * Tokens are now bounded by {User, Client, Device} (idem WAMP Tickets)
     * Tokens are sharded across all partitions, allowing for more scalability
       (idem WAMP Tickets)
-    * This is part of a roadmap to completely redesign and complete the OAuth2 
+    * This is part of a roadmap to completely redesign and complete the OAuth2
     and OIDC capabilities in Bondy
 * OTP/Partisan compatibiliey issue fixes in PlumDB
 * Refactoring of WAMP APIs (Modules renamed and consolidated)
 * New WAMP APIs
     * `bondy.registry.list`
 * New standard `CALL.Options`
-    * `_disclose_session` - The callee will receive and the session information 
+    * `_disclose_session` - The callee will receive and the session information
     in  `INVOCATION.Details._session_info`
 - Drop x_ prefix for RPC experimental options
 
@@ -107,7 +110,7 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
 ## 1.0.0-rc.36
 * Migration to Erlang OTP 27 (latest)
 * Move `wamp` library as part of the umbrella as `bondy_wamp`
-* New version of plum_db with solution to map key ordering encoding issue 
+* New version of plum_db with solution to map key ordering encoding issue
   (using `deterministic` option in call to `term_to_binary/2`)
 * WS dynamic buffers via `bondy.conf` options
     * `wamp.websocket.buffer.[min | max]`
@@ -144,7 +147,7 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
 ## 1.0.0-rc.29
 ## Changes
 * Changed the `bondy_session_manager` pool worker selection to use the Session
- Id as opposed to the realm to distribute load evenly when a single realm is 
+ Id as opposed to the realm to distribute load evenly when a single realm is
  used
 
 ## Fixes
@@ -153,7 +156,7 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
 
 ## 1.0.0-rc.28
 ## Fixes
-* Upgraded `plum_db` with a fix to a bug causing a partition a crash when 
+* Upgraded `plum_db` with a fix to a bug causing a partition a crash when
   forcing a partition hashtree reset
 * Upgraded `observer_cli` and `prometheus` dependencies
 * Remove unused `bear` dependency
@@ -170,8 +173,8 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
 
 ## 1.0.0-rc.25
 ### Changes
-* Removed `enacl` and `pbkdf2` libraries, replacing its funcionality with 
-  Erlang's `public_key` and `crypto` applications for password hashing and WAMP 
+* Removed `enacl` and `pbkdf2` libraries, replacing its funcionality with
+  Erlang's `public_key` and `crypto` applications for password hashing and WAMP
   Cryptosign.
 * Upgraded several dependencies
 **BREAKING CHANGE NOTICE**
@@ -182,7 +185,7 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
 
 ## 1.0.0-rc.24
 * Upgraded PlumDB and Partisan with fix to avoid partisan_plumree_brodcast to crash when the behaviour implementors raise an exception
-* Fixes to Debian dockerfile 
+* Fixes to Debian dockerfile
 ## 1.0.0-rc.23
 ### Changes
 **BREAKING CHANGE NOTICE**
@@ -196,7 +199,7 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
 ### Fixed
 * Fix checking user credentials changes in `on_merge` (#31)
 * Fixes several bugs reported in #30:
-    * Missing `authroles` in WAMP context for Oauth2 flow 
+    * Missing `authroles` in WAMP context for Oauth2 flow
     * Pattern matching exception in Bondy Dealer where the atom `no_proc` was wrongly used instead of `noproc`
     * Fix in bondy Oauth2 un be able to handle undefined as a "token_type" in the  `revoke_token` operation
 
@@ -232,7 +235,7 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
    - `router.forward.retransmission = on|off`
    - `bridge.forward.ack = on|off`
    - `bridge.forward.retransmission = on|off`
-   - 
+   -
 
 ### Fixed
 - Fixed a bug that occured in `bondy_rpc_laod_balancer` when entries are empty
@@ -240,8 +243,8 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
 ## 1.0.0-rc.14
 
 ### Added
-* Support for TCP/TLS proxy protocol and HTTP equivalent via headers 
-  `forwarded`, `x-real-ip`, `x-forwarded-for`. The algorithm searches for 
+* Support for TCP/TLS proxy protocol and HTTP equivalent via headers
+  `forwarded`, `x-real-ip`, `x-forwarded-for`. The algorithm searches for
   the presence of headers in that order and chooses the first Private IP found,
   returning the first IP Address if none are private.
     * New config options to enable/disable it
@@ -254,7 +257,7 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
         * `bridge.listener.tcp.proxy_protocol`
         * `bridge.listener.tls.proxy_protocol`
         * Default: `off`
-    * New config options to define whether to reject connections when a 
+    * New config options to define whether to reject connections when a
     `source_ip` address cannot be obtained from the proxy (`strict`) or
     fallback to the local IP address (`relaxed`).
         * `wamp.tcp.proxy_protocol.mode`
@@ -272,7 +275,7 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
 ### Fixes
 * Fix bug in WAMP procedure `bondy.oauth2.token.revoke`
 * Re-establish support for HTTP `x-forwarded-for` and `x-real-ip` headers
-* Fixed logger formatter so that metadata values for keys not included in the  
+* Fixed logger formatter so that metadata values for keys not included in the
   template are included as part of the message.
 
 ## 1.0.0-rc.13
@@ -313,7 +316,7 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
 
 ## 1.0.0-rc.6
 #### Fixes
-* Upgrade Partisan with fixes to fast forward which was not working 
+* Upgrade Partisan with fixes to fast forward which was not working
 
 ## 1.0.0-rc.5
 #### Fixes

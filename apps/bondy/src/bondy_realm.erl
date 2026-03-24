@@ -406,6 +406,12 @@
         required => true,
         default => false,
         datatype => boolean
+    },
+    <<"cookie_domain">> => #{
+        alias => cookie_domain,
+        key => cookie_domain,
+        required => false,
+        datatype => binary
     }
 }).
 
