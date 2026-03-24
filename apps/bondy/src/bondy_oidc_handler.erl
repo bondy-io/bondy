@@ -450,32 +450,39 @@ handle_logout(Req0, State) ->
 
 
 %% @private
-do_handle_logout(Req0, #{realm_uri := RealmUri} = State) ->
+do_handle_logout(Req0, #{realm_uri := DefaultRealmUri} = State) ->
     Cookies = cowboy_req:parse_cookies(Req0),
     BasePath = maps:get(base_path, State, <<>>),
     QsVals = cowboy_req:parse_qs(Req0),
+    RealmUri = proplists:get_value(
+        <<"realm">>, QsVals, DefaultRealmUri
+    ),
     RedirectUri = proplists:get_value(
         <<"redirect_uri">>, QsVals, ?DEFAULT_REDIRECT
     ),
 
-    %% Find the realm-prefixed ticket cookie and revoke it.
-    %% The cookie is named bondy_ticket_<RealmUri>.
+    %% Find the realm-prefixed ticket cookie and try to revoke it.
+    %% The realm may not exist on this node (e.g. after reconfiguration),
+    %% so we catch errors to ensure cookies are always cleared.
     TicketCookieName = ticket_cookie_name(RealmUri),
     OidcClaims = case lists:keyfind(TicketCookieName, 1, Cookies) of
         {_, JWT} ->
-            case bondy_ticket:verify(JWT) of
+            try bondy_ticket:verify(JWT) of
                 {ok, Claims} ->
                     _ = bondy_ticket:revoke(Claims),
                     Claims;
                 {error, _} ->
-                    _ = bondy_ticket:revoke(JWT),
+                    _ = catch bondy_ticket:revoke(JWT),
+                    #{}
+            catch
+                _:_ ->
                     #{}
             end;
         false ->
             #{}
     end,
 
-    %% Clear realm-prefixed cookies
+    %% Always clear realm-prefixed cookies regardless of verify outcome
     IsSecure = cowboy_req:scheme(Req0) =:= <<"https">>,
     Req1 = clear_ticket_cookie(Req0, RealmUri, BasePath, IsSecure),
     Req2 = clear_csrf_cookie(Req1, RealmUri, BasePath, IsSecure),
@@ -673,7 +680,7 @@ set_ticket_cookie(Req, RealmUri, JWT, _BasePath, MaxAgeSecs, IsSecure) ->
     cowboy_req:set_resp_cookie(
         ticket_cookie_name(RealmUri), JWT, Req,
         #{
-            http_only => true,
+            http_only => false,
             secure => IsSecure,
             same_site => lax,
             path => Path,
@@ -688,7 +695,7 @@ clear_ticket_cookie(Req, RealmUri, _BasePath, IsSecure) ->
     cowboy_req:set_resp_cookie(
         ticket_cookie_name(RealmUri), <<>>, Req,
         #{
-            http_only => true,
+            http_only => false,
             secure => IsSecure,
             same_site => lax,
             path => Path,
