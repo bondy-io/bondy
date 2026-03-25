@@ -23,6 +23,13 @@
 %% =============================================================================
 
 
+-define(BONDY_CERT_RELOAD_CACERTS,      <<"bondy.cert_manager.reload_cacerts">>).
+-define(BONDY_CERT_ROTATE_LISTENER,     <<"bondy.cert_manager.rotate_listener">>).
+-define(BONDY_CERT_ROTATE_ALL,          <<"bondy.cert_manager.rotate_all">>).
+-define(BONDY_CERT_GET_SERVER_CERT_INFO,<<"bondy.cert_manager.get_server_cert_info">>).
+-define(BONDY_CERT_SET_CLIENT_AUTH,     <<"bondy.cert_manager.set_client_auth">>).
+-define(BONDY_CERT_GET_CLIENT_AUTH,     <<"bondy.cert_manager.get_client_auth">>).
+
 -define(BONDY_BACKUP_CREATE,            <<"bondy.backup.create">>).
 -define(BONDY_BACKUP_RESTORE,           <<"bondy.backup.restore">>).
 -define(BONDY_BACKUP_STATUS,            <<"bondy.backup.status">>).

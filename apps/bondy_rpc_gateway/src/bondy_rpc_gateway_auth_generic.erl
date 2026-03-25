@@ -164,7 +164,7 @@ fetch_token(#{fetch := FetchConf} = Conf) ->
         maps:get(auth, FetchConf, undefined), Vars, Headers1
     ),
 
-    Opts = [insecure, {pool, default}, with_body],
+    Opts = [{ssl_options, bondy_cert_manager:ssl_opts()}, {pool, default}, with_body],
 
     case hackney:request(Method, Url, Headers, Body, Opts) of
         {ok, 200, _RH, RespBody} ->

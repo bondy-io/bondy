@@ -60,16 +60,21 @@ end_per_suite(_Config) ->
     ok.
 
 init_per_testcase(_TC, Config) ->
-    %% Start fresh supervision tree for each test
-    {ok, Sup} = bondy_rpc_gateway_sup:start_link(),
-    unlink(Sup),
+    %% Start only the token cache subsystem (supervisor + registry worker),
+    %% not the full bondy_rpc_gateway_sup which requires service config.
+    {ok, CacheSup} = bondy_rpc_gateway_token_cache_sup:start_link(),
+    unlink(CacheSup),
+    {ok, CacheReg} = bondy_rpc_gateway_token_cache:start_link(),
+    unlink(CacheReg),
     bondy_rpc_gateway_mock_auth:reset_call_count(),
     bondy_rpc_gateway_mock_auth:set_token(<<"default-token">>),
-    [{sup, Sup} | Config].
+    [{cache_sup, CacheSup}, {cache_reg, CacheReg} | Config].
 
 end_per_testcase(_TC, Config) ->
-    Sup = proplists:get_value(sup, Config),
-    exit(Sup, shutdown),
+    CacheReg = proplists:get_value(cache_reg, Config),
+    CacheSup = proplists:get_value(cache_sup, Config),
+    catch exit(CacheReg, shutdown),
+    catch exit(CacheSup, shutdown),
     timer:sleep(50),
     %% Clean up persistent_term keys
     lists:foreach(fun(Key) ->

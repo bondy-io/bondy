@@ -229,6 +229,8 @@ init(Args) ->
     %% We read bondy env and cache the values
     ok = app_config:init(?BONDY, #{callback_mod => ?MODULE}),
 
+    ok = bondy_cert_manager:init(),
+
     ok = setup_wamp(),
 
     ok = setup_mods(),
@@ -330,7 +332,9 @@ node_spec() ->
 listener_transport_opts(Name) ->
     Opts = key_value:to_map(get([Name, transport_opts])),
     NumAcceptors = key_value:get(num_acceptors, Opts),
-    SocketOpts = normalise_socket_opts(key_value:get(socket_opts, Opts, [])),
+    SocketOpts0 = normalise_socket_opts(key_value:get(socket_opts, Opts, [])),
+    %% Inject sni_fun for TLS listeners to enable live cert rotation
+    SocketOpts = bondy_cert_manager:maybe_inject_sni_fun(Name, SocketOpts0),
 
     Opts#{
         %% connection_type => worker,

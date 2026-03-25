@@ -408,7 +408,7 @@ hackney_opts(Timeout, Pool) ->
     [
         {connect_timeout, Timeout},
         {recv_timeout, Timeout},
-        insecure,
+        {ssl_options, bondy_cert_manager:ssl_opts()},
         {pool, Pool},
         with_body
     ].

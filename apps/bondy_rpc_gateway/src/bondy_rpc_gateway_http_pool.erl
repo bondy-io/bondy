@@ -301,7 +301,7 @@ do_mark_down(#state{} = State) ->
 
 %% @private
 default_ssl_options() ->
-    [{verify, verify_none}].
+    bondy_cert_manager:ssl_opts().
 
 
 schedule_retry(#state{retry = Retry0} = State) ->
