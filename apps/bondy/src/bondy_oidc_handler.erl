@@ -317,9 +317,16 @@ handle_token_success(
     UserinfoOpts = #{request_opts => bondy_oidc_provider:request_opts(Config)},
     AllClaims = case oidcc_userinfo:retrieve(Token, ClientCtx, UserinfoOpts) of
         {ok, UserinfoClaims} ->
+            ?LOG_DEBUG(#{
+                description => "OIDC userinfo fetched successfully",
+                realm_uri => RealmUri,
+                provider => Provider,
+                userinfo_keys => maps:keys(UserinfoClaims),
+                has_roles => maps:is_key(<<"roles">>, UserinfoClaims)
+            }),
             maps:merge(IdClaims, UserinfoClaims);
         {error, Reason} ->
-            ?LOG_WARNING(#{
+            ?LOG_ERROR(#{
                 description => "Failed to fetch OIDC userinfo, "
                     "using id_token claims only",
                 realm_uri => RealmUri,
@@ -537,13 +544,33 @@ provider_name(Req, State) ->
 
 %% @private
 ensure_user(RealmUri, Authid, Authroles) ->
+    %% Filter out groups that don't exist in the realm. OIDC providers may
+    %% return roles that have no corresponding Bondy group.
+    {ValidGroups, Unknown} = lists:partition(
+        fun(G) ->
+            bondy_rbac_group:lookup(RealmUri, G) =/= {error, not_found}
+        end,
+        Authroles
+    ),
+    case Unknown of
+        [] ->
+            ok;
+        _ ->
+            ?LOG_WARNING(#{
+                description =>
+                    "Ignoring OIDC roles with no matching Bondy group",
+                realm_uri => RealmUri,
+                authid => Authid,
+                unknown_groups => Unknown
+            })
+    end,
     case bondy_rbac_user:lookup(RealmUri, Authid) of
         {ok, _User} ->
             ok;
         {error, not_found} ->
             User = bondy_rbac_user:new(#{
                 <<"username">> => Authid,
-                <<"groups">> => Authroles
+                <<"groups">> => ValidGroups
             }),
             case bondy_rbac_user:add(RealmUri, User) of
                 {ok, _} -> ok;
