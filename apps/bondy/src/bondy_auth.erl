@@ -646,7 +646,7 @@ valid_roles(Roles, User) when is_list(Roles) ->
     RolesSet = sets:from_list(Roles),
     AllSet = sets:from_list(bondy_rbac_user:groups(User)),
 
-    RolesSet =:= sets:intersection(RolesSet, AllSet)
+    sets:is_subset(RolesSet, AllSet)
         orelse throw(no_such_group),
 
     {undefined, Roles}.
