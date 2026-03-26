@@ -1,4 +1,9 @@
 # CHANGELOG
+## 1.0.0-rc.56
+### Fixes
+* Fix set comparison on authroles calculation
+* Add error logs for failed OIDC conections
+
 ## 1.0.0-rc.55
 ### Fixes
 * Fixed issues with role mapping and metadata merging in OIDC/Cookies
