@@ -1,4 +1,8 @@
 # CHANGELOG
+## 1.0.0-rc.55
+### Fixes
+* Fixed issues with role mapping and metadata merging in OIDC/Cookies
+
 ## 1.0.0-rc.54
 ### New Features
 * new `bondy_cert_manager` used for validation of outgoing TLS certificates and other features like live certificate rotation
