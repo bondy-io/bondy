@@ -647,8 +647,8 @@ map_roles(Roles, RoleMapping) ->
     lists:filtermap(
         fun(Role) ->
             case maps:find(Role, RoleMapping) of
-                {ok, MappedRole} -> {true, MappedRole};
-                error -> {true, Role}
+                {ok, MappedRole} -> {true, string:casefold(MappedRole)};
+                error -> {true, string:casefold(Role)}
             end
         end,
         Roles
@@ -693,13 +693,13 @@ csrf_cookie_name(RealmUri) ->
 %% @private
 set_ticket_cookie(Req, RealmUri, JWT, BasePath, MaxAgeSecs, IsSecure,
                   CookieDomain) ->
-    Opts = cookie_opts(BasePath, MaxAgeSecs, IsSecure, false, CookieDomain),
+    Opts = cookie_opts(BasePath, MaxAgeSecs, IsSecure, true, CookieDomain),
     cowboy_req:set_resp_cookie(ticket_cookie_name(RealmUri), JWT, Req, Opts).
 
 
 %% @private
 clear_ticket_cookie(Req, RealmUri, BasePath, IsSecure, CookieDomain) ->
-    Opts = cookie_opts(BasePath, 0, IsSecure, false, CookieDomain),
+    Opts = cookie_opts(BasePath, 0, IsSecure, true, CookieDomain),
     cowboy_req:set_resp_cookie(ticket_cookie_name(RealmUri), <<>>, Req, Opts).
 
 

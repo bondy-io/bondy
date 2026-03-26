@@ -883,17 +883,25 @@ permission_denied_message(
 
 
 %% @private
-do_get_metadata([H|T] = L0 , {RealmUri, ProtoUri} = RealmProto, Acc0) ->
+do_get_metadata([H|T], {RealmUri, ProtoUri} = RealmProto, Acc0) ->
     case bondy_rbac_group:lookup(RealmUri, H) of
         {error, not_found} when ProtoUri == undefined ->
-            Acc0;
+            %% Group not found and no prototype realm — skip and continue
+            do_get_metadata(T, RealmProto, Acc0);
 
         {error, not_found} ->
-            %% Swap realm
-            do_get_metadata(L0, RealmProto, Acc0);
+            %% Try the prototype realm
+            case bondy_rbac_group:lookup(ProtoUri, H) of
+                {error, not_found} ->
+                    %% Not in prototype either — skip and continue
+                    do_get_metadata(T, RealmProto, Acc0);
+                Group ->
+                    Acc = [maps:to_list(bondy_rbac_group:meta(Group)) | Acc0],
+                    L = T ++ bondy_rbac_group:groups(Group),
+                    do_get_metadata(L, RealmProto, Acc)
+            end;
 
         Group ->
-            %% TODO: Make bondy_rbac_group:lookup/2 return a result
             Acc = [maps:to_list(bondy_rbac_group:meta(Group)) | Acc0],
             L = T ++ bondy_rbac_group:groups(Group),
             do_get_metadata(L, RealmProto, Acc)

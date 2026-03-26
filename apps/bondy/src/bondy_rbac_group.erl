@@ -611,7 +611,7 @@ normalise_name(<<"anonymous">>) ->
     anonymous;
 
 normalise_name(Term) when is_binary(Term) ->
-    Term;
+    string:casefold(Term);
 
 normalise_name(_) ->
     error(badarg).
