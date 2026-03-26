@@ -352,7 +352,7 @@ request_with_retry(Method, Url, Headers, Body, RetriesLeft, Timeout, Pool) ->
     Opts = [
         {connect_timeout, Timeout},
         {recv_timeout, Timeout},
-        insecure,
+        {ssl_options, bondy_cert_manager:ssl_opts()},
         {pool, Pool},
         with_body
     ],

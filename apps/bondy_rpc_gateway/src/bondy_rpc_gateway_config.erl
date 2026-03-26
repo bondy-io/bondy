@@ -86,9 +86,9 @@ set(Key, Value) ->
 init_lhttpc_ssl_options() ->
     case application:get_env(lhttpc, ssl_options) of
         undefined ->
-            application:set_env(lhttpc, ssl_options, [
-                {verify, verify_none}
-            ]);
+            application:set_env(lhttpc, ssl_options,
+                bondy_cert_manager:ssl_opts()
+            );
         {ok, _} ->
             ok
     end.

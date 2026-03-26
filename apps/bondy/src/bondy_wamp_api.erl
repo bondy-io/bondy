@@ -95,6 +95,9 @@ do_handle_call(<<"bondy.ping">>, M, _Ctxt) ->
 do_handle_call(<<"bondy.backup.", _/binary>> = Proc, M, Ctxt) ->
     bondy_backup_api:handle_call(Proc, M, Ctxt);
 
+do_handle_call(<<"bondy.cert_manager.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_cert_manager_wamp_api:handle_call(Proc, M, Ctxt);
+
 do_handle_call(<<"bondy.cluster.", _/binary>> = Proc, M, Ctxt) ->
     bondy_cluster_api:handle_call(Proc, M, Ctxt);
 

@@ -1,5 +1,10 @@
 # CHANGELOG
+## 1.0.0-rc.54
+### New Features
+* new `bondy_cert_manager` used for validation of outgoing TLS certificates and other features like live certificate rotation
+
 ## 1.0.0-rc.53
+## Fixes
 * Fixes to OIDC Handler
 
 ## 1.0.0-rc.52

@@ -261,16 +261,9 @@ do_start_worker(RealmUri, ProviderName, Config) ->
 ssl_opts(Issuer, _AllowUnsafeHttp) when is_binary(Issuer) ->
     case string:prefix(Issuer, <<"https">>) of
         nomatch ->
-            %% Plain HTTP — no cert verification needed
-            [{verify, verify_none}];
+            bondy_cert_manager:ssl_opts(#{verify => verify_none});
         _ ->
-            %% HTTPS — use certifi CA bundle
-            CaCerts = certifi:cacerts(),
-            [
-                {verify, verify_peer},
-                {cacerts, CaCerts},
-                {depth, 5}
-            ]
+            bondy_cert_manager:ssl_opts()
     end.
 
 

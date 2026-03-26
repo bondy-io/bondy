@@ -625,6 +625,21 @@
 end}.
 
 %% =============================================================================
+%% CERTIFICATE MANAGER
+%% =============================================================================
+
+%% @doc Path to a PEM file containing additional trusted CA certificates for
+%% outbound TLS connections (OIDC providers, RPC Gateway HTTP backends, etc.).
+%% These certificates are merged with the certifi Mozilla CA bundle and
+%% (when available) the OS trust store.
+%% If not set, Bondy will try to use the api_gateway.https.cacertfile value
+%% as a fallback.
+{mapping, "cert_manager.cacertfile", "bondy.cert_manager.cacertfile", [
+  {datatype, file},
+  {commented, "{{platform_etc_dir}}/cacert.pem"}
+]}.
+
+%% =============================================================================
 %% OVERLOAD PROTECTION AND LOAD REGULATION
 %% =============================================================================
 
@@ -1386,6 +1401,22 @@ end}.
   {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
 
+%% @doc SSL verification mode for Admin API HTTPS connections. Set to
+%% verify_peer to require client certificates (mTLS).
+{mapping, "admin_api.https.verify",
+"bondy.admin_api_https.transport_opts.socket_opts.verify", [
+  {datatype, {enum, [verify_peer, verify_none]}},
+  {default, verify_none}
+]}.
+
+%% @doc Whether to reject connections where the client does not provide a
+%% certificate when verify is set to verify_peer.
+{mapping, "admin_api.https.fail_if_no_peer_cert",
+"bondy.admin_api_https.transport_opts.socket_opts.fail_if_no_peer_cert", [
+  {datatype, {flag, on, off}},
+  {default, off}
+]}.
+
 %% @doc A comma separate list of TLS protocol versions that will be supported
 %% At the moment Bondy only supports versions 1.2 and 1.3
 {mapping, "admin_api.https.versions",
@@ -2066,6 +2097,22 @@ end}.
 "bondy.api_gateway_https.transport_opts.socket_opts.cacertfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/cacert.pem"}
+]}.
+
+%% @doc SSL verification mode for API Gateway HTTPS connections. Set to
+%% verify_peer to require client certificates (mTLS).
+{mapping, "api_gateway.https.verify",
+"bondy.api_gateway_https.transport_opts.socket_opts.verify", [
+  {datatype, {enum, [verify_peer, verify_none]}},
+  {default, verify_none}
+]}.
+
+%% @doc Whether to reject connections where the client does not provide a
+%% certificate when verify is set to verify_peer.
+{mapping, "api_gateway.https.fail_if_no_peer_cert",
+"bondy.api_gateway_https.transport_opts.socket_opts.fail_if_no_peer_cert", [
+  {datatype, {flag, on, off}},
+  {default, off}
 ]}.
 
 %% @doc A comma separate list of TLS protocol versions that will be supported
@@ -3300,6 +3347,14 @@ end}.
 "bondy.wamp_tls.transport_opts.socket_opts.verify", [
   {datatype, {enum, [verify_peer, verify_none]}},
   {default, verify_none}
+]}.
+
+%% @doc Whether to reject connections where the client does not provide a
+%% certificate when verify is set to verify_peer.
+{mapping, "wamp.tls.fail_if_no_peer_cert",
+"bondy.wamp_tls.transport_opts.socket_opts.fail_if_no_peer_cert", [
+  {datatype, {flag, on, off}},
+  {default, off}
 ]}.
 
 %% @doc Enables or disables the TCP Proxy Protocol. This is used to capture
