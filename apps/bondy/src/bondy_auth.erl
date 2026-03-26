@@ -820,8 +820,6 @@ init_from_claims(
         throw:{no_such_user, _} -> undefined
     end,
 
-    %% For claims-based auth, we trust the provided roles even without
-    %% a user record. If the user exists, we validate against their groups.
     {Role, ValidRoles} = case User of
         undefined ->
             {undefined, Roles};
