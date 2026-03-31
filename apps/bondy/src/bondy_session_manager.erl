@@ -531,13 +531,13 @@ do_schedule_oidc_refresh(Session) ->
             Authid = bondy_session:authid(Session),
             EntryId = bondy_utils:uuid(),
             AccessExp = maps:get(
-                oidc_access_token_expires_at, Details, 0
+                oidc_access_token_expires_in, Details, 0
             ),
             ok = bondy_oidc_refresh_worker:schedule_refresh(
                 EntryId, RealmUri, Authid, Provider,
                 #{
                     refresh_token => RT,
-                    access_token_expires_at => AccessExp
+                    access_token_expires_in => AccessExp
                 }
             ),
             %% Store EntryId back for removal at session close

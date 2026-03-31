@@ -407,7 +407,11 @@ do_handle_close_body(Req0, State) ->
                     ),
                     {ok, Req1, State};
                 ok ->
-                    bondy_http_transport_session:close(Pid),
+                    try
+                        bondy_http_transport_session:close(Pid)
+                    catch
+                        _:_ -> ok
+                    end,
                     Req1 = cowboy_req:reply(
                         ?HTTP_ACCEPTED, #{}, <<>>, Req0
                     ),

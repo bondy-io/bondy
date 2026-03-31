@@ -75,7 +75,7 @@ andalso is_map(Opts) ->
         IdToken = maps:get(id_token, OidcTokens, undefined),
         RefreshToken = maps:get(refresh_token, OidcTokens, undefined),
         AccessTokenExpiresAt = maps:get(
-            access_token_expires_at, OidcTokens, undefined
+            access_token_expires_in, OidcTokens, undefined
         ),
         Authroles = maps:get(authroles, Opts, []),
 
@@ -107,7 +107,7 @@ andalso is_map(Opts) ->
 
         Claims = case AccessTokenExpiresAt of
             undefined -> Claims2;
-            _ -> Claims2#{oidc_access_token_expires_at => AccessTokenExpiresAt}
+            _ -> Claims2#{oidc_access_token_expires_in => AccessTokenExpiresAt}
         end,
 
         JWT = jose_jwt:from(Claims),

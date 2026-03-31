@@ -46,6 +46,7 @@ all() ->
         context_refresh_after_epoch,
         explicit_groups_oidc,
         nested_group_inheritance_deep,
+        explicit_groups_deep_inheritance,
         externalize_grant_formats,
         group_deletion_cascades_grants,
         grant_to_any_resource,
@@ -1202,6 +1203,170 @@ nested_group_inheritance_deep(_) ->
         ok,
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.deep.resource">>, C)
     ).
+
+
+%% @doc Tests that `bondy_rbac:get_context/3` (the OIDC explicit-groups path)
+%% correctly computes the transitive closure of group inheritance up to 4
+%% levels deep, with grants assigned at every level.
+%%
+%% Group hierarchy:
+%%
+%%   level_0  (root)         — grants wamp.call   on com.l0.
+%%     ^
+%%     |  member-of
+%%   level_1                 — grants wamp.register on com.l1.
+%%     ^
+%%     |  member-of
+%%   level_2                 — grants wamp.subscribe on com.l2.
+%%     ^
+%%     |  member-of
+%%   level_3  (leaf)         — grants wamp.publish on com.l3.
+%%
+%% Also tests diamond inheritance:
+%%
+%%   level_0
+%%     ^       ^
+%%     |       |
+%%   level_1  level_1b
+%%     ^       ^
+%%     |       |
+%%     level_2d
+%%
+explicit_groups_deep_inheritance(_) ->
+    Uri = <<"com.test.oidc_deep_groups">>,
+    _ = bondy_realm:create(#{
+        uri => Uri,
+        security_enabled => true,
+        authmethods => [?TRUST_AUTH],
+        groups => [
+            #{name => <<"level_0">>},
+            #{name => <<"level_1">>, groups => [<<"level_0">>]},
+            #{name => <<"level_2">>, groups => [<<"level_1">>]},
+            #{name => <<"level_3">>, groups => [<<"level_2">>]},
+            %% Diamond: level_1b also member of level_0
+            #{name => <<"level_1b">>, groups => [<<"level_0">>]},
+            %% level_2d member of both level_1 and level_1b
+            #{name => <<"level_2d">>, groups => [<<"level_1">>, <<"level_1b">>]}
+        ],
+        grants => [
+            #{
+                permissions => [<<"wamp.call">>],
+                uri => <<"com.l0.">>,
+                match => <<"prefix">>,
+                roles => [<<"level_0">>]
+            },
+            #{
+                permissions => [<<"wamp.register">>],
+                uri => <<"com.l1.">>,
+                match => <<"prefix">>,
+                roles => [<<"level_1">>]
+            },
+            #{
+                permissions => [<<"wamp.subscribe">>],
+                uri => <<"com.l2.">>,
+                match => <<"prefix">>,
+                roles => [<<"level_2">>]
+            },
+            #{
+                permissions => [<<"wamp.publish">>],
+                uri => <<"com.l3.">>,
+                match => <<"prefix">>,
+                roles => [<<"level_3">>]
+            }
+        ]
+    }),
+
+    %% ---- Linear chain: explicit group = [level_3] ----
+    %% Should inherit grants from level_3, level_2, level_1, and level_0
+    C3 = bondy_rbac:get_context(
+        Uri, <<"oidc_deep@idp.com">>, [<<"level_3">>]
+    ),
+
+    %% level_3 own grant
+    ?assertEqual(
+        ok,
+        bondy_rbac:authorize(<<"wamp.publish">>, <<"com.l3.x">>, C3)
+    ),
+    %% level_2 grant (1 hop up)
+    ?assertEqual(
+        ok,
+        bondy_rbac:authorize(<<"wamp.subscribe">>, <<"com.l2.x">>, C3)
+    ),
+    %% level_1 grant (2 hops up)
+    ?assertEqual(
+        ok,
+        bondy_rbac:authorize(<<"wamp.register">>, <<"com.l1.x">>, C3)
+    ),
+    %% level_0 grant (3 hops up — root)
+    ?assertEqual(
+        ok,
+        bondy_rbac:authorize(<<"wamp.call">>, <<"com.l0.x">>, C3)
+    ),
+
+    %% Negative: a permission not granted at any level
+    ?assertError(
+        {not_authorized, _},
+        bondy_rbac:authorize(<<"wamp.unregister">>, <<"com.l0.x">>, C3)
+    ),
+
+    %% ---- Middle of chain: explicit group = [level_2] ----
+    %% Should inherit level_2, level_1, level_0 but NOT level_3
+    C2 = bondy_rbac:get_context(
+        Uri, <<"oidc_mid@idp.com">>, [<<"level_2">>]
+    ),
+
+    ?assertEqual(
+        ok,
+        bondy_rbac:authorize(<<"wamp.subscribe">>, <<"com.l2.x">>, C2)
+    ),
+    ?assertEqual(
+        ok,
+        bondy_rbac:authorize(<<"wamp.register">>, <<"com.l1.x">>, C2)
+    ),
+    ?assertEqual(
+        ok,
+        bondy_rbac:authorize(<<"wamp.call">>, <<"com.l0.x">>, C2)
+    ),
+    %% Must NOT have level_3 grant
+    ?assertError(
+        {not_authorized, _},
+        bondy_rbac:authorize(<<"wamp.publish">>, <<"com.l3.x">>, C2)
+    ),
+
+    %% ---- Multiple explicit groups: [level_3, level_1] ----
+    %% Redundant but should not break (level_1 already visited via level_3)
+    CMulti = bondy_rbac:get_context(
+        Uri, <<"oidc_multi@idp.com">>, [<<"level_3">>, <<"level_1">>]
+    ),
+
+    ?assertEqual(
+        ok,
+        bondy_rbac:authorize(<<"wamp.publish">>, <<"com.l3.x">>, CMulti)
+    ),
+    ?assertEqual(
+        ok,
+        bondy_rbac:authorize(<<"wamp.call">>, <<"com.l0.x">>, CMulti)
+    ),
+
+    %% ---- Diamond: explicit group = [level_2d] ----
+    %% level_2d → level_1 → level_0  AND  level_2d → level_1b → level_0
+    %% Should get grants from level_1, level_1b, and level_0 (no duplicates)
+    CDiamond = bondy_rbac:get_context(
+        Uri, <<"oidc_diamond@idp.com">>, [<<"level_2d">>]
+    ),
+
+    %% level_1 grant (via level_2d → level_1)
+    ?assertEqual(
+        ok,
+        bondy_rbac:authorize(<<"wamp.register">>, <<"com.l1.x">>, CDiamond)
+    ),
+    %% level_0 grant (via either path)
+    ?assertEqual(
+        ok,
+        bondy_rbac:authorize(<<"wamp.call">>, <<"com.l0.x">>, CDiamond)
+    ),
+
+    ok.
 
 
 

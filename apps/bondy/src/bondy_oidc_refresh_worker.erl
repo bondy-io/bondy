@@ -101,7 +101,7 @@ when is_binary(EntryId) andalso is_binary(RealmUri)
 andalso is_binary(Authid) andalso is_binary(OidcProvider)
 andalso is_map(RefreshInfo) ->
     #{refresh_token := RefreshToken} = RefreshInfo,
-    AccessExpiresAt = maps:get(access_token_expires_at, RefreshInfo, 0),
+    AccessExpiresAt = maps:get(access_token_expires_in, RefreshInfo, 0),
     NextRefreshAt = max(0, AccessExpiresAt - ?REFRESH_BUFFER_SECS),
 
     Entry = #refresh_entry{
@@ -275,7 +275,7 @@ handle_refresh_success(
         end,
         case NewAccessExpiresAt of
             0 -> Claims1;
-            _ -> Claims1#{oidc_access_token_expires_at => NewAccessExpiresAt}
+            _ -> Claims1#{oidc_access_token_expires_in => NewAccessExpiresAt}
         end
     end,
 
@@ -291,7 +291,7 @@ handle_refresh_success(
                         EntryId, RealmUri, Authid, Provider,
                         #{
                             refresh_token => NewRT,
-                            access_token_expires_at => NewAccessExpiresAt
+                            access_token_expires_in => NewAccessExpiresAt
                         }
                     )
             end;
