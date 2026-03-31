@@ -164,7 +164,12 @@ fetch_token(#{fetch := FetchConf} = Conf) ->
         maps:get(auth, FetchConf, undefined), Vars, Headers1
     ),
 
-    Opts = [{ssl_options, bondy_cert_manager:ssl_opts()}, {pool, default}, with_body],
+    TlsVerify = maps:get(tls_verify, Conf, verify_peer),
+    SslOpts = case TlsVerify of
+        verify_none -> bondy_cert_manager:ssl_opts(#{verify => verify_none});
+        _ -> bondy_cert_manager:ssl_opts()
+    end,
+    Opts = [{ssl_options, SslOpts}, {pool, default}, with_body],
 
     case hackney:request(Method, Url, Headers, Body, Opts) of
         {ok, 200, _RH, RespBody} ->

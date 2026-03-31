@@ -204,11 +204,12 @@ forward(Event, Token,
 
     Retries = maps:get(retries, Conf, ?DEFAULT_RETRIES),
     Timeout = maps:get(timeout, Conf, ?DEFAULT_TIMEOUT),
+    TlsVerify = maps:get(tls_verify, Conf, verify_peer),
     Pool = pool_name(Name),
 
     case request_with_retry(
             method_atom(Method), FinalUrl, FinalHeaders, FwdBody,
-            Retries, Timeout, Pool) of
+            Retries, Timeout, Pool, TlsVerify) of
         {ok, Status, _RH, _RespBody} when Status =:= 401; Status =:= 403 ->
             ?LOG_WARNING(#{
                 msg => <<"Got auth rejection, retrying with fresh token">>,
@@ -216,7 +217,8 @@ forward(Event, Token,
             }),
             retry_with_fresh_token(
                 Name, AuthMod, AuthConf, Url, BaseHeaders,
-                method_atom(Method), FwdBody, Retries, Timeout, Pool
+                method_atom(Method), FwdBody, Retries, Timeout, Pool,
+                TlsVerify
             );
         {ok, Status, _RH, RespBody} ->
             process_response(Status, RespBody);
@@ -226,7 +228,7 @@ forward(Event, Token,
 
 retry_with_fresh_token(
         Name, AuthMod, AuthConf, Url, BaseHeaders,
-        MethodAtom, FwdBody, Retries, Timeout, Pool) ->
+        MethodAtom, FwdBody, Retries, Timeout, Pool, TlsVerify) ->
     bondy_rpc_gateway_token_cache:invalidate(Name),
     case bondy_rpc_gateway_token_cache:get(Name, AuthMod, AuthConf) of
         {ok, NewToken} ->
@@ -234,7 +236,7 @@ retry_with_fresh_token(
                 AuthMod:apply_auth(NewToken, Url, BaseHeaders, AuthConf),
             case request_with_retry(
                     MethodAtom, RetryUrl, RetryHeaders, FwdBody,
-                    Retries, Timeout, Pool) of
+                    Retries, Timeout, Pool, TlsVerify) of
                 {ok, Status2, _RH2, RespBody2} ->
                     process_response(Status2, RespBody2);
                 {error, Reason} ->
@@ -404,17 +406,21 @@ validate_request_body(Body) when is_list(Body) ->
 %% Internal helpers
 %% ===================================================================
 
-hackney_opts(Timeout, Pool) ->
+hackney_opts(Timeout, Pool, TlsVerify) ->
+    SslOpts = case TlsVerify of
+        verify_none -> bondy_cert_manager:ssl_opts(#{verify => verify_none});
+        _ -> bondy_cert_manager:ssl_opts()
+    end,
     [
         {connect_timeout, Timeout},
         {recv_timeout, Timeout},
-        {ssl_options, bondy_cert_manager:ssl_opts()},
+        {ssl_options, SslOpts},
         {pool, Pool},
         with_body
     ].
 
-request_with_retry(Method, Url, Headers, Body, RetriesLeft, Timeout, Pool) ->
-    case hackney:request(Method, Url, Headers, Body, hackney_opts(Timeout, Pool)) of
+request_with_retry(Method, Url, Headers, Body, RetriesLeft, Timeout, Pool, TlsVerify) ->
+    case hackney:request(Method, Url, Headers, Body, hackney_opts(Timeout, Pool, TlsVerify)) of
         {ok, S, RH, RB} ->
             {ok, S, RH, RB};
         {error, _} when RetriesLeft > 0 ->
@@ -423,7 +429,7 @@ request_with_retry(Method, Url, Headers, Body, RetriesLeft, Timeout, Pool) ->
             ?LOG_WARNING(#{msg => <<"Retrying">>,
                            attempt => Attempt, backoff_ms => BackoffMs}),
             timer:sleep(BackoffMs),
-            request_with_retry(Method, Url, Headers, Body, RetriesLeft - 1, Timeout, Pool);
+            request_with_retry(Method, Url, Headers, Body, RetriesLeft - 1, Timeout, Pool, TlsVerify);
         {error, Reason} ->
             {error, Reason}
     end.

@@ -306,7 +306,15 @@ start_http_pools(Services) ->
         fun(#{name := ServiceName} = ServiceConf, Acc) ->
             PoolName = pool_name(ServiceName),
             Endpoint = maps:get(base_url, ServiceConf),
-            PoolOpts = maps:get(pool, ServiceConf, #{}),
+            PoolOpts0 = maps:get(pool, ServiceConf, #{}),
+            TlsVerify = maps:get(tls_verify, ServiceConf, verify_peer),
+            SslOpts = case TlsVerify of
+                verify_none ->
+                    bondy_cert_manager:ssl_opts(#{verify => verify_none});
+                _ ->
+                    bondy_cert_manager:ssl_opts()
+            end,
+            PoolOpts = PoolOpts0#{ssl_options => SslOpts},
             bondy_rpc_gateway_http_pool_sup:start_pool(
                 PoolName, Endpoint, PoolOpts
             ),

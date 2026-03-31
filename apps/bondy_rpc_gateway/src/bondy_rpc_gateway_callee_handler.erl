@@ -139,6 +139,7 @@ do_handle_wamp_call(ProcConf, KWArgs0) ->
     Timeout = maps:get(timeout, ProcConf, ?DEFAULT_TIMEOUT),
     Retries = maps:get(retries, ProcConf, ?DEFAULT_RETRIES),
     Pool = maps:get(pool, ProcConf, default),
+    TlsVerify = maps:get(tls_verify, ProcConf, verify_peer),
 
     try
         %% 1. Extract custom headers
@@ -173,7 +174,8 @@ do_handle_wamp_call(ProcConf, KWArgs0) ->
         %% 6. Make HTTP request
         MethodAtom = method_to_atom(Method),
         Response = request_with_retry(
-            MethodAtom, FinalUrl, FinalHeaders, Body, Retries, Timeout, Pool
+            MethodAtom, FinalUrl, FinalHeaders, Body, Retries, Timeout, Pool,
+            TlsVerify
         ),
 
         case Response of
@@ -187,7 +189,7 @@ do_handle_wamp_call(ProcConf, KWArgs0) ->
                 retry_with_fresh_token(
                     ServiceName, AuthMod, AuthConf,
                     Url, BaseHeaders, MethodAtom, Body,
-                    Retries, Timeout, Pool
+                    Retries, Timeout, Pool, TlsVerify
                 );
 
             {ok, Status1, _RH1, RespBody1} ->
@@ -348,11 +350,15 @@ acquire_token(ServiceName, AuthMod, AuthConf) ->
 %% HTTP request with retry
 %% ===================================================================
 
-request_with_retry(Method, Url, Headers, Body, RetriesLeft, Timeout, Pool) ->
+request_with_retry(Method, Url, Headers, Body, RetriesLeft, Timeout, Pool, TlsVerify) ->
+    SslOpts = case TlsVerify of
+        verify_none -> bondy_cert_manager:ssl_opts(#{verify => verify_none});
+        _ -> bondy_cert_manager:ssl_opts()
+    end,
     Opts = [
         {connect_timeout, Timeout},
         {recv_timeout, Timeout},
-        {ssl_options, bondy_cert_manager:ssl_opts()},
+        {ssl_options, SslOpts},
         {pool, Pool},
         with_body
     ],
@@ -371,7 +377,8 @@ request_with_retry(Method, Url, Headers, Body, RetriesLeft, Timeout, Pool) ->
             }),
             timer:sleep(BackoffMs),
             request_with_retry(
-                Method, Url, Headers, Body, RetriesLeft - 1, Timeout, Pool
+                Method, Url, Headers, Body, RetriesLeft - 1, Timeout, Pool,
+                TlsVerify
             );
         {error, Reason} ->
             {error, Reason}
@@ -385,7 +392,7 @@ request_with_retry(Method, Url, Headers, Body, RetriesLeft, Timeout, Pool) ->
 retry_with_fresh_token(
         ServiceName, AuthMod, AuthConf,
         Url, BaseHeaders, MethodAtom, Body,
-        Retries, Timeout, Pool) ->
+        Retries, Timeout, Pool, TlsVerify) ->
     bondy_rpc_gateway_token_cache:invalidate(ServiceName),
     case bondy_rpc_gateway_token_cache:get(
             ServiceName, AuthMod, AuthConf) of
@@ -396,7 +403,7 @@ retry_with_fresh_token(
                 ),
             case request_with_retry(
                     MethodAtom, RetryUrl, RetryHeaders, Body,
-                    Retries, Timeout, Pool) of
+                    Retries, Timeout, Pool, TlsVerify) of
                 {ok, Status, _RH, RespBody} ->
                     http_to_wamp(Status, RespBody);
                 {error, Reason} ->
