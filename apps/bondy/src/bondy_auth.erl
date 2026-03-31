@@ -153,7 +153,7 @@ Only valid for transport-level authentication e.g. cookie
     | {error,
         {no_such_user, binary()}
         | {no_such_realm, binary()}
-        | no_such_group
+        | {no_such_groups, [bondy_rbac_group:name()]}
     }
     | no_return().
 
@@ -173,7 +173,7 @@ Only valid for transport-level authentication e.g. cookie
     | {error,
         {no_such_user, binary()}
         | {no_such_realm, binary()}
-        | no_such_group
+        | {no_such_groups, [bondy_rbac_group:name()]}
     }
     | no_return().
 
@@ -227,7 +227,7 @@ WAMP-level authentication.
     | {error,
         {no_such_user, binary()}
         | {no_such_realm, binary()}
-        | no_such_group
+        | {no_such_groups, [bondy_rbac_group:name()]}
     }
     | no_return().
 
@@ -250,7 +250,7 @@ init(SessionId, Uri, UserId, Roles, SourceIP) ->
     | {error,
         {no_such_user, binary()}
         | {no_such_realm, binary()}
-        | no_such_group
+        | {no_such_groups, [bondy_rbac_group:name()]}
     }
     | no_return().
 
@@ -594,7 +594,7 @@ authenticate(Method, Signature, DataIn, Ctxt) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns the requested role `Role' if user `User' is a member of that
-%% role, otherwise throws an 'no_such_group' exception.
+%% role, otherwise throws a `{no_such_groups, [Name]}' exception.
 %% In case the requested role is the
 %% atom 'undefined' it returns the first group in the user's groups or
 %% undefined if the user is not a member of any group.
@@ -639,17 +639,20 @@ valid_roles(Role, User) when is_binary(Role) ->
             %% The session is restricted to the specific role
             {Role, [Role]};
         false ->
-            throw(no_such_group)
+            throw({no_such_groups, [Role]})
     end;
 
 valid_roles(Roles, User) when is_list(Roles) ->
     RolesSet = sets:from_list(Roles),
     AllSet = sets:from_list(bondy_rbac_user:groups(User)),
 
-    sets:is_subset(RolesSet, AllSet)
-        orelse throw(no_such_group),
-
-    {undefined, Roles}.
+    case sets:is_subset(RolesSet, AllSet) of
+        true ->
+            {undefined, Roles};
+        false ->
+            Unknown = sets:to_list(sets:subtract(RolesSet, AllSet)),
+            throw({no_such_groups, Unknown})
+    end.
 
 
 %% @private
