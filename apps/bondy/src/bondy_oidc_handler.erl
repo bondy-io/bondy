@@ -373,10 +373,16 @@ do_issue_ticket(
     Authid, Authroles, IdTokenJWT, AccessToken, RefreshToken,
     SpaRedirect, TicketScope
 ) ->
+    %% Filter out roles that have no corresponding Bondy group in the realm.
+    %% This ensures that only valid groups end up in the ticket, in the
+    %% auto-provisioned user record, and ultimately in the WAMP session's
+    %% authroles and RBAC context.
+    ValidAuthroles = filter_valid_groups(RealmUri, Authid, Authroles),
+
     %% Optionally provision a local user record
     case maps:get(auto_provision, Config, false) of
         true ->
-            ok = ensure_user(RealmUri, Authid, Authroles);
+            ok = ensure_user(RealmUri, Authid, ValidAuthroles);
         false ->
             ok
     end,
@@ -405,7 +411,7 @@ do_issue_ticket(
         RealmUri, Authid, Provider, OidcTokensMap,
         #{
             expiry_time_secs => ExpirySecs,
-            authroles => Authroles,
+            authroles => ValidAuthroles,
             scope => TicketScope
         }
     ) of
@@ -543,12 +549,12 @@ provider_name(Req, State) ->
 
 
 %% @private
-ensure_user(RealmUri, Authid, Authroles) ->
-    %% Filter out groups that don't exist in the realm. OIDC providers may
-    %% return roles that have no corresponding Bondy group.
+filter_valid_groups(RealmUri, Authid, Authroles) ->
     {ValidGroups, Unknown} = lists:partition(
-        fun(G) ->
-            bondy_rbac_group:lookup(RealmUri, G) =/= {error, not_found}
+        fun(G) when is_binary(G) ->
+            bondy_rbac_group:lookup(RealmUri, G) =/= {error, not_found};
+           (_) ->
+            false
         end,
         Authroles
     ),
@@ -564,13 +570,18 @@ ensure_user(RealmUri, Authid, Authroles) ->
                 unknown_groups => Unknown
             })
     end,
+    ValidGroups.
+
+
+%% @private
+ensure_user(RealmUri, Authid, Groups) ->
     case bondy_rbac_user:lookup(RealmUri, Authid) of
         {ok, _User} ->
             ok;
         {error, not_found} ->
             User = bondy_rbac_user:new(#{
                 <<"username">> => Authid,
-                <<"groups">> => ValidGroups
+                <<"groups">> => Groups
             }),
             case bondy_rbac_user:add(RealmUri, User) of
                 {ok, _} -> ok;
@@ -615,9 +626,15 @@ extract_claim(ClaimName, Claims) when is_map(Claims) ->
             end;
         [_] ->
             case maps:get(ClaimName, Claims, undefined) of
-                L when is_list(L) -> L;
-                B when is_binary(B) -> [B];
-                _ -> []
+                L when is_list(L) ->
+                    %% Only keep binary elements. IdP claims may contain
+                    %% integers, nulls, or other non-string values that
+                    %% would crash downstream (normalise_name, casefold).
+                    [E || E <- L, is_binary(E)];
+                B when is_binary(B) ->
+                    [B];
+                _ ->
+                    []
             end
     end.
 
@@ -668,15 +685,17 @@ decode_jwt_claims(JWT) when is_binary(JWT) ->
 
 %% @private
 map_roles(Roles, RoleMapping) when map_size(RoleMapping) == 0 ->
-    Roles;
+    [R || R <- Roles, is_binary(R)];
 
 map_roles(Roles, RoleMapping) ->
     lists:filtermap(
-        fun(Role) ->
+        fun(Role) when is_binary(Role) ->
             case maps:find(Role, RoleMapping) of
                 {ok, MappedRole} -> {true, string:casefold(MappedRole)};
                 error -> {true, string:casefold(Role)}
-            end
+            end;
+           (_) ->
+            false
         end,
         Roles
     ).
@@ -699,7 +718,7 @@ build_oidc_tokens_map(IdTokenJWT, AccessToken, RefreshToken) ->
         when is_binary(AT) ->
             Map2 = Map1#{access_token => AT},
             case is_integer(Exp) of
-                true -> Map2#{access_token_expires_at => Exp};
+                true -> Map2#{access_token_expires_in => Exp};
                 false -> Map2
             end;
         _ ->

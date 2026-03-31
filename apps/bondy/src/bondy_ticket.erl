@@ -211,7 +211,7 @@
                             %% Optional OIDC fields
                             oidc_provider       =>  binary(),
                             oidc_refresh_token  =>  binary(),
-                            oidc_access_token_expires_at
+                            oidc_access_token_expires_in
                                                 =>  pos_integer()
                         }.
 -type opts()        ::  #{

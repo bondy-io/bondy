@@ -79,7 +79,7 @@
                                             optional(binary()),
                                         oidc_refresh_token =>
                                             optional(binary()),
-                                        oidc_access_token_expires_at =>
+                                        oidc_access_token_expires_in =>
                                             optional(pos_integer()),
                                         oidc_refresh_entry_id =>
                                             optional(binary())

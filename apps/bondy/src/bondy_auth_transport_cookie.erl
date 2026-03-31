@@ -118,8 +118,8 @@ validate_claims(#{scope := #{realm := Uri}} = Claims, Ctxt, State) ->
                     oidc_refresh_token => maps:get(
                         oidc_refresh_token, Claims, undefined
                     ),
-                    oidc_access_token_expires_at => maps:get(
-                        oidc_access_token_expires_at, Claims, undefined
+                    oidc_access_token_expires_in => maps:get(
+                        oidc_access_token_expires_in, Claims, undefined
                     )
                 }
             },
