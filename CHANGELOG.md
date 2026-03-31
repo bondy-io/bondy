@@ -1,4 +1,8 @@
 # CHANGELOG
+## 1.0.0-rc.57
+### Fixes
+* Fixes an issue with OIDC tokens containin roles unknown to Bondy
+
 ## 1.0.0-rc.56
 ### Fixes
 * Fix set comparison on authroles calculation

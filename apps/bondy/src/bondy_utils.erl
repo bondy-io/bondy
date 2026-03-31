@@ -117,13 +117,13 @@ to_existing_atom_keys(Map) when is_map(Map) ->
     F = fun
         (K, V, Acc) when is_binary(K) andalso is_map(V) ->
             maps:put(
-                binary_to_existing_atom(K, utf8),
+                try_binary_to_existing_atom(K),
                 to_existing_atom_keys(V),
                 Acc
             );
 
         (K, V, Acc) when is_binary(K) ->
-            maps:put(binary_to_existing_atom(K, utf8), V, Acc);
+            maps:put(try_binary_to_existing_atom(K), V, Acc);
 
         (K, V, Acc) when is_atom(K) andalso is_map(V) ->
             maps:put(K, to_existing_atom_keys(V), Acc);
@@ -132,6 +132,18 @@ to_existing_atom_keys(Map) when is_map(Map) ->
             maps:put(K, V, Acc)
     end,
     maps:fold(F, #{}, Map).
+
+
+%% @private
+%% @doc Converts a binary to an existing atom if one exists, otherwise keeps
+%% the binary. This avoids crashes when decoding JWTs that contain keys added
+%% in a different version of the code (forwards/backwards compatibility).
+try_binary_to_existing_atom(Bin) when is_binary(Bin) ->
+    try
+        binary_to_existing_atom(Bin, utf8)
+    catch
+        error:badarg -> Bin
+    end.
 
 
 %% -----------------------------------------------------------------------------
