@@ -1,5 +1,5 @@
 # CHANGELOG
-## 1.0.0-rc.57 (DEVELOP)
+## 1.0.0-rc.57
 ### Fixes
 * Fixes an issue with OIDC tokens containin roles unknown to Bondy
 
