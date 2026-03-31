@@ -140,6 +140,20 @@
 ]}.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Whether to verify the upstream service's TLS certificate.
+%% When set to verify_peer (the default), Bondy validates the upstream
+%% certificate against the CA trust store managed by bondy_cert_manager.
+%% Set to verify_none to disable TLS verification for this service.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "rpc_gateway.services.$service.tls_verify",
+          "bondy_rpc_gateway.services", [
+  {datatype, {enum, [verify_peer, verify_none]}},
+  {default, verify_peer}
+]}.
+
+
 %% =============================================================================
 %% CONNECTION POOL
 %%
@@ -754,6 +768,7 @@ fun(Conf0) ->
             AuthMod = AuthModAtom(Get(Pfx ++ ".auth_mod", generic)),
             Timeout = Get(Pfx ++ ".timeout", 30000),
             Retries = Get(Pfx ++ ".retries", 3),
+            TlsVerify = Get(Pfx ++ ".tls_verify", verify_peer),
 
             %% --- Fetch section ---
             FetchMethod = Get(Pfx ++ ".auth.fetch.method", post),
@@ -1011,10 +1026,11 @@ fun(Conf0) ->
                 vars  => Vars,
                 cache => Cache
             },
-            AuthConf = case Secrets of
+            AuthConf1 = case Secrets of
                 undefined -> AuthConf0;
                 _         -> AuthConf0#{secrets => Secrets}
             end,
+            AuthConf = AuthConf1#{tls_verify => TlsVerify},
 
             #{
                 name      => ToBin(Name),
@@ -1024,6 +1040,7 @@ fun(Conf0) ->
                 auth_conf => AuthConf,
                 timeout => Timeout,
                 retries => Retries,
+                tls_verify => TlsVerify,
                 pool => Pool,
                 procedures => Procedures
             }
