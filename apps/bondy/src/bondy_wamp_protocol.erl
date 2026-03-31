@@ -993,10 +993,12 @@ abort_message({no_such_realm, Realm}) ->
     },
     bondy_wamp_message:abort(Details, ?WAMP_NO_SUCH_REALM);
 
-abort_message(no_such_group) ->
-    Details = #{
-        message => <<"Group does not exist.">>
-    },
+abort_message({no_such_groups, Groups}) when is_list(Groups) ->
+    Joined = lists:join(<<", ">>, Groups),
+    Msg = iolist_to_binary(
+        [<<"The following groups do not exist: ">>, Joined]
+    ),
+    Details = #{message => Msg},
     bondy_wamp_message:abort(Details, ?WAMP_NO_SUCH_ROLE);
 
 abort_message({no_such_user, Username}) ->
@@ -1020,10 +1022,15 @@ abort_message({authentication_failed, {no_such_realm, Realm}}) ->
     },
     bondy_wamp_message:abort(Details, ?WAMP_NO_SUCH_REALM);
 
-abort_message({authentication_failed, no_such_group}) ->
-    Details = #{
-        message => <<"A group does not exist for the the groupname or one of the groupnames requested ('authrole' or 'x_authroles').">>
-    },
+abort_message({authentication_failed, {no_such_groups, Groups}})
+when is_list(Groups) ->
+    Joined = lists:join(<<", ">>, Groups),
+    Msg = iolist_to_binary([
+        <<"The following groups requested via 'authrole' or 'x_authroles' ">>,
+        <<"do not exist: ">>,
+        Joined
+    ]),
+    Details = #{message => Msg},
     bondy_wamp_message:abort(Details, ?WAMP_NO_SUCH_ROLE);
 
 abort_message({authentication_failed, {no_such_user, Username}}) ->
