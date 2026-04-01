@@ -349,9 +349,12 @@ when is_binary(Username) orelse Username == anonymous ->
     ExplicitGroups :: [binary()]
 ) -> context().
 
-get_context(RealmUri, Username, ExplicitGroups)
+get_context(RealmUri, Username, ExplicitGroups0)
 when (is_binary(Username) orelse Username == anonymous)
-andalso is_list(ExplicitGroups) ->
+andalso is_list(ExplicitGroups0) ->
+    %% Normalise group names early so the context stores casefolded names
+    ExplicitGroups = [normalise_name(G) || G <- ExplicitGroups0],
+
     ProtoUri = bondy_realm:prototype_uri(RealmUri),
     RealmProto = {RealmUri, ProtoUri},
 
