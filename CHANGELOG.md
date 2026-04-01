@@ -1,4 +1,11 @@
 # CHANGELOG
+
+## 1.0.0-rc.58
+### Changes
+* Change user auto provisioning in OIDC to `false`
+### Added
+* RBAC property-based tests
+
 ## 1.0.0-rc.57
 ### Fixes
 * Fixes an issue with OIDC tokens containin roles unknown to Bondy

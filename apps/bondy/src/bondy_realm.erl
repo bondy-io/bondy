@@ -339,7 +339,7 @@
         alias => auto_provision,
         key => auto_provision,
         required => true,
-        default => true,
+        default => false,
         datatype => boolean
     },
     <<"client_id">> => #{
