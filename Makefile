@@ -41,7 +41,11 @@ export CXXLAGS
 export LDFLAGS
 
 
-.PHONY: genvars compile check test xref eunit dialyzer release release-tar spellcheck spellfix
+.PHONY: genvars compile check test xref eunit dialyzer release release-tar spellcheck spellfix conf
+
+conf:
+	@_build/default/bin/cuttlefish effective -s schema/ 2>/dev/null > config/bondy.conf.defaults
+	@echo "Generated config/bondy.conf.defaults"
 
 certs:
 	cd config && ./make_certs

@@ -1074,6 +1074,140 @@ end}.
 ]}.
 
 
+%% -----------------------------------------------------------------------------
+%% ADMIN REST API HTTP - CORS
+%% -----------------------------------------------------------------------------
+
+%% @doc Whether CORS headers are enabled for the Admin API HTTP listener.
+{mapping, "admin_api.http.cors.enabled",
+"bondy.admin_api_http.cors.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc The allowed origins for CORS requests.
+%% Can be "*" (wildcard), "auto" (derive from request host), or a
+%% comma-separated list of origins e.g.
+%% "https://app.example.com, https://admin.example.com".
+{mapping, "admin_api.http.cors.allowed_origins",
+"bondy.admin_api_http.cors.allowed_origins", [
+  {default, "*"},
+  {datatype, string}
+]}.
+
+%% @doc The allowed HTTP methods for CORS requests.
+{mapping, "admin_api.http.cors.allowed_methods",
+"bondy.admin_api_http.cors.allowed_methods", [
+  {default, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"},
+  {datatype, string}
+]}.
+
+%% @doc The allowed HTTP headers for CORS requests.
+{mapping, "admin_api.http.cors.allowed_headers",
+"bondy.admin_api_http.cors.allowed_headers", [
+  {default, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"},
+  {datatype, string}
+]}.
+
+%% @doc The max age in seconds for CORS preflight cache.
+{mapping, "admin_api.http.cors.max_age",
+"bondy.admin_api_http.cors.max_age", [
+  {default, 86400},
+  {datatype, integer},
+  {validators, ["non_neg_integer"]}
+]}.
+
+{translation, "bondy.admin_api_http.cors",
+  fun(Conf) ->
+    Prefix = "admin_api.http.cors",
+    Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
+    OriginsStr = cuttlefish:conf_get(Prefix ++ ".allowed_origins", Conf, "*"),
+    MethodsStr = cuttlefish:conf_get(Prefix ++ ".allowed_methods", Conf, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"),
+    HeadersStr = cuttlefish:conf_get(Prefix ++ ".allowed_headers", Conf, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"),
+    MaxAge = cuttlefish:conf_get(Prefix ++ ".max_age", Conf, 86400),
+    Origins = case string:strip(OriginsStr) of
+      "*" -> '*';
+      "auto" -> auto;
+      Other ->
+        [list_to_binary(string:strip(S))
+         || S <- string:tokens(Other, ","), string:strip(S) =/= ""]
+    end,
+    #{
+      enabled => Enabled,
+      allowed_origins => Origins,
+      allowed_methods => list_to_binary(MethodsStr),
+      allowed_headers => list_to_binary(HeadersStr),
+      max_age => integer_to_binary(MaxAge)
+    }
+  end
+}.
+
+
+%% -----------------------------------------------------------------------------
+%% ADMIN REST API HTTP - Security Headers
+%% -----------------------------------------------------------------------------
+
+%% @doc Whether static security headers are enabled for the Admin API HTTP
+%% listener.
+{mapping, "admin_api.http.security_headers.enabled",
+"bondy.admin_api_http.security_headers.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc The value for the Strict-Transport-Security header.
+%% Only meaningful for HTTPS listeners.
+{mapping, "admin_api.http.security_headers.hsts",
+"bondy.admin_api_http.security_headers.hsts", [
+  {datatype, string}
+]}.
+
+%% @doc The value for the X-Frame-Options header.
+%% Set to an empty string to disable.
+{mapping, "admin_api.http.security_headers.frame_options",
+"bondy.admin_api_http.security_headers.frame_options", [
+  {default, "SAMEORIGIN"},
+  {datatype, string}
+]}.
+
+%% @doc The value for the X-Content-Type-Options header.
+%% Set to an empty string to disable.
+{mapping, "admin_api.http.security_headers.content_type_options",
+"bondy.admin_api_http.security_headers.content_type_options", [
+  {default, "nosniff"},
+  {datatype, string}
+]}.
+
+%% @doc The value for the Content-Security-Policy header.
+{mapping, "admin_api.http.security_headers.content_security_policy",
+"bondy.admin_api_http.security_headers.content_security_policy", [
+  {datatype, string}
+]}.
+
+%% @doc The value for the Server response header.
+%% Set to "bondy" to emit "bondy/<version>", or an empty string to suppress.
+{mapping, "admin_api.http.server_header",
+"bondy.admin_api_http.server_header", [
+  {default, "bondy"},
+  {datatype, string}
+]}.
+
+{translation, "bondy.admin_api_http.security_headers",
+  fun(Conf) ->
+    Prefix = "admin_api.http.security_headers",
+    Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
+    ToUndefined = fun("") -> undefined; (V) -> list_to_binary(V) end,
+    #{
+      enabled => Enabled,
+      hsts => ToUndefined(cuttlefish:conf_get(Prefix ++ ".hsts", Conf, "")),
+      frame_options => ToUndefined(cuttlefish:conf_get(Prefix ++ ".frame_options", Conf, "SAMEORIGIN")),
+      content_type_options => ToUndefined(cuttlefish:conf_get(Prefix ++ ".content_type_options", Conf, "nosniff")),
+      content_security_policy => ToUndefined(cuttlefish:conf_get(Prefix ++ ".content_security_policy", Conf, ""))
+    }
+  end
+}.
+
+
 %% =============================================================================
 %% ADMIN REST API TLS
 %% =============================================================================
@@ -1375,6 +1509,136 @@ end}.
   {datatype, {enum, [strict, relaxed]}},
   {default, relaxed}
 ]}.
+
+
+%% -----------------------------------------------------------------------------
+%% ADMIN REST API HTTPS - CORS
+%% -----------------------------------------------------------------------------
+
+%% @doc Whether CORS headers are enabled for the Admin API HTTPS listener.
+{mapping, "admin_api.https.cors.enabled",
+"bondy.admin_api_https.cors.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc The allowed origins for CORS requests.
+%% Can be "*" (wildcard), "auto" (derive from request host), or a
+%% comma-separated list of origins.
+{mapping, "admin_api.https.cors.allowed_origins",
+"bondy.admin_api_https.cors.allowed_origins", [
+  {default, "*"},
+  {datatype, string}
+]}.
+
+%% @doc The allowed HTTP methods for CORS requests.
+{mapping, "admin_api.https.cors.allowed_methods",
+"bondy.admin_api_https.cors.allowed_methods", [
+  {default, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"},
+  {datatype, string}
+]}.
+
+%% @doc The allowed HTTP headers for CORS requests.
+{mapping, "admin_api.https.cors.allowed_headers",
+"bondy.admin_api_https.cors.allowed_headers", [
+  {default, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"},
+  {datatype, string}
+]}.
+
+%% @doc The max age in seconds for CORS preflight cache.
+{mapping, "admin_api.https.cors.max_age",
+"bondy.admin_api_https.cors.max_age", [
+  {default, 86400},
+  {datatype, integer},
+  {validators, ["non_neg_integer"]}
+]}.
+
+{translation, "bondy.admin_api_https.cors",
+  fun(Conf) ->
+    Prefix = "admin_api.https.cors",
+    Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
+    OriginsStr = cuttlefish:conf_get(Prefix ++ ".allowed_origins", Conf, "*"),
+    MethodsStr = cuttlefish:conf_get(Prefix ++ ".allowed_methods", Conf, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"),
+    HeadersStr = cuttlefish:conf_get(Prefix ++ ".allowed_headers", Conf, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"),
+    MaxAge = cuttlefish:conf_get(Prefix ++ ".max_age", Conf, 86400),
+    Origins = case string:strip(OriginsStr) of
+      "*" -> '*';
+      "auto" -> auto;
+      Other ->
+        [list_to_binary(string:strip(S))
+         || S <- string:tokens(Other, ","), string:strip(S) =/= ""]
+    end,
+    #{
+      enabled => Enabled,
+      allowed_origins => Origins,
+      allowed_methods => list_to_binary(MethodsStr),
+      allowed_headers => list_to_binary(HeadersStr),
+      max_age => integer_to_binary(MaxAge)
+    }
+  end
+}.
+
+%% -----------------------------------------------------------------------------
+%% ADMIN REST API HTTPS - Security Headers
+%% -----------------------------------------------------------------------------
+
+%% @doc Whether static security headers are enabled for the Admin API HTTPS
+%% listener.
+{mapping, "admin_api.https.security_headers.enabled",
+"bondy.admin_api_https.security_headers.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc The value for the Strict-Transport-Security header.
+%% Set to an empty string to disable.
+{mapping, "admin_api.https.security_headers.hsts",
+"bondy.admin_api_https.security_headers.hsts", [
+  {default, "max-age=31536000; includeSubDomains"},
+  {datatype, string}
+]}.
+
+%% @doc The value for the X-Frame-Options header.
+{mapping, "admin_api.https.security_headers.frame_options",
+"bondy.admin_api_https.security_headers.frame_options", [
+  {default, "SAMEORIGIN"},
+  {datatype, string}
+]}.
+
+%% @doc The value for the X-Content-Type-Options header.
+{mapping, "admin_api.https.security_headers.content_type_options",
+"bondy.admin_api_https.security_headers.content_type_options", [
+  {default, "nosniff"},
+  {datatype, string}
+]}.
+
+%% @doc The value for the Content-Security-Policy header.
+{mapping, "admin_api.https.security_headers.content_security_policy",
+"bondy.admin_api_https.security_headers.content_security_policy", [
+  {datatype, string}
+]}.
+
+%% @doc The value for the Server response header.
+{mapping, "admin_api.https.server_header",
+"bondy.admin_api_https.server_header", [
+  {default, "bondy"},
+  {datatype, string}
+]}.
+
+{translation, "bondy.admin_api_https.security_headers",
+  fun(Conf) ->
+    Prefix = "admin_api.https.security_headers",
+    Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
+    ToUndefined = fun("") -> undefined; (V) -> list_to_binary(V) end,
+    #{
+      enabled => Enabled,
+      hsts => ToUndefined(cuttlefish:conf_get(Prefix ++ ".hsts", Conf, "max-age=31536000; includeSubDomains")),
+      frame_options => ToUndefined(cuttlefish:conf_get(Prefix ++ ".frame_options", Conf, "SAMEORIGIN")),
+      content_type_options => ToUndefined(cuttlefish:conf_get(Prefix ++ ".content_type_options", Conf, "nosniff")),
+      content_security_policy => ToUndefined(cuttlefish:conf_get(Prefix ++ ".content_security_policy", Conf, ""))
+    }
+  end
+}.
 
 
 %% @doc Default cert location for https can be overridden
@@ -1774,6 +2038,136 @@ end}.
   {default, relaxed}
 ]}.
 
+
+%% -----------------------------------------------------------------------------
+%% API GATEWAY HTTP - CORS
+%% -----------------------------------------------------------------------------
+
+%% @doc Whether CORS headers are enabled for the API Gateway HTTP listener.
+{mapping, "api_gateway.http.cors.enabled",
+"bondy.api_gateway_http.cors.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc The allowed origins for CORS requests.
+%% Can be "*" (wildcard), "auto" (derive from request host), or a
+%% comma-separated list of origins.
+{mapping, "api_gateway.http.cors.allowed_origins",
+"bondy.api_gateway_http.cors.allowed_origins", [
+  {default, "*"},
+  {datatype, string}
+]}.
+
+%% @doc The allowed HTTP methods for CORS requests.
+{mapping, "api_gateway.http.cors.allowed_methods",
+"bondy.api_gateway_http.cors.allowed_methods", [
+  {default, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"},
+  {datatype, string}
+]}.
+
+%% @doc The allowed HTTP headers for CORS requests.
+{mapping, "api_gateway.http.cors.allowed_headers",
+"bondy.api_gateway_http.cors.allowed_headers", [
+  {default, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"},
+  {datatype, string}
+]}.
+
+%% @doc The max age in seconds for CORS preflight cache.
+{mapping, "api_gateway.http.cors.max_age",
+"bondy.api_gateway_http.cors.max_age", [
+  {default, 86400},
+  {datatype, integer},
+  {validators, ["non_neg_integer"]}
+]}.
+
+{translation, "bondy.api_gateway_http.cors",
+  fun(Conf) ->
+    Prefix = "api_gateway.http.cors",
+    Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
+    OriginsStr = cuttlefish:conf_get(Prefix ++ ".allowed_origins", Conf, "*"),
+    MethodsStr = cuttlefish:conf_get(Prefix ++ ".allowed_methods", Conf, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"),
+    HeadersStr = cuttlefish:conf_get(Prefix ++ ".allowed_headers", Conf, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"),
+    MaxAge = cuttlefish:conf_get(Prefix ++ ".max_age", Conf, 86400),
+    Origins = case string:strip(OriginsStr) of
+      "*" -> '*';
+      "auto" -> auto;
+      Other ->
+        [list_to_binary(string:strip(S))
+         || S <- string:tokens(Other, ","), string:strip(S) =/= ""]
+    end,
+    #{
+      enabled => Enabled,
+      allowed_origins => Origins,
+      allowed_methods => list_to_binary(MethodsStr),
+      allowed_headers => list_to_binary(HeadersStr),
+      max_age => integer_to_binary(MaxAge)
+    }
+  end
+}.
+
+%% -----------------------------------------------------------------------------
+%% API GATEWAY HTTP - Security Headers
+%% -----------------------------------------------------------------------------
+
+%% @doc Whether static security headers are enabled for the API Gateway HTTP
+%% listener.
+{mapping, "api_gateway.http.security_headers.enabled",
+"bondy.api_gateway_http.security_headers.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc The value for the Strict-Transport-Security header.
+%% Only meaningful for HTTPS listeners.
+{mapping, "api_gateway.http.security_headers.hsts",
+"bondy.api_gateway_http.security_headers.hsts", [
+  {datatype, string}
+]}.
+
+%% @doc The value for the X-Frame-Options header.
+{mapping, "api_gateway.http.security_headers.frame_options",
+"bondy.api_gateway_http.security_headers.frame_options", [
+  {default, "SAMEORIGIN"},
+  {datatype, string}
+]}.
+
+%% @doc The value for the X-Content-Type-Options header.
+{mapping, "api_gateway.http.security_headers.content_type_options",
+"bondy.api_gateway_http.security_headers.content_type_options", [
+  {default, "nosniff"},
+  {datatype, string}
+]}.
+
+%% @doc The value for the Content-Security-Policy header.
+{mapping, "api_gateway.http.security_headers.content_security_policy",
+"bondy.api_gateway_http.security_headers.content_security_policy", [
+  {datatype, string}
+]}.
+
+%% @doc The value for the Server response header.
+{mapping, "api_gateway.http.server_header",
+"bondy.api_gateway_http.server_header", [
+  {default, "bondy"},
+  {datatype, string}
+]}.
+
+{translation, "bondy.api_gateway_http.security_headers",
+  fun(Conf) ->
+    Prefix = "api_gateway.http.security_headers",
+    Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
+    ToUndefined = fun("") -> undefined; (V) -> list_to_binary(V) end,
+    #{
+      enabled => Enabled,
+      hsts => ToUndefined(cuttlefish:conf_get(Prefix ++ ".hsts", Conf, "")),
+      frame_options => ToUndefined(cuttlefish:conf_get(Prefix ++ ".frame_options", Conf, "SAMEORIGIN")),
+      content_type_options => ToUndefined(cuttlefish:conf_get(Prefix ++ ".content_type_options", Conf, "nosniff")),
+      content_security_policy => ToUndefined(cuttlefish:conf_get(Prefix ++ ".content_security_policy", Conf, ""))
+    }
+  end
+}.
+
+
 %% -----------------------------------------------------------------------------
 %% API GATEWAY TLS
 %% -----------------------------------------------------------------------------
@@ -2074,6 +2468,135 @@ end}.
   {default, relaxed}
 ]}.
 
+
+%% -----------------------------------------------------------------------------
+%% API GATEWAY HTTPS - CORS
+%% -----------------------------------------------------------------------------
+
+%% @doc Whether CORS headers are enabled for the API Gateway HTTPS listener.
+{mapping, "api_gateway.https.cors.enabled",
+"bondy.api_gateway_https.cors.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc The allowed origins for CORS requests.
+%% Can be "*" (wildcard), "auto" (derive from request host), or a
+%% comma-separated list of origins.
+{mapping, "api_gateway.https.cors.allowed_origins",
+"bondy.api_gateway_https.cors.allowed_origins", [
+  {default, "*"},
+  {datatype, string}
+]}.
+
+%% @doc The allowed HTTP methods for CORS requests.
+{mapping, "api_gateway.https.cors.allowed_methods",
+"bondy.api_gateway_https.cors.allowed_methods", [
+  {default, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"},
+  {datatype, string}
+]}.
+
+%% @doc The allowed HTTP headers for CORS requests.
+{mapping, "api_gateway.https.cors.allowed_headers",
+"bondy.api_gateway_https.cors.allowed_headers", [
+  {default, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"},
+  {datatype, string}
+]}.
+
+%% @doc The max age in seconds for CORS preflight cache.
+{mapping, "api_gateway.https.cors.max_age",
+"bondy.api_gateway_https.cors.max_age", [
+  {default, 86400},
+  {datatype, integer},
+  {validators, ["non_neg_integer"]}
+]}.
+
+{translation, "bondy.api_gateway_https.cors",
+  fun(Conf) ->
+    Prefix = "api_gateway.https.cors",
+    Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
+    OriginsStr = cuttlefish:conf_get(Prefix ++ ".allowed_origins", Conf, "*"),
+    MethodsStr = cuttlefish:conf_get(Prefix ++ ".allowed_methods", Conf, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"),
+    HeadersStr = cuttlefish:conf_get(Prefix ++ ".allowed_headers", Conf, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"),
+    MaxAge = cuttlefish:conf_get(Prefix ++ ".max_age", Conf, 86400),
+    Origins = case string:strip(OriginsStr) of
+      "*" -> '*';
+      "auto" -> auto;
+      Other ->
+        [list_to_binary(string:strip(S))
+         || S <- string:tokens(Other, ","), string:strip(S) =/= ""]
+    end,
+    #{
+      enabled => Enabled,
+      allowed_origins => Origins,
+      allowed_methods => list_to_binary(MethodsStr),
+      allowed_headers => list_to_binary(HeadersStr),
+      max_age => integer_to_binary(MaxAge)
+    }
+  end
+}.
+
+%% -----------------------------------------------------------------------------
+%% API GATEWAY HTTPS - Security Headers
+%% -----------------------------------------------------------------------------
+
+%% @doc Whether static security headers are enabled for the API Gateway HTTPS
+%% listener.
+{mapping, "api_gateway.https.security_headers.enabled",
+"bondy.api_gateway_https.security_headers.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc The value for the Strict-Transport-Security header.
+%% Set to an empty string to disable.
+{mapping, "api_gateway.https.security_headers.hsts",
+"bondy.api_gateway_https.security_headers.hsts", [
+  {default, "max-age=31536000; includeSubDomains"},
+  {datatype, string}
+]}.
+
+%% @doc The value for the X-Frame-Options header.
+{mapping, "api_gateway.https.security_headers.frame_options",
+"bondy.api_gateway_https.security_headers.frame_options", [
+  {default, "SAMEORIGIN"},
+  {datatype, string}
+]}.
+
+%% @doc The value for the X-Content-Type-Options header.
+{mapping, "api_gateway.https.security_headers.content_type_options",
+"bondy.api_gateway_https.security_headers.content_type_options", [
+  {default, "nosniff"},
+  {datatype, string}
+]}.
+
+%% @doc The value for the Content-Security-Policy header.
+{mapping, "api_gateway.https.security_headers.content_security_policy",
+"bondy.api_gateway_https.security_headers.content_security_policy", [
+  {datatype, string}
+]}.
+
+%% @doc The value for the Server response header.
+{mapping, "api_gateway.https.server_header",
+"bondy.api_gateway_https.server_header", [
+  {default, "bondy"},
+  {datatype, string}
+]}.
+
+{translation, "bondy.api_gateway_https.security_headers",
+  fun(Conf) ->
+    Prefix = "api_gateway.https.security_headers",
+    Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
+    ToUndefined = fun("") -> undefined; (V) -> list_to_binary(V) end,
+    #{
+      enabled => Enabled,
+      hsts => ToUndefined(cuttlefish:conf_get(Prefix ++ ".hsts", Conf, "max-age=31536000; includeSubDomains")),
+      frame_options => ToUndefined(cuttlefish:conf_get(Prefix ++ ".frame_options", Conf, "SAMEORIGIN")),
+      content_type_options => ToUndefined(cuttlefish:conf_get(Prefix ++ ".content_type_options", Conf, "nosniff")),
+      content_security_policy => ToUndefined(cuttlefish:conf_get(Prefix ++ ".content_security_policy", Conf, ""))
+    }
+  end
+}.
 
 
 %% @doc Default cert location for https can be overridden

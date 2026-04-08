@@ -95,7 +95,7 @@
 %%
 %% See the previous description of burst_limit_max_count.
 {mapping, "log.handlers.default.config.burst_limit_window_time", "kernel.logger", [
-    {default, 1000},
+    {default, "1s"},
     {datatype, {duration, ms}}
 ]}.
 
@@ -191,7 +191,7 @@
 %% operation repeatedly, but only performs a new sync if something has actually
 %% been logged.
 {mapping, "log.handlers.default.config.filesync_repeat_interval", "kernel.logger", [
-    {default, 5000},
+    {default, "5s"},
     {datatype, {duration, ms}}
 ]}.
 
@@ -245,7 +245,7 @@
 %% If the handler is terminated, it restarts automatically after a delay
 %% specified in milliseconds. The value infinity prevents restarts.
 {mapping, "log.handlers.default.config.overload_kill_restart_after", "kernel.logger", [
-    {default, 5000},
+    {default, "5s"},
     {datatype, {duration, ms}}
 ]}.
 
@@ -430,7 +430,7 @@
 %%
 %% See the previous description of burst_limit_max_count.
 {mapping, "log.handlers.$id.config.burst_limit_window_time", "kernel.logger", [
-    {default, 1000},
+    {default, "1s"},
     {datatype, {duration, ms}}
 ]}.
 
@@ -526,7 +526,7 @@
 %% operation repeatedly, but only performs a new sync if something has actually
 %% been logged.
 {mapping, "log.handlers.$id.config.filesync_repeat_interval", "kernel.logger", [
-    {default, 5000},
+    {default, "5s"},
     {datatype, {duration, ms}}
 ]}.
 
@@ -580,7 +580,7 @@
 %% If the handler is terminated, it restarts automatically after a delay
 %% specified in milliseconds. The value infinity prevents restarts.
 {mapping, "log.handlers.$id.config.overload_kill_restart_after", "kernel.logger", [
-    {default, 5000},
+    {default, "5s"},
     {datatype, {duration, ms}}
 ]}.
 

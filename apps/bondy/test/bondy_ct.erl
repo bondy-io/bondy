@@ -380,6 +380,20 @@
                 {inactivity_timeout,300000},
                 {idle_timeout,15000},
                 {active_n,100}]},
+           {cors, #{
+                enabled => true,
+                allowed_origins => '*',
+                allowed_methods => <<"GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE">>,
+                allowed_headers => <<"origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token">>,
+                max_age => <<"86400">>
+           }},
+           {security_headers, #{
+                enabled => true,
+                hsts => <<"max-age=31536000; includeSubDomains">>,
+                frame_options => <<"SAMEORIGIN">>,
+                content_type_options => <<"nosniff">>,
+                content_security_policy => undefined
+           }},
            {enabled,false}]},
         {api_gateway_http,
           [{proxy_protocol,[{mode,relaxed},{enabled,true}]},
@@ -411,6 +425,20 @@
                      {ip_version,inet}]},
                 {max_connections,500000},
                 {num_acceptors,200}]},
+           {cors, #{
+                enabled => true,
+                allowed_origins => '*',
+                allowed_methods => <<"GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE">>,
+                allowed_headers => <<"origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token">>,
+                max_age => <<"86400">>
+           }},
+           {security_headers, #{
+                enabled => true,
+                hsts => undefined,
+                frame_options => <<"SAMEORIGIN">>,
+                content_type_options => <<"nosniff">>,
+                content_security_policy => undefined
+           }},
            {enabled,true}]},
         {api_gateway,[{config_file,"./etc/api_gateway_config.json"}]},
         {admin_api_http,
@@ -444,6 +472,20 @@
                      {ip_version,inet}]},
                 {max_connections,500000},
                 {num_acceptors,200}]},
+           {cors, #{
+                enabled => true,
+                allowed_origins => '*',
+                allowed_methods => <<"GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE">>,
+                allowed_headers => <<"origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token">>,
+                max_age => <<"86400">>
+           }},
+           {security_headers, #{
+                enabled => true,
+                hsts => undefined,
+                frame_options => <<"SAMEORIGIN">>,
+                content_type_options => <<"nosniff">>,
+                content_security_policy => undefined
+           }},
            {enabled,true}]},
         {admin_api_https,
           [{transport_opts,
@@ -479,6 +521,20 @@
                 {inactivity_timeout,300000},
                 {idle_timeout,15000},
                 {active_n,100}]},
+           {cors, #{
+                enabled => true,
+                allowed_origins => '*',
+                allowed_methods => <<"GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE">>,
+                allowed_headers => <<"origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token">>,
+                max_age => <<"86400">>
+           }},
+           {security_headers, #{
+                enabled => true,
+                hsts => <<"max-age=31536000; includeSubDomains">>,
+                frame_options => <<"SAMEORIGIN">>,
+                content_type_options => <<"nosniff">>,
+                content_security_policy => undefined
+           }},
            {enabled,true}]},
         {request_timeout,20000},
         {wamp_message_retention,

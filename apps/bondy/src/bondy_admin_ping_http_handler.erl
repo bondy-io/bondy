@@ -16,6 +16,6 @@
 
 
 init(Req0, State) ->
-    Req1 = bondy_http_utils:set_meta_headers(Req0),
+    Req1 = bondy_http_utils:set_all_headers(Req0),
     Req2 = cowboy_req:reply(?HTTP_NO_CONTENT, Req1),
     {ok, Req2, State}.

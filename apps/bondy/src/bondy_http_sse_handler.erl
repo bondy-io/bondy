@@ -36,7 +36,9 @@ Handles three actions:
 
 
 init(Req0, State) ->
-    Req = cowboy_req:set_resp_headers(cors_headers(Req0), Req0),
+    CorsConfig = bondy_http_cors:config_from_req(Req0),
+    Req1 = bondy_http_cors:set_headers(Req0, CorsConfig),
+    Req = bondy_http_utils:set_all_headers(Req1),
     case cowboy_req:method(Req) of
         <<"OPTIONS">> ->
             Req1 = cowboy_req:reply(?HTTP_OK, #{}, <<>>, Req),
@@ -424,10 +426,6 @@ find_ticket_cookie(Cookies) ->
     ).
 
 
-%% @private
-cors_headers(Req) ->
-    Origin = cowboy_req:header(<<"origin">>, Req, <<"*">>),
-    begin ?CORS_HEADERS end#{<<"access-control-allow-origin">> => Origin}.
 
 
 %% @private

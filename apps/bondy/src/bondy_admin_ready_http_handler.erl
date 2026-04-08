@@ -23,7 +23,7 @@
 
 init(Req0, State) ->
     Method = cowboy_req:method(Req0),
-    Req1 = bondy_http_utils:set_meta_headers(Req0),
+    Req1 = bondy_http_utils:set_all_headers(Req0),
     Req2 = ready(Method, Req1),
     {ok, Req2, State}.
 
