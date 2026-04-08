@@ -1156,11 +1156,9 @@ end}.
 ]}.
 
 %% @doc The value for the Strict-Transport-Security header.
-%% Set to an empty string to disable. Only meaningful for HTTPS listeners;
-%% for HTTP listeners this defaults to empty (disabled).
+%% Only meaningful for HTTPS listeners.
 {mapping, "admin_api.http.security_headers.hsts",
 "bondy.admin_api_http.security_headers.hsts", [
-  {default, ""},
   {datatype, string}
 ]}.
 
@@ -1181,10 +1179,8 @@ end}.
 ]}.
 
 %% @doc The value for the Content-Security-Policy header.
-%% Set to an empty string to disable (default).
 {mapping, "admin_api.http.security_headers.content_security_policy",
 "bondy.admin_api_http.security_headers.content_security_policy", [
-  {default, ""},
   {datatype, string}
 ]}.
 
@@ -1617,10 +1613,8 @@ end}.
 ]}.
 
 %% @doc The value for the Content-Security-Policy header.
-%% Set to an empty string to disable (default).
 {mapping, "admin_api.https.security_headers.content_security_policy",
 "bondy.admin_api_https.security_headers.content_security_policy", [
-  {default, ""},
   {datatype, string}
 ]}.
 
@@ -2125,10 +2119,9 @@ end}.
 ]}.
 
 %% @doc The value for the Strict-Transport-Security header.
-%% Set to an empty string to disable. Defaults to empty for HTTP listeners.
+%% Only meaningful for HTTPS listeners.
 {mapping, "api_gateway.http.security_headers.hsts",
 "bondy.api_gateway_http.security_headers.hsts", [
-  {default, ""},
   {datatype, string}
 ]}.
 
@@ -2147,10 +2140,8 @@ end}.
 ]}.
 
 %% @doc The value for the Content-Security-Policy header.
-%% Set to an empty string to disable (default).
 {mapping, "api_gateway.http.security_headers.content_security_policy",
 "bondy.api_gateway_http.security_headers.content_security_policy", [
-  {default, ""},
   {datatype, string}
 ]}.
 
@@ -2580,10 +2571,8 @@ end}.
 ]}.
 
 %% @doc The value for the Content-Security-Policy header.
-%% Set to an empty string to disable (default).
 {mapping, "api_gateway.https.security_headers.content_security_policy",
 "bondy.api_gateway_https.security_headers.content_security_policy", [
-  {default, ""},
   {datatype, string}
 ]}.
 
