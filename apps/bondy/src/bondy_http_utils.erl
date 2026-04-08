@@ -11,6 +11,7 @@
 -include_lib("partisan/include/partisan_util.hrl").
 
 -export([set_meta_headers/1]).
+-export([set_all_headers/1]).
 -export([meta_headers/0]).
 -export([parse_authorization/1]).
 -export([is_public_ip/1]).
@@ -33,6 +34,23 @@
 
 set_meta_headers(Req) ->
     cowboy_req:set_resp_headers(meta_headers(), Req).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Sets both meta headers and per-listener security headers on the
+%% Cowboy request. Security headers are cached in persistent_term by
+%% {@link bondy_http_security_headers} and include HSTS, X-Frame-Options,
+%% X-Content-Type-Options, Content-Security-Policy, and the Server header.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_all_headers(cowboy_req:req()) -> cowboy_req:req().
+
+set_all_headers(Req) ->
+    SecurityHeaders = bondy_http_security_headers:headers_from_req(Req),
+    %% Security headers include the server header (when configured), so they
+    %% are applied after meta_headers to allow per-listener overrides.
+    Req1 = cowboy_req:set_resp_headers(meta_headers(), Req),
+    cowboy_req:set_resp_headers(SecurityHeaders, Req1).
 
 
 %% -----------------------------------------------------------------------------

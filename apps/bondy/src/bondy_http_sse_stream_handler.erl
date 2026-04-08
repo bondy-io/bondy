@@ -53,7 +53,9 @@ intermediaries from closing the connection.
 
 
 init(Req0, Opts) ->
-    Req1 = cowboy_req:set_resp_headers(cors_headers(Req0), Req0),
+    CorsConfig = bondy_http_cors:config_from_req(Req0),
+    Req0a = bondy_http_cors:set_headers(Req0, CorsConfig),
+    Req1 = bondy_http_utils:set_all_headers(Req0a),
     TransportId = cowboy_req:binding(transport_id, Req1),
 
     case bondy_http_transport_session:whereis(TransportId) of
@@ -268,7 +270,3 @@ send_wamp_events(Messages, Req, #state{encoding = Encoding}) ->
     cowboy_req:stream_events(Events, nofin, Req).
 
 
-%% @private
-cors_headers(Req) ->
-    Origin = cowboy_req:header(<<"origin">>, Req, <<"*">>),
-    begin ?CORS_HEADERS end#{<<"access-control-allow-origin">> => Origin}.

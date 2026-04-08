@@ -1345,8 +1345,21 @@ mops_eval(Expr, Ctxt, Opts) ->
 
 
 set_resp_headers(Headers, Req0) ->
-    Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-    cowboy_req:set_resp_headers(bondy_http_utils:meta_headers(), Req1).
+    Headers1 = maybe_add_cors_fallback(Headers, Req0),
+    Req1 = cowboy_req:set_resp_headers(Headers1, Req0),
+    bondy_http_utils:set_all_headers(Req1).
+
+
+%% @private
+maybe_add_cors_fallback(Headers, Req) ->
+    case maps:is_key(<<"access-control-allow-origin">>, Headers) of
+        true ->
+            Headers;
+        false ->
+            CorsConfig = bondy_http_cors:config_from_req(Req),
+            CorsHeaders = bondy_http_cors:headers(Req, CorsConfig),
+            maps:merge(CorsHeaders, Headers)
+    end.
 
 
 %% @private

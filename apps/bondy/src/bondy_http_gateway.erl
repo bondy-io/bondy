@@ -647,6 +647,8 @@ do_stop_listeners(public) ->
     }),
     catch cowboy:stop_listener(?HTTP),
     catch cowboy:stop_listener(?HTTPS),
+    bondy_http_security_headers:cleanup(?HTTP),
+    bondy_http_security_headers:cleanup(?HTTPS),
     ok;
 
 do_stop_listeners(admin) ->
@@ -655,6 +657,8 @@ do_stop_listeners(admin) ->
     }),
     catch cowboy:stop_listener(?ADMIN_HTTP),
     catch cowboy:stop_listener(?ADMIN_HTTPS),
+    bondy_http_security_headers:cleanup(?ADMIN_HTTP),
+    bondy_http_security_headers:cleanup(?ADMIN_HTTPS),
     ok.
 
 
@@ -839,6 +843,7 @@ maybe_start_https(Routes, Name) ->
 listener_protocol_opts(Routes, Name) ->
     ProtocolOpts0 = bondy_config:listener_protocol_opts(Name),
     ok = compile_dispatch(Routes, Name),
+    ok = bondy_http_security_headers:init(Name),
 
     ProtocolOpts0#{
         env => #{

@@ -24,12 +24,8 @@
 
 -define(GRANT_TYPE, <<"grant_type">>).
 
--define(HEADERS, begin ?CORS_HEADERS end#{
+-define(JSON_HEADERS, #{
     <<"content-type">> => <<"application/json; charset=utf-8">>
-}).
-
--define(OPTIONS_HEADERS, begin ?HEADERS end#{
-    <<"access-control-allow">> => <<"HEAD,OPTIONS,POST">>
 }).
 
 -define(AUTH_CODE_SPEC, #{
@@ -250,7 +246,11 @@ content_types_provided(Req, St) ->
 
 
 options(Req, State) ->
-    {ok, set_resp_headers(?OPTIONS_HEADERS, Req), State}.
+    CorsHeaders = bondy_http_cors:headers(
+        Req, bondy_http_cors:config_from_req(Req)
+    ),
+    Headers = maps:merge(?JSON_HEADERS, CorsHeaders),
+    {ok, set_resp_headers(Headers, Req), State}.
 
 
 is_authorized(Req0, St0) ->
@@ -305,7 +305,11 @@ resource_existed(Req, St) ->
 
 provide(Req, St) ->
     %% This is just to support OPTIONS
-    {ok, set_resp_headers(?HEADERS, Req), St}.
+    CorsHeaders = bondy_http_cors:headers(
+        Req, bondy_http_cors:config_from_req(Req)
+    ),
+    Headers = maps:merge(?JSON_HEADERS, CorsHeaders),
+    {ok, set_resp_headers(Headers, Req), St}.
 
 
 accept(Req0, St) ->
@@ -728,7 +732,11 @@ reply(Error, Req) ->
 -spec prepare_request(term(), map(), cowboy_req:req()) -> cowboy_req:req().
 
 prepare_request(Body, Headers, Req0) ->
-    Req1 = set_resp_headers(maps:merge(?HEADERS, Headers), Req0),
+    CorsHeaders = bondy_http_cors:headers(
+        Req0, bondy_http_cors:config_from_req(Req0)
+    ),
+    AllHeaders = maps:merge(maps:merge(?JSON_HEADERS, CorsHeaders), Headers),
+    Req1 = set_resp_headers(AllHeaders, Req0),
     cowboy_req:set_resp_body(bondy_utils:maybe_encode(json, Body), Req1).
 
 
@@ -764,7 +772,7 @@ on_login(_RealmUri, _Username, _Meta) ->
 
 set_resp_headers(Headers, Req0) ->
     Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-    cowboy_req:set_resp_headers(bondy_http_utils:meta_headers(), Req1).
+    bondy_http_utils:set_all_headers(Req1).
 
 
 %% reply(HTTPCode, Enc, Response, Req0) ->
