@@ -1,9 +1,8 @@
 # CHANGELOG
 
-## 1.0.0-develop
+## 1.0.0-rc.59
 ### Added
-- bondy_http_cors.erl — Centralised CORS logic with 3 origin modes (*, auto, explicit allowlist). Never combines
-  credentials: true with origin: *. Adds Vary: Origin for non-wildcard origins.
+- bondy_http_cors.erl — Centralised CORS logic with 3 origin modes (`*, auto, explicit allowlist`). Never combines credentials: true with origin: `*`. Adds Vary: Origin for non-wildcard origins.
 - bondy_http_security_headers.erl — Static security headers (HSTS, X-Frame-Options, X-Content-Type-Options, CSP) cached in
   persistent_term per-listener. Configurable server header (suppress/customise).
 - CORS + security headers schema keys to `bondy.schema` for all 4 listeners (admin_api http/https, api_gateway
@@ -16,6 +15,10 @@
 - Updated admin ping/ready handlers to use set_all_headers/1
 - Removed ?CORS_HEADERS macro from http_api.hrl
 - Removed hardcoded CORS from bondy_admin_api.json and example specs
+
+### Fixes
+- Fixed config defaults with wrong types
+
 ## 1.0.0-rc.58
 ### Changes
 * Change user auto provisioning in OIDC to `false`
