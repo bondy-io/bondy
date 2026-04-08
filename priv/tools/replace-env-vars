@@ -179,7 +179,7 @@ replace_env_vars([Char|Str]) ->
     [Char | replace_env_vars(Str)].
 
 until_var_end(Str) ->
-    case re:run(Str, "([a-zA-Z_]+[a-zA-Z0-9_]*)}", [{capture, [1], list}]) of
+    case re:run(list_to_binary(Str), "([a-zA-Z_]+[a-zA-Z0-9_]*)}", [{capture, [1], list}]) of
         nomatch ->
             error;
         {match, [Name]} ->
