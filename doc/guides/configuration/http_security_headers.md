@@ -37,11 +37,19 @@ Controls which origins are permitted to make cross-origin requests. Three modes 
 api_gateway.http.cors.allowed_origins = *
 ```
 
-**Explicit allowlist** -- a comma-separated list of exact origins. Only requests whose `Origin` header matches one of these values will receive CORS headers. Requests from unlisted origins receive no `Access-Control-Allow-Origin` header at all, which causes the browser to block the response. When a match is found, `Access-Control-Allow-Credentials` is set to `true` and a `Vary: Origin` header is added:
+**Explicit allowlist** -- a comma-separated list of origins. Only requests whose `Origin` header matches one of these values will receive CORS headers. Requests from unlisted origins receive no `Access-Control-Allow-Origin` header at all, which causes the browser to block the response. When a match is found, `Access-Control-Allow-Credentials` is set to `true` and a `Vary: Origin` header is added.
+
+Entries can be exact origins or wildcard subdomain patterns using the `*.` prefix:
 
 ```
 api_gateway.http.cors.allowed_origins = https://app.example.com, https://admin.example.com
 ```
+
+```
+api_gateway.http.cors.allowed_origins = *.example.com, https://other.com
+```
+
+A wildcard pattern like `*.example.com` matches any subdomain (e.g. `https://app.example.com`, `https://staging.example.com`) but does **not** match the bare domain `https://example.com` itself. The exact requesting origin is always reflected back in the `Access-Control-Allow-Origin` header -- the `*.` is purely a server-side config convenience.
 
 **Auto** -- derives the allowed origin from the incoming request's own scheme, host, and port (`Scheme://Host[:Port]`). This is effectively "same-origin only" and is useful when the frontend application is served from the same domain as the API. Default ports (80 for HTTP, 443 for HTTPS) are omitted:
 

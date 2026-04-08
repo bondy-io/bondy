@@ -34,7 +34,12 @@ all() ->
         auto_default_http_port,
         auto_default_https_port,
         custom_methods_and_headers,
-        custom_max_age
+        custom_max_age,
+        wildcard_subdomain_match,
+        wildcard_subdomain_no_match,
+        wildcard_subdomain_exact_domain_no_match,
+        wildcard_subdomain_with_port,
+        wildcard_subdomain_mixed_with_exact
     ].
 
 
@@ -185,6 +190,68 @@ custom_max_age(_Config) ->
     Req = fake_req(<<"https://any.com">>),
     Headers = bondy_http_cors:headers(Req, Config),
     ?assertEqual(<<"3600">>, maps:get(<<"access-control-max-age">>, Headers)).
+
+
+
+wildcard_subdomain_match(_Config) ->
+    Allowed = [<<"*.example.com">>],
+    Config = config(#{allowed_origins => Allowed}),
+    Req = fake_req(<<"https://app.example.com">>),
+    Headers = bondy_http_cors:headers(Req, Config),
+    ?assertEqual(
+        <<"https://app.example.com">>,
+        maps:get(<<"access-control-allow-origin">>, Headers)
+    ).
+
+
+wildcard_subdomain_no_match(_Config) ->
+    Allowed = [<<"*.example.com">>],
+    Config = config(#{allowed_origins => Allowed}),
+    Req = fake_req(<<"https://evil.com">>),
+    ?assertEqual(#{}, bondy_http_cors:headers(Req, Config)).
+
+
+wildcard_subdomain_exact_domain_no_match(_Config) ->
+    %% "*.example.com" should NOT match "https://example.com" itself —
+    %% only subdomains like "sub.example.com"
+    Allowed = [<<"*.example.com">>],
+    Config = config(#{allowed_origins => Allowed}),
+    Req = fake_req(<<"https://example.com">>),
+    ?assertEqual(#{}, bondy_http_cors:headers(Req, Config)).
+
+
+wildcard_subdomain_with_port(_Config) ->
+    Allowed = [<<"*.example.com">>],
+    Config = config(#{allowed_origins => Allowed}),
+    Req = fake_req(<<"https://app.example.com:8443">>),
+    Headers = bondy_http_cors:headers(Req, Config),
+    ?assertEqual(
+        <<"https://app.example.com:8443">>,
+        maps:get(<<"access-control-allow-origin">>, Headers)
+    ).
+
+
+wildcard_subdomain_mixed_with_exact(_Config) ->
+    %% Mix of wildcard subdomain and exact origin
+    Allowed = [<<"*.example.com">>, <<"https://other.com">>],
+    Config = config(#{allowed_origins => Allowed}),
+    %% Subdomain match
+    Req1 = fake_req(<<"https://app.example.com">>),
+    Headers1 = bondy_http_cors:headers(Req1, Config),
+    ?assertEqual(
+        <<"https://app.example.com">>,
+        maps:get(<<"access-control-allow-origin">>, Headers1)
+    ),
+    %% Exact match
+    Req2 = fake_req(<<"https://other.com">>),
+    Headers2 = bondy_http_cors:headers(Req2, Config),
+    ?assertEqual(
+        <<"https://other.com">>,
+        maps:get(<<"access-control-allow-origin">>, Headers2)
+    ),
+    %% No match
+    Req3 = fake_req(<<"https://nope.com">>),
+    ?assertEqual(#{}, bondy_http_cors:headers(Req3, Config)).
 
 
 

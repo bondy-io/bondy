@@ -14,7 +14,9 @@ configuration. Supports three origin modes:
 - `auto` — derives the allowed origin from the request's own
   scheme/host/port
 - `[binary()]` — an explicit allowlist of origins; the request
-  `Origin` header is validated against this list
+  `Origin` header is validated against this list. Entries starting
+  with `*.` are treated as wildcard subdomain patterns (e.g.
+  `*.example.com` matches `https://app.example.com`)
 
 Configuration is read from the Bondy application environment at path
 `[ListenerName, cors]` using the listener ref from the Cowboy request.
@@ -112,7 +114,7 @@ effective_origin(Req, #{allowed_origins := AllowedList}) when is_list(AllowedLis
         undefined ->
             undefined;
         Origin ->
-            case lists:member(Origin, AllowedList) of
+            case origin_allowed(Origin, AllowedList) of
                 true -> Origin;
                 false -> undefined
             end
@@ -132,6 +134,56 @@ derive_origin(Req) ->
         _ ->
             PortBin = integer_to_binary(Port),
             <<Scheme/binary, "://", Host/binary, ":", PortBin/binary>>
+    end.
+
+
+%% @private
+origin_allowed(_Origin, []) ->
+    false;
+
+origin_allowed(Origin, [Origin | _]) ->
+    true;
+
+origin_allowed(Origin, [<<"*.", Rest/binary>> | Tail]) ->
+    case origin_matches_wildcard(Origin, Rest) of
+        true -> true;
+        false -> origin_allowed(Origin, Tail)
+    end;
+
+origin_allowed(Origin, [_ | Tail]) ->
+    origin_allowed(Origin, Tail).
+
+
+%% @private
+%% Matches "*.example.com" against an origin like "https://sub.example.com:443".
+%% Extracts the host from the origin and checks if it is a subdomain of the
+%% wildcard suffix.
+origin_matches_wildcard(Origin, DomainSuffix) ->
+    case extract_host(Origin) of
+        undefined ->
+            false;
+        Host ->
+            %% Host must end with ".example.com" (the DomainSuffix)
+            %% and must be strictly longer (i.e. have a subdomain part).
+            SuffixWithDot = <<".", DomainSuffix/binary>>,
+            SuffixLen = byte_size(SuffixWithDot),
+            HostLen = byte_size(Host),
+            HostLen > SuffixLen andalso
+                binary:part(Host, HostLen - SuffixLen, SuffixLen) =:= SuffixWithDot
+    end.
+
+
+%% @private
+%% Extracts the host part from an origin string like "https://host:port".
+extract_host(Origin) ->
+    case binary:split(Origin, <<"://">>) of
+        [_Scheme, Rest] ->
+            case binary:split(Rest, <<":">>) of
+                [Host, _Port] -> Host;
+                [Host] -> Host
+            end;
+        _ ->
+            undefined
     end.
 
 
