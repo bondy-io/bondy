@@ -523,11 +523,11 @@ postcondition(S, {call, _, sut_authorize, [_, Username, Permission, Resource]},
     end;
 
 postcondition(S, {call, _, sut_authorize_explicit,
-              [_, _Username, ExplicitGroups, Permission, Resource]}, Result) ->
+              [_, Username, ExplicitGroups, Permission, Resource]}, Result) ->
     %% For explicit groups, effective grants come from those groups
-    %% (after normalization) + 'all' group, NOT the user's stored groups.
+    %% (after normalization) + 'all' group + direct user grants.
     NormGroups = [string:casefold(G) || G <- ExplicitGroups],
-    EffGrants = model_effective_grants_explicit(NormGroups, S),
+    EffGrants = model_effective_grants_explicit(Username, NormGroups, S),
     ModelDecision = model_authorize(Permission, Resource, EffGrants),
     case {Result, ModelDecision} of
         {authorized, true} ->
@@ -707,7 +707,7 @@ merge_grant_maps(Map1, Map2) ->
 %% @doc Compute effective grants for explicit group memberships (get_context/3).
 %% Uses the provided groups instead of the user's stored groups.
 %% Also includes 'all' group grants and direct user grants.
-model_effective_grants_explicit(ExplicitGroups, #model{
+model_effective_grants_explicit(Username, ExplicitGroups, #model{
     groups = GroupsMap, grants = Grants
 }) ->
     %% 1. 'all' group grants
@@ -717,14 +717,18 @@ model_effective_grants_explicit(ExplicitGroups, #model{
     ReachableGroups = model_resolve_groups(ExplicitGroups, GroupsMap),
 
     %% 3. Accumulate grants from all reachable groups
-    lists:foldl(
+    GroupGrantsAcc = lists:foldl(
         fun(GroupName, Acc) ->
             GGrants = maps:get({group, GroupName}, Grants, #{}),
             merge_grant_maps(Acc, GGrants)
         end,
         AllGrants,
         ReachableGroups
-    ).
+    ),
+
+    %% 4. Direct user grants
+    UserGrants = maps:get({user, Username}, Grants, #{}),
+    merge_grant_maps(GroupGrantsAcc, UserGrants).
 
 
 %% @doc Check if a permission is authorized given the effective grants.
