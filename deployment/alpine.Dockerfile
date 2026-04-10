@@ -69,7 +69,6 @@ ENV HOME "/bondy"
 # - iproute2: a collection of utilities for networking and traffic control.
 # - net-tools: which includes the commands arp, ifconfig, netstat, rarp, nameif
 #   and route
-# - curl, jq: for devops to use the REST Admin API
 # - nano: for devops
 #
 # We install the following required packages:
@@ -82,8 +81,7 @@ RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
     ln -s /var/cache/apk /etc/apk/cache \
     && apk add --no-cache \
         libstdc++  \
-        bash procps iproute2 net-tools curl jq nano \
-        ncurses openssl \
+        bash procps iproute2 net-tools nano ncurses openssl \
     && addgroup --gid 1000 bondy \
     && adduser \
         --uid 1000 \
