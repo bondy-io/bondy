@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 1.0.0-rc.61
+### Fixes
+- `cookie_same_site` validation was using atoms as opposed to strings (binaries)
+
 ## 1.0.0-rc.60
 ### Added
 - Configurable `cookie_same_site` option for OIDC providers (`lax`, `strict`, `none`; default `lax`). Required for cross-subdomain deployments where Safari refuses to send cookies on SSE/fetch requests. Both `cookie_domain` and `cookie_same_site` can be overridden via query parameters on `/oidc/logout`.
