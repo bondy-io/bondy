@@ -51,6 +51,12 @@ api_gateway.http.cors.allowed_origins = *.example.com, https://other.com
 
 A wildcard pattern like `*.example.com` matches any subdomain (e.g. `https://app.example.com`, `https://staging.example.com`) but does **not** match the bare domain `https://example.com` itself. The exact requesting origin is always reflected back in the `Access-Control-Allow-Origin` header -- the `*.` is purely a server-side config convenience.
 
+> **Cross-subdomain OIDC deployments:** When the SPA and Bondy are on different
+> subdomains, use an explicit allowlist (or wildcard subdomain pattern) so that
+> `Access-Control-Allow-Credentials` is set to `true`. You must also configure
+> `cookie_domain` and `cookie_same_site` in the OIDC provider config -- see the
+> [Web Developer OIDC Guide](../../../_spec/web_developer_oidc_guide.md#cross-origin-deployments-eg-safari--sse).
+
 **Auto** -- derives the allowed origin from the incoming request's own scheme, host, and port (`Scheme://Host[:Port]`). This is effectively "same-origin only" and is useful when the frontend application is served from the same domain as the API. Default ports (80 for HTTP, 443 for HTTPS) are omitted:
 
 ```

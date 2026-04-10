@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 1.0.0-rc.60
+### Added
+- Configurable `cookie_same_site` option for OIDC providers (`lax`, `strict`, `none`; default `lax`). Required for cross-subdomain deployments where Safari refuses to send cookies on SSE/fetch requests. Both `cookie_domain` and `cookie_same_site` can be overridden via query parameters on `/oidc/logout`.
+
 ## 1.0.0-rc.59
 ### Added
 - bondy_http_cors.erl — Centralised CORS logic with 3 origin modes (`*, auto, explicit allowlist`). Never combines credentials: true with origin: `*`. Adds Vary: Origin for non-wildcard origins.
