@@ -417,8 +417,8 @@
         alias => cookie_same_site,
         key => cookie_same_site,
         required => true,
-        default => lax,
-        datatype => {in, [lax, strict, none]}
+        default => <<"lax">>,
+        datatype => {in, [<<"lax">>, <<"strict">>, <<"none">>]}
     }
 }).
 

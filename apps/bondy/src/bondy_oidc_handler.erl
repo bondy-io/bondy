@@ -421,8 +421,8 @@ do_issue_ticket(
             BasePath = maps:get(base_path, State, <<>>),
             IsSecure = cowboy_req:scheme(Req0) =:= <<"https">>,
             CookieDomain = maps:get(cookie_domain, Config, undefined),
-            CookieSameSite = maps:get(
-                cookie_same_site, Config, lax
+            CookieSameSite = same_site_atom(
+                maps:get(cookie_same_site, Config, <<"lax">>)
             ),
             CsrfToken = bondy_utils:uuid(),
             Req1 = set_ticket_cookie(
@@ -512,7 +512,9 @@ do_handle_logout(Req0, #{realm_uri := DefaultRealmUri} = State) ->
                 {ok, Cfg} ->
                     {
                         maps:get(cookie_domain, Cfg, undefined),
-                        maps:get(cookie_same_site, Cfg, lax)
+                        same_site_atom(
+                            maps:get(cookie_same_site, Cfg, <<"lax">>)
+                        )
                     };
                 {error, _} ->
                     {undefined, lax}
@@ -527,10 +529,7 @@ do_handle_logout(Req0, #{realm_uri := DefaultRealmUri} = State) ->
     end,
     CookieSameSite1 = case proplists:get_value(<<"cookie_same_site">>, QsVals) of
         undefined -> CookieSameSite;
-        <<"none">> -> none;
-        <<"lax">> -> lax;
-        <<"strict">> -> strict;
-        _ -> CookieSameSite
+        Val -> same_site_atom(Val)
     end,
     IsSecure = cowboy_req:scheme(Req0) =:= <<"https">>,
     Req1 = clear_ticket_cookie(
@@ -798,6 +797,15 @@ clear_csrf_cookie(Req, RealmUri, BasePath, IsSecure, CookieDomain,
     cowboy_req:set_resp_cookie(
         csrf_cookie_name(RealmUri), <<>>, Req, Opts
     ).
+
+
+%% @private
+same_site_atom(<<"none">>) -> none;
+same_site_atom(<<"lax">>) -> lax;
+same_site_atom(<<"strict">>) -> strict;
+same_site_atom(none) -> none;
+same_site_atom(lax) -> lax;
+same_site_atom(strict) -> strict.
 
 
 %% @private
