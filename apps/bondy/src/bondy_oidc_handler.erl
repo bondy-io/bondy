@@ -421,14 +421,17 @@ do_issue_ticket(
             BasePath = maps:get(base_path, State, <<>>),
             IsSecure = cowboy_req:scheme(Req0) =:= <<"https">>,
             CookieDomain = maps:get(cookie_domain, Config, undefined),
+            CookieSameSite = maps:get(
+                cookie_same_site, Config, lax
+            ),
             CsrfToken = bondy_utils:uuid(),
             Req1 = set_ticket_cookie(
                 Req0, RealmUri, JWT, BasePath, ExpirySecs, IsSecure,
-                CookieDomain
+                CookieDomain, CookieSameSite
             ),
             Req2 = set_csrf_cookie(
                 Req1, RealmUri, CsrfToken, BasePath, ExpirySecs, IsSecure,
-                CookieDomain
+                CookieDomain, CookieSameSite
             ),
             Req3 = cowboy_req:reply(
                 302,
@@ -503,20 +506,39 @@ do_handle_logout(Req0, #{realm_uri := DefaultRealmUri} = State) ->
     %% Always clear realm-prefixed cookies regardless of verify outcome.
     %% cookie_domain may come from the provider config or as a query param.
     Provider = maps:get(oidc_provider, OidcClaims, undefined),
-    CookieDomain = case proplists:get_value(<<"cookie_domain">>, QsVals) of
-        undefined when is_binary(Provider) ->
-            case bondy_oidc_provider:get_provider_config(RealmUri, Provider) of
-                {ok, Cfg} -> maps:get(cookie_domain, Cfg, undefined);
-                {error, _} -> undefined
+    {CookieDomain, CookieSameSite} = case Provider of
+        P when is_binary(P) ->
+            case bondy_oidc_provider:get_provider_config(RealmUri, P) of
+                {ok, Cfg} ->
+                    {
+                        maps:get(cookie_domain, Cfg, undefined),
+                        maps:get(cookie_same_site, Cfg, lax)
+                    };
+                {error, _} ->
+                    {undefined, lax}
             end;
-        undefined ->
-            undefined;
-        Domain ->
-            Domain
+        _ ->
+            {undefined, lax}
+    end,
+    %% Query params override provider config.
+    CookieDomain1 = case proplists:get_value(<<"cookie_domain">>, QsVals) of
+        undefined -> CookieDomain;
+        QsDomain -> QsDomain
+    end,
+    CookieSameSite1 = case proplists:get_value(<<"cookie_same_site">>, QsVals) of
+        undefined -> CookieSameSite;
+        <<"none">> -> none;
+        <<"lax">> -> lax;
+        <<"strict">> -> strict;
+        _ -> CookieSameSite
     end,
     IsSecure = cowboy_req:scheme(Req0) =:= <<"https">>,
-    Req1 = clear_ticket_cookie(Req0, RealmUri, BasePath, IsSecure, CookieDomain),
-    Req2 = clear_csrf_cookie(Req1, RealmUri, BasePath, IsSecure, CookieDomain),
+    Req1 = clear_ticket_cookie(
+        Req0, RealmUri, BasePath, IsSecure, CookieDomain1, CookieSameSite1
+    ),
+    Req2 = clear_csrf_cookie(
+        Req1, RealmUri, BasePath, IsSecure, CookieDomain1, CookieSameSite1
+    ),
 
     %% Build the redirect target. If the ticket contains OIDC claims, attempt
     %% RP-Initiated Logout at the IdP's end_session_endpoint so that both the
@@ -740,40 +762,51 @@ csrf_cookie_name(RealmUri) ->
 
 %% @private
 set_ticket_cookie(Req, RealmUri, JWT, BasePath, MaxAgeSecs, IsSecure,
-                  CookieDomain) ->
-    Opts = cookie_opts(BasePath, MaxAgeSecs, IsSecure, true, CookieDomain),
+                  CookieDomain, CookieSameSite) ->
+    Opts = cookie_opts(
+        BasePath, MaxAgeSecs, IsSecure, true, CookieDomain, CookieSameSite
+    ),
     cowboy_req:set_resp_cookie(ticket_cookie_name(RealmUri), JWT, Req, Opts).
 
 
 %% @private
-clear_ticket_cookie(Req, RealmUri, BasePath, IsSecure, CookieDomain) ->
-    Opts = cookie_opts(BasePath, 0, IsSecure, true, CookieDomain),
+clear_ticket_cookie(Req, RealmUri, BasePath, IsSecure, CookieDomain,
+                    CookieSameSite) ->
+    Opts = cookie_opts(
+        BasePath, 0, IsSecure, true, CookieDomain, CookieSameSite
+    ),
     cowboy_req:set_resp_cookie(ticket_cookie_name(RealmUri), <<>>, Req, Opts).
 
 
 %% @private
 set_csrf_cookie(Req, RealmUri, CsrfToken, BasePath, MaxAgeSecs, IsSecure,
-                CookieDomain) ->
-    Opts = cookie_opts(BasePath, MaxAgeSecs, IsSecure, false, CookieDomain),
+                CookieDomain, CookieSameSite) ->
+    Opts = cookie_opts(
+        BasePath, MaxAgeSecs, IsSecure, false, CookieDomain, CookieSameSite
+    ),
     cowboy_req:set_resp_cookie(
         csrf_cookie_name(RealmUri), CsrfToken, Req, Opts
     ).
 
 
 %% @private
-clear_csrf_cookie(Req, RealmUri, BasePath, IsSecure, CookieDomain) ->
-    Opts = cookie_opts(BasePath, 0, IsSecure, false, CookieDomain),
+clear_csrf_cookie(Req, RealmUri, BasePath, IsSecure, CookieDomain,
+                  CookieSameSite) ->
+    Opts = cookie_opts(
+        BasePath, 0, IsSecure, false, CookieDomain, CookieSameSite
+    ),
     cowboy_req:set_resp_cookie(
         csrf_cookie_name(RealmUri), <<>>, Req, Opts
     ).
 
 
 %% @private
-cookie_opts(_BasePath, MaxAge, IsSecure, HttpOnly, CookieDomain) ->
+cookie_opts(_BasePath, MaxAge, IsSecure, HttpOnly, CookieDomain,
+            CookieSameSite) ->
     Opts0 = #{
         http_only => HttpOnly,
         secure => IsSecure,
-        same_site => lax,
+        same_site => CookieSameSite,
         path => <<"/">>,
         max_age => MaxAge
     },

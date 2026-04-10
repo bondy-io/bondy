@@ -69,7 +69,6 @@ ENV HOME "/bondy"
 # - iproute2: a collection of utilities for networking and traffic control.
 # - net-tools: which includes the commands arp, ifconfig, netstat, rarp, nameif
 #   and route
-# - curl, jq: for devops to use the REST Admin API
 # - nano: for devops
 #
 # We install the following required packages:
@@ -80,8 +79,7 @@ ENV HOME "/bondy"
 # have permission to write.
 RUN apt-get update && \
     apt-get -y install --no-install-recommends \
-    sudo bash procps iproute2 net-tools dnsutils curl jq nano \
-    openssl libsnappy-dev\
+    sudo bash procps iproute2 net-tools dnsutils nano openssl libsnappy-dev \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 -r bondy \
     && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "bondy" bondy \

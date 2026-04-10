@@ -412,6 +412,13 @@
         key => cookie_domain,
         required => false,
         datatype => binary
+    },
+    <<"cookie_same_site">> => #{
+        alias => cookie_same_site,
+        key => cookie_same_site,
+        required => true,
+        default => lax,
+        datatype => {in, [lax, strict, none]}
     }
 }).
 

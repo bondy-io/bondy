@@ -304,6 +304,8 @@
                     "auto_provision": false,
                     "ticket_expiry_secs": 2592000,
                     "allow_unsafe_http": true,
+                    "cookie_domain": "${OIDC_COOKIE_DOMAIN}",
+                    "cookie_same_site": "lax",
                     "role_mapping": {
                         "AZURE_WellIOS_ServiceProgrammer": "resource_owners",
                         "AZURE_WellOS_MU_GSJ": "api_clients"
