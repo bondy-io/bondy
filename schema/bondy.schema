@@ -3320,11 +3320,23 @@ end}.
 ]}.
 
 %% =============================================================================
-%% WAMP LONGPOLLSSE
+%% WAMP LONGPOLL
 %% =============================================================================
 
-%% How long a `/receive` request blocks waiting for messages before returning an
-%% empty 200
+%% How long a `/wamp/longpoll/:transport_id/receive` request blocks waiting for
+%% messages before returning an empty 204. This MUST be strictly less than
+%% `wamp.longpoll.idle_timeout`, otherwise Cowboy may close the connection
+%% before the longpoll reply is sent, stripping the response (including CORS
+%% headers) that browser clients depend on.
+{mapping, "wamp.longpoll.poll_timeout",
+"bondy.wamp_longpoll.poll_timeout", [
+  {default, "30s"},
+  {datatype, {duration, ms}}
+]}.
+
+%% Cowboy HTTP connection idle timeout for `/wamp/longpoll/*` endpoints. It
+%% MUST be strictly greater than `wamp.longpoll.poll_timeout` so the server has
+%% time to reply before the connection is torn down for inactivity.
 {mapping, "wamp.longpoll.idle_timeout",
 "bondy.wamp_longpoll.idle_timeout", [
   {default, "10m"},

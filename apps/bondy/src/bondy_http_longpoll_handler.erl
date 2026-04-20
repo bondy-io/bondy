@@ -40,8 +40,14 @@ same identifiers as the WAMP spec. The handler determines the transport type
 %% The client sends these in the /open body; we map them to internal tuples.
 -define(SUPPORTED_PROTOCOLS, [?WAMP2_JSON]).
 
-%% Default longpoll timeout (30 seconds)
--define(DEFAULT_IDLE_TIMEOUT, 30000).
+%% Default time a `/receive` request blocks waiting for messages (30 seconds)
+-define(DEFAULT_POLL_TIMEOUT, 30000).
+
+%% Default Cowboy connection idle timeout (10 minutes). MUST be strictly greater
+%% than the poll timeout; otherwise the connection can be closed by Cowboy
+%% before the longpoll reply is sent, stripping the response (including CORS
+%% headers) that clients depend on.
+-define(DEFAULT_IDLE_TIMEOUT, timer:minutes(10)).
 
 
 
@@ -57,8 +63,8 @@ init(Req0, State) ->
     Req = bondy_http_utils:set_all_headers(Req1),
     case cowboy_req:method(Req) of
         <<"OPTIONS">> ->
-            Req1 = cowboy_req:reply(?HTTP_OK, #{}, <<>>, Req),
-            {ok, Req1, State};
+            Req2 = cowboy_req:reply(?HTTP_OK, #{}, <<>>, Req),
+            {ok, Req2, State};
         _ ->
             dispatch(Req, State)
     end.
@@ -343,14 +349,15 @@ do_handle_receive(Req0, State) ->
                     {ok, Req1, State};
                 ok ->
                     bondy_http_transport_session:touch(Pid),
-                    Timeout = bondy_config:get(
-                        [wamp_longpoll, idle_timeout], ?DEFAULT_IDLE_TIMEOUT
+                    PollTimeout = bondy_config:get(
+                        [wamp_longpoll, poll_timeout], ?DEFAULT_POLL_TIMEOUT
                     ),
                     Encoding = bondy_http_transport_session:encoding(Pid),
-                    ok = bondy_http_transport_session:request_poll(Pid, Timeout),
+                    ok = bondy_http_transport_session:request_poll(
+                        Pid, PollTimeout
+                    ),
                     IdleTimeout = bondy_config:get(
-                        [wamp_longpoll, idle_timeout],
-                        timer:minutes(10)
+                        [wamp_longpoll, idle_timeout], ?DEFAULT_IDLE_TIMEOUT
                     ),
                     ResetOnSend = bondy_config:get(
                         [wamp_longpoll, reset_idle_timeout_on_send],

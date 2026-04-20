@@ -2,6 +2,10 @@
 
 ## 1.0.0-rc.61
 ### Fixes
+* Race condition in longpolling connection (between longpoll timeout and idel timeout, now separate configs)
+
+## 1.0.0-rc.61
+### Fixes
 - `cookie_same_site` validation was using atoms as opposed to strings (binaries)
 
 ## 1.0.0-rc.60
