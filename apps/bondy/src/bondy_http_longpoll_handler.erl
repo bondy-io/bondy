@@ -57,8 +57,8 @@ init(Req0, State) ->
     Req = bondy_http_utils:set_all_headers(Req1),
     case cowboy_req:method(Req) of
         <<"OPTIONS">> ->
-            Req1 = cowboy_req:reply(?HTTP_OK, #{}, <<>>, Req),
-            {ok, Req1, State};
+            Req2 = cowboy_req:reply(?HTTP_OK, #{}, <<>>, Req),
+            {ok, Req2, State};
         _ ->
             dispatch(Req, State)
     end.
