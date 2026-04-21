@@ -84,6 +84,12 @@ registry.
 -type value()       ::  term().
 -type policy()      ::  exact | prefix | wildcard.
 -type leaf()        ::  {key(), policy(), value()}.
+-type update_fun()  ::  fun((undefined | value()) ->
+                             {ok, value()} | delete | noop).
+-type update_result() :: ok
+                       | deleted
+                       | noop
+                       | {error, cas_exhausted}.
 
 %% Adaptive child-container shapes (PART §4.3). Path copying allocates a
 %% fresh node on every mutation, so "adaptive sizing" collapses to:
@@ -112,6 +118,8 @@ registry.
 -export_type([policy/0]).
 -export_type([leaf/0]).
 -export_type([node_id/0]).
+-export_type([update_fun/0]).
+-export_type([update_result/0]).
 
 
 %% =============================================================================
@@ -125,6 +133,7 @@ registry.
 -export([insert/4]).
 -export([remove/2]).
 -export([remove/3]).
+-export([update/4]).
 -export([lookup/2]).
 -export([lookup/3]).
 -export([match/2]).
@@ -286,6 +295,39 @@ remove(#handle{} = H, Key, Policy)
     when is_binary(Key) andalso ?IS_POLICY(Policy) ->
     do_write(H, fun(Root) -> walk_remove(H, Root, Key, 0, Policy) end,
              ?DEFAULT_CAS_RETRIES).
+
+
+-doc """
+Atomically read-modify-write the leaf at `{Key, Policy}`.
+
+`UpdateFun` is called with the leaf's current value (`undefined` if
+absent) and must return:
+
+  - `{ok, NewValue}` — replace (or insert) the leaf with `NewValue`.
+  - `delete`         — remove the leaf.
+  - `noop`           — make no change.
+
+Returns `ok` on insert/update, `deleted` on removal, `noop` when the
+function requested no change (or requested delete on an already-absent
+leaf), or `{error, cas_exhausted}` if retry budget runs out under
+sustained contention.
+
+Concurrent-safe: uses the same CAS-on-root protocol as `insert/remove`.
+Under contention, `UpdateFun` may be invoked more than once — each retry
+re-reads the current value before re-deciding. The function must be
+idempotent / safe under repeated calls.
+""".
+-spec update(
+    Handle    :: handle(),
+    Key       :: key(),
+    Policy    :: policy(),
+    UpdateFun :: update_fun()
+) -> update_result().
+
+update(#handle{} = H, Key, Policy, UpdateFun)
+    when is_binary(Key) andalso ?IS_POLICY(Policy)
+    andalso is_function(UpdateFun, 1) ->
+    do_update(H, Key, Policy, UpdateFun, ?DEFAULT_CAS_RETRIES).
 
 
 -doc """
@@ -682,6 +724,69 @@ publish(#handle{root_tab = RT} = H, OldRootId, V, NewRootId, Retired, Fresh,
 %% @private
 discard_fresh(#handle{node_tab = T}, FreshIds) ->
     lists:foreach(fun(Id) -> ets:delete(T, Id) end, FreshIds).
+
+
+%% @private
+%% Update loop: reads the leaf's current value, applies UpdateFun,
+%% dispatches to walk_insert/walk_remove/noop, then CAS-publishes. On CAS
+%% failure, re-reads and re-applies — so the UpdateFun must be safe to
+%% invoke multiple times under contention.
+do_update(_H, _Key, _Policy, _UpdateFun, 0) ->
+    {error, cas_exhausted};
+do_update(#handle{} = H, Key, Policy, UpdateFun, N) ->
+    {OldRootId, V} = read_root(H),
+    case ets:lookup(H#handle.node_tab, OldRootId) of
+        [] ->
+            do_update(H, Key, Policy, UpdateFun, N - 1);
+        [OldRoot] ->
+            CurrentVal =
+                case walk_lookup(H#handle.node_tab, OldRoot, Key, 0, Policy) of
+                    {ok, Val} -> Val;
+                    error     -> undefined
+                end,
+            case UpdateFun(CurrentVal) of
+                noop ->
+                    noop;
+                {ok, NewValue} ->
+                    {NewRootId, Retired, Fresh} =
+                        walk_insert(H, OldRoot, Key, 0, Policy, NewValue),
+                    finalize_update(H, Key, Policy, UpdateFun, N,
+                                    OldRootId, V,
+                                    NewRootId, Retired, Fresh, ok);
+                delete when CurrentVal =:= undefined ->
+                    noop;
+                delete ->
+                    {NewRootId, Retired, Fresh} =
+                        walk_remove(H, OldRoot, Key, 0, Policy),
+                    case NewRootId =:= OldRootId of
+                        true ->
+                            noop;
+                        false ->
+                            finalize_update(H, Key, Policy, UpdateFun, N,
+                                            OldRootId, V,
+                                            NewRootId, Retired, Fresh,
+                                            deleted)
+                    end
+            end
+    end.
+
+
+%% @private
+finalize_update(#handle{root_tab = RT} = H, Key, Policy, UpdateFun, N,
+                OldRootId, V, NewRootId, Retired, Fresh, Outcome) ->
+    NewVersion = V + 1,
+    Match = [{{?ROOT_KEY, OldRootId, V},
+              [],
+              [{const, {?ROOT_KEY, NewRootId, NewVersion}}]}],
+    case ets:select_replace(RT, Match) of
+        1 ->
+            _ = retire(H, Retired),
+            Outcome;
+        0 ->
+            discard_fresh(H, Fresh),
+            erlang:yield(),
+            do_update(H, Key, Policy, UpdateFun, N - 1)
+    end.
 
 
 %% -----------------------------------------------------------------------------

@@ -35,6 +35,12 @@ all() ->
         unit_remove_existing,
         unit_remove_nonexistent,
         unit_fold_order,
+        unit_update_insert_new,
+        unit_update_modify_existing,
+        unit_update_delete_existing,
+        unit_update_delete_missing_is_noop,
+        unit_update_noop_branch,
+        unit_update_concurrent_rmw,
 
         %% Property tests — randomized against a map reference
         prop_insert_then_lookup,
@@ -165,6 +171,78 @@ unit_remove_nonexistent(Config) ->
     ok = bondy_registry_ptrie:remove(H, <<"nonexistent">>),
     ?assertEqual({ok, 1}, bondy_registry_ptrie:lookup(H, <<"a">>)),
     ?assertEqual(1, bondy_registry_ptrie:size(H)).
+
+
+unit_update_insert_new(Config) ->
+    H = ?config(handle, Config),
+    ?assertEqual(ok, bondy_registry_ptrie:update(
+        H, <<"k">>, exact,
+        fun(undefined) -> {ok, first}; (_) -> erlang:error(unexpected) end
+    )),
+    ?assertEqual({ok, first}, bondy_registry_ptrie:lookup(H, <<"k">>, exact)),
+    ok.
+
+
+unit_update_modify_existing(Config) ->
+    H = ?config(handle, Config),
+    ok = bondy_registry_ptrie:insert(H, <<"k">>, exact, 1),
+    ?assertEqual(ok, bondy_registry_ptrie:update(
+        H, <<"k">>, exact,
+        fun(V) -> {ok, V + 10} end
+    )),
+    ?assertEqual({ok, 11}, bondy_registry_ptrie:lookup(H, <<"k">>, exact)),
+    ok.
+
+
+unit_update_delete_existing(Config) ->
+    H = ?config(handle, Config),
+    ok = bondy_registry_ptrie:insert(H, <<"k">>, exact, 1),
+    ?assertEqual(deleted, bondy_registry_ptrie:update(
+        H, <<"k">>, exact, fun(_) -> delete end
+    )),
+    ?assertEqual(error, bondy_registry_ptrie:lookup(H, <<"k">>, exact)),
+    ok.
+
+
+unit_update_delete_missing_is_noop(Config) ->
+    H = ?config(handle, Config),
+    ?assertEqual(noop, bondy_registry_ptrie:update(
+        H, <<"k">>, exact, fun(undefined) -> delete end
+    )),
+    ok.
+
+
+unit_update_noop_branch(Config) ->
+    H = ?config(handle, Config),
+    ok = bondy_registry_ptrie:insert(H, <<"k">>, exact, 1),
+    ?assertEqual(noop, bondy_registry_ptrie:update(
+        H, <<"k">>, exact, fun(_) -> noop end
+    )),
+    ?assertEqual({ok, 1}, bondy_registry_ptrie:lookup(H, <<"k">>, exact)),
+    ok.
+
+
+unit_update_concurrent_rmw(Config) ->
+    %% N processes concurrently add their ID to a set stored as the value.
+    %% If `update/4` is truly atomic, the final set contains every ID.
+    H = ?config(handle, Config),
+    N = 32,
+    Parent = self(),
+    Pids = [spawn_link(fun() ->
+        ok = bondy_registry_ptrie:update(
+            H, <<"bag">>, exact,
+            fun
+                (undefined) -> {ok, sets:from_list([I])};
+                (Set) -> {ok, sets:add_element(I, Set)}
+            end
+        ),
+        Parent ! {done, self()}
+    end) || I <- lists:seq(1, N)],
+    [receive {done, P} -> ok end || P <- Pids],
+    {ok, Final} = bondy_registry_ptrie:lookup(H, <<"bag">>, exact),
+    ?assertEqual(lists:sort(lists:seq(1, N)),
+                 lists:sort(sets:to_list(Final))),
+    ok.
 
 
 unit_fold_order(Config) ->

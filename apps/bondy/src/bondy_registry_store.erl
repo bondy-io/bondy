@@ -32,26 +32,22 @@ Indeces for matching bondy_registry_entry(s).
 -record(bondy_registry_store, {
     partition                       ::  pid(),
     index                           ::  integer(),
-    %% Registrations w/match_policy == exact (bag) -> concurrent r/w
+    %% Registrations w/match_policy == exact (bag) — concurrent r/w
     reg_exact_idx_tab               ::  ets:tab(),
-    %% Registrations w/match_policy == prefix (ordered_set) -> serialised r/w
-    reg_prefix_idx_art              ::  art:t(),
-    %% Registrations w/match_policy == wildcard (set) -> concurrent r/w
-    reg_wc_buffer_tab               ::  ets:tab(),
-    %% Registrations w/match_policy == wildcard -> serialised r/w
-    reg_wc_idx_art                  ::  art:t(),
-    %% Subscriptions w/match_policy == exact (bag) -> concurrent r/w
+    %% Registrations w/match_policy == prefix — persistent trie, lock-free
+    reg_prefix_idx_ptrie            ::  bondy_registry_ptrie:handle(),
+    %% Registrations w/match_policy == wildcard — persistent trie, lock-free
+    reg_wc_idx_ptrie                ::  bondy_registry_ptrie:handle(),
+    %% Subscriptions w/match_policy == exact (bag) — concurrent r/w
     sub_local_exact_idx_tab         ::  ets:tab(),
-    %% Sbscriptions w/match_policy == exact -> concurrent r/w
+    %% Remote subscriptions with any match_policy (deduped by node) — bag
     sub_remote_exact_idx_tab        ::  ets:tab(),
-    %% Subscriptions w/match_policy == prefix -> serialised r/w
-    sub_prefix_idx_art              ::  art:t(),
-    %% Subscriptions w/match_policy == wildcard -> concurrent r/w
-    sub_wc_buffer_tab               ::  ets:tab(),
-    %% Subscriptions w/match_policy == wildcard -> serialised r/w
-    sub_wc_idx_art                  ::  art:t(),
+    %% Subscriptions w/match_policy == prefix — persistent trie, lock-free
+    sub_prefix_idx_ptrie            ::  bondy_registry_ptrie:handle(),
+    %% Subscriptions w/match_policy == wildcard — persistent trie, lock-free
+    sub_wc_idx_ptrie                ::  bondy_registry_ptrie:handle(),
     %% Counter per URI, used to distinguish on_create vs.
-    %% on_register|on_subscribe -> concurrent r/w
+    %% on_register|on_subscribe — concurrent r/w
     counters_tab                    ::  ets:tab()
 }).
 
@@ -252,12 +248,8 @@ new(PartitionIndex) ->
         gen_name(reg_exact_idx_tab, PartitionIndex),
         [bag | Opts]
     ),
-    R2 = art:new(gen_name(reg_prefix_idx_art, PartitionIndex), []),
-    {ok, R3} = bondy_table_manager:add_or_claim(
-        gen_name(reg_wc_buffer_tab, PartitionIndex),
-        [set | Opts]
-    ),
-    R4 = art:new(gen_name(reg_wc_idx_art, PartitionIndex), []),
+    R2 = bondy_registry_ptrie:new(gen_name(reg_prefix_idx_ptrie, PartitionIndex)),
+    R3 = bondy_registry_ptrie:new(gen_name(reg_wc_idx_ptrie, PartitionIndex)),
 
     %% Subscription tables
     {ok, S1} = bondy_table_manager:add_or_claim(
@@ -268,12 +260,8 @@ new(PartitionIndex) ->
         gen_name(sub_remote_exact_idx_tab, PartitionIndex),
         [bag | Opts]
     ),
-    S3 = art:new(gen_name(sub_prefix_idx_art, PartitionIndex), []),
-    {ok, S4} = bondy_table_manager:add_or_claim(
-        gen_name(sub_wc_buffer_tab, PartitionIndex),
-        [set | Opts]
-    ),
-    S5 = art:new(gen_name(sub_wc_idx_art, PartitionIndex), []),
+    S3 = bondy_registry_ptrie:new(gen_name(sub_prefix_idx_ptrie, PartitionIndex)),
+    S4 = bondy_registry_ptrie:new(gen_name(sub_wc_idx_ptrie, PartitionIndex)),
 
     %% Common
     {ok, C1} = bondy_table_manager:add_or_claim(
@@ -286,15 +274,13 @@ new(PartitionIndex) ->
         index = PartitionIndex,
         %% Registrations
         reg_exact_idx_tab = R1,
-        reg_prefix_idx_art = R2,
-        reg_wc_buffer_tab = R3,
-        reg_wc_idx_art = R4,
+        reg_prefix_idx_ptrie = R2,
+        reg_wc_idx_ptrie = R3,
         %% Subscriptions
         sub_local_exact_idx_tab = S1,
         sub_remote_exact_idx_tab = S2,
-        sub_prefix_idx_art = S3,
-        sub_wc_buffer_tab = S4,
-        sub_wc_idx_art = S5,
+        sub_prefix_idx_ptrie = S3,
+        sub_wc_idx_ptrie = S4,
         %% Common
         counters_tab = C1
     }.
@@ -305,32 +291,28 @@ new(PartitionIndex) ->
 info(#bondy_registry_store{} = Store) ->
     Tabs = [
         Store#bondy_registry_store.reg_exact_idx_tab,
-        Store#bondy_registry_store.reg_wc_buffer_tab,
         Store#bondy_registry_store.sub_local_exact_idx_tab,
-        Store#bondy_registry_store.sub_wc_buffer_tab,
         Store#bondy_registry_store.sub_remote_exact_idx_tab,
         Store#bondy_registry_store.counters_tab
     ],
 
-    ArtInfo1 = art:info(Store#bondy_registry_store.reg_prefix_idx_art),
-    ArtInfo2 = art:info(Store#bondy_registry_store.reg_wc_idx_art),
-    ArtInfo3 = art:info(Store#bondy_registry_store.sub_prefix_idx_art),
-    ArtInfo4 = art:info(Store#bondy_registry_store.sub_wc_idx_art),
+    Ptries = [
+        Store#bondy_registry_store.reg_prefix_idx_ptrie,
+        Store#bondy_registry_store.reg_wc_idx_ptrie,
+        Store#bondy_registry_store.sub_prefix_idx_ptrie,
+        Store#bondy_registry_store.sub_wc_idx_ptrie
+    ],
 
+    %% Ptrie `info/1` returns a map with `node_count` and related keys.
+    %% Sum `node_count` and ETS memory for an overall size snapshot. The
+    %% memory estimate is approximate — it covers the node table of each
+    %% ptrie but not its auxiliary tables (root row, retire queue, epoch
+    %% slots), which are small.
+    PtrieStats = [bondy_registry_ptrie:info(P) || P <- Ptries],
+    NodeSum = lists:sum([maps:get(node_count, I, 0) || I <- PtrieStats]),
 
-    Size =
-        key_value:get(nodes, ArtInfo1) +
-        key_value:get(nodes, ArtInfo2) +
-        key_value:get(nodes, ArtInfo3) +
-        key_value:get(nodes, ArtInfo4) +
-        lists:sum([ets:info(Tab, size) || Tab <- Tabs]),
-
-    Mem =
-        key_value:get(memory, ArtInfo1) +
-        key_value:get(memory, ArtInfo2) +
-        key_value:get(memory, ArtInfo3) +
-        key_value:get(memory, ArtInfo4) +
-        lists:sum([ets:info(Tab, memory) || Tab <- Tabs]),
+    Size = NodeSum + lists:sum([ets:info(Tab, size) || Tab <- Tabs]),
+    Mem = lists:sum([ets:info(Tab, memory) || Tab <- Tabs]),
 
     #{size => Size, memory => Mem}.
 
@@ -989,12 +971,12 @@ This call executes concurrently.
 -spec match_prefix(t(), entry_type(), uri(), uri(), map()) -> match_result().
 
 match_prefix(Store, Type, RealmUri, Uri, Opts) when Type == registration ->
-    ART = Store#bondy_registry_store.reg_prefix_idx_art,
-    art_match(Store, Type, RealmUri, Uri, Opts, ART);
+    Ptrie = Store#bondy_registry_store.reg_prefix_idx_ptrie,
+    ptrie_match(Store, Type, RealmUri, Uri, Opts, Ptrie, prefix);
 
 match_prefix(Store, Type, RealmUri, Uri, Opts) when Type == subscription ->
-    ART = Store#bondy_registry_store.sub_prefix_idx_art,
-    art_match(Store, Type, RealmUri, Uri, Opts, ART).
+    Ptrie = Store#bondy_registry_store.sub_prefix_idx_ptrie,
+    ptrie_match(Store, Type, RealmUri, Uri, Opts, Ptrie, prefix).
 
 
 -doc """
@@ -1019,13 +1001,13 @@ This call is serialised through a partition server.
 
 match_wildcard(Store, Type, RealmUri, Uri, Opts)
 when Type == registration ->
-    ART = Store#bondy_registry_store.reg_wc_idx_art,
-    art_match(Store, Type, RealmUri, Uri, Opts, ART);
+    Ptrie = Store#bondy_registry_store.reg_wc_idx_ptrie,
+    ptrie_match(Store, Type, RealmUri, Uri, Opts, Ptrie, wildcard);
 
 match_wildcard(Store, Type, RealmUri, Uri, Opts)
 when Type == subscription ->
-    ART = Store#bondy_registry_store.sub_wc_idx_art,
-    art_match(Store, Type, RealmUri, Uri, Opts, ART).
+    Ptrie = Store#bondy_registry_store.sub_wc_idx_ptrie,
+    ptrie_match(Store, Type, RealmUri, Uri, Opts, Ptrie, wildcard).
 
 
 -doc """
@@ -1158,13 +1140,13 @@ This call executes concurrently.
 
 find_prefix_matches(Store, Type, RealmUri, Uri, Opts)
 when Type == registration ->
-    ART = Store#bondy_registry_store.reg_prefix_idx_art,
-    art_find_matches(Store, Type, RealmUri, Uri, Opts, ART);
+    Ptrie = Store#bondy_registry_store.reg_prefix_idx_ptrie,
+    ptrie_find_matches(Store, Type, RealmUri, Uri, Opts, Ptrie);
 
 find_prefix_matches(Store, Type, RealmUri, Uri, Opts)
  when Type == subscription ->
-    ART = Store#bondy_registry_store.sub_prefix_idx_art,
-    art_find_matches(Store, Type, RealmUri, Uri, Opts, ART).
+    Ptrie = Store#bondy_registry_store.sub_prefix_idx_ptrie,
+    ptrie_find_matches(Store, Type, RealmUri, Uri, Opts, Ptrie).
 
 
 -doc """
@@ -1190,13 +1172,13 @@ This call is serialised through the ART server.
 
 find_wildcard_matches(Store, Type, RealmUri, Uri, Opts)
 when Type == registration ->
-    ART = Store#bondy_registry_store.reg_wc_idx_art,
-    art_find_matches(Store, Type, RealmUri, Uri, Opts, ART);
+    Ptrie = Store#bondy_registry_store.reg_wc_idx_ptrie,
+    ptrie_find_matches(Store, Type, RealmUri, Uri, Opts, Ptrie);
 
 find_wildcard_matches(Store, Type, RealmUri, Uri, Opts)
 when Type == subscription ->
-    ART = Store#bondy_registry_store.sub_wc_idx_art,
-    art_find_matches(Store, Type, RealmUri, Uri, Opts, ART).
+    Ptrie = Store#bondy_registry_store.sub_wc_idx_ptrie,
+    ptrie_find_matches(Store, Type, RealmUri, Uri, Opts, Ptrie).
 
 
 
@@ -1448,26 +1430,26 @@ del_local_exact_subscription_index(Store, Entry) ->
 
 %% @private
 add_prefix_registration_idx(Store, Entry) ->
-    ART = Store#bondy_registry_store.reg_prefix_idx_art,
-    add_art_index(Store, Entry, ART).
+    Ptrie = Store#bondy_registry_store.reg_prefix_idx_ptrie,
+    add_ptrie_index(Store, Entry, Ptrie).
 
 
 %% @private
 del_prefix_registration_index(Store, Entry) ->
-    ART = Store#bondy_registry_store.reg_prefix_idx_art,
-    del_art_index(Store, Entry, ART).
+    Ptrie = Store#bondy_registry_store.reg_prefix_idx_ptrie,
+    del_ptrie_index(Store, Entry, Ptrie).
 
 
 %% @private
 add_prefix_subscription_index(Store, Entry) ->
-    ART = Store#bondy_registry_store.sub_prefix_idx_art,
-    add_art_index(Store, Entry, ART).
+    Ptrie = Store#bondy_registry_store.sub_prefix_idx_ptrie,
+    add_ptrie_index(Store, Entry, Ptrie).
 
 
 %% @private
 del_prefix_subscription_index(Store, Entry) ->
-    ART = Store#bondy_registry_store.sub_prefix_idx_art,
-    del_art_index(Store, Entry, ART).
+    Ptrie = Store#bondy_registry_store.sub_prefix_idx_ptrie,
+    del_ptrie_index(Store, Entry, Ptrie).
 
 
 %% -----------------------------------------------------------------------------
@@ -1521,40 +1503,49 @@ del_remote_exact_subscription_index(Store, Entry) ->
 
 
 %% @private
-%% This MUST NOT be called concurrently
 add_wildcard_registration_index(Store, Entry) ->
-    ART = Store#bondy_registry_store.reg_wc_idx_art,
-    add_art_index(Store, Entry, ART).
+    Ptrie = Store#bondy_registry_store.reg_wc_idx_ptrie,
+    add_ptrie_index(Store, Entry, Ptrie).
 
 
 %% @private
-%% This MUST NOT be called concurrently
 del_wildcard_registration_index(Store, Entry) ->
-    ART = Store#bondy_registry_store.reg_wc_idx_art,
-    del_art_index(Store, Entry, ART).
+    Ptrie = Store#bondy_registry_store.reg_wc_idx_ptrie,
+    del_ptrie_index(Store, Entry, Ptrie).
 
 
 %% @private
 add_wildcard_subscription_index(Store, Entry) ->
-    ART = Store#bondy_registry_store.sub_wc_idx_art,
-    add_art_index(Store, Entry, ART).
+    Ptrie = Store#bondy_registry_store.sub_wc_idx_ptrie,
+    add_ptrie_index(Store, Entry, Ptrie).
 
 
 %% @private
 del_wildcard_subscription_index(Store, Entry) ->
-    ART = Store#bondy_registry_store.sub_wc_idx_art,
-    del_art_index(Store, Entry, ART).
+    Ptrie = Store#bondy_registry_store.sub_wc_idx_ptrie,
+    del_ptrie_index(Store, Entry, Ptrie).
 
 
 %% @private
-%% Calls art:set/3 serialising the call via a registry partition server
-add_art_index(Store, Entry, ART) ->
-    Pid = Store#bondy_registry_store.partition,
-    Key = art_key(Entry),
-    Value = art_value(Entry),
-    Args = [Key, Value, ART],
+%% Atomic RMW: add the entry to the `#{EntryKey => EntryData}` map stored
+%% at the ptrie leaf for `{URI, Policy}`. Under concurrent writers, the
+%% underlying `ptrie:update/4` retries via root-CAS, so the update is
+%% lost-update-free without a per-partition gen_server.
+add_ptrie_index(Store, Entry, Ptrie) ->
+    Key = ptrie_index_key(Entry),
+    Policy = ptrie_policy(Entry),
+    EntryKey = bondy_registry_entry:key(Entry),
+    EntryData = ptrie_entry_data(Entry),
 
-    Result = bondy_registry_partition:execute(Pid, fun art:set/3, Args, 5_000),
+    Result = bondy_registry_ptrie:update(
+        Ptrie, Key, Policy,
+        fun
+            (undefined) ->
+                {ok, #{EntryKey => EntryData}};
+            (Map) when is_map(Map) ->
+                {ok, maps:put(EntryKey, EntryData, Map)}
+        end
+    ),
 
     case Result of
         ok ->
@@ -1562,33 +1553,46 @@ add_art_index(Store, Entry, ART) ->
             MatchPolicy = bondy_registry_entry:match_policy(Entry),
             IsFirstEntry = incr_counter(Store, Uri, MatchPolicy, 1) =:= 1,
             {ok, {Entry, IsFirstEntry}};
-
         {error, _} = Error ->
             Error
     end.
 
 
 %% @private
-%% Calls art:delete/2 serialising the call via a registry partition server
-del_art_index(Store, Entry, ART) ->
-    Pid = Store#bondy_registry_store.partition,
-    Key = art_key(Entry),
-    Args = [Key, ART],
+%% Atomic RMW: remove the entry from the leaf's `#{EntryKey => EntryData}`
+%% map. If the map becomes empty, the leaf is removed entirely. No-op if
+%% the leaf wasn't there.
+del_ptrie_index(Store, Entry, Ptrie) ->
+    Key = ptrie_index_key(Entry),
+    Policy = ptrie_policy(Entry),
+    EntryKey = bondy_registry_entry:key(Entry),
 
-    Result = bondy_registry_partition:execute(
-        Pid, fun art:delete/2, Args, 5_000
+    Result = bondy_registry_ptrie:update(
+        Ptrie, Key, Policy,
+        fun
+            (undefined) ->
+                noop;
+            (Map) when is_map(Map) ->
+                case maps:remove(EntryKey, Map) of
+                    M when map_size(M) =:= 0 -> delete;
+                    M -> {ok, M}
+                end
+        end
     ),
 
     case Result of
-        {ok, true} ->
+        ok ->
             Uri = bondy_registry_entry:uri(Entry),
             MatchPolicy = bondy_registry_entry:match_policy(Entry),
             _ = decr_counter(Store, Uri, MatchPolicy, 1),
             ok;
-
-        {ok, false} ->
+        deleted ->
+            Uri = bondy_registry_entry:uri(Entry),
+            MatchPolicy = bondy_registry_entry:match_policy(Entry),
+            _ = decr_counter(Store, Uri, MatchPolicy, 1),
             ok;
-
+        noop ->
+            ok;
         {error, _} = Error ->
             Error
     end.
@@ -1635,290 +1639,264 @@ decr_counter(Store, Uri, MatchPolicy, N) ->
 
 
 %% =============================================================================
-%% PRIVATE: ART UTILS
+%% PRIVATE: PTRIE UTILS
 %% =============================================================================
 
 
-
 %% @private
--spec art_key(bondy_registry_entry:t_or_key()) -> art:key().
+%% Build the ptrie key for an entry: `<<RealmUri, ".", Uri>>`, with empty
+%% URI components replaced by `\0` wildcard sentinels for wildcard-policy
+%% entries. `bondy_registry_ptrie:match/2` treats `\0` bytes in stored
+%% keys as "skip one target URI segment" during traversal.
+-spec ptrie_index_key(bondy_registry_entry:t_or_key()) ->
+    bondy_registry_ptrie:key().
 
-art_key(Entry) ->
+ptrie_index_key(Entry) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Uri = bondy_registry_entry:uri(Entry),
-    SessionId0 = bondy_registry_entry:session_id(Entry),
-    Nodestring = bondy_registry_entry:nodestring(Entry),
     MatchPolicy = bondy_registry_entry:match_policy(Entry),
-
-    {ProtocolSessionId, SessionId, Id} = case bondy_registry_entry:id(Entry) of
-        _ when SessionId0 == '_' ->
-            %% As we currently do not support wildcard matching in art:match,
-            %% we turn this into a prefix matching query
-            %% TODO change when wildcard matching is enabled in art.
-            {<<>>, <<>>, <<>>};
-
-        Id0 when SessionId0 == undefined ->
-            {<<"undefined">>, <<"undefined">>, term_to_art_key_part(Id0)};
-
-        Id0 when is_binary(SessionId0) ->
-            ProtocolSessionId0 = bondy_session_id:to_external(SessionId0),
-            {
-                term_to_art_key_part(ProtocolSessionId0),
-                term_to_art_key_part(SessionId0),
-                term_to_art_key_part(Id0)
-            }
-    end,
-
-    %% RealmUri is always ground, so we join it with URI using a $. as any
-    %% other separator will not work with art:find_matches/2
-    Key = <<RealmUri/binary, $., Uri/binary>>,
-
-    %% We add Nodestring for cases where SessionId == <<>>
     case MatchPolicy of
-        ?PREFIX_MATCH ->
-            %% art lib uses the star char to explicitly denote a prefix
-            {<<Key/binary, $*>>, Nodestring, ProtocolSessionId, SessionId, Id};
-
+        ?WILDCARD_MATCH ->
+            EncodedUri = bondy_registry_ptrie:encode_pattern(Uri),
+            <<RealmUri/binary, $., EncodedUri/binary>>;
         _ ->
-            {Key, Nodestring, ProtocolSessionId, SessionId, Id}
+            <<RealmUri/binary, $., Uri/binary>>
     end.
 
 
 %% @private
-term_to_art_key_part('_') ->
-    <<>>;
+-spec ptrie_policy(bondy_registry_entry:t_or_key()) ->
+    bondy_registry_ptrie:policy().
 
-term_to_art_key_part(Term) when is_atom(Term) ->
-    atom_to_binary(Term, utf8);
-
-term_to_art_key_part(Term) when is_integer(Term) ->
-    integer_to_binary(Term);
-
-term_to_art_key_part(Term) when is_binary(Term) ->
-    Term.
+ptrie_policy(Entry) ->
+    policy_atom(bondy_registry_entry:match_policy(Entry)).
 
 
 %% @private
-art_value(Entry) ->
-    art_value(Entry, bondy_registry_entry:type(Entry)).
+policy_atom(?EXACT_MATCH)    -> exact;
+policy_atom(?PREFIX_MATCH)   -> prefix;
+policy_atom(?WILDCARD_MATCH) -> wildcard.
 
 
 %% @private
-art_value(Entry, registration) ->
-    EntryKey = bondy_registry_entry:key(Entry),
+%% Data stored at each `#{EntryKey => _}` slot inside a ptrie leaf. We
+%% inline Nodestring and ProtocolSessionId so post-match filtering
+%% (remote vs local, Opts.eligible/exclude, Opts.invoke) can run without
+%% an extra plum_db lookup — mirrors the fields the old ART match-spec
+%% filtered on.
+ptrie_entry_data(Entry) ->
+    ptrie_entry_data(Entry, bondy_registry_entry:type(Entry)).
+
+ptrie_entry_data(Entry, registration) ->
     IsProxy = bondy_registry_entry:is_proxy(Entry),
     Invoke = bondy_registry_entry:get_option(invoke, Entry, ?INVOKE_SINGLE),
     Timestamp = bondy_registry_entry:created(Entry),
-    {EntryKey, IsProxy, Invoke, Timestamp};
+    Nodestring = bondy_registry_entry:nodestring(Entry),
+    ProtoSessId = entry_proto_sess_id(Entry),
+    {IsProxy, Invoke, Timestamp, Nodestring, ProtoSessId};
 
-art_value(Entry, subscription) ->
-    EntryKey = bondy_registry_entry:key(Entry),
+ptrie_entry_data(Entry, subscription) ->
     IsProxy = bondy_registry_entry:is_proxy(Entry),
-    {EntryKey, IsProxy}.
+    Nodestring = bondy_registry_entry:nodestring(Entry),
+    ProtoSessId = entry_proto_sess_id(Entry),
+    {IsProxy, Nodestring, ProtoSessId}.
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc This is match_spec that art applies after a match.
-%% @end
-%% -----------------------------------------------------------------------------
--spec art_ms(Type :: entry_type(), Opts :: map()) ->
-    ets:match_spec() | undefined.
-
-art_ms(registration, Opts) ->
-    Nodestring =
-        case maps:find(node, Opts) of
-            {ok, Val} ->
-                Val;
-
-            error ->
-                case maps:get(nodestring, Opts, '_') of
-                    '_' ->
-                        '_';
-                    Bin ->
-                        binary_to_atom(Bin, utf8)
-                end
-        end,
-
-    Conds =
-        case maps:get(invoke, Opts, '_') of
-            '_' ->
-                [];
-            Invoke ->
-                [{'=:=', '$3', Invoke}]
-        end,
-
-    case Conds of
-        [] ->
-            undefined;
-
-        [_] ->
-            %% {Key, Nodestring, ProtocolSessionId, SessionId, EntryIdBin}
-            Key = {'_', Nodestring, '_', '_'},
-            %% {EntryKey, IsProxy, Invoke}
-            Value = {'_', '_', '$3', '_'},
-
-            [{ {Key, Value}, Conds, ['$_'] }]
-    end;
-
-art_ms(subscription, Opts) ->
-    %% {{$1, $2, $3, $4, $5}, $6},
-    %% {{Key, Node, ProtocolSessionId, SessionId, EntryIdBin}, '_'},
-    Node =
-        case maps:find(node, Opts) of
-            {ok, Val} ->
-                Val;
-
-            error ->
-                case maps:get(nodestring, Opts, '_') of
-                    '_' ->
-                        '_';
-                    Bin ->
-                        binary_to_atom(Bin, utf8)
-                end
-        end,
-
-    Conds1 =
-        case maps:find(eligible, Opts) of
-            error ->
-                [];
-
-            {ok, []} ->
-                [];
-
-            {ok, EligibleIds} ->
-                [
-                    maybe_or(
-                        [
-                            {'=:=', '$1', {const, integer_to_binary(S)}}
-                            || S <- EligibleIds
-                        ]
-                    )
-                ]
-        end,
-
-    Conds2 =
-        case maps:find(exclude, Opts) of
-            error ->
-                Conds1;
-
-            {ok, []} ->
-                Conds1;
-
-            {ok, ExcludedIds} ->
-                ExclConds = maybe_and(
-                    [
-                        {'=/=', '$1', {const, integer_to_binary(S)}}
-                        || S <- ExcludedIds
-                    ]
-                ),
-                [ExclConds | Conds1]
-        end,
-
-    Conds =
-        case Conds2 of
-            [] ->
-                [];
-            [_] ->
-                Conds2;
-            _ ->
-                [list_to_tuple(['andalso' | Conds2])]
-        end,
-
-    case Conds of
-        [] ->
-            undefined;
-
-        _ ->
-            %% {Key, Node, ProtocolSessionId, SessionId, EntryIdBin}
-            Key = {'_', Node, '$1', '_', '_'},
-            %% {EntryKey, IsProxy}.
-            Value = {'_', '_'},
-
-            [{ {Key, Value}, Conds, ['$_'] }]
+entry_proto_sess_id(Entry) ->
+    case bondy_registry_entry:session_id(Entry) of
+        undefined        -> undefined;
+        '_'              -> '_';
+        S when is_binary(S) -> bondy_session_id:to_external(S)
     end.
 
 
 %% @private
-%% See trie_key to understand how we generated Bin
-parse_index_key_uri(RealmUri, Bin) ->
+%% Strip the `<<RealmUri, ".">>` prefix from a ptrie key, and decode any
+%% `\0` wildcard sentinels back to empty URI components (for wildcard
+%% leaves). Inverse of `ptrie_index_key/1`.
+parse_ptrie_key_uri(RealmUri, PtrieKey, Policy) ->
     Sz = byte_size(RealmUri),
-    <<RealmUri:Sz/binary, $., Uri0/binary>> = Bin,
-    string:trim(Uri0, trailing, "*").
+    <<RealmUri:Sz/binary, $., EncodedUri/binary>> = PtrieKey,
+    case Policy of
+        wildcard -> bondy_registry_ptrie:decode_pattern(EncodedUri);
+        _        -> EncodedUri
+    end.
 
 
 %% @private
-art_match_result(_, _, ?EOT) ->
+%% Convert a list of `{PtrieKey, Policy, EntryMap}` triples (as returned
+%% by `bondy_registry_ptrie:match/2` / `:lookup/3`) into a WAMP match
+%% result. Flat-maps each leaf's `#{EntryKey => Data}` map into index
+%% records, applies Opts-driven filters (invoke for registrations;
+%% node/eligible/exclude for subscriptions), and separates local from
+%% remote subscription entries.
+%%
+%% This replaces `art_match_result/3`. Same return shape.
+ptrie_match_result(_Store, _Type, _Opts, ?EOT) ->
     ?EOT;
 
-art_match_result(_, subscription, []) ->
+ptrie_match_result(_Store, subscription, _Opts, []) ->
     {[], []};
 
-art_match_result(Store, subscription, All) when is_list(All) ->
-    Nodestring = partisan:nodestring(),
+ptrie_match_result(Store, subscription, Opts, All) when is_list(All) ->
+    MyNodestring = partisan:nodestring(),
+    NodeFilter = ms_node_filter(Opts),
+    EligibleFilter = ms_id_set_filter(eligible, Opts),
+    ExcludeFilter = ms_id_set_filter(exclude, Opts),
 
     {L, R} = lists:foldl(
-        fun
-            ({{_, NS, _, _, _}, _}, {L, R}) when NS =/= Nodestring ->
-                %% A remote subscription, we just append the nodestring on the
-                %% right-hand side acc
-                Node = binary_to_atom(NS, utf8),
-                {L, sets:add_element(Node, R)};
-
-            ({{Bin, _, _, _, _}, {EntryKey, IsProxy}}, {L, R}) ->
-                %% We project the expected triple
-                %% TODO this is projection subscriptions only at the moment,
-                %% registrations need the Invoke field too.
-                %% We will need to add INvoke Policy to the art value
-                RealmUri = bondy_registry_entry:realm_uri(EntryKey),
-                Uri = parse_index_key_uri(RealmUri, Bin),
-                Match = #sub_idx{
-                    key = {RealmUri, Uri},
-                    entry_key = EntryKey,
-                    is_proxy = IsProxy
-                },
-                {[Match|L], R}
+        fun({PKey, Policy, EntryMap}, Acc) ->
+            RealmUri = leaf_realm_uri(EntryMap),
+            Uri = parse_ptrie_key_uri(RealmUri, PKey, Policy),
+            maps:fold(
+                fun(EntryKey, {IsProxy, Ns, ProtoSessId}, {La, Ra}) ->
+                    case keep_subscription(
+                             Ns, ProtoSessId, MyNodestring,
+                             NodeFilter, EligibleFilter, ExcludeFilter) of
+                        skip ->
+                            {La, Ra};
+                        {remote, Node} ->
+                            {La, sets:add_element(Node, Ra)};
+                        local ->
+                            M = #sub_idx{
+                                key = {RealmUri, Uri},
+                                entry_key = EntryKey,
+                                is_proxy = IsProxy
+                            },
+                            {[M | La], Ra}
+                    end
+                end,
+                Acc,
+                EntryMap
+            )
         end,
         {[], sets:new()},
         All
     ),
     {lists:reverse(project(Store, L)), sets:to_list(R)};
 
-art_match_result(Store, registration, All) when is_list(All) ->
-    L = [
-        begin
-            RealmUri = bondy_registry_entry:realm_uri(EntryKey),
-            Uri = parse_index_key_uri(RealmUri, Bin),
-            #reg_idx{
-                key = {RealmUri, Uri},
-                entry_key = EntryKey,
-                is_proxy = IsProxy,
-                invoke = Invoke,
-                timestamp = TS
-            }
-        end
-        || {{Bin, _, _, _, _}, {EntryKey, IsProxy, Invoke, TS}} <- All
-    ],
+ptrie_match_result(Store, registration, Opts, All) when is_list(All) ->
+    InvokeFilter = maps:get(invoke, Opts, '_'),
+
+    L = lists:foldl(
+        fun({PKey, Policy, EntryMap}, Acc) ->
+            RealmUri = leaf_realm_uri(EntryMap),
+            Uri = parse_ptrie_key_uri(RealmUri, PKey, Policy),
+            maps:fold(
+                fun(EntryKey,
+                    {IsProxy, Invoke, TS, _Ns, _ProtoSessId},
+                    Acc1) ->
+                    case InvokeFilter of
+                        '_' ->
+                            reg_idx_entry(RealmUri, Uri, EntryKey, IsProxy,
+                                          Invoke, TS, Acc1);
+                        Invoke ->
+                            reg_idx_entry(RealmUri, Uri, EntryKey, IsProxy,
+                                          Invoke, TS, Acc1);
+                        _Other ->
+                            Acc1
+                    end
+                end,
+                Acc,
+                EntryMap
+            )
+        end,
+        [],
+        All
+    ),
     project(Store, L);
 
-art_match_result(Store, Type, {All, Cont}) ->
-    {art_match_result(Store, Type, All), Cont}.
+ptrie_match_result(Store, Type, Opts, {All, Cont}) ->
+    {ptrie_match_result(Store, Type, Opts, All), Cont}.
 
 
 %% @private
-maybe_and([Clause]) ->
-    Clause;
-
-maybe_and(Clauses) ->
-    list_to_tuple(['and' | Clauses]).
+reg_idx_entry(RealmUri, Uri, EntryKey, IsProxy, Invoke, TS, Acc) ->
+    [#reg_idx{
+        key = {RealmUri, Uri},
+        entry_key = EntryKey,
+        is_proxy = IsProxy,
+        invoke = Invoke,
+        timestamp = TS
+    } | Acc].
 
 
 %% @private
-maybe_or([Clause]) ->
-    Clause;
+leaf_realm_uri(EntryMap) ->
+    %% All entries at a ptrie leaf share the same RealmUri (the leaf's
+    %% path encodes it), so any key works as a sample.
+    I = maps:iterator(EntryMap),
+    {EntryKey, _V, _Rest} = maps:next(I),
+    bondy_registry_entry:realm_uri(EntryKey).
 
-maybe_or(Clauses) ->
-    list_to_tuple(['or' | Clauses]).
+
+%% @private
+%% Extract the desired Nodestring from Opts — a binary Nodestring or
+%% `'_'` meaning "any". Matches the old `art_ms` handling of the `node`
+%% and `nodestring` keys.
+ms_node_filter(Opts) ->
+    case maps:find(node, Opts) of
+        {ok, Node} when is_atom(Node) -> atom_to_binary(Node, utf8);
+        error ->
+            case maps:get(nodestring, Opts, '_') of
+                '_' -> '_';
+                Bin when is_binary(Bin) -> Bin
+            end
+    end.
+
+
+%% @private
+%% Returns a set of protocol-session-id binaries from Opts.Key
+%% (`eligible` or `exclude`), or `'_'` meaning no filter.
+ms_id_set_filter(Key, Opts) ->
+    case maps:find(Key, Opts) of
+        error               -> '_';
+        {ok, []}            -> '_';
+        {ok, Ids}           ->
+            sets:from_list([integer_to_binary(I) || I <- Ids])
+    end.
+
+
+%% @private
+%% Decide how to route a subscription entry given its `{Nodestring,
+%% ProtoSessId}` metadata and the caller's filters:
+%%   - `skip`           — filter dropped it.
+%%   - `{remote, Node}` — remote node; add to the node-list accumulator.
+%%   - `local`          — local entry; emit as #sub_idx{}.
+keep_subscription(Ns, ProtoSessId, MyNs, NodeFilter, Eligible, Exclude) ->
+    case {Ns =/= MyNs andalso is_binary(Ns), node_filter_match(Ns, NodeFilter)} of
+        {_, false} ->
+            skip;
+        {true, true} ->
+            {remote, binary_to_atom(Ns, utf8)};
+        {false, true} ->
+            case id_set_match(ProtoSessId, Eligible, Exclude) of
+                true  -> local;
+                false -> skip
+            end
+    end.
+
+
+%% @private
+node_filter_match(_Ns, '_') -> true;
+node_filter_match(Ns, Ns)   -> true;
+node_filter_match(_, _)     -> false.
+
+
+%% @private
+id_set_match(Id, Eligible, Exclude) ->
+    InEligible = case Eligible of
+        '_' -> true;
+        _   -> sets:is_element(Id, Eligible)
+    end,
+    NotExcluded = case Exclude of
+        '_' -> true;
+        _   -> not sets:is_element(Id, Exclude)
+    end,
+    InEligible andalso NotExcluded.
+
+
 
 
 
@@ -1968,6 +1946,20 @@ zip_local_remote({L, C}, ?EOT) ->
 
 zip_local_remote({L, C}, R) ->
     {{L, R}, C}.
+
+
+%% @private
+maybe_and([Clause]) ->
+    Clause;
+maybe_and(Clauses) ->
+    list_to_tuple(['and' | Clauses]).
+
+
+%% @private
+maybe_or([Clause]) ->
+    Clause;
+maybe_or(Clauses) ->
+    list_to_tuple(['or' | Clauses]).
 
 
 %% @private
@@ -2230,60 +2222,40 @@ match_remote_exact_subscription(Store, RealmUri, Uri, Opts) ->
 
 
 %% @private
-art_key_pattern(_Type, RealmUri, Uri) ->
-    {<<RealmUri/binary, $., Uri/binary>>, <<>>, <<>>, <<>>, <<>>}.
-
-
-%% @private
-%% Calls art:match/3 serialising the call via a registry partition server
--spec art_match(t(), entry_type(), uri(), uri(), map(), art:t()) ->
+%% Forward-direction lookup on a policy-specific ptrie: the caller gives
+%% a URI (the registered pattern) and we return all entries keyed by that
+%% URI under the given Policy. Replaces `art:match/3` with mode => exact
+%% but runs directly — no gen_server hop.
+-spec ptrie_match(t(), entry_type(), uri(), uri(), map(),
+                  bondy_registry_ptrie:handle(),
+                  bondy_registry_ptrie:policy()) ->
     match_result().
 
-art_match(Store, Type, RealmUri, Uri, Opts, ART) ->
-    Pid = Store#bondy_registry_store.partition,
-    Pattern = art_key_pattern(Type, RealmUri, term_to_art_key_part(Uri)),
+ptrie_match(Store, Type, RealmUri, Uri, Opts, Ptrie, Policy) ->
     Limit = maps:get(limit, Opts, infinity),
-    %% We do not use limit as ART does not support it yet.
-    ARTOpts = #{
-        %% We match the Uri exactly
-        mode => exact,
-        match_spec => art_ms(Type, Opts),
-        first => <<RealmUri/binary, $.>>
-    },
-    Args = [Pattern, ART, ARTOpts],
-
-    Result = bondy_registry_partition:execute(
-        Pid, fun art:match/3, Args, 10_000
-    ),
-
-    case Result of
-        {ok, []} when Limit =/= infinity ->
-            art_match_result(Store, Type, ?EOT);
-
-        {ok, []} ->
-            art_match_result(Store, Type, []);
-
-        {ok, L} when Limit =/= infinity ->
-            art_match_result(Store, Type, {L, ?EOT});
-
-        {ok, L} ->
-            art_match_result(Store, Type, L);
-
-        {error, badarg} when Limit =/= infinity ->
-            art_match_result(Store, Type, ?EOT);
-
-        {error, badarg} ->
-            art_match_result(Store, Type, []);
-
-        {error, Reason} ->
-            ?LOG_ERROR(#{
-                description =>
-                    "Error when executing serialised match on registry"
-                    "Returning empty result",
-                partition => Pid,
-                reason => Reason
-            }),
-            art_match_result(Store, Type, ?EOT)
+    Key = case Policy of
+        wildcard ->
+            EncodedUri = bondy_registry_ptrie:encode_pattern(Uri),
+            <<RealmUri/binary, $., EncodedUri/binary>>;
+        _ ->
+            <<RealmUri/binary, $., Uri/binary>>
+    end,
+    Entries = case bondy_registry_ptrie:lookup(Ptrie, Key, Policy) of
+        {ok, EntryMap} -> [{Key, Policy, EntryMap}];
+        error          -> []
+    end,
+    case {Entries, Limit} of
+        {[], infinity} ->
+            ptrie_match_result(Store, Type, Opts, []);
+        {[], _} ->
+            ptrie_match_result(Store, Type, Opts, ?EOT);
+        {L, infinity} ->
+            ptrie_match_result(Store, Type, Opts, L);
+        {L, _} ->
+            %% Prefix/wildcard queries do not support pagination (ART
+            %% didn't either). Return all + ?EOT so the caller does not
+            %% try to continue.
+            ptrie_match_result(Store, Type, Opts, {L, ?EOT})
     end.
 
 
@@ -2327,57 +2299,30 @@ find_matches_each(_, _, _, _, _, []) ->
 
 
 %% @private
-%% This MUST NOT be called concurrently
--spec art_find_matches(t(), entry_type(), uri(), uri(), map(), art:t()) ->
+%% Reverse-direction match (WAMP routing hot path): given a concrete
+%% target URI, find every stored pattern in the ptrie whose key matches
+%% it — byte-equal for exact, prefix for prefix-tagged leaves, or
+%% wildcard-segment-matching for wildcard-tagged leaves.
+%%
+%% This replaces `art:find_matches/3`. Runs directly on the calling
+%% process — no gen_server hop, multiple readers truly concurrent.
+-spec ptrie_find_matches(t(), entry_type(), uri(), uri(), map(),
+                         bondy_registry_ptrie:handle()) ->
     match_result().
 
-art_find_matches(Store, Type, RealmUri, Uri, Opts, ART) ->
-    Pid = Store#bondy_registry_store.partition,
-    Pattern = <<RealmUri/binary, $., Uri/binary>>,
+ptrie_find_matches(Store, Type, RealmUri, Uri, Opts, Ptrie) ->
+    Target = <<RealmUri/binary, $., Uri/binary>>,
     Limit = maps:get(limit, Opts, undefined),
-    %% We do not use limit as ART does not support them yet.
-    ARTOpts = #{
-        match_spec => art_ms(Type, Opts),
-        first => <<RealmUri/binary, $.>>
-    },
-    %% Notice we have an inconsistency between art:match/3 and
-    %% art:find_matches/3. In the latter the Trie is the 3rd arg instead of the
-    %% 2nd (as in match/3)
-    Args = [Pattern, ARTOpts, ART],
-
-    Result = bondy_registry_partition:execute(
-        Pid, fun art:find_matches/3, Args, 10_000
-    ),
-
-    %% Always sync at the moment
-    case Result of
-        {ok, []} when Limit =/= undefined ->
-            art_match_result(Store, Type, ?EOT);
-
-        {ok, []} ->
-            art_match_result(Store, Type, []);
-
-        {ok, L} when Limit =/= undefined ->
-            art_match_result(Store, Type, {L, ?EOT});
-
-        {ok, L} ->
-            art_match_result(Store, Type, L);
-
-        {error, badarg} when Limit =/= undefined ->
-            art_match_result(Store, Type, ?EOT);
-
-        {error, badarg} ->
-            art_match_result(Store, Type, []);
-
-        {error, Reason} ->
-            ?LOG_ERROR(#{
-                description =>
-                    "Error when executing serialised find_matches on registry"
-                    "Returning empty result",
-                partition => Pid,
-                reason => Reason
-            }),
-            art_match_result(Store, Type, ?EOT)
+    Result = bondy_registry_ptrie:match(Ptrie, Target),
+    case {Result, Limit} of
+        {[], undefined} ->
+            ptrie_match_result(Store, Type, Opts, []);
+        {[], _} ->
+            ptrie_match_result(Store, Type, Opts, ?EOT);
+        {L, undefined} ->
+            ptrie_match_result(Store, Type, Opts, L);
+        {L, _} ->
+            ptrie_match_result(Store, Type, Opts, {L, ?EOT})
     end.
 
 

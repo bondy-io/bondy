@@ -47,7 +47,6 @@
         lrw,
         %% 1st-party deps
         mops,
-        art,
         bondy_wamp,
         bondy_stdlib,
         bondy_regulator

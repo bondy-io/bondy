@@ -4,32 +4,26 @@
 %% =============================================================================
 
 -module(bondy_registry_ptrie_bench_SUITE).
--behaviour(gen_server).
-
 -moduledoc """
-Microbenchmark comparing `bondy_registry_ptrie` against the `art` library
-(which currently backs `bondy_registry_store`'s prefix / wildcard index).
+Microbenchmarks for `bondy_registry_ptrie` — regression detector for
+future changes.
 
-Scenarios, from the landing plan:
+Each case exercises one dimension of the design:
 
   (a) single-writer insert throughput, no readers
   (b) match latency, no writers
   (c) match latency under 4-writer contention
   (d) insert latency under 16-reader contention
-  (e) match throughput, N readers, N in {1, 4, 8, 16}, no writers
+  (e) match throughput, N readers ∈ {1, 4, 8, 16}, no writers
 
-Targets:
-  - (c), (d), (e) strictly better by 3x+
-  - (a), (b) within 2x of current
+Output is `ct:pal` lines with timing summaries. The suite does not assert
+on absolute numbers — thresholds would be flaky on varied hardware.
 
-Each scenario runs both the ptrie (direct ETS, multi-writer CAS) and the
-ART library (wrapped in a gen_server — that's how production Bondy
-actually deploys it via `bondy_registry_partition:execute/4`; running it
-multi-writer-direct would corrupt since art is single-writer by design).
-
-Output is `ct:pal` with a side-by-side summary. The suite does not assert
-on numbers — tuning thresholds would make it flaky on varied CI hardware.
-Read the summary line in the CT log.
+Historical context: during the ART→ptrie migration this suite ran
+side-by-side against `art`, which Bondy used for prefix/wildcard matches
+via a gen_server (`bondy_registry_partition:execute/4`). The ART
+comparison code was deleted once ptrie shipped; see the final numbers
+captured in `_design/PATTERN_MATCHING_DESIGN_v2.md`.
 """.
 
 -include_lib("common_test/include/ct.hrl").
@@ -46,7 +40,6 @@ Read the summary line in the CT log.
 -define(INSERT_OPS, 20000).
 -define(MATCH_OPS, 50000).
 -define(LATENCY_SAMPLE, 5000).
--define(BACKGROUND_OPS, 50000).
 
 
 %% =============================================================================
@@ -65,7 +58,6 @@ all() ->
 
 
 init_per_suite(Config) ->
-    _ = application:ensure_all_started(art),
     Config.
 
 
@@ -93,11 +85,10 @@ bench_a_insert_single_writer(Config) ->
     N = ?INSERT_OPS,
     Inserts = extend_cycling(Patterns, N),
 
-    Ptrie = bench_ptrie_insert(Inserts),
-    Art   = bench_art_insert(Inserts),
+    Result = bench_insert(Inserts),
 
     report(a, "insert throughput (single writer, no readers)",
-           [{ptrie, Ptrie}, {art_direct, Art}]),
+           [{ptrie, Result}]),
     ok.
 
 
@@ -106,11 +97,9 @@ bench_b_match_no_writers(Config) ->
     Targets0 = ?config(targets, Config),
     Targets = lists:sublist(Targets0, ?LATENCY_SAMPLE),
 
-    Ptrie = with_ptrie(Patterns, fun(H) -> measure_match(H, Targets) end),
-    Art   = with_art(Patterns, fun(T) -> measure_art_match(T, Targets) end),
+    Result = with_ptrie(Patterns, fun(H) -> measure_match(H, Targets) end),
 
-    report(b, "match latency (no writers)",
-           [{ptrie, Ptrie}, {art_direct, Art}]),
+    report(b, "match latency (no writers)", [{ptrie, Result}]),
     ok.
 
 
@@ -120,17 +109,12 @@ bench_c_match_under_4_writers(Config) ->
     Targets = lists:sublist(Targets0, ?LATENCY_SAMPLE),
     Writers = 4,
 
-    Ptrie = with_ptrie(Patterns, fun(H) ->
-        run_with_writers(Writers, fun() -> ptrie_write_loop(H, Patterns) end,
+    Result = with_ptrie(Patterns, fun(H) ->
+        run_with_writers(Writers, fun() -> write_loop(H, Patterns) end,
                          fun() -> measure_match(H, Targets) end)
     end),
-    Art = with_art_gs(Patterns, fun(Pid) ->
-        run_with_writers(Writers, fun() -> art_gs_write_loop(Pid, Patterns) end,
-                         fun() -> measure_art_gs_match(Pid, Targets) end)
-    end),
 
-    report(c, "match latency (4 writers concurrent)",
-           [{ptrie, Ptrie}, {art_gs, Art}]),
+    report(c, "match latency (4 writers concurrent)", [{ptrie, Result}]),
     ok.
 
 
@@ -141,35 +125,27 @@ bench_d_insert_under_16_readers(Config) ->
     InsertOps = ?LATENCY_SAMPLE,
     Inserts = extend_cycling(Patterns, InsertOps),
 
-    Ptrie = with_ptrie(Patterns, fun(H) ->
-        run_with_readers(Readers, fun() -> ptrie_read_loop(H, Targets) end,
-                         fun() -> measure_ptrie_inserts(H, Inserts) end)
-    end),
-    Art = with_art_gs(Patterns, fun(Pid) ->
-        run_with_readers(Readers, fun() -> art_gs_read_loop(Pid, Targets) end,
-                         fun() -> measure_art_gs_inserts(Pid, Inserts) end)
+    Result = with_ptrie(Patterns, fun(H) ->
+        run_with_readers(Readers, fun() -> read_loop(H, Targets) end,
+                         fun() -> measure_inserts(H, Inserts) end)
     end),
 
-    report(d, "insert latency (16 readers concurrent)",
-           [{ptrie, Ptrie}, {art_gs, Art}]),
+    report(d, "insert latency (16 readers concurrent)", [{ptrie, Result}]),
     ok.
 
 
 bench_e_match_scaling(Config) ->
     Patterns = ?config(patterns, Config),
     Targets0 = ?config(targets, Config),
-    OpsPerReader = ?MATCH_OPS div 4,   %% keep total workload bounded
+    OpsPerReader = ?MATCH_OPS div 4,
     Scales = [1, 4, 8, 16],
 
-    PtrieResults = with_ptrie(Patterns, fun(H) ->
-        [{N, match_scale_ptrie(H, Targets0, N, OpsPerReader)} || N <- Scales]
-    end),
-    ArtResults = with_art_gs(Patterns, fun(Pid) ->
-        [{N, match_scale_art_gs(Pid, Targets0, N, OpsPerReader)} || N <- Scales]
+    Results = with_ptrie(Patterns, fun(H) ->
+        [{N, match_scale(H, Targets0, N, OpsPerReader)} || N <- Scales]
     end),
 
     report_scaling(e, "match throughput (N readers, no writers)",
-                   [{ptrie, PtrieResults}, {art_gs, ArtResults}]),
+                   [{ptrie, Results}]),
     ok.
 
 
@@ -184,7 +160,7 @@ with_ptrie(Patterns, Fun) ->
                         ++ integer_to_list(erlang:unique_integer([positive]))),
     H = bondy_registry_ptrie:new(Name),
     try
-        populate_ptrie(H, Patterns),
+        populate(H, Patterns),
         Fun(H)
     after
         catch bondy_registry_ptrie:delete(H)
@@ -192,7 +168,7 @@ with_ptrie(Patterns, Fun) ->
 
 
 %% @private
-populate_ptrie(H, Patterns) ->
+populate(H, Patterns) ->
     lists:foreach(
         fun({K, Policy, V}) ->
             EncodedK = case Policy of
@@ -206,7 +182,7 @@ populate_ptrie(H, Patterns) ->
 
 
 %% @private
-bench_ptrie_insert(Inserts) ->
+bench_insert(Inserts) ->
     H = bondy_registry_ptrie:new(
         list_to_atom("bench_ptrie_ins_"
                      ++ integer_to_list(erlang:unique_integer([positive])))
@@ -242,7 +218,7 @@ measure_match(H, Targets) ->
 
 
 %% @private
-measure_ptrie_inserts(H, Inserts) ->
+measure_inserts(H, Inserts) ->
     Samples = [begin
         T0 = erlang:monotonic_time(nanosecond),
         EncodedK = case Policy of
@@ -257,27 +233,27 @@ measure_ptrie_inserts(H, Inserts) ->
 
 
 %% @private
-ptrie_write_loop(H, Patterns) ->
-    %% Infinite until killed — drives the "background writer" in (c).
-    P = lists:nth(rand:uniform(length(Patterns)), Patterns),
-    {K, Policy, V} = P,
+write_loop(H, Patterns) ->
+    {K, Policy, V} = lists:nth(rand:uniform(length(Patterns)), Patterns),
     EncodedK = case Policy of
         wildcard -> bondy_registry_ptrie:encode_pattern(K);
         _ -> K
     end,
-    _ = bondy_registry_ptrie:insert(H, EncodedK, Policy, {V, erlang:unique_integer()}),
-    ptrie_write_loop(H, Patterns).
+    _ = bondy_registry_ptrie:insert(
+        H, EncodedK, Policy, {V, erlang:unique_integer()}
+    ),
+    write_loop(H, Patterns).
 
 
 %% @private
-ptrie_read_loop(H, Targets) ->
+read_loop(H, Targets) ->
     T = lists:nth(rand:uniform(length(Targets)), Targets),
     _ = bondy_registry_ptrie:match(H, T),
-    ptrie_read_loop(H, Targets).
+    read_loop(H, Targets).
 
 
 %% @private
-match_scale_ptrie(H, Targets, NReaders, OpsPerReader) ->
+match_scale(H, Targets, NReaders, OpsPerReader) ->
     Parent = self(),
     T0 = erlang:monotonic_time(nanosecond),
     Pids = [spawn_link(fun() ->
@@ -297,213 +273,13 @@ match_scale_ptrie(H, Targets, NReaders, OpsPerReader) ->
 
 
 %% =============================================================================
-%% ART HARNESS
-%% =============================================================================
-
-
-%% @private
-with_art(Patterns, Fun) ->
-    T = art:new(),
-    try
-        populate_art(T, Patterns),
-        Fun(T)
-    after
-        catch art:delete(T)
-    end.
-
-
-%% @private
-populate_art(T, Patterns) ->
-    %% ART encoding:
-    %%   exact    -> store raw key
-    %%   prefix   -> store key ++ "*" (ART's prefix sentinel)
-    %%   wildcard -> store URI with empty-segments as-is; ART matches ".." naturally
-    lists:foreach(
-        fun({K, Policy, V}) ->
-            ArtKey = case Policy of
-                exact -> K;
-                prefix -> <<K/binary, "*">>;
-                wildcard -> K
-            end,
-            _ = art:store(ArtKey, V, T)
-        end,
-        Patterns
-    ).
-
-
-%% @private
-bench_art_insert(Inserts) ->
-    T = art:new(),
-    try
-        T0 = erlang:monotonic_time(nanosecond),
-        lists:foreach(
-            fun({K, Policy, V}) ->
-                ArtKey = case Policy of
-                    exact -> K;
-                    prefix -> <<K/binary, "*">>;
-                    wildcard -> K
-                end,
-                _ = art:store(ArtKey, V, T)
-            end,
-            Inserts
-        ),
-        T1 = erlang:monotonic_time(nanosecond),
-        summarize(throughput, length(Inserts), T1 - T0)
-    after
-        catch art:delete(T)
-    end.
-
-
-%% @private
-measure_art_match(T, Targets) ->
-    Samples = [begin
-        T0 = erlang:monotonic_time(nanosecond),
-        _ = art:find_matches(Target, T),
-        T1 = erlang:monotonic_time(nanosecond),
-        T1 - T0
-    end || Target <- Targets],
-    summarize(latency, Samples).
-
-
-%% =============================================================================
-%% ART-VIA-GEN_SERVER HARNESS (what production actually sees)
-%% =============================================================================
-
-
-%% Simple gen_server wrapping an ART trie. Mirrors
-%% `bondy_registry_partition:execute/4` — every op is a gen_server:call.
-%% (The `-behaviour(gen_server).` declaration is at the top of the file;
-%% `-compile([nowarn_export_all, export_all]).` covers the callback exports.)
-
-
-art_gs_start(Patterns) ->
-    {ok, Pid} = gen_server:start_link(?MODULE, [], []),
-    ok = gen_server:call(Pid, {populate, Patterns}, 60_000),
-    Pid.
-
-
-art_gs_stop(Pid) ->
-    catch gen_server:stop(Pid, normal, 5_000).
-
-
-art_gs_insert(Pid, K, Policy, V) ->
-    gen_server:call(Pid, {insert, K, Policy, V}, 30_000).
-
-
-art_gs_match(Pid, Target) ->
-    gen_server:call(Pid, {match, Target}, 30_000).
-
-
-init([]) ->
-    {ok, art:new()}.
-
-
-handle_call({populate, Patterns}, _From, T) ->
-    lists:foreach(
-        fun({K, Policy, V}) ->
-            ArtKey = case Policy of
-                exact -> K;
-                prefix -> <<K/binary, "*">>;
-                wildcard -> K
-            end,
-            _ = art:store(ArtKey, V, T)
-        end,
-        Patterns
-    ),
-    {reply, ok, T};
-handle_call({insert, K, Policy, V}, _From, T) ->
-    ArtKey = case Policy of
-        exact -> K;
-        prefix -> <<K/binary, "*">>;
-        wildcard -> K
-    end,
-    _ = art:store(ArtKey, V, T),
-    {reply, ok, T};
-handle_call({match, Target}, _From, T) ->
-    R = art:find_matches(Target, T),
-    {reply, R, T};
-handle_call(_, _, T) ->
-    {reply, {error, unknown}, T}.
-
-
-handle_cast(_, T) -> {noreply, T}.
-
-
-%% @private
-with_art_gs(Patterns, Fun) ->
-    Pid = art_gs_start(Patterns),
-    try
-        Fun(Pid)
-    after
-        art_gs_stop(Pid)
-    end.
-
-
-%% @private
-measure_art_gs_match(Pid, Targets) ->
-    Samples = [begin
-        T0 = erlang:monotonic_time(nanosecond),
-        _ = art_gs_match(Pid, Target),
-        T1 = erlang:monotonic_time(nanosecond),
-        T1 - T0
-    end || Target <- Targets],
-    summarize(latency, Samples).
-
-
-%% @private
-measure_art_gs_inserts(Pid, Inserts) ->
-    Samples = [begin
-        T0 = erlang:monotonic_time(nanosecond),
-        ok = art_gs_insert(Pid, K, Policy, V),
-        T1 = erlang:monotonic_time(nanosecond),
-        T1 - T0
-    end || {K, Policy, V} <- Inserts],
-    summarize(latency, Samples).
-
-
-%% @private
-art_gs_write_loop(Pid, Patterns) ->
-    {K, Policy, V} = lists:nth(rand:uniform(length(Patterns)), Patterns),
-    _ = art_gs_insert(Pid, K, Policy, {V, erlang:unique_integer()}),
-    art_gs_write_loop(Pid, Patterns).
-
-
-%% @private
-art_gs_read_loop(Pid, Targets) ->
-    Target = lists:nth(rand:uniform(length(Targets)), Targets),
-    _ = art_gs_match(Pid, Target),
-    art_gs_read_loop(Pid, Targets).
-
-
-%% @private
-match_scale_art_gs(Pid, Targets, NReaders, OpsPerReader) ->
-    Parent = self(),
-    T0 = erlang:monotonic_time(nanosecond),
-    Pids = [spawn_link(fun() ->
-        lists:foreach(
-            fun(I) ->
-                Target = lists:nth((I rem length(Targets)) + 1, Targets),
-                _ = art_gs_match(Pid, Target)
-            end,
-            lists:seq(1, OpsPerReader)
-        ),
-        Parent ! {done, self()}
-    end) || _ <- lists:seq(1, NReaders)],
-    [receive {done, P} -> ok end || P <- Pids],
-    T1 = erlang:monotonic_time(nanosecond),
-    TotalOps = NReaders * OpsPerReader,
-    summarize(throughput, TotalOps, T1 - T0).
-
-
-%% =============================================================================
-%% COMMON HARNESS — spawn background workers, measure the foreground
+%% WORKER HARNESS
 %% =============================================================================
 
 
 %% @private
 run_with_writers(N, WriterFun, MeasureFun) ->
-    Writers = [spawn_link(fun() -> WriterFun() end)
-               || _ <- lists:seq(1, N)],
+    Writers = [spawn_link(fun() -> WriterFun() end) || _ <- lists:seq(1, N)],
     Result = MeasureFun(),
     [unlink(P) || P <- Writers],
     [exit(P, kill) || P <- Writers],
@@ -512,8 +288,7 @@ run_with_writers(N, WriterFun, MeasureFun) ->
 
 %% @private
 run_with_readers(N, ReaderFun, MeasureFun) ->
-    Readers = [spawn_link(fun() -> ReaderFun() end)
-               || _ <- lists:seq(1, N)],
+    Readers = [spawn_link(fun() -> ReaderFun() end) || _ <- lists:seq(1, N)],
     Result = MeasureFun(),
     [unlink(P) || P <- Readers],
     [exit(P, kill) || P <- Readers],
@@ -619,9 +394,7 @@ report_scaling(Case, Description, Runs) ->
 
 
 %% @private
-%% A realistic mix of WAMP-like URI patterns across the three policies.
-%% The distribution (~60% exact, ~25% prefix, ~15% wildcard) mirrors what
-%% a large WAMP registry tends to see in production.
+%% Realistic WAMP-like mix: ~60% exact, ~25% prefix, ~15% wildcard.
 make_patterns(N) ->
     rand:seed(exsss, {1, 2, 3}),
     [make_pattern(I) || I <- lists:seq(1, N)].
@@ -651,7 +424,6 @@ make_uri(I, Policy) ->
         prefix ->
             iolist_to_binary([Domain, <<".">>, Service, <<".">>]);
         wildcard ->
-            %% Randomize wildcard positions: sometimes service, sometimes method.
             case I rem 3 of
                 0 -> iolist_to_binary([Domain, <<"..">>, Method]);
                 1 -> iolist_to_binary([Domain, <<".">>, Service, <<"..">>,
@@ -662,9 +434,6 @@ make_uri(I, Policy) ->
 
 
 %% @private
-%% Valid strict target URIs (no wildcards, no trailing dots). A mix of
-%% hits and misses — some are structured to match registered patterns,
-%% others are random.
 make_targets(N) ->
     [make_target(I) || I <- lists:seq(1, N)].
 
@@ -680,10 +449,8 @@ make_target(I) ->
 
 
 %% @private
-%% Extend `L` by cycling to produce exactly `N` elements.
 extend_cycling(L, N) ->
     extend_cycling(L, L, N, []).
-
 
 extend_cycling(_L, _C, 0, Acc) ->
     lists:reverse(Acc);
