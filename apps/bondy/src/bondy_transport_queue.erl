@@ -95,9 +95,19 @@ Three layers enforce bounds:
 -doc """
 Initialises the sharded queue tables and the metadata table.
 
-Creates `NumPartitions` physical ETS tables (`bondy_transport_queue_0`, ...),
-each registered with `bondy_table_manager` as heir. The partition ring is stored
-in `persistent_term` for zero-cost lookup on the hot path.
+Creates `NumPartitions` anonymous ETS tables registered with
+`bondy_table_manager` under `{?MODULE, partition, Bucket}` keys. The
+tables are owned by `bondy_table_manager` so they survive the caller
+(typically `bondy_transport_queue_manager`) crashing and being restarted
+by its supervisor — in-flight queued messages are not lost.
+
+The partition ring maps `Bucket -> ets:tid()` and is stored in
+`persistent_term` for zero-cost lookup on the hot path.
+
+Partitions are anonymous (no `named_table`) so that no atoms are allocated
+per bucket — the table identifier is an opaque `ets:tid()`. The function
+is idempotent: re-running it on a manager restart finds the existing
+tables rather than recreating them.
 
 This function must be called once at startup, typically from
 `bondy_transport_queue_manager:init/1`.
@@ -110,21 +120,25 @@ init() ->
         erlang:system_info(schedulers)
     ),
 
-    %% Create the sharded queue tables
+    %% Sharded queue tables — anonymous, owned by bondy_table_manager so
+    %% they survive the transport_queue_manager crashing and being
+    %% restarted by its supervisor. Idempotent: existing tables are
+    %% returned as-is on re-init.
+    PartitionOpts = [
+        ordered_set,
+        {keypos, #bondy_transport_queue_entry.key},
+        public,
+        {read_concurrency, true},
+        {write_concurrency, true},
+        {decentralized_counters, true}
+    ],
     Ring = lists:foldl(
         fun(Bucket, Acc) ->
-            TabName = table_name(Bucket),
-            Opts = [
-                ordered_set,
-                {keypos, #bondy_transport_queue_entry.key},
-                named_table,
-                public,
-                {read_concurrency, true},
-                {write_concurrency, true},
-                {decentralized_counters, true}
-            ],
-            {ok, _} = bondy_table_manager:add(TabName, Opts),
-            Acc#{Bucket => TabName}
+            Key = {?MODULE, partition, Bucket},
+            {ok, Tab} = bondy_table_manager:get_or_create_anonymous(
+                Key, PartitionOpts
+            ),
+            Acc#{Bucket => Tab}
         end,
         #{},
         lists:seq(0, NumPartitions - 1)
@@ -133,7 +147,8 @@ init() ->
     %% Store the ring in persistent_term for zero-cost lookup
     persistent_term:put(?RING_KEY, Ring),
 
-    %% Create the metadata table
+    %% Metadata table — named (single static atom, not a per-bucket leak)
+    %% and also owned by bondy_table_manager. Idempotent.
     MetaOpts = [
         set,
         {keypos, #bondy_transport_queue_meta.transport_id},
@@ -143,7 +158,7 @@ init() ->
         {write_concurrency, true},
         {decentralized_counters, true}
     ],
-    {ok, _} = bondy_table_manager:add(?META_TAB, MetaOpts),
+    {ok, _} = bondy_table_manager:get_or_create(?META_TAB, MetaOpts),
 
     ok.
 
@@ -294,9 +309,9 @@ byte_size(TransportId) when is_binary(TransportId) ->
 
 
 -doc """
-Returns the list of all sharded queue table names.
+Returns the list of all sharded queue table identifiers.
 """.
--spec tables() -> [atom()].
+-spec tables() -> [ets:tid()].
 
 tables() ->
     Ring = persistent_term:get(?RING_KEY),
@@ -497,6 +512,3 @@ lookup_meta(TransportId) ->
     end.
 
 
-%% @private
-table_name(Bucket) when is_integer(Bucket) ->
-    list_to_atom("bondy_transport_queue_" ++ integer_to_list(Bucket)).
