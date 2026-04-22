@@ -46,15 +46,15 @@ registry.
 %% it is a safety valve against pathological livelock, not a load-shedding
 %% mechanism.
 -define(DEFAULT_CAS_RETRIES, 1024).
+%% The WAMP IRI segment separator
+-define(SEGMENT_SEP, $.).
 %% Sentinel byte that stands for "empty URI component" (WAMP wildcard
 %% single-segment match). The WAMP URI grammars forbid `\0` in valid URI
 %% components (strict: `[0-9a-z_]+`, loose: `[^\s.#]+`), so this byte
 %% unambiguously marks a wildcard position during match-time traversal.
 %% Byte-indexed into a 256-tuple, so it lives at tuple index 1.
 -define(WILDCARD_BYTE, 0).
--define(SEGMENT_SEP, $.).
--define(IS_POLICY(P),
-        (P =:= exact orelse P =:= prefix orelse P =:= wildcard)).
+-define(IS_POLICY(P), (P =:= exact orelse P =:= prefix orelse P =:= wildcard)).
 
 
 -record(pnode, {
