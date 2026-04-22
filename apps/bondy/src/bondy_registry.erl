@@ -1629,8 +1629,8 @@ do_prune(_Index, _Node, _From, L) when is_list(L) ->
             ),
 
             case Result of
-                {ok, _} ->
-                    ok;
+                {ok, Entry} ->
+                    maybe_flush_callee_promises(Type, Entry);
 
                 {error, notfound} ->
                     ?LOG_WARNING(#{
@@ -1667,6 +1667,18 @@ do_prune(Index, Node, From, ETSCont0) ->
             do_prune(Index, Node, From, ETSCont)
     end.
 
+
+%% @private
+%% @doc Fast-fails in-flight callers whose callee was on the pruned
+%% node's registration, so they don't wait for the call timeout.
+%% Subscriptions have no promise table to reap.
+maybe_flush_callee_promises(registration, Entry) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    Ref = bondy_registry_entry:ref(Entry),
+    bondy_dealer:flush_callee_promises(RealmUri, Ref);
+
+maybe_flush_callee_promises(_, _) ->
+    ok.
 
 
 sort(_, ?EOT) ->

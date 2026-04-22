@@ -82,6 +82,7 @@
 -export([expiry/1]).
 -export([find/1]).
 -export([flush/2]).
+-export([flush/3]).
 -export([get/2]).
 -export([get/3]).
 -export([info/1]).
@@ -599,12 +600,37 @@ evict_expired(Opts) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Removes all pending promises from the queue for the reference
+%% @doc Removes all pending promises from the queue for the reference.
+%% Equivalent to `flush(RealmUri, Ref, #{})'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec flush(RealmUri :: uri(), bondy_ref:t()) -> ok.
+-spec flush(RealmUri :: uri(), bondy_ref:t() | '_') -> ok.
 
-flush(RealmUri, '_') ->
+flush(RealmUri, Ref) ->
+    flush(RealmUri, Ref, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Removes all pending promises from the queue for the reference.
+%%
+%% When `Ref' is a concrete `bondy_ref:t()' and `Opts' contains the key
+%% `on_callee_flush', the bound function is invoked once per `invocation'
+%% promise being removed (i.e. promises where `Ref' is the callee) before the
+%% promise is deleted. This is used by the dealer to fast-fail in-flight
+%% calls when the callee session dies, avoiding waits up to the call timeout.
+%%
+%% The callback is not invoked for `call' promises (where `Ref' is the caller)
+%% as there is no longer a caller to notify. It is also not invoked when
+%% `Ref' is `_' (bulk flush).
+%% @end
+%% -----------------------------------------------------------------------------
+-spec flush(
+    RealmUri :: uri(),
+    bondy_ref:t() | '_',
+    Opts :: #{on_callee_flush => fun((t()) -> ok)}
+) -> ok.
+
+flush(RealmUri, '_', _Opts) ->
     Tab = ?TAB(RealmUri),
     KeyPattern = #bondy_rpc_promise_key{
         realm_uri = RealmUri,
@@ -618,14 +644,23 @@ flush(RealmUri, '_') ->
     _ = do_flush(Tab, KeyPattern),
     ok;
 
-flush(RealmUri, Ref) ->
+flush(RealmUri, Ref, Opts) ->
     Tab = ?TAB(RealmUri),
+    OnCalleeFlush = maps:get(on_callee_flush, Opts, undefined),
 
-    %% As caller
+    is_function(OnCalleeFlush, 1)
+        orelse undefined == OnCalleeFlush
+        orelse error({badarg, {on_callee_flush, OnCalleeFlush}}),
+
+    %% As caller — no notify (caller is already gone)
     _ = do_flush(Tab, call_key_pattern(RealmUri, Ref, '_')),
 
-    %% As callee
-    _ = do_flush(Tab, invocation_key_pattern(RealmUri, '_', '_', Ref, '_')),
+    %% As callee — optionally invoke callback per promise before deletion
+    _ = do_flush_as_callee(
+        Tab,
+        invocation_key_pattern(RealmUri, '_', '_', Ref, '_'),
+        OnCalleeFlush
+    ),
 
     ok.
 
@@ -655,6 +690,39 @@ do_flush(Tab, Key) ->
     [{MatchPattern, _, _}] = match_spec(Key),
     MS = [{MatchPattern, [], ['true']}],
     ets:select_delete(Tab, MS).
+
+
+%% @private
+do_flush_as_callee(Tab, Key, undefined) ->
+    do_flush(Tab, Key);
+
+do_flush_as_callee(Tab, Key, OnFlush) ->
+    [{MatchPattern, _, _}] = match_spec(Key),
+    MS = [{MatchPattern, [], ['$_']}],
+    do_flush_as_callee_loop(Tab, OnFlush, ets:select(Tab, MS, 100)).
+
+
+%% @private
+do_flush_as_callee_loop(_, _, '$end_of_table') ->
+    ok;
+
+do_flush_as_callee_loop(Tab, OnFlush, {Promises, Cont}) ->
+    _ = [
+        begin
+            %% This is an ordered_set so take always returns
+            %% at most 1 element
+            case ets:take(Tab, K) of
+                [Promise] ->
+                    maybe_apply(OnFlush, Promise);
+                [] ->
+                    %% The item was removed by some other process since we
+                    %% read it, as select followed by take is not atomic
+                    ok
+            end
+        end
+        || #bondy_rpc_promise{key = K} <- Promises
+    ],
+    do_flush_as_callee_loop(Tab, OnFlush, ets:select(Cont)).
 
 
 %% @private
@@ -699,7 +767,7 @@ maybe_apply(Fun, V) ->
     catch
         Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
-                message => <<"Error while applying on_evict function">>,
+                description => "Error while applying user callback",
                 class => Class,
                 reason => Reason,
                 stacktrace => Stacktrace

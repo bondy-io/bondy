@@ -1033,15 +1033,16 @@ find_matches(Store, Type, RealmUri, Uri, Opts) ->
     Policy = maps:get(match, Opts, '_'),
 
     case {Policy, Limit} of
-        {'_', Limit}
-        when Limit == undefined orelse (is_integer(Limit) andalso Limit > 0) ->
+        {'_', undefined} ->
             ExactRes = find_exact_matches(Store, Type, RealmUri, Uri, Opts),
             PrefixRes = find_prefix_matches(Store, Type, RealmUri, Uri, Opts),
             WildRes = find_wildcard_matches(Store, Type, RealmUri, Uri, Opts),
             merge_results([ExactRes, PrefixRes, WildRes], Type, match);
 
-        %% {'_', N} when is_integer(N), N > 0 ->
-        %%     find_exact_matches(Store, Type, RealmUri, Uri, Opts);
+        {'_', N} when is_integer(N), N > 0 ->
+            find_matches_each(
+                Store, Type, RealmUri, Uri, Opts, ?MATCH_POLICIES
+            );
 
         {?EXACT_MATCH, _} ->
             find_exact_matches(Store, Type, RealmUri, Uri, Opts);

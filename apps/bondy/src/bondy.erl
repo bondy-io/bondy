@@ -612,22 +612,13 @@ do_send(To, M, #{realm_uri := RealmUri} = Opts) ->
                 true ->
                     ok;
                 false ->
-                    %% bondy_dealer (using bondy_rpc_load_balancer) is already
-                    %% checking if process is alive, so for RPC this is a
-                    %% double check, not expensive but a waste anyway.
-                    %% TODO Consider avoiding this check here.
-                    case erlang:is_process_alive(Pid) of
-                        true ->
-                            Pid ! request(self(), RealmUri, M),
-                            ok;
-                        false ->
-                            ?LOG_DEBUG(#{
-                                description => "Cannot deliver message",
-                                reason => noproc,
-                                message_type => element(1, M)
-                            }),
-                            ok
-                    end
+                    %% No liveness check — `!` to a dead local pid is a
+                    %% silent no-op and `bondy_dealer:flush/2' reaps any
+                    %% in-flight promises on session death, so callers
+                    %% fast-fail via the reaper rather than a per-send
+                    %% probe.
+                    Pid ! request(self(), RealmUri, M),
+                    ok
             end
     end.
 

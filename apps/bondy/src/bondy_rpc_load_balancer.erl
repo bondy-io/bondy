@@ -138,8 +138,7 @@
     {ok, bondy_registry_entry:t()} | {error, noproc | map()}.
 
 select(Entries, Opts) when is_list(Entries) ->
-    Nodestring = bondy_config:nodestring(),
-    do_select(iterate(Entries, Opts), Nodestring).
+    do_select(iterate(Entries, Opts)).
 
 
 %% -----------------------------------------------------------------------------
@@ -249,21 +248,18 @@ maybe_sort_by_locality(false, L) ->
 
 
 %% @private
-do_select('$end_of_table', _) ->
+%% @doc No synchronous liveness check on the chosen entry: the registry
+%% removes entries on session death and `bondy_dealer:flush/2' fast-fails
+%% any in-flight promises for the dead callee, so the narrow TOCTOU race
+%% that a check would have covered is bounded by the same failure path.
+do_select('$end_of_table') ->
     {error, noproc};
 
-do_select({error, _} = Error, _) ->
+do_select({error, _} = Error) ->
     Error;
 
-do_select({Entry, Iter}, Nodestring) ->
-    %% An optimisation as bondy_registry_entry:is_local/1 would fetch the
-    %% nodestring every time.
-    case bondy_registry_entry:is_alive(Entry) of
-        true ->
-            {ok, Entry};
-        false ->
-            do_select(iterate(Iter), Nodestring)
-    end.
+do_select({Entry, _Iter}) ->
+    {ok, Entry}.
 
 
 %% -----------------------------------------------------------------------------
@@ -302,40 +298,15 @@ next_round_robin(Iter) ->
 
 %% @private
 next_round_robin(#iterator{entries = [H|T]} = Iter, undefined) ->
-    %% We never invoked this procedure before or we reordered the round
+    %% We never invoked this procedure before or we reordered the round.
+    %% No synchronous liveness check — see do_select/1.
     NewIter = Iter#iterator{entries = T},
-
-    case bondy_config:nodestring() =:= bondy_registry_entry:nodestring(H) of
-        true ->
-            %% The pid of the connection process
-            Pid = bondy_registry_entry:pid(H),
-
-            case erlang:is_process_alive(Pid) of
-                true ->
-                    %% We update the invocation state
-                    ok = set_last_invocation(
-                        bondy_registry_entry:realm_uri(H),
-                        bondy_registry_entry:uri(H),
-                        bondy_registry_entry:id(H)
-                    ),
-                    %% We return the entry and the remaining ones
-                    {H, NewIter};
-                false ->
-                    %% The peer connection must have been closed between
-                    %% the time we read and now.
-                    next_round_robin(NewIter, undefined)
-            end;
-        false ->
-            %% A remote callee
-            %% We update the invocation state
-            ok = set_last_invocation(
-                bondy_registry_entry:realm_uri(H),
-                bondy_registry_entry:uri(H),
-                bondy_registry_entry:id(H)
-            ),
-            %% We return the entry and the remaining ones
-            {H, NewIter}
-    end;
+    ok = set_last_invocation(
+        bondy_registry_entry:realm_uri(H),
+        bondy_registry_entry:uri(H),
+        bondy_registry_entry:id(H)
+    ),
+    {H, NewIter};
 
 next_round_robin(Iter, #last_invocation{value = LastId}) ->
     Pred = fun(E) -> LastId =:= bondy_registry_entry:id(E) end,
