@@ -727,7 +727,10 @@ when ?SOCKET_DATA(Tag) ->
     ok = set_socket_active(State),
 
     try
-        Msg = binary_to_term(Data),
+        %% `[safe]` prevents atom-table exhaustion from a malformed or
+        %% adversarial peer. The surrounding try/catch already stops the
+        %% connection on decode failure.
+        Msg = binary_to_term(Data, [safe]),
         ?LOG_DEBUG(#{
             description => "Received message from server",
             message => Msg
