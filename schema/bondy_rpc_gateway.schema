@@ -187,7 +187,7 @@
 %% -----------------------------------------------------------------------------
 {mapping, "rpc_gateway.services.$service.pool.checkout_timeout",
           "bondy_rpc_gateway.services", [
-  {datatype, {duration, s}},
+  {datatype, {duration, ms}},
   {default, "5s"}
 ]}.
 
@@ -198,7 +198,7 @@
 %% -----------------------------------------------------------------------------
 {mapping, "rpc_gateway.services.$service.pool.connect_timeout",
           "bondy_rpc_gateway.services", [
-  {datatype, {duration, s}},
+  {datatype, {duration, ms}},
   {default, "8s"}
 ]}.
 
@@ -208,7 +208,7 @@
 %% -----------------------------------------------------------------------------
 {mapping, "rpc_gateway.services.$service.pool.idle_timeout",
           "bondy_rpc_gateway.services", [
-  {datatype, {duration, s}},
+  {datatype, {duration, ms}},
   {default, "5m"}
 ]}.
 
@@ -219,7 +219,7 @@
 %% -----------------------------------------------------------------------------
 {mapping, "rpc_gateway.services.$service.pool.recv_timeout",
           "bondy_rpc_gateway.services", [
-  {datatype, {duration, s}},
+  {datatype, {duration, ms}},
   {default, "60s"}
 ]}.
 
