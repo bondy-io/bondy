@@ -25,6 +25,11 @@
     index               ::  integer(),
     store               ::  bondy_registry_store:t(),
     remote_tab          ::  bondy_registry_remote_index:t(),
+    %% One janitor per ptrie handle in the store. The map is keyed by pid
+    %% so an `{'EXIT', Pid, _}` lookup tells us which handle to respawn
+    %% against. The handle survives janitor crashes — its ETS tables are
+    %% owned by this partition gen_server.
+    janitors            ::  #{pid() => bondy_registry_ptrie:handle()},
     start_ts            ::  pos_integer()
 }).
 
@@ -567,8 +572,8 @@ find_matches(Partition, Type, RealmUri, Uri, Opts) when is_pid(Partition) ->
 
 
 init([Index]) ->
-    %% Trap exists otherwise terminate/1 won't be called when shutdown by
-    %% supervisor.
+    %% Trap exits otherwise terminate/2 won't be called when shutdown by
+    %% supervisor, and we wouldn't observe janitor crashes for restart.
     erlang:process_flag(trap_exit, true),
 
     %% We connect this worker to the pool worker name
@@ -582,10 +587,13 @@ init([Index]) ->
     Tab = bondy_registry_remote_index:new(Index),
     _ = persistent_term:put(?REGISTRY_REMOTE_IDX_KEY(self()), Tab),
 
+    Janitors = start_janitors(bondy_registry_store:ptrie_handles(Store)),
+
     State = #state{
         index = Index,
         store = Store,
         remote_tab = Tab,
+        janitors = Janitors,
         start_ts = erlang:system_time()
     },
     {ok, State}.
@@ -623,6 +631,29 @@ handle_info({'ETS-TRANSFER', _, _, _}, State) ->
     %% We ignore as tables are named.
     {noreply, State};
 
+handle_info({'EXIT', Pid, Reason}, #state{janitors = Js} = State) ->
+    case maps:take(Pid, Js) of
+        {Handle, Js1} ->
+            %% A ptrie janitor crashed. The ptrie's ETS tables are owned
+            %% by this partition, not the janitor — the handle is still
+            %% valid, so just spawn a fresh janitor against it.
+            ?LOG_WARNING(#{
+                description => "ptrie janitor exited; restarting",
+                pid => Pid,
+                reason => Reason
+            }),
+            NewPid = start_janitor(Handle),
+            {noreply, State#state{janitors = Js1#{NewPid => Handle}}};
+        error ->
+            %% Some other linked process exited. Currently there are
+            %% none, but be tolerant.
+            ?LOG_DEBUG(#{
+                description => "unexpected linked process exited",
+                pid => Pid,
+                reason => Reason
+            }),
+            {noreply, State}
+    end;
 
 handle_info(Info, State) ->
     ?LOG_DEBUG(#{
@@ -657,10 +688,37 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 
-cleanup(_State) ->
+cleanup(#state{janitors = Js}) ->
     _ = persistent_term:erase(?REGISTRY_STORE_KEY(self())),
     _ = persistent_term:erase(?REGISTRY_REMOTE_IDX_KEY(self())),
+    %% Stop janitors before our ETS tables die so any in-flight sweep
+    %% finishes against valid tables. `gen_server:stop/3` returns once the
+    %% janitor has exited; the link signal we receive after is harmless
+    %% because we are already inside terminate/2.
+    maps:foreach(
+        fun(Pid, _Handle) ->
+            catch bondy_registry_ptrie_janitor:stop(Pid)
+        end,
+        Js
+    ),
     ok.
+
+
+%% @private
+start_janitors(Handles) ->
+    lists:foldl(
+        fun(Handle, Acc) ->
+            Acc#{start_janitor(Handle) => Handle}
+        end,
+        #{},
+        Handles
+    ).
+
+
+%% @private
+start_janitor(Handle) ->
+    {ok, Pid} = bondy_registry_ptrie_janitor:start_link(Handle, #{}),
+    Pid.
 
 
 do_execute(_State, Fun, []) ->

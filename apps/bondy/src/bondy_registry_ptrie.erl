@@ -11,17 +11,19 @@
 A persistent (functional) path-copied Adaptive Radix Tree on ETS.
 
 Every write allocates fresh copies of the O(log_256 N) nodes on the
-root-to-leaf path and publishes the new version with a single-row CAS on the
-root-pointer row. Readers grab the current root once and traverse an
+root-to-leaf path and publishes the new version with a single-row CAS on
+the root-pointer row. Readers grab the current root once and traverse an
 immutable snapshot; they never take locks, never retry, never bump
-refcounts. Old nodes are reclaimed by a janitor (see
-`bondy_registry_ptrie_janitor`) using QSBR via the `atomics` module.
+refcounts. Retired nodes are reclaimed by `bondy_registry_ptrie_janitor`
+using QSBR — readers register their starting epoch in `epoch_tab` for the
+duration of a traversal, and the janitor only frees nodes retired before
+the minimum live epoch.
 
-This module is a prototype and intentionally isolated from
-`bondy_registry_store` — its API is generic (opaque `key()`, opaque
-`value()`) so it can be tested standalone before being wired into the
-registry.
-
+The API is intentionally generic — opaque `t:key/0`, opaque `t:value/0` —
+so the module is reusable. The Bondy registry uses it via
+`bondy_registry_store`, mapping each ptrie leaf to a
+`#{EntryKey => Meta}` map (one ptrie leaf can carry many registrations
+under the same `{URI, Policy}`); see `bondy_registry_ptrie:update/4`.
 """.
 
 
@@ -169,11 +171,13 @@ registry.
 
 
 -doc """
-Create a new ptrie handle identified by `Name`. The atom is used to name the
-underlying ETS tables (`<Name>_root`, `<Name>_nodes`, `<Name>_retire`) so they
-can be inspected with `observer` and named-looked-up in tests.
+Create a new ptrie handle identified by `Name`. The atom is used to name
+the underlying ETS tables (`<Name>_root`, `<Name>_nodes`, `<Name>_retire`,
+`<Name>_epochs`) for inspection in `observer`.
 
-The handle owns three ETS tables. The caller process becomes their heir.
+The handle owns four ETS tables (root, node, retire, epoch). The caller
+process becomes their owner — the tables are deleted when the caller
+terminates. Use `delete/1` to release them earlier.
 """.
 -spec new(Name :: atom()) -> handle().
 

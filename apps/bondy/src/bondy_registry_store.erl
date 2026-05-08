@@ -85,7 +85,7 @@ Indeces for matching bondy_registry_entry(s).
     realm_uri                   ::  optional(uri()),
     uri                         ::  uri(),
     opts                        ::  map(),
-    source                      ::  ets | art | plum_db,
+    source                      ::  ets | plum_db,
     original                    ::  optional(
                                         term()
                                         | ets:continuation()
@@ -167,6 +167,7 @@ Indeces for matching bondy_registry_entry(s).
 %% STORE APIS
 -export([new/1]).
 -export([info/1]).
+-export([ptrie_handles/1]).
 
 %% ENTRY API
 -export([add/2]).
@@ -219,17 +220,16 @@ Indeces for matching bondy_registry_entry(s).
 -doc """
 Returns a new registry store.
 
-The store currently used PlumDB to store all entries and builds a number of
-in-memory indices using `ets` and `art`.
+Entries are persisted in PlumDB. The store builds in-memory indices on top:
 
-The store record contains the references to the `ets` tables and `art`
-processes and it is stored for concurrent access via `persistent_term`. This
-allows the caller to concurrently access the indices that use `ets` and only
-get serialised when accessing PlumDB and `art`.
+  - `exact` matching uses ETS `bag` tables with read/write concurrency.
+  - `prefix` and `wildcard` matching use lock-free persistent ART tries
+    (`m:bondy_registry_ptrie`) — readers traverse an immutable snapshot,
+    writers publish new versions via single-row CAS on the root pointer.
 
-> #### {.notice}
-> In future releases the `art` tries will be replaced by a simpler
-> read-concurrent alternative.
+The store record holds direct references to its tables and ptrie handles
+and is published via `persistent_term` so callers access the indices
+concurrently without going through a gen_server.
 """.
 -spec new(PartitionIndex :: integer()) -> t().
 
@@ -296,12 +296,7 @@ info(#bondy_registry_store{} = Store) ->
         Store#bondy_registry_store.counters_tab
     ],
 
-    Ptries = [
-        Store#bondy_registry_store.reg_prefix_idx_ptrie,
-        Store#bondy_registry_store.reg_wc_idx_ptrie,
-        Store#bondy_registry_store.sub_prefix_idx_ptrie,
-        Store#bondy_registry_store.sub_wc_idx_ptrie
-    ],
+    Ptries = ptrie_handles(Store),
 
     %% Ptrie `info/1` returns a map with `node_count` and related keys.
     %% Sum `node_count` and ETS memory for an overall size snapshot. The
@@ -315,6 +310,23 @@ info(#bondy_registry_store{} = Store) ->
     Mem = lists:sum([ets:info(Tab, memory) || Tab <- Tabs]),
 
     #{size => Size, memory => Mem}.
+
+
+-doc """
+Return the four ptrie handles owned by the store: registration-prefix,
+registration-wildcard, subscription-prefix, subscription-wildcard. Used by
+`bondy_registry_partition` to attach a janitor to each handle, and by
+`info/1` for stats aggregation.
+""".
+-spec ptrie_handles(Store :: t()) -> [bondy_registry_ptrie:handle()].
+
+ptrie_handles(#bondy_registry_store{} = Store) ->
+    [
+        Store#bondy_registry_store.reg_prefix_idx_ptrie,
+        Store#bondy_registry_store.reg_wc_idx_ptrie,
+        Store#bondy_registry_store.sub_prefix_idx_ptrie,
+        Store#bondy_registry_store.sub_wc_idx_ptrie
+    ].
 
 
 -doc """
@@ -2225,8 +2237,8 @@ match_remote_exact_subscription(Store, RealmUri, Uri, Opts) ->
 %% @private
 %% Forward-direction lookup on a policy-specific ptrie: the caller gives
 %% a URI (the registered pattern) and we return all entries keyed by that
-%% URI under the given Policy. Replaces `art:match/3` with mode => exact
-%% but runs directly — no gen_server hop.
+%% URI under the given Policy. Runs lock-free against the ptrie's current
+%% snapshot.
 -spec ptrie_match(t(), entry_type(), uri(), uri(), map(),
                   bondy_registry_ptrie:handle(),
                   bondy_registry_ptrie:policy()) ->
@@ -2303,10 +2315,8 @@ find_matches_each(_, _, _, _, _, []) ->
 %% Reverse-direction match (WAMP routing hot path): given a concrete
 %% target URI, find every stored pattern in the ptrie whose key matches
 %% it — byte-equal for exact, prefix for prefix-tagged leaves, or
-%% wildcard-segment-matching for wildcard-tagged leaves.
-%%
-%% This replaces `art:find_matches/3`. Runs directly on the calling
-%% process — no gen_server hop, multiple readers truly concurrent.
+%% wildcard-segment-matching for wildcard-tagged leaves. Runs lock-free
+%% on the calling process; multiple readers are truly concurrent.
 -spec ptrie_find_matches(t(), entry_type(), uri(), uri(), map(),
                          bondy_registry_ptrie:handle()) ->
     match_result().

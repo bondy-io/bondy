@@ -14,9 +14,14 @@ This gen_server drives `bondy_registry_ptrie:reclaim/1` on a fixed cadence.
 It runs at `low` priority and `hibernate`s between ticks so it never steals
 scheduler time from the hot path.
 
-One janitor per ptrie handle — the caller is responsible for the lifecycle
-(supervisor in production; explicit `start_link/2` + `stop/1` in tests).
+One janitor per ptrie handle. The caller manages the lifecycle: in
+production, `bondy_registry_partition` spawns one janitor per ptrie handle
+in the store, linked, and respawns it on crash; in tests, suites use
+`start_link/2` and `stop/1` directly.
 
+The janitor does not trap exits — when its starter dies the link signal
+terminates it cleanly (the ptrie's ETS tables die with the starter, so a
+last-pass sweep would have nothing to reclaim).
 """.
 
 -behaviour(gen_server).
@@ -134,7 +139,6 @@ stats(Pid) ->
 
 init({Handle, Opts}) ->
     process_flag(priority, low),
-    process_flag(trap_exit, true),
     Period = maps:get(period_ms, Opts, ?DEFAULT_PERIOD_MS),
     State = schedule(#state{
         handle = Handle,

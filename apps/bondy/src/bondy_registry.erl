@@ -10,14 +10,17 @@
 An in-memory registry for PubSub subscriptions and Routed RPC registrations,
 providing pattern matching capabilities including support for WAMP's
 version 2.0 match policies (exact, prefix and wildcard).
-The registry entries are stored in plum_db (using an in-memory prefix). The
-registry also uses in-memory trie-based indexed (materialised
-view) using {@link bondy_registry_trie}.
-This module also provides a singleton server to perform the initialisation
-of the trie from the plum_db tables.
 
-The registry consists of this server and a pool of bondy_registry_partitions.
-Each registry partition is the owner of a bondy_registry_partition
+Entries are stored in plum_db (using an in-memory prefix). The registry
+also maintains in-memory indices as a materialised view: ETS bags for
+exact matching, and lock-free persistent ART tries
+(`m:bondy_registry_ptrie`) for prefix and wildcard matching.
+
+This module also provides a singleton server that initialises the indices
+from the plum_db tables on startup.
+
+The registry consists of this server and a pool of `bondy_registry_partition`
+workers; each partition owns its own slice of the indices.
 """).
 
 -include_lib("kernel/include/logger.hrl").
