@@ -84,9 +84,12 @@ bondy_rpc_gateway_http_pool:start_link(my_api_pool,
 -export([start_link/3]).
 -export([status/1]).
 -export([mark_down/1]).
+-export([request/5]).
+-export([request/6]).
 
 %% gen_server callbacks
 -export([init/1]).
+-export([handle_continue/2]).
 -export([handle_call/3]).
 -export([handle_cast/2]).
 -export([handle_info/2]).
@@ -118,6 +121,50 @@ status(Name) ->
 
 mark_down(Name) ->
     gen_server:call(Name, mark_down).
+
+
+-doc """
+Issue a request through the pool using its preconfigured request options
+(`ssl_options`, timeouts, `with_body`, etc.). Returns `{error, pool_down}`
+immediately while the pool is down so callers fail fast.
+""".
+-spec request(
+    Pool :: atom(),
+    Method :: atom(),
+    Url :: binary(),
+    Headers :: list(),
+    Body :: iodata()
+) -> {ok, non_neg_integer(), list(), binary()}
+   | {error, pool_down | term()}.
+
+request(Pool, Method, Url, Headers, Body) ->
+    request(Pool, Method, Url, Headers, Body, []).
+
+
+-doc """
+Same as `request/5` but allows per-call overrides (e.g. `connect_timeout`,
+`recv_timeout`) to be merged on top of the pool's stored options.
+""".
+-spec request(
+    Pool :: atom(),
+    Method :: atom(),
+    Url :: binary(),
+    Headers :: list(),
+    Body :: iodata(),
+    Overrides :: proplists:proplist()
+) -> {ok, non_neg_integer(), list(), binary()}
+   | {error, pool_down | term()}.
+
+request(Pool, Method, Url, Headers, Body, Overrides) ->
+    case persistent_term:get({?MODULE, Pool}, undefined) of
+        {up, ReqOpts} ->
+            Opts = merge_opts(Overrides, ReqOpts),
+            hackney:request(Method, Url, Headers, Body, Opts);
+        {down, _} ->
+            {error, pool_down};
+        undefined ->
+            {error, pool_down}
+    end.
 
 %% =============================================================================
 %% gen_server callbacks
@@ -157,7 +204,19 @@ init([Name, Endpoint, Opts]) ->
         retry = Retry
     },
 
-    {ok, try_start_pool(State)}.
+    %% Publish in `down` state synchronously so callers see `pool_down`
+    %% rather than `undefined` between supervisor return and the first
+    %% health check completing. Defer the actual health probe to a
+    %% continuation so init/1 returns immediately — otherwise N services
+    %% with unreachable endpoints would block the manager's start_pools
+    %% continuation for N × ~10s serially.
+    ok = publish_status(State),
+    {ok, State, {continue, init_pool}}.
+
+
+-doc false.
+handle_continue(init_pool, #state{} = State) ->
+    {noreply, try_start_pool(State)}.
 
 
 -doc false.
@@ -190,10 +249,12 @@ handle_info(_Msg, State) ->
 
 -doc false.
 terminate(_Reason, #state{name = Name, status = up}) ->
+    _ = persistent_term:erase({?MODULE, Name}),
     hackney_pool:stop_pool(Name),
     ok;
 
-terminate(_Reason, _State) ->
+terminate(_Reason, #state{name = Name}) ->
+    _ = persistent_term:erase({?MODULE, Name}),
     ok.
 
 
@@ -245,8 +306,12 @@ request_opts(Name, Opts) ->
 
 
 try_start_pool(#state{name = Name, endpoint = Endpoint} = State0) ->
-    catch hackney_pool:stop_pool(Name),
-    hackney_pool:start_pool(Name, State0#state.pool_opts),
+    %% Idempotent: hackney_pool:start_pool returns ok on first call and
+    %% (silently / harmlessly) on subsequent calls when the pool already
+    %% exists, so we don't tear down in-flight connections on every health
+    %% retry. The pool itself is only destroyed in `do_mark_down/1` and on
+    %% `terminate/2` — i.e. when state actually demands it.
+    _ = hackney_pool:start_pool(Name, State0#state.pool_opts),
 
     %% Health check with minimal timeouts, reusing the pool's SSL opts
     HealthOpts0 = [
@@ -279,29 +344,69 @@ try_start_pool(#state{name = Name, endpoint = Endpoint} = State0) ->
 
 
 
-mark_up(#state{name = Name, retry = Retry0} = State) ->
+mark_up(#state{name = Name, retry = Retry0} = State0) ->
     {_, Retry} = bondy_retry:succeed(Retry0),
     ?LOG_INFO(#{
         description => "Pool is up",
         pool => Name
     }),
-    State#state{
+    State = State0#state{
         status = up,
         retry = Retry,
         retry_ref = undefined
-    }.
+    },
+    ok = publish_status(State),
+    State.
 
 
 
-do_mark_down(#state{} = State) ->
-    catch hackney_pool:stop_pool(State#state.name),
-    schedule_retry(State#state{status = down}).
+do_mark_down(#state{} = State0) ->
+    catch hackney_pool:stop_pool(State0#state.name),
+    State1 = State0#state{status = down},
+    ok = publish_status(State1),
+    schedule_retry(State1).
 
 
 
 %% @private
 default_ssl_options() ->
     bondy_cert_manager:ssl_opts().
+
+
+%% @private
+%% Persistent_term writes trigger a major GC of all persistent_term
+%% consumers, so skip when the value isn't actually changing. ReqOpts is
+%% set once at init and never mutates, so the only thing that flips after
+%% startup is Status — ignoring no-op transitions there is what matters.
+publish_status(#state{name = Name, status = Status, req_opts = ReqOpts}) ->
+    Key = {?MODULE, Name},
+    Value = {Status, ReqOpts},
+    case persistent_term:get(Key, undefined) of
+        Value -> ok;
+        _ ->
+            persistent_term:put(Key, Value),
+            ok
+    end.
+
+
+%% @private
+%% Merge per-call overrides on top of pool defaults. lists:keymerge would
+%% require sorting; this preserves the pool's option order which matters for
+%% hackney (later proplist entries win, so we put overrides last).
+merge_opts([], ReqOpts) ->
+    ReqOpts;
+
+merge_opts(Overrides, ReqOpts) ->
+    Filtered = [
+        Opt || Opt <- ReqOpts,
+        not lists:keymember(opt_key(Opt), 1, Overrides)
+    ],
+    Filtered ++ Overrides.
+
+
+%% @private
+opt_key({K, _}) -> K;
+opt_key(K) when is_atom(K) -> K.
 
 
 schedule_retry(#state{retry = Retry0} = State) ->

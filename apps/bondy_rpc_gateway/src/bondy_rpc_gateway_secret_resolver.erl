@@ -66,7 +66,6 @@ Used by the manager for resilient startup with retry.
 resolve_service_secrets(SecretsSpec, ServiceName) ->
     try
         SecretMap = fetch_secret(SecretsSpec, ServiceName),
-        ?LOG_WARNING(#{got => SecretMap}),
         VarMappings = maps:get(vars, SecretsSpec, #{}),
         ResolvedVars = resolve_var_mappings(VarMappings, SecretMap, ServiceName),
         {ok, ResolvedVars}
@@ -128,7 +127,6 @@ decode_basic_auth(Value0) ->
 resolve_service(#{auth_conf := #{secrets := SecretsSpec} = AuthConf} = Service) ->
     ServiceName = maps:get(name, Service, <<"unknown">>),
     SecretMap = fetch_secret(SecretsSpec, ServiceName),
-    ?LOG_NOTICE(#{secret => SecretMap}),
     VarMappings = maps:get(vars, SecretsSpec, #{}),
     ResolvedVars = resolve_var_mappings(VarMappings, SecretMap, ServiceName),
 
@@ -155,7 +153,7 @@ fetch_secret(#{provider := aws_sm, secret_id := SecretId, region := Region},
 
         {error, Reason} ->
             ?LOG_ERROR(#{
-                msg => <<"Failed to fetch secret from AWS Secrets Manager">>,
+                description => <<"Failed to fetch secret from AWS Secrets Manager">>,
                 service => ServiceName,
                 secret_id => SecretId,
                 region => Region,

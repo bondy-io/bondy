@@ -1,3 +1,8 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
 -module(bondy_rpc_gateway_http_pool_sup).
 
 -moduledoc """
@@ -11,8 +16,6 @@ The manager calls `start_pool/3` for each configured service.
 %% API
 -export([start_link/0]).
 -export([start_pool/3]).
--export([stop_pool/1]).
--export([which_pools/0]).
 
 %% supervisor callback
 -export([init/1]).
@@ -37,28 +40,6 @@ start_link() ->
 
 start_pool(Name, Endpoint, Opts) ->
     supervisor:start_child(?MODULE, [Name, Endpoint, Opts]).
-
-
--doc "Stop a pool child by its registered name.".
--spec stop_pool(atom()) -> ok | {error, not_found}.
-
-stop_pool(Name) ->
-    case whereis(Name) of
-        undefined ->
-            {error, not_found};
-        Pid ->
-            supervisor:terminate_child(?MODULE, Pid)
-    end.
-
-
--doc "Return the pids of all running pool children.".
--spec which_pools() -> [pid()].
-
-which_pools() ->
-    [
-        Pid
-        || {_, Pid, _, _} <- supervisor:which_children(?MODULE), is_pid(Pid)
-    ].
 
 
 %% =============================================================================

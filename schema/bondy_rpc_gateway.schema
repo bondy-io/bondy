@@ -1026,11 +1026,13 @@ fun(Conf0) ->
                 vars  => Vars,
                 cache => Cache
             },
-            AuthConf1 = case Secrets of
+            AuthConf = case Secrets of
                 undefined -> AuthConf0;
                 _         -> AuthConf0#{secrets => Secrets}
             end,
-            AuthConf = AuthConf1#{tls_verify => TlsVerify},
+            %% tls_verify lives on the service config only — it's consumed by
+            %% the HTTP pool, which is shared by both the procedure forwarder
+            %% and the token fetcher. No second source of truth.
 
             #{
                 name      => ToBin(Name),

@@ -8,18 +8,19 @@
 -moduledoc """
 On startup:
 1. reads service configuration from the application environment,
-2. initiates secret resolution per service
-3. Groups service procedures by realm and spawns a `bondy_rpc_gateway_callee` per service/realm
+2. resolves service secrets (with retry for transient external-provider failures),
+3. starts the per-service HTTP pools,
+4. groups service procedures by realm and spawns a `bondy_rpc_gateway_callee`
+   per service/realm.
 
-## Resilient Secret Resolution
-Services with `auth_conf.secrets` are registered immediately (even before
-secrets are resolved). Secret resolution is attempted at startup and
-retried indefinitely with exponential backoff via `bondy_retry` if the
+## Resilient secret resolution
+Services with `auth_conf.secrets` are registered immediately even if their
+secrets haven't resolved yet. Secret resolution is attempted at startup
+and retried indefinitely with exponential backoff via `bondy_retry` if the
 external provider is unreachable.
 
 ## Callee readiness
-A callee is ready when secrets have been resolved. Per-callee readiness is
-tracked in the `?READINESS_TAB` ets table:
+Per-service readiness is tracked in the `?READINESS_TAB` ETS table:
 
 | Entry | Meaning |
 |-------|---------|
@@ -27,10 +28,10 @@ tracked in the `?READINESS_TAB` ets table:
 | `{ServiceName, not_ready}` | Secrets not yet resolved |
 | `{ServiceName, {ready, ResolvedVars}}` | Secrets resolved |
 
-
-Each Callee WAMP handler checks the service readiness by calling `get_secrets/2`
-at call time and returns `bondy.error.bad_gateway` for not_ready services.
-
+The WAMP handler checks readiness on each call by reading this table via
+`service_readiness/1`. Callees registered before their secrets resolve
+serve calls through a slow fallback path that merges secrets per call
+until the callee is recycled by the supervisor for an unrelated reason.
 """.
 
 -behaviour(gen_server).
@@ -48,7 +49,7 @@ at call time and returns `bondy.error.bad_gateway` for not_ready services.
 }).
 
 -record(state, {
-    services = []    ::  list(),
+    services = []           ::  list(),
     service_poolnames = #{} ::  #{binary() => atom()},
     pending_secrets = #{}   ::  #{binary() => {map(), bondy_retry:t()}}
 }).
@@ -57,7 +58,7 @@ at call time and returns `bondy.error.bad_gateway` for not_ready services.
 %% API
 -export([start_link/0]).
 -export([services/0]).
--export([get_secrets/1]).
+-export([service_readiness/1]).
 
 
 %% GEN_SERVER CALLBACKS
@@ -86,13 +87,14 @@ services() ->
 
 
 -doc """
-Returns `{ok, Vars}` where `Vars` is a mapping of secret vars to their resolved
-values (if they have been resolved).
-Otherwise, returns `{error, not_ready}`.
+Returns `{ok, Vars}` where `Vars` is the resolved secret-vars map for the
+service (empty when the service has no secrets configured). Returns
+`{error, not_ready}` if secrets are still being resolved in the
+background.
 """.
--spec get_secrets(binary()) -> {ok, map()} | {error, not_ready}.
+-spec service_readiness(binary()) -> {ok, map()} | {error, not_ready}.
 
-get_secrets(ServiceName) ->
+service_readiness(ServiceName) ->
     try ets:lookup(?READINESS_TAB, ServiceName) of
         [] ->
             {ok, #{}};
@@ -124,7 +126,7 @@ init([]) ->
 
 -doc false.
 handle_continue(resolve_secrets, #state{services = []} = State) ->
-    %% No Services defined
+    %% No services defined
     {noreply, State};
 
 handle_continue(resolve_secrets, State0) ->
@@ -144,9 +146,18 @@ handle_continue(start_pools, State0) ->
 handle_continue(start_callees, State) ->
     lists:foreach(
         fun({RealmUri, Service, PoolName}) ->
-            bondy_rpc_gateway_callee_sup:start_callee(
-                RealmUri, Service, PoolName
-            )
+            case bondy_rpc_gateway_callee_sup:start_callee(
+                    RealmUri, Service, PoolName) of
+                {ok, _Pid} ->
+                    ok;
+                {error, Reason} ->
+                    ?LOG_ERROR(#{
+                        description => "Failed to start RPC Gateway callee",
+                        service => maps:get(name, Service),
+                        realm => RealmUri,
+                        reason => Reason
+                    })
+            end
         end,
         callee_params(State)
     ),
@@ -155,13 +166,7 @@ handle_continue(start_callees, State) ->
 
 -doc false.
 handle_call(services, _From, State) ->
-    Res = State#state.services,
-    {reply, Res, State};
-
-handle_call(callees, _From, State) ->
-    %% TODO
-    Res = [],
-    {reply, Res, State};
+    {reply, State#state.services, State};
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
@@ -186,14 +191,15 @@ handle_info(
                         {ServiceName, {ready, ResolvedVars}}
                     ),
                     ?LOG_INFO(#{
-                        msg => <<"Secrets resolved for service">>,
+                        description => <<"Secrets resolved for service">>,
                         service => ServiceName
                     }),
-                    Pending1 = maps:remove(ServiceName, Pending),
-                    {noreply, State#state{pending_secrets = Pending1}};
+                    {noreply, State#state{
+                        pending_secrets = maps:remove(ServiceName, Pending)
+                    }};
                 {error, Reason} ->
                     ?LOG_WARNING(#{
-                        msg => <<"Secret resolution retry failed">>,
+                        description => <<"Secret resolution retry failed">>,
                         service => ServiceName,
                         reason => Reason
                     }),
@@ -208,8 +214,8 @@ handle_info(
                             }};
                         {max_retries, _NewRetry} ->
                             ?LOG_ERROR(#{
-                                msg => <<"Max retries reached for secret "
-                                         "resolution">>,
+                                description => <<"Max retries reached for "
+                                                 "secret resolution">>,
                                 service => ServiceName
                             }),
                             {noreply, State}
@@ -272,7 +278,7 @@ resolve_service_secret(
         {ok, ResolvedVars} ->
             ets:insert(?READINESS_TAB, {Name, {ready, ResolvedVars}}),
             ?LOG_INFO(#{
-                msg => <<"Secrets resolved for service at startup">>,
+                description => <<"Secrets resolved for service at startup">>,
                 service => Name
             }),
             {ok, CleanedService};
@@ -280,7 +286,7 @@ resolve_service_secret(
         {error, Reason} ->
             ets:insert(?READINESS_TAB, {Name, not_ready}),
             ?LOG_WARNING(#{
-                msg => ~"Secret resolution failed at startup, will retry in background",
+                description => ~"Secret resolution failed at startup, will retry in background",
                 service => Name,
                 reason => Reason
             }),
@@ -315,10 +321,18 @@ start_http_pools(Services) ->
                     bondy_cert_manager:ssl_opts()
             end,
             PoolOpts = PoolOpts0#{ssl_options => SslOpts},
-            bondy_rpc_gateway_http_pool_sup:start_pool(
-                PoolName, Endpoint, PoolOpts
-            ),
-            Acc#{ServiceName => PoolName}
+            case bondy_rpc_gateway_http_pool_sup:start_pool(
+                    PoolName, Endpoint, PoolOpts) of
+                {ok, _Pid} ->
+                    Acc#{ServiceName => PoolName};
+                {error, {already_started, _Pid}} ->
+                    %% Manager crashed and restarted while pools survived.
+                    %% Adopt the existing pool — its config is a deterministic
+                    %% function of ServiceConf so it still matches.
+                    Acc#{ServiceName => PoolName};
+                {error, Reason} ->
+                    error({pool_start_failed, ServiceName, Reason})
+            end
         end,
         #{},
         Services
@@ -328,17 +342,18 @@ start_http_pools(Services) ->
 pool_name(ServiceName) ->
     binary_to_atom(<<"bondy_rpc_gateway_http_pool_", ServiceName/binary>>).
 
-%% For every service(procs) we return => [{realm, service(realm_procs)}]
+%% For each service, return [{RealmUri, ScopedService, PoolName}] — one
+%% entry per realm with the service config narrowed to the procedures of
+%% that realm.
 callee_params(State) ->
     lists:foldl(
         fun(Service0, Acc) ->
             case maps:take(procedures, Service0) of
                 {Procedures, Service1} ->
-                    %{Realm => [{ProceName, ProcMap}]}
                     ProceduresByRealm =
                         maps:groups_from_list(
                             fun
-                                ({_Name, #{uri := RealmUri}}) -> RealmUri;
+                                ({_Name, #{realm := RealmUri}}) -> RealmUri;
                                 (_) -> undefined
                             end,
                             maps:to_list(Procedures)
@@ -372,4 +387,3 @@ callee_params(State) ->
 
 poolname(#state{service_poolnames = Map}, Name) ->
     maps:get(Name, Map).
-

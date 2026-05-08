@@ -427,7 +427,7 @@ handle_call_pending_service(_Config) ->
     ets:insert(bondy_rpc_gateway_manager, {ServiceName, not_ready}),
     ?assertEqual(
         {error, not_ready},
-        bondy_rpc_gateway_manager:get_secrets(ServiceName)
+        bondy_rpc_gateway_manager:service_readiness(ServiceName)
     ).
 
 handle_call_ready_service(_Config) ->
@@ -437,7 +437,7 @@ handle_call_ready_service(_Config) ->
         bondy_rpc_gateway_manager, {ServiceName, {ready, ExtraVars}}
     ),
 
-    {ok, Vars} = bondy_rpc_gateway_manager:get_secrets(ServiceName),
+    {ok, Vars} = bondy_rpc_gateway_manager:service_readiness(ServiceName),
     %% Both vars are returned
     ?assertEqual(<<"keep">>, maps:get(existing, Vars)),
     ?assertEqual(<<"from-secret">>, maps:get(client_id, Vars)).
@@ -447,5 +447,5 @@ handle_call_no_secrets_service(_Config) ->
     %% No ETS entry means service has no secrets — always ready
     ?assertEqual(
         {ok, #{}},
-        bondy_rpc_gateway_manager:get_secrets(ServiceName)
+        bondy_rpc_gateway_manager:service_readiness(ServiceName)
     ).

@@ -26,7 +26,6 @@ The manager calls `start_callee/3` for each service/realm pair.
 %% API
 -export([start_link/0]).
 -export([start_callee/3]).
--export([terminate_callee/1]).
 
 
 %% SUPERVISOR CALLBACKS
@@ -47,12 +46,8 @@ start_callee(RealmUri, Service, PoolName) ->
     supervisor:start_child(?MODULE, [RealmUri, Service, PoolName]).
 
 
--doc "Terminate a callee child by pid.".
-terminate_callee(Callee) when is_pid(Callee)->
-    supervisor:terminate_child(?MODULE, Callee).
-
-
 -doc "Start the supervisor, registered locally.".
+-spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 

@@ -47,7 +47,7 @@
  {<<"jobs">>,{pkg,<<"jobs">>,<<"0.10.0">>},0},
  {<<"jose">>,
   {git,"https://github.com/potatosalad/erlang-jose.git",
-       {ref,"eb6de2cb506b55533f550a1b0776c81b15317e23"}},
+       {ref,"c8b669c86d73300d2af377c7c0f08b4df06fedbe"}},
   0},
  {<<"jsx">>,{pkg,<<"jsx">>,<<"2.11.0">>},1},
  {<<"kafka_protocol">>,{pkg,<<"kafka_protocol">>,<<"4.2.6">>},1},
