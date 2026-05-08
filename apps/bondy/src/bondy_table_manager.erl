@@ -11,6 +11,11 @@
 -export([add/2]).
 -export([add_and_claim/2]).
 -export([add_or_claim/2]).
+-export([get_or_create/2]).
+-export([add_anonymous/2]).
+-export([get_or_create_anonymous/2]).
+-export([lookup_anonymous/1]).
+-export([delete_anonymous/1]).
 -export([claim/1]).
 -export([delete/1]).
 -export([give_away/2]).
@@ -103,6 +108,79 @@ is_atom(Name) andalso Name =/= undefined andalso is_list(Opts) ->
 add_or_claim(Name, Opts) when
 is_atom(Name) andalso Name =/= undefined andalso is_list(Opts) ->
     gen_server:call(?MODULE, {add_or_claim, Name, Opts}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Idempotent variant of `add/2'. Returns the existing table for `Name'
+%% if it is already registered; otherwise creates a new ETS table with
+%% `bondy_table_manager' as owner and heir.
+%%
+%% Useful when a caller's `init' runs more than once (e.g. a gen_server is
+%% restarted by its supervisor) and must tolerate pre-existing tables.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_or_create(Name :: atom(), Opts :: list()) ->
+    {ok, ets:tid() | atom()}.
+
+get_or_create(Name, Opts) when
+is_atom(Name) andalso Name =/= undefined andalso is_list(Opts) ->
+    gen_server:call(?MODULE, {get_or_create, Name, Opts}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Creates a new anonymous ETS table (no `named_table', no atom
+%% allocated) owned by `bondy_table_manager' and registered under the
+%% caller-supplied `Key' (any term). Returns `{error, already_exists}' if
+%% `Key' is already registered.
+%%
+%% Prefer `get_or_create_anonymous/2' for idempotent init paths.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add_anonymous(Key :: term(), Opts :: list()) ->
+    {ok, ets:tid()} | {error, already_exists}.
+
+add_anonymous(Key, Opts) when is_list(Opts) ->
+    gen_server:call(?MODULE, {add_anonymous, Key, Opts}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Idempotent variant of `add_anonymous/2'. Returns the existing
+%% anonymous table registered under `Key' or creates a new one if absent.
+%% The table is owned by `bondy_table_manager', so it survives the caller's
+%% crash and restart.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_or_create_anonymous(Key :: term(), Opts :: list()) ->
+    {ok, ets:tid()}.
+
+get_or_create_anonymous(Key, Opts) when is_list(Opts) ->
+    gen_server:call(?MODULE, {get_or_create_anonymous, Key, Opts}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Looks up the anonymous table registered under `Key'. Pure ETS
+%% lookup — does not call the gen_server.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec lookup_anonymous(Key :: term()) -> {ok, ets:tid()} | error.
+
+lookup_anonymous(Key) ->
+    case ets:lookup(?MODULE, Key) of
+        [{Key, Tab}] -> {ok, Tab};
+        [] -> error
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Deletes the anonymous table registered under `Key' and its registry
+%% entry. Returns `true' if the table existed and was deleted, `false'
+%% otherwise.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec delete_anonymous(Key :: term()) -> boolean().
+
+delete_anonymous(Key) ->
+    gen_server:call(?MODULE, {delete_anonymous, Key}).
 
 
 %% -----------------------------------------------------------------------------
@@ -219,6 +297,51 @@ handle_call({add_or_claim, Name, Opts0}, {From, _Tag}, St) ->
         {reply, {ok, Tab}, St}
   end;
 
+handle_call({get_or_create, Name, Opts0}, _From, St) ->
+    Reply = case ets:lookup(?MODULE, Name) of
+        [{Name, Tab}] ->
+            {ok, Tab};
+        [] ->
+            Opts1 = set_heir(Opts0),
+            Tab = ets:new(Name, Opts1),
+            true = ets:insert(?MODULE, [{Name, Tab}]),
+            {ok, Tab}
+    end,
+    {reply, Reply, St};
+
+handle_call({add_anonymous, Key, Opts0}, _From, St) ->
+    Reply = case ets:lookup(?MODULE, Key) of
+        [{Key, _}] ->
+            {error, already_exists};
+        [] ->
+            Tab = do_new_anonymous(Opts0),
+            true = ets:insert(?MODULE, [{Key, Tab}]),
+            {ok, Tab}
+    end,
+    {reply, Reply, St};
+
+handle_call({get_or_create_anonymous, Key, Opts0}, _From, St) ->
+    Reply = case ets:lookup(?MODULE, Key) of
+        [{Key, Tab}] ->
+            {ok, Tab};
+        [] ->
+            Tab = do_new_anonymous(Opts0),
+            true = ets:insert(?MODULE, [{Key, Tab}]),
+            {ok, Tab}
+    end,
+    {reply, Reply, St};
+
+handle_call({delete_anonymous, Key}, _From, St) ->
+    Reply = case ets:lookup(?MODULE, Key) of
+        [{Key, Tab}] ->
+            _ = catch ets:delete(Tab),
+            true = ets:delete(?MODULE, Key),
+            true;
+        [] ->
+            false
+    end,
+    {reply, Reply, St};
+
 handle_call({delete, Name}, {_From, _Tag}, St) ->
     Reg = ?MODULE,
     case ets:lookup(Reg, Name) of
@@ -294,6 +417,14 @@ code_change(_OldVsn, St, _Extra) ->
 %% @private
 set_heir(Opts) ->
     lists:keystore(heir, 1, Opts, {heir, self(), []}).
+
+%% @private
+%% Creates an anonymous ETS table owned by the calling (table_manager)
+%% process. Strips `named_table' from Opts defensively so callers can reuse
+%% the same opts list they pass to named variants.
+do_new_anonymous(Opts0) ->
+    Opts1 = set_heir(Opts0) -- [named_table],
+    ets:new(anonymous, Opts1).
 
 %% @private
 do_give_away(Tab, From) ->

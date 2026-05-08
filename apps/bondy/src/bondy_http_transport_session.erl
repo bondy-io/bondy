@@ -688,6 +688,12 @@ handle_info(Info, State) ->
 
 
 terminate(_Reason, #state{transport_id = TransportId} = State) ->
+    %% Cleanup transport queue FIRST — this is the most important cleanup
+    %% (without it, queue entries and the meta row leak until the eviction
+    %% sweep ages them out). Running it first guarantees it happens even if
+    %% a subsequent cleanup step raises unexpectedly.
+    ok = bondy_transport_queue:delete_transport(TransportId),
+
     %% Reply to any pending longpoll caller
     case State#state.poll_from of
         undefined ->
@@ -736,8 +742,6 @@ terminate(_Reason, #state{transport_id = TransportId} = State) ->
             ok
     end,
 
-    %% Cleanup transport queue
-    ok = bondy_transport_queue:delete_transport(TransportId),
     ok.
 
 

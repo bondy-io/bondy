@@ -775,11 +775,11 @@ do_publish(_, ?EOT, _, _, _) ->
 
 do_publish(RealmUri, {_, _} = MatchResult, MakeEvent, Fwd, Origin)
 when is_function(MakeEvent, 1), is_function(Fwd, 1) ->
-    %% REVIEW Consider creating a Broadcast tree out of the registry trie
-    %% results so that instead of us sending possibly millions of Erlang
-    %% messages to millions of peers (processes) we delegate that to peers as
-    %% Erlang might penalise a process that is sending lots of messages to many
-    %% processes. Maybe resolve this in the bondy_registry_trie itself!
+    %% REVIEW Consider creating a broadcast tree out of the registry's
+    %% match results so that instead of sending possibly millions of
+    %% messages to millions of peers (processes) we delegate that to peers
+    %% — Erlang may penalise a process that fans out messages to many
+    %% destinations. Could be implemented at the registry layer.
     Fun = fun
         (Node, ok) when is_atom(Node) ->
             %% A remote subscriber located in a peer cluster node.

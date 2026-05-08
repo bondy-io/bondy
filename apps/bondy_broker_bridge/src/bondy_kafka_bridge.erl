@@ -60,7 +60,7 @@ mappings for use in `mops` templates.
             (Val) when is_atom(Val) ->
                 {ok, Val};
             (Val) when is_binary(Val) ->
-                {ok, binary_to_atom(Val, utf8)}
+                {ok, binary_to_existing_atom(Val, utf8)}
         end
     },
     %% Is this a sync or async produce
@@ -484,7 +484,7 @@ partition(#{<<"partitioner">> := Map}) ->
         <<"hash">> ->
             hash;
         Other ->
-            Type = binary_to_atom(Other, utf8),
+            Type = binary_to_existing_atom(Other, utf8),
             PartValue = maps:get(<<"value">>, Map),
 
             fun(_Topic, PartCount, K, _V) ->

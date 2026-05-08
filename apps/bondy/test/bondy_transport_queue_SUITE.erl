@@ -24,7 +24,10 @@ all() ->
         ttl_expiry_sweep,
         concurrent_enqueue,
         dequeue_empty,
-        multiple_transports_isolation
+        multiple_transports_isolation,
+        init_is_idempotent,
+        partition_tables_are_anonymous,
+        partitions_survive_manager_crash
     ].
 
 
@@ -412,6 +415,109 @@ multiple_transports_isolation(_Config) ->
     ok = bondy_transport_queue:delete_transport(TransportB).
 
 
+init_is_idempotent(_Config) ->
+    %% Partition tables and the meta table must survive a re-invocation of
+    %% init/0 (simulating bondy_transport_queue_manager being restarted by
+    %% its supervisor without the table manager dying).
+    RingBefore = persistent_term:get({bondy_transport_queue, ring}),
+    MetaBefore = ets:info(bondy_transport_queue_meta, size),
+
+    %% Put some state in so we can verify it survives
+    TransportId = make_transport_id(),
+    ok = bondy_transport_queue:init_transport(
+        TransportId, <<"com.test.realm">>, rand:uniform(1 bsl 53)
+    ),
+    ok = bondy_transport_queue:enqueue(TransportId, make_event(1), #{}),
+    ?assertEqual(1, bondy_transport_queue:count(TransportId)),
+
+    %% Re-run init/0
+    ok = bondy_transport_queue:init(),
+
+    %% Ring is the same map (same TIDs for every bucket)
+    RingAfter = persistent_term:get({bondy_transport_queue, ring}),
+    ?assertEqual(RingBefore, RingAfter),
+
+    %% Meta table still exists
+    ?assertNotEqual(undefined, ets:info(bondy_transport_queue_meta, size)),
+
+    %% Queued message survived
+    ?assertEqual(1, bondy_transport_queue:count(TransportId)),
+    [Msg] = bondy_transport_queue:dequeue_batch(TransportId, 10),
+    ?assertEqual(make_event(1), Msg),
+
+    %% Meta size didn't regress (may have grown by 1 from this test)
+    MetaAfter = ets:info(bondy_transport_queue_meta, size),
+    ?assert(MetaAfter >= MetaBefore),
+
+    ok = bondy_transport_queue:delete_transport(TransportId).
+
+
+partition_tables_are_anonymous(_Config) ->
+    %% Each partition table must be an anonymous ets:tid(), not a named
+    %% atom. This is the property that guarantees no atoms are allocated
+    %% per bucket at boot.
+    Tabs = bondy_transport_queue:tables(),
+    ?assert(length(Tabs) > 0),
+
+    lists:foreach(
+        fun(Tab) ->
+            ?assertEqual(false, ets:info(Tab, named_table)),
+            %% TIDs are opaque (reference or integer depending on OTP
+            %% release). Explicitly reject the atom case.
+            ?assertNot(is_atom(Tab))
+        end,
+        Tabs
+    ).
+
+
+partitions_survive_manager_crash(_Config) ->
+    %% The real property this suite is here to guard: when the transport
+    %% queue manager gen_server crashes, the partition tables owned by
+    %% bondy_table_manager must stay alive and queued messages must still
+    %% be dequeue-able after a new manager replaces the crashed one.
+    TransportId = make_transport_id(),
+    ok = bondy_transport_queue:init_transport(
+        TransportId, <<"com.test.realm">>, rand:uniform(1 bsl 53)
+    ),
+
+    %% Enqueue a message the crashed manager would have been responsible for
+    Msg = make_event(42),
+    ok = bondy_transport_queue:enqueue(TransportId, Msg, #{}),
+    ?assertEqual(1, bondy_transport_queue:count(TransportId)),
+
+    RingBefore = persistent_term:get({bondy_transport_queue, ring}),
+
+    %% Simulate a manager crash. The supervisor will restart it, which
+    %% calls bondy_transport_queue:init/0 again (now idempotent). We
+    %% reproduce that sequence manually here.
+    ManagerPid = whereis(bondy_transport_queue_manager),
+    ?assert(is_pid(ManagerPid)),
+
+    MRef = erlang:monitor(process, ManagerPid),
+    exit(ManagerPid, kill),
+    receive
+        {'DOWN', MRef, process, ManagerPid, _} -> ok
+    after 2000 ->
+        error(manager_did_not_die)
+    end,
+
+    %% Wait for the supervisor to bring a new manager up
+    NewPid = wait_for_manager(10, 100),
+    ?assert(is_pid(NewPid)),
+    ?assertNotEqual(ManagerPid, NewPid),
+
+    %% Ring is unchanged — same TIDs
+    RingAfter = persistent_term:get({bondy_transport_queue, ring}),
+    ?assertEqual(RingBefore, RingAfter),
+
+    %% The queued message is still there and still dequeue-able
+    ?assertEqual(1, bondy_transport_queue:count(TransportId)),
+    [Dequeued] = bondy_transport_queue:dequeue_batch(TransportId, 10),
+    ?assertEqual(Msg, Dequeued),
+
+    ok = bondy_transport_queue:delete_transport(TransportId).
+
+
 
 %% =============================================================================
 %% PRIVATE
@@ -434,3 +540,17 @@ make_event(N) ->
         args = [<<"payload-", (integer_to_binary(N))/binary>>],
         kwargs = undefined
     }.
+
+
+%% @private
+wait_for_manager(0, _Every) ->
+    undefined;
+
+wait_for_manager(Attempts, Every) ->
+    case whereis(bondy_transport_queue_manager) of
+        undefined ->
+            timer:sleep(Every),
+            wait_for_manager(Attempts - 1, Every);
+        Pid ->
+            Pid
+    end.

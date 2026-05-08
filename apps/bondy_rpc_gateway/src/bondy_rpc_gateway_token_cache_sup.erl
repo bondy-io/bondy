@@ -35,10 +35,16 @@ bondy_rpc_gateway_sup (rest_for_one)
 
 
 
--doc false.
+-doc "Start the supervisor, registered locally.".
+-spec start_link() -> {ok, pid()} | {error, term()}.
+
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+
+-doc "Start a token-cache worker child belonging to the given gproc pool.".
+-spec start_worker(PoolName :: atom(), WorkerName :: atom()) ->
+    {ok, pid()} | {error, term()}.
 
 start_worker(PoolName, WorkerName) ->
     ChildSpec = #{

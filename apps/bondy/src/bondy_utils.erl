@@ -193,7 +193,7 @@ maybe_encode(bert, Term) ->
     bert:encode(Term);
 
 maybe_encode(erl, Term) ->
-   binary_to_term(Term);
+   binary_to_term(Term, [safe]);
 
 maybe_encode(json, Term) when is_binary(Term) ->
     %% TODO this is wrong, we should be passing the metadada so that we know in
@@ -214,7 +214,7 @@ maybe_encode(msgpack, Term) ->
      msgpack:pack(Term, Opts);
 
 maybe_encode(Enc, Term) when is_binary(Enc) ->
-    maybe_encode(binary_to_atom(Enc, utf8), Term).
+    maybe_encode(binary_to_existing_atom(Enc, utf8), Term).
 
 
 maybe_slice(undefined, _, _) ->
@@ -229,7 +229,7 @@ decode(bert, Bin) ->
     bert:decode(Bin);
 
 decode(erl, Bin) ->
-   binary_to_term(Bin);
+   binary_to_term(Bin, [safe]);
 
 decode(json, <<>>) ->
     <<>>;

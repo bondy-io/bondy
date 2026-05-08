@@ -158,7 +158,9 @@ encode_key_part(Term) ->
 
 %% @private
 decode_key_part(Term) when is_binary(Term) ->
-    binary_to_term(base64_decode(Term)).
+    %% `[safe]` prevents atom-table exhaustion from crafted client tokens.
+    %% `parse/1` already catches the resulting `badarg` as `invalid_token`.
+    binary_to_term(base64_decode(Term), [safe]).
 
 
 %% @private

@@ -83,6 +83,10 @@ The `cache` key in `auth_conf` controls timing:
 
 -define(DEFAULT_TTL, 3600).
 -define(DEFAULT_REFRESH_MARGIN, 60).
+%% Backoff for retrying a failed pre-emptive refresh. Capped well below the
+%% remaining TTL so that callers never have to wait for the cached token to
+%% expire and trip the slow-path 401 retry.
+-define(REFRESH_RETRY_MS, 30_000).
 
 -record(state, {
     name :: atom()
@@ -192,17 +196,25 @@ handle_info({refresh, ServiceName, AuthMod, AuthConf}, State) ->
     case get_new_token(ServiceName, AuthMod, AuthConf, State) of
         {ok, _} ->
             ?LOG_DEBUG(#{
-                msg => <<"Preemptive token refresh succeeded">>,
+                description => <<"Preemptive token refresh succeeded">>,
                 service => ServiceName
             }),
             {noreply, State};
 
         {error, Reason} ->
             ?LOG_WARNING(#{
-                msg => <<"Preemptive token refresh failed">>,
+                description => <<"Preemptive token refresh failed">>,
                 service => ServiceName,
                 reason => Reason
             }),
+            %% Re-arm a short retry. Without this, the cached token would
+            %% sit in ETS until expiry, after which the hot-path
+            %% `lookup_element` keeps serving the (now stale) value to
+            %% upstream and only recovers via the 401 fallback.
+            _ = erlang:send_after(
+                ?REFRESH_RETRY_MS, self(),
+                {refresh, ServiceName, AuthMod, AuthConf}
+            ),
             {noreply, State}
     end;
 
@@ -246,6 +258,7 @@ get_new_token(ServiceName, AuthMod, AuthConf, State) ->
 
 %% @private
 store_token(ServiceName, AuthMod, AuthConf, Token, TTL, State) ->
+    ok = cancel_pending_refresh(ServiceName, State),
     ExpiresAt = erlang:system_time(second) + TTL,
     RefreshMargin = cache_opt(
         refresh_margin,
@@ -277,6 +290,18 @@ store_token(ServiceName, AuthMod, AuthConf, Token, TTL, State) ->
                 service_name => ServiceName
             }),
             {ok, Token}
+    end.
+
+%% @private
+cancel_pending_refresh(ServiceName, State) ->
+    case ets:lookup_element(
+            State#state.name, ServiceName,
+            #rpc_gateway_token.timer_ref, undefined) of
+        undefined ->
+            ok;
+        Ref ->
+            _ = erlang:cancel_timer(Ref),
+            ok
     end.
 
 %% @private

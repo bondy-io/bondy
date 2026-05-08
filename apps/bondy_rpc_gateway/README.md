@@ -26,6 +26,98 @@ WAMP Call(KWArgs)
           └─ HTTP Response → WAMP Result / Error
 ```
 
+## Architecture
+
+### Supervision tree
+
+```
+bondy_rpc_gateway_sup (rest_for_one)
+├── bondy_rpc_gateway_token_cache_sup   (one_for_one — worker pool)
+├── bondy_rpc_gateway_token_cache       (gen_server — gproc_pool registry)
+├── bondy_rpc_gateway_http_pool_sup     (simple_one_for_one)
+├── bondy_rpc_gateway_callee_sup        (simple_one_for_one)
+└── bondy_rpc_gateway_manager           (gen_server)
+```
+
+`rest_for_one` ensures that a manager restart re-spawns the http pools
+and callees. The manager is started last and drives startup through a
+chain of `handle_continue` steps:
+
+1. **`resolve_secrets`** — reach external providers (e.g. AWS Secrets
+   Manager) for any service whose `auth.secrets` block is configured.
+   Successes are written to the readiness ETS (`{ServiceName, {ready,
+   Vars}}`); failures are recorded as `{ServiceName, not_ready}` and
+   retried indefinitely in the background with jittered exponential
+   backoff.
+2. **`start_pools`** — spawn one `bondy_rpc_gateway_http_pool` per
+   service. Pools start in `down` state and defer their first health
+   check to a `handle_continue`, so a slow upstream cannot serialise
+   startup of the other pools. On manager-restart the pool's
+   `hackney_pool` peer is adopted via `{error, {already_started, _}}`.
+3. **`start_callees`** — for each service, group procedures by realm
+   and spawn one `bondy_rpc_gateway_callee` per service/realm pair.
+
+### Components
+
+| Module | Role |
+|---|---|
+| `bondy_rpc_gateway_manager` | Owns service config, secret resolution, pool/callee orchestration |
+| `bondy_rpc_gateway_http_pool` | One per service — wraps a hackney pool with health checks and `persistent_term`-backed status |
+| `bondy_rpc_gateway_callee` | One per service+realm — opens a WAMP session and registers procedures with the dealer |
+| `bondy_rpc_gateway_callee_handler` | Stateless callback module invoked **inline** by the dealer; translates WAMP calls into HTTP requests |
+| `bondy_rpc_gateway_token_cache` + `_worker` | Sharded token cache: `gproc_pool` hash → ETS lookup, `gen_server` only on miss |
+| `bondy_rpc_gateway_secret_resolver` | Pluggable secret-store provider (currently AWS Secrets Manager) |
+| `bondy_rpc_gateway_auth_generic` | Declarative auth strategy: fetch token (HTTP) → apply to outgoing request |
+
+### Hot path
+
+The WAMP handler runs **inline on the caller's process** — it is not a
+`gen_server` hop. Per call, in order:
+
+1. Pattern-match on `vars_resolved = true` in the precomputed
+   `#rpc_gateway_proc_conf{}` record (built once at registration time).
+2. Path-template interpolation using a precomputed list of variables
+   stored in the record.
+3. Token lookup — `gproc_pool:pick/2` → `ets:lookup_element/4` (lock-free).
+4. `hackney:request/5` through the pool's stored options, read from
+   `persistent_term` with no copy.
+
+`persistent_term` writes are deduped (no-op when the value is unchanged)
+to avoid the global GC every consumer pays on a write.
+
+### Callee lifecycle
+
+Each callee gets its own WAMP `SessionId` and opens it via
+`bondy_session_manager:open/3` in `init/1`. The session manager monitors
+the callee process; when it exits — crash, supervisor shutdown, or a
+`rest_for_one` cascade — the `'DOWN'` handler fires
+`bondy_router:flush/2`, which calls `bondy_dealer:flush/2` and
+`bondy_registry:remove_all/5` keyed on the callee's `SessionId`.
+
+This is what allows a restarted callee to re-register the same procedure
+URIs without colliding with stale entries from the previous incarnation.
+
+### Resilience
+
+- **Pool down** — while a pool is `down`, `request/5,6` returns
+  `{error, pool_down}` immediately. The WAMP handler treats this as
+  fast-fail — no retry, no backoff — because the same `persistent_term`
+  value will keep coming back until the pool's own health-check loop
+  flips it to `up`.
+- **Pool health-check** — uses `bondy_retry` with indefinite retries
+  (`max_retries` resets on hit). `hackney_pool:start_pool/2` is
+  idempotent, so transient health failures do not tear down in-flight
+  connections.
+- **Token refresh** — each token's TTL drives a `send_after` timer.
+  On preemptive refresh failure the worker re-arms a short retry
+  (`?REFRESH_RETRY_MS = 30s`) so that the cached token never goes stale
+  silently and trips the slow-path 401 retry.
+- **Secret-resolution fallback** — services whose secrets are still
+  resolving register their procedures with `vars_resolved = false`.
+  The handler then falls back to a per-call merge keyed on the
+  manager's readiness ETS until the callee is recycled by the
+  supervisor for an unrelated reason.
+
 ## Service configuration
 
 Services are defined in the `bondy_rpc_gateway` application environment
@@ -702,16 +794,32 @@ If the retry also fails, the error response is returned normally.
 
 ## Retries and timeouts
 
-HTTP requests are retried on connection failures with exponential backoff:
+HTTP requests are retried on connection failures with **jittered**
+exponential backoff. Because the WAMP handler runs inline in the
+dealer's caller process, every sleep stalls the dispatch path — so each
+individual wait is hard-capped well below the per-procedure timeout.
 
-| Attempt | Backoff |
+Backoff for retry attempt `n` (1-based) is:
+
+```
+max(FLOOR, rand:uniform(min(BASE × 2^(n-1), CAP)))
+```
+
+| Constant | Value |
 |---|---|
-| 1 | 0 ms (immediate) |
-| 2 | 300 ms |
-| 3 | 600 ms |
-| 4 | 1200 ms |
+| `RETRY_BACKOFF_BASE_MS` | 50 |
+| `RETRY_BACKOFF_FLOOR_MS` | 30 |
+| `RETRY_BACKOFF_CAP_MS` | 200 |
 
-Default: 3 retries, 30 000 ms timeout. Both are configurable per service.
+So with the default 3 retries the worst-case total backoff is
+`50 + 100 + 200 = 350 ms`, and each individual sleep is bounded at 200 ms.
+
+`{error, pool_down}` short-circuits the retry loop — no backoff, no
+sleep — because the pool's status only changes when the pool's own
+asynchronous health check flips it back to `up`.
+
+Default: 3 retries, 30 000 ms request timeout. Both are configurable
+per service via `..retries` and `..timeout`.
 
 ## Build
 

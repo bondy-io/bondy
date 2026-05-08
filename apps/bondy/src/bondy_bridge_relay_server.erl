@@ -586,7 +586,10 @@ handle_event(info, {Tag, Socket, Data}, _, #state{socket = Socket} = State)
 when ?SOCKET_DATA(Tag) ->
     ok = set_socket_active(State),
 
-    try binary_to_term(Data) of
+    %% `[safe]` prevents atom-table exhaustion from a malformed or
+    %% adversarial peer. The surrounding try/catch already handles decode
+    %% failures.
+    try binary_to_term(Data, [safe]) of
         Msg ->
             ?LOG_DEBUG(#{
                 description => "Received message from client",

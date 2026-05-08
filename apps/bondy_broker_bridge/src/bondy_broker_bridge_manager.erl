@@ -151,7 +151,7 @@ map returned by `Bridge:init/1`.
         allow_undefined => false,
         validator => fun
             (Bin) when is_binary(Bin) ->
-                try binary_to_atom(Bin, utf8) of
+                try binary_to_existing_atom(Bin, utf8) of
                     Mod ->
                         case erlang:module_loaded(Mod) of
                             true -> {ok, Mod};

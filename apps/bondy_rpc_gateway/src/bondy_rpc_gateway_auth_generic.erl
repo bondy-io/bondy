@@ -164,14 +164,22 @@ fetch_token(#{fetch := FetchConf} = Conf) ->
         maps:get(auth, FetchConf, undefined), Vars, Headers1
     ),
 
-    TlsVerify = maps:get(tls_verify, Conf, verify_peer),
-    SslOpts = case TlsVerify of
-        verify_none -> bondy_cert_manager:ssl_opts(#{verify => verify_none});
-        _ -> bondy_cert_manager:ssl_opts()
+    %% Route through the service's HTTP pool when one was supplied (the
+    %% RPC gateway callee threads it in at registration time). When no pool
+    %% is provided — direct callers like ad-hoc tests — fall back to a plain
+    %% hackney request with cert_manager defaults so behaviour is unchanged.
+    Result = case maps:get(pool, Conf, undefined) of
+        undefined ->
+            SslOpts = bondy_cert_manager:ssl_opts(),
+            Opts = [{ssl_options, SslOpts}, with_body],
+            hackney:request(Method, Url, Headers, Body, Opts);
+        Pool ->
+            bondy_rpc_gateway_http_pool:request(
+                Pool, Method, Url, Headers, Body
+            )
     end,
-    Opts = [{ssl_options, SslOpts}, {pool, default}, with_body],
 
-    case hackney:request(Method, Url, Headers, Body, Opts) of
+    case Result of
         {ok, 200, _RH, RespBody} ->
             case decode_json(RespBody) of
                 {ok, Data} ->
@@ -193,7 +201,7 @@ fetch_token(#{fetch := FetchConf} = Conf) ->
 
         {ok, Status, _RH, RespBody} ->
             ?LOG_ERROR(#{
-                msg => <<"Token request failed">>,
+                description => <<"Token request failed">>,
                 status => Status,
                 body => RespBody
             }),

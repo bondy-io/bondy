@@ -1,8 +1,21 @@
 # CHANGELOG
 
-## 1.0.0-rc.61
+## 1.0.0-rc.63
+### Performance
+* Registry pattern matching (prefix and wildcard) rewritten as a lock-free persistent Adaptive Radix Trie (`bondy_registry_ptrie`), replacing the `art` library and its serialising gen_server. Match latency drops from ~133µs to ~1µs and reads scale with cores instead of being capped at ~5k ops/s. Per-handle QSBR reclamation is driven by `bondy_registry_ptrie_janitor` processes managed by each registry partition.
+* RPC dealer: removed expensive defensive liveness checks from the call hot path; in-flight promises are now flushed when a Callee dies.
+
+### Improvements
+* RPC Gateway: significant refactor of callee lifecycle, HTTP pool management, and token cache; added `bondy_rpc_gateway_callee_lifecycle_SUITE` for coverage.
+* `bondy_table_manager` supports anonymous ETS tables to avoid creating atoms from runtime-generated names; broader protections added across the codebase against atom-table exhaustion.
+
 ### Fixes
-* Race condition in longpolling connection (between longpoll timeout and idel timeout, now separate configs)
+* `bondy_rpc_gateway.schema`: corrected duration unit on `pool.checkout_timeout`, `pool.connect_timeout`, `pool.idle_timeout`, and `pool.recv_timeout` (`s` → `ms`) so sub-second values round-trip correctly.
+* Fixed a raise that prevented ETS table cleanup in `bondy_transport_queue` / `bondy_http_transport_session`.
+
+## 1.0.0-rc.62
+### Fixes
+* Race condition in longpolling connection (between longpoll timeout and idle timeout, now separate configs)
 
 ## 1.0.0-rc.61
 ### Fixes

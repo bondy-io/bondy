@@ -316,6 +316,7 @@
 -export([callees/3]).
 -export([features/0]).
 -export([flush/2]).
+-export([flush_callee_promises/2]).
 -export([forward/2]).
 -export([forward/3]).
 -export([is_feature_enabled/1]).
@@ -372,7 +373,9 @@ is_feature_enabled(F) when is_atom(F) ->
 flush(RealmUri, Ref) ->
     try
         %% TODO If registration is deleted we need to also call on_delete/1
-        %% Cleanup all registrations for the ref's session
+        %% Cleanup all registrations for the ref's session.
+        %% We do this before flushing promises so that any concurrent CALL
+        %% cannot pick this ref as a callee after we start the flush.
         SessionId = bondy_ref:session_id(Ref),
         bondy_registry:remove_all(
             registration,
@@ -384,8 +387,13 @@ flush(RealmUri, Ref) ->
             #{broadcast => false}
         ),
 
-        %% Cleanup all RPC queued invocations for Ref
-        ok = bondy_rpc_promise:flush(RealmUri, Ref)
+        %% Cleanup all RPC queued invocations for Ref. For invocation
+        %% promises where Ref is the callee, fast-fail the caller with
+        %% wamp.error.no_eligible_callee instead of letting the call wait
+        %% for its timeout.
+        ok = bondy_rpc_promise:flush(
+            RealmUri, Ref, #{on_callee_flush => fun send_no_eligible_callee/1}
+        )
 
     catch
         Class:Reason:Stacktrace ->
@@ -393,6 +401,39 @@ flush(RealmUri, Ref) ->
                 description =>
                     "Error while flushing registration and RPC promise "
                     "queue items",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace,
+                realm_uri => RealmUri,
+                ref => Ref
+            }),
+            ok
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Flushes any in-flight invocation promises where `Ref' is the callee,
+%% replying to each caller with a `wamp.error.no_eligible_callee' ERROR
+%% routed back through the promise's `via' queue.
+%%
+%% Used by the registry to fast-fail callers when a remote node goes down
+%% and its callees are being pruned, so they don't wait for the call
+%% timeout. Unlike `flush/2', this does not touch registrations — the
+%% caller is expected to have already removed them.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec flush_callee_promises(RealmUri :: uri(), Ref :: bondy_ref:t()) -> ok.
+
+flush_callee_promises(RealmUri, Ref) ->
+    try
+        bondy_rpc_promise:flush(
+            RealmUri, Ref, #{on_callee_flush => fun send_no_eligible_callee/1}
+        )
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_WARNING(#{
+                description =>
+                    "Error while flushing RPC promise queue items",
                 class => Class,
                 reason => Reason,
                 stacktrace => Stacktrace,
@@ -1960,6 +2001,39 @@ on_unregister(Entry) ->
 %% @private
 on_delete(Entry) ->
     bondy_event_manager:notify({[bondy, dealer, registration, deleted], Entry}).
+
+
+%% @private
+%% @doc Replies to the caller of an in-flight invocation promise with a
+%% `wamp.error.no_eligible_callee' ERROR. Used by `flush/2' when the callee
+%% session dies, so callers fast-fail instead of waiting for the call
+%% timeout. The reply is routed back through any relays stored in the
+%% promise's `via' queue.
+send_no_eligible_callee(Promise) ->
+    RealmUri = bondy_rpc_promise:realm_uri(Promise),
+    Caller = bondy_rpc_promise:caller(Promise),
+    Callee = bondy_rpc_promise:callee(Promise),
+    CallId = bondy_rpc_promise:call_id(Promise),
+    Via = bondy_rpc_promise:via(Promise),
+
+    Msg = <<"There are no eligible callees for the procedure.">>,
+    Description = <<
+        "The callee handling this call became unavailable "
+        "while the call was in flight."
+    >>,
+    Error = bondy_wamp_message:error(
+        ?CALL,
+        CallId,
+        #{},
+        ?WAMP_NO_ELIGIBLE_CALLE,
+        [Msg],
+        #{message => Msg, description => Description}
+    ),
+
+    SendOpts0 = #{from => Callee, via => Via},
+    {To, SendOpts} = bondy:prepare_send(Caller, SendOpts0),
+    _ = bondy:send(RealmUri, To, Error, SendOpts),
+    ok.
 
 
 %% %% @private

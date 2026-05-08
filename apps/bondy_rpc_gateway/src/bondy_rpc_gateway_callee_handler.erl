@@ -50,17 +50,19 @@ merged into the outgoing HTTP headers.
 """.
 
 -include_lib("kernel/include/logger.hrl").
-
--define(DEFAULT_TIMEOUT, 30000).
--define(DEFAULT_RETRIES, 3).
--define(RETRY_BACKOFF_MS, 300).
+-include("bondy_rpc_gateway.hrl").
 
 -export([handle_wamp_call/2]).
 -export([handle_wamp_call/3]).
 
+%% Used by bondy_rpc_gateway_callee for registration-time precomputation
+%% and merging of resolved secret vars
+-export([apply_secrets/2]).
+-export([extract_path_vars/1]).
+
 %% Exported for testing
 -export([interpolate_path/2]).
--export([extract_path_vars/1]).
+-export([interpolate_path/3]).
 -export([route_kwargs/3]).
 -export([http_to_wamp/2]).
 
@@ -75,7 +77,7 @@ merged into the outgoing HTTP headers.
 Called when kwargs is undefined (dealer flattens to 2 args).
 Delegates to `handle_wamp_call/3` with an empty kwargs map.
 """.
--spec handle_wamp_call(map(), map()) ->
+-spec handle_wamp_call(#rpc_gateway_proc_conf{}, map()) ->
     {ok, map(), list(), map()} |
     {error, binary(), map(), list(), map()}.
 
@@ -90,17 +92,25 @@ If the service's secrets are still pending, returns `bondy.error.bad_gateway`.
 Otherwise merges any resolved secret vars into ProcConf and delegates
 to the HTTP forwarding logic.
 """.
--spec handle_wamp_call(map(), map(), map()) ->
+-spec handle_wamp_call(#rpc_gateway_proc_conf{}, map(), map()) ->
     {ok, map(), list(), map()} |
     {error, binary(), map(), list(), map()}.
 
-handle_wamp_call(ProcConf, KWArgs0, _Options) ->
-    maybe
-        #{service_name := ServiceName} ?= ProcConf,
-        {ok, Vars} ?= bondy_rpc_gateway_manager:get_secrets(ServiceName),
-        {ok, ProcConf1} ?= apply_secrets(ProcConf, Vars),
-        do_handle_wamp_call(ProcConf1, KWArgs0)
-    else
+handle_wamp_call(
+        #rpc_gateway_proc_conf{vars_resolved = true} = ProcConf,
+        KWArgs0, _Options) ->
+    %% Fast path: secrets were merged at registration time, no need to check
+    %% readiness or merge per-call.
+    do_handle_wamp_call(ProcConf, KWArgs0);
+
+handle_wamp_call(
+        #rpc_gateway_proc_conf{service_name = ServiceName} = ProcConf,
+        KWArgs0, _Options) ->
+    %% Fallback: callee was started before its secrets resolved. Check
+    %% readiness on each call and merge as needed.
+    case bondy_rpc_gateway_manager:service_readiness(ServiceName) of
+        {ok, Vars} ->
+            do_handle_wamp_call(apply_secrets(ProcConf, Vars), KWArgs0);
         {error, not_ready} ->
             wamp_error(
                 <<"bondy.error.bad_gateway">>,
@@ -117,39 +127,55 @@ handle_wamp_call(ProcConf, KWArgs0, _Options) ->
 %% PRIVATE
 %% =============================================================================
 
-apply_secrets(ProcConf, SecretVars) ->
-    AuthConf0 = maps:get(auth_conf, ProcConf),
+-doc """
+Merge resolved secret `Vars` into the procedure's `auth_conf.vars` map and
+flag the record as fully-resolved.
+
+Called by `bondy_rpc_gateway_callee` at registration time when secrets are
+already resolved (so the WAMP hot path bypasses readiness checks), and by
+the slow-fallback clause of `handle_wamp_call/3` when a callee was
+registered before its service's secrets came back.
+""".
+-spec apply_secrets(#rpc_gateway_proc_conf{}, map()) ->
+    #rpc_gateway_proc_conf{}.
+
+apply_secrets(ProcConf, SecretVars) when map_size(SecretVars) =:= 0 ->
+    ProcConf#rpc_gateway_proc_conf{vars_resolved = true};
+
+apply_secrets(#rpc_gateway_proc_conf{auth_conf = AuthConf0} = ProcConf,
+              SecretVars) ->
     ExistingVars = maps:get(vars, AuthConf0, #{}),
     MergedVars = maps:merge(ExistingVars, SecretVars),
-    AuthConf1 = AuthConf0#{vars => MergedVars},
-    {ok, ProcConf#{auth_conf => AuthConf1}}.
+    ProcConf#rpc_gateway_proc_conf{
+        auth_conf = AuthConf0#{vars => MergedVars},
+        vars_resolved = true
+    }.
 
 
 
-do_handle_wamp_call(ProcConf, KWArgs0) ->
-    #{
-        service_name := ServiceName,
-        base_url := BaseUrl,
-        auth_mod := AuthMod,
-        auth_conf := AuthConf,
-        method := Method,
-        path := PathTemplate
+do_handle_wamp_call(#rpc_gateway_proc_conf{} = ProcConf, KWArgs0) ->
+    #rpc_gateway_proc_conf{
+        service_name = ServiceName,
+        base_url = BaseUrl,
+        auth_mod = AuthMod,
+        auth_conf = AuthConf,
+        method = Method,
+        path = PathTemplate,
+        path_vars = PathVars,
+        timeout = Timeout,
+        retries = Retries,
+        pool = Pool
     } = ProcConf,
-
-    Timeout = maps:get(timeout, ProcConf, ?DEFAULT_TIMEOUT),
-    Retries = maps:get(retries, ProcConf, ?DEFAULT_RETRIES),
-    Pool = maps:get(pool, ProcConf, default),
-    TlsVerify = maps:get(tls_verify, ProcConf, verify_peer),
 
     try
         %% 1. Extract custom headers
         {CustomHeaders, KWArgs1} = extract_custom_headers(KWArgs0),
 
         %% 2. Interpolate path template — consumes matched keys
-        {Path, KWArgs2} = interpolate_path(PathTemplate, KWArgs1),
+        {Path, KWArgs2} = interpolate_path(PathTemplate, KWArgs1, PathVars),
 
         %% 3. Build URL and route remaining kwargs
-        Endpoint = bondy_rpc_gateway_service:construct_url(BaseUrl, Path),
+        Endpoint = construct_url(BaseUrl, Path),
         {Url, Body} = route_kwargs(Method, Endpoint, KWArgs2),
 
         %% 4. Build headers
@@ -164,8 +190,8 @@ do_handle_wamp_call(ProcConf, KWArgs0) ->
         {FinalUrl, FinalHeaders} =
             AuthMod:apply_auth(Token, Url, BaseHeaders, AuthConf),
 
-        ?LOG_INFO(#{
-            msg => <<"WAMP→HTTP forwarding">>,
+        ?LOG_DEBUG(#{
+            description => <<"WAMP→HTTP forwarding">>,
             service => ServiceName,
             method => Method,
             url => FinalUrl
@@ -174,22 +200,21 @@ do_handle_wamp_call(ProcConf, KWArgs0) ->
         %% 6. Make HTTP request
         MethodAtom = method_to_atom(Method),
         Response = request_with_retry(
-            MethodAtom, FinalUrl, FinalHeaders, Body, Retries, Timeout, Pool,
-            TlsVerify
+            MethodAtom, FinalUrl, FinalHeaders, Body, Retries, Timeout, Pool
         ),
 
         case Response of
             {ok, Status0, _RH0, _RespBody0}
               when Status0 =:= 401; Status0 =:= 403 ->
                 ?LOG_WARNING(#{
-                    msg => <<"Auth rejection, retrying with fresh token">>,
+                    description => <<"Auth rejection, retrying with fresh token">>,
                     service => ServiceName,
                     status => Status0
                 }),
                 retry_with_fresh_token(
                     ServiceName, AuthMod, AuthConf,
                     Url, BaseHeaders, MethodAtom, Body,
-                    Retries, Timeout, Pool, TlsVerify
+                    Retries, Timeout, Pool
                 );
 
             {ok, Status1, _RH1, RespBody1} ->
@@ -197,7 +222,7 @@ do_handle_wamp_call(ProcConf, KWArgs0) ->
 
             {error, HttpErr} ->
                 ?LOG_ERROR(#{
-                    msg => <<"HTTP request failed">>,
+                    description => <<"HTTP request failed">>,
                     service => ServiceName,
                     reason => HttpErr
                 }),
@@ -217,7 +242,7 @@ do_handle_wamp_call(ProcConf, KWArgs0) ->
 
         throw:{auth_error, AuthErr} ->
             ?LOG_ERROR(#{
-                msg => <<"Auth failed for WAMP procedure">>,
+                description => <<"Auth failed for WAMP procedure">>,
                 service => ServiceName,
                 reason => AuthErr
             }),
@@ -229,7 +254,7 @@ do_handle_wamp_call(ProcConf, KWArgs0) ->
 
         Class:CatchReason:Stack ->
             ?LOG_ERROR(#{
-                msg => <<"Unexpected error in WAMP handler">>,
+                description => <<"Unexpected error in WAMP handler">>,
                 service => ServiceName,
                 class => Class,
                 reason => CatchReason,
@@ -250,7 +275,11 @@ do_handle_wamp_call(ProcConf, KWArgs0) ->
 -doc false.
 -spec interpolate_path(binary(), map()) -> {binary(), map()}.
 interpolate_path(Template, KWArgs) ->
-    Vars = extract_path_vars(Template),
+    interpolate_path(Template, KWArgs, extract_path_vars(Template)).
+
+-doc false.
+-spec interpolate_path(binary(), map(), [binary()]) -> {binary(), map()}.
+interpolate_path(Template, KWArgs, Vars) ->
     lists:foldl(
         fun(Var, {TplAcc, KWAcc}) ->
             case maps:take(Var, KWAcc) of
@@ -281,6 +310,23 @@ extract_path_vars(Template) ->
         nomatch ->
             []
     end.
+
+
+%% ===================================================================
+%% URL construction
+%% ===================================================================
+
+-spec construct_url(binary(), binary()) -> binary().
+construct_url(BaseUrl, RequestPath) ->
+    Base = case binary:last(BaseUrl) of
+        $/ -> binary:part(BaseUrl, 0, byte_size(BaseUrl) - 1);
+        _ -> BaseUrl
+    end,
+    Path = case RequestPath of
+        <<"/", _/binary>> -> RequestPath;
+        _ -> <<"/", RequestPath/binary>>
+    end,
+    <<Base/binary, Path/binary>>.
 
 
 %% ===================================================================
@@ -350,39 +396,47 @@ acquire_token(ServiceName, AuthMod, AuthConf) ->
 %% HTTP request with retry
 %% ===================================================================
 
-request_with_retry(Method, Url, Headers, Body, RetriesLeft, Timeout, Pool, TlsVerify) ->
-    SslOpts = case TlsVerify of
-        verify_none -> bondy_cert_manager:ssl_opts(#{verify => verify_none});
-        _ -> bondy_cert_manager:ssl_opts()
-    end,
-    Opts = [
+request_with_retry(Method, Url, Headers, Body, RetriesLeft, Timeout, Pool) ->
+    Overrides = [
         {connect_timeout, Timeout},
-        {recv_timeout, Timeout},
-        {ssl_options, SslOpts},
-        {pool, Pool},
-        with_body
+        {recv_timeout, Timeout}
     ],
-    case hackney:request(Method, Url, Headers, Body, Opts) of
+    case bondy_rpc_gateway_http_pool:request(
+            Pool, Method, Url, Headers, Body, Overrides) of
         {ok, S, RH, RB} ->
             {ok, S, RH, RB};
+        {error, pool_down} = E ->
+            %% No point sleeping and re-asking the same persistent_term —
+            %% the pool's status only flips when the pool's own health
+            %% retry succeeds. Fail fast so the dealer can move on.
+            E;
         {error, _} when RetriesLeft > 0 ->
             Attempt = ?DEFAULT_RETRIES - RetriesLeft + 1,
-            BackoffMs = round(
-                ?RETRY_BACKOFF_MS * math:pow(2, Attempt - 1)
-            ),
+            BackoffMs = backoff_with_jitter(Attempt),
             ?LOG_WARNING(#{
-                msg => <<"Retrying HTTP request">>,
+                description => <<"Retrying HTTP request">>,
                 attempt => Attempt,
                 backoff_ms => BackoffMs
             }),
-            timer:sleep(BackoffMs),
+            receive after BackoffMs -> ok end,
             request_with_retry(
-                Method, Url, Headers, Body, RetriesLeft - 1, Timeout, Pool,
-                TlsVerify
+                Method, Url, Headers, Body, RetriesLeft - 1, Timeout, Pool
             );
         {error, Reason} ->
             {error, Reason}
     end.
+
+
+%% @private
+%% Exponential backoff with full jitter and a hard ceiling. The handler
+%% runs INLINE in the dealer's caller process — long sleeps stall every
+%% other CALL queued behind us — so each individual wait is capped well
+%% below the per-procedure timeout. The floor avoids hammering an upstream
+%% that just failed with a near-zero retry.
+backoff_with_jitter(Attempt) ->
+    Exp = round(?RETRY_BACKOFF_BASE_MS * math:pow(2, Attempt - 1)),
+    Cap = min(?RETRY_BACKOFF_CAP_MS, Exp),
+    max(?RETRY_BACKOFF_FLOOR_MS, rand:uniform(max(1, Cap))).
 
 
 %% ===================================================================
@@ -392,7 +446,7 @@ request_with_retry(Method, Url, Headers, Body, RetriesLeft, Timeout, Pool, TlsVe
 retry_with_fresh_token(
         ServiceName, AuthMod, AuthConf,
         Url, BaseHeaders, MethodAtom, Body,
-        Retries, Timeout, Pool, TlsVerify) ->
+        Retries, Timeout, Pool) ->
     bondy_rpc_gateway_token_cache:invalidate(ServiceName),
     case bondy_rpc_gateway_token_cache:get(
             ServiceName, AuthMod, AuthConf) of
@@ -403,12 +457,12 @@ retry_with_fresh_token(
                 ),
             case request_with_retry(
                     MethodAtom, RetryUrl, RetryHeaders, Body,
-                    Retries, Timeout, Pool, TlsVerify) of
+                    Retries, Timeout, Pool) of
                 {ok, Status, _RH, RespBody} ->
                     http_to_wamp(Status, RespBody);
                 {error, Reason} ->
                     ?LOG_ERROR(#{
-                        msg => <<"Retry HTTP request failed">>,
+                        description => <<"Retry HTTP request failed">>,
                         service => ServiceName,
                         reason => Reason
                     }),

@@ -6,27 +6,29 @@
 -module(bondy_rpc_gateway_token_cache).
 
 -moduledoc """
-Registry and public API for the per-service token cache.
+Public API for the per-service token cache.
 
-This gen_server owns a `set` ETS table that maps service names to worker
-pids. Token reads go directly to a pool of workers via the ETS lookup (concurrent,
-lock-free); worker creation is managed by `bondy_rpc_gateway_token_cache_sup`
+A pool of `bondy_rpc_gateway_token_cache_worker` processes is started
+eagerly at registry init. Service names are mapped to a worker via
+`gproc_pool` `hash` strategy (deterministic mapping per service name).
+Each worker owns a private named ETS table holding its assigned services'
+tokens, so token reads are lock-free.
 
 ## Supervision tree
 
 ```
 bondy_rpc_gateway_sup (rest_for_one)
-├── bondy_rpc_gateway_token_cache    ← this module (registry)
-└── bondy_rpc_gateway_token_cache_sup (simple_one_for_one)
-    ├── worker for <<"service_a">>
-    ├── worker for <<"service_b">>
+├── bondy_rpc_gateway_token_cache        ← this module (registry)
+└── bondy_rpc_gateway_token_cache_sup    (one_for_one)
+    ├── worker_1
+    ├── worker_2
     └── ...
 ```
 
 ## Usage
 
 ```erlang
-%% Fetch a token (creates worker on first call)
+%% Fetch a token
 {ok, Token} = bondy_rpc_gateway_token_cache:get(
     <<"service_a">>, bondy_rpc_gateway_auth_generic, AuthConf
 ).
@@ -43,20 +45,18 @@ ok = bondy_rpc_gateway_token_cache:invalidate(<<"service_a">>).
 ## Hot path (cached token)
 
 ```
-get(Name, ...) → ets:lookup → worker pid
-                     → gen_server:call(Pid, get)
-                     → state check → {ok, Token}
+get(Name, ...) → gproc_pool:pick → worker name (atom)
+                     → ets:lookup_element on worker's table → Token
 ```
-No HTTP call, no registry gen_server involved.
 
-## Cold path (first request for a service)
+Two ETS lookups, no gen_server hop.
+
+## Cold path (no cached token for service)
 
 ```
-get(Name, ...) → ets:lookup → miss
-                     → gen_server:call(registry, {start_worker, ...})
-                     → supervisor:start_child → new worker pid
-                     → ets:insert, monitor
-                     → gen_server:call(Pid, get)
+get(Name, ...) → gproc_pool:pick → worker name
+                     → ets:lookup_element → undefined
+                     → gen_server:call(worker, {get_token, ...})
                      → AuthMod:fetch_token → {ok, Token}
 ```
 """.
@@ -215,14 +215,12 @@ init_pool() ->
     DefaultSize = max(erlang:system_info(schedulers_online), 8),
     Size = bondy_rpc_gateway_config:get([token_cache_pool, size], DefaultSize),
 
-    %% If the supervisor restarts and we call groc_pool:new it will fail with
-    %% an exception, so we catch
-    _ = catch gproc_pool:new(?POOLNAME, hash, [{size, Size}]),
+    ok = ensure_pool(?POOLNAME, Size),
 
     [
         begin
             WorkerName = worker_name(Id),
-            _ = catch gproc_pool:add_worker(?POOLNAME, WorkerName),
+            ok = ensure_worker_slot(?POOLNAME, WorkerName),
             Result = bondy_rpc_gateway_token_cache_sup:start_worker(
                 ?POOLNAME, WorkerName
             ),
@@ -242,6 +240,27 @@ init_pool() ->
         || Id <- lists:seq(1, Size)
     ],
     ok.
+
+
+%% @private
+%% gproc_pool state survives restarts of this gen_server, so a re-init can
+%% encounter an existing pool. `gproc_pool:new/3` raises `error:exists` in
+%% that case — anything else is a real failure and should propagate.
+ensure_pool(Pool, Size) ->
+    try gproc_pool:new(Pool, hash, [{size, Size}]) of
+        ok -> ok
+    catch
+        error:exists -> ok
+    end.
+
+
+%% @private
+ensure_worker_slot(Pool, WorkerName) ->
+    try gproc_pool:add_worker(Pool, WorkerName) of
+        Pos when is_integer(Pos) -> ok
+    catch
+        error:exists -> ok
+    end.
 
 %% @private
 worker_name(Id) when is_integer(Id) ->
