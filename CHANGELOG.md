@@ -1,6 +1,10 @@
 # CHANGELOG
 
-## 1.0.0-rc.63
+## 1.0.0-rc.64
+### Fixes
+* Dockerfile seurity fixes to reduce CVE surface in runtime image
+
+## 1.0.0-rc.64
 ### Performance
 * Registry pattern matching (prefix and wildcard) rewritten as a lock-free persistent Adaptive Radix Trie (`bondy_registry_ptrie`), replacing the `art` library and its serialising gen_server. Match latency drops from ~133µs to ~1µs and reads scale with cores instead of being capped at ~5k ops/s. Per-handle QSBR reclamation is driven by `bondy_registry_ptrie_janitor` processes managed by each registry partition.
 * RPC dealer: removed expensive defensive liveness checks from the call hot path; in-flight promises are now flushed when a Callee dies.
