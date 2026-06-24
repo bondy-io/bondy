@@ -415,7 +415,15 @@ to_external(#{type := source, version := ?VERSION} = Source) ->
     String = iolist_to_binary(
         io_lib:format("~s/~B", [inet_parse:ntoa(Addr), Mask])
     ),
-    maps:put(cidr, String, Source).
+    maps:put(cidr, String, Source);
+to_external({_, #{type := source, version := ?VERSION} = Source}) ->
+    {Addr, Mask} = maps:get(cidr, Source),
+    String = iolist_to_binary(
+        io_lib:format("~s/~B", [inet_parse:ntoa(Addr), Mask])
+    ),
+    maps:put(cidr, String, Source);
+to_external(InvalidSource) ->
+    throw({error, {invalid_source, InvalidSource}}).
 
 
 
