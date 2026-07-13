@@ -661,7 +661,10 @@ message_to_map(#result{} = M0) ->
         kwargs => kwargs(KWArgs)
     };
 
-message_to_map(#error{} = M) ->
+message_to_map(#error{} = M0) ->
+
+    M = bondy_wamp_message:decode_partial(M0),
+
     #error{
         request_type = Type,
         request_id = Id,
