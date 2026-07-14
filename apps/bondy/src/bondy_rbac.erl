@@ -547,7 +547,10 @@ revoke(RealmUri, #{type := request} = Request) ->
     } = Request,
     revoke(RealmUri, Roles, Resources, Permissions);
 
-revoke(RealmUri, Data) when is_map(Data) ->
+revoke(RealmUri, Data0)  when is_map(Data0) ->
+    Uri = maps:get(~"uri", Data0, any),
+    Match = maps:get(~"match", Data0, ?PREFIX_MATCH),
+    Data = Data0#{~"uri" => Uri, ~"match" => Match},
     revoke(RealmUri, validate(Data)).
 
 
@@ -706,6 +709,9 @@ externalize_grant({{Role, {_, _} = Resource}, Permissions}) ->
 %% -----------------------------------------------------------------------------
 externalize_grant({{<<>>, Strategy}, Permissions}) ->
     externalize_grant({{any, Strategy}, Permissions});
+
+externalize_grant({{<<"group/", _/binary>> = Role, Strategy}, Permissions}) ->
+    externalize_grant({{Role, { <<>>, Strategy}}, Permissions});
 
 externalize_grant({{Uri, Strategy}, Permissions}) ->
     #{
