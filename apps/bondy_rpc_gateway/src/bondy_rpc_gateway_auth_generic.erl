@@ -114,12 +114,9 @@ to write a dedicated Erlang module for each upstream auth scheme.
 -export([fetch_token/1]).
 -export([apply_auth/4]).
 
-
 %% =============================================================================
 %% BONDY_RPC_GATEWAY_AUTH_PROXY CALLBACKS
 %% =============================================================================
-
-
 
 -doc """
 Fetch a token from the configured HTTP endpoint.
@@ -168,16 +165,17 @@ fetch_token(#{fetch := FetchConf} = Conf) ->
     %% RPC gateway callee threads it in at registration time). When no pool
     %% is provided — direct callers like ad-hoc tests — fall back to a plain
     %% hackney request with cert_manager defaults so behaviour is unchanged.
-    Result = case maps:get(pool, Conf, undefined) of
-        undefined ->
-            SslOpts = bondy_cert_manager:ssl_opts(),
-            Opts = [{ssl_options, SslOpts}, with_body],
-            hackney:request(Method, Url, Headers, Body, Opts);
-        Pool ->
-            bondy_rpc_gateway_http_pool:request(
-                Pool, Method, Url, Headers, Body
-            )
-    end,
+    Result =
+        case maps:get(pool, Conf, undefined) of
+            undefined ->
+                SslOpts = bondy_cert_manager:ssl_opts(),
+                Opts = [{ssl_options, SslOpts}, with_body],
+                hackney:request(Method, Url, Headers, Body, Opts);
+            Pool ->
+                bondy_rpc_gateway_http_pool:request(
+                    Pool, Method, Url, Headers, Body
+                )
+        end,
 
     case Result of
         {ok, 200, _RH, RespBody} ->
@@ -191,14 +189,12 @@ fetch_token(#{fetch := FetchConf} = Conf) ->
                                 _ ->
                                     {error, no_token_in_response}
                             end;
-
                         {error, _} = Err ->
                             Err
                     end;
                 {error, _} = Err ->
                     Err
             end;
-
         {ok, Status, _RH, RespBody} ->
             ?LOG_ERROR(#{
                 description => <<"Token request failed">>,
@@ -206,7 +202,6 @@ fetch_token(#{fetch := FetchConf} = Conf) ->
                 body => RespBody
             }),
             {error, {http_status, Status}};
-
         {error, Reason} ->
             {error, Reason}
     end.
@@ -245,29 +240,22 @@ apply_auth(Token, Url, Headers, #{apply := ApplyConf}) ->
             Sep =
                 case binary:match(Url, <<"?">>) of
                     nomatch -> <<"?">>;
-                    _       -> <<"&">>
+                    _ -> <<"&">>
                 end,
             Param = uri_string:compose_query([{Name, Token}]),
             {<<Url/binary, Sep/binary, Param/binary>>, Headers};
-
         #{placement := header, name := Name} ->
             Format = maps:get(format, ApplyConf, <<"{{token}}">>),
             Value = binary:replace(Format, <<"{{token}}">>, Token),
             {Url, [{Name, Value} | Headers]}
     end.
 
-
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
 make_token_result(Token, _Data, undefined) ->
     {ok, Token};
-
 make_token_result(Token, Data, ExpiresInPath) ->
     case walk_path(Data, ExpiresInPath) of
         {ok, N} when is_integer(N), N > 0 ->
@@ -294,14 +282,12 @@ interpolate_map(Map, Vars) ->
 
 encode_body(none, _BodyMap, Headers) ->
     {Headers, <<>>};
-
 encode_body(form, BodyMap, Headers) ->
     Body = uri_string:compose_query(maps:to_list(BodyMap)),
     {
         ensure_content_type(<<"application/x-www-form-urlencoded">>, Headers),
         Body
     };
-
 encode_body(json, BodyMap, Headers) ->
     Body = iolist_to_binary(json:encode(BodyMap)),
     {ensure_content_type(<<"application/json">>, Headers), Body}.
@@ -310,19 +296,17 @@ ensure_content_type(CT, Headers) ->
     case lists:keyfind(<<"Content-Type">>, 1, Headers) of
         false ->
             [{<<"Content-Type">>, CT} | Headers];
-
         _ ->
             Headers
     end.
 
-
 apply_request_auth(undefined, _Vars, Headers) ->
     Headers;
-
 apply_request_auth(
     #{type := basic, username := UserTpl, password := PassTpl},
     Vars,
-    Headers) ->
+    Headers
+) ->
     User = interpolate(UserTpl, Vars),
     Pass = interpolate(PassTpl, Vars),
     Cred = base64:encode(<<User/binary, ":", Pass/binary>>),
@@ -343,22 +327,18 @@ decode_json(Body) ->
 
 check_error(_Data, undefined) ->
     ok;
-
 check_error(Data, ErrorPath) ->
     case walk_path(Data, ErrorPath) of
         {ok, Msg} when is_binary(Msg) ->
             {error, {upstream_error, Msg}};
-
         {ok, _} ->
             {error, {upstream_error, <<"Unknown error">>}};
-
         error ->
             ok
     end.
 
 walk_path(Value, []) ->
     {ok, Value};
-
 walk_path(Data, [Key | Rest]) when is_map(Data) ->
     case maps:find(Key, Data) of
         {ok, Value} ->
@@ -366,19 +346,14 @@ walk_path(Data, [Key | Rest]) when is_map(Data) ->
         error ->
             error
     end;
-
 walk_path(_, _) ->
     error.
 
-
 to_binary(B) when is_binary(B) ->
     B;
-
 to_binary(A) when is_atom(A) ->
     atom_to_binary(A);
-
 to_binary(I) when is_integer(I) ->
     integer_to_binary(I);
-
 to_binary(L) when is_list(L) ->
     list_to_binary(L).

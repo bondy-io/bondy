@@ -33,23 +33,17 @@ bondy_broker_bridge_sup (one_for_one)
 %% Supervisor callbacks
 -export([init/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 -doc "Start the supervisor, registered locally.".
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-
-
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
-
 
 -doc false.
 init([]) ->

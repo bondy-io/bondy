@@ -1,0 +1,116 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+-module(bondy_ranch_listener).
+-moduledoc """
+This module encapsulates several operations on the ranch library and it is used
+by all other modules to setup and manage TCP and TLS listeners.
+""".
+
+-include_lib("kernel/include/logger.hrl").
+
+-export([connections/1]).
+-export([resume/1]).
+-export([start/3]).
+-export([stop/1]).
+-export([suspend/1]).
+-export([transport_opts/1]).
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+-doc """
+Conditionally starts a listener with reference `Ref`.
+References for each listener is defined by the bondy.schema file.
+""".
+-spec start(
+    Ref :: ranch:ranch_ref(), Protocol :: module(), ProtocolOpts :: any()
+) ->
+    ok | {error, any()}.
+
+start(Ref, Protocol, ProtocolOpts) ->
+    case bondy_config:get([Ref, enabled], true) of
+        true ->
+            Transport = ref_to_transport(Ref),
+            TransportOpts = transport_opts(Ref),
+            Result = ranch:start_listener(
+                Ref,
+                Transport,
+                TransportOpts,
+                Protocol,
+                ProtocolOpts
+            ),
+            resulto:then(Result, fun(_OK) ->
+                ?LOG_NOTICE(#{
+                    description => "Started TCP listener",
+                    listener => Ref,
+                    transport => Transport,
+                    transport_opts => TransportOpts,
+                    protocol => Protocol
+                }),
+                ok
+            end);
+        false ->
+            ok
+    end.
+
+-spec stop(Ref :: ranch:ranch_ref()) -> ok.
+
+stop(Ref) ->
+    catch ranch:stop_listener(Ref),
+    ok.
+
+-spec suspend(Ref :: ranch:ranch_ref()) -> ok.
+
+suspend(Ref) ->
+    catch ranch:suspend_listener(Ref),
+    ok.
+
+-spec resume(Ref :: ranch:ranch_ref()) -> ok.
+
+resume(Ref) ->
+    catch ranch:resume_listener(Ref),
+    ok.
+
+connections(Ref) ->
+    ranch:procs(Ref, connections).
+
+-doc """
+Returns the transport and transport options to be used with listener `Ref`.
+
+The definition of the listeners in bondy.schema MUST match this structure.
+- Ref
+    - ip
+    - port
+    - num_acceptors
+    - max_connections
+    - backlog
+    - max_connections
+    - max_connections
+    - socket_opts
+        - keepalive
+        - nodelay
+        - sndbuf
+        - recbuf
+        - buffer
+        - certfile (TLS)
+        - keyfile (TLS)
+        - keyfile (TLS)
+        - versions (TLS)
+""".
+transport_opts(Ref) ->
+    bondy_config:listener_transport_opts(Ref).
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+%% These MUST match the listener names defined in bondy.schema
+ref_to_transport(bridge_relay_tcp) -> ranch_tcp;
+ref_to_transport(bridge_relay_tls) -> ranch_ssl;
+ref_to_transport(wamp_tcp) -> ranch_tcp;
+ref_to_transport(wamp_tls) -> ranch_ssl.

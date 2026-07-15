@@ -9,7 +9,6 @@
 -include_lib("bondy_wamp.hrl").
 -compile(export_all).
 
-
 all() ->
     [
         test_strict,
@@ -23,8 +22,6 @@ all() ->
         match
     ].
 
-
-
 init_per_suite(Config) ->
     _ = application:ensure_all_started(bondy_wamp),
     ok = bondy_wamp_config:init(),
@@ -32,7 +29,6 @@ init_per_suite(Config) ->
 
 end_per_suite(_) ->
     ok.
-
 
 test_strict(_) ->
     List = [
@@ -91,7 +87,6 @@ validate_exact_error(_) ->
         List
     ).
 
-
 validate_prefix(_) ->
     List = [
         <<>>,
@@ -131,7 +126,6 @@ validate_prefix_error(_) ->
         List
     ).
 
-
 validate_wildcard(_) ->
     List = [
         <<".">>,
@@ -153,21 +147,19 @@ validate_wildcard(_) ->
         List
     ).
 
-
 validate_wildcard_error(_) ->
     List = [
         <<>>
     ],
     lists:foreach(
         fun(URI) ->
-          ?assertError(
+            ?assertError(
                 {invalid_uri, URI},
                 bondy_wamp_uri:validate(URI, ?WILDCARD_MATCH)
             )
         end,
         List
     ).
-
 
 empty_uri(_) ->
     bondy_wamp_config:set(uri_strictness, strict),
@@ -192,15 +184,12 @@ empty_uri(_) ->
 
     ok.
 
-
-
 match(Config) ->
     bondy_wamp_config:set(uri_strictness, strict),
     do_match(Config),
 
     bondy_wamp_config:set(uri_strictness, loose),
     do_match(Config).
-
 
 do_match(_) ->
     ?assertError(badarg, bondy_wamp_uri:match(<<>>, <<"a">>, ?EXACT_MATCH)),
@@ -218,4 +207,3 @@ do_match(_) ->
     ?assert(bondy_wamp_uri:match(<<"a.b">>, <<"a.">>, ?WILDCARD_MATCH)),
     ?assert(bondy_wamp_uri:match(<<"a.b">>, <<".b">>, ?WILDCARD_MATCH)),
     ?assert(bondy_wamp_uri:match(<<"a.b">>, <<"a.b">>, ?WILDCARD_MATCH)).
-

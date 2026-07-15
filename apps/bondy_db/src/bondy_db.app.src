@@ -1,0 +1,23 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2023 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+{application, bondy_db, [
+    {description,
+        "Consumer-facing database facade and storage topologies "
+        "(leveled-backed) over the bondy_oplog replication framework."},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, {bondy_db_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        leveled,
+        bondy_oplog
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

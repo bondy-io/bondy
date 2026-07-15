@@ -20,44 +20,44 @@
 
 
 %% @doc Default location for oauth2 configuration file
-{mapping, "oauth2.config_file", "bondy.oauth2.config_file", [
+{mapping, "oauth2.config_file", "bondy_router.oauth2.config_file", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/oauth2_config.json"}
 ]}.
 
 
-{mapping, "oauth2.password_grant.duration", "bondy.oauth2.password_grant_duration",
+{mapping, "oauth2.password_grant.duration", "bondy_router.oauth2.password_grant_duration",
 [
 {default, "15m"},
 {datatype, {duration, s}}
 ]}.
 
-{mapping, "oauth2.client_credentials_grant.duration", "bondy.oauth2.client_credentials_grant_duration",
+{mapping, "oauth2.client_credentials_grant.duration", "bondy_router.oauth2.client_credentials_grant_duration",
 [
 {default, "15m"},
 {datatype, {duration, s}}
 ]}.
 
-{mapping, "oauth2.code_grant.duration", "bondy.oauth2.code_grant_duration",
+{mapping, "oauth2.code_grant.duration", "bondy_router.oauth2.code_grant_duration",
 [
 {default, "10m"},
 {datatype, {duration, s}}
 ]}.
 
-{mapping, "oauth2.refresh_token.duration", "bondy.oauth2.refresh_token_duration",
+{mapping, "oauth2.refresh_token.duration", "bondy_router.oauth2.refresh_token_duration",
 [
 {default, "30d"},
 {datatype, {duration, s}}
 ]}.
 
 %% Deprecated
-{mapping, "oauth2.refresh_token.length", "bondy.oauth2.refresh_token_length",
+{mapping, "oauth2.refresh_token.length", "bondy_router.oauth2.refresh_token_length",
 [
 {default, "40"},
 {datatype, bytesize}
 ]}.
 
-{mapping, "oauth2.refresh_token.limit", "bondy.oauth2.max_tokens_per_user",
+{mapping, "oauth2.refresh_token.limit", "bondy_router.oauth2.max_tokens_per_user",
 [
 {default, "25"},
 {datatype, bytesize}

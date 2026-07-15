@@ -1,0 +1,50 @@
+# =============================================================================
+# bondy umbrella — Linux bench substrate on Fly.io (performance-8x variant)
+#
+# Parallel to fly.toml (performance-2x) — used to validate whether the
+# write-path / applier throughput we measure on perf-2x is substrate-
+# limited (burst-IOPS exhaustion on the shared Firecracker slot) or
+# actually code-limited. perf-8x gives 8 dedicated vCPU + 16 GB RAM
+# and a 40 GB volume (Fly volume burst IOPS scales with size, so a
+# larger volume yields a bigger burst budget).
+#
+# Drive via the umbrella `just bench-fly-8x-*` recipes. flyctl
+# auto-discovers `fly.toml` only, so every recipe passes
+# `--config fly-8x.toml` explicitly. The Dockerfile + build context +
+# remote-builder behaviour are identical to fly.toml.
+#
+# Cost: ~$6/mo standing (40 GB volume) + ~$0.85 per 2h bench run.
+# `just bench-fly-8x-down` after every session.
+#
+# App is named `bondy-db-bench-8x` so it coexists with the perf-2x
+# `bondy-db-bench` app — Fly app names are globally unique.
+# =============================================================================
+
+app = 'bondy-db-bench-8x'
+primary_region = 'lhr'
+
+[build]
+  dockerfile = 'bench/fly/Dockerfile'
+
+  [build.args]
+    REBAR3_VERSION = '3.24.0'
+    JUST_VERSION = '1.36.0'
+
+[deploy]
+  strategy = 'immediate'
+
+[[mounts]]
+  source = 'bench_data_8x'
+  destination = '/data'
+  initial_size = '40gb'
+
+[[vm]]
+  size = 'performance-8x'
+  cpu_kind = 'performance'
+  cpus = 8
+  memory_mb = 16384
+
+[machine]
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0

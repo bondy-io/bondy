@@ -63,9 +63,9 @@ fetch_token(Config) ->
 ```
 """.
 -callback fetch_token(Config :: map()) ->
-    {ok, Token :: binary()} |
-    {ok, {Token :: binary(), Meta :: map()}} |
-    {error, term()}.
+    {ok, Token :: binary()}
+    | {ok, {Token :: binary(), Meta :: map()}}
+    | {error, term()}.
 
 -doc """
 Apply the acquired token to an outgoing request.
@@ -86,8 +86,8 @@ apply_auth(Token, Url, Headers, _Conf) ->
 ```
 """.
 -callback apply_auth(
-    Token   :: binary(),
-    Url     :: binary(),
+    Token :: binary(),
+    Url :: binary(),
     Headers :: [{binary(), binary()}],
-    Config  :: map()
+    Config :: map()
 ) -> {Url :: binary(), Headers :: [{binary(), binary()}]}.

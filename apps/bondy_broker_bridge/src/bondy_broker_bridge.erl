@@ -30,12 +30,9 @@ Each bridge implementation exports four callbacks:
 | `bondy_mailgun_bridge` | Mailgun email (via `email`) |
 """.
 
-
-
 %% =============================================================================
 %% CALLBACKS
 %% =============================================================================
-
 
 -doc """
 Initialise the external broker or system as an event sink.
@@ -48,7 +45,6 @@ action templates can reference bridge-specific values.
 -callback init(Config :: any()) ->
     {ok, Ctxt :: #{binary() => any()}} | {error, Reason :: any()}.
 
-
 -doc """
 Parse and validate the action `Action`.
 
@@ -58,7 +54,6 @@ reject malformed actions early.
 """.
 -callback validate_action(Action :: map()) ->
     {ok, ValidAction :: map()} | {error, Reason :: any()}.
-
 
 -doc """
 Execute the action `Action`.
@@ -71,7 +66,6 @@ failures.
     ok
     | {retry, Reason :: any()}
     | {error, Reason :: any()}.
-
 
 -doc """
 Terminate the bridge and clean up resources.

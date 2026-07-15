@@ -1,0 +1,1887 @@
+{
+    "id": "com.leapsight.bondy",
+    "name": "Bondy Admin API",
+    "host" : "_",
+    "realm_uri" : "com.leapsight.bondy",
+    "status_codes" : {
+        "bondy.error.badarg" : 400,
+        "bondy.error.not_found" : 404,
+        "bondy.error.already_exists": 400,
+        "bondy.error.no_such_user": 400
+    },
+    "variables" : {
+        "oauth2" : {
+            "type" : "oauth2",
+            "flow" : "resource_owner_password_credentials",
+            "token_path" : "/oauth/token",
+            "revoke_token_path" : "/oauth/revoke",
+            "schemes" : "{{variables.schemes}}"
+        },
+        "query_spec" :
+            "{{request.query_params |> with([_q,_p,_limit,_sort,_page])}}",
+        "query_match" :
+            "{{request.query_params |> without([_q,_p,_limit,_sort,_page])}}",
+        "schemes" : ["http", "https"],
+        "headers": {},
+        "wamp_error_body": "{{action.error.kwargs |> put(code, {{action.error.error_uri}})}}"
+    },
+    "defaults" : {
+        "retries" : 0,
+        "timeout" : 5000,
+        "connect_timeout" : 5000,
+        "schemes" : "{{variables.schemes}}",
+        "headers": "{{variables.headers}}",
+        "security":{}
+    },
+    "versions" :  {
+        "1.0.0" : {
+            "base_path" : "/[v1.0]",
+            "variables" : {},
+            "defaults" : {
+                "timeout" : 20000
+            },
+            "languages": ["en", "es-AR"],
+            "paths" : {
+                "/services/call" : {
+                    "summary":"Allows to perform an arbitrary WAMP call.",
+                    "description":"",
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "{{request.body.procedure}}",
+                            "options" : "{{request.body.options}}",
+                            "args" : "{{request.body.args}}",
+                            "kwargs" : "{{request.body.kwargs}}"
+                        },
+                        "response": {
+                            "on_error": {
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body": {
+                                    "error_uri": "{{action.error.error_uri}}",
+                                    "args" : "{{action.error.args}}",
+                                    "kwargs" : "{{action.error.kwargs}}",
+                                    "details": "{{action.error.details}}"
+                                }
+                            },
+                            "on_result": {
+                                "body": {
+                                    "args" : "{{action.result.args}}",
+                                    "kwargs" : "{{action.result.kwargs}}",
+                                    "details": "{{action.result.details}}"
+                                }
+                            }
+                        }
+                    }
+                },
+                "/services/create_backup" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.export.create",
+                            "options" : {},
+                            "args" : [
+                                "{{request.body}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/services/backup_status" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get": {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.export.status",
+                            "options" : {},
+                            "args" : ["{{variables.query_match}}"],
+                            "kwargs" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/services/restore_backup" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post": {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.export.import",
+                            "options" : {},
+                            "args" : ["{{request.body}}"],
+                            "kwargs" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/services/load_api_spec" : {
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.http_gateway.api.load",
+                            "options" : {},
+                            "args" : [
+                                "{{request.body}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/api_specs" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.http_gateway.api.list",
+                            "options" : {},
+                            "args" : [],
+                            "kwargs" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" : "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.http_gateway.api.load",
+                            "options" : {},
+                            "args" : [
+                                "{{request.body}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/api_specs/:id" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.http_gateway.api.get",
+                            "options" : {},
+                            "args" : ["{{request.bindings.id}}"],
+                            "kwargs" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" : "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.http_gateway.api.delete",
+                            "options" : {},
+                            "args" : ["{{request.bindings.id}}"],
+                            "kwargs" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" : "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/api_specs/:id/info" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.http_gateway.api.get",
+                            "options" : {},
+                            "args" : ["{{request.bindings.id}}"],
+                            "kwargs" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" : "{{action.result.args |> head |> with([id, name, host, realm_uri, meta, ts])}}"
+                            }
+                        }
+                    }
+                },
+                "/realms": {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get": {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.realm.list",
+                            "options" : {},
+                            "args" : [],
+                            "kwargs" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.realm.create",
+                            "options" : {},
+                            "args" : ["{{request.body}}"],
+                            "kwargs" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "uri": "\"{{request.path}}/{{action.result.args |> head |> get('uri')}}\"",
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get": {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.realm.get",
+                            "options" : {},
+                            "args" : ["{{request.bindings.realm_uri}}"],
+                            "kwargs" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.realm.update",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.body}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.realm.delete",
+                            "options" : {},
+                            "args" : ["{{request.bindings.realm_uri}}"],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/security_enabled" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get": {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.realm.security.is_enabled",
+                            "options" : {},
+                            "args" : ["{{request.bindings.realm_uri}}"],
+                            "kwargs" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.realm.security.enable",
+                            "options" : {},
+                            "args" : ["{{request.bindings.realm_uri}}"],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.realm.security.disable",
+                            "options" : {},
+                            "args" : ["{{request.bindings.realm_uri}}"],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/clients" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.oauth2.client.add",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.body}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/clients/:id" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.oauth2.client.update",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.body}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.oauth2.client.delete",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/resource_owners" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.oauth2.resource_owner.add",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.body}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/resource_owners/:id" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.oauth2.resource_owner.update",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.body}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.oauth2.resource_owner.delete",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/users" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.add",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.body}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.list",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" : "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/users/:id" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.get",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.update",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.body}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.delete",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/users/:id/change_password" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post": {
+                        "action": {
+                            "type": "wamp_call",
+                            "procedure": "bondy.user.change_password",
+                            "options": {},
+                            "args": [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.body.new_password}}"
+                            ],
+                            "kwargs": {}
+                        },
+                        "response": {
+                            "on_error": {
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body": "{{variables.wamp_error_body}}"
+                            },
+                            "on_result": {
+                                "body": "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/users/:id/enabled" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get": {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.is_enabled",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ],
+                            "kwargs" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.enable",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.disable",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/users/:id/aliases" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.add_alias",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.body}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/users/:id/aliases/:alias" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.add_alias",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.bindings.alias}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.remove_alias",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.bindings.alias}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/users/:id/groups/:group" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.add_group",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.bindings.group}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.remove_group",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.bindings.group}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/groups" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.group.add",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.body}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.group.list",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" : "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/groups/:id" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.group.get",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.group.update",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.body}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.group.delete",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/services/change_password" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post": {
+                        "action": {
+                            "type": "wamp_call",
+                            "procedure": "bondy.user.change_password",
+                            "options": {},
+                            "args": [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.body.username}}",
+                                "{{request.body.new_password}}"
+                            ],
+                            "kwargs": {}
+                        },
+                        "response": {
+                            "on_error": {
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body": "{{variables.wamp_error_body}}"
+                            },
+                            "on_result": {
+                                "body": "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/callees" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.wamp.callee.list",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/callees/:session_id" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.wamp.callee.get",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.session_id |> integer}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/registrations" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.registration.list",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/registrations_summary" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "wamp.registration.list",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/registrations/:id" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "wamp.registration.get",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id |> integer}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/registrations/:id/callees" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "wamp.registration.list_callees",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id |> integer}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/subscriptions" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.subscription.list",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/subscriptions_summary" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "wamp.subscription.list",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/grants" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.realm.grants",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.grant.create",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.body}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.grant.revoke",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.body}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/groups/:id/grants" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.group.grants",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/users/:id/grants" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.user.grants",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/sources" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.source.list",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.source.add",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.body}}"
+                            ],
+                            "kwargs" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/users/:id/sources" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.source.match",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "bondy.source.delete",
+                            "options" : {},
+                            "args" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{variables.query_match |> get(cidr)}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.args |> head}}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,75 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+{application, bondy_router,
+ [
+    {description,
+        "Bondy is an open source, always-on and scalable "
+        "application networking platform for modern architectures. "
+        "It is an all-in-one event and service mesh "
+        "that offers both Publish-Subscribe (PubSub) and routed Remote " "Procedure Calls (RPC), additional protocols and secure multi-tenancy. "
+        "Bondy implements the open Web Application Messaging Protocol (WAMP) "
+        "and is written in Erlang."
+    },
+    {vsn, "1.0.0-rc.65"},
+    {registered, []},
+    %% We pass the version number in the bondy_app:start/2 arguments
+    {mod, {bondy_app, [{vsn, "1.0.0-rc.65"}]}},
+    {applications,[
+        %% Erlang/OTP
+        stdlib,
+        kernel,
+        crypto,
+        inets,
+        runtime_tools,
+        sasl,
+        tools,
+        %% 3rd-party Crypto
+        jose,
+        stringprep,
+        %% 3rd-party Web Sevrver|client
+        cowboy,
+        hackney,
+        backoff,
+        oidcc,
+        %% 3rd-party Utils
+        %% Process registry / worker pools (bondy_jobs_sup et al.). Previously
+        %% started transitively via plum_db; bondy_app no longer starts plum_db,
+        %% so bondy_router must declare it as a direct runtime dependency.
+        gproc,
+        %% 3rd-party Instrumentation
+        prometheus,
+        telemetry,
+        riak_sysmon,
+        %% 3rd-party Serialization formats
+        msgpack,
+        sidejob,
+        jobs,
+        uuid,
+        lrw,
+        key_value,
+        %% 1st-party deps
+        mops,
+        bondy_wamp,
+        bondy_stdlib,
+        bondy_regulator,
+        %% bondy implements bondy_connect_local's handler behaviour and
+        %% registers it at boot (the in-VM WAMP transport for co-located clients)
+        bondy_connect
+        %% tuplespace, partisan and bondy_db are started manually by bondy_app
+        %% (partisan is `{partisan, load}` in the release; bondy_app owns
+        %% starting it, before bondy_db). plum_db is no longer started.
+    ]},
+    {env, []},
+    {modules, []},
+    {maintainers, ["Alejandro M. Ramallo"]},
+    {licenses, ["Apache 2.0"]},
+    {links, [
+        {"Github", "https://github/leapsight/bondy"},
+        {"Docs", "https://docs.getbondy.io"},
+        {"Website", "https://getbondy.io"},
+        {"Docker", "https://hub.docker.com/r/leapsight/bondy"}
+    ]}
+ ]}.

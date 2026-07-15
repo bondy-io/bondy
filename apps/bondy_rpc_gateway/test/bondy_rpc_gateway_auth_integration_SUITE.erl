@@ -82,31 +82,34 @@ header/URL placement.
     gis_fetch_no_token_in_response/1
 ]).
 
-
 %% ===================================================================
 %% CT callbacks
 %% ===================================================================
 
 all() ->
-    [{group, cc_oauth2},
-     {group, gis_custom}].
+    [
+        {group, cc_oauth2},
+        {group, gis_custom}
+    ].
 
 groups() ->
-    [{cc_oauth2, [], [
-        cc_fetch_token,
-        cc_fetch_token_with_expires_in,
-        cc_apply_auth_bearer_header,
-        cc_fetch_basic_auth_sent,
-        cc_fetch_invalid_credentials,
-        cc_fetch_server_error,
-        cc_custom_token_type
-    ]},
-    {gis_custom, [], [
-        gis_fetch_token,
-        gis_apply_auth_query_param,
-        gis_fetch_error_in_body,
-        gis_fetch_no_token_in_response
-    ]}].
+    [
+        {cc_oauth2, [], [
+            cc_fetch_token,
+            cc_fetch_token_with_expires_in,
+            cc_apply_auth_bearer_header,
+            cc_fetch_basic_auth_sent,
+            cc_fetch_invalid_credentials,
+            cc_fetch_server_error,
+            cc_custom_token_type
+        ]},
+        {gis_custom, [], [
+            gis_fetch_token,
+            gis_apply_auth_query_param,
+            gis_fetch_error_in_body,
+            gis_fetch_no_token_in_response
+        ]}
+    ].
 
 init_per_suite(Config) ->
     {ok, _} = application:ensure_all_started(hackney),
@@ -124,7 +127,6 @@ init_per_testcase(_TC, Config) ->
 
 end_per_testcase(_TC, _Config) ->
     ok.
-
 
 %% ===================================================================
 %% OAuth2 client_credentials tests
@@ -167,16 +169,18 @@ cc_fetch_basic_auth_sent(Config) ->
     mock_auth_http_server:set_credentials(
         oauth2, <<"test-client">>, <<"test-secret">>
     ),
-    Conf = cc_config_with_creds(Config,
-        <<"test-client">>, <<"test-secret">>
+    Conf = cc_config_with_creds(
+        Config,
+        <<"test-client">>,
+        <<"test-secret">>
     ),
     {ok, {_Token, _Meta}} = bondy_rpc_gateway_auth_generic:fetch_token(Conf),
     %% Verify Basic auth was sent
     [Req] = mock_auth_http_server:get_requests(oauth2),
     Headers = maps:get(headers, Req),
     AuthHeader = maps:get(<<"authorization">>, Headers),
-    Expected = <<"Basic ",
-        (base64:encode(<<"test-client:test-secret">>))/binary>>,
+    Expected =
+        <<"Basic ", (base64:encode(<<"test-client:test-secret">>))/binary>>,
     ?assertEqual(Expected, AuthHeader).
 
 cc_fetch_invalid_credentials(Config) ->
@@ -184,8 +188,10 @@ cc_fetch_invalid_credentials(Config) ->
     mock_auth_http_server:set_credentials(
         oauth2, <<"good-id">>, <<"good-secret">>
     ),
-    Conf = cc_config_with_creds(Config,
-        <<"bad-id">>, <<"bad-secret">>
+    Conf = cc_config_with_creds(
+        Config,
+        <<"bad-id">>,
+        <<"bad-secret">>
     ),
     Result = bondy_rpc_gateway_auth_generic:fetch_token(Conf),
     ?assertMatch({error, {http_status, 401}}, Result).
@@ -206,16 +212,13 @@ cc_custom_token_type(Config) ->
     %% Token itself is just the access_token, not token_type
     ?assertEqual(<<"mock-oauth2-access-token">>, Token),
     %% Verify the mock response includes token_type
-    Url = <<(proplists:get_value(base_url, Config))/binary,
-            "/oauth2/token">>,
+    Url = <<(proplists:get_value(base_url, Config))/binary, "/oauth2/token">>,
     Body = <<"grant_type=client_credentials">>,
-    Headers = [{<<"Content-Type">>,
-                <<"application/x-www-form-urlencoded">>}],
+    Headers = [{<<"Content-Type">>, <<"application/x-www-form-urlencoded">>}],
     {ok, 200, _RH, RespBody} =
         hackney:request(post, Url, Headers, Body, [with_body]),
     Decoded = json:decode(RespBody),
     ?assertEqual(<<"Bearer">>, maps:get(<<"token_type">>, Decoded)).
-
 
 %% ===================================================================
 %% GIS custom scheme tests
@@ -239,8 +242,10 @@ gis_apply_auth_query_param(_Config) ->
     %% Headers should be unchanged
     ?assertEqual([], ResultHeaders),
     %% URL should have ?token=... appended
-    ?assertNotEqual(nomatch,
-        binary:match(ResultUrl, <<"token=gis-tok-123">>)).
+    ?assertNotEqual(
+        nomatch,
+        binary:match(ResultUrl, <<"token=gis-tok-123">>)
+    ).
 
 gis_fetch_error_in_body(Config) ->
     %% Returns 200 with error in body (not an HTTP error code).
@@ -248,8 +253,10 @@ gis_fetch_error_in_body(Config) ->
     mock_auth_http_server:set_credentials(
         gis, <<"admin">>, <<"s3cret">>
     ),
-    Conf = gis_config_with_creds(Config,
-        <<"wrong-user">>, <<"wrong-pass">>
+    Conf = gis_config_with_creds(
+        Config,
+        <<"wrong-user">>,
+        <<"wrong-pass">>
     ),
     Result = bondy_rpc_gateway_auth_generic:fetch_token(Conf),
     ?assertMatch({error, {upstream_error, _}}, Result).
@@ -260,7 +267,6 @@ gis_fetch_no_token_in_response(Config) ->
     Conf = gis_config(Config),
     Result = bondy_rpc_gateway_auth_generic:fetch_token(Conf),
     ?assertMatch({error, no_token_in_response}, Result).
-
 
 %% ===================================================================
 %% Config builders
@@ -314,7 +320,6 @@ cc_config_apply_only() ->
             format => <<"Bearer {{token}}">>
         }
     }.
-
 
 %% --- GIS custom token scheme ---
 

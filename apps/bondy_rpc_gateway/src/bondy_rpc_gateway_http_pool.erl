@@ -46,37 +46,37 @@ bondy_rpc_gateway_http_pool:start_link(my_api_pool,
 -include_lib("kernel/include/logger.hrl").
 
 -record(state, {
-    name                ::  atom(),
-    endpoint            ::  binary(),
-    pool_opts           ::  proplists:proplist(),
-    req_opts            ::  proplists:proplist(),
-    retry               ::  bondy_retry:t(),
-    retry_ref           ::  reference() | undefined,
-    status = down       ::  up | down
+    name :: atom(),
+    endpoint :: binary(),
+    pool_opts :: proplists:proplist(),
+    req_opts :: proplists:proplist(),
+    retry :: bondy_retry:t(),
+    retry_ref :: reference() | undefined,
+    status = down :: up | down
 }).
 
--type start_opts()      ::  #{
-                                %% Pool (hackney_pool)
-                                size => pos_integer(),
-                                checkout_timeout => timeout(),
-                                idle_timeout => timeout(),
-                                %% Request defaults (hackney:request)
-                                connect_timeout => timeout(),
-                                recv_timeout => timeout(),
-                                follow_redirect => boolean(),
-                                max_redirect => non_neg_integer(),
-                                %% TLS (hackney:request)
-                                ssl_options => [ssl:tls_client_option()],
-                                %% Proxy (hackney:request)
-                                proxy => binary(),
-                                proxy_auth =>
-                                    {User :: binary(), Pass :: binary()},
-                                %% Auth (hackney:request)
-                                basic_auth =>
-                                    {User :: binary(), Pass :: binary()},
-                                %% Retry (ours)
-                                retry_opts => bondy_retry:opts()
-                            }.
+-type start_opts() :: #{
+    %% Pool (hackney_pool)
+    size => pos_integer(),
+    checkout_timeout => timeout(),
+    idle_timeout => timeout(),
+    %% Request defaults (hackney:request)
+    connect_timeout => timeout(),
+    recv_timeout => timeout(),
+    follow_redirect => boolean(),
+    max_redirect => non_neg_integer(),
+    %% TLS (hackney:request)
+    ssl_options => [ssl:tls_client_option()],
+    %% Proxy (hackney:request)
+    proxy => binary(),
+    proxy_auth =>
+        {User :: binary(), Pass :: binary()},
+    %% Auth (hackney:request)
+    basic_auth =>
+        {User :: binary(), Pass :: binary()},
+    %% Retry (ours)
+    retry_opts => bondy_retry:opts()
+}.
 
 -export_type([start_opts/0]).
 
@@ -95,11 +95,9 @@ bondy_rpc_gateway_http_pool:start_link(my_api_pool,
 -export([handle_info/2]).
 -export([terminate/2]).
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 -doc "Start a pool process and link it to the calling process.".
 -spec start_link(Name :: atom(), Endpoint :: binary(), Opts :: start_opts()) ->
@@ -108,20 +106,17 @@ bondy_rpc_gateway_http_pool:start_link(my_api_pool,
 start_link(Name, Endpoint, Opts) when is_map(Opts) ->
     gen_server:start_link({local, Name}, ?MODULE, [Name, Endpoint, Opts], []).
 
-
 -doc "Return the current pool status (`up` or `down`).".
 -spec status(Name :: atom()) -> up | down.
 
 status(Name) ->
     gen_server:call(Name, status).
 
-
 -doc "Mark the pool as down and schedule a health-check retry.".
 -spec mark_down(Name :: atom()) -> ok.
 
 mark_down(Name) ->
     gen_server:call(Name, mark_down).
-
 
 -doc """
 Issue a request through the pool using its preconfigured request options
@@ -134,12 +129,12 @@ immediately while the pool is down so callers fail fast.
     Url :: binary(),
     Headers :: list(),
     Body :: iodata()
-) -> {ok, non_neg_integer(), list(), binary()}
-   | {error, pool_down | term()}.
+) ->
+    {ok, non_neg_integer(), list(), binary()}
+    | {error, pool_down | term()}.
 
 request(Pool, Method, Url, Headers, Body) ->
     request(Pool, Method, Url, Headers, Body, []).
-
 
 -doc """
 Same as `request/5` but allows per-call overrides (e.g. `connect_timeout`,
@@ -152,8 +147,9 @@ Same as `request/5` but allows per-call overrides (e.g. `connect_timeout`,
     Headers :: list(),
     Body :: iodata(),
     Overrides :: proplists:proplist()
-) -> {ok, non_neg_integer(), list(), binary()}
-   | {error, pool_down | term()}.
+) ->
+    {ok, non_neg_integer(), list(), binary()}
+    | {error, pool_down | term()}.
 
 request(Pool, Method, Url, Headers, Body, Overrides) ->
     case persistent_term:get({?MODULE, Pool}, undefined) of
@@ -169,7 +165,6 @@ request(Pool, Method, Url, Headers, Body, Overrides) ->
 %% =============================================================================
 %% gen_server callbacks
 %% =============================================================================
-
 
 -doc false.
 init([Name, Endpoint, Opts]) ->
@@ -213,28 +208,22 @@ init([Name, Endpoint, Opts]) ->
     ok = publish_status(State),
     {ok, State, {continue, init_pool}}.
 
-
 -doc false.
 handle_continue(init_pool, #state{} = State) ->
     {noreply, try_start_pool(State)}.
-
 
 -doc false.
 handle_call(mark_down, _From, #state{} = State0) ->
     State = do_mark_down(State0),
     {reply, ok, State};
-
 handle_call(status, _From, #state{status = Status} = State) ->
     {reply, Status, State};
-
 handle_call(_Msg, _From, State) ->
     {reply, {error, unknown_call}, State}.
-
 
 -doc false.
 handle_cast(_Msg, State) ->
     {noreply, State}.
-
 
 -doc false.
 handle_info(
@@ -242,27 +231,21 @@ handle_info(
     #state{retry_ref = Ref, name = Name} = State
 ) ->
     {noreply, try_start_pool(State)};
-
 handle_info(_Msg, State) ->
     {noreply, State}.
-
 
 -doc false.
 terminate(_Reason, #state{name = Name, status = up}) ->
     _ = persistent_term:erase({?MODULE, Name}),
     hackney_pool:stop_pool(Name),
     ok;
-
 terminate(_Reason, #state{name = Name}) ->
     _ = persistent_term:erase({?MODULE, Name}),
     ok.
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 -spec request_opts(atom(), start_opts()) -> proplists:proplist().
 
@@ -277,33 +260,34 @@ request_opts(Name, Opts) ->
         {follow_redirect, maps:get(follow_redirect, Opts, false)},
         {max_redirect, maps:get(max_redirect, Opts, 5)}
     ],
-    MaybeSSL = case maps:find(ssl_options, Opts) of
-        {ok, SslOpts} ->
-            [{ssl_options, SslOpts}];
-        error ->
-            [{ssl_options, default_ssl_options()}]
-    end,
-    MaybeProxy = case maps:find(proxy, Opts) of
-        {ok, Proxy} ->
-            [{proxy, Proxy}] ++
-            case maps:find(proxy_auth, Opts) of
-                {ok, ProxyAuth} ->
-                    [{proxy_auth, ProxyAuth}];
-                error ->
-                    []
-            end;
-        error ->
-            []
-    end,
-    MaybeAuth = case maps:find(basic_auth, Opts) of
-        {ok, Auth} ->
-            [{basic_auth, Auth}];
-        error ->
-            []
-    end,
+    MaybeSSL =
+        case maps:find(ssl_options, Opts) of
+            {ok, SslOpts} ->
+                [{ssl_options, SslOpts}];
+            error ->
+                [{ssl_options, default_ssl_options()}]
+        end,
+    MaybeProxy =
+        case maps:find(proxy, Opts) of
+            {ok, Proxy} ->
+                [{proxy, Proxy}] ++
+                    case maps:find(proxy_auth, Opts) of
+                        {ok, ProxyAuth} ->
+                            [{proxy_auth, ProxyAuth}];
+                        error ->
+                            []
+                    end;
+            error ->
+                []
+        end,
+    MaybeAuth =
+        case maps:find(basic_auth, Opts) of
+            {ok, Auth} ->
+                [{basic_auth, Auth}];
+            error ->
+                []
+        end,
     Base ++ Optional ++ MaybeSSL ++ MaybeProxy ++ MaybeAuth.
-
-
 
 try_start_pool(#state{name = Name, endpoint = Endpoint} = State0) ->
     %% Idempotent: hackney_pool:start_pool returns ok on first call and
@@ -319,10 +303,11 @@ try_start_pool(#state{name = Name, endpoint = Endpoint} = State0) ->
         {connect_timeout, 5_000},
         {recv_timeout, 5_000}
     ],
-    HealthOpts = case proplists:get_value(ssl_options, State0#state.req_opts) of
-        undefined -> HealthOpts0;
-        SslOpts -> [{ssl_options, SslOpts} | HealthOpts0]
-    end,
+    HealthOpts =
+        case proplists:get_value(ssl_options, State0#state.req_opts) of
+            undefined -> HealthOpts0;
+            SslOpts -> [{ssl_options, SslOpts} | HealthOpts0]
+        end,
 
     case hackney:request(head, Endpoint, [], <<>>, HealthOpts) of
         {ok, _Status, _Headers} ->
@@ -342,8 +327,6 @@ try_start_pool(#state{name = Name, endpoint = Endpoint} = State0) ->
             schedule_retry(State0)
     end.
 
-
-
 mark_up(#state{name = Name, retry = Retry0} = State0) ->
     {_, Retry} = bondy_retry:succeed(Retry0),
     ?LOG_INFO(#{
@@ -358,20 +341,15 @@ mark_up(#state{name = Name, retry = Retry0} = State0) ->
     ok = publish_status(State),
     State.
 
-
-
 do_mark_down(#state{} = State0) ->
     catch hackney_pool:stop_pool(State0#state.name),
     State1 = State0#state{status = down},
     ok = publish_status(State1),
     schedule_retry(State1).
 
-
-
 %% @private
 default_ssl_options() ->
     bondy_cert_manager:ssl_opts().
-
 
 %% @private
 %% Persistent_term writes trigger a major GC of all persistent_term
@@ -382,12 +360,12 @@ publish_status(#state{name = Name, status = Status, req_opts = ReqOpts}) ->
     Key = {?MODULE, Name},
     Value = {Status, ReqOpts},
     case persistent_term:get(Key, undefined) of
-        Value -> ok;
+        Value ->
+            ok;
         _ ->
             persistent_term:put(Key, Value),
             ok
     end.
-
 
 %% @private
 %% Merge per-call overrides on top of pool defaults. lists:keymerge would
@@ -395,19 +373,17 @@ publish_status(#state{name = Name, status = Status, req_opts = ReqOpts}) ->
 %% hackney (later proplist entries win, so we put overrides last).
 merge_opts([], ReqOpts) ->
     ReqOpts;
-
 merge_opts(Overrides, ReqOpts) ->
     Filtered = [
-        Opt || Opt <- ReqOpts,
+        Opt
+     || Opt <- ReqOpts,
         not lists:keymember(opt_key(Opt), 1, Overrides)
     ],
     Filtered ++ Overrides.
 
-
 %% @private
 opt_key({K, _}) -> K;
 opt_key(K) when is_atom(K) -> K.
-
 
 schedule_retry(#state{retry = Retry0} = State) ->
     case bondy_retry:fail(Retry0) of

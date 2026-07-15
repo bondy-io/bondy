@@ -38,19 +38,21 @@ all() ->
     [{group, cache_tests}].
 
 groups() ->
-    [{cache_tests, [sequence], [
-        cold_cache_fetches_token,
-        hot_cache_returns_same_token,
-        hot_cache_no_extra_fetch,
-        invalidate_forces_fresh_fetch,
-        invalidate_nonexistent_service_ok,
-        multiple_services_isolated,
-        worker_crash_cleans_registry,
-        concurrent_cold_cache_single_fetch,
-        preemptive_refresh_fires,
-        fetch_error_propagates,
-        meta_expires_in_respected
-    ]}].
+    [
+        {cache_tests, [sequence], [
+            cold_cache_fetches_token,
+            hot_cache_returns_same_token,
+            hot_cache_no_extra_fetch,
+            invalidate_forces_fresh_fetch,
+            invalidate_nonexistent_service_ok,
+            multiple_services_isolated,
+            worker_crash_cleans_registry,
+            concurrent_cold_cache_single_fetch,
+            preemptive_refresh_fires,
+            fetch_error_propagates,
+            meta_expires_in_respected
+        ]}
+    ].
 
 init_per_suite(Config) ->
     _ = application:ensure_all_started(gproc),
@@ -77,13 +79,16 @@ end_per_testcase(_TC, Config) ->
     catch exit(CacheSup, shutdown),
     timer:sleep(50),
     %% Clean up persistent_term keys
-    lists:foreach(fun(Key) ->
-        catch persistent_term:erase(Key)
-    end, [
-        {bondy_rpc_gateway_mock_auth, result},
-        {bondy_rpc_gateway_mock_auth, fetch_fun},
-        {bondy_rpc_gateway_mock_auth, call_count}
-    ]),
+    lists:foreach(
+        fun(Key) ->
+            catch persistent_term:erase(Key)
+        end,
+        [
+            {bondy_rpc_gateway_mock_auth, result},
+            {bondy_rpc_gateway_mock_auth, fetch_fun},
+            {bondy_rpc_gateway_mock_auth, call_count}
+        ]
+    ),
     ok.
 
 %% ===================================================================
@@ -93,14 +98,14 @@ end_per_testcase(_TC, Config) ->
 auth_conf() ->
     #{
         fetch => #{
-            method     => post,
-            url        => <<"http://mock/token">>,
+            method => post,
+            url => <<"http://mock/token">>,
             token_path => [<<"token">>]
         },
         apply => #{
             placement => header,
-            name      => <<"Authorization">>,
-            format    => <<"Bearer {{token}}">>
+            name => <<"Authorization">>,
+            format => <<"Bearer {{token}}">>
         }
     }.
 
@@ -164,7 +169,9 @@ invalidate_forces_fresh_fetch(_Config) ->
 
 invalidate_nonexistent_service_ok(_Config) ->
     %% Should not crash
-    ?assertEqual(ok, bondy_rpc_gateway_token_cache:invalidate(<<"no-such-svc">>)).
+    ?assertEqual(
+        ok, bondy_rpc_gateway_token_cache:invalidate(<<"no-such-svc">>)
+    ).
 
 multiple_services_isolated(_Config) ->
     Counter = atomics:new(1, [{signed, false}]),
@@ -222,19 +229,30 @@ concurrent_cold_cache_single_fetch(_Config) ->
 
     Self = self(),
     N = 20,
-    Pids = [spawn_link(fun() ->
-        Result = bondy_rpc_gateway_token_cache:get(
-            <<"conc-svc">>, bondy_rpc_gateway_mock_auth, auth_conf()
-        ),
-        Self ! {done, self(), Result}
-    end) || _ <- lists:seq(1, N)],
+    Pids = [
+        spawn_link(fun() ->
+            Result = bondy_rpc_gateway_token_cache:get(
+                <<"conc-svc">>, bondy_rpc_gateway_mock_auth, auth_conf()
+            ),
+            Self ! {done, self(), Result}
+        end)
+     || _ <- lists:seq(1, N)
+    ],
 
-    Results = [receive {done, P, R} -> R end || P <- Pids],
+    Results = [
+        receive
+            {done, P, R} -> R
+        end
+     || P <- Pids
+    ],
 
     %% All should succeed with the same token
-    lists:foreach(fun(R) ->
-        ?assertEqual({ok, <<"concurrent-tok">>}, R)
-    end, Results),
+    lists:foreach(
+        fun(R) ->
+            ?assertEqual({ok, <<"concurrent-tok">>}, R)
+        end,
+        Results
+    ),
 
     %% fetch_token should only have been called once (or very few times
     %% if there was a race before the worker was registered)
@@ -245,8 +263,10 @@ preemptive_refresh_fires(_Config) ->
     Counter = atomics:new(1, [{signed, false}]),
     bondy_rpc_gateway_mock_auth:set_fetch_fun(fun(_Conf) ->
         N = atomics:add_get(Counter, 1, 1),
-        {ok, {<<"refresh-tok-", (integer_to_binary(N))/binary>>,
-         #{expires_in => 2}}}
+        {ok,
+            {<<"refresh-tok-", (integer_to_binary(N))/binary>>, #{
+                expires_in => 2
+            }}}
     end),
 
     %% TTL=2s, margin=1s => refresh fires after 1s
@@ -283,8 +303,8 @@ meta_expires_in_respected(_Config) ->
         N = atomics:add_get(Counter, 1, 1),
         %% Always return expires_in => 1 so the cache TTL is 1s,
         %% overriding the large default_ttl in cache config.
-        {ok, {<<"meta-tok-", (integer_to_binary(N))/binary>>,
-         #{expires_in => 1}}}
+        {ok,
+            {<<"meta-tok-", (integer_to_binary(N))/binary>>, #{expires_in => 1}}}
     end),
     Conf = auth_conf_with_cache(3600, 0),
     {ok, <<"meta-tok-1">>} = bondy_rpc_gateway_token_cache:get(

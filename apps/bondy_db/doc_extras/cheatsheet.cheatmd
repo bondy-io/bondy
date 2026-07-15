@@ -1,0 +1,167 @@
+# Cheatsheet
+
+A one-page reference for the `bondy_mst` substrate. The architecture
+chapters (see the sidebar) are the narrative version.
+
+## Tables (bondy_db)
+{: .col-2}
+
+### Open a DB and a table
+
+```erlang
+{ok, Db} = bondy_db:open(my_db, #{
+    topology => bondy_db_topology_shared_shards
+}),
+{ok, T} = bondy_db:open_table(Db, users, #{
+    fold_module => lww_register,   %% required: the CRDT type label
+    shard_count => 8
+}).
+```
+
+### Ephemeral, fused, in-memory WAL
+
+```erlang
+{ok, T} = bondy_db:open_table(Db, registry, #{
+    fold_module => lww_register,        %% required
+    projection_backend => ets,          %% table-level
+    fused => true,                      %% table-level
+    oplog_instance_opts => #{           %% instance-level knobs:
+        backend => ets,                 %%   in-memory MST store
+        wal_backend => mem,             %%   in-memory WAL
+        durability => ephemeral         %%   ack no durable storage
+    }
+}).
+```
+
+### Read / write
+
+```erlang
+{ok, Value, Hlc} = bondy_db:read(T, Realm, Key),
+ok = bondy_db:apply(T, Realm, Key, Op),
+ok = bondy_db:counter_inc(Counters, Realm, Key, +1).
+
+%% pack many Map/set commands into ONE atomic event:
+ok = bondy_db:apply_batch(T, Realm, Key, [{put, F1, V1}, {rmv, F2}]),
+ok = bondy_db:map_update(T, Realm, Key, #{put => #{F1 => V1}, rmv => [F2]}).
+```
+
+The op shape is CRDT-specific (e.g. `{set, Hlc, V}` for
+`lww_register`, `{inc, N}` for counters). Batched writes
+(`apply_batch/4` / `map_update/4`) pack many Map/set commands into one
+event (one WAL/MST entry, applied atomically); not available for
+counters/registers (`{error, {not_batchable, _}}`).
+
+### Secondary indexes
+
+```erlang
+{ok, T} = bondy_db:open_table(Db, users, #{
+    crdt_module => bondy_oplog_crdt_lww_register,
+    indexes => [#{name => by_email,
+                  extract => [email]}]   %% path into the value
+}),
+{ok, Hits} = bondy_db:index_get(T, Realm, by_email, Email, #{}),
+{ok, Hits2} = bondy_db:index_range(T, Realm, by_email, Lo, Hi, #{
+    max_lag => 1000, fallback => primary
+}).
+```
+
+## The CRDT catalogue
+{: .col-1}
+
+| `crdt_module` (`bondy_oplog_crdt_*`) | tier | semantics |
+|---|---|---|
+| `lww_register` | 0 | last-writer-wins register; deterministic same-HLC tie-break |
+| `g_counter` | 0 | grow-only counter |
+| `pn_counter` | 0 | pos/neg counter, per-Origin Seq dedup |
+| `g_set` | 0 | grow-only set |
+| `two_p_set` | 0 | two-phase set; removal is permanent (no re-add) |
+| `max_register` / `min_register` | 0 | monotone integer lattice |
+| `mv_register` | 2 | concurrent writes surface as siblings |
+| `aw_map` | 2 | add-wins map; pure remove; per-key sub-values |
+| `aw_set` | 2 | add-wins set (concurrent add\|remove ⇒ add wins) |
+| `rw_set` | 2 | remove-wins set (concurrent add\|remove ⇒ remove wins) |
+| `ew_flag` | 2 | enable-wins flag |
+| `dw_flag` | 2 | disable-wins flag |
+
+tier_0 = scalar HLC; tier_2 = per-cell causal context (DVV).
+Details: [The CRDT model](05_crdt_model.md).
+
+## Freshness and consistency
+{: .col-2}
+
+### Bounded staleness (auth paths)
+
+```erlang
+%% ensure_fresh/2 -> ok | {stale, [Namespace]}
+%% read_batch(BatchKeys, Opts); BatchKeys :: [{NS, Index, Bucket, Key}]
+case bondy_oplog_core:ensure_fresh([users, grants], 1000) of
+    ok           -> {ok, Result} = bondy_oplog_core:read_batch(BatchKeys, #{});
+    {stale, NSs} -> too_stale   %% more than max_lag behind
+end.
+```
+
+### Write barrier
+
+```erlang
+ok = bondy_oplog:await_apply(InstanceId, 5000).
+```
+
+### Change notification
+
+```erlang
+%% opt in per table: open_table(.., #{publish => true})
+{ok, Ref} = bondy_oplog_core:subscribe(NS, all),
+%%   {bondy_oplog_core_event,       NS, Key, Hlc, Op}  — local write
+%%   {bondy_oplog_core_merge_event, NS, Key, Hlc, Op}  — peer write (AE)
+ok = bondy_oplog_core:unsubscribe(Ref).
+```
+
+The merge tag fires only for writes a peer made (reacted to via
+anti-entropy); a node's own writes deliver the local tag. See
+[bondy_db read side](03_bondy_db.md#change-notification).
+
+## Operations
+{: .col-2}
+
+### Backup / restore (cold)
+
+```erlang
+{ok, _Manifest} = bondy_mst_admin:backup(SrcDir, BackupDir),
+{ok, _}         = bondy_mst_admin:verify(BackupDir),
+{ok, _}         = bondy_mst_admin:restore(BackupDir, TargetDir).
+```
+
+### Compaction & bootstrap
+
+- Compaction runs on the `bondy_oplog_gc_scheduler` tick; the MST is
+  a *window*, not a log.
+- New replicas bootstrap from a checkpoint / catalogue snapshot, then
+  catch the live tail via anti-entropy.
+- Genesis peer: `seed => true`. Lifecycle gate:
+  `pre_bootstrap → live`.
+
+See [Compaction & bootstrap](06_compaction_and_bootstrap.md).
+
+### Write→readable latency
+
+Per-instance telemetry: how long a user write takes to become readable
+in the projection (all backends). Sampled on the synchronous write path
+(near-zero cost); emitted each window.
+
+```erlang
+%% [bondy_oplog, instance, write_latency]
+%%   measurements: count, mean_us, p50_us, p95_us, p99_us, max_us
+%%   metadata:     instance_id, interval_ms
+
+%% config (defaults shown)
+{oplog_latency, #{
+    enabled => true,
+    interval_ms => 10000,
+    probe => #{enabled => false}   %% idle-instance heartbeat
+}}.
+
+ok = bondy_oplog_latency:set_enabled(true).
+ok = bondy_oplog_latency:set_probe_enabled(true).  %% opt-in idle probe
+```
+
+Local-origin only. See [the applier chapter](04_applier.md#writereadable-latency-telemetry).

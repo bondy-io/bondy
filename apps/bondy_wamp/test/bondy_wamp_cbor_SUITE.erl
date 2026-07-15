@@ -9,7 +9,6 @@
 -include_lib("bondy_wamp.hrl").
 -compile(export_all).
 
-
 all() ->
     [
         test_encode_basic,
@@ -28,8 +27,6 @@ all() ->
         test_error_cases
     ].
 
-
-
 init_per_suite(Config) ->
     _ = application:ensure_all_started(bondy_wamp),
     ok = bondy_wamp_config:init(),
@@ -37,7 +34,6 @@ init_per_suite(Config) ->
 
 end_per_suite(_) ->
     ok.
-
 
 test_datetime(_) ->
     %% Test basic datetime encoding (returns datetime string)
@@ -65,7 +61,6 @@ test_datetime(_) ->
     Decoded4 = bondy_wamp_cbor:decode(Encoded4),
     ?assertEqual(<<"0099-05-15T12:00:00Z">>, Decoded4).
 
-
 test_encode_basic(_) ->
     %% Basic types - encode and decode to verify
     ?assertEqual(1, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(1))),
@@ -79,10 +74,14 @@ test_encode_basic(_) ->
 
     %% Arrays
     ?assertEqual([], bondy_wamp_cbor:decode(bondy_wamp_cbor:encode([]))),
-    ?assertEqual([1, 2, 3], bondy_wamp_cbor:decode(bondy_wamp_cbor:encode([1, 2, 3]))),
+    ?assertEqual(
+        [1, 2, 3], bondy_wamp_cbor:decode(bondy_wamp_cbor:encode([1, 2, 3]))
+    ),
     ?assertEqual(
         [<<"a">>, <<"b">>, <<"c">>],
-        bondy_wamp_cbor:decode(bondy_wamp_cbor:encode([<<"a">>, <<"b">>, <<"c">>]))
+        bondy_wamp_cbor:decode(
+            bondy_wamp_cbor:encode([<<"a">>, <<"b">>, <<"c">>])
+        )
     ),
 
     %% Objects (maps)
@@ -92,16 +91,21 @@ test_encode_basic(_) ->
 
     %% Nested structures
     Nested = [1, #{<<"nested">> => [2, 3]}, 4],
-    ?assertEqual(Nested, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(Nested))),
+    ?assertEqual(
+        Nested, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(Nested))
+    ),
 
     %% Floats
     ?assertEqual(1.5, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(1.5))),
-    ?assertEqual(3.14159, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(3.14159))).
-
+    ?assertEqual(
+        3.14159, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(3.14159))
+    ).
 
 test_encode_undefined(_) ->
     %% undefined should encode to null
-    ?assertEqual(undefined, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(undefined))),
+    ?assertEqual(
+        undefined, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(undefined))
+    ),
 
     %% undefined in arrays
     ?assertEqual(
@@ -113,38 +117,48 @@ test_encode_undefined(_) ->
     Map = #{<<"key">> => undefined},
     ?assertEqual(Map, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(Map))).
 
-
 test_decode_basic(_) ->
     %% CBOR uses binary format, so we test by encoding then decoding
     %% Basic types
     ?assertEqual(1, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(1))),
     ?assertEqual(-42, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(-42))),
-    ?assertEqual(<<"hello">>, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(<<"hello">>))),
+    ?assertEqual(
+        <<"hello">>, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(<<"hello">>))
+    ),
     ?assertEqual(true, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(true))),
     ?assertEqual(false, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(false))),
-    ?assertEqual(undefined, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(undefined))),
+    ?assertEqual(
+        undefined, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(undefined))
+    ),
 
     %% Arrays
     ?assertEqual([], bondy_wamp_cbor:decode(bondy_wamp_cbor:encode([]))),
-    ?assertEqual([1, 2, 3], bondy_wamp_cbor:decode(bondy_wamp_cbor:encode([1, 2, 3]))),
+    ?assertEqual(
+        [1, 2, 3], bondy_wamp_cbor:decode(bondy_wamp_cbor:encode([1, 2, 3]))
+    ),
     ?assertEqual(
         [<<"a">>, <<"b">>, <<"c">>],
-        bondy_wamp_cbor:decode(bondy_wamp_cbor:encode([<<"a">>, <<"b">>, <<"c">>]))
+        bondy_wamp_cbor:decode(
+            bondy_wamp_cbor:encode([<<"a">>, <<"b">>, <<"c">>])
+        )
     ),
 
     %% Objects
     ?assertEqual(#{}, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(#{}))),
     ?assertEqual(
         #{<<"key">> => <<"value">>},
-        bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(#{<<"key">> => <<"value">>}))
+        bondy_wamp_cbor:decode(
+            bondy_wamp_cbor:encode(#{<<"key">> => <<"value">>})
+        )
     ),
 
     %% Nested structures
     ?assertEqual(
         [1, #{<<"nested">> => [2, 3]}, 4],
-        bondy_wamp_cbor:decode(bondy_wamp_cbor:encode([1, #{<<"nested">> => [2, 3]}, 4]))
+        bondy_wamp_cbor:decode(
+            bondy_wamp_cbor:encode([1, #{<<"nested">> => [2, 3]}, 4])
+        )
     ).
-
 
 test_decode_with_opts(_) ->
     %% Test with custom decoders
@@ -159,17 +173,20 @@ test_decode_with_opts(_) ->
     ?assertEqual(undefined, bondy_wamp_cbor:decode(Encoded)),
     ?assertEqual([1, undefined, 3], bondy_wamp_cbor:decode(EncodedArray)).
 
-
 test_try_decode(_) ->
     %% Successful decode
-    ?assertEqual({ok, 1}, bondy_wamp_cbor:try_decode(bondy_wamp_cbor:encode(1))),
+    ?assertEqual(
+        {ok, 1}, bondy_wamp_cbor:try_decode(bondy_wamp_cbor:encode(1))
+    ),
     ?assertEqual(
         {ok, [1, 2, 3]},
         bondy_wamp_cbor:try_decode(bondy_wamp_cbor:encode([1, 2, 3]))
     ),
     ?assertEqual(
         {ok, #{<<"key">> => <<"value">>}},
-        bondy_wamp_cbor:try_decode(bondy_wamp_cbor:encode(#{<<"key">> => <<"value">>}))
+        bondy_wamp_cbor:try_decode(
+            bondy_wamp_cbor:encode(#{<<"key">> => <<"value">>})
+        )
     ),
 
     %% Failed decode - invalid CBOR
@@ -183,7 +200,6 @@ test_try_decode(_) ->
         bondy_wamp_cbor:try_decode(bondy_wamp_cbor:encode(undefined), Opts)
     ).
 
-
 test_key_value_list(_) ->
     %% Key-value lists (proplists) should be encoded as objects
     KVList = [{<<"key1">>, <<"value1">>}, {<<"key2">>, <<"value2">>}],
@@ -191,14 +207,17 @@ test_key_value_list(_) ->
 
     %% Decode back and verify
     Decoded = bondy_wamp_cbor:decode(Result),
-    ?assertEqual(#{<<"key1">> => <<"value1">>, <<"key2">> => <<"value2">>}, Decoded),
+    ?assertEqual(
+        #{<<"key1">> => <<"value1">>, <<"key2">> => <<"value2">>}, Decoded
+    ),
 
     %% Nested key-value lists
     NestedKV = [{<<"outer">>, [{<<"inner">>, <<"value">>}]}],
     NestedResult = bondy_wamp_cbor:encode(NestedKV),
     NestedDecoded = bondy_wamp_cbor:decode(NestedResult),
-    ?assertEqual(#{<<"outer">> => #{<<"inner">> => <<"value">>}}, NestedDecoded).
-
+    ?assertEqual(
+        #{<<"outer">> => #{<<"inner">> => <<"value">>}}, NestedDecoded
+    ).
 
 test_check_duplicate_keys(_) ->
     %% Without duplicate checking (default) - duplicates are allowed
@@ -216,8 +235,10 @@ test_check_duplicate_keys(_) ->
     ?assert(is_binary(Result2)),
 
     %% Verify option validation
-    ?assertError(badarg, bondy_wamp_cbor:encode([], [{check_duplicate_keys, not_boolean}])).
-
+    ?assertError(
+        badarg,
+        bondy_wamp_cbor:encode([], [{check_duplicate_keys, not_boolean}])
+    ).
 
 test_decode_head(_) ->
     %% Decode first 2 elements of a WAMP message
@@ -246,7 +267,6 @@ test_decode_head(_) ->
     ?assertEqual([#{<<"key">> => <<"value">>}, [1, 2]], Elements4),
     TailDecoded4 = bondy_wamp_cbor:decode_tail(Tail4),
     ?assertEqual([3, 4], TailDecoded4).
-
 
 test_decode_tail(_) ->
     %% Get a tail from decode_head and decode it
@@ -278,7 +298,6 @@ test_decode_tail(_) ->
     Result5 = bondy_wamp_cbor:decode_tail(Tail5, Opts),
     ?assertEqual([custom_null, 2], Result5).
 
-
 test_encode_with_tail(_) ->
     %% Get tail from decode_head, encode new elements with it
     CBOR = bondy_wamp_cbor:encode([1, 2, 3, 4, 5]),
@@ -293,15 +312,18 @@ test_encode_with_tail(_) ->
     %% Complex elements with tail
     CBOR3 = bondy_wamp_cbor:encode([1, 2, 3]),
     {_, Tail3} = bondy_wamp_cbor:decode_head(CBOR3, 1),
-    Result3 = bondy_wamp_cbor:encode_with_tail([#{<<"key">> => <<"value">>}], Tail3),
-    ?assertEqual([#{<<"key">> => <<"value">>}, 2, 3], bondy_wamp_cbor:decode(Result3)),
+    Result3 = bondy_wamp_cbor:encode_with_tail(
+        [#{<<"key">> => <<"value">>}], Tail3
+    ),
+    ?assertEqual(
+        [#{<<"key">> => <<"value">>}, 2, 3], bondy_wamp_cbor:decode(Result3)
+    ),
 
     %% Single element with tail
     CBOR4 = bondy_wamp_cbor:encode([10, 20, 30, 40]),
     {_, Tail4} = bondy_wamp_cbor:decode_head(CBOR4, 2),
     Result4 = bondy_wamp_cbor:encode_with_tail([1], Tail4),
     ?assertEqual([1, 30, 40], bondy_wamp_cbor:decode(Result4)).
-
 
 test_validate_opts(_) ->
     %% Valid check_duplicate_keys
@@ -325,7 +347,6 @@ test_validate_opts(_) ->
         [{some_option, some_value}],
         bondy_wamp_cbor:validate_opts([{some_option, some_value}])
     ).
-
 
 test_roundtrip(_) ->
     %% Test encode/decode roundtrip for various data structures
@@ -360,7 +381,9 @@ test_roundtrip(_) ->
         [5, 6],
         undefined
     ],
-    ?assertEqual(Nested, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(Nested))),
+    ?assertEqual(
+        Nested, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(Nested))
+    ),
 
     %% Partial encode/decode roundtrip
     FullArray = [1, 2, 3, 4, 5],
@@ -371,18 +394,23 @@ test_roundtrip(_) ->
     ?assertEqual(FullArray, Head ++ TailDecoded),
 
     %% Encode with tail roundtrip
-    {Head2, Tail2} = bondy_wamp_cbor:decode_head(bondy_wamp_cbor:encode([10, 20, 30, 40]), 2),
+    {Head2, Tail2} = bondy_wamp_cbor:decode_head(
+        bondy_wamp_cbor:encode([10, 20, 30, 40]), 2
+    ),
     Encoded2 = bondy_wamp_cbor:encode_with_tail(Head2, Tail2),
     ?assertEqual([10, 20, 30, 40], bondy_wamp_cbor:decode(Encoded2)),
 
     %% Large integers
     LargeInt = 9007199254740993,
-    ?assertEqual(LargeInt, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(LargeInt))),
+    ?assertEqual(
+        LargeInt, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(LargeInt))
+    ),
 
     %% Binary data
     BinData = <<1, 2, 3, 4, 5, 255, 254, 253>>,
-    ?assertEqual(BinData, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(BinData))).
-
+    ?assertEqual(
+        BinData, bondy_wamp_cbor:decode(bondy_wamp_cbor:encode(BinData))
+    ).
 
 test_error_cases(_) ->
     %% Invalid CBOR should fail

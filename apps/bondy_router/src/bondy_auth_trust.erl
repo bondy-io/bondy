@@ -1,0 +1,69 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+-module(bondy_auth_trust).
+-moduledoc """
+This module implements the `bondy_auth` behaviour for trusted authentication,
+granting access to a known, non-anonymous user without requiring credentials.
+""".
+-behaviour(bondy_auth).
+
+-include("bondy_security.hrl").
+
+-type state() :: undefined.
+
+%% BONDY_AUTH CALLBACKS
+-export([init/1]).
+-export([requirements/0]).
+-export([challenge/3]).
+-export([authenticate/4]).
+
+%% =============================================================================
+%% BONDY_AUTH CALLBACKS
+%% =============================================================================
+
+-spec init(bondy_auth:context()) ->
+    {ok, State :: state()} | {error, Reason :: any()}.
+
+init(Ctxt) ->
+    try
+        User = bondy_auth:user(Ctxt),
+        undefined =/= User andalso anonymous =/= bondy_rbac_user:username(User) orelse
+            throw({no_such_user, bondy_auth:user_id(Ctxt)}),
+        {ok, undefined}
+    catch
+        throw:Reason ->
+            {error, Reason}
+    end.
+
+-spec requirements() -> map().
+
+requirements() ->
+    #{
+        identification => true,
+        password => false,
+        authorized_keys => false
+    }.
+
+-spec challenge(
+    Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()
+) ->
+    {false, NewState :: state()}
+    | {error, Reason :: any(), NewState :: state()}.
+
+challenge(_, _, State) ->
+    {false, State}.
+
+-spec authenticate(
+    Signature :: binary(),
+    DataIn :: map(),
+    Ctxt :: bondy_auth:context(),
+    CBState :: state()
+) ->
+    {ok, DataOut :: map(), CBState :: state()}
+    | {error, Reason :: any(), CBState :: state()}.
+
+authenticate(_, _, _, State) ->
+    {ok, #{}, State}.

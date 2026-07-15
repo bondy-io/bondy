@@ -11,6 +11,8 @@
   {applications,
    [kernel,
     stdlib,
+    crypto,
+    public_key,
     bondy_cbor,
     msgpack,
     bert,

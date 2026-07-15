@@ -49,17 +49,15 @@ until the callee is recycled by the supervisor for an unrelated reason.
 }).
 
 -record(state, {
-    services = []           ::  list(),
-    service_poolnames = #{} ::  #{binary() => atom()},
-    pending_secrets = #{}   ::  #{binary() => {map(), bondy_retry:t()}}
+    services = [] :: list(),
+    service_poolnames = #{} :: #{binary() => atom()},
+    pending_secrets = #{} :: #{binary() => {map(), bondy_retry:t()}}
 }).
-
 
 %% API
 -export([start_link/0]).
 -export([services/0]).
 -export([service_readiness/1]).
-
 
 %% GEN_SERVER CALLBACKS
 -export([init/1]).
@@ -74,8 +72,6 @@ until the callee is recycled by the supervisor for an unrelated reason.
 %% API
 %% =============================================================================
 
-
-
 -doc "Start the manager, registered locally. Called by the supervisor.".
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -84,7 +80,6 @@ start_link() ->
 -spec services() -> [map()].
 services() ->
     gen_server:call(?MODULE, services, 10000).
-
 
 -doc """
 Returns `{ok, Vars}` where `Vars` is the resolved secret-vars map for the
@@ -98,10 +93,8 @@ service_readiness(ServiceName) ->
     try ets:lookup(?READINESS_TAB, ServiceName) of
         [] ->
             {ok, #{}};
-
         [{_, {ready, Vars}}] ->
             {ok, Vars};
-
         [{_, not_ready}] ->
             {error, not_ready}
     catch
@@ -109,11 +102,9 @@ service_readiness(ServiceName) ->
             {error, not_ready}
     end.
 
-
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
-
 
 -doc false.
 init([]) ->
@@ -128,7 +119,6 @@ init([]) ->
 handle_continue(resolve_secrets, #state{services = []} = State) ->
     %% No services defined
     {noreply, State};
-
 handle_continue(resolve_secrets, State0) ->
     {Services, PendingSecrets0} = resolve_secrets(State0#state.services),
     PendingSecrets = schedule_retries(PendingSecrets0),
@@ -137,17 +127,18 @@ handle_continue(resolve_secrets, State0) ->
         pending_secrets = PendingSecrets
     },
     {noreply, State, {continue, start_pools}};
-
 handle_continue(start_pools, State0) ->
     {ok, PoolMapping} = start_http_pools(State0#state.services),
     State = State0#state{service_poolnames = PoolMapping},
     {noreply, State, {continue, start_callees}};
-
 handle_continue(start_callees, State) ->
     lists:foreach(
         fun({RealmUri, Service, PoolName}) ->
-            case bondy_rpc_gateway_callee_sup:start_callee(
-                    RealmUri, Service, PoolName) of
+            case
+                bondy_rpc_gateway_callee_sup:start_callee(
+                    RealmUri, Service, PoolName
+                )
+            of
                 {ok, _Pid} ->
                     ok;
                 {error, Reason} ->
@@ -163,11 +154,9 @@ handle_continue(start_callees, State) ->
     ),
     {noreply, State}.
 
-
 -doc false.
 handle_call(services, _From, State) ->
     {reply, State#state.services, State};
-
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
@@ -182,9 +171,11 @@ handle_info(
 ) ->
     case maps:find(ServiceName, Pending) of
         {ok, {SecretsSpec, RetryState}} ->
-            case bondy_rpc_gateway_secret_resolver:resolve_service_secrets(
-                SecretsSpec, ServiceName
-            ) of
+            case
+                bondy_rpc_gateway_secret_resolver:resolve_service_secrets(
+                    SecretsSpec, ServiceName
+                )
+            of
                 {ok, ResolvedVars} ->
                     ets:insert(
                         ?READINESS_TAB,
@@ -214,8 +205,10 @@ handle_info(
                             }};
                         {max_retries, _NewRetry} ->
                             ?LOG_ERROR(#{
-                                description => <<"Max retries reached for "
-                                                 "secret resolution">>,
+                                description => <<
+                                    "Max retries reached for "
+                                    "secret resolution"
+                                >>,
                                 service => ServiceName
                             }),
                             {noreply, State}
@@ -224,7 +217,6 @@ handle_info(
         error ->
             {noreply, State}
     end;
-
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -232,17 +224,13 @@ handle_info(_Info, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-
 -doc false.
 terminate(_Reason, #state{}) ->
     ok.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 resolve_secrets(Services) ->
     lists:foldl(
@@ -250,7 +238,6 @@ resolve_secrets(Services) ->
             case resolve_service_secret(Service) of
                 {ok, CleanedService} ->
                     {[CleanedService | SvcAcc], PendAcc};
-
                 {not_ready, CleanedService, ServiceName, SecretsSpec} ->
                     RetryState = bondy_retry:init(
                         {resolve_secrets, ServiceName}, ?RETRY_OPTS
@@ -282,20 +269,18 @@ resolve_service_secret(
                 service => Name
             }),
             {ok, CleanedService};
-
         {error, Reason} ->
             ets:insert(?READINESS_TAB, {Name, not_ready}),
             ?LOG_WARNING(#{
-                description => ~"Secret resolution failed at startup, will retry in background",
+                description =>
+                    ~"Secret resolution failed at startup, will retry in background",
                 service => Name,
                 reason => Reason
             }),
             {not_ready, CleanedService, Name, SecretsSpec}
     end;
-
 resolve_service_secret(Service) ->
     {ok, Service}.
-
 
 schedule_retries(PendingSecrets) ->
     maps:map(
@@ -314,15 +299,19 @@ start_http_pools(Services) ->
             Endpoint = maps:get(base_url, ServiceConf),
             PoolOpts0 = maps:get(pool, ServiceConf, #{}),
             TlsVerify = maps:get(tls_verify, ServiceConf, verify_peer),
-            SslOpts = case TlsVerify of
-                verify_none ->
-                    bondy_cert_manager:ssl_opts(#{verify => verify_none});
-                _ ->
-                    bondy_cert_manager:ssl_opts()
-            end,
+            SslOpts =
+                case TlsVerify of
+                    verify_none ->
+                        bondy_cert_manager:ssl_opts(#{verify => verify_none});
+                    _ ->
+                        bondy_cert_manager:ssl_opts()
+                end,
             PoolOpts = PoolOpts0#{ssl_options => SslOpts},
-            case bondy_rpc_gateway_http_pool_sup:start_pool(
-                    PoolName, Endpoint, PoolOpts) of
+            case
+                bondy_rpc_gateway_http_pool_sup:start_pool(
+                    PoolName, Endpoint, PoolOpts
+                )
+            of
                 {ok, _Pid} ->
                     Acc#{ServiceName => PoolName};
                 {error, {already_started, _Pid}} ->
@@ -362,7 +351,6 @@ callee_params(State) ->
                         fun
                             (undefined, _, IAcc) ->
                                 IAcc;
-
                             (RealmUri, List, IAcc) ->
                                 Service = Service1#{
                                     procedures => maps:from_list(List)
@@ -375,7 +363,6 @@ callee_params(State) ->
                         Acc,
                         ProceduresByRealm
                     );
-
                 error ->
                     Acc
             end
@@ -383,7 +370,6 @@ callee_params(State) ->
         [],
         State#state.services
     ).
-
 
 poolname(#state{service_poolnames = Map}, Name) ->
     maps:get(Name, Map).

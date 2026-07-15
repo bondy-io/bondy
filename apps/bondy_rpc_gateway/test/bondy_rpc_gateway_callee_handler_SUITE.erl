@@ -64,66 +64,69 @@ running Bondy dealer or HTTP backend.
     handle_call_no_secrets_service/1
 ]).
 
-
 %% ===================================================================
 %% CT callbacks
 %% ===================================================================
 
 all() ->
-    [{group, path_interpolation},
-     {group, extract_path_vars},
-     {group, kwarg_routing},
-     {group, error_mapping},
-     {group, response_shaping},
-     {group, readiness_gate}].
+    [
+        {group, path_interpolation},
+        {group, extract_path_vars},
+        {group, kwarg_routing},
+        {group, error_mapping},
+        {group, response_shaping},
+        {group, readiness_gate}
+    ].
 
 groups() ->
-    [{path_interpolation, [parallel], [
-        path_no_vars,
-        path_single_var,
-        path_multiple_vars,
-        path_missing_var_throws,
-        path_var_consumed_from_kwargs
-    ]},
-    {extract_path_vars, [parallel], [
-        extract_vars_empty,
-        extract_vars_single,
-        extract_vars_multiple
-    ]},
-    {kwarg_routing, [parallel], [
-        route_get_empty_kwargs,
-        route_get_with_kwargs,
-        route_delete_with_kwargs,
-        route_head_with_kwargs,
-        route_post_empty_kwargs,
-        route_post_with_kwargs,
-        route_put_with_kwargs,
-        route_patch_with_kwargs
-    ]},
-    {error_mapping, [parallel], [
-        error_uri_400,
-        error_uri_401,
-        error_uri_403,
-        error_uri_404,
-        error_uri_408,
-        error_uri_422,
-        error_uri_429,
-        error_uri_450,
-        error_uri_502,
-        error_uri_503,
-        error_uri_504,
-        error_uri_550
-    ]},
-    {response_shaping, [parallel], [
-        success_200_json,
-        success_201_json,
-        error_response_includes_status_and_body
-    ]},
-    {readiness_gate, [sequence], [
-        handle_call_pending_service,
-        handle_call_ready_service,
-        handle_call_no_secrets_service
-    ]}].
+    [
+        {path_interpolation, [parallel], [
+            path_no_vars,
+            path_single_var,
+            path_multiple_vars,
+            path_missing_var_throws,
+            path_var_consumed_from_kwargs
+        ]},
+        {extract_path_vars, [parallel], [
+            extract_vars_empty,
+            extract_vars_single,
+            extract_vars_multiple
+        ]},
+        {kwarg_routing, [parallel], [
+            route_get_empty_kwargs,
+            route_get_with_kwargs,
+            route_delete_with_kwargs,
+            route_head_with_kwargs,
+            route_post_empty_kwargs,
+            route_post_with_kwargs,
+            route_put_with_kwargs,
+            route_patch_with_kwargs
+        ]},
+        {error_mapping, [parallel], [
+            error_uri_400,
+            error_uri_401,
+            error_uri_403,
+            error_uri_404,
+            error_uri_408,
+            error_uri_422,
+            error_uri_429,
+            error_uri_450,
+            error_uri_502,
+            error_uri_503,
+            error_uri_504,
+            error_uri_550
+        ]},
+        {response_shaping, [parallel], [
+            success_200_json,
+            success_201_json,
+            error_response_includes_status_and_body
+        ]},
+        {readiness_gate, [sequence], [
+            handle_call_pending_service,
+            handle_call_ready_service,
+            handle_call_no_secrets_service
+        ]}
+    ].
 
 init_per_suite(Config) ->
     Config.
@@ -137,29 +140,28 @@ init_per_group(_Group, Config) ->
 end_per_group(_Group, _Config) ->
     ok.
 
-init_per_testcase(TC, Config)
-  when TC =:= handle_call_pending_service;
-       TC =:= handle_call_ready_service;
-       TC =:= handle_call_no_secrets_service ->
+init_per_testcase(TC, Config) when
+    TC =:= handle_call_pending_service;
+    TC =:= handle_call_ready_service;
+    TC =:= handle_call_no_secrets_service
+->
     catch ets:delete(bondy_rpc_gateway_manager),
     ets:new(bondy_rpc_gateway_manager, [
         named_table, protected, set, {read_concurrency, true}
     ]),
     Config;
-
 init_per_testcase(_TC, Config) ->
     Config.
 
-end_per_testcase(TC, _Config)
-  when TC =:= handle_call_pending_service;
-       TC =:= handle_call_ready_service;
-       TC =:= handle_call_no_secrets_service ->
+end_per_testcase(TC, _Config) when
+    TC =:= handle_call_pending_service;
+    TC =:= handle_call_ready_service;
+    TC =:= handle_call_no_secrets_service
+->
     catch ets:delete(bondy_rpc_gateway_manager),
     ok;
-
 end_per_testcase(_TC, _Config) ->
     ok.
-
 
 %% ===================================================================
 %% Path interpolation tests
@@ -197,7 +199,8 @@ path_multiple_vars(_Config) ->
 path_missing_var_throws(_Config) ->
     KWArgs = #{<<"other">> => <<"val">>},
     ?assertException(
-        throw, {path_var_missing, <<"id">>},
+        throw,
+        {path_var_missing, <<"id">>},
         bondy_rpc_gateway_callee_handler:interpolate_path(
             <<"/invoices/{{id}}">>, KWArgs
         )
@@ -211,7 +214,6 @@ path_var_consumed_from_kwargs(_Config) ->
             <<"/items/{{id}}">>, KWArgs
         ),
     ?assertEqual(#{}, Remaining).
-
 
 %% ===================================================================
 %% extract_path_vars tests
@@ -235,7 +237,6 @@ extract_vars_multiple(_Config) ->
     ),
     ?assertEqual([<<"org">>, <<"project">>, <<"task">>], Vars).
 
-
 %% ===================================================================
 %% Kwarg routing tests
 %% ===================================================================
@@ -249,7 +250,8 @@ route_get_empty_kwargs(_Config) ->
 
 route_get_with_kwargs(_Config) ->
     {Url, Body} = bondy_rpc_gateway_callee_handler:route_kwargs(
-        get, <<"https://api.example.com/items">>,
+        get,
+        <<"https://api.example.com/items">>,
         #{<<"status">> => <<"active">>}
     ),
     ?assertNotEqual(nomatch, binary:match(Url, <<"status=active">>)),
@@ -257,7 +259,8 @@ route_get_with_kwargs(_Config) ->
 
 route_delete_with_kwargs(_Config) ->
     {Url, Body} = bondy_rpc_gateway_callee_handler:route_kwargs(
-        delete, <<"https://api.example.com/items">>,
+        delete,
+        <<"https://api.example.com/items">>,
         #{<<"force">> => <<"true">>}
     ),
     ?assertNotEqual(nomatch, binary:match(Url, <<"force=true">>)),
@@ -265,7 +268,8 @@ route_delete_with_kwargs(_Config) ->
 
 route_head_with_kwargs(_Config) ->
     {Url, Body} = bondy_rpc_gateway_callee_handler:route_kwargs(
-        head, <<"https://api.example.com/items">>,
+        head,
+        <<"https://api.example.com/items">>,
         #{<<"q">> => <<"test">>}
     ),
     ?assertNotEqual(nomatch, binary:match(Url, <<"q=test">>)),
@@ -280,7 +284,8 @@ route_post_empty_kwargs(_Config) ->
 
 route_post_with_kwargs(_Config) ->
     {Url, Body} = bondy_rpc_gateway_callee_handler:route_kwargs(
-        post, <<"https://api.example.com/items">>,
+        post,
+        <<"https://api.example.com/items">>,
         #{<<"name">> => <<"widget">>}
     ),
     %% URL should not have query params
@@ -291,7 +296,8 @@ route_post_with_kwargs(_Config) ->
 
 route_put_with_kwargs(_Config) ->
     {Url, Body} = bondy_rpc_gateway_callee_handler:route_kwargs(
-        put, <<"https://api.example.com/items/1">>,
+        put,
+        <<"https://api.example.com/items/1">>,
         #{<<"name">> => <<"updated">>}
     ),
     ?assertEqual(<<"https://api.example.com/items/1">>, Url),
@@ -300,13 +306,13 @@ route_put_with_kwargs(_Config) ->
 
 route_patch_with_kwargs(_Config) ->
     {Url, Body} = bondy_rpc_gateway_callee_handler:route_kwargs(
-        patch, <<"https://api.example.com/items/1">>,
+        patch,
+        <<"https://api.example.com/items/1">>,
         #{<<"status">> => <<"done">>}
     ),
     ?assertEqual(<<"https://api.example.com/items/1">>, Url),
     Decoded = json:decode(Body),
     ?assertEqual(#{<<"status">> => <<"done">>}, Decoded).
-
 
 %% ===================================================================
 %% Error URI mapping tests
@@ -386,7 +392,6 @@ error_uri_550(_Config) ->
     ),
     ?assertEqual(<<"bondy.error.bad_gateway">>, Uri).
 
-
 %% ===================================================================
 %% Response shaping tests
 %% ===================================================================
@@ -416,7 +421,6 @@ error_response_includes_status_and_body(_Config) ->
         #{<<"error">> => <<"not found">>},
         maps:get(<<"body">>, KWArgs)
     ).
-
 
 %% ===================================================================
 %% Readiness gate tests

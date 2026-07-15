@@ -66,9 +66,6 @@ merged into the outgoing HTTP headers.
 -export([route_kwargs/3]).
 -export([http_to_wamp/2]).
 
-
-
-
 %% ===================================================================
 %% BONDY_DEALER CALLBACKS
 %% ===================================================================
@@ -78,8 +75,8 @@ Called when kwargs is undefined (dealer flattens to 2 args).
 Delegates to `handle_wamp_call/3` with an empty kwargs map.
 """.
 -spec handle_wamp_call(#rpc_gateway_proc_conf{}, map()) ->
-    {ok, map(), list(), map()} |
-    {error, binary(), map(), list(), map()}.
+    {ok, map(), list(), map()}
+    | {error, binary(), map(), list(), map()}.
 
 handle_wamp_call(ProcConf, Options) ->
     handle_wamp_call(ProcConf, #{}, Options).
@@ -93,19 +90,22 @@ Otherwise merges any resolved secret vars into ProcConf and delegates
 to the HTTP forwarding logic.
 """.
 -spec handle_wamp_call(#rpc_gateway_proc_conf{}, map(), map()) ->
-    {ok, map(), list(), map()} |
-    {error, binary(), map(), list(), map()}.
+    {ok, map(), list(), map()}
+    | {error, binary(), map(), list(), map()}.
 
 handle_wamp_call(
-        #rpc_gateway_proc_conf{vars_resolved = true} = ProcConf,
-        KWArgs0, _Options) ->
+    #rpc_gateway_proc_conf{vars_resolved = true} = ProcConf,
+    KWArgs0,
+    _Options
+) ->
     %% Fast path: secrets were merged at registration time, no need to check
     %% readiness or merge per-call.
     do_handle_wamp_call(ProcConf, KWArgs0);
-
 handle_wamp_call(
-        #rpc_gateway_proc_conf{service_name = ServiceName} = ProcConf,
-        KWArgs0, _Options) ->
+    #rpc_gateway_proc_conf{service_name = ServiceName} = ProcConf,
+    KWArgs0,
+    _Options
+) ->
     %% Fallback: callee was started before its secrets resolved. Check
     %% readiness on each call and merge as needed.
     case bondy_rpc_gateway_manager:service_readiness(ServiceName) of
@@ -118,10 +118,6 @@ handle_wamp_call(
                 <<"Service credentials pending">>
             )
     end.
-
-
-
-
 
 %% =============================================================================
 %% PRIVATE
@@ -141,17 +137,16 @@ registered before its service's secrets came back.
 
 apply_secrets(ProcConf, SecretVars) when map_size(SecretVars) =:= 0 ->
     ProcConf#rpc_gateway_proc_conf{vars_resolved = true};
-
-apply_secrets(#rpc_gateway_proc_conf{auth_conf = AuthConf0} = ProcConf,
-              SecretVars) ->
+apply_secrets(
+    #rpc_gateway_proc_conf{auth_conf = AuthConf0} = ProcConf,
+    SecretVars
+) ->
     ExistingVars = maps:get(vars, AuthConf0, #{}),
     MergedVars = maps:merge(ExistingVars, SecretVars),
     ProcConf#rpc_gateway_proc_conf{
         auth_conf = AuthConf0#{vars => MergedVars},
         vars_resolved = true
     }.
-
-
 
 do_handle_wamp_call(#rpc_gateway_proc_conf{} = ProcConf, KWArgs0) ->
     #rpc_gateway_proc_conf{
@@ -204,22 +199,29 @@ do_handle_wamp_call(#rpc_gateway_proc_conf{} = ProcConf, KWArgs0) ->
         ),
 
         case Response of
-            {ok, Status0, _RH0, _RespBody0}
-              when Status0 =:= 401; Status0 =:= 403 ->
+            {ok, Status0, _RH0, _RespBody0} when
+                Status0 =:= 401; Status0 =:= 403
+            ->
                 ?LOG_WARNING(#{
-                    description => <<"Auth rejection, retrying with fresh token">>,
+                    description =>
+                        <<"Auth rejection, retrying with fresh token">>,
                     service => ServiceName,
                     status => Status0
                 }),
                 retry_with_fresh_token(
-                    ServiceName, AuthMod, AuthConf,
-                    Url, BaseHeaders, MethodAtom, Body,
-                    Retries, Timeout, Pool
+                    ServiceName,
+                    AuthMod,
+                    AuthConf,
+                    Url,
+                    BaseHeaders,
+                    MethodAtom,
+                    Body,
+                    Retries,
+                    Timeout,
+                    Pool
                 );
-
             {ok, Status1, _RH1, RespBody1} ->
                 http_to_wamp(Status1, RespBody1);
-
             {error, HttpErr} ->
                 ?LOG_ERROR(#{
                     description => <<"HTTP request failed">>,
@@ -239,7 +241,6 @@ do_handle_wamp_call(#rpc_gateway_proc_conf{} = ProcConf, KWArgs0) ->
                 400,
                 <<"Missing required path variable: ", Var/binary>>
             );
-
         throw:{auth_error, AuthErr} ->
             ?LOG_ERROR(#{
                 description => <<"Auth failed for WAMP procedure">>,
@@ -251,7 +252,6 @@ do_handle_wamp_call(#rpc_gateway_proc_conf{} = ProcConf, KWArgs0) ->
                 503,
                 <<"Authentication unavailable">>
             );
-
         Class:CatchReason:Stack ->
             ?LOG_ERROR(#{
                 description => <<"Unexpected error in WAMP handler">>,
@@ -266,7 +266,6 @@ do_handle_wamp_call(#rpc_gateway_proc_conf{} = ProcConf, KWArgs0) ->
                 <<"Internal error">>
             )
     end.
-
 
 %% ===================================================================
 %% Path interpolation
@@ -300,17 +299,18 @@ interpolate_path(Template, KWArgs, Vars) ->
 -doc false.
 -spec extract_path_vars(binary()) -> [binary()].
 extract_path_vars(Template) ->
-    case re:run(
-        Template,
-        <<"\\{\\{([^}]+)\\}\\}">>,
-        [global, {capture, all_but_first, binary}]
-    ) of
+    case
+        re:run(
+            Template,
+            <<"\\{\\{([^}]+)\\}\\}">>,
+            [global, {capture, all_but_first, binary}]
+        )
+    of
         {match, Matches} ->
             [Var || [Var] <- Matches];
         nomatch ->
             []
     end.
-
 
 %% ===================================================================
 %% URL construction
@@ -318,16 +318,17 @@ extract_path_vars(Template) ->
 
 -spec construct_url(binary(), binary()) -> binary().
 construct_url(BaseUrl, RequestPath) ->
-    Base = case binary:last(BaseUrl) of
-        $/ -> binary:part(BaseUrl, 0, byte_size(BaseUrl) - 1);
-        _ -> BaseUrl
-    end,
-    Path = case RequestPath of
-        <<"/", _/binary>> -> RequestPath;
-        _ -> <<"/", RequestPath/binary>>
-    end,
+    Base =
+        case binary:last(BaseUrl) of
+            $/ -> binary:part(BaseUrl, 0, byte_size(BaseUrl) - 1);
+            _ -> BaseUrl
+        end,
+    Path =
+        case RequestPath of
+            <<"/", _/binary>> -> RequestPath;
+            _ -> <<"/", RequestPath/binary>>
+        end,
     <<Base/binary, Path/binary>>.
-
 
 %% ===================================================================
 %% Custom headers extraction
@@ -348,13 +349,13 @@ extract_custom_headers(KWArgs) ->
             {[], KWArgs}
     end.
 
-
 %% ===================================================================
 %% Kwargs routing by HTTP method
 %% ===================================================================
 
 route_kwargs(Method, Endpoint, KWArgs) when
-        Method =:= get; Method =:= delete; Method =:= head ->
+    Method =:= get; Method =:= delete; Method =:= head
+->
     %% GET/DELETE/HEAD: remaining kwargs become query params
     case map_size(KWArgs) of
         0 ->
@@ -377,20 +378,21 @@ route_kwargs(_Method, Endpoint, KWArgs) ->
         _ -> {Endpoint, iolist_to_binary(json:encode(KWArgs))}
     end.
 
-
 %% ===================================================================
 %% Token acquisition
 %% ===================================================================
 
 acquire_token(ServiceName, AuthMod, AuthConf) ->
-    case bondy_rpc_gateway_token_cache:get(
-            ServiceName, AuthMod, AuthConf) of
+    case
+        bondy_rpc_gateway_token_cache:get(
+            ServiceName, AuthMod, AuthConf
+        )
+    of
         {ok, Token} ->
             Token;
         {error, Reason} ->
             throw({auth_error, Reason})
     end.
-
 
 %% ===================================================================
 %% HTTP request with retry
@@ -401,8 +403,11 @@ request_with_retry(Method, Url, Headers, Body, RetriesLeft, Timeout, Pool) ->
         {connect_timeout, Timeout},
         {recv_timeout, Timeout}
     ],
-    case bondy_rpc_gateway_http_pool:request(
-            Pool, Method, Url, Headers, Body, Overrides) of
+    case
+        bondy_rpc_gateway_http_pool:request(
+            Pool, Method, Url, Headers, Body, Overrides
+        )
+    of
         {ok, S, RH, RB} ->
             {ok, S, RH, RB};
         {error, pool_down} = E ->
@@ -418,14 +423,15 @@ request_with_retry(Method, Url, Headers, Body, RetriesLeft, Timeout, Pool) ->
                 attempt => Attempt,
                 backoff_ms => BackoffMs
             }),
-            receive after BackoffMs -> ok end,
+            receive
+            after BackoffMs -> ok
+            end,
             request_with_retry(
                 Method, Url, Headers, Body, RetriesLeft - 1, Timeout, Pool
             );
         {error, Reason} ->
             {error, Reason}
     end.
-
 
 %% @private
 %% Exponential backoff with full jitter and a hard ceiling. The handler
@@ -438,26 +444,44 @@ backoff_with_jitter(Attempt) ->
     Cap = min(?RETRY_BACKOFF_CAP_MS, Exp),
     max(?RETRY_BACKOFF_FLOOR_MS, rand:uniform(max(1, Cap))).
 
-
 %% ===================================================================
 %% Auth retry on 401/403
 %% ===================================================================
 
 retry_with_fresh_token(
-        ServiceName, AuthMod, AuthConf,
-        Url, BaseHeaders, MethodAtom, Body,
-        Retries, Timeout, Pool) ->
+    ServiceName,
+    AuthMod,
+    AuthConf,
+    Url,
+    BaseHeaders,
+    MethodAtom,
+    Body,
+    Retries,
+    Timeout,
+    Pool
+) ->
     bondy_rpc_gateway_token_cache:invalidate(ServiceName),
-    case bondy_rpc_gateway_token_cache:get(
-            ServiceName, AuthMod, AuthConf) of
+    case
+        bondy_rpc_gateway_token_cache:get(
+            ServiceName, AuthMod, AuthConf
+        )
+    of
         {ok, NewToken} ->
             {RetryUrl, RetryHeaders} =
                 AuthMod:apply_auth(
                     NewToken, Url, BaseHeaders, AuthConf
                 ),
-            case request_with_retry(
-                    MethodAtom, RetryUrl, RetryHeaders, Body,
-                    Retries, Timeout, Pool) of
+            case
+                request_with_retry(
+                    MethodAtom,
+                    RetryUrl,
+                    RetryHeaders,
+                    Body,
+                    Retries,
+                    Timeout,
+                    Pool
+                )
+            of
                 {ok, Status, _RH, RespBody} ->
                     http_to_wamp(Status, RespBody);
                 {error, Reason} ->
@@ -476,37 +500,50 @@ retry_with_fresh_token(
             throw({auth_error, Reason})
     end.
 
-
 %% ===================================================================
 %% HTTP status → WAMP result/error mapping
 %% ===================================================================
 
 http_to_wamp(Status, RespBody) when Status >= 200, Status < 300 ->
-    DecodedBody = try json:decode(RespBody)
-                  catch _:_ -> RespBody
-                  end,
+    DecodedBody =
+        try
+            json:decode(RespBody)
+        catch
+            _:_ -> RespBody
+        end,
     {ok, #{}, [], #{<<"status">> => Status, <<"body">> => DecodedBody}};
-
 http_to_wamp(Status, RespBody) ->
     ErrorUri = status_to_error_uri(Status),
-    DecodedBody = try json:decode(RespBody)
-                  catch _:_ -> RespBody
-                  end,
-    {error, ErrorUri, #{},
-     [],
-     #{<<"status">> => Status, <<"body">> => DecodedBody}}.
+    DecodedBody =
+        try
+            json:decode(RespBody)
+        catch
+            _:_ -> RespBody
+        end,
+    {error, ErrorUri, #{}, [], #{
+        <<"status">> => Status, <<"body">> => DecodedBody
+    }}.
 
-
-status_to_error_uri(400) -> <<"wamp.error.invalid_argument">>;
-status_to_error_uri(422) -> <<"wamp.error.invalid_argument">>;
-status_to_error_uri(401) -> <<"wamp.error.not_authorized">>;
-status_to_error_uri(403) -> <<"wamp.error.not_authorized">>;
-status_to_error_uri(404) -> <<"wamp.error.not_found">>;
-status_to_error_uri(408) -> <<"wamp.error.timeout">>;
-status_to_error_uri(504) -> <<"wamp.error.timeout">>;
-status_to_error_uri(429) -> <<"bondy.error.too_many_requests">>;
-status_to_error_uri(502) -> <<"bondy.error.bad_gateway">>;
-status_to_error_uri(503) -> <<"bondy.error.bad_gateway">>;
+status_to_error_uri(400) ->
+    <<"wamp.error.invalid_argument">>;
+status_to_error_uri(422) ->
+    <<"wamp.error.invalid_argument">>;
+status_to_error_uri(401) ->
+    <<"wamp.error.not_authorized">>;
+status_to_error_uri(403) ->
+    <<"wamp.error.not_authorized">>;
+status_to_error_uri(404) ->
+    <<"wamp.error.not_found">>;
+status_to_error_uri(408) ->
+    <<"wamp.error.timeout">>;
+status_to_error_uri(504) ->
+    <<"wamp.error.timeout">>;
+status_to_error_uri(429) ->
+    <<"bondy.error.too_many_requests">>;
+status_to_error_uri(502) ->
+    <<"bondy.error.bad_gateway">>;
+status_to_error_uri(503) ->
+    <<"bondy.error.bad_gateway">>;
 status_to_error_uri(S) when S >= 400, S < 500 ->
     <<"bondy.error.invalid_argument">>;
 status_to_error_uri(S) when S >= 500 ->
@@ -514,26 +551,30 @@ status_to_error_uri(S) when S >= 500 ->
 status_to_error_uri(_) ->
     <<"bondy.error.bad_gateway">>.
 
-
 %% ===================================================================
 %% Helpers
 %% ===================================================================
 
 wamp_error(Uri, Status, Message) ->
-    {error, Uri, #{}, [],
-     #{<<"status">> => Status, <<"message">> => Message}}.
+    {error, Uri, #{}, [], #{<<"status">> => Status, <<"message">> => Message}}.
 
-method_to_atom(get) -> get;
-method_to_atom(post) -> post;
-method_to_atom(put) -> put;
-method_to_atom(patch) -> patch;
-method_to_atom(delete) -> delete;
-method_to_atom(head) -> head;
+method_to_atom(get) ->
+    get;
+method_to_atom(post) ->
+    post;
+method_to_atom(put) ->
+    put;
+method_to_atom(patch) ->
+    patch;
+method_to_atom(delete) ->
+    delete;
+method_to_atom(head) ->
+    head;
 method_to_atom(B) when is_binary(B) ->
     method_to_atom(binary_to_existing_atom(string:lowercase(B), utf8)).
 
-to_binary(B) when is_binary(B)  -> B;
-to_binary(A) when is_atom(A)    -> atom_to_binary(A);
+to_binary(B) when is_binary(B) -> B;
+to_binary(A) when is_atom(A) -> atom_to_binary(A);
 to_binary(I) when is_integer(I) -> integer_to_binary(I);
-to_binary(F) when is_float(F)   -> float_to_binary(F, [{decimals, 10}, compact]);
-to_binary(L) when is_list(L)    -> list_to_binary(L).
+to_binary(F) when is_float(F) -> float_to_binary(F, [{decimals, 10}, compact]);
+to_binary(L) when is_list(L) -> list_to_binary(L).

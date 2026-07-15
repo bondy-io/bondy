@@ -1,0 +1,134 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+-module(bondy_registry_api).
+-moduledoc """
+Implements the `bondy_wamp_api` behaviour for the registry WAMP API, dispatching
+procedure calls that list registrations, subscriptions and callees for a realm.
+""".
+-behaviour(bondy_wamp_api).
+
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
+-include("bondy.hrl").
+-include("bondy_uris.hrl").
+
+-export([handle_call/3]).
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+-spec handle_call(
+    Proc :: uri(), M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()
+) ->
+    ok
+    | continue
+    | {continue, uri() | wamp_call()}
+    | {continue, uri() | wamp_call(), fun(
+        (Reason :: any()) -> wamp_error() | undefined
+    )}
+    | {reply, wamp_result() | wamp_error()}.
+
+%% -----------------------------------------------------------------------------
+%% bondy.registration.*
+%% -----------------------------------------------------------------------------
+handle_call(?BONDY_REGISTRATION_LIST, M, Ctxt) ->
+    [RealmUri] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
+    case list(registration, RealmUri) of
+        {ok, Result} ->
+            R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
+            {reply, R};
+        {error, Reason} ->
+            E = bondy_wamp_api_utils:error(Reason, M),
+            {reply, E}
+    end;
+handle_call(?BONDY_REGISTRATION_CALLEE_LIST, M, Ctxt) ->
+    Args = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1, 2),
+    case list_callees(Args) of
+        {ok, Result} ->
+            R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
+            {reply, R};
+        {error, Reason} ->
+            E = bondy_wamp_api_utils:error(Reason, M),
+            {reply, E}
+    end;
+%% -----------------------------------------------------------------------------
+%% bondy.subscription.*
+%% -----------------------------------------------------------------------------
+handle_call(?BONDY_SUBSCRIPTION_LIST, M, Ctxt) ->
+    [RealmUri] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
+    case list(subscription, RealmUri) of
+        {ok, Result} ->
+            R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
+            {reply, R};
+        {error, Reason} ->
+            E = bondy_wamp_api_utils:error(Reason, M),
+            {reply, E}
+    end;
+handle_call(_, M, _) ->
+    E = bondy_wamp_api_utils:no_such_procedure_error(M),
+    {reply, E}.
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+list(Type, RealmUri) ->
+    list(Type, RealmUri, fun bondy_registry_entry:to_external/1).
+
+list(Type, RealmUri, Fun) ->
+    try
+        case bondy_registry:entries(Type, RealmUri, '_') of
+            [] ->
+                {ok, []};
+            Entries ->
+                {ok, [Fun(E) || E <- Entries]}
+        end
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            {error, Reason}
+    end.
+
+%% @private
+list_callees([RealmUri]) ->
+    try
+        case bondy_dealer:callees(RealmUri) of
+            [] ->
+                {ok, []};
+            Callees ->
+                {ok, Callees}
+        end
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            {error, Reason}
+    end;
+list_callees([RealmUri, ProcedureUri]) ->
+    try
+        case bondy_dealer:callees(RealmUri, ProcedureUri) of
+            [] ->
+                {ok, []};
+            Callees ->
+                {ok, Callees}
+        end
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            {error, Reason}
+    end.

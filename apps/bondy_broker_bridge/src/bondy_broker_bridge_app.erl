@@ -15,17 +15,13 @@ Starts the top-level supervisor `bondy_broker_bridge_sup`.
 
 -export([start/2, stop/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
 -doc false.
 start(_StartType, _StartArgs) ->
     bondy_broker_bridge_sup:start_link().
-
 
 -doc false.
 stop(_State) ->

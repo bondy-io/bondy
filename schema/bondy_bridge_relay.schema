@@ -22,70 +22,70 @@
 %% =============================================================================
 
 %% @doc Enabled or disable a bridge relay
-{mapping, "bridge.$name", "bondy.bridges", [
+{mapping, "bridge.$name", "bondy_router.bridges", [
   {commented, off},
   {datatype, flag}
 ]}.
 
 %% @doc Defines the endpoint and port number of the remote Bondy Router this
 %% edge node will connect to.
-{mapping, "bridge.$name.endpoint", "bondy.bridges", [
+{mapping, "bridge.$name.endpoint", "bondy_router.bridges", [
   {commented, "127.0.0.1:18092"},
   {datatype, string}
 ]}.
 
 
-{mapping, "bridge.$name.transport", "bondy.bridges", [
+{mapping, "bridge.$name.transport", "bondy_router.bridges", [
   {commented, tcp},
   {datatype, {enum, [tcp, tls]}}
 ]}.
 
 %% @doc Default cert location for cluster TLS connection
-{mapping, "bridge.$name.tls.certfile", "bondy.bridges", [
+{mapping, "bridge.$name.tls.certfile", "bondy_router.bridges", [
   {datatype, file},
   {commented, "{{platform_etc_dir}}/client/keycert.pem"}
 ]}.
 
 %% @doc Default key location for cluster TLS connection
-{mapping, "bridge.$name.tls.keyfile", "bondy.bridges", [
+{mapping, "bridge.$name.tls.keyfile", "bondy_router.bridges", [
   {datatype, file},
   {commented, "{{platform_etc_dir}}/client/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for cluster TLS connection
-{mapping, "bridge.$name.tls.cacertfile", "bondy.bridges", [
+{mapping, "bridge.$name.tls.cacertfile", "bondy_router.bridges", [
   {datatype, file},
   {commented, "{{platform_etc_dir}}/client/cacert.pem"}
 ]}.
 
 
 {mapping, "bridge.$name.tls.hostname_verification",
-  "bondy.bridges", [
+  "bondy_router.bridges", [
   {datatype, {enum, [wildcard, none]}},
   {commented, wildcard}
 ]}.
 
 %% @doc A comma separate list of TLS protocol versions that will be supported
 %% At the moment Bondy only supports versions 1.2 and 1.3
-{mapping, "bridge.$name.tls.versions", "bondy.bridges", [
+{mapping, "bridge.$name.tls.versions", "bondy_router.bridges", [
   {datatype, string},
   {commented, "1.3"}
 ]}.
 
-{mapping, "bridge.$name.tls.verify", "bondy.bridges", [
+{mapping, "bridge.$name.tls.verify", "bondy_router.bridges", [
   {datatype, {enum, [verify_peer, verify_none]}},
   {commented, verify_none}
 ]}.
 
 
 %% @doc Defines the number of TCP connections for the edge-remote connection
-{mapping, "bridge.$name.parallelism", "bondy.bridges", [
+{mapping, "bridge.$name.parallelism", "bondy_router.bridges", [
   {commented, 1},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
-{mapping, "bridge.$name.connect_timeout", "bondy.bridges", [
+{mapping, "bridge.$name.connect_timeout", "bondy_router.bridges", [
   {commented, "5s"},
   {datatype, [{atom, infinity}, {duration, ms}]}
 ]}.
@@ -98,28 +98,28 @@
 %% the realm has not yet been provisioned, so we want the connection to retry
 %% indefinitely.
 %% @end
-{mapping, "bridge.$name.reconnect", "bondy.bridges", [
+{mapping, "bridge.$name.reconnect", "bondy_router.bridges", [
   {commented, on},
   {datatype, flag}
 ]}.
 
-{mapping, "bridge.$name.reconnect.max_retries", "bondy.bridges", [
+{mapping, "bridge.$name.reconnect.max_retries", "bondy_router.bridges", [
   {commented, 100},
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
 
-{mapping, "bridge.$name.reconnect.backoff.type", "bondy.bridges", [
+{mapping, "bridge.$name.reconnect.backoff.type", "bondy_router.bridges", [
   {commented, jitter},
   {datatype, {enum, [jitter, normal]}}
 ]}.
 
-{mapping, "bridge.$name.reconnect.backoff.min", "bondy.bridges", [
+{mapping, "bridge.$name.reconnect.backoff.min", "bondy_router.bridges", [
   {commented, "5s"},
   {datatype, {duration, ms}}
 ]}.
 
-{mapping, "bridge.$name.reconnect.backoff.max", "bondy.bridges", [
+{mapping, "bridge.$name.reconnect.backoff.max", "bondy_router.bridges", [
   {commented, "60s"},
   {datatype, {duration, ms}}
 ]}.
@@ -130,19 +130,19 @@
 %% checks the hosts' number of IPV4 network interfaces (ignoring the loopback
 %% interface), so for local development without and network connection you want
 %% to disable this functionality. Setting a value to infinity, disables it.
-{mapping, "bridge.$name.network_timeout", "bondy.bridges", [
+{mapping, "bridge.$name.network_timeout", "bondy_router.bridges", [
   {commented, "60s"},
   {datatype, [{atom, infinity}, {duration, ms}]}
 ]}.
 
 
 %% @doc Drops the connection after a period of inactivity.
-{mapping, "bridge.$name.idle_timeout", "bondy.bridges", [
+{mapping, "bridge.$name.idle_timeout", "bondy_router.bridges", [
   {commented, "24h"},
   {datatype, [{atom, infinity}, {duration, ms}]}
 ]}.
 
-{mapping, "bridge.$name.hibernate", "bondy.bridges", [
+{mapping, "bridge.$name.hibernate", "bondy_router.bridges", [
   {commented, idle},
   {datatype, {enum, [never, idle, always]}}
 ]}.
@@ -154,7 +154,7 @@
 %% always respond to those even if this option is turned off.
 %% This feature is useful to keep a connection alive and validate the
 %% connection is healthy.
-{mapping, "bridge.$name.ping", "bondy.bridges", [
+{mapping, "bridge.$name.ping", "bondy_router.bridges", [
   {commented, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -164,7 +164,7 @@
 %% the remote router finishes transmitting a message and the point it starts
 %% sending the next.
 %% Notice this is not the same as bridge.$name.idle_timeout.
-{mapping, "bridge.$name.ping.idle_timeout", "bondy.bridges", [
+{mapping, "bridge.$name.ping.idle_timeout", "bondy_router.bridges", [
   {commented, "20s"},
   {datatype, {duration, ms}}
 ]}.
@@ -173,14 +173,14 @@
 %% amount of time Bondy waits for a ping response from the remote.
 %% Once that time has passed this counts as a fail attempt
 %% (see bridge.$name.ping.max_attempts).
-{mapping, "bridge.$name.ping.timeout", "bondy.bridges", [
+{mapping, "bridge.$name.ping.timeout", "bondy_router.bridges", [
 {commented, "10s"},
 {datatype, {duration, ms}}
 ]}.
 
 %% @doc If  bridge.$name.ping.enabled is 'on', this parameter controls maximum number of ping attempts Bondy will do before dropping the connection.
 {mapping,
-"bridge.$name.ping.max_attempts", "bondy.bridges", [
+"bridge.$name.ping.max_attempts", "bondy_router.bridges", [
   {commented, 2},
   {datatype, integer},
   {validators, ["pos_integer"]}
@@ -192,21 +192,21 @@
 %% For fragmented frames this applies to the size of the reconstituted frame.
 %%
 %% A value of zero means un unbounded size (internally translated to 'infinity')
-{mapping, "bridge.$name.max_frame_size", "bondy.bridges", [
+{mapping, "bridge.$name.max_frame_size", "bondy_router.bridges", [
   {commented, infinity},
   {datatype, [{atom, infinity}, integer]}
 ]}.
 
-{mapping, "bridge.$name.realm.$id.uri", "bondy.bridges", [
+{mapping, "bridge.$name.realm.$id.uri", "bondy_router.bridges", [
   {datatype, string}
 ]}.
 
-{mapping, "bridge.$name.realm.$id.authid", "bondy.bridges", [
+{mapping, "bridge.$name.realm.$id.authid", "bondy_router.bridges", [
   {datatype, string}
 ]}.
 
 
-{mapping, "bridge.$name.realm.$id.cryptosign.pubkey", "bondy.bridges", [
+{mapping, "bridge.$name.realm.$id.cryptosign.pubkey", "bondy_router.bridges", [
   {datatype, string}
 ]}.
 
@@ -222,7 +222,7 @@
 %% And it MUST return the base64 encoded binary resulting from signing
 %% the challenge with the users's private key known to the callee matching the
 %% provided pubkey.
-{mapping, "bridge.$name.realm.$id.cryptosign.procedure", "bondy.bridges", [
+{mapping, "bridge.$name.realm.$id.cryptosign.procedure", "bondy_router.bridges", [
   {datatype, string}
 ]}.
 
@@ -247,20 +247,20 @@
 
 {mapping,
   "bridge.$name.realm.$id.cryptosign.exec",
-  "bondy.bridges", [
+  "bondy_router.bridges", [
     {datatype, string}
 ]}.
 
 {mapping,
   "bridge.$name.realm.$id.cryptosign.privkey_env_var",
-  "bondy.bridges", [
+  "bondy_router.bridges", [
     {datatype, string}
 ]}.
 
 %% For testing only, it will be removed on 1.0.0 release
 {mapping,
   "bridge.$name.realm.$id.cryptosign.privkey",
-  "bondy.bridges", [
+  "bondy_router.bridges", [
     {datatype, string}
 ]}.
 
@@ -274,7 +274,7 @@
 %% <direction> ::= "in" | "out" | "both"
 {mapping,
   "bridge.$name.realm.$id.procedure.$pid",
-  "bondy.bridges", [
+  "bondy_router.bridges", [
     {datatype, string}
 ]}.
 
@@ -286,12 +286,12 @@
 %% <direction> ::= "in" | "out" | "both"
 {mapping,
   "bridge.$name.realm.$id.topic.$tid",
-  "bondy.bridges", [
+  "bondy_router.bridges", [
     {datatype, string}
 ]}.
 
 
-{translation, "bondy.bridges", fun(Conf0) ->
+{translation, "bondy_router.bridges", fun(Conf0) ->
       Conf1 = cuttlefish_variable:filter_by_prefix("bridge", Conf0),
     Conf2 = lists:filter(
       fun
@@ -641,13 +641,13 @@ end}.
 
 
 %% @doc Enables or disables Bondy edge nodes to connect to Bondy.
-{mapping, "bridge.listener.tcp", "bondy.bridge_relay_tcp.enabled", [
+{mapping, "bridge.listener.tcp", "bondy_router.bridge_relay_tcp.enabled", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
 
 %% @doc TCP port that Bondy edge nodes will use to connect to Bondy.
-{mapping, "bridge.listener.tcp.port", "bondy.bridge_relay_tcp.port", [
+{mapping, "bridge.listener.tcp.port", "bondy_router.bridge_relay_tcp.port", [
   {default, 18092},
   {validators, [port_number]},
   {datatype, integer}
@@ -656,7 +656,7 @@ end}.
 %% @doc TheIP address that Bondy uses for
 %% exposing the Bridge Relay listener. When the host has many network
 %% interfaces, this option specifies which one to listen on.
-{mapping, "bridge.listener.tcp.ip", "bondy.bridge_relay_tcp.ip", [
+{mapping, "bridge.listener.tcp.ip", "bondy_router.bridge_relay_tcp.ip", [
   {datatype, string},
   {validators, ["ip_address"]}
 ]}.
@@ -664,12 +664,12 @@ end}.
 %% @doc The IP version to use. Either 4 or 6.
 {mapping,
   "bridge.listener.tcp.ip_version",
-  "bondy.bridge_relay_tcp.ip_version", [
+  "bondy_router.bridge_relay_tcp.ip_version", [
   {default, "4"},
   {datatype, string}
 ]}.
 
-{translation, "bondy.bridge_relay_tcp.ip_version",
+{translation, "bondy_router.bridge_relay_tcp.ip_version",
   fun(Conf) ->
     Value =  cuttlefish:conf_get("bridge.listener.tcp.ip_version", Conf),
       try
@@ -691,7 +691,7 @@ end}.
 
 %% The ranch acceptors_pool_size for the socket tcp listener
 {mapping, "bridge.listener.tcp.acceptors_pool_size",
-"bondy.bridge_relay_tcp.transport_opts.num_acceptors", [
+"bondy_router.bridge_relay_tcp.transport_opts.num_acceptors", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 200}
@@ -699,7 +699,7 @@ end}.
 
 %% The ranch max number of connections for the socket tcp listener
 {mapping, "bridge.listener.tcp.max_connections",
-"bondy.bridge_relay_tcp.transport_opts.max_connections", [
+"bondy_router.bridge_relay_tcp.transport_opts.max_connections", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 100000}
@@ -707,7 +707,7 @@ end}.
 
 %% The maximum length that the queue of pending connections can grow to.
 {mapping, "bridge.listener.tcp.backlog",
-"bondy.bridge_relay_tcp.transport_opts.socket_opts.backlog", [
+"bondy_router.bridge_relay_tcp.transport_opts.socket_opts.backlog", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 1024}
@@ -717,18 +717,18 @@ end}.
 %% Enables/disables periodic transmission on a connected socket when no other
 %% data is exchanged. If the other end does not respond, the connection is
 %% considered broken and an error message is sent to the controlling process.
-{mapping, "bridge.listener.tcp.keepalive", "bondy.bridge_relay_tcp.transport_opts.socket_opts.keepalive", [
+{mapping, "bridge.listener.tcp.keepalive", "bondy_router.bridge_relay_tcp.transport_opts.socket_opts.keepalive", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
 
 %% The minimum size of the send buffer to use for the socket.
-{mapping, "bridge.listener.tcp.sndbuf", "bondy.bridge_relay_tcp.transport_opts.socket_opts.sndbuf", [
+{mapping, "bridge.listener.tcp.sndbuf", "bondy_router.bridge_relay_tcp.transport_opts.socket_opts.sndbuf", [
   {datatype, bytesize}
 ]}.
 
 %% The minimum size of the receive buffer to use for the socket.
-{mapping, "bridge.listener.tcp.recbuf", "bondy.bridge_relay_tcp.transport_opts.socket_opts.recbuf", [
+{mapping, "bridge.listener.tcp.recbuf", "bondy_router.bridge_relay_tcp.transport_opts.socket_opts.recbuf", [
   {datatype, bytesize}
 ]}.
 
@@ -739,13 +739,13 @@ end}.
 %% avoid performance issues because of unnecessary copying.
 %% val(buffer) is automatically set to the above maximum when values sndbuf or
 %% recbuf are set.
-{mapping, "bridge.listener.tcp.buffer", "bondy.bridge_relay_tcp.transport_opts.socket_opts.buffer", [
+{mapping, "bridge.listener.tcp.buffer", "bondy_router.bridge_relay_tcp.transport_opts.socket_opts.buffer", [
   {datatype, bytesize}
 ]}.
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
-{mapping, "bridge.listener.tcp.nodelay", "bondy.bridge_relay_tcp.transport_opts.socket_opts.nodelay", [
+{mapping, "bridge.listener.tcp.nodelay", "bondy_router.bridge_relay_tcp.transport_opts.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
@@ -758,7 +758,7 @@ end}.
 %% This feature is useful to keep a connection alive and validate the
 %% connection is healthy.
 {mapping, "bridge.listener.tcp.ping",
-"bondy.bridge_relay_tcp.ping.enabled", [
+"bondy_router.bridge_relay_tcp.ping.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
@@ -768,7 +768,7 @@ end}.
 %% the remote router finishes transmitting a message and the point it starts
 %% sending the next.
 %% Notice this is not the same as bridge.listener.tcp.idle_timeout.
-{mapping, "bridge.listener.tcp.ping.idle_timeout", "bondy.bridge_relay_tcp.ping.idle_timeout", [
+{mapping, "bridge.listener.tcp.ping.idle_timeout", "bondy_router.bridge_relay_tcp.ping.idle_timeout", [
   {default, "20s"},
   {datatype, {duration, ms}}
 ]}.
@@ -777,7 +777,7 @@ end}.
 %% amount of time Bondy waits for a ping response from the remote.
 %% Once that time has passed this counts as a fail attempt
 %% (see bridge.listener.tcp.ping.max_attempts).
-{mapping, "bridge.listener.tcp.ping.timeout", "bondy.bridge_relay_tcp.ping.timeout", [
+{mapping, "bridge.listener.tcp.ping.timeout", "bondy_router.bridge_relay_tcp.ping.timeout", [
 {default, "10s"},
 {datatype, {duration, ms}}
 ]}.
@@ -788,7 +788,7 @@ end}.
 %% If the value is 'infinity' Bondy will never timeout based on missed pings.
 {mapping,
 "bridge.listener.tcp.ping.max_attempts",
-"bondy.bridge_relay_tcp.ping.max_attempts",[
+"bondy_router.bridge_relay_tcp.ping.max_attempts",[
   {default, 2},
   {datatype, integer}
 ]}.
@@ -796,7 +796,7 @@ end}.
 %% @doc The period of inactivity after which a connection is dropped. Ping
 %% control messages do not reset this timer, only client or server data packets
 %% do.
-{mapping, "bridge.listener.tcp.idle_timeout", "bondy.bridge_relay_tcp.idle_timeout", [
+{mapping, "bridge.listener.tcp.idle_timeout", "bondy_router.bridge_relay_tcp.idle_timeout", [
   {default, "8h"},
   {datatype, [{atom, infinity}, {duration, ms}]}
 ]}.
@@ -804,14 +804,14 @@ end}.
 %% @doc Defines whether the connection process should hibernate when its idle.
 %% Enabling hibernation will typically reduce memory consumption and should not
 %% have a penalty in performance as it is used only during idle state.
-{mapping, "bridge.listener.tcp.hibernate", "bondy.bridge_relay_tcp.hibernate", [
+{mapping, "bridge.listener.tcp.hibernate", "bondy_router.bridge_relay_tcp.hibernate", [
 {default, idle},
 {datatype, {enum, [never, idle, always]}}
 ]}.
 
 %% @doc The period of time without a session after which the connection is
 %% dropped.
-{mapping, "bridge.listener.tcp.auth_timeout", "bondy.bridge_relay_tcp.auth_timeout", [
+{mapping, "bridge.listener.tcp.auth_timeout", "bondy_router.bridge_relay_tcp.auth_timeout", [
 {default, "5s"},
 {datatype, [{atom, infinity}, {duration, ms}]}
 ]}.
@@ -822,7 +822,7 @@ end}.
 %% For fragmented frames this applies to the size of the reconstituted frame.
 %%
 %% A value of zero means un unbounded size (internally translated to 'infinity')
-{mapping, "bridge.listener.tcp.max_frame_size", "bondy.bridge_relay_tcp.max_frame_size", [
+{mapping, "bridge.listener.tcp.max_frame_size", "bondy_router.bridge_relay_tcp.max_frame_size", [
   {default, infinity},
   {datatype, [{atom, infinity}, integer]}
 ]}.
@@ -831,7 +831,7 @@ end}.
 %% @doc Enables or disables the TCP Proxy Protocol. This is used to capture
 %% the source IP address which will be used for matching against RBAC Source
 %% assignments.
-{mapping, "bridge.listener.tcp.proxy_protocol", "bondy.bridge_relay_tcp.proxy_protocol.enabled", [
+{mapping, "bridge.listener.tcp.proxy_protocol", "bondy_router.bridge_relay_tcp.proxy_protocol.enabled", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -841,7 +841,7 @@ end}.
 %% with invalid headers will be dropped. If 'relaxed' the connection is
 %% always accepted and Bondy will log when there is not Proxy Procotol header
 %% or if it is invalid.
-{mapping, "bridge.listener.tcp.proxy_protocol.mode", "bondy.bridge_relay_tcp.proxy_protocol.mode", [
+{mapping, "bridge.listener.tcp.proxy_protocol.mode", "bondy_router.bridge_relay_tcp.proxy_protocol.mode", [
   {datatype, {enum, [strict, relaxed]}},
   {default, relaxed}
 ]}.
@@ -853,14 +853,14 @@ end}.
 
 
 %% @doc Enables or disables Bondy edge nodes to connect to Bondy.
-{mapping, "bridge.listener.tls", "bondy.bridge_relay_tls.enabled", [
+{mapping, "bridge.listener.tls", "bondy_router.bridge_relay_tls.enabled", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
 
 %% @doc TCP port that Bondy edge nodes will use to connect to Bondy.
 {mapping, "bridge.listener.tls.port",
-"bondy.bridge_relay_tls.transport_opts.socket_opts.port", [
+"bondy_router.bridge_relay_tls.transport_opts.socket_opts.port", [
   {default, 18093},
   {validators, [port_number]},
   {datatype, integer}
@@ -871,7 +871,7 @@ end}.
 %% exposing the Bridge Relay listener. When the host has many network
 %% interfaces, this option specifies which one to listen on.
 {mapping, "bridge.listener.tls.ip",
-"bondy.bridge_relay_tls.transport_opts.socket_opts.ip", [
+"bondy_router.bridge_relay_tls.transport_opts.socket_opts.ip", [
   {datatype, string},
   {validators, ["ip_address"]}
 ]}.
@@ -879,12 +879,12 @@ end}.
 %% @doc The IP version to use. Either 4 or 6.
 {mapping,
   "bridge.listener.tls.ip_version",
-  "bondy.bridge_relay_tls.transport_opts.socket_opts.ip_version", [
+  "bondy_router.bridge_relay_tls.transport_opts.socket_opts.ip_version", [
   {default, "4"},
   {datatype, string}
 ]}.
 
-{translation, "bondy.bridge_relay_tls.transport_opts.socket_opts.ip_version",
+{translation, "bondy_router.bridge_relay_tls.transport_opts.socket_opts.ip_version",
   fun(Conf) ->
     Value =  cuttlefish:conf_get("bridge.listener.tls.ip_version", Conf),
       try
@@ -905,14 +905,14 @@ end}.
 }.
 
 %% The ranch acceptors_pool_size for the socket tcp listener
-{mapping, "bridge.listener.tls.acceptors_pool_size", "bondy.bridge_relay_tls.transport_opts.num_acceptors", [
+{mapping, "bridge.listener.tls.acceptors_pool_size", "bondy_router.bridge_relay_tls.transport_opts.num_acceptors", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 200}
 ]}.
 
 %% The ranch max number of connections for the edge TLS listener
-{mapping, "bridge.listener.tls.max_connections", "bondy.bridge_relay_tls.transport_opts.max_connections", [
+{mapping, "bridge.listener.tls.max_connections", "bondy_router.bridge_relay_tls.transport_opts.max_connections", [
   {datatype, integer},
   {validators, ["pos_integer"]},
   {default, 100000}
@@ -920,7 +920,7 @@ end}.
 
 %% The maximum length that the queue of pending connections can grow to.
 {mapping, "bridge.listener.tls.backlog",
-"bondy.bridge_relay_tls.transport_opts.socket_opts.backlog", [
+"bondy_router.bridge_relay_tls.transport_opts.socket_opts.backlog", [
   {datatype, integer},
   {default, 1024}
 ]}.
@@ -929,18 +929,18 @@ end}.
 %% Enables/disables periodic transmission on a connected socket when no other
 %% data is exchanged. If the other end does not respond, the connection is
 %% considered broken and an error message is sent to the controlling process.
-{mapping, "bridge.listener.tls.keepalive", "bondy.bridge_relay_tls.transport_opts.socket_opts.keepalive", [
+{mapping, "bridge.listener.tls.keepalive", "bondy_router.bridge_relay_tls.transport_opts.socket_opts.keepalive", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
 
 %% The minimum size of the send buffer to use for the socket.
-{mapping, "bridge.listener.tls.sndbuf", "bondy.bridge_relay_tls.transport_opts.socket_opts.sndbuf", [
+{mapping, "bridge.listener.tls.sndbuf", "bondy_router.bridge_relay_tls.transport_opts.socket_opts.sndbuf", [
   {datatype, bytesize}
 ]}.
 
 %% The minimum size of the receive buffer to use for the socket.
-{mapping, "bridge.listener.tls.recbuf", "bondy.bridge_relay_tls.transport_opts.socket_opts.recbuf", [
+{mapping, "bridge.listener.tls.recbuf", "bondy_router.bridge_relay_tls.transport_opts.socket_opts.recbuf", [
   {datatype, bytesize}
 ]}.
 
@@ -951,13 +951,13 @@ end}.
 %% avoid performance issues because of unnecessary copying.
 %% val(buffer) is automatically set to the above maximum when values sndbuf or
 %% recbuf are set.
-{mapping, "bridge.listener.tls.buffer", "bondy.bridge_relay_tls.transport_opts.socket_opts.buffer", [
+{mapping, "bridge.listener.tls.buffer", "bondy_router.bridge_relay_tls.transport_opts.socket_opts.buffer", [
   {datatype, bytesize}
 ]}.
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
-{mapping, "bridge.listener.tls.nodelay", "bondy.bridge_relay_tls.transport_opts.socket_opts.nodelay", [
+{mapping, "bridge.listener.tls.nodelay", "bondy_router.bridge_relay_tls.transport_opts.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
@@ -969,7 +969,7 @@ end}.
 %% This feature is useful to keep a connection alive and validate the
 %% connection is healthy.
 {mapping, "bridge.listener.tls.ping",
-"bondy.bridge_relay_tls.ping.enabled", [
+"bondy_router.bridge_relay_tls.ping.enabled", [
 {default, on},
 {datatype, {flag, on, off}}
 ]}.
@@ -979,7 +979,7 @@ end}.
 %% the remote router finishes transmitting a message and the point it starts
 %% sending the next.
 %% Notice this is not the same as bridge.listener.tls.idle_timeout.
-{mapping, "bridge.listener.tls.ping.idle_timeout", "bondy.bridge_relay_tls.ping.idle_timeout", [
+{mapping, "bridge.listener.tls.ping.idle_timeout", "bondy_router.bridge_relay_tls.ping.idle_timeout", [
 {default, "20s"},
 {datatype, {duration, ms}}
 ]}.
@@ -988,7 +988,7 @@ end}.
 %% amount of time Bondy waits for a ping response from the remote.
 %% Once that time has passed this counts as a fail attempt
 %% (see bridge.listener.tls.ping.max_attempts).
-{mapping, "bridge.listener.tls.ping.timeout", "bondy.bridge_relay_tls.ping.timeout", [
+{mapping, "bridge.listener.tls.ping.timeout", "bondy_router.bridge_relay_tls.ping.timeout", [
 {default, "10s"},
 {datatype, {duration, ms}}
 ]}.
@@ -999,7 +999,7 @@ end}.
 %% If the value is 'infinity' Bondy will never timeout based on missed pings.
 {mapping,
 "bridge.listener.tls.ping.max_attempts",
-"bondy.bridge_relay_tls.ping.max_attempts",[
+"bondy_router.bridge_relay_tls.ping.max_attempts",[
 {default, 2},
 {datatype, integer}
 ]}.
@@ -1010,7 +1010,7 @@ end}.
 %% than this option.
 %% Notice that for some clients using this option alone is not enough to keep
 %% a connection alive as the client will drop the connection due to inactivity.
-{mapping, "bridge.listener.tls.idle_timeout", "bondy.bridge_relay_tls.idle_timeout", [
+{mapping, "bridge.listener.tls.idle_timeout", "bondy_router.bridge_relay_tls.idle_timeout", [
   {default, "8h"},
   {datatype, [{atom, infinity}, {duration, ms}]}
 ]}.
@@ -1019,7 +1019,7 @@ end}.
 %% Enabling hibernation will typically reduce memory consumption and should not
 %% have a penalty in performance as it is used only during idle state.
 {mapping, "bridge.listener.tls.hibernate",
-"bondy.bridge_relay_tls.hibernate", [
+"bondy_router.bridge_relay_tls.hibernate", [
 {default, idle},
 {datatype, {enum, [never, idle, always]}}
 ]}.
@@ -1029,7 +1029,7 @@ end}.
 %% For fragmented frames this applies to the size of the reconstituted frame.
 %%
 %% A value of zero means un unbounded size (internally translated to 'infinity')
-{mapping, "bridge.listener.tls.max_frame_size", "bondy.bridge_relay_tls.max_frame_size", [
+{mapping, "bridge.listener.tls.max_frame_size", "bondy_router.bridge_relay_tls.max_frame_size", [
   {default, infinity},
   {datatype, [{atom, infinity}, integer]}
 ]}.
@@ -1037,7 +1037,7 @@ end}.
 
 %% @doc Default cert location for https can be overridden
 %% with the edge.tls config variable, for example:
-{mapping, "bridge.listener.tls.certfile", "bondy.bridge_relay_tls.transport_opts.socket_opts.certfile", [
+{mapping, "bridge.listener.tls.certfile", "bondy_router.bridge_relay_tls.transport_opts.socket_opts.certfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/keycert.pem"}
 ]}.
@@ -1045,21 +1045,21 @@ end}.
 %% @doc Default key location for https can be overridden with the
 %%edge.tls config variable, for example:
 {mapping, "bridge.listener.tls.keyfile",
-"bondy.bridge_relay_tls.transport_opts.socket_opts.keyfile", [
+"bondy_router.bridge_relay_tls.transport_opts.socket_opts.keyfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for https can be overridden
 %% with the edge.tls config variable, for example:
-{mapping, "bridge.listener.tls.cacertfile", "bondy.bridge_relay_tls.transport_opts.socket_opts.cacertfile", [
+{mapping, "bridge.listener.tls.cacertfile", "bondy_router.bridge_relay_tls.transport_opts.socket_opts.cacertfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
 
 %% @doc A comma separate list of TLS protocol versions that will be supported
 %% At the moment Bondy only supports versions 1.2 and 1.3
-{mapping, "bridge.listener.tls.versions", "bondy.bridge_relay_tls.transport_opts.socket_opts.versions", [
+{mapping, "bridge.listener.tls.versions", "bondy_router.bridge_relay_tls.transport_opts.socket_opts.versions", [
   {datatype, string},
   {default, "1.3"}
 ]}.
@@ -1067,7 +1067,7 @@ end}.
 
 
 
-{translation, "bondy.bridge_relay_tls.transport_opts.socket_opts.versions",
+{translation, "bondy_router.bridge_relay_tls.transport_opts.socket_opts.versions",
 fun(Conf) ->
   case cuttlefish:conf_get("bridge.listener.tls.versions", Conf) of
       Value when is_list(Value) ->
@@ -1097,7 +1097,7 @@ end
 %% @doc Enables or disables the TCP Proxy Protocol. This is used to capture
 %% the source IP address which will be used for matching against RBAC Source
 %% assignments.
-{mapping, "bridge.listener.tls.proxy_protocol", "bondy.bridge_relay_tls.proxy_protocol.enabled", [
+{mapping, "bridge.listener.tls.proxy_protocol", "bondy_router.bridge_relay_tls.proxy_protocol.enabled", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -1107,7 +1107,7 @@ end
 %% with invalid headers will be dropped. If 'relaxed' the connection is
 %% always accepted and Bondy will log when there is not Proxy Procotol header
 %% or if it is invalid.
-{mapping, "bridge.listener.tls.proxy_protocol.mode", "bondy.bridge_relay_tls.proxy_protocol.mode", [
+{mapping, "bridge.listener.tls.proxy_protocol.mode", "bondy_router.bridge_relay_tls.proxy_protocol.mode", [
   {datatype, {enum, [strict, relaxed]}},
   {default, relaxed}
 ]}.
@@ -1115,7 +1115,7 @@ end
 
 {mapping,
   "bridge.forward.ack",
-  "bondy.bridge_relay.forward.ack",
+  "bondy_router.bridge_relay.forward.ack",
   [
     {default, off},
     {datatype, flag}
@@ -1124,14 +1124,14 @@ end
 
 {mapping,
   "bridge.forward.retransmission",
-  "bondy.bridge_relay.forward.retransmission",
+  "bondy_router.bridge_relay.forward.retransmission",
   [
     {default, off},
     {datatype, flag}
   ]
 }.
 
-{translation, "bondy.bridge_relay.forward",
+{translation, "bondy_router.bridge_relay.forward",
   fun(Conf0) ->
     Conf = cuttlefish_variable:filter_by_prefix("bridge.forward", Conf0),
     Fwd =

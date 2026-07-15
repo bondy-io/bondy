@@ -53,11 +53,13 @@ apply_auth_query_param_existing_qs(_Config) ->
     ?assertMatch(<<"https://api.example.com/data?foo=bar&token=xyz">>, Url).
 
 apply_auth_header_bearer(_Config) ->
-    Conf = #{apply => #{
-        placement => header,
-        name      => <<"Authorization">>,
-        format    => <<"Bearer {{token}}">>
-    }},
+    Conf = #{
+        apply => #{
+            placement => header,
+            name => <<"Authorization">>,
+            format => <<"Bearer {{token}}">>
+        }
+    },
     {Url, Headers} = bondy_rpc_gateway_auth_generic:apply_auth(
         <<"mytoken">>, <<"https://api.example.com">>, [], Conf
     ),

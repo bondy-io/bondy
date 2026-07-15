@@ -9,7 +9,6 @@
 ##
 ## Acceptable values:
 ##   - on or off
-startup.wait_for_store_partitions = on
 
 ## Defines whether Bondy will wait for the db hashtrees to be built
 ## before continuing with initialisation.
@@ -18,7 +17,6 @@ startup.wait_for_store_partitions = on
 ##
 ## Acceptable values:
 ##   - on or off
-startup.wait_for_store_hashtrees = on
 
 ## Defines whether Bondy will wait for the first aae exchange to be
 ## finished before continuing with initialisation.
@@ -27,7 +25,6 @@ startup.wait_for_store_hashtrees = on
 ##
 ## Acceptable values:
 ##   - on or off
-startup.wait_for_store_aae_exchange = on
 
 
 ## The period in seconds that Bondy will waith for clients to gracefully
@@ -982,28 +979,24 @@ cluster.peer_discovery.type = list
 ##
 ## Acceptable values:
 ##   - a time duration with units, e.g. '10s' for 10 seconds
-aae.data_exchange_timeout = 1m
 
 ##
 ## Default: on
 ##
 ## Acceptable values:
 ##   - on or off
-aae.enabled = off
 
 ##
 ## Default: 10s
 ##
 ## Acceptable values:
 ##   - a time duration with units, e.g. '10s' for 10 seconds
-aae.hashtree_timer = 10s
 
 ##
 ## Default: 1w
 ##
 ## Acceptable values:
 ##   - a time duration with units, e.g. '10s' for 10 seconds
-aae.hashtree_ttl = 1w
 
 ##
 ## Default: 1m
@@ -1018,7 +1011,6 @@ aae.exchange_timer = 1m
 ##
 ## Acceptable values:
 ##   - on or off
-aae.exchange_on_cluster_join = off
 
 
 
@@ -1027,7 +1019,6 @@ aae.exchange_on_cluster_join = off
 ## STORAGE
 ## =============================================================================
 
-store.shard_by = prefix
 
 ## Defines the level of concurrency in plum_db (the local embedded
 ## database used by Bondy).
@@ -1040,21 +1031,18 @@ store.shard_by = prefix
 ##
 ## Acceptable values:
 ##   - an integer
-store.partitions = 16
 
 ##
 ## Default: 30
 ##
 ## Acceptable values:
 ##   - an integer
-store.open_retry_limit = 30
 
 ##
 ## Default: 2s
 ##
 ## Acceptable values:
 ##   - a time duration with units, e.g. '10s' for 10 seconds
-store.open_retries_delay = 2s
 
 
 ## =============================================================================

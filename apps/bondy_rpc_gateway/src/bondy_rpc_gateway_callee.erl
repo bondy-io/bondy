@@ -54,15 +54,14 @@ URIs without colliding with stale entries from the prior incarnation.
 -include("bondy_rpc_gateway.hrl").
 
 -record(state, {
-    service             ::  map(),
-    realm_uri           ::  uri(),
-    session_id          ::  binary() | undefined,
-    poolname            ::  atom(),
-    registrations       ::  #{
+    service :: map(),
+    realm_uri :: uri(),
+    session_id :: binary() | undefined,
+    poolname :: atom(),
+    registrations :: #{
         binary() => {term(), binary(), #rpc_gateway_proc_conf{}}
     }
 }).
-
 
 -export([start_link/3]).
 
@@ -74,9 +73,6 @@ URIs without colliding with stale entries from the prior incarnation.
 -export([handle_info/2]).
 -export([terminate/2]).
 
-
-
-
 %% ===================================================================
 %% Public API
 %% ===================================================================
@@ -87,7 +83,6 @@ URIs without colliding with stale entries from the prior incarnation.
 start_link(RealmUri, Service, PoolName) ->
     Args = [RealmUri, Service, PoolName],
     gen_server:start_link(?MODULE, Args, []).
-
 
 %% ===================================================================
 %% gen_server callbacks
@@ -165,11 +160,9 @@ handle_info(_Info, State) ->
 terminate(_Reason, #state{}) ->
     ok.
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 register_procedures(State) ->
     #state{
@@ -210,30 +203,44 @@ register_procedures(State) ->
     maps:fold(
         fun(_ProcName, ProcConf, Acc) ->
             Base = build_proc_conf(
-                ProcConf, ServiceName, BaseUrl, AuthMod, AuthConf,
-                Timeout, Retries, PoolName
+                ProcConf,
+                ServiceName,
+                BaseUrl,
+                AuthMod,
+                AuthConf,
+                Timeout,
+                Retries,
+                PoolName
             ),
-            FullProcConf = case SecretVars of
-                not_ready ->
-                    Base;
-                _ ->
-                    bondy_rpc_gateway_callee_handler:apply_secrets(
-                        Base, SecretVars
-                    )
-            end,
+            FullProcConf =
+                case SecretVars of
+                    not_ready ->
+                        Base;
+                    _ ->
+                        bondy_rpc_gateway_callee_handler:apply_secrets(
+                            Base, SecretVars
+                        )
+                end,
             register_one(FullProcConf, SessionId, Acc)
         end,
         #{},
         Procedures
     ).
 
-
 %% @private
 %% Builds the record with `vars_resolved = false`. Caller is responsible
 %% for delegating to `bondy_rpc_gateway_callee_handler:apply_secrets/2`
 %% when secrets are available, which flips the flag and merges the vars.
-build_proc_conf(ProcConf, ServiceName, BaseUrl, AuthMod, AuthConf,
-                Timeout, Retries, PoolName) ->
+build_proc_conf(
+    ProcConf,
+    ServiceName,
+    BaseUrl,
+    AuthMod,
+    AuthConf,
+    Timeout,
+    Retries,
+    PoolName
+) ->
     #{uri := ProcUri, realm := RealmUri} = ProcConf,
     Method = maps:get(method, ProcConf, get),
     Path = maps:get(path, ProcConf, ~"/"),
@@ -254,15 +261,18 @@ build_proc_conf(ProcConf, ServiceName, BaseUrl, AuthMod, AuthConf,
         vars_resolved = false
     }.
 
-
 %% @private
-register_one(#rpc_gateway_proc_conf{
+register_one(
+    #rpc_gateway_proc_conf{
         uri = ProcUri,
         realm = RealmUri,
         service_name = ServiceName,
         method = Method,
         path = Path
-    } = FullProcConf, SessionId, Acc) ->
+    } = FullProcConf,
+    SessionId,
+    Acc
+) ->
     MF = {bondy_rpc_gateway_callee_handler, handle_wamp_call},
     Ref = bondy_ref:new(internal, MF, SessionId),
     Opts = #{
@@ -290,5 +300,3 @@ register_one(#rpc_gateway_proc_conf{
             }),
             Acc
     end.
-
-

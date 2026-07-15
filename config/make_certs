@@ -274,6 +274,7 @@ create_self_signed_cert(Root, CAName, Cnf, C = #config{ecc_certs = true}) ->
     Cmd2 = [C#config.openssl_cmd, " req"
        " -new"
        " -x509"
+       " -days 7300"
        " -config ", CnfFile,
        " -key ", KeyFile,
          " -outform PEM ",
@@ -288,6 +289,7 @@ create_self_signed_cert(Root, CAName, Cnf, C) ->
     Cmd = [C#config.openssl_cmd, " req"
        " -new"
        " -x509"
+       " -days 7300"
        " -config ", CnfFile,
        " -keyout ", KeyFile,
        " -outform PEM",

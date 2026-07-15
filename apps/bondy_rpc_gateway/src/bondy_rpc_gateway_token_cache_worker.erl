@@ -93,26 +93,22 @@ The `cache` key in `auth_conf` controls timing:
 }).
 
 -record(rpc_gateway_token, {
-    service_name    :: binary(),
-    auth_mod        :: module(),
-    auth_conf       :: map(),
-    token           :: binary() | undefined,
-    expires_at      :: integer() | undefined,
-    timer_ref       :: reference() | undefined
+    service_name :: binary(),
+    auth_mod :: module(),
+    auth_conf :: map(),
+    token :: binary() | undefined,
+    expires_at :: integer() | undefined,
+    timer_ref :: reference() | undefined
 }).
 
 -type t() :: #state{}.
 -type rpc_gateway_token() :: #rpc_gateway_token{}.
 
-
 -export_type([rpc_gateway_token/0]).
-
 
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc false.
 -spec start_link(binary(), atom()) -> {ok, pid()} | {error, term()}.
@@ -122,7 +118,6 @@ start_link(PoolName, WorkerName) ->
         {local, WorkerName}, ?MODULE, [PoolName, WorkerName], []
     ).
 
-
 -doc """
 Returns a token from the ets cache concurrently. If it is not found, call the
 server to obtain a new token.
@@ -130,7 +125,9 @@ server to obtain a new token.
 -spec get_token(atom(), binary(), module(), map()) ->
     {ok, binary()} | {error, not_found}.
 
-get_token(WorkerName, ServiceName, AuthMod, AuthConf) when is_atom(WorkerName) ->
+get_token(WorkerName, ServiceName, AuthMod, AuthConf) when
+    is_atom(WorkerName)
+->
     Default = undefined,
     Pos = #rpc_gateway_token.token,
 
@@ -138,12 +135,9 @@ get_token(WorkerName, ServiceName, AuthMod, AuthConf) when is_atom(WorkerName) -
         undefined ->
             Cmd = {get_token, ServiceName, AuthMod, AuthConf},
             gen_server:call(WorkerName, Cmd);
-
         Token ->
             {ok, Token}
     end.
-
-
 
 %% ===================================================================
 %% gen_server callbacks
@@ -158,28 +152,25 @@ init([PoolName, WorkerName]) ->
     ),
     {ok, #state{name = WorkerName}}.
 
-
 -doc false.
 handle_call({get_token, ServiceName, AuthMod, AuthConf}, _From, State) ->
     #state{name = WorkerName} = State,
     Now = erlang:system_time(second),
 
     case ets:lookup(WorkerName, ServiceName) of
-        [#rpc_gateway_token{token = Token, expires_at = ExpiresAt}]
-                when Token =/= undefined, ExpiresAt > Now ->
+        [#rpc_gateway_token{token = Token, expires_at = ExpiresAt}] when
+            Token =/= undefined, ExpiresAt > Now
+        ->
             {reply, {ok, Token}, State};
-
         _ ->
             %% Expired or not found
             case get_new_token(ServiceName, AuthMod, AuthConf, State) of
                 {ok, Token} ->
                     {reply, {ok, Token}, State};
-
                 {error, Reason} ->
                     {reply, {error, Reason}, State}
             end
     end;
-
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
@@ -187,7 +178,6 @@ handle_call(_Request, _From, State) ->
 handle_cast({invalidate, ServiceName}, #state{} = State) ->
     _ = clear_token(ServiceName, State),
     {noreply, State};
-
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -200,7 +190,6 @@ handle_info({refresh, ServiceName, AuthMod, AuthConf}, State) ->
                 service => ServiceName
             }),
             {noreply, State};
-
         {error, Reason} ->
             ?LOG_WARNING(#{
                 description => <<"Preemptive token refresh failed">>,
@@ -212,12 +201,12 @@ handle_info({refresh, ServiceName, AuthMod, AuthConf}, State) ->
             %% `lookup_element` keeps serving the (now stale) value to
             %% upstream and only recovers via the 401 fallback.
             _ = erlang:send_after(
-                ?REFRESH_RETRY_MS, self(),
+                ?REFRESH_RETRY_MS,
+                self(),
                 {refresh, ServiceName, AuthMod, AuthConf}
             ),
             {noreply, State}
     end;
-
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -225,13 +214,9 @@ handle_info(_Info, State) ->
 terminate(_Reason, _State) ->
     ok.
 
-
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 %% @private
 -spec get_new_token(binary(), module(), map(), t()) ->
@@ -248,7 +233,6 @@ get_new_token(ServiceName, AuthMod, AuthConf, State) ->
                 store_token(
                     ServiceName, AuthMod, AuthConf, Token, TTL, State
                 );
-
             (Token) when is_binary(Token) ->
                 store_token(
                     ServiceName, AuthMod, AuthConf, Token, DefaultTTL, State
@@ -283,7 +267,6 @@ store_token(ServiceName, AuthMod, AuthConf, Token, TTL, State) ->
     case ets:insert(State#state.name, T) of
         true ->
             {ok, Token};
-
         false ->
             ?LOG_ERROR(#{
                 description => "Couldn't store token on cache",
@@ -294,9 +277,14 @@ store_token(ServiceName, AuthMod, AuthConf, Token, TTL, State) ->
 
 %% @private
 cancel_pending_refresh(ServiceName, State) ->
-    case ets:lookup_element(
-            State#state.name, ServiceName,
-            #rpc_gateway_token.timer_ref, undefined) of
+    case
+        ets:lookup_element(
+            State#state.name,
+            ServiceName,
+            #rpc_gateway_token.timer_ref,
+            undefined
+        )
+    of
         undefined ->
             ok;
         Ref ->

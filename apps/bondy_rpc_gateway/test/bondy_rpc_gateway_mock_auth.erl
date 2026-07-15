@@ -76,10 +76,12 @@ fetch_token(Config) ->
         Fun when is_function(Fun, 1) ->
             Fun(Config);
         _ ->
-            case persistent_term:get({?MODULE, result}, {error, not_configured}) of
+            case
+                persistent_term:get({?MODULE, result}, {error, not_configured})
+            of
                 {ok, Token, undefined} -> {ok, Token};
-                {ok, Token, Meta}      -> {ok, {Token, Meta}};
-                {error, _} = Err       -> Err
+                {ok, Token, Meta} -> {ok, {Token, Meta}};
+                {error, _} = Err -> Err
             end
     end.
 

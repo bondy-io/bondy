@@ -1,0 +1,133 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+-module(bondy_registry_remote_index).
+-moduledoc """
+A per-partition ETS index of remote registry entries, keyed by node, entry type
+and entry key. It is used to look up the registry entries belonging to a given
+node, for example when pruning entries after a node leaves the cluster.
+""".
+
+-include("bondy.hrl").
+-include("bondy_registry.hrl").
+
+-define(EOT, '$end_of_table').
+
+-type t() :: ets:tab().
+-type eot() :: ?EOT.
+-type match_result() ::
+    [{entry_type(), entry_key()}]
+    | {
+        [{entry_type(), entry_key()}],
+        eot() | ets:continuation()
+    }
+    | eot().
+
+%% Aliases
+-type entry() :: bondy_registry_entry:entry().
+-type entry_type() :: bondy_registry_entry:entry_type().
+-type entry_key() :: bondy_registry_entry:key().
+
+-export_type([t/0]).
+-export_type([eot/0]).
+-export_type([match_result/0]).
+
+%% API
+-export([new/1]).
+-export([add/2]).
+-export([delete/2]).
+-export([match/3]).
+-export([match/1]).
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+-spec new(Index :: integer()) -> t().
+
+new(Index) ->
+    %% Stores all remote entries indexed by node and timestamp
+    Tab = gen_table_name(Index),
+    Opts = [
+        ordered_set,
+        {keypos, 1},
+        named_table,
+        public,
+        {read_concurrency, true},
+        {write_concurrency, true},
+        {decentralized_counters, true}
+    ],
+    {ok, Tab} = bondy_table_manager:add_or_claim(Tab, Opts),
+    Tab.
+
+-spec add(T :: t(), Entry :: entry()) -> ok.
+
+add(T, Entry) ->
+    do(T, Entry, add).
+
+-spec delete(T :: t(), Entry :: entry()) -> ok.
+
+delete(T, Entry) ->
+    do(T, Entry, delete).
+
+-spec match(T :: t(), Node :: node(), Limit :: pos_integer()) ->
+    match_result().
+
+match(T, Node, Limit) when is_atom(Node), is_integer(Limit) ->
+    %% Key = {node(), entry_type(), entry_key()}.
+    Key = {Node, '$1', '$2'},
+    %% We use a 1-tuple
+    Pattern = {Key},
+    MS = [{Pattern, [], [{{'$1', '$2'}}]}],
+
+    ets:select(T, MS, Limit).
+
+-spec match(ets:continuation() | eot()) -> match_result().
+
+match(?EOT) ->
+    ?EOT;
+match(Cont) ->
+    ets:select(Cont).
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+-doc """
+Generates a dynamic ets table name given a generic name and and index
+(partition number).
+""".
+gen_table_name(Index) when is_integer(Index) ->
+    list_to_atom("bondy_registry_remote_idx_tab_" ++ integer_to_list(Index)).
+
+%% @private
+-doc """
+If Entry is remote, it adds it to the remote_tab index.
+This index is solely used by find_by_node/3 function.
+""".
+do(Op, Entry, T) ->
+    case bondy_registry_entry:is_local(Entry) of
+        true ->
+            ok;
+        false ->
+            Node = bondy_registry_entry:node(Entry),
+            Type = bondy_registry_entry:type(Entry),
+            EntryKey = bondy_registry_entry:key(Entry),
+
+            %% Entry is the value we are interested in but we use it as part of
+            %% the key to disambiguate, and avoid adding more elements to the
+            %% tuple.
+            Key = {Node, Type, EntryKey},
+
+            case Op of
+                add ->
+                    Object = {Key},
+                    true = ets:insert(T, Object);
+                delete ->
+                    true = ets:match_delete(T, Key)
+            end,
+            ok
+    end.

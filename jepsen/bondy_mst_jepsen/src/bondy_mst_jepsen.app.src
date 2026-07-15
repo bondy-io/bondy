@@ -1,0 +1,46 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2023 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+{application, bondy_mst_jepsen,
+ [{description, "Jepsen-facing OTP wrapper around bondy_mst: HTTP shim, "
+                "disterl-backed sync dispatch, 3-node cluster bring-up."},
+  {vsn, "0.4.0"},
+  {registered, []},
+  {mod, {bondy_mst_jepsen_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    sasl,
+    crypto,
+    inets,
+    ranch,
+    cowlib,
+    cowboy,
+    jsx,
+    %% bondy_db pulls bondy_oplog + bondy_mst transitively; listing it here
+    %% starts the whole stack (and bondy_mst's env namespace, which the oplog
+    %% still reads its config from, stays available).
+    bondy_db
+   ]},
+  {env, [
+    %% Wire-level defaults; sys.config overrides on real runs.
+    {http_port, 8080},
+    %% Namespace/table/shard layout the Jepsen test exercises.
+    {db_name, jepsen},
+    {tables, [t0, t1, t2, t3, t4, t5, t6, t7, t8, t9]},
+    {shard_count, 16},
+    %% Default fold: register-style CAS workload. The set workload
+    %% reuses the same fold + CAS as in ra-kv-store.
+    {fold_module, lww_register},
+    %% Disterl peer list (overridden per node in sys.config).
+    {peers, []},
+    {data_dir, "/var/lib/bondy_mst_jepsen"},
+    %% Sync scheduler tick — kept small so partition healing is brisk.
+    {sync_interval_ms, 200}
+  ]},
+  {modules, []},
+  {licenses, ["Apache-2.0"]},
+  {links, []}
+ ]}.

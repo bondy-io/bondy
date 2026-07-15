@@ -20,13 +20,9 @@ name, plus startup hooks for ssl defaults consumed by transitive deps.
 
 -compile({no_auto_import, [get/1]}).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Initialise application config and ssl defaults for transitive HTTP deps.
@@ -39,20 +35,17 @@ init() ->
     ok = init_lhttpc_ssl_options(),
     ok.
 
-
 -doc "Get a config value by key.".
 -spec get(Key :: list() | atom() | tuple()) -> term().
 
 get(Key) ->
     app_config:get(?APP, Key).
 
-
 -doc "Get a config value by key, falling back to `Default` when unset.".
 -spec get(Key :: list() | atom() | tuple(), Default :: term()) -> term().
 
 get(Key, Default) ->
     app_config:get(?APP, Key, Default).
-
 
 -doc "Set a config value at runtime.".
 -spec set(Key :: key_value:key() | tuple(), Value :: term()) -> ok.
@@ -62,16 +55,12 @@ set(status, Value) ->
     %% lifecycle so to avoid a loop (resulting in timeout) we avoid
     %% calling application:set_env/3.
     persistent_term:put({?APP, status}, Value);
-
 set(Key, Value) ->
     app_config:set(?APP, Key, Value).
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 %% @private
 %% Ensure lhttpc (used by erlcloud) has proper TLS defaults.
@@ -79,11 +68,11 @@ set(Key, Value) ->
 init_lhttpc_ssl_options() ->
     case application:get_env(lhttpc, ssl_options) of
         undefined ->
-            application:set_env(lhttpc, ssl_options,
+            application:set_env(
+                lhttpc,
+                ssl_options,
                 bondy_cert_manager:ssl_opts()
             );
         {ok, _} ->
             ok
     end.
-
-

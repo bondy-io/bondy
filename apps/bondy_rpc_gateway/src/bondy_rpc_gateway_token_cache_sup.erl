@@ -27,20 +27,15 @@ bondy_rpc_gateway_sup (rest_for_one)
 -export([start_worker/2]).
 -export([init/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc "Start the supervisor, registered locally.".
 -spec start_link() -> {ok, pid()} | {error, term()}.
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
-
 
 -doc "Start a token-cache worker child belonging to the given gproc pool.".
 -spec start_worker(PoolName :: atom(), WorkerName :: atom()) ->
@@ -65,16 +60,15 @@ start_worker(PoolName, WorkerName) ->
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
 
-
-
 -doc false.
 init([]) ->
     SupFlags = #{
         strategy => one_for_one,
-        intensity => 5, % max restarts
-        period => 10, % seconds
+        % max restarts
+        intensity => 5,
+        % seconds
+        period => 10,
         auto_shutdown => never
     },
     Children = [],
     {ok, {SupFlags, Children}}.
-

@@ -1,0 +1,33 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2023 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+{application, bondy_mst,
+ [{description,
+    "Merkle Search Tree replication-structure library. The bondy_oplog "
+    "write/replication framework and the bondy_db consumer facade that build "
+    "on it live in the bondy umbrella and depend on this library."},
+  {vsn, "0.4.0"},
+  {registered, []},
+  %% Pure library app: `bondy_mst_app`/`bondy_mst_sup` only initialise the
+  %% library configuration (no long-lived processes of their own). The
+  %% `bondy_oplog`/`bondy_db` layer that builds on this library is booted by
+  %% `bondy_oplog_app`/`bondy_db_app` in the bondy umbrella.
+  {mod, {bondy_mst_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    app_config,
+    utils,
+    resulto,
+    memory,
+    bloomfi,
+    telemetry
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {licenses, ["Apache-2.0"]},
+  {links, []}
+ ]}.

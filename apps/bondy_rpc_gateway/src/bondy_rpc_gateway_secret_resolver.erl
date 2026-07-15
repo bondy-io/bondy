@@ -36,13 +36,9 @@ Secret fields can be transformed before becoming auth vars:
 -export([apply_transform/2]).
 -export([decode_basic_auth/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Iterate services and resolve any that have a secrets specification.
@@ -67,7 +63,9 @@ resolve_service_secrets(SecretsSpec, ServiceName) ->
     try
         SecretMap = fetch_secret(SecretsSpec, ServiceName),
         VarMappings = maps:get(vars, SecretsSpec, #{}),
-        ResolvedVars = resolve_var_mappings(VarMappings, SecretMap, ServiceName),
+        ResolvedVars = resolve_var_mappings(
+            VarMappings, SecretMap, ServiceName
+        ),
         {ok, ResolvedVars}
     catch
         error:Reason ->
@@ -119,7 +117,6 @@ decode_basic_auth(Value0) ->
             error({invalid_basic_auth, Value0})
     end.
 
-
 %% ===================================================================
 %% Internal
 %% ===================================================================
@@ -136,12 +133,13 @@ resolve_service(#{auth_conf := #{secrets := SecretsSpec} = AuthConf} = Service) 
     AuthConf1 = maps:remove(secrets, AuthConf),
     AuthConf2 = AuthConf1#{vars => MergedVars},
     Service#{auth_conf => AuthConf2};
-
 resolve_service(Service) ->
     Service.
 
-fetch_secret(#{provider := aws_sm, secret_id := SecretId, region := Region},
-             ServiceName) ->
+fetch_secret(
+    #{provider := aws_sm, secret_id := SecretId, region := Region},
+    ServiceName
+) ->
     {ok, Config0} = erlcloud_aws:auto_config(),
     Config = erlcloud_aws:service_config(
         <<"sm">>, binary_to_list(Region), Config0
@@ -150,10 +148,10 @@ fetch_secret(#{provider := aws_sm, secret_id := SecretId, region := Region},
         {ok, Proplist} ->
             SecretString = proplists:get_value(<<"SecretString">>, Proplist),
             json:decode(SecretString);
-
         {error, Reason} ->
             ?LOG_ERROR(#{
-                description => <<"Failed to fetch secret from AWS Secrets Manager">>,
+                description =>
+                    <<"Failed to fetch secret from AWS Secrets Manager">>,
                 service => ServiceName,
                 secret_id => SecretId,
                 region => Region,
@@ -180,10 +178,8 @@ strip_basic_prefix(Value) ->
     case Value of
         <<"Basic ", Rest/binary>> ->
             string:trim(Rest);
-
         <<"basic ", Rest/binary>> ->
             string:trim(Rest);
-
         _ ->
             %% Try case-insensitive match for other casings
             Str = binary:part(Value, 0, min(6, byte_size(Value))),
@@ -191,7 +187,6 @@ strip_basic_prefix(Value) ->
             case string:lowercase(Str) of
                 <<"basic ">> ->
                     string:trim(binary:part(Value, 6, byte_size(Value) - 6));
-
                 _ ->
                     string:trim(Value)
             end

@@ -10,7 +10,9 @@
   {applications,
    [kernel,
     stdlib,
-    resulto
+    resulto,
+    backoff,
+    key_value
    ]},
   {env,[]},
   {modules, []},

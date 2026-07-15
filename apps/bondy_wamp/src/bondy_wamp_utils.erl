@@ -4,8 +4,12 @@
 %% =============================================================================
 
 -module(bondy_wamp_utils).
+-moduledoc """
+Utility functions shared across the WAMP message modules, including WAMP
+identifier generation and validation, and validation of message
+option/details maps against their key specifications.
+""".
 -include("bondy_wamp.hrl").
-
 
 -export([rand_uniform/0]).
 -export([is_valid_id/1]).
@@ -13,32 +17,18 @@
 -export([validate_map/3]).
 -export([validate_map/4]).
 
-
-
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns a random number from a _uniform distribution_ over the range [0, 2^53]
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns a random number from a _uniform distribution_ over the range `[0, 2^53]`.
+""".
 -spec rand_uniform() -> integer().
 
 rand_uniform() ->
     rand:uniform(?MAX_ID).
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec is_valid_id(id()) -> boolean().
 
 is_valid_id(N) when is_integer(N) andalso N >= 0 andalso N =< ?MAX_ID ->
@@ -46,38 +36,29 @@ is_valid_id(N) when is_integer(N) andalso N >= 0 andalso N =< ?MAX_ID ->
 is_valid_id(_) ->
     false.
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 validate_id(Id) ->
     is_valid_id(Id) == true orelse error({invalid_id, Id}),
     Id.
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 validate_map(Map, Spec, Extensions) ->
     Opts = #{
-        atomic => true, % Fail atomically for the whole map
-        labels => atom,  % This will only turn the defined keys to atoms
-        keep_unknown => false % Remove all unknown options
+        % Fail atomically for the whole map
+        atomic => true,
+        % This will only turn the defined keys to atoms
+        labels => atom,
+        % Remove all unknown options
+        keep_unknown => false
     },
     validate_map(Map, Spec, Extensions, Opts).
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 validate_map(Map, Spec, Extensions, Opts0) ->
     Defaults = #{
-        atomic => true, % Fail atomically for the whole map
-        labels => atom,  % This will only turn the defined keys to atoms
-        keep_unknown => false % Remove all unknown options
+        % Fail atomically for the whole map
+        atomic => true,
+        % This will only turn the defined keys to atoms
+        labels => atom,
+        % Remove all unknown options
+        keep_unknown => false
     },
     Opts = maps:merge(Defaults, Opts0),
     NewSpec = maybe_add_extensions(Extensions, Spec),
@@ -89,16 +70,12 @@ validate_map(Map, Spec, Extensions, Opts0) ->
             error({validation_failed, Reason})
     end.
 
-
 %% private
 maybe_add_extensions(Keys, Spec) when is_list(Keys) ->
     MaybeAdd = fun(Key, Acc) -> maybe_add_extension(Key, Acc) end,
     lists:foldl(MaybeAdd, Spec, Keys);
-
 maybe_add_extensions([], Spec) ->
     Spec.
-
-
 
 maybe_add_extension({invoke, Options}, Acc) ->
     #{datatype := {in, L}} = KeySpec = maps:get(invoke, Acc),
@@ -106,7 +83,6 @@ maybe_add_extension({invoke, Options}, Acc) ->
         datatype => {in, lists:append(L, Options)}
     },
     maps:put(invoke, NewKeySpec, Acc);
-
 maybe_add_extension(Key, Acc) ->
     try
         %% We add a maps_utils key specification for the known
@@ -123,12 +99,9 @@ maybe_add_extension(Key, Acc) ->
             Acc
     end.
 
-
-
 %% @private
 to_valid_extension_key(Key) when is_atom(Key) ->
     to_valid_extension_key(atom_to_binary(Key, utf8));
-
 to_valid_extension_key(Key) when is_binary(Key) ->
     try
         {match, _} = re:run(Key, extension_key_pattern()),
@@ -141,19 +114,15 @@ to_valid_extension_key(Key) when is_binary(Key) ->
             throw(invalid_key)
     end.
 
-
-
 %% @private
 extension_key_pattern() ->
     CompiledPattern = persistent_term:get({?MODULE, ekey_pattern}, undefined),
     extension_key_pattern(CompiledPattern).
-
 
 %% @private
 extension_key_pattern(undefined) ->
     {ok, Pattern} = re:compile("_[a-z0-9_]{3,}"),
     ok = persistent_term:put({?MODULE, ekey_pattern}, Pattern),
     Pattern;
-
 extension_key_pattern(CompiledPattern) ->
     CompiledPattern.

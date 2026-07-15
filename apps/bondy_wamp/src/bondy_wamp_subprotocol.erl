@@ -4,48 +4,36 @@
 %% =============================================================================
 
 -module(bondy_wamp_subprotocol).
+-moduledoc """
+Parses and validates WAMP subprotocol identifiers, mapping their binary
+representations (e.g. `wamp.2.json`) to the internal
+`{Transport, Frame, Encoding}` subprotocol tuples and back.
+""".
 -include("bondy_wamp.hrl").
-
 
 -define(IS_WAMP_TRANSPORT(X), (T =:= ws orelse T =:= raw)).
 
 -export([from_binary/1]).
 -export([validate/1]).
 
-
-
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec from_binary(binary()) -> subprotocol() | {error, invalid_subprotocol}.
 
-from_binary(?WAMP2_JSON) ->                 {ws, text, json};
-from_binary(?WAMP2_CBOR) ->                 {ws, binary, cbor};
-from_binary(?WAMP2_MSGPACK) ->              {ws, binary, msgpack};
-from_binary(?WAMP2_JSON_BATCHED) ->         {ws, text, json_batched};
-from_binary(?WAMP2_CBOR_BATCHED) ->         {ws, binary, cbor_batched};
-from_binary(?WAMP2_MSGPACK_BATCHED) ->      {ws, binary, msgpack_batched};
-from_binary(?WAMP2_BERT) ->                 {ws, binary, bert};
-from_binary(?WAMP2_ERL) ->                  {ws, binary, erl};
-from_binary(?WAMP2_BERT_BATCHED) ->         {ws, binary, bert_batched};
-from_binary(?WAMP2_ERL_BATCHED) ->          {ws, binary, erl_batched};
-from_binary(_) ->                           {error, invalid_subprotocol}.
+from_binary(?WAMP2_JSON) -> {ws, text, json};
+from_binary(?WAMP2_CBOR) -> {ws, binary, cbor};
+from_binary(?WAMP2_MSGPACK) -> {ws, binary, msgpack};
+from_binary(?WAMP2_JSON_BATCHED) -> {ws, text, json_batched};
+from_binary(?WAMP2_CBOR_BATCHED) -> {ws, binary, cbor_batched};
+from_binary(?WAMP2_MSGPACK_BATCHED) -> {ws, binary, msgpack_batched};
+from_binary(?WAMP2_BERT) -> {ws, binary, bert};
+from_binary(?WAMP2_ERL) -> {ws, binary, erl};
+from_binary(?WAMP2_BERT_BATCHED) -> {ws, binary, bert_batched};
+from_binary(?WAMP2_ERL_BATCHED) -> {ws, binary, erl_batched};
+from_binary(_) -> {error, invalid_subprotocol}.
 
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec validate(binary() | subprotocol()) ->
     {ok, subprotocol()} | {error, invalid_subprotocol}.
 
@@ -78,6 +66,3 @@ validate({T, binary, bert} = S) when ?IS_WAMP_TRANSPORT(T) ->
     {ok, S};
 validate(_) ->
     {error, invalid_subprotocol}.
-
-
-

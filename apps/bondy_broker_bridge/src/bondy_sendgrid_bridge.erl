@@ -40,7 +40,6 @@ context so that action templates can reference `{{email_sender}}`.
 
 -include_lib("kernel/include/logger.hrl").
 
-
 -define(PRODUCE_ACTION_SPEC, #{
     <<"email_address">> => #{
         alias => email_address,
@@ -115,19 +114,14 @@ context so that action templates can reference `{{email_sender}}`.
 -define(RETRY_TIMES, 3).
 -define(RETRY_BACKOFF_MS, 2000).
 
-
 -export([init/1]).
 -export([validate_action/1]).
 -export([apply_action/1]).
 -export([terminate/2]).
 
-
-
 %% =============================================================================
 %% BONDY_BROKER_BRIDGE CALLBACKS
 %% =============================================================================
-
-
 
 -doc """
 Configure and start the `email` application for SendGrid.
@@ -135,14 +129,12 @@ Configure and start the `email` application for SendGrid.
 Extracts `email_sender` from config and returns it as the bridge context.
 """.
 init(Config) ->
-
     ?LOG_DEBUG(#{
         description => "Configuration",
         config => Config
     }),
 
     try
-
         application:set_env([{email, Config}]),
 
         {ok, _} = application:ensure_all_started(email),
@@ -165,22 +157,18 @@ init(Config) ->
             {error, Reason}
     end.
 
-
-
 -doc "Validate a SendGrid email action spec.".
 validate_action(Action0) ->
     try maps_utils:validate(Action0, ?PRODUCE_ACTION_SPEC) of
         Action1 ->
             {ok, Action1}
     catch
-       _:Reason->
+        _:Reason ->
             {error, Reason}
     end.
 
-
 -doc "Send an email via SendGrid with up to 3 retries on timeout.".
 apply_action(Action) ->
-
     ?LOG_DEBUG(#{
         description => "Action",
         action => Action
@@ -214,26 +202,17 @@ apply_action(Action) ->
             {error, EReason}
     end.
 
-
 -doc false.
 terminate(_Reason, _State) ->
     ok.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec send_email(map())
-    -> {ok, binary()} | {error, Reason :: any()} | no_return().
+-spec send_email(map()) ->
+    {ok, binary()} | {error, Reason :: any()} | no_return().
 
 send_email(Action) ->
     #{
@@ -260,55 +239,48 @@ send_email(Action) ->
             {ok, Ref};
         {error, timeout} = Error ->
             Error;
-        {error, {Status, RespBody}}
-            when Status == 400 orelse Status == 413 ->
-                %% Unrecoverable, there is an issue with our request
-                error(RespBody);
-        {error, {Status, _}} = Error
-            when Status == 401 orelse Status == 402 orelse Status == 404 ->
-                %% An implementation error,
-                %% recoverable but needs manual intervention
-                Error;
-        {error, {Status, _}} = Error
-            when Status >= 500 ->
-                %% Emails service Error, recoverable by retrying
-                Error;
+        {error, {Status, RespBody}} when
+            Status == 400 orelse Status == 413
+        ->
+            %% Unrecoverable, there is an issue with our request
+            error(RespBody);
+        {error, {Status, _}} = Error when
+            Status == 401 orelse Status == 402 orelse Status == 404
+        ->
+            %% An implementation error,
+            %% recoverable but needs manual intervention
+            Error;
+        {error, {Status, _}} = Error when
+            Status >= 500
+        ->
+            %% Emails service Error, recoverable by retrying
+            Error;
         {error, _} = Error ->
             Error
     end.
 
-
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec formatted_body(map()) -> list() | no_return().
- 
+
 formatted_body(#{<<"template_id">> := _, <<"template_data">> := _}) ->
     %% the message is not used when a template is provided
     [];
-
 formatted_body(#{<<"text/html">> := HTML}) ->
-    Message =  <<
+    Message = <<
         "Please open this email with an HTML viewer to complete the process."
     >>,
     [{html, HTML}, {text, Message}];
-
 formatted_body(#{<<"text/plain">> := Text}) ->
     [{text, Text}];
-
 formatted_body(_) ->
-    error({error, <<"Missing body data Keys: [text/html, text/plain or template_id and template_data]">>}).
+    error(
+        {error,
+            <<"Missing body data Keys: [text/html, text/plain or template_id and template_data]">>}
+    ).
 
-
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec do_send_with_retry(map(), integer(), backoff:backoff())
-    -> {ok, binary()} | {error, Reason :: any()} | no_return().
+-spec do_send_with_retry(map(), integer(), backoff:backoff()) ->
+    {ok, binary()} | {error, Reason :: any()} | no_return().
 
 do_send_with_retry(Action, 1, _Backoff) ->
     try send_email(Action) of
@@ -320,7 +292,6 @@ do_send_with_retry(Action, 1, _Backoff) ->
         _:_ ->
             error({error, <<"Max retries reached">>})
     end;
-
 do_send_with_retry(Action, Times, Backoff) ->
     try send_email(Action) of
         {ok, _} = Success ->

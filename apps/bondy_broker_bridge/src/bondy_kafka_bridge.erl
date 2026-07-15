@@ -46,7 +46,9 @@ mappings for use in `mops` templates.
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
--define(PRODUCE_OPTIONS_SPEC, begin ?BROD_OPTIONS_SPEC end #{
+-define(PRODUCE_OPTIONS_SPEC, begin
+    ?BROD_OPTIONS_SPEC
+end#{
     %% The brod client to be used. This should have been configured through the
     %% configuration files
     <<"client_id">> => #{
@@ -257,12 +259,18 @@ mappings for use in `mops` templates.
         alias => algorithm,
         required => true,
         default => <<"fnv32a">>,
-        datatype => {in, [
-            <<"random">>, <<"hash">>,
-            <<"fnv32">>, <<"fnv32a">>, <<"fnv32m">>,
-            <<"fnv64">>, <<"fnv64a">>,
-            <<"fnv128">>, <<"fnv128a">>
-        ]}
+        datatype =>
+            {in, [
+                <<"random">>,
+                <<"hash">>,
+                <<"fnv32">>,
+                <<"fnv32a">>,
+                <<"fnv32m">>,
+                <<"fnv64">>,
+                <<"fnv64a">>,
+                <<"fnv128">>,
+                <<"fnv128a">>
+            ]}
     },
     <<"value">> => #{
         alias => value,
@@ -325,18 +333,14 @@ mappings for use in `mops` templates.
     }
 }).
 
-
 -export([init/1]).
 -export([validate_action/1]).
 -export([apply_action/1]).
 -export([terminate/2]).
 
-
-
 %% =============================================================================
 %% BONDY_BROKER_BRIDGE CALLBACKS
 %% =============================================================================
-
 
 -doc """
 Initialise the Kafka bridge.
@@ -363,7 +367,8 @@ init(Config) ->
                         {endpoints, Endpoints} when is_list(Endpoints) ->
                             ok = brod:start_client(Endpoints, Name, Opts)
                     end
-                end || {Name, Opts} <- Clients
+                end
+             || {Name, Opts} <- Clients
             ],
             Topics = maps:from_list(proplists:get_value(topics, Config, [])),
             Ctxt = #{<<"kafka">> => #{<<"topics">> => Topics}},
@@ -371,10 +376,9 @@ init(Config) ->
         Error ->
             Error
     catch
-       _:Reason ->
+        _:Reason ->
             {error, Reason}
     end.
-
 
 -doc "Validate a Kafka produce action spec against `PRODUCE_ACTION_SPEC`.".
 validate_action(Action0) ->
@@ -383,10 +387,9 @@ validate_action(Action0) ->
         Action1 ->
             {ok, Action1}
     catch
-       _:Reason->
+        _:Reason ->
             {error, Reason}
     end.
-
 
 -doc """
 Execute the action by producing a message to Kafka via `brod:produce_sync/5`.
@@ -411,12 +414,13 @@ apply_action(Action) ->
         Part = partition(Opts),
         Data = bondy_utils:maybe_encode(Enc, Value),
 
-        Result = case ActionType of
-            %% <<"produce">> ->
-            %%     brod:produce(Client, Topic, Part, Key, Data);
-            <<"produce_sync">> ->
-                brod:produce_sync(Client, Topic, Part, Key, Data)
-        end,
+        Result =
+            case ActionType of
+                %% <<"produce">> ->
+                %%     brod:produce(Client, Topic, Part, Key, Data);
+                <<"produce_sync">> ->
+                    brod:produce_sync(Client, Topic, Part, Key, Data)
+            end,
 
         case Result of
             ok ->
@@ -439,21 +443,15 @@ apply_action(Action) ->
             {error, EReason}
     end.
 
-
 -doc "Stop the `hash` and `brod` applications.".
 terminate(_Reason, _State) ->
-    _  = application:stop(hash),
-    _  = application:stop(brod),
+    _ = application:stop(hash),
+    _ = application:stop(brod),
     ok.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
-
 
 get_client() ->
     case bondy_broker_bridge_manager:bridge(?MODULE) of
@@ -461,22 +459,17 @@ get_client() ->
             {error, not_found};
         PL ->
             case lists:keyfind(clients, 1, PL) of
-                {clients, [H|_]} ->
+                {clients, [H | _]} ->
                     {ok, H};
                 false ->
                     {error, not_found}
             end
     end.
 
-
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc Returns a brod partition() or partitioner().
-%% @end
-%% -----------------------------------------------------------------------------
+-doc "Returns a brod `partition()` or `partitioner()`.".
 partition(#{<<"partition">> := N}) when is_integer(N) ->
     N;
-
 partition(#{<<"partitioner">> := Map}) ->
     case maps:get(<<"algorithm">>, Map) of
         <<"random">> ->
@@ -488,12 +481,13 @@ partition(#{<<"partitioner">> := Map}) ->
             PartValue = maps:get(<<"value">>, Map),
 
             fun(_Topic, PartCount, K, _V) ->
-                Hash = case PartValue of
-                    undefined ->
-                        hash:Type(K);
-                    PartValue ->
-                        hash:Type(PartValue)
-                end,
+                Hash =
+                    case PartValue of
+                        undefined ->
+                            hash:Type(K);
+                        PartValue ->
+                            hash:Type(PartValue)
+                    end,
                 {ok, Hash rem PartCount}
             end
     end.

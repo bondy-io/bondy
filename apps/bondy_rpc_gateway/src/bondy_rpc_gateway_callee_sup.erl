@@ -27,16 +27,12 @@ The manager calls `start_callee/3` for each service/realm pair.
 -export([start_link/0]).
 -export([start_callee/3]).
 
-
 %% SUPERVISOR CALLBACKS
 -export([init/1]).
-
 
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc "Start a callee child for the given realm, service, and pool.".
 -spec start_callee(binary(), map(), atom()) ->
@@ -45,26 +41,23 @@ The manager calls `start_callee/3` for each service/realm pair.
 start_callee(RealmUri, Service, PoolName) ->
     supervisor:start_child(?MODULE, [RealmUri, Service, PoolName]).
 
-
 -doc "Start the supervisor, registered locally.".
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-
-
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
-
-
 
 -doc false.
 init([]) ->
     SupFlags = #{
         strategy => simple_one_for_one,
-        intensity => 5, % max restarts
-        period => 10, % seconds
+        % max restarts
+        intensity => 5,
+        % seconds
+        period => 10,
         auto_shutdown => never
     },
     Children = [
@@ -73,11 +66,6 @@ init([]) ->
 
     {ok, {SupFlags, Children}}.
 
-
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-

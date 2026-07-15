@@ -52,52 +52,55 @@ latency injection, and request logging.
     reset_clears_all/1
 ]).
 
-
 %% ===================================================================
 %% CT callbacks
 %% ===================================================================
 
 all() ->
-    [{group, oauth2},
-     {group, oidc},
-     {group, gis},
-     {group, upstream},
-     {group, cross_cutting}].
+    [
+        {group, oauth2},
+        {group, oidc},
+        {group, gis},
+        {group, upstream},
+        {group, cross_cutting}
+    ].
 
 groups() ->
-    [{oauth2, [], [
-        oauth2_client_credentials,
-        oauth2_basic_auth,
-        oauth2_bad_grant_type,
-        oauth2_custom_token,
-        oauth2_invalid_credentials,
-        oauth2_failure_injection
-    ]},
-    {oidc, [], [
-        oidc_discovery,
-        oidc_jwks,
-        oidc_token
-    ]},
-    {gis, [], [
-        gis_generate_token,
-        gis_invalid_credentials,
-        gis_error_in_body,
-        gis_custom_token
-    ]},
-    {upstream, [], [
-        upstream_echo_get,
-        upstream_echo_post,
-        upstream_custom_response,
-        upstream_failure_injection
-    ]},
-    {cross_cutting, [], [
-        request_log,
-        request_log_filtered,
-        latency_injection,
-        failure_count,
-        failure_infinity,
-        reset_clears_all
-    ]}].
+    [
+        {oauth2, [], [
+            oauth2_client_credentials,
+            oauth2_basic_auth,
+            oauth2_bad_grant_type,
+            oauth2_custom_token,
+            oauth2_invalid_credentials,
+            oauth2_failure_injection
+        ]},
+        {oidc, [], [
+            oidc_discovery,
+            oidc_jwks,
+            oidc_token
+        ]},
+        {gis, [], [
+            gis_generate_token,
+            gis_invalid_credentials,
+            gis_error_in_body,
+            gis_custom_token
+        ]},
+        {upstream, [], [
+            upstream_echo_get,
+            upstream_echo_post,
+            upstream_custom_response,
+            upstream_failure_injection
+        ]},
+        {cross_cutting, [], [
+            request_log,
+            request_log_filtered,
+            latency_injection,
+            failure_count,
+            failure_infinity,
+            reset_clears_all
+        ]}
+    ].
 
 init_per_suite(Config) ->
     {ok, _} = application:ensure_all_started(hackney),
@@ -116,7 +119,6 @@ init_per_testcase(_TC, Config) ->
 end_per_testcase(_TC, _Config) ->
     ok.
 
-
 %% ===================================================================
 %% OAuth2 tests
 %% ===================================================================
@@ -128,8 +130,10 @@ oauth2_client_credentials(Config) ->
     {ok, 200, _RH, RespBody} =
         hackney:request(post, Url, Headers, Body, [with_body]),
     Decoded = json:decode(RespBody),
-    ?assertEqual(<<"mock-oauth2-access-token">>,
-                 maps:get(<<"access_token">>, Decoded)),
+    ?assertEqual(
+        <<"mock-oauth2-access-token">>,
+        maps:get(<<"access_token">>, Decoded)
+    ),
     ?assertEqual(<<"Bearer">>, maps:get(<<"token_type">>, Decoded)),
     ?assertEqual(3600, maps:get(<<"expires_in">>, Decoded)).
 
@@ -152,8 +156,10 @@ oauth2_bad_grant_type(Config) ->
     {ok, 400, _RH, RespBody} =
         hackney:request(post, Url, Headers, Body, [with_body]),
     Decoded = json:decode(RespBody),
-    ?assertEqual(<<"unsupported_grant_type">>,
-                 maps:get(<<"error">>, Decoded)).
+    ?assertEqual(
+        <<"unsupported_grant_type">>,
+        maps:get(<<"error">>, Decoded)
+    ).
 
 oauth2_custom_token(Config) ->
     mock_auth_http_server:set_token(oauth2, <<"custom-tok-123">>, 900),
@@ -163,8 +169,10 @@ oauth2_custom_token(Config) ->
     {ok, 200, _RH, RespBody} =
         hackney:request(post, Url, Headers, Body, [with_body]),
     Decoded = json:decode(RespBody),
-    ?assertEqual(<<"custom-tok-123">>,
-                 maps:get(<<"access_token">>, Decoded)),
+    ?assertEqual(
+        <<"custom-tok-123">>,
+        maps:get(<<"access_token">>, Decoded)
+    ),
     ?assertEqual(900, maps:get(<<"expires_in">>, Decoded)).
 
 oauth2_invalid_credentials(Config) ->
@@ -172,8 +180,10 @@ oauth2_invalid_credentials(Config) ->
         oauth2, <<"good-id">>, <<"good-secret">>
     ),
     Url = <<(base(Config))/binary, "/oauth2/token">>,
-    Body = <<"grant_type=client_credentials"
-             "&client_id=bad-id&client_secret=bad-secret">>,
+    Body = <<
+        "grant_type=client_credentials"
+        "&client_id=bad-id&client_secret=bad-secret"
+    >>,
     Headers = [{<<"Content-Type">>, <<"application/x-www-form-urlencoded">>}],
     {ok, 401, _RH, RespBody} =
         hackney:request(post, Url, Headers, Body, [with_body]),
@@ -191,23 +201,25 @@ oauth2_failure_injection(Config) ->
     {ok, 200, _RH2, _} =
         hackney:request(post, Url, Headers, Body, [with_body]).
 
-
 %% ===================================================================
 %% OIDC tests
 %% ===================================================================
 
 oidc_discovery(Config) ->
-    Url = <<(base(Config))/binary,
-            "/.well-known/openid-configuration">>,
+    Url = <<(base(Config))/binary, "/.well-known/openid-configuration">>,
     {ok, 200, _RH, RespBody} =
         hackney:request(get, Url, [], <<>>, [with_body]),
     Decoded = json:decode(RespBody),
     Base = base(Config),
     ?assertEqual(Base, maps:get(<<"issuer">>, Decoded)),
-    ?assertMatch(<<_/binary>>,
-                 maps:get(<<"token_endpoint">>, Decoded)),
-    ?assertMatch(<<_/binary>>,
-                 maps:get(<<"jwks_uri">>, Decoded)).
+    ?assertMatch(
+        <<_/binary>>,
+        maps:get(<<"token_endpoint">>, Decoded)
+    ),
+    ?assertMatch(
+        <<_/binary>>,
+        maps:get(<<"jwks_uri">>, Decoded)
+    ).
 
 oidc_jwks(Config) ->
     Url = <<(base(Config))/binary, "/oidc/jwks">>,
@@ -226,26 +238,30 @@ oidc_token(Config) ->
     {ok, 200, _RH, RespBody} =
         hackney:request(post, Url, Headers, Body, [with_body]),
     Decoded = json:decode(RespBody),
-    ?assertEqual(<<"mock-oidc-access-token">>,
-                 maps:get(<<"access_token">>, Decoded)),
+    ?assertEqual(
+        <<"mock-oidc-access-token">>,
+        maps:get(<<"access_token">>, Decoded)
+    ),
     ?assertMatch(<<_/binary>>, maps:get(<<"id_token">>, Decoded)).
-
 
 %% ===================================================================
 %% GIS tests
 %% ===================================================================
 
 gis_generate_token(Config) ->
-    Url = <<(base(Config))/binary,
-            "/portal/sharing/rest/generateToken">>,
-    Body = <<"username=testuser&password=testpass"
-             "&f=json&referer=https://www.example.com">>,
+    Url = <<(base(Config))/binary, "/portal/sharing/rest/generateToken">>,
+    Body = <<
+        "username=testuser&password=testpass"
+        "&f=json&referer=https://www.example.com"
+    >>,
     Headers = [{<<"Content-Type">>, <<"application/x-www-form-urlencoded">>}],
     {ok, 200, _RH, RespBody} =
         hackney:request(post, Url, Headers, Body, [with_body]),
     Decoded = json:decode(RespBody),
-    ?assertEqual(<<"mock-gis-token-abc123">>,
-                 maps:get(<<"token">>, Decoded)),
+    ?assertEqual(
+        <<"mock-gis-token-abc123">>,
+        maps:get(<<"token">>, Decoded)
+    ),
     ?assert(is_integer(maps:get(<<"expires">>, Decoded))),
     %% Should NOT have an error key
     ?assertEqual(error, maps:find(<<"error">>, Decoded)).
@@ -254,8 +270,7 @@ gis_invalid_credentials(Config) ->
     mock_auth_http_server:set_credentials(
         gis, <<"admin">>, <<"s3cret">>
     ),
-    Url = <<(base(Config))/binary,
-            "/portal/sharing/rest/generateToken">>,
+    Url = <<(base(Config))/binary, "/portal/sharing/rest/generateToken">>,
     Body = <<"username=wrong&password=wrong&f=json">>,
     Headers = [{<<"Content-Type">>, <<"application/x-www-form-urlencoded">>}],
     %% GIS returns 200 even on auth errors
@@ -271,8 +286,7 @@ gis_error_in_body(Config) ->
     mock_auth_http_server:set_credentials(
         gis, <<"admin">>, <<"s3cret">>
     ),
-    Url = <<(base(Config))/binary,
-            "/portal/sharing/rest/generateToken">>,
+    Url = <<(base(Config))/binary, "/portal/sharing/rest/generateToken">>,
     %% Send correct credentials
     Body = <<"username=admin&password=s3cret&f=json">>,
     Headers = [{<<"Content-Type">>, <<"application/x-www-form-urlencoded">>}],
@@ -286,8 +300,7 @@ gis_error_in_body(Config) ->
 gis_custom_token(Config) ->
     mock_auth_http_server:set_token(gis, <<"custom-gis-tok">>),
     mock_auth_http_server:set_expires_in(gis, 9999999999),
-    Url = <<(base(Config))/binary,
-            "/portal/sharing/rest/generateToken">>,
+    Url = <<(base(Config))/binary, "/portal/sharing/rest/generateToken">>,
     Body = <<"username=any&password=any&f=json">>,
     Headers = [{<<"Content-Type">>, <<"application/x-www-form-urlencoded">>}],
     {ok, 200, _RH, RespBody} =
@@ -295,7 +308,6 @@ gis_custom_token(Config) ->
     Decoded = json:decode(RespBody),
     ?assertEqual(<<"custom-gis-tok">>, maps:get(<<"token">>, Decoded)),
     ?assertEqual(9999999999, maps:get(<<"expires">>, Decoded)).
-
 
 %% ===================================================================
 %% Upstream echo tests
@@ -321,8 +333,10 @@ upstream_echo_post(Config) ->
     ?assertEqual(<<"POST">>, maps:get(<<"method">>, Decoded)),
     %% Body is echoed back as-is (binary)
     EchoedBody = maps:get(<<"body">>, Decoded),
-    ?assertEqual(#{<<"amount">> => 100},
-                 json:decode(EchoedBody)).
+    ?assertEqual(
+        #{<<"amount">> => 100},
+        json:decode(EchoedBody)
+    ).
 
 upstream_custom_response(Config) ->
     ErrBody = iolist_to_binary(json:encode(#{<<"error">> => <<"forbidden">>})),
@@ -341,7 +355,6 @@ upstream_failure_injection(Config) ->
     %% One-shot: next request succeeds
     {ok, 200, _RH2, _} =
         hackney:request(get, Url, [], <<>>, [with_body]).
-
 
 %% ===================================================================
 %% Cross-cutting tests
@@ -364,15 +377,19 @@ request_log_filtered(Config) ->
     mock_auth_http_server:clear_requests(),
     %% Hit two different endpoints
     OAuthUrl = <<(base(Config))/binary, "/oauth2/token">>,
-    GisUrl = <<(base(Config))/binary,
-               "/portal/sharing/rest/generateToken">>,
+    GisUrl = <<(base(Config))/binary, "/portal/sharing/rest/generateToken">>,
     Body = <<"grant_type=client_credentials">>,
     Headers = [{<<"Content-Type">>, <<"application/x-www-form-urlencoded">>}],
     {ok, 200, _, _} =
         hackney:request(post, OAuthUrl, Headers, Body, [with_body]),
     {ok, 200, _, _} =
-        hackney:request(post, GisUrl, Headers,
-                        <<"username=a&password=b&f=json">>, [with_body]),
+        hackney:request(
+            post,
+            GisUrl,
+            Headers,
+            <<"username=a&password=b&f=json">>,
+            [with_body]
+        ),
     ?assertEqual(1, length(mock_auth_http_server:get_requests(oauth2))),
     ?assertEqual(1, length(mock_auth_http_server:get_requests(gis))),
     ?assertEqual(2, length(mock_auth_http_server:get_requests())).
@@ -386,7 +403,8 @@ latency_injection(Config) ->
     {ok, 200, _, _} =
         hackney:request(post, Url, Headers, Body, [with_body]),
     Elapsed = erlang:monotonic_time(millisecond) - T0,
-    ?assert(Elapsed >= 150). %% Allow some slack
+    %% Allow some slack
+    ?assert(Elapsed >= 150).
 
 failure_count(Config) ->
     %% Fail exactly 2 times, then succeed
@@ -433,9 +451,10 @@ reset_clears_all(Config) ->
     {ok, 200, _, RespBody} =
         hackney:request(post, Url, Headers, Body, [with_body]),
     Decoded = json:decode(RespBody),
-    ?assertEqual(<<"mock-oauth2-access-token">>,
-                 maps:get(<<"access_token">>, Decoded)).
-
+    ?assertEqual(
+        <<"mock-oauth2-access-token">>,
+        maps:get(<<"access_token">>, Decoded)
+    ).
 
 %% ===================================================================
 %% Helpers

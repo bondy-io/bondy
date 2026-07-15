@@ -24,21 +24,30 @@ ifeq ($(UNAME_M), x86_64)
 	DOCKER_PLATFORM = amd64
 else ifeq ($(UNAME_M), aarch64)
 	DOCKER_PLATFORM = arm64
-	CFLAGS := $(CFLAGS) -arch arm64 -O2 -g
-	CXXFLAGS := $(CXXFLAGS) -arch arm64
-	LDFLAGS := $(LDFLAGS) -arch arm64
 else ifeq ($(UNAME_M), arm64)
 	DOCKER_PLATFORM = arm64
-	CFLAGS := $(CFLAGS) -arch arm64 -O2 -g
-	CXXFLAGS := $(CXXFLAGS) -arch arm64
-	LDFLAGS := $(LDFLAGS) -arch arm64
 else ifeq ($(UNAME_M), armv7l)
 	DOCKER_PLATFORM = arm32v7
 endif
 
-export CFLAGS
-export CXXLAGS
-export LDFLAGS
+# Keep native-dependency builds hermetic: never leak CFLAGS/CXXFLAGS/LDFLAGS
+# into them — whether set in this Makefile or inherited from the shell.
+#
+# Bondy's NIF deps (ezstd, lz4, stringprep, crc32cer) set their own platform
+# compile/link flags via `?=` in their c_src Makefiles. On macOS ezstd needs
+# `-flat_namespace -undefined suppress` so the beam resolves the `enif_*` NIF
+# API at load time. Because `?=` only assigns when the variable is UNSET, ANY
+# non-empty inherited LDFLAGS (e.g. a stray `export LDFLAGS="-arch arm64"`)
+# turns that `?=` into a no-op, drops the flag, and breaks the link with
+# "Undefined symbols for architecture arm64 ... _enif_*". The deps already add
+# `-arch arm64` themselves on Apple Silicon, so forcing it here is both
+# redundant and harmful. `unexport` strips these from every recipe's
+# environment and wins over a stray `export` in the user's shell.
+unexport CFLAGS
+unexport CXXFLAGS
+unexport CPPFLAGS
+unexport LDFLAGS
+unexport LDLIBS
 
 
 .PHONY: genvars compile check test xref eunit dialyzer release release-tar spellcheck spellfix conf
@@ -167,6 +176,9 @@ node1-clean:
 node2:
 	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} as node2 release
+	@set -a && \
+    [ -f .env ] && . .env && \
+    set +a && \
 	ERL_DIST_PORT=27782 _build/node2/rel/bondy/bin/bondy console
 
 node2-clean:

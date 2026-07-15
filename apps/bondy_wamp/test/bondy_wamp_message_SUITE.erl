@@ -9,21 +9,15 @@
 -include_lib("eunit/include/eunit.hrl").
 -compile(export_all).
 
-
-
 all() ->
     common:all().
 
 groups() ->
     [{main, [parallel], common:tests(?MODULE)}].
 
-
-
-
 %% =============================================================================
 %% JSON
 %% =============================================================================
-
 
 init_per_suite(Config) ->
     _ = application:ensure_all_started(bondy_wamp),
@@ -33,15 +27,12 @@ init_per_suite(Config) ->
 end_per_suite(_) ->
     ok.
 
-
 abort_test(_) ->
     Uri = <<"com.example.foo">>,
     Details = #{bar => baz},
     Expected = #abort{reason_uri = Uri, details = Details},
 
     ?assertEqual(Expected, bondy_wamp_message:abort(Details, Uri)).
-
-
 
 call_test(_) ->
     Uri = <<"com.example.foo">>,

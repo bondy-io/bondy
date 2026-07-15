@@ -80,7 +80,6 @@ get(Name, ...) → gproc_pool:pick → worker name
 -export([handle_info/2]).
 -export([terminate/2]).
 
-
 %% ===================================================================
 %% Public API
 %% ===================================================================
@@ -94,8 +93,6 @@ service-name to worker-pid lookups.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
-
-
 
 -doc """
 Get a cached token for the given service, creating a worker if needed.
@@ -137,7 +134,6 @@ get(ServiceName, AuthMod, AuthConf) ->
         fun
             (noproc) ->
                 {error, noproc};
-
             (WorkerName) ->
                 bondy_rpc_gateway_token_cache_worker:get_token(
                     WorkerName, ServiceName, AuthMod, AuthConf
@@ -145,7 +141,6 @@ get(ServiceName, AuthMod, AuthConf) ->
         end,
         ServiceName
     ).
-
 
 -doc """
 Invalidate the cached token for a service.
@@ -168,16 +163,15 @@ invalidate(ServiceName) ->
         fun
             (noproc) ->
                 ok;
-
             (WorkerName) ->
-                _ = catch gen_server:cast(
-                    WorkerName, {invalidate, ServiceName}
-                ),
+                _ =
+                    catch gen_server:cast(
+                        WorkerName, {invalidate, ServiceName}
+                    ),
                 ok
         end,
         ServiceName
     ).
-
 
 %% ===================================================================
 %% gen_server callbacks
@@ -204,11 +198,9 @@ handle_info(_Info, State) ->
 terminate(_Reason, _State) ->
     ok.
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 %% @private
 init_pool() ->
@@ -231,16 +223,15 @@ init_pool() ->
                         type => noproc,
                         message =>
                             ~"An error ocurred when starting an RPC Gateway token cache worker.",
-                        details => #{reason => Reason}}
-                    ),
+                        details => #{reason => Reason}
+                    }),
                     error(Info)
                 end
             )
         end
-        || Id <- lists:seq(1, Size)
+     || Id <- lists:seq(1, Size)
     ],
     ok.
-
 
 %% @private
 %% gproc_pool state survives restarts of this gen_server, so a re-init can
@@ -253,7 +244,6 @@ ensure_pool(Pool, Size) ->
         error:exists -> ok
     end.
 
-
 %% @private
 ensure_worker_slot(Pool, WorkerName) ->
     try gproc_pool:add_worker(Pool, WorkerName) of
@@ -264,15 +254,15 @@ ensure_worker_slot(Pool, WorkerName) ->
 
 %% @private
 worker_name(Id) when is_integer(Id) ->
-    list_to_atom("bondy_rpc_gateway_token_cache_worker_" ++ integer_to_list(Id)).
+    list_to_atom(
+        "bondy_rpc_gateway_token_cache_worker_" ++ integer_to_list(Id)
+    ).
 
 %% @private
 do_for_worker(Fun, Key) ->
     case gproc_pool:pick(?POOLNAME, Key) of
         false ->
             Fun(noproc);
-
         {_, _, [gproc_pool, _, _, WorkerName]} ->
             Fun(WorkerName)
     end.
-

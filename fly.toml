@@ -1,0 +1,53 @@
+# =============================================================================
+# bondy umbrella — Linux bench substrate on Fly.io (bondy_oplog/bondy_db)
+#
+# This fly.toml lives at the umbrella root (not under bench/fly/) because
+# flyctl resolves the `[build].dockerfile` path AND the upload build
+# context relative to this file's directory. The Dockerfile's
+# `COPY . /opt/bondy` needs the umbrella source (apps/, bench/mix.exs,
+# etc.), so fly.toml must live here. All other Fly assets — Dockerfile,
+# entrypoint, README — stay under bench/fly/.
+#
+# Drive via the umbrella `just bench-fly-*` recipes. See
+# bench/fly/README.md for the operator runbook.
+#
+# Cost: ~$1.50/month standing (volume) + ~$0.10 per 2h bench run.
+# `just bench-fly-down` after every session to keep idle cost
+# volume-only.
+# =============================================================================
+
+app = 'bondy-db-bench'
+primary_region = 'lhr'
+
+[build]
+  dockerfile = 'bench/fly/Dockerfile'
+
+  # OTP + Elixir versions are baked into the hexpm/elixir base image
+  # tag (see bench/fly/Dockerfile FROM line). Re-pin the FROM tag,
+  # not these args, when production OTP is fixed.
+  [build.args]
+    REBAR3_VERSION = '3.24.0'
+    JUST_VERSION = '1.36.0'
+
+[deploy]
+  strategy = 'immediate'
+
+[[mounts]]
+  source = 'bench_data'
+  destination = '/data'
+  initial_size = '10gb'
+
+[[vm]]
+  size = 'performance-2x'
+  cpu_kind = 'performance'
+  cpus = 2
+  memory_mb = 4096
+
+# Cost control — stop when idle, restart on demand. Bench runs are
+# operator-driven (`fly ssh console` and the `bench-fly-*` recipes
+# will wake the machine); between runs the machine is stopped and
+# we only pay for the volume.
+[machine]
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0

@@ -1,0 +1,189 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+-module(bondy_router_worker).
+-moduledoc """
+Implements the router worker pool using the `sidejob` library, supporting both
+a permanent pool of supervised `m:gen_server` workers and a transient pool that
+spawns a new worker per task. Used by `m:bondy_router` to forward WAMP messages
+asynchronously with load regulation.
+""".
+-behaviour(gen_server).
+
+-include_lib("kernel/include/logger.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
+-include("bondy.hrl").
+
+-define(POOL_NAME, router_pool).
+
+-record(state, {
+    pool_type :: permanent | transient,
+    op :: function()
+}).
+
+%% API
+-export([start_pool/0]).
+-export([cast/1]).
+
+%% GEN_SERVER CALLBACKS
+-export([init/1]).
+-export([handle_info/2]).
+-export([handle_continue/2]).
+-export([terminate/2]).
+-export([code_change/3]).
+-export([handle_call/3]).
+-export([handle_cast/2]).
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+-doc """
+Starts a sidejob pool of workers according to the configuration
+for the entry named `router_pool`.
+""".
+-spec start_pool() -> ok.
+
+start_pool() ->
+    case do_start_pool() of
+        {ok, _Child} -> ok;
+        {ok, _Child, _Info} -> ok;
+        {error, already_present} -> ok;
+        {error, {already_started, _Child}} -> ok;
+        {error, Reason} -> error(Reason)
+    end.
+
+cast(Fun) when is_function(Fun, 0) ->
+    Opts = bondy_config:get(router_pool),
+    PoolType = key_value:get(type, Opts, transient),
+
+    case do_cast(PoolType, router_pool, Fun) of
+        ok ->
+            ok;
+        {ok, _} ->
+            ok;
+        {error, overload} = Error ->
+            Error
+    end.
+
+%% =============================================================================
+%% API : GEN_SERVER CALLBACKS FOR SIDEJOB WORKER
+%% =============================================================================
+
+init([?POOL_NAME]) ->
+    %% We've been called by sidejob_worker
+    %% We will be called via a a cast (handle_cast/2)
+    %% TODO publish metaevent and stats
+    {ok, #state{pool_type = permanent}};
+init([Fun]) ->
+    %% We've been called by sidejob_supervisor
+    State = #state{pool_type = transient},
+    {ok, State, {continue, {apply, Fun}}}.
+
+handle_continue({apply, Fun}, State) ->
+    %% We apply and terminate as this is a transient worker.
+    _ = Fun(),
+    {stop, normal, State}.
+
+handle_call(Event, From, State) ->
+    ?LOG_WARNING(#{
+        reason => unsupported_event,
+        event => Event,
+        from => From
+    }),
+    {reply, {error, {unsupported_call, Event}}, State}.
+
+handle_cast(Fun, State) when is_function(Fun, 0) ->
+    try
+        _ = Fun(),
+        {noreply, State}
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            {noreply, State}
+    after
+        %% We cleanup, liberating the Fun from having to try..catch and do it
+        bondy:unset_process_metadata()
+    end;
+handle_cast(Event, State) ->
+    ?LOG_DEBUG(#{
+        reason => unsupported_event,
+        event => Event
+    }),
+    {noreply, State}.
+
+handle_info(Info, State) ->
+    ?LOG_DEBUG(#{
+        reason => unsupported_event,
+        event => Info
+    }),
+    {noreply, State}.
+
+terminate(normal, _State) ->
+    ok;
+terminate(shutdown, _State) ->
+    ok;
+terminate({shutdown, _}, _State) ->
+    ok;
+terminate(_Reason, _State) ->
+    %% TODO publish metaevent
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+-doc """
+Actually starts a sidejob pool based on system configuration.
+""".
+do_start_pool() ->
+    Opts = bondy_config:get(router_pool),
+    Size = key_value:get(size, Opts),
+    Capacity = key_value:get(capacity, Opts),
+    PoolType = key_value:get(type, Opts, transient),
+
+    case PoolType of
+        permanent ->
+            Mod = ?MODULE,
+            sidejob:new_resource(?POOL_NAME, Mod, Capacity, Size);
+        transient ->
+            Mod = sidejob_supervisor,
+            sidejob:new_resource(?POOL_NAME, Mod, Capacity, Size)
+    end.
+
+%% @private
+-doc """
+Helper function for `async_forward/2`.
+""".
+do_cast(permanent, PoolName, Fun) ->
+    %% We send a request to an existing permanent worker
+    %% using bondy_router acting as a sidejob_worker
+    case sidejob:cast(PoolName, Fun) of
+        ok ->
+            ok;
+        overload ->
+            {error, overload}
+    end;
+do_cast(transient, PoolName, Fun) ->
+    Opts = [
+        {spawn_opt, [
+            {min_heap_size, 1598}
+        ]}
+    ],
+    %% We spawn a transient worker using sidejob_supervisor
+    sidejob_supervisor:start_child(
+        PoolName,
+        gen_server,
+        start_link,
+        [?MODULE, [Fun], Opts]
+    ).

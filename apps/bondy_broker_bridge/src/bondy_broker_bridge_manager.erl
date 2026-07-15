@@ -114,9 +114,10 @@ map returned by `Bridge:init/1`.
         required => true,
         allow_null => false,
         allow_undefined => false,
-        datatype => {in, [
-            <<"v1.0">>
-        ]}
+        datatype =>
+            {in, [
+                <<"v1.0">>
+            ]}
     },
     <<"meta">> => #{
         alias => meta,
@@ -207,16 +208,16 @@ map returned by `Bridge:init/1`.
 }).
 
 -record(state, {
-    nodestring                        ::  binary(),
-    broker_agent                    ::  binary(),
-    bridges = #{}                   ::  #{module() => bridge()}
+    nodestring :: binary(),
+    broker_agent :: binary(),
+    bridges = #{} :: #{module() => bridge()}
     %% Cluster sync state
     %% exchange_ref            ::  {pid(), reference()} | undefined,
     %% updated_specs = []      ::  list()
 }).
 
--type bridge()              ::  map().
--type subscription_detail() ::  map().
+-type bridge() :: map().
+-type subscription_detail() :: map().
 
 %% API
 -export([start_link/0]).
@@ -237,30 +238,23 @@ map returned by `Bridge:init/1`.
 -export([handle_call/3]).
 -export([handle_cast/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 -doc "Start the manager, registered locally. Called by the supervisor.".
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
-
 
 -doc "Return all configured bridge maps.".
 -spec bridges() -> [bridge()].
 bridges() ->
     gen_server:call(?MODULE, bridges, 10000).
 
-
 -doc "Return the bridge configuration for `Mod`, or `undefined`.".
 -spec bridge(module()) -> bridge() | undefined.
 bridge(Mod) ->
     gen_server:call(?MODULE, {bridge, Mod}, 10000).
-
 
 -doc """
 Load a broker bridge specification.
@@ -274,7 +268,6 @@ specification and creates all declared subscriptions for enabled bridges.
 load(Term) when is_map(Term) orelse is_list(Term) ->
     gen_server:call(?MODULE, {load, Term}).
 
-
 -doc """
 Subscribe to a WAMP topic and bridge events to an external system.
 
@@ -287,8 +280,8 @@ evaluating the action `Spec` with `mops`.
 
 subscribe(RealmUri, Opts, Topic, Bridge, Spec) ->
     gen_server:call(
-        ?MODULE, {subscribe, RealmUri, Opts, Topic, Bridge, Spec}, ?TIMEOUT).
-
+        ?MODULE, {subscribe, RealmUri, Opts, Topic, Bridge, Spec}, ?TIMEOUT
+    ).
 
 -doc "Remove a bridge subscription by its subscriber pid.".
 -spec unsubscribe(pid()) -> ok | {error, not_found}.
@@ -296,13 +289,11 @@ subscribe(RealmUri, Opts, Topic, Bridge, Spec) ->
 unsubscribe(Pid) ->
     gen_server:call(?MODULE, {unsubscribe, Pid}, ?TIMEOUT).
 
-
 -doc "Return subscription details for all subscribers of `BridgeId`.".
 -spec subscriptions(BridgeId :: bridge()) -> [subscription_detail()].
 
 subscriptions(BridgeId) ->
     gen_server:call(?MODULE, {subscriptions, BridgeId}, 10000).
-
 
 -doc """
 Validate a broker bridge specification map.
@@ -316,18 +307,13 @@ validate_spec(Map) ->
         Val = maps_utils:validate(Map, ?SUBSCRIPTIONS_SPEC),
         {ok, Val}
     catch
-       _:Reason ->
+        _:Reason ->
             {error, Reason}
     end.
-
-
-
 
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
-
-
 
 init([]) ->
     %% We store the bridges configurations provided
@@ -342,7 +328,6 @@ init([]) ->
     },
 
     {ok, State0, {continue, init_bridges}}.
-
 
 -doc false.
 handle_continue(init_bridges, State0) ->
@@ -364,37 +349,30 @@ handle_continue(init_bridges, State0) ->
             {stop, Reason, State0}
     end.
 
-
 -doc false.
 handle_call(bridges, _From, State) ->
     Res = bridges(State),
     {reply, Res, State};
-
 handle_call({bridge, Mod}, _From, State) ->
     Res = get_bridge(Mod, State),
     {reply, Res, State};
-
 handle_call({subscriptions, Bridge}, _From, State) ->
     Res = get_subscriptions(Bridge),
     {reply, Res, State};
-
 handle_call({subscribe, RealmUri, Opts, Topic, Bridge, Spec0}, _From, State) ->
     try do_subscribe(RealmUri, Opts, Topic, Bridge, Spec0, State) of
         {ok, Id, _Pid} ->
             {reply, {ok, Id}, State}
     catch
-       _:Reason ->
+        _:Reason ->
             {reply, {error, Reason}, State}
     end;
-
 handle_call({unsubscribe, Pid}, _From, State) ->
     Res = bondy_broker:unsubscribe(Pid),
     {reply, Res, State};
-
 handle_call({load, Term}, _From, State) ->
     {Res, NewState} = load_config(Term, State),
     {reply, Res, NewState};
-
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -402,7 +380,6 @@ handle_call(Event, From, State) ->
         from => From
     }),
     {noreply, State}.
-
 
 -doc false.
 handle_cast(Event, State) ->
@@ -422,8 +399,6 @@ handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     %% bondy_subscriber is responsible for the cleanup
 
     {noreply, State};
-
-
 handle_info(Info, State) ->
     ?LOG_DEBUG(#{
         reason => unsupported_event,
@@ -431,55 +406,44 @@ handle_info(Info, State) ->
     }),
     {noreply, State}.
 
-
 -doc false.
 terminate(normal, State) ->
     do_terminate(normal, State);
-
 terminate(shutdown, State) ->
     do_terminate(shutdown, State);
-
 terminate({shutdown, _}, State) ->
     do_terminate(shutdown, State);
-
 terminate(Reason, State) ->
     do_terminate(Reason, State).
-
 
 -doc false.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
-
 init_bridges(State) ->
     try
         Bridges0 = State#state.bridges,
-        Fun = fun
-            (Bridge, #{config := Config}, Acc) ->
-                case key_value:get(enabled, Config, false) of
-                    true ->
-                        case Bridge:init(Config) of
-                            {ok, Ctxt} when is_map(Ctxt) ->
-                                key_value:put([Bridge, ctxt], Ctxt, Acc);
-                            {error, Reason} ->
-                                error(Reason)
-                        end;
-                    false ->
-                        Acc
-                end
+        Fun = fun(Bridge, #{config := Config}, Acc) ->
+            case key_value:get(enabled, Config, false) of
+                true ->
+                    case Bridge:init(Config) of
+                        {ok, Ctxt} when is_map(Ctxt) ->
+                            key_value:put([Bridge, ctxt], Ctxt, Acc);
+                        {error, Reason} ->
+                            error(Reason)
+                    end;
+                false ->
+                    Acc
+            end
         end,
         Bridges1 = maps:fold(Fun, Bridges0, Bridges0),
         {ok, State#state{bridges = Bridges1}}
     catch
-        Class:Reason:Stacktrace->
+        Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
                 class => Class,
                 reason => Reason,
@@ -488,8 +452,6 @@ init_bridges(State) ->
             {error, Reason}
     end.
 
-
-
 terminate_bridges(Reason, #state{bridges = Map} = State) ->
     Fun = fun(Bridge, _Config, Acc) ->
         ok = Bridge:terminate(Reason),
@@ -497,20 +459,14 @@ terminate_bridges(Reason, #state{bridges = Map} = State) ->
     end,
     maps:fold(Fun, State, Map).
 
-
-
 get_bridge(Mod, State) ->
     maps:get(Mod, State#state.bridges, undefined).
-
-
 
 do_terminate(Reason, State) ->
     %% ok = plum_db_unsubscribe(),
     _ = unsubscribe_all(State),
     _ = terminate_bridges(Reason, State),
     ok.
-
-
 
 load_config(Map, State) when is_map(Map) ->
     case validate_spec(Map) of
@@ -531,19 +487,10 @@ load_config(Map, State) when is_map(Map) ->
                 end
             end,
             NewState = lists:foldl(Folder, State, Subscriptions),
-            %% We store the specification, see add/2 for an explanation
-            %% ok = plum_db:put(?PREFIX,
-            %%     Id,
-            %%     maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Spec)
-            %% ),
-            %% %% We rebuild the dispatch table
-            %% rebuild_dispatch_tables();
             {ok, NewState};
-
         {error, _} = Error ->
             {Error, State}
     end;
-
 load_config(FName, State) when is_list(FName) orelse is_binary(FName) ->
     case bondy_utils:json_consult(FName) of
         {ok, Spec} ->
@@ -564,14 +511,11 @@ load_config(FName, State) when is_list(FName) orelse is_binary(FName) ->
             }),
             exit(badarg)
     end;
-
 load_config(undefined, State) ->
     ?LOG_INFO(#{description => "Broker Bridge configuration file undefined"}),
     {ok, State};
-
 load_config(_, State) ->
     {{error, badarg}, State}.
-
 
 mops_ctxt(Event, RealmUri, _Opts, Topic, Bridge, State) ->
     %% mops require binary keys
@@ -586,7 +530,6 @@ mops_ctxt(Event, RealmUri, _Opts, Topic, Bridge, State) ->
         <<"event">> => CtxtEvent
     }.
 
-
 do_subscribe(Subscription, State) ->
     #{
         <<"bridge">> := Bridge,
@@ -599,32 +542,28 @@ do_subscribe(Subscription, State) ->
         <<"action">> := Action
     } = Subscription,
 
-
     case get_bridge(Bridge, State) of
-        undefined  ->
+        undefined ->
             error({unknown_bridge, Bridge});
-
         #{id := Bridge} ->
             Opts1 = maps:put(meta, Meta, Opts0),
             do_subscribe(RealmUri, Opts1, Topic, Bridge, Action, State)
     end.
 
-
 do_subscribe(RealmUri, Opts0, Topic, Bridge, Action0, State) ->
     try
         %% We build the fun that we will use for the subscriber
-        Fun = fun
-            (Topic1, #event{} = Event) when Topic1 == Topic ->
-                Ctxt = mops_ctxt(Event, RealmUri, Opts0, Topic, Bridge, State),
-                Action1 = mops:eval(Action0, Ctxt),
-                case Bridge:validate_action(Action1) of
-                    {ok, Action2} ->
-                        %% TODO: Also handle acknowledge to publisher when
-                        %% Action.options.acknowledge == true
-                        Bridge:apply_action(Action2);
-                    {error, Reason} ->
-                        throw({invalid_action, Reason})
-                end
+        Fun = fun(Topic1, #event{} = Event) when Topic1 == Topic ->
+            Ctxt = mops_ctxt(Event, RealmUri, Opts0, Topic, Bridge, State),
+            Action1 = mops:eval(Action0, Ctxt),
+            case Bridge:validate_action(Action1) of
+                {ok, Action2} ->
+                    %% TODO: Also handle acknowledge to publisher when
+                    %% Action.options.acknowledge == true
+                    Bridge:apply_action(Action2);
+                {error, Reason} ->
+                    throw({invalid_action, Reason})
+            end
         end,
         %% We use bondy_broker subscribers, this is an instance of a
         %% bondy_subscriber gen_server supervised by bondy_subscribers_sup.
@@ -638,21 +577,23 @@ do_subscribe(RealmUri, Opts0, Topic, Bridge, Action0, State) ->
             group_id => Bridge
         },
         %% REVIEW: Shall we pass a bondy_ref with a session ID here or use name
-        {ok, {Id, Pid}} = Res = bondy_broker:subscribe(
-            RealmUri, Opts, Topic, Fun
-        ),
+        {ok, {Id, Pid}} =
+            Res = bondy_broker:subscribe(
+                RealmUri, Opts, Topic, Fun
+            ),
 
         %% Add to registry and set properties so that we can perform queries
         true = bondy_gproc:register({subscriber, Id}, Pid),
-        true = bondy_gproc:register(subscription_id, Pid, resource_property, Id),
+        true = bondy_gproc:register(
+            subscription_id, Pid, resource_property, Id
+        ),
         true = bondy_gproc:register(
             bondy_broker_bridge, Pid, resource_property, Bridge
         ),
 
         Res
-
     catch
-        Class:Reason:Stacktrace->
+        Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
                 class => Class,
                 reason => Reason,
@@ -662,38 +603,27 @@ do_subscribe(RealmUri, Opts0, Topic, Bridge, Action0, State) ->
             {{error, Reason}, State}
     end.
 
-
-
-
 unsubscribe_all(State) ->
     _ = [bondy_broker:unsubscribe(Pid) || Pid <- all_subscribers(State)],
     ok.
 
-
-
 bridges(State) ->
     maps:values(State#state.bridges).
-
-
 
 all_subscribers(State) ->
     Ids = maps:keys(State#state.bridges),
     lists:append([subscribers(Id) || Id <- Ids]).
 
-
-
 subscribers(Bridge) ->
     %% {{{p,l,bondy_broker_bridge},<0.2738.0>},<0.2738.0>,Bridge},
-    MatchSpec = [{
-        {{r, l, bondy_broker_bridge}, '$1', Bridge},
-        [],
-        ['$1']
-    }],
+    MatchSpec = [
+        {
+            {{r, l, bondy_broker_bridge}, '$1', Bridge},
+            [],
+            ['$1']
+        }
+    ],
     bondy_gproc:select(MatchSpec).
-
-
 
 get_subscriptions(Bridge) ->
     [bondy_subscriber:info(Pid) || Pid <- subscribers(Bridge)].
-
-

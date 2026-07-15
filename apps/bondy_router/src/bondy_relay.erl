@@ -1,0 +1,226 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+-module(bondy_relay).
+-moduledoc """
+A gen_server that forwards INVOCATION (their RESULT or ERROR), INTERRUPT
+and EVENT messages between WAMP clients connected to different Bondy peers
+(nodes).
+
+```
++-------------------------+                    +-------------------------+
+|         node_1          |                    |         node_2          |
+|                         |                    |                         |
+|                         |                    |                         |
+| +---------------------+ |    cast_message    | +---------------------+ |
+| |partisan_peer_service| |                    | |partisan_peer_service| |
+| |      _manager       |<+--------------------+>|      _manager       | |
+| |                     | |                    | |                     | |
+| +---------------------+ |                    | +---------------------+ |
+|    ^          |         |                    |         |          ^    |
+|    |          v         |                    |         v          |    |
+|    |  +---------------+ |                    | +---------------+  |    |
+|    |  |  bondy_router | |                    | |  bondy_router |  |    |
+|    |  |    _relay     | |                    | |    _relay     |  |    |
+|    |  |               | |                    | |               |  |    |
+|    |  +---------------+ |                    | +---------------+  |    |
+|    |          |         |                    |         |          |    |
+|    |          |         |                    |         |          |    |
+|    |          |         |                    |         |          |    |
+|    |          v         |                    |         v          |    |
+| +---------------------+ |                    | +---------------------+ |
+| | bondy_router_worker | |                    | | bondy_router_worker | |
+| |    (router_pool)    | |                    | |    (router_pool)    | |
+| |                     | |                    | |                     | |
+| |                     | |                    | |                     | |
+| |                     | |                    | |                     | |
+| |                     | |                    | |                     | |
+| |                     | |                    | |                     | |
+| |                     | |                    | |                     | |
+| |                     | |                    | |                     | |
+| +---------------------+ |                    | +---------------------+ |
+|         ^    |          |                    |          |   ^          |
+|         |    |          |                    |          |   |          |
+|         |    v          |                    |          v   |          |
+| +---------------------+ |                    | +---------------------+ |
+| |bondy_wamp_*_handler | |                    | |bondy_wamp_*_handler | |
+| |                     | |                    | |                     | |
+| |                     | |                    | |                     | |
+| +---------------------+ |                    | +---------------------+ |
+|         ^    |          |                    |          |   ^          |
+|         |    |          |                    |          |   |          |
++---------+----+----------+                    +----------+---+----------+
+          |    |                                          |   |
+          |    |                                          |   |
+     CALL |    | RESULT | ERROR                INVOCATION |   | YIELD
+          |    |                                          |   |
+          |    v                                          v   |
++-------------------------+                    +-------------------------+
+|         Caller          |                    |         Callee          |
+|                         |                    |                         |
+|                         |                    |                         |
++-------------------------+                    +-------------------------+
+```
+""".
+-behaviour(gen_server).
+
+-include_lib("kernel/include/logger.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
+
+-record(state, {
+    ref :: bondy_ref:t()
+}).
+
+%% API
+-export([forward/2]).
+-export([forward/3]).
+-export([start_link/0]).
+
+%% GEN_SERVER CALLBACKS
+-export([init/1]).
+-export([handle_info/2]).
+-export([terminate/2]).
+-export([code_change/3]).
+-export([handle_call/3]).
+-export([handle_cast/2]).
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+-spec start_link() -> {'ok', pid()} | 'ignore' | {'error', term()}.
+
+start_link() ->
+    %% bondy_relay may receive a huge amount of
+    %% messages. Make sure that they are stored off heap to
+    %% avoid exessive GCs. This makes messaging slower though.
+    SpawnOpts = [
+        {spawn_opt, [{message_queue_data, off_heap}]}
+    ],
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], SpawnOpts).
+
+-spec forward(Node :: node() | [node()], Msg :: any()) -> ok.
+
+forward(Node, Msg) ->
+    forward(Node, Msg, #{}).
+
+-doc """
+Forwards a wamp message to a peer (cluster node).
+It returns `ok`.
+
+This only works for PUBLISH, ERROR, INTERRUPT, INVOCATION and RESULT WAMP
+message types. It will fail with an exception if another type is passed
+as the third argument.
+""".
+-spec forward(Node :: node() | [node()], Msg :: any(), Opts :: map()) -> ok.
+
+forward(Node, Msg, Opts0) when is_atom(Node) ->
+    Channel = bondy_config:get(wamp_peer_channel, undefined),
+    Opts = Opts0#{channel => Channel},
+    partisan:cast_message(Node, ?MODULE, Msg, Opts);
+forward(Nodes, Msg, Opts0) when is_list(Nodes) ->
+    Channel = bondy_config:get(wamp_peer_channel, undefined),
+    Opts = Opts0#{channel => Channel},
+    _ = [
+        partisan:cast_message(Node, ?MODULE, Msg, Opts)
+     || Node <- Nodes
+    ],
+    ok.
+
+%% =============================================================================
+%% API : GEN_SERVER CALLBACKS
+%% =============================================================================
+
+init([]) ->
+    true = bondy_gproc:register(?MODULE),
+    {ok, #state{ref = bondy_ref:new(relay)}}.
+
+handle_call(Event, From, State) ->
+    ?LOG_WARNING(#{
+        reason => unsupported_event,
+        event => Event,
+        from => From
+    }),
+    {reply, {error, {unsupported_call, Event}}, State}.
+
+handle_cast({forward, To, Msg, Opts0} = M, State) ->
+    %% We are receiving a message from peer
+    try
+        %% This in theory breaks the CALL order guarantee!!!
+        %% We either implement causality or we just use hashing over a pool of
+        %% workers by {CallerID, CalleeId}
+        Job = fun() ->
+            try
+                Opts = Opts0#{relayed_by => State#state.ref},
+                bondy_router:forward(Msg, To, Opts)
+            catch
+                Class:Reason:Stacktrace ->
+                    ?LOG_ERROR(#{
+                        description => "Error while forwarding peer message",
+                        class => Class,
+                        reason => Reason,
+                        stacktrace => Stacktrace,
+                        message => M
+                    }),
+                    ok
+            end
+        end,
+
+        case bondy_router_worker:cast(Job) of
+            ok ->
+                ok;
+            {error, overload} ->
+                %% TODO send back WAMP message
+                %% We should synchronoulsy call bondy_router:forward to get back
+                %% a WAMP ERROR we can send back to the Opts.from
+                ?LOG_DEBUG(#{
+                    description => "Error while forwarding peer message",
+                    reason => overload
+                }),
+                ok
+        end,
+
+        {noreply, State}
+    catch
+        Class:Reason:Stacktrace ->
+            %% TODO send back WAMP message
+            %% TODO publish metaevent
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            {noreply, State}
+    end;
+handle_cast(Event, State) ->
+    ?LOG_WARNING(#{
+        reason => unsupported_event,
+        event => Event
+    }),
+    {noreply, State}.
+
+handle_info(Info, State) ->
+    ?LOG_WARNING(#{
+        reason => unsupported_event,
+        event => Info
+    }),
+    {noreply, State}.
+
+terminate(normal, _State) ->
+    ok;
+terminate(shutdown, _State) ->
+    ok;
+terminate({shutdown, _}, _State) ->
+    ok;
+terminate(_Reason, _State) ->
+    %% TODO publish metaevent
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================

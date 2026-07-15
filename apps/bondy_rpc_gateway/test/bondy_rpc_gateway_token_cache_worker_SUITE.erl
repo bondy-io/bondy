@@ -31,13 +31,9 @@ architecture.
 -define(WORKER_NAME, bondy_rpc_gateway_token_cache_worker_test_w).
 -define(SERVICE_NAME, <<"test-svc">>).
 
-
-
 %% =============================================================================
 %% CT CALLBACKS
 %% =============================================================================
-
-
 
 all() ->
     [
@@ -51,15 +47,12 @@ all() ->
         meta_expires_in_overrides_default_ttl
     ].
 
-
 init_per_suite(Config) ->
     _ = application:ensure_all_started(gproc),
     Config.
 
-
 end_per_suite(_Config) ->
     ok.
-
 
 init_per_testcase(_TC, Config) ->
     bondy_rpc_gateway_mock_auth:reset_call_count(),
@@ -71,7 +64,6 @@ init_per_testcase(_TC, Config) ->
     _ = catch gproc_pool:add_worker(?POOL_NAME, ?WORKER_NAME),
 
     Config.
-
 
 end_per_testcase(_TC, _Config) ->
     %% Stop the worker if alive
@@ -89,33 +81,31 @@ end_per_testcase(_TC, _Config) ->
     %% Remove the pool
     _ = catch gproc_pool:force_delete(?POOL_NAME),
 
-    lists:foreach(fun(Key) ->
-        catch persistent_term:erase(Key)
-    end, [
-        {bondy_rpc_gateway_mock_auth, result},
-        {bondy_rpc_gateway_mock_auth, fetch_fun},
-        {bondy_rpc_gateway_mock_auth, call_count}
-    ]),
+    lists:foreach(
+        fun(Key) ->
+            catch persistent_term:erase(Key)
+        end,
+        [
+            {bondy_rpc_gateway_mock_auth, result},
+            {bondy_rpc_gateway_mock_auth, fetch_fun},
+            {bondy_rpc_gateway_mock_auth, call_count}
+        ]
+    ),
     ok.
-
-
 
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
 
-
-
 auth_conf() ->
     #{
         fetch => #{
-            method     => post,
-            url        => <<"http://mock/token">>,
+            method => post,
+            url => <<"http://mock/token">>,
             token_path => [<<"token">>]
         },
         apply => #{placement => header, name => <<"Authorization">>}
     }.
-
 
 start_worker() ->
     {ok, Pid} = bondy_rpc_gateway_token_cache_worker:start_link(
@@ -124,16 +114,13 @@ start_worker() ->
     unlink(Pid),
     Pid.
 
-
 stop_worker(Pid) ->
     exit(Pid, shutdown),
     timer:sleep(20).
 
-
 %% @private
 get_token(Pid) ->
     get_token(Pid, auth_conf()).
-
 
 %% @private
 get_token(Pid, Conf) ->
@@ -142,18 +129,13 @@ get_token(Pid, Conf) ->
         {get_token, ?SERVICE_NAME, bondy_rpc_gateway_mock_auth, Conf}
     ).
 
-
 %% @private
 invalidate(Pid) ->
     gen_server:cast(Pid, {invalidate, ?SERVICE_NAME}).
 
-
-
 %% =============================================================================
 %% TEST CASES
 %% =============================================================================
-
-
 
 get_token_fetches_on_cold_start(_Config) ->
     bondy_rpc_gateway_mock_auth:set_token(<<"fresh-tok">>),
@@ -162,7 +144,6 @@ get_token_fetches_on_cold_start(_Config) ->
     ?assertEqual(<<"fresh-tok">>, Token),
     ?assertEqual(1, bondy_rpc_gateway_mock_auth:call_count()),
     stop_worker(Pid).
-
 
 get_token_caches_on_hot(_Config) ->
     bondy_rpc_gateway_mock_auth:set_token(<<"cached-tok">>),
@@ -174,7 +155,6 @@ get_token_caches_on_hot(_Config) ->
     ?assertEqual(<<"cached-tok">>, T3),
     ?assertEqual(1, bondy_rpc_gateway_mock_auth:call_count()),
     stop_worker(Pid).
-
 
 invalidate_clears_cached_token(_Config) ->
     Counter = atomics:new(1, [{signed, false}]),
@@ -190,13 +170,11 @@ invalidate_clears_cached_token(_Config) ->
     ?assertEqual(2, atomics:get(Counter, 1)),
     stop_worker(Pid).
 
-
 fetch_error_returns_error(_Config) ->
     bondy_rpc_gateway_mock_auth:set_error(boom),
     Pid = start_worker(),
     ?assertEqual({error, boom}, get_token(Pid)),
     stop_worker(Pid).
-
 
 preemptive_refresh_updates_token(_Config) ->
     Counter = atomics:new(1, [{signed, false}]),
@@ -212,7 +190,6 @@ preemptive_refresh_updates_token(_Config) ->
     {ok, T2} = get_token(Pid, Conf),
     ?assertEqual(<<"r-2">>, T2),
     stop_worker(Pid).
-
 
 preemptive_refresh_failure_keeps_old_token(_Config) ->
     bondy_rpc_gateway_mock_auth:set_fetch_fun(fun(_) ->
@@ -230,7 +207,6 @@ preemptive_refresh_failure_keeps_old_token(_Config) ->
     {ok, T2} = get_token(Pid, Conf),
     ?assertEqual(<<"will-keep">>, T2),
     stop_worker(Pid).
-
 
 expired_token_triggers_refetch(_Config) ->
     Counter = atomics:new(1, [{signed, false}]),
@@ -251,15 +227,14 @@ expired_token_triggers_refetch(_Config) ->
     ?assert(atomics:get(Counter, 1) >= 2),
     stop_worker(Pid).
 
-
 meta_expires_in_overrides_default_ttl(_Config) ->
     %% The meta expires_in (1s) should override the large default_ttl (3600).
     %% With refresh_margin=0, the preemptive refresh fires at max(1, 1-0) = 1s.
     Counter = atomics:new(1, [{signed, false}]),
     bondy_rpc_gateway_mock_auth:set_fetch_fun(fun(_) ->
         N = atomics:add_get(Counter, 1, 1),
-        {ok, {<<"meta-tok-", (integer_to_binary(N))/binary>>,
-         #{expires_in => 1}}}
+        {ok,
+            {<<"meta-tok-", (integer_to_binary(N))/binary>>, #{expires_in => 1}}}
     end),
     Conf = (auth_conf())#{cache => #{default_ttl => 3600, refresh_margin => 0}},
     Pid = start_worker(),

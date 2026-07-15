@@ -1,0 +1,18 @@
+## Node name (`-sname`) and cookie are overwritten by
+## io.leapsight.jepsen.Utils#vmArgs on each Jepsen run. The defaults
+## here let the operator run `./bin/bondy_mst_jepsen_release console`
+## standalone without distribution.
+
+-sname bondy_mst_jepsen
+-setcookie bondy_mst_jepsen
+
++P 1048576
++Q 1048576
++sbwt very_short
++sbwtdcpu very_short
++sbwtdio very_short
+
+-kernel inet_dist_listen_min 25000
+-kernel inet_dist_listen_max 25099
+
+-kernel shell_history enabled

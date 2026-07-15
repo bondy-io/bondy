@@ -4,26 +4,31 @@
 %% =============================================================================
 
 -module(bondy_stdlib).
+-moduledoc """
+General-purpose standard library helpers: combinators for `optional()` values
+(`and_then/2`, `or_else/2`, `lazy_or_else/2`), exponential and jittered
+increment functions, and a `retry/1,2` facility implementing exponential backoff
+with jitter.
+""".
 
 -include("bondy_stdlib.hrl").
 
 %% Retry defaults
 -define(DEFAULT_RETRY_OPTS, #{
-        max_retries => 3,
-        base_delay => 100,
-        max_delay => 5000,
-        mode => jitter
+    max_retries => 3,
+    base_delay => 100,
+    max_delay => 5000,
+    mode => jitter
 }).
 
--type retry_opts()  :: #{
-                            max_retries => pos_integer() | infinity,
-                            base_delay => pos_integer(),
-                            max_delay => pos_integer(),
-                            mode => normal | jitter
-                        }.
+-type retry_opts() :: #{
+    max_retries => pos_integer() | infinity,
+    base_delay => pos_integer(),
+    max_delay => pos_integer(),
+    mode => normal | jitter
+}.
 
 -export_type([retry_opts/0]).
-
 
 -export([and_then/2]).
 -export([lazy_or_else/2]).
@@ -36,13 +41,9 @@
 -export([rand_increment/1]).
 -export([rand_increment/2]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 If `Value` is the atom `undefined`, return `undefined`, otherwise apply `Fun` to
@@ -56,10 +57,8 @@ Conceptually the dual of `or_else/2`:
 
 and_then(undefined, _Fun) ->
     undefined;
-
 and_then(Value, Fun) when is_function(Fun, 1) ->
     Fun(Value).
-
 
 -doc """
 Returns the first argument if it is not the atom `undefined`, otherwise the second.
@@ -68,10 +67,8 @@ Returns the first argument if it is not the atom `undefined`, otherwise the seco
 
 or_else(undefined, Default) ->
     Default;
-
 or_else(Value, _) ->
     Value.
-
 
 -doc """
 Returns the first argument if it is not the atom `undefined`, otherwise calls the second argument.
@@ -80,11 +77,8 @@ Returns the first argument if it is not the atom `undefined`, otherwise calls th
 
 lazy_or_else(undefined, Fun) when is_function(Fun, 0) ->
     Fun();
-
 lazy_or_else(Value, _) ->
     Value.
-
-
 
 -doc """
 Increment an integer exponentially
@@ -93,7 +87,6 @@ Increment an integer exponentially
 
 increment(N) when is_integer(N) ->
     N bsl 1.
-
 
 -doc """
 Increment an integer exponentially within a range.
@@ -104,11 +97,12 @@ increment(N, Max) ->
     min(increment(N), Max).
 
 -doc """
-Increment an integer exponentially with randomness or jitter.-behaviour(behaviour).
-Chooses a delay uniformly from `[0.5 * Time, 1.5 * Time]' as recommended in:
+Increment an integer exponentially with randomness or jitter.
+
+Chooses a delay uniformly from `[0.5 * Time, 1.5 * Time]` as recommended in:
 [Sally Floyd and Van Jacobson, The Synchronization of Periodic Routing Messages,
 April 1994 IEEE/ACM Transactions on Networking](http://ee.lbl.gov/papers/sync_94.pdf).
-Implementation borrowed from Hex package [backoff](https://hex.pm/packages/backoff) (MIT Licence, Copyright (c) 2013 Heroku <mononcqc@ferd.ca>).
+Implementation borrowed from Hex package [backoff](https://hex.pm/packages/backoff) (MIT Licence, Copyright (c) 2013 Heroku `<mononcqc@ferd.ca>`).
 """.
 -spec rand_increment(N :: pos_integer()) -> pos_integer().
 
@@ -117,14 +111,13 @@ rand_increment(N) ->
     Width = N bsl 1,
     N + rand:uniform(Width + 1) - 1.
 
-
 -doc """
 Increment an integer exponentially with randomness or jitter within a range.
 
-Chooses a delay uniformly from `[0.5 * Time, 1.5 * Time]' as recommended in:
+Chooses a delay uniformly from `[0.5 * Time, 1.5 * Time]` as recommended in:
 [Sally Floyd and Van Jacobson, The Synchronization of Periodic Routing Messages,
 April 1994 IEEE/ACM Transactions on Networking](http://ee.lbl.gov/papers/sync_94.pdf).
-Implementation borrowed from Hex package [backoff](https://hex.pm/packages/backoff) (MIT Licence, Copyright (c) 2013 Heroku <mononcqc@ferd.ca>).
+Implementation borrowed from Hex package [backoff](https://hex.pm/packages/backoff) (MIT Licence, Copyright (c) 2013 Heroku `<mononcqc@ferd.ca>`).
 """.
 -spec rand_increment(N :: pos_integer(), Max :: pos_integer()) -> pos_integer().
 
@@ -136,14 +129,11 @@ rand_increment(N, Max) ->
     if
         MaxMinDelay =:= 0 ->
             rand:uniform(Max);
-
         N > MaxMinDelay ->
             rand_increment(MaxMinDelay);
-
         true ->
             rand_increment(N)
     end.
-
 
 -doc """
 Calls retry/2 with the default the follwing default options:
@@ -157,7 +147,6 @@ Calls retry/2 with the default the follwing default options:
 
 retry(Fun) ->
     retry(Fun, ?DEFAULT_RETRY_OPTS).
-
 
 -doc """
 Retries a function with full control over timing parameters.
@@ -180,14 +169,17 @@ Implements exponential backoff with jitter:
 - Function calls exit/1 - Propagated immediately
 - Maximum retries exceeded - Returns last error or `{error, timeout}`
 
-### Paramters
+### Parameters
 - `Fun` Function to execute. Should be side-effect free for reliable retries.
-@param MaxRetries Maximum number of retry attempts (0 means no retries).
-@param BaseDelay Initial delay in milliseconds (must be > 0).
-@param MaxDelay Maximum delay cap in milliseconds (must be >= BaseDelay).
-@returns {ok, Result} | ok on success, {error, Reason} on final failure.
-@example
-Retry expensive operation with longer delays
+- `MaxRetries` Maximum number of retry attempts (0 means no retries).
+- `BaseDelay` Initial delay in milliseconds (must be `> 0`).
+- `MaxDelay` Maximum delay cap in milliseconds (must be `>= BaseDelay`).
+
+Returns `{ok, Result}` or `ok` on success, `{error, Reason}` on final failure.
+
+### Example
+Retry expensive operation with longer delays:
+```erlang
 retry:retry(fun() ->
  case expensive_remote_call() of
      {ok, Data} -> {ok, Data};
@@ -196,6 +188,7 @@ retry:retry(fun() ->
      {error, permanent} -> exit(permanent_failure)
  end
 end, 10, 1000, 30000).
+```
 
 Notice this function will not catch exceptions and thus there will be no retries
 in that scenario.
@@ -206,20 +199,16 @@ retry(Fun, Opts) ->
     State = maps:merge(?DEFAULT_RETRY_OPTS, Opts),
     retry_loop(Fun, 0, undefined, State).
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
-retry_loop(Fun, Attempt, _Reason, #{max_retries := MaxRetries} = State0)
-when Attempt =< MaxRetries ->
+retry_loop(Fun, Attempt, _Reason, #{max_retries := MaxRetries} = State0) when
+    Attempt =< MaxRetries
+->
     Result = resulto:then_recover(Fun(), fun
         (Reason) when Attempt =:= MaxRetries ->
             {error, Reason};
-
         (Reason) ->
             State = incr_delay(State0),
             timer:sleep(maps:get(base_delay, State)),
@@ -228,21 +217,14 @@ when Attempt =< MaxRetries ->
 
     %% Ensure we return a result.
     resulto:flatten(resulto:ok(Result));
-
 retry_loop(_, _, Reason, _) ->
     {error, Reason}.
 
-
 incr_delay(#{mode := normal, max_delay := infinity} = State) ->
     State#{base_delay => increment(maps:get(base_delay, State))};
-
 incr_delay(#{mode := normal, max_delay := Max} = State) ->
     State#{base_delay => increment(maps:get(base_delay, State), Max)};
-
 incr_delay(#{mode := jitter, max_delay := infinity} = State) ->
     State#{base_delay => rand_increment(maps:get(base_delay, State))};
-
 incr_delay(#{mode := jitter, max_delay := Max} = State) ->
     State#{base_delay => rand_increment(maps:get(base_delay, State), Max)}.
-
-

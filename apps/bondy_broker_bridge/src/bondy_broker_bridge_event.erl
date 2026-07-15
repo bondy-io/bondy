@@ -17,12 +17,9 @@ like `{{event.topic}}` resolve correctly.
 
 -export([new/3]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 -doc """
 Build an event context map from a WAMP event record.

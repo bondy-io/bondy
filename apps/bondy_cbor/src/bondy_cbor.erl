@@ -28,6 +28,45 @@ For deterministic encoding (RFC 8949 Section 4.2), use `encode_deterministic/1`:
 <<162,97,97,2,97,98,1>>
 ```
 
+## Profiles
+
+A _profile_ names a CBOR dialect. Both `encode/2` and `decode/2` accept a
+`t:profile/0` as their second argument and apply that profile's rules,
+always returning a canonical `t:binary/0`:
+
+- `default` — full RFC 8949 CBOR, identical to `encode/1` and `decode/1`.
+- `dag` — [DAG-CBOR](https://ipld.io/specs/codecs/dag-cbor/spec/), the strict
+  IPLD subset described below.
+
+(RFC 8949 §4.2 deterministic encoding remains available through the dedicated
+`encode_deterministic/1` function; it is a canonicalization of the `default`
+codec rather than a separate wire format.)
+
+DAG-CBOR is the strict, deterministic CBOR subset used by IPLD for content
+addressing:
+
+```erlang
+4> bondy_cbor:encode(#{<<"a">> => 1, <<"b">> => 2}, dag).
+<<162,97,97,1,97,98,2>>
+5> bondy_cbor:decode(<<162,97,97,1,97,98,2>>, dag).
+#{<<"a">> => 1, <<"b">> => 2}
+```
+
+DAG-CBOR differs from RFC 8949 deterministic encoding in a few important ways
+and adds the IPLD data model:
+
+- **Links (CIDs)** are represented as `{cid, binary()}`, where the binary is the
+  raw CID. They encode to tag 42 wrapping a byte string carrying the multibase
+  identity (`0x00`) prefix.
+- **Map keys must be strings** and are sorted length-first, then byte-wise.
+  On encode a key may be given as `{text, binary()}`, a `binary()` or an
+  `atom()`; on decode keys are returned as `binary()`.
+- **Floats** are always encoded as 64-bit doubles. The special values NaN,
+  Infinity and -Infinity are rejected.
+- **Integers** must fall within `[-2^64, 2^64-1]` (bignums are not allowed).
+- Indefinite-length items, non-minimal encodings, tags other than 42, the
+  `undefined` simple value and trailing bytes are all rejected on decode.
+
 ## Decoding
 
 The `decode/1` function decodes CBOR binaries to Erlang terms:
@@ -53,7 +92,6 @@ The `decode/1` function decodes CBOR binaries to Erlang terms:
 
 -include("bondy_cbor.hrl").
 
-
 %% Cached decoder callbacks record for O(1) access during recursive calls.
 -record(dec_callbacks, {
     array_start :: array_start_decoder(term()),
@@ -66,12 +104,13 @@ The `decode/1` function decodes CBOR binaries to Erlang terms:
     undefined_value :: term()
 }).
 
-
 %%--------------------------------------------------------------------
 %% Types
 %%--------------------------------------------------------------------
 
 -type tag() :: non_neg_integer().
+
+-type profile() :: default | dag.
 
 -type encode_value() ::
     integer()
@@ -81,23 +120,32 @@ The `decode/1` function decodes CBOR binaries to Erlang terms:
     | list(encode_value())
     | #{encode_value() => encode_value()}
     | {text, binary()}
+    | {cid, binary()}
     | {tag, tag(), encode_value()}.
 
 -type decode_value() ::
     integer()
     | float()
-    | infinity | neg_infinity | nan
+    | infinity
+    | neg_infinity
+    | nan
     | binary()
-    | true | false | null | undefined
+    | true
+    | false
+    | null
+    | undefined
     | list(decode_value())
     | #{decode_value() => decode_value()}
+    | {cid, binary()}
     | {tag, tag(), decode_value()}.
 
 -type encoder() :: fun((term(), encoder()) -> iodata()).
 
 -type decoder(Acc) :: fun((decode_value(), Acc) -> Acc).
 
--type array_start_decoder(Acc) :: fun((non_neg_integer() | indefinite, Acc) -> Acc).
+-type array_start_decoder(Acc) :: fun(
+    (non_neg_integer() | indefinite, Acc) -> Acc
+).
 -type array_push_decoder(Acc) :: fun((decode_value(), Acc) -> Acc).
 -type array_finish_decoder(Acc, Result) :: fun((Acc) -> {Result, Acc}).
 
@@ -128,7 +176,6 @@ The `decode/1` function decodes CBOR binaries to Erlang terms:
     Decoders :: decoders()
 }.
 
-
 -export_type([continuation_state/0]).
 -export_type([decode_value/0]).
 -export_type([decoder/1]).
@@ -136,6 +183,7 @@ The `decode/1` function decodes CBOR binaries to Erlang terms:
 -export_type([decoders/3]).
 -export_type([encode_value/0]).
 -export_type([encoder/0]).
+-export_type([profile/0]).
 -export_type([tag/0]).
 
 %%--------------------------------------------------------------------
@@ -163,6 +211,7 @@ The `decode/1` function decodes CBOR binaries to Erlang terms:
 %%--------------------------------------------------------------------
 
 -export([decode/1]).
+-export([decode/2]).
 -export([decode/3]).
 -export([decode_start/3]).
 -export([decode_continue/2]).
@@ -172,7 +221,6 @@ The `decode/1` function decodes CBOR binaries to Erlang terms:
 %%--------------------------------------------------------------------
 
 -export([format/1]).
-
 
 %%====================================================================
 %% Encoding API
@@ -188,14 +236,23 @@ encode(Term) ->
     encode(Term, fun default_encoder/2).
 
 -doc """
-Encode a term using a custom encoder function.
+Encode a term using a custom encoder function or a built-in profile.
 
-The encoder function is called for each term and can customize
-how specific types are encoded.
+When the second argument is an encoder function it is called for each term and
+can customize how specific types are encoded, returning lazy `t:iodata/0`.
+
+When it is a `t:profile/0` (see the module documentation) the term is encoded
+according to that profile's rules and a canonical `t:binary/0` is returned.
 """.
--spec encode(term(), encoder()) -> iodata().
+-spec encode
+    (term(), encoder()) -> iodata();
+    (encode_value(), profile()) -> binary().
 encode(Term, Encoder) when is_function(Encoder, 2) ->
-    Encoder(Term, Encoder).
+    Encoder(Term, Encoder);
+encode(Term, default) ->
+    iolist_to_binary(encode(Term, fun default_encoder/2));
+encode(Term, dag) ->
+    iolist_to_binary(encode(Term, fun dag_encoder/2)).
 
 -doc """
 Encode a term in deterministic CBOR format (RFC 8949 Section 4.2).
@@ -263,41 +320,159 @@ encode_list([A, B, C], Enc) ->
 encode_list([A, B, C, D], Enc) ->
     [<<16#84>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc)];
 encode_list([A, B, C, D, E], Enc) ->
-    [<<16#85>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc)];
+    [
+        <<16#85>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc)
+    ];
 encode_list([A, B, C, D, E, F], Enc) ->
-    [<<16#86>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc)];
+    [
+        <<16#86>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G], Enc) ->
-    [<<16#87>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc)];
+    [
+        <<16#87>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G, H], Enc) ->
-    [<<16#88>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc), Enc(H, Enc)];
+    [
+        <<16#88>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc),
+        Enc(H, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G, H, I], Enc) ->
-    [<<16#89>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc), Enc(H, Enc), Enc(I, Enc)];
+    [
+        <<16#89>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc),
+        Enc(H, Enc),
+        Enc(I, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G, H, I, J], Enc) ->
-    [<<16#8A>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc), Enc(H, Enc), Enc(I, Enc), Enc(J, Enc)];
+    [
+        <<16#8A>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc),
+        Enc(H, Enc),
+        Enc(I, Enc),
+        Enc(J, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G, H, I, J, K], Enc) ->
-    [<<16#8B>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc), Enc(H, Enc), Enc(I, Enc), Enc(J, Enc), Enc(K, Enc)];
+    [
+        <<16#8B>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc),
+        Enc(H, Enc),
+        Enc(I, Enc),
+        Enc(J, Enc),
+        Enc(K, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G, H, I, J, K, L], Enc) ->
-    [<<16#8C>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc), Enc(H, Enc), Enc(I, Enc), Enc(J, Enc), Enc(K, Enc),
-     Enc(L, Enc)];
+    [
+        <<16#8C>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc),
+        Enc(H, Enc),
+        Enc(I, Enc),
+        Enc(J, Enc),
+        Enc(K, Enc),
+        Enc(L, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G, H, I, J, K, L, M], Enc) ->
-    [<<16#8D>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc), Enc(H, Enc), Enc(I, Enc), Enc(J, Enc), Enc(K, Enc),
-     Enc(L, Enc), Enc(M, Enc)];
+    [
+        <<16#8D>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc),
+        Enc(H, Enc),
+        Enc(I, Enc),
+        Enc(J, Enc),
+        Enc(K, Enc),
+        Enc(L, Enc),
+        Enc(M, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G, H, I, J, K, L, M, N], Enc) ->
-    [<<16#8E>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc), Enc(H, Enc), Enc(I, Enc), Enc(J, Enc), Enc(K, Enc),
-     Enc(L, Enc), Enc(M, Enc), Enc(N, Enc)];
+    [
+        <<16#8E>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc),
+        Enc(H, Enc),
+        Enc(I, Enc),
+        Enc(J, Enc),
+        Enc(K, Enc),
+        Enc(L, Enc),
+        Enc(M, Enc),
+        Enc(N, Enc)
+    ];
 encode_list([A, B, C, D, E, F, G, H, I, J, K, L, M, N, O], Enc) ->
-    [<<16#8F>>, Enc(A, Enc), Enc(B, Enc), Enc(C, Enc), Enc(D, Enc), Enc(E, Enc),
-     Enc(F, Enc), Enc(G, Enc), Enc(H, Enc), Enc(I, Enc), Enc(J, Enc), Enc(K, Enc),
-     Enc(L, Enc), Enc(M, Enc), Enc(N, Enc), Enc(O, Enc)];
+    [
+        <<16#8F>>,
+        Enc(A, Enc),
+        Enc(B, Enc),
+        Enc(C, Enc),
+        Enc(D, Enc),
+        Enc(E, Enc),
+        Enc(F, Enc),
+        Enc(G, Enc),
+        Enc(H, Enc),
+        Enc(I, Enc),
+        Enc(J, Enc),
+        Enc(K, Enc),
+        Enc(L, Enc),
+        Enc(M, Enc),
+        Enc(N, Enc),
+        Enc(O, Enc)
+    ];
 %% General case for larger arrays - use binary comprehension
 encode_list(List, Enc) when is_list(List), is_function(Enc, 2) ->
     Len = length(List),
@@ -324,12 +499,28 @@ encode_map(Map, Enc) when map_size(Map) =:= 2 ->
     [<<16#A2>>, Enc(K1, Enc), Enc(V1, Enc), Enc(K2, Enc), Enc(V2, Enc)];
 encode_map(Map, Enc) when map_size(Map) =:= 3 ->
     [{K1, V1}, {K2, V2}, {K3, V3}] = maps:to_list(Map),
-    [<<16#A3>>, Enc(K1, Enc), Enc(V1, Enc), Enc(K2, Enc), Enc(V2, Enc),
-     Enc(K3, Enc), Enc(V3, Enc)];
+    [
+        <<16#A3>>,
+        Enc(K1, Enc),
+        Enc(V1, Enc),
+        Enc(K2, Enc),
+        Enc(V2, Enc),
+        Enc(K3, Enc),
+        Enc(V3, Enc)
+    ];
 encode_map(Map, Enc) when map_size(Map) =:= 4 ->
     [{K1, V1}, {K2, V2}, {K3, V3}, {K4, V4}] = maps:to_list(Map),
-    [<<16#A4>>, Enc(K1, Enc), Enc(V1, Enc), Enc(K2, Enc), Enc(V2, Enc),
-     Enc(K3, Enc), Enc(V3, Enc), Enc(K4, Enc), Enc(V4, Enc)];
+    [
+        <<16#A4>>,
+        Enc(K1, Enc),
+        Enc(V1, Enc),
+        Enc(K2, Enc),
+        Enc(V2, Enc),
+        Enc(K3, Enc),
+        Enc(V3, Enc),
+        Enc(K4, Enc),
+        Enc(V4, Enc)
+    ];
 encode_map(Map, Enc) when is_map(Map), is_function(Enc, 2) ->
     %% General case: use iterator for efficiency
     Size = map_size(Map),
@@ -338,8 +529,10 @@ encode_map(Map, Enc) when is_map(Map), is_function(Enc, 2) ->
 %% @private Encode map pairs using iterator
 encode_map_pairs(Iter, Enc) ->
     case maps:next(Iter) of
-        none -> [];
-        {K, V, NextIter} -> [Enc(K, Enc), Enc(V, Enc) | encode_map_pairs(NextIter, Enc)]
+        none ->
+            [];
+        {K, V, NextIter} ->
+            [Enc(K, Enc), Enc(V, Enc) | encode_map_pairs(NextIter, Enc)]
     end.
 
 -doc """
@@ -354,20 +547,35 @@ encode_map_sorted(Map, Enc) when is_map(Map), is_function(Enc, 2) ->
     %% Encode all key-value pairs, converting keys to binary for sorting
     %% Using maps:to_list is faster than maps:fold for this use case
     Pairs = maps:to_list(Map),
-    EncodedPairs = [{iolist_to_binary(Enc(K, Enc)), Enc(V, Enc)} || {K, V} <- Pairs],
+    EncodedPairs = [
+        {iolist_to_binary(Enc(K, Enc)), Enc(V, Enc)}
+     || {K, V} <- Pairs
+    ],
     %% Sort by encoded key bytes (CBOR deterministic requirement)
-    SortedPairs = lists:sort(fun({K1, _}, {K2, _}) -> K1 =< K2 end, EncodedPairs),
+    SortedPairs = lists:sort(
+        fun({K1, _}, {K2, _}) -> K1 =< K2 end, EncodedPairs
+    ),
     [encode_head(?MT_MAP, map_size(Map)) | [[K, V] || {K, V} <- SortedPairs]].
 
 -doc "Encode an atom as a CBOR text string.".
 -spec encode_atom(atom(), encoder()) -> iodata().
-encode_atom(true, _Encoder) -> ?CBOR_TRUE;
-encode_atom(false, _Encoder) -> ?CBOR_FALSE;
-encode_atom(null, _Encoder) -> ?CBOR_NULL;
-encode_atom(undefined, _Encoder) -> ?CBOR_UNDEFINED;
-encode_atom(infinity, _Encoder) -> <<16#F9, 16#7C, 16#00>>;      % Half-precision +Infinity
-encode_atom(neg_infinity, _Encoder) -> <<16#F9, 16#FC, 16#00>>; % Half-precision -Infinity
-encode_atom(nan, _Encoder) -> <<16#F9, 16#7E, 16#00>>;           % Half-precision NaN
+encode_atom(true, _Encoder) ->
+    ?CBOR_TRUE;
+encode_atom(false, _Encoder) ->
+    ?CBOR_FALSE;
+encode_atom(null, _Encoder) ->
+    ?CBOR_NULL;
+encode_atom(undefined, _Encoder) ->
+    ?CBOR_UNDEFINED;
+% Half-precision +Infinity
+encode_atom(infinity, _Encoder) ->
+    <<16#F9, 16#7C, 16#00>>;
+% Half-precision -Infinity
+encode_atom(neg_infinity, _Encoder) ->
+    <<16#F9, 16#FC, 16#00>>;
+% Half-precision NaN
+encode_atom(nan, _Encoder) ->
+    <<16#F9, 16#7E, 16#00>>;
 encode_atom(Atom, _Encoder) when is_atom(Atom) ->
     Bin = atom_to_binary(Atom, utf8),
     encode_string(Bin).
@@ -420,7 +628,9 @@ The list must contain 2-tuples {Key, Value}. Keys are not checked
 for duplicates.
 """.
 -spec encode_key_value_list([{term(), term()}], encoder()) -> iodata().
-encode_key_value_list(List, Encoder) when is_list(List), is_function(Encoder, 2) ->
+encode_key_value_list(List, Encoder) when
+    is_list(List), is_function(Encoder, 2)
+->
     Len = length(List),
     [encode_head(?MT_MAP, Len) | encode_kv_pairs(List, Encoder)].
 
@@ -430,7 +640,9 @@ Encode a key-value list (proplist) as a CBOR map, checking for duplicate keys.
 Raises {duplicate_key, Key} error if a duplicate key is found.
 """.
 -spec encode_key_value_list_checked([{term(), term()}], encoder()) -> iodata().
-encode_key_value_list_checked(List, Encoder) when is_list(List), is_function(Encoder, 2) ->
+encode_key_value_list_checked(List, Encoder) when
+    is_list(List), is_function(Encoder, 2)
+->
     check_duplicate_keys(List, #{}),
     encode_key_value_list(List, Encoder).
 
@@ -466,12 +678,30 @@ decode(Binary) when is_binary(Binary) ->
     Value.
 
 -doc """
+Decode a CBOR binary using a built-in profile (see the module documentation).
+
+The `default` profile is equivalent to `decode/1`. The `dag` profile performs a
+strict DAG-CBOR decode, rejecting any input that is not in canonical form
+(non-minimal encodings, indefinite-length items, tags other than 42, unsorted
+or non-string map keys, NaN/Infinity, the `undefined` simple value and trailing
+bytes).
+""".
+-spec decode(binary(), profile()) -> decode_value().
+decode(Binary, default) when is_binary(Binary) ->
+    decode(Binary);
+decode(Binary, dag) when is_binary(Binary) ->
+    case decode_value_dag(Binary) of
+        {Value, <<>>} -> Value;
+        {_Value, _Rest} -> error(trailing_bytes)
+    end.
+
+-doc """
 Decode a CBOR binary with custom decoders and accumulator.
 
 Returns `{Result, Acc, Rest}` where Rest is any unconsumed bytes.
 """.
--spec decode(binary(), Acc, decoders()) -> {decode_value(), Acc, binary()}
-    when Acc :: term().
+-spec decode(binary(), Acc, decoders()) -> {decode_value(), Acc, binary()} when
+    Acc :: term().
 decode(Binary, Acc, Decoders) when is_binary(Binary), is_map(Decoders) ->
     {Value, Rest, NewAcc} = decode_value_custom(Binary, Acc, Decoders),
     {Value, NewAcc, Rest}.
@@ -483,7 +713,8 @@ Returns either a complete result or a continuation state if more data is needed.
 """.
 -spec decode_start(binary(), Acc, decoders()) ->
     {decode_value(), Acc, binary()} | {continue, continuation_state()}
-    when Acc :: term().
+when
+    Acc :: term().
 decode_start(Binary, Acc, Decoders) when is_binary(Binary), is_map(Decoders) ->
     try
         {Value, Rest, NewAcc} = decode_value_custom(Binary, Acc, Decoders),
@@ -628,6 +859,107 @@ deterministic_encoder({tag, Tag, Value}, Enc) when is_integer(Tag), Tag >= 0 ->
     encode_tagged(Tag, Value, Enc);
 deterministic_encoder(Term, _Enc) ->
     error({badarg, Term}).
+
+%% @private
+%% DAG-CBOR encoder (https://ipld.io/specs/codecs/dag-cbor/spec/).
+%%
+%% A strict, deterministic profile threaded through the shared `encode_*`
+%% helpers exactly like `default_encoder/2` and `deterministic_encoder/2`. It
+%% differs from the latter by: encoding floats as 64-bit doubles (never the
+%% shortest form), sorting map keys length-first, restricting keys to strings,
+%% representing links as `{cid, binary()}` (tag 42), and rejecting bignums,
+%% NaN/Infinity, `undefined` and every other non-IPLD term.
+-spec dag_encoder(term(), encoder()) -> iodata().
+%% Tiny positive integers (0-23): single byte, most common case
+dag_encoder(N, _Enc) when is_integer(N), N >= 0, N < 24 ->
+    <<N>>;
+%% Small positive integers (24-255): two bytes
+dag_encoder(N, _Enc) when is_integer(N), N >= 24, N =< 16#FF ->
+    <<24, N:8>>;
+%% Medium positive integers (256-65535): three bytes
+dag_encoder(N, _Enc) when is_integer(N), N >= 16#100, N =< 16#FFFF ->
+    <<25, N:16>>;
+%% Remaining unsigned integers up to the 64-bit limit
+dag_encoder(N, _Enc) when is_integer(N), N >= 0, N =< ?MAX_UINT64 ->
+    encode_head(?MT_UNSIGNED, N);
+%% Negative integers down to -2^64 (mirror of the unsigned range)
+dag_encoder(N, _Enc) when is_integer(N), N < 0, N >= -1 - ?MAX_UINT64 ->
+    encode_head(?MT_NEGATIVE, -1 - N);
+%% Integers outside [-2^64, 2^64-1] would need bignums, which DAG-CBOR forbids
+dag_encoder(N, _Enc) when is_integer(N) ->
+    error({integer_out_of_range, N});
+%% Floats are always encoded as 64-bit doubles (Erlang floats are always finite,
+%% so NaN/Infinity never reach here - they are the rejected atoms below)
+dag_encoder(F, _Enc) when is_float(F) ->
+    encode_float(F);
+dag_encoder(Bin, _Enc) when is_binary(Bin) ->
+    encode_binary(Bin);
+dag_encoder(true, _Enc) ->
+    ?CBOR_TRUE;
+dag_encoder(false, _Enc) ->
+    ?CBOR_FALSE;
+dag_encoder(null, _Enc) ->
+    ?CBOR_NULL;
+dag_encoder(List, Enc) when is_list(List) ->
+    encode_list(List, Enc);
+dag_encoder(Map, Enc) when is_map(Map) ->
+    encode_map_dag(Map, Enc);
+dag_encoder({text, Bin}, _Enc) when is_binary(Bin) ->
+    encode_string(Bin);
+dag_encoder({cid, Bin}, _Enc) when is_binary(Bin) ->
+    encode_cid(Bin);
+dag_encoder(Term, _Enc) ->
+    error({badarg, Term}).
+
+%% @private
+%% Encode a map as DAG-CBOR: keys must be strings, sorted length-first then
+%% byte-wise (RFC 8949 calls this the "length-first" ordering; IPLD mandates it).
+%% Sorting on `{byte_size(Key), Key}` is exactly that ordering because Erlang
+%% compares binaries of equal size byte-wise.
+-spec encode_map_dag(map(), encoder()) -> iodata().
+encode_map_dag(Map, _Enc) when map_size(Map) =:= 0 ->
+    <<16#A0>>;
+encode_map_dag(Map, Enc) when is_map(Map) ->
+    Entries = maps:fold(
+        fun(K, V, Acc) ->
+            Key = dag_map_key(K),
+            [{byte_size(Key), Key, Enc(V, Enc)} | Acc]
+        end,
+        [],
+        Map
+    ),
+    Sorted = lists:sort(
+        fun({S1, K1, _}, {S2, K2, _}) -> {S1, K1} =< {S2, K2} end,
+        Entries
+    ),
+    [
+        encode_head(?MT_MAP, map_size(Map))
+        | [[encode_string(K), V] || {_S, K, V} <- Sorted]
+    ].
+
+%% @private
+%% Extract the string bytes of a DAG-CBOR map key. Keys must be strings, so a
+%% `binary()` here is unambiguously a string (unlike a `binary()` value, which
+%% is a byte string). Atoms are accepted as a convenience for hand-built maps.
+-spec dag_map_key(term()) -> binary().
+dag_map_key({text, Bin}) when is_binary(Bin) ->
+    Bin;
+dag_map_key(Bin) when is_binary(Bin) ->
+    Bin;
+dag_map_key(Atom) when is_atom(Atom) ->
+    atom_to_binary(Atom, utf8);
+dag_map_key(Key) ->
+    error({invalid_map_key, Key}).
+
+%% @private
+%% Encode an IPLD link (CID) as tag 42 wrapping a byte string that carries the
+%% mandatory multibase identity (0x00) prefix ahead of the binary CID.
+-spec encode_cid(binary()) -> iodata().
+encode_cid(Cid) when is_binary(Cid) ->
+    [
+        encode_head(?MT_TAG, ?TAG_CID),
+        encode_binary(<<?MULTIBASE_IDENTITY, Cid/binary>>)
+    ].
 
 %% @private
 %% Encode a float using the shortest representation that preserves the value.
@@ -841,7 +1173,8 @@ decode_arg(27, <<V:64, Rest/binary>>) ->
 decode_arg(AI, _Bin) when AI >= 28, AI =< 30 ->
     error({invalid_ai, AI});
 decode_arg(31, _Bin) ->
-    {indefinite, <<>>};  % Handled specially by callers
+    % Handled specially by callers
+    {indefinite, <<>>};
 decode_arg(_, <<>>) ->
     error(incomplete).
 
@@ -986,7 +1319,8 @@ decode_tag(AI, Bin) ->
 
 %% @private
 %% Convert common tags to native types.
--spec decode_tagged(tag(), decode_value(), binary()) -> {decode_value(), binary()}.
+-spec decode_tagged(tag(), decode_value(), binary()) ->
+    {decode_value(), binary()}.
 decode_tagged(?TAG_POSITIVE_BIGNUM, Bytes, Rest) when is_binary(Bytes) ->
     {binary:decode_unsigned(Bytes), Rest};
 decode_tagged(?TAG_NEGATIVE_BIGNUM, Bytes, Rest) when is_binary(Bytes) ->
@@ -1000,10 +1334,14 @@ decode_tagged(Tag, Value, Rest) ->
 %% @private
 %% Decode simple values and floats (major type 7).
 -spec decode_simple(0..31, binary()) -> {decode_value(), binary()}.
-decode_simple(?SIMPLE_FALSE, Bin) -> {false, Bin};
-decode_simple(?SIMPLE_TRUE, Bin) -> {true, Bin};
-decode_simple(?SIMPLE_NULL, Bin) -> {null, Bin};
-decode_simple(?SIMPLE_UNDEFINED, Bin) -> {undefined, Bin};
+decode_simple(?SIMPLE_FALSE, Bin) ->
+    {false, Bin};
+decode_simple(?SIMPLE_TRUE, Bin) ->
+    {true, Bin};
+decode_simple(?SIMPLE_NULL, Bin) ->
+    {null, Bin};
+decode_simple(?SIMPLE_UNDEFINED, Bin) ->
+    {undefined, Bin};
 decode_simple(24, <<V, Rest/binary>>) when V >= 32 ->
     %% Simple value in following byte
     {{simple, V}, Rest};
@@ -1033,7 +1371,9 @@ extract_callbacks(Decoders) ->
     #dec_callbacks{
         array_start = maps:get(array_start, Decoders, fun(_, A) -> A end),
         array_push = maps:get(array_push, Decoders, fun(_, A) -> A end),
-        array_finish = maps:get(array_finish, Decoders, fun(A) -> {default, A} end),
+        array_finish = maps:get(array_finish, Decoders, fun(A) ->
+            {default, A}
+        end),
         map_start = maps:get(map_start, Decoders, fun(_, A) -> A end),
         map_push = maps:get(map_push, Decoders, fun(_, A) -> A end),
         map_finish = maps:get(map_finish, Decoders, fun(A) -> {default, A} end),
@@ -1043,7 +1383,9 @@ extract_callbacks(Decoders) ->
 
 %% @private
 -spec decode_value_custom(binary(), Acc, decoders()) ->
-    {decode_value(), binary(), Acc} when Acc :: term().
+    {decode_value(), binary(), Acc}
+when
+    Acc :: term().
 decode_value_custom(<<>>, _Acc, _Decoders) ->
     error(incomplete);
 decode_value_custom(<<IB, Rest/binary>>, Acc, Decoders) ->
@@ -1057,7 +1399,9 @@ decode_value_custom(<<IB, Rest/binary>>, Acc, Decoders) ->
 %% through all recursive calls, eliminating O(N) maps:get lookups for
 %% arrays/maps of N elements. Pattern inspired by OTP json.erl.
 -spec decode_value_cached(binary(), Acc, #dec_callbacks{}) ->
-    {decode_value(), binary(), Acc} when Acc :: term().
+    {decode_value(), binary(), Acc}
+when
+    Acc :: term().
 decode_value_cached(<<>>, _Acc, _Cbs) ->
     error(incomplete);
 decode_value_cached(<<IB, Rest/binary>>, Acc, Cbs) ->
@@ -1092,11 +1436,12 @@ decode_major_type_cached(?MT_TAG, AI, Bin, Acc, Cbs) ->
     end;
 decode_major_type_cached(?MT_SIMPLE, AI, Bin, Acc, Cbs) ->
     {Value, Rest} = decode_simple(AI, Bin),
-    Value2 = case Value of
-        null -> Cbs#dec_callbacks.null_value;
-        undefined -> Cbs#dec_callbacks.undefined_value;
-        _ -> Value
-    end,
+    Value2 =
+        case Value of
+            null -> Cbs#dec_callbacks.null_value;
+            undefined -> Cbs#dec_callbacks.undefined_value;
+            _ -> Value
+        end,
     {Value2, Rest, Acc}.
 
 %% @private
@@ -1117,10 +1462,11 @@ decode_array_cached(AI, Bin, Acc, Cbs) ->
 decode_array_n_cached(0, Bin, Items, Acc, Cbs) ->
     ArrayFinish = Cbs#dec_callbacks.array_finish,
     {Result, Acc2} = ArrayFinish(Acc),
-    Result2 = case Result of
-        default -> lists:reverse(Items);
-        _ -> Result
-    end,
+    Result2 =
+        case Result of
+            default -> lists:reverse(Items);
+            _ -> Result
+        end,
     {Result2, Bin, Acc2};
 decode_array_n_cached(N, Bin, Items, Acc, Cbs) ->
     {Value, Rest, Acc1} = decode_value_cached(Bin, Acc, Cbs),
@@ -1133,10 +1479,11 @@ decode_array_n_cached(N, Bin, Items, Acc, Cbs) ->
 decode_array_indefinite_cached(<<16#FF, Rest/binary>>, Items, Acc, Cbs) ->
     ArrayFinish = Cbs#dec_callbacks.array_finish,
     {Result, Acc2} = ArrayFinish(Acc),
-    Result2 = case Result of
-        default -> lists:reverse(Items);
-        _ -> Result
-    end,
+    Result2 =
+        case Result of
+            default -> lists:reverse(Items);
+            _ -> Result
+        end,
     {Result2, Rest, Acc2};
 decode_array_indefinite_cached(Bin, Items, Acc, Cbs) ->
     {Value, Rest, Acc1} = decode_value_cached(Bin, Acc, Cbs),
@@ -1164,10 +1511,11 @@ decode_map_cached(AI, Bin, Acc, Cbs) ->
 decode_map_n_cached(0, Bin, Pairs, Acc, Cbs) ->
     MapFinish = Cbs#dec_callbacks.map_finish,
     {Result, Acc2} = MapFinish(Acc),
-    Result2 = case Result of
-        default -> maps:from_list(lists:reverse(Pairs));
-        _ -> Result
-    end,
+    Result2 =
+        case Result of
+            default -> maps:from_list(lists:reverse(Pairs));
+            _ -> Result
+        end,
     {Result2, Bin, Acc2};
 decode_map_n_cached(N, Bin, Pairs, Acc, Cbs) ->
     {Key, Rest1, Acc1} = decode_value_cached(Bin, Acc, Cbs),
@@ -1181,10 +1529,11 @@ decode_map_n_cached(N, Bin, Pairs, Acc, Cbs) ->
 decode_map_indefinite_cached(<<16#FF, Rest/binary>>, Pairs, Acc, Cbs) ->
     MapFinish = Cbs#dec_callbacks.map_finish,
     {Result, Acc2} = MapFinish(Acc),
-    Result2 = case Result of
-        default -> maps:from_list(lists:reverse(Pairs));
-        _ -> Result
-    end,
+    Result2 =
+        case Result of
+            default -> maps:from_list(lists:reverse(Pairs));
+            _ -> Result
+        end,
     {Result2, Rest, Acc2};
 decode_map_indefinite_cached(Bin, Pairs, Acc, Cbs) ->
     {Key, Rest1, Acc1} = decode_value_cached(Bin, Acc, Cbs),
@@ -1192,7 +1541,6 @@ decode_map_indefinite_cached(Bin, Pairs, Acc, Cbs) ->
     MapPush = Cbs#dec_callbacks.map_push,
     Acc3 = MapPush({Key, Value}, Acc2),
     decode_map_indefinite_cached(Rest2, [{Key, Value} | Pairs], Acc3, Cbs).
-
 
 %% @private
 %% Continue decoding from a continuation state.
@@ -1203,6 +1551,203 @@ continue_decode(Bin, [], Acc, Decoders) ->
 continue_decode(_Bin, _Stack, _Acc, _Decoders) ->
     %% More complex continuation handling would go here
     error(not_implemented).
+
+%%====================================================================
+%% Internal - DAG-CBOR Decoding (strict)
+%%====================================================================
+%%
+%% A separate, strict recursive descent. Unlike the lenient `decode_value/1`
+%% path it rejects anything that is not canonical DAG-CBOR: non-minimal
+%% arguments, indefinite-length items, tags other than 42, non-string or
+%% unsorted map keys, half/single-precision and special floats, the `undefined`
+%% simple value and unassigned simple values.
+
+%% @private
+-spec decode_value_dag(binary()) -> {decode_value(), binary()}.
+decode_value_dag(<<>>) ->
+    error(incomplete);
+decode_value_dag(<<IB, Rest/binary>>) ->
+    MT = IB bsr 5,
+    AI = IB band 16#1F,
+    decode_major_dag(MT, AI, Rest).
+
+%% @private
+-spec decode_major_dag(0..7, 0..31, binary()) -> {decode_value(), binary()}.
+decode_major_dag(?MT_UNSIGNED, AI, Bin) ->
+    decode_arg_dag(AI, Bin);
+decode_major_dag(?MT_NEGATIVE, AI, Bin) ->
+    {N, Rest} = decode_arg_dag(AI, Bin),
+    {-1 - N, Rest};
+decode_major_dag(?MT_BYTES, AI, Bin) ->
+    decode_bytes_dag(AI, Bin);
+decode_major_dag(?MT_TEXT, AI, Bin) ->
+    {Text, Rest} = decode_text_dag(AI, Bin),
+    {{text, Text}, Rest};
+decode_major_dag(?MT_ARRAY, AI, Bin) ->
+    decode_array_dag(AI, Bin);
+decode_major_dag(?MT_MAP, AI, Bin) ->
+    decode_map_dag(AI, Bin);
+decode_major_dag(?MT_TAG, AI, Bin) ->
+    decode_tag_dag(AI, Bin);
+decode_major_dag(?MT_SIMPLE, AI, Bin) ->
+    decode_simple_dag(AI, Bin).
+
+%% @private
+%% Decode an argument enforcing the minimal-length encoding rule: a value must
+%% use the shortest of the inline / 1 / 2 / 4 / 8 byte forms. Indefinite (31)
+%% and reserved (28-30) additional information values are rejected.
+-spec decode_arg_dag(0..31, binary()) -> {non_neg_integer(), binary()}.
+decode_arg_dag(AI, Bin) when AI < ?AI_1BYTE ->
+    {AI, Bin};
+decode_arg_dag(?AI_1BYTE, <<V, Rest/binary>>) when V >= ?AI_1BYTE ->
+    {V, Rest};
+decode_arg_dag(?AI_2BYTE, <<V:16, Rest/binary>>) when V > ?MAX_UINT8 ->
+    {V, Rest};
+decode_arg_dag(?AI_4BYTE, <<V:32, Rest/binary>>) when V > ?MAX_UINT16 ->
+    {V, Rest};
+decode_arg_dag(?AI_8BYTE, <<V:64, Rest/binary>>) when V > ?MAX_UINT32 ->
+    {V, Rest};
+decode_arg_dag(AI, _Bin) when AI >= ?AI_1BYTE, AI =< ?AI_8BYTE ->
+    %% Right additional info, but the value was not minimally encoded (or the
+    %% input was truncated) - either way it is not valid DAG-CBOR.
+    error(non_minimal_argument);
+decode_arg_dag(?AI_INDEFINITE, _Bin) ->
+    error(indefinite_not_supported);
+decode_arg_dag(AI, _Bin) ->
+    error({reserved_additional_info, AI}).
+
+%% @private
+-spec decode_bytes_dag(0..31, binary()) -> {binary(), binary()}.
+decode_bytes_dag(?AI_INDEFINITE, _Bin) ->
+    error(indefinite_not_supported);
+decode_bytes_dag(AI, Bin) ->
+    {Len, Rest} = decode_arg_dag(AI, Bin),
+    case Rest of
+        <<Bytes:Len/binary, Rest2/binary>> -> {Bytes, Rest2};
+        _ -> error(incomplete)
+    end.
+
+%% @private
+%% UTF-8 validation is skipped for performance, consistent with the lenient
+%% decoder. All conformant DAG-CBOR strings are valid UTF-8.
+-spec decode_text_dag(0..31, binary()) -> {binary(), binary()}.
+decode_text_dag(?AI_INDEFINITE, _Bin) ->
+    error(indefinite_not_supported);
+decode_text_dag(AI, Bin) ->
+    {Len, Rest} = decode_arg_dag(AI, Bin),
+    case Rest of
+        <<Text:Len/binary, Rest2/binary>> -> {Text, Rest2};
+        _ -> error(incomplete)
+    end.
+
+%% @private
+%% Uses the `<<Bin/binary>>` wrapper for the binary match-context reuse
+%% optimization, like the lenient `decode_array_n/3`.
+-spec decode_array_dag(0..31, binary()) -> {list(), binary()}.
+decode_array_dag(?AI_INDEFINITE, _Bin) ->
+    error(indefinite_not_supported);
+decode_array_dag(AI, Bin) ->
+    {Len, Rest} = decode_arg_dag(AI, Bin),
+    decode_array_dag_n(Len, Rest, []).
+
+%% @private
+decode_array_dag_n(0, <<Bin/binary>>, Acc) ->
+    {lists:reverse(Acc), Bin};
+decode_array_dag_n(N, <<Bin/binary>>, Acc) ->
+    {Value, Rest} = decode_value_dag(Bin),
+    decode_array_dag_n(N - 1, Rest, [Value | Acc]).
+
+%% @private
+%% Decode a map, enforcing string keys in strictly ascending DAG order. The
+%% order check also rejects duplicate keys (equal keys are not strictly
+%% ascending), so `maps:from_list/1` never silently drops a pair.
+-spec decode_map_dag(0..31, binary()) -> {map(), binary()}.
+decode_map_dag(?AI_INDEFINITE, _Bin) ->
+    error(indefinite_not_supported);
+decode_map_dag(AI, Bin) ->
+    {Len, Rest} = decode_arg_dag(AI, Bin),
+    decode_map_dag_pairs(Len, Rest, [], first).
+
+%% @private
+decode_map_dag_pairs(0, Bin, Acc, _Prev) ->
+    {maps:from_list(Acc), Bin};
+decode_map_dag_pairs(N, Bin, Acc, Prev) ->
+    {Key, Rest1} = decode_dag_key(Bin),
+    ok = check_key_order(Prev, Key),
+    {Value, Rest2} = decode_value_dag(Rest1),
+    decode_map_dag_pairs(N - 1, Rest2, [{Key, Value} | Acc], Key).
+
+%% @private
+%% Decode a map key: it must be a (minimally encoded, definite-length) text
+%% string. The string content is returned as a `binary()`.
+-spec decode_dag_key(binary()) -> {binary(), binary()}.
+decode_dag_key(<<IB, Rest/binary>>) when IB bsr 5 =:= ?MT_TEXT ->
+    decode_text_dag(IB band 16#1F, Rest);
+decode_dag_key(_Bin) ->
+    error(non_string_map_key).
+
+%% @private
+check_key_order(first, _Key) ->
+    ok;
+check_key_order(Prev, Key) ->
+    PrevSize = byte_size(Prev),
+    KeySize = byte_size(Key),
+    case
+        PrevSize < KeySize orelse
+            (PrevSize =:= KeySize andalso Prev < Key)
+    of
+        true -> ok;
+        false -> error(unordered_map_keys)
+    end.
+
+%% @private
+%% The only tag permitted by DAG-CBOR is 42 (a CID/link), which must wrap a byte
+%% string whose first byte is the multibase identity prefix (0x00).
+-spec decode_tag_dag(0..31, binary()) -> {{cid, binary()}, binary()}.
+decode_tag_dag(AI, Bin) ->
+    {Tag, Rest} = decode_arg_dag(AI, Bin),
+    Tag =:= ?TAG_CID orelse error({unsupported_tag, Tag}),
+    case Rest of
+        <<IB, Rest1/binary>> when IB bsr 5 =:= ?MT_BYTES ->
+            {Bytes, Rest2} = decode_bytes_dag(IB band 16#1F, Rest1),
+            decode_cid(Bytes, Rest2);
+        _ ->
+            error(cid_not_byte_string)
+    end.
+
+%% @private
+decode_cid(<<?MULTIBASE_IDENTITY, Cid/binary>>, Rest) ->
+    {{cid, Cid}, Rest};
+decode_cid(_Bytes, _Rest) ->
+    error(invalid_cid_multibase_prefix).
+
+%% @private
+%% Major type 7 is restricted to false/true/null and 64-bit floats. The float
+%% binary match naturally rejects NaN/Infinity bit patterns (Erlang floats
+%% cannot represent them), so only finite doubles succeed.
+-spec decode_simple_dag(0..31, binary()) -> {decode_value(), binary()}.
+decode_simple_dag(?SIMPLE_FALSE, Bin) ->
+    {false, Bin};
+decode_simple_dag(?SIMPLE_TRUE, Bin) ->
+    {true, Bin};
+decode_simple_dag(?SIMPLE_NULL, Bin) ->
+    {null, Bin};
+decode_simple_dag(?AI_DOUBLE_FLOAT, <<F:64/float, Rest/binary>>) ->
+    {F, Rest};
+decode_simple_dag(?AI_DOUBLE_FLOAT, <<_:64, _/binary>>) ->
+    error(special_float_not_supported);
+decode_simple_dag(?AI_DOUBLE_FLOAT, _Bin) ->
+    error(incomplete);
+decode_simple_dag(?AI_HALF_FLOAT, _Bin) ->
+    error(non_minimal_float);
+decode_simple_dag(?AI_SINGLE_FLOAT, _Bin) ->
+    error(non_minimal_float);
+decode_simple_dag(?SIMPLE_UNDEFINED, _Bin) ->
+    error(undefined_not_supported);
+decode_simple_dag(?AI_INDEFINITE, _Bin) ->
+    error(unexpected_break);
+decode_simple_dag(AI, _Bin) ->
+    error({unsupported_simple_value, AI}).
 
 %%====================================================================
 %% Internal - Formatting (Diagnostic Notation)
@@ -1245,11 +1790,13 @@ format_value({simple, N}) when is_integer(N) ->
 %% @private
 format_float(F) ->
     case F of
-        _ when F =/= F ->  % NaN check
+        % NaN check
+        _ when F =/= F ->
             "NaN";
         _ ->
             case is_float(F) andalso F > 0 andalso F * 2 =:= F of
-                true -> "Infinity";
+                true ->
+                    "Infinity";
                 false ->
                     case is_float(F) andalso F < 0 andalso F * 2 =:= F of
                         true -> "-Infinity";
@@ -1283,7 +1830,7 @@ format_map(Map) ->
 
 %% @private
 binary_to_hex(Bin) ->
-    << <<(hex_digit(H)), (hex_digit(L))>> || <<H:4, L:4>> <= Bin >>.
+    <<<<(hex_digit(H)), (hex_digit(L))>> || <<H:4, L:4>> <= Bin>>.
 
 %% @private
 hex_digit(N) when N < 10 -> $0 + N;

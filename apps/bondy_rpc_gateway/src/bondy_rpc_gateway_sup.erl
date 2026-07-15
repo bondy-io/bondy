@@ -36,14 +36,9 @@ bondy_rpc_gateway_sup (rest_for_one)
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
-
-
-
 %% =============================================================================
 %% CALLBACKS
 %% =============================================================================
-
-
 
 -doc false.
 init([]) ->
@@ -60,7 +55,6 @@ init([]) ->
                     description => "No services configured, skipping startup"
                 }),
                 [];
-
             L when is_list(L) ->
                 ?LOG_NOTICE(#{
                     description => io_lib:format(
@@ -73,15 +67,12 @@ init([]) ->
 
     {ok, {SupFlags, Children}}.
 
-
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
 children() ->
-     [
+    [
         #{
             id => bondy_rpc_gateway_token_cache_sup,
             start => {
@@ -125,5 +116,3 @@ children() ->
             modules => [bondy_rpc_gateway_manager]
         }
     ].
-
-

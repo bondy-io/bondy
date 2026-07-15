@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>bondy_db: the operation-based re-grounding (Canteen × MST)</title>
+<style>
+  :root{
+    --keep-s:#2e7d32; --keep-f:#e8f5e9;
+    --change-s:#ef6c00; --change-f:#fff3e0;
+    --remove-s:#c62828; --remove-f:#ffebee;
+    --infra-s:#546e7a; --infra-f:#eceff1;
+    --ink:#1b2733; --muted:#5b6b7a;
+  }
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+       color:var(--ink); margin:0; background:#fafbfc;}
+  header{padding:28px 32px 8px;}
+  h1{font-size:22px; margin:0 0 4px;}
+  .sub{color:var(--muted); font-size:14px; max-width:980px; line-height:1.5;}
+  .legend{display:flex; gap:18px; flex-wrap:wrap; padding:14px 32px 6px; font-size:13px;}
+  .legend span{display:inline-flex; align-items:center; gap:7px;}
+  .sw{width:15px; height:15px; border-radius:3px; border:2px solid;}
+  .sw.keep{background:var(--keep-f); border-color:var(--keep-s);}
+  .sw.change{background:var(--change-f); border-color:var(--change-s);}
+  .sw.remove{background:var(--remove-f); border-color:var(--remove-s);}
+  .sw.infra{background:var(--infra-f); border-color:var(--infra-s);}
+  section{padding:8px 32px 26px;}
+  h2{font-size:17px; margin:18px 0 2px;}
+  .cap{color:var(--muted); font-size:13px; margin:0 0 8px; max-width:980px; line-height:1.5;}
+  svg{max-width:100%; height:auto; background:#fff; border:1px solid #e2e8f0; border-radius:10px;}
+  /* SVG element classes */
+  .band{fill:none; stroke-width:1.5; stroke-dasharray:7 5; rx:12;}
+  .band.keep{stroke:var(--keep-s);} .band.change{stroke:var(--change-s);} .band.remove{stroke:var(--remove-s);}
+  .bandfill.keep{fill:#f3faf5;} .bandfill.change{fill:#fff8f0;} .bandfill.remove{fill:#fdf2f1;}
+  .box{stroke-width:2; rx:9;}
+  .box.keep{fill:var(--keep-f); stroke:var(--keep-s);}
+  .box.change{fill:var(--change-f); stroke:var(--change-s);}
+  .box.remove{fill:var(--remove-f); stroke:var(--remove-s);}
+  .box.infra{fill:var(--infra-f); stroke:var(--infra-s);}
+  .box.dash{stroke-dasharray:6 4;}
+  .t{font-size:13px; fill:var(--ink); text-anchor:middle; font-weight:600;}
+  .t small,.ts{font-size:11px; font-weight:400; fill:var(--muted);}
+  .bandlbl{font-size:13px; font-weight:700;}
+  .bandlbl.keep{fill:var(--keep-s);} .bandlbl.change{fill:var(--change-s);} .bandlbl.remove{fill:var(--remove-s);}
+  .edge{fill:none; stroke:#445; stroke-width:2;}
+  .edge.dash{stroke-dasharray:6 5; stroke:#90a;}
+  .elbl{font-size:11px; fill:#445; text-anchor:middle;}
+  .elbl.dash{fill:#90a;}
+  footer{padding:0 32px 40px; color:var(--muted); font-size:12.5px; max-width:980px; line-height:1.5;}
+  code{background:#eef2f5; padding:1px 5px; border-radius:4px; font-size:12px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>bondy_db: the operation-based re-grounding (Canteen × MST)</h1>
+  <p class="sub">The substrate is <b>two layers</b>. Layer 1 (the MST op-log substrate,
+  <i>Auvolat &amp; Taïani</i>) reconciles a grow-only <b>set of operations</b> — legitimately state-based, and
+  correct. Layer 2 (the application CRDT, <i>Canteen / McCrary</i>) produces state by replaying the log through
+  the <b>COG-Interpreter</b> <code>interpret_cog</code>. This re-grounding made <code>interpret_cog</code> the
+  catalogue's sole kernel while preserving every performance lever; it is <b>complete and as-built</b>. The
+  panels below trace the correction: <b>§1 the state-based-fold design that was corrected</b>, <b>§2 a snapshot
+  mid-correction</b>, and <b>§3 the as-built operation-based architecture</b>. The narrative version lives in
+  <a href="architecture/05_crdt_model.md">the CRDT model</a> and
+  <a href="architecture_regrounding_plan.md">the design rationale</a>.</p>
+</header>
+
+<div class="legend">
+  <span><i class="sw keep"></i> Keep (unchanged)</span>
+  <span><i class="sw change"></i> Change / redirect</span>
+  <span><i class="sw remove"></i> Remove (deprecated)</span>
+  <span><i class="sw infra"></i> Storage / infra (kept)</span>
+  <span style="color:#90a">— · — dashed = sidelined / compaction-only relationship</span>
+</div>
+
+<!-- ============================== CURRENT ============================== -->
+<section>
+  <h2>1 · Before — the state-based-fold design (corrected)</h2>
+  <p class="cap">Local writes land in the MST op-set (Layer 1, correct). The applier then builds the projection
+  <b>incrementally via <code>apply_event</code> in arrival order</b> using the deprecated state-based folds, and
+  bootstrap uses a <code>merge_states</code> state-join. The real COG-Interpreter (<code>bondy_oplog_crdt</code>)
+  exists but is sidelined — used only at compaction/query, with zero production CRDTs.</p>
+
+  <svg viewBox="0 0 980 700" role="img" aria-label="Current architecture diagram">
+    <defs>
+      <marker id="a1" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto">
+        <path d="M0,0 L8,4 L0,8 z" fill="#445"/></marker>
+      <marker id="a1d" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto">
+        <path d="M0,0 L8,4 L0,8 z" fill="#90a"/></marker>
+      <marker id="a1s" markerWidth="9" markerHeight="9" refX="0.5" refY="4" orient="auto">
+        <path d="M8,0 L0,4 L8,8 z" fill="#445"/></marker>
+    </defs>
+
+    <!-- Layer 1 band -->
+    <rect class="bandfill keep" x="20" y="55" width="940" height="168" rx="12"/>
+    <rect class="band keep" x="20" y="55" width="940" height="168"/>
+    <text class="bandlbl keep" x="34" y="78">LAYER 1 · Operation-log substrate — CORRECT (MST paper): grow-only op-SET, state-based union</text>
+
+    <rect class="box keep" x="60" y="110" width="170" height="66"/>
+    <text class="t" x="145" y="139">WAL<tspan class="ts" x="145" dy="17">group commit · fsync</tspan></text>
+
+    <rect class="box keep" x="405" y="104" width="190" height="80"/>
+    <text class="t" x="500" y="130">MST = op-SET<tspan class="ts" x="500" dy="16">dots {HLC,Origin,Seq}</tspan><tspan class="ts" x="500" dy="15">state-based union</tspan></text>
+
+    <rect class="box keep" x="770" y="110" width="170" height="66"/>
+    <text class="t" x="855" y="139">Anti-entropy<tspan class="ts" x="855" dy="17">δ-swaps · roots</tspan></text>
+
+    <path class="edge" d="M230,143 L405,143" marker-end="url(#a1)"/>
+    <path class="edge" d="M770,143 L595,143" marker-end="url(#a1)" marker-start="url(#a1s)"/>
+
+    <!-- MST -> applier -->
+    <path class="edge" d="M500,184 L500,305" marker-end="url(#a1)"/>
+    <text class="elbl" x="520" y="246" text-anchor="start">events</text>
+
+    <!-- Layer 2 band -->
+    <rect class="bandfill remove" x="20" y="250" width="940" height="420" rx="12"/>
+    <rect class="band remove" x="20" y="250" width="940" height="420"/>
+    <text class="bandlbl remove" x="34" y="273">LAYER 2 · Application CRDT — DRIFTED (state-based folds)</text>
+
+    <rect class="box change" x="395" y="305" width="210" height="80"/>
+    <text class="t" x="500" y="333">applier · compute_one_cell:1714<tspan class="ts" x="500" dy="16">apply_event()</tspan><tspan class="ts" x="500" dy="15">incremental · arrival-order</tspan></text>
+
+    <rect class="box remove" x="720" y="305" width="210" height="80"/>
+    <text class="t" x="825" y="333">bootstrap merge-mode<tspan class="ts" x="825" dy="16">merge_states</tspan><tspan class="ts" x="825" dy="15">(state join)</tspan></text>
+
+    <rect class="box remove" x="70" y="470" width="220" height="92"/>
+    <text class="t" x="180" y="502">bondy_oplog_fold_* (13)<tspan class="ts" x="180" dy="16">apply_event + merge_states</tspan><tspan class="ts" x="180" dy="15" font-weight="700" fill="#c62828">DEPRECATED</tspan></text>
+
+    <rect class="box infra" x="700" y="470" width="230" height="92"/>
+    <text class="t" x="815" y="502">Projection (leveled / ETS)<tspan class="ts" x="815" dy="16">cell = {state, value}</tspan><tspan class="ts" x="815" dy="15">= Canteen Domain-DB</tspan></text>
+
+    <rect class="box change dash" x="375" y="585" width="250" height="78"/>
+    <text class="t" x="500" y="613">bondy_oplog_crdt · interpret_cog<tspan class="ts" x="500" dy="16">EXISTS — only compaction + query</tspan><tspan class="ts" x="500" dy="15">ZERO production CRDTs</tspan></text>
+
+    <!-- L2 edges -->
+    <path class="edge" d="M440,385 L440,430 L180,430 L180,470" marker-end="url(#a1)"/>
+    <text class="elbl" x="300" y="423">uses apply_event</text>
+
+    <path class="edge" d="M560,385 L560,448 L815,448 L815,470" marker-end="url(#a1)"/>
+    <text class="elbl" x="640" y="441">write {state,value}</text>
+
+    <path class="edge" d="M825,385 L825,470" marker-end="url(#a1)"/>
+    <text class="elbl" x="880" y="430" text-anchor="start">merge</text>
+
+    <!-- MST ⟿ interpret_cog (sidelined), far-left L route -->
+    <path class="edge dash" d="M405,150 L40,150 L40,624 L375,624" marker-end="url(#a1d)"/>
+    <text class="elbl dash" x="120" y="142" text-anchor="start">compaction / query only</text>
+  </svg>
+</section>
+
+<!-- ============================== AS-BUILT ============================== -->
+<section>
+  <h2>2 · The correction, mid-flight (historical snapshot)</h2>
+  <p class="cap">Where the code actually sits today, between the drifted baseline (§1) and the target (§3).
+  Layer 1 is untouched. For a table with a <code>crdt_module</code> the applier's per-cell <b>kernel</b> runs the
+  operation-based path (<code>interpret_cog</code>) on <i>both</i> the write seam (step&nbsp;3) and the read seam
+  (step&nbsp;3b); the legacy <code>fold</code> kernel still exists and is the <b>default</b> (byte-identical).
+  The projection is <b>eagerly materialised</b> by the applier (Option&nbsp;B), so it <i>is</i> the per-cell
+  <code>interpret_cog</code> checkpoint — hence <b>compaction is pure COG-stability GC with no separate
+  checkpoint re-fold</b> (step&nbsp;4). That is the one deliberate <b>deviation</b> from §3's compaction box
+  (which draws a redundant <code>interpret_cog(stable&nbsp;COG)→checkpoint</code> step that Option&nbsp;B does not
+  need). Native non-commutative CRDTs, the default flip, and removing <code>merge_states</code> are steps 5–8.</p>
+
+  <svg viewBox="0 0 980 720" role="img" aria-label="As-built architecture diagram">
+    <defs>
+      <marker id="a3" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto">
+        <path d="M0,0 L8,4 L0,8 z" fill="#445"/></marker>
+      <marker id="a3d" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto">
+        <path d="M0,0 L8,4 L0,8 z" fill="#90a"/></marker>
+      <marker id="a3s" markerWidth="9" markerHeight="9" refX="0.5" refY="4" orient="auto">
+        <path d="M8,0 L0,4 L8,8 z" fill="#445"/></marker>
+    </defs>
+
+    <!-- Layer 1 band (unchanged) -->
+    <rect class="bandfill keep" x="20" y="55" width="940" height="168" rx="12"/>
+    <rect class="band keep" x="20" y="55" width="940" height="168"/>
+    <text class="bandlbl keep" x="34" y="78">LAYER 1 · Operation-log substrate — UNCHANGED (grow-only op-SET, state-based union)</text>
+
+    <rect class="box keep" x="60" y="110" width="170" height="66"/>
+    <text class="t" x="145" y="139">WAL<tspan class="ts" x="145" dy="17">group commit · fsync</tspan></text>
+
+    <rect class="box keep" x="405" y="104" width="190" height="80"/>
+    <text class="t" x="500" y="130">MST = op-SET<tspan class="ts" x="500" dy="16">dots {HLC,Origin,Seq}</tspan><tspan class="ts" x="500" dy="15">state-based union</tspan></text>
+
+    <rect class="box keep" x="770" y="110" width="170" height="66"/>
+    <text class="t" x="855" y="139">Anti-entropy<tspan class="ts" x="855" dy="17">δ-swaps · roots</tspan></text>
+
+    <path class="edge" d="M230,143 L405,143" marker-end="url(#a3)"/>
+    <path class="edge" d="M770,143 L595,143" marker-end="url(#a3)" marker-start="url(#a3s)"/>
+    <path class="edge" d="M500,184 L500,298" marker-end="url(#a3)"/>
+    <text class="elbl" x="520" y="244" text-anchor="start">events</text>
+
+    <!-- Layer 2 band (as-built · transitional) -->
+    <rect class="bandfill change" x="20" y="250" width="940" height="450" rx="12"/>
+    <rect class="band change" x="20" y="250" width="940" height="450"/>
+    <text class="bandlbl change" x="34" y="273">LAYER 2 · Application CRDT — AS-BUILT (interpret_cog for crdt tables; fold kernel still the default)</text>
+
+    <!-- applier kernel -->
+    <rect class="box change" x="338" y="298" width="304" height="86"/>
+    <text class="t" x="490" y="324">applier · cell kernel {fold | crdt}<tspan class="ts" x="490" dy="16">crdt_module wins per table · default = fold</tspan><tspan class="ts" x="490" dy="15">crdt: apply_op ≡ interpret_cog · non-comm REFUSED →5</tspan></text>
+
+    <!-- native CRDTs -->
+    <rect class="box keep" x="40" y="452" width="212" height="96"/>
+    <text class="t" x="146" y="482">bondy_oplog_crdt_* (native)<tspan class="ts" x="146" dy="16">lww_register · bounded_counter</tspan><tspan class="ts" x="146" dy="15">(g_set fixture; rest still folds →5/6)</tspan></text>
+
+    <!-- deprecated folds -->
+    <rect class="box remove" x="268" y="452" width="212" height="96"/>
+    <text class="t" x="374" y="482">bondy_oplog_fold_* (13)<tspan class="ts" x="374" dy="16">apply_event · DEPRECATED</tspan><tspan class="ts" x="374" dy="15" font-weight="700" fill="#c62828">still the DEFAULT path →6–8</tspan></text>
+
+    <!-- compaction GC -->
+    <rect class="box keep" x="496" y="452" width="220" height="96"/>
+    <text class="t" x="606" y="479">Compaction = COG-stability GC<tspan class="ts" x="606" dy="16">replay-before-truncate → truncate MST</tspan><tspan class="ts" x="606" dy="15" font-weight="700" fill="#ef6c00">no checkpoint re-fold</tspan></text>
+
+    <!-- projection -->
+    <rect class="box infra" x="732" y="452" width="208" height="96"/>
+    <text class="t" x="836" y="479">Projection (leveled / ETS)<tspan class="ts" x="836" dy="16">eager-materialised (Option B)</tspan><tspan class="ts" x="836" dy="15">= per-cell interpret_cog checkpoint</tspan></text>
+
+    <!-- bootstrap merge_states -->
+    <rect class="box remove" x="268" y="588" width="212" height="74"/>
+    <text class="t" x="374" y="616">bootstrap merge-mode<tspan class="ts" x="374" dy="16">merge_states (state join)</tspan><tspan class="ts" x="374" dy="15" font-weight="700" fill="#c62828">still present →7</tspan></text>
+
+    <!-- deviation callout -->
+    <rect class="box change dash" x="496" y="588" width="220" height="74"/>
+    <text class="t" x="606" y="611" fill="#ef6c00">▲ DEVIATION vs §3<tspan class="ts" x="606" dy="16">target: interpret_cog(stable COG)→checkpoint</tspan><tspan class="ts" x="606" dy="15">as-built: eager projection IS the checkpoint</tspan></text>
+
+    <!-- read -->
+    <rect class="box keep dash" x="732" y="588" width="208" height="74"/>
+    <text class="t" x="836" y="612">Read<tspan class="ts" x="836" dy="16">stable ← projection (O(1))</tspan><tspan class="ts" x="836" dy="15">RYW ← interpret_cog(live, proj)</tspan></text>
+
+    <!-- L2 edges -->
+    <path class="edge" d="M420,384 L420,420 L146,420 L146,452" marker-end="url(#a3)"/>
+    <text class="elbl" x="270" y="413">interpret_cog · crdt tables</text>
+
+    <path class="edge dash" d="M470,384 L470,436 L374,436 L374,452" marker-end="url(#a3d)"/>
+    <text class="elbl dash" x="486" y="430" text-anchor="start">apply_event · default</text>
+
+    <path class="edge" d="M580,384 L580,432 L836,432 L836,452" marker-end="url(#a3)"/>
+    <text class="elbl" x="700" y="425">materialise · eager</text>
+
+    <path class="edge" d="M836,548 L836,588" marker-end="url(#a3)"/>
+    <text class="elbl" x="862" y="576" text-anchor="start">serve</text>
+
+    <!-- MST stable prefix → compaction GC (far-left dashed route) -->
+    <path class="edge dash" d="M405,150 L40,150 L40,500 L496,500" marker-end="url(#a3d)"/>
+    <text class="elbl dash" x="60" y="142" text-anchor="start">stable prefix → COG-stability GC · truncate (no re-fold)</text>
+  </svg>
+</section>
+
+<!-- ============================== TARGET ============================== -->
+<section>
+  <h2>3 · As-built — operation-based (Canteen × MST)</h2>
+  <p class="cap">Layer 1 is untouched. The applier's per-cell kernel becomes <code>interpret_cog</code> — the
+  <b>sole</b> semantics — backed by native <code>bondy_oplog_crdt_*</code> modules. Compaction folds each stable
+  COG into a real checkpoint in the projection (Canteen's Domain-Specific DB) and truncates the MST. Reads are
+  O(1) from the materialised projection; read-your-writes folds the live group via <code>interpret_cog</code>.
+  All deprecated state-based machinery is removed.</p>
+
+  <svg viewBox="0 0 980 700" role="img" aria-label="Target architecture diagram">
+    <defs>
+      <marker id="a2" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto">
+        <path d="M0,0 L8,4 L0,8 z" fill="#445"/></marker>
+      <marker id="a2d" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto">
+        <path d="M0,0 L8,4 L0,8 z" fill="#90a"/></marker>
+      <marker id="a2s" markerWidth="9" markerHeight="9" refX="0.5" refY="4" orient="auto">
+        <path d="M8,0 L0,4 L8,8 z" fill="#445"/></marker>
+    </defs>
+
+    <!-- Layer 1 band (unchanged) -->
+    <rect class="bandfill keep" x="20" y="55" width="940" height="168" rx="12"/>
+    <rect class="band keep" x="20" y="55" width="940" height="168"/>
+    <text class="bandlbl keep" x="34" y="78">LAYER 1 · Operation-log substrate — UNCHANGED (grow-only op-SET, state-based union)</text>
+
+    <rect class="box keep" x="60" y="110" width="170" height="66"/>
+    <text class="t" x="145" y="139">WAL<tspan class="ts" x="145" dy="17">group commit · fsync</tspan></text>
+
+    <rect class="box keep" x="405" y="104" width="190" height="80"/>
+    <text class="t" x="500" y="130">MST = op-SET<tspan class="ts" x="500" dy="16">dots {HLC,Origin,Seq}</tspan><tspan class="ts" x="500" dy="15">state-based union</tspan></text>
+
+    <rect class="box keep" x="770" y="110" width="170" height="66"/>
+    <text class="t" x="855" y="139">Anti-entropy<tspan class="ts" x="855" dy="17">δ-swaps · roots</tspan></text>
+
+    <path class="edge" d="M230,143 L405,143" marker-end="url(#a2)"/>
+    <path class="edge" d="M770,143 L595,143" marker-end="url(#a2)" marker-start="url(#a2s)"/>
+
+    <path class="edge" d="M500,184 L500,305" marker-end="url(#a2)"/>
+    <text class="elbl" x="520" y="246" text-anchor="start">events</text>
+
+    <!-- Layer 2 band (operation-based) -->
+    <rect class="bandfill keep" x="20" y="250" width="940" height="420" rx="12"/>
+    <rect class="band keep" x="20" y="250" width="940" height="420"/>
+    <text class="bandlbl keep" x="34" y="273">LAYER 2 · Application CRDT — OPERATION-BASED (Canteen COG-Interpreter)</text>
+
+    <rect class="box keep" x="360" y="302" width="280" height="86"/>
+    <text class="t" x="500" y="330">applier · interpret_cog(COG, state)<tspan class="ts" x="500" dy="16" font-weight="700" fill="#2e7d32">SOLE kernel</tspan><tspan class="ts" x="500" dy="15">commutative: fold O(1) · non-comm: re-interpret group</tspan></text>
+
+    <rect class="box keep" x="60" y="470" width="240" height="92"/>
+    <text class="t" x="180" y="500">bondy_oplog_crdt_* native CRDTs<tspan class="ts" x="180" dy="16">interpret_cog / to_value / query</tspan><tspan class="ts" x="180" dy="15">lww · g_set · counters · aw_map · bounded_counter</tspan></text>
+
+    <rect class="box keep" x="370" y="470" width="240" height="92"/>
+    <text class="t" x="490" y="500">Compaction = COG-stability GC<tspan class="ts" x="490" dy="16">interpret_cog(stable COG)</tspan><tspan class="ts" x="490" dy="15">→ checkpoint → truncate MST</tspan></text>
+
+    <rect class="box infra" x="690" y="470" width="240" height="92"/>
+    <text class="t" x="810" y="500">Projection = Domain-Specific DB<tspan class="ts" x="810" dy="16">(leveled / ETS)</tspan><tspan class="ts" x="810" dy="15">materialised stable view</tspan></text>
+
+    <rect class="box keep dash" x="690" y="590" width="240" height="70"/>
+    <text class="t" x="810" y="618">Read<tspan class="ts" x="810" dy="16">stable ← projection (O(1))</tspan><tspan class="ts" x="810" dy="15">unstable/RYW ← interpret_cog(live, snap)</tspan></text>
+
+    <!-- L2 edges -->
+    <path class="edge" d="M430,388 L430,432 L180,432 L180,470" marker-end="url(#a2)"/>
+    <text class="elbl" x="300" y="425">interpret_cog</text>
+
+    <path class="edge" d="M575,388 L575,448 L810,448 L810,470" marker-end="url(#a2)"/>
+    <text class="elbl" x="660" y="441">materialise value</text>
+
+    <path class="edge" d="M610,516 L690,516" marker-end="url(#a2)"/>
+    <text class="elbl" x="650" y="508">checkpoint</text>
+
+    <path class="edge" d="M810,562 L810,590" marker-end="url(#a2)"/>
+    <text class="elbl" x="836" y="580" text-anchor="start">serve</text>
+
+    <!-- MST -> compaction (stable prefix), far-left L route -->
+    <path class="edge dash" d="M405,150 L40,150 L40,516 L370,516" marker-end="url(#a2d)"/>
+    <text class="elbl dash" x="120" y="142" text-anchor="start">stable prefix → COG-stability GC</text>
+  </svg>
+</section>
+
+<footer>
+  <b>Projection maintenance: eager-materialised value.</b> The projection holds each cell's materialised value,
+  kept current on write, with <code>interpret_cog</code> as the sole convergence kernel split by commutativity —
+  so reads stay O(1). All three panels depict this design.
+  <br/><b>Compaction, as-built.</b> Because the projection is materialised eagerly, the projection <i>is</i> the
+  per-cell <code>interpret_cog</code> checkpoint, so catalogue compaction is pure COG-stability GC
+  (replay-before-truncate, then truncate the MST) rather than re-folding a separate checkpoint as §3's compaction
+  box draws. A separate checkpoint would byte-for-byte duplicate the projection; the checkpoint store is
+  explicitly <i>"not a durability layer for the projection."</i> Only the monolithic whole-instance CRDT path
+  still folds a checkpoint.
+  <br/>Conceptual sources: the Canteen and Merkle-Search-Tree papers. The authoritative as-built description is
+  <a href="architecture/05_crdt_model.md">the CRDT model</a>.
+</footer>
+</body>
+</html>

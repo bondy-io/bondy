@@ -113,9 +113,9 @@ or latency.
 -define(DEFAULT_OIDC_TOKEN, <<"mock-oidc-access-token">>).
 -define(DEFAULT_GIS_TOKEN, <<"mock-gis-token-abc123">>).
 -define(DEFAULT_EXPIRES_IN, 3600).
--define(DEFAULT_GIS_EXPIRES, 1893456000). %% 2030-01-01
+%% 2030-01-01
+-define(DEFAULT_GIS_EXPIRES, 1893456000).
 -define(DEFAULT_TOKEN_TYPE, <<"Bearer">>).
-
 
 %% ===================================================================
 %% Public API
@@ -160,7 +160,8 @@ start(Opts) ->
         ]}
     ]),
 
-    {ok, _} = cowboy:start_clear(?LISTENER,
+    {ok, _} = cowboy:start_clear(
+        ?LISTENER,
         [{port, Port}],
         #{env => #{dispatch => Dispatch}}
     ),
@@ -194,7 +195,6 @@ base_url() ->
         io_lib:format("http://localhost:~B", [port()])
     ).
 
-
 %% ===================================================================
 %% Token configuration
 %% ===================================================================
@@ -206,8 +206,8 @@ Scheme is `oauth2 | oidc | gis`.
 """.
 -spec set_token(atom(), binary()) -> true.
 set_token(oauth2, Token) -> ets:insert(?TABLE, {oauth2_token, Token});
-set_token(oidc, Token)   -> ets:insert(?TABLE, {oidc_token, Token});
-set_token(gis, Token)    -> ets:insert(?TABLE, {gis_token, Token}).
+set_token(oidc, Token) -> ets:insert(?TABLE, {oidc_token, Token});
+set_token(gis, Token) -> ets:insert(?TABLE, {gis_token, Token}).
 
 -doc "Set the token and expiry for the given scheme.".
 -spec set_token(atom(), binary(), integer()) -> true.
@@ -218,8 +218,8 @@ set_token(Scheme, Token, ExpiresIn) ->
 -doc "Set the expires_in (or expires for GIS) value.".
 -spec set_expires_in(atom(), integer()) -> true.
 set_expires_in(oauth2, V) -> ets:insert(?TABLE, {oauth2_expires_in, V});
-set_expires_in(oidc, V)   -> ets:insert(?TABLE, {oidc_expires_in, V});
-set_expires_in(gis, V)    -> ets:insert(?TABLE, {gis_expires, V}).
+set_expires_in(oidc, V) -> ets:insert(?TABLE, {oidc_expires_in, V});
+set_expires_in(gis, V) -> ets:insert(?TABLE, {gis_expires, V}).
 
 -doc """
 Set the token_type returned in OAuth2/OIDC token responses.
@@ -229,8 +229,7 @@ that read token_type from the response (e.g. some OAuth2 providers).
 """.
 -spec set_token_type(atom(), binary()) -> true.
 set_token_type(oauth2, V) -> ets:insert(?TABLE, {oauth2_token_type, V});
-set_token_type(oidc, V)   -> ets:insert(?TABLE, {oidc_token_type, V}).
-
+set_token_type(oidc, V) -> ets:insert(?TABLE, {oidc_token_type, V}).
 
 %% ===================================================================
 %% Failure injection
@@ -260,7 +259,6 @@ set_failure(Scheme, StatusCode, Count) ->
 clear_failure(Scheme) ->
     ets:delete(?TABLE, {failure, Scheme}).
 
-
 %% ===================================================================
 %% Latency injection
 %% ===================================================================
@@ -269,7 +267,6 @@ clear_failure(Scheme) ->
 -spec set_latency(atom(), non_neg_integer()) -> true.
 set_latency(Scheme, Ms) ->
     ets:insert(?TABLE, {{latency, Scheme}, Ms}).
-
 
 %% ===================================================================
 %% Credential validation
@@ -288,7 +285,6 @@ For `gis`: `Id` is the username, `Secret` the password.
 set_credentials(Scheme, Id, Secret) ->
     ets:insert(?TABLE, {{credentials, Scheme}, {Id, Secret}}).
 
-
 %% ===================================================================
 %% Upstream echo configuration
 %% ===================================================================
@@ -302,7 +298,6 @@ Use this to test upstream error handling (e.g. 401/403 retry logic).
 -spec set_upstream_response(integer(), binary()) -> true.
 set_upstream_response(StatusCode, Body) ->
     ets:insert(?TABLE, {upstream_response, {StatusCode, Body}}).
-
 
 %% ===================================================================
 %% Request inspection
@@ -326,7 +321,6 @@ get_requests(Scheme) ->
 clear_requests() ->
     ets:insert(?TABLE, {requests, []}).
 
-
 %% ===================================================================
 %% Reset
 %% ===================================================================
@@ -346,7 +340,6 @@ reset() ->
     ets:delete(?TABLE, upstream_response),
     ok.
 
-
 %% ===================================================================
 %% Cowboy handler
 %% ===================================================================
@@ -357,15 +350,19 @@ init(Req, {Scheme, Action} = State) ->
     maybe_inject_latency(Scheme),
     case check_failure(Scheme) of
         {fail, StatusCode} ->
-            Body = iolist_to_binary(json:encode(#{<<"error">> => <<"injected_failure">>})),
-            Req2 = cowboy_req:reply(StatusCode,
+            Body = iolist_to_binary(
+                json:encode(#{<<"error">> => <<"injected_failure">>})
+            ),
+            Req2 = cowboy_req:reply(
+                StatusCode,
                 #{<<"content-type">> => <<"application/json">>},
-                Body, Req),
+                Body,
+                Req
+            ),
             {ok, Req2, State};
         ok ->
             handle(Scheme, Action, Req, State)
     end.
-
 
 %% --- OAuth2 client_credentials ---
 
@@ -384,77 +381,85 @@ handle(oauth2, token, Req0, State) ->
                         ets:lookup(?TABLE, oauth2_expires_in),
                     [{oauth2_token_type, TType}] =
                         ets:lookup(?TABLE, oauth2_token_type),
-                    RespBody = iolist_to_binary(json:encode(#{
-                        <<"access_token">> => Token,
-                        <<"token_type">> => TType,
-                        <<"expires_in">> => Exp
-                    })),
+                    RespBody = iolist_to_binary(
+                        json:encode(#{
+                            <<"access_token">> => Token,
+                            <<"token_type">> => TType,
+                            <<"expires_in">> => Exp
+                        })
+                    ),
                     reply_json(200, RespBody, Req, State);
                 {error, Msg} ->
-                    RespBody = iolist_to_binary(json:encode(#{
-                        <<"error">> => <<"invalid_client">>,
-                        <<"error_description">> => Msg
-                    })),
+                    RespBody = iolist_to_binary(
+                        json:encode(#{
+                            <<"error">> => <<"invalid_client">>,
+                            <<"error_description">> => Msg
+                        })
+                    ),
                     reply_json(401, RespBody, Req, State)
             end;
         _ ->
-            RespBody = iolist_to_binary(json:encode(#{
-                <<"error">> => <<"unsupported_grant_type">>,
-                <<"error_description">> =>
-                    <<"Only client_credentials is supported">>
-            })),
+            RespBody = iolist_to_binary(
+                json:encode(#{
+                    <<"error">> => <<"unsupported_grant_type">>,
+                    <<"error_description">> =>
+                        <<"Only client_credentials is supported">>
+                })
+            ),
             reply_json(400, RespBody, Req, State)
     end;
-
-
 %% --- OIDC discovery ---
 
 handle(oidc, discovery, Req, State) ->
     Base = base_url(),
-    Doc = iolist_to_binary(json:encode(#{
-        <<"issuer">> => Base,
-        <<"authorization_endpoint">> =>
-            <<Base/binary, "/oidc/authorize">>,
-        <<"token_endpoint">> =>
-            <<Base/binary, "/oidc/token">>,
-        <<"userinfo_endpoint">> =>
-            <<Base/binary, "/oidc/userinfo">>,
-        <<"jwks_uri">> =>
-            <<Base/binary, "/oidc/jwks">>,
-        <<"response_types_supported">> =>
-            [<<"code">>, <<"token">>],
-        <<"subject_types_supported">> =>
-            [<<"public">>],
-        <<"id_token_signing_alg_values_supported">> =>
-            [<<"RS256">>],
-        <<"grant_types_supported">> =>
-            [<<"authorization_code">>, <<"client_credentials">>],
-        <<"token_endpoint_auth_methods_supported">> =>
-            [<<"client_secret_basic">>, <<"client_secret_post">>]
-    })),
+    Doc = iolist_to_binary(
+        json:encode(#{
+            <<"issuer">> => Base,
+            <<"authorization_endpoint">> =>
+                <<Base/binary, "/oidc/authorize">>,
+            <<"token_endpoint">> =>
+                <<Base/binary, "/oidc/token">>,
+            <<"userinfo_endpoint">> =>
+                <<Base/binary, "/oidc/userinfo">>,
+            <<"jwks_uri">> =>
+                <<Base/binary, "/oidc/jwks">>,
+            <<"response_types_supported">> =>
+                [<<"code">>, <<"token">>],
+            <<"subject_types_supported">> =>
+                [<<"public">>],
+            <<"id_token_signing_alg_values_supported">> =>
+                [<<"RS256">>],
+            <<"grant_types_supported">> =>
+                [<<"authorization_code">>, <<"client_credentials">>],
+            <<"token_endpoint_auth_methods_supported">> =>
+                [<<"client_secret_basic">>, <<"client_secret_post">>]
+        })
+    ),
     reply_json(200, Doc, Req, State);
-
-
 %% --- OIDC JWKS ---
 
 handle(oidc, jwks, Req, State) ->
     %% Static placeholder JWKS. The gateway doesn't validate JWTs
     %% itself — it just passes tokens through — so a stub is fine.
-    JWKS = iolist_to_binary(json:encode(#{
-        <<"keys">> => [#{
-            <<"kty">> => <<"RSA">>,
-            <<"use">> => <<"sig">>,
-            <<"kid">> => <<"mock-key-1">>,
-            <<"alg">> => <<"RS256">>,
-            <<"n">> => <<"0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbW"
-                         "hM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc"
-                         "_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ">>,
-            <<"e">> => <<"AQAB">>
-        }]
-    })),
+    JWKS = iolist_to_binary(
+        json:encode(#{
+            <<"keys">> => [
+                #{
+                    <<"kty">> => <<"RSA">>,
+                    <<"use">> => <<"sig">>,
+                    <<"kid">> => <<"mock-key-1">>,
+                    <<"alg">> => <<"RS256">>,
+                    <<"n">> => <<
+                        "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbW"
+                        "hM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc"
+                        "_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ"
+                    >>,
+                    <<"e">> => <<"AQAB">>
+                }
+            ]
+        })
+    ),
     reply_json(200, JWKS, Req, State);
-
-
 %% --- OIDC token ---
 
 handle(oidc, token, Req0, State) ->
@@ -472,39 +477,43 @@ handle(oidc, token, Req0, State) ->
                         ets:lookup(?TABLE, oidc_expires_in),
                     [{oidc_token_type, TType}] =
                         ets:lookup(?TABLE, oidc_token_type),
-                    RespBody = iolist_to_binary(json:encode(#{
-                        <<"access_token">> => Token,
-                        <<"token_type">> => TType,
-                        <<"expires_in">> => Exp,
-                        <<"id_token">> => <<"mock-id-token">>
-                    })),
+                    RespBody = iolist_to_binary(
+                        json:encode(#{
+                            <<"access_token">> => Token,
+                            <<"token_type">> => TType,
+                            <<"expires_in">> => Exp,
+                            <<"id_token">> => <<"mock-id-token">>
+                        })
+                    ),
                     reply_json(200, RespBody, Req, State);
                 {error, Msg} ->
-                    RespBody = iolist_to_binary(json:encode(#{
-                        <<"error">> => <<"invalid_client">>,
-                        <<"error_description">> => Msg
-                    })),
+                    RespBody = iolist_to_binary(
+                        json:encode(#{
+                            <<"error">> => <<"invalid_client">>,
+                            <<"error_description">> => Msg
+                        })
+                    ),
                     reply_json(401, RespBody, Req, State)
             end;
         _ ->
-            RespBody = iolist_to_binary(json:encode(#{
-                <<"error">> => <<"unsupported_grant_type">>
-            })),
+            RespBody = iolist_to_binary(
+                json:encode(#{
+                    <<"error">> => <<"unsupported_grant_type">>
+                })
+            ),
             reply_json(400, RespBody, Req, State)
     end;
-
-
 %% --- OIDC userinfo ---
 
 handle(oidc, userinfo, Req, State) ->
-    RespBody = iolist_to_binary(json:encode(#{
-        <<"sub">> => <<"mock-user-001">>,
-        <<"name">> => <<"Mock User">>,
-        <<"email">> => <<"mock@example.com">>
-    })),
+    RespBody = iolist_to_binary(
+        json:encode(#{
+            <<"sub">> => <<"mock-user-001">>,
+            <<"name">> => <<"Mock User">>,
+            <<"email">> => <<"mock@example.com">>
+        })
+    ),
     reply_json(200, RespBody, Req, State);
-
-
 %% --- GIS custom scheme ---
 
 handle(gis, token, Req0, State) ->
@@ -518,33 +527,38 @@ handle(gis, token, Req0, State) ->
         ok ->
             [{gis_token, Token}] = ets:lookup(?TABLE, gis_token),
             [{gis_expires, Expires}] = ets:lookup(?TABLE, gis_expires),
-            RespBody = iolist_to_binary(json:encode(#{
-                <<"token">> => Token,
-                <<"expires">> => Expires
-            })),
+            RespBody = iolist_to_binary(
+                json:encode(#{
+                    <<"token">> => Token,
+                    <<"expires">> => Expires
+                })
+            ),
             %% GIS always returns 200 for the token endpoint
             reply_json(200, RespBody, Req, State);
         {error, Msg} ->
             %% GIS returns 200 with error in body (not an HTTP error)
-            RespBody = iolist_to_binary(json:encode(#{
-                <<"error">> => #{
-                    <<"code">> => 400,
-                    <<"message">> => Msg,
-                    <<"details">> => []
-                }
-            })),
+            RespBody = iolist_to_binary(
+                json:encode(#{
+                    <<"error">> => #{
+                        <<"code">> => 400,
+                        <<"message">> => Msg,
+                        <<"details">> => []
+                    }
+                })
+            ),
             reply_json(200, RespBody, Req, State)
     end;
-
-
 %% --- Upstream echo ---
 
 handle(upstream, echo, Req0, State) ->
     case ets:lookup(?TABLE, upstream_response) of
         [{upstream_response, {StatusCode, Body}}] ->
-            Req = cowboy_req:reply(StatusCode,
+            Req = cowboy_req:reply(
+                StatusCode,
                 #{<<"content-type">> => <<"application/json">>},
-                Body, Req0),
+                Body,
+                Req0
+            ),
             {ok, Req, State};
         [] ->
             Method = cowboy_req:method(Req0),
@@ -556,16 +570,17 @@ handle(upstream, echo, Req0, State) ->
 
             QueryMap = maps:from_list(QsPairs),
 
-            RespBody = iolist_to_binary(json:encode(#{
-                <<"method">> => Method,
-                <<"path">> => Path,
-                <<"query">> => QueryMap,
-                <<"headers">> => Headers,
-                <<"body">> => Body
-            })),
+            RespBody = iolist_to_binary(
+                json:encode(#{
+                    <<"method">> => Method,
+                    <<"path">> => Path,
+                    <<"query">> => QueryMap,
+                    <<"headers">> => Headers,
+                    <<"body">> => Body
+                })
+            ),
             reply_json(200, RespBody, Req, State)
     end.
-
 
 %% ===================================================================
 %% Internal helpers
@@ -581,7 +596,9 @@ start_ets_owner() ->
                 ets_owner_loop()
             end),
             register(?ETS_OWNER, Pid),
-            receive {ets_ready, Pid} -> ok end;
+            receive
+                {ets_ready, Pid} -> ok
+            end;
         _ ->
             ets:delete_all_objects(?TABLE)
     end.
@@ -605,9 +622,12 @@ init_defaults() ->
     ]).
 
 reply_json(Status, Body, Req0, State) ->
-    Req = cowboy_req:reply(Status,
+    Req = cowboy_req:reply(
+        Status,
         #{<<"content-type">> => <<"application/json">>},
-        Body, Req0),
+        Body,
+        Req0
+    ),
     {ok, Req, State}.
 
 log_request(Scheme, Req) ->

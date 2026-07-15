@@ -1,2 +1,0 @@
--define(API_CLIENTS, ~"api_clients").
--define(RESOURCE_OWNERS, ~"resource_owners").

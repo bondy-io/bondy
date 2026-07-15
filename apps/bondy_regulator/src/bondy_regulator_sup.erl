@@ -4,6 +4,9 @@
 %% =============================================================================
 
 -module(bondy_regulator_sup).
+-moduledoc """
+Top supervisor for the `bondy_regulator` application.
+""".
 
 -behaviour(supervisor).
 
@@ -15,7 +18,6 @@
 
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
-
 
 init([]) ->
     SupFlags = #{

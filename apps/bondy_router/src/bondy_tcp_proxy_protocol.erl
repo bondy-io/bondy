@@ -1,0 +1,104 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+-module(bondy_tcp_proxy_protocol).
+-moduledoc """
+Handles the PROXY protocol for a Ranch listener.
+
+Reads the PROXY protocol header on a connection (when enabled) and resolves the
+effective source IP according to the configured `strict` or `relaxed` mode,
+falling back to the local IP when permitted.
+""".
+-include_lib("partisan/include/partisan_util.hrl").
+-include("bondy.hrl").
+
+-type t() :: #{
+    enabled := boolean(),
+    mode := strict | relaxed,
+    proxy_info => ranch_proxy_header:proxy_info() | undefined,
+    error => any() | undefined
+}.
+
+-export([init/1]).
+-export([init/2]).
+-export([enabled/1]).
+-export([error/1]).
+-export([has_error/1]).
+-export([mode/1]).
+-export([proxy_info/1]).
+-export([source_ip/2]).
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+-spec init(atom()) -> t().
+
+init(Ref) ->
+    init(Ref, 15_000).
+
+-spec init(atom(), timeout()) -> t().
+
+init(Ref, Timeout) ->
+    Opts = maps:from_list(bondy_config:get([Ref, proxy_protocol], [])),
+
+    case maps:get(enabled, Opts, false) of
+        true ->
+            case ranch:recv_proxy_header(Ref, Timeout) of
+                {ok, ProxyInfo} ->
+                    Opts#{proxy_info => ProxyInfo};
+                {error, Reason} ->
+                    Opts#{error => {socket_error, Reason}};
+                {error, protocol_error, Reason} ->
+                    Opts#{error => {protocol_error, Reason}}
+            end;
+        false ->
+            Opts
+    end.
+
+enabled(#{enabled := Val}) ->
+    Val.
+
+mode(#{mode := Val}) ->
+    Val.
+
+proxy_info(#{proxy_info := Val}) ->
+    Val;
+proxy_info(_) ->
+    undefined.
+
+error(#{error := Val}) ->
+    Val;
+error(_) ->
+    undefined.
+
+has_error(#{error := _}) -> true;
+has_error(#{}) -> false.
+
+source_ip(#{enabled := true, mode := relaxed, error := _}, LocalIP) when
+    ?IS_IP(LocalIP)
+->
+    {ok, LocalIP};
+source_ip(#{enabled := true, mode := strict, error := Reason}, LocalIP) when
+    ?IS_IP(LocalIP)
+->
+    {error, Reason};
+source_ip(#{enabled := true, mode := Mode, proxy_info := Info}, LocalIP) when
+    ?IS_IP(LocalIP)
+->
+    case Info of
+        #{command := local} ->
+            {ok, LocalIP};
+        #{command := proxy, src_address := SourceIP} ->
+            {ok, SourceIP};
+        #{command := proxy} when Mode == relaxed ->
+            {ok, LocalIP};
+        #{command := proxy} when Mode == strict ->
+            {error, {protocol_error, <<"Missing src_address field">>}}
+    end;
+source_ip(#{enabled := false}, LocalIP) when ?IS_IP(LocalIP) ->
+    {ok, LocalIP};
+source_ip(#{enabled := _, mode := _} = T, LocalIP) ->
+    ?ERROR(badarg, [T, LocalIP], #{1 => "should be a valid IP address"}).

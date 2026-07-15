@@ -1,0 +1,42 @@
+# 3-node bondy_mst Jepsen harness. Modelled on ra-kv-store's
+# jepsen/docker/docker-compose.yml; each node is debian:bookworm with
+# NET_ADMIN so iptables-based partition nemeses work, and the control
+# container runs the Clojure / lein driver.
+
+x-node-common: &node-common
+  networks:
+    - jepsen
+  image: debian:bookworm
+  tty: true
+  volumes:
+    - ../jepsen.bondymst:/root/jepsen.bondymst
+    - ./shared:/root/shared
+  cap_add:
+    - NET_ADMIN
+
+services:
+  control:
+    networks:
+      - jepsen
+    hostname: control
+    container_name: jepsen-control
+    image: debian:bookworm
+    tty: true
+    volumes:
+      - ../jepsen.bondymst:/root/jepsen.bondymst
+      - ./shared:/root/shared
+  n1:
+    <<: *node-common
+    hostname: n1
+    container_name: jepsen-n1
+  n2:
+    <<: *node-common
+    hostname: n2
+    container_name: jepsen-n2
+  n3:
+    <<: *node-common
+    hostname: n3
+    container_name: jepsen-n3
+
+networks:
+  jepsen:

@@ -20,19 +20,15 @@ The manager calls `start_pool/3` for each configured service.
 %% supervisor callback
 -export([init/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 -doc "Start the supervisor, registered locally.".
 -spec start_link() -> {ok, pid()} | {error, term()}.
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
-
 
 -doc "Start a pool child for the given endpoint.".
 -spec start_pool(atom(), binary(), bondy_rpc_gateway_http_pool:start_opts()) ->
@@ -41,11 +37,9 @@ start_link() ->
 start_pool(Name, Endpoint, Opts) ->
     supervisor:start_child(?MODULE, [Name, Endpoint, Opts]).
 
-
 %% =============================================================================
 %% supervisor callback
 %% =============================================================================
-
 
 -doc false.
 init([]) ->

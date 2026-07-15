@@ -3,22 +3,23 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%%%-------------------------------------------------------------------
-%%%  wamp_feature_flags.erl
-%%%
-%%%  Compact bit-mask representation of feature flags.
-%%%  - One integer holds up to 64 (or more) boolean capabilities.
-%%%  - O(1) look-ups, intersections and subset checks.
-%%%
-%%%  Increment ?VERSION whenever you append to CapList.
-%%%-------------------------------------------------------------------
 -module(bondy_wamp_feature_flags).
+-moduledoc """
+Compact bit-mask representation of feature flags.
+
+- One integer holds up to 64 (or more) boolean capabilities.
+- O(1) look-ups, intersections and subset checks.
+
+Increment `?VERSION` whenever you append to `cap_list/0`.
+""".
 
 -include("bondy_wamp.hrl").
 
 -export([
-    version/0,          %% Current schema version
-    cap_list/0,         %% Canonical ordered list of capabilities
+    %% Current schema version
+    version/0,
+    %% Canonical ordered list of capabilities
+    cap_list/0,
 
     %% Map ↔ Mask
     map_to_mask/1,
@@ -42,26 +43,35 @@
 
 cap_list() ->
     %% Never reorder existing entries; only append at the tail.
-    [<<"read">>,           %% bit 0
-     <<"write">>,          %% bit 1
-     <<"execute">>,        %% bit 2
-     <<"share">>,          %% bit 3
-     <<"admin">>].         %% bit 4
+
+    %% bit 0
+    [
+        <<"read">>,
+        %% bit 1
+        <<"write">>,
+        %% bit 2
+        <<"execute">>,
+        %% bit 3
+        <<"share">>,
+        %% bit 4
+        <<"admin">>
+    ].
 
 version() -> ?VERSION.
 
 %% Pre-computed map {CapBinary ⇒ BitPosition} for O(1) lookup.
--define(CAP_POS_MAP,
-        #{ <<"read">>    => 0,
-           <<"write">>   => 1,
-           <<"execute">> => 2,
-           <<"share">>   => 3,
-           <<"admin">>   => 4 }).
+-define(CAP_POS_MAP, #{
+    <<"read">> => 0,
+    <<"write">> => 1,
+    <<"execute">> => 2,
+    <<"share">> => 3,
+    <<"admin">> => 4
+}).
 
 pos(Cap) ->
     case maps:get(Cap, ?CAP_POS_MAP, undefined) of
         undefined -> error({unknown_capability, Cap});
-        N         -> N
+        N -> N
     end.
 
 %%--------------------------------------------------------------------
@@ -70,14 +80,15 @@ pos(Cap) ->
 -spec map_to_mask(map()) -> integer().
 map_to_mask(Map) when is_map(Map) ->
     lists:foldl(
-      fun(Cap, Acc) ->
-          case maps:get(Cap, Map, false) of
-              true  -> Acc bor (1 bsl pos(Cap));
-              false -> Acc
-          end
-      end,
-      0,
-      cap_list()).
+        fun(Cap, Acc) ->
+            case maps:get(Cap, Map, false) of
+                true -> Acc bor (1 bsl pos(Cap));
+                false -> Acc
+            end
+        end,
+        0,
+        cap_list()
+    ).
 
 %%--------------------------------------------------------------------
 %% 3.  Integer mask ➜ Map (for logs, APIs, tests)
@@ -85,8 +96,11 @@ map_to_mask(Map) when is_map(Map) ->
 -spec mask_to_map(integer()) -> map().
 mask_to_map(Mask) when is_integer(Mask) ->
     maps:from_list(
-      [ {Cap, (Mask band (1 bsl pos(Cap))) =/= 0}
-        || Cap <- cap_list()]).
+        [
+            {Cap, (Mask band (1 bsl pos(Cap))) =/= 0}
+         || Cap <- cap_list()
+        ]
+    ).
 
 %%--------------------------------------------------------------------
 %% 4.  Per-flag helpers (all guard-safe and inline-able)
@@ -95,10 +109,10 @@ mask_to_map(Mask) when is_integer(Mask) ->
 enabled(Mask, Cap) -> (Mask band (1 bsl pos(Cap))) =/= 0.
 
 -spec enable(integer(), binary()) -> integer().
-enable(Mask, Cap)  -> Mask bor  (1 bsl pos(Cap)).
+enable(Mask, Cap) -> Mask bor (1 bsl pos(Cap)).
 
 -spec disable(integer(), binary()) -> integer().
-disable(Mask, Cap) -> Mask band bnot(1 bsl pos(Cap)).
+disable(Mask, Cap) -> Mask band bnot (1 bsl pos(Cap)).
 
 %%--------------------------------------------------------------------
 %% 5.  Whole-set operations for handshakes / negotiation
@@ -114,11 +128,6 @@ combined(MaskA, MaskB) -> MaskA bor MaskB.
 compatible(RequiredMask, PeerMask) ->
     (RequiredMask band PeerMask) =:= RequiredMask.
 
-
-
-
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
@@ -126,4 +135,3 @@ compatible(RequiredMask, PeerMask) ->
 
 %% maps_to_list(Map) ->
 %%     maps:to_list(maps:iterator(Map, ordered)).
-

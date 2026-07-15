@@ -23,7 +23,6 @@ application is configured and started during `init/1`.
 
 -include_lib("kernel/include/logger.hrl").
 
-
 -define(PRODUCE_ACTION_SPEC, #{
     <<"phone_number">> => #{
         alias => phone_number,
@@ -41,23 +40,17 @@ application is configured and started during `init/1`.
     }
 }).
 
-
 -export([init/1]).
 -export([validate_action/1]).
 -export([apply_action/1]).
 -export([terminate/2]).
 
-
-
 %% =============================================================================
 %% BONDY_BROKER_BRIDGE CALLBACKS
 %% =============================================================================
 
-
-
 -doc "Configure and start the `erlcloud` application with the provided config.".
 init(Config) ->
-
     ?LOG_DEBUG(#{
         description => "Configuration",
         config => Config
@@ -73,8 +66,8 @@ init(Config) ->
         Error ->
             Error
     catch
-       _:Reason ->
-           ?LOG_ERROR(#{
+        _:Reason ->
+            ?LOG_ERROR(#{
                 description => "Error while initialising bridge",
                 config => Config,
                 reason => Reason
@@ -82,21 +75,18 @@ init(Config) ->
             {error, Reason}
     end.
 
-
 -doc "Validate an SNS SMS action spec (`phone_number`, `text_message`).".
 validate_action(Action0) ->
     try maps_utils:validate(Action0, ?PRODUCE_ACTION_SPEC) of
         Action1 ->
             {ok, Action1}
     catch
-       _:Reason->
+        _:Reason ->
             {error, Reason}
     end.
 
-
 -doc "Send an SMS via `erlcloud_sns:publish_to_phone/2`.".
 apply_action(Action) ->
-
     ?LOG_DEBUG(#{
         description => "Action",
         action => Action
@@ -130,25 +120,16 @@ apply_action(Action) ->
             {error, EReason}
     end.
 
-
 -doc "Stop the `erlcloud` application.".
 terminate(_Reason, _State) ->
-    _  = application:stop(erlcloud),
+    _ = application:stop(erlcloud),
     ok.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec send_sms(map()) ->
     {ok, binary()} | {error, Reason :: any()} | no_return().
 
