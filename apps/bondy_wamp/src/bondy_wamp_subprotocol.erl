@@ -28,9 +28,12 @@ from_binary(?WAMP2_MSGPACK) -> {ws, binary, msgpack};
 from_binary(?WAMP2_JSON_BATCHED) -> {ws, text, json_batched};
 from_binary(?WAMP2_CBOR_BATCHED) -> {ws, binary, cbor_batched};
 from_binary(?WAMP2_MSGPACK_BATCHED) -> {ws, binary, msgpack_batched};
-from_binary(?WAMP2_BERT) -> {ws, binary, bert};
+%% NOTE: wamp.2.bert / wamp.2.bert.batched are intentionally NOT accepted — the
+%% BERT decoder is bert:decode/1 => binary_to_term/1 WITHOUT [safe], reachable
+%% pre-authentication (atom-table exhaustion / node crash). `erl` is retained
+%% because it decodes with binary_to_term(_, [safe]). See
+%% bondy_wamp_encoding:decode_message/4.
 from_binary(?WAMP2_ERL) -> {ws, binary, erl};
-from_binary(?WAMP2_BERT_BATCHED) -> {ws, binary, bert_batched};
 from_binary(?WAMP2_ERL_BATCHED) -> {ws, binary, erl_batched};
 from_binary(_) -> {error, invalid_subprotocol}.
 
@@ -50,8 +53,6 @@ validate({ws, binary, cbor_batched} = S) ->
     {ok, S};
 validate({ws, binary, msgpack_batched} = S) ->
     {ok, S};
-validate({ws, binary, bert_batched} = S) ->
-    {ok, S};
 validate({ws, binary, erl_batched} = S) ->
     {ok, S};
 validate({raw, binary, json} = S) ->
@@ -61,8 +62,6 @@ validate({T, binary, erl} = S) when ?IS_WAMP_TRANSPORT(T) ->
 validate({T, binary, cbor} = S) when ?IS_WAMP_TRANSPORT(T) ->
     {ok, S};
 validate({T, binary, msgpack} = S) when ?IS_WAMP_TRANSPORT(T) ->
-    {ok, S};
-validate({T, binary, bert} = S) when ?IS_WAMP_TRANSPORT(T) ->
     {ok, S};
 validate(_) ->
     {error, invalid_subprotocol}.

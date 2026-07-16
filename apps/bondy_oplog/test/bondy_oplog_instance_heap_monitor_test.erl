@@ -35,15 +35,18 @@ gc_decision_test() ->
     Delta = 1000,
     %% Grew past the delta → reclaim, provisional baseline at the pre-GC size.
     ?assertEqual(
-        {hibernate, 5000}, bondy_oplog_heap_monitor:gc_decision(5000, 3500, Delta)
+        {hibernate, 5000},
+        bondy_oplog_heap_monitor:gc_decision(5000, 3500, Delta)
     ),
     %% Exactly at the delta → reclaim.
     ?assertEqual(
-        {hibernate, 4500}, bondy_oplog_heap_monitor:gc_decision(4500, 3500, Delta)
+        {hibernate, 4500},
+        bondy_oplog_heap_monitor:gc_decision(4500, 3500, Delta)
     ),
     %% Shrank below the baseline (post-hibernate) → adopt the lower live size.
     ?assertEqual(
-        {rebaseline, 2500}, bondy_oplog_heap_monitor:gc_decision(2500, 3500, Delta)
+        {rebaseline, 2500},
+        bondy_oplog_heap_monitor:gc_decision(2500, 3500, Delta)
     ),
     %% Grew, but under the delta → keep accumulating against the same baseline.
     ?assertEqual(keep, bondy_oplog_heap_monitor:gc_decision(4000, 3500, Delta)),
@@ -63,7 +66,8 @@ slow_growth_trips_test() ->
     ?assertEqual(keep, bondy_oplog_heap_monitor:gc_decision(2400, Base, Delta)),
     ?assertEqual(keep, bondy_oplog_heap_monitor:gc_decision(2800, Base, Delta)),
     ?assertEqual(
-        {hibernate, 3200}, bondy_oplog_heap_monitor:gc_decision(3200, Base, Delta)
+        {hibernate, 3200},
+        bondy_oplog_heap_monitor:gc_decision(3200, Base, Delta)
     ),
     ok.
 

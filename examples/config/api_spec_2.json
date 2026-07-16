@@ -1,0 +1,62 @@
+{
+    "id": "com.leapsight.test",
+    "name": "Longpoll & SSE",
+    "host": "_",
+    "realm_uri": "com.leapsight.test",
+    "status_codes": {
+        "bondy.error.badarg": 400,
+        "bondy.error.not_found": 404,
+        "bondy.error.already_exists": 400,
+        "wamp.error.no_such_procedure": 404
+    },
+    "variables": {
+        "oidc": {
+            "type": "oidc",
+            "provider": "mock"
+        },
+        "schemes": [
+            "https"
+        ],
+        "headers": {
+            "access-control-allow-origin": "*",
+            "access-control-allow-credentials": "true",
+            "access-control-allow-methods": "GET,HEAD,PUT,PATCH,POST,DELETE",
+            "access-control-allow-headers": "origin,x-requested-with,content-type,accept,x-csrf-token",
+            "access-control-max-age": "86400"
+        }
+    },
+    "defaults": {
+        "retries": 0,
+        "timeout": 15000,
+        "connect_timeout": 5000,
+        "schemes": "{{variables.schemes}}",
+        "headers": "{{variables.headers}}",
+        "security": "{{variables.oidc}}"
+    },
+    "versions": {
+        "1.0.0": {
+            "base_path": "/api/[v1.0]",
+            "variables": {},
+            "defaults": {
+                "timeout": 20000
+            },
+            "languages": ["en"],
+            "paths": {
+                "/ping": {
+                    "get": {
+                        "action": {
+                            "type": "static",
+                            "headers": "{{variables.headers}}",
+                            "body": "pong"
+                        },
+                        "response": {
+                            "on_result": {
+                                "body": "{{action.result.body}}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

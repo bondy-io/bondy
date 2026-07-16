@@ -73,6 +73,12 @@ Returns true is scope A matches B.
 matches(A, B) ->
     type(A) =:= type(B).
 
+%% A `realm := all` scope means "any realm under the token's SSO issuer". This
+%% is only safe because the caller has already asserted, via
+%% `bondy_realm:is_trusted_issuer/2` (A-1), that the token's issuer (`aud`) is
+%% the target realm itself or its configured SSO realm — so the wildcard cannot
+%% be honoured for a realm outside the issuer's SSO family. Do not rely on this
+%% predicate for cross-realm trust on its own.
 matches_realm(#{realm := all}, _) ->
     true;
 matches_realm(#{realm := Val}, RealmUri) ->

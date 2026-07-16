@@ -193,12 +193,18 @@ from the end of the log). The table is `public`, so any process may read it
 lock-free.
 """).
 -spec reader_view(pid()) ->
-    #{tab => ets:tid(), mem_seg => non_neg_integer(), atomics => atomics:atomics_ref()}.
+    #{
+        tab => ets:tid(),
+        mem_seg => non_neg_integer(),
+        atomics => atomics:atomics_ref()
+    }.
 
 reader_view(Pid) when is_pid(Pid) ->
     gen_server:call(Pid, reader_view, infinity).
 
-?DOC("The head: the max `Seq` handed out. Read lock-free from the atomics ref.").
+?DOC(
+    "The head: the max `Seq` handed out. Read lock-free from the atomics ref."
+).
 -spec reserved(atomics:atomics_ref()) -> non_neg_integer().
 
 reserved(ARef) ->

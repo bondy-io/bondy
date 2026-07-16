@@ -11,6 +11,7 @@ via `bondy_ticket`.
 """.
 -behaviour(bondy_auth).
 
+-include_lib("kernel/include/logger.hrl").
 -include("bondy_security.hrl").
 
 -type state() :: map().
@@ -77,18 +78,36 @@ authenticate(Ticket, _, Ctxt, State) ->
         {ok,
             #{
                 authid := UserId,
+                authrealm := AuthRealmUri,
                 scope := #{realm := Uri}
             } = Claims} when
             Uri == undefined orelse Uri == RealmUri
         ->
-            Extra = #{
-                authmethod_details => #{
-                    id => maps:get(id, Claims),
-                    authrealm => maps:get(authrealm, Claims),
-                    scope => maps:get(scope, Claims)
-                }
-            },
-            {ok, Extra, State};
+            %% A-1: the ticket's issuer (`authrealm`) must be trusted by the
+            %% target realm (itself or its SSO realm); the `scope.realm`
+            %% guard above is not sufficient — an SSO ticket carries
+            %% `scope.realm = undefined` and would otherwise be accepted by
+            %% any realm against its own issuer's key.
+            case bondy_realm:is_trusted_issuer(RealmUri, AuthRealmUri) of
+                true ->
+                    Extra = #{
+                        authmethod_details => #{
+                            id => maps:get(id, Claims),
+                            authrealm => AuthRealmUri,
+                            scope => maps:get(scope, Claims)
+                        }
+                    },
+                    {ok, Extra, State};
+                false ->
+                    ?LOG_WARNING(#{
+                        description =>
+                            "Rejected ticket: issuer not trusted by "
+                            "target realm",
+                        realm_uri => RealmUri,
+                        ticket_authrealm => AuthRealmUri
+                    }),
+                    {error, untrusted_issuer, State}
+            end;
         {ok, _} ->
             {error, invalid_ticket, State};
         {error, Reason} ->

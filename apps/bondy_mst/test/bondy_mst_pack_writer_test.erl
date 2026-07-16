@@ -882,22 +882,30 @@ seal_works_with_high_k_test() ->
     end).
 
 t_threshold_fires_eventually_test() ->
-    %% T=1ms: any inter-append delay above 1ms will trigger a sync
-    %% on the next append.  We pace the second append behind a sleep
-    %% to make the trigger deterministic.
+    %% The ms-threshold `T` must sit COMFORTABLY above the wall-clock cost of a
+    %% single record write, or the first append itself can trip it: `do_append`
+    %% checks `now - last_sync_ms >= T` AFTER writing the record, and although
+    %% `flip_manifest_to_present` rebases `last_sync_ms` to "now" at incoming-pack
+    %% creation, the tiny window that remains (one `prim_file:write`) can still
+    %% exceed a pathologically small `T` under heavy full-suite load with /tmp
+    %% contention — spuriously syncing the first append (`unsynced_count` 0, not
+    %% 1). A former `T=1ms` was below that jitter and flaked. Use 30ms (matching
+    %% `set_root_ms_threshold_flushes_eventually_test`), far above single-write
+    %% jitter, and pace the second append behind a 60ms sleep (> T) so the
+    %% ms-trigger on it is deterministic. Still exercises the ms path end to end.
     with_tmp_dir(fun(Dir) ->
         {ok, W0} = bondy_mst_pack_writer:open(
             Dir,
             #{
                 instance_id => <<"writer-test">>,
                 sync_every_records => 1000,
-                sync_every_ms => 1
+                sync_every_ms => 30
             }
         ),
         try
             {ok, _, W1} = bondy_mst_pack_writer:append(W0, <<"a">>),
             ?assertEqual(1, bondy_mst_pack_writer:unsynced_count(W1)),
-            timer:sleep(15),
+            timer:sleep(60),
             {ok, _, W2} = bondy_mst_pack_writer:append(W1, <<"b">>),
             ?assertEqual(0, bondy_mst_pack_writer:unsynced_count(W2))
         after
@@ -1080,11 +1088,13 @@ with_rename_fault(Suffix, Reason, Body) ->
         Body()
     end).
 
-%% @private Same shape as `bondy_oplog_wal_proper_test:with_io_fault_lock/1`
-%% but local to this suite. Acquires a node-scoped global lock so two
-%% suites that fault-inject `bondy_mst_io` cannot collide.
+%% @private Same shape as `bondy_oplog_wal_proper_test:with_io_fault_lock/1`.
+%% Acquires a node-scoped global lock so sibling suites that fault-inject
+%% `bondy_mst_io` cannot collide. The lock resource is keyed by the MOCKED
+%% module (NOT `?MODULE`) so it is the SAME resource those sibling suites
+%% contend on — a `?MODULE`-scoped key would give no cross-suite exclusion.
 with_io_fault_lock(Body) ->
-    Lock = {bondy_mst_io_fault, ?MODULE},
+    Lock = {meck_vm_lock, bondy_mst_io},
     global:trans(
         {Lock, self()},
         fun() ->

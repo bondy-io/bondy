@@ -665,7 +665,10 @@ do_compute_available_methods(#{user_id := UserId} = Ctxt, RealmAllowed) ->
 
     Filter = fun
         ({_, ?WAMP_ANON_AUTH = Method}) ->
-            true =:= bondy_config:get([security, allow_anonymous_user], true) andalso
+            %% Anonymous is gated by the security.allow_anonymous_user policy
+            %% (off | local | on); `local` (the default) permits it only from a
+            %% loopback source.
+            bondy_rbac:anonymous_allowed(source_ip(Ctxt)) andalso
                 matches_requirements(Method, Ctxt);
         ({_Order, Method}) ->
             matches_requirements(Method, Ctxt)

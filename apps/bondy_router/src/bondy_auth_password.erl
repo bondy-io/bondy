@@ -78,3 +78,17 @@ authenticate(String, _, _, #{password := PWD} = State) ->
         false ->
             {error, bad_signature, State}
     end.
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% NOTE (S-1): transparent re-hash-on-login was intentionally NOT implemented.
+%% `token_version` is the user cell's HLC and the OAuth2 fence requires strict
+%% equality (see `bondy_auth_oauth2:check_token_version/2`), so ANY re-store of
+%% the user cell — even to upgrade only the stored PBKDF2 iteration count —
+%% advances `token_version` and invalidates every outstanding token for that
+%% user. There is no side-effect-free write in this model. The S-1 hardening is
+%% therefore limited to raising the work factor for NEW and CHANGED passwords
+%% (see `schema/bondy.schema` `security.password.pbkdf2.iterations`); an existing
+%% low-iteration verifier upgrades on the user's next password change.

@@ -2307,8 +2307,15 @@ is_strictly_increasing(_) ->
 %% meck install/expect/uninstall window, not across the writer's whole
 %% lifetime, so it does not serialise property runs that do not fault-
 %% inject.
+%%
+%% The lock resource MUST be keyed by the MOCKED module, not by the
+%% test module — otherwise sibling suites (`bondy_oplog_wal_group_commit_test`,
+%% `bondy_mst_pack_writer_test`) that also fault-inject `bondy_mst_io`
+%% would each hold a distinct `?MODULE`-scoped lock and never mutually
+%% exclude (the intermittent `{error, eacces}` leak this comment used to
+%% describe as impossible). Keep this key IDENTICAL across those suites.
 with_io_fault_lock(Body) ->
-    Lock = {bondy_mst_io_fault, ?MODULE},
+    Lock = {meck_vm_lock, bondy_mst_io},
     global:trans(
         {Lock, self()},
         fun() ->

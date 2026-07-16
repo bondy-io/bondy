@@ -22,6 +22,10 @@ network listeners, and tearing them down gracefully on stop.
 -export([stop/1]).
 -export([vsn/0]).
 
+-ifdef(TEST).
+-export([peer_plane_gate/1]).
+-endif.
+
 %% =============================================================================
 %% API
 %% =============================================================================
@@ -63,6 +67,11 @@ start(_Type, Args) ->
     %% bondy_db is transport-agnostic (it works over disterl or Partisan via
     %% its callbacks). Partisan was configured by bondy_config:init/1 above.
     {ok, _} = application:ensure_all_started(partisan, permanent),
+
+    %% C-1: refuse to boot an auto-clustering node whose peer plane is insecure
+    %% (plaintext or `verify_none`) unless the operator acknowledged it via
+    %% `cluster.tls.allow_insecure`. Runs before the substrate/listeners start.
+    ok = guard_peer_plane(),
 
     %% When oplog anti-entropy is enabled (off by default) wire the sync
     %% scheduler to Partisan BEFORE the substrate starts, so it reads the
@@ -164,6 +173,116 @@ setup_commons() ->
     ok.
 
 %% @private
+%% C-1 peer-plane safety gate. Reads the effective Partisan config and the
+%% `cluster.tls.allow_insecure` acknowledgement, then acts on the verdict:
+%% `refuse` aborts startup (fail-closed), `warn` logs prominently and continues.
+%% The gate only engages when auto-clustering is configured
+%% (`cluster.peer_discovery.enabled`), so solo / dev / test nodes are untouched.
+guard_peer_plane() ->
+    Input = #{
+        clustering => auto_clustering_enabled(),
+        tls => partisan_tls_enabled(),
+        server_verify => partisan_verify(tls_server_options),
+        client_verify => partisan_verify(tls_client_options),
+        allow_insecure =>
+            bondy_config:get([cluster, tls, allow_insecure], false)
+    },
+    case peer_plane_gate(Input) of
+        ok ->
+            ok;
+        {warn, Reason} ->
+            ?LOG_WARNING(#{
+                description =>
+                    "The cluster peer plane (Partisan) is insecure. An on-path "
+                    "attacker can read or modify replicated credentials and "
+                    "realm signing keys, and a rogue peer can inject security "
+                    "state. Enable cluster.tls with verify_peer and a private "
+                    "cluster CA. Proceeding because cluster.tls.allow_insecure "
+                    "is on.",
+                reason => Reason,
+                peer_ip => partisan_peer_ip()
+            }),
+            ok;
+        {refuse, Reason} ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Refusing to start: this node is configured to cluster "
+                    "(cluster.peer_discovery.enabled) but its Partisan peer "
+                    "plane is insecure. Configure cluster.tls.enabled = on with "
+                    "cluster.tls.{server,client}.verify = verify_peer and a "
+                    "private cluster CA, or set cluster.tls.allow_insecure = on "
+                    "to override (NOT recommended off a trusted network).",
+                reason => Reason,
+                peer_ip => partisan_peer_ip()
+            }),
+            error({insecure_cluster_peer_plane, Reason})
+    end.
+
+%% @private
+%% Pure verdict for the peer-plane gate. `clustering` is whether auto-clustering
+%% is configured; `tls` whether Partisan TLS is on; `server_verify`/
+%% `client_verify` the per-side verify mode; `allow_insecure` the operator
+%% acknowledgement. Non-clustering nodes are never gated.
+-spec peer_plane_gate(map()) ->
+    ok
+    | {warn, tls_disabled | verify_none}
+    | {refuse, tls_disabled | verify_none}.
+
+peer_plane_gate(#{clustering := false}) ->
+    ok;
+peer_plane_gate(#{clustering := true} = Input) ->
+    #{
+        tls := Tls,
+        server_verify := SV,
+        client_verify := CV,
+        allow_insecure := Allow
+    } = Input,
+    case insecure_reason(Tls, SV, CV) of
+        none ->
+            ok;
+        Reason when Allow == true ->
+            {warn, Reason};
+        Reason ->
+            {refuse, Reason}
+    end.
+
+%% @private
+insecure_reason(false, _SV, _CV) ->
+    tls_disabled;
+insecure_reason(true, verify_peer, verify_peer) ->
+    none;
+insecure_reason(true, _SV, _CV) ->
+    verify_none.
+
+%% @private
+auto_clustering_enabled() ->
+    PeerDiscovery = application:get_env(partisan, peer_discovery, #{}),
+    opt(enabled, PeerDiscovery, false) == true.
+
+%% @private
+partisan_tls_enabled() ->
+    application:get_env(partisan, tls, false) == true.
+
+%% @private
+partisan_verify(OptsKey) ->
+    Opts = application:get_env(partisan, OptsKey, #{}),
+    opt(verify, Opts, verify_none).
+
+%% @private
+%% Partisan normalises option groups to maps at runtime, but cuttlefish/sys.config
+%% may still present them as proplists — tolerate both.
+opt(Key, Opts, Default) when is_map(Opts) ->
+    maps:get(Key, Opts, Default);
+opt(Key, Opts, Default) when is_list(Opts) ->
+    proplists:get_value(Key, Opts, Default);
+opt(_Key, _Opts, Default) ->
+    Default.
+
+%% @private
+partisan_peer_ip() ->
+    application:get_env(partisan, peer_ip, undefined).
+
+%% @private
 configure_services() ->
     ?LOG_NOTICE(#{
         description =>
@@ -175,6 +294,9 @@ configure_services() ->
     %% We use bondy_realm:get/1 to force the creation of the bondy admin realm
     %% if it does not exist.
     _ = bondy_realm:get(?MASTER_REALM_URI),
+    %% Idempotent one-shot hardening for installs provisioned before the
+    %% master-realm hardening (D-1/D-2). No-op on fresh installs.
+    ok = bondy_realm:harden_master_realm(),
     ok = bondy_realm:apply_config(),
     ok = bondy_http_gateway:apply_config().
 

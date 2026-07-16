@@ -185,7 +185,8 @@ encode_state({_Cell, _CC, _Hlc} = State) ->
 -spec decode_state(binary()) -> state().
 
 decode_state(<<?ENC_V1, Bin/binary>>) ->
-    uncanon(binary_to_term(Bin)).
+    %% C-2: `[safe]` — decodes peer-shipped CRDT state on the AAE merge path.
+    uncanon(binary_to_term(Bin, [safe])).
 
 %% =============================================================================
 %% INTERNAL

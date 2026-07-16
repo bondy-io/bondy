@@ -84,6 +84,20 @@ init({Ref, Transport, _Opts0}) ->
 
     SourceIP = source_ip(ProxyProtocol, PeerIP),
 
+    %% AV-1: throttle new connections per source IP (no-op unless enabled).
+    %% Reject early by closing the just-accepted socket and terminating.
+    case bondy_rate_limit:throttle(connection, SourceIP) of
+        throttled ->
+            ?LOG_NOTICE(#{
+                description => "TCP connection rejected (AV-1 rate limit)",
+                source_ip => inet:ntoa(SourceIP)
+            }),
+            catch Transport:close(Socket),
+            exit(normal);
+        ok ->
+            ok
+    end,
+
     ok = logger:update_process_metadata(#{
         peername => inet_utils:peername_to_binary(Peername),
         source_ip => inet:ntoa(SourceIP)
@@ -627,9 +641,12 @@ validate_encoding(N) ->
     case lists:keyfind(N, 2, bondy_config:get(wamp_serializers, [])) of
         {erl, N} ->
             {binary, erl};
-        {bert, N} ->
-            {binary, bert};
-        undefined ->
+        %% SECURITY: bert is intentionally NOT resolved, even if present in the
+        %% wamp_serializers config — bert:decode/1 => binary_to_term/1 without
+        %% [safe] is a pre-auth atom-table exhaustion DoS. See
+        %% bondy_wamp_subprotocol:from_binary/1. (This clause also handles the
+        %% `false` returned by lists:keyfind/3 for an unknown slot.)
+        _ ->
             %% TODO define correct error return
             throw(serializer_unsupported)
     end.

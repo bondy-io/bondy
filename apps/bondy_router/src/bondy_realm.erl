@@ -143,6 +143,13 @@ connected to any realm.
 %% shards while `bondy_db:list/2` over the band scatter-scans every realm.
 -define(REALM_BAND, <<>>).
 
+%% S-2: at-rest encryption marker for a `bondy_realm_keys` bundle field. A
+%% sensitive field (`private`, `encryption`) is stored either as a plaintext JWK
+%% (encryption off / legacy) or as `{?ENC_TAG, Envelope}` (a `bondy_keyring`
+%% AES-256-GCM envelope over `term_to_binary(JWK)`). `public` is never encrypted.
+-define(ENC_TAG, '$bondy_enc').
+-define(SENSITIVE_KEY_FIELDS, [private, encryption]).
+
 -define(DEFAULT_AUTHMETHODS, [
     ?WAMP_ANON_AUTH,
     ?PASSWORD_AUTH,
@@ -559,8 +566,9 @@ connected to any realm.
         ?WAMP_CRYPTOSIGN_AUTH,
         % ?WAMP_SCRAM_AUTH,
         ?WAMP_CRA_AUTH,
-        ?PASSWORD_AUTH,
-        ?WAMP_ANON_AUTH
+        ?PASSWORD_AUTH
+        %% D-2: ?WAMP_ANON_AUTH removed — the master realm is the administrative
+        %% control plane and must not accept anonymous connections.
     ],
     is_prototype => false,
     prototype_uri => undefined,
@@ -570,8 +578,12 @@ connected to any realm.
     security_enabled => true,
     users => [
         #{
+            %% D-1: no hardcoded password. The admin password is injected at
+            %% first-boot creation (see add_master_realm/0 /
+            %% resolve_master_admin_password/0) from
+            %% `security.admin_user.password`, or a random one is generated and
+            %% logged once.
             username => <<"admin">>,
-            password => <<"bondy-admin">>,
             groups => [<<"bondy.administrators">>],
             meta => #{
                 <<"description">> => <<"The default Bondy administrator user.">>
@@ -588,6 +600,12 @@ connected to any realm.
         }
     ],
     grants => [
+        %% D-2: the administrators group is granted wamp.* on the Bondy admin
+        %% namespaces ONLY (`bondy.*` and `wamp.*`), not on all URIs (`<<"">>`).
+        %% The anonymous grant that previously mirrored this has been REMOVED, so
+        %% the anonymous role holds no capability on the master realm. The
+        %% trailing-dot prefixes are component-safe under the current byte-prefix
+        %% match and become component-correct once Z-1/WP-N lands.
         #{
             permissions => [
                 <<"wamp.call">>,
@@ -595,14 +613,14 @@ connected to any realm.
                 <<"wamp.subscribe">>,
                 <<"wamp.unsubscribe">>
             ],
-            uri => <<"">>,
+            uri => <<"bondy.">>,
             match => <<"prefix">>,
             roles => [<<"bondy.administrators">>],
             meta => #{
                 <<"description">> => <<
-                    "Allows the administrators users to make RPC Calls to "
-                    "the Bondy Admin APIs and subscribe to all Bondy events. "
-                    "This is too liberal and should be restricted."
+                    "Allows the administrators group to call the Bondy admin "
+                    "APIs and subscribe to Bondy events under the 'bondy.' "
+                    "namespace."
                 >>
             }
         },
@@ -613,65 +631,64 @@ connected to any realm.
                 <<"wamp.subscribe">>,
                 <<"wamp.unsubscribe">>
             ],
-            uri => <<"">>,
+            uri => <<"wamp.">>,
             match => <<"prefix">>,
-            roles => [<<"anonymous">>],
+            roles => [<<"bondy.administrators">>],
             meta => #{
                 <<"description">> => <<
-                    "Allows anonymous users to make RPC Calls to the "
-                    "Bondy Admin APIs and subscribe to all Bondy events. "
-                    "This is too liberal and should be restricted."
+                    "Allows the administrators group to use the WAMP meta API "
+                    "and subscribe to WAMP events under the 'wamp.' namespace."
                 >>
             }
         }
     ],
     sources => [
+        %% D-1: master-realm credential auth defaults to LOOPBACK ONLY. The
+        %% master realm is the administrative control plane; remote admin access
+        %% is an explicit operator decision — add a source for your admin network
+        %% (e.g. an RFC1918 CIDR) rather than exposing it to 0.0.0.0/0.
         #{
             usernames => <<"all">>,
             authmethod => ?PASSWORD_AUTH,
-            cidr => <<"0.0.0.0/0">>,
+            cidr => <<"127.0.0.0/8">>,
             meta => #{
                 <<"description">> => <<
-                    "Allows all users from any network authenticate using "
-                    "password credentials. This should ideally be restricted "
-                    "to your local administrative or DMZ network."
+                    "Allows users to authenticate using password credentials "
+                    "from the loopback interface only. Add a source for your "
+                    "admin network to allow remote administrative access."
                 >>
             }
         },
         #{
             usernames => <<"all">>,
             authmethod => ?WAMP_CRYPTOSIGN_AUTH,
-            cidr => <<"0.0.0.0/0">>,
+            cidr => <<"127.0.0.0/8">>,
             meta => #{
                 <<"description">> => <<
-                    "Allows all users from any network authenticate using "
-                    "cryptosign. This should ideally be restricted "
-                    "to your local administrative or DMZ network."
+                    "Allows users to authenticate using cryptosign from the "
+                    "loopback interface only. Add a source for your admin "
+                    "network to allow remote administrative access."
                 >>
             }
         },
         #{
             usernames => <<"all">>,
             authmethod => ?WAMP_CRA_AUTH,
-            cidr => <<"0.0.0.0/0">>,
+            cidr => <<"127.0.0.0/8">>,
             meta => #{
                 <<"description">> => <<
-                    "Allows all users from any network authenticate using "
-                    "password credentials. This should ideally be restricted "
-                    "to your local administrative or DMZ network."
+                    "Allows users to authenticate using WAMP-CRA from the "
+                    "loopback interface only. Add a source for your admin "
+                    "network to allow remote administrative access."
                 >>
             }
         },
         % #{
         %     usernames => <<"all">>,
         %     authmethod => ?WAMP_SCRAM_AUTH,
-        %     cidr => <<"0.0.0.0/0">>,
+        %     cidr => <<"127.0.0.0/8">>,
         %     meta => #{
-        %         <<"description">> => <<"
-        %             Allows all users from any network authenticate using "
-        %             "password credentials. This should ideally be restricted "
-        %             "to your local administrative or DMZ network."
-        %         >>
+        %         <<"description">> => <<"loopback only">>
         %     }
         % },
         #{
@@ -684,18 +701,9 @@ connected to any realm.
                     "interface (i.e. localhost) by presenting just its username."
                 >>
             }
-        },
-        #{
-            usernames => [<<"anonymous">>],
-            authmethod => ?WAMP_ANON_AUTH,
-            cidr => <<"127.0.0.0/8">>,
-            meta => #{
-                <<"description">> => <<
-                    "Allows the anonymous user to connect over the loopback "
-                    "interface (i.e. localhost) only."
-                >>
-            }
         }
+        %% D-2: the anonymous loopback source has been REMOVED — the master realm
+        %% no longer accepts anonymous connections.
     ]
 }).
 
@@ -766,6 +774,7 @@ connected to any realm.
 
 -export([allow_connections/1]).
 -export([apply_config/0]).
+-export([harden_master_realm/0]).
 -export([authmethods/1]).
 -export([create/1]).
 -export([delete/1]).
@@ -793,6 +802,7 @@ connected to any realm.
 -export([oidc_providers/1]).
 -export([is_security_enabled/1]).
 -export([is_sso_realm/1]).
+-export([is_trusted_issuer/2]).
 -export([is_type/1]).
 -export([is_value_inherited/2]).
 -export([list/0]).
@@ -960,6 +970,31 @@ is_sso_realm(#realm{is_sso_realm = Val}) ->
     Val;
 is_sso_realm(Uri) when is_binary(Uri) ->
     is_sso_realm(fetch(Uri)).
+
+-doc """
+Returns `true` if a token or ticket whose issuer — the value of its `aud`
+(JWT) / `authrealm` (ticket) claim, `AuthRealmUri` — may be accepted to
+establish a session in realm `RealmUri`. Otherwise returns `false`.
+
+An issuer is trusted iff it is the target realm itself, or the target realm's
+configured SSO realm (resolving prototype inheritance via `sso_realm_uri/1`).
+
+This is the cross-realm token-trust boundary: it prevents a token/ticket minted
+under an unrelated — possibly attacker-controlled — realm or SSO family from
+being replayed against `RealmUri` merely because that token verifies against its
+own issuer's key. Every token/ticket verifier that binds a session to a target
+realm MUST gate on this predicate.
+
+The common same-realm case (`AuthRealmUri =:= RealmUri`) short-circuits before
+any realm lookup, so only genuine SSO tokens incur a `fetch/1`.
+""".
+-spec is_trusted_issuer(RealmUri :: uri(), AuthRealmUri :: uri()) -> boolean().
+
+is_trusted_issuer(RealmUri, AuthRealmUri) when
+    is_binary(RealmUri) andalso is_binary(AuthRealmUri)
+->
+    AuthRealmUri =:= RealmUri orelse
+        AuthRealmUri =:= sso_realm_uri(RealmUri).
 
 -doc """
 Returns `true` if the Realm is allowing connections. Otherwise returns
@@ -1729,8 +1764,175 @@ grants(Uri, Opts) when is_binary(Uri) ->
 
 %% @private
 add_master_realm() ->
-    Data = validate(?MASTER_REALM, ?MASTER_REALM_VALIDATOR),
+    Data0 = inject_master_admin_password(?MASTER_REALM),
+    Data = validate(Data0, ?MASTER_REALM_VALIDATOR),
     do_create(Data, #{declarative => true}).
+
+%% @private
+%% The master-realm 'admin' user ships WITHOUT a password (D-1: no hardcoded
+%% default credential). Resolve it at first-boot creation: prefer the
+%% operator-configured `security.admin_user.password`; otherwise generate a
+%% random one and log it ONCE at notice level so the operator can capture it.
+%% NOTE: a generated password is per-node — for a MULTI-NODE cluster operators
+%% MUST set `security.admin_user.password` identically on every node so the
+%% deterministically-salted admin user cell (see validate_rbac_config/2)
+%% converges instead of diverging under anti-entropy.
+inject_master_admin_password(#{users := Users} = Data) ->
+    Password = resolve_master_admin_password(),
+    NewUsers = [
+        case User of
+            #{username := <<"admin">>} -> User#{password => Password};
+            _ -> User
+        end
+     || User <- Users
+    ],
+    Data#{users => NewUsers};
+inject_master_admin_password(Data) ->
+    Data.
+
+%% @private
+resolve_master_admin_password() ->
+    case bondy_config:get([security, admin_user, password], undefined) of
+        Configured when is_binary(Configured) andalso Configured =/= <<>> ->
+            Configured;
+        Configured when is_list(Configured) andalso Configured =/= [] ->
+            list_to_binary(Configured);
+        _ ->
+            Password = base64:encode(crypto:strong_rand_bytes(18)),
+            ?LOG_NOTICE(#{
+                description =>
+                    "No admin password configured for the master realm; a random "
+                    "one was generated for the 'admin' user. Record it now (shown "
+                    "only once) or set 'security.admin_user.password'. For a "
+                    "multi-node cluster you MUST configure it identically on every "
+                    "node.",
+                realm => ?MASTER_REALM_URI,
+                username => <<"admin">>,
+                generated_password => Password
+            }),
+            Password
+    end.
+
+-doc """
+Idempotent one-shot hardening of an ALREADY-STORED master realm (D-1/D-2), for
+installations provisioned before the master-realm hardening. Fresh installs
+create the master realm already hardened, so this is a no-op for them. Called at
+boot (see `bondy_app`) after the master realm is guaranteed to exist. Guarded so
+a failure can never crash boot.
+""".
+-spec harden_master_realm() -> ok.
+
+harden_master_realm() ->
+    try
+        Realm = fetch(?MASTER_REALM_URI),
+        %% Only remediate a LEGACY master realm — presence of the anonymous
+        %% authmethod is the marker. This keeps the migration a true no-op (no
+        %% writes, no log noise) on fresh / already-hardened installs.
+        case lists:member(?WAMP_ANON_AUTH, authmethods(Realm)) of
+            true ->
+                ok = remediate_legacy_anon(Realm);
+            false ->
+                ok
+        end,
+        %% The password warning runs every boot (until rotated), independently of
+        %% the anonymous remediation.
+        ok = maybe_warn_legacy_admin_password(Realm)
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_WARNING(#{
+                description =>
+                    "Master realm hardening migration failed; continuing boot. "
+                    "Review the master realm's security configuration manually.",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            })
+    end,
+    ok.
+
+%% @private
+%% Remediate a legacy (pre-hardening) master realm (D-2): remove the anonymous
+%% authmethod and revoke the anonymous wamp.* grant. Removing the authmethod alone
+%% already blocks anonymous sessions; the grant revoke is defence in depth and is
+%% guarded so an RBAC quirk (e.g. anonymous role handling) cannot fail the whole
+%% migration.
+remediate_legacy_anon(#realm{uri = Uri} = Realm) ->
+    NewMethods = authmethods(Realm) -- [?WAMP_ANON_AUTH],
+    _ = update(Uri, #{<<"authmethods">> => NewMethods}),
+    ?LOG_WARNING(#{
+        description =>
+            "Master realm hardening (D-2): removed anonymous authentication from "
+            "the master realm. Anonymous clients can no longer connect to the "
+            "administrative control plane.",
+        realm => Uri
+    }),
+    Request = #{
+        roles => [?WAMP_ANON_AUTH],
+        permissions => [
+            <<"wamp.call">>,
+            <<"wamp.cancel">>,
+            <<"wamp.subscribe">>,
+            <<"wamp.unsubscribe">>
+        ],
+        uri => <<"">>,
+        match => <<"prefix">>
+    },
+    try bondy_rbac:revoke(Uri, Request) of
+        ok ->
+            ?LOG_WARNING(#{
+                description =>
+                    "Master realm hardening (D-2): revoked the anonymous wamp.* "
+                    "grant on the master realm.",
+                realm => Uri
+            });
+        {error, Reason} ->
+            ?LOG_WARNING(#{
+                description =>
+                    "Master realm hardening (D-2): could not auto-revoke the "
+                    "anonymous master-realm grant; remove it manually.",
+                realm => Uri,
+                reason => Reason
+            })
+    catch
+        _:CatchReason ->
+            ?LOG_WARNING(#{
+                description =>
+                    "Master realm hardening (D-2): could not auto-revoke the "
+                    "anonymous master-realm grant; remove it manually.",
+                realm => Uri,
+                reason => CatchReason
+            })
+    end,
+    ok.
+
+%% @private
+maybe_warn_legacy_admin_password(#realm{uri = Uri}) ->
+    case bondy_rbac_user:lookup(Uri, <<"admin">>) of
+        {ok, User} ->
+            case bondy_rbac_user:password(User) of
+                undefined ->
+                    ok;
+                PW ->
+                    case bondy_password:verify_string(<<"bondy-admin">>, PW) of
+                        true ->
+                            ?LOG_WARNING(#{
+                                description =>
+                                    "The master realm 'admin' user still uses the "
+                                    "legacy default password 'bondy-admin' (D-1). "
+                                    "Rotate it immediately via "
+                                    "'security.admin_user.password' or the admin "
+                                    "API.",
+                                realm => Uri,
+                                username => <<"admin">>
+                            }),
+                            ok;
+                        false ->
+                            ok
+                    end
+            end;
+        _ ->
+            ok
+    end.
 
 %% @private
 validate(Map0, Spec) ->
@@ -2134,17 +2336,20 @@ keys_to_entries(#realm{
 %% — this preserves a pre-split realm whose keys still live in the identity cell
 %% (migrated to the keys cell on its next store), and a brand-new realm read
 %% before its keys cell write lands. Only a populated keys cell is authoritative.
-merge_keys(#realm{} = R, KeysMap) when map_size(KeysMap) > 0 ->
+merge_keys(#realm{uri = Uri} = R, KeysMap) when map_size(KeysMap) > 0 ->
     {Priv, Pub, Enc} = maps:fold(
-        fun fold_key_entry/3, {#{}, #{}, #{}}, KeysMap
+        fun(Kid, Bundles, Acc) -> fold_key_entry(Uri, Kid, Bundles, Acc) end,
+        {#{}, #{}, #{}},
+        KeysMap
     ),
     R#realm{private_keys = Priv, public_keys = Pub, encryption_keys = Enc};
 merge_keys(#realm{} = R, _Empty) ->
     R.
 
 %% @private
-fold_key_entry(Kid, Bundles, {P, Pu, E}) ->
-    case bundle_of(Bundles) of
+fold_key_entry(Uri, Kid, Bundles, {P, Pu, E}) ->
+    %% Decrypt any at-rest-encrypted sensitive fields back to plaintext JWKs.
+    case decrypt_bundle(Uri, Kid, bundle_of(Bundles)) of
         #{encryption := EncK} ->
             {P, Pu, E#{Kid => EncK}};
         #{public := PubK} = B ->
@@ -2157,6 +2362,82 @@ fold_key_entry(Kid, Bundles, {P, Pu, E}) ->
         _ ->
             {P, Pu, E}
     end.
+
+%% =============================================================================
+%% PRIVATE: REALM KEY AT-REST ENCRYPTION (S-2)
+%% =============================================================================
+
+%% @private
+%% Encrypt the sensitive fields (`private`, `encryption`) of a bundle when the
+%% keyring is enabled; otherwise return it unchanged (plaintext, legacy layout).
+maybe_encrypt_bundle(_Uri, _Kid, Bundle, false) ->
+    Bundle;
+maybe_encrypt_bundle(Uri, Kid, Bundle, true) ->
+    maps:map(
+        fun(Field, V) ->
+            case lists:member(Field, ?SENSITIVE_KEY_FIELDS) of
+                true -> encrypt_field(Uri, Kid, Field, V);
+                false -> V
+            end
+        end,
+        Bundle
+    ).
+
+%% @private
+encrypt_field(_Uri, _Kid, _Field, undefined) ->
+    undefined;
+encrypt_field(_Uri, _Kid, _Field, {?ENC_TAG, _} = Already) ->
+    Already;
+encrypt_field(Uri, Kid, Field, V) ->
+    Envelope = bondy_keyring:seal(term_to_binary(V), key_aad(Uri, Kid, Field)),
+    {?ENC_TAG, Envelope}.
+
+%% @private
+%% Decrypt any `{?ENC_TAG, Envelope}` sensitive fields back to plaintext JWKs;
+%% plaintext fields pass through (encryption off / legacy / pre-migration).
+decrypt_bundle(Uri, Kid, Bundle) ->
+    maps:map(
+        fun(Field, V) ->
+            case lists:member(Field, ?SENSITIVE_KEY_FIELDS) of
+                true -> decrypt_field(Uri, Kid, Field, V);
+                false -> V
+            end
+        end,
+        Bundle
+    ).
+
+%% @private
+decrypt_field(Uri, Kid, Field, {?ENC_TAG, Envelope}) ->
+    case bondy_keyring:open(Envelope, key_aad(Uri, Kid, Field)) of
+        {ok, Bin} ->
+            %% The plaintext is AES-256-GCM authenticated (we produced it), so
+            %% `[safe]` is belt-and-suspenders over already-trusted bytes.
+            binary_to_term(Bin, [safe]);
+        {error, Reason} ->
+            error({realm_key_decrypt_failed, Uri, Kid, Field, Reason})
+    end;
+decrypt_field(_Uri, _Kid, _Field, V) ->
+    V.
+
+%% @private
+%% A bundle is plaintext iff none of its sensitive fields carries the encryption
+%% marker. Drives the one-time plaintext → ciphertext migration in `store_keys`.
+is_plaintext_bundle(Bundle) ->
+    not lists:any(
+        fun(Field) ->
+            case maps:get(Field, Bundle, undefined) of
+                {?ENC_TAG, _} -> true;
+                _ -> false
+            end
+        end,
+        ?SENSITIVE_KEY_FIELDS
+    ).
+
+%% @private
+%% Additional Authenticated Data binds an envelope to its (realm, kid, field) so
+%% it cannot be lifted into another slot.
+key_aad(Uri, Kid, Field) ->
+    <<Uri/binary, 0, Kid/binary, 0, (atom_to_binary(Field, utf8))/binary>>.
 
 %% @private
 %% An aw-map value is a sibling list; rotations use distinct kids so it is a
@@ -2185,12 +2466,22 @@ store_keys(Uri, #realm{} = Realm) ->
     Desired = keys_to_entries(Realm),
     Current = read_keys(Uri),
     Table = keys_table(),
-    %% Add / update changed or new kids.
+    Enabled = bondy_keyring:is_enabled(),
+    %% Add / update changed or new kids. The idempotence check compares the
+    %% LOGICAL (decrypted) bundle, not the stored bytes — at-rest encryption uses
+    %% a fresh random IV per write, so ciphertext is never byte-stable and a
+    %% byte comparison would re-stamp the cell on every boot (and diverge the
+    %% aw-map cross-node). A stored *plaintext* bundle is additionally re-written
+    %% once when encryption is enabled, to migrate it to ciphertext.
     ok = maps:foreach(
-        fun(Kid, Bundle) ->
-            case current_bundle(Current, Kid) of
-                Bundle -> ok;
-                _ -> aw_apply(Table, Uri, {put, Kid, Bundle})
+        fun(Kid, Desired0) ->
+            Stored = current_bundle(Current, Kid),
+            case key_needs_write(Uri, Kid, Desired0, Stored, Enabled) of
+                true ->
+                    Bundle = maybe_encrypt_bundle(Uri, Kid, Desired0, Enabled),
+                    aw_apply(Table, Uri, {put, Kid, Bundle});
+                false ->
+                    ok
             end
         end,
         Desired
@@ -2202,6 +2493,15 @@ store_keys(Uri, #realm{} = Realm) ->
         not maps:is_key(Kid, Desired)
     ],
     ok.
+
+%% @private
+%% Decide whether the stored bundle for `Kid` must be (re)written. `Stored` is
+%% the raw (possibly encrypted) bundle, or `undefined` when absent.
+key_needs_write(_Uri, _Kid, _Desired, undefined, _Enabled) ->
+    true;
+key_needs_write(Uri, Kid, Desired, Stored, Enabled) ->
+    decrypt_bundle(Uri, Kid, Stored) =/= Desired orelse
+        (Enabled andalso is_plaintext_bundle(Stored)).
 
 %% @private
 current_bundle(Current, Kid) ->

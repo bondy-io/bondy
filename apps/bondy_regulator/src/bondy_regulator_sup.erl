@@ -33,6 +33,16 @@ init([]) ->
             shutdown => 5000,
             type => worker,
             modules => [bondy_regulator_rate_limit]
+        },
+        %% Keyed + GC'd layer over the buckets above (owns its registry ETS).
+        %% Started after the bucket store it depends on (one_for_all order).
+        #{
+            id => bondy_rate_limiter,
+            start => {bondy_rate_limiter, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [bondy_rate_limiter]
         }
     ],
     {ok, {SupFlags, ChildSpecs}}.

@@ -202,6 +202,47 @@ do_match(_) ->
     ?assert(bondy_wamp_uri:match(<<"a.">>, <<"a">>, ?PREFIX_MATCH)),
     ?assert(bondy_wamp_uri:match(<<"a.b">>, <<"a">>, ?PREFIX_MATCH)),
 
+    %% Z-1: prefix matching is component-boundary-aware, NOT byte-wise. A grant
+    %% prefixed `com.app.order` must NOT leak onto sibling URIs that merely share
+    %% the byte prefix across a component boundary.
+    ?assertEqual(
+        false,
+        bondy_wamp_uri:match(
+            <<"com.app.orders_admin.x">>, <<"com.app.order">>, ?PREFIX_MATCH
+        )
+    ),
+    ?assertEqual(
+        false,
+        bondy_wamp_uri:match(
+            <<"com.app.orders">>, <<"com.app.order">>, ?PREFIX_MATCH
+        )
+    ),
+    %% ... but genuine sub-URIs and the exact URI still match.
+    ?assert(
+        bondy_wamp_uri:match(
+            <<"com.app.order.secret">>, <<"com.app.order">>, ?PREFIX_MATCH
+        )
+    ),
+    ?assert(
+        bondy_wamp_uri:match(
+            <<"com.app.order">>, <<"com.app.order">>, ?PREFIX_MATCH
+        )
+    ),
+    %% The empty "any" prefix still matches every URI.
+    ?assert(
+        bondy_wamp_uri:match(<<"com.app.orders_admin">>, <<>>, ?PREFIX_MATCH)
+    ),
+
+    %% A trailing-dot pattern (the operator wrote the boundary explicitly) still
+    %% matches sub-URIs but not a byte-prefix sibling.
+    ?assert(
+        bondy_wamp_uri:match(<<"com.api.foo">>, <<"com.api.">>, ?PREFIX_MATCH)
+    ),
+    ?assertEqual(
+        false,
+        bondy_wamp_uri:match(<<"com.apix.foo">>, <<"com.api.">>, ?PREFIX_MATCH)
+    ),
+
     ?assert(bondy_wamp_uri:match(<<"a">>, <<"a">>, ?WILDCARD_MATCH)),
     ?assert(bondy_wamp_uri:match(<<"a.b">>, <<".">>, ?WILDCARD_MATCH)),
     ?assert(bondy_wamp_uri:match(<<"a.b">>, <<"a.">>, ?WILDCARD_MATCH)),

@@ -236,7 +236,10 @@ encode_state({_DS, _CC, _Hlc} = State) ->
 -spec decode_state(binary()) -> state().
 
 decode_state(<<?ENC_V1, Bin/binary>>) ->
-    uncanon(binary_to_term(Bin)).
+    %% C-2: `[safe]` — this decodes peer-shipped CRDT state on the AAE merge
+    %% path (`bondy_oplog_cell_apply`), so untrusted bytes must not be able to
+    %% create atoms/funs. Bondy-written values are plain data and round-trip.
+    uncanon(binary_to_term(Bin, [safe])).
 
 %% =============================================================================
 %% INTERNAL

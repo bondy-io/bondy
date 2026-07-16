@@ -10,6 +10,7 @@ signatures and expiry.
 """.
 
 -include_lib("kernel/include/logger.hrl").
+-include("bondy_security.hrl").
 
 -define(NOW, erlang:system_time(second)).
 % 2 mins
@@ -104,6 +105,23 @@ do_verify(RealmUri, JWT, Spec) ->
             ~"kid" := Kid
         } = Claims,
 
+        %% A-1: the token's issuer (`aud`) must be trusted by the target realm
+        %% (itself or its SSO realm), else a token minted under an unrelated
+        %% realm/SSO family could be replayed here against its own issuer's key.
+        case bondy_realm:is_trusted_issuer(RealmUri, AuthRealmUri) of
+            true ->
+                ok;
+            false ->
+                ?LOG_WARNING(#{
+                    description =>
+                        "Rejected OAuth2 token: issuer not trusted by "
+                        "target realm",
+                    realm_uri => RealmUri,
+                    token_authrealm => AuthRealmUri
+                }),
+                throw(untrusted_issuer)
+        end,
+
         AuthRealm = bondy_realm:fetch(AuthRealmUri),
 
         %% Finally we try to verify the JWT
@@ -111,7 +129,7 @@ do_verify(RealmUri, JWT, Spec) ->
             undefined ->
                 {error, oauth2_invalid_grant};
             JWK ->
-                case jose_jwt:verify(JWK, JWT) of
+                case jose_jwt:verify_strict(JWK, ?ALLOWED_JWT_ALGS, JWT) of
                     {true, {jose_jwt, Claims}, _} ->
                         matches(RealmUri, Claims, Spec);
                     {false, {jose_jwt, _Claims}, _} ->

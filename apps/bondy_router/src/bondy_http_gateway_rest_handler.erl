@@ -107,6 +107,11 @@ include `wamp.error.not_found` → 404, `wamp.error.not_authorized` →
 -export([expires/2]).
 -export([forbidden/2]).
 
+-ifdef(TEST).
+%% G-1: exposed for unit-testing the per-scheme fail-closed authorization logic.
+-export([is_authorized/3]).
+-endif.
+
 %% =============================================================================
 %% API
 %% =============================================================================
@@ -410,9 +415,39 @@ is_authorized(_, Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
         request => Req
     }),
     {false, Req, St};
-is_authorized(_, Req, #{security := _} = St0) ->
+is_authorized(_, Req, #{security := #{<<"type">> := Type}} = St) when
+    Type == <<"basic">> orelse Type == <<"oidc">>
+->
+    %% G-1: `basic` and `oidc` are first-class schemes in the spec parser but
+    %% have NO runtime enforcement here. They MUST fail closed — falling through
+    %% to the anonymous branch below would serve the endpoint unauthenticated
+    %% even though the operator declared it protected.
+    ?LOG_WARNING(#{
+        description =>
+            "Denying request: the endpoint's HTTP security scheme is not "
+            "enforced at runtime (fail-closed).",
+        type => Type,
+        request => Req
+    }),
+    {false, Req, St};
+is_authorized(_, Req, #{security := Security} = St0) when
+    is_map(Security) andalso map_size(Security) == 0
+->
+    %% A genuinely anonymous endpoint declares an EMPTY security map
+    %% (`?DEFAULT_SECURITY`); only that is served without authentication.
     St1 = St0#{is_anonymous => true},
-    {true, Req, St1}.
+    {true, Req, St1};
+is_authorized(_, Req, #{security := Security} = St) ->
+    %% Any other (unknown / malformed / future) security value fails closed
+    %% rather than defaulting to anonymous access.
+    ?LOG_WARNING(#{
+        description =>
+            "Denying request: unrecognised endpoint security scheme "
+            "(fail-closed).",
+        security => Security,
+        request => Req
+    }),
+    {false, Req, St}.
 
 %% @private
 authenticate(Token, Ctxt0, Req0, St0) ->

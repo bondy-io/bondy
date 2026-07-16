@@ -29,14 +29,15 @@ the process being monitored.
 """.
 
 -record(?MODULE, {
-    baseline = 0            ::  non_neg_integer(),
-    timer = undefined       ::  undefined | reference()
+    baseline = 0 :: non_neg_integer(),
+    timer = undefined :: undefined | reference()
 }).
 
--type t()                   ::  #?MODULE{}.
--type decision()            ::  {hibernate, non_neg_integer()}
-                                | {rebaseline, non_neg_integer()}
-                                | keep.
+-type t() :: #?MODULE{}.
+-type decision() ::
+    {hibernate, non_neg_integer()}
+    | {rebaseline, non_neg_integer()}
+    | keep.
 
 -export_type([t/0]).
 
@@ -45,20 +46,15 @@ the process being monitored.
 -export([handle_tick/1]).
 -export([new/0]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc "A disarmed monitor with a zero baseline.".
 -spec new() -> t().
 
 new() ->
     #?MODULE{}.
-
 
 -doc """
 (Re-)arms the periodic heap-monitor tick, scheduling a `gc_tick` message to the
@@ -77,7 +73,6 @@ arm(#?MODULE{timer = Ref} = T) ->
         _ ->
             T#?MODULE{timer = undefined}
     end.
-
 
 -doc """
 Handles a `gc_tick`: re-arms the timer, then decides whether the calling process
@@ -105,7 +100,6 @@ handle_tick(#?MODULE{} = T0) ->
             {ok, T}
     end.
 
-
 -doc """
 Pure heap-monitor decision. Given the current heap size `Cur`, the post-GC
 baseline `Base` (the live size after the last fullsweep), and the growth
@@ -122,7 +116,8 @@ threshold `DeltaWords`:
 -spec gc_decision(
     Cur :: non_neg_integer(),
     Base :: non_neg_integer(),
-    DeltaWords :: pos_integer()) -> decision().
+    DeltaWords :: pos_integer()
+) -> decision().
 
 gc_decision(Cur, Base, DeltaWords) when Cur - Base >= DeltaWords ->
     {hibernate, Cur};
@@ -131,13 +126,9 @@ gc_decision(Cur, Base, _DeltaWords) when Cur < Base ->
 gc_decision(_Cur, _Base, _DeltaWords) ->
     keep.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 %% The calling process's total heap size (young + old generations) in words —

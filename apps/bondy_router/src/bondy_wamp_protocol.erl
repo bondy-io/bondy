@@ -30,7 +30,11 @@ outbound WAMP messages.
     auth_timestamp :: integer() | undefined,
     state_name :: state_name(),
     context :: bondy_context:t() | undefined,
-    goodbye_reason :: uri() | undefined
+    goodbye_reason :: uri() | undefined,
+    %% AV-1: per-session message-throttle bucket, created at session open when
+    %% message throttling is enabled (else `undefined`). Held here so the
+    %% per-message path never reads config.
+    msg_limiter :: bondy_rate_limit:session_limiter()
 }).
 
 -type state() :: #wamp_state{} | undefined.
@@ -54,6 +58,13 @@ outbound WAMP messages.
 
 %% BONDY_SENSITIVE CALLBACKS
 -export([format_status/1]).
+
+-ifdef(TEST).
+%% Exported for regression testing of the generic pre-auth ABORT (A-2 / WP-D).
+-export([abort_message/1]).
+%% Exported for testing the AV-1 inbound throttle (WP-K).
+-export([throttle/2]).
+-endif.
 
 %% API
 -export([init/3]).
@@ -150,6 +161,9 @@ terminate(#wamp_state{context = undefined}) ->
 terminate(#wamp_state{} = State) ->
     Ctxt = State#wamp_state.context,
 
+    %% AV-1: free the per-session message-throttle bucket (no-op if none).
+    _ = bondy_rate_limit:delete_session_limiter(State#wamp_state.msg_limiter),
+
     case bondy_context:has_session(Ctxt) of
         true ->
             Session = bondy_context:session(Ctxt),
@@ -177,8 +191,6 @@ validate_subprotocol({ws, binary, cbor_batched} = S) ->
     {ok, S};
 validate_subprotocol({ws, binary, msgpack_batched} = S) ->
     {ok, S};
-validate_subprotocol({ws, binary, bert_batched} = S) ->
-    {ok, S};
 validate_subprotocol({ws, binary, erl_batched} = S) ->
     {ok, S};
 validate_subprotocol({raw, binary, json} = S) ->
@@ -193,8 +205,9 @@ validate_subprotocol({T, binary, cbor} = S) when ?IS_TRANSPORT(T) ->
     {ok, S};
 validate_subprotocol({T, binary, msgpack} = S) when ?IS_TRANSPORT(T) ->
     {ok, S};
-validate_subprotocol({T, binary, bert} = S) when ?IS_TRANSPORT(T) ->
-    {ok, S};
+%% NOTE: bert / bert_batched are intentionally NOT accepted — bert:decode/1 uses
+%% binary_to_term/1 without [safe] (pre-auth atom-table exhaustion DoS). See
+%% bondy_wamp_subprotocol:from_binary/1.
 validate_subprotocol({error, _} = Error) ->
     Error;
 validate_subprotocol(_) ->
@@ -410,21 +423,27 @@ handle_inbound_messages(
     %% Client is requesting a session
     %% This will return either reply with
     %% wamp_welcome() | wamp_challenge() | wamp_abort()
-    Ctxt0 = St0#wamp_state.context,
     ok = notify(M, St0),
-    Ctxt1 = bondy_context:set_realm_uri(Ctxt0, Uri),
-    St1 = update_context(Ctxt1, St0),
-    St = set_next_state(establishing, St1),
+    %% AV-1: throttle the pre-auth handshake per source IP (no-op unless enabled).
+    case throttle(handshake, St0) of
+        throttled ->
+            stop({rate_limited, handshake}, St0);
+        ok ->
+            Ctxt0 = St0#wamp_state.context,
+            Ctxt1 = bondy_context:set_realm_uri(Ctxt0, Uri),
+            St1 = update_context(Ctxt1, St0),
+            St = set_next_state(establishing, St1),
 
-    %% Lookup or create realm
-    case bondy_realm:get(Uri) of
-        {ok, Realm} ->
-            ok = logger:update_process_metadata(#{realm => Uri}),
-            maybe_open_session(
-                maybe_auth_challenge(M#hello.details, Realm, St)
-            );
-        {error, not_found} ->
-            stop({authentication_failed, {no_such_realm, Uri}}, St)
+            %% Lookup or create realm
+            case bondy_realm:get(Uri) of
+                {ok, Realm} ->
+                    ok = logger:update_process_metadata(#{realm => Uri}),
+                    maybe_open_session(
+                        maybe_auth_challenge(M#hello.details, Realm, St)
+                    );
+                {error, not_found} ->
+                    stop({authentication_failed, {no_such_realm, Uri}}, St)
+            end
     end;
 handle_inbound_messages([#hello{} = M | _], #wamp_state{} = St, _) ->
     %% Client does not have a session but we already received a HELLO message
@@ -448,17 +467,27 @@ handle_inbound_messages(
     %% Client is responding to a challenge
     ok = notify(M, St0),
 
-    AuthMethod = St0#wamp_state.authmethod,
-    AuthCtxt0 = St0#wamp_state.auth_context,
-    Signature = M#authenticate.signature,
-    Extra = M#authenticate.extra,
+    %% AV-1: throttle credential-verification attempts per source IP so a
+    %% credential-stuffing / brute-force flood is rate-limited (no-op unless
+    %% enabled). Applied before the (expensive) verification.
+    case throttle(auth, St0) of
+        throttled ->
+            stop({rate_limited, auth}, St0);
+        ok ->
+            AuthMethod = St0#wamp_state.authmethod,
+            AuthCtxt0 = St0#wamp_state.auth_context,
+            Signature = M#authenticate.signature,
+            Extra = M#authenticate.extra,
 
-    case bondy_auth:authenticate(AuthMethod, Signature, Extra, AuthCtxt0) of
-        {ok, WelcomeAuthExtra, AuthCtxt1} ->
-            St1 = St0#wamp_state{auth_context = AuthCtxt1},
-            open_session(WelcomeAuthExtra, St1);
-        {error, Reason} ->
-            stop({authentication_failed, Reason}, St0)
+            case
+                bondy_auth:authenticate(AuthMethod, Signature, Extra, AuthCtxt0)
+            of
+                {ok, WelcomeAuthExtra, AuthCtxt1} ->
+                    St1 = St0#wamp_state{auth_context = AuthCtxt1},
+                    open_session(WelcomeAuthExtra, St1);
+                {error, Reason} ->
+                    stop({authentication_failed, Reason}, St0)
+            end
     end;
 handle_inbound_messages(
     [#authenticate{} = M | _], #wamp_state{state_name = Name} = St, _
@@ -474,16 +503,27 @@ handle_inbound_messages(
     #wamp_state{state_name = established, context = #{session := _}} = St,
     Acc
 ) ->
-    %% We have a session, so we forward messages via router
-    case bondy_router:forward(H, St#wamp_state.context) of
-        {ok, Ctxt} ->
-            handle_inbound_messages(T, update_context(Ctxt, St), Acc);
-        {reply, M, Ctxt} ->
-            Bin = bondy_wamp_encoding:encode(M, encoding(St)),
-            handle_inbound_messages(T, update_context(Ctxt, St), [Bin | Acc]);
-        {stop, M, Ctxt} ->
-            Bin = bondy_wamp_encoding:encode(M, encoding(St)),
-            {stop, [Bin | Acc], update_context(Ctxt, St)}
+    %% AV-1 (opt-in): per-session throttle for flood-prone verbs before routing.
+    case msg_throttle(H, St) of
+        allow ->
+            %% We have a session, so we forward messages via router
+            case bondy_router:forward(H, St#wamp_state.context) of
+                {ok, Ctxt} ->
+                    handle_inbound_messages(T, update_context(Ctxt, St), Acc);
+                {reply, M, Ctxt} ->
+                    Bin = bondy_wamp_encoding:encode(M, encoding(St)),
+                    handle_inbound_messages(
+                        T, update_context(Ctxt, St), [Bin | Acc]
+                    );
+                {stop, M, Ctxt} ->
+                    Bin = bondy_wamp_encoding:encode(M, encoding(St)),
+                    {stop, [Bin | Acc], update_context(Ctxt, St)}
+            end;
+        {throttled, ErrorMsg} ->
+            Bin = bondy_wamp_encoding:encode(ErrorMsg, encoding(St)),
+            handle_inbound_messages(T, St, [Bin | Acc]);
+        drop ->
+            handle_inbound_messages(T, St, Acc)
     end;
 handle_inbound_messages(_, #wamp_state{state_name = shutting_down} = St, _) ->
     %% TODO should we reply with ERROR and keep on waiting for the client
@@ -618,7 +658,12 @@ open_session(Extra, St0) when is_map(Extra) ->
 
         ok = bondy:set_process_metadata(Meta, LogKeys),
 
-        {reply, Bin, St1#wamp_state{state_name = established}}
+        %% AV-1: resolve the per-session message-throttle bucket ONCE, now that
+        %% the session is open (or `undefined` if message throttling is off).
+        {reply, Bin, St1#wamp_state{
+            state_name = established,
+            msg_limiter = bondy_rate_limit:new_session_limiter()
+        }}
     catch
         throw:Reason ->
             stop(Reason, St0);
@@ -804,6 +849,57 @@ auth_challenge(Method, St0) ->
     end.
 
 %% =============================================================================
+%% PRIVATE: RATE LIMITING (AV-1)
+%% =============================================================================
+
+%% @private
+%% Per-source-IP inbound throttle for the handshake / auth classes. Delegates to
+%% the shared `bondy_rate_limit` policy (off by default; never raises).
+throttle(Class, #wamp_state{} = St) ->
+    {IP, _Port} = peer(St),
+    bondy_rate_limit:throttle(Class, IP).
+
+%% @private
+%% AV-1 Stage 4: opt-in per-session throttle for the flood-prone verbs
+%% (CALL/PUBLISH/SUBSCRIBE/REGISTER), keyed by session id. Returns `allow`,
+%% `{throttled, ErrorMsg}` (a WAMP ERROR to return), or `drop` (throttled but the
+%% verb expects no reply — an unacknowledged PUBLISH). Non-throttled verbs (and
+%% the whole feature when disabled) short-circuit to `allow` with a single map
+%% read. Message throttling has its own opt-in flag on top of the master switch.
+msg_throttle(#call{} = M, St) ->
+    do_msg_throttle(M, St, reply);
+msg_throttle(#subscribe{} = M, St) ->
+    do_msg_throttle(M, St, reply);
+msg_throttle(#register{} = M, St) ->
+    do_msg_throttle(M, St, reply);
+msg_throttle(#publish{options = Opts} = M, St) ->
+    Reply =
+        case maps:get(acknowledge, Opts, false) of
+            true -> reply;
+            _ -> noreply
+        end,
+    do_msg_throttle(M, St, Reply);
+msg_throttle(_M, _St) ->
+    allow.
+
+%% @private
+do_msg_throttle(M, #wamp_state{msg_limiter = Limiter}, Reply) ->
+    %% Hot path: a field read + (only when enabled) an atomics consume. No
+    %% config read per message — the bucket was resolved once at session open.
+    case bondy_rate_limit:allow_session(Limiter) of
+        ok ->
+            allow;
+        throttled when Reply == reply ->
+            Details = #{
+                message => <<"Rate limited. Please slow down and retry.">>
+            },
+            {throttled,
+                bondy_wamp_message:error_from(M, Details, ?WAMP_UNAVAILABLE)};
+        throttled ->
+            drop
+    end.
+
+%% =============================================================================
 %% PRIVATE: UTILS
 %% =============================================================================
 
@@ -862,6 +958,14 @@ abort_message(connections_not_allowed) ->
             <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure taken by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>
     },
     bondy_wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
+abort_message({rate_limited, _Class}) ->
+    %% AV-1: inbound throttle tripped. A pre-auth signal, so the reason is not a
+    %% user-enumeration oracle; keep it generic and non-specific about the limit.
+    Details = #{
+        message =>
+            <<"Too many requests. Please slow down and retry later.">>
+    },
+    bondy_wamp_message:abort(Details, ?WAMP_UNAVAILABLE);
 abort_message(no_such_realm) ->
     Details = #{
         message => <<"Realm does not exist.">>
@@ -880,10 +984,14 @@ abort_message({no_such_groups, Groups}) when is_list(Groups) ->
     Details = #{message => Msg},
     bondy_wamp_message:abort(Details, ?WAMP_NO_SUCH_ROLE);
 abort_message({no_such_user, Username}) ->
-    Details = #{
-        message => <<"User '", Username/binary, "' does not exist.">>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_NO_SUCH_PRINCIPAL);
+    ?LOG_INFO(#{
+        description =>
+            "Authentication failed; returning a generic reason to the client "
+            "to avoid user enumeration.",
+        reason => no_such_user,
+        authid => Username
+    }),
+    generic_authentication_failed();
 abort_message({protocol_violation, Reason}) when is_binary(Reason) ->
     bondy_wamp_message:abort(#{message => Reason}, ?WAMP_PROTOCOL_VIOLATION);
 abort_message({authentication_failed, invalid_authmethod}) ->
@@ -908,26 +1016,29 @@ abort_message({authentication_failed, {no_such_groups, Groups}}) when
     Details = #{message => Msg},
     bondy_wamp_message:abort(Details, ?WAMP_NO_SUCH_ROLE);
 abort_message({authentication_failed, {no_such_user, Username}}) ->
-    Details = #{
-        message => <<"User '", Username/binary, "' does not exist.">>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_NO_SUCH_PRINCIPAL);
+    ?LOG_INFO(#{
+        description =>
+            "Authentication failed; returning a generic reason to the client "
+            "to avoid user enumeration.",
+        reason => no_such_user,
+        authid => Username
+    }),
+    generic_authentication_failed();
 abort_message({authentication_failed, user_disabled}) ->
-    Details = #{
-        message =>
-            <<"The user requested (via 'authid') is disabled so we cannot establish a session. Contact your administrator to enable the user.">>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_NO_SUCH_PRINCIPAL);
+    ?LOG_INFO(#{
+        description =>
+            "Authentication failed; returning a generic reason to the client "
+            "to avoid user enumeration.",
+        reason => user_disabled
+    }),
+    generic_authentication_failed();
 abort_message({authentication_failed, invalid_scheme}) ->
     Details = #{
         message => <<"Unsupported authentication scheme.">>
     },
     bondy_wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
 abort_message({authentication_failed, missing_signature}) ->
-    Details = #{
-        message => <<"The signature did not match.">>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
+    generic_authentication_failed();
 abort_message({authentication_failed, oauth2_invalid_grant}) ->
     Details = #{
         message => <<
@@ -938,11 +1049,10 @@ abort_message({authentication_failed, oauth2_invalid_grant}) ->
     },
     bondy_wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
 abort_message({authentication_failed, _}) ->
-    %% bad_signature,
-    Details = #{
-        message => <<"The signature did not match.">>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
+    %% Wrong password, bad signature, or any other unspecified auth failure.
+    %% Kept byte-identical to the unknown/disabled-user responses above so the
+    %% client cannot distinguish them (no user-enumeration oracle).
+    generic_authentication_failed();
 abort_message({unsupported_encoding, Encoding}) ->
     Details = #{
         message => <<
@@ -990,6 +1100,18 @@ abort_message({invalid_authmethod, Method}) ->
     bondy_wamp_message:abort(Details, ?WAMP_NOT_AUTH_METHOD);
 abort_message({Code, Term}) when is_atom(Term) ->
     abort_message({Code, ?CHARS2BIN(atom_to_list(Term))}).
+
+%% @private
+%% A single, client-indistinguishable ABORT for every pre-authentication
+%% credential/identity failure — unknown user, disabled user, bad or missing
+%% signature, wrong password. Distinct reason URIs or messages here would be a
+%% user-enumeration oracle (CWE-204); the specific reason is logged server-side
+%% by the callers.
+generic_authentication_failed() ->
+    bondy_wamp_message:abort(
+        #{message => <<"Authentication failed.">>},
+        ?WAMP_AUTHENTICATION_FAILED
+    ).
 
 %% @private
 % abort_message(Details, Uri) when is_map(Details), is_binary(Uri) ->

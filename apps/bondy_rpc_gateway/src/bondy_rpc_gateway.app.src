@@ -11,7 +11,8 @@
     {applications, [
         kernel,
         stdlib,
-        erlcloud
+        erlcloud,
+        bondy_stdlib
     ]},
     {env, []},
     {modules, []},

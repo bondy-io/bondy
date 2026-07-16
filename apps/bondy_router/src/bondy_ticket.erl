@@ -329,7 +329,9 @@ verify(Ticket, Opts) ->
         Key = bondy_realm:get_public_key(Realm, Kid),
         Key =/= undefined orelse throw(invalid),
 
-        {Verified, _, _} = jose_jwt:verify(Key, Ticket),
+        {Verified, _, _} = jose_jwt:verify_strict(
+            Key, ?ALLOWED_JWT_ALGS, Ticket
+        ),
         Verified == true orelse throw(invalid),
 
         case is_persistent(scope_type(Scope)) of

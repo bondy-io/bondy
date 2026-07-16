@@ -241,8 +241,9 @@ bootstrap_peer_strategy() ->
 -doc "Sets `bootstrap_peer_strategy/0` at runtime. Takes effect on the next tick.".
 -spec set_bootstrap_peer_strategy(first | random | round_robin) -> ok.
 
-set_bootstrap_peer_strategy(S)
-when S =:= first; S =:= random; S =:= round_robin ->
+set_bootstrap_peer_strategy(S) when
+    S =:= first; S =:= random; S =:= round_robin
+->
     application:set_env(?APP, bootstrap_peer_strategy, S).
 
 -doc "Maximum concurrent bootstrap sessions in flight (default `4`).".

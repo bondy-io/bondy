@@ -506,10 +506,152 @@
 %% @doc Defines whether Bondy allows the "anonymous" user
 %% @end
 %% -----------------------------------------------------------------------------
+%% @doc Controls anonymous authentication (the `anonymous` role):
+%%   off   - anonymous is disabled everywhere.
+%%   local - anonymous is allowed only from the loopback interface (the DEFAULT):
+%%           local development works out of the box, while exposing anonymous
+%%           access remotely is an explicit opt-in. Mirrors RabbitMQ's
+%%           loopback-only `guest` user and Redis protected mode.
+%%   on    - anonymous is allowed from anywhere a realm's own sources permit.
+%% This does NOT affect the master realm, which never accepts anonymous
+%% connections regardless of this setting.
 {mapping, "security.allow_anonymous_user",
 "bondy_router.security.allow_anonymous_user", [
-  {default, on},
+  {default, local},
+  {datatype, {enum, [off, local, on]}}
+]}.
+
+%% @doc The initial password for the master realm's `admin` user. It is applied
+%% ONLY when the master realm is first created (first boot of a fresh install).
+%% If left unset, Bondy generates a random password and logs it once at startup.
+%% For a multi-node cluster, set the SAME value on every node.
+{mapping, "security.admin_user.password",
+"bondy_router.security.admin_user.password", [
+  {datatype, string},
+  {commented, "changeme-use-a-strong-password"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Master key for at-rest encryption of realm signing/encryption keys (and,
+%% when wired, the WAL body codec). The master key is a 32-byte value resolved
+%% once at startup via the shared secret resolver.
+%%
+%% Encryption is OFF by default (`provider = none`) — key material is stored in
+%% cleartext (filesystem/disk-encryption is then the only at-rest control). Set
+%% `provider` to enable it:
+%%   - `env`    — read from the environment variable named by
+%%                `security.master_key.env.var` (recommended for the base64
+%%                default: `BONDY_SECRET_KEY=$(openssl rand -base64 32)`).
+%%   - `aws_sm` — read from AWS Secrets Manager
+%%                (`security.master_key.aws_sm.{secret_id,region,field}`).
+%%
+%% In a cluster EVERY node must resolve the SAME master key, or replicated
+%% (anti-entropy) realm keys will not decrypt on peers. Back the master key up
+%% out of band: losing it makes all encrypted realm keys unrecoverable.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "security.master_key.provider",
+"bondy_router.security.master_key.provider", [
+  {default, none},
+  {datatype, {enum, [none, env, aws_sm]}}
+]}.
+
+{mapping, "security.master_key.env.var",
+"bondy_router.security.master_key.env.var", [
+  {datatype, string},
+  {commented, "BONDY_SECRET_KEY"}
+]}.
+
+{mapping, "security.master_key.aws_sm.secret_id",
+"bondy_router.security.master_key.aws_sm.secret_id", [
+  {datatype, string},
+  {commented, "bondy/master_key"}
+]}.
+
+{mapping, "security.master_key.aws_sm.region",
+"bondy_router.security.master_key.aws_sm.region", [
+  {datatype, string},
+  {commented, "us-east-1"}
+]}.
+
+{mapping, "security.master_key.aws_sm.field",
+"bondy_router.security.master_key.aws_sm.field", [
+  {datatype, string},
+  {commented, "master_key"}
+]}.
+
+%% @doc How the resolved master key material is encoded. `base64` decodes it to
+%% raw bytes (expected 32); `raw` uses the bytes verbatim.
+{mapping, "security.master_key.encoding",
+"bondy_router.security.master_key.encoding", [
+  {default, base64},
+  {datatype, {enum, [raw, base64]}}
+]}.
+
+%% @doc The key id baked into new encryption envelopes; bump on rotation.
+{mapping, "security.master_key.id",
+"bondy_router.security.master_key.id", [
+  {default, 1},
+  {datatype, integer}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc (AV-1) Inbound application-level rate limiting. OFF by default — enabling
+%% it applies per-source-IP token buckets to the pre-auth handshake and
+%% credential-verification path, and (opt-in) per-session message rate limits.
+%% Each `rate` is tokens per SECOND (steady-state); `capacity` is the burst size.
+%% Tune to your topology: source IPs behind a shared NAT/proxy are throttled
+%% collectively, so keep limits generous unless clients are per-IP.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "security.rate_limit.enabled",
+"bondy_router.security.rate_limit.enabled", [
+  {default, off},
   {datatype, {flag, on, off}}
+]}.
+
+%% Pre-auth handshake (HELLO) per source IP.
+{mapping, "security.rate_limit.handshake.rate",
+"bondy_router.security.rate_limit.handshake.rate", [
+  {default, 10}, {datatype, integer}
+]}.
+{mapping, "security.rate_limit.handshake.capacity",
+"bondy_router.security.rate_limit.handshake.capacity", [
+  {default, 50}, {datatype, integer}
+]}.
+
+%% Credential-verification attempts (AUTHENTICATE) per source IP.
+{mapping, "security.rate_limit.auth.rate",
+"bondy_router.security.rate_limit.auth.rate", [
+  {default, 5}, {datatype, integer}
+]}.
+{mapping, "security.rate_limit.auth.capacity",
+"bondy_router.security.rate_limit.auth.capacity", [
+  {default, 20}, {datatype, integer}
+]}.
+
+%% New connections per source IP (pre-auth, at the transport handler).
+{mapping, "security.rate_limit.connection.rate",
+"bondy_router.security.rate_limit.connection.rate", [
+  {default, 20}, {datatype, integer}
+]}.
+{mapping, "security.rate_limit.connection.capacity",
+"bondy_router.security.rate_limit.connection.capacity", [
+  {default, 100}, {datatype, integer}
+]}.
+
+%% Per-session CALL/PUBLISH/SUBSCRIBE/REGISTER message rate (opt-in; hot path).
+{mapping, "security.rate_limit.message.enabled",
+"bondy_router.security.rate_limit.message.enabled", [
+  {default, off}, {datatype, {flag, on, off}}
+]}.
+{mapping, "security.rate_limit.message.rate",
+"bondy_router.security.rate_limit.message.rate", [
+  {default, 1000}, {datatype, integer}
+]}.
+{mapping, "security.rate_limit.message.capacity",
+"bondy_router.security.rate_limit.message.capacity", [
+  {default, 2000}, {datatype, integer}
 ]}.
 
 %% -----------------------------------------------------------------------------
@@ -623,23 +765,25 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc Defines the default number of iterations to be used with the pbkdf2 key
-%% derivation function. It should be an integer in the range 4096..65536.
+%% derivation function. It should be an integer in the range 4096..10000000.
+%% The default (600000) follows OWASP guidance for PBKDF2-HMAC-SHA256 (S-1);
+%% raise it as hardware improves. Higher values increase login CPU cost.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "security.password.pbkdf2.iterations",
   "bondy_router.security.password.pbkdf2.iterations", [
-  {default, "10000"},
+  {default, "600000"},
   {datatype, integer}
 ]}.
 
 {translation, "bondy_router.security.password.pbkdf2.iterations",
   fun(Conf) ->
     case cuttlefish:conf_get("security.password.pbkdf2.iterations", Conf) of
-        Value when is_integer(Value), Value >= 4096, Value =< 65536 ->
+        Value when is_integer(Value), Value >= 4096, Value =< 10000000 ->
           Value;
         _ ->
             cuttlefish:invalid(
-              "value should be an integer in the range 4096..65536"
+              "value should be an integer in the range 4096..10000000"
             )
     end
   end
@@ -1129,6 +1273,10 @@ end}.
 %% interfaces, this option specifies which one to listen on.
 {mapping, "admin_api.http.ip",
 "bondy_router.admin_api_http.ip", [
+  %% D-1: default to loopback. The admin API is the control plane; the previous
+  %% no-default behaviour bound all interfaces (0.0.0.0). Set an explicit address
+  %% to expose it deliberately.
+  {default, "127.0.0.1"},
   {datatype, string},
   {validators, ["ip_address"]}
 ]}.
@@ -1405,6 +1553,17 @@ end}.
   {default, relaxed}
 ]}.
 
+%% @doc (G-2) Comma-separated CIDR list of trusted reverse proxies. The
+%% `Forwarded`/`X-Real-IP`/`X-Forwarded-For` headers are only believed when the
+%% immediate socket peer is within one of these ranges; otherwise the socket
+%% peer is used as the source IP. EMPTY (the default) means no proxy is trusted,
+%% so spoofed forwarding headers can never influence source-IP-based auth.
+{mapping, "admin_api.http.proxy_protocol.trusted_proxies",
+"bondy_router.admin_api_http.proxy_protocol.trusted_proxies", [
+  {datatype, string},
+  {commented, "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"}
+]}.
+
 
 %% -----------------------------------------------------------------------------
 %% ADMIN REST API HTTP - CORS
@@ -1566,6 +1725,8 @@ end}.
 %% interfaces, this option specifies which one to listen on.
 {mapping, "admin_api.https.ip",
 "bondy_router.admin_api_https.ip", [
+  %% D-1: default to loopback (see admin_api.http.ip).
+  {default, "127.0.0.1"},
   {datatype, string},
   {validators, ["ip_address"]}
 ]}.
@@ -1840,6 +2001,13 @@ end}.
 "bondy_router.admin_api_https.proxy_protocol.mode", [
   {datatype, {enum, [strict, relaxed]}},
   {default, relaxed}
+]}.
+
+%% @doc (G-2) Trusted reverse-proxy CIDRs; see admin_api.http.proxy_protocol.trusted_proxies.
+{mapping, "admin_api.https.proxy_protocol.trusted_proxies",
+"bondy_router.admin_api_https.proxy_protocol.trusted_proxies", [
+  {datatype, string},
+  {commented, "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"}
 ]}.
 
 
@@ -2138,7 +2306,9 @@ end}.
 "bondy_router.api_gateway_http.transport_opts.max_connections", [
   {datatype, integer},
   {validators, ["pos_integer"]},
-  {default, 500000}
+  %% AV-1: lowered from 500000 — match to host memory/fd capacity and raise
+  %% deliberately. A per-listener cap this high invites fd/memory exhaustion.
+  {default, 100000}
 ]}.
 
 %% The backlog value defines the maximum length that the queue of pending
@@ -2370,6 +2540,13 @@ end}.
   {default, relaxed}
 ]}.
 
+%% @doc (G-2) Trusted reverse-proxy CIDRs; see admin_api.http.proxy_protocol.trusted_proxies.
+{mapping, "api_gateway.http.proxy_protocol.trusted_proxies",
+"bondy_router.api_gateway_http.proxy_protocol.trusted_proxies", [
+  {datatype, string},
+  {commented, "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"}
+]}.
+
 
 %% -----------------------------------------------------------------------------
 %% API GATEWAY HTTP - CORS
@@ -2571,7 +2748,8 @@ end}.
 "bondy_router.api_gateway_https.transport_opts.max_connections", [
   {datatype, integer},
   {validators, ["pos_integer"]},
-  {default, 500000}
+  %% AV-1: lowered from 500000 (see api_gateway.http.max_connections).
+  {default, 100000}
 ]}.
 
 %% The maximum length that the queue of pending connections can grow to.
@@ -2798,6 +2976,13 @@ end}.
 "bondy_router.api_gateway_https.proxy_protocol.mode", [
   {datatype, {enum, [strict, relaxed]}},
   {default, relaxed}
+]}.
+
+%% @doc (G-2) Trusted reverse-proxy CIDRs; see admin_api.http.proxy_protocol.trusted_proxies.
+{mapping, "api_gateway.https.proxy_protocol.trusted_proxies",
+"bondy_router.api_gateway_https.proxy_protocol.trusted_proxies", [
+  {datatype, string},
+  {commented, "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"}
 ]}.
 
 
@@ -4633,6 +4818,21 @@ end}.
 
 {mapping, "cluster.tls.enabled",
 "partisan.tls", [
+  {default, "off"},
+  {datatype, flag}
+]}.
+
+%% @doc C-1 safety gate. The Partisan peer plane is plaintext + unauthenticated
+%% by default (`cluster.tls.enabled = off`, and `verify_none` even when TLS is
+%% on) — an on-path attacker can read/modify replicated credentials and realm
+%% signing keys, and a rogue peer can inject security state. When auto-clustering
+%% is configured (`cluster.peer_discovery.enabled = on`) but the peer plane is
+%% insecure, Bondy REFUSES to start. Set this to `on` to acknowledge the risk and
+%% downgrade the refusal to a startup warning (e.g. a properly network-isolated
+%% cluster). The secure fix is `cluster.tls.enabled = on` with
+%% `cluster.tls.{server,client}.verify = verify_peer` and a private cluster CA.
+{mapping, "cluster.tls.allow_insecure",
+"bondy_router.cluster.tls.allow_insecure", [
   {default, "off"},
   {datatype, flag}
 ]}.

@@ -307,7 +307,8 @@ encode_state({_Clock, _Hlc} = State) ->
 -spec decode_state(binary()) -> state().
 
 decode_state(<<?ENC_V1, Bin/binary>>) ->
-    binary_to_term(Bin).
+    %% C-2: `[safe]` — decodes peer-shipped CRDT state on the AAE merge path.
+    binary_to_term(Bin, [safe]).
 
 %% =============================================================================
 %% INTERNAL

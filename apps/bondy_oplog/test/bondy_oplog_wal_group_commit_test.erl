@@ -405,8 +405,13 @@ group_commit_fatal_during_drain_errors_group_and_stops_test() ->
 %% Serialises any test that mecks a VM-wide module (meck:new/2 swaps it in
 %% the code server) and guarantees unload even on assertion failure. Mirrors
 %% `bondy_oplog_wal_proper_test:with_io_fault_lock/1`.
+%%
+%% The lock resource is keyed by the MOCKED module, so mocking `bondy_mst_io`
+%% here contends on the SAME `{meck_vm_lock, bondy_mst_io}` resource as the
+%% sibling suites — a `?MODULE`-scoped key would let them clobber each other's
+%% VM-wide expectations (intermittent injected-fault leak).
 with_meck(Mod, Body) ->
-    Lock = {bondy_mst_meck_fault, ?MODULE},
+    Lock = {meck_vm_lock, Mod},
     global:trans(
         {Lock, self()},
         fun() ->

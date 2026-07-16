@@ -38,6 +38,7 @@ all() ->
         revoke_user_grants,
         revoke_group_grants,
         exact_match_grant,
+        prefix_match_grant_component_boundary,
         wildcard_match_grant,
         mixed_match_strategies,
         user_specific_grants,
@@ -845,6 +846,50 @@ exact_match_grant(_) ->
     ?assertError(
         {not_authorized, _},
         bondy_rbac:authorize(<<"wamp.call">>, <<"com.my.other">>, C)
+    ).
+
+prefix_match_grant_component_boundary(_) ->
+    %% Z-1 end-to-end: a `com.app.order` PREFIX grant must authorize the exact
+    %% URI and genuine sub-URIs, but NOT sibling URIs that only share the byte
+    %% prefix across a component boundary (RBAC is the sole caller of the fixed
+    %% `bondy_wamp_uri:match/3` prefix path).
+    Uri = <<"com.test.prefix_boundary">>,
+    _ = bondy_realm:create(#{
+        uri => Uri,
+        security_enabled => true,
+        authmethods => [?TRUST_AUTH],
+        groups => [#{name => <<"pfx_g">>}],
+        users => [#{username => <<"pfx_u">>, groups => [<<"pfx_g">>]}],
+        grants => [
+            #{
+                permissions => [<<"wamp.call">>],
+                uri => <<"com.app.order">>,
+                match => <<"prefix">>,
+                roles => [<<"pfx_g">>]
+            }
+        ]
+    }),
+
+    C = bondy_rbac:get_context(Uri, <<"pfx_u">>),
+
+    %% Exact URI + genuine sub-URIs are authorized.
+    ?assertEqual(
+        ok, bondy_rbac:authorize(<<"wamp.call">>, <<"com.app.order">>, C)
+    ),
+    ?assertEqual(
+        ok, bondy_rbac:authorize(<<"wamp.call">>, <<"com.app.order.create">>, C)
+    ),
+
+    %% Sibling URIs sharing the byte prefix across a boundary must be DENIED.
+    ?assertError(
+        {not_authorized, _},
+        bondy_rbac:authorize(<<"wamp.call">>, <<"com.app.orders.secret">>, C)
+    ),
+    ?assertError(
+        {not_authorized, _},
+        bondy_rbac:authorize(
+            <<"wamp.call">>, <<"com.app.orders_admin.delete">>, C
+        )
     ).
 
 wildcard_match_grant(_) ->

@@ -118,7 +118,12 @@ end#{
 
 -else.
 
--define(CTXT_REFRESH_SECS, timer:minutes(5)).
+%% 5 minutes, expressed in SECONDS to match `Diff = Now - epoch` in
+%% refresh_context/1 (which is also in seconds). This was previously
+%% `timer:minutes(5)` = 300000, i.e. MILLISECONDS: compared against a
+%% seconds-valued Diff it deferred the RBAC context refresh for ~3.47 days, so
+%% grant/membership revocations were not honored within a live session.
+-define(CTXT_REFRESH_SECS, 300).
 
 -endif.
 
@@ -179,6 +184,7 @@ end#{
 -export([externalize_grant/1]).
 -export([get_anonymous_context/1]).
 -export([get_anonymous_context/2]).
+-export([anonymous_allowed/1]).
 -export([get_context/1]).
 -export([get_context/2]).
 -export([get_context/3]).
@@ -289,7 +295,8 @@ refresh_context(#bondy_rbac_context{realm_uri = Uri} = Context) ->
 -spec get_anonymous_context(Ctxt :: bondy_context:t()) -> context().
 
 get_anonymous_context(Ctxt) ->
-    case bondy_config:get([security, allow_anonymous_user], true) of
+    SourceIP = bondy_context:source_ip(Ctxt),
+    case anonymous_allowed(SourceIP) of
         true ->
             AuthId = bondy_context:authid(Ctxt),
             RealmUri = bondy_context:realm_uri(Ctxt),
@@ -303,6 +310,47 @@ get_anonymous_context(RealmUri, Username) ->
         RealmUri, Username, grants(RealmUri, anonymous, group)
     ),
     Ctxt#bondy_rbac_context{is_anonymous = true}.
+
+-doc """
+Whether anonymous authentication is permitted for a connection originating from
+`SourceIP`, per the `security.allow_anonymous_user` policy:
+
+- `off`   — anonymous is disabled.
+- `local` — allowed only from a loopback address (the default); mirrors
+  RabbitMQ's loopback-only `guest` user and Redis protected mode, so local
+  development works out of the box while remote anonymous access is an explicit
+  opt-in.
+- `on`    — allowed from anywhere the realm's own sources permit.
+
+The master realm never accepts anonymous connections regardless of this policy
+(its authmethods do not include anonymous).
+""".
+-spec anonymous_allowed(SourceIP :: inet:ip_address() | undefined) -> boolean().
+
+anonymous_allowed(SourceIP) ->
+    case anonymous_policy() of
+        on -> true;
+        local -> is_loopback_addr(SourceIP);
+        off -> false
+    end.
+
+%% @private
+anonymous_policy() ->
+    case bondy_config:get([security, allow_anonymous_user], local) of
+        on -> on;
+        local -> local;
+        off -> off;
+        %% Legacy boolean form (the setting was a {flag, on, off} before it
+        %% became a three-state policy).
+        true -> on;
+        false -> off;
+        _ -> local
+    end.
+
+%% @private
+is_loopback_addr({127, _, _, _}) -> true;
+is_loopback_addr({0, 0, 0, 0, 0, 0, 0, 1}) -> true;
+is_loopback_addr(_) -> false.
 
 -doc """
 Contexts are only valid until the GRANT epoch changes, and it will

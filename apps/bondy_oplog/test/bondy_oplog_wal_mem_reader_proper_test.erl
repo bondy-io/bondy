@@ -57,7 +57,9 @@ properties_test_() ->
 %% never skipping a gap. A skip would drop a Seq inserted late (its slot already
 %% passed), so the final list would be missing it and the property fails.
 prop_contiguous_exactly_once() ->
-    ?FORALL(Order, insert_order(),
+    ?FORALL(
+        Order,
+        insert_order(),
         begin
             N = length(Order),
             {Tab, ARef} = fresh_view(),
@@ -68,13 +70,16 @@ prop_contiguous_exactly_once() ->
             Delivered = feed(Tab, Iter0, Order),
             ets:delete(Tab),
             equals(seqs(Delivered), lists:seq(1, N))
-        end).
+        end
+    ).
 
 %% A reader that opens behind the GC watermark (`beginning`, cursor `0`, while
 %% `committed = C`) must jump forward over the GC'd prefix `1..C` and deliver
 %% only the live suffix — not stall on the absent `Seq 1`.
 prop_gc_prefix_is_skipped() ->
-    ?FORALL({C, Order}, gc_scenario(),
+    ?FORALL(
+        {C, Order},
+        gc_scenario(),
         begin
             M = length(Order),
             {Tab, ARef} = fresh_view(),
@@ -87,7 +92,8 @@ prop_gc_prefix_is_skipped() ->
             Delivered = feed(Tab, Iter0, [S + C || S <- Order]),
             ets:delete(Tab),
             equals(seqs(Delivered), lists:seq(C + 1, C + M))
-        end).
+        end
+    ).
 
 %% =============================================================================
 %% Generators
@@ -108,9 +114,15 @@ gc_scenario() ->
 permutation([]) ->
     [];
 permutation(L) ->
-    ?LET(X, elements(L),
-        ?LET(Rest, permutation(L -- [X]),
-            [X | Rest])).
+    ?LET(
+        X,
+        elements(L),
+        ?LET(
+            Rest,
+            permutation(L -- [X]),
+            [X | Rest]
+        )
+    ).
 
 %% =============================================================================
 %% Helpers

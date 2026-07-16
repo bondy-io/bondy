@@ -191,7 +191,10 @@ capture_chosen_peers(InstanceId, N) ->
                 bondy_oplog_sync_scheduler:trigger(),
                 receive
                     {Ref, P} -> P
-                after 2000 -> error(no_dispatch)
+                    %% Generous timeout: under full-suite load the scheduler's
+                    %% dispatch can lag well past a couple of seconds; a tight bound
+                    %% produced an intermittent `no_dispatch` flake.
+                after 30000 -> error(no_dispatch)
                 end
             end
          || _ <- lists:seq(1, N)

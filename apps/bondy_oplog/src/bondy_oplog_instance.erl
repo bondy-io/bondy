@@ -399,8 +399,8 @@ without protocol changes.
     %% the instance once its heap has grown past a threshold over its post-GC
     %% baseline, capping the transient peak without touching the hot
     %% append/drain path. Driven from `handle_info(gc_tick, _)`.
-    heap_monitor = bondy_oplog_heap_monitor:new()
-                            ::  bondy_oplog_heap_monitor:t()
+    heap_monitor = bondy_oplog_heap_monitor:new() ::
+        bondy_oplog_heap_monitor:t()
 }).
 
 -type backend() :: map | ets | module().
@@ -3294,7 +3294,9 @@ fused_park_or_retry(#state{fused_drain = FD} = State) ->
             fused_arm_idle_waiter(
                 State#state{fused_drain = FD#fused_drain{gap_retries = 0}}
             );
-        {gap, _Cursor} when FD#fused_drain.gap_retries < ?FUSED_MAX_GAP_RETRIES ->
+        {gap, _Cursor} when
+            FD#fused_drain.gap_retries < ?FUSED_MAX_GAP_RETRIES
+        ->
             _ = erlang:send_after(?FUSED_GAP_RETRY_MS, self(), fused_drain),
             State#state{
                 fused_drain = FD#fused_drain{
@@ -3489,7 +3491,6 @@ fused_partition_cells(Events) ->
         end,
         Events
     ).
-
 
 %% @private
 fused_batch_summary(Batch) ->

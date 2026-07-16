@@ -111,6 +111,7 @@ all() ->
         full_oauth2_auth_flow,
         wrong_user_token_rejected,
         invalid_jwt_rejected,
+        jwt_alg_confusion_rejected,
 
         %% Source / CIDR
         user2_rejected_outside_cidr,
@@ -240,6 +241,43 @@ client_credentials(Config) ->
         {ok, _, _},
         bondy_auth:authenticate(?WAMP_OAUTH2_AUTH, JWT, #{}, Ctxt)
     ).
+
+%% =============================================================================
+%% WP-C / A-4: JWT algorithm pinning (alg-confusion + `none` rejected)
+%% =============================================================================
+
+jwt_alg_confusion_rejected(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+
+    %% A legitimately-issued, realm-signed (asymmetric) token still verifies
+    %% under the alg-pinned verifier.
+    ValidJWT = issue_jwt(RealmUri, ?U1, [<<"group_1">>]),
+    {ok, Claims} = bondy_oauth_jwt:verify(RealmUri, ValidJWT),
+
+    %% The payload carries `aud` and `kid`, so a token that REUSES this payload
+    %% still resolves the realm's public key — the alg check is therefore what
+    %% must reject the forgeries. verify_strict refuses a disallowed alg BEFORE
+    %% any signature verification, so a garbage signature is sufficient.
+    ?assertMatch(#{<<"aud">> := RealmUri, <<"kid">> := _}, Claims),
+
+    %% Algorithm-substitution ("alg confusion"): a symmetric HS256 header is
+    %% rejected (the classic attack HMACs with the public key; we need no valid
+    %% MAC because the alg is refused first).
+    HS256 = forge_jwt(<<"HS256">>, Claims, <<"bm90LWEtdmFsaWQtbWFj">>),
+    ?assertMatch({error, _}, bondy_oauth_jwt:verify(RealmUri, HS256)),
+
+    %% Unsecured `none` alg is rejected.
+    NoneJWT = forge_jwt(<<"none">>, Claims, <<>>),
+    ?assertMatch({error, _}, bondy_oauth_jwt:verify(RealmUri, NoneJWT)),
+
+    ok.
+
+%% @private
+forge_jwt(Alg, Claims, Signature) ->
+    Header = #{<<"alg">> => Alg, <<"typ">> => <<"JWT">>},
+    H = jose_jwa_base64url:encode(jsx:encode(Header)),
+    P = jose_jwa_base64url:encode(jsx:encode(Claims)),
+    <<H/binary, $., P/binary, $., Signature/binary>>.
 
 %% =============================================================================
 %% OAUTH2 METHOD AVAILABILITY

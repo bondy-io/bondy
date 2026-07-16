@@ -117,7 +117,8 @@ wait_until(_Pred, Remaining) when Remaining =< 0 ->
     error(timeout);
 wait_until(Pred, Remaining) ->
     case Pred() of
-        true -> ok;
+        true ->
+            ok;
         false ->
             timer:sleep(50),
             wait_until(Pred, Remaining - 50)

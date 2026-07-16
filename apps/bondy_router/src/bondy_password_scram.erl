@@ -289,7 +289,8 @@ validate_memory(#{kdf := KDF} = Params) ->
 
 %% @private
 iterations_to_integer(pbkdf2, N) when is_integer(N) ->
-    N >= 4096 andalso N =< 65536 orelse error({invalid_argument, iterations}),
+    N >= 4096 andalso N =< 10000000 orelse
+        error({invalid_argument, iterations}),
     N;
 %% iterations_to_integer(argon2id13, Name) when is_atom(Name) ->
 %%     %% We convert names to their values according to

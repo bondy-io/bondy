@@ -21,6 +21,7 @@ Cookies are actually Tickets (JWT).
 
 -behaviour(bondy_auth).
 
+-include_lib("kernel/include/logger.hrl").
 -include("bondy_security.hrl").
 
 -type state() :: map().
@@ -87,14 +88,21 @@ authenticate(Ticket, _, Ctxt, State) when is_binary(Ticket) ->
 %% =============================================================================
 
 %% @private
-validate_claims(#{scope := #{realm := Uri}} = Claims, Ctxt, State) ->
+validate_claims(
+    #{scope := #{realm := Uri}, authrealm := AuthRealmUri} = Claims, Ctxt, State
+) ->
     RealmUri = bondy_auth:realm_uri(Ctxt),
-    case Uri == undefined orelse Uri == RealmUri of
+    TrustedScope = Uri == undefined orelse Uri == RealmUri,
+    %% A-1: the cookie/ticket issuer (`authrealm`) must be trusted by the
+    %% target realm (itself or its SSO realm); the `scope.realm` check alone
+    %% would accept an SSO cookie (`scope.realm = undefined`) for any realm.
+    TrustedIssuer = bondy_realm:is_trusted_issuer(RealmUri, AuthRealmUri),
+    case TrustedScope andalso TrustedIssuer of
         true ->
             Extra = #{
                 authmethod_details => #{
                     id => maps:get(id, Claims),
-                    authrealm => maps:get(authrealm, Claims),
+                    authrealm => AuthRealmUri,
                     authmethod => maps:get(authmethod, Claims),
                     scope => maps:get(scope, Claims),
                     oidc_provider => maps:get(
@@ -110,6 +118,13 @@ validate_claims(#{scope := #{realm := Uri}} = Claims, Ctxt, State) ->
             },
             {ok, Extra, State};
         false ->
+            TrustedIssuer orelse
+                ?LOG_WARNING(#{
+                    description =>
+                        "Rejected cookie: issuer not trusted by target realm",
+                    realm_uri => RealmUri,
+                    cookie_authrealm => AuthRealmUri
+                }),
             {error, invalid_cookie, State}
     end;
 validate_claims(_Claims, _Ctxt, State) ->

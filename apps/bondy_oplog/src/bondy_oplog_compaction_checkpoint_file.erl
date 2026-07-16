@@ -167,7 +167,11 @@ write_and_sync(TmpPath, Bin) ->
 %% Safe-decode: any crash inside binary_to_term surfaces as
 %% `{error, {corrupted, Reason}}` rather than killing the caller.
 decode(Bin) ->
-    try erlang:binary_to_term(Bin) of
+    %% `[safe]` (C-2 hygiene): this reads a local checkpoint file, but decoding
+    %% with `[safe]` keeps it consistent with the merge decoders and rejects
+    %% funs/novel atoms should the file be tampered with; the `try` still maps a
+    %% rejection to `{error, {corrupted, _}}`.
+    try erlang:binary_to_term(Bin, [safe]) of
         {checkpoint_v1, W, S} ->
             {ok, W, S};
         Other ->

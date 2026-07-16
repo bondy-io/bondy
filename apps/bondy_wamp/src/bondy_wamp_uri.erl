@@ -88,7 +88,22 @@ match(_, <<>>, ?PREFIX_MATCH) ->
 match(Uri, Pattern, ?PREFIX_MATCH) when
     is_binary(Uri)
 ->
-    binary:longest_common_prefix([Uri, Pattern]) >= byte_size(Pattern);
+    %% Z-1: match on a URI-COMPONENT boundary, not a raw byte prefix. A byte
+    %% prefix (`longest_common_prefix >= byte_size`) let a `com.app.order` grant
+    %% authorise the unrelated `com.app.orders_admin.x`. The prefix matches iff
+    %% the URIs are equal, or `Uri` byte-starts with `Pattern` AND the join is a
+    %% component boundary — either `Pattern` already ends with `.` (the operator
+    %% wrote a trailing-dot prefix such as `com.app.`) or the next byte of `Uri`
+    %% is `.`. (The empty "match-all" prefix is handled by the clause above.)
+    PS = byte_size(Pattern),
+    case Uri of
+        Pattern ->
+            true;
+        <<Pattern:PS/binary, Next, _/binary>> ->
+            Next =:= $. orelse binary:last(Pattern) =:= $.;
+        _ ->
+            false
+    end;
 match(Uri, Pattern, ?WILDCARD_MATCH) when
     is_binary(Uri) andalso byte_size(Uri) > 0
 ->

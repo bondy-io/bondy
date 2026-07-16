@@ -571,6 +571,12 @@ decode_message(Data, msgpack, Opts, Acc) ->
     {ok, M} = msgpack:unpack(Data, lists:keydelete(partial_decode, 1, Opts)),
     unpack(M, Acc);
 decode_message(Data, bert, _, Acc) ->
+    %% SECURITY: bert is de-listed as a WIRE serializer (see
+    %% bondy_wamp_subprotocol:from_binary/1 and
+    %% bondy_wamp_tcp_connection_handler:validate_encoding/1) because
+    %% bert:decode/1 => binary_to_term/1 WITHOUT [safe] is a pre-auth atom-table
+    %% exhaustion DoS. This codec is retained for internal/test use only and MUST
+    %% NOT be re-exposed to untrusted input.
     M = bert:decode(Data),
     unpack(M, Acc);
 decode_message(Bin, erl, Opts, Acc) ->

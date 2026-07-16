@@ -235,6 +235,7 @@ encode_state({cleared, H}) when is_integer(H) ->
 decode_state(<<0>>) ->
     undefined;
 decode_state(<<1, H:64/big-unsigned, VBin/binary>>) ->
-    {set, binary_to_term(VBin), H};
+    %% C-2: `[safe]` — decodes peer-shipped CRDT state on the AAE merge path.
+    {set, binary_to_term(VBin, [safe]), H};
 decode_state(<<2, H:64/big-unsigned>>) ->
     {cleared, H}.

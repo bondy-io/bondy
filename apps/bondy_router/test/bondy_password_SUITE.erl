@@ -18,6 +18,7 @@ all() ->
         new_default,
         new_cra_too_low_iterations,
         new_cra_too_high_iterations,
+        new_cra_above_legacy_cap_accepted,
         new_cra_invalid_kdf,
         new_cra_options,
 
@@ -64,13 +65,24 @@ new_cra_too_low_iterations(_) ->
     ).
 
 new_cra_too_high_iterations(_) ->
+    %% S-1: the ceiling was raised from 65,536 to 10,000,000; a value above the
+    %% new ceiling is still rejected.
     ?assertError(
         {invalid_argument, iterations},
         bondy_password:new(?P1, #{
             protocol => cra,
-            params => #{kdf => pbkdf2, iterations => 66000}
+            params => #{kdf => pbkdf2, iterations => 20000000}
         })
     ).
+
+new_cra_above_legacy_cap_accepted(_) ->
+    %% S-1: a work factor above the OLD 65,536 cap (impossible before) is now
+    %% accepted. 100k keeps the test fast while proving the cap was lifted.
+    Opts = #{protocol => cra, params => #{kdf => pbkdf2, iterations => 100000}},
+    A = bondy_password:new(?P1, Opts),
+    ?assertMatch(#{params := #{iterations := 100000}}, A),
+    ?assertEqual(true, bondy_password:verify_string(?P1, A)),
+    ?assertEqual(false, bondy_password:verify_string(<<"foo">>, A)).
 
 new_cra_invalid_kdf(_) ->
     ?assertError(
@@ -125,11 +137,12 @@ new_scram_too_low_iterations(_) ->
 %% ).
 
 new_scram_too_high_iterations(_) ->
+    %% S-1: rejected only above the new 10,000,000 ceiling.
     ?assertError(
         {invalid_argument, iterations},
         bondy_password:new(?P1, #{
             protocol => scram,
-            params => #{kdf => pbkdf2, iterations => 66000}
+            params => #{kdf => pbkdf2, iterations => 20000000}
         })
     ),
 

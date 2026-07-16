@@ -20,6 +20,8 @@ in Erlang as `{inet:ip_address(), Maskbits}` tuples for both IPv4 and IPv6.
 
 -type t() :: {inet:ip_address(), non_neg_integer()}.
 
+-export_type([t/0]).
+
 -export([parse/1]).
 -export([is_type/1]).
 -export([mask/1]).

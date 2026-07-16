@@ -131,7 +131,7 @@ validate_kdf(Params) ->
 
 %% @private
 validate_iterations(#{iterations := N} = Params) when
-    N >= 4096 andalso N =< 65536
+    N >= 4096 andalso N =< 10000000
 ->
     Params;
 validate_iterations(#{iterations := _}) ->

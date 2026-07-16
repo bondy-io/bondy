@@ -110,3 +110,24 @@
     <<"bondy.revoke">>,
     <<"bondy.authenticate">>
 ]).
+
+%% The JWS "alg" values Bondy accepts when verifying a JWT or authentication
+%% ticket. Bondy realms sign with asymmetric keys only (EC P-256 => ES256,
+%% RSA-2048 => PS256/RS256), so this list is intentionally asymmetric-only: it
+%% excludes the symmetric HMAC family (HS256/384/512) and the unsecured "none"
+%% alg. This closes algorithm-substitution ("alg confusion") attacks where a
+%% token's public verification key is abused as an HMAC secret, or "none" strips
+%% the signature. MUST be used with jose_jwt:verify_strict/3 — never the
+%% non-strict jose_jwt:verify/2, which trusts the token's self-declared alg.
+-define(ALLOWED_JWT_ALGS, [
+    <<"ES256">>,
+    <<"ES384">>,
+    <<"ES512">>,
+    <<"RS256">>,
+    <<"RS384">>,
+    <<"RS512">>,
+    <<"PS256">>,
+    <<"PS384">>,
+    <<"PS512">>,
+    <<"EdDSA">>
+]).

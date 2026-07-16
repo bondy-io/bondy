@@ -95,13 +95,27 @@ init(Req0, _) ->
 
         case bondy_http_proxy_protocol:source_ip(ProxyProtocol) of
             {ok, SourceIP} ->
-                State0 = #state{
-                    proxy_protocol = ProxyProtocol,
-                    source_ip = SourceIP,
-                    auth_token = AuthToken
-                },
-
-                do_init(Subproto, BinProto, Req0, State0);
+                %% AV-1: throttle new connections per source IP (no-op unless
+                %% enabled) before doing any per-connection work.
+                case bondy_rate_limit:throttle(connection, SourceIP) of
+                    throttled ->
+                        ?LOG_NOTICE(#{
+                            description =>
+                                "WS connection rejected (AV-1 rate limit)",
+                            source_ip => SourceIP
+                        }),
+                        ThrottleReq = cowboy_req:reply(
+                            ?HTTP_TOO_MANY_REQUESTS, Req0
+                        ),
+                        {ok, ThrottleReq, undefined};
+                    ok ->
+                        State0 = #state{
+                            proxy_protocol = ProxyProtocol,
+                            source_ip = SourceIP,
+                            auth_token = AuthToken
+                        },
+                        do_init(Subproto, BinProto, Req0, State0)
+                end;
             {error, Reason} ->
                 throw({Reason, ProxyProtocol})
         end

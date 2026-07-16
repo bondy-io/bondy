@@ -135,8 +135,8 @@ asymmetric_compaction_keeps_oracle_in_sync(Config) ->
 
         %% N1 was compacted (roots settle to `undefined`); N2 was not (roots
         %% stay binary). Snapshot each side at its steady state so a `root_hash/1`
-        %% call that transiently times out under full-suite CT load — swallowed to
-        %% `undefined` by `do_instance_sigs/0` — cannot flake the root assertions.
+        %% call that transiently times out under CT load — swallowed to
+        %% `undefined` by `do_instance_sigs/1` — cannot flake the root assertions.
         Sigs1b = await_instance_sigs(N1, Targets, fun(R) -> R =:= undefined end),
         Sigs2b = await_instance_sigs(N2, Targets, fun erlang:is_binary/1),
 
@@ -420,7 +420,9 @@ await_instance_sigs(Node, Targets, Pred) ->
 
 %% @private
 await_instance_sigs(Node, Targets, Pred, Deadline) ->
-    Sigs = erpc:call(Node, ?MODULE, do_instance_sigs, []),
+    %% Read ONLY the target instances (not every instance on the node) so the
+    %% poll does not itself starve them — see `do_instance_sigs/1`.
+    Sigs = erpc:call(Node, ?MODULE, do_instance_sigs, [Targets]),
     Settled = lists:all(
         fun(I) ->
             case maps:get(I, Sigs, undefined) of
@@ -435,10 +437,43 @@ await_instance_sigs(Node, Targets, Pred, Deadline) ->
             Sigs;
         false ->
             now_ms() =< Deadline orelse
-                error({instance_sigs_unsettled, Node, Targets}),
+                error(
+                    {instance_sigs_unsettled, Node,
+                        erpc:call(Node, ?MODULE, do_target_diag, [Targets])}
+                ),
             timer:sleep(200),
             await_instance_sigs(Node, Targets, Pred, Deadline)
     end.
+
+%% @private
+%% Per-target diagnosis captured when a barrier times out: is the instance
+%% process alive, and what does a bounded `root_hash` read actually return or
+%% raise? Distinguishes "deregistered" (`no_pid`) from "alive but starved"
+%% (`{read_failed, ...}` / timeout) from "genuinely empty root" (`root_undefined`)
+%% — turning an opaque `instance_sigs_unsettled` into an actionable reason. Runs
+%% ON the node (via erpc) so `is_process_alive/1` sees a local pid.
+do_target_diag(InstIds) ->
+    [
+        begin
+            Pid = bondy_oplog_registry:instance_pid(I),
+            Alive = is_pid(Pid) andalso erlang:is_process_alive(Pid),
+            Read =
+                case Pid of
+                    undefined ->
+                        no_pid;
+                    _ ->
+                        try gen_server:call(Pid, root_hash, 5000) of
+                            R when is_binary(R) -> {binary, byte_size(R)};
+                            undefined -> root_undefined;
+                            Other -> {other, Other}
+                        catch
+                            C:R2 -> {read_failed, C, R2}
+                        end
+                end,
+            {I, Pid, Alive, Read}
+        end
+     || I <- InstIds
+    ].
 
 %% @private
 push_module(Node, Mod) ->
@@ -505,6 +540,22 @@ do_band_on_target(Table, Bands, Targets) ->
 %% The value read is the SAME live `root_hash` snapshot (via the instance
 %% gen_server, for AAE consistency); only the patience differs.
 do_instance_sigs() ->
+    do_instance_sigs(bondy_oplog:list_instances()).
+
+%% @private
+%% Signatures for a SPECIFIC set of instances. `await_instance_sigs/4` passes
+%% just its `Targets` (typically 1-2 instances) rather than reading EVERY oplog
+%% instance on the node (dozens, per-table × shard) on every 200ms poll: that
+%% whole-node `root_hash` gen_server fan-out, five times a second for up to 120s,
+%% was itself a heavy CPU load that could starve the very instances it reads,
+%% collapsing their `root_hash` to a swallowed `undefined` and making the barrier
+%% time out (`instance_sigs_unsettled`). Reading only the targets removes that
+%% self-inflicted observer effect. `InstIds` is intersected with the live set so
+%% a target that has since deregistered is simply absent (same as the /0 fold),
+%% never a crash in `frontier/1`.
+do_instance_sigs(InstIds) ->
+    Live = bondy_oplog:list_instances(),
+    Wanted = [I || I <- InstIds, lists:member(I, Live)],
     lists:foldl(
         fun(I, Acc) ->
             Frontier = bondy_oplog_instance:frontier(I),
@@ -516,7 +567,7 @@ do_instance_sigs() ->
             Acc#{I => {Frontier, Root}}
         end,
         #{},
-        bondy_oplog:list_instances()
+        Wanted
     ).
 
 %% @private

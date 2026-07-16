@@ -33,6 +33,9 @@ all() ->
         %% CIDR filtering
         anonymous_from_any_ip,
 
+        %% allow_anonymous_user policy (off | local | on)
+        anonymous_local_policy_scopes_by_source_ip,
+
         %% Error cases
         nonexistent_realm_error,
 
@@ -249,6 +252,34 @@ anonymous_auth_returns_empty_extra(Config) ->
         ?WAMP_ANON_AUTH, undefined, undefined, Ctxt
     ),
     ?assertEqual(#{}, Extra).
+
+%% =============================================================================
+%% allow_anonymous_user POLICY (off | local | on)
+%% =============================================================================
+
+anonymous_local_policy_scopes_by_source_ip(_Config) ->
+    Key = [security, allow_anonymous_user],
+    Orig = bondy_config:get(Key, local),
+    try
+        %% `local` (the default): anonymous permitted only from loopback.
+        ok = bondy_config:set(Key, local),
+        ?assert(bondy_rbac:anonymous_allowed({127, 0, 0, 1})),
+        ?assert(bondy_rbac:anonymous_allowed({0, 0, 0, 0, 0, 0, 0, 1})),
+        ?assertNot(bondy_rbac:anonymous_allowed({8, 8, 8, 8})),
+        ?assertNot(bondy_rbac:anonymous_allowed({192, 168, 1, 10})),
+
+        %% `off`: anonymous denied everywhere, including loopback.
+        ok = bondy_config:set(Key, off),
+        ?assertNot(bondy_rbac:anonymous_allowed({127, 0, 0, 1})),
+        ?assertNot(bondy_rbac:anonymous_allowed({8, 8, 8, 8})),
+
+        %% `on`: anonymous permitted from anywhere.
+        ok = bondy_config:set(Key, on),
+        ?assert(bondy_rbac:anonymous_allowed({127, 0, 0, 1})),
+        ?assert(bondy_rbac:anonymous_allowed({8, 8, 8, 8}))
+    after
+        bondy_config:set(Key, Orig)
+    end.
 
 %% =============================================================================
 %% NAMED USER CANNOT USE ANONYMOUS

@@ -137,24 +137,21 @@ resolve_service(Service) ->
     Service.
 
 fetch_secret(
-    #{provider := aws_sm, secret_id := SecretId, region := Region},
+    #{provider := aws_sm, secret_id := _, region := _} = Spec,
     ServiceName
 ) ->
-    {ok, Config0} = erlcloud_aws:auto_config(),
-    Config = erlcloud_aws:service_config(
-        <<"sm">>, binary_to_list(Region), Config0
-    ),
-    case erlcloud_sm:get_secret_value(SecretId, [], Config) of
-        {ok, Proplist} ->
-            SecretString = proplists:get_value(<<"SecretString">>, Proplist),
+    %% Delegate the raw fetch to the shared, provider-pluggable resolver
+    %% (`aws_sm` is served by `bondy_secret_resolver_aws_sm`); this module keeps
+    %% the service-specific JSON-field → auth-var mapping on top.
+    Ref = maps:with([provider, secret_id, region], Spec),
+    case bondy_secret_resolver:resolve(Ref) of
+        {ok, SecretString} ->
             json:decode(SecretString);
         {error, Reason} ->
             ?LOG_ERROR(#{
                 description =>
                     <<"Failed to fetch secret from AWS Secrets Manager">>,
                 service => ServiceName,
-                secret_id => SecretId,
-                region => Region,
                 reason => Reason
             }),
             error({secret_resolution_failed, ServiceName, Reason})

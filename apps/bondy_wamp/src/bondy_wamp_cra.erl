@@ -106,7 +106,7 @@ Requires `kdf` and `iterations` to be present and valid; unlike the legacy
 -spec validate_params(Params :: map()) -> params() | no_return().
 
 validate_params(#{kdf := pbkdf2, iterations := N} = Params) when
-    is_integer(N) andalso N >= 4096 andalso N =< 65536
+    is_integer(N) andalso N >= 4096 andalso N =< 10000000
 ->
     Static = #{
         hash_function => hash_function(),

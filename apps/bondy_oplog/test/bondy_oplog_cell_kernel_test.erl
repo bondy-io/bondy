@@ -63,6 +63,23 @@ decode_state_dispatch_test() ->
     Bytes = ?LWW:encode_state({set, <<"v">>, 5}),
     ?assertEqual({set, <<"v">>, 5}, ?K:decode_state({crdt, ?LWW}, Bytes)).
 
+%% C-2: a peer-crafted CRDT state whose value encodes an atom that was never
+%% interned must be REJECTED by the `[safe]` decoder on the merge path — not
+%% silently interned (unsafe-term / atom-table-exhaustion class). A legit value
+%% at the same envelope still decodes.
+c2_decode_state_rejects_uninterned_atom_test() ->
+    %% Hand-built ETF for a small UTF-8 atom (tag 119 = SMALL_ATOM_UTF8_EXT). The
+    %% name appears here only as binary bytes, so loading this test never
+    %% interns it — `[safe]` must refuse to create it.
+    Name = <<"bondy_c2_uninterned_atom_qwertyz">>,
+    ValueBytes = <<131, 119, (byte_size(Name)):8, Name/binary>>,
+    %% Wrap it in an LWW `set` state envelope (<<1, Hlc:64, ValueBytes>>).
+    Crafted = <<1, 5:64/big-unsigned, ValueBytes/binary>>,
+    ?assertError(badarg, ?K:decode_state({crdt, ?LWW}, Crafted)),
+
+    Legit = ?LWW:encode_state({set, <<"v">>, 5}),
+    ?assertEqual({set, <<"v">>, 5}, ?K:decode_state({crdt, ?LWW}, Legit)).
+
 encode_state_dispatch_test() ->
     State = {set, <<"v">>, 5},
     ?assertEqual(

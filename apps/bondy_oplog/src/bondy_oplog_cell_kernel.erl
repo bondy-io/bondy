@@ -292,7 +292,9 @@ decode_value_bytes({crdt, Mod}, ValueBytes) when is_binary(ValueBytes) ->
             State = Mod:decode_state(ValueBytes),
             Mod:to_value(State);
         false ->
-            binary_to_term(ValueBytes)
+            %% C-2: `[safe]` — decodes peer-shipped cell value bytes on the AAE
+            %% merge path; untrusted bytes must not create atoms/funs.
+            binary_to_term(ValueBytes, [safe])
     end.
 
 -doc """

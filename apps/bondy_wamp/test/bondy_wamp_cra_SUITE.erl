@@ -199,9 +199,10 @@ validate_params_rejects_low_iterations(_) ->
     ).
 
 validate_params_rejects_high_iterations(_) ->
+    %% S-1: ceiling raised 65,536 -> 10,000,000; only values ABOVE it are rejected.
     ?assertError(
         {invalid_argument, iterations},
-        bondy_wamp_cra:validate_params(#{kdf => pbkdf2, iterations => 100000})
+        bondy_wamp_cra:validate_params(#{kdf => pbkdf2, iterations => 20000000})
     ).
 
 %% =============================================================================
