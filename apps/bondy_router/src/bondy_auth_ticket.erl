@@ -81,12 +81,12 @@ authenticate(Ticket, _, Ctxt, State) ->
                 authrealm := AuthRealmUri,
                 scope := #{realm := Uri}
             } = Claims} when
-            Uri == undefined orelse Uri == RealmUri
+            Uri == all orelse Uri == RealmUri
         ->
             %% A-1: the ticket's issuer (`authrealm`) must be trusted by the
             %% target realm (itself or its SSO realm); the `scope.realm`
             %% guard above is not sufficient — an SSO ticket carries
-            %% `scope.realm = undefined` and would otherwise be accepted by
+            %% `scope.realm = all` and would otherwise be accepted by
             %% any realm against its own issuer's key.
             case bondy_realm:is_trusted_issuer(RealmUri, AuthRealmUri) of
                 true ->

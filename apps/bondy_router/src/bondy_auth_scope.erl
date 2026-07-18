@@ -33,12 +33,21 @@ and device. Provides constructors, accessors and helpers to classify
 %% API
 %% =============================================================================
 
+-doc """
+Creates a scope. Each field accepts a binary, the atom `all`, or `undefined`;
+the latter two both denote the wildcard and are normalised to `all`.
+
+The wildcard is spelled `all` in memory but is emitted as the JSON string
+`"all"` when a scope is embedded in a JWT, and comes back as `~"all"`. `cast/1`
+maps both spellings (and the legacy `undefined`/`null` wildcard) onto `all` so
+that a decoded scope compares and hashes identically to the one that was issued.
+""".
 -spec new(optional(binary()), optional(binary()), optional(binary())) -> t().
 
 new(RealmUri, ClientId, DeviceId) when
-    (is_binary(RealmUri) orelse RealmUri == all) andalso
-        (is_binary(ClientId) orelse ClientId == all) andalso
-        (is_binary(DeviceId) orelse DeviceId == all)
+    (is_binary(RealmUri) orelse RealmUri == all orelse RealmUri == undefined) andalso
+        (is_binary(ClientId) orelse ClientId == all orelse ClientId == undefined) andalso
+        (is_binary(DeviceId) orelse DeviceId == all orelse DeviceId == undefined)
 ->
     #{
         realm => cast(RealmUri),
@@ -84,15 +93,25 @@ matches_realm(#{realm := all}, _) ->
 matches_realm(#{realm := Val}, RealmUri) ->
     Val == RealmUri.
 
+-doc """
+Normalises a scope map, filling in absent fields with the wildcard and casting
+every value via `cast/1`.
+
+This MUST be applied to any scope that has been through a JSON round-trip (e.g.
+the `scope` claim of a JWT) before it is used for classification (`type/1`),
+comparison (`matches/2`, `matches_realm/2`) or storage-key derivation. Encoding
+turns the wildcard atom `all` into the string `~"all"`, and `type/1` matches on
+the atom, so an un-normalised decoded scope classifies differently from the
+scope that was issued.
+""".
 -spec normalize(map()) -> t().
 
 normalize(Map) when is_map(Map) ->
-    Default = #{
-        realm => all,
-        client_id => all,
-        device_id => all
-    },
-    maps:merge(Default, maps:with([client_id, device_id, realm], Map)).
+    #{
+        realm => cast(maps:get(realm, Map, all)),
+        client_id => cast(maps:get(client_id, Map, all)),
+        device_id => cast(maps:get(device_id, Map, all))
+    }.
 
 -spec realm(t()) -> binary() | all.
 
@@ -113,8 +132,13 @@ device_id(#{device_id := Val}) ->
 %% Private
 %% =============================================================================
 
+%% `undefined` is the pre-normalisation spelling of the wildcard used by tickets
+%% issued before the scope round-trip fix; `bondy_wamp_json` maps it to/from
+%% JSON `null`. Both it and the `"all"` spellings collapse onto `all`.
 cast("all") -> all;
 cast(~"all") -> all;
+cast(undefined) -> all;
+cast(null) -> all;
 cast(Val) -> Val.
 
 %% =============================================================================
@@ -422,6 +446,72 @@ normalize_all_values_test() ->
     },
     Result = bondy_auth_scope:normalize(Input),
     ?assertEqual(Input, Result).
+
+%% -----------------------------------------------------------------------------
+%% Wildcard casting (JSON round-trip)
+%% -----------------------------------------------------------------------------
+
+%% A scope embedded in a JWT is encoded as JSON, so the wildcard atom `all`
+%% comes back as the binary ~"all". normalize/1 must restore the atom, otherwise
+%% type/1 classifies a decoded scope differently from the one that was issued.
+normalize_casts_binary_wildcard_test() ->
+    Decoded = #{
+        realm => ~"all",
+        client_id => ~"all",
+        device_id => ~"all"
+    },
+    Expected = #{realm => all, client_id => all, device_id => all},
+    ?assertEqual(Expected, bondy_auth_scope:normalize(Decoded)).
+
+%% `undefined` is the legacy spelling of the wildcard, used by tickets issued
+%% before the round-trip fix; bondy_wamp_json maps it to/from JSON null.
+normalize_casts_legacy_undefined_wildcard_test() ->
+    Decoded = #{realm => undefined, client_id => ~"all", device_id => ~"all"},
+    Expected = #{realm => all, client_id => all, device_id => all},
+    ?assertEqual(Expected, bondy_auth_scope:normalize(Decoded)).
+
+normalize_preserves_concrete_values_test() ->
+    Decoded = #{
+        realm => test_realm1(),
+        client_id => test_client1(),
+        device_id => ~"all"
+    },
+    Expected = #{
+        realm => test_realm1(),
+        client_id => test_client1(),
+        device_id => all
+    },
+    ?assertEqual(Expected, bondy_auth_scope:normalize(Decoded)).
+
+%% The property that actually matters: a scope must classify and key the same
+%% way before and after a JSON round-trip.
+normalize_roundtrip_preserves_type_test() ->
+    Scopes = [
+        bondy_auth_scope:new(all, all, all),
+        bondy_auth_scope:new(all, test_client1(), all),
+        bondy_auth_scope:new(test_realm1(), all, all),
+        bondy_auth_scope:new(test_realm1(), test_client1(), test_device1())
+    ],
+    lists:foreach(
+        fun(Scope) ->
+            Decoded = bondy_wamp_json:decode(bondy_wamp_json:encode(Scope)),
+            Renormalized = bondy_auth_scope:normalize(
+                bondy_utils:to_existing_atom_keys(Decoded)
+            ),
+            ?assertEqual(Scope, Renormalized),
+            ?assertEqual(
+                bondy_auth_scope:type(Scope),
+                bondy_auth_scope:type(Renormalized)
+            )
+        end,
+        Scopes
+    ).
+
+new_accepts_undefined_as_wildcard_test() ->
+    ?assertEqual(
+        #{realm => all, client_id => all, device_id => all},
+        bondy_auth_scope:new(undefined, undefined, undefined)
+    ).
 
 %% -----------------------------------------------------------------------------
 %% realm/1 tests

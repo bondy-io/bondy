@@ -206,8 +206,9 @@ issue_sso_ticket() ->
         bondy_session:table(bondy_session:external_id(Session)), Session
     ),
     {ok, Ticket, Claims} = bondy_ticket:issue(Session, #{allow_sso => true}),
-    %% Sanity: an SSO ticket is not pinned to a single realm.
-    ?assertMatch(#{scope := #{realm := undefined}}, Claims),
+    %% Sanity: an SSO ticket is not pinned to a single realm. The wildcard is
+    %% the atom `all`, matching the spelling used by bondy_oauth_token.
+    ?assertMatch(#{scope := #{realm := all}}, Claims),
     ?assertEqual(?SSO, maps:get(authrealm, Claims)),
     Ticket.
 

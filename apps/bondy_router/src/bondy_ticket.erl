@@ -40,6 +40,15 @@ method that is neither `ticket` nor `anonymous` authentication.
   by the authrealm (an SSO realm). Otherwise, the value is the realm this ticket
   is valid on.
 
+> #### Scope encoding {: .warning}
+>
+> The wildcard is the atom `all` in memory, but a scope embedded in a ticket is
+> carried as JSON, which renders it as the string `~"all"`. `scope_type/1` and
+> `store_key/3` match on the atom, so any scope obtained by decoding a ticket
+> MUST be passed through `bondy_auth_scope:normalize/1` before use — otherwise
+> the storage key derived at verification differs from the one used at issue and
+> `lookup/3` can never find the persisted claims. `verify/1` does this.
+
 ## Claims Storage
 
 Claims for a ticket are stored in PlumDB using the prefix
@@ -209,11 +218,7 @@ WAMP permission required to call the procedures.
 -type verify_opts() :: #{
     allow_not_found => boolean()
 }.
--type scope() :: #{
-    realm := optional(uri()),
-    client_id := optional(authid()),
-    device_id := optional(binary())
-}.
+-type scope() :: bondy_auth_scope:t().
 -type jwt() :: binary().
 -type ticket_id() :: binary().
 -type authid() :: bondy_rbac_user:username().
@@ -308,8 +313,8 @@ verify(Ticket) ->
 
 verify(Ticket, Opts) ->
     try
-        {jose_jwt, Claims0} = jose_jwt:peek(Ticket),
-        Claims = bondy_utils:to_existing_atom_keys(Claims0),
+        {jose_jwt, RawClaims} = jose_jwt:peek(Ticket),
+        Claims0 = bondy_utils:to_existing_atom_keys(RawClaims),
 
         #{
             authrealm := AuthRealmUri,
@@ -317,9 +322,18 @@ verify(Ticket, Opts) ->
             issued_at := IssuedAt,
             expires_at := ExpiresAt,
             % issued_on := Node,
-            scope := Scope,
+            scope := Scope0,
             kid := Kid
-        } = Claims,
+        } = Claims0,
+
+        %% The scope survives the JWT as JSON, so its wildcards come back as
+        %% `~"all"` (or `undefined` for tickets issued before this fix) rather
+        %% than the atom `all`. `scope_type/1` and `store_key/3` match on the
+        %% atom, so without this the type — and therefore the storage key —
+        %% computed here would differ from the one used at issue time and
+        %% `lookup/3` could never find the persisted claims.
+        Scope = bondy_auth_scope:normalize(Scope0),
+        Claims = Claims0#{scope := Scope},
 
         is_expired(Claims) andalso throw(expired),
         ExpiresAt > IssuedAt orelse throw(invalid),
@@ -522,8 +536,11 @@ do_issue(Session, Opts) ->
         case maps:get(allow_sso, Opts) of
             true when SSORealmUri =/= undefined ->
                 %% The ticket can be used to authenticate on all user realms
-                %% connected to this SSORealmUri
-                undefined;
+                %% connected to this SSORealmUri. The wildcard carries no realm
+                %% itself: the reachable set is determined at verification time
+                %% by bondy_realm:is_trusted_issuer/2 against the `authrealm`
+                %% claim.
+                all;
             _ ->
                 %% SSORealmUri is undefined or SSO was not allowed,
                 %% the scope realm can only be the session realm
@@ -618,11 +635,7 @@ scope(Session, Opts, Uri) ->
     %% Throw exception if client is requesting a ticket issued to itself
     Authid =/= ClientId orelse throw(invalid_request),
 
-    #{
-        realm => Uri,
-        client_id => ClientId,
-        device_id => InstanceId
-    }.
+    bondy_auth_scope:new(Uri, ClientId, InstanceId).
 
 %% @private
 authorize(ScopeType, AuthCtxt) ->
@@ -683,16 +696,7 @@ store_key(Authid, #{realm := Uri, device_id := Id}, local) ->
 
 %% @private
 lookup_key(Authid, Scope) ->
-    store_key(Authid, normalise_scope(Scope)).
-
-%% @private
-normalise_scope(Scope) ->
-    Default = #{
-        realm => all,
-        client_id => all,
-        device_id => all
-    },
-    maps:merge(Default, Scope).
+    store_key(Authid, bondy_auth_scope:normalize(Scope)).
 
 %% @private
 list_key(#{realm := Uri, device_id := Id}) ->

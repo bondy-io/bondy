@@ -89,13 +89,16 @@ authenticate(Ticket, _, Ctxt, State) when is_binary(Ticket) ->
 
 %% @private
 validate_claims(
-    #{scope := #{realm := Uri}, authrealm := AuthRealmUri} = Claims, Ctxt, State
+    #{scope := Scope, authrealm := AuthRealmUri} = Claims, Ctxt, State
 ) ->
     RealmUri = bondy_auth:realm_uri(Ctxt),
-    TrustedScope = Uri == undefined orelse Uri == RealmUri,
+    %% Claims reach here only via bondy_ticket:verify/1, which normalises the
+    %% scope, so the wildcard is always the atom `all` (never the legacy
+    %% `undefined`) by this point.
+    TrustedScope = bondy_auth_scope:matches_realm(Scope, RealmUri),
     %% A-1: the cookie/ticket issuer (`authrealm`) must be trusted by the
     %% target realm (itself or its SSO realm); the `scope.realm` check alone
-    %% would accept an SSO cookie (`scope.realm = undefined`) for any realm.
+    %% would accept an SSO cookie (`scope.realm = all`) for any realm.
     TrustedIssuer = bondy_realm:is_trusted_issuer(RealmUri, AuthRealmUri),
     case TrustedScope andalso TrustedIssuer of
         true ->

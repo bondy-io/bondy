@@ -31,6 +31,7 @@ all() ->
         ticket_method_not_available_outside_cidr,
 
         %% Ticket issuance
+        scope_survives_jwt_roundtrip,
         issue_with_custom_expiry,
         issue_returns_ticket_and_details,
 
@@ -315,8 +316,10 @@ local_scope(Config) ->
         bondy_auth:authenticate(?WAMP_TICKET_AUTH, Ticket, undefined, Ctxt1)
     ),
 
+    %% U1's own local ticket has client_id = all, so this is not a nested
+    %% ticket; it is rejected because U1 would be granting a ticket to itself.
     ?assertEqual(
-        {error, {invalid_request, "Nested tickets are not allowed"}},
+        {error, {invalid_request, "Self-granting ticket not allowed"}},
         bondy_ticket:issue(Session, #{client_ticket => Ticket})
     ).
 
@@ -364,10 +367,29 @@ client_scope_with_ticket(Config) ->
         UserSession
     ),
 
+    %% AppTicket is a plain local ticket (client_id = all) issued by APP, which
+    %% is exactly what the Client-Local scope flow expects as `client_ticket`.
+    %% The result is a ticket for U1 usable only via APP.
+    {ok, UserTicket, Claims} = bondy_ticket:issue(UserSession, #{
+        client_ticket => AppTicket,
+        expiry_time_secs => 300
+    }),
+
+    ?assertMatch(
+        #{
+            authid := ?U1,
+            issued_by := ?APP,
+            scope := #{realm := RealmUri, client_id := ?APP, device_id := all}
+        },
+        Claims
+    ),
+
+    %% Nesting IS rejected: the client-scoped ticket just issued cannot itself
+    %% be used as a `client_ticket`.
     ?assertEqual(
         {error, {invalid_request, "Nested tickets are not allowed"}},
         bondy_ticket:issue(UserSession, #{
-            client_ticket => AppTicket,
+            client_ticket => UserTicket,
             expiry_time_secs => 300
         })
     ).
@@ -452,6 +474,45 @@ ticket_method_not_available_outside_cidr(Config) ->
 %% =============================================================================
 %% TICKET ISSUANCE
 %% =============================================================================
+
+-doc """
+Regression: the scope survives the ticket as JSON, so its wildcards decode as
+`~"all"` rather than the atom `all`. `verify/1` must normalise them, otherwise
+`scope_type/1` classifies the decoded scope differently from the issued one, the
+derived storage key differs, and `lookup/3` can never find the persisted claims.
+
+That failure is invisible whenever `security.ticket.allow_not_found` is `true`
+(the default) because `verify/1` then falls back to trusting the signature — so
+this test asserts on `lookup/3` directly rather than relying on the flag.
+""".
+scope_survives_jwt_roundtrip(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    Session = make_session(RealmUri, ?U1, ?WAMP_CRA_AUTH),
+
+    {ok, Ticket, IssuedClaims} = bondy_ticket:issue(Session, #{}),
+
+    {ok, VerifiedClaims} = bondy_ticket:verify(Ticket),
+
+    IssuedScope = maps:get(scope, IssuedClaims),
+    VerifiedScope = maps:get(scope, VerifiedClaims),
+
+    %% The decoded scope must be identical to the issued one, wildcards included
+    ?assertEqual(IssuedScope, VerifiedScope),
+    ?assertEqual(all, maps:get(client_id, VerifiedScope)),
+    ?assertEqual(all, maps:get(device_id, VerifiedScope)),
+
+    %% ...so that a lookup keyed off the decoded scope resolves the stored claims
+    ?assertEqual(
+        {ok, IssuedClaims},
+        bondy_ticket:lookup(RealmUri, ?U1, VerifiedScope)
+    ),
+
+    %% Revocation must therefore be observable through verify/1's store check
+    ok = bondy_ticket:revoke(VerifiedClaims),
+    ?assertEqual(
+        {error, not_found},
+        bondy_ticket:lookup(RealmUri, ?U1, VerifiedScope)
+    ).
 
 issue_with_custom_expiry(Config) ->
     RealmUri = ?config(realm_uri, Config),
