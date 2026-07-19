@@ -131,7 +131,6 @@ before the next write (pinned by `bondy_db_tier2_durability_test`).
 %% projection seam
 -export([to_value/1]).
 -export([hlc/1]).
--export([gc_threshold/1]).
 -export([value_equals_state/0]).
 -export([order_independent/0]).
 -export([context_of/1]).
@@ -280,13 +279,6 @@ reap_origins({{}, _Hlc} = State, _Retired) ->
 -spec hlc(state()) -> bondy_oplog_hlc:hlc().
 
 hlc({_Clock, Hlc}) ->
-    Hlc.
-
--spec gc_threshold(state()) -> bondy_oplog_hlc:hlc() | undefined.
-
-gc_threshold({_Clock, 0}) ->
-    undefined;
-gc_threshold({_Clock, Hlc}) ->
     Hlc.
 
 -spec value_equals_state() -> boolean().

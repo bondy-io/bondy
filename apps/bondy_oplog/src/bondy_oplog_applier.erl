@@ -410,6 +410,8 @@ instances are unaffected.
 -export([await_drain/1]).
 -export([reap_origins_sync/2]).
 -export([cell_apply_target/1]).
+-export([sweep_stable_cells/2]).
+-export([sweep_stable_cells/3]).
 -export([install_catalogue_batch/2]).
 -export([cell_context/3]).
 %% State-free drain leaves reused verbatim by the ephemeral fused-writer
@@ -792,6 +794,97 @@ projection's cells from.
 """.
 cell_apply_target(ApplierPid) when is_pid(ApplierPid) ->
     gen_server:call(ApplierPid, cell_apply_target, infinity).
+
+-doc """
+Reclaims projection cells that are no longer semantically meaningful once
+`StableHlc` is causally stable.
+
+Walks the shard's primary cells and asks the fold's `stabilize/2` what remains
+of each. `discard` removes the cell physically — via `Adapter:delete/3`, which
+on the leveled backend emits real `remove` ObjectSpecs that LSM compaction can
+reclaim, unlike a tombstone written as an ordinary value.
+
+`{keep, State}` — metadata reduction — is **not implemented**: it is counted as
+`reduction_skipped` and the cell is left unchanged. That forgoes a space saving
+but cannot lose data, unlike getting `discard` wrong. Implementing it needs the
+out-of-band cell rewrite `reap_origins` already performs.
+
+Runs **inside the applier process**, deliberately. The applier is the only
+writer to the projection, so a sweep executed here is serialised against
+applies and cannot interleave a delete with a concurrent write to the same
+cell. It is a bounded, explicitly-driven pass rather than a background loop —
+the caller decides when, and pays the latency.
+
+`StableHlc` MUST come from a confirmed all-peer frontier
+(`bondy_oplog_peer_state:confirmed_peer_states/2`), and MUST be strictly
+greater than the HLC of any cell it licenses discarding. Deriving it from
+anything weaker — the recency-filtered peer read, or the compaction watermark —
+reclaims cells a lagging peer can still contradict, which resurrects deleted
+data silently and permanently.
+
+Returns a summary. A cell whose projection value cannot be read is skipped and
+counted, never treated as reclaimable: absence of evidence is not evidence of
+staleness.
+""".
+-spec sweep_stable_cells(pid(), bondy_oplog_hlc:hlc()) ->
+    {ok, #{
+        scanned := non_neg_integer(),
+        discarded := non_neg_integer(),
+        reduction_skipped := non_neg_integer(),
+        skipped := non_neg_integer()
+    }}
+    | {error, term()}.
+
+sweep_stable_cells(ApplierPid, StableHlc) ->
+    %% Unbounded: with no budget the bounded form always completes.
+    case sweep_stable_cells(ApplierPid, StableHlc, #{}) of
+        {ok, Stats, done} -> {ok, Stats};
+        {error, _} = E -> E
+    end.
+
+-doc """
+As `sweep_stable_cells/2`, bounded and resumable.
+
+`max_cells` caps the cells *scanned* in this call (default `infinity`). The
+sweep runs inside the applier — the sole projection writer — so an unbounded
+pass over a large shard stalls every write to it for the duration; the bound
+is the latency mechanism. `{resume, Cursor}` names where the pass stopped;
+pass it back as `cursor` to continue. Members (registered tables) already
+swept are skipped WITHOUT re-enumerating their directories; only the member
+the cursor points into is enumerated again.
+
+A cursor is only meaningful against the same `StableHlc` epoch or a later
+one — stability is monotone, so resuming batches under a newer (higher)
+point is safe; it can only license more.
+
+A cell left behind by a bound is simply "left in place and retried on a
+later pass" — the same semantics as a fence-skipped cell, so partial passes
+need no new invariant.
+""".
+-spec sweep_stable_cells(
+    pid(),
+    bondy_oplog_hlc:hlc(),
+    Opts :: #{
+        max_cells => pos_integer() | infinity,
+        cursor => undefined | term()
+    }
+) ->
+    {ok,
+        #{
+            scanned := non_neg_integer(),
+            discarded := non_neg_integer(),
+            reduction_skipped := non_neg_integer(),
+            skipped := non_neg_integer()
+        },
+        done | {resume, Cursor :: term()}}
+    | {error, term()}.
+
+sweep_stable_cells(ApplierPid, StableHlc, Opts) when
+    is_pid(ApplierPid), is_integer(StableHlc), is_map(Opts)
+->
+    gen_server:call(
+        ApplierPid, {sweep_stable_cells, StableHlc, Opts}, infinity
+    ).
 
 -doc """
 Registers (or replaces) a table on a multiplexing per-shard applier: routes the
@@ -1322,6 +1415,22 @@ handle_call(
     #state{fold_state = FS} = State
 ) ->
     {reply, {ok, FS}, State};
+handle_call(
+    {sweep_stable_cells, _StableHlc, _Opts},
+    _From,
+    #state{cell_apply_ctx = undefined} = State
+) ->
+    {reply, {error, no_projection}, State};
+handle_call(
+    {sweep_stable_cells, StableHlc, Opts},
+    _From,
+    #state{
+        cell_apply_ctx = Ctx,
+        cell_apply_source = Source,
+        instance_id = Id
+    } = State
+) ->
+    {reply, do_sweep_stable_cells(Ctx, Source, Id, StableHlc, Opts), State};
 handle_call(
     cell_apply_target,
     _From,
@@ -2405,29 +2514,196 @@ distinct_cell_keys(MST) ->
     ]).
 
 %% @private
-%% Read one cell's CURRENT projection frame and term-project its value into
-%% index `put` ops. Returns `skip` when the cell has no projection value
-%% yet (a not-yet-replayed peer cell) or a read raises.
-reindex_one_cell(Adapter, Handle, Kernel, SecIdx, Id, Bucket, Key) ->
-    try Adapter:get(Handle, Bucket, Key) of
-        not_found ->
-            skip;
-        {ok, Frame} ->
-            {Hlc, StateBytes, _ValueBytes} =
-                bondy_oplog_cell_frame:decode_full(Frame),
-            State = bondy_oplog_cell_kernel:decode_state(Kernel, StateBytes),
-            IdxOps = index_puts_for_cell(
-                SecIdx, Id, Kernel, Bucket, Key, State, Hlc
-            ),
-            {ok, IdxOps, Hlc}
+%% See `sweep_stable_cells/2`. Reads each cell's CURRENT projection state — not
+%% the event history — and asks the fold what survives stabilization.
+%%
+%% A6 — kernel fidelity. On a multiplexed per-shard applier the shard's cells
+%% span every registered table, each with its own CRDT kernel, projection
+%% handle and cell scope. The sweep therefore iterates the mux MEMBERS: each
+%% table's cells are enumerated through ITS OWN ctx (scope + handle) and
+%% decoded with ITS OWN kernel. Sweeping from the founding ctx alone would
+%% both miss every other table's cells (a `{entity, ET}` scope enumerates
+%% only the founding table's) and — wherever a shared handle CAN read a
+%% foreign frame, as in `do_reap_origins/2`'s MST walk — misdecode them with
+%% the wrong kernel (BONDY_DB_RECLAMATION_PROOF.md §7.3). Cells of
+%% unregistered buckets are never enumerated, hence never touched.
+do_sweep_stable_cells(Ctx, Source, Id, StableHlc, Opts) ->
+    Limit = maps:get(max_cells, Opts, infinity),
+    Cursor = maps:get(cursor, Opts, undefined),
+    Overlay = overlay_tab(Ctx),
+    %% Sorted so the {MemberKey, CellKey} cursor is deterministic across
+    %% calls (`maps:to_list` order is not).
+    Members = lists:keysort(
+        1,
+        [
+            E
+         || {_, MCtx} = E <- bondy_oplog_mux:entries(Source),
+            MCtx =/= undefined
+        ]
+    ),
+    {Acc, Next} = sweep_members(
+        Members,
+        Cursor,
+        Limit,
+        Overlay,
+        Id,
+        StableHlc,
+        #{
+            scanned => 0,
+            discarded => 0,
+            reduction_skipped => 0,
+            skipped => 0
+        },
+        undefined
+    ),
+    telemetry:execute(
+        [bondy_oplog, applier, cells_swept],
+        maps:with(
+            [scanned, discarded, reduction_skipped, skipped], Acc
+        ),
+        #{instance_id => Id, stable_hlc => StableHlc}
+    ),
+    {ok, Acc, Next}.
+
+%% @private
+%% Bounded pass over the sorted mux members. `Cursor` names where the
+%% previous call stopped ({MemberKey, CellKey}): members strictly before it
+%% are skipped WITHOUT enumerating their directories; the member it points
+%% into resumes strictly after its cell; later members sweep from the start.
+%% `Rem` is the remaining cell budget; `Last` the cursor of the last cell
+%% swept this call (what a `{resume, _}` returns).
+sweep_members([], _Cursor, _Rem, _Overlay, _Id, _StableHlc, Acc, _Last) ->
+    {Acc, done};
+sweep_members(Members, _Cursor, 0, _Overlay, _Id, _StableHlc, Acc, Last) when
+    Members =/= []
+->
+    %% Budget exhausted with members still pending. `Last` is defined: the
+    %% budget only decrements by sweeping a cell.
+    {Acc, {resume, Last}};
+sweep_members(
+    [{MKey, MCtx} | Rest], Cursor, Rem, Overlay, Id, StableHlc, Acc0, Last
+) ->
+    case member_start(MKey, Cursor) of
+        skip ->
+            sweep_members(
+                Rest, Cursor, Rem, Overlay, Id, StableHlc, Acc0, Last
+            );
+        {sweep, CellCursor} ->
+            Cells = member_cells(MCtx, MKey, CellCursor, Id),
+            case
+                sweep_cells(
+                    Cells, MCtx, MKey, Overlay, Id, StableHlc, Rem, Acc0, Last
+                )
+            of
+                {complete, Acc, Rem1, Last1} ->
+                    sweep_members(
+                        Rest, Cursor, Rem1, Overlay, Id, StableHlc, Acc, Last1
+                    );
+                {stopped, Acc, Last1} ->
+                    {Acc, {resume, Last1}}
+            end
+    end.
+
+%% @private
+%% Where this member stands relative to the resume cursor.
+member_start(_MKey, undefined) ->
+    {sweep, undefined};
+member_start(MKey, {MKey, _CellKey} = Cursor) ->
+    {sweep, Cursor};
+member_start(MKey, {CursorMKey, _}) when MKey < CursorMKey ->
+    skip;
+member_start(_MKey, _Cursor) ->
+    {sweep, undefined}.
+
+%% @private
+%% One mux member's cell directory: enumerated through the member's own
+%% scope/handle, filtered to its bucket (the MST-walk fallback spans all
+%% buckets), sorted (the cursor requires a deterministic order), and — when
+%% resuming into this member — restarted strictly after the cursor's cell.
+member_cells(
+    #{adapter := Adapter, handle := Handle} = MCtx, MKey, CellCursor, Id
+) ->
+    Scope = maps:get(primary_cell_scope, MCtx, undefined),
+    All = lists:sort([
+        BK
+     || {B, _K} = BK <- primary_cell_directory(Adapter, Handle, Id, Scope),
+        MKey =:= all orelse B =:= MKey
+    ]),
+    case CellCursor of
+        undefined -> All;
+        {MKey, LastCell} -> [BK || BK <- All, BK > LastCell]
+    end.
+
+%% @private
+%% Sweep this member's cells until they run out (`complete`) or the budget
+%% does with cells still pending (`stopped`).
+sweep_cells([], _MCtx, _MKey, _Overlay, _Id, _StableHlc, Rem, Acc, Last) ->
+    {complete, Acc, Rem, Last};
+sweep_cells(
+    [{Bucket, Key} = BK | RestCells],
+    MCtx,
+    MKey,
+    Overlay,
+    Id,
+    StableHlc,
+    Rem,
+    Acc0,
+    _Last
+) ->
+    Acc = sweep_one_cell(MCtx, Overlay, Id, Bucket, Key, StableHlc, Acc0),
+    Rem1 = dec_budget(Rem),
+    case Rem1 =:= 0 andalso RestCells =/= [] of
+        true ->
+            {stopped, Acc, {MKey, BK}};
+        false ->
+            sweep_cells(
+                RestCells,
+                MCtx,
+                MKey,
+                Overlay,
+                Id,
+                StableHlc,
+                Rem1,
+                Acc,
+                {MKey, BK}
+            )
+    end.
+
+%% @private
+dec_budget(infinity) -> infinity;
+dec_budget(N) when is_integer(N), N > 0 -> N - 1.
+
+%% @private
+%% Read and decode one cell's CURRENT projection state through the given
+%% member's adapter and kernel, then run `Fun(Hlc, State, ValueBytes)` — the
+%% caller's verdict. The WHOLE read→decode→act path runs inside
+%% `try ... catch`, deliberately NOT `try ... of`: exceptions raised in an
+%% `of` body are not caught, and a cell that cannot be read, decoded, or
+%% acted on must yield `OnFail` — never kill the applier, the sole
+%% projection writer for every table on the shard. `NotFound` is returned
+%% for an absent cell (not an error — a concurrent path may have removed
+%% it). `Desc` names the failing pass in the warning log. This is the ONE
+%% home of that protection rule; every per-cell maintenance pass (sweep,
+%% index rebuild, dead-origin reap) goes through it.
+with_cell_state(
+    Adapter, Handle, Kernel, Id, Bucket, Key, Desc, NotFound, OnFail, Fun
+) ->
+    try
+        case Adapter:get(Handle, Bucket, Key) of
+            not_found ->
+                NotFound;
+            {ok, Frame} ->
+                {Hlc, StateBytes, ValueBytes} =
+                    bondy_oplog_cell_frame:decode_full(Frame),
+                State = bondy_oplog_cell_kernel:decode_state(
+                    Kernel, StateBytes
+                ),
+                Fun(Hlc, State, ValueBytes)
+        end
     catch
         C:R:S ->
             ?LOG_WARNING(#{
-                description =>
-                    "bondy_oplog_applier index rebuild could not read a "
-                    "cell's projection value; its index terms are skipped "
-                    "this pass (the shard stays marked and a later trigger "
-                    "retries).",
+                description => Desc,
                 instance_id => Id,
                 bucket => Bucket,
                 cell_key => Key,
@@ -2435,52 +2711,226 @@ reindex_one_cell(Adapter, Handle, Kernel, SecIdx, Id, Bucket, Key) ->
                 reason => R,
                 stacktrace => S
             }),
-            skip
+            OnFail
     end.
 
 %% @private
-%% Dead-origin VV reaping. Walk every cell named in the MST, ask the
-%% kernel to drop the value-preserving causal-context entries of the
-%% retired origins, re-persist only the changed cells, and co-evict the
-%% reaped origins from the stamp-site context guard. Short-circuits to a
-%% no-op when the kernel is not a context-carrying tier_2 CRDT (legacy
-%% fold / tier_0), so those shards are byte-identical.
-do_reap_origins(
-    #state{cell_apply_ctx = #{kernel := Kernel} = Ctx, instance_id = Id} =
-        State,
-    Retired
+%% One cell's stabilization verdict. A cell we cannot read is a cell we
+%% must not reclaim — we have no evidence it is stale — so failure
+%% skips-and-counts and a later pass retries.
+sweep_one_cell(
+    #{adapter := Adapter, handle := Handle, kernel := Kernel},
+    Overlay,
+    Id,
+    Bucket,
+    Key,
+    StableHlc,
+    Acc0
 ) ->
-    case kernel_reap_supported(Kernel) of
-        false ->
-            {{ok, reap_report(false, 0, [])}, State};
-        true ->
-            case bondy_oplog_registry:mst(Id) of
-                undefined ->
-                    {{ok, reap_report(true, 0, [])}, State};
-                MST ->
-                    #{adapter := Adapter, handle := Handle} = Ctx,
-                    Cells = distinct_cell_keys(MST),
-                    Reaped = lists:foldl(
-                        fun(CellKey, Acc) ->
-                            case
-                                reap_one_cell(
-                                    Adapter,
-                                    Handle,
-                                    Kernel,
-                                    Id,
-                                    CellKey,
-                                    Retired
-                                )
-                            of
-                                skip -> Acc;
-                                {Frame, Ids} -> [{CellKey, Frame, Ids} | Acc]
-                            end
-                        end,
-                        [],
-                        Cells
-                    ),
-                    finish_reap(State, Ctx, length(Cells), Reaped)
+    Acc = bump(scanned, Acc0),
+    with_cell_state(
+        Adapter,
+        Handle,
+        Kernel,
+        Id,
+        Bucket,
+        Key,
+        "bondy_oplog_applier cell sweep could not read a cell's "
+        "projection value; it is left in place and retried on a later pass.",
+        Acc,
+        bump(skipped, Acc),
+        fun(_Hlc, State, _ValueBytes) ->
+            apply_stabilize(
+                Adapter,
+                Handle,
+                Kernel,
+                Overlay,
+                Bucket,
+                Key,
+                StableHlc,
+                State,
+                Acc
+            )
+        end
+    ).
+
+%% @private
+apply_stabilize(
+    Adapter, Handle, Kernel, Overlay, Bucket, Key, StableHlc, State, Acc
+) ->
+    case bondy_oplog_cell_kernel:stabilize(Kernel, StableHlc, State) of
+        keep ->
+            Acc;
+        discard ->
+            %% OVERLAY FENCE. A read of an ABSENT cell starts its overlay
+            %% replay from HLC 0, where a read of a PRESENT cell starts from
+            %% that cell's HLC (`bondy_oplog_core:read_overlay/4`). So removing
+            %% the cell widens the replay window: any event still pending in
+            %% the overlay for this key — including one older than the state we
+            %% just judged stale — would be replayed and resurrect a value.
+            %%
+            %% Only reclaim when the overlay holds nothing at all for the key.
+            case overlay_clear(Overlay, Bucket, Key) of
+                true ->
+                    ok = Adapter:delete(Handle, Bucket, Key),
+                    bump(discarded, Acc);
+                false ->
+                    %% Pending work for this cell: leave it and retry on a
+                    %% later pass, once the applier has drained.
+                    bump(skipped, Acc)
+            end;
+        {keep, _Reduced} ->
+            %% NOT IMPLEMENTED — and counted honestly as such.
+            %%
+            %% This is metadata reduction (arXiv:1710.04469 §7.2.1): once a
+            %% timestamp is causally stable nothing will be compared against it
+            %% again, so it can be dropped from the stored state. The value
+            %% stays; only ordering metadata goes. Worth real space for types
+            %% whose metadata dwarfs their payload.
+            %%
+            %% Persisting it means an out-of-band cell rewrite — encode the
+            %% reduced state, rebuild the frame, put it. `reap_origins` already
+            %% does exactly that and is the template to follow.
+            %%
+            %% Until then the cell is left as-is, which forgoes a saving but
+            %% cannot lose data. Do NOT count it as `rewritten`: nothing was
+            %% written, and a counter that says otherwise would hide the gap
+            %% from whoever adds the first fold that returns this.
+            bump(reduction_skipped, Acc);
+        not_supported ->
+            %% Fold declares no stabilization: nothing is reclaimable for it.
+            %% MUST NOT be read as "reclaimable".
+            Acc
+    end.
+
+%% @private
+%% The shard's overlay table; `disabled` when the topology declares none;
+%% `unavailable` when the shard IS registered but its registry entry cannot be
+%% read right now — the fence must then FAIL CLOSED (skip the cell), because a
+%% transient registry failure says nothing about what is pending in the
+%% overlay (A5).
+overlay_tab(Ctx) ->
+    case maps:get(shard_key, Ctx, undefined) of
+        undefined ->
+            disabled;
+        {NS, Index, Shard} ->
+            case bondy_oplog_core_registry:lookup(NS, Index, Shard) of
+                {ok, Entry} ->
+                    bondy_oplog_core_registry:entry_overlay(Entry);
+                _ ->
+                    unavailable
             end
+    end.
+
+%% @private
+%% `0` — not the cell's HLC — deliberately: the fence asks whether ANY event is
+%% pending for this key, because after the delete the read path would replay
+%% from 0.
+overlay_clear(disabled, _Bucket, _Key) ->
+    true;
+overlay_clear(undefined, _Bucket, _Key) ->
+    %% Registered shard that declares no overlay: nothing can be pending.
+    true;
+overlay_clear(unavailable, _Bucket, _Key) ->
+    %% FAIL CLOSED: the overlay exists (or may exist) but cannot be consulted.
+    false;
+overlay_clear(Tab, Bucket, Key) ->
+    bondy_oplog_db_overlay:events_for(Tab, Bucket, Key, 0) =:= [].
+
+%% @private
+%% Read one cell's CURRENT projection frame and term-project its value into
+%% index `put` ops. Returns `skip` when the cell has no projection value
+%% yet (a not-yet-replayed peer cell) or the read/decode/projection raises
+%% (`with_cell_state/10` owns the protection).
+reindex_one_cell(Adapter, Handle, Kernel, SecIdx, Id, Bucket, Key) ->
+    with_cell_state(
+        Adapter,
+        Handle,
+        Kernel,
+        Id,
+        Bucket,
+        Key,
+        "bondy_oplog_applier index rebuild could not read a cell's "
+        "projection value; its index terms are skipped this pass (the "
+        "shard stays marked and a later trigger retries).",
+        skip,
+        skip,
+        fun(Hlc, State, _ValueBytes) ->
+            IdxOps = index_puts_for_cell(
+                SecIdx, Id, Kernel, Bucket, Key, State, Hlc
+            ),
+            {ok, IdxOps, Hlc}
+        end
+    ).
+
+%% @private
+%% Dead-origin VV reaping. Ask each table's kernel to drop the
+%% value-preserving causal-context entries of the retired origins,
+%% re-persist only the changed cells, and co-evict the reaped origins from
+%% the stamp-site context guard.
+%%
+%% A6 + D-9, same shape as the sweep: iterate the mux MEMBERS. Each table's
+%% cells are enumerated through ITS OWN ctx — the PROJECTION-backed
+%% directory, not the truncatable MST, so already-compacted cells are still
+%% reaped — and decoded with ITS OWN kernel. The founding-ctx version had
+%% both defects: on a shared shard whose founding table is tier_0 the whole
+%% pass no-oped (12 of the 13 core tables never reaped), and its
+%% `distinct_cell_keys(MST)` directory silently missed every compacted cell
+%% (BONDY_DB_RECLAMATION_PROOF.md §7.3). Members whose kernel is not a
+%% context-carrying tier_2 CRDT are skipped, byte-identical.
+do_reap_origins(#state{cell_apply_source = Source} = State, Retired) ->
+    Members = [
+        E
+     || {_, MCtx} = E <- lists:keysort(1, bondy_oplog_mux:entries(Source)),
+        MCtx =/= undefined,
+        kernel_reap_supported(maps:get(kernel, MCtx))
+    ],
+    case Members of
+        [] ->
+            {{ok, reap_report(false, 0, [])}, State};
+        _ ->
+            reap_members(Members, State, Retired, 0, [], 0)
+    end.
+
+%% @private
+reap_members([], State, _Retired, Scanned, Origins, CellsReaped) ->
+    OriginsReaped = lists:usort(Origins),
+    CellsReaped > 0 andalso
+        telemetry:execute(
+            [bondy_oplog, applier, origins_reaped],
+            #{cells => CellsReaped, origins => length(OriginsReaped)},
+            #{instance_id => State#state.instance_id}
+        ),
+    Report = reap_report(true, Scanned, OriginsReaped),
+    {{ok, Report#{cells_reaped => CellsReaped}}, State};
+reap_members(
+    [{MKey, MCtx} | Rest], State, Retired, Scanned, Origins, CellsN
+) ->
+    Id = State#state.instance_id,
+    #{adapter := Adapter, handle := Handle, kernel := Kernel} = MCtx,
+    Cells = member_cells(MCtx, MKey, undefined, Id),
+    Reaped = lists:foldl(
+        fun(CellKey, Acc) ->
+            case reap_one_cell(Adapter, Handle, Kernel, Id, CellKey, Retired) of
+                skip -> Acc;
+                {Frame, Ids} -> [{CellKey, Frame, Ids} | Acc]
+            end
+        end,
+        [],
+        Cells
+    ),
+    case finish_reap_member(State, MCtx, Reaped) of
+        {ok, State1, MemberOrigins} ->
+            reap_members(
+                Rest,
+                State1,
+                Retired,
+                Scanned + length(Cells),
+                MemberOrigins ++ Origins,
+                CellsN + length(Reaped)
+            );
+        {error, _} = E ->
+            {E, State}
     end.
 
 %% @private
@@ -2491,40 +2941,36 @@ kernel_reap_supported({crdt, Mod}) ->
 %% Read one cell's CURRENT projection frame, reap the retired origins from
 %% its decoded state, and re-encode a value-preserving frame (same Hlc and
 %% value column — only the state bytes shrink). `skip` when the cell has no
-%% projection value, nothing was reaped, or a read raised.
+%% projection value, nothing was reaped, or the read/decode/reap raises
+%% (`with_cell_state/10` owns the protection).
 reap_one_cell(Adapter, Handle, Kernel, Id, {Bucket, Key}, Retired) ->
-    try Adapter:get(Handle, Bucket, Key) of
-        not_found ->
-            skip;
-        {ok, Frame} ->
-            {Hlc, StateBytes, ValueBytes} =
-                bondy_oplog_cell_frame:decode_full(Frame),
-            State = bondy_oplog_cell_kernel:decode_state(Kernel, StateBytes),
-            case bondy_oplog_cell_kernel:reap_origins(Kernel, State, Retired) of
+    with_cell_state(
+        Adapter,
+        Handle,
+        Kernel,
+        Id,
+        Bucket,
+        Key,
+        "bondy_oplog_applier dead-origin reap could not read a cell's "
+        "projection value; it is skipped this pass.",
+        skip,
+        skip,
+        fun(Hlc, State, ValueBytes) ->
+            case
+                bondy_oplog_cell_kernel:reap_origins(Kernel, State, Retired)
+            of
                 {NewState, [_ | _] = Ids} ->
-                    StateBytes2 =
-                        bondy_oplog_cell_kernel:encode_state(Kernel, NewState),
+                    StateBytes2 = bondy_oplog_cell_kernel:encode_state(
+                        Kernel, NewState
+                    ),
                     {reaped_frame(Hlc, StateBytes2, ValueBytes), Ids};
                 _ ->
                     %% `{_NewState, []}` (no matching entry) or
                     %% `not_supported` (defensive — already gated above).
                     skip
             end
-    catch
-        C:R:S ->
-            ?LOG_WARNING(#{
-                description =>
-                    "bondy_oplog_applier dead-origin reap could not read a "
-                    "cell's projection value; it is skipped this pass.",
-                instance_id => Id,
-                bucket => Bucket,
-                cell_key => Key,
-                class => C,
-                reason => R,
-                stacktrace => S
-            }),
-            skip
-    end.
+        end
+    ).
 
 %% @private
 %% Re-encode a reaped cell frame, preserving the value column exactly (the
@@ -2536,13 +2982,18 @@ reaped_frame(Hlc, StateBytes, ValueBytes) when is_binary(ValueBytes) ->
     bondy_oplog_cell_frame:encode(Hlc, StateBytes, ValueBytes, false).
 
 %% @private
-finish_reap(State, _Ctx, Scanned, []) ->
-    {{ok, reap_report(true, Scanned, [])}, State};
-finish_reap(State, Ctx, Scanned, Reaped) ->
-    #{adapter := Adapter, handle := Handle} = Ctx,
-    CacheAdapter = maps:get(cache_adapter, Ctx, undefined),
-    CacheHandle = maps:get(cache_handle, Ctx, undefined),
-    OldStateCache = maps:get(oldstate_cache, Ctx, undefined),
+%% Persist one member's reaped frames through the MEMBER's own ctx (adapter,
+%% handle, caches) and co-evict its reaped origins from the tier_2
+%% stamp-site guard: the cell's context legitimately shrank, and
+%% `vv_regressed/2` would otherwise flag the next write as a regression
+%% (#27 NOTE). Returns the origins this member reaped.
+finish_reap_member(State, _MCtx, []) ->
+    {ok, State, []};
+finish_reap_member(State, MCtx, Reaped) ->
+    #{adapter := Adapter, handle := Handle} = MCtx,
+    CacheAdapter = maps:get(cache_adapter, MCtx, undefined),
+    CacheHandle = maps:get(cache_handle, MCtx, undefined),
+    OldStateCache = maps:get(oldstate_cache, MCtx, undefined),
     Id = State#state.instance_id,
     Entries = [{B, K, F} || {{B, K}, F, _Ids} <- Reaped],
     case Adapter:put_batch(Handle, Entries) of
@@ -2560,32 +3011,21 @@ finish_reap(State, Ctx, Scanned, Reaped) ->
             bondy_oplog_cell_apply:oldstate_cache_put_entries(
                 OldStateCache, Entries
             ),
-            %% Co-evict the reaped origins from the tier_2 stamp-site guard:
-            %% the cell's context legitimately shrank, and `vv_regressed/2`
-            %% would otherwise flag the next write as a regression (#27 NOTE).
             Guard1 = coevict_ctx_guard(State#state.ctx_guard, Reaped),
             OriginsReaped = lists:usort(
                 lists:append([Ids || {_C, _F, Ids} <- Reaped])
             ),
-            telemetry:execute(
-                [bondy_oplog, applier, origins_reaped],
-                #{cells => length(Reaped), origins => length(OriginsReaped)},
-                #{instance_id => Id}
-            ),
-            Report = reap_report(true, Scanned, OriginsReaped),
-            {{ok, Report#{cells_reaped => length(Reaped)}}, State#state{
-                ctx_guard = Guard1
-            }};
+            {ok, State#state{ctx_guard = Guard1}, OriginsReaped};
         {error, Reason} ->
             ?LOG_WARNING(#{
                 description =>
                     "bondy_oplog_applier dead-origin reap projection write "
-                    "failed; no cell was reaped this pass.",
+                    "failed; this member's cells were not reaped this pass.",
                 instance_id => Id,
                 count => length(Entries),
                 reason => Reason
             }),
-            {{error, Reason}, State}
+            {error, Reason}
     end.
 
 %% @private
@@ -2836,7 +3276,8 @@ do_install_catalogue_batch(Id, Source, Cells) ->
             installed => 0,
             skipped => 0,
             merged => 0,
-            replaced_no_merge => 0
+            replaced_no_merge => 0,
+            max_hlc => 0
         },
         Groups
     ),
@@ -2900,6 +3341,16 @@ install_one_cell(
             Existing = read_existing_for_install(
                 Adapter, Handle, Bucket, Key
             ),
+            %% A3 — track the maximum decoded cell HLC across the batch. The
+            %% sync session folds it across batches and the instance absorbs
+            %% it into the local clock at finalize
+            %% (`finalize_catalogue_bootstrap/5`); without that absorb a
+            %% bootstrapped replica's clock sits BELOW the cells it just
+            %% installed and it can mint events under a stability point
+            %% computed from them (BONDY_DB_RECLAMATION_PROOF.md §7.1).
+            Acc1 = Acc#{
+                max_hlc => max(maps:get(max_hlc, Acc, 0), IncomingHlc)
+            },
             handle_cell(
                 Id,
                 Adapter,
@@ -2912,7 +3363,7 @@ install_one_cell(
                 Frame,
                 IncomingHlc,
                 Existing,
-                Acc
+                Acc1
             )
     catch
         C:R:St ->

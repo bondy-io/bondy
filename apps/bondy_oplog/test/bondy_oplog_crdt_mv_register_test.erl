@@ -48,8 +48,7 @@ apply_event(State, Event) ->
 init_is_empty_test() ->
     ?assertEqual([], ?MOD:to_value(?MOD:init())),
     ?assertEqual([], ?MOD:context_of(?MOD:init())),
-    ?assertEqual(0, ?MOD:hlc(?MOD:init())),
-    ?assertEqual(undefined, ?MOD:gc_threshold(?MOD:init())).
+    ?assertEqual(0, ?MOD:hlc(?MOD:init())).
 
 %% Sequential writes from one origin: each observes the prior (read-your-
 %% writes), so the later value dominates — a single value, not a sibling.

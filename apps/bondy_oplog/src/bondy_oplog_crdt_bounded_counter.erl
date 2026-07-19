@@ -109,7 +109,6 @@ whole group is absorbed.
 -export([hlc/1]).
 -export([encode_state/1]).
 -export([decode_state/1]).
--export([gc_threshold/1]).
 -export([value_equals_state/0]).
 -export([order_independent/0]).
 
@@ -174,13 +173,6 @@ to_value({V, _H}) ->
 -spec hlc(state()) -> bondy_oplog_hlc:hlc().
 
 hlc({_V, H}) ->
-    H.
-
--spec gc_threshold(state()) -> bondy_oplog_hlc:hlc().
-
-%% Everything with `hlc =< H` has been absorbed into the clamped value and
-%% is safe to drop from the WAL/MST.
-gc_threshold({_V, H}) ->
     H.
 
 -spec value_equals_state() -> boolean().

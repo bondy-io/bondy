@@ -36,17 +36,38 @@ instance) cannot pile up unbounded.
 
 Errors raised by the trigger are caught and logged in the worker; they
 do not crash the scheduler.
+
+## Named instances
+
+The scheduler holds no per-instance state, so a SECOND instance with its own
+interval, cap and trigger is just another registration: pass `name` in
+`Opts` (default `?MODULE`) — it becomes both the registered name and the
+`child_spec/1` id. The control API's default arities address the default
+instance; the name-first arities address a named one. Telemetry events carry
+`scheduler => Name` so instances are distinguishable. This is what lets
+projection-cell reclamation run on its own cadence
+(`BONDY_DB_RECLAMATION_PLAN.md` Step 5) without duplicating this module or
+smuggling per-instance time checks into a shared trigger.
 """).
 
 -record(state, {
+    name :: atom(),
     enabled :: boolean(),
     interval_ms :: non_neg_integer(),
     trigger :: undefined | fun((instance_id()) -> any()),
     tick_ref :: undefined | reference(),
     max_concurrency :: pos_integer(),
     %% Pid → InstanceId of currently running workers.
-    in_flight :: #{pid() => instance_id()}
+    in_flight :: #{pid() => instance_id()},
+    %% InstanceId → last wall-clock ms a stall was LOGGED for it. The
+    %% rate limit for the stalled-reclamation warning (telemetry is never
+    %% rate-limited; only the log line is).
+    last_stall_log = #{} :: #{instance_id() => integer()}
 }).
+
+%% A stalled instance is re-reported in the log at most this often. The
+%% telemetry event fires on every occurrence regardless.
+-define(STALL_LOG_INTERVAL_MS, 60_000).
 
 %% Lifecycle
 -export([start_link/0]).
@@ -55,10 +76,15 @@ do not crash the scheduler.
 
 %% Control
 -export([trigger/0]).
+-export([trigger/1]).
 -export([trigger_for/1]).
+-export([trigger_for/2]).
 -export([set_trigger/1]).
+-export([set_trigger/2]).
 -export([set_interval_ms/1]).
+-export([set_interval_ms/2]).
 -export([info/0]).
+-export([info/1]).
 
 %% gen_server callbacks
 -export([init/1]).
@@ -79,13 +105,16 @@ start_link() ->
 -spec start_link(map()) -> {ok, pid()} | {error, term()}.
 
 start_link(Opts) when is_map(Opts) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
+    Name = maps:get(name, Opts, ?MODULE),
+    gen_server:start_link({local, Name}, ?MODULE, Opts, []).
 
 -spec child_spec(map()) -> supervisor:child_spec().
 
 child_spec(Opts) ->
     #{
-        id => ?MODULE,
+        %% The id follows the name — two scheduler children under one
+        %% supervisor must not collide on `?MODULE`.
+        id => maps:get(name, Opts, ?MODULE),
         start => {?MODULE, start_link, [Opts]},
         restart => permanent,
         shutdown => 5000,
@@ -101,7 +130,13 @@ child_spec(Opts) ->
 -spec trigger() -> ok.
 
 trigger() ->
-    gen_server:cast(?MODULE, tick).
+    trigger(?MODULE).
+
+?DOC("As `trigger/0`, on the named scheduler instance.").
+-spec trigger(Name :: atom()) -> ok.
+
+trigger(Name) when is_atom(Name) ->
+    gen_server:cast(Name, tick).
 
 ?DOC("""
 Triggers GC for a single instance immediately.
@@ -109,7 +144,13 @@ Triggers GC for a single instance immediately.
 -spec trigger_for(instance_id()) -> ok.
 
 trigger_for(InstanceId) ->
-    gen_server:cast(?MODULE, {tick_for, InstanceId}).
+    trigger_for(?MODULE, InstanceId).
+
+?DOC("As `trigger_for/1`, on the named scheduler instance.").
+-spec trigger_for(Name :: atom(), instance_id()) -> ok.
+
+trigger_for(Name, InstanceId) when is_atom(Name) ->
+    gen_server:cast(Name, {tick_for, InstanceId}).
 
 ?DOC("""
 Replaces the trigger callback at runtime. Pass `undefined` to
@@ -117,8 +158,18 @@ quiesce.
 """).
 -spec set_trigger(undefined | fun((instance_id()) -> any())) -> ok.
 
-set_trigger(Fun) when is_function(Fun, 1); Fun =:= undefined ->
-    gen_server:call(?MODULE, {set_trigger, Fun}).
+set_trigger(Fun) ->
+    set_trigger(?MODULE, Fun).
+
+?DOC("As `set_trigger/1`, on the named scheduler instance.").
+-spec set_trigger(
+    Name :: atom(), undefined | fun((instance_id()) -> any())
+) -> ok.
+
+set_trigger(Name, Fun) when
+    is_atom(Name) andalso (is_function(Fun, 1) orelse Fun =:= undefined)
+->
+    gen_server:call(Name, {set_trigger, Fun}).
 
 ?DOC("""
 Sets the periodic-tick interval (in milliseconds) at runtime. `0`
@@ -131,13 +182,25 @@ periodic firing while asserting on explicit triggers.
 """).
 -spec set_interval_ms(non_neg_integer()) -> ok.
 
-set_interval_ms(Ms) when is_integer(Ms), Ms >= 0 ->
-    gen_server:call(?MODULE, {set_interval_ms, Ms}).
+set_interval_ms(Ms) ->
+    set_interval_ms(?MODULE, Ms).
+
+?DOC("As `set_interval_ms/1`, on the named scheduler instance.").
+-spec set_interval_ms(Name :: atom(), non_neg_integer()) -> ok.
+
+set_interval_ms(Name, Ms) when is_atom(Name), is_integer(Ms), Ms >= 0 ->
+    gen_server:call(Name, {set_interval_ms, Ms}).
 
 -spec info() -> map().
 
 info() ->
-    gen_server:call(?MODULE, info).
+    info(?MODULE).
+
+?DOC("As `info/0`, on the named scheduler instance.").
+-spec info(Name :: atom()) -> map().
+
+info(Name) when is_atom(Name) ->
+    gen_server:call(Name, info).
 
 %% =============================================================================
 %% gen_server CALLBACKS
@@ -156,6 +219,7 @@ init(Opts) ->
                 end
         end,
     State = #state{
+        name = maps:get(name, Opts, ?MODULE),
         enabled = maps:get(
             enabled, Opts, bondy_oplog_config:gc_scheduler_enabled()
         ),
@@ -172,6 +236,7 @@ init(Opts) ->
 
 handle_call(info, _From, State) ->
     Reply = #{
+        name => State#state.name,
         enabled => State#state.enabled,
         interval_ms => State#state.interval_ms,
         trigger_set => State#state.trigger =/= undefined,
@@ -192,12 +257,32 @@ handle_cast(tick, State) ->
     {noreply, run_tick(State)};
 handle_cast({tick_for, InstanceId}, State) ->
     {noreply, fire_async(InstanceId, State)};
+handle_cast({stalled, InstanceId, Reason}, State) ->
+    %% A trigger reported "no stability, reclaimed nothing" for this
+    %% instance. Log it — rate-limited per instance, because a genuinely
+    %% stalled member re-reports on every tick — naming the members holding
+    %% stability down: this is the difference between "GC is working" and
+    %% "GC has been stalled for a week on a decommissioned node nobody
+    %% retired".
+    {noreply, maybe_log_stall(InstanceId, Reason, State)};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info(tick, State) ->
     {noreply, schedule_tick(run_tick(State))};
-handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
+handle_info({'DOWN', _Ref, process, Pid, Reason}, State) ->
+    %% `run_trigger/3` catches trigger exceptions, so an abnormal worker
+    %% exit is something outside it (e.g. a kill). It must not be silent:
+    %% a permanently dying worker would otherwise look identical to a
+    %% permanently healthy one.
+    Reason =:= normal orelse
+        ?LOG_WARNING(#{
+            description => "GC worker exited abnormally",
+            scheduler => State#state.name,
+            instance =>
+                maps:get(Pid, State#state.in_flight, undefined),
+            reason => Reason
+        }),
     {noreply, State#state{
         in_flight = maps:remove(Pid, State#state.in_flight)
     }};
@@ -227,7 +312,7 @@ run_tick(#state{} = State0) ->
             instances => length(Instances),
             in_flight => map_size(State#state.in_flight)
         },
-        #{}
+        #{scheduler => State#state.name}
     ),
     State.
 
@@ -249,7 +334,11 @@ fire_async(
     telemetry:execute(
         [bondy_oplog, scheduler, gc, skipped],
         #{count => 1},
-        #{instance_id => InstanceId, reason => max_concurrency}
+        #{
+            instance_id => InstanceId,
+            reason => max_concurrency,
+            scheduler => State#state.name
+        }
     ),
     State;
 fire_async(InstanceId, #state{in_flight = InFlight} = State) ->
@@ -259,32 +348,106 @@ fire_async(InstanceId, #state{in_flight = InFlight} = State) ->
             telemetry:execute(
                 [bondy_oplog, scheduler, gc, skipped],
                 #{count => 1},
-                #{instance_id => InstanceId, reason => already_running}
+                #{
+                    instance_id => InstanceId,
+                    reason => already_running,
+                    scheduler => State#state.name
+                }
             ),
             State;
         false ->
             Trigger = State#state.trigger,
+            Name = State#state.name,
             {Pid, _Ref} = spawn_monitor(fun() ->
-                run_trigger(InstanceId, Trigger)
+                run_trigger(Name, InstanceId, Trigger)
             end),
             State#state{in_flight = InFlight#{Pid => InstanceId}}
     end.
 
 %% @private
-run_trigger(InstanceId, Fun) when is_function(Fun, 1) ->
-    try
-        _ = Fun(InstanceId),
-        ok
-    catch
-        K:V:S ->
-            ?LOG_WARNING(#{
-                description => "GC trigger raised",
-                instance => InstanceId,
-                class => K,
-                reason => V,
-                stacktrace => S
-            }),
+%% Runs the trigger and REPORTS its outcome — a permanently failing or
+%% permanently stalled instance must produce a scheduler-level signal, not
+%% vanish into a discarded return value. Every run emits
+%% `[bondy_oplog, scheduler, gc, trigger_outcome]`; a reclamation-style
+%% "no stability" outcome is additionally cast back to the scheduler for
+%% the rate-limited stall log.
+run_trigger(Name, InstanceId, Fun) when is_function(Fun, 1) ->
+    Outcome =
+        try Fun(InstanceId) of
+            {error, Reason} -> {error, Reason};
+            _ -> ok
+        catch
+            K:V:S ->
+                ?LOG_WARNING(#{
+                    description => "GC trigger raised",
+                    scheduler => Name,
+                    instance => InstanceId,
+                    class => K,
+                    reason => V,
+                    stacktrace => S
+                }),
+                {error, {raised, K, V}}
+        end,
+    telemetry:execute(
+        [bondy_oplog, scheduler, gc, trigger_outcome],
+        #{count => 1},
+        #{
+            scheduler => Name,
+            instance_id => InstanceId,
+            outcome => outcome_label(Outcome)
+        }
+    ),
+    case Outcome of
+        {error, {unconfirmed, _} = Stall} ->
+            gen_server:cast(Name, {stalled, InstanceId, Stall});
+        {error, membership_unavailable = Stall} ->
+            gen_server:cast(Name, {stalled, InstanceId, Stall});
+        _ ->
             ok
+    end.
+
+%% @private
+outcome_label(ok) -> ok;
+outcome_label({error, {unconfirmed, _}}) -> unconfirmed;
+outcome_label({error, {raised, K, _}}) -> {raised, K};
+outcome_label({error, Reason}) when is_atom(Reason) -> Reason;
+outcome_label({error, _}) -> error.
+
+%% @private
+%% See the `{stalled, _, _}` cast. The rate limit is per instance and
+%% applies to the LOG only; the telemetry emitted by the trigger and by
+%% `bondy_oplog_instance:reclaim_stable_cells/1` is never limited.
+maybe_log_stall(InstanceId, Reason, State) ->
+    Now = erlang:monotonic_time(millisecond),
+    Last = maps:get(InstanceId, State#state.last_stall_log, undefined),
+    case Last =:= undefined orelse Now - Last >= ?STALL_LOG_INTERVAL_MS of
+        false ->
+            State;
+        true ->
+            Missing =
+                case Reason of
+                    {unconfirmed, Peers} -> Peers;
+                    _ -> []
+                end,
+            ?LOG_WARNING(#{
+                description =>
+                    "Reclamation stalled: no causal stability for this "
+                    "instance, nothing reclaimed. A member that stays in "
+                    "this state must be retired by a deliberate membership "
+                    "act (it never ages out).",
+                scheduler => State#state.name,
+                instance => InstanceId,
+                reason =>
+                    case Reason of
+                        {unconfirmed, _} -> unconfirmed;
+                        _ -> Reason
+                    end,
+                missing_members => Missing
+            }),
+            State#state{
+                last_stall_log =
+                    (State#state.last_stall_log)#{InstanceId => Now}
+            }
     end.
 
 %% @private
@@ -323,6 +486,7 @@ schedule_tick(#state{interval_ms = Ms} = State) ->
 %% Default trigger: run a compaction cycle for the instance. The cycle
 %% is a no-op when there are no peers, no intersecting prefix, or no
 %% CRDT module configured — so this is safe to call on every tick.
+%% The result is RETURNED, not discarded: `run_trigger/3` reports it, so a
+%% permanently failing instance produces a scheduler-level signal.
 default_trigger(InstanceId) ->
-    _ = bondy_oplog_compaction:compact(InstanceId),
-    ok.
+    bondy_oplog_compaction:compact(InstanceId).

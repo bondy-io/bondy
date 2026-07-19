@@ -89,7 +89,6 @@ cells decode unchanged after the cutover (a zero-migration swap).
 %% projection seam
 -export([to_value/1]).
 -export([hlc/1]).
--export([gc_threshold/1]).
 -export([value_equals_state/0]).
 -export([order_independent/0]).
 -export([encode_state/1]).
@@ -159,11 +158,6 @@ to_value({dead, _Cols, _H}) -> undefined.
 -spec hlc(state()) -> bondy_oplog_hlc:hlc().
 
 hlc({_P, _C, H}) -> H.
-
--spec gc_threshold(state()) -> bondy_oplog_hlc:hlc() | undefined.
-
-gc_threshold({dead, <<>>, 0}) -> undefined;
-gc_threshold({_P, _C, H}) -> H.
 
 -spec value_equals_state() -> boolean().
 

@@ -408,19 +408,23 @@ has(#?MODULE{} = T, Hash) when is_binary(Hash) ->
     %% Physical presence, not the `free_set` mask — see `get/2`.
     do_has(T, Hash).
 
+-doc """
+Diagnostic: is the page's content PHYSICALLY present (in pending or a
+sealed pack), ignoring the `free_set` tombstone that `has/2` honours? Used
+to classify a "missing" page (per `missing_set/2`) as either
+tombstone-masked-but-present (data on disk) or genuinely absent (never
+written) when diagnosing a dangling root.
+""".
 -spec is_present(t(), binary()) -> boolean().
 
-%% @doc Diagnostic: is the page's content PHYSICALLY present (in pending or a
-%% sealed pack), ignoring the `free_set` tombstone that `has/2` honours? Used
-%% to classify a "missing" page (per `missing_set/2`) as either
-%% tombstone-masked-but-present (data on disk) or genuinely absent (never
-%% written) when diagnosing a dangling root.
 is_present(#?MODULE{} = T, Hash) when is_binary(Hash) ->
     do_has(T, Hash).
 
+-doc """
+Diagnostic: is the hash currently tombstoned in the `free_set`?
+""".
 -spec is_tombstoned(t(), binary()) -> boolean().
 
-%% @doc Diagnostic: is the hash currently tombstoned in the `free_set`?
 is_tombstoned(#?MODULE{free_set = FreeSet}, Hash) when is_binary(Hash) ->
     sets:is_element(Hash, FreeSet).
 

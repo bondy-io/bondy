@@ -69,11 +69,22 @@ init([]) ->
         bondy_oplog_latency:child_spec(),
         bondy_oplog_peer_state:child_spec(#{}),
         bondy_oplog_origin_bans:child_spec(),
+        bondy_oplog_origin_retirement:child_spec(),
         bondy_oplog_quarantine:child_spec(),
         bondy_oplog_responder:child_spec(),
         bondy_oplog_catalogue_cursor:child_spec(),
         bondy_oplog_sync_scheduler:child_spec(#{}),
         bondy_oplog_gc_scheduler:child_spec(#{}),
+        %% Projection-cell reclamation: a SECOND gc_scheduler instance on
+        %% its own (much slower) cadence, driving the causal-stability
+        %% sweep. Off by default (`reclaim_enabled`); an idle disabled
+        %% scheduler costs one process.
+        bondy_oplog_gc_scheduler:child_spec(#{
+            name => bondy_oplog_reclaim_scheduler,
+            enabled => bondy_oplog_config:reclaim_enabled(),
+            interval_ms => bondy_oplog_config:reclaim_interval_ms(),
+            trigger => fun bondy_oplog_instance:reclaim_stable_cells/1
+        }),
         bondy_oplog_index_rebuild:child_spec(),
         #{
             id => bondy_oplog_secondary_sup,

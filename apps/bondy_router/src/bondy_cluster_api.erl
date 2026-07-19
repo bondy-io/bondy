@@ -35,8 +35,13 @@ handle_call(?BONDY_CLUSTER_JOIN, #call{} = M, _Ctxt) ->
     R = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, R};
 handle_call(?BONDY_CLUSTER_LEAVE, #call{} = M, _Ctxt) ->
-    %% TODO
-    R = bondy_wamp_message:result(M#call.request_id, #{}, []),
+    %% NOT implemented — and it must not pretend to be: replying success here
+    %% would tell an operator a node was retired when nothing happened, and
+    %% causal-stability reclamation stays stalled on the un-retired member.
+    %% Retirement is a deliberate Partisan membership act
+    %% (`partisan_peer_service:leave/1`); until this endpoint performs it,
+    %% it refuses like its unimplemented siblings.
+    R = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, R};
 handle_call(?BONDY_CLUSTER_CONNECTIONS, #call{} = M, _Ctxt) ->
     %% TODO

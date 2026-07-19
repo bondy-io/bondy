@@ -64,8 +64,8 @@ as the sole convergence kernel.
   value stored in the projection / served on reads. Pure.
 
 - `hlc(State) -> hlc()` the state's logical timestamp — non-decreasing
-  as operations are interpreted. Drives `gc_threshold/1` and the
-  projection's per-cell HEAD HLC.
+  as operations are interpreted. Drives the projection's per-cell HEAD
+  HLC.
 
 - `encode_state(State) -> binary()` / `decode_state(binary()) -> State`
   serialise the state for the compaction checkpoint and the projection
@@ -75,10 +75,32 @@ as the sole convergence kernel.
 
 ## Optional callbacks
 
-- `gc_threshold(State) -> hlc() | undefined` the highest HLC fully
-  absorbed into `State`; every operation with `hlc <= threshold` is safe
-  to drop from the WAL/MST at compaction. `undefined` means "nothing is
-  collectable yet".
+- `removal_op() -> Op | undefined` the operation that removes the WHOLE
+  cell, for `bondy_db:delete/3` — `clear` for register-like types (a flag
+  would declare `disable`; none does yet, so `delete/3` on a flag table
+  returns `{error, {no_removal_op, _}}`). Collection types return
+  `undefined`: a set or map has no whole-cell removal, its entries are
+  removed individually.
+
+- `stabilize(StableHlc, State) -> keep | {keep, State} | discard` — what
+  remains of `State` once `StableHlc` is causally stable, i.e. once no
+  operation older than it can ever be delivered again.
+
+  `discard` means the cell carries no remaining semantic content and may
+  be physically removed from the projection. A tombstone is the case that
+  matters: it exists only to reject a concurrent write with a lower HLC,
+  so once that is impossible it is pure overhead.
+
+  `{keep, State'}` is the weaker form — retain the cell but drop metadata
+  that only served to order it against operations that can no longer
+  arrive.
+
+  This is causal *stabilization* in the sense of Baquero, Almeida and
+  Shoker (arXiv:1710.04469 §7.2): a data-type-specific reduction licensed
+  by stability, distinct from the redundancy applied on delivery. It MUST
+  NOT be called with an `StableHlc` derived from anything weaker than a
+  confirmed all-peer frontier — see
+  `bondy_oplog_peer_state:confirmed_peer_states/2`.
 
 - `value_equals_state() -> boolean()` declares that `to_value/1` is the
   identity (the projection value *is* the state) — a storage optimisation
@@ -153,8 +175,12 @@ silently diverge.
 
 %% Optional callbacks.
 
--callback gc_threshold(State :: term()) ->
-    bondy_oplog_hlc:hlc() | undefined.
+-callback removal_op() -> Op :: term() | undefined.
+
+-callback stabilize(
+    StableHlc :: bondy_oplog_hlc:hlc(),
+    State :: term()
+) -> keep | {keep, State :: term()} | discard.
 
 -callback value_equals_state() -> boolean().
 
@@ -168,7 +194,8 @@ silently diverge.
 ) -> {NewState :: term(), Reaped :: [term()]}.
 
 -optional_callbacks([
-    gc_threshold/1,
+    removal_op/0,
+    stabilize/2,
     value_equals_state/0,
     order_independent/0,
     context_of/1,

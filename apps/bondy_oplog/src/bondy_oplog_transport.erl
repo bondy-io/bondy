@@ -72,6 +72,19 @@ the `Opts` argument.
     get_root
     | get_frontier
     | {get_pages, [bondy_mst:hash()] | sets:set(bondy_mst:hash())}
+    %% Reciprocal form: carries the requester's peer id and root so the
+    %% responder learns, for free, that it is behind and can schedule its own
+    %% exchange in the opposite direction. The 2-tuple form above remains
+    %% supported so a mixed-version cluster keeps working.
+    | {get_pages, Peer :: peer_id(), Root :: bondy_mst:hash(), [
+        bondy_mst:hash()
+    ]}
+    %% Swap-completion notice. The initiator tells the responder "I now hold
+    %% every page reachable from the root you advertised", naming that root.
+    %% Both sides then checkpoint the SAME root against each other, which is
+    %% what makes the stability frontier a shared object rather than two
+    %% unilateral observations. See BONDY_DB_DELETE_DESIGN.md §4.2.
+    | {confirm_root, Peer :: peer_id(), Root :: bondy_mst:hash()}
     | get_snapshot
     | get_catalogue_snapshot_init
     | {get_catalogue_snapshot_next, bondy_oplog_catalogue_cursor:cursor()}.
@@ -80,6 +93,11 @@ the `Opts` argument.
     {ok, bondy_mst:hash() | undefined}
     | {ok, #{binary() => non_neg_integer()}}
     | {ok, #{bondy_mst:hash() => bondy_mst_page:t()}}
+    %% The peer cannot serve the requested pages — typically because they have
+    %% been reclaimed by compaction. Distinct from an empty page map, which is
+    %% a protocol violation. The caller should fall back to bootstrap rather
+    %% than retry.
+    | {ok, {unavailable, [bondy_mst:hash()]}}
     | {ok, no_snapshot}
     | {ok, bondy_oplog_event:event_key(), term()}
     | {ok, {init, {non_neg_integer(), bondy_oplog_catalogue_cursor:cursor()}}}
@@ -98,3 +116,12 @@ the `Opts` argument.
     Request :: request(),
     Opts :: map()
 ) -> {ok, term()} | {error, term()}.
+
+-doc """
+Returns this node's own `peer_id()` — the value a remote peer would use to
+address it over this transport.
+
+Transport-specific: the inline transport addresses peers by instance id, so
+self is `InstanceId`; network transports address by node.
+""".
+-callback self_id(InstanceId :: instance_id()) -> peer_id().

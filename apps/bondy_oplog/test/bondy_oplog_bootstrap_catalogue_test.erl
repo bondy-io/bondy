@@ -41,6 +41,7 @@ bootstrap_catalogue_test_() ->
         fun bootstrap_marks_local_live/0,
         fun finalize_adopts_peer_frontier/0,
         fun bootstrap_seeds_local_frontier/0,
+        fun bootstrap_absorbs_installed_hlcs/0,
         fun live_sync_adopts_peer_frontier/0,
         fun no_snapshot_falls_through_to_sync/0,
         fun single_crdt_local_refuses_bootstrap_catalogue/0,
@@ -106,6 +107,65 @@ adopt_phantom_within(Local, Peer, Phantom, Expected, N) ->
             timer:sleep(20),
             adopt_phantom_within(Local, Peer, Phantom, Expected, N - 1)
     end.
+
+%% A3 — the catalogue install writes peer cells carrying remote HLCs straight
+%% into the projection. The bootstrapped replica's clock must absorb them, or
+%% its next locally minted event can carry an HLC BELOW a stability point
+%% computed from the very cells it installed — the resurrection hazard
+%% causal-stability reclamation exists to prevent
+%% (BONDY_DB_RECLAMATION_PROOF.md §7.1).
+%%
+%% Two deliberate test-shape choices:
+%% - The peer's MST is truncated EMPTY before the bootstrap, so the AAE round
+%%   that follows cannot rescue the clock via `bondy_mst:last/1` — that rescue
+%%   no-ops on `undefined`, which is exactly the compacted-peer case bootstrap
+%%   exists to serve.
+%% - Installed cell HLCs sit far AHEAD of the local wall clock. Below it,
+%%   absorption is masked by the clock's `max(OldPhys, Wall)` and the test
+%%   would pass vacuously even with the bug present.
+bootstrap_absorbs_installed_hlcs() ->
+    {Peer, _, _, _} = setup_instance(),
+    {Local, _, _, _} = setup_instance(),
+
+    %% Derive "far future" from a real minted HLC so the margin holds
+    %% regardless of the clock's internal packing.
+    SeedKey = bondy_oplog:append(
+        Peer, {cell_apply, ?B, <<"seed">>, {set, <<"s">>}}
+    ),
+    FarHlc = bondy_oplog_event:key_hlc(SeedKey) * 2,
+
+    [
+        bondy_oplog:append(Peer, {cell_apply, ?B, K, {set, Hlc, V}})
+     || {K, Hlc, V} <- [
+            {<<"far1">>, FarHlc - 1, <<"v1">>},
+            {<<"far2">>, FarHlc, <<"v2">>}
+        ]
+    ],
+    _ = barrier(Peer),
+
+    %% Compact the peer's MST away entirely: projection cells survive (they are
+    %% what the snapshot ships), the events do not.
+    {ok, LastKey} = bondy_oplog_instance:latest_key(Peer),
+    _ = bondy_oplog_instance:truncate_prefix(Peer, LastKey),
+    ?assertEqual(empty, bondy_oplog_instance:first_key(Peer)),
+
+    ?assertMatch(
+        {ok, _},
+        bondy_oplog_sync_session:bootstrap_catalogue(
+            Local, Peer, #{transport_opts => #{}}
+        )
+    ),
+
+    %% The bootstrapped node's next locally minted HLC must exceed every
+    %% installed cell's HLC. Without the finalize absorb it sits at the local
+    %% wall clock, far below `FarHlc`.
+    ProbeKey = bondy_oplog:append(
+        Local, {cell_apply, ?B, <<"probe">>, {set, <<"p">>}}
+    ),
+    ?assert(bondy_oplog_event:key_hlc(ProbeKey) > FarHlc),
+
+    teardown(Peer),
+    teardown(Local).
 
 %% Direct, deterministic regression for the fix mechanism. A catalogue bootstrap
 %% ships the peer's projection cells, which carry only HLC + value — NOT the

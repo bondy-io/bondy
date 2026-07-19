@@ -46,8 +46,10 @@ that a decoded scope compares and hashes identically to the one that was issued.
 
 new(RealmUri, ClientId, DeviceId) when
     (is_binary(RealmUri) orelse RealmUri == all orelse RealmUri == undefined) andalso
-        (is_binary(ClientId) orelse ClientId == all orelse ClientId == undefined) andalso
-        (is_binary(DeviceId) orelse DeviceId == all orelse DeviceId == undefined)
+        (is_binary(ClientId) orelse ClientId == all orelse
+            ClientId == undefined) andalso
+        (is_binary(DeviceId) orelse DeviceId == all orelse
+            DeviceId == undefined)
 ->
     #{
         realm => cast(RealmUri),

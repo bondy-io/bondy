@@ -65,12 +65,7 @@ compact_after_sync_advances_watermark() ->
     {A, B} = mk_pair(counter_opts()),
     [bondy_oplog:append(A, {inc, 1}) || _ <- lists:seq(1, 10)],
     [bondy_oplog:append(B, {inc, 1}) || _ <- lists:seq(1, 10)],
-    %% Bidirectional sync converges both to the same root.
-    {ok, _} = bondy_oplog:sync(A, B),
-    {ok, _} = bondy_oplog:sync(B, A),
-    %% Both instances now have peer_state for each other; compaction
-    %% can advance to the largest common-prefix key.
-    bondy_oplog_peer_state:sync(),
+    ok = converge(A, B),
     ?assertMatch(
         {ok, {compacted, _, 20}},
         bondy_oplog:compact(A)
@@ -82,9 +77,7 @@ compaction_truncates_mst() ->
     {A, B} = mk_pair(counter_opts()),
     [bondy_oplog:append(A, {inc, 1}) || _ <- lists:seq(1, 5)],
     [bondy_oplog:append(B, {inc, 1}) || _ <- lists:seq(1, 5)],
-    {ok, _} = bondy_oplog:sync(A, B),
-    {ok, _} = bondy_oplog:sync(B, A),
-    bondy_oplog_peer_state:sync(),
+    ok = converge(A, B),
     SizeBefore = bondy_oplog:size(A),
     ?assertEqual(10, SizeBefore),
     ?assertMatch({ok, {compacted, _, _}}, bondy_oplog:compact(A)),
@@ -94,9 +87,7 @@ snapshot_state_is_correct() ->
     {A, B} = mk_pair(counter_opts()),
     [bondy_oplog:append(A, {inc, 1}) || _ <- lists:seq(1, 7)],
     [bondy_oplog:append(B, {inc, 1}) || _ <- lists:seq(1, 3)],
-    {ok, _} = bondy_oplog:sync(A, B),
-    {ok, _} = bondy_oplog:sync(B, A),
-    bondy_oplog_peer_state:sync(),
+    ok = converge(A, B),
     {ok, {compacted, _, _}} = bondy_oplog:compact(A),
     {ok, _W, S} = bondy_oplog:compaction_checkpoint(A),
     ?assertEqual(10, S).
@@ -105,9 +96,7 @@ query_after_compact_returns_consistent_value() ->
     {A, B} = mk_pair(counter_opts()),
     [bondy_oplog:append(A, {inc, 1}) || _ <- lists:seq(1, 5)],
     [bondy_oplog:append(B, {inc, 2}) || _ <- lists:seq(1, 3)],
-    {ok, _} = bondy_oplog:sync(A, B),
-    {ok, _} = bondy_oplog:sync(B, A),
-    bondy_oplog_peer_state:sync(),
+    ok = converge(A, B),
     {ok, {compacted, _, _}} = bondy_oplog:compact(A),
     %% 5*1 + 3*2 = 11
     ?assertEqual(11, bondy_oplog:query(A, value)).
@@ -116,9 +105,7 @@ query_stable_returns_snapshot_only() ->
     {A, B} = mk_pair(counter_opts()),
     [bondy_oplog:append(A, {inc, 1}) || _ <- lists:seq(1, 4)],
     [bondy_oplog:append(B, {inc, 1}) || _ <- lists:seq(1, 4)],
-    {ok, _} = bondy_oplog:sync(A, B),
-    {ok, _} = bondy_oplog:sync(B, A),
-    bondy_oplog_peer_state:sync(),
+    ok = converge(A, B),
     {ok, {compacted, _, _}} = bondy_oplog:compact(A),
     %% Add a *new* event after compaction; stable query should NOT see it.
     bondy_oplog:append(A, {inc, 100}),
@@ -141,9 +128,7 @@ watermark_filter_drops_old_remote_events() ->
     {A, B} = mk_pair(counter_opts()),
     [bondy_oplog:append(A, {inc, 1}) || _ <- lists:seq(1, 5)],
     [bondy_oplog:append(B, {inc, 1}) || _ <- lists:seq(1, 5)],
-    {ok, _} = bondy_oplog:sync(A, B),
-    {ok, _} = bondy_oplog:sync(B, A),
-    bondy_oplog_peer_state:sync(),
+    ok = converge(A, B),
     {ok, {compacted, _, _}} = bondy_oplog:compact(A),
     ?assertEqual(0, bondy_oplog:size(A)),
     %% B has not compacted, so it still has all 10 events.
@@ -158,9 +143,7 @@ deterministic_snapshot_across_replicas() ->
     {A, B} = mk_pair(counter_opts()),
     [bondy_oplog:append(A, {inc, 1}) || _ <- lists:seq(1, 8)],
     [bondy_oplog:append(B, {inc, 1}) || _ <- lists:seq(1, 8)],
-    {ok, _} = bondy_oplog:sync(A, B),
-    {ok, _} = bondy_oplog:sync(B, A),
-    bondy_oplog_peer_state:sync(),
+    ok = converge(A, B),
     {ok, {compacted, _, _}} = bondy_oplog:compact(A),
     {ok, {compacted, _, _}} = bondy_oplog:compact(B),
     {ok, WA, SA} = bondy_oplog:compaction_checkpoint(A),
@@ -172,9 +155,7 @@ idempotent_compact() ->
     {A, B} = mk_pair(counter_opts()),
     [bondy_oplog:append(A, {inc, 1}) || _ <- lists:seq(1, 4)],
     [bondy_oplog:append(B, {inc, 1}) || _ <- lists:seq(1, 4)],
-    {ok, _} = bondy_oplog:sync(A, B),
-    {ok, _} = bondy_oplog:sync(B, A),
-    bondy_oplog_peer_state:sync(),
+    ok = converge(A, B),
     {ok, {compacted, W1, _}} = bondy_oplog:compact(A),
     %% Second compact with no new events ⇒ no_change.
     ?assertEqual({ok, no_change}, bondy_oplog:compact(A)),
@@ -213,3 +194,18 @@ mk_pair(Opts) ->
     {ok, _} = bondy_oplog:start_instance(A, OptsA),
     {ok, _} = bondy_oplog:start_instance(B, OptsB),
     {A, B}.
+
+%% @private
+%% Converges A and B and leaves BOTH with a checkpointed peer root covering the
+%% converged state.
+%%
+%% Two rounds suffice because each session ends with a swap confirmation: the
+%% initiator tells the peer it now holds the advertised root, so BOTH sides
+%% checkpoint the same root. Without that confirmation each side would hold
+%% only what it unilaterally observed, and a third round would be needed for
+%% the frontier to catch up.
+converge(A, B) ->
+    {ok, _} = bondy_oplog:sync(A, B),
+    {ok, _} = bondy_oplog:sync(B, A),
+    bondy_oplog_peer_state:sync(),
+    ok.

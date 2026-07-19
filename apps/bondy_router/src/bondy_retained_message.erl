@@ -54,8 +54,8 @@ moment.**
     eligible => [id()],
     exclude => [id()]
 }.
-%% The key_value options threaded through `match/5` and its continuation:
-%% `first` (the inclusive resume key) and `limit` (max messages per page).
+%% The key_value options threaded through match/5 and its continuation:
+%% first (the inclusive resume key) and limit (max messages per page).
 -type scan_opts() :: [{first, binary()} | {limit, pos_integer()}].
 -type evict_fun() :: fun((uri(), t()) -> ok).
 

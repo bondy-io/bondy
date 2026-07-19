@@ -22,24 +22,20 @@
 %% NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
 %% DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 %% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-%%
-%% @doc
-%% An Erlang implementation of *compact* Dotted Version Vectors, which
-%% provides a container for a set of concurrent values (siblings) with causal
-%% order information.
-%%
-%% For further reading, visit the
-%% <a href="https://github.com/ricardobcl/Dotted-Version-Vectors/tree/ompact">github page</a>.
-%% @end
-%%
-%% @reference
-%% <a href="http://arxiv.org/abs/1011.5808">
-%% Dotted Version Vectors: Logical Clocks for Optimistic Replication
-%% </a>
-%% @end
-%%
 %%-------------------------------------------------------------------
 -module(bondy_dvvset).
+
+-moduledoc """
+An Erlang implementation of *compact* Dotted Version Vectors, which
+provides a container for a set of concurrent values (siblings) with causal
+order information.
+
+For further reading, visit the
+[github page](https://github.com/ricardobcl/Dotted-Version-Vectors/tree/ompact).
+
+Reference: [Dotted Version Vectors: Logical Clocks for Optimistic
+Replication](http://arxiv.org/abs/1011.5808).
+""".
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -65,7 +61,6 @@
 
 -export_type([clock/0, vector/0, id/0, value/0]).
 
-% % @doc
 %% STRUCTURE details:
 %%      * entries() are sorted by id()
 %%      * each counter() also includes the number of values in that id()
@@ -82,16 +77,20 @@
 -eqwalizer({nowarn_function, equal/2}).
 -eqwalizer({nowarn_function, less/2}).
 
-%% @doc Constructs a new clock set without causal history,
-%% and receives a list of values that goes to the anonymous list.
+-doc """
+Constructs a new clock set without causal history,
+and receives a list of values that goes to the anonymous list.
+""".
 -spec new(value() | [value()]) -> clock().
 new(Vs) when is_list(Vs) -> {[], Vs};
 new(V) -> {[], [V]}.
 
-%% @doc Constructs a new clock set with the causal history
-%% of the given version vector / vector clock,
-%% and receives a list of values that gos to the anonymous list.
-%% The version vector SHOULD BE a direct result of join/1.
+-doc """
+Constructs a new clock set with the causal history
+of the given version vector / vector clock,
+and receives a list of values that gos to the anonymous list.
+The version vector SHOULD BE a direct result of join/1.
+""".
 -spec new(vector(), value() | [value()]) -> clock().
 new(VV, Vs) when is_list(Vs) ->
     % defense against non-order preserving serialization
@@ -100,9 +99,11 @@ new(VV, Vs) when is_list(Vs) ->
 new(VV, V) ->
     new(VV, [V]).
 
-%% @doc Synchronizes a list of clocks using sync/2.
-%% It discards (causally) outdated values,
-%% while merging all causal histories.
+-doc """
+Synchronizes a list of clocks using sync/2.
+It discards (causally) outdated values,
+while merging all causal histories.
+""".
 -spec sync([clock()]) -> clock().
 sync(L) -> lists:foldl(fun sync/2, {}, L).
 
@@ -160,25 +161,31 @@ merge(I, N1, L1, N2, L2) ->
             end
     end.
 
-%% @doc Return a version vector that represents the causal history.
+-doc """
+Return a version vector that represents the causal history.
+""".
 -spec join(clock()) -> vector().
 join({C, _}) -> [{I, N} || {I, N, _} <- C].
 
-%% @doc Advances the causal history with the given id.
-%% The new value is the *anonymous dot* of the clock.
-%% The client clock SHOULD BE a direct result of new/2.
+-doc """
+Advances the causal history with the given id.
+The new value is the *anonymous dot* of the clock.
+The client clock SHOULD BE a direct result of new/2.
+""".
 -spec update(clock(), id()) -> clock().
 update({C, [V]}, I) -> {event(C, I, V), []}.
 
-%% @doc Advances the causal history of the
-%% first clock with the given id, while synchronizing
-%% with the second clock, thus the new clock is
-%% causally newer than both clocks in the argument.
-%% The new value is the *anonymous dot* of the clock.
-%% The first clock SHOULD BE a direct result of new/2,
-%% which is intended to be the client clock with
-%% the new value in the *anonymous dot* while
-%% the second clock is from the local server.
+-doc """
+Advances the causal history of the
+first clock with the given id, while synchronizing
+with the second clock, thus the new clock is
+causally newer than both clocks in the argument.
+The new value is the *anonymous dot* of the clock.
+The first clock SHOULD BE a direct result of new/2,
+which is intended to be the client clock with
+the new value in the *anonymous dot* while
+the second clock is from the local server.
+""".
 -spec update(clock(), clock(), id()) -> clock().
 update({Cc, [V]}, Cr, I) ->
     %% Sync both clocks without the new value
@@ -195,21 +202,29 @@ event([{I, N, L} | T], I, V) -> [{I, N + 1, [V | L]} | T];
 event([{I1, _, _} | _] = C, I, V) when I1 > I -> [{I, 1, [V]} | C];
 event([H | T], I, V) -> [H | event(T, I, V)].
 
-%% @doc Returns the total number of values in this clock set.
+-doc """
+Returns the total number of values in this clock set.
+""".
 -spec size(clock()) -> non_neg_integer().
 size({C, Vs}) -> lists:sum([length(L) || {_, _, L} <- C]) + length(Vs).
 
-%% @doc Returns all the ids used in this clock set.
+-doc """
+Returns all the ids used in this clock set.
+""".
 -spec ids(clock()) -> [id()].
 ids({C, _}) -> ([I || {I, _, _} <- C]).
 
-%% @doc Returns all the values used in this clock set,
-%% including the anonymous values.
+-doc """
+Returns all the values used in this clock set,
+including the anonymous values.
+""".
 -spec values(clock()) -> [value()].
 values({C, Vs}) -> Vs ++ lists:append([L || {_, _, L} <- C]).
 
-%% @doc Compares the equality of both clocks, regarding
-%% only the causal histories, thus ignoring the values.
+-doc """
+Compares the equality of both clocks, regarding
+only the causal histories, thus ignoring the values.
+""".
 -spec equal(clock() | vector(), clock() | vector()) -> boolean().
 % DVVSet
 equal({C1, _}, {C2, _}) -> equal2(C1, C2);
@@ -227,9 +242,11 @@ equal2([{I, C, L1} | T1], [{I, C, L2} | T2]) when
 equal2(_, _) ->
     false.
 
-%% @doc Returns True if the first clock is causally older than
-%% the second clock, thus values on the first clock are outdated.
-%% Returns False otherwise.
+-doc """
+Returns True if the first clock is causally older than
+the second clock, thus values on the first clock are outdated.
+Returns False otherwise.
+""".
 -spec less(clock(), clock()) -> boolean().
 less({C1, _}, {C2, _}) -> greater(C2, C1, false).
 
@@ -252,33 +269,41 @@ greater([{I1, _, _} | T1], [{I2, _, _} | _] = C2, _) when I1 < I2 ->
 greater(_, _, _) ->
     false.
 
-%% @doc Maps (applies) a function on all values in this clock set,
-%% returning the same clock set with the updated values.
+-doc """
+Maps (applies) a function on all values in this clock set,
+returning the same clock set with the updated values.
+""".
 -spec map(fun((value()) -> value()), clock()) -> clock().
 map(F, {C, Vs}) ->
     {[{I, N, lists:map(F, V)} || {I, N, V} <- C], lists:map(F, Vs)}.
 
-%% @doc Return a clock with the same causal history, but with only one
-%% value in the anonymous placeholder. This value is the result of
-%% the function F, which takes all values and returns a single new value.
+-doc """
+Return a clock with the same causal history, but with only one
+value in the anonymous placeholder. This value is the result of
+the function F, which takes all values and returns a single new value.
+""".
 -spec reconcile(Winner :: fun(([value()]) -> value()), clock()) -> clock().
 reconcile(F, C) ->
     V = F(values(C)),
     new(join(C), [V]).
 
-%% @doc Returns the latest value in the clock set,
-%% according to function F(A,B), which returns *true* if
-%% A compares less than or equal to B, false otherwise.
+-doc """
+Returns the latest value in the clock set,
+according to function F(A,B), which returns *true* if
+A compares less than or equal to B, false otherwise.
+""".
 -spec last(LessOrEqual :: fun((value(), value()) -> boolean()), clock()) ->
     value().
 last(F, C) ->
     {_, _, V2} = find_entry(F, C),
     V2.
 
-%% @doc Return a clock with the same causal history, but with only one
-%% value in its original position. This value is the newest value
-%% in the given clock, according to function F(A,B), which returns *true*
-%% if A compares less than or equal to B, false otherwise.
+-doc """
+Return a clock with the same causal history, but with only one
+value in its original position. This value is the newest value
+in the given clock, according to function F(A,B), which returns *true*
+if A compares less than or equal to B, false otherwise.
+""".
 -spec lww(LessOrEqual :: fun((value(), value()) -> boolean()), clock()) ->
     clock().
 lww(F, C = {E, _}) ->

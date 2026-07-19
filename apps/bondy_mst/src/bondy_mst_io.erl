@@ -9,7 +9,7 @@
 -include_lib("kernel/include/logger.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Project-wide low-level file durability primitives.
 
 Shared by every subsystem in this project that writes to disk —
@@ -33,7 +33,7 @@ This module exists so that:
 Tests that fault-inject these functions must hold the
 `?MODULE` global lock (see `with_io_fault_lock/1` in the test
 suites) so concurrent test modules don't see each other's mocks.
-""").
+""".
 
 -export([fsync_dir/1]).
 -export([datasync/1]).

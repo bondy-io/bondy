@@ -63,6 +63,7 @@ folds events through a state-based `apply_event`.
 -export([interpret_overlay/4]).
 -export([decode_value_bytes/2]).
 -export([reap_origins/3]).
+-export([stabilize/3]).
 
 -type t() :: {crdt, module()}.
 
@@ -315,6 +316,23 @@ bookkeeping). The applier short-circuits the whole reap pass on
 reap_origins({crdt, Mod}, State, Retired) ->
     case erlang:function_exported(Mod, reap_origins, 2) of
         true -> Mod:reap_origins(State, Retired);
+        false -> not_supported
+    end.
+
+-doc """
+Asks the fold what survives causal stabilization of `State` at `StableHlc`.
+
+`discard` licenses physically removing the cell from the projection; `{keep,
+State}` a reduced state; `keep` no change. A fold that declares no
+`stabilize/2` yields `not_supported`, which callers MUST treat as "reclaim
+nothing" — never as "reclaimable".
+""".
+-spec stabilize(t(), bondy_oplog_hlc:hlc(), State :: term()) ->
+    keep | {keep, term()} | discard | not_supported.
+
+stabilize({crdt, Mod}, StableHlc, State) ->
+    case erlang:function_exported(Mod, stabilize, 2) of
+        true -> Mod:stabilize(StableHlc, State);
         false -> not_supported
     end.
 

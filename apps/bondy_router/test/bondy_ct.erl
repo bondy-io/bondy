@@ -657,6 +657,7 @@
     start_cluster/2,
     start_cluster/3,
     stop_cluster/1,
+    freeze_gc/1,
     stop_nodes/1,
     peer_boot/1,
     aae_reset_all_stale/0,
@@ -791,6 +792,31 @@ stop_cluster(Nodes) ->
         Nodes
     ),
     ok.
+
+%% -----------------------------------------------------------------------------
+%% @doc Freezes scheduler-driven GC (compaction) on `Node' and WAITS for its
+%% in-flight compaction workers to drain, so MST roots are frozen when this
+%% returns. Cluster suites that assert on root or frontier state call this per
+%% node — a live GC tick truncates MSTs mid-assertion, skewing root
+%% comparisons and (deliberately-)asymmetric compaction setups. Plain `erpc'
+%% into the node's scheduler; no suite module needs pushing.
+%% -----------------------------------------------------------------------------
+freeze_gc(Node) ->
+    ok = erpc:call(Node, bondy_oplog_gc_scheduler, set_interval_ms, [0]),
+    freeze_gc_await(Node, erlang:monotonic_time(millisecond) + 10_000).
+
+%% @private
+freeze_gc_await(Node, Deadline) ->
+    Info = erpc:call(Node, bondy_oplog_gc_scheduler, info, []),
+    case maps:get(in_flight, Info) of
+        0 ->
+            ok;
+        N ->
+            erlang:monotonic_time(millisecond) =< Deadline orelse
+                error({gc_workers_stuck, Node, N}),
+            timer:sleep(50),
+            freeze_gc_await(Node, Deadline)
+    end.
 
 %% -----------------------------------------------------------------------------
 %% @doc Boots `bondy_router' on the local (peer) node from the per-node `Env'.
@@ -1002,7 +1028,21 @@ node_env(DataDir, PeerPort) ->
     ),
     E4 = key_value:set([bondy_oplog, aae_enabled], true, E3),
     E5 = key_value:set([bondy_oplog, sync_interval_ms], 200, E4),
-    key_value:set([bondy_oplog, aae_fanout], 3, E5).
+    E6 = key_value:set([bondy_oplog, aae_fanout], 3, E5),
+    %% Cluster suites assert on CONVERGENCE, not on scheduler politeness, so
+    %% disable the adaptive live-sync throttle. With it on, a shard that goes
+    %% quiescent is polled only every `live_sync_max_ms` (5s), and under the
+    %% load of a full CT run — many namespaces, all competing for a node-wide
+    %% cap of 3 concurrent sessions — a single namespace can wait long enough
+    %% to blow even a generous convergence deadline. That produced an
+    %% intermittent `wait_eq_timeout` in `bondy_aae_cluster_SUITE` that never
+    %% reproduced when the suite ran alone.
+    E7 = key_value:set([bondy_oplog, live_sync_adaptive], false, E6),
+    %% More slots so no namespace queues behind the cap. This does NOT raise
+    %% the node-wide page ceiling: `aae_pages_per_round` is
+    %% `aae_max_pages_in_flight div aae_max_concurrency`, so more concurrency
+    %% means smaller batches, not more memory.
+    key_value:set([bondy_oplog, aae_max_concurrency], 8, E7).
 
 %% @private
 %% Joins every node to the first one. Partisan's full-membership strategy

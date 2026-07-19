@@ -92,12 +92,12 @@ off-by-one.
 -export([shard/3]).
 
 -type column() :: binary() | integer() | atom().
-%% One column of a composite term, encoded by the type-tagged `encode_col/1`.
+%% One column of a composite term, encoded by the type-tagged encode_col/1.
 -type term_value() :: binary() | integer() | [column()].
-%% An index term before order-preserving encoding. A scalar (`binary()` /
-%% `integer()`) is a single-column inverted-index term; a **list of columns** is
+%% An index term before order-preserving encoding. A scalar (binary() /
+%% integer()) is a single-column inverted-index term; a **list of columns** is
 %% a composite (covering) term — a config-declared collation order — encoded by
-%% `encode_tuple/1` into one order-preserving key so any *prefix* of the columns
+%% encode_tuple/1 into one order-preserving key so any *prefix* of the columns
 %% is a bounded range scan (Hexastore / RDF-permutation indices).
 
 -export_type([term_value/0, column/0]).

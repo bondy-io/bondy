@@ -22,8 +22,102 @@ peer_state_test_() ->
         fun stale_peer_excluded/0,
         fun stale_peer_included_when_since_is_old/0,
         fun get_known_peers_unique/0,
-        fun touch_peer_refreshes_last_seen/0
+        fun touch_peer_refreshes_last_seen/0,
+        fun strict_read_ignores_recency/0,
+        fun strict_read_names_unconfirmed_members/0,
+        fun strict_read_solo_instance_is_stable/0,
+        fun reclamation_members_solo/0,
+        fun reclamation_members_error_is_not_solo/0
     ]}.
+
+%% -----------------------------------------------------------------------------
+%% Strict reading — for callers that reclaim irreversibly
+%% -----------------------------------------------------------------------------
+%%
+%% `get_instance_peer_states/1` drops peers unheard-from within
+%% `peer_timeout_ms`. That is correct for MST compaction, where a dropped peer
+%% resyncs via bootstrap, and unsound for projection-cell reclamation, where it
+%% silently resurrects deleted data. `confirmed_peer_states/2` is the reading
+%% reclamation must use.
+
+strict_read_ignores_recency() ->
+    P = mk_peer(),
+    I = mk_inst(),
+    H = <<1:256>>,
+    %% Record with a last_seen far enough in the past that the recency read
+    %% excludes it.
+    Stale = os:system_time(millisecond) - (10 * 60 * 1000),
+    ok = bondy_oplog_peer_state:record_sync_complete(P, I, H, Stale),
+    sync(),
+
+    %% Recency read drops it...
+    ?assertEqual([], bondy_oplog_peer_state:get_instance_peer_states(I)),
+
+    %% ...the strict read does not. A silent member must hold stability down,
+    %% not vanish from the computation.
+    ?assertMatch(
+        {ok, [#{peer := P, root_hash := H}]},
+        bondy_oplog_peer_state:confirmed_peer_states(I, [P])
+    ).
+
+strict_read_names_unconfirmed_members() ->
+    P1 = mk_peer(),
+    P2 = mk_peer(),
+    I = mk_inst(),
+    ok = bondy_oplog_peer_state:record_sync_complete(P1, I, <<2:256>>),
+    sync(),
+
+    %% P2 is a member but has never confirmed, so there is no stability and the
+    %% caller is told which member is missing.
+    ?assertEqual(
+        {unconfirmed, [P2]},
+        bondy_oplog_peer_state:confirmed_peer_states(I, [P1, P2])
+    ),
+
+    %% With P2 confirmed, both are returned in member order.
+    ok = bondy_oplog_peer_state:record_sync_complete(P2, I, <<3:256>>),
+    sync(),
+    {ok, States} = bondy_oplog_peer_state:confirmed_peer_states(I, [P1, P2]),
+    ?assertEqual([P1, P2], [maps:get(peer, S) || S <- States]).
+
+strict_read_solo_instance_is_stable() ->
+    I = mk_inst(),
+    %% No members ⇒ nothing can contradict us ⇒ trivially stable.
+    ?assertEqual({ok, []}, bondy_oplog_peer_state:confirmed_peer_states(I, [])).
+
+%% -----------------------------------------------------------------------------
+%% Reclamation membership — the ONLY member source reclamation may use
+%% -----------------------------------------------------------------------------
+%%
+%% `error` ≠ `[]` is the load-bearing contract: `[]` means genuinely solo
+%% (maximal reclamation is licensed), `error` means the membership service is
+%% unavailable and MUST propagate as "no stability, reclaim nothing".
+%% Conflating them would let a node that merely cannot see its membership
+%% service reclaim as though nothing could contradict it.
+
+reclamation_members_solo() ->
+    %% Single-node eunit VM: the known membership is exactly this node, so
+    %% reclamation members = [] — the solo case, distinct from `error`.
+    ?assertEqual({ok, []}, bondy_oplog_instance:reclamation_members()).
+
+reclamation_members_error_is_not_solo() ->
+    ok = meck:new(partisan_peer_service, [passthrough]),
+    try
+        %% A dead/hung peer service exits the call rather than returning a
+        %% tuple — that must surface as `error`, never as solo.
+        ok = meck:expect(partisan_peer_service, members, fun() ->
+            exit({noproc, {gen_server, call, [partisan_peer_service]}})
+        end),
+        ?assertEqual(error, bondy_oplog_instance:reclamation_members()),
+
+        %% A malformed reply is equally `error`.
+        ok = meck:expect(partisan_peer_service, members, fun() ->
+            {ok, not_a_list}
+        end),
+        ?assertEqual(error, bondy_oplog_instance:reclamation_members())
+    after
+        meck:unload(partisan_peer_service)
+    end.
 
 record_and_read() ->
     P = mk_peer(),

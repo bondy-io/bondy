@@ -67,7 +67,6 @@ so a table can switch from the fold to this module with no data migration.
 %% projection seam
 -export([to_value/1]).
 -export([hlc/1]).
--export([gc_threshold/1]).
 -export([value_equals_state/0]).
 -export([order_independent/0]).
 -export([encode_state/1]).
@@ -149,13 +148,6 @@ to_value(#{counters := C}) ->
 -spec hlc(state()) -> bondy_oplog_hlc:hlc().
 
 hlc(#{hlc := H}) -> H.
-
--spec gc_threshold(state()) -> bondy_oplog_hlc:hlc() | undefined.
-
-gc_threshold(#{counters := C, hlc := 0}) when map_size(C) == 0 ->
-    undefined;
-gc_threshold(#{hlc := H}) ->
-    H.
 
 -spec value_equals_state() -> boolean().
 

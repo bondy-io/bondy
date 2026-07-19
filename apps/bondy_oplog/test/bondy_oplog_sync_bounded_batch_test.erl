@@ -57,11 +57,16 @@ bounded_batch_converges() ->
     %% Capture every {get_pages, Batch} the session issues.
     Tab = ets:new(get_pages_batches, [public, bag]),
     meck:new(bondy_oplog_transport_inline, [passthrough]),
+    %% Both request shapes are captured: the reciprocal 4-tuple the session
+    %% now sends, and the legacy 2-tuple retained for mixed-version clusters.
     meck:expect(
         bondy_oplog_transport_inline,
         request,
         fun
             (Peer, Inst, {get_pages, Batch} = Req, Opts) ->
+                true = ets:insert(Tab, {sz, length(Batch)}),
+                meck:passthrough([Peer, Inst, Req, Opts]);
+            (Peer, Inst, {get_pages, _Self, _Root, Batch} = Req, Opts) ->
                 true = ets:insert(Tab, {sz, length(Batch)}),
                 meck:passthrough([Peer, Inst, Req, Opts]);
             (Peer, Inst, Req, Opts) ->

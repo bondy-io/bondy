@@ -39,6 +39,7 @@ Partisan's default channel.
 """).
 
 -export([request/4]).
+-export([self_id/1]).
 
 %% =============================================================================
 %% API
@@ -83,3 +84,9 @@ call_opts(Timeout, Opts) ->
         {ok, Channel} -> [{timeout, Timeout}, {channel, Channel}];
         error -> [{timeout, Timeout}]
     end.
+
+-doc "Peers are addressed by Partisan node name on this transport.".
+-spec self_id(instance_id()) -> peer_id().
+
+self_id(_InstanceId) ->
+    partisan:node().

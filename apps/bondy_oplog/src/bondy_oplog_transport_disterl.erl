@@ -45,6 +45,7 @@ is shipped because disterl is part of OTP.
 """).
 
 -export([request/4]).
+-export([self_id/1]).
 
 -spec request(
     peer_id(),
@@ -70,3 +71,9 @@ request(PeerNode, InstanceId, Request, Opts) when
     end;
 request(Peer, _InstanceId, _Request, _Opts) ->
     {error, {invalid_peer_for_disterl_transport, Peer}}.
+
+-doc "Peers are addressed by Erlang node name on this transport.".
+-spec self_id(instance_id()) -> peer_id().
+
+self_id(_InstanceId) ->
+    node().

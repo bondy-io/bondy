@@ -53,7 +53,6 @@ an enable that observed every disable.
 %% projection seam
 -export([to_value/1]).
 -export([hlc/1]).
--export([gc_threshold/1]).
 -export([value_equals_state/0]).
 -export([order_independent/0]).
 -export([batchable/0]).
@@ -153,13 +152,6 @@ context_of({_Cell, CC, _Hlc}) ->
 -spec hlc(state()) -> bondy_oplog_hlc:hlc().
 
 hlc({_Cell, _CC, Hlc}) ->
-    Hlc.
-
--spec gc_threshold(state()) -> bondy_oplog_hlc:hlc() | undefined.
-
-gc_threshold({_Cell, _CC, 0}) ->
-    undefined;
-gc_threshold({_Cell, _CC, Hlc}) ->
     Hlc.
 
 -spec value_equals_state() -> boolean().

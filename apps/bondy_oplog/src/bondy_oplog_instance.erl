@@ -529,7 +529,11 @@ without protocol changes.
 -export([install_catalogue_batch/2]).
 -export([finalize_catalogue_bootstrap/3]).
 -export([finalize_catalogue_bootstrap/4]).
+-export([finalize_catalogue_bootstrap/5]).
 -export([persist_frontier/1]).
+-export([reclamation_members/0]).
+-export([reclaim_stable_cells/1]).
+-export([stability_point/1]).
 -export([register_table/4]).
 -export([unregister_table/2]).
 -export([open_drain_gate/1]).
@@ -548,6 +552,8 @@ without protocol changes.
 -ifdef(TEST).
 %% Exposed for the stability-frontier equivalence test.
 -export([compute_frontier_for/2]).
+%% Exposed for the non-event-frontier outcome test (Step 3, reclamation).
+-export([frontier_stability_point/1]).
 %% Exposed for the catch-up remote-origin filter test.
 -export([remote_pairs/2]).
 %% Exposed for the pack-store seal-threshold default test.
@@ -1884,11 +1890,43 @@ normal apply path has already recorded. An empty map is a no-op.
     WasLive :: boolean()
 ) -> ok.
 
-finalize_catalogue_bootstrap(InstanceId, Watermark, PeerFrontier, WasLive) when
+finalize_catalogue_bootstrap(InstanceIdOrPid, Watermark, PeerFrontier, WasLive) ->
+    finalize_catalogue_bootstrap(
+        InstanceIdOrPid, Watermark, PeerFrontier, 0, WasLive
+    ).
+
+-doc """
+As `finalize_catalogue_bootstrap/4`, additionally absorbing `MaxInstalledHlc`
+— the maximum cell HLC the install loop decoded — into the local clock (A3).
+
+The catalogue install writes peer cells carrying remote HLCs straight into the
+projection without touching the clock, and the AAE round that follows absorbs
+from `bondy_mst:last/1` — `undefined` exactly when the peer has compacted,
+which is the case bootstrap exists to serve. Without this absorb a
+bootstrapped replica can mint events BELOW a stability point computed from the
+very cells it installed, silently invalidating causal-stability reclamation
+(`BONDY_DB_RECLAMATION_PROOF.md` §7.1). The absorb happens inside the
+instance, before `mark_live` flips it into service. `0` means "nothing
+installed" and is a no-op. Over-absorption is safe: the clock only ever
+advances.
+""".
+-spec finalize_catalogue_bootstrap(
+    instance_id() | pid(),
+    Watermark :: non_neg_integer(),
+    PeerFrontier :: #{binary() => non_neg_integer()},
+    MaxInstalledHlc :: non_neg_integer(),
+    WasLive :: boolean()
+) -> ok.
+
+finalize_catalogue_bootstrap(
+    InstanceId, Watermark, PeerFrontier, MaxInstalledHlc, WasLive
+) when
     is_binary(InstanceId),
     is_integer(Watermark),
     Watermark >= 0,
     is_map(PeerFrontier),
+    is_integer(MaxInstalledHlc),
+    MaxInstalledHlc >= 0,
     is_boolean(WasLive)
 ->
     ok = maybe_advance_high_water(InstanceId, Watermark),
@@ -1903,20 +1941,23 @@ finalize_catalogue_bootstrap(InstanceId, Watermark, PeerFrontier, WasLive) when
     %% maxima and the convergence oracle would report DIVERGED forever despite
     %% holding all the data. Persisting into the checkpoint here closes that gap
     %% so `restore_frontier/2` recovers them on any restart.
-    ok = persist_frontier(InstanceId),
+    %% The same round-trip absorbs `MaxInstalledHlc` into the clock (A3).
+    ok = persist_frontier(InstanceId, MaxInstalledHlc),
     case WasLive of
         true ->
             ok;
         false ->
             ok = mark_live(InstanceId)
     end;
-finalize_catalogue_bootstrap(Pid, Watermark, PeerFrontier, WasLive) when
+finalize_catalogue_bootstrap(
+    Pid, Watermark, PeerFrontier, MaxInstalledHlc, WasLive
+) when
     is_pid(Pid)
 ->
     case bondy_oplog_registry:instance_id_by_sup_pid(Pid) of
         {ok, InstanceId} ->
             finalize_catalogue_bootstrap(
-                InstanceId, Watermark, PeerFrontier, WasLive
+                InstanceId, Watermark, PeerFrontier, MaxInstalledHlc, WasLive
             );
         not_found ->
             ok
@@ -1938,6 +1979,14 @@ ephemeral backend (no checkpoint).
 
 persist_frontier(Target) ->
     gen_server:call(target(Target), persist_frontier, infinity).
+
+%% @private
+%% As `persist_frontier/1`, absorbing `AbsorbHlc` into the local clock first —
+%% see `finalize_catalogue_bootstrap/5` (A3). `0` skips the absorb.
+persist_frontier(Target, AbsorbHlc) when
+    is_integer(AbsorbHlc), AbsorbHlc >= 0
+->
+    gen_server:call(target(Target), {persist_frontier, AbsorbHlc}, infinity).
 
 %% @private — advance the per-shard high-water atomic for the
 %% applier's `cell_apply_target`. No-op if the instance is not
@@ -2992,6 +3041,23 @@ do_handle_call(persist_frontier, _From, State) ->
         State#state.compaction_checkpoint_state
     ),
     {reply, ok, State};
+do_handle_call(reclamation_stability_point, _From, State) ->
+    {reply, reclamation_stability_point(State), State};
+do_handle_call({persist_frontier, AbsorbHlc}, From, State) when
+    is_integer(AbsorbHlc), AbsorbHlc >= 0
+->
+    %% A3 — absorb the maximum installed cell HLC into the local clock BEFORE
+    %% the frontier is persisted and the instance can be marked live. The
+    %% catalogue install wrote peer cells carrying remote HLCs straight into
+    %% the projection; the clock must dominate them or this replica can mint
+    %% events below a stability point computed from those very cells. The
+    %% AAE-path absorb cannot rescue this case: it reads `bondy_mst:last/1`,
+    %% which is `undefined` exactly when the peer has compacted. Over-
+    %% absorption is safe — `update/2` only ever advances the clock.
+    _ =
+        AbsorbHlc > 0 andalso
+            bondy_oplog_hlc:update(State#state.hlc, AbsorbHlc),
+    do_handle_call(persist_frontier, From, State);
 do_handle_call(_Req, _From, State) ->
     {reply, {error, badcall}, State}.
 
@@ -4913,6 +4979,209 @@ mst_has_entries_at_or_below(MST, Watermark) ->
     case bondy_mst:first(MST) of
         undefined -> false;
         {Key, _Value} -> Key =< Watermark
+    end.
+
+%% =============================================================================
+%% RECLAMATION — causal-stability projection-cell GC
+%% =============================================================================
+
+-doc """
+The membership set for causal-stability reclamation: the full known Partisan
+membership minus this node. The ONLY member source reclamation may use.
+
+Deliberately NOT `bondy_oplog_peer_source:peers_for/2` — that returns a random
+sample (default 3), and a sample confirms a frontier the unsampled members
+never saw. `partisan_peer_service:members/0` returns the full known membership
+INCLUDING currently-unreachable peers (membership changes only by a deliberate
+join/leave, never by connectivity), which is what makes a partitioned member
+hold stability down instead of vanishing (`BONDY_DB_RECLAMATION_PROOF.md` A4).
+
+Returns `error` — never `[]` — when the membership service is unavailable.
+The two MUST NOT be conflated: `[]` means *solo*, which licenses maximal
+reclamation, while `error` must propagate as "no stability, reclaim nothing".
+Conflating them would let a node that merely cannot see its membership service
+reclaim as though nothing could contradict it.
+""".
+-spec reclamation_members() -> {ok, [node()]} | error.
+
+reclamation_members() ->
+    %% The whole call sequence is protected: a dead or hung peer service EXITS
+    %% the `gen_server` call rather than returning an error tuple, and that
+    %% exit must become `error`, not a crash inside a GC worker (where
+    %% `run_trigger/2` would swallow it into a warning with no signal).
+    try
+        {ok, Members} = partisan_peer_service:members(),
+        true = is_list(Members),
+        {ok, Members -- [partisan:node()]}
+    catch
+        _:_ ->
+            error
+    end.
+
+-doc """
+The causal-stability point for projection-cell reclamation: an HLC `h` such
+that no event with HLC `< h` can ever be delivered again (POLog Definition
+5.1 — the Theorem in `BONDY_DB_RECLAMATION_PROOF.md`).
+
+The chain runs inside the instance because it owns the MST: membership
+(`reclamation_members/0`) → strict all-member confirmation
+(`bondy_oplog_peer_state:confirmed_peer_states/2`) → frontier over the
+confirmed roots (`compute_frontier_for/2`) → the frontier key's HLC.
+
+**Solo** (`members =:= []`) short-circuits to a fresh local tick: with no
+member that could contradict this node, every event it holds is stable, and —
+because the clock dominates every held event's HLC (locally minted events by
+construction, remote deliveries by absorption, bootstrap installs by the
+finalize absorb) — a fresh tick strictly exceeds them all. The tick also
+covers the two holes an MST-derived point has: an ex-cluster node whose MST
+has compacted empty, and the tail tombstone a strict `<` bound would
+otherwise never license.
+
+Every negative outcome names its reason, and callers MUST reclaim nothing on
+any `{error, _}`:
+
+- `{error, membership_unavailable}` — the membership service cannot be read.
+  NOT the same as solo; conflating them would license maximal reclamation on
+  a node that merely cannot see its membership service.
+- `{error, {unconfirmed, Peers}}` — members with no confirmed root; a silent
+  member holds stability down instead of vanishing (A4).
+- `{error, no_frontier}` — no local key is confirmed by every member.
+- `{error, non_event_frontier}` — the frontier key is not an event key.
+""".
+-spec stability_point(instance_id() | pid()) ->
+    {ok, bondy_oplog_hlc:hlc()} | {error, term()}.
+
+stability_point(Target) ->
+    gen_server:call(target(Target), reclamation_stability_point, infinity).
+
+-doc """
+Computes the stability point and, when one exists, runs the applier's
+projection-cell sweep at it (`bondy_oplog_applier:sweep_stable_cells/2`).
+Any `{error, _}` from `stability_point/1` reclaims nothing and is returned
+verbatim, so the caller (a GC trigger, an operator) can see WHY stability is
+not advancing.
+
+Runs in the CALLER's process — one call into the instance (the stability
+point), one into the applier (the sweep) — deliberately not a single
+instance handler: the instance must never block on the applier.
+""".
+-spec reclaim_stable_cells(instance_id()) ->
+    {ok, Stats :: map()} | {error, term()}.
+
+reclaim_stable_cells(InstanceId) when is_binary(InstanceId) ->
+    case stability_point(InstanceId) of
+        {ok, StableHlc} ->
+            case bondy_oplog_registry:applier_pid(InstanceId) of
+                undefined ->
+                    reclamation_stalled(InstanceId, no_applier);
+                Pid when is_pid(Pid) ->
+                    %% Bounded batches to completion: each applier call
+                    %% scans at most `reclaim_batch_cells`, so concurrent
+                    %% writes interleave between batches instead of
+                    %% stalling for the whole pass. Success observability
+                    %% is the sweep's own `[bondy_oplog, applier,
+                    %% cells_swept]` event per batch, carrying the stats
+                    %% and the derived `stable_hlc`.
+                    reclaim_batches(
+                        Pid,
+                        StableHlc,
+                        bondy_oplog_config:reclaim_batch_cells(),
+                        undefined,
+                        #{
+                            scanned => 0,
+                            discarded => 0,
+                            reduction_skipped => 0,
+                            skipped => 0
+                        }
+                    )
+            end;
+        {error, Reason} ->
+            reclamation_stalled(InstanceId, Reason)
+    end.
+
+%% @private
+reclaim_batches(Pid, StableHlc, Max, Cursor, Acc) ->
+    case
+        bondy_oplog_applier:sweep_stable_cells(
+            Pid, StableHlc, #{max_cells => Max, cursor => Cursor}
+        )
+    of
+        {ok, Stats, done} ->
+            {ok, merge_sweep_stats(Acc, Stats)};
+        {ok, Stats, {resume, Next}} ->
+            reclaim_batches(
+                Pid, StableHlc, Max, Next, merge_sweep_stats(Acc, Stats)
+            );
+        {error, _} = E ->
+            E
+    end.
+
+%% @private
+merge_sweep_stats(A, B) ->
+    maps:merge_with(fun(_, X, Y) -> X + Y end, A, B).
+
+%% @private
+%% Reclamation fails silently in both directions, so every negative outcome
+%% emits `[bondy_oplog, reclamation, stalled]` — the difference between "GC
+%% is working" and "GC has been stalled for a week on a decommissioned node
+%% nobody retired". Telemetry only here (this runs on every reclamation
+%% attempt); the rate-limited LOG naming the missing members is the
+%% scheduler's job (`bondy_oplog_gc_scheduler`), which sees the same outcome
+%% from its trigger.
+reclamation_stalled(InstanceId, Reason) ->
+    {Label, Missing} =
+        case Reason of
+            {unconfirmed, Peers} -> {unconfirmed, Peers};
+            Other -> {Other, []}
+        end,
+    telemetry:execute(
+        [bondy_oplog, reclamation, stalled],
+        #{count => 1},
+        #{
+            instance_id => InstanceId,
+            reason => Label,
+            missing_members => Missing
+        }
+    ),
+    {error, Reason}.
+
+%% @private
+%% See `stability_point/1`. Membership is read FIRST: the solo carve-out
+%% needs only the clock, and an instance with no MST yet must still answer.
+reclamation_stability_point(State) ->
+    case reclamation_members() of
+        error ->
+            {error, membership_unavailable};
+        {ok, []} ->
+            %% Solo: a fresh tick strictly exceeds every event this node
+            %% holds — see `stability_point/1`.
+            {ok, bondy_oplog_hlc:now(State#state.hlc)};
+        {ok, Members} ->
+            confirmed_stability_point(State, Members)
+    end.
+
+%% @private
+confirmed_stability_point(#state{mst = undefined}, _Members) ->
+    {error, no_frontier};
+confirmed_stability_point(#state{instance_id = Id, mst = MST}, Members) ->
+    case bondy_oplog_peer_state:confirmed_peer_states(Id, Members) of
+        {unconfirmed, Missing} ->
+            {error, {unconfirmed, Missing}};
+        {ok, States} ->
+            Roots = [maps:get(root_hash, S) || S <- States],
+            frontier_stability_point(compute_frontier_for(MST, Roots))
+    end.
+
+%% @private
+%% Frontier key → stability point. Guarded with `is_key/1`: a non-event-keyed
+%% frontier must yield a named error, not a raise inside a GC worker — where
+%% `bondy_oplog_gc_scheduler:run_trigger/2` would swallow it into a warning.
+frontier_stability_point(undefined) ->
+    {error, no_frontier};
+frontier_stability_point(Key) ->
+    case bondy_oplog_event:is_key(Key) of
+        true -> {ok, bondy_oplog_event:key_hlc(Key)};
+        false -> {error, non_event_frontier}
     end.
 
 %% @private

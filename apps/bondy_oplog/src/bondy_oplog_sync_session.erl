@@ -32,8 +32,15 @@ pulling from A — converge both replicas to the same root.
      instance:merge_pages(Instance, Pages)
      %% the round pulls only a bounded slice; the next missing_set picks
      %% up the rest (and any deeper pages a merged page now references)
-4. record_sync_complete(Peer, Instance, LocalRoot)
+4. record_sync_complete(Peer, Instance, PeerRoot)
 ```
+
+Step 4 checkpoints the **peer's** root — the one it advertised in step 1, every
+page of which we hold by the time we reach step 4. That is what makes
+`bondy_oplog_instance:compute_frontier_for/2` a statement about what peers
+hold. Recording our own root would instead measure our sync recency: sync is
+pull-only, so a peer receives our data only when it pulls from us, in a
+different session.
 
 Each round pulls at most `bondy_oplog_config:aae_pages_per_round/0` pages, so a
 session's peak memory is bounded regardless of how divergent the trees are — a
@@ -122,9 +129,18 @@ run(Instance, Peer, Opts, Iterations) when is_binary(Instance) ->
     PeerFrontier = request_peer_frontier(
         Instance, Peer, Transport, TransportOpts
     ),
-    Result = do_run(Instance, Peer, Transport, TransportOpts, Iterations),
+    %% `do_run/5` yields the peer root alongside the local one; only the local
+    %% root is part of this function's contract, so split them here.
+    {Result, PeerRoot} =
+        case do_run(Instance, Peer, Transport, TransportOpts, Iterations) of
+            {ok, LocalRoot, PR} -> {{ok, LocalRoot}, PR};
+            {error, _} = Error -> {Error, undefined}
+        end,
     ok = maybe_adopt_peer_frontier(Result, Instance, PeerFrontier),
-    maybe_record(Result, Instance, Peer, Record),
+    maybe_record(Result, Instance, Peer, Record, PeerRoot),
+    ok = maybe_confirm_root(
+        Result, Instance, Peer, Transport, TransportOpts, Record, PeerRoot
+    ),
     Duration = erlang:monotonic_time() - Start,
     Outcome =
         case Result of
@@ -336,12 +352,20 @@ do_bootstrap_snapshot(Instance, Peer, Opts, Transport, TransportOpts, WasLive) -
             ),
             case
                 pull_install_loop(
-                    Instance, Peer, Transport, TransportOpts, Cursor, 0, 0
+                    Instance, Peer, Transport, TransportOpts, Cursor, 0, 0, 0
                 )
             of
-                {ok, Installed, Skipped} ->
+                {ok, Installed, Skipped, MaxInstalledHlc} ->
+                    %% A3 — `MaxInstalledHlc` is absorbed into the local clock
+                    %% at finalize, BEFORE the instance can be marked live.
+                    %% The session-start `Watermark` alone would under-absorb:
+                    %% it is a lower bound for what the live scan ships.
                     ok = bondy_oplog_instance:finalize_catalogue_bootstrap(
-                        Instance, Watermark, PeerFrontier, WasLive
+                        Instance,
+                        Watermark,
+                        PeerFrontier,
+                        MaxInstalledHlc,
+                        WasLive
                     ),
                     telemetry:execute(
                         [bondy_oplog, sync, catalogue_bootstrap, complete],
@@ -415,7 +439,14 @@ request_peer_frontier(Instance, Peer, Transport, TransportOpts) ->
 
 %% @private
 pull_install_loop(
-    Instance, Peer, Transport, TransportOpts, Cursor, Installed, Skipped
+    Instance,
+    Peer,
+    Transport,
+    TransportOpts,
+    Cursor,
+    Installed,
+    Skipped,
+    MaxHlc
 ) ->
     %% The install is always `replace` (skip-if-older by HLC); CvRDT
     %% `merge_states` merge-mode is not used. On a fresh
@@ -425,14 +456,14 @@ pull_install_loop(
     Req = {get_catalogue_snapshot_next, Cursor},
     case Transport:request(Peer, Instance, Req, TransportOpts) of
         {ok, {done, []}} ->
-            {ok, Installed, Skipped};
+            {ok, Installed, Skipped, MaxHlc};
         {ok, {batch, {NextCursor, Cells}}} ->
             case
                 bondy_oplog_instance:install_catalogue_batch(
                     Instance, {replace, Cells}
                 )
             of
-                {ok, #{installed := I, skipped := S} = _Counts} ->
+                {ok, #{installed := I, skipped := S} = Counts} ->
                     pull_install_loop(
                         Instance,
                         Peer,
@@ -440,7 +471,8 @@ pull_install_loop(
                         TransportOpts,
                         NextCursor,
                         Installed + I,
-                        Skipped + S
+                        Skipped + S,
+                        max(MaxHlc, maps:get(max_hlc, Counts, 0))
                     );
                 {error, _} = E ->
                     E
@@ -551,14 +583,23 @@ pull_if_compatible(
     LocalFp = bondy_oplog:topology_fingerprint(bondy_oplog:db_of(Instance)),
     case topology_compatible(LocalFp, PeerFp) of
         true ->
-            pull_from_root(
-                Instance,
-                Peer,
-                Transport,
-                TransportOpts,
-                MaxIterations,
-                PeerRoot
-            );
+            %% Carry `PeerRoot` out alongside the resulting local root. It is
+            %% what `peer_state` must checkpoint: a root the peer advertised
+            %% and that we have since confirmed we hold in full. The local
+            %% root states nothing about the peer — see `maybe_record/5`.
+            case
+                pull_from_root(
+                    Instance,
+                    Peer,
+                    Transport,
+                    TransportOpts,
+                    MaxIterations,
+                    PeerRoot
+                )
+            of
+                {ok, LocalRoot} -> {ok, LocalRoot, PeerRoot};
+                {error, _} = E -> E
+            end;
         false ->
             ?LOG_ERROR(#{
                 description =>
@@ -667,14 +708,18 @@ pull_until_complete(
             %% `missing_set` recomputes the remainder, including any deeper pages
             %% a just-merged page now references.
             Batch = lists:sublist(Missing, PerRound),
-            case
-                Transport:request(
-                    Peer,
-                    Instance,
-                    {get_pages, Batch},
-                    TransportOpts
-                )
-            of
+            %% Reciprocal form: announce our own root while asking for pages,
+            %% so the peer learns for free whether it is behind us and can
+            %% schedule an exchange in the other direction. Without this a
+            %% pair converges mutually only when both schedulers happen to
+            %% tick toward each other.
+            Req = get_pages_request(Instance, Transport, Batch),
+            case Transport:request(Peer, Instance, Req, TransportOpts) of
+                {ok, {unavailable, _}} ->
+                    %% The peer cannot serve these pages — normally because
+                    %% compaction reclaimed them. Retrying cannot help; the
+                    %% scheduler's bootstrap path is the way forward.
+                    {error, {peer_pages_unavailable, Batch}};
                 {ok, Pages} when map_size(Pages) =:= 0 ->
                     {error, {peer_returned_empty_pages, Batch}};
                 {ok, Pages} ->
@@ -693,6 +738,21 @@ pull_until_complete(
     end.
 
 %% @private
+%% Builds the page request, preferring the reciprocal 4-tuple form. Falls back
+%% to the legacy 2-tuple when the transport cannot name us — a peer running an
+%% older version answers the 2-tuple and simply does not reciprocate, so a
+%% mixed-version cluster degrades to the previous behaviour rather than
+%% failing.
+get_pages_request(Instance, Transport, Batch) ->
+    try Transport:self_id(Instance) of
+        SelfId ->
+            {get_pages, SelfId, bondy_oplog_instance:root_hash(Instance), Batch}
+    catch
+        error:undef ->
+            {get_pages, Batch}
+    end.
+
+%% @private
 initial_round_budget(MissingCount, PerRound) ->
     (MissingCount div PerRound + 1) * ?AAE_ROUND_BUDGET_SLACK +
         ?AAE_ROUND_BUDGET_FLOOR.
@@ -703,10 +763,71 @@ initial_round_budget(MissingCount, PerRound) ->
 %% instance verified caught-up with the peer). The empty case is exactly the
 %% idle low-churn shard the auth freshness fence depends on, so it MUST bump;
 %% only the peer-state checkpoint (which needs a concrete root) is skipped.
-maybe_record({ok, Root}, Instance, Peer, true) ->
-    ok = maybe_checkpoint_root(Root, Instance, Peer),
+maybe_record({ok, _LocalRoot}, Instance, Peer, true, PeerRoot) ->
+    %% Checkpoint the PEER's root, not ours.
+    %%
+    %% `peer_state` feeds `compute_frontier_for/2`, whose contract is "the
+    %% largest local key present in EVERY peer's confirmed root" — a statement
+    %% about what peers hold. Recording our own root instead makes it a
+    %% statement about our own sync recency: because sync is pull-only, a peer
+    %% receives our data only when *it* pulls from *us*, in a session this one
+    %% knows nothing about. The frontier would then cover events no peer has,
+    %% which is unsound for anything that reclaims on stability.
+    %%
+    %% `PeerRoot` is the root the peer advertised at the start of this session,
+    %% and reaching here means we pulled every page reachable from it. So both
+    %% replicas demonstrably hold it. Using the session-start root (rather than
+    %% re-reading the peer's current one) is deliberately conservative: the peer
+    %% may have advanced since, which only delays the frontier, never
+    %% over-claims it.
+    ok = maybe_checkpoint_root(PeerRoot, Instance, Peer),
     ok = bump_ae_on_sync(Instance, Peer);
-maybe_record(_, _, _, _) ->
+maybe_record(_, _, _, _, _) ->
+    ok.
+
+%% @private
+%% Completes the swap: tell the peer we now hold every page reachable from the
+%% root it advertised, so it checkpoints that same root against us.
+%%
+%% This is what makes the stability frontier a *shared* object. A pull alone
+%% leaves each side holding only what it unilaterally observed of the other, at
+%% its own times; stability then advances at different rates per node and
+%% compaction diverges. With the confirmation both replicas hold the same root
+%% for each other — Canteen's common sub-graph (§3.3), reached without a push
+%% path or a reverse session.
+%%
+%% Best-effort: a failure costs the peer a stale checkpoint, which only delays
+%% its frontier. Never fails the session.
+maybe_confirm_root(
+    {ok, _}, Instance, Peer, Transport, TransportOpts, true, PeerRoot
+) when is_binary(PeerRoot) ->
+    SelfId =
+        try
+            Transport:self_id(Instance)
+        catch
+            error:undef -> undefined
+        end,
+    case SelfId of
+        undefined ->
+            %% Transport cannot name us, so the peer could not attribute the
+            %% confirmation. Degrade to the unilateral behaviour.
+            ok;
+        _ ->
+            Req = {confirm_root, SelfId, PeerRoot},
+            case Transport:request(Peer, Instance, Req, TransportOpts) of
+                {ok, _} ->
+                    ok;
+                {error, Reason} ->
+                    ?LOG_DEBUG(#{
+                        description => "swap confirmation not delivered",
+                        instance => Instance,
+                        peer => Peer,
+                        reason => Reason
+                    }),
+                    ok
+            end
+    end;
+maybe_confirm_root(_, _, _, _, _, _, _) ->
     ok.
 
 %% @private

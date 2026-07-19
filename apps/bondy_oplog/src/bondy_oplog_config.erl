@@ -46,6 +46,11 @@ here.
 -export([sync_scheduler_enabled/0]).
 -export([sync_interval_ms/0]).
 -export([gc_scheduler_enabled/0]).
+-export([origin_retirement_enabled/0]).
+-export([origin_retirement_interval_ms/0]).
+-export([reclaim_enabled/0]).
+-export([reclaim_interval_ms/0]).
+-export([reclaim_batch_cells/0]).
 -export([gc_interval_ms/0]).
 -export([gc_max_concurrency/0]).
 
@@ -117,6 +122,58 @@ sync_interval_ms() ->
 
 gc_scheduler_enabled() ->
     application:get_env(?APP, gc_scheduler, true).
+
+-doc """
+Whether origin retirement auto-reacts to membership removals (default
+`false`; the flip is a separate change from the capability).
+""".
+-spec origin_retirement_enabled() -> boolean().
+
+origin_retirement_enabled() ->
+    application:get_env(?APP, origin_retirement, false).
+
+-doc """
+Periodic origin-retirement pass interval in milliseconds (default
+`600_000`). Membership events remain the primary trigger; the periodic pass
+covers origin-epoch turnover WITHOUT a membership change — e.g. a K8s
+StatefulSet pod that loses its volume and rejoins under the same name.
+The pass is idempotent and fail-closed, so the tick is safe by construction.
+""".
+-spec origin_retirement_interval_ms() -> non_neg_integer().
+
+origin_retirement_interval_ms() ->
+    application:get_env(?APP, origin_retirement_interval_ms, 600_000).
+
+-doc """
+Whether the projection-cell reclamation scheduler ticks (default `false`).
+The flip is a separate change from the capability
+(`BONDY_DB_RECLAMATION_PLAN.md` Step 9).
+""".
+-spec reclaim_enabled() -> boolean().
+
+reclaim_enabled() ->
+    application:get_env(?APP, reclaim_enabled, false).
+
+-doc """
+Reclamation scheduler tick interval in milliseconds (default `60_000` —
+deliberately much larger than `gc_interval_ms`'s 1000; reclamation is a
+space concern, not a liveness one).
+""".
+-spec reclaim_interval_ms() -> non_neg_integer().
+
+reclaim_interval_ms() ->
+    application:get_env(?APP, reclaim_interval_ms, 60_000).
+
+-doc """
+Cells per bounded sweep call during a reclamation pass (default `500`).
+The sweep runs inside the applier — the sole projection writer — so this is
+the cap on how long a single pass batch can stall a concurrent write; the
+pass loops batches to completion, letting writes interleave between them.
+""".
+-spec reclaim_batch_cells() -> pos_integer().
+
+reclaim_batch_cells() ->
+    application:get_env(?APP, reclaim_batch_cells, 500).
 
 -doc "GC scheduler tick interval in milliseconds (default `1000`).".
 -spec gc_interval_ms() -> non_neg_integer().

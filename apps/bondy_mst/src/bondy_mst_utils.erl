@@ -30,20 +30,18 @@ hash(Term, Algo) when Algo == sha256 orelse Algo == sha512 ->
         erlang:term_to_binary(Term, [deterministic, {minor_version, 2}])
     ).
 
-%% -----------------------------------------------------------------------------
-%% @doc Ensures a module is loaded.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Ensures a module is loaded.
+""".
 ensure_loaded(Mod) when is_atom(Mod) ->
     erlang:function_exported(Mod, module_info, 0) orelse
         code:ensure_loaded(Mod),
     ok.
 
-%% -----------------------------------------------------------------------------
-%% @doc Lists the behaviours implemented by a module.
-%% Raises an exception if the module is not loaded.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Lists the behaviours implemented by a module.
+Raises an exception if the module is not loaded.
+""".
 -spec behaviours(atom()) -> [atom()] | no_return().
 
 behaviours(Mod) when is_atom(Mod) ->
@@ -51,11 +49,10 @@ behaviours(Mod) when is_atom(Mod) ->
     Attributes = Mod:module_info(attributes),
     lists:flatten(proplists:get_all_values(behaviour, Attributes)).
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns `true' if module `module' implements behaviour `behaviour'.
-%% Otherwise, it returns `false'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns `true` if module `module` implements behaviour `behaviour`.
+Otherwise, it returns `false`.
+""".
 -spec implements_behaviour(atom(), atom()) -> boolean().
 
 implements_behaviour(Mod, Behaviour) when is_atom(Mod), is_atom(Behaviour) ->
@@ -70,11 +67,10 @@ implements_callback(Mod, FunctionName, Arity) when is_atom(Mod) ->
     ok = ensure_loaded(Mod),
     erlang:function_exported(Mod, FunctionName, Arity).
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns the list of modules implementing `Behaviour' in application
-%% `Application'.
-%% @end
-%% -----------------------------------------------------------------------------
+-doc """
+Returns the list of modules implementing `Behaviour` in application
+`Application`.
+""".
 -spec implementations(atom(), atom()) -> [atom()].
 
 implementations(Application, Behaviour) ->

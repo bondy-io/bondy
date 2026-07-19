@@ -45,8 +45,7 @@ contract_markers_test() ->
     ?assertEqual(true, ?CRDT:value_equals_state()),
     ?assertEqual(true, ?CRDT:order_independent()),
     ?assertEqual({dead, <<>>, 0}, ?CRDT:init()),
-    ?assertEqual(undefined, ?CRDT:to_value(?CRDT:init())),
-    ?assertEqual(undefined, ?CRDT:gc_threshold(?CRDT:init())).
+    ?assertEqual(undefined, ?CRDT:to_value(?CRDT:init())).
 
 %% Golden wire-format bytes. The retired `bondy_oplog_fold_index_entry`
 %% used `<<Rank:8, H:64/big, ColsSize:32/big, Cols/binary>>` with

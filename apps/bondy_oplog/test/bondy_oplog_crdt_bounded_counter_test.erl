@@ -174,10 +174,6 @@ hlc_advances_to_group_max_test() ->
     Es = [ev(50, <<"n1">>, 1, {bogus, 1}), ev(10, <<"n1">>, 2, {inc, 2})],
     ?assertEqual({2, 50}, ?CRDT:interpret_cog(Es, ?CRDT:init())).
 
-gc_threshold_is_state_hlc_test() ->
-    S = ?CRDT:interpret_cog([ev(99, <<"n1">>, 1, {inc, 1})], ?CRDT:init()),
-    ?assertEqual(?CRDT:hlc(S), ?CRDT:gc_threshold(S)).
-
 encode_decode_roundtrip_test() ->
     S = ?CRDT:interpret_cog(
         [ev(10, <<"n1">>, 1, {inc, 123456789})], ?CRDT:init()

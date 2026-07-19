@@ -138,6 +138,7 @@ it).
 -export([map_update/4]).
 -export([counter_inc/4]).
 -export([probe_write/1]).
+-export([delete/3]).
 -export([read/3]).
 -export([range/5]).
 -export([range_all/5]).
@@ -812,6 +813,49 @@ same DB.
 
 tick(#{db_hlc := Hlc}) ->
     bondy_oplog_hlc:now(Hlc).
+
+-doc """
+Deletes the cell at `(Realm, Key)` in `Table`.
+
+Issues the removal operation the table's CRDT declares via `removal_op/0` —
+`clear` for a register, `disable` for a flag. This is an ordinary operation, not
+a physical erase: it goes through the log and converges like any other write.
+
+**When the cell physically disappears is the CRDT's business.** For a register
+the removal leaves a tombstone whose only job is to reject a concurrent write
+with a lower HLC; the cell is reclaimed later, once that HLC is causally stable
+and `stabilize/2` returns `discard`. For types whose removal is redundant on
+delivery there is nothing to retain and reclamation is immediate. Callers get
+`not_found` from `read/3` either way, from the moment the removal is applied.
+
+Returns `{error, {no_removal_op, Module}}` for a collection type — a set or map
+has no whole-cell removal; remove its entries individually.
+""".
+-spec delete(Table :: table(), Realm :: realm(), Key :: binary()) ->
+    ok | {error, term()}.
+
+delete(Table, Realm, Key) when is_binary(Realm), is_binary(Key) ->
+    InstanceId = instance_for_shard(Table, shard_for(Table, Realm, Key)),
+    case probe_module(InstanceId) of
+        undefined ->
+            {error, {no_crdt_module, InstanceId}};
+        Module ->
+            case removal_op(Module) of
+                undefined ->
+                    {error, {no_removal_op, Module}};
+                Op ->
+                    ?MODULE:apply(Table, Realm, Key, Op)
+            end
+    end.
+
+%% @private
+%% `removal_op/0` is optional: a CRDT that does not export it has no whole-cell
+%% removal.
+removal_op(Module) ->
+    case erlang:function_exported(Module, removal_op, 0) of
+        true -> Module:removal_op();
+        false -> undefined
+    end.
 
 -doc """
 Apply a fold-specific event to `(Realm, Key)` inside `Table`.
@@ -3101,16 +3145,6 @@ assert_durable_rebuild_invariant(leveled, IndexMap) when
 assert_durable_rebuild_invariant(_Backend, _IndexMap) ->
     ok.
 
-%% @private
-%% Cold-start index recovery. For each declared index, decide per shard whether
-%% to TRUST (the durable trust marker is present — built and kept complete
-%% `<= snapshot_wm` by the compaction flush barrier) or REBUILD (no marker: a
-%% new index, a pre-restart drop, or a wiped ephemeral shard). If ANY shard of
-%% an index is unmarked, rebuild the whole index from the primary (`rebuild_sync`
-%% is per-index and re-derives + freshens every shard); otherwise just freshen
-%% the trusted shards so a finite `max_lag` read passes. Best-effort — a failure
-%% leaves the index marked for rebuild (reads refuse), recoverable by a later
-%% trigger — so it never fails `open_table`.
 %% @private
 %% `true` when this table's founding instance is provisioned with the WAL drain
 %% gated (`oplog_instance_opts.applier.drain_gated`). The inline index cold-start

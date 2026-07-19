@@ -456,9 +456,11 @@ projection(InstanceId) when is_binary(InstanceId) ->
             {error, instance_unavailable}
     end.
 
-%% @doc The `bondy_db` DB name an oplog instance belongs to, derived from its id
-%% (`<<"core/6">>` -> `core`). Returns `undefined` when the DB segment is not a
-%% known atom.
+-doc """
+The `bondy_db` DB name an oplog instance belongs to, derived from its id
+(`<<"core/6">>` -> `core`). Returns `undefined` when the DB segment is not a
+known atom.
+""".
 -spec db_of(instance_id()) -> atom() | undefined.
 
 db_of(InstanceId) when is_binary(InstanceId) ->
@@ -469,10 +471,12 @@ db_of(InstanceId) when is_binary(InstanceId) ->
         error:badarg -> undefined
     end.
 
-%% @doc Record this node's frozen keying-topology fingerprint for `Db` (computed
-%% by `bondy_db_manifest:fingerprint/1`). Exchanged during anti-entropy so two
-%% nodes refuse to sync when they key data differently. Stored in
-%% `persistent_term` (written once at provision, read on the sync path).
+-doc """
+Record this node's frozen keying-topology fingerprint for `Db` (computed
+by `bondy_db_manifest:fingerprint/1`). Exchanged during anti-entropy so two
+nodes refuse to sync when they key data differently. Stored in
+`persistent_term` (written once at provision, read on the sync path).
+""".
 -spec set_topology_fingerprint(Db :: atom(), Fingerprint :: binary()) -> ok.
 
 set_topology_fingerprint(Db, Fingerprint) when
@@ -480,8 +484,10 @@ set_topology_fingerprint(Db, Fingerprint) when
 ->
     persistent_term:put({?MODULE, topology_fingerprint, Db}, Fingerprint).
 
-%% @doc This node's keying-topology fingerprint for `Db`, or `undefined` if none
-%% was recorded (e.g. an ephemeral in-memory DB with no manifest).
+-doc """
+This node's keying-topology fingerprint for `Db`, or `undefined` if none
+was recorded (e.g. an ephemeral in-memory DB with no manifest).
+""".
 -spec topology_fingerprint(Db :: atom() | undefined) -> binary() | undefined.
 
 topology_fingerprint(undefined) ->

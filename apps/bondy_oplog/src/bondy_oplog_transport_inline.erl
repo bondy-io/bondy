@@ -24,6 +24,7 @@ behaviour.
 """).
 
 -export([request/4]).
+-export([self_id/1]).
 
 -spec request(
     peer_id(),
@@ -64,13 +65,20 @@ do_request(PeerInstance, get_frontier) ->
     %% fingerprint leg (the responder's Partisan path carries it).
     _ = bondy_oplog_instance:await_apply(PeerInstance),
     {ok, bondy_oplog_instance:frontier(PeerInstance)};
-do_request(PeerInstance, {get_pages, Hashes}) ->
-    HashList =
-        case is_list(Hashes) of
-            true -> Hashes;
-            false -> sets:to_list(Hashes)
-        end,
-    {ok, bondy_oplog_instance:get_pages(PeerInstance, HashList)};
+do_request(PeerInstance, {confirm_root, _, _} = Request) ->
+    bondy_oplog_responder:dispatch(PeerInstance, Request);
+do_request(PeerInstance, get_origins) ->
+    %% Node-level origin advertisement for retirement reap-by-complement;
+    %% delegate so the in-VM path exercises the responder verb.
+    bondy_oplog_responder:dispatch(PeerInstance, get_origins);
+do_request(PeerInstance, {get_pages, _} = Request) ->
+    %% Delegate to the responder so the in-VM path exercises exactly the same
+    %% logic as the network transports — notably the `unavailable` reply when
+    %% the peer can no longer serve the requested pages.
+    bondy_oplog_responder:dispatch(PeerInstance, Request);
+do_request(PeerInstance, {get_pages, _, _, _} = Request) ->
+    %% Reciprocal form; the responder also schedules the reverse exchange.
+    bondy_oplog_responder:dispatch(PeerInstance, Request);
 do_request(PeerInstance, get_snapshot) ->
     %% Wire-protocol message name is preserved (transport ABI);
     %% internally we route to the renamed compaction_checkpoint API.
@@ -100,3 +108,12 @@ do_request(PeerInstance, {get_catalogue_snapshot_next, Cursor}) ->
         {error, _} = E ->
             E
     end.
+
+-doc """
+Peers are addressed by instance id on this transport, so this instance's own
+id is exactly how a peer would address it.
+""".
+-spec self_id(instance_id()) -> peer_id().
+
+self_id(InstanceId) ->
+    InstanceId.

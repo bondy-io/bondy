@@ -66,6 +66,14 @@ init_per_suite(Config) ->
     %% The peer-side helpers below run on the cluster nodes, so make this module
     %% loadable there.
     _ = [push_module(Node, ?MODULE) || {_, Node, _} <- Nodes],
+    %% Freeze scheduler-driven GC for the WHOLE suite, before any writes.
+    %% Both tests compact explicitly (`do_compact`) and assert on which
+    %% node's MSTs are truncated; a background compaction tick landing
+    %% during seeding truncates one node's MST ahead of the baseline
+    %% snapshot — equal frontiers, unequal roots, the intermittent step-3
+    %% `R1 =:= R2` failure — and can even empty the deliberately-UNCOMPACTED
+    %% node's roots. Convergence needs only the sync scheduler, not GC.
+    _ = [bondy_ct:freeze_gc(Node) || {_, Node, _} <- Nodes],
     [{cluster, Nodes} | Config].
 
 end_per_suite(Config) ->
@@ -91,23 +99,32 @@ asymmetric_compaction_keeps_oracle_in_sync(Config) ->
     seed_and_converge(N1, N2, Pairs),
 
     try
-        %% 2. Freeze the cluster: a live scheduler would re-pull a compacted
-        %% node's MST back from its peer (the false-DIVERGED re-pull). Drain any
-        %% in-flight applier so the baseline frontiers are stable.
-        quiesce(N1, N2),
-        ok = erpc:call(N1, ?MODULE, do_drain_all, []),
-        ok = erpc:call(N2, ?MODULE, do_drain_all, []),
-
-        %% 3. Baseline: the data-bearing, converged instances. Both nodes hold
-        %% identical content ⇒ equal frontiers AND equal binary roots, locally
-        %% and over the production transport.
-        Sigs1 = erpc:call(N1, ?MODULE, do_instance_sigs, []),
-        Sigs2 = erpc:call(N2, ?MODULE, do_instance_sigs, []),
-        Targets = converged_data_targets(Sigs1, Sigs2),
+        %% 2. Select targets and let the ROOTS pairwise-converge BEFORE the
+        %% freeze. Frontier adoption runs ahead of MST page transfer (a live
+        %% round adopts the peer's applied-frontier VV even for events whose
+        %% pages arrive on a later round), so "equal frontiers, unequal
+        %% roots" is a normal in-between state — the intermittent `R1 =:= R2`
+        %% failure here. Freezing first PINS that state forever; the barrier
+        %% must run while sync can still deliver the lagging pages. Errors
+        %% with per-node diagnostics if the roots genuinely never equalise.
+        Sigs1a = erpc:call(N1, ?MODULE, do_instance_sigs, []),
+        Sigs2a = erpc:call(N2, ?MODULE, do_instance_sigs, []),
+        Targets = converged_data_targets(Sigs1a, Sigs2a),
         ct:pal("asym: ~p data-bearing converged target instances", [
             length(Targets)
         ]),
         ?assert(length(Targets) >= 1),
+        {_, _} = await_pairwise_sigs(N1, N2, Targets),
+
+        %% 3. NOW freeze the cluster: a live scheduler would re-pull a
+        %% compacted node's MST back from its peer (the false-DIVERGED
+        %% re-pull). Drain in-flight appliers, then re-read the settled
+        %% baseline — nothing mutates events after the freeze (GC is frozen
+        %% suite-wide, seeding is done), so this settles immediately.
+        quiesce(N1, N2),
+        ok = erpc:call(N1, ?MODULE, do_drain_all, []),
+        ok = erpc:call(N2, ?MODULE, do_drain_all, []),
+        {Sigs1, Sigs2} = await_pairwise_sigs(N1, N2, Targets),
 
         lists:foreach(
             fun(I) ->
@@ -331,9 +348,14 @@ seed_and_converge(N1, N2, Pairs) ->
     ).
 
 %% @private
+%% GC is frozen suite-wide in `init_per_suite` (see the rationale there);
+%% quiesce/unquiesce toggle only the sync scheduler. The `freeze_gc/1` here
+%% is a belt-and-braces drain of any straggling compaction worker.
 quiesce(N1, N2) ->
     ok = erpc:call(N1, ?MODULE, do_set_dispatch, [off]),
-    ok = erpc:call(N2, ?MODULE, do_set_dispatch, [off]).
+    ok = erpc:call(N2, ?MODULE, do_set_dispatch, [off]),
+    ok = bondy_ct:freeze_gc(N1),
+    ok = bondy_ct:freeze_gc(N2).
 
 %% @private
 unquiesce(N1, N2) ->
@@ -345,10 +367,19 @@ unquiesce(N1, N2) ->
 %% The data-bearing, converged instances: non-empty frontier, binary root, and
 %% the same frontier + a binary root on the peer's snapshot. These are the
 %% meaningful compaction targets.
+%%
+%% CORE instances only, deliberately. The ephemeral REGISTRY instances can
+%% transiently qualify (both nodes hold internal registrations) but their
+%% cross-node MST contents are not required to equalise — entries are
+%% node-local and session-scoped (owner self-cleanup removes them without a
+%% cross-node contract) — so a registry bystander in the target set makes the
+%% baseline root assertions flake on state this suite does not test. Both
+%% tests here assert the DURABLE core DB's compaction/frontier semantics.
 converged_data_targets(Sigs1, Sigs2) ->
     [
         I
      || {I, {F1, R1}} <- maps:to_list(Sigs1),
+        binary:part(I, 0, min(5, byte_size(I))) =:= <<"core/">>,
         map_size(F1) >= 1,
         is_binary(R1),
         case maps:get(I, Sigs2, undefined) of
@@ -417,6 +448,44 @@ now_ms() ->
 %% reading a transient value.
 await_instance_sigs(Node, Targets, Pred) ->
     await_instance_sigs(Node, Targets, Pred, now_ms() + ?CONVERGE_MS).
+
+%% @private
+%% Poll BOTH nodes until every target's signature is PAIRWISE equal — same
+%% frontier and same binary MST root on both. See the baseline comment in
+%% `asymmetric_compaction_keeps_oracle_in_sync/1` for why a one-shot
+%% snapshot is not enough. Errors with per-node diagnostics at the deadline.
+await_pairwise_sigs(N1, N2, Targets) ->
+    await_pairwise_sigs(N1, N2, Targets, now_ms() + ?CONVERGE_MS).
+
+%% @private
+await_pairwise_sigs(N1, N2, Targets, Deadline) ->
+    S1 = erpc:call(N1, ?MODULE, do_instance_sigs, [Targets]),
+    S2 = erpc:call(N2, ?MODULE, do_instance_sigs, [Targets]),
+    Settled = lists:all(
+        fun(I) ->
+            case {maps:get(I, S1, undefined), maps:get(I, S2, undefined)} of
+                {{F, R}, {F, R}} -> is_binary(R);
+                _ -> false
+            end
+        end,
+        Targets
+    ),
+    case Settled of
+        true ->
+            {S1, S2};
+        false ->
+            now_ms() =< Deadline orelse
+                error(
+                    {pairwise_sigs_unsettled, [
+                        {targets, Targets},
+                        {sigs, S1, S2},
+                        {n1, erpc:call(N1, ?MODULE, do_target_diag, [Targets])},
+                        {n2, erpc:call(N2, ?MODULE, do_target_diag, [Targets])}
+                    ]}
+                ),
+            timer:sleep(200),
+            await_pairwise_sigs(N1, N2, Targets, Deadline)
+    end.
 
 %% @private
 await_instance_sigs(Node, Targets, Pred, Deadline) ->

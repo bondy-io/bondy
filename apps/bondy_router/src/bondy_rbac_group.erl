@@ -114,7 +114,7 @@ at the write / delete chokepoints; the remote `on_merge` is a no-op.
     | already_exists.
 -type list_opts() :: #{limit => pos_integer()}.
 %% Note: the group list contract returns a bare list (the anonymous group always
-%% heads it), so `Limit` truncates rather than yielding a resumable cursor.
+%% heads it), so Limit truncates rather than yielding a resumable cursor.
 
 -export_type([t/0]).
 -export_type([external/0]).
@@ -697,8 +697,10 @@ not_reserved_name_check(Term) ->
     not bondy_rbac:is_reserved_name(Term) orelse throw(reserved_name),
     ok.
 
-%% @doc Exported for legacy-backup import: upgrade a pre-v1.1 proplist group
-%% value to the current map (or pass a current map through).
+-doc """
+Exported for legacy-backup import: upgrade a pre-v1.1 proplist group
+value to the current map (or pass a current map through).
+""".
 from_term({Name, PList}) when is_list(PList) ->
     Group0 = maps:from_list(
         lists:keymap(fun erlang:binary_to_existing_atom/1, 1, PList)

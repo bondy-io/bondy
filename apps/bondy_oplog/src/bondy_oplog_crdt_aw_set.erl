@@ -63,7 +63,6 @@ not the dot-store, so the substrate stores a value column.
 %% projection seam
 -export([to_value/1]).
 -export([hlc/1]).
--export([gc_threshold/1]).
 -export([value_equals_state/0]).
 -export([order_independent/0]).
 -export([batchable/0]).
@@ -204,13 +203,6 @@ reap_origins({DS, CC, Hlc}, Retired) ->
 -spec hlc(state()) -> bondy_oplog_hlc:hlc().
 
 hlc({_DS, _CC, Hlc}) ->
-    Hlc.
-
--spec gc_threshold(state()) -> bondy_oplog_hlc:hlc() | undefined.
-
-gc_threshold({_DS, _CC, 0}) ->
-    undefined;
-gc_threshold({_DS, _CC, Hlc}) ->
     Hlc.
 
 -spec value_equals_state() -> boolean().

@@ -85,7 +85,8 @@ undefined    -> <<0>>
 %% projection seam
 -export([to_value/1]).
 -export([hlc/1]).
--export([gc_threshold/1]).
+-export([removal_op/0]).
+-export([stabilize/2]).
 -export([value_equals_state/0]).
 -export([order_independent/0]).
 -export([encode_state/1]).
@@ -203,11 +204,31 @@ hlc(undefined) -> 0;
 hlc({set, _, H}) -> H;
 hlc({cleared, H}) -> H.
 
--spec gc_threshold(state()) -> bondy_oplog_hlc:hlc() | undefined.
+-doc """
+Whole-cell removal for a register is `clear`.
+""".
+-spec removal_op() -> clear.
 
-gc_threshold(undefined) -> undefined;
-gc_threshold({set, _, H}) -> H;
-gc_threshold({cleared, H}) -> H.
+removal_op() ->
+    clear.
+
+-doc """
+A `{cleared, H}` tombstone exists for exactly one purpose: to reject a
+concurrent `{set, _, H0}` with `H0 < H` that has not yet been delivered. Once
+`H` is causally stable no such operation can arrive again — every replica has
+delivered the clear, and per-origin HLC monotonicity means everything they send
+from here on is newer. The tombstone is then pure overhead and the cell can go.
+
+A live `{set, V, H}` is never discarded: it carries the value. Nothing in its
+representation is redundant once stable either, so there is no `{keep, _}`
+reduction to make — the HLC is still needed to order it against future writes.
+""".
+-spec stabilize(bondy_oplog_hlc:hlc(), state()) -> keep | discard.
+
+stabilize(StableHlc, {cleared, H}) when H < StableHlc ->
+    discard;
+stabilize(_StableHlc, _State) ->
+    keep.
 
 -spec value_equals_state() -> boolean().
 

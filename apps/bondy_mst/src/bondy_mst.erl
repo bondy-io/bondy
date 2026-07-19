@@ -102,9 +102,9 @@ hash.
     | {keys_only, boolean()}
     | {limit, pos_integer() | infinity}.
 -type fold_pages_fun() :: fun(({hash(), bondy_mst_page:t()}, any()) -> any()).
-%% Opaque token returned by `maybe_roll_for_seal/1`. Carries the backend
+%% Opaque token returned by maybe_roll_for_seal/1. Carries the backend
 %% module and its self-contained seal job so a worker process can run the
-%% seal (`run_seal_job/1`) without holding the tree.
+%% seal (run_seal_job/1) without holding the tree.
 -opaque seal_job() :: {module(), term()}.
 
 -export_type([t/0]).

@@ -1938,8 +1938,10 @@ store_alias(RealmUri, Alias, AliasEntry) ->
             throw(already_exists)
     end.
 
-%% @doc Exported for legacy-backup import: upgrade a pre-v1.1 proplist user
-%% value to the current map (or pass a current map through).
+-doc """
+Exported for legacy-backup import: upgrade a pre-v1.1 proplist user
+value to the current map (or pass a current map through).
+""".
 from_term({Username, PList}) when is_list(PList) ->
     User0 = value_from_term(PList),
     %% Prev to v1.1 we removed the username (key) from the payload (value).

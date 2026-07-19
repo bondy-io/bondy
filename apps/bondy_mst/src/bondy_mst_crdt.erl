@@ -19,11 +19,16 @@ Anti-entropy merges are performed in the background and without blocking
 local operations. The underlying tree is not changed until all the remote
 information necessary for the merge is obtained from a peer.
 
-This module allows a set of remote trees that we want to merge with the local
-tree to be kept in the state (`#?bondy_mst_crdt.merge_buffer`) and all missing
-pages are requested to the remote peers. Once all pages are locally
-available, the merge operation is done without network communication and the
-local tree is updated.
+The exchange itself — the merge buffer, bounded merge concurrency and the
+`get`/`put`/`missing` protocol — lives in `bondy_mst_exchange`, which this
+module embeds. That module holds the remote roots being merged, requests the
+missing pages, and performs the merge only once every page is locally
+available, so the local tree is never mutated mid-flight.
+
+This module owns everything that must follow a merge: version history,
+garbage collection, gossip and the `on_merge` hook. It interprets the
+`bondy_mst_exchange:event()` values returned by the exchange (see
+`apply_events/2`).
 
 # CRDT Types
 By selecting the type of values stored we can obtain various CRDTs:
@@ -79,9 +84,7 @@ handled concurrently depending on the backend store used.
 |Message Type|Purpose|Can be handled concurrently|
 |===|===|===|
 |`gossip()`|Initiate a full sync or notify a key value change|No|
-|`get_cmd()`|Obtain missing data from replica|Yes|
-|`put_cmd()`|Responds to a `get_cmd()`|Yes|
-|`missing_cmd()`|Responds to a `get_cmd()`|No|
+|`bondy_mst_exchange:message()`|Page exchange — see that module|Varies|
 
 ## Network Operations
 This module relies on a callback module provided by you that implements the
@@ -107,13 +110,9 @@ following callbacks:
     %% The interval, measured in milliseconds, between two fwd_bcasts.
     fwd_bcast_interval = 1000 :: integer(),
     last_fwd_bcast_time :: integer(),
-    %% The maximum number of concurrent merges.
-    %% Bounds the size of 'merge_buffer'.
-    max_merges = 1 :: pos_integer(),
-    %% The maximum number of concurrent merges having the same root.
-    %% This occurs when considering merging with N peers, as two or more of
-    %% them might be in sync and hence having the same root hash.
-    max_merges_per_root = 1 :: pos_integer(),
+    %% Anti-entropy exchange orchestration (merge buffer, bounded merge
+    %% concurrency, the get/put/missing protocol). See `bondy_mst_exchange`.
+    exchange :: bondy_mst_exchange:t(),
     %% max_versions
     %% The max number of versions to keep i.e. the version will not be eligible
     %% for garbage collection.
@@ -125,10 +124,6 @@ following callbacks:
     %% history
     %% This map's size is bounded by max_versions.
     history = #{} :: #{epoch() => hash()},
-    %% merge_buffer
-    %% A buffer of the remote MSTs we are merging with.
-    %% Its size is bounded by max_merges.
-    merge_buffer = #{} :: #{node_id() => hash()},
     %% A queue containing the latest gossiped roots from peers i.e. candidates
     %% for merges.
     %% It colesces base on peer and thus its size is naturally bounded to the
@@ -145,21 +140,6 @@ following callbacks:
     root :: hash(),
     key :: any(),
     value :: any()
-}).
-
--record(get, {
-    from :: node_id(),
-    root :: hash(),
-    set :: sets:set(hash())
-}).
-
--record(put, {
-    from :: node_id(),
-    map :: #{hash() := bondy_mst_page:t()}
-}).
-
--record(missing, {
-    from :: node_id()
 }).
 
 -type t() :: #?MODULE{}.
@@ -190,14 +170,7 @@ following callbacks:
     callback_args => list()
 }.
 -type gossip() :: #gossip{}.
--type get_cmd() :: #get{}.
--type missing_cmd() :: #missing{}.
--type put_cmd() :: #put{}.
--type message() ::
-    gossip()
-    | get_cmd()
-    | put_cmd()
-    | missing_cmd().
+-type message() :: gossip() | bondy_mst_exchange:message().
 -type gossip_data() ::
     #{
         from => node_id(),
@@ -390,12 +363,15 @@ new(NodeId, Opts0) when
         fwd_bcast = key_value:get(fwd_bcast, Opts, false),
         fwd_bcast_interval = key_value:get(fwd_bcast_interval, Opts, 1000),
         last_fwd_bcast_time = erlang:monotonic_time(),
-        max_merges = key_value:get(max_merges, Opts, 6),
-        max_merges_per_root = key_value:get(max_merges_per_root, Opts, 1),
+        exchange = bondy_mst_exchange:new(NodeId, #{
+            callback_mod => validate_callback_mod(Opts),
+            callback_args => key_value:get(callback_args, Opts, []),
+            max_merges => key_value:get(max_merges, Opts, 6),
+            max_merges_per_root => key_value:get(max_merges_per_root, Opts, 1)
+        }),
         max_versions = key_value:get(max_versions, Opts, 10),
         version_ttl = key_value:get(version_ttl, Opts, timer:minutes(1)),
         history = #{},
-        merge_buffer = #{},
         merge_backlog = bondy_mst_coalescing_queue:new(),
         bcast_backlog = bondy_mst_coalescing_queue:new()
     }.
@@ -526,8 +502,8 @@ Returns the list of peers that have ongoing merges with this node.
 """).
 -spec merges(t()) -> [node()].
 
-merges(#?MODULE{merge_buffer = Merges}) ->
-    maps:keys(Merges).
+merges(#?MODULE{exchange = Exchange}) ->
+    bondy_mst_exchange:merges(Exchange).
 
 ?DOC("""
 Cancels an ongoing merge (if it exists for peer `Peer`).
@@ -537,8 +513,8 @@ Cancelled merge pages will be purged on the next garbage collection run.
 """).
 -spec cancel_merge(t(), node_id()) -> ok.
 
-cancel_merge(#?MODULE{merge_buffer = Merges} = CRDT, Peer) ->
-    CRDT#?MODULE{merge_buffer = maps:without([Peer], Merges)}.
+cancel_merge(#?MODULE{exchange = Exchange} = CRDT, Peer) ->
+    CRDT#?MODULE{exchange = bondy_mst_exchange:cancel_merge(Exchange, Peer)}.
 
 %% =============================================================================
 %% API: ANTI-ENTROPY EXCHANGE PROTOCOL
@@ -610,17 +586,8 @@ Returns `true` if `PeerRoot` is not contained in the tree.
 """).
 -spec is_stale(t(), hash()) -> boolean().
 
-is_stale(#?MODULE{} = CRDT, PeerRoot) ->
-    Tree = CRDT#?MODULE.tree,
-    Root = bondy_mst:root(Tree),
-
-    case Root == PeerRoot of
-        true ->
-            false;
-        false ->
-            MissingSet = bondy_mst:missing_set(Tree, PeerRoot),
-            not sets:is_empty(MissingSet)
-    end.
+is_stale(#?MODULE{tree = Tree}, PeerRoot) ->
+    bondy_mst_exchange:is_stale(Tree, PeerRoot).
 
 ?DOC("""
 Call this function when your node receives a message or broadcast from a
@@ -693,104 +660,64 @@ handle(CRDT0, #gossip{} = Gossip) ->
                     CRDT1
             end
     end;
-handle(CRDT, #get{from = Peer, root = PeerRoot, set = Set}) ->
-    ?LOG_DEBUG(#{
-        message => <<"Received GET message">>,
-        peer => Peer,
-        set_size => sets:size(Set)
-    }),
-    %% We are being asked to produce a set of pages
-    Tree = CRDT#?MODULE.tree,
-    Store = bondy_mst:store(Tree),
+handle(CRDT0, Msg) ->
+    case bondy_mst_exchange:is_message(Msg) of
+        true ->
+            {Tree, Exchange, Events} = bondy_mst_exchange:handle(
+                CRDT0#?MODULE.exchange, CRDT0#?MODULE.tree, Msg
+            ),
+            CRDT = CRDT0#?MODULE{tree = Tree, exchange = Exchange},
+            apply_events(CRDT, Events);
+        false ->
+            error({unknown_event, Msg})
+    end.
 
-    %% We determine the hashes we don't have
-    Missing = sets:filter(
-        fun(Hash) -> not bondy_mst_store:has(Store, Hash) end,
-        Set
-    ),
+%% @private
+%% Interprets the outcomes reported by `bondy_mst_exchange`. The exchange owns
+%% the mechanics of a merge; everything that must follow one — version history,
+%% garbage collection, announcing the new root, the `on_merge` hook — is the
+%% CRDT's concern and lives here.
+apply_events(CRDT, []) ->
+    CRDT;
+apply_events(CRDT0, [{merged, Peer, _OldRoot, NewRoot} | T]) ->
+    %% Keep the new root out of GC's reach for at least its TTL.
+    CRDT1 = add_history(CRDT0, NewRoot),
+    CRDT2 = maybe_gc(CRDT1),
 
+    %% Tell the peer we now hold something it does not, which is what makes the
+    %% exchange bidirectional without a push path.
     ok =
-        case sets:is_empty(Missing) of
-            true ->
-                %% We collect the pages for the requested hashes and reply
-                Map = sets:fold(
-                    fun(Hash, Acc) ->
-                        Page = bondy_mst_store:get(Store, Hash),
-                        maps:put(Hash, Page, Acc)
-                    end,
-                    #{},
-                    Set
-                ),
-                Msg = #put{from = CRDT#?MODULE.node_id, map = Map},
-                call_callback(CRDT, send, [Peer, Msg]);
+        case bondy_mst_exchange:is_stale(CRDT2#?MODULE.tree, NewRoot) of
             false ->
-                %% We don't have all the pages, we reply a missing message
-                Msg = #missing{from = CRDT#?MODULE.node_id},
-                call_callback(CRDT, send, [Peer, Msg])
+                Event = #gossip{
+                    from = CRDT2#?MODULE.node_id,
+                    root = NewRoot,
+                    key = undefined,
+                    value = undefined
+                },
+                call_callback(CRDT2, send, [Peer, Event]);
+            true ->
+                ok
         end,
 
-    case PeerRoot == bondy_mst:root(Tree) of
-        true ->
-            CRDT;
-        false ->
-            %% TODO split this into a separate action executed by the wrapping
-            %% server, so that the GET can be handled concurrently
-            maybe_merge(CRDT, Peer, PeerRoot)
-    end;
-handle(CRDT, #put{from = Peer, map = Map}) ->
-    case maps:is_key(Peer, CRDT#?MODULE.merge_buffer) of
-        true ->
-            ?LOG_DEBUG(#{
-                message => <<"Received peer data">>,
-                peer => Peer,
-                payload_size => maps:size(Map)
-            }),
-            Tree = maps:fold(
-                fun(Hash0, Page, Acc0) ->
-                    {Hash1, Acc} = bondy_mst:put_page(Acc0, Page),
-
-                    %% Post-condition: Input and output hash should be the same
-                    %% A difference might occur when the peer runs a different
-                    %% implementation or when is using a different hashing
-                    %% algorithm, in which case we fail.
-                    Hash0 == Hash1 orelse
-                        error({inconsistency, Hash0, Page, Hash1}),
-
-                    Acc
-                end,
-                CRDT#?MODULE.tree,
-                Map
-            ),
-            %% TODO split this into a separate action executed by the wrapping
-            %% server, so that the GET can be handled concurrently
-            merge(CRDT#?MODULE{tree = Tree}, Peer);
-        false ->
-            ?LOG_DEBUG(#{
-                message => <<
-                    "Ignored data from peer. Peer is not in merge set."
-                >>,
-                peer => Peer,
-                payload_size => maps:size(Map)
-            }),
-            %% REVIEW: Will this happen when a previous merge has been evicted
-            %% from the merge buffer?
-            CRDT
-    end;
-handle(CRDT, #missing{from = Peer}) ->
-    case maps:take(Peer, CRDT#?MODULE.merge_buffer) of
-        {_, Merges} ->
-            %% Abandon merge
-            telemetry:execute(
-                [bondy_mst, merge, abandoned],
-                #{count => 1},
-                #{peer => Peer, node => CRDT#?MODULE.node_id}
-            ),
-            CRDT#?MODULE{merge_buffer = Merges};
-        error ->
-            CRDT
-    end;
-handle(_CRDT, Msg) ->
-    error({unknown_event, Msg}).
+    CRDT = on_merge(CRDT2, Peer),
+    apply_events(CRDT, T);
+apply_events(CRDT0, [{in_sync, Peer} | T]) ->
+    CRDT = on_merge(CRDT0, Peer),
+    apply_events(CRDT, T);
+apply_events(CRDT0, [{peer_root, Peer, PeerRoot} | T]) ->
+    %% A peer announced its root while requesting pages. Consider merging in
+    %% the other direction.
+    CRDT = maybe_merge(CRDT0, Peer, PeerRoot),
+    apply_events(CRDT, T);
+apply_events(CRDT, [{merge_skipped, Peer, peer_empty} | T]) ->
+    %% Peer has nothing; trigger an exchange in the other direction.
+    ok = trigger(CRDT, Peer),
+    apply_events(CRDT, T);
+apply_events(CRDT, [{merge_skipped, _Peer, _Reason} | T]) ->
+    apply_events(CRDT, T);
+apply_events(CRDT, [{merge_abandoned, _Peer, _Reason} | T]) ->
+    apply_events(CRDT, T).
 
 %% =============================================================================
 %% PRIVATE
@@ -881,144 +808,17 @@ broadcast_pending(#?MODULE{} = CRDT, Pred) when is_function(Pred, 1) ->
     end.
 
 %% @private
+%% Delegates to `bondy_mst_exchange`, which owns the merge buffer, the
+%% concurrency limits and the get/put/missing protocol, then interprets the
+%% outcomes it reports.
 -spec maybe_merge(t(), node_id(), hash() | undefined) -> t().
 
-maybe_merge(#?MODULE{} = CRDT, Peer, undefined) ->
-    %% Peer is empty, so we trigger an exchange in the other direction
-    ok = trigger(CRDT, Peer),
-    CRDT;
 maybe_merge(#?MODULE{} = CRDT0, Peer, PeerRoot) ->
-    Max = CRDT0#?MODULE.max_merges,
-    MaxSame = CRDT0#?MODULE.max_merges_per_root,
-    Merges = CRDT0#?MODULE.merge_buffer,
-    Same = count_same_merges(Merges, PeerRoot),
-    Size = map_size(Merges),
-
-    case Same < MaxSame andalso Size < Max of
-        true ->
-            CRDT = CRDT0#?MODULE{
-                merge_buffer = maps:put(Peer, PeerRoot, Merges)
-            },
-            ?LOG_INFO(#{
-                message => <<"Starting merge with peer.">>,
-                peer => Peer,
-                merge_count => Size + 1,
-                max_merges => {Max, MaxSame}
-            }),
-            merge(CRDT, Peer);
-        false ->
-            ?LOG_DEBUG(#{
-                message => <<
-                    "Skipping merge, merge concurrency limits reached."
-                >>,
-                peer => Peer,
-                merge_count => Size + 1,
-                max_merges => {Max, MaxSame}
-            }),
-            CRDT0
-    end.
-
-%% @private
-count_same_merges(Merges, Root) ->
-    maps:fold(
-        fun
-            (_, V, Acc) when V == Root ->
-                Acc + 1;
-            (_, _, Acc) ->
-                Acc
-        end,
-        0,
-        Merges
-    ).
-
-%% @private
-%% This is called directly only when receiving a PUT. Otherwise it is called
-%% by maybe_merge/2.
-merge(CRDT0, Peer) ->
-    Tree = CRDT0#?MODULE.tree,
-
-    PeerRoot = maps:get(Peer, CRDT0#?MODULE.merge_buffer),
-    %% Pre-condition
-    true = PeerRoot =/= undefined,
-
-    MissingSet = bondy_mst:missing_set(Tree, PeerRoot),
-
-    case sets:is_empty(MissingSet) of
-        true ->
-            %% All pages are locally available, so we perform the merge and
-            %% update the local tree.
-            ?LOG_DEBUG(#{
-                message => <<
-                    "All peer pages are now locally available. "
-                    "Finishing merge."
-                >>,
-                peer => Peer
-            }),
-            CRDT = do_merge(CRDT0, Peer, PeerRoot),
-            ok = on_merge(CRDT, Peer),
-            CRDT;
-        false ->
-            %% We still have missing pages, so we request them and keep the
-            %% remote reference in a buffer until we receive those pages from
-            %% peer.
-            ?LOG_DEBUG(#{
-                message => <<"Requesting missing pages from peer.">>,
-                missing_count => sets:size(MissingSet),
-                peer => Peer
-            }),
-            Root = bondy_mst:root(Tree),
-            Cmd = #get{
-                from = CRDT0#?MODULE.node_id,
-                root = Root,
-                set = MissingSet
-            },
-            ok = call_callback(CRDT0, send, [Peer, Cmd]),
-            CRDT0
-    end.
-
-%% @private
-do_merge(CRDT0, Peer, PeerRoot) ->
-    Tree0 = CRDT0#?MODULE.tree,
-    Root = bondy_mst:root(Tree0),
-
-    Tree1 = bondy_mst:merge(Tree0, Tree0, PeerRoot),
-    NewRoot = bondy_mst:root(Tree1),
-
-    %% Post-condition
-    true = sets:is_empty(bondy_mst:missing_set(Tree1, NewRoot)),
-
-    NewMerges = maps:filter(
-        fun(_, V) -> V =/= PeerRoot andalso V =/= NewRoot end,
-        CRDT0#?MODULE.merge_buffer
+    {Tree, Exchange, Events} = bondy_mst_exchange:maybe_merge(
+        CRDT0#?MODULE.exchange, CRDT0#?MODULE.tree, Peer, PeerRoot
     ),
-
-    CRDT1 = CRDT0#?MODULE{tree = Tree1, merge_buffer = NewMerges},
-
-    case Root =/= NewRoot of
-        true ->
-            %% We store the new root on the version history so that is not
-            %% immediately elegible for garbage collection.
-            %% The version will automatically elegible when its TTL is reached
-            %% or when history has reached its maximum size.
-            CRDT2 = add_history(CRDT1, NewRoot),
-            CRDT = maybe_gc(CRDT2),
-
-            case NewRoot =/= PeerRoot of
-                true ->
-                    Event = #gossip{
-                        from = CRDT#?MODULE.node_id,
-                        root = NewRoot,
-                        key = undefined,
-                        value = undefined
-                    },
-                    call_callback(CRDT, send, [Peer, Event]);
-                false ->
-                    ok
-            end,
-            CRDT;
-        false ->
-            CRDT1
-    end.
+    CRDT = CRDT0#?MODULE{tree = Tree, exchange = Exchange},
+    apply_events(CRDT, Events).
 
 %% @private
 on_merge(CRDT0, Peer) ->
@@ -1029,23 +829,26 @@ on_merge(CRDT0, Peer) ->
 
     CRDT = broadcast_pending(CRDT0),
 
-    try
-        bondy_mst_utils:apply_lazy(
-            CRDT#?MODULE.callback_mod,
-            on_merge,
-            1,
-            CRDT#?MODULE.callback_args ++ [Peer],
-            fun() -> ok end
-        )
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                message => "Error while evaluating callback on_merge/1",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            })
-    end.
+    _ =
+        try
+            bondy_mst_utils:apply_lazy(
+                CRDT#?MODULE.callback_mod,
+                on_merge,
+                1,
+                CRDT#?MODULE.callback_args ++ [Peer],
+                fun() -> ok end
+            )
+        catch
+            Class:Reason:Stacktrace ->
+                ?LOG_ERROR(#{
+                    message => "Error while evaluating callback on_merge/1",
+                    class => Class,
+                    reason => Reason,
+                    stacktrace => Stacktrace
+                })
+        end,
+
+    CRDT.
 
 %% @private
 maybe_gc(CRDT) ->
@@ -1059,9 +862,8 @@ encode_hash(Bin) -> binary:encode_hex(Bin).
 %% @private
 cancel_merges(CRDT, NewRoot) ->
     %% We remove any ongoing merges matching the merged NewRoot.
-    Merges = maps:filter(
-        fun(_, V) -> V =/= NewRoot end,
-        CRDT#?MODULE.merge_buffer
+    Exchange = bondy_mst_exchange:cancel_merges(
+        CRDT#?MODULE.exchange, NewRoot
     ),
 
     %% We remove any pending merges matching the merged NewRoot.
@@ -1070,7 +872,7 @@ cancel_merges(CRDT, NewRoot) ->
         fun(_, V) -> V =/= NewRoot end
     ),
 
-    CRDT#?MODULE{merge_buffer = Merges, merge_backlog = Backlog}.
+    CRDT#?MODULE{exchange = Exchange, merge_backlog = Backlog}.
 
 %% @private
 add_history(#?MODULE{} = CRDT, Root) ->
@@ -1089,7 +891,9 @@ add_history(#?MODULE{} = CRDT, Root) ->
 
 %% @private
 keep_roots(#?MODULE{} = CRDT) ->
-    MergeRoots = maps:values(CRDT#?MODULE.merge_buffer),
+    %% In-flight merges pin their peer roots: collecting those pages would
+    %% strand an exchange mid-flight.
+    MergeRoots = bondy_mst_exchange:merge_roots(CRDT#?MODULE.exchange),
     HistoryRoots = maps:values(CRDT#?MODULE.history),
     MergeRoots ++ HistoryRoots.
 

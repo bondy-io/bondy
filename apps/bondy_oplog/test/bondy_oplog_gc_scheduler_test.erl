@@ -34,7 +34,8 @@ gc_scheduler_test_() ->
         fun trigger_per_running_instance/0,
         fun trigger_for_single_instance/0,
         fun no_trigger_when_unset/0,
-        fun trigger_error_does_not_crash/0
+        fun trigger_error_does_not_crash/0,
+        fun named_second_scheduler_is_independent/0
     ]}.
 
 trigger_invokes_callback() ->
@@ -124,6 +125,73 @@ trigger_error_does_not_crash() ->
     ?assert(is_pid(Pid)),
     ?assert(is_process_alive(Pid)),
     ok = bondy_oplog:stop_instance(Inst).
+
+%% Step 5 of BONDY_DB_RECLAMATION_PLAN.md — a SECOND scheduler instance with
+%% its own name, interval, cap and trigger runs concurrently with the default
+%% one, and neither observes the other's ticks or settings. This is what lets
+%% reclamation run on its own cadence without duplicating the module.
+named_second_scheduler_is_independent() ->
+    Self = self(),
+    RefD = make_ref(),
+    RefN = make_ref(),
+    Name = gc_sched_test_named,
+    bondy_oplog_gc_scheduler:set_trigger(fun(I) -> Self ! {RefD, I} end),
+    {ok, Pid} = bondy_oplog_gc_scheduler:start_link(#{
+        name => Name,
+        interval_ms => 0,
+        trigger => fun(I) -> Self ! {RefN, I} end
+    }),
+    Inst = mk_inst(),
+    {ok, _} = bondy_oplog:start_instance(Inst),
+    try
+        %% Distinct registrations and distinct child ids — two children under
+        %% one supervisor must not collide.
+        ?assertNotEqual(whereis(bondy_oplog_gc_scheduler), Pid),
+        ?assertEqual(
+            Name,
+            maps:get(
+                id, bondy_oplog_gc_scheduler:child_spec(#{name => Name})
+            )
+        ),
+
+        %% The named scheduler ticks ITS trigger, not the default's...
+        bondy_oplog_gc_scheduler:trigger(Name),
+        receive
+            {RefN, Inst} -> ok
+        after 1000 -> error(no_named_trigger)
+        end,
+        receive
+            {RefD, _} -> error(default_fired_by_named_tick)
+        after 100 -> ok
+        end,
+
+        %% ...and the default ticks only its own.
+        bondy_oplog_gc_scheduler:trigger(),
+        receive
+            {RefD, Inst} -> ok
+        after 1000 -> error(no_default_trigger)
+        end,
+        receive
+            {RefN, _} -> error(named_fired_by_default_tick)
+        after 100 -> ok
+        end,
+
+        %% Independent intervals: retuning the named one leaves the default
+        %% untouched (the suite runs the default at 0).
+        ok = bondy_oplog_gc_scheduler:set_interval_ms(Name, 60_000),
+        ?assertEqual(
+            60_000,
+            maps:get(interval_ms, bondy_oplog_gc_scheduler:info(Name))
+        ),
+        ?assertEqual(
+            0, maps:get(interval_ms, bondy_oplog_gc_scheduler:info())
+        ),
+        ?assertEqual(Name, maps:get(name, bondy_oplog_gc_scheduler:info(Name)))
+    after
+        gen_server:stop(Pid),
+        bondy_oplog:stop_instance(Inst),
+        bondy_oplog_gc_scheduler:set_trigger(undefined)
+    end.
 
 %% Helpers
 

@@ -166,20 +166,59 @@ dispatch(InstanceId, get_frontier) when is_binary(InstanceId) ->
                     bondy_oplog:db_of(InstanceId)
                 )}
     end;
-dispatch(InstanceId, {get_pages, Hashes}) when is_binary(InstanceId) ->
+dispatch(InstanceId, {confirm_root, Peer, Root}) when
+    is_binary(InstanceId), is_binary(Root)
+->
+    %% The peer completed a pull against the root we advertised, so it now
+    %% holds every page reachable from it. Checkpoint that root against the
+    %% peer: both replicas now hold the SAME root for each other, which is
+    %% Canteen's common sub-graph and what makes the stability frontier
+    %% symmetric. Without it each side records only what it unilaterally
+    %% observed, at its own times, and compaction diverges.
     case bondy_oplog_instance:whereis(InstanceId) of
         undefined ->
             {error, {instance_not_running, InstanceId}};
         _Pid ->
-            %% No await_apply: serve the current MST snapshot (AAE eventual);
-            %% blocking here caused the 5s sync timeouts — see `get_root`.
-            HashList =
-                case is_list(Hashes) of
-                    true -> Hashes;
-                    false -> sets:to_list(Hashes)
-                end,
-            {ok, bondy_oplog_instance:get_pages(InstanceId, HashList)}
+            ok = bondy_oplog_peer_state:record_sync_complete(
+                Peer, InstanceId, Root
+            ),
+            {ok, ok}
     end;
+dispatch(InstanceId, get_origins) when is_binary(InstanceId) ->
+    %% NODE-level, deliberately: the origins this node currently claims,
+    %% for the retirement reap-by-complement
+    %% (`bondy_oplog_origin_retirement`). The instance id only routes the
+    %% request; every instance answers identically. A mixed-version peer
+    %% that lacks this verb answers `{error, {dispatch_failed, _}}`, which
+    %% the retirement pass treats as member-unreachable — fail-closed.
+    {ok, bondy_oplog_origin_retirement:local_origins()};
+dispatch(InstanceId, {get_pages, Hashes}) when is_binary(InstanceId) ->
+    do_get_pages(InstanceId, Hashes);
+dispatch(InstanceId, {get_pages, _Peer, _PeerRoot, Hashes}) when
+    is_binary(InstanceId)
+->
+    %% Reciprocal form. The requester's peer id and root ride along so that a
+    %% responder learns, for free, what the requester holds — the input a
+    %% stability oracle needs (see BONDY_DB_DELETE_DESIGN.md §4.6).
+    %%
+    %% We do NOT act on it here. Two hazards, both measured:
+    %%
+    %%  1. Root inequality is not "I am behind". While A bulk-pulls from B the
+    %%     roots differ on *every* round, so triggering on inequality turns one
+    %%     bulk pull into a storm of reverse sessions.
+    %%  2. Those sessions consume slots from the node-wide `aae_max_concurrency`
+    %%     cap (default 3), starving the sessions that were making progress.
+    %%     Reciprocity then *slows* convergence — `bondy_frontier_cluster_SUITE`
+    %%     fails on `asymmetric_compaction_keeps_oracle_in_sync` with a
+    %%     convergence timeout.
+    %%
+    %% Serving pages must also stay cheap: an `is-behind` test via `missing_set`
+    %% is O(diff) and this is the hot path.
+    %%
+    %% Wiring the trigger therefore needs a genuine is-behind predicate and a
+    %% budget that does not compete with scheduled sync. Until then the wire
+    %% carries the information and nothing acts on it.
+    do_get_pages(InstanceId, Hashes);
 dispatch(InstanceId, get_snapshot) when is_binary(InstanceId) ->
     case bondy_oplog_instance:whereis(InstanceId) of
         undefined ->
@@ -222,6 +261,37 @@ dispatch(InstanceId, {get_catalogue_snapshot_next, Cursor}) when
                 {ok, {batch, _} = Batch} -> {ok, Batch};
                 {ok, {done, _} = Done} -> {ok, Done};
                 {error, _} = E -> E
+            end
+    end.
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+do_get_pages(InstanceId, Hashes) ->
+    case bondy_oplog_instance:whereis(InstanceId) of
+        undefined ->
+            {error, {instance_not_running, InstanceId}};
+        _Pid ->
+            %% No await_apply: serve the current MST snapshot (AAE eventual);
+            %% blocking here caused the 5s sync timeouts — see `get_root`.
+            HashList =
+                case is_list(Hashes) of
+                    true -> Hashes;
+                    false -> sets:to_list(Hashes)
+                end,
+            Pages = bondy_oplog_instance:get_pages(InstanceId, HashList),
+            case map_size(Pages) of
+                0 when HashList =/= [] ->
+                    %% We hold none of the requested pages. The usual cause is
+                    %% that compaction reclaimed them, in which case no amount
+                    %% of retrying will help and the caller must bootstrap.
+                    %% Say so explicitly rather than returning an empty map,
+                    %% which the caller cannot distinguish from a bug.
+                    {ok, {unavailable, HashList}};
+                _ ->
+                    {ok, Pages}
             end
     end.
 

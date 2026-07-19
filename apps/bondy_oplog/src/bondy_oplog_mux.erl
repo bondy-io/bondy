@@ -44,6 +44,7 @@ directory mode (`dir/1`) instead.
 -export([put/3]).
 -export([remove/2]).
 -export([resolve/2]).
+-export([entries/1]).
 -export([group_by/2]).
 
 %% =============================================================================
@@ -103,6 +104,19 @@ resolve({single, V}, _Key) ->
     V;
 resolve({dir, Map}, Key) ->
     maps:get(Key, Map, undefined).
+
+-doc """
+The multiplexer's members as `[{Key | all, Value}]`. A `{single, V}` has one
+member matching every key, represented as `{all, V}`. Lets a caller iterate
+per member — e.g. a maintenance pass that must run each registered table
+through its own context rather than resolve key-by-key.
+""".
+-spec entries(Mux :: t()) -> [{key() | all, value()}].
+
+entries({single, V}) ->
+    [{all, V}];
+entries({dir, Map}) ->
+    maps:to_list(Map).
 
 -doc """
 Group `Items` by the key `KeyOf` extracts from each (`{ok, Key}` to route it,

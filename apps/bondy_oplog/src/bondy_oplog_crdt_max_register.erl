@@ -46,7 +46,6 @@ fold, so a table can switch with no data migration.
 %% projection seam
 -export([to_value/1]).
 -export([hlc/1]).
--export([gc_threshold/1]).
 -export([value_equals_state/0]).
 -export([order_independent/0]).
 -export([encode_state/1]).
@@ -111,11 +110,6 @@ to_value({V, _H}) -> V.
 
 hlc(undefined) -> 0;
 hlc({_V, H}) -> H.
-
--spec gc_threshold(state()) -> bondy_oplog_hlc:hlc() | undefined.
-
-gc_threshold(undefined) -> undefined;
-gc_threshold({_V, H}) -> H.
 
 -spec value_equals_state() -> boolean().
 
