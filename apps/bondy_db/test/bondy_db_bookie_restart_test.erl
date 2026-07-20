@@ -30,8 +30,13 @@
 
 bookie_restart_test_() ->
     {foreach, fun setup/0, fun cleanup/1, [
-        gen("bookie kill → restart is transparent to handles", fun restart_transparent/1),
-        gen("pool stop erases pt registrations", fun stop_erases_registrations/1)
+        gen(
+            "bookie kill → restart is transparent to handles",
+            fun restart_transparent/1
+        ),
+        gen(
+            "pool stop erases pt registrations", fun stop_erases_registrations/1
+        )
     ]}.
 
 gen(Title, Fn) ->

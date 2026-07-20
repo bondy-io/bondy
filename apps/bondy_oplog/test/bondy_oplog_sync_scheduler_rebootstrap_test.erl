@@ -99,11 +99,12 @@ other_failures_do_not_flag() ->
         %% silence and that the next tick does NOT route to bootstrap.
         bondy_oplog_sync_scheduler:trigger(),
         receive
-            {telemetry, [bondy_oplog, sync_scheduler, rebootstrap_scheduled],
-                _, #{instance_id := Inst}} ->
-                error(unexpected_rebootstrap_flag);
-            {telemetry, [bondy_oplog, sync_scheduler, dispatch_bootstrap], _,
+            {telemetry, [bondy_oplog, sync_scheduler, rebootstrap_scheduled], _,
                 #{instance_id := Inst}} ->
+                error(unexpected_rebootstrap_flag);
+            {telemetry, [bondy_oplog, sync_scheduler, dispatch_bootstrap], _, #{
+                    instance_id := Inst
+                }} ->
                 error(unexpected_bootstrap_dispatch)
         after 500 ->
             ok

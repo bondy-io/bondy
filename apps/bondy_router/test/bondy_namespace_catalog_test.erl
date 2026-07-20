@@ -78,29 +78,28 @@ declarations_test_() ->
             ?assertEqual(lww, fold(ByName, security_user_grants)),
             ?assertEqual(lww, fold(ByName, security_sources))
         end},
-        {"registry tables are ephemeral lww, published, by_session",
-            fun() ->
-                %% Cut over to bondy_db (D-7): `lww` IS the presence state machine
-                %% (keys unique by SessionId — set=live, clear=dead);
-                %% `publish => true` wires the merge-side reactor that
-                %% maintains the routing trie from peers' registrations (§9.6), with
-                %% the `by_session` reverse index for session-close cleanup.
-                ?assert(
-                    lists:all(
-                        fun(S) ->
-                            maps:get(fold, S) =:= lww andalso
-                                maps:get(durability, S) =:= ephemeral andalso
-                                maps:get(publish, S, false) =:= true andalso
-                                [by_session] =:=
-                                    [
-                                        bondy_oplog_index_spec:name(I)
-                                     || I <- maps:get(indexes, S, [])
-                                    ]
-                        end,
-                        Registry
-                    )
+        {"registry tables are ephemeral lww, published, by_session", fun() ->
+            %% Cut over to bondy_db (D-7): `lww` IS the presence state machine
+            %% (keys unique by SessionId — set=live, clear=dead);
+            %% `publish => true` wires the merge-side reactor that
+            %% maintains the routing trie from peers' registrations (§9.6), with
+            %% the `by_session` reverse index for session-close cleanup.
+            ?assert(
+                lists:all(
+                    fun(S) ->
+                        maps:get(fold, S) =:= lww andalso
+                            maps:get(durability, S) =:= ephemeral andalso
+                            maps:get(publish, S, false) =:= true andalso
+                            [by_session] =:=
+                                [
+                                    bondy_oplog_index_spec:name(I)
+                                 || I <- maps:get(indexes, S, [])
+                                ]
+                    end,
+                    Registry
                 )
-            end},
+            )
+        end},
         {"core_db_spec: shared_shards, durable, default shards", fun() ->
             Spec = ?CAT:core_db_spec(),
             ?assertMatch(

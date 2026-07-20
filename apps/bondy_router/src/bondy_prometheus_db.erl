@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_prometheus_db).
 -moduledoc """
 Bridges the `bondy_db` / `bondy_oplog` / `bondy_mst` storage stack onto the
@@ -50,8 +49,22 @@ metric family, never a scrape error.
 
 %% Log-spaced microsecond buckets covering 50us .. 5s.
 -define(DURATION_BUCKETS_US, [
-    50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000,
-    100000, 250000, 500000, 1000000, 2500000, 5000000
+    50,
+    100,
+    250,
+    500,
+    1000,
+    2500,
+    5000,
+    10000,
+    25000,
+    50000,
+    100000,
+    250000,
+    500000,
+    1000000,
+    2500000,
+    5000000
 ]).
 
 %% Overall deadline for gathering per-instance WAL writer snapshots on
@@ -69,13 +82,9 @@ metric family, never a scrape error.
 -export([collect_mf/2]).
 -export([deregister_cleanup/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -doc """
 Declares all metric families, attaches the telemetry handler and registers
@@ -85,14 +94,15 @@ the collector. Idempotent; called from `bondy_prometheus:setup/0` at boot.
 
 setup() ->
     ok = declare_metrics(),
-    case telemetry:attach_many(
-        ?HANDLER_ID, events(), fun ?MODULE:handle_event/4, undefined
-    ) of
+    case
+        telemetry:attach_many(
+            ?HANDLER_ID, events(), fun ?MODULE:handle_event/4, undefined
+        )
+    of
         ok -> ok;
         {error, already_exists} -> ok
     end,
     ok = prometheus_registry:register_collector(?MODULE).
-
 
 -doc "Detaches the telemetry handler and deregisters the collector.".
 -spec teardown() -> ok.
@@ -102,13 +112,9 @@ teardown() ->
     _ = prometheus_registry:deregister_collector(default, ?MODULE),
     ok.
 
-
-
 %% =============================================================================
 %% TELEMETRY CALLBACKS
 %% =============================================================================
-
-
 
 -doc """
 Maps a storage-stack telemetry event onto the Prometheus families declared
@@ -137,13 +143,9 @@ handle_event(Event, Meas, Meta, _Config) ->
             ok
     end.
 
-
-
 %% =============================================================================
 %% PROMETHEUS_COLLECTOR CALLBACKS
 %% =============================================================================
-
-
 
 -spec collect_mf(
     prometheus_registry:registry(), prometheus_collector:callback()
@@ -180,16 +182,11 @@ collect_mf(_Registry, CB) ->
             ok
     end.
 
-
 deregister_cleanup(_) -> ok.
-
-
 
 %% =============================================================================
 %% PRIVATE: TELEMETRY EVENT MAPPING
 %% =============================================================================
-
-
 
 %% @private
 %% The exact set of event names this module attaches to. Events with
@@ -289,63 +286,65 @@ events() ->
         [bondy_mst, page_store, idx_rebuild]
     ].
 
-
 %% @private
 declare_metrics() ->
     Counters = [
-        {bondy_oplog_wal_appends_total,
-            "WAL frame appends.", [instance_id]},
+        {bondy_oplog_wal_appends_total, "WAL frame appends.", [instance_id]},
         {bondy_oplog_wal_appended_ops_total,
-            "Operations appended to the WAL (batch sizes summed).",
-            [instance_id]},
+            "Operations appended to the WAL (batch sizes summed).", [
+                instance_id
+            ]},
         {bondy_oplog_wal_appended_bytes_total,
-            "Bytes appended to the WAL (frame lengths summed).",
-            [instance_id]},
-        {bondy_oplog_wal_fsyncs_total,
-            "WAL fsync calls.", [instance_id, mode]},
-        {bondy_oplog_wal_fsync_bytes_total,
-            "Bytes made durable by WAL fsyncs.", [instance_id, mode]},
-        {bondy_oplog_wal_rotations_total,
-            "WAL segment rotations.", [instance_id]},
+            "Bytes appended to the WAL (frame lengths summed).", [instance_id]},
+        {bondy_oplog_wal_fsyncs_total, "WAL fsync calls.", [instance_id, mode]},
+        {bondy_oplog_wal_fsync_bytes_total, "Bytes made durable by WAL fsyncs.",
+            [instance_id, mode]},
+        {bondy_oplog_wal_rotations_total, "WAL segment rotations.", [
+            instance_id
+        ]},
         {bondy_oplog_wal_retention_deleted_segments_total,
             "WAL segments deleted by retention sweeps.", [instance_id]},
         {bondy_oplog_wal_retention_freed_bytes_total,
             "Bytes freed by WAL retention sweeps.", [instance_id]},
-        {bondy_oplog_wal_recoveries_total,
-            "WAL recovery scans on open.", [instance_id]},
+        {bondy_oplog_wal_recoveries_total, "WAL recovery scans on open.", [
+            instance_id
+        ]},
         {bondy_oplog_wal_recovery_truncated_bytes_total,
             "Bytes truncated by WAL recovery.", [instance_id]},
-        {bondy_oplog_wal_full_total,
-            "WAL hard-backpressure activations.", [instance_id, reason]},
-        {bondy_oplog_wal_codec_ops_total,
-            "WAL codec operations.", [instance_id, op, algorithm]},
-        {bondy_oplog_wal_codec_input_bytes_total,
-            "WAL codec input bytes.", [instance_id, op, algorithm]},
-        {bondy_oplog_wal_codec_output_bytes_total,
-            "WAL codec output bytes.", [instance_id, op, algorithm]},
-        {bondy_oplog_wal_scrub_runs_total,
-            "WAL scrubber runs.", [instance_id]},
+        {bondy_oplog_wal_full_total, "WAL hard-backpressure activations.", [
+            instance_id, reason
+        ]},
+        {bondy_oplog_wal_codec_ops_total, "WAL codec operations.", [
+            instance_id, op, algorithm
+        ]},
+        {bondy_oplog_wal_codec_input_bytes_total, "WAL codec input bytes.", [
+            instance_id, op, algorithm
+        ]},
+        {bondy_oplog_wal_codec_output_bytes_total, "WAL codec output bytes.", [
+            instance_id, op, algorithm
+        ]},
+        {bondy_oplog_wal_scrub_runs_total, "WAL scrubber runs.", [instance_id]},
         {bondy_oplog_wal_scrub_frames_checked_total,
             "Frames checked by the WAL scrubber.", [instance_id]},
         {bondy_oplog_wal_scrub_corruption_total,
             "Corrupt frames found by the WAL scrubber.", [instance_id, kind]},
         {bondy_oplog_applier_batch_items_total,
-            "Items processed per applier pipeline stage.",
-            [instance_id, stage]},
+            "Items processed per applier pipeline stage.", [instance_id, stage]},
         {bondy_oplog_applier_applied_total,
-            "Events applied by the applier (incl. fused path).",
+            "Events applied by the applier (incl. fused path).", [instance_id]},
+        {bondy_oplog_applier_rejected_total, "Events rejected by the applier.",
             [instance_id]},
-        {bondy_oplog_applier_rejected_total,
-            "Events rejected by the applier.", [instance_id]},
         {bondy_oplog_applier_published_total,
             "Apply-path notifications published.", [instance_id]},
         {bondy_oplog_applier_publish_skipped_total,
             "Apply-path notifications skipped.", [instance_id]},
         {bondy_oplog_applier_faults_total,
-            "Applier fault signals (context regression, verify failure).",
-            [instance_id, kind]},
-        {bondy_oplog_applier_sweep_cells_total,
-            "Stable-cell sweep results.", [instance_id, result]},
+            "Applier fault signals (context regression, verify failure).", [
+                instance_id, kind
+            ]},
+        {bondy_oplog_applier_sweep_cells_total, "Stable-cell sweep results.", [
+            instance_id, result
+        ]},
         {bondy_oplog_applier_origins_reaped_total,
             "Origins reaped from cell contexts.", [instance_id]},
         {bondy_oplog_applier_replayed_cells_total,
@@ -361,18 +360,21 @@ declare_metrics() ->
         {bondy_oplog_remote_appends_total,
             "Remote (replicated) append outcomes.", [instance_id, outcome]},
         {bondy_oplog_apply_events_total,
-            "Locally applied events installed into instance state.",
-            [instance_id]},
+            "Locally applied events installed into instance state.", [
+                instance_id
+            ]},
         {bondy_oplog_overlay_backpressure_drops_total,
             "Overlay writes dropped by backpressure.", [instance_id]},
-        {bondy_oplog_compactions_total,
-            "MST compactions completed.", [instance_id]},
-        {bondy_oplog_reclamation_stalled_total,
-            "Reclamation attempts stalled.", [instance_id, reason]},
-        {bondy_oplog_sync_sessions_total,
-            "AAE sync sessions.", [instance_id, peer, outcome]},
-        {bondy_oplog_bootstrap_sessions_total,
-            "Catalogue bootstrap sessions.", [instance_id, peer, outcome]},
+        {bondy_oplog_compactions_total, "MST compactions completed.", [
+            instance_id
+        ]},
+        {bondy_oplog_reclamation_stalled_total, "Reclamation attempts stalled.",
+            [instance_id, reason]},
+        {bondy_oplog_sync_sessions_total, "AAE sync sessions.", [
+            instance_id, peer, outcome
+        ]},
+        {bondy_oplog_bootstrap_sessions_total, "Catalogue bootstrap sessions.",
+            [instance_id, peer, outcome]},
         {bondy_oplog_bootstrap_cells_total,
             "Catalogue bootstrap cell outcomes.", [instance_id, result]},
         {bondy_oplog_sync_scheduler_events_total,
@@ -381,37 +383,40 @@ declare_metrics() ->
             "GC scheduler activity by event kind.", [event]},
         {bondy_oplog_peer_exclusions_total,
             "Sync peer exclusions (stale peer_state).", [instance_id]},
-        {bondy_oplog_retirements_total,
-            "Origin retirement outcomes.", [outcome]},
-        {bondy_oplog_secondary_flush_ops_total,
-            "Secondary index ops flushed.", [namespace, index]},
-        {bondy_oplog_secondary_saturated_dropped_total,
-            "Secondary index ops dropped due to writer saturation.",
+        {bondy_oplog_retirements_total, "Origin retirement outcomes.", [
+            outcome
+        ]},
+        {bondy_oplog_secondary_flush_ops_total, "Secondary index ops flushed.",
             [namespace, index]},
-        {bondy_oplog_secondary_rebuilds_total,
-            "Secondary index rebuilds.", [namespace, index]},
-        {bondy_mst_merges_total,
-            "MST merges.", [result]},
-        {bondy_mst_merges_abandoned_total,
-            "MST exchange merges abandoned.", []},
-        {bondy_mst_gc_runs_total,
-            "MST store GC runs.", [result]},
-        {bondy_mst_broadcasts_total,
-            "MST CRDT gossip messages.", [direction]},
-        {bondy_mst_broadcast_bytes_total,
-            "MST CRDT gossip bytes.", [direction]},
-        {bondy_mst_page_store_ops_total,
-            "Page store operations.", [instance_id, op]},
-        {bondy_mst_page_store_bytes_total,
-            "Page store bytes read/written.", [instance_id, op]},
-        {bondy_mst_seals_total,
-            "Pack seals.", [instance_id, kind]},
-        {bondy_mst_seal_records_total,
-            "Records sealed into packs.", [instance_id, kind]},
-        {bondy_mst_seal_bytes_total,
-            "Bytes sealed into packs.", [instance_id, kind]},
-        {bondy_mst_page_store_gc_runs_total,
-            "Page store GC runs.", [instance_id, reason]},
+        {bondy_oplog_secondary_saturated_dropped_total,
+            "Secondary index ops dropped due to writer saturation.", [
+                namespace, index
+            ]},
+        {bondy_oplog_secondary_rebuilds_total, "Secondary index rebuilds.", [
+            namespace, index
+        ]},
+        {bondy_mst_merges_total, "MST merges.", [result]},
+        {bondy_mst_merges_abandoned_total, "MST exchange merges abandoned.",
+            []},
+        {bondy_mst_gc_runs_total, "MST store GC runs.", [result]},
+        {bondy_mst_broadcasts_total, "MST CRDT gossip messages.", [direction]},
+        {bondy_mst_broadcast_bytes_total, "MST CRDT gossip bytes.", [direction]},
+        {bondy_mst_page_store_ops_total, "Page store operations.", [
+            instance_id, op
+        ]},
+        {bondy_mst_page_store_bytes_total, "Page store bytes read/written.", [
+            instance_id, op
+        ]},
+        {bondy_mst_seals_total, "Pack seals.", [instance_id, kind]},
+        {bondy_mst_seal_records_total, "Records sealed into packs.", [
+            instance_id, kind
+        ]},
+        {bondy_mst_seal_bytes_total, "Bytes sealed into packs.", [
+            instance_id, kind
+        ]},
+        {bondy_mst_page_store_gc_runs_total, "Page store GC runs.", [
+            instance_id, reason
+        ]},
         {bondy_mst_page_store_gc_pages_dropped_total,
             "Pages dropped by page store GC.", [instance_id]},
         {bondy_mst_page_store_gc_packs_retired_total,
@@ -420,8 +425,9 @@ declare_metrics() ->
             "Bytes freed by page store GC.", [instance_id]},
         {bondy_mst_page_store_recoveries_total,
             "Page store incoming-pack recoveries.", [instance_id, result]},
-        {bondy_mst_pack_idx_rebuilds_total,
-            "Sealed-pack index rebuilds.", [instance_id, result]}
+        {bondy_mst_pack_idx_rebuilds_total, "Sealed-pack index rebuilds.", [
+            instance_id, result
+        ]}
     ],
     lists:foreach(
         fun({Name, Help, Labels}) ->
@@ -432,24 +438,24 @@ declare_metrics() ->
         Counters
     ),
     Histograms = [
-        {bondy_oplog_wal_fsync_duration_microseconds,
-            "WAL fsync duration.", [mode]},
+        {bondy_oplog_wal_fsync_duration_microseconds, "WAL fsync duration.", [
+            mode
+        ]},
         {bondy_oplog_applier_batch_duration_microseconds,
             "Applier pipeline stage duration per batch.", [stage]},
         {bondy_oplog_instance_mst_install_duration_microseconds,
             "MST batch install duration.", []},
         {bondy_oplog_compaction_duration_microseconds,
             "MST compaction duration.", []},
-        {bondy_oplog_sync_duration_microseconds,
-            "AAE sync session duration.", [outcome]},
+        {bondy_oplog_sync_duration_microseconds, "AAE sync session duration.", [
+                outcome
+            ]},
         {bondy_oplog_bootstrap_duration_microseconds,
             "Catalogue bootstrap session duration.", [outcome]},
         {bondy_oplog_secondary_flush_duration_microseconds,
             "Secondary index flush duration.", []},
-        {bondy_mst_merge_duration_microseconds,
-            "MST merge duration.", []},
-        {bondy_mst_seal_duration_microseconds,
-            "Pack seal duration.", [kind]}
+        {bondy_mst_merge_duration_microseconds, "MST merge duration.", []},
+        {bondy_mst_seal_duration_microseconds, "Pack seal duration.", [kind]}
     ],
     lists:foreach(
         fun({Name, Help, Labels}) ->
@@ -457,7 +463,9 @@ declare_metrics() ->
             %% otherwise prometheus infers the unit from the `_microseconds`
             %% suffix and converts values from native time units.
             _ = prometheus_histogram:declare([
-                {name, Name}, {help, Help}, {labels, Labels},
+                {name, Name},
+                {help, Help},
+                {labels, Labels},
                 {buckets, ?DURATION_BUCKETS_US},
                 {duration_unit, false}
             ])
@@ -466,27 +474,33 @@ declare_metrics() ->
     ),
     Gauges = [
         {bondy_oplog_core_cache_hit_ratio,
-            "Substrate cache hit ratio over the last refresh interval.",
-            [namespace]},
+            "Substrate cache hit ratio over the last refresh interval.", [
+                namespace
+            ]},
         {bondy_oplog_core_read_rps,
-            "Substrate point reads per second (last refresh interval).",
-            [namespace]},
+            "Substrate point reads per second (last refresh interval).", [
+                namespace
+            ]},
         {bondy_oplog_core_range_rps,
-            "Substrate range reads per second (last refresh interval).",
-            [namespace]},
-        {bondy_oplog_core_subscribers,
-            "Substrate pub/sub subscribers.", [namespace]},
+            "Substrate range reads per second (last refresh interval).", [
+                namespace
+            ]},
+        {bondy_oplog_core_subscribers, "Substrate pub/sub subscribers.", [
+            namespace
+        ]},
         {bondy_oplog_core_freshness_lag_max_milliseconds,
-            "Max AE freshness lag across the namespace's shards.",
-            [namespace]},
+            "Max AE freshness lag across the namespace's shards.", [namespace]},
         {bondy_oplog_write_readable_latency_microseconds,
-            "Write-to-readable latency (rolling window quantiles).",
-            [instance_id, quantile]}
+            "Write-to-readable latency (rolling window quantiles).", [
+                instance_id, quantile
+            ]}
     ],
     lists:foreach(
         fun({Name, Help, Labels}) ->
             _ = prometheus_gauge:declare([
-                {name, Name}, {help, Help}, {labels, Labels},
+                {name, Name},
+                {help, Help},
+                {labels, Labels},
                 {duration_unit, false}
             ])
         end,
@@ -494,14 +508,12 @@ declare_metrics() ->
     ),
     ok.
 
-
 %% @private
 do_handle_event([bondy_oplog, wal, append], Meas, Meta) ->
     Id = instance_id(Meta),
     counter(bondy_oplog_wal_appends_total, [Id], 1),
     counter(bondy_oplog_wal_appended_ops_total, [Id], num(batch_size, Meas)),
     counter(bondy_oplog_wal_appended_bytes_total, [Id], num(frame_len, Meas));
-
 do_handle_event([bondy_oplog, wal, fsync], Meas, Meta) ->
     Id = instance_id(Meta),
     Mode = maps:get(mode, Meta, undefined),
@@ -514,10 +526,8 @@ do_handle_event([bondy_oplog, wal, fsync], Meas, Meta) ->
         [Mode],
         num(duration_us, Meas)
     );
-
 do_handle_event([bondy_oplog, wal, rotate], _Meas, Meta) ->
     counter(bondy_oplog_wal_rotations_total, [instance_id(Meta)], 1);
-
 do_handle_event([bondy_oplog, wal, retention_sweep], Meas, Meta) ->
     Id = instance_id(Meta),
     counter(
@@ -530,7 +540,6 @@ do_handle_event([bondy_oplog, wal, retention_sweep], Meas, Meta) ->
         [Id],
         num(freed_bytes, Meas)
     );
-
 do_handle_event([bondy_oplog, wal, recovery], Meas, Meta) ->
     Id = instance_id(Meta),
     counter(bondy_oplog_wal_recoveries_total, [Id], 1),
@@ -539,24 +548,20 @@ do_handle_event([bondy_oplog, wal, recovery], Meas, Meta) ->
         [Id],
         num(truncated_bytes, Meas)
     );
-
 do_handle_event([bondy_oplog, wal, recovery, rescan], _Meas, _Meta) ->
     ok;
-
 do_handle_event([bondy_oplog, wal, wal_full], _Meas, Meta) ->
     counter(
         bondy_oplog_wal_full_total,
         [instance_id(Meta), maps:get(reason, Meta, undefined)],
         1
     );
-
 do_handle_event([bondy_oplog, wal_mem, wal_full], _Meas, Meta) ->
     counter(
         bondy_oplog_wal_full_total,
         [instance_id(Meta), max_live_events],
         1
     );
-
 do_handle_event([bondy_oplog, wal, codec, Op], Meas, Meta) ->
     Id = instance_id(Meta),
     Algo = maps:get(algorithm, Meta, undefined),
@@ -571,7 +576,6 @@ do_handle_event([bondy_oplog, wal, codec, Op], Meas, Meta) ->
         [Id, Op, Algo],
         num(output_bytes, Meas)
     );
-
 do_handle_event([bondy_oplog, wal, scrub, run], Meas, Meta) ->
     Id = instance_id(Meta),
     counter(bondy_oplog_wal_scrub_runs_total, [Id], 1),
@@ -583,22 +587,23 @@ do_handle_event([bondy_oplog, wal, scrub, run], Meas, Meta) ->
     lists:foreach(
         fun(Kind) ->
             case num(Kind, Meas) of
-                0 -> ok;
-                N -> counter(
-                    bondy_oplog_wal_scrub_corruption_total, [Id, Kind], N
-                )
+                0 ->
+                    ok;
+                N ->
+                    counter(
+                        bondy_oplog_wal_scrub_corruption_total, [Id, Kind], N
+                    )
             end
         end,
         [bad_crc, bad_magic, truncated_segment]
     );
-
 do_handle_event([bondy_oplog, applier, Stage], Meas, Meta) when
     Stage == batch_verify orelse
-    Stage == batch_fold orelse
-    Stage == batch_cell_apply orelse
-    Stage == batch_cell_put orelse
-    Stage == batch_publish orelse
-    Stage == batch_install_cast
+        Stage == batch_fold orelse
+        Stage == batch_cell_apply orelse
+        Stage == batch_cell_put orelse
+        Stage == batch_publish orelse
+        Stage == batch_install_cast
 ->
     <<"batch_", StageBin/binary>> = atom_to_binary(Stage),
     counter(
@@ -611,7 +616,6 @@ do_handle_event([bondy_oplog, applier, Stage], Meas, Meta) when
         [StageBin],
         num(duration_us, Meas)
     );
-
 do_handle_event([bondy_oplog, applier, applied], Meas, Meta) ->
     Id = instance_id(Meta),
     counter(bondy_oplog_applier_applied_total, [Id], num(count, Meas)),
@@ -619,7 +623,6 @@ do_handle_event([bondy_oplog, applier, applied], Meas, Meta) ->
         0 -> ok;
         R -> counter(bondy_oplog_applier_rejected_total, [Id], R)
     end;
-
 do_handle_event([bondy_oplog, applier, published], Meas, Meta) ->
     Id = instance_id(Meta),
     counter(bondy_oplog_applier_published_total, [Id], num(count, Meas)),
@@ -627,68 +630,61 @@ do_handle_event([bondy_oplog, applier, published], Meas, Meta) ->
         0 -> ok;
         S -> counter(bondy_oplog_applier_publish_skipped_total, [Id], S)
     end;
-
 do_handle_event([bondy_oplog, applier, context_regression], _Meas, Meta) ->
     counter(
         bondy_oplog_applier_faults_total,
         [instance_id(Meta), context_regression],
         1
     );
-
 do_handle_event([bondy_oplog, applier, verify_failed], _Meas, Meta) ->
     counter(
         bondy_oplog_applier_faults_total,
         [instance_id(Meta), verify_failed],
         1
     );
-
 do_handle_event([bondy_oplog, applier, cells_swept], Meas, Meta) ->
     Id = instance_id(Meta),
     lists:foreach(
         fun(Result) ->
             case num(Result, Meas) of
-                0 -> ok;
-                N -> counter(
-                    bondy_oplog_applier_sweep_cells_total, [Id, Result], N
-                )
+                0 ->
+                    ok;
+                N ->
+                    counter(
+                        bondy_oplog_applier_sweep_cells_total, [Id, Result], N
+                    )
             end
         end,
         [scanned, discarded, reduction_skipped, skipped]
     );
-
 do_handle_event([bondy_oplog, applier, origins_reaped], Meas, Meta) ->
     counter(
         bondy_oplog_applier_origins_reaped_total,
         [instance_id(Meta)],
         num(origins, Meas)
     );
-
 do_handle_event([bondy_oplog, applier, replay_cell_events], Meas, Meta) ->
     counter(
         bondy_oplog_applier_replayed_cells_total,
         [instance_id(Meta), maps:get(outcome, Meta, undefined)],
         num(cells_applied, Meas)
     );
-
 do_handle_event([bondy_oplog, applier, validator_refresh], _Meas, Meta) ->
     counter(
         bondy_oplog_applier_validator_refreshes_total,
         [maps:get(outcome, Meta, undefined)],
         1
     );
-
 do_handle_event([bondy_oplog, instance, append], Meas, Meta) ->
     counter(
         bondy_oplog_instance_appends_total,
         [instance_id(Meta)],
         num(count, Meas)
     );
-
 do_handle_event([bondy_oplog, instance, backpressure], _Meas, Meta) ->
     counter(
         bondy_oplog_instance_backpressure_total, [instance_id(Meta)], 1
     );
-
 do_handle_event([bondy_oplog, instance, mst_install], Meas, Meta) ->
     counter(
         bondy_oplog_instance_mst_install_items_total,
@@ -700,28 +696,24 @@ do_handle_event([bondy_oplog, instance, mst_install], Meas, Meta) ->
         [],
         num(duration_us, Meas)
     );
-
 do_handle_event([bondy_oplog, instance, apply_event, ok], Meas, Meta) ->
     counter(
         bondy_oplog_apply_events_total,
         [instance_id(Meta)],
         num(count, Meas)
     );
-
 do_handle_event([bondy_oplog, instance, append_remote, Outcome], Meas, Meta) ->
     counter(
         bondy_oplog_remote_appends_total,
         [instance_id(Meta), Outcome],
         max(1, num(count, Meas))
     );
-
 do_handle_event(
     [bondy_oplog, instance, overlay, backpressure_drop], _Meas, Meta
 ) ->
     counter(
         bondy_oplog_overlay_backpressure_drops_total, [instance_id(Meta)], 1
     );
-
 do_handle_event([bondy_oplog, instance, write_latency], Meas, Meta) ->
     Id = instance_id(Meta),
     lists:foreach(
@@ -733,11 +725,13 @@ do_handle_event([bondy_oplog, instance, write_latency], Meas, Meta) ->
             )
         end,
         [
-            {mean_us, mean}, {p50_us, p50}, {p95_us, p95},
-            {p99_us, p99}, {max_us, max}
+            {mean_us, mean},
+            {p50_us, p50},
+            {p95_us, p95},
+            {p99_us, p99},
+            {max_us, max}
         ]
     );
-
 do_handle_event([bondy_oplog, compaction, ok], Meas, Meta) ->
     Id = instance_id(Meta),
     counter(bondy_oplog_compactions_total, [Id], 1),
@@ -746,14 +740,12 @@ do_handle_event([bondy_oplog, compaction, ok], Meas, Meta) ->
         [],
         num(duration_us, Meas)
     );
-
 do_handle_event([bondy_oplog, reclamation, stalled], _Meas, Meta) ->
     counter(
         bondy_oplog_reclamation_stalled_total,
         [instance_id(Meta), label(maps:get(reason, Meta, undefined))],
         1
     );
-
 do_handle_event([bondy_oplog, sync, Outcome], Meas, Meta) when
     Outcome == ok orelse Outcome == error
 ->
@@ -767,7 +759,6 @@ do_handle_event([bondy_oplog, sync, Outcome], Meas, Meta) when
         [Outcome],
         native_to_us(num(duration, Meas))
     );
-
 do_handle_event(
     [bondy_oplog, sync, catalogue_bootstrap, complete], Meas, Meta
 ) ->
@@ -780,7 +771,6 @@ do_handle_event(
     counter(
         bondy_oplog_bootstrap_cells_total, [Id, skipped], num(skipped, Meas)
     );
-
 do_handle_event([bondy_oplog, sync, catalogue_bootstrap, Outcome], Meas, Meta) ->
     counter(
         bondy_oplog_bootstrap_sessions_total,
@@ -792,41 +782,32 @@ do_handle_event([bondy_oplog, sync, catalogue_bootstrap, Outcome], Meas, Meta) -
         [Outcome],
         native_to_us(num(duration, Meas))
     );
-
 do_handle_event([bondy_oplog, scheduler, sync, tick], _Meas, _Meta) ->
     counter(bondy_oplog_sync_scheduler_events_total, [tick], 1);
-
 do_handle_event([bondy_oplog, sync_scheduler, Kind, Suffix], _Meas, _Meta) when
     Kind == bootstrap orelse Kind == live
 ->
-    Event = <<(atom_to_binary(Kind))/binary, "_",
-        (atom_to_binary(Suffix))/binary>>,
+    Event = <<
+        (atom_to_binary(Kind))/binary, "_", (atom_to_binary(Suffix))/binary
+    >>,
     counter(bondy_oplog_sync_scheduler_events_total, [Event], 1);
-
 do_handle_event([bondy_oplog, sync_scheduler, Event], _Meas, _Meta) ->
     counter(bondy_oplog_sync_scheduler_events_total, [Event], 1);
-
 do_handle_event([bondy_oplog, scheduler, gc, trigger_outcome], _Meas, Meta) ->
-    Event = <<"trigger_",
-        (label(maps:get(outcome, Meta, undefined)))/binary>>,
+    Event = <<"trigger_", (label(maps:get(outcome, Meta, undefined)))/binary>>,
     counter(bondy_oplog_gc_scheduler_events_total, [Event], 1);
-
 do_handle_event([bondy_oplog, scheduler, gc, Event], _Meas, _Meta) ->
     counter(bondy_oplog_gc_scheduler_events_total, [Event], 1);
-
 do_handle_event([bondy_oplog, peer_state, excluded], Meas, Meta) ->
     counter(
         bondy_oplog_peer_exclusions_total,
         [instance_id(Meta)],
         max(1, num(count, Meas))
     );
-
 do_handle_event([bondy_oplog, retirement, completed], _Meas, _Meta) ->
     counter(bondy_oplog_retirements_total, [completed], 1);
-
 do_handle_event([bondy_oplog, retirement, skipped], _Meas, _Meta) ->
     counter(bondy_oplog_retirements_total, [skipped], 1);
-
 do_handle_event([bondy_oplog, secondary_writer, flush], Meas, Meta) ->
     NS = maps:get(namespace, Meta, undefined),
     Index = maps:get(index_name, Meta, undefined),
@@ -838,7 +819,6 @@ do_handle_event([bondy_oplog, secondary_writer, flush], Meas, Meta) ->
         [],
         num(duration_us, Meas)
     );
-
 do_handle_event([bondy_oplog, secondary_writer, saturated], Meas, Meta) ->
     counter(
         bondy_oplog_secondary_saturated_dropped_total,
@@ -848,7 +828,6 @@ do_handle_event([bondy_oplog, secondary_writer, saturated], Meas, Meta) ->
         ],
         max(1, num(dropped_ops, Meas))
     );
-
 do_handle_event([bondy_oplog, secondary_index, rebuild], _Meas, Meta) ->
     counter(
         bondy_oplog_secondary_rebuilds_total,
@@ -858,7 +837,6 @@ do_handle_event([bondy_oplog, secondary_index, rebuild], _Meas, Meta) ->
         ],
         1
     );
-
 do_handle_event([bondy_oplog_core, metrics, refresh], Meas, Meta) ->
     NS = maps:get(namespace, Meta, undefined),
     gauge(bondy_oplog_core_cache_hit_ratio, [NS], num(cache_hit_rate, Meas)),
@@ -870,7 +848,6 @@ do_handle_event([bondy_oplog_core, metrics, refresh], Meas, Meta) ->
         [NS],
         num(current_freshness_lag_max_ms, Meas)
     );
-
 do_handle_event([bondy_mst, merge, stop], Meas, _Meta) ->
     counter(bondy_mst_merges_total, [ok], 1),
     histogram(
@@ -878,30 +855,23 @@ do_handle_event([bondy_mst, merge, stop], Meas, _Meta) ->
         [],
         native_to_us(num(duration, Meas))
     );
-
 do_handle_event([bondy_mst, merge, exception], _Meas, _Meta) ->
     counter(bondy_mst_merges_total, [error], 1);
-
 do_handle_event([bondy_mst, merge, abandoned], _Meas, _Meta) ->
     counter(bondy_mst_merges_abandoned_total, [], 1);
-
 do_handle_event([bondy_mst, gc, stop], _Meas, _Meta) ->
     counter(bondy_mst_gc_runs_total, [ok], 1);
-
 do_handle_event([bondy_mst, gc, exception], _Meas, _Meta) ->
     counter(bondy_mst_gc_runs_total, [error], 1);
-
 do_handle_event([bondy_mst, broadcast, Direction], Meas, _Meta) ->
     counter(bondy_mst_broadcasts_total, [Direction], 1),
     counter(bondy_mst_broadcast_bytes_total, [Direction], num(bytes, Meas));
-
 do_handle_event([bondy_mst, page_store, Op], Meas, Meta) when
     Op == put orelse Op == get
 ->
     Id = instance_id(Meta),
     counter(bondy_mst_page_store_ops_total, [Id, Op], 1),
     counter(bondy_mst_page_store_bytes_total, [Id, Op], num(page_bytes, Meas));
-
 do_handle_event([bondy_mst, page_store, SealKind], Meas, Meta) when
     SealKind == seal_incoming orelse SealKind == seal_roll
 ->
@@ -915,7 +885,6 @@ do_handle_event([bondy_mst, page_store, SealKind], Meas, Meta) when
     histogram(
         bondy_mst_seal_duration_microseconds, [Kind], num(duration_us, Meas)
     );
-
 do_handle_event([bondy_mst, page_store, gc], Meas, Meta) ->
     Id = instance_id(Meta),
     counter(
@@ -938,108 +907,89 @@ do_handle_event([bondy_mst, page_store, gc], Meas, Meta) ->
         [Id],
         num(bytes_freed, Meas)
     );
-
 do_handle_event([bondy_mst, page_store, recovery], _Meas, Meta) ->
     counter(
         bondy_mst_page_store_recoveries_total,
         [instance_id(Meta), result_label(maps:get(result, Meta, undefined))],
         1
     );
-
 do_handle_event([bondy_mst, page_store, idx_rebuild], _Meas, Meta) ->
     counter(
         bondy_mst_pack_idx_rebuilds_total,
         [instance_id(Meta), result_label(maps:get(result, Meta, undefined))],
         1
     );
-
 do_handle_event(_Event, _Meas, _Meta) ->
     ok.
-
-
 
 %% =============================================================================
 %% PRIVATE: COLLECTOR GAUGE FAMILIES
 %% =============================================================================
-
-
 
 %% @private
 %% Scrape-time gauge families. Each fun returns `[{Labels, Value}]`; an
 %% empty list (or a crash, caught by the caller) skips the family.
 families() ->
     [
-        {bondy_cluster_members,
-            "Size of the Partisan membership view.",
-            gauge, fun cluster_members/0},
-        {bondy_cluster_connected_peers,
-            "Number of connected Partisan peers.",
+        {bondy_cluster_members, "Size of the Partisan membership view.", gauge,
+            fun cluster_members/0},
+        {bondy_cluster_connected_peers, "Number of connected Partisan peers.",
             gauge, fun cluster_connected/0},
         {bondy_cluster_all_members_connected,
-            "1 when every member of the Partisan view is reachable.",
-            gauge, fun cluster_all_connected/0},
+            "1 when every member of the Partisan view is reachable.", gauge,
+            fun cluster_all_connected/0},
         {bondy_cluster_peer_connected,
-            "Per-peer Partisan connectivity (1 connected, 0 not).",
-            gauge, fun cluster_peer_rows/0},
-        {bondy_oplog_aae_enabled,
-            "1 when AAE is enabled on this node.",
-            gauge, fun aae_enabled/0},
-        {bondy_oplog_instances,
-            "Oplog instances by bootstrap lifecycle state.",
+            "Per-peer Partisan connectivity (1 connected, 0 not).", gauge,
+            fun cluster_peer_rows/0},
+        {bondy_oplog_aae_enabled, "1 when AAE is enabled on this node.", gauge,
+            fun aae_enabled/0},
+        {bondy_oplog_instances, "Oplog instances by bootstrap lifecycle state.",
             gauge, fun instances_by_lifecycle/0},
         {bondy_oplog_instance_lifecycle_code,
             "Per-instance lifecycle (0 starting, 1 pre_bootstrap, 2 live).",
             gauge, fun instance_lifecycle_rows/0},
         {bondy_oplog_instance_live_size,
-            "Per-instance live (unapplied overlay) size.",
-            gauge, fun instance_live_size_rows/0},
+            "Per-instance live (unapplied overlay) size.", gauge,
+            fun instance_live_size_rows/0},
         {bondy_oplog_instance_frontier_hash,
             "Stable hash of the applied-frontier version vector. Equal "
-            "across nodes iff the instance is converged.",
-            gauge, fun frontier_hash_rows/0},
+            "across nodes iff the instance is converged.", gauge,
+            fun frontier_hash_rows/0},
         {bondy_oplog_instance_frontier_origins,
-            "Number of origins in the applied-frontier version vector.",
-            gauge, fun frontier_origin_rows/0},
+            "Number of origins in the applied-frontier version vector.", gauge,
+            fun frontier_origin_rows/0},
         {bondy_oplog_instance_frontier_seq_total,
             "Sum of per-origin max sequence numbers in the applied "
             "frontier. Monotone; cross-node differences show replication "
-            "lag.",
-            gauge, fun frontier_seq_rows/0},
+            "lag.", gauge, fun frontier_seq_rows/0},
         {bondy_oplog_peer_last_sync_age_seconds,
             "Seconds since the last completed sync with a peer, per "
-            "(instance, peer).",
-            gauge, fun() -> peer_age_rows(last_sync) end},
+            "(instance, peer).", gauge, fun() -> peer_age_rows(last_sync) end},
         {bondy_oplog_peer_last_seen_age_seconds,
-            "Seconds since a peer was last seen, per (instance, peer).",
-            gauge, fun() -> peer_age_rows(last_seen) end},
-        {bondy_oplog_peer_state_entries,
-            "Rows in the peer sync-state table.",
+            "Seconds since a peer was last seen, per (instance, peer).", gauge,
+            fun() -> peer_age_rows(last_seen) end},
+        {bondy_oplog_peer_state_entries, "Rows in the peer sync-state table.",
             gauge, fun peer_state_size/0},
         {bondy_oplog_core_ae_lag_milliseconds,
-            "Per-shard AE freshness lag of the substrate.",
-            gauge, fun ae_lag_rows/0},
-        {bondy_oplog_gc_scheduler_inflight,
-            "In-flight MST GC/compaction runs.",
+            "Per-shard AE freshness lag of the substrate.", gauge,
+            fun ae_lag_rows/0},
+        {bondy_oplog_gc_scheduler_inflight, "In-flight MST GC/compaction runs.",
             gauge, fun gc_scheduler_inflight/0}
     ].
-
 
 %% @private
 cluster_members() ->
     [{[], length(members())}].
 
-
 %% @private
 cluster_connected() ->
     [{[], length(connected())}].
-
 
 %% @private
 cluster_all_connected() ->
     Members = members(),
     Reachable = lists:usort([self_node() | connected()]),
     [{[], bool_to_int(Members -- Reachable == [])}].
-
 
 %% @private
 cluster_peer_rows() ->
@@ -1059,12 +1009,10 @@ cluster_peer_rows() ->
      || N <- Nodes
     ].
 
-
 %% @private
 aae_enabled() ->
     Enabled = application:get_env(bondy_oplog, aae_enabled, false) == true,
     [{[], bool_to_int(Enabled)}].
-
 
 %% @private
 instances_by_lifecycle() ->
@@ -1077,14 +1025,12 @@ instances_by_lifecycle() ->
     ),
     [{[{lifecycle, State}], N} || {State, N} <- maps:to_list(Counts)].
 
-
 %% @private
 instance_lifecycle_rows() ->
     [
         {[{instance_id, Id}], lifecycle_code(lifecycle(Id))}
      || Id <- instances()
     ].
-
 
 %% @private
 instance_live_size_rows() ->
@@ -1100,7 +1046,6 @@ instance_live_size_rows() ->
         instances()
     ).
 
-
 %% @private
 frontier_hash_rows() ->
     [
@@ -1108,11 +1053,9 @@ frontier_hash_rows() ->
      || Id <- instances()
     ].
 
-
 %% @private
 frontier_origin_rows() ->
     [{[{instance_id, Id}], map_size(frontier(Id))} || Id <- instances()].
-
 
 %% @private
 frontier_seq_rows() ->
@@ -1123,7 +1066,6 @@ frontier_seq_rows() ->
         }
      || Id <- instances()
     ].
-
 
 %% @private
 %% Emits the per-instance WAL writer gauges from ONE parallel gather of
@@ -1136,14 +1078,14 @@ collect_wal(CB) ->
             _:_ -> []
         end,
     Families = [
-        {bondy_oplog_wal_size_bytes,
-            "Total bytes across live WAL segments.", bytes_total},
-        {bondy_oplog_wal_live_segments,
-            "Live WAL segments.", live_segments_count},
+        {bondy_oplog_wal_size_bytes, "Total bytes across live WAL segments.",
+            bytes_total},
+        {bondy_oplog_wal_live_segments, "Live WAL segments.",
+            live_segments_count},
         {bondy_oplog_wal_pending_fsync_bytes,
             "Bytes appended but not yet fsynced.", pending_fsync_bytes},
-        {bondy_oplog_wal_waiters,
-            "Callers blocked awaiting WAL durability.", waiter_count},
+        {bondy_oplog_wal_waiters, "Callers blocked awaiting WAL durability.",
+            waiter_count},
         {bondy_oplog_wal_head_lag_milliseconds,
             "Age of the newest unfsynced append.", head_lag_ms}
     ],
@@ -1174,7 +1116,6 @@ collect_wal(CB) ->
         "1 when the WAL is in hard backpressure.",
         Backpressure
     ).
-
 
 %% @private
 %% Emits the sync-scheduler gauges from ONE `info/0` call per scrape.
@@ -1226,19 +1167,15 @@ collect_sync_scheduler(CB) ->
         Inflight
     ).
 
-
 %% @private
 emit_gauge_mf(_CB, _Name, _Help, []) ->
     ok;
-
 emit_gauge_mf(CB, Name, Help, Metrics) ->
     CB(prometheus_model_helpers:create_mf(Name, Help, gauge, Metrics)).
-
 
 %% @private
 bp_to_int(ok) -> 0;
 bp_to_int(_) -> 1.
-
 
 %% @private
 peer_age_rows(Key) ->
@@ -1265,14 +1202,12 @@ peer_age_rows(Key) ->
         instances()
     ).
 
-
 %% @private
 peer_state_size() ->
     case catch bondy_oplog_peer_state:info() of
         #{table_size := N} when is_integer(N) -> [{[], N}];
         _ -> []
     end.
-
 
 %% @private
 ae_lag_rows() ->
@@ -1304,14 +1239,12 @@ ae_lag_rows() ->
         Namespaces
     ).
 
-
 %% @private
 gc_scheduler_inflight() ->
     case catch bondy_oplog_gc_scheduler:info() of
         #{in_flight := N} when is_integer(N) -> [{[], N}];
         _ -> []
     end.
-
 
 %% @private
 %% Re-exposes every counter/gauge accumulated in `bondy_metrics` (the
@@ -1348,7 +1281,9 @@ collect_bondy_metrics(CB) ->
                 end,
             CB(
                 prometheus_model_helpers:create_mf(
-                    Name, "bondy_metrics registry passthrough.", PromType,
+                    Name,
+                    "bondy_metrics registry passthrough.",
+                    PromType,
                     Metrics
                 )
             )
@@ -1356,13 +1291,9 @@ collect_bondy_metrics(CB) ->
         ByName
     ).
 
-
-
 %% =============================================================================
 %% PRIVATE: RUNTIME STATE READERS
 %% =============================================================================
-
-
 
 %% @private
 instances() ->
@@ -1371,14 +1302,12 @@ instances() ->
         _ -> []
     end.
 
-
 %% @private
 frontier(Id) ->
     case catch bondy_oplog_registry:frontier(Id) of
         F when is_map(F) -> F;
         _ -> #{}
     end.
-
 
 %% @private
 lifecycle(Id) ->
@@ -1388,12 +1317,10 @@ lifecycle(Id) ->
         _ -> starting
     end.
 
-
 %% @private
 lifecycle_code(starting) -> 0;
 lifecycle_code(pre_bootstrap) -> 1;
 lifecycle_code(live) -> 2.
-
 
 %% @private
 self_node() ->
@@ -1403,7 +1330,6 @@ self_node() ->
         _:_ -> node()
     end.
 
-
 %% @private
 members() ->
     case catch partisan_peer_service:members() of
@@ -1412,14 +1338,12 @@ members() ->
         _ -> []
     end.
 
-
 %% @private
 connected() ->
     case catch partisan:nodes() of
         N when is_list(N) -> N;
         _ -> []
     end.
-
 
 %% @private
 %% Gathers `bondy_oplog_wal:info/1` snapshots for every instance with a WAL
@@ -1457,11 +1381,9 @@ wal_infos() ->
     flush_wal_infos(Alias),
     Infos.
 
-
 %% @private
 await_wal_infos(_Alias, 0, _Deadline, Acc) ->
     Acc;
-
 await_wal_infos(Alias, Pending, Deadline, Acc) ->
     Timeout = max(0, Deadline - erlang:monotonic_time(millisecond)),
     receive
@@ -1473,7 +1395,6 @@ await_wal_infos(Alias, Pending, Deadline, Acc) ->
         Acc
     end.
 
-
 %% @private
 flush_wal_infos(Alias) ->
     receive
@@ -1482,37 +1403,27 @@ flush_wal_infos(Alias) ->
         ok
     end.
 
-
-
 %% =============================================================================
 %% PRIVATE: HELPERS
 %% =============================================================================
 
-
-
 %% @private
 counter(Name, LabelValues, Value) when is_integer(Value), Value >= 0 ->
     prometheus_counter:inc(Name, LabelValues, Value);
-
 counter(_, _, _) ->
     ok.
-
 
 %% @private
 gauge(Name, LabelValues, Value) when is_number(Value) ->
     prometheus_gauge:set(Name, LabelValues, Value);
-
 gauge(_, _, _) ->
     ok.
-
 
 %% @private
 histogram(Name, LabelValues, Value) when is_number(Value), Value >= 0 ->
     prometheus_histogram:observe(Name, LabelValues, round(Value));
-
 histogram(_, _, _) ->
     ok.
-
 
 %% @private
 num(Key, Map) ->
@@ -1521,14 +1432,11 @@ num(Key, Map) ->
         _ -> 0
     end.
 
-
 %% @private
 native_to_us(N) when is_integer(N) ->
     erlang:convert_time_unit(N, native, microsecond);
-
 native_to_us(_) ->
     0.
-
 
 %% @private
 instance_id(Meta) ->
@@ -1537,34 +1445,27 @@ instance_id(Meta) ->
         Other -> label(Other)
     end.
 
-
 %% @private
 %% Renders an arbitrary term as a bounded, printable label value.
 label(V) when is_atom(V) ->
     atom_to_binary(V);
-
 label(V) when is_binary(V) ->
     V;
-
 label(V) ->
     unicode:characters_to_binary(io_lib:format("~0p", [V])).
-
 
 %% @private
 result_label(ok) -> ok;
 result_label({error, _}) -> error;
 result_label(_) -> unknown.
 
-
 %% @private
 bool_to_int(true) -> 1;
 bool_to_int(false) -> 0.
 
-
 %% @private
 label_map_to_list(L) when is_map(L) ->
     lists:keysort(1, [{K, label_value(V)} || {K, V} <- maps:to_list(L)]).
-
 
 %% @private
 label_value(V) when is_atom(V) orelse is_binary(V) -> V;

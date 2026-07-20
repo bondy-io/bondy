@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_prometheus_db_test).
 -moduledoc """
 EUnit coverage for the `bondy_prometheus_db` telemetry→Prometheus bridge:
@@ -15,29 +14,23 @@ declaration idempotence, event-to-metric mapping, handler crash-immunity
 
 -define(ID, <<"test_instance">>).
 
-
 %% =============================================================================
 %% FIXTURE
 %% =============================================================================
 
-
 bridge_test_() ->
-    {setup,
-        fun test_setup/0,
-        fun test_cleanup/1,
-        [
-            fun setup_is_idempotent/0,
-            fun wal_events_are_counted/0,
-            fun applier_stage_events_are_counted/0,
-            fun sync_events_are_counted/0,
-            fun scheduler_events_are_counted/0,
-            fun mst_events_are_counted/0,
-            fun core_refresh_sets_gauges/0,
-            fun write_latency_sets_quantile_gauges/0,
-            fun malformed_event_does_not_detach_handler/0,
-            fun exposition_formats/0
-        ]}.
-
+    {setup, fun test_setup/0, fun test_cleanup/1, [
+        fun setup_is_idempotent/0,
+        fun wal_events_are_counted/0,
+        fun applier_stage_events_are_counted/0,
+        fun sync_events_are_counted/0,
+        fun scheduler_events_are_counted/0,
+        fun mst_events_are_counted/0,
+        fun core_refresh_sets_gauges/0,
+        fun write_latency_sets_quantile_gauges/0,
+        fun malformed_event_does_not_detach_handler/0,
+        fun exposition_formats/0
+    ]}.
 
 test_setup() ->
     {ok, Started1} = application:ensure_all_started(telemetry),
@@ -45,22 +38,18 @@ test_setup() ->
     ok = bondy_prometheus_db:setup(),
     Started1 ++ Started2.
 
-
 test_cleanup(Started) ->
     ok = bondy_prometheus_db:teardown(),
     _ = [application:stop(App) || App <- lists:reverse(Started)],
     ok.
 
-
 %% =============================================================================
 %% TESTS
 %% =============================================================================
 
-
 setup_is_idempotent() ->
     ?assertEqual(ok, bondy_prometheus_db:setup()),
     ?assertEqual(ok, bondy_prometheus_db:setup()).
-
 
 wal_events_are_counted() ->
     Meta = #{instance_id => ?ID, segment => 1, offset => 0},
@@ -101,7 +90,6 @@ wal_events_are_counted() ->
     ?assertEqual(1, lists:sum(BucketCounts)),
     ?assertEqual(250, round(Sum)).
 
-
 applier_stage_events_are_counted() ->
     Meta = #{instance_id => ?ID},
     ok = telemetry:execute(
@@ -136,7 +124,6 @@ applier_stage_events_are_counted() ->
         1, prometheus_counter:value(bondy_oplog_applier_rejected_total, [?ID])
     ).
 
-
 sync_events_are_counted() ->
     Meta = #{instance_id => ?ID, peer => 'peer@127.0.0.1'},
     Duration = erlang:convert_time_unit(1500, microsecond, native),
@@ -153,7 +140,6 @@ sync_events_are_counted() ->
         bondy_oplog_sync_duration_microseconds, [ok]
     ),
     ?assertEqual(1, lists:sum(BucketCounts)).
-
 
 scheduler_events_are_counted() ->
     ok = telemetry:execute(
@@ -176,7 +162,6 @@ scheduler_events_are_counted() ->
             bondy_oplog_sync_scheduler_events_total, [<<"bootstrap_started">>]
         )
     ).
-
 
 mst_events_are_counted() ->
     Meta = #{instance_id => ?ID},
@@ -209,7 +194,6 @@ mst_events_are_counted() ->
         )
     ).
 
-
 core_refresh_sets_gauges() ->
     ok = telemetry:execute(
         [bondy_oplog_core, metrics, refresh],
@@ -236,13 +220,16 @@ core_refresh_sets_gauges() ->
         )
     ).
 
-
 write_latency_sets_quantile_gauges() ->
     ok = telemetry:execute(
         [bondy_oplog, instance, write_latency],
         #{
-            count => 100, mean_us => 500, p50_us => 400,
-            p95_us => 900, p99_us => 1200, max_us => 3000
+            count => 100,
+            mean_us => 500,
+            p50_us => 400,
+            p95_us => 900,
+            p99_us => 1200,
+            max_us => 3000
         },
         #{instance_id => ?ID, interval_ms => 1000}
     ),
@@ -259,7 +246,6 @@ write_latency_sets_quantile_gauges() ->
         )
     ).
 
-
 malformed_event_does_not_detach_handler() ->
     %% Measurements/metadata with unexpected shapes must be swallowed:
     %% telemetry silently detaches a handler whose callback raises.
@@ -272,7 +258,6 @@ malformed_event_does_not_detach_handler() ->
      || H <- telemetry:list_handlers([bondy_oplog, wal, append])
     ],
     ?assert(lists:member(bondy_prometheus_db, Ids)).
-
 
 exposition_formats() ->
     Output = prometheus_text_format:format(),

@@ -2976,9 +2976,7 @@ reap_one_cell(Adapter, Handle, Kernel, Id, {Bucket, Key}, Retired) ->
         skip,
         skip,
         fun(Hlc, State, ValueBytes) ->
-            case
-                bondy_oplog_cell_kernel:reap_origins(Kernel, State, Retired)
-            of
+            case bondy_oplog_cell_kernel:reap_origins(Kernel, State, Retired) of
                 {NewState, [_ | _] = Ids} ->
                     StateBytes2 = bondy_oplog_cell_kernel:encode_state(
                         Kernel, NewState

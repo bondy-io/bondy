@@ -441,7 +441,9 @@ collect_partition(Relation, Realm, [Shard | Rest], Lo, Target, Acc) ->
 %% global `Target` is reached (`{filled, Acc}`) or the shard's band is
 %% exhausted (`{exhausted, Acc}`). Mirrors `collect/7` but single-shard and
 %% shard-tagging, so a chunk's over-fetch absorbs the decoder's rejected rows.
-collect_shard(#relation{table = Table} = Relation, Realm, Shard, Lo, Target, Acc) ->
+collect_shard(
+    #relation{table = Table} = Relation, Realm, Shard, Lo, Target, Acc
+) ->
     Remaining = Target - length(Acc),
     Chunk = erlang:max(Remaining, ?CHUNK_MIN),
     RangeOpts = #{limit => Chunk, shard => Shard},
