@@ -103,7 +103,6 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 -type bucket() :: term().
 -type range_opts() :: #{
     limit => pos_integer(),
-    direction => asc | desc,
     atom() => term()
 }.
 

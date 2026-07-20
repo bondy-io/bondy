@@ -77,8 +77,8 @@ init([]) ->
         bondy_oplog_gc_scheduler:child_spec(#{}),
         %% Projection-cell reclamation: a SECOND gc_scheduler instance on
         %% its own (much slower) cadence, driving the causal-stability
-        %% sweep. Off by default (`reclaim_enabled`); an idle disabled
-        %% scheduler costs one process.
+        %% sweep. On by default (`reclaim_enabled`); a disabled scheduler
+        %% idles at the cost of one process.
         bondy_oplog_gc_scheduler:child_spec(#{
             name => bondy_oplog_reclaim_scheduler,
             enabled => bondy_oplog_config:reclaim_enabled(),

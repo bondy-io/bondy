@@ -76,7 +76,7 @@ overlay, fold_module}` for each `(NS, Index, Shard)` they manage.
 -export([subscribe/2]).
 -export([unsubscribe/1]).
 -export([publish/4]).
--export([publish_merge/4]).
+-export([publish_merge/5]).
 
 -export_type([bucket/0]).
 -export_type([read_opts/0]).
@@ -114,7 +114,6 @@ overlay, fold_module}` for each `(NS, Index, Shard)` they manage.
 %% leveled projection adapters.
 -type range_opts() :: #{
     limit => pos_integer(),
-    direction => asc | desc,
     include_overlay => boolean(),
     fence => bondy_oplog_hlc:hlc() | infinity,
     shard => non_neg_integer()
@@ -159,8 +158,8 @@ read(NS, Index, Bucket, Key) ->
 Bucket-aware point read of a single cell.
 
 The shard is selected by `phash2({Bucket, Key}, ShardCount)` unless the
-caller passes `Opts#{shard => N}`. The override exists for `shard_by =>
-realm` tables: their write hashes by `phash2(Realm, ShardCount)`, so the
+caller passes `Opts#{shard => N}`. The override exists for realm-partitioned
+tables: their write hashes by the realm-derived placement, so the
 point read MUST be forced onto the same realm-derived shard or it would
 hash `{Bucket, Key}` to a different shard and silently miss. Symmetric
 with `range/5`'s `shard` override.
@@ -239,6 +238,14 @@ result is a map keyed by the same four-tuple, mapping to the per-cell
 `read_result()`.
 
 See module doc for `Opts` semantics.
+
+**Status.** This is the consistency-class read primitive (the CP/AP split:
+`eventual | causal | snapshot`, fence + `max_lag` + skew refusal) and is
+covered by `bondy_oplog_core_consistency_class_test`, but it is NOT on the
+default auth read path — the AAE freshness fence at
+`bondy_auth:authenticate/4` (token_version + fence refusal) superseded it
+there. It is retained for the strict-realm / export / cluster-join class of
+consumers that need an explicitly fenced multi-cell read.
 """.
 -spec read_batch([batch_key()], read_batch_opts()) ->
     {ok, read_batch_result(), bondy_oplog_hlc:hlc()} | {error, term()}.
@@ -347,7 +354,6 @@ the results.
 ## Opts
 
 - `limit` — max rows in the result (default `1000`).
-- `direction` — `asc` (default) or `desc`.
 - `include_overlay` — set `false` to exclude pending events (default `true`).
 - `fence` — HLC ceiling for overlay events (default `infinity`).
 - `shard` — explicit shard override.
@@ -389,7 +395,6 @@ merges the per-shard results into a single globally-sorted list.
 
 - `limit` — global cap on rows in the result (default `1000`). Applied
   after merge.
-- `direction` — `asc` (default) or `desc`.
 - `include_overlay` — set `false` to exclude pending events (default
   `true`). Propagated to every per-shard scan.
 - `fence` — HLC ceiling for overlay events (default `infinity`).
@@ -417,7 +422,6 @@ If `(NS, Index)` has no registered shards the call returns `{ok, []}`.
 range_all(NS, Index, Bucket, {Low, High}, Opts) when
     is_atom(NS), is_atom(Index), is_map(Opts)
 ->
-    Direction = maps:get(direction, Opts, asc),
     Limit = maps:get(limit, Opts, 1000),
     Shards = shards_in(NS, Index),
     T0 = erlang:monotonic_time(microsecond),
@@ -425,7 +429,7 @@ range_all(NS, Index, Bucket, {Low, High}, Opts) when
     DurUs = erlang:monotonic_time(microsecond) - T0,
     case Result of
         {ok, Rows} ->
-            Merged = merge_sorted_ranges(Rows, Direction),
+            Merged = merge_sorted_ranges(Rows),
             Truncated = lists:sublist(Merged, Limit),
             emit_range_all_event(
                 NS,
@@ -598,12 +602,21 @@ publish(NS, Key, Hlc, Op) ->
 -doc """
 Publish a remote-merge event. Fired by the replay path when anti-entropy merges
 a peer's write into the local projection, so node-local reactors can react to
-peer-originated changes. See `bondy_oplog_core_dispatcher:publish_merge/4`.
+peer-originated changes. `Old` is the pre-merge cell value (`undefined` when
+the cell did not exist), letting a reactor diff old vs new — e.g. detect a
+credential change or a remote write clobbering a differing local value. See
+`bondy_oplog_core_dispatcher:publish_merge/5`.
 """.
--spec publish_merge(atom(), term(), bondy_oplog_hlc:hlc(), term()) -> ok.
+-spec publish_merge(
+    NS :: atom(),
+    Key :: term(),
+    Hlc :: bondy_oplog_hlc:hlc(),
+    Op :: term(),
+    Old :: term() | undefined
+) -> ok.
 
-publish_merge(NS, Key, Hlc, Op) ->
-    bondy_oplog_core_dispatcher:publish_merge(NS, Key, Hlc, Op).
+publish_merge(NS, Key, Hlc, Op, Old) ->
+    bondy_oplog_core_dispatcher:publish_merge(NS, Key, Hlc, Op, Old).
 
 %% =============================================================================
 %% Read path
@@ -621,7 +634,7 @@ resolve_shard(NS, Index, Bucket, Key) ->
     end.
 
 %% Point-read shard resolution honouring an explicit `shard` override
-%% (symmetry with `resolve_shard_for_range/5`). A `shard_by => realm`
+%% (symmetry with `resolve_shard_for_range/5`). A realm-partitioned
 %% table forces the point read onto the realm-derived shard via
 %% `Opts#{shard => N}` so write and read address the same shard; without
 %% the override the shard is hashed from `{Bucket, Key}`.
@@ -951,7 +964,6 @@ registry_lookup(NS, Index, Shard) ->
 
 do_range(Entry, Bucket, Low, High, Opts) ->
     Limit = maps:get(limit, Opts, 1000),
-    Direction = maps:get(direction, Opts, asc),
     IncludeOverlay = maps:get(include_overlay, Opts, true),
     Fence = maps:get(fence, Opts, infinity),
     Kernel = kernel_for(Entry),
@@ -964,12 +976,7 @@ do_range(Entry, Bucket, Low, High, Opts) ->
                 Entry, Bucket, Low, High, Fence, IncludeOverlay
             ),
             Merged = merge_range(Kernel, ProjEntries, OverlayEntries),
-            Ordered =
-                case Direction of
-                    asc -> Merged;
-                    desc -> lists:reverse(Merged)
-                end,
-            {ok, lists:sublist(Ordered, Limit)};
+            {ok, lists:sublist(Merged, Limit)};
         {error, _} = Err ->
             Err
     end.
@@ -1081,20 +1088,15 @@ drain_scatter([{_Pid, MRef} | Rest]) ->
     drain_scatter(Rest).
 
 %% Multi-way merge of per-shard range results into a single globally
-%% sorted list. Each input list is already sorted by Key for the
-%% requested direction; shards partition the keyspace under
-%% `phash2({Bucket, Key}, ShardCount)` so the union has no Key
-%% collisions, and a flat sort over the concatenation is correct.
-merge_sorted_ranges([], _Direction) ->
+%% sorted (ascending) list. Each input list is already key-sorted; shards
+%% partition the keyspace under `phash2({Bucket, Key}, ShardCount)` so the
+%% union has no Key collisions, and a flat sort over the concatenation is
+%% correct.
+merge_sorted_ranges([]) ->
     [];
-merge_sorted_ranges(PerShardRows, Direction) ->
+merge_sorted_ranges(PerShardRows) ->
     Flat = lists:append(PerShardRows),
-    Comparator =
-        case Direction of
-            asc -> fun({K1, _, _}, {K2, _, _}) -> K1 =< K2 end;
-            desc -> fun({K1, _, _}, {K2, _, _}) -> K1 >= K2 end
-        end,
-    lists:sort(Comparator, Flat).
+    lists:sort(fun({K1, _, _}, {K2, _, _}) -> K1 =< K2 end, Flat).
 
 emit_range_cell(Kernel, Frame, Events) ->
     {ProjState, ProjHlc} =

@@ -189,8 +189,9 @@ id belonged to which node.
   cannot confirm surfaces within one scheduler interval as telemetry naming
   the missing member, and as a rate-limited log line. A stall is always a
   fact about membership, and the remedy is always a membership decision.
-- Everything here is off by default. Enabling it, and every knob mentioned,
-  is covered in the [reclamation configuration reference](../configuration/reclamation_options.md).
+- Everything here is on by default. Every knob mentioned — including how to
+  disable reclamation or retirement — is covered in the
+  [reclamation configuration reference](../configuration/reclamation_options.md).
 
 ## See also
 

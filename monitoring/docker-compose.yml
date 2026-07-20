@@ -1,0 +1,53 @@
+# =============================================================================
+# Bondy monitoring stack: Prometheus + Grafana.
+#
+# Scrapes the local 3-node dev cluster (make node1 / node2 / node3) through
+# the Admin API /metrics endpoint on ports 18081 / 18181 / 18281 of the
+# Docker host. See prometheus/prometheus.yml to add or change targets.
+#
+#   docker compose up -d
+#   Grafana:    http://localhost:3000   (anonymous admin, no login)
+#   Prometheus: http://localhost:9090
+# =============================================================================
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.53.4
+    container_name: bondy-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      # Lets the container reach Bondy nodes running on the Docker host
+      # (already implicit on Docker Desktop for macOS/Windows; required on
+      # Linux).
+      - host.docker.internal:host-gateway
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: bondy-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      # Dev convenience: open Grafana straight into the dashboards without
+      # a login. Do NOT reuse this configuration outside a workstation.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_USERS_DEFAULT_THEME: system
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus-data:
+  grafana-data:

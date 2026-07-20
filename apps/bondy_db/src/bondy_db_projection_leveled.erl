@@ -47,7 +47,7 @@ one guaranteed present, **range scans enumerate `?SK_STATE`**, not
 
 ## Why head_only mode
 
-Two material wins over the previous `?BONDY_FOLD_TAG` normal-mode
+Two material wins over the previous normal-mode (custom leveled-tag)
 setup:
 
 1. **Atomic batched writes via `book_mput/2`**. The cell-apply engine's
@@ -73,36 +73,43 @@ inside the shard.
 ## Handle shape
 
 ```erlang
-#{bookie := pid()}
+#{bookie := pid() | {pt, PTKey :: term()}}
 ```
+
+A raw pid pins the Bookie for the handle's lifetime (the anonymous
+`single_bookie` / `per_entity` Bookies). The `{pt, PTKey}` form is a
+crash-following ROUTING REFERENCE (`bondy_db_leveled_sup:bookie_ref/2`):
+every call resolves the current pid through `persistent_term`, so a
+supervisor restart of a crashed keyed Bookie is transparent to every
+handle already captured by readers and the applier. The lookup is a
+few nanoseconds — no measurable hot-path cost.
 
 ## Required `Opts` for `open/4`
 
 | Key | Type | Meaning |
 |---|---|---|
-| `bookie` | `pid()` | The leveled Bookie this `(NS, Index, Shard)` writes to |
+| `bookie` | `pid() | {pt, term()}` | The leveled Bookie this `(NS, Index, Shard)` writes to |
 
 Anything else in `Opts` is ignored.
 
 ## Range bounds
 
-Leveled's `book_keylist/5` range is **inclusive** on both ends; the
-substrate contract is `[Low, High)` (half-open on the high side).
-The fold function below excludes any composite key whose underlying
-Key matches the High sentinel. Within each Key, only the
-`?SK_STATE` SubKey is enumerated for the range (it is the one subkey
-every cell is guaranteed to have — `value_equals_state` cells omit
-`?SK_VALUE`); the full V2 frame is then reconstructed on demand via
-`get/3`.
+Leveled's range folds are **inclusive** on both ends; the substrate
+contract is `[Low, High)` (half-open on the high side). The range
+fold excludes any composite key whose underlying Key matches the High
+sentinel. `range/5` streams ONE `book_headfold` over both subkeys —
+each Key's `?SK_STATE` and (when present) `?SK_VALUE` are stored
+consecutively, so the fold groups them and reconstructs each V2 frame
+inline (`value_equals_state` cells omit `?SK_VALUE` and re-encode as
+value-present frames, exactly as `get/3` does).
 
 ## What this adapter does NOT do
 
 - Open, stop, or supervise the Bookie.
 - Path management, journal/ledger directory creation, recovery.
 - Routing or topology decisions.
-- Reuse the legacy `?BONDY_FOLD_TAG` extractor at
-  `bondy_db_leveled_tag` — head_only mode bypasses extractors
-  entirely (HEAD bytes are written directly via `book_mput`).
+- Register any custom leveled tag/extractor — head_only mode bypasses
+  extractors entirely (HEAD bytes are written directly via `book_mput`).
 """).
 
 -behaviour(bondy_oplog_projection_adapter).
@@ -128,7 +135,7 @@ every cell is guaranteed to have — `value_equals_state` cells omit
 -define(SK_LOW, <<>>).
 -define(SK_HIGH, <<255, 255, 255, 255>>).
 
--type handle() :: #{bookie := pid()}.
+-type handle() :: #{bookie := pid() | {pt, term()}}.
 
 %% =============================================================================
 %% API
@@ -141,8 +148,10 @@ every cell is guaranteed to have — `value_equals_state` cells omit
     Opts :: map()
 ) -> {ok, handle()} | {error, term()}.
 
-open(_NS, _Index, _Shard, #{bookie := Pid} = _Opts) when is_pid(Pid) ->
-    {ok, #{bookie => Pid}};
+open(_NS, _Index, _Shard, #{bookie := B} = _Opts) when
+    is_pid(B) orelse (is_tuple(B) andalso element(1, B) =:= pt)
+->
+    {ok, #{bookie => B}};
 open(_NS, _Index, _Shard, Opts) when is_map(Opts) ->
     {error, {invalid_opts, Opts}}.
 
@@ -165,9 +174,10 @@ and surfaces here as not_found).
 -spec get(handle(), Bucket :: binary(), Key :: binary()) ->
     {ok, Frame :: binary()} | not_found.
 
-get(#{bookie := Pid}, Bucket, Key) when
+get(H, Bucket, Key) when
     is_binary(Bucket), is_binary(Key)
 ->
+    Pid = bookie(H),
     case read_state_subkey(Pid, Bucket, Key) of
         not_found ->
             not_found;
@@ -205,9 +215,10 @@ mechanism can skip the export and let the caller fall back to
 -spec head(handle(), Bucket :: binary(), Key :: binary()) ->
     {ok, HeadBytes :: binary()} | not_found.
 
-head(#{bookie := Pid}, Bucket, Key) when
+head(H, Bucket, Key) when
     is_binary(Bucket), is_binary(Key)
 ->
+    Pid = bookie(H),
     case leveled_bookie:book_headonly(Pid, Bucket, Key, ?SK_VALUE) of
         {ok, HeadBytes} ->
             {ok, HeadBytes};
@@ -239,7 +250,8 @@ typically receives N entries and issues ONE gen_server roundtrip.
 
 put_batch(_Handle, []) ->
     ok;
-put_batch(#{bookie := Pid}, Entries) when is_list(Entries) ->
+put_batch(H, Entries) when is_map(H), is_list(Entries) ->
+    Pid = bookie(H),
     ObjectSpecs = build_object_specs(Entries, []),
     case leveled_bookie:book_mput(Pid, ObjectSpecs) of
         ok -> ok;
@@ -247,18 +259,21 @@ put_batch(#{bookie := Pid}, Entries) when is_list(Entries) ->
     end.
 
 -doc """
-Range read over the value subkeys. Returns up to `Limit`
-`{Key, Frame}` pairs in the requested direction. Each `Frame` is the
-reconstructed V2 frame (one extra `book_headonly` per result to fetch
-the matching state subkey).
+Range read over `(Bucket, [Low, High))`. Returns up to `Limit`
+`{Key, Frame}` pairs in ascending key order. One streaming
+`book_headfold` over BOTH subkeys reconstructs every V2 frame in a
+single ledger pass — no per-result reads (see the implementation
+comment for why the old keylist-then-`book_headonly` N+1 was
+replaced).
 
-The high bound is **exclusive** (substrate contract); the
-keylist fold below filters out the matching key.
+The high bound is **exclusive** (substrate contract); leveled's
+`KeyRange` end is inclusive, so the fold drops a state subkey whose
+Key equals `High`.
 
-`High` may be the atom `infinity` for an open-ended scan (every value
-subkey `>= Low` in the bucket) — the form the secondary-index
-primary-scan fallback uses. It folds the whole bucket
-(`book_keylist/4`) rather than a bounded `KeyRange`.
+`High` may be the atom `infinity` for an open-ended scan (every cell
+with Key `>= Low` in the bucket) — the form the secondary-index
+primary-scan fallback uses. It folds the whole bucket rather than a
+bounded `KeyRange`.
 """.
 -spec range(
     handle(),
@@ -268,14 +283,14 @@ primary-scan fallback uses. It folds the whole bucket
     Opts :: bondy_oplog_projection_adapter:range_opts()
 ) -> {ok, [{Key :: binary(), Frame :: binary()}]} | {error, term()}.
 
-range(#{bookie := Pid}, Bucket, Low, High, Opts) when
+range(H, Bucket, Low, High, Opts) when
     is_binary(Bucket),
     is_binary(Low),
     (is_binary(High) orelse High =:= infinity),
     is_map(Opts)
 ->
+    Pid = bookie(H),
     Limit = maps:get(limit, Opts, 1000),
-    Direction = maps:get(direction, Opts, asc),
     %% ONE streaming head-fold over BOTH subkeys reconstructs every frame in a
     %% single ledger pass. The value lives in the head (no journal hop), so
     %% there is no need for the old keylist + per-key `get/3` — that was an N+1
@@ -315,11 +330,7 @@ range(#{bookie := Pid}, Bucket, Low, High, Opts) when
             throw:{limit_reached, S} -> S
         end,
     {_, FinalRev} = finalize_frame(Pending, 0, PairsRev),
-    PairsAsc = lists:reverse(FinalRev),
-    case Direction of
-        asc -> {ok, PairsAsc};
-        desc -> {ok, lists:reverse(PairsAsc)}
-    end.
+    {ok, lists:reverse(FinalRev)}.
 
 -doc """
 Delete both subkeys for `(Bucket, Key)` atomically via `book_mput/2`
@@ -327,9 +338,10 @@ with `remove` ops.
 """.
 -spec delete(handle(), Bucket :: binary(), Key :: binary()) -> ok.
 
-delete(#{bookie := Pid}, Bucket, Key) when
+delete(H, Bucket, Key) when
     is_binary(Bucket), is_binary(Key)
 ->
+    Pid = bookie(H),
     ObjectSpecs = [
         {remove, Bucket, Key, ?SK_STATE, null},
         {remove, Bucket, Key, ?SK_VALUE, null}
@@ -369,13 +381,15 @@ re-folding a secondary index from the primary.
 """.
 -spec clear(handle(), bondy_oplog_projection_adapter:clear_scope()) -> ok.
 
-clear(#{bookie := Pid}, {suffix, IndexName}) when is_atom(IndexName) ->
+clear(H, {suffix, IndexName}) when is_map(H), is_atom(IndexName) ->
+    Pid = bookie(H),
     Suffix = bondy_oplog_index_key:bucket_suffix(IndexName),
     Buckets = matching_buckets(Pid, Suffix),
     lists:foreach(fun(Bucket) -> clear_bucket(Pid, Bucket) end, Buckets);
-clear(#{bookie := Pid}, {entity, ET, IndexName}) when
-    is_binary(ET), is_atom(IndexName)
+clear(H, {entity, ET, IndexName}) when
+    is_map(H), is_binary(ET), is_atom(IndexName)
 ->
+    Pid = bookie(H),
     Buckets = entity_index_buckets(Pid, ET, IndexName),
     lists:foreach(fun(Bucket) -> clear_bucket(Pid, Bucket) end, Buckets).
 
@@ -412,12 +426,14 @@ Each cell is counted once off its always-present `?SK_STATE` subkey.
     handle(), bondy_oplog_projection_adapter:cell_keys_scope()
 ) -> [{binary(), term()}].
 
-cell_keys(#{bookie := Pid}, {entity, ET}) when is_binary(ET) ->
+cell_keys(H, {entity, ET}) when is_map(H), is_binary(ET) ->
+    Pid = bookie(H),
     lists:flatmap(
         fun(Bucket) -> bucket_cell_keys(Pid, Bucket) end,
         primary_buckets(Pid, ET)
     );
-cell_keys(#{bookie := Pid}, all_primary) ->
+cell_keys(H, all_primary) when is_map(H) ->
+    Pid = bookie(H),
     lists:flatmap(
         fun(Bucket) -> bucket_cell_keys(Pid, Bucket) end,
         all_primary_buckets(Pid)
@@ -425,10 +441,10 @@ cell_keys(#{bookie := Pid}, all_primary) ->
 
 -spec info(handle()) -> #{atom() => term()}.
 
-info(#{bookie := Pid}) ->
+info(H) when is_map(H) ->
     #{
         backend => leveled,
-        bookie => Pid,
+        bookie => bookie(H),
         tag => ?HEAD_TAG,
         subkey_state => ?SK_STATE,
         subkey_value => ?SK_VALUE
@@ -575,6 +591,17 @@ clear_bucket(Pid, Bucket) ->
                 pause -> ok
             end
     end.
+
+%% Resolve the handle's Bookie to its CURRENT pid. A raw pid is returned
+%% as-is; a `{pt, PTKey}` routing reference resolves through
+%% `persistent_term` so a supervisor-restarted Bookie (new pid) is picked
+%% up by every existing handle. A missing registration (the pool was
+%% stopped) raises `badarg` — the caller is racing shutdown and the crash
+%% surfaces where the stale handle was used.
+bookie(#{bookie := Pid}) when is_pid(Pid) ->
+    Pid;
+bookie(#{bookie := {pt, PTKey}}) ->
+    persistent_term:get(PTKey).
 
 %% Read the state subkey, returning {ok, Hlc, StateBytes} | not_found.
 read_state_subkey(Pid, Bucket, Key) ->

@@ -140,7 +140,7 @@ merge_event_fires_on_remote_write(Config) ->
     Events = erpc:call(N2, ?MODULE, collector_drain, []),
     Merges = [
         K
-     || {bondy_oplog_core_merge_event, _, K, _, _} <- Events,
+     || {bondy_oplog_core_merge_event, _, K, _, _, _} <- Events,
         binary:match(K, LKey) =/= nomatch
     ],
     ?assertEqual([], Merges),
@@ -540,7 +540,7 @@ wait_for_merge_event_loop(Node, Username, Deadline) ->
     Events = erpc:call(Node, ?MODULE, collector_drain, []),
     Found = [
         K
-     || {bondy_oplog_core_merge_event, _NS, K, _Hlc, _Op} <- Events,
+     || {bondy_oplog_core_merge_event, _NS, K, _Hlc, _Op, _Old} <- Events,
         binary:match(K, Username) =/= nomatch
     ],
     case Found of
@@ -815,7 +815,7 @@ collector_loop(Acc) ->
         {get, From} ->
             From ! {merge_collector_events, lists:reverse(Acc)},
             collector_loop(Acc);
-        {bondy_oplog_core_merge_event, _, _, _, _} = E ->
+        {bondy_oplog_core_merge_event, _, _, _, _, _} = E ->
             collector_loop([E | Acc]);
         {bondy_oplog_core_event, _, _, _, _} = E ->
             collector_loop([E | Acc]);

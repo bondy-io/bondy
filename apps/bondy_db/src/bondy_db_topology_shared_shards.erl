@@ -15,8 +15,8 @@ Topology where **N Bookies are shared across every table**.
 ```
 DB (shard_count = 16)
 ├── Bookie(0)            ← holds all tables' shard-0 data
-│   ├── bucket=<<"t0">>  <<"R1/k1">>  → frame
-│   ├── bucket=<<"t1">>  <<"R1/k7">>  → frame
+│   ├── bucket=<<"t0">>  <<"R1",0,"k1">>  → frame
+│   ├── bucket=<<"t1">>  <<"R1",0,"k7">>  → frame
 │   └── ...
 ├── Bookie(1)            ← holds all tables' shard-1 data
 │   └── ...
@@ -27,8 +27,9 @@ DB (shard_count = 16)
 Each table calls `open_table/4` with the same `ShardCount`. The
 topology starts N Bookies once (lazily, on first `open_table`) and
 reuses them for every subsequent table. The bucket distinguishes
-entity types within a Bookie; the (Realm, Key) composite is folded
-into the cell key by the facade as in the other topologies.
+entity types within a Bookie; the facade folds the realm into the
+storage key with a NUL separator (`<<Realm, 0, Key>>` — G-1), so each
+realm's cells form a contiguous, scannable band within the bucket.
 
 ## Why this topology
 
@@ -73,12 +74,16 @@ becomes inconsistent.
     entity_type := atom(),
     shard_count := pos_integer(),
     bucket      := binary(),
-    shards      := #{Shard :: non_neg_integer() := pid()}
+    shards      := #{Shard :: non_neg_integer() := {pt, term()}}
 }
 ```
 
-`shards` is a *view* of the topology-wide Bookies; the topology
-itself owns the lifetime.
+`shards` is a *view* of the topology-wide Bookies; the topology itself
+owns the lifetime. Each value is a `bondy_db_leveled_sup:bookie_ref/2`
+routing reference (NOT the raw pid): the projection adapter resolves it
+per call through `persistent_term`, so a supervisor restart of a crashed
+Bookie is transparently followed by every handle already in circulation
+(readers AND the applier).
 
 ## Bucket
 
@@ -256,21 +261,33 @@ get_or_start_shards(
                     Sup, {shard, I}, BookOpts
                 )
             of
-                {ok, Bookie} ->
-                    get_or_start_shards(I + 1, N, State, Acc#{I => Bookie});
+                {ok, _Bookie} ->
+                    %% Route by REFERENCE, not pid — the ref survives a
+                    %% supervisor restart of the Bookie (crash recovery).
+                    Ref = bondy_db_leveled_sup:bookie_ref(Sup, {shard, I}),
+                    get_or_start_shards(I + 1, N, State, Acc#{I => Ref});
                 {error, _} = Err ->
-                    %% Best-effort rollback of Bookies THIS call started.
-                    %% On the reuse path `get_or_start_bookie/3` returns
-                    %% existing pids without error, so a rollback only fires
-                    %% on the first (creating) table — never closing a pool a
-                    %% sibling table is already using.
-                    [?COMMON:stop_bookie_safe(B) || B <- maps:values(Acc)],
+                    rollback_shards(Sup, Acc),
                     Err
             end;
         {error, _} = Err ->
-            [?COMMON:stop_bookie_safe(B) || B <- maps:values(Acc)],
+            rollback_shards(Sup, Acc),
             Err
     end.
+
+%% @private
+%% Best-effort rollback of Bookies THIS call started. On the reuse path
+%% `get_or_start_bookie/3` returns existing pids without error, so a rollback
+%% only fires on the first (creating) table — never closing a pool a sibling
+%% table is already using. Must go through `stop_bookie/2` (terminate +
+%% delete + handle erase): a plain close would leave a `permanent` child for
+%% the supervisor to immediately restart.
+rollback_shards(Sup, Acc) ->
+    _ = [
+        bondy_db_leveled_sup:stop_bookie(Sup, {shard, I})
+     || I <- maps:keys(Acc)
+    ],
+    ok.
 
 shard_dir(Dir, Shard) ->
     filename:join([Dir, integer_to_list(Shard)]).

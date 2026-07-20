@@ -58,8 +58,8 @@ late appends; `bondy_oplog_origin_bans` stays an operator tool.
 
 ## Enablement
 
-Gated by `bondy_oplog` env `origin_retirement` (default `false`); Step 9
-of the plan owns flipping defaults. The transport is taken from the
+Gated by `bondy_oplog` env `origin_retirement` (default `true` — the pass
+is idempotent and fail-closed). The transport is taken from the
 `sync_session_opts` env (same source as AAE); with the default inline
 transport a member query cannot address a remote node and the pass aborts —
 fail-closed, never fail-open.
@@ -344,10 +344,6 @@ reap_complement(MemberOrigins, Forgotten) ->
         dead_origins => Dead,
         origins_reaped => Reaped
     }}.
-
-%% @private
-reap_targets([]) -> [];
-reap_targets(_Dead) -> bondy_oplog:list_instances().
 
 %% @private
 reap_instance(InstanceId, Dead) ->

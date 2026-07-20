@@ -67,34 +67,21 @@ Indeces for matching bondy_registry_entry(s).
 
 -record(continuation, {
     store :: t(),
-    %% undefined when source == plum_db otherwise an entry_type()
     type :: optional(entry_type()),
     function :: atom(),
     policies :: [binary()] | '_',
-    %% undefined when source == plum_db otherwise an uri()
     realm_uri :: optional(uri()),
     uri :: uri(),
     opts :: map(),
-    source :: ets | plum_db,
     original :: optional(
         term()
         | ets:continuation()
-        | prefix_continuation()
         | eot()
     )
 }).
 
--record(prefix_continuation, {
-    table :: ets:tab(),
-    match_spec :: reg_idx(),
-    match_spec_compiled :: reference(),
-    uri :: uri(),
-    next :: optional(index_key() | ?EOT)
-}).
-
 -opaque t() :: #bondy_registry_store{}.
 -opaque continuation() :: #continuation{}.
--type prefix_continuation() :: #prefix_continuation{}.
 -type partial(T) :: {T, continuation() | eot()}.
 -type reg_idx() :: #reg_idx{}.
 -type sub_idx() :: #sub_idx{}.
@@ -937,7 +924,6 @@ match_exact(Store, registration, RealmUri, Uri, Opts) ->
                 policies = Policies,
                 opts = Opts,
                 store = Store,
-                source = ets,
                 original = ETSCont
             },
             {project(Store, L), C}
@@ -1877,7 +1863,7 @@ id_set_match(Id, Eligible, Exclude) ->
 %% =============================================================================
 
 %% @private
-continue(#continuation{source = ets} = C0) ->
+continue(#continuation{} = C0) ->
     case ets:select(C0#continuation.original) of
         ?EOT ->
             ?EOT;
@@ -2105,7 +2091,6 @@ match_local_exact_subscription(Store, RealmUri, Uri, Opts) ->
                 uri = Uri,
                 opts = Opts,
                 store = Store,
-                source = ets,
                 original = ETSCont
             },
             {project(Store, L), C}
@@ -2147,7 +2132,6 @@ match_remote_exact_subscription(Store, RealmUri, Uri, Opts) ->
                 uri = Uri,
                 opts = Opts,
                 store = Store,
-                source = ets,
                 original = ETSCont
             },
             {project(Store, L), C}

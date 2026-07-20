@@ -72,7 +72,7 @@ read_honours_shard_override() ->
     %% override the read hashes to the unregistered shard 1 → error; with
     %% `shard => 0` it resolves to the registered shard and returns the
     %% value. This proves the override forces a shard the hash would never
-    %% select — the invariant a `shard_by => realm` table relies on.
+    %% select — the invariant a realm-partitioned table relies on.
     NS = mk_ns(),
     {Setup, #{projection := PH}} = setup_shard(NS, primary, 0, 4, lww_register),
     Key = pick_key_for_shard(NS, primary, 1),

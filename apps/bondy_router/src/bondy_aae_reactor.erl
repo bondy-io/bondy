@@ -10,7 +10,7 @@ Node-local reactor for bondy_db **remote-merge** changes.
 Subscribes to the change-notification namespaces of the bondy_db tables whose
 remote (anti-entropy) changes require a node-local side-effect, and acts on the
 `{bondy_oplog_core_merge_event, ...}` tag published by the merge-side hook
-(`bondy_oplog_core:publish_merge/4`). Local writes are handled inline at their
+(`bondy_oplog_core:publish_merge/5`). Local writes are handled inline at their
 own write/delete chokepoints, so the `{bondy_oplog_core_event, ...}` (local) tag
 is ignored here.
 
@@ -19,12 +19,24 @@ is ignored here.
 | Table                   | Remote change | Side-effect |
 |-------------------------|---------------|-------------|
 | `security_users`        | delete        | close this node's sessions for the user (`bondy.user.deleted`) |
+| `security_users`        | credential change | close this node's sessions for the user (`bondy.user.credentials_changed`) |
 | `bondy_realm`           | delete        | close this node's sessions for the realm (`wamp.close.close_realm`) |
-| `security_user_grants`  | grant/revoke  | invalidate this node's cached RBAC contexts for the realm (§9.5) |
-| `security_group_grants` | grant/revoke  | invalidate this node's cached RBAC contexts for the realm (§9.5) |
+| `security_user_grants`  | grant/revoke  | invalidate this node's cached RBAC contexts for the realm (§9.5) + conflict alarm |
+| `security_group_grants` | grant/revoke  | invalidate this node's cached RBAC contexts for the realm (§9.5) + conflict alarm |
 | `security_group_members`| add/remove    | invalidate this node's cached RBAC contexts for the realm (§9.5) |
+| `security_sources`      | set/delete    | conflict alarm only (sources gate *new* connections; no live-session effect) |
 | `bondy_registration`    | create/delete | add / remove the peer's registration in this node's routing trie |
 | `bondy_subscription`    | create/delete | add / remove the peer's subscription in this node's routing trie |
+
+The **conflict alarm** is the lww safety valve for the authorization tables
+(design §3): grants and sources deliberately stay last-writer-wins, so when a
+remote merge replaces an existing *different* local value the losing write is
+silently discarded. The reactor cannot tell a genuinely newer remote edit from
+a concurrent one (lww carries no causal context), so it over-approximates:
+every remote replacement of a differing value emits a
+`[bondy, aae, merge_conflict]` telemetry event and a warning log naming realm
+and table. Operators who never edit the same grant on two nodes concurrently
+will never see it fire.
 
 The split mirrors the authn-vs-authz distinction in the local write path: an
 **authentication-level** change (a user or realm *delete*) tears the affected
@@ -53,11 +65,11 @@ Node-level masking on `node_down` / `node_up` (presence SUSPEND / RESUME) is
 `bondy_registry`, so it needs no replicated event. Only cluster-wide *removals*
 ride AAE as `clear`s, and those are what this reactor applies.
 
-A peer's user *credential change* (a `set` rather than a `clear`) does not yet
-close sessions here: the merge hook carries no old value, so this node cannot
-tell a credential change from a metadata edit without re-reading every live
-session. That refinement is deferred; tokens/tickets still converge to revoked
-via the CRDT regardless. A realm `set` (create / update) likewise needs no
+A peer's user *credential change* (a `set` whose password / authorized keys
+differ from the pre-merge value carried by the event) closes this node's
+sessions for the user, mirroring the local credential-change chokepoint
+(`bondy_rbac_user`) and the legacy plum_db `on_merge` behaviour. A metadata-only
+`set` is a no-op. A realm `set` (create / update) likewise needs no
 session-close.
 
 ## Subscription lifecycle
@@ -90,7 +102,7 @@ the dispatcher is configured to effectively never restart.
 -record(sub, {
     table :: atom(),
     label :: string(),
-    kind :: user | realm | grant | member | registry,
+    kind :: user | realm | grant | member | source | registry,
     ns :: atom() | undefined,
     ref :: reference() | undefined
 }).
@@ -107,10 +119,11 @@ the dispatcher is configured to effectively never restart.
 
 -ifdef(TEST).
 %% Exposed for unit testing the reaction logic without a running cluster.
--export([react_user/2]).
+-export([react_user/3]).
 -export([react_realm/2]).
--export([react_grant/2]).
+-export([react_grant/4]).
 -export([react_member/2]).
+-export([react_source/4]).
 -export([react_registry/4]).
 -export([owner_up/1]).
 -export([unfold_user_key/1]).
@@ -185,11 +198,12 @@ handle_cast(_Msg, State) ->
 handle_info(retry_subscribe, State) ->
     {noreply, subscribe(State)};
 handle_info(
-    {bondy_oplog_core_merge_event, NS, Key, _Hlc, Op}, State
+    {bondy_oplog_core_merge_event, NS, Key, _Hlc, Op, Old}, State
 ) ->
     %% A peer's change to a reacted-on table arrived via anti-entropy; route it
-    %% to the matching reaction by namespace.
-    ok = react(NS, Key, Op, State),
+    %% to the matching reaction by namespace. `Old` is the pre-merge cell value
+    %% (`undefined` when the cell did not exist).
+    ok = react(NS, Key, Op, Old, State),
     {noreply, State};
 handle_info({bondy_oplog_core_event, _NS, _Key, _Hlc, _Op}, State) ->
     %% Local write — its side-effects fire inline at the write chokepoint.
@@ -241,6 +255,11 @@ reacted_tables() ->
             table = ?BONDY_DB_GROUP_MEMBERS_TAB,
             label = "security_group_members",
             kind = member
+        },
+        #sub{
+            table = ?BONDY_DB_SOURCE_TAB,
+            label = "security_sources",
+            kind = source
         },
         #sub{
             table = ?BONDY_DB_REGISTRATION_TAB,
@@ -304,16 +323,18 @@ ensure_subscribed(#sub{table = Table, label = Label} = Sub) ->
 %% @private
 %% Route a delivered merge event to the reaction for its namespace. An event for
 %% a namespace not (yet) bound — or with no reaction — is ignored.
-react(NS, Key, Op, #state{subs = Subs, entries = Entries}) ->
+react(NS, Key, Op, Old, #state{subs = Subs, entries = Entries}) ->
     case lists:keyfind(NS, #sub.ns, Subs) of
         #sub{kind = user} ->
-            react_user(Key, Op);
+            react_user(Key, Op, Old);
         #sub{kind = realm} ->
             react_realm(Key, Op);
-        #sub{kind = grant} ->
-            react_grant(Key, Op);
+        #sub{kind = grant, label = Label} ->
+            react_grant(Label, Key, Op, Old);
         #sub{kind = member} ->
             react_member(Key, Op);
+        #sub{kind = source, label = Label} ->
+            react_source(Label, Key, Op, Old);
         #sub{kind = registry} ->
             react_registry(Entries, NS, Key, Op);
         false ->
@@ -322,12 +343,14 @@ react(NS, Key, Op, #state{subs = Subs, entries = Entries}) ->
 
 %% @private
 %% React to a remote security_users change. A `clear` (delete) closes this
-%% node's sessions for the user; a `set` is a no-op here (see moduledoc). The
-%% delete arrives as bondy_db's short-form `clear` atom (the explicit
-%% `{clear, Hlc}` form is accepted too).
-react_user(Key, clear) ->
-    react_user(Key, {clear, undefined});
-react_user(Key, {clear, _Hlc}) ->
+%% node's sessions for the user; a `set` closes them only when the merge
+%% changed the user's credential material relative to the pre-merge value
+%% (`Old`), mirroring the local credential-change chokepoint and the legacy
+%% plum_db `on_merge`. Ops arrive as bondy_db's short forms (`{set, Value}` /
+%% `clear`); the explicit HLC-carrying forms are accepted too.
+react_user(Key, clear, Old) ->
+    react_user(Key, {clear, undefined}, Old);
+react_user(Key, {clear, _Hlc}, _Old) ->
     {RealmUri, Username} = unfold_user_key(Key),
     ?LOG_INFO(#{
         description =>
@@ -336,8 +359,54 @@ react_user(Key, {clear, _Hlc}) ->
         username => Username
     }),
     bondy_rbac_user:close_sessions(RealmUri, Username, ?BONDY_USER_DELETED);
-react_user(_Key, _Op) ->
+react_user(Key, {set, Value}, Old) ->
+    react_user_set(Key, Value, Old);
+react_user(Key, {set, _Hlc, Value}, Old) ->
+    react_user_set(Key, Value, Old);
+react_user(_Key, _Op, _Old) ->
     ok.
+
+%% @private
+react_user_set(Key, New, Old) ->
+    case credentials_changed(New, Old) of
+        true ->
+            {RealmUri, Username} = unfold_user_key(Key),
+            ?LOG_INFO(#{
+                description =>
+                    "Closing local sessions for a user whose credentials "
+                    "changed on a peer node",
+                realm_uri => RealmUri,
+                username => Username
+            }),
+            bondy_rbac_user:close_sessions(
+                RealmUri, Username, ?BONDY_USER_CREDENTIALS_CHANGED
+            );
+        false ->
+            ok
+    end.
+
+%% @private
+%% Whether a merged user value changed the credential material relative to the
+%% pre-merge value. Same rule as the legacy plum_db `on_merge`: a credential
+%% counts as changed when the NEW value carries it and it differs — a create
+%% (`Old = undefined`) or a metadata-only edit is not a change. Total: any
+%% non-map shape answers `false` (never crash the reactor).
+credentials_changed(New, Old) when is_map(New) andalso is_map(Old) ->
+    password_changed(New, Old) orelse authorized_keys_changed(New, Old);
+credentials_changed(_New, _Old) ->
+    false.
+
+%% @private
+password_changed(New, Old) ->
+    NewPassword = maps:get(password, New, undefined),
+    NewPassword =/= undefined andalso
+        NewPassword =/= maps:get(password, Old, undefined).
+
+%% @private
+authorized_keys_changed(New, Old) ->
+    NewKeys = maps:get(authorized_keys, New, undefined),
+    NewKeys =/= undefined andalso
+        NewKeys =/= maps:get(authorized_keys, Old, undefined).
 
 %% @private
 %% React to a remote bondy_realm change. A `clear` (delete) closes this node's
@@ -363,15 +432,64 @@ react_realm(_Key, _Op) ->
 %% context would compute, so each invalidates this node's sessions for the realm
 %% in place (§9.5): the next authorize re-reads the subject's current grants. No
 %% teardown — an authorization change re-evaluates, it does not drop the session.
-%% Realm-wide because a group-grant change affects every member.
-react_grant(Key, _Op) ->
+%% Realm-wide because a group-grant change affects every member. Additionally
+%% raises the lww conflict alarm when the merge replaced a differing value.
+react_grant(Label, Key, Op, Old) ->
     RealmUri = unfold_grant_key(Key),
+    ok = maybe_conflict_alarm(Label, RealmUri, Op, Old),
     ?LOG_INFO(#{
         description =>
             "Invalidating local RBAC contexts after a peer grant change",
         realm_uri => RealmUri
     }),
     bondy_session_manager:invalidate_rbac_all(RealmUri).
+
+%% @private
+%% React to a remote security_sources change: conflict alarm only. Sources gate
+%% authentication of NEW connections — established sessions are unaffected, so
+%% there is nothing to invalidate or close; the next connection attempt reads
+%% the merged value. The alarm is the reaction (design §3): sources stay lww,
+%% so a silently discarded concurrent edit must at least be observable.
+react_source(Label, Key, Op, Old) ->
+    RealmUri = unfold_grant_key(Key),
+    maybe_conflict_alarm(Label, RealmUri, Op, Old).
+
+%% @private
+%% The lww conflict alarm (design §3): a remote merge REPLACED an existing,
+%% differing value of an authorization cell. Under lww the losing write is
+%% silently discarded; the reactor cannot distinguish a genuinely newer remote
+%% edit from a concurrent one (lww carries no causal context), so this
+%% over-approximates — it fires on every remote replacement of a differing
+%% value. Emits `[bondy, aae, merge_conflict]` telemetry + a warning log.
+%% A create (`Old = undefined`), an identical rewrite, and a `clear` (a revoke
+%% is an intended removal, not a conflict) are all silent.
+maybe_conflict_alarm(Label, RealmUri, Op, Old) ->
+    New =
+        case Op of
+            {set, V} -> V;
+            {set, _Hlc, V} -> V;
+            _ -> undefined
+        end,
+    case New =/= undefined andalso Old =/= undefined andalso New =/= Old of
+        true ->
+            telemetry:execute(
+                [bondy, aae, merge_conflict],
+                #{count => 1},
+                #{table => Label, realm_uri => RealmUri}
+            ),
+            ?LOG_WARNING(#{
+                description =>
+                    "A remote anti-entropy merge replaced a different local "
+                    "value of an authorization cell (last-writer-wins). If "
+                    "both nodes edited it concurrently, the losing edit was "
+                    "discarded — re-check the intended value.",
+                table => Label,
+                realm_uri => RealmUri
+            }),
+            ok;
+        false ->
+            ok
+    end.
 
 %% @private
 %% React to a remote group-membership change (security_group_members). An

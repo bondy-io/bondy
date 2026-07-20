@@ -1,0 +1,33 @@
+# =============================================================================
+# Prometheus scrape configuration for a local Bondy dev cluster.
+#
+# Bondy serves Prometheus metrics on the Admin API HTTP listener at
+# /metrics (default port 18081). The `make node1/node2/node3` dev cluster
+# offsets each node by +100: 18081 / 18181 / 18281.
+#
+# The `node` label matches the Partisan node name and drives the dashboard's
+# node selector.
+# =============================================================================
+
+global:
+  scrape_interval: 10s
+  scrape_timeout: 8s
+  evaluation_interval: 10s
+
+scrape_configs:
+  - job_name: bondy
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:18081"]
+        labels:
+          node: bondy1@127.0.0.1
+      - targets: ["host.docker.internal:18181"]
+        labels:
+          node: bondy2@127.0.0.1
+      - targets: ["host.docker.internal:18281"]
+        labels:
+          node: bondy3@127.0.0.1
+      # edge1 dev node (make edge1):
+      # - targets: ["host.docker.internal:19081"]
+      #   labels:
+      #     node: edge1@127.0.0.1

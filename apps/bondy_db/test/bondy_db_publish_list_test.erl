@@ -22,8 +22,13 @@ publish_list_test_() ->
             {"publish off by default — no events", fun publish_off/0},
             {"list/2 enumerates all cells; clear removes from the scan",
                 fun list_scans/0},
+            {timeout, 120,
+                {"list/2 pages past the substrate range cap (complete result)",
+                    fun list_pages_to_completion/0}},
             {"short-form ops: term values, auto HLC, decoded reads",
-                fun short_form_ops/0}
+                fun short_form_ops/0},
+            {"a NUL-bearing realm is refused (G-1 injectivity)",
+                fun nul_realm_refused/0}
         ]
     end}.
 
@@ -129,6 +134,31 @@ short_form_ops() ->
         ok = bondy_db:close(Db)
     end.
 
+%% list/2 must page internally past `range_all/5`'s merged-page cap (1000):
+%% a realm with more rows than the cap gets the COMPLETE enumeration, not a
+%% silently truncated first page.
+list_pages_to_completion() ->
+    {Db, T} = open(list_page, false),
+    N = 1203,
+    try
+        ok = lists:foreach(
+            fun(I) ->
+                Key = iolist_to_binary(io_lib:format("k~4..0b", [I])),
+                ok = bondy_db:apply(
+                    T, <<"r">>, Key, {set, bondy_db:tick(T), <<"v">>}
+                )
+            end,
+            lists:seq(1, N)
+        ),
+        {ok, Rows} = bondy_db:list(T, <<"r">>),
+        ?assertEqual(N, length(Rows)),
+        %% Complete AND ascending — the page seams neither drop nor reorder.
+        Keys = [K || {K, _, _} <- Rows],
+        ?assertEqual(lists:sort(Keys), Keys)
+    after
+        ok = bondy_db:close(Db)
+    end.
+
 %% =============================================================================
 %% Helpers
 %% =============================================================================
@@ -149,3 +179,30 @@ open(Name, Publish) ->
 %% Keep only live (binary-valued) cells as {Key, Value}, sorted by key.
 live(Cells) ->
     lists:sort([{K, V} || {K, V, _Hlc} <- Cells, is_binary(V)]).
+
+%% G-1's injectivity precondition, enforced at the facade: a NUL inside a
+%% realm would fold realms `<<"a">>` and `<<"a",0,"b">>` onto colliding
+%% storage cells, and the shorter realm's scan band would CONTAIN the longer
+%% realm's rows — a cross-tenant leak. Writes AND scans must refuse.
+nul_realm_refused() ->
+    {Db, T} = open(nul_realm, false),
+    try
+        Evil = <<"a", 0, "b">>,
+        ?assertError(
+            {badarg, {realm_contains_nul, Evil}},
+            bondy_db:apply(T, Evil, <<"k">>, {set, <<"v">>})
+        ),
+        ?assertError(
+            {badarg, {realm_contains_nul, Evil}},
+            bondy_db:list(T, Evil)
+        ),
+        ?assertError(
+            {badarg, {realm_contains_nul, Evil}},
+            bondy_db:read(T, Evil, <<"k">>)
+        ),
+        %% The victim realm is untouched and fully functional.
+        ok = bondy_db:apply(T, <<"a">>, <<"k">>, {set, <<"safe">>}),
+        ?assertMatch({ok, {<<"safe">>, _}}, bondy_db:read(T, <<"a">>, <<"k">>))
+    after
+        ok = bondy_db:close(Db)
+    end.

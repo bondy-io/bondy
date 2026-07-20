@@ -2719,7 +2719,7 @@ with_cell_state(
 %% must not reclaim — we have no evidence it is stale — so failure
 %% skips-and-counts and a later pass retries.
 sweep_one_cell(
-    #{adapter := Adapter, handle := Handle, kernel := Kernel},
+    #{adapter := Adapter, handle := Handle, kernel := Kernel} = MCtx,
     Overlay,
     Id,
     Bucket,
@@ -2741,9 +2741,7 @@ sweep_one_cell(
         bump(skipped, Acc),
         fun(_Hlc, State, _ValueBytes) ->
             apply_stabilize(
-                Adapter,
-                Handle,
-                Kernel,
+                MCtx,
                 Overlay,
                 Bucket,
                 Key,
@@ -2756,7 +2754,13 @@ sweep_one_cell(
 
 %% @private
 apply_stabilize(
-    Adapter, Handle, Kernel, Overlay, Bucket, Key, StableHlc, State, Acc
+    #{adapter := Adapter, handle := Handle, kernel := Kernel} = MCtx,
+    Overlay,
+    Bucket,
+    Key,
+    StableHlc,
+    State,
+    Acc
 ) ->
     case bondy_oplog_cell_kernel:stabilize(Kernel, StableHlc, State) of
         keep ->
@@ -2773,6 +2777,22 @@ apply_stabilize(
             case overlay_clear(Overlay, Bucket, Key) of
                 true ->
                     ok = Adapter:delete(Handle, Bucket, Key),
+                    %% The point-read cache and the A3 OldValue cache both
+                    %% mirror the projection; a reclaimed cell left in either
+                    %% would serve the pre-reclaim value (visible for a fold
+                    %% whose empty value is real data, e.g. a flag's `false`)
+                    %% or feed the next apply a stale OldState.
+                    bondy_oplog_cell_apply:invalidate_cache(
+                        maps:get(cache_adapter, MCtx, undefined),
+                        maps:get(cache_handle, MCtx, undefined),
+                        Bucket,
+                        Key
+                    ),
+                    bondy_oplog_cell_apply:oldstate_cache_delete(
+                        maps:get(oldstate_cache, MCtx, undefined),
+                        Bucket,
+                        Key
+                    ),
                     bump(discarded, Acc);
                 false ->
                     %% Pending work for this cell: leave it and retry on a

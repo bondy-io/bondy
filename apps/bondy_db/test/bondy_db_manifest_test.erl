@@ -26,10 +26,9 @@ configured() ->
         shard_count => 16,
         realm_prefix_depth => 1,
         tables => #{
-            security_users => #{shard_by => realm, aggregate_root => identity},
-            security_user_grants =>
-                #{shard_by => realm, aggregate_root => leading_col},
-            bondy_realm => #{shard_by => key, aggregate_root => identity}
+            security_users => #{aggregate_root => identity},
+            security_user_grants => #{aggregate_root => leading_col},
+            bondy_realm => #{aggregate_root => identity}
         }
     }.
 
@@ -50,7 +49,9 @@ manifest_test_() ->
         fun diff_identical/1,
         fun diff_scalar_change/1,
         fun diff_table_attr_change/1,
-        fun diff_table_added_removed/1
+        fun diff_table_added_removed/1,
+        fun hash_probe_skipped_when_absent_on_disk/1,
+        fun hash_probe_divergence_detected/1
     ]}.
 
 setup() ->
@@ -110,7 +111,13 @@ stamps_substrate_invariants(Dir) ->
         ?assertEqual(phash2, maps:get(hash_algo, Frozen)),
         %% instances_strategy is derived from the topology module
         %% (shared_shards ⇒ per_shard, the one-log-per-shard collapse).
-        ?assertEqual(per_shard, maps:get(instances_strategy, Frozen))
+        ?assertEqual(per_shard, maps:get(instances_strategy, Frozen)),
+        %% hash_probe records what phash2 actually computes over a fixed
+        %% sentinel, so an OTP change to phash2 shows up as a divergence.
+        ?assertEqual(
+            erlang:phash2({bondy_db_hash_probe, 42}, 1 bsl 27),
+            maps:get(hash_probe, Frozen)
+        )
     end.
 
 warn_mismatch_returns_on_disk_effective(Dir) ->
@@ -122,7 +129,7 @@ warn_mismatch_returns_on_disk_effective(Dir) ->
             shard_count => 32,
             tables => maps:put(
                 bondy_realm,
-                #{shard_by => realm, aggregate_root => identity},
+                #{aggregate_root => leading_col},
                 maps:get(tables, configured())
             )
         },
@@ -134,7 +141,7 @@ warn_mismatch_returns_on_disk_effective(Dir) ->
         %% Both diverging keys are named.
         Keys = [K || {K, _, _} <- Divs],
         ?assert(lists:member(shard_count, Keys)),
-        ?assert(lists:member({table, bondy_realm, shard_by}, Keys)),
+        ?assert(lists:member({table, bondy_realm, aggregate_root}, Keys)),
         %% The manifest on disk is unchanged (still the genesis one).
         {ok, #{frozen := Frozen}} = bondy_db_manifest:read(Dir),
         ?assertEqual(16, maps:get(shard_count, Frozen))
@@ -215,12 +222,12 @@ diff_table_attr_change(Dir) ->
         Changed = (configured())#{
             tables => maps:put(
                 security_users,
-                #{shard_by => key, aggregate_root => identity},
+                #{aggregate_root => leading_col},
                 maps:get(tables, configured())
             )
         },
         ?assertEqual(
-            [{{table, security_users, shard_by}, key, realm}],
+            [{{table, security_users, aggregate_root}, leading_col, identity}],
             bondy_db_manifest:diff(Changed, OnDisk)
         )
     end.
@@ -234,6 +241,27 @@ diff_table_added_removed(Dir) ->
         ?assertMatch(
             [{{table, bondy_realm}, '$absent', _}],
             bondy_db_manifest:diff(Changed, OnDisk)
+        )
+    end.
+
+hash_probe_skipped_when_absent_on_disk(Dir) ->
+    fun() ->
+        %% A manifest written before the probe existed has no baseline to
+        %% compare against — it must reconcile as a match, not a mismatch.
+        OnDisk = maps:remove(hash_probe, baseline(Dir)),
+        ?assertEqual([], bondy_db_manifest:diff(configured(), OnDisk))
+    end.
+
+hash_probe_divergence_detected(Dir) ->
+    fun() ->
+        %% Simulate a phash2 behaviour change: the on-disk manifest recorded a
+        %% different probe value than the running VM computes.
+        OnDisk0 = baseline(Dir),
+        Recorded = maps:get(hash_probe, OnDisk0),
+        OnDisk = OnDisk0#{hash_probe => Recorded + 1},
+        ?assertEqual(
+            [{hash_probe, Recorded, Recorded + 1}],
+            bondy_db_manifest:diff(configured(), OnDisk)
         )
     end.
 

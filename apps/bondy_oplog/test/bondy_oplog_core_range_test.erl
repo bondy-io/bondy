@@ -26,7 +26,6 @@ range_test_() ->
         fun projection_and_overlay_merge_per_key/0,
         fun half_open_interval_excludes_high_key/0,
         fun limit_caps_the_result/0,
-        fun direction_desc_reverses_result/0,
         fun include_overlay_false_drops_overlay_events/0,
         fun fence_excludes_overlay_events_past_it/0,
         fun overlay_only_undefined_terminal_is_filtered/0,
@@ -128,27 +127,6 @@ limit_caps_the_result() ->
     {ok, Rows} =
         bondy_oplog_core:range(NS, primary, {<<"k">>, <<"z">>}, #{limit => 2}),
     ?assertEqual(2, length(Rows)),
-    teardown_shard(Setup).
-
-direction_desc_reverses_result() ->
-    NS = mk_ns(),
-    {Setup, #{projection := PH}} =
-        setup_shard(NS, primary, 0, 1, lww_register),
-    materialise(PH, <<"a">>, {set, <<"va">>, 1}, 1),
-    materialise(PH, <<"b">>, {set, <<"vb">>, 2}, 2),
-    materialise(PH, <<"c">>, {set, <<"vc">>, 3}, 3),
-    {ok, Rows} =
-        bondy_oplog_core:range(NS, primary, {<<"a">>, <<"z">>}, #{
-            direction => desc
-        }),
-    ?assertEqual(
-        [
-            {<<"c">>, <<"vc">>, 3},
-            {<<"b">>, <<"vb">>, 2},
-            {<<"a">>, <<"va">>, 1}
-        ],
-        Rows
-    ),
     teardown_shard(Setup).
 
 include_overlay_false_drops_overlay_events() ->

@@ -148,16 +148,21 @@ uri_regex(Rule) ->
     uri_regex(Rule, Regex).
 
 %% @private
+%% The loose component class excludes whitespace, the URI separators — and
+%% ALL control characters (`\x00-\x1F`, `\x7F`). PCRE `\s` does NOT cover
+%% NUL, and a NUL-bearing URI accepted here would defeat the NUL-separator
+%% key encoding downstream (`bondy_db`'s G-1 realm fold) — a multi-tenancy
+%% boundary, not a cosmetic restriction.
 uri_regex(loose = Rule, undefined) ->
-    {ok, Regex} = re:compile("^([^\s\\.#]+\\.)*([^\s\\.#]+)$"),
+    {ok, Regex} = re:compile("^([^\s\\.#\\x00-\\x1F\\x7F]+\\.)*([^\s\\.#\\x00-\\x1F\\x7F]+)$"),
     ok = persistent_term:put({?MODULE, Rule}, Regex),
     Regex;
 uri_regex(loose_prefix = Rule, undefined) ->
-    {ok, Regex} = re:compile("^([^\s\\.#]+\\.)*([^\s\\.#]+)[.]?$"),
+    {ok, Regex} = re:compile("^([^\s\\.#\\x00-\\x1F\\x7F]+\\.)*([^\s\\.#\\x00-\\x1F\\x7F]+)[.]?$"),
     ok = persistent_term:put({?MODULE, Rule}, Regex),
     Regex;
 uri_regex(loose_allow_empty = Rule, undefined) ->
-    {ok, Regex} = re:compile("^(([^\s\\.#]+\\.)|\\.)*([^\s\\.#]+)?$"),
+    {ok, Regex} = re:compile("^(([^\s\\.#\\x00-\\x1F\\x7F]+\\.)|\\.)*([^\s\\.#\\x00-\\x1F\\x7F]+)?$"),
     ok = persistent_term:put({?MODULE, Rule}, Regex),
     Regex;
 uri_regex(strict = Rule, undefined) ->

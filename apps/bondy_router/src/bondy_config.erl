@@ -9,7 +9,7 @@ An implementation of the `app_config` behaviour.
 """.
 -behaviour(app_config).
 
-%% We renamed the default plum_db data channel
+%% The Partisan channel carrying bondy_db replication data.
 -define(BONDY_DB_DATA_CHANNEL, data).
 -define(WAMP_RELAY_CHANNEL, wamp_relay).
 -define(BONDY_AAE_CHANNEL, bondy_aae).
@@ -103,7 +103,6 @@ An implementation of the `app_config` behaviour.
         {membership_strategy, partisan_full_membership_strategy},
         {connect_disterl, false},
         {broadcast_mods, [
-            plum_db,
             partisan_plumtree_backend
         ]},
         %% Remote refs
@@ -344,21 +343,12 @@ setup_partisan_channels() ->
                 maps:merge(DefaultChannels, Channels1)
         end,
 
-    %% There is some redundancy as plum_db_config also configures channels, so
-    %% we make sure they coincide.
-    DataChannelOpts = maps:get(?BONDY_DB_DATA_CHANNEL, Channels),
-    application:set_env(plum_db, data_channel_opts, DataChannelOpts),
     application:set_env(partisan, channels, maps:to_list(Channels)).
 
 %% @private
 setup_partisan() ->
     %% We re-apply partisan config, this reads the partisan env and re-caches
-    %% the values.
-    %% We do this because partisan might have started already. Before we were
-    %% adding plum_db included application and we were synchronising using
-    %% application start phases but that so we could control when plum_db and
-    %% partisan were being load, but that complicates embedding plum_db in
-    %% other applications.
+    %% the values. We do this because partisan might have started already.
     ok = partisan_config:init(),
 
     %% We add the wamp_relay channel
@@ -419,20 +409,7 @@ dynamic_buffer(Key) ->
 
 %% @private
 prepare_private_config() ->
-    %% Retained messages used to inject a `{retained_messages, storage_type}`
-    %% plum_db prefix here; they now live in the durable bondy_db `core` table
-    %% (always durable — `wamp.message_retention.storage_type` is inert), so no
-    %% plum_db prefix is needed and the config knob no longer affects storage.
-    {ok, configure_plum_db(?CONFIG)}.
-
-%% @private
-configure_plum_db(Config) ->
-    PDBConfig = [
-        {data_channel, ?BONDY_DB_DATA_CHANNEL},
-        {prefixes, ?BONDY_DB_PREFIXES},
-        {data_dir, get(platform_data_dir)}
-    ],
-    key_value:set(plum_db, PDBConfig, Config).
+    {ok, ?CONFIG}.
 
 %% @private
 configure_registry() ->

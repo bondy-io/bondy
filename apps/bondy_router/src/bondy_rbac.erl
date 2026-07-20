@@ -398,13 +398,25 @@ get_context(RealmUri, Username, ExplicitGroups0) when
     ),
 
     %% Traverse explicit groups (from IdP claims) for their grants
-    {Acc1, Seen1} = acc_grants(ExplicitGroups, group, RealmProto, [], Acc0),
+    {Acc1, _Seen1} = acc_grants(ExplicitGroups, group, RealmProto, [], Acc0),
 
-    %% Also gather direct user grants (if any exist in grant tables)
-    {Acc2, _} = acc_grants([Username], user, RealmProto, Seen1, Acc1),
+    %% Also gather the user's DIRECT grants (rows whose role IS the username
+    %% in the user grant table). Deliberately NOT `acc_grants/5` on the
+    %% username: that traverses the user's LOCALLY-STORED group memberships,
+    %% which must not contribute here — the explicit (IdP-claimed) groups are
+    %% the sole authority on group-derived permissions for this session, and
+    %% folding local memberships back in would escalate a claim-restricted
+    %% session to the union of both.
+    UserGrants = lists:append(
+        find_grants(RealmUri, {Username, '_'}, user),
+        find_grants(ProtoUri, {Username, '_'}, user)
+    ),
 
     build_context(
-        RealmUri, Username, group_grants(lists:flatten(Acc2)), ExplicitGroups
+        RealmUri,
+        Username,
+        group_grants(lists:flatten([UserGrants | Acc1])),
+        ExplicitGroups
     ).
 
 get_metadata(_, anonymous) ->

@@ -46,6 +46,7 @@ all() ->
         anonymous_permission_denied_message,
         context_refresh_after_epoch,
         explicit_groups_oidc,
+        explicit_groups_exclude_local_memberships,
         nested_group_inheritance_deep,
         explicit_groups_deep_inheritance,
         externalize_grant_formats,
@@ -1242,6 +1243,63 @@ explicit_groups_oidc(_) ->
     ?assertError(
         {not_authorized, _},
         bondy_rbac:authorize(<<"wamp.publish">>, <<"com.admin.x">>, C)
+    ).
+
+%% Regression (found by prop_rbac_statem): explicit-groups contexts must NOT
+%% fold in grants from the user's LOCALLY-STORED group memberships. The
+%% explicit (IdP-claimed) list is the sole authority on group-derived
+%% permissions — a local membership outside the claims would otherwise
+%% escalate a claim-restricted session to the union of both. Direct user
+%% grants (role = the username itself) still apply.
+explicit_groups_exclude_local_memberships(_) ->
+    Uri = <<"com.test.oidc_local_membership">>,
+    _ = bondy_realm:create(#{
+        uri => Uri,
+        security_enabled => true,
+        authmethods => [?TRUST_AUTH],
+        groups => [
+            #{name => <<"claimed_g">>},
+            #{name => <<"local_g">>}
+        ],
+        %% The user IS locally a member of local_g...
+        users => [#{username => <<"claims_u">>, groups => [<<"local_g">>]}],
+        grants => [
+            #{
+                permissions => [<<"wamp.call">>],
+                uri => <<"com.claimed.">>,
+                match => <<"prefix">>,
+                roles => [<<"claimed_g">>]
+            },
+            #{
+                permissions => [<<"wamp.publish">>],
+                uri => <<"com.local.">>,
+                match => <<"prefix">>,
+                roles => [<<"local_g">>]
+            },
+            #{
+                permissions => [<<"wamp.subscribe">>],
+                uri => <<"com.direct.">>,
+                match => <<"prefix">>,
+                roles => [<<"claims_u">>]
+            }
+        ]
+    }),
+
+    %% ...but the session's claims name only claimed_g.
+    C = bondy_rbac:get_context(Uri, <<"claims_u">>, [<<"claimed_g">>]),
+
+    %% Claimed group's grant applies.
+    ?assertEqual(
+        ok, bondy_rbac:authorize(<<"wamp.call">>, <<"com.claimed.x">>, C)
+    ),
+    %% Direct user grant applies.
+    ?assertEqual(
+        ok, bondy_rbac:authorize(<<"wamp.subscribe">>, <<"com.direct.x">>, C)
+    ),
+    %% The local (unclaimed) membership's grant must NOT leak in.
+    ?assertError(
+        {not_authorized, _},
+        bondy_rbac:authorize(<<"wamp.publish">>, <<"com.local.x">>, C)
     ).
 
 %% =============================================================================

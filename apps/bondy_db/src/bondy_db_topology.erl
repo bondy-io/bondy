@@ -41,10 +41,10 @@ The behaviour distinguishes two pieces of state:
   any cross-table state.
 - `TableState` — per-table view derived from `State` at `open_table/4`
   time. Typically carries the per-shard `{Bookie, BookieOpts}` map that
-  `route/3` resolves against.
+  `route/2` resolves against.
 
 `open_table/4` returns both the new global `State` and the per-table
-`TableState`; the facade hands `TableState` to subsequent `route/3`
+`TableState`; the facade hands `TableState` to subsequent `route/2`
 calls and `close_table/2` calls. This separation lets a topology pool
 or share Bookies across tables (e.g., single_bookie reuses one Bookie
 for every entity type) while still giving each table a stable handle.
@@ -59,9 +59,10 @@ inside `open_table/4` and is handing back ready-to-use handles.
 
 The handle is **per-shard**, not per-`(shard, realm)`. The substrate
 (`bondy_oplog_core`) is keyed by `(Namespace, Index, Shard)` with no realm
-dimension; the facade folds `Realm` into the cell key
-(`<<Realm/binary, "/", UserKey/binary>>`) so a single per-shard handle
-serves every realm.
+dimension; for topologies whose Bucket does not carry the realm, the
+facade folds `Realm` into the storage key with a NUL separator
+(`<<Realm/binary, 0, UserKey/binary>>` — G-1, versioned by the manifest's
+`key_encoding_version`) so a single per-shard handle serves every realm.
 
 ## What the behaviour does NOT cover
 

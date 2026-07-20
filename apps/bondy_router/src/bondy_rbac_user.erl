@@ -14,7 +14,7 @@ applications. Users can be assigned group memberships.
 
 Users are persisted in `bondy_db`. The
 durable `security_users` table is provisioned by `bondy_namespace_catalog`
-(`fold => lww`, `shard_by => realm`). Each user (and each alias index entry)
+(`fold => lww`). Each user (and each alias index entry)
 is a cell keyed by its `Username` / `Alias` binary, addressed as
 `(Table, RealmUri, Key)` — the realm is the bucket.
 
@@ -1311,7 +1311,7 @@ page_member_groups(RealmUri, Users) ->
 %% reverses). Forced onto `Shard` (the band's co-located shard); pages past the
 %% row cap so a wide band (many users / groups) is never silently truncated.
 scan_member_band(RealmUri, Shard, Lo, Hi, Acc) ->
-    RangeOpts = #{limit => 1000, direction => asc, shard => Shard},
+    RangeOpts = #{limit => 1000, shard => Shard},
     case bondy_db:range(member_table(), RealmUri, Lo, Hi, RangeOpts) of
         {ok, []} ->
             Acc;
@@ -1391,7 +1391,7 @@ members_page(RealmUri, Group, After, Target) ->
 %% @private
 collect_members(RealmUri, Lo, Hi, Target, Acc) ->
     Chunk = erlang:max(Target, 64),
-    RangeOpts = #{limit => Chunk, direction => asc},
+    RangeOpts = #{limit => Chunk},
     %% Single-shard read: a group's reverse cells co-locate on the group's shard
     %% (`second_col(Lo) = Group`), so `range/5` resolves to that one shard rather
     %% than scattering — "members of a group" is a bounded single-shard band scan.

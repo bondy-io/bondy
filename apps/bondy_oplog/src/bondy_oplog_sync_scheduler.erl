@@ -236,6 +236,32 @@ failure backoff. Telemetry: `[bondy_oplog, sync_scheduler,
 live_sync_poll]` on each backed-off poll (with `window_ms`) and
 `[bondy_oplog, sync_scheduler, live_sync_skipped]` on each tick a
 converged instance is skipped.
+
+## Re-bootstrap on reclaimed peer pages
+
+A live pull that fails with `{peer_pages_unavailable, _}` is terminal for
+the page protocol: the peer explicitly no longer holds pages this replica
+needs — its compaction or stable-cell reclamation ran ahead of our sync —
+so retrying the pull can never succeed. The way forward is a catalogue
+snapshot re-bootstrap (`bondy_oplog_sync_session:bootstrap_catalogue/3`
+with a live caller), which ships the peer's *current* projection and then
+op-replays on top.
+
+The scheduler is the consumer of that terminal error. When a live
+session's exit reason carries `{peer_pages_unavailable, _}`, the
+instance is flagged for re-bootstrap
+(`[bondy_oplog, sync_scheduler, rebootstrap_scheduled]` telemetry fires)
+and, from the next tick, its live dispatch is replaced by a bootstrap
+dispatch routed through the regular bootstrap gates (load yield, retry
+backoff, both concurrency caps). The peer that reported the
+unavailability is offered first to the peer strategy — it certifiably
+holds a snapshot covering the reclaimed pages — but any member does:
+reclamation only ever discards what EVERY member confirmed holding.
+While the re-bootstrap session is in flight no live syncs are dispatched
+for the instance (they would fail with the same reason and waste cap
+slots); a failed re-bootstrap re-enters via the normal live path — the
+next unavailable pull re-flags it, and the bootstrap backoff paces the
+retries.
 """).
 
 -record(state, {
@@ -276,6 +302,7 @@ converged instance is skipped.
 -define(BACKOFF_TAB, bondy_oplog_sync_scheduler_backoff).
 -define(LIVE_BACKOFF_TAB, bondy_oplog_sync_scheduler_live_backoff).
 -define(LOAD_TAB, bondy_oplog_sync_scheduler_load).
+-define(REBOOTSTRAP_TAB, bondy_oplog_sync_scheduler_rebootstrap).
 %% EWMA smoothing factor for the node-load signal: the weight given to the
 %% newest per-tick sample. 0.3 keeps ~3 ticks of history, enough hysteresis
 %% that a single-tick burst does not flip the yield while still reacting
@@ -391,6 +418,7 @@ init(Opts) ->
     _ = ensure_table(?BACKOFF_TAB),
     _ = ensure_table(?LIVE_BACKOFF_TAB),
     _ = ensure_table(?LOAD_TAB),
+    _ = ensure_table(?REBOOTSTRAP_TAB),
     Dispatch =
         case maps:find(dispatch, Opts) of
             {ok, V} ->
@@ -475,12 +503,17 @@ handle_info(tick, State) ->
     {noreply, schedule_tick(run_tick(State))};
 handle_info({'DOWN', _MonRef, process, Pid, Reason}, State) ->
     case ets:lookup(?INFLIGHT_TAB, Pid) of
-        [{Pid, InstanceId, Kind, _Peer}] ->
+        [{Pid, InstanceId, Kind, Peer}] ->
             ets:delete(?INFLIGHT_TAB, Pid),
             %% Bootstrap failures drive the per-instance retry backoff; live
             %% sync failures are self-healing (the next tick re-dispatches
             %% under the same throttle/cap), so they carry no backoff state.
+            %% EXCEPT the terminal one: `peer_pages_unavailable` means the
+            %% peer reclaimed pages we still need — no retry can succeed, so
+            %% the instance is flagged for a snapshot re-bootstrap instead.
             Kind =:= bootstrap andalso update_backoff(InstanceId, Reason),
+            Kind =:= live andalso
+                maybe_flag_rebootstrap(InstanceId, Peer, Reason),
             telemetry:execute(
                 [bondy_oplog, sync_scheduler, Kind, ended],
                 #{remaining => inflight_count()},
@@ -625,7 +658,7 @@ current_load() ->
 %% Idempotently creates one of the scheduler's named work tables (all share
 %% the same `set, public, read+write-concurrency` shape). Tolerates a race on
 %% first creation (`badarg`). The named tables are `?RR_TAB`, `?INFLIGHT_TAB`,
-%% `?BACKOFF_TAB`, `?LIVE_BACKOFF_TAB`, `?LOAD_TAB`.
+%% `?BACKOFF_TAB`, `?LIVE_BACKOFF_TAB`, `?LOAD_TAB`, `?REBOOTSTRAP_TAB`.
 ensure_table(Name) ->
     case ets:info(Name) of
         undefined ->
@@ -736,6 +769,8 @@ default_dispatch(InstanceId, Peers) ->
 %%   2. Global in-flight cap.
 %% Backoff is checked first because an instance in backoff should
 %% not count against the cap — other instances still get a slot.
+%% Returns `dispatched | skipped` so the re-bootstrap path can tell
+%% whether its pending flag was consumed this tick.
 maybe_dispatch_bootstrap(InstanceId, Peers) ->
     %% Load gate first (cheapest, node-global): the snapshot ship is the
     %% heaviest AAE operation and a `pre_bootstrap` instance serves no reads
@@ -749,7 +784,7 @@ maybe_dispatch_bootstrap(InstanceId, Peers) ->
                 #{run_queue_ratio => current_load()},
                 #{instance_id => InstanceId}
             ),
-            ok;
+            skipped;
         false ->
             maybe_dispatch_bootstrap_backoff_check(InstanceId, Peers)
     end.
@@ -763,7 +798,7 @@ maybe_dispatch_bootstrap_backoff_check(InstanceId, Peers) ->
                 #{wait_ms => Wait, fail_count => FailCount},
                 #{instance_id => InstanceId}
             ),
-            ok;
+            skipped;
         {_, _} ->
             maybe_dispatch_bootstrap_cap_check(InstanceId, Peers)
     end.
@@ -795,11 +830,12 @@ maybe_dispatch_bootstrap_cap_check(InstanceId, Peers) ->
                 },
                 #{instance_id => InstanceId}
             ),
-            ok;
+            skipped;
         false ->
             Strategy = bondy_oplog_config:bootstrap_peer_strategy(),
             Peer = pick_bootstrap_peer(Strategy, InstanceId, Peers),
-            dispatch_bootstrap(InstanceId, Peer, Strategy)
+            dispatch_bootstrap(InstanceId, Peer, Strategy),
+            dispatched
     end.
 
 %% @private
@@ -986,7 +1022,23 @@ backoff_remaining(InstanceId) ->
 %% window to the base interval, so missed replication heals within at
 %% most one cap-length window and active divergence stays tick-fast.
 %% Bootstrap is unaffected (different lifecycle, its own backoff).
+%%
+%% The re-bootstrap check comes first — BEFORE the fence exemption: a
+%% fence-backing instance whose peer reclaimed pages would otherwise
+%% redispatch a doomed live pull every tick. While a re-bootstrap session
+%% is in flight nothing else is dispatched for the instance.
 maybe_dispatch_live(InstanceId, Peers) ->
+    case rebootstrap_state(InstanceId) of
+        inflight ->
+            ok;
+        {pending, Peer} ->
+            maybe_dispatch_rebootstrap(InstanceId, Peer, Peers);
+        none ->
+            do_maybe_dispatch_live(InstanceId, Peers)
+    end.
+
+%% @private
+do_maybe_dispatch_live(InstanceId, Peers) ->
     case backs_fence(InstanceId) of
         true ->
             %% This instance backs the auth freshness fence — its successful
@@ -1044,6 +1096,79 @@ backs_fence(InstanceId) ->
     case catch bondy_oplog_registry:ae_targets(InstanceId) of
         L when is_list(L) -> L =/= [];
         _ -> true
+    end.
+
+%% @private
+%% Flags a live instance for snapshot re-bootstrap when its sync session
+%% died on the terminal `peer_pages_unavailable` reason (the peer reclaimed
+%% pages we still need — see the module doc). Any other exit reason is the
+%% self-healing kind and leaves no state. Called from
+%% `handle_info({'DOWN', ...})` for `live` sessions only.
+maybe_flag_rebootstrap(
+    InstanceId, Peer, {sync_failed, {peer_pages_unavailable, _}}
+) ->
+    _ = ensure_table(?REBOOTSTRAP_TAB),
+    ets:insert(?REBOOTSTRAP_TAB, {InstanceId, Peer}),
+    telemetry:execute(
+        [bondy_oplog, sync_scheduler, rebootstrap_scheduled],
+        #{count => 1},
+        #{instance_id => InstanceId, peer => Peer}
+    ),
+    ?LOG_WARNING(#{
+        description =>
+            "Peer can no longer serve pages this replica needs (it "
+            "reclaimed them); scheduling a snapshot re-bootstrap.",
+        instance => InstanceId,
+        peer => Peer
+    }),
+    ok;
+maybe_flag_rebootstrap(_InstanceId, _Peer, _Reason) ->
+    ok.
+
+%% @private
+%% The re-bootstrap disposition for a live instance this tick:
+%%   - `inflight`         — a bootstrap session for it is already running;
+%%                          dispatch nothing (live pulls would fail with the
+%%                          same terminal reason and waste cap slots).
+%%   - `{pending, Peer}`  — flagged by a prior `peer_pages_unavailable`
+%%                          exit; dispatch a re-bootstrap instead of live
+%%                          syncs. `Peer` is the one that reported the
+%%                          unavailability.
+%%   - `none`             — the normal live path.
+rebootstrap_state(InstanceId) ->
+    _ = ensure_table(?REBOOTSTRAP_TAB),
+    case select_inflight_count({'_', InstanceId, bootstrap, '_'}) > 0 of
+        true ->
+            inflight;
+        false ->
+            case ets:lookup(?REBOOTSTRAP_TAB, InstanceId) of
+                [{InstanceId, Peer}] -> {pending, Peer};
+                [] -> none
+            end
+    end.
+
+%% @private
+%% Dispatches the re-bootstrap through the SAME gate chain as a
+%% `pre_bootstrap` dispatch (load yield → retry backoff → both caps), so a
+%% re-bootstrapping live instance competes for slots and paces retries
+%% exactly like any other bootstrap. The flagging peer is offered first —
+%% having reclaimed the pages, it certifiably holds a covering snapshot —
+%% but any member's snapshot covers them (reclamation requires all-member
+%% confirmation), so the rest of the peer list stays as fallback for the
+%% configured strategy. The pending flag is consumed only when a session
+%% actually dispatches; a gated tick retries.
+maybe_dispatch_rebootstrap(InstanceId, Peer, Peers) ->
+    Candidates =
+        case lists:member(Peer, Peers) of
+            true -> [Peer | lists:delete(Peer, Peers)];
+            false -> Peers
+        end,
+    case maybe_dispatch_bootstrap(InstanceId, Candidates) of
+        dispatched ->
+            true = ets:delete(?REBOOTSTRAP_TAB, InstanceId),
+            ok;
+        skipped ->
+            ok
     end.
 
 %% @private

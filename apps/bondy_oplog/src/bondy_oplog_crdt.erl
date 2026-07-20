@@ -76,11 +76,10 @@ as the sole convergence kernel.
 ## Optional callbacks
 
 - `removal_op() -> Op | undefined` the operation that removes the WHOLE
-  cell, for `bondy_db:delete/3` — `clear` for register-like types (a flag
-  would declare `disable`; none does yet, so `delete/3` on a flag table
-  returns `{error, {no_removal_op, _}}`). Collection types return
-  `undefined`: a set or map has no whole-cell removal, its entries are
-  removed individually.
+  cell, for `bondy_db:delete/3` — `clear` for register-like types,
+  `disable` for the flags (BONDY_DB_RECLAMATION_PROOF.md §9). Collection
+  types return `undefined`: a set or map has no whole-cell removal, its
+  entries are removed individually.
 
 - `stabilize(StableHlc, State) -> keep | {keep, State} | discard` — what
   remains of `State` once `StableHlc` is causally stable, i.e. once no

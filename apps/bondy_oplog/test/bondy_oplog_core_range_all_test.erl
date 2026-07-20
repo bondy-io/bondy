@@ -4,8 +4,8 @@
 %% Pins cross-shard scatter-merge: enumerating every shard registered
 %% under `(NS, Index)`, running the single-shard `range/5` per shard with
 %% `shard => N`, and merging the per-shard results into a single
-%% globally-sorted list. Verifies limit truncation after merge, direction
-%% propagation, include_overlay + fence propagation, bucket isolation,
+%% globally-sorted list. Verifies limit truncation after merge,
+%% include_overlay + fence propagation, bucket isolation,
 %% and the `range_all/4` backward-compat alias.
 %% =============================================================================
 
@@ -26,7 +26,6 @@ range_all_test_() ->
         fun single_shard_matches_single_shard_range/0,
         fun multi_shard_merges_globally_sorted/0,
         fun multi_shard_respects_limit/0,
-        fun multi_shard_direction_desc/0,
         fun multi_shard_propagates_include_overlay_false/0,
         fun multi_shard_propagates_fence/0,
         fun bucket_isolation_within_shard/0,
@@ -115,23 +114,6 @@ multi_shard_respects_limit() ->
     ),
     Keys = [K || {K, _, _} <- R],
     ?assertEqual([<<"a">>, <<"b">>], Keys),
-    teardown_shards(Setups).
-
-multi_shard_direction_desc() ->
-    NS = mk_ns(),
-    Setups = setup_n_shards(NS, primary, 3, 3, lww_register),
-    place(Setups, 0, <<"a">>, 10),
-    place(Setups, 1, <<"b">>, 20),
-    place(Setups, 2, <<"c">>, 30),
-    {ok, R} = bondy_oplog_core:range_all(
-        NS,
-        primary,
-        <<>>,
-        {<<"a">>, <<"z">>},
-        #{direction => desc}
-    ),
-    Keys = [K || {K, _, _} <- R],
-    ?assertEqual([<<"c">>, <<"b">>, <<"a">>], Keys),
     teardown_shards(Setups).
 
 multi_shard_propagates_include_overlay_false() ->

@@ -53,6 +53,9 @@ cluster.peer_discovery.timeout = 5s
 cluster.peer_discovery.type = list
 cluster.peer_discovery.config.addresses = [bondy1@127.0.0.1:18086, bondy2@127.0.0.1:18186, bondy3@127.0.0.1:18286]
 cluster.tls.enabled = off
+## Loopback dev/test cluster: acknowledge the plaintext peer plane so the
+## startup guard warns instead of refusing. Never use off a trusted network.
+cluster.tls.allow_insecure = on
 cluster.tls.server.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
 cluster.tls.server.certfile = ${BONDY_ETC_DIR}/ssl/server/keycert.pem
 cluster.tls.server.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem

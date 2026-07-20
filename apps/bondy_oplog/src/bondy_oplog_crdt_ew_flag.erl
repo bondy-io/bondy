@@ -60,6 +60,8 @@ The value is `true` iff any enable dot is live.
 -export([batchable/0]).
 -export([context_of/1]).
 -export([reap_origins/2]).
+-export([removal_op/0]).
+-export([stabilize/2]).
 -export([encode_state/1]).
 -export([decode_state/1]).
 %% bondy_oplog_crdt_commutative (tier_2 step)
@@ -176,6 +178,36 @@ reap_origins({Dots, CC, Hlc}, Retired) ->
             CC1 = [{O, S} || {O, S} <- CC, not lists:member(O, Reaped)],
             {{Dots, CC1, Hlc}, lists:usort(Reaped)}
     end.
+
+-doc """
+The whole-cell removal for `bondy_db:delete/3`: a `disable` drops every
+dot the caller observed, driving the value to the fold's empty (`false`);
+the cell is physically reclaimed later by `stabilize/2` once the disable
+is causally stable (BONDY_DB_RECLAMATION_PROOF.md §9).
+""".
+-spec removal_op() -> disable.
+
+removal_op() ->
+    disable.
+
+-doc """
+Causal stabilization (BONDY_DB_RECLAMATION_PROOF.md §9): `discard` when the
+flag is `false` (no live enable dot) and every constituent operation is
+strictly below the stability point (`hlc(S) < StableHlc`). The retained
+causal context is then effect-unreachable — the dots it covers are dropped
+at every member, and any future-delivered operation's stamped context
+covers the stable disables (obligation A7), so a fresh cell behaves
+identically. Strict bound: a dot at exactly `StableHlc` may be undelivered.
+A live flag (`true`) is data and is kept at any stability point.
+""".
+-spec stabilize(bondy_oplog_hlc:hlc(), state()) -> keep | discard.
+
+stabilize(StableHlc, {Dots, _CC, Hlc}) when
+    map_size(Dots) =:= 0 andalso Hlc < StableHlc
+->
+    discard;
+stabilize(_StableHlc, _State) ->
+    keep.
 
 -spec hlc(state()) -> bondy_oplog_hlc:hlc().
 

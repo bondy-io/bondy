@@ -39,7 +39,6 @@ topology_test_() ->
 
 setup() ->
     process_flag(trap_exit, true),
-    ok = bondy_db_leveled_tag:install(),
     Dir = make_tempdir(),
     {ok, Sup} = bondy_db_leveled_sup:start_link(),
     {Sup, Dir}.

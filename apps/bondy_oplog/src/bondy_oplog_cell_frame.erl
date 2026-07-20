@@ -60,15 +60,15 @@ nuked.
 
 ## HEAD wire format
 
-The leveled tag's metadata extractor (`bondy_db_leveled_tag`)
-projects the frame to the user-facing HEAD wire format:
+The leveled projection adapter (`bondy_db_projection_leveled`) projects
+the frame to the user-facing HEAD wire format:
 
 ```
 <<HlcLen:16/big-unsigned, HlcBin:HlcLen/binary, ValueBytes/binary>>
 ```
 
 Where `ValueBytes` is `ValueBin` (HasValueColumn=1) or `StateBin`
-(HasValueColumn=0). See `bondy_db_leveled_tag:extract_metadata/3`.
+(HasValueColumn=0).
 """).
 
 -define(VERSION, 2).
@@ -187,8 +187,7 @@ extract_head(
     end.
 
 -doc """
-Decode the HEAD wire format produced by `extract_head/1` (or by the
-leveled extractor `bondy_db_leveled_tag:extract_metadata/3`) into
+Decode the HEAD wire format produced by `extract_head/1` into
 `{Hlc, ValueBytes}`.
 
 Total over well-formed HEAD bytes; malformed input raises

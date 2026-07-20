@@ -185,7 +185,6 @@ table() ->
 setup() ->
     {ok, _} = application:ensure_all_started(bondy_db),
     Tmp = make_tmpdir(),
-    application:set_env(bondy_router, oplog_catalog_enabled, false),
     application:set_env(bondy_router, oplog_core_shard_count, 1),
     application:set_env(bondy_router, platform_data_dir, Tmp),
     {ok, Pid} = bondy_namespace_catalog:start_link(),
@@ -193,7 +192,6 @@ setup() ->
 
 cleanup({Pid, Tmp}) ->
     _ = catch gen_server:stop(Pid, normal, 30000),
-    application:unset_env(bondy_router, oplog_catalog_enabled),
     application:unset_env(bondy_router, oplog_core_shard_count),
     application:unset_env(bondy_router, platform_data_dir),
     _ = file:del_dir_r(Tmp),

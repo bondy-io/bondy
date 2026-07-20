@@ -124,13 +124,15 @@ gc_scheduler_enabled() ->
     application:get_env(?APP, gc_scheduler, true).
 
 -doc """
-Whether origin retirement auto-reacts to membership removals (default
-`false`; the flip is a separate change from the capability).
+Whether origin retirement auto-reacts to membership removals and runs its
+periodic pass (default `true`). The pass is idempotent and fail-closed, so
+enablement is safe by construction; disable only to pin retirement to
+explicit operator runs (`bondy_oplog_origin_retirement:run/0`).
 """.
 -spec origin_retirement_enabled() -> boolean().
 
 origin_retirement_enabled() ->
-    application:get_env(?APP, origin_retirement, false).
+    application:get_env(?APP, origin_retirement, true).
 
 -doc """
 Periodic origin-retirement pass interval in milliseconds (default
@@ -145,14 +147,15 @@ origin_retirement_interval_ms() ->
     application:get_env(?APP, origin_retirement_interval_ms, 600_000).
 
 -doc """
-Whether the projection-cell reclamation scheduler ticks (default `false`).
-The flip is a separate change from the capability
-(`BONDY_DB_RECLAMATION_PLAN.md` Step 9).
+Whether the projection-cell reclamation scheduler ticks (default `true`).
+When disabled, deletes still converge and tombstones are retained
+indefinitely — reclamation is the space-return mechanism, not the deletion
+semantics.
 """.
 -spec reclaim_enabled() -> boolean().
 
 reclaim_enabled() ->
-    application:get_env(?APP, reclaim_enabled, false).
+    application:get_env(?APP, reclaim_enabled, true).
 
 -doc """
 Reclamation scheduler tick interval in milliseconds (default `60_000` —

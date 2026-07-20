@@ -28,7 +28,7 @@ behaviour is byte-identical.
     handle := term(),
     fold_module := atom() | undefined,
     %% Namespace under which the replay path publishes remote-merge events
-    %% (`bondy_oplog_core:publish_merge/4`) so node-local reactors can react to
+    %% (`bondy_oplog_core:publish_merge/5`) so node-local reactors can react to
     %% peer-originated changes. `undefined` (the default) disables emission —
     %% set only for tables opened with `publish => true`. Only the replay
     %% (`apply_cell_pairs/4`) path emits; local writes use the applier's
@@ -87,6 +87,7 @@ behaviour is byte-identical.
 -export([build_source/2]).
 -export([compute_one_cell/12]).
 -export([oldstate_cache_new/2]).
+-export([oldstate_cache_delete/3]).
 -export([oldstate_cache_put_entries/2]).
 -export([oldstate_cache_clear/1]).
 -export([max_hlc/2]).
@@ -162,7 +163,7 @@ apply_cell_batch(Ctx, Id, Events) ->
                             OldStateCache
                         )
                     of
-                        {ok, NewFrame, NewHlc, IdxOps} ->
+                        {ok, NewFrame, NewHlc, IdxOps, _OldValueBytes} ->
                             WAcc1 = WAcc#{{Bucket, Key} => NewFrame},
                             {
                                 WAcc1,
@@ -317,7 +318,7 @@ compute_one_cell(
         IdxOps = index_ops_for_cell(
             SecIdx, Id, Kernel, Bucket, Key, OldState, NewState, Hlc
         ),
-        {ok, NewFrame, Hlc, IdxOps}
+        {ok, NewFrame, Hlc, IdxOps, OldValueOpt}
     catch
         C:R:S ->
             ?LOG_ERROR(#{
@@ -409,6 +410,16 @@ oldstate_cache_put_entries({Tab, Max}, Entries) ->
         end,
         Entries
     ),
+    ok.
+
+%% Drop ONE cached frame — the cell was physically removed from the
+%% projection (the stable-cell sweep), so a hit would feed the next apply a
+%% stale OldState. Runs in the owning applier process (the table is
+%% `private`). No-op when disabled.
+oldstate_cache_delete(undefined, _Bucket, _Key) ->
+    ok;
+oldstate_cache_delete({Tab, _Max}, Bucket, Key) ->
+    true = ets:delete(Tab, {Bucket, Key}),
     ok.
 
 %% @private
@@ -704,7 +715,7 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
                             OldStateCache
                         )
                     of
-                        {ok, NewFrame, NewHlc, IdxOps} ->
+                        {ok, NewFrame, NewHlc, IdxOps, OldValueBytes} ->
                             WAcc1 = WAcc#{{Bucket, CellKey} => NewFrame},
                             %% Only a peer-authored cell is a true merge; a
                             %% locally-authored cell swept into the diff was
@@ -718,7 +729,10 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
                                 Bucket,
                                 CellKey,
                                 FoldEvent,
-                                NewHlc
+                                NewHlc,
+                                decode_publish_old(
+                                    Kernel, CellPublishNs, OldValueBytes
+                                )
                             ),
                             {
                                 WAcc1,
@@ -973,21 +987,44 @@ merge_publish_ns(PublishNs, MstKey, LocalOrigin) ->
 %% Accumulate a cell's `(FoldEvent, Hlc)` for remote-merge publication, keyed by
 %% `{Bucket, CellKey}` so a key written twice in one batch publishes once (the
 %% last write). A no-op when the table did not opt in (`publish_ns = undefined`).
-maybe_collect_merge(undefined, PubAcc, _Bucket, _CellKey, _FoldEvent, _Hlc) ->
+maybe_collect_merge(
+    undefined, PubAcc, _Bucket, _CellKey, _FoldEvent, _Hlc, _Old
+) ->
     PubAcc;
-maybe_collect_merge(_NS, PubAcc, Bucket, CellKey, FoldEvent, Hlc) ->
-    PubAcc#{{Bucket, CellKey} => {FoldEvent, Hlc}}.
+maybe_collect_merge(_NS, PubAcc, Bucket, CellKey, FoldEvent, Hlc, Old) ->
+    PubAcc#{{Bucket, CellKey} => {FoldEvent, Hlc, Old}}.
+
+%% @private
+%% The pre-merge cell VALUE for the published merge event, decoded from the old
+%% frame's value bytes. Only paid for cells actually being published
+%% (`NS =/= undefined`); `undefined` when the cell did not exist (and for a
+%% `value_equals_state` fold, whose frames carry no value column — no published
+%% table uses one). Decode failure degrades to `undefined` — the old value is
+%% advisory (diffing / conflict detection), never load-bearing for the merge
+%% itself.
+decode_publish_old(_Kernel, undefined, _ValueBytes) ->
+    undefined;
+decode_publish_old(_Kernel, _NS, undefined) ->
+    undefined;
+decode_publish_old(Kernel, _NS, ValueBytes) ->
+    try
+        bondy_oplog_cell_kernel:decode_value_bytes(Kernel, ValueBytes)
+    catch
+        _:_ ->
+            undefined
+    end.
 
 %% @private
 %% Publish one remote-merge event per collected cell. The published `(Key, Op)`
 %% mirrors `bondy_db:publish_event/1` (Key = CellKey, Op = FoldEvent), so a
-%% reactor sees the same shape for local and remote changes.
+%% reactor sees the same shape for local and remote changes; the merge event
+%% additionally carries the pre-merge value (`Old`) so reactors can diff.
 publish_merges(undefined, _PubAcc) ->
     ok;
 publish_merges(NS, PubAcc) ->
     maps:foreach(
-        fun({_Bucket, CellKey}, {FoldEvent, Hlc}) ->
-            bondy_oplog_core:publish_merge(NS, CellKey, Hlc, FoldEvent)
+        fun({_Bucket, CellKey}, {FoldEvent, Hlc, Old}) ->
+            bondy_oplog_core:publish_merge(NS, CellKey, Hlc, FoldEvent, Old)
         end,
         PubAcc
     ).

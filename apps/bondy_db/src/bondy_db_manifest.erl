@@ -14,7 +14,7 @@ On-disk **topology manifest** for a durable `bondy_db` database (AR-16).
 
 The keying configuration of a durable DB — partition strategy, shard count,
 realm-prefix depth, hash algorithm, key-encoding version, topology module, and
-each table's `shard_by` / `aggregate_root` — determines the **physical key
+each table's `aggregate_root` — determines the **physical key
 layout** on disk. Changing any of it **re-keys** existing data: a write that
 used to land on shard 3 now lands on shard 9, so the old data becomes
 unreadable through the new routing (it is not lost, just mis-addressed). That
@@ -82,12 +82,18 @@ Precedent: RocksDB `OPTIONS`, Kafka `meta.properties`, Riak's ring file.
     %% instance id — an on-disk layout change that must be caught, not silently
     %% applied.
     instances_strategy := atom(),
+    %% A sample output of the shard-placement hash over a fixed sentinel term.
+    %% `hash_algo => phash2` records which function we use; the probe records
+    %% what that function actually COMPUTES, so an OTP release that changes
+    %% phash2's output (allowed across majors) is caught as a re-key divergence
+    %% instead of silently mis-routing every key. Stamped by `finalize/1`;
+    %% absent from manifests written before it existed (skipped in `diff/2`).
+    hash_probe => non_neg_integer(),
     tables := #{atom() => table_freeze()}
 }.
 
 -type table_freeze() :: #{
-    shard_by := key | realm,
-    aggregate_root := identity | leading_col
+    aggregate_root := identity | leading_col | second_col
 }.
 
 -type manifest() :: #{
@@ -257,7 +263,20 @@ diff(Configured0, OnDisk) when is_map(Configured0) andalso is_map(OnDisk) ->
      || K <- Scalars,
         maps:get(K, Configured, undefined) =/= maps:get(K, OnDisk, undefined)
     ],
-    ScalarDivs ++
+    %% The hash probe only diffs against a manifest that recorded one: a
+    %% manifest written before the probe existed carries no baseline to compare
+    %% (it is adopted at the next genesis, not retrofitted).
+    ProbeDivs =
+        case OnDisk of
+            #{hash_probe := DiskProbe} ->
+                case maps:get(hash_probe, Configured) of
+                    DiskProbe -> [];
+                    OurProbe -> [{hash_probe, OurProbe, DiskProbe}]
+                end;
+            _ ->
+                []
+        end,
+    ScalarDivs ++ ProbeDivs ++
         diff_tables(
             maps:get(tables, Configured, #{}),
             maps:get(tables, OnDisk, #{})
@@ -348,7 +367,11 @@ finalize(Frozen) when is_map(Frozen) ->
         instances_strategy =>
             bondy_db_topology:instances_strategy(
                 maps:get(topology_module, Frozen)
-            )
+            ),
+        %% Probe the placement hash with a fixed sentinel: same OTP behaviour
+        %% ⇒ same value. The range bound matches the widest use (2^27 covers
+        %% any practical shard_count) without depending on this DB's count.
+        hash_probe => erlang:phash2({bondy_db_hash_probe, 42}, 1 bsl 27)
     }.
 
 %% @private
@@ -390,7 +413,7 @@ diff_table(Name, Configured, OnDisk) ->
                 {CVal, DVal} -> {true, {{table, Name, Attr}, CVal, DVal}}
             end
         end,
-        [shard_by, aggregate_root]
+        [aggregate_root]
     ).
 
 %% @private

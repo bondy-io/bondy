@@ -113,8 +113,8 @@ put_batch(Tab, Entries) ->
     ok.
 
 -doc """
-Single-bucket half-open `[Low, High)` range scan in the requested
-direction, capped at `limit` (default 1000).
+Single-bucket half-open `[Low, High)` ascending range scan, capped at
+`limit` (default 1000).
 
 `High` may be the atom `infinity` for an open-ended scan (every key
 `>= Low` in the bucket) — the form the secondary-index primary-scan
@@ -122,7 +122,6 @@ fallback uses, since no finite binary exceeds every possible key.
 """.
 range(Tab, Bucket, Low, High, Opts) ->
     Limit = maps:get(limit, Opts, 1000),
-    Direction = maps:get(direction, Opts, asc),
     %% Rows are keyed by `{Bucket, Key}`. To scan a single bucket's
     %% `[Low, High)` we constrain the composite key to that bucket. An
     %% `infinity` high drops the upper-bound guard.
@@ -152,12 +151,7 @@ range(Tab, Bucket, Low, High, Opts) ->
             '$end_of_table' -> [];
             {Found, _Cont} -> Found
         end,
-    Ordered =
-        case Direction of
-            asc -> Result;
-            desc -> lists:reverse(Result)
-        end,
-    {ok, Ordered}.
+    {ok, Result}.
 
 -doc "Single-key delete inside a Bucket.".
 delete(Tab, Bucket, Key) ->

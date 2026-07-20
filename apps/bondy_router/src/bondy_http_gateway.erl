@@ -381,7 +381,7 @@ handle_info(
     %% boot config load) collapses into a single dispatch-table rebuild.
     {noreply, note_spec_change(Key, State0)};
 handle_info(
-    {bondy_oplog_core_merge_event, _NS, Key, _Hlc, _Op}, State0
+    {bondy_oplog_core_merge_event, _NS, Key, _Hlc, _Op, _Old}, State0
 ) ->
     %% A peer's API spec change arrived via anti-entropy (the merge-side hook).
     %% Rebuild this node's dispatch table too, debounced like the local case.

@@ -38,27 +38,59 @@ them.
   _)` — without threading any topology state between `open_table`
   calls.
 
+## Crash recovery (keyed Bookies)
+
+A **keyed** Bookie is `permanent`: leveled acks a put only after the
+journal write, so a reopen replays the journal and recovers every acked
+write — restarting in place is safe and strictly better than leaving the
+shard dead. The restarted Bookie has a NEW pid, so keyed children are
+started through `start_registered/3`, which publishes the pid under the
+`persistent_term` key `{bondy_db_bookie, Sup, Key}` on every (re)start.
+Routing handles carry `{pt, PTKey}` instead of the raw pid
+(`bookie_ref/2`) and `bondy_db_projection_leveled` resolves it per call,
+so readers and the applier follow a restart with no handle rewiring.
+This is the plum_db partition-store model; Riak's lazy vnode-proxy
+restart was rejected (it fits dynamic ownership this design lacks).
+
+A crash-LOOP (e.g. a corrupted store that dies on every reopen) exhausts
+the supervisor's restart intensity — sized to tolerate a few slow leveled
+reopens, not a tight loop — and fells the supervisor. The owner
+(`bondy_namespace_catalog` for the core DB) links it and stops on its
+EXIT, escalating the failure up the OTP tree instead of serving a
+silently dead shard.
+
+**Anonymous** Bookies (`start_bookie/2`; the `single_bookie` /
+`per_entity` topologies, which stash the raw pid in their own state)
+remain `temporary` — a restarted pid would be unreachable through their
+state, so their crash policy stays with the owning topology.
+
 ## Lifecycle
 
 `start_link/0` spawns an unnamed supervisor. The caller (the topology
 module's `init/2`) gets the supervisor pid back and stashes it inside
 its own state. Topology `shutdown/1` calls `stop/1` here, which
-terminates every child Bookie (so leveled flushes) and then brings the
-supervisor down.
-
-Each Bookie is `temporary` — supervisor restart-after-crash would
-deliver a fresh Bookie pid that the topology's existing routing map
-does not know about. The topology is responsible for any restart
-policy it wants.
+terminates every child Bookie (so leveled flushes), erases the
+registered `persistent_term` handles, and then brings the supervisor
+down.
 """).
 
 -export([start_link/0]).
 -export([stop/1]).
 -export([start_bookie/2]).
 -export([get_or_start_bookie/3]).
+-export([stop_bookie/2]).
+-export([bookie_ref/2]).
 -export([bookie_count/1]).
 
+%% Child start callback (keyed Bookies) — not part of the public API.
+-export([start_registered/3]).
+
 -export([init/1]).
+
+%% The persistent_term key a keyed Bookie's pid is published under. Keyed by
+%% the supervisor pid so two DBs' pools (each with its own supervisor) never
+%% collide on the same `{shard, K}` key.
+-define(PT_KEY(Sup, Key), {bondy_db_bookie, Sup, Key}).
 
 %% =============================================================================
 %% API
@@ -90,7 +122,10 @@ stop(Sup) when is_pid(Sup) ->
     ],
     lists:foreach(
         fun(Id) ->
-            _ = catch supervisor:terminate_child(Sup, Id)
+            _ = catch supervisor:terminate_child(Sup, Id),
+            %% Erase the keyed handle registration (no-op for the
+            %% never-registered anonymous ids).
+            _ = persistent_term:erase(?PT_KEY(Sup, Id))
         end,
         Ids
     ),
@@ -128,6 +163,31 @@ start_bookie(Sup, Opts) when is_pid(Sup), is_list(Opts) ->
     supervisor:start_child(Sup, child_spec(Id, Opts)).
 
 -doc """
+Terminate AND forget the keyed Bookie `Key` (child delete + registered
+handle erase). Used by a topology rolling back a partially-started pool:
+a plain `book_close` would leave a `permanent` child behind for the
+supervisor to immediately restart.
+""".
+-spec stop_bookie(Sup :: pid(), Key :: term()) -> ok.
+
+stop_bookie(Sup, Key) when is_pid(Sup) ->
+    _ = catch supervisor:terminate_child(Sup, Key),
+    _ = catch supervisor:delete_child(Sup, Key),
+    _ = persistent_term:erase(?PT_KEY(Sup, Key)),
+    ok.
+
+-doc """
+The routing REFERENCE for the keyed Bookie `Key`: the `{pt, PTKey}` form a
+projection handle carries instead of the raw pid, resolved per call by
+`bondy_db_projection_leveled` so a supervisor restart of the Bookie is
+transparently followed.
+""".
+-spec bookie_ref(Sup :: pid(), Key :: term()) -> {pt, term()}.
+
+bookie_ref(Sup, Key) when is_pid(Sup) ->
+    {pt, ?PT_KEY(Sup, Key)}.
+
+-doc """
 Idempotently provision the leveled Bookie identified by `Key`.
 
 The first call for `Key` starts a Bookie with `Opts`; every later call
@@ -145,10 +205,29 @@ table in the DB: the supervisor — itself shared via `topology_opts.sup`
 ) -> {ok, pid()} | {error, term()}.
 
 get_or_start_bookie(Sup, Key, Opts) when is_pid(Sup), is_list(Opts) ->
-    case supervisor:start_child(Sup, child_spec(Key, Opts)) of
+    case supervisor:start_child(Sup, keyed_child_spec(Sup, Key, Opts)) of
         {ok, Pid} -> {ok, Pid};
         {error, {already_started, Pid}} -> {ok, Pid};
         {error, _} = Err -> Err
+    end.
+
+-doc """
+Child start callback for a keyed Bookie: start leveled, then publish the
+pid under the `persistent_term` routing key. Runs on the FIRST start and
+on every supervisor restart, which is exactly what keeps `{pt, _}`
+handles current across a crash.
+""".
+-spec start_registered(
+    Sup :: pid(), Key :: term(), Opts :: proplists:proplist()
+) -> {ok, pid()} | {error, term()}.
+
+start_registered(Sup, Key, Opts) ->
+    case leveled_bookie:book_start(Opts) of
+        {ok, Pid} ->
+            ok = persistent_term:put(?PT_KEY(Sup, Key), Pid),
+            {ok, Pid};
+        {error, _} = Err ->
+            Err
     end.
 
 -doc """
@@ -172,14 +251,14 @@ bookie_count(Sup) when is_pid(Sup) ->
 init([]) ->
     %% `one_for_one` (not `simple_one_for_one`) so children carry stable,
     %% caller-chosen ids — the precondition for `get_or_start_bookie/3`'s
-    %% idempotent keying. `intensity => 0` with `temporary` children: a
-    %% Bookie crash is never restarted (so it does not count against the
-    %% intensity and does not fell the supervisor); the owning topology
-    %% drives any restart policy.
+    %% idempotent keying. Intensity is sized for leveled REOPENS, not tight
+    %% loops: a restart replays the journal (seconds on a large store), so 5
+    %% restarts in 60s already indicates a store that cannot stay up — the
+    %% supervisor then dies and the owner escalates (see moduledoc).
     SupFlags = #{
         strategy => one_for_one,
-        intensity => 0,
-        period => 1
+        intensity => 5,
+        period => 60
     },
     {ok, {SupFlags, []}}.
 
@@ -188,11 +267,26 @@ init([]) ->
 %% =============================================================================
 
 %% @private
+%% Anonymous child: temporary (crash policy owned by the topology, see
+%% moduledoc).
 child_spec(Id, Opts) ->
     #{
         id => Id,
         start => {leveled_bookie, book_start, [Opts]},
         restart => temporary,
+        shutdown => 30_000,
+        type => worker,
+        modules => [leveled_bookie]
+    }.
+
+%% @private
+%% Keyed child: permanent, started through `start_registered/3` so every
+%% (re)start publishes the current pid under the `{pt, _}` routing key.
+keyed_child_spec(Sup, Key, Opts) ->
+    #{
+        id => Key,
+        start => {?MODULE, start_registered, [Sup, Key, Opts]},
+        restart => permanent,
         shutdown => 30_000,
         type => worker,
         modules => [leveled_bookie]

@@ -35,7 +35,7 @@ remote_delete_closes_user_sessions_test() ->
     try
         ?assertEqual(
             {closed, ?REALM, ?USER, ?BONDY_USER_DELETED},
-            bondy_aae_reactor:react_user(?USER_KEY, clear)
+            bondy_aae_reactor:react_user(?USER_KEY, clear, undefined)
         ),
         ?assert(
             meck:called(
@@ -48,19 +48,61 @@ remote_delete_closes_user_sessions_test() ->
         meck:unload(bondy_rbac_user)
     end.
 
-%% A remote user `set` (update / credential change) is a no-op here for now —
-%% it must NOT close sessions (deferred; see the module docs).
+%% A remote user `set` that does NOT change credential material (a create, or a
+%% metadata-only edit) must NOT close sessions.
 remote_set_does_not_close_user_sessions_test() ->
     ok = meck:new(bondy_rbac_user, [passthrough]),
     ok = meck:expect(
         bondy_rbac_user, close_sessions, fun(_, _, _) -> ok end
     ),
     try
+        %% Create: no pre-merge value.
         ?assertEqual(
-            ok, bondy_aae_reactor:react_user(?USER_KEY, {set, #{}})
+            ok, bondy_aae_reactor:react_user(?USER_KEY, {set, #{}}, undefined)
+        ),
+        %% Metadata-only edit: credentials unchanged.
+        ?assertEqual(
+            ok,
+            bondy_aae_reactor:react_user(
+                ?USER_KEY,
+                {set, #{password => p1, meta => 2}},
+                #{password => p1, meta => 1}
+            )
         ),
         ?assertNot(
             meck:called(bondy_rbac_user, close_sessions, ['_', '_', '_'])
+        )
+    after
+        meck:unload(bondy_rbac_user)
+    end.
+
+%% A remote user `set` whose password or authorized keys differ from the
+%% pre-merge value closes this node's sessions with
+%% ?BONDY_USER_CREDENTIALS_CHANGED (plum_db `on_merge` parity).
+remote_credential_change_closes_user_sessions_test() ->
+    ok = meck:new(bondy_rbac_user, [passthrough]),
+    ok = meck:expect(
+        bondy_rbac_user,
+        close_sessions,
+        fun(R, U, Reason) -> {closed, R, U, Reason} end
+    ),
+    try
+        Expected = {closed, ?REALM, ?USER, ?BONDY_USER_CREDENTIALS_CHANGED},
+        %% Password changed.
+        ?assertEqual(
+            Expected,
+            bondy_aae_reactor:react_user(
+                ?USER_KEY, {set, #{password => p2}}, #{password => p1}
+            )
+        ),
+        %% Authorized keys changed (explicit HLC-carrying op form).
+        ?assertEqual(
+            Expected,
+            bondy_aae_reactor:react_user(
+                ?USER_KEY,
+                {set, 123, #{authorized_keys => [k2]}},
+                #{authorized_keys => [k1]}
+            )
         )
     after
         meck:unload(bondy_rbac_user)
@@ -112,11 +154,15 @@ remote_grant_invalidates_realm_rbac_test() ->
     try
         ?assertEqual(
             {invalidated, ?REALM},
-            bondy_aae_reactor:react_grant(?GRANT_KEY, {set, #{}})
+            bondy_aae_reactor:react_grant(
+                "security_user_grants", ?GRANT_KEY, {set, #{}}, undefined
+            )
         ),
         ?assertEqual(
             {invalidated, ?REALM},
-            bondy_aae_reactor:react_grant(?GRANT_KEY, clear)
+            bondy_aae_reactor:react_grant(
+                "security_user_grants", ?GRANT_KEY, clear, #{}
+            )
         ),
         ?assertEqual(
             2,
@@ -126,6 +172,65 @@ remote_grant_invalidates_realm_rbac_test() ->
         )
     after
         meck:unload(bondy_session_manager)
+    end.
+
+%% The lww conflict alarm: a remote `set` that replaced a DIFFERENT existing
+%% value emits [bondy, aae, merge_conflict]; a create (Old = undefined), an
+%% identical rewrite, and a `clear` stay silent. Asserted via a telemetry
+%% handler on both the grant and the source reactions.
+merge_conflict_alarm_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    Self = self(),
+    HandlerId = {?MODULE, ?FUNCTION_NAME},
+    ok = telemetry:attach(
+        HandlerId,
+        [bondy, aae, merge_conflict],
+        fun(_Event, Meas, Meta, _Cfg) -> Self ! {alarm, Meas, Meta} end,
+        undefined
+    ),
+    ok = meck:new(bondy_session_manager, [passthrough]),
+    ok = meck:expect(
+        bondy_session_manager, invalidate_rbac_all, fun(_) -> ok end
+    ),
+    try
+        %% Grant: replaced a differing value → alarm.
+        ok = bondy_aae_reactor:react_grant(
+            "security_user_grants", ?GRANT_KEY, {set, v2}, v1
+        ),
+        Meta1 =
+            receive
+                {alarm, #{count := 1}, M1} -> M1
+            after 1000 -> error(no_alarm)
+            end,
+        ?assertEqual("security_user_grants", maps:get(table, Meta1)),
+        ?assertEqual(?REALM, maps:get(realm_uri, Meta1)),
+
+        %% Source: alarm-only reaction, same rule.
+        ok = bondy_aae_reactor:react_source(
+            "security_sources", ?GRANT_KEY, {set, v2}, v1
+        ),
+        receive
+            {alarm, _, _} -> ok
+        after 1000 -> error(no_source_alarm)
+        end,
+
+        %% Silent cases: create, identical rewrite, clear (revoke).
+        ok = bondy_aae_reactor:react_grant(
+            "security_user_grants", ?GRANT_KEY, {set, v2}, undefined
+        ),
+        ok = bondy_aae_reactor:react_grant(
+            "security_user_grants", ?GRANT_KEY, {set, v2}, v2
+        ),
+        ok = bondy_aae_reactor:react_source(
+            "security_sources", ?GRANT_KEY, clear, v1
+        ),
+        receive
+            {alarm, _, _} = Unexpected -> error({unexpected_alarm, Unexpected})
+        after 200 -> ok
+        end
+    after
+        meck:unload(bondy_session_manager),
+        telemetry:detach(HandlerId)
     end.
 
 %% A remote membership change (security_group_members) invalidates this node's

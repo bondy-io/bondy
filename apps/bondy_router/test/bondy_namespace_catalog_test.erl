@@ -2,9 +2,9 @@
 %% Tests for `bondy_namespace_catalog` — the bondy_db DB/table declaration
 %% point and owner of the durable `core` database.
 %%
-%% Pins: the twelve-table declaration (db split, shard_by mapping, fold class),
-%% the core/registry DB specs, gated provisioning (core tables open + appear in
-%% bondy_db:info, fold→CRDT wiring), the disabled no-op path, and teardown.
+%% Pins: the table declarations (db split, aggregate_root routing, fold class),
+%% the core/registry DB specs, unconditional provisioning (every declared
+%% table opens + appears in bondy_db:info, fold→CRDT wiring), and teardown.
 %% =============================================================================
 
 -module(bondy_namespace_catalog_test).
@@ -28,28 +28,24 @@ declarations_test_() ->
             ?assertEqual(13, length(Core)),
             ?assertEqual(2, length(Registry))
         end},
-        {"realm_keys is a durable core aw table sharded by key", fun() ->
+        {"realm_keys is a durable core aw table", fun() ->
             %% Realm key material, split out of the realm identity cell so the
             %% realm's bondy_db identity/digest is Uri + config, not key bytes.
-            %% Global registry like bondy_realm (key-sharded); aw-map of
+            %% Global registry like bondy_realm; aw-map of
             %% kid => key bundle so concurrent rotations merge without loss.
             Spec = maps:get(bondy_realm_keys, ByName),
             ?assertEqual(core, maps:get(db, Spec)),
             ?assertEqual(durable, maps:get(durability, Spec)),
-            ?assertEqual(key, maps:get(shard_by, Spec)),
-            ?assertEqual(aw, maps:get(fold, Spec)),
-            ?assertEqual(true, maps:get(migrated, Spec, false))
+            ?assertEqual(aw, maps:get(fold, Spec))
         end},
-        {"retained_messages is a durable core lww migrated table", fun() ->
+        {"retained_messages is a durable core lww table", fun() ->
             %% Cut over to bondy_db (§11.4): always durable regardless of the
             %% inert `wamp.message_retention.storage_type` knob; storage-only
-            %% lww, always provisioned, no secondary index (matched by key).
+            %% lww, no secondary index (matched by key).
             Spec = maps:get(retained_messages, ByName),
             ?assertEqual(core, maps:get(db, Spec)),
             ?assertEqual(durable, maps:get(durability, Spec)),
-            ?assertEqual(realm, maps:get(shard_by, Spec)),
             ?assertEqual(lww, maps:get(fold, Spec)),
-            ?assertEqual(true, maps:get(migrated, Spec, false)),
             ?assertEqual([], maps:get(indexes, Spec, []))
         end},
         {"group membership is a durable core ew fold (cell-per-fact)", fun() ->
@@ -58,42 +54,20 @@ declarations_test_() ->
             Spec = maps:get(security_group_members, ByName),
             ?assertEqual(core, maps:get(db, Spec)),
             ?assertEqual(durable, maps:get(durability, Spec)),
-            ?assertEqual(realm, maps:get(shard_by, Spec)),
             ?assertEqual(ew, maps:get(fold, Spec)),
             %% Facts co-locate with their leading entity (forward → user shard,
             %% reverse → group shard) so a user's groups / a group's members are
             %% single-shard band scans (`bondy_db:aggregate_root/2`).
             ?assertEqual(second_col, maps:get(aggregate_root, Spec)),
-            ?assertEqual(true, maps:get(migrated, Spec, false)),
             ?assertEqual(true, maps:get(publish, Spec, false))
         end},
-        {"ticket/oauth_token/realm(+keys) shard by key", fun() ->
-            %% ticket/oauth_token prioritise point lookup; bondy_realm and
-            %% bondy_realm_keys are global registries under one band, so
-            %% realm-sharding would be degenerate (every realm on one shard) —
-            %% they shard by key.
-            ?assertEqual(key, shard_by(ByName, bondy_ticket)),
-            ?assertEqual(key, shard_by(ByName, bondy_oauth_token)),
-            ?assertEqual(key, shard_by(ByName, bondy_realm)),
-            ?assertEqual(key, shard_by(ByName, bondy_realm_keys))
-        end},
-        {"all other tables shard by realm", fun() ->
-            Others = [
-                S
-             || S <- Tables,
-                not lists:member(
-                    maps:get(name, S),
-                    [
-                        bondy_ticket,
-                        bondy_oauth_token,
-                        bondy_realm,
-                        bondy_realm_keys
-                    ]
-                )
-            ],
+        {"no table declares the retired shard_by key", fun() ->
+            %% shard_by was declared/frozen but never consumed by routing
+            %% (partition_strategy + aggregate_root is the placement model);
+            %% it was deleted — pin that it never reappears in a spec.
             ?assert(
                 lists:all(
-                    fun(S) -> maps:get(shard_by, S) =:= realm end, Others
+                    fun(S) -> not maps:is_key(shard_by, S) end, Tables
                 )
             )
         end},
@@ -104,11 +78,11 @@ declarations_test_() ->
             ?assertEqual(lww, fold(ByName, security_user_grants)),
             ?assertEqual(lww, fold(ByName, security_sources))
         end},
-        {"registry tables are ephemeral lww, migrated, published, by_session",
+        {"registry tables are ephemeral lww, published, by_session",
             fun() ->
                 %% Cut over to bondy_db (D-7): `lww` IS the presence state machine
-                %% (keys unique by SessionId — set=live, clear=dead), provisioned
-                %% (`migrated`), `publish => true` wires the merge-side reactor that
+                %% (keys unique by SessionId — set=live, clear=dead);
+                %% `publish => true` wires the merge-side reactor that
                 %% maintains the routing trie from peers' registrations (§9.6), with
                 %% the `by_session` reverse index for session-close cleanup.
                 ?assert(
@@ -116,7 +90,6 @@ declarations_test_() ->
                         fun(S) ->
                             maps:get(fold, S) =:= lww andalso
                                 maps:get(durability, S) =:= ephemeral andalso
-                                maps:get(migrated, S, false) =:= true andalso
                                 maps:get(publish, S, false) =:= true andalso
                                 [by_session] =:=
                                     [
@@ -175,21 +148,19 @@ lifecycle_test_() ->
         end,
         fun(_) -> ok end, [
             {timeout, 60,
-                {"provision_all opens every core table", fun provision_all/0}},
-            {timeout, 60,
-                {"default provisions only migrated tables",
-                    fun migrated_only/0}},
+                {"provisions every declared table", fun provisions_all/0}},
             {timeout, 60,
                 {"registry by_session index works end-to-end",
                     fun registry_index/0}}
         ]}.
 
-provision_all() ->
+provisions_all() ->
     Tmp = make_tmpdir(),
-    set_env(true, 1, Tmp),
+    set_env(1, Tmp),
     {ok, Pid} = ?CAT:start_link(),
     try
-        %% Core DB + all twelve core tables provisioned and published.
+        %% Core DB + every declared core table provisioned and published —
+        %% unconditionally, there is no per-table or per-domain gate.
         ?assert(?CAT:is_open()),
         ?assertMatch(#{name := core}, ?CAT:core_db()),
         ?assertMatch(
@@ -208,8 +179,8 @@ provision_all() ->
             end,
             CoreNames
         ),
-        %% Registry tables (migrated, D-7) are provisioned in the ephemeral
-        %% `registry` DB, independently of the `oplog.catalog` flag.
+        %% Registry tables (D-7) are provisioned in the ephemeral
+        %% `registry` DB.
         ?assertMatch(
             #{entity_type := bondy_registration, db_name := registry},
             ?CAT:table(bondy_registration)
@@ -236,7 +207,7 @@ provision_all() ->
         ),
         %% info/0 summary.
         Info = ?CAT:info(),
-        ?assertMatch(#{provision_all := true, core := #{kind := db}}, Info),
+        ?assertMatch(#{core := #{kind := db}}, Info),
         ?assertEqual(13, map_size(maps:get(tables, Info)))
     after
         ok = stop_catalog(Pid),
@@ -248,94 +219,13 @@ provision_all() ->
     ?assertEqual(undefined, ?CAT:core_db()),
     ?assertEqual(undefined, ?CAT:table(bondy_realm)).
 
-%% Default (flag off): only the migrated domains' tables (api_gateway,
-%% bondy_realm, bondy_bridge_relay, bondy_ticket, bondy_oauth_token,
-%% security_users, security_groups, security_group_members, security_user_grants,
-%% security_group_grants, security_sources, retained_messages) are opened; the
-%% core DB still comes up to host them, but any not-yet-migrated table stays shut.
-migrated_only() ->
-    Tmp = make_tmpdir(),
-    set_env(false, 1, Tmp),
-    {ok, Pid} = ?CAT:start_link(),
-    try
-        ?assert(?CAT:is_open()),
-        ?assertMatch(
-            #{entity_type := bondy_realm, db_name := core},
-            ?CAT:table(bondy_realm)
-        ),
-        ?assertMatch(
-            #{entity_type := api_gateway, db_name := core},
-            ?CAT:table(api_gateway)
-        ),
-        ?assertMatch(
-            #{entity_type := bondy_bridge_relay, db_name := core},
-            ?CAT:table(bondy_bridge_relay)
-        ),
-        ?assertMatch(
-            #{entity_type := bondy_ticket, db_name := core},
-            ?CAT:table(bondy_ticket)
-        ),
-        ?assertMatch(
-            #{entity_type := bondy_oauth_token, db_name := core},
-            ?CAT:table(bondy_oauth_token)
-        ),
-        ?assertMatch(
-            #{entity_type := security_users, db_name := core},
-            ?CAT:table(security_users)
-        ),
-        ?assertMatch(
-            #{entity_type := security_groups, db_name := core},
-            ?CAT:table(security_groups)
-        ),
-        ?assertMatch(
-            #{entity_type := security_user_grants, db_name := core},
-            ?CAT:table(security_user_grants)
-        ),
-        ?assertMatch(
-            #{entity_type := security_group_grants, db_name := core},
-            ?CAT:table(security_group_grants)
-        ),
-        ?assertMatch(
-            #{entity_type := security_sources, db_name := core},
-            ?CAT:table(security_sources)
-        ),
-        ?assertMatch(
-            #{entity_type := retained_messages, db_name := core},
-            ?CAT:table(retained_messages)
-        ),
-        %% Registry tables (migrated, D-7) come up in the ephemeral `registry`
-        %% DB even with the `oplog.catalog` flag off.
-        ?assertMatch(
-            #{entity_type := bondy_registration, db_name := registry},
-            ?CAT:table(bondy_registration)
-        ),
-        ?assertMatch(
-            #{entity_type := bondy_subscription, db_name := registry},
-            ?CAT:table(bondy_subscription)
-        ),
-        %% security_group_members is now a migrated domain (the authoritative
-        %% cell-per-fact membership relation), so it is opened even with the
-        %% `oplog.catalog` flag off.
-        ?assertMatch(
-            #{entity_type := security_group_members, db_name := core},
-            ?CAT:table(security_group_members)
-        ),
-        ?assertMatch(
-            #{provision_all := false, core := #{kind := db}}, ?CAT:info()
-        )
-    after
-        ok = stop_catalog(Pid),
-        reset_env(),
-        rmrf(Tmp)
-    end.
-
 %% Drives the ephemeral `registry` table exactly as `bondy_registry_store`
 %% does — `entry_id` primary key, the `#{session_id, entry}` cell value, the
 %% `by_session` reverse index — asserting the storage swap's load-bearing
 %% behaviour end-to-end through the provisioned catalogue.
 registry_index() ->
     Tmp = make_tmpdir(),
-    set_env(false, 1, Tmp),
+    set_env(1, Tmp),
     {ok, Pid} = ?CAT:start_link(),
     try
         Table = ?CAT:table(bondy_registration),
@@ -413,19 +303,14 @@ session_ids(Table, Realm, SessionId) ->
 %% Helpers
 %% =============================================================================
 
-shard_by(ByName, Name) ->
-    maps:get(shard_by, maps:get(Name, ByName)).
-
 fold(ByName, Name) ->
     maps:get(fold, maps:get(Name, ByName)).
 
-set_env(Enabled, Shards, Dir) ->
-    application:set_env(bondy_router, oplog_catalog_enabled, Enabled),
+set_env(Shards, Dir) ->
     application:set_env(bondy_router, oplog_core_shard_count, Shards),
     application:set_env(bondy_router, platform_data_dir, Dir).
 
 reset_env() ->
-    application:unset_env(bondy_router, oplog_catalog_enabled),
     application:unset_env(bondy_router, oplog_core_shard_count),
     application:unset_env(bondy_router, platform_data_dir).
 

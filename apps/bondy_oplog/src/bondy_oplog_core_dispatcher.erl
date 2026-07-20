@@ -52,8 +52,8 @@ compile time.
 Subscribers receive one of
 
 ```erlang
-{bondy_oplog_core_event,       Namespace, Key, Hlc, Operation}  %% local write
-{bondy_oplog_core_merge_event, Namespace, Key, Hlc, Operation}  %% remote merge
+{bondy_oplog_core_event,       Namespace, Key, Hlc, Operation}       %% local write
+{bondy_oplog_core_merge_event, Namespace, Key, Hlc, Operation, Old}  %% remote merge
 ```
 
 The first is published by the applier for a **local** `bondy_db:apply/4`
@@ -111,7 +111,7 @@ does not police this.
 -export([subscribe/2]).
 -export([unsubscribe/1]).
 -export([publish/4]).
--export([publish_merge/4]).
+-export([publish_merge/5]).
 -export([subscription_count/0]).
 -export([subscription_count/1]).
 
@@ -172,14 +172,21 @@ peer-originated change (e.g. close a user's sessions when the user is deleted on
 another node) subscribe and handle this message; purely local writes never
 deliver it.
 
-Subscribers receive `{bondy_oplog_core_merge_event, NS, Key, Hlc, Op}` — the
-same `(Key, Op)` shape as a local event, only the tag differs, so a reactor can
-listen for one or both.
+Subscribers receive `{bondy_oplog_core_merge_event, NS, Key, Hlc, Op, Old}` —
+the same `(Key, Op)` shape as a local event plus the pre-merge cell value
+(`Old`, `undefined` when the cell did not exist), so a reactor can diff what
+the merge replaced.
 """.
--spec publish_merge(atom(), term(), bondy_oplog_hlc:hlc(), term()) -> ok.
+-spec publish_merge(
+    NS :: atom(),
+    Key :: term(),
+    Hlc :: bondy_oplog_hlc:hlc(),
+    Op :: term(),
+    Old :: term() | undefined
+) -> ok.
 
-publish_merge(NS, Key, Hlc, Op) ->
-    fanout({bondy_oplog_core_merge_event, NS, Key, Hlc, Op}, NS, Key).
+publish_merge(NS, Key, Hlc, Op, Old) ->
+    fanout({bondy_oplog_core_merge_event, NS, Key, Hlc, Op, Old}, NS, Key).
 
 %% @private
 %% Shared publish hot path: select the namespace's subscriptions and send `Msg`

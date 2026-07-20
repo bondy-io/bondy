@@ -15,7 +15,7 @@
 %%
 %% These tests pin, per mode:
 %%
-%%   1. Multi-page asc/desc scans cover every row exactly once (no skip, no
+%%   1. Multi-page ascending scans cover every row exactly once (no skip, no
 %%      dup) across page boundaries, with `has_more`/`next` consistent —
 %%      asserted as a SET for `partition`, in exact key order for `global`.
 %%   2. The decoder's `skip` (rejected rows interleaved with accepted ones —
@@ -47,17 +47,12 @@ bondy_relation_test_() ->
             "partition_asc_covers_all_once", fun partition_asc_covers_all_once/1
         ),
         gen(
-            "partition_desc_covers_all_once",
-            fun partition_desc_covers_all_once/1
-        ),
-        gen(
             "partition_rejected_backfilled", fun partition_rejected_backfilled/1
         ),
         gen("partition_cursor_roundtrip", fun partition_cursor_roundtrip/1),
         gen("default_mode_is_partition", fun default_mode_is_partition/1),
         %% global mode: globally key-ordered, scatter+merge every page
         gen("global_asc_in_key_order", fun global_asc_in_key_order/1),
-        gen("global_desc_in_key_order", fun global_desc_in_key_order/1),
         gen("global_cursor_roundtrip", fun global_cursor_roundtrip/1),
         %% mode-agnostic
         gen("fold_streams_accepted_only", fun fold_streams_accepted_only/1),
@@ -119,15 +114,6 @@ partition_asc_covers_all_once({_Db, T, _Sup, _Dir}) ->
     ?assertEqual(length(Keys), length(GotKeys)),
     ?assertEqual([10, 10, 5], [length(P) || P <- Pages]).
 
-partition_desc_covers_all_once({_Db, T, _Sup, _Dir}) ->
-    Keys = put_users(T, 25),
-    Rel = relation(T),
-    {Vals, Pages} = collect_all(Rel, ?R, 10, desc),
-    GotKeys = [K || {K, _} <- Vals],
-    ?assertEqual(Keys, lists:sort(GotKeys)),
-    ?assertEqual(length(Keys), length(GotKeys)),
-    ?assertEqual([10, 10, 5], [length(P) || P <- Pages]).
-
 %% Interleave 20 user rows with 20 alias rows the decoder rejects. Every page
 %% must still hold `limit` USERS (back-fill across the rejected rows, now
 %% within each shard's chunk), the aliases must never appear, and the scan
@@ -148,19 +134,12 @@ partition_rejected_backfilled({_Db, T, _Sup, _Dir}) ->
     ?assertEqual([7, 7, 6], [length(P) || P <- Pages]).
 
 %% global mode: the flattened pages MUST equal the full key set in ascending
-%% (resp. descending) key order — the scatter+merge contract.
+%% key order — the scatter+merge contract.
 global_asc_in_key_order({_Db, T, _Sup, _Dir}) ->
     Keys = put_users(T, 25),
     Rel = relation_global(T),
     {Vals, Pages} = collect_all(Rel, ?R, 10, asc),
     ?assertEqual(Keys, [K || {K, _} <- Vals]),
-    ?assertEqual([10, 10, 5], [length(P) || P <- Pages]).
-
-global_desc_in_key_order({_Db, T, _Sup, _Dir}) ->
-    Keys = put_users(T, 25),
-    Rel = relation_global(T),
-    {Vals, Pages} = collect_all(Rel, ?R, 10, desc),
-    ?assertEqual(lists:reverse(Keys), [K || {K, _} <- Vals]),
     ?assertEqual([10, 10, 5], [length(P) || P <- Pages]).
 
 fold_streams_accepted_only({_Db, T, _Sup, _Dir}) ->
@@ -318,7 +297,7 @@ collect_all(Rel, Realm, Limit, Dir) ->
     collect_all(Rel, Realm, Limit, Dir, undefined, [], []).
 
 collect_all(Rel, Realm, Limit, Dir, Cursor, ValsAcc, PagesAcc) ->
-    Opts0 = #{limit => Limit, direction => Dir},
+    Opts0 = #{limit => Limit},
     Opts =
         case Cursor of
             undefined -> Opts0;

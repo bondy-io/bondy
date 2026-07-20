@@ -2,7 +2,7 @@
 
 The configuration surface for projection-cell reclamation and origin
 retirement. All options are `bondy_oplog` application-environment keys, read
-at node start. Reclamation and retirement are **off by default**; deletion
+at node start. Reclamation and retirement are **on by default**; deletion
 itself (`bondy_db:delete/3`) is always available and needs no configuration.
 
 > **Concept:** [Understanding deletion and reclamation →](../database/deletion_and_reclamation.md)
@@ -11,7 +11,7 @@ itself (`bondy_db:delete/3`) is always available and needs no configuration.
 
 ### `reclaim_enabled`
 
-`boolean()`, default `false`.
+`boolean()`, default `true`.
 
 Whether the reclamation scheduler ticks. When `false` the scheduler process
 runs idle: deletes still converge and tombstones are retained indefinitely,
@@ -39,7 +39,7 @@ completion; writes interleave between batches.
 
 ### `origin_retirement`
 
-`boolean()`, default `false`.
+`boolean()`, default `true`.
 
 Whether the origin-retirement pass auto-reacts to Partisan membership
 changes. When enabled, each node reacts to an observed membership removal —

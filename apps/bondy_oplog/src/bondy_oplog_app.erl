@@ -19,9 +19,9 @@ built on (`bondy_mst_config:init/0`). That init also runs via `bondy_mst`'s
 own application start before `bondy_oplog` starts; it is idempotent, so the
 call here is a defensive no-op.
 
-The leveled projection fold-tag (`bondy_db_leveled_tag:install/0`) is **not**
-installed here — that is a `bondy_db` (leveled) concern and is done by
-`bondy_db_app`, which depends on this application.
+This layer has no leveled concern of its own — leveled storage (bookies,
+topologies, the projection adapter) belongs to `bondy_db`, which depends on
+this application.
 """).
 
 -export([start/2, stop/1]).

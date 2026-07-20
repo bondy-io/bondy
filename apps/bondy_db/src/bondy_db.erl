@@ -48,21 +48,30 @@ The `Namespace` atom is derived deterministically as
 so two DBs with a colliding `EntityType` on the same node get distinct
 substrate identities.
 
-## Realm → Bucket mapping
+## Realm → Bucket and storage-key mapping (G-1)
 
-The facade does not bake Realm into the cell key. Instead it asks the
-topology — via `Topology:bucket_for(EntityType, Realm, TableState)` —
-for the storage-layer **Bucket** the substrate should use, then calls
-`bondy_oplog_core` with `(NS, primary, Bucket, Key)`. The topology decides
-the composition rule:
+Realm separation happens in one of two places, decided by the topology.
+The facade asks the topology — via
+`Topology:bucket_for(EntityType, Realm, TableState)` — for the
+storage-layer **Bucket**, then derives the **storage key** with
+`cell_key/3`:
 
-- `per_entity` returns `Bucket = Realm` (EntityType already implicit in
-  the Bookie).
-- `single_bookie` returns `Bucket = <<Realm, "/", EntityType>>`
-  (one Bookie holds everything, so Bucket disambiguates both).
+- **Realm-in-bucket** topologies (`per_entity`: `Bucket = Realm`;
+  `single_bookie`: `Bucket = <<Realm, "/", EntityType>>`) are already
+  realm-separated at the bucket, so the storage key is the caller's
+  `Key`, verbatim.
+- **Realm-in-key** topologies (`shared_shards`, `memory`) use the bare
+  EntityType as the Bucket — so a per-shard instance can multiplex
+  tables by bucket — and the facade folds the realm into the storage
+  key instead: `<<Realm/binary, 0, Key/binary>>` (G-1). The NUL
+  separator makes realm-scoped scans a contiguous band
+  (`[<<Realm,0>>, <<Realm,1>>)`) because realm URIs are NUL-free text;
+  the caller's key bytes after the separator are preserved verbatim.
 
-`Key` is the user-supplied key, **unmodified**. Range scans address
-`(Bucket, [Low, High))` directly.
+Either way the facade calls `bondy_oplog_core` with
+`(NS, primary, Bucket, StorageKey)`, and range scans fold their bounds
+the same way (`realm_scan_range/2`). This key encoding is an on-disk
+contract, versioned by the topology manifest's `key_encoding_version`.
 
 ## Write path
 
@@ -433,13 +442,12 @@ open_table_provision(
     Db, EntityType, Merged, FoldModule, Backend, Topology, State
 ) ->
     ShardCount = maps:get(shard_count, Merged, ?DEFAULT_SHARD_COUNT),
-    %% Strategy-aware shard routing inputs (AR-2 / AR-3). Threaded into the table
-    %% state and consumed by `shard_for/3` (wired in a later step); the defaults
-    %% reproduce the legacy `phash2({Bucket, Key})` placement (`shard_by => key`,
-    %% strategy `entity`), so a table declaring neither routes exactly as before.
+    %% Strategy-aware shard routing inputs (AR-2 / AR-3), threaded into the
+    %% table state and consumed by `shard_for/3`. The defaults reproduce the
+    %% legacy `phash2({Bucket, Key})` placement (strategy `entity`), so a
+    %% table declaring neither routes exactly as before.
     PartitionStrategy = maps:get(partition_strategy, Merged, entity),
     RealmPrefixDepth = maps:get(realm_prefix_depth, Merged, 1),
-    ShardBy = maps:get(shard_by, Merged, key),
     AggregateRoot = maps:get(aggregate_root, Merged, identity),
     DbName = maps:get(name, Db),
     NS = namespace_atom(DbName, EntityType),
@@ -570,7 +578,6 @@ open_table_provision(
                                 shard_count => ShardCount,
                                 partition_strategy => PartitionStrategy,
                                 realm_prefix_depth => RealmPrefixDepth,
-                                shard_by => ShardBy,
                                 aggregate_root => AggregateRoot,
                                 fold_module => FoldModule,
                                 crdt_module => CrdtModule,
@@ -818,8 +825,9 @@ tick(#{db_hlc := Hlc}) ->
 Deletes the cell at `(Realm, Key)` in `Table`.
 
 Issues the removal operation the table's CRDT declares via `removal_op/0` —
-`clear` for a register, `disable` for a flag. This is an ordinary operation, not
-a physical erase: it goes through the log and converges like any other write.
+`clear` for a register, `disable` for the flags. This is an ordinary
+operation, not a physical erase: it goes through the log and converges like any
+other write.
 
 **When the cell physically disappears is the CRDT's business.** For a register
 the removal leaves a tombstone whose only job is to reject a concurrent write
@@ -1278,6 +1286,13 @@ Convenience wrapper over `apply/4` for tables backed by the
 per-Origin Seq number tracked in the WAL event key — duplicate
 delivery and replay are no-ops by construction.
 
+That idempotence covers SUBSTRATE re-delivery only. A CALLER retry
+after `{error, timeout}` mints a fresh event and is a genuine second
+increment if the first append was in fact durable — a counter is the
+one fold where at-least-once caller behaviour is observable in the
+value. Callers that need exactly-once must layer an idempotency-key
+pattern of their own.
+
 Returns `ok` once the WAL append is durable and the applier has
 committed the projection write, or `{error, _}` on substrate failure.
 
@@ -1446,10 +1461,11 @@ Callers whose `[Low, High)` spans more than one shard / aggregate MUST scatter
 across shards themselves and merge the results (see `range_all/5` / `list/2`);
 the facade does not do scatter-merge here.
 
-Routes through `bondy_oplog_core:range/4`, which merges the projection
-with the per-shard overlay (currently always empty at this layer).
-Realm is folded into both bounds so the substrate scan stays inside
-the realm's prefix.
+Routes through `bondy_oplog_core:range/4`. Facade shards register with
+`overlay = disabled`, so the scan reads the projection only;
+read-your-writes comes from `apply/4`'s `await_apply` step, not an
+overlay merge. Under a realm-folding topology the realm is folded into
+both bounds so the substrate scan stays inside the realm's band.
 
 Returns `{ok, [Row]}` — one `t:row/0` (`{Key, Value, Hlc}`) per cell
 present in the range, in ascending key order. `Value` is the fold's
@@ -1506,9 +1522,14 @@ range(
 Enumerates **every** cell in `Realm` across all shards of `Table`.
 
 Unlike `range/5` (single-shard), this scatters a full scan across every
-shard and merges the results in ascending key order. Use it for the
+shard and merges the results in ascending key order, paging internally
+until the realm band is exhausted — the result is COMPLETE, never
+silently truncated at the substrate's default range cap. Use it for the
 small, list-all tables (e.g. the API Gateway specs) — it is O(table),
-not a point read. Returns `{ok, [Row]}` of `t:row/0` (`{Key, Value, Hlc}`);
+not a point read, and it materialises the whole realm's rows in memory;
+for an unbounded / large enumeration use `bondy_relation`'s keyset
+pagination (`bondy_relation:list/3`) or `bondy_relation:fold/4` instead.
+Returns `{ok, [Row]}` of `t:row/0` (`{Key, Value, Hlc}`);
 `Value` is the fold-decoded value (a caller filters retracted cells whose
 value is the fold's empty value if its policy requires).
 """.
@@ -1523,7 +1544,7 @@ list(#{namespace := NS, db_topology := Topology} = Table, Realm) when
     %% key band and recover the caller's keys; otherwise the Bucket already
     %% isolates the realm and keys are passed through verbatim.
     {Lo, Hi} = realm_scan_range(Topology, Realm),
-    case bondy_oplog_core:range_all(NS, ?INDEX, Bucket, {Lo, Hi}, #{}) of
+    case list_pages(NS, Bucket, Lo, Hi, []) of
         {ok, Rows} ->
             {ok, [
                 {uncell_key(Topology, Realm, K), V, Hlc}
@@ -1538,19 +1559,19 @@ Bounded, globally-ordered range scan over `(Realm, [Low, High))` across
 **every** shard of `Table`.
 
 Like `range/5` but scatters the `[Low, High)` window to every shard and
-merges the per-shard results into one key-ordered list (ascending, or
-descending under `Opts#{direction => desc}`), capped at `Opts`' `limit`
+merges the per-shard results into one ascending key-ordered list, capped
+at `Opts`' `limit`
 (default 1000). The merge is correct because each shard is internally
 sorted and every key in the global top-`limit` appears in some shard's
 top-`limit` (see `bondy_oplog_core:range_all/5`).
 
-This is the keyset-pagination primitive to use while `shard_by => realm`
-is not yet honoured: a realm's keys are spread across shards by
-`phash2({Bucket, Key})`, so a single-shard `range/5` would return only
-the fraction of the window that hashes to one shard — an incomplete page.
-When realm-sharding lands, all of a realm's keys collapse onto one shard,
-the other shards return empty, and this degenerates to a single-shard
-scan for free.
+This is the keyset-pagination primitive for globally-ordered windows: a
+realm's keys are spread across shards by the table's partition strategy
+(`aggregate` hashes each key's `(Realm, Aggregate)`; `entity` hashes
+`{Bucket, Key}`), so a single-shard `range/5` returns only the fraction
+of the window that hashes to one shard — an incomplete page. The G-1
+realm band bounds each per-shard scan to the realm; this function
+assembles the global window across shards.
 
 `Low`/`High` are realm-folded exactly as `range/5`; `High => infinity`
 scans to the end of the realm band. Returns `{ok, [Row]}` of `t:row/0`
@@ -1624,7 +1645,7 @@ path below is likewise not yet realm-scoped.)
 - `fallback => primary` — instead of refusing a stale read, scan the
   primary directly and recompute the matching keys (slow but correct).
   Bounded by an internal cell cap.
-- `limit`, `direction` — forwarded to the underlying range scan (and the
+- `limit` — forwarded to the underlying range scan (and the
   fallback).
 - `after_key => PrimaryKey` — resume strictly after this primary key,
   scanning only the term's remaining entries (keyset pagination within one
@@ -1693,7 +1714,7 @@ within `Realm`.
 Both bounds are normalised through the index's spec. The scan scatters
 across every secondary shard (terms span all shards) and the merged
 result is globally ordered by `(term, primary-key)`. `Opts` are as for
-`index_get/5` (`max_lag` refusal, `limit`, `direction`); `limit` caps the
+`index_get/5` (`max_lag` refusal, `limit`); `limit` caps the
 merged result.
 
 Returns `{ok, [{PrimaryKey, Columns}]}`,
@@ -3379,7 +3400,7 @@ shard_lag_info(NS, IndexName, Shard) ->
 %% Forward only the scan-shaping opts to the substrate; `max_lag`/`shard`
 %% are facade-level and must not leak into the adapter opts.
 index_range_opts(Opts) ->
-    maps:with([limit, direction], Opts).
+    maps:with([limit], Opts).
 
 %% @private
 %% A stale index read either refuses with the lag diagnostic, or — when
@@ -3666,9 +3687,25 @@ realm_prefix(Realm, _Depth) ->
 
 cell_key(Topology, Realm, Key) when is_binary(Realm), is_binary(Key) ->
     case ?FOLDS_REALM(Topology) of
-        true -> <<Realm/binary, 0, Key/binary>>;
-        false -> Key
+        true ->
+            ok = assert_nul_free_realm(Realm),
+            <<Realm/binary, 0, Key/binary>>;
+        false ->
+            Key
     end.
+
+%% @private
+%% G-1's injectivity precondition, ENFORCED. A NUL inside `Realm` makes the
+%% fold non-injective — realms `<<"a">>` and `<<"a",0,"b">>` collide distinct
+%% `(Realm, Key)` pairs onto one storage cell — and `realm_scan_range/2`'s
+%% band for the shorter realm then CONTAINS the longer realm's rows, leaking
+%% reads across the tenancy boundary. Realm URIs are validated upstream, but
+%% this facade's contract cannot borrow another app's validation: one
+%% comparison here, cold next to the I/O it fronts, closes the boundary.
+assert_nul_free_realm(Realm) ->
+    binary:match(Realm, <<0>>) =:= nomatch orelse
+        error({badarg, {realm_contains_nul, Realm}}),
+    ok.
 
 %% @private
 %% Recover the caller's key from a (possibly folded) storage key.
@@ -3688,8 +3725,34 @@ uncell_key(Topology, Realm, Stored) when is_binary(Realm), is_binary(Stored) ->
 %% the Bucket already isolates the realm, so it is the whole bucket.
 realm_scan_range(Topology, Realm) when is_binary(Realm) ->
     case ?FOLDS_REALM(Topology) of
-        true -> {<<Realm/binary, 0>>, <<Realm/binary, 1>>};
-        false -> {<<>>, infinity}
+        true ->
+            %% Guarded on the SCAN side too: even with all writes guarded, a
+            %% NUL-bearing realm's band is a sub-band of the NUL-free prefix
+            %% realm's band, so an unguarded scan would read the victim
+            %% realm's rows.
+            ok = assert_nul_free_realm(Realm),
+            {<<Realm/binary, 0>>, <<Realm/binary, 1>>};
+        false ->
+            {<<>>, infinity}
+    end.
+
+%% @private
+%% Page a cross-shard scatter-scan to completion: `range_all/5` caps each
+%% merged page (default 1000), so `list/2` loops, advancing the inclusive
+%% lower bound to the successor of the last STORAGE key, until a short page
+%% signals band exhaustion. Rows accumulate in ascending storage-key order;
+%% the caller unfolds keys once, on the complete result.
+list_pages(NS, Bucket, Lo, Hi, Acc) ->
+    Limit = 1000,
+    Opts = #{limit => Limit},
+    case bondy_oplog_core:range_all(NS, ?INDEX, Bucket, {Lo, Hi}, Opts) of
+        {ok, Rows} when length(Rows) < Limit ->
+            {ok, lists:append(lists:reverse([Rows | Acc]))};
+        {ok, Rows} ->
+            {LastKey, _, _} = lists:last(Rows),
+            list_pages(NS, Bucket, <<LastKey/binary, 0>>, Hi, [Rows | Acc]);
+        {error, _} = Err ->
+            Err
     end.
 
 %% @private

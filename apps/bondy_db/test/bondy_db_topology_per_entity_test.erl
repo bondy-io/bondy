@@ -41,9 +41,6 @@ setup() ->
     %% via the start_link/0 link in cleanup) does not also kill the
     %% per-test process.
     process_flag(trap_exit, true),
-    %% Adapter writes go through the `?BONDY_FOLD_TAG` extractor, which
-    %% needs the leveled hooks installed before `book_put` lands.
-    ok = bondy_db_leveled_tag:install(),
     Dir = make_tempdir(),
     {ok, Sup} = bondy_db_leveled_sup:start_link(),
     {Sup, Dir}.

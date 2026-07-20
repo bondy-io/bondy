@@ -53,7 +53,6 @@ adapter_test_() ->
         fun range_respects_limit/1,
         fun range_limit_larger_than_data_returns_all/1,
         fun range_asc_returns_ascending/1,
-        fun range_desc_returns_reversed/1,
         fun clear_is_bucket_scoped/1,
         fun clear_is_entity_scoped/1,
         fun cell_keys_is_entity_scoped/1,
@@ -65,12 +64,9 @@ adapter_test_() ->
 %% =============================================================================
 
 setup() ->
-    %% Per-test fresh Bookie in a fresh temp directory. The adapter
-    %% (PR-PS-15b) uses head_only mode with the built-in ?HEAD_TAG;
-    %% the custom leveled-tag extractor is no longer required on the
-    %% write path but `install/0` is left in place because it's a
-    %% global env-var set and harmless when head_only is enabled.
-    ok = bondy_db_leveled_tag:install(),
+    %% Per-test fresh Bookie in a fresh temp directory. The adapter uses
+    %% head_only mode with the built-in ?HEAD_TAG; no custom leveled-tag
+    %% extractor is involved.
     Dir = make_tempdir(),
     {ok, Pid} = leveled_bookie:book_start(
         [
@@ -255,30 +251,9 @@ range_asc_returns_ascending({Pid, _Dir}) ->
             ?BUCKET,
             <<"k01">>,
             <<"k99">>,
-            #{direction => asc}
+            #{}
         ),
         ?assertEqual([<<"k01">>, <<"k02">>, <<"k03">>], [K || {K, _} <- Rows])
-    end.
-
-range_desc_returns_reversed({Pid, _Dir}) ->
-    fun() ->
-        H = handle(Pid),
-        ok = ?MOD:put_batch(H, [
-            {?BUCKET, <<"k01">>, mk_frame(<<"v01">>)},
-            {?BUCKET, <<"k02">>, mk_frame(<<"v02">>)},
-            {?BUCKET, <<"k03">>, mk_frame(<<"v03">>)}
-        ]),
-        {ok, Rows} = ?MOD:range(
-            H,
-            ?BUCKET,
-            <<"k01">>,
-            <<"k99">>,
-            #{direction => desc}
-        ),
-        %% Matches the ETS adapter's contract: take first Limit rows in
-        %% asc, then reverse for desc — i.e., desc with no limit returns
-        %% the full range reversed.
-        ?assertEqual([<<"k03">>, <<"k02">>, <<"k01">>], [K || {K, _} <- Rows])
     end.
 
 clear_is_bucket_scoped({Pid, _Dir}) ->

@@ -28,7 +28,6 @@
 
 setup() ->
     {ok, _} = application:ensure_all_started(bondy_db),
-    ok = bondy_db_leveled_tag:install(),
     ok.
 
 cleanup(_) ->

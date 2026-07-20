@@ -25,14 +25,6 @@
 %% public key) — the replication layer treats it as opaque.
 -define(BONDY_OPLOG_ORIGIN_BYTES, 16).
 
-%% Leveled object tag used for projection cell frames. The tag activates
-%% the `bondy_db_leveled_tag` extractor + head-builder pair so
-%% `leveled_bookie:book_head/4` returns the HEAD wire format
-%% (`<<HlcLen:16, Hlc/binary, ValueBytes/binary>>`) instead of the full
-%% V2 frame. This is an oplog/leveled-layer concept (not an MST one),
-%% so it lives here rather than in `bondy_mst.hrl`.
--define(BONDY_FOLD_TAG, o_fold).
-
 %% An *instance id* is the unit of independence. One MST per instance.
 %% Instance ids are opaque binaries chosen by the consumer; the library
 %% does not interpret them. Consumers that need atom-friendly ids can

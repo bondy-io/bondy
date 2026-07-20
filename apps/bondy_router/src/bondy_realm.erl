@@ -40,7 +40,7 @@ Realms are persisted to disk and replicated across the cluster via the
 bondy_db `bondy_realm` core table. Unlike the per-realm tables, the realm table
 is a **global registry**:
 all realms share a single bondy_db band (the empty binary, like the API Gateway
-specs) and are keyed by their Uri, with `shard_by => key` spreading them across
+specs) and are keyed by their Uri, whose hash spreads them across
 shards. `list/0` therefore scatter-scans the band across every shard. Realms'
 associated RBAC objects (users, credentials, groups, sources, grants) live in
 their own bondy_db tables.
@@ -139,8 +139,8 @@ connected to any realm.
 
 %% The realm table is a global registry: every realm shares this one bondy_db
 %% band (the empty binary, mirroring the api_gateway specs) and is keyed by its
-%% Uri. `shard_by => key` (see bondy_namespace_catalog) spreads realms across
-%% shards while `bondy_db:list/2` over the band scatter-scans every realm.
+%% Uri, whose hash spreads realms across shards
+%% while `bondy_db:list/2` over the band scatter-scans every realm.
 -define(REALM_BAND, <<>>).
 
 %% S-2: at-rest encryption marker for a `bondy_realm_keys` bundle field. A

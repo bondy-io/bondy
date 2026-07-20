@@ -19,6 +19,7 @@ all() ->
         validate_wildcard,
         validate_wildcard_error,
         empty_uri,
+        control_chars_rejected,
         match
     ].
 
@@ -182,6 +183,34 @@ empty_uri(_) ->
     ?assertEqual(false, bondy_wamp_uri:is_valid(<<>>, loose_allow_empty)),
     ?assertEqual(false, bondy_wamp_uri:is_valid(<<>>, strict_allow_empty)),
 
+    ok.
+
+%% The loose component class must reject ALL control characters. PCRE `\s`
+%% does not cover NUL, and a NUL-bearing URI accepted as a realm would defeat
+%% the NUL-separator storage-key encoding downstream (`bondy_db` G-1) — a
+%% multi-tenancy boundary. Regression for the tightened classes.
+control_chars_rejected(_) ->
+    Bad = [
+        <<"a", 0, "b">>,
+        <<"a", 0, "b.c">>,
+        <<"a.b", 0>>,
+        <<0, "a">>,
+        <<"a", 1, "b">>,
+        <<"a", 16#1F, "b">>,
+        <<"a", 16#7F, "b">>
+    ],
+    [
+        begin
+            ?assertEqual(false, bondy_wamp_uri:is_valid(U, loose)),
+            ?assertEqual(false, bondy_wamp_uri:is_valid(U, loose_prefix)),
+            ?assertEqual(false, bondy_wamp_uri:is_valid(U, loose_allow_empty)),
+            ?assertEqual(false, bondy_wamp_uri:is_valid(U, strict))
+        end
+     || U <- Bad
+    ],
+    %% Ordinary printable URIs are unaffected.
+    ?assert(bondy_wamp_uri:is_valid(<<"com.example.thing">>, loose)),
+    ?assert(bondy_wamp_uri:is_valid(<<"com.Example-Thing_1">>, loose)),
     ok.
 
 match(Config) ->

@@ -14,7 +14,7 @@ input to lowercase use `string:casefold/1`.
 ## Storage
 
 Groups are persisted in `bondy_db`. The durable `security_groups` table is
-provisioned by `bondy_namespace_catalog` (`fold => lww`, `shard_by => realm`);
+provisioned by `bondy_namespace_catalog` (`fold => lww`);
 each group is a cell keyed by its `Name` binary, addressed as
 `(Table, RealmUri, Name)`. The value carries the group's `groups` property (its
 parent groups, for role inheritance). Group *membership* is not held here: it
