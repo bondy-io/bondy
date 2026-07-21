@@ -177,6 +177,7 @@ collect_mf(_Registry, CB) ->
             ),
             collect_wal(CB),
             collect_sync_scheduler(CB),
+            collect_leveled(CB),
             collect_bondy_metrics(CB);
         false ->
             ok
@@ -283,7 +284,9 @@ events() ->
         [bondy_mst, page_store, seal_roll],
         [bondy_mst, page_store, gc],
         [bondy_mst, page_store, recovery],
-        [bondy_mst, page_store, idx_rebuild]
+        [bondy_mst, page_store, idx_rebuild],
+        %% AAE reactor (router-level lww conflict alarm)
+        [bondy, aae, merge_conflict]
     ].
 
 %% @private
@@ -386,6 +389,9 @@ declare_metrics() ->
         {bondy_oplog_retirements_total, "Origin retirement outcomes.", [
             outcome
         ]},
+        {bondy_aae_merge_conflicts_total,
+            "Remote AAE merges that replaced a differing local value of an "
+            "authorization cell (lww conflict over-approximation).", [table]},
         {bondy_oplog_secondary_flush_ops_total, "Secondary index ops flushed.",
             [namespace, index]},
         {bondy_oplog_secondary_saturated_dropped_total,
@@ -808,6 +814,12 @@ do_handle_event([bondy_oplog, retirement, completed], _Meas, _Meta) ->
     counter(bondy_oplog_retirements_total, [completed], 1);
 do_handle_event([bondy_oplog, retirement, skipped], _Meas, _Meta) ->
     counter(bondy_oplog_retirements_total, [skipped], 1);
+do_handle_event([bondy, aae, merge_conflict], Meas, Meta) ->
+    counter(
+        bondy_aae_merge_conflicts_total,
+        [label(maps:get(table, Meta, undefined))],
+        max(1, num(count, Meas))
+    );
 do_handle_event([bondy_oplog, secondary_writer, flush], Meas, Meta) ->
     NS = maps:get(namespace, Meta, undefined),
     Index = maps:get(index_name, Meta, undefined),
@@ -974,8 +986,38 @@ families() ->
             "Per-shard AE freshness lag of the substrate.", gauge,
             fun ae_lag_rows/0},
         {bondy_oplog_gc_scheduler_inflight, "In-flight MST GC/compaction runs.",
-            gauge, fun gc_scheduler_inflight/0}
+            gauge, fun gc_scheduler_inflight/0},
+        {bondy_alarms, "Number of active alarms on the node.", gauge,
+            fun alarm_count/0},
+        {bondy_alarm_active, "1 per active alarm, labelled by alarm id.",
+            gauge, fun alarm_rows/0},
+        {bondy_node_ready,
+            "1 when the node reports ready (same flag the /ready probe "
+            "serves).", gauge, fun node_ready/0}
     ].
+
+%% @private
+alarm_count() ->
+    [{[], length(alarms())}].
+
+%% @private
+alarm_rows() ->
+    [{[{alarm_id, label(Id)}], 1} || {Id, _Desc} <- alarms()].
+
+%% @private
+alarms() ->
+    case catch bondy_alarm_handler:get_alarms() of
+        L when is_list(L) -> [A || {_, _} = A <- L];
+        _ -> []
+    end.
+
+%% @private
+node_ready() ->
+    case catch bondy_config:get(status, undefined) of
+        ready -> [{[], 1}];
+        {'EXIT', _} -> [];
+        _ -> [{[], 0}]
+    end.
 
 %% @private
 cluster_members() ->
@@ -1168,6 +1210,158 @@ collect_sync_scheduler(CB) ->
     ).
 
 %% @private
+%% Emits the per-Bookie LSM gauges from ONE parallel `book_status/1`
+%% gather per scrape (see `bookie_statuses/0`). Labels are the
+%% representative (namespace, shard) of the Bookie.
+collect_leveled(CB) ->
+    Statuses =
+        try
+            bookie_statuses()
+        catch
+            _:_ -> []
+        end,
+    Scalars = [
+        {bondy_leveled_ledger_cache_size,
+            "Leveled ledger (write) cache entries.", ledger_cache_size},
+        {bondy_leveled_penciller_cache_size,
+            "Leveled penciller in-memory (L0) cache size.",
+            penciller_inmem_cache_size},
+        {bondy_leveled_active_journal_files,
+            "Active journal (CDB) files.", n_active_journal_files},
+        {bondy_leveled_journal_compaction_score,
+            "Last journal compaction score.",
+            journal_last_compaction_score}
+    ],
+    lists:foreach(
+        fun({Name, Help, Key}) ->
+            Metrics = lists:filtermap(
+                fun({Labels, Status}) ->
+                    case maps:get(Key, Status, undefined) of
+                        V when is_number(V) ->
+                            {true, {bookie_labels(Labels), V}};
+                        _ ->
+                            false
+                    end
+                end,
+                Statuses
+            ),
+            emit_gauge_mf(CB, Name, Help, Metrics)
+        end,
+        Scalars
+    ),
+    Backlog = [
+        {bookie_labels(Labels), element(1, B)}
+     || {Labels, S} <- Statuses, is_tuple(B = backlog(S))
+    ],
+    emit_gauge_mf(
+        CB,
+        bondy_leveled_penciller_backlog,
+        "Penciller work backlog (the LSM write-stall signal).",
+        Backlog
+    ),
+    Pending = lists:flatmap(
+        fun({Labels, S}) ->
+            case backlog(S) of
+                {_, L0, Manifest} ->
+                    BL = bookie_labels(Labels),
+                    [
+                        {[{kind, l0} | BL], bool_to_int(L0 == true)},
+                        {[{kind, manifest} | BL],
+                            bool_to_int(Manifest == true)}
+                    ];
+                _ ->
+                    []
+            end
+        end,
+        Statuses
+    ),
+    emit_gauge_mf(
+        CB,
+        bondy_leveled_penciller_pending,
+        "1 while an L0 flush / manifest change is pending.",
+        Pending
+    ),
+    LevelFiles = lists:flatmap(
+        fun({Labels, S}) ->
+            case maps:get(level_files_count, S, undefined) of
+                M when is_map(M) ->
+                    [
+                        {[{level, Level} | bookie_labels(Labels)], N}
+                     || {Level, N} <- maps:to_list(M), is_integer(N)
+                    ];
+                _ ->
+                    []
+            end
+        end,
+        Statuses
+    ),
+    emit_gauge_mf(
+        CB,
+        bondy_leveled_level_files,
+        "SST file count per LSM level.",
+        LevelFiles
+    ),
+    Fetches = lists:flatmap(
+        fun({Labels, S}) ->
+            case maps:get(fetch_count_by_level, S, undefined) of
+                M when is_map(M) ->
+                    [
+                        {[{level, Level} | bookie_labels(Labels)],
+                            maps:get(count, Counters, 0)}
+                     || {Level, Counters} <- maps:to_list(M),
+                        is_map(Counters)
+                    ];
+                _ ->
+                    []
+            end
+        end,
+        Statuses
+    ),
+    emit_gauge_mf(
+        CB,
+        bondy_leveled_fetches,
+        "Sampled fetches by resolution level (read amplification / "
+        "cache-hit distribution).",
+        Fetches
+    ),
+    OpTimes = lists:flatmap(
+        fun({Labels, S}) ->
+            BL = bookie_labels(Labels),
+            [
+                {[{op, Op} | BL], Time / Count}
+             || {Op, TimeKey, CountKey} <- [
+                    {get, get_body_time, get_sample_count},
+                    {head, head_rsp_time, head_sample_count},
+                    {put_ink, put_ink_time, put_sample_count},
+                    {put_mem, put_mem_time, put_sample_count},
+                    {put_prep, put_prep_time, put_sample_count}
+                ],
+                is_number(Time = maps:get(TimeKey, S, undefined)),
+                is_integer(Count = maps:get(CountKey, S, 0)),
+                Count > 0
+            ]
+        end,
+        Statuses
+    ),
+    emit_gauge_mf(
+        CB,
+        bondy_leveled_mean_op_time_microseconds,
+        "Mean sampled operation time.",
+        OpTimes
+    ).
+
+%% @private
+backlog(Status) ->
+    case maps:get(penciller_work_backlog_status, Status, undefined) of
+        {N, _, _} = B when is_integer(N) -> B;
+        _ -> undefined
+    end.
+
+%% @private
+bookie_labels({NS, Shard}) ->
+    [{namespace, NS}, {shard, Shard}].
+
+%% @private
 emit_gauge_mf(_CB, _Name, _Help, []) ->
     ok;
 emit_gauge_mf(CB, Name, Help, Metrics) ->
@@ -1348,57 +1542,105 @@ connected() ->
 %% @private
 %% Gathers `bondy_oplog_wal:info/1` snapshots for every instance with a WAL
 %% writer, in parallel and under a global deadline so one slow writer cannot
-%% stall the scrape. Replies are addressed to an alias so stragglers
-%% arriving after `unalias/1` are dropped instead of leaking into the
-%% scraping process's mailbox.
+%% stall the scrape.
 wal_infos() ->
-    Alias = alias(),
-    Pending = lists:foldl(
-        fun(Id, Acc) ->
+    Pairs = lists:filtermap(
+        fun(Id) ->
             case catch bondy_oplog_registry:wal_pid(Id) of
-                Pid when is_pid(Pid) ->
-                    _ = spawn(fun() ->
-                        Info =
-                            try
-                                bondy_oplog_wal:info(Pid)
-                            catch
-                                _:_ -> undefined
-                            end,
-                        Alias ! {Alias, Id, Info}
-                    end),
-                    Acc + 1;
-                _ ->
-                    Acc
+                Pid when is_pid(Pid) -> {true, {Id, Pid}};
+                _ -> false
             end
         end,
-        0,
         instances()
     ),
-    Deadline =
-        erlang:monotonic_time(millisecond) + ?WAL_INFO_DEADLINE_MS,
-    Infos = await_wal_infos(Alias, Pending, Deadline, []),
-    _ = unalias(Alias),
-    flush_wal_infos(Alias),
-    Infos.
+    pgather(Pairs, fun bondy_oplog_wal:info/1, ?WAL_INFO_DEADLINE_MS).
 
 %% @private
-await_wal_infos(_Alias, 0, _Deadline, Acc) ->
+%% One `leveled_bookie:book_status/1` snapshot per DISTINCT Bookie process,
+%% labelled by a representative (namespace, shard). With shared_shards
+%% topologies many tables (and secondary indexes) share one Bookie per
+%% shard, so entries are deduplicated by pid before fanning out.
+%% `book_status/1` is an infinity-timeout gen_server call; the parallel
+%% gather's deadline is what keeps a wedged Bookie from stalling the
+%% scrape.
+bookie_statuses() ->
+    Entries =
+        case catch bondy_oplog_core_registry:list() of
+            L when is_list(L) -> L;
+            _ -> []
+        end,
+    ByPid = lists:foldl(
+        fun(Entry, Acc) ->
+            try
+                bondy_db_projection_leveled =
+                    bondy_oplog_core_registry:entry_projection_adapter(
+                        Entry
+                    ),
+                Handle =
+                    bondy_oplog_core_registry:entry_projection_handle(
+                        Entry
+                    ),
+                #{bookie := Pid} = bondy_db_projection_leveled:info(Handle),
+                true = is_pid(Pid),
+                {NS, _Index, Shard} =
+                    bondy_oplog_core_registry:entry_key(Entry),
+                maps:put(Pid, {NS, Shard}, Acc)
+            catch
+                _:_ -> Acc
+            end
+        end,
+        #{},
+        Entries
+    ),
+    Pairs = [{Key, Pid} || {Pid, Key} <- maps:to_list(ByPid)],
+    pgather(Pairs, fun leveled_bookie:book_status/1, ?WAL_INFO_DEADLINE_MS).
+
+%% @private
+%% Runs `Fun(Arg)` for each `{Key, Arg}` in a spawned process and collects
+%% the `{Key, Result}` pairs whose result is a map, under a global
+%% deadline. Replies are addressed to an alias so stragglers arriving
+%% after `unalias/1` are dropped instead of leaking into the scraping
+%% process's mailbox.
+pgather(Pairs, Fun, DeadlineMs) ->
+    Alias = alias(),
+    lists:foreach(
+        fun({Key, Arg}) ->
+            _ = spawn(fun() ->
+                Result =
+                    try
+                        Fun(Arg)
+                    catch
+                        _:_ -> undefined
+                    end,
+                Alias ! {Alias, Key, Result}
+            end)
+        end,
+        Pairs
+    ),
+    Deadline = erlang:monotonic_time(millisecond) + DeadlineMs,
+    Results = await_gather(Alias, length(Pairs), Deadline, []),
+    _ = unalias(Alias),
+    flush_gather(Alias),
+    Results.
+
+%% @private
+await_gather(_Alias, 0, _Deadline, Acc) ->
     Acc;
-await_wal_infos(Alias, Pending, Deadline, Acc) ->
+await_gather(Alias, Pending, Deadline, Acc) ->
     Timeout = max(0, Deadline - erlang:monotonic_time(millisecond)),
     receive
-        {Alias, Id, Info} when is_map(Info) ->
-            await_wal_infos(Alias, Pending - 1, Deadline, [{Id, Info} | Acc]);
-        {Alias, _Id, _} ->
-            await_wal_infos(Alias, Pending - 1, Deadline, Acc)
+        {Alias, Key, Result} when is_map(Result) ->
+            await_gather(Alias, Pending - 1, Deadline, [{Key, Result} | Acc]);
+        {Alias, _Key, _} ->
+            await_gather(Alias, Pending - 1, Deadline, Acc)
     after Timeout ->
         Acc
     end.
 
 %% @private
-flush_wal_infos(Alias) ->
+flush_gather(Alias) ->
     receive
-        {Alias, _, _} -> flush_wal_infos(Alias)
+        {Alias, _, _} -> flush_gather(Alias)
     after 0 ->
         ok
     end.

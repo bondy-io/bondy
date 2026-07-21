@@ -28,6 +28,7 @@ bridge_test_() ->
         fun mst_events_are_counted/0,
         fun core_refresh_sets_gauges/0,
         fun write_latency_sets_quantile_gauges/0,
+        fun aae_conflict_is_counted/0,
         fun malformed_event_does_not_detach_handler/0,
         fun exposition_formats/0
     ]}.
@@ -35,11 +36,25 @@ bridge_test_() ->
 test_setup() ->
     {ok, Started1} = application:ensure_all_started(telemetry),
     {ok, Started2} = application:ensure_all_started(prometheus),
+    %% A sync scheduler left running by an earlier eunit module in the same
+    %% VM emits the same global scheduler telemetry these tests assert EXACT
+    %% counter values on; suspend its periodic tick for the duration.
+    Interval =
+        case erlang:whereis(bondy_oplog_sync_scheduler) of
+            undefined ->
+                undefined;
+            _Pid ->
+                #{interval_ms := I} = bondy_oplog_sync_scheduler:info(),
+                ok = bondy_oplog_sync_scheduler:set_interval_ms(0),
+                I
+        end,
     ok = bondy_prometheus_db:setup(),
-    Started1 ++ Started2.
+    {Started1 ++ Started2, Interval}.
 
-test_cleanup(Started) ->
+test_cleanup({Started, Interval}) ->
     ok = bondy_prometheus_db:teardown(),
+    is_integer(Interval) andalso
+        (ok = bondy_oplog_sync_scheduler:set_interval_ms(Interval)),
     _ = [application:stop(App) || App <- lists:reverse(Started)],
     ok.
 
@@ -243,6 +258,19 @@ write_latency_sets_quantile_gauges() ->
         1200,
         prometheus_gauge:value(
             bondy_oplog_write_readable_latency_microseconds, [?ID, p99]
+        )
+    ).
+
+aae_conflict_is_counted() ->
+    ok = telemetry:execute(
+        [bondy, aae, merge_conflict],
+        #{count => 1},
+        #{table => security_grants, realm_uri => <<"com.example.realm">>}
+    ),
+    ?assertEqual(
+        1,
+        prometheus_counter:value(
+            bondy_aae_merge_conflicts_total, [<<"security_grants">>]
         )
     ).
 

@@ -65,6 +65,7 @@ throttle(Class, Key) ->
                         class => Class,
                         key => Key
                     }),
+                    ok = count_denial(Class),
                     throttled
             end
     end.
@@ -125,9 +126,19 @@ allow_session(undefined) ->
     ok;
 allow_session(T) ->
     case bondy_regulator_rate_limit:allow(T, 1) of
-        {true, _} -> ok;
-        {false, _} -> throttled
+        {true, _} ->
+            ok;
+        {false, _} ->
+            ok = count_denial(message),
+            throttled
     end.
+
+%% @private
+%% The throttling verdict must never depend on the metrics subsystem
+%% being up (e.g. before `bondy_prometheus` setup, or in embedded tests).
+count_denial(Class) ->
+    _ = (catch prometheus_counter:inc(bondy_rate_limited_total, [Class], 1)),
+    ok.
 
 -doc "Deletes a per-session limiter (frees its bucket). No-op for `undefined`.".
 -spec delete_session_limiter(session_limiter()) -> ok.

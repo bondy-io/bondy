@@ -737,9 +737,10 @@ forward(#result{} = M, Caller, #{from := _Callee} = Opts) ->
     Key = bondy_rpc_promise:call_key_pattern(RealmUri, Caller, CallId),
 
     case bondy_rpc_promise:take(Key) of
-        {ok, _Promise} ->
+        {ok, Promise} ->
             %% Even if promise has timeout but bondy_rpc_promise_manager has
             %% not evicted it yet.
+            ok = notify_call_latency(Promise),
             bondy:send(RealmUri, Caller, M);
         error ->
             no_matching_promise(M)
@@ -769,7 +770,8 @@ forward(#error{request_type = ?CALL} = M, Caller, Opts) ->
         end,
 
     case bondy_rpc_promise:take(Key, Status) of
-        {ok, _Promise} ->
+        {ok, Promise} ->
+            ok = notify_call_latency(Promise),
             bondy:send(RealmUri, Caller, M, #{});
         error ->
             %% The promise timed out already and local promise manager evicted
@@ -883,7 +885,11 @@ do_forward(#yield{} = M, Ctxt0) ->
 
     case bondy_rpc_promise:take(Key) of
         {ok, Promise} ->
-            %% Caller can be local or remote.
+            %% Caller can be local or remote. When the Caller is local this
+            %% resolves the whole call (only one promise exists), so it is
+            %% the local-call latency observation point; for a remote Caller
+            %% its own node observes latency on the call promise instead.
+            ok = notify_call_latency(Promise),
             Caller = bondy_rpc_promise:caller(Promise),
             CallId = bondy_rpc_promise:call_id(Promise),
 
@@ -946,6 +952,7 @@ do_forward(#error{request_type = Type} = M, Ctxt0) when
 
     case Result of
         {ok, Promise} ->
+            _ = (NewType == ?CALL andalso notify_call_latency(Promise)),
             CallId = bondy_rpc_promise:call_id(Promise),
             %% Caller can be local or remote.
             Caller = bondy_rpc_promise:caller(Promise),
@@ -1391,6 +1398,23 @@ no_matching_promise(M) ->
         message => M
     }),
     ok.
+
+%% @private
+%% Emits the call round-trip latency (promise creation to first response)
+%% for the promise that resolved a CALL. Async via the event manager;
+%% `bondy_prometheus` observes it into `bondy_wamp_call_latency_milliseconds`.
+notify_call_latency(Promise) ->
+    case bondy_rpc_promise:procedure_uri(Promise) of
+        Uri when is_binary(Uri) ->
+            Elapsed =
+                erlang:system_time(millisecond) -
+                    bondy_rpc_promise:timestamp(Promise),
+            bondy_event_manager:notify(
+                {[bondy, wamp, call, latency], Uri, max(0, Elapsed)}
+            );
+        _ ->
+            ok
+    end.
 
 %% =============================================================================
 %% PRIVATE - CALLS AND INVOCATION STRATEGIES (LOAD BALANCING, FAIL OVER, ETC)

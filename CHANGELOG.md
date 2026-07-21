@@ -1,4 +1,75 @@
 # CHANGELOG
+## Unreleased
+
+### New Features
+
+#### New storage and replication architecture
+* PlumDB (and its RocksDB backend) has been removed and replaced by a new, purpose-built storage and replication stack:
+    * `bondy_db` — the database layer used by all Bondy subsystems (security, realms, API Gateway specs, tickets, tokens, registry). Provides tables with per-table CRDT semantics, point reads, ranged scans, cursor-based pagination (`bondy_relation`), and deletion.
+    * `bondy_oplog` — the replicated operation-log substrate underneath `bondy_db`: per-shard write-ahead log, Merkle Search Tree (MST) history, appliers that maintain materialised projections, and pull-based anti-entropy replication over Partisan.
+    * `bondy_mst` — the MST library, now vendored as an umbrella app.
+    * Durable tables project onto a `leveled` (LSM-tree) backend with ETS point-read caches; ephemeral tables (e.g. the registry) are fully in-memory. The WAL owns durability: writes are acknowledged after the log fsync, and projections are rebuilt from the log on recovery.
+* Convergence is op-based CRDT semantics per table — last-writer-wins and multi-value registers, add-wins maps/sets, enable/disable-wins flags, counters — with per-cell Hybrid Logical Clocks and, for concurrency-detecting types, per-cell causal contexts (dotted version vectors). Replicas converge deterministically regardless of delivery order (Strong Eventual Consistency).
+* Sharding and physical layout are configurable per table: realm-partitioned or key-hashed placement, configurable shard counts (`oplog.core.shard_count`, `oplog.core.partition_strategy`, `oplog.core.realm_prefix_depth`), and aggregate-root routing that co-locates related keys (e.g. a user's group memberships) on a single shard for the authentication hot path. Realm identifiers are folded into storage keys so identically-named keys in different realms can never collide.
+* The node's keying topology is frozen in an on-disk manifest at first boot; incompatible changes (which would corrupt routing) are detected and refused at startup, including changes to the runtime's internal hash function across OTP upgrades. Anti-entropy sessions exchange a topology fingerprint and refuse to sync with peers whose keying differs.
+* Anti-entropy (enabled by default, `oplog.aae`): pull-based MST reconciliation with bounded per-round page batches, a node-wide concurrency cap (`oplog.aae.max_concurrency`), a node-wide in-flight page budget (`oplog.aae.max_pages_in_flight`), adaptive live-sync throttling for quiescent shards (`oplog.aae.live_sync`), optional load-reactive yielding under routing pressure (`oplog.aae.load_adaptive`), and exponential retry backoff for failed bootstraps. New and recovering nodes bootstrap by streaming a peer's projection snapshot and then replaying the log delta. A node whose peer has already reclaimed historical pages automatically falls back to a fresh snapshot bootstrap.
+* Authentication freshness fence: when replicated security state (credentials, grants) on this node is provably stale beyond `oplog.aae.fence.max_lag`, authentication is refused rather than decided on stale data. The behaviour on cluster isolation is configurable (`oplog.aae.fence.on_isolation`); genuine single-node deployments are exempt.
+* Cluster-wide security reactions: a credential change replicated from another node (password or authorized keys) closes the affected user's active sessions on every node; replication that overwrites a concurrent local edit of a grant or source raises a telemetry alarm (`[bondy, aae, merge_conflict]`).
+* Group membership is now stored as one replicated fact per (user, group) pair with add-wins semantics, so concurrent membership changes on different nodes merge deterministically without lost updates.
+* Registry entries (registrations, subscriptions) live in an ephemeral in-memory database; remote-session liveness is handled by presence masking (suspend/resume/evict) instead of destructive deletes, so a flapping node's entries recover without re-registration.
+
+#### Deletion and space reclamation
+* `bondy_db:delete/3` deletes a value from a replicated table: the value disappears immediately and everywhere, while the underlying tombstone is retained until it is *causally stable* — provably known to every cluster member — and then physically reclaimed. This is driven by:
+    * A stability oracle built on reciprocal sync confirmation: each anti-entropy session confirms the exact MST root both peers hold, and reclamation only proceeds for data below the frontier confirmed by **all** current members (a silent member holds reclamation back; it never ages out implicitly).
+    * A background reclamation scheduler (enabled by default) running bounded, resumable sweeps inside each shard's applier.
+    * Origin retirement (enabled by default): when a node permanently leaves the cluster, its per-cell causal bookkeeping is garbage-collected via a fail-closed reap-by-complement pass, triggered by membership changes and a slow periodic tick. No origin is ever banned automatically.
+* Reclamation is observable end-to-end: telemetry for sweep batches, stalled reclamation (naming the members holding it back), retirement passes and scheduler outcomes, plus rate-limited warning logs. New documentation covers the model and every configuration option (`doc/guides/database/deletion_and_reclamation.md`, `doc/guides/configuration/reclamation_options.md`).
+
+#### Realm signing keys encrypted at rest
+* Realm private keys are now encrypted at rest (AES-256-GCM) using a master key obtained through `bondy_secret_resolver` providers configured via `security.master_key.*`: an environment variable or AWS Secrets Manager. The keyring fails closed — if the master key is unavailable at boot, encrypted keys are not served.
+
+#### HTTP/2
+* HTTP/2 is now served on all four HTTP listeners: negotiated via ALPN on the HTTPS listeners and via the h2c upgrade or prior-knowledge preface on the HTTP listeners. Resource use is bounded (at most `max_concurrent_streams` concurrent requests per connection, default 100, plus HPACK and frame-rate caps). Note for capacity planning: one HTTP/2 connection can carry up to `max_concurrent_streams` in-flight requests, so `max_connections`-based alarms undercount request-level load.
+
+### Security
+* Inbound rate limiting (`security.rate_limit.*`): token-bucket limits on connection establishment, handshakes and authentication attempts.
+* Refined X-Forwarded-For trust handling so source-address checks cannot be spoofed through untrusted proxy headers.
+* Clustering now refuses to start when the Partisan peer plane is insecure (plaintext, or TLS without peer verification) — replicated credentials and signing keys would otherwise transit unprotected. Operators on trusted networks can acknowledge the risk explicitly with `cluster.tls.allow_insecure = on`, which downgrades the refusal to a startup warning.
+* Fixed ticket scope normalisation on decode: persisted ticket lookups now resolve, making ticket revocation enforceable.
+* Fixed a privilege escalation in claim-restricted (e.g. OIDC) sessions: a session restricted to an explicit set of groups also received the grants of the user's locally-stored group memberships. Such sessions now receive only the user's direct grants plus the claimed groups' grants.
+* NUL bytes are rejected in realm URIs and storage keys, and WAMP URI validation rejects control characters, closing key-injection paths into the storage layer.
+* Cowboy upgraded from 2.13.0 to 2.17.0 (with cowlib 2.18.0), picking up upstream security fixes: an HTTP/1.1 parser denial-of-service, HPACK-bomb protection, early rejection of NUL/CR/LF in unexpected positions, and termination of responses carrying invalid header names or values (a response-splitting defence; a response with e.g. control characters in a header value now yields a 500 instead of being relayed).
+
+### Improvements
+* New Cowboy listener options exposed in `bondy.conf` for all four listeners (`admin_api.http[s]`, `api_gateway.http[s]`): `max_authorization_header_value_length` (raise for large bearer tokens without raising the general header limit), `max_cookie_header_value_length`, `max_authority_length`, `invalid_response_headers` (`error_terminate` | `ignore`) and `max_concurrent_streams`.
+* Comprehensive Prometheus observability, all exported on the existing Admin API `/metrics` endpoint:
+    * Storage stack (`bondy_db`/`bondy_oplog`/`bondy_mst`): WAL activity and durability state, applier pipeline stage latencies and throughput, anti-entropy sync/bootstrap sessions, scheduler activity, MST page store (seals, GC, gossip, integrity/corruption counters), secondary index flushes, substrate read/cache rates and AE freshness lag, per-shard applied-frontier signatures (cluster-wide convergence is computable in PromQL with no scrape-time cross-node calls), and per-Bookie `leveled` LSM state (penciller work backlog, level file distribution, caches, journal compaction score, sampled fetch levels and operation times).
+    * Router: WAMP call round-trip latency per procedure (`bondy_wamp_call_latency_milliseconds`, observed at RPC-promise resolution for local and cross-node calls, success and error), in-flight RPC promises and promise timeouts, inbound rate-limiter denials by class, registration/subscription churn, realm and user lifecycle events (including logins and credential changes), registry size/memory, listener saturation and accept/terminate counters per socket listener, load-regulation queue depths, Partisan connection counts per peer and channel, active OTP alarms, node readiness, and mailbox depth of critical singleton processes.
+    * BEAM: microstate-accounting scheduler-time metrics (`erlang_vm_msacc_*`) and counters for system-monitor events (`long_gc`, `long_schedule`, `large_heap`, `busy_port`, `busy_dist_port`), which were previously logged and discarded.
+* Ready-to-run monitoring stack under `monitoring/`: Docker Compose (Prometheus + Grafana, pre-provisioned) with a comprehensive dashboard — cluster node selector, Partisan connectivity matrix, an N×N anti-entropy convergence matrix (diverged-shard count per node pair) with per-pair drill-down into diverged shards and their replication gaps, and per-area rows (write path/WAL, applier, core substrate, leveled, MST, secondary indexes, router internals, WAMP traffic, HTTP, BEAM VM) using latency heatmaps, state timelines and saturation gauges.
+* `bondy_export` import now batches writes (500 records per transaction) instead of syncing per record, making large imports orders of magnitude faster.
+* The reference documentation build (`rebar3 ex_doc`) was repaired (legacy doc comments crashed the doc compiler) and module documentation across the storage stack migrated to `-doc` attributes.
+* Erlang/OTP 28 is now the minimum supported release; Partisan upgraded to latest.
+
+### Performance
+* Durable-table pack sealing is asynchronous: the write path is no longer frozen while the MST pack store seals, cutting p99 apply latency roughly in half under sustained write load. The seal threshold default was lowered (16MB → 2MB) so seals are frequent-but-small instead of rare-but-long.
+
+### Fixes
+* The session and socket duration histograms (`bondy_session_duration_seconds`, `bondy_socket_duration_seconds`) mis-recorded every observation: values fed in seconds were interpreted as native time units (the prometheus library infers a duration unit from the metric-name suffix), so every observation landed in the lowest bucket and sums under-read by ~10⁹×. Both now record correctly.
+* Cold boot after an unclean shutdown could lose the tail of the write-ahead log when multiple tables shared a WAL: draining is now gated until every co-hosted table has registered.
+* Stopping a node destroyed the durable MST history and forced a full log replay on next boot; history is now closed on shutdown and destroyed only for ephemeral tables.
+* Two durability-ordering bugs in the durable MST pack store: the root could be persisted before the pages it references (leaving a dangling root after a crash) and the root was only persisted lazily (forcing full log replays after clean shutdowns). Pages are now synced before the root, and the root is flushed at every commit barrier.
+* A freshly bootstrapped node adopted the peer's data but not its replication frontier, permanently reporting divergence; the frontier is now merged at bootstrap completion.
+* Boot-time configuration application is declarative and idempotent: re-applying the same `security` config on every boot no longer generates spurious replicated writes.
+* Realm signing keys were part of the realm's identity hash, causing every boot to regenerate and re-replicate them; keys now live in their own union-merged structure and cross-node JWT verification works while keys propagate.
+* The `<listener>.buffer.min/max` (dynamic socket buffer) options were broken: setting them silently disabled dynamic buffering instead of bounding it. Values are now validated at boot (both bounds required, 1KB–128KB, `0` disables) and reach the HTTP server in the shape it expects; when unset, the adaptive default (512B–128KB) applies. The equivalent `wamp.websocket.buffer.*` options are documented as having no effect (a WebSocket connection inherits its listener's buffer configuration).
+
+### Changes
+* The router OTP application was renamed `bondy` → `bondy_router` (directory `apps/bondy_router`). The release, node name, configuration file and WAMP URIs are unchanged (`bondy`).
+* On-disk data from previous releases (PlumDB/RocksDB) is not readable by this release; there is no in-place migration. Carry data across with export/import, and wipe stale data directories before starting.
+* The PlumDB `store.*` configuration options were removed, together with the `plum_db` broadcast wiring. New storage options live under `oplog.*` (see the reclamation configuration reference for the reclamation/retirement application-environment options).
+* Requests with more than 100 query-string parameters or form fields are now rejected (Cowboy 2.17 default).
+
 ## 1.0.0-rc.65
 * Fix bug in decoding of Error messages when using partial JSON encoding
 

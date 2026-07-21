@@ -51,6 +51,16 @@ Whenever a new event handler is added to an event manager, this function is
 called to initialize the event handler.
 """.
 init([]) ->
+    %% prometheus is a dependency app of bondy_router, so it is running by
+    %% the time this handler is installed; the catch covers embedded or
+    %% test setups that install the handler without it.
+    _ = (catch prometheus_counter:declare([
+        {name, bondy_sysmon_events_total},
+        {help,
+            "BEAM system-monitor events received (long_gc, long_schedule, "
+            "large_heap, busy_port, busy_dist_port, ...)."},
+        {labels, [type]}
+    ])),
     State = #state{},
     {ok, State, hibernate}.
 
@@ -62,6 +72,7 @@ handler to handle the event.
 handle_event({monitor, Pid, Type, Info}, #state{} = State) when
     Type == long_gc; Type == large_heap; Type == long_schedule
 ->
+    ok = count_event(Type),
     PInfo = process_info(Pid, [
         registered_name,
         current_function,
@@ -79,6 +90,7 @@ handle_event({monitor, Pid, Type, Info}, #state{} = State) when
     }),
     {ok, State};
 handle_event({monitor, Pid, Type, Info}, #state{} = State) ->
+    ok = count_event(Type),
     ?LOG_NOTICE(#{
         description => "System event received.",
         pid => Pid,
@@ -88,6 +100,19 @@ handle_event({monitor, Pid, Type, Info}, #state{} = State) ->
     {ok, State};
 handle_event(_Event, #state{} = State) ->
     {ok, State}.
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+%% A raising gen_event callback would remove this handler; never let the
+%% metric update take the logging down with it.
+count_event(Type) when is_atom(Type) ->
+    _ = (catch prometheus_counter:inc(bondy_sysmon_events_total, [Type], 1)),
+    ok;
+count_event(_) ->
+    ok.
 
 -doc """
 Whenever an event manager receives a request sent using `gen_event:call/3,4`,

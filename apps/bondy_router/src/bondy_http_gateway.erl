@@ -840,8 +840,16 @@ listener_protocol_opts(Routes, Name) ->
             cowboy_router,
             cowboy_handler
         ],
-        hibernate => true,
-        protocols => [http]
+        hibernate => true
+        %% `protocols` is deliberately NOT set: Cowboy's default ([http2,
+        %% http]) serves HTTP/2 on every listener — via ALPN on TLS (which
+        %% `cowboy:start_tls/3` advertises unconditionally, so h2 was always
+        %% served there) and via the h2c upgrade / prior-knowledge preface on
+        %% clear listeners. HTTP/2 resource use is bounded by
+        %% `max_concurrent_streams` (default 100) and Cowboy's HPACK and
+        %% frame-rate caps. NOTE for capacity alarms: one HTTP/2 connection
+        %% carries up to `max_concurrent_streams` in-flight requests, so the
+        %% `max_connections` thresholds undercount request-level load.
     }.
 
 -spec start_https(list(), atom()) -> ok | {error, any()}.

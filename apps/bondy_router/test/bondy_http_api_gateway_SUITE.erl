@@ -13,6 +13,16 @@ all() ->
 groups() ->
     [{main, [parallel], bondy_ct:tests(?MODULE)}].
 
+%% The spec parser validates WAMP URIs through `bondy_wamp_config`, so the
+%% suite needs Bondy running — without this it only passed when an earlier
+%% suite in the same run had already started it (order dependence).
+init_per_suite(Config) ->
+    bondy_ct:start_bondy(),
+    Config.
+
+end_per_suite(Config) ->
+    {save_config, Config}.
+
 simple_1_test(_) ->
     Spec = #{
         <<"id">> => <<"com.myapi">>,

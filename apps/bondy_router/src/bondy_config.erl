@@ -198,6 +198,13 @@ An implementation of the `app_config` behaviour.
 
 -compile({no_auto_import, [get/1]}).
 
+-ifdef(TEST).
+%% Exposed for deterministic unit testing of the dynamic_buffer
+%% normalisation (schema {min,max} property list → Cowboy's
+%% {Min, Max} | false), decoupled from the app_config store.
+-export([normalize_dynamic_buffer/1]).
+-endif.
+
 %% =============================================================================
 %% API
 %% =============================================================================
@@ -362,50 +369,76 @@ setup_wamp() ->
     %% operate i.e. all dependencies, and are private.
 
     %% ROUTER
-    %% Dynamic Buffer just for HTTP and WS (not RAW TCP sockets)
+    %% Dynamic buffer, HTTP listeners only (not RAW TCP sockets). The schema
+    %% maps <listener>.buffer.min/max to a {min, max} property list at
+    %% [Listener, protocol_opts, dynamic_buffer]; Cowboy requires
+    %% `dynamic_buffer => {Min, Max} | false', so normalise the value in
+    %% place. When unset the key is left ABSENT and Cowboy's default
+    %% ({512, 131072}, adaptive) applies. `wamp_websocket' is deliberately
+    %% not listed: since Cowboy 2.13 a WebSocket connection INHERITS the
+    %% listener's dynamic_buffer (cowboy_websocket overrides any
+    %% handler-supplied value), so a WS-specific setting cannot take effect.
     Keys = [
-        [api_gateway_http, dynamic_buffer],
-        [api_gateway_https, dynamic_buffer],
-        [admin_api_http, dynamic_buffer],
-        [admin_api_https, dynamic_buffer],
-        %% At the moment WS goes on top of api_gateway_http/s listener
-        %% but this config should override it
-        [wamp_websocket, dynamic_buffer]
+        [api_gateway_http, protocol_opts, dynamic_buffer],
+        [api_gateway_https, protocol_opts, dynamic_buffer],
+        [admin_api_http, protocol_opts, dynamic_buffer],
+        [admin_api_https, protocol_opts, dynamic_buffer]
     ],
-    ok = lists:foreach(
-        fun(Key) -> bondy_config:set(Key, dynamic_buffer(Key)) end,
-        Keys
-    ),
+    ok = lists:foreach(fun set_dynamic_buffer/1, Keys),
 
     %% WAMP PROTOCOL LIB
     ok = bondy_wamp_config:set(extended_details, ?WAMP_EXT_DETAILS),
     ok = bondy_wamp_config:set(extended_options, ?WAMP_EXT_OPTIONS).
 
 %% @private
-dynamic_buffer(Key) ->
-    Low = memory:kibibytes(1),
-    Top = memory:kibibytes(128),
+set_dynamic_buffer(Key) ->
+    Value0 = bondy_config:get(Key, undefined),
 
-    case bondy_config:get(Key, []) of
-        [] ->
-            false;
-        [{min, 0}, _] ->
-            false;
-        [_, {max, 0}] ->
-            false;
-        [{min, Min}, {max, Max}] when Min >= Low, Max =< Top ->
-            {Min, Max};
-        [{max, Max}, {min, Min}] when Min >= Low, Max =< Top ->
-            {Min, Max};
-        Other ->
+    case normalize_dynamic_buffer(Value0) of
+        undefined ->
+            ok;
+        {error, Reason} ->
             ?LOG_ERROR(#{
                 description => "Error while preparing configuration",
-                reason => "invalid value for configuration option",
+                reason => Reason,
                 key => Key,
-                value => Other
+                value => Value0
             }),
-            exit(invalid_configuration)
+            exit(invalid_configuration);
+        Value ->
+            bondy_config:set(Key, Value)
     end.
+
+%% @private
+%% Normalises the schema's {min, max} property list into the
+%% `{Min, Max} | false' shape Cowboy requires. `undefined' means the option
+%% is unset — the caller leaves the key absent so Cowboy's default applies.
+%% Setting either bound to 0 disables the dynamic buffer; otherwise BOTH
+%% bounds are required, within [1 KiB, 128 KiB] and with Min =< Max.
+normalize_dynamic_buffer(undefined) ->
+    undefined;
+normalize_dynamic_buffer([]) ->
+    undefined;
+normalize_dynamic_buffer(Props) when is_list(Props) ->
+    Low = memory:kibibytes(1),
+    Top = memory:kibibytes(128),
+    Min = key_value:get(min, Props, undefined),
+    Max = key_value:get(max, Props, undefined),
+
+    if
+        Min == 0 orelse Max == 0 ->
+            false;
+        is_integer(Min) andalso is_integer(Max) andalso
+            Min >= Low andalso Max =< Top andalso Min =< Max ->
+            {Min, Max};
+        true ->
+            {error,
+                "invalid value for configuration option: both min and max "
+                "are required, within 1KB..128KB and min =< max "
+                "(either may be 0 to disable)"}
+    end;
+normalize_dynamic_buffer(_) ->
+    {error, "invalid value for configuration option"}.
 
 %% @private
 prepare_private_config() ->

@@ -44,8 +44,9 @@ The provisioned dashboard is **Bondy — bondy_db / oplog / MST** in the
 
 ## Reading the dashboard
 
-- **Cluster** — Partisan membership vs connectivity per node; the
-  connectivity matrix is red on any member a node cannot reach.
+- **Cluster** — Partisan membership vs connectivity: an N×N
+  connectivity matrix (observer × peer, green/red cells) plus a state
+  timeline of link history, node readiness and OTP alarms.
 - **Sync / AAE** — convergence is judged exactly like the observer_cli
   Sync pane: by the applied-frontier version vector, not the MST root.
   Each node exports a stable hash of each instance's frontier
@@ -54,9 +55,33 @@ The provisioned dashboard is **Bondy — bondy_db / oplog / MST** in the
   `count_values`, no cross-node calls at scrape time). Divergence during
   active writes is normal — a *persistently* non-zero "Instances
   DIVERGED" stat is not.
-- **Write path / WAL / Applier / MST** — throughput, latency
-  percentiles, backpressure and integrity counters. Backpressure, fault
-  and corruption panels should sit at zero.
+- **Frontier sync matrix** — an N×N grid (row per node A, cell per
+  node B) where each cell counts the shards whose frontiers differ
+  between that pair; green `0` = the pair is converged. Clicking a cell
+  jumps to the **Pair inspector**, which lists the diverged shards for
+  that pair with their applied-sequence gap (how far apart), the pair's
+  sync-session outcomes and last-sync age.
+- **Write path / WAL / Applier / MST** — throughput, latency heatmaps
+  and percentiles, backpressure state timelines and an integrity
+  status-history panel (all rows should stay green).
+- **Leveled projection store** — per-Bookie LSM state polled at scrape
+  time (`leveled_bookie:book_status/1`, deduplicated per shared Bookie,
+  parallel with a deadline): penciller work backlog (the write-stall
+  signal), SST files per level, caches, journal compaction score, and
+  sampled fetch-resolution levels (read amplification).
+- **Router internals** — in-flight RPC promises (callee saturation),
+  ranch listener saturation and accept/terminate rates, jobs-pool queue
+  depth (async-work backpressure), Partisan connection counts per
+  peer/channel, rate-limiter bucket and OIDC flow table sizes, and
+  mailbox depth of critical singleton processes.
+- **WAMP / HTTP / BEAM VM** — router-level traffic (message mix by
+  type, RPC vs PubSub, session churn and duration), **call round-trip
+  latency** (heatmap, quantiles and slowest-procedures ranking, observed
+  at RPC-promise resolution), registration/subscription churn,
+  realm/user lifecycle events, HTTP listener health, and VM depth
+  including the msacc scheduler-time breakdown and system-monitor
+  events. RPC promise timeouts and rate-limiter denials live in the
+  Router internals row and should sit at zero.
 
 ## Notes
 

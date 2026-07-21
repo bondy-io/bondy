@@ -76,6 +76,13 @@ handle_info(evict, State) ->
         Timeout = bondy_rpc_promise:timeout(Promise),
         ProcUri = bondy_rpc_promise:procedure_uri(Promise),
 
+        %% Eviction must never depend on the metrics subsystem being up.
+        _ = (catch prometheus_counter:inc(
+            bondy_rpc_promise_timeouts_total,
+            [bondy_rpc_promise:type(Promise)],
+            1
+        )),
+
         ?LOG_DEBUG(#{
             description => "RPC Promise evicted from queue",
             realm_uri => RealmUri,

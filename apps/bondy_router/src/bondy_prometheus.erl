@@ -266,6 +266,43 @@ handle_event({send_error, Reason, M, Ctxt}, State) ->
     Labels = [Reason, MessageType, get_labels_values(Ctxt)],
     ok = prometheus_counter:inc(bondy_send_errors_total, Labels),
     {ok, State};
+handle_event({[bondy, wamp, call, latency], ProcUri, DurationMs}, State) when
+    is_binary(ProcUri) andalso is_integer(DurationMs)
+->
+    ok = prometheus_histogram:observe(
+        bondy_wamp_call_latency_milliseconds,
+        [ProcUri, node_name()],
+        DurationMs
+    ),
+    {ok, State};
+handle_event({[bondy, dealer, registration, Action], _Entry}, State) ->
+    ok = prometheus_counter:inc(
+        bondy_registry_events_total, [registration, Action]
+    ),
+    {ok, State};
+handle_event({[bondy, broker, subscription, Action], _Entry}, State) ->
+    ok = prometheus_counter:inc(
+        bondy_registry_events_total, [subscription, Action]
+    ),
+    {ok, State};
+handle_event({[bondy, realm, Action], _Uri}, State) when
+    Action == created orelse Action == updated orelse Action == deleted
+->
+    ok = prometheus_counter:inc(bondy_realm_events_total, [Action]),
+    {ok, State};
+handle_event({[bondy, user, logged_in], _, _, _}, State) ->
+    ok = prometheus_counter:inc(bondy_user_events_total, [logged_in]),
+    {ok, State};
+handle_event({[bondy, user, credentials, updated], _, _}, State) ->
+    ok = prometheus_counter:inc(
+        bondy_user_events_total, [credentials_updated]
+    ),
+    {ok, State};
+handle_event({[bondy, user, Action], _, _}, State) when
+    Action == added orelse Action == updated orelse Action == deleted
+->
+    ok = prometheus_counter:inc(bondy_user_events_total, [Action]),
+    {ok, State};
 handle_event(_Event, State) ->
     {ok, State}.
 
@@ -296,10 +333,14 @@ setup() ->
     ok = declare_wamp_metrics(),
     ok = bondy_prometheus_cowboy_collector:setup(),
     ok = bondy_prometheus_db:setup(),
+    %% Required for prometheus_vm_msacc_collector to report anything.
+    _ = erlang:system_flag(microstate_accounting, true),
     Collectors = [
         prometheus_vm_memory_collector,
         prometheus_vm_statistics_collector,
-        prometheus_vm_system_info_collector
+        prometheus_vm_system_info_collector,
+        prometheus_vm_msacc_collector,
+        bondy_prometheus_collector
     ],
     _ = [prometheus_registry:register_collector(C) || C <- Collectors],
     ok.
@@ -400,7 +441,11 @@ declare_net_metrics() ->
         {name, bondy_socket_duration_seconds},
         {buckets, seconds_duration_buckets()},
         {help, <<"A histogram of the duration of a socket.">>},
-        {labels, [node, protocol, transport]}
+        {labels, [node, protocol, transport]},
+        %% Observations arrive in seconds already; without this, prometheus
+        %% infers a duration unit from the name suffix and treats them as
+        %% native time units (mis-bucketing every observation).
+        {duration_unit, false}
     ]),
 
     %% Bytes
@@ -461,7 +506,9 @@ declare_session_metrics() ->
         {name, bondy_session_duration_seconds},
         {buckets, seconds_duration_buckets()},
         {help, <<"A histogram of the duration of sessions.">>},
-        {labels, [realm_type, node]}
+        {labels, [realm_type, node]},
+        %% Seconds in; see bondy_socket_duration_seconds.
+        {duration_unit, false}
     ]),
     ok.
 
@@ -495,12 +542,43 @@ declare_wamp_metrics() ->
         {buckets, milliseconds_duration_buckets()},
         {help,
             <<"A histogram of routed RPC response latencies. This measurement reflects the time between the dealer processing a WAMP call message and the first response (WAMP result or error).">>},
-        {labels, get_labels(call)}
+        {labels, [procedure_uri, node]},
+        %% Milliseconds in; see bondy_socket_duration_seconds.
+        {duration_unit, false}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_call_retries_total},
         {help, <<"The total number of retries for WAMP call.">>},
         {labels, get_labels(call)}
+    ]),
+    _ = prometheus_counter:declare([
+        {name, bondy_rate_limited_total},
+        {help,
+            <<"The total number of inbound requests denied by the AV-1 rate limiter, by class (handshake | auth | connection | message).">>},
+        {labels, [class]}
+    ]),
+    _ = prometheus_counter:declare([
+        {name, bondy_rpc_promise_timeouts_total},
+        {help,
+            <<"The total number of RPC promises evicted on expiry (the caller received a WAMP timeout error), by promise type.">>},
+        {labels, [type]}
+    ]),
+    _ = prometheus_counter:declare([
+        {name, bondy_registry_events_total},
+        {help,
+            <<"Registration and subscription lifecycle events routed by this node.">>},
+        {labels, [type, action]}
+    ]),
+    _ = prometheus_counter:declare([
+        {name, bondy_realm_events_total},
+        {help, <<"Realm lifecycle events (created | updated | deleted).">>},
+        {labels, [action]}
+    ]),
+    _ = prometheus_counter:declare([
+        {name, bondy_user_events_total},
+        {help,
+            <<"User lifecycle and authentication events (added | updated | deleted | logged_in | credentials_updated).">>},
+        {labels, [action]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_cancel_messages_total},

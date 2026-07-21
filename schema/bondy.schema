@@ -1389,13 +1389,13 @@ end}.
   {datatype, bytesize}
 ]}.
 
-%% Bondy will dynamically change the socket's buffer size depending on the size
-%% of the data it receives from the socket. This lets Bondy use the optimal
-%% buffer size for the current workload. The dynamic buffer size functionality
-%% can be disabled by setting this option to false.
-%% When enabled this option overrides the buffer option.
-%% This option is ignored when buffer is set.
-%% Set min or max to 0 to disable.
+%% Bondy dynamically resizes the socket's receive buffer between these two
+%% bounds based on the size of the data it receives, using the optimal buffer
+%% size for the current workload. When neither bound is set, an adaptive
+%% default of 512B..128KB applies. To tune it, BOTH min and max must be set,
+%% within 1KB..128KB and with min =< max; setting either to 0 disables
+%% dynamic buffering entirely. This option is ignored when the socket
+%% 'buffer' size is set explicitly.
 {mapping, "admin_api.http.buffer.min",
 "bondy_router.admin_api_http.protocol_opts.dynamic_buffer.min", [
   {datatype, bytesize}
@@ -1504,6 +1504,62 @@ end}.
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
+
+%% Maximum length of the Authorization header value, in bytes. Authorization
+%% headers routinely carry bearer tokens (JWTs) larger than typical header
+%% values, so Cowboy allows raising this limit independently of
+%% admin_api.http.max_header_value_length, which is used when this option
+%% is not set.
+{mapping, "admin_api.http.max_authorization_header_value_length",
+"bondy_router.admin_api_http.protocol_opts.max_authorization_header_value_length", [
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% Maximum length of the Cookie header value, in bytes. Cookie headers can
+%% legitimately exceed typical header values, so Cowboy allows raising this
+%% limit independently of admin_api.http.max_header_value_length, which is
+%% used when this option is not set.
+{mapping, "admin_api.http.max_cookie_header_value_length",
+"bondy_router.admin_api_http.protocol_opts.max_cookie_header_value_length", [
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% Maximum length of the authority component of the request URI (the
+%% host[:port] part), in bytes. Requests exceeding it are rejected.
+%% Defaults to 255 (the DNS name length limit).
+{mapping, "admin_api.http.max_authority_length",
+"bondy_router.admin_api_http.protocol_opts.max_authority_length", [
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% What to do when a response given to Cowboy contains invalid header names
+%% or values (for example control characters): 'error_terminate' replies
+%% with a 500 and terminates the stream — preventing header injection and
+%% response splitting — while 'ignore' relays the response unchanged
+%% (Cowboy's behaviour before 2.16). Keep the default unless a legacy
+%% upstream behind the API gateway requires relaying such headers.
+{mapping, "admin_api.http.invalid_response_headers",
+"bondy_router.admin_api_http.protocol_opts.invalid_response_headers", [
+  {default, error_terminate},
+  {datatype, {enum, [error_terminate, ignore]}}
+]}.
+
+%% HTTP/2 only: maximum number of concurrent streams (requests) a single
+%% client connection may have open. HTTP/2 is negotiated via ALPN on TLS
+%% listeners. Unbounded concurrent streams let one connection exhaust the
+%% node (Cowboy versions before 2.17 defaulted to infinity); 100 is the
+%% Cowboy 2.17 default. Raise it only for trusted, heavily multiplexing
+%% clients.
+{mapping, "admin_api.http.max_concurrent_streams",
+"bondy_router.admin_api_http.protocol_opts.max_concurrent_streams", [
+  {default, 100},
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
 
 {mapping, "admin_api.http.max_method_length",
 "bondy_router.admin_api_http.protocol_opts.max_method_length", [
@@ -1840,13 +1896,13 @@ end}.
   {datatype, bytesize}
 ]}.
 
-%% Bondy will dynamically change the socket's buffer size depending on the size
-%% of the data it receives from the socket. This lets Bondy use the optimal
-%% buffer size for the current workload. The dynamic buffer size functionality
-%% can be disabled by setting this option to false.
-%% When enabled this option overrides the buffer option.
-%% This option is ignored when buffer is set.
-%% Set min or max to 0 to disable.
+%% Bondy dynamically resizes the socket's receive buffer between these two
+%% bounds based on the size of the data it receives, using the optimal buffer
+%% size for the current workload. When neither bound is set, an adaptive
+%% default of 512B..128KB applies. To tune it, BOTH min and max must be set,
+%% within 1KB..128KB and with min =< max; setting either to 0 disables
+%% dynamic buffering entirely. This option is ignored when the socket
+%% 'buffer' size is set explicitly.
 {mapping, "admin_api.https.buffer.min",
 "bondy_router.admin_api_https.protocol_opts.dynamic_buffer.min", [
   {datatype, bytesize}
@@ -1955,6 +2011,62 @@ end}.
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
+
+%% Maximum length of the Authorization header value, in bytes. Authorization
+%% headers routinely carry bearer tokens (JWTs) larger than typical header
+%% values, so Cowboy allows raising this limit independently of
+%% admin_api.https.max_header_value_length, which is used when this option
+%% is not set.
+{mapping, "admin_api.https.max_authorization_header_value_length",
+"bondy_router.admin_api_https.protocol_opts.max_authorization_header_value_length", [
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% Maximum length of the Cookie header value, in bytes. Cookie headers can
+%% legitimately exceed typical header values, so Cowboy allows raising this
+%% limit independently of admin_api.https.max_header_value_length, which is
+%% used when this option is not set.
+{mapping, "admin_api.https.max_cookie_header_value_length",
+"bondy_router.admin_api_https.protocol_opts.max_cookie_header_value_length", [
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% Maximum length of the authority component of the request URI (the
+%% host[:port] part), in bytes. Requests exceeding it are rejected.
+%% Defaults to 255 (the DNS name length limit).
+{mapping, "admin_api.https.max_authority_length",
+"bondy_router.admin_api_https.protocol_opts.max_authority_length", [
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% What to do when a response given to Cowboy contains invalid header names
+%% or values (for example control characters): 'error_terminate' replies
+%% with a 500 and terminates the stream — preventing header injection and
+%% response splitting — while 'ignore' relays the response unchanged
+%% (Cowboy's behaviour before 2.16). Keep the default unless a legacy
+%% upstream behind the API gateway requires relaying such headers.
+{mapping, "admin_api.https.invalid_response_headers",
+"bondy_router.admin_api_https.protocol_opts.invalid_response_headers", [
+  {default, error_terminate},
+  {datatype, {enum, [error_terminate, ignore]}}
+]}.
+
+%% HTTP/2 only: maximum number of concurrent streams (requests) a single
+%% client connection may have open. HTTP/2 is negotiated via ALPN on TLS
+%% listeners. Unbounded concurrent streams let one connection exhaust the
+%% node (Cowboy versions before 2.17 defaulted to infinity); 100 is the
+%% Cowboy 2.17 default. Raise it only for trusted, heavily multiplexing
+%% clients.
+{mapping, "admin_api.https.max_concurrent_streams",
+"bondy_router.admin_api_https.protocol_opts.max_concurrent_streams", [
+  {default, 100},
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
 
 {mapping, "admin_api.https.max_method_length",
 "bondy_router.admin_api_https.protocol_opts.max_method_length", [
@@ -2378,13 +2490,13 @@ end}.
   {datatype, bytesize}
 ]}.
 
-%% Bondy will dynamically change the socket's buffer size depending on the size
-%% of the data it receives from the socket. This lets Bondy use the optimal
-%% buffer size for the current workload. The dynamic buffer size functionality
-%% can be disabled by setting this option to false.
-%% This option is ignored when buffer is set
-%% It is enabled by default.
-%% Set min or max to 0 to disable.
+%% Bondy dynamically resizes the socket's receive buffer between these two
+%% bounds based on the size of the data it receives, using the optimal buffer
+%% size for the current workload. When neither bound is set, an adaptive
+%% default of 512B..128KB applies. To tune it, BOTH min and max must be set,
+%% within 1KB..128KB and with min =< max; setting either to 0 disables
+%% dynamic buffering entirely. This option is ignored when the socket
+%% 'buffer' size is set explicitly.
 {mapping, "api_gateway.http.buffer.min",
 "bondy_router.api_gateway_http.protocol_opts.dynamic_buffer.min", [
   {datatype, bytesize}
@@ -2492,6 +2604,62 @@ end}.
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
+
+%% Maximum length of the Authorization header value, in bytes. Authorization
+%% headers routinely carry bearer tokens (JWTs) larger than typical header
+%% values, so Cowboy allows raising this limit independently of
+%% api_gateway.http.max_header_value_length, which is used when this option
+%% is not set.
+{mapping, "api_gateway.http.max_authorization_header_value_length",
+"bondy_router.api_gateway_http.protocol_opts.max_authorization_header_value_length", [
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% Maximum length of the Cookie header value, in bytes. Cookie headers can
+%% legitimately exceed typical header values, so Cowboy allows raising this
+%% limit independently of api_gateway.http.max_header_value_length, which is
+%% used when this option is not set.
+{mapping, "api_gateway.http.max_cookie_header_value_length",
+"bondy_router.api_gateway_http.protocol_opts.max_cookie_header_value_length", [
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% Maximum length of the authority component of the request URI (the
+%% host[:port] part), in bytes. Requests exceeding it are rejected.
+%% Defaults to 255 (the DNS name length limit).
+{mapping, "api_gateway.http.max_authority_length",
+"bondy_router.api_gateway_http.protocol_opts.max_authority_length", [
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% What to do when a response given to Cowboy contains invalid header names
+%% or values (for example control characters): 'error_terminate' replies
+%% with a 500 and terminates the stream — preventing header injection and
+%% response splitting — while 'ignore' relays the response unchanged
+%% (Cowboy's behaviour before 2.16). Keep the default unless a legacy
+%% upstream behind the API gateway requires relaying such headers.
+{mapping, "api_gateway.http.invalid_response_headers",
+"bondy_router.api_gateway_http.protocol_opts.invalid_response_headers", [
+  {default, error_terminate},
+  {datatype, {enum, [error_terminate, ignore]}}
+]}.
+
+%% HTTP/2 only: maximum number of concurrent streams (requests) a single
+%% client connection may have open. HTTP/2 is negotiated via ALPN on TLS
+%% listeners. Unbounded concurrent streams let one connection exhaust the
+%% node (Cowboy versions before 2.17 defaulted to infinity); 100 is the
+%% Cowboy 2.17 default. Raise it only for trusted, heavily multiplexing
+%% clients.
+{mapping, "api_gateway.http.max_concurrent_streams",
+"bondy_router.api_gateway_http.protocol_opts.max_concurrent_streams", [
+  {default, 100},
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
 
 {mapping, "api_gateway.http.max_method_length",
 "bondy_router.api_gateway_http.protocol_opts.max_method_length", [
@@ -2817,13 +2985,13 @@ end}.
   {datatype, bytesize}
 ]}.
 
-%% Bondy will dynamically change the socket's buffer size depending on the size
-%% of the data it receives from the socket. This lets Bondy use the optimal
-%% buffer size for the current workload. The dynamic buffer size functionality
-%% can be disabled by setting this option to false.
-%% This option is ignored when buffer is set
-%% It is enabled by default.
-%% Set min or max to 0 to disable.
+%% Bondy dynamically resizes the socket's receive buffer between these two
+%% bounds based on the size of the data it receives, using the optimal buffer
+%% size for the current workload. When neither bound is set, an adaptive
+%% default of 512B..128KB applies. To tune it, BOTH min and max must be set,
+%% within 1KB..128KB and with min =< max; setting either to 0 disables
+%% dynamic buffering entirely. This option is ignored when the socket
+%% 'buffer' size is set explicitly.
 {mapping, "api_gateway.https.buffer.min", "bondy_router.api_gateway_https.protocol_opts.dynamic_buffer.min", [
   {datatype, bytesize}
 ]}.
@@ -2930,6 +3098,62 @@ end}.
   {validators, ["pos_integer"]},
   {datatype, integer}
 ]}.
+
+%% Maximum length of the Authorization header value, in bytes. Authorization
+%% headers routinely carry bearer tokens (JWTs) larger than typical header
+%% values, so Cowboy allows raising this limit independently of
+%% api_gateway.https.max_header_value_length, which is used when this option
+%% is not set.
+{mapping, "api_gateway.https.max_authorization_header_value_length",
+"bondy_router.api_gateway_https.protocol_opts.max_authorization_header_value_length", [
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% Maximum length of the Cookie header value, in bytes. Cookie headers can
+%% legitimately exceed typical header values, so Cowboy allows raising this
+%% limit independently of api_gateway.https.max_header_value_length, which is
+%% used when this option is not set.
+{mapping, "api_gateway.https.max_cookie_header_value_length",
+"bondy_router.api_gateway_https.protocol_opts.max_cookie_header_value_length", [
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% Maximum length of the authority component of the request URI (the
+%% host[:port] part), in bytes. Requests exceeding it are rejected.
+%% Defaults to 255 (the DNS name length limit).
+{mapping, "api_gateway.https.max_authority_length",
+"bondy_router.api_gateway_https.protocol_opts.max_authority_length", [
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% What to do when a response given to Cowboy contains invalid header names
+%% or values (for example control characters): 'error_terminate' replies
+%% with a 500 and terminates the stream — preventing header injection and
+%% response splitting — while 'ignore' relays the response unchanged
+%% (Cowboy's behaviour before 2.16). Keep the default unless a legacy
+%% upstream behind the API gateway requires relaying such headers.
+{mapping, "api_gateway.https.invalid_response_headers",
+"bondy_router.api_gateway_https.protocol_opts.invalid_response_headers", [
+  {default, error_terminate},
+  {datatype, {enum, [error_terminate, ignore]}}
+]}.
+
+%% HTTP/2 only: maximum number of concurrent streams (requests) a single
+%% client connection may have open. HTTP/2 is negotiated via ALPN on TLS
+%% listeners. Unbounded concurrent streams let one connection exhaust the
+%% node (Cowboy versions before 2.17 defaulted to infinity); 100 is the
+%% Cowboy 2.17 default. Raise it only for trusted, heavily multiplexing
+%% clients.
+{mapping, "api_gateway.https.max_concurrent_streams",
+"bondy_router.api_gateway_https.protocol_opts.max_concurrent_streams", [
+  {default, 100},
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
 
 {mapping, "api_gateway.https.max_method_length",
 "bondy_router.api_gateway_https.protocol_opts.max_method_length", [
@@ -3626,12 +3850,11 @@ end}.
 ]}.
 
 
-%% Bondy will dynamically change the socket's buffer size depending on the size
-%% of the data it receives from the socket. This lets Bondy use the optimal
-%% buffer size for the current workload. The dynamic buffer size functionality
-%% can be disabled by setting this option to false.
-%% When enabled this option overrides the buffer option.
-%% This option is ignored when the socket buffer is set
+%% Has NO effect since Cowboy 2.13: a WebSocket connection always inherits
+%% the dynamic buffer of the LISTENER it arrived on (Cowboy overrides any
+%% handler-supplied value), so configure the listener's buffer options
+%% instead (e.g. api_gateway.http.buffer.min/max). The mappings are kept so
+%% existing configuration files still parse.
 {mapping, "wamp.websocket.buffer.min",
 "bondy_router.wamp_websocket.protocol_opts.dynamic_buffer.min", [
   {datatype, bytesize}
