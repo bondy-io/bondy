@@ -5,6 +5,7 @@
 
 -module(bondy_http_api_gateway_SUITE).
 -include_lib("common_test/include/ct.hrl").
+-include_lib("stdlib/include/assert.hrl").
 -compile([nowarn_export_all, export_all]).
 
 all() ->
@@ -102,6 +103,90 @@ simple_1_test(_) ->
         }
     },
     bondy_http_gateway_api_spec_parser:parse(Spec).
+
+call_timeout_merge_test(_) ->
+    Merge = fun bondy_http_gateway_rest_handler:merge_call_timeout/2,
+
+    %% The action timeout is merged when options define no timeout
+    ?assertEqual(#{<<"timeout">> => 90000}, Merge(90000, #{})),
+
+    %% Per WAMP, options.timeout = 0 means the Call Timeout feature is
+    %% disabled, so the action timeout applies
+    ?assertEqual(
+        #{<<"timeout">> => 90000},
+        Merge(90000, #{<<"timeout">> => 0})
+    ),
+
+    %% An explicit non-zero options.timeout wins over the action timeout
+    ?assertEqual(
+        #{<<"timeout">> => 120000},
+        Merge(90000, #{<<"timeout">> => 120000})
+    ),
+    ?assertEqual(
+        #{timeout => 120000},
+        Merge(90000, #{timeout => 120000})
+    ),
+
+    %% An unset or invalid action timeout leaves the options untouched
+    ?assertEqual(#{}, Merge(0, #{})),
+    ?assertEqual(#{}, Merge(undefined, #{})).
+
+%% Regression test: the action `timeout` (inherited from `defaults.timeout`)
+%% must survive parsing and, once merged, govern the WAMP call options.
+%% Previous versions parsed the value but discarded it before calling
+%% `bondy:call/5`, so the spec's timeout had no effect.
+call_timeout_spec_flow_test(_) ->
+    Spec = #{
+        <<"id">> => <<"com.timeout_api">>,
+        <<"name">> => <<"com.timeout_api">>,
+        <<"host">> => <<"timeout-api.com">>,
+        <<"realm_uri">> => <<"com.timeout_api">>,
+        <<"defaults">> => #{
+            <<"timeout">> => 95000,
+            <<"security">> => #{},
+            <<"schemes">> => [<<"http">>]
+        },
+        <<"versions">> => #{
+            <<"1.0.0">> => #{
+                <<"base_path">> => <<"/v1.0">>,
+                <<"paths">> => #{
+                    <<"/things">> => #{
+                        <<"get">> => #{
+                            <<"action">> => #{
+                                <<"type">> => <<"wamp_call">>,
+                                <<"procedure">> => <<"com.timeout_api.get">>,
+                                <<"options">> => #{},
+                                <<"args">> => [],
+                                <<"kwargs">> => #{}
+                            },
+                            <<"response">> => #{
+                                <<"on_error">> => #{},
+                                <<"on_result">> => #{}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    Parsed = bondy_http_gateway_api_spec_parser:parse(Spec),
+    Action = maps_utils:get_path(
+        [
+            <<"versions">>,
+            <<"1.0.0">>,
+            <<"paths">>,
+            <<"/things">>,
+            <<"get">>,
+            <<"action">>
+        ],
+        Parsed
+    ),
+    #{<<"timeout">> := Timeout, <<"options">> := Opts} = Action,
+    ?assertEqual(95000, Timeout),
+    ?assertEqual(
+        #{<<"timeout">> => 95000},
+        bondy_http_gateway_rest_handler:merge_call_timeout(Timeout, Opts)
+    ).
 
 %% png() ->
 %%     <<137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,1,194,

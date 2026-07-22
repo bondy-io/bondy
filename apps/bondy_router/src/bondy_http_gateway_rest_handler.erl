@@ -36,7 +36,11 @@ when that method is called:
 
 - `wamp_call` — calls a WAMP RPC procedure via `bondy:call/5` and maps
   the WAMP result/error through the `on_result`/`on_error` MOPS
-  response templates
+  response templates. The action's `timeout` (which inherits from
+  `defaults.timeout`) is used as the WAMP call timeout unless the
+  action's `options` map defines a non-zero `timeout`, which takes
+  precedence. When neither is set the node-wide `wamp.call_timeout`
+  config applies.
 - `wamp_publish` — publishes to a WAMP topic via
   `bondy_broker:publish/5`
 - `forward` — proxies the request to an upstream HTTP service via
@@ -881,11 +885,13 @@ perform_action(
         <<"procedure">> := P,
         <<"args">> := A,
         <<"kwargs">> := Akw,
-        <<"options">> := Opts,
+        <<"options">> := Opts0,
         %% TODO use retries
         <<"retries">> := _R,
-        <<"timeout">> := _
+        <<"timeout">> := Timeout
     } = mops_eval(Act, ApiCtxt0, MopsOpts),
+
+    Opts = merge_call_timeout(Timeout, Opts0),
 
     RSpec = maps:get(<<"response">>, Spec),
 
@@ -979,6 +985,23 @@ perform_action(
             ),
             {error, StatusCode1, Response1, St2}
     end.
+
+%% @private
+%% The action-level `timeout` applies unless the action's WAMP call
+%% `options` already define a non-zero `timeout` (per WAMP, 0 means the
+%% Call Timeout feature is disabled, so we treat it as unset). Downstream
+%% `bondy:call/5` falls back to `wamp.call_timeout` when no timeout is set.
+merge_call_timeout(Timeout, Opts) when
+    is_integer(Timeout) andalso Timeout > 0
+->
+    case maps_utils:get_any([<<"timeout">>, timeout], Opts, 0) of
+        0 ->
+            maps:put(<<"timeout">>, Timeout, Opts);
+        _ ->
+            Opts
+    end;
+merge_call_timeout(_, Opts) ->
+    Opts.
 
 %% @private
 wamp_context(RealmUri, Peer, St1) ->
