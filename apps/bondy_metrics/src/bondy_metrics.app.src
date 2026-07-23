@@ -1,0 +1,26 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2023 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+{application, bondy_metrics,
+ [{description,
+   "A wait-free counter/gauge/histogram primitive backed by the BIF "
+   "`counters`/`atomics` modules, with a declaration registry for "
+   "exposition. Self-contained (no Bondy dependencies) and reusable "
+   "outside Bondy as a git dependency."},
+  {vsn, "1.0.0"},
+  %% Library application: the `bondy_metrics` gen_server is started by the
+  %% consumer's supervision tree via `bondy_metrics:child_spec/0` (in
+  %% Bondy, by `bondy_oplog_sup`). No `{mod, _}` — starting this app does
+  %% not start a supervisor of its own.
+  {registered, [bondy_metrics]},
+  {applications,
+   [kernel,
+    stdlib
+   ]},
+  {env, []},
+  {modules, []},
+  {licenses, ["Apache-2.0"]},
+  {links, []}
+ ]}.

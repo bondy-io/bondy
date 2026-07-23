@@ -365,7 +365,13 @@ setup_event_handlers() ->
         bondy_event_wamp_publisher, []
     ),
 
-    _ = bondy_event_manager:add_watched_handler(bondy_prometheus, []),
+    %% Metrics no longer ride the gen_event bus: bondy_prometheus only
+    %% declares families, attaches telemetry sinks and registers the
+    %% Prometheus collectors.
+    ok = bondy_prometheus:setup(),
+
+    %% Eagerly allocate the meta-event shed-warning cell off the shed path.
+    ok = bondy_meta_events:setup(),
 
     %% We subscribe to partisan up and down events and republish them
     partisan_peer_service:on_up('_', fun(Node) ->

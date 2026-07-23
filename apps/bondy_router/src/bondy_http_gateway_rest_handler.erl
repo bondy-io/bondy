@@ -128,6 +128,16 @@ query params, bindings) and stores it in the handler state alongside
 the parsed API spec received from the dispatch table.
 """.
 init(Req, St0) ->
+    %% Expose the route template to the cowboy metrics stream handler so
+    %% the per-request HTTP metrics carry a bounded-cardinality `route`
+    %% label (raw paths are unbounded).
+    ok = cowboy_req:cast(
+        {set_options, #{
+            metrics_user_data => #{route => maps:get(route, St0, undefined)}
+        }},
+        Req
+    ),
+
     %% TODO Set session will now be required by bondy_auth:init
 
     %TODO

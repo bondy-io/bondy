@@ -15,6 +15,10 @@ Bondy events.
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
 
+%% Minimum seconds between load-shedding warnings; further drops within
+%% the window are counted in metrics and logged at debug level only.
+-define(SHED_WARN_WINDOW_SECS, 60).
+
 -record(state, {
     ref :: bondy_ref:t()
 }).
@@ -53,12 +57,7 @@ handle_event(Event, State) ->
                 ok ->
                     ok;
                 {error, full} ->
-                    ?LOG_DEBUG(#{
-                        description =>
-                            "Dropping event due to load shedding: "
-                            "jobs queue at capacity",
-                        event => Event
-                    });
+                    ok = on_shed(Event);
                 {error, Reason} ->
                     ?LOG_ERROR(#{
                         description => "Unexpected error while enqueuing job",
@@ -89,6 +88,58 @@ code_change(_OldVsn, State, _Extra) ->
 %% PRIVATE
 %% =============================================================================
 
+%% @private
+%% Records a load-shed meta event so operators can see the feature
+%% degrading: always bumps `bondy_wamp_dropped_total{reason=shed}` and logs
+%% a warning at most once per window (the handler runs in the event
+%% manager process, so the process dictionary is a safe window store).
+on_shed(Event) ->
+    Family = event_family(Event),
+    ok = bondy_prometheus:report_dropped(shed, Family),
+    Now = erlang:monotonic_time(second),
+    Key = {?MODULE, last_shed_warning},
+
+    case erlang:get(Key) of
+        Last when is_integer(Last), Now - Last < ?SHED_WARN_WINDOW_SECS ->
+            ?LOG_DEBUG(#{
+                description =>
+                    "Dropping WAMP meta event due to load shedding: "
+                    "jobs queue at capacity",
+                family => Family
+            });
+        _ ->
+            _ = erlang:put(Key, Now),
+            ?LOG_WARNING(#{
+                description =>
+                    "Dropping WAMP meta events due to load shedding: "
+                    "jobs queue at capacity. Subscribers to meta topics "
+                    "are missing events; further drops in the next "
+                    "window are counted in bondy_wamp_dropped_total "
+                    "and logged at debug level.",
+                family => Family,
+                window_secs => ?SHED_WARN_WINDOW_SECS
+            })
+    end,
+    ok.
+
+%% @private
+%% Events are tuples of varying arity whose first element is the event
+%% path, e.g. `{[bondy, broker, subscription, added], Entry}`.
+event_family(Event) when is_tuple(Event) andalso tuple_size(Event) >= 1 ->
+    case element(1, Event) of
+        [bondy, broker, subscription | _] -> subscription;
+        [bondy, dealer, registration | _] -> registration;
+        [bondy, session | _] -> session;
+        [bondy, realm | _] -> realm;
+        [bondy, cluster | _] -> cluster;
+        [bondy, rbac | _] -> rbac;
+        [bondy, user | _] -> user;
+        [bondy, export | _] -> export;
+        _ -> other
+    end;
+event_family(_) ->
+    other.
+
 -spec async_handle_event(event(), term()) ->
     ok | {ok, {function(), partition_key()}}.
 
@@ -108,7 +159,11 @@ async_handle_event({[bondy, cluster, connection, Type], Node}, Ref) when
         bondy_broker:publish(ReqId, #{}, Topic, [MyNode, Node], #{}, Ctxt)
     end,
     {ok, {Fun, undefined}};
-async_handle_event({[bondy, realm, created, Type], Uri}, Ref) when
+%% NOTE: the emitted event path is `[bondy, realm, Action]` (see
+%% bondy_realm on_create/on_update/on_delete). A previous version of
+%% this clause matched `[bondy, realm, created, Type]`, which never
+%% matched, so the realm meta events were silently never published.
+async_handle_event({[bondy, realm, Type], Uri}, Ref) when
     Type == created; Type == updated; Type == deleted
 ->
     Fun = fun() ->
@@ -284,76 +339,9 @@ async_handle_event(
     {ok, {Fun, undefined}};
 %% REGISTRATION META API
 
-async_handle_event({[bondy, dealer, registration, Type], Entry}, Ref) when
-    Type == created; Type == added; Type == deleted; Type == removed
-->
-    RealmUri = bondy_registry_entry:realm_uri(Entry),
-    SessionId = bondy_registry_entry:session_id(Entry),
-
-    Fun = fun() ->
-        ExtSessionId = bondy_utils:external_session_id(SessionId),
-        %% We use a global ID as this is not a publishers request
-        ReqId = bondy_message_id:global(),
-        RegId = bondy_registry_entry:id(Entry),
-        Args =
-            case Type == created of
-                true ->
-                    [
-                        ExtSessionId,
-                        bondy_registry_entry:to_external(Entry, wamp_meta)
-                    ];
-                false ->
-                    [ExtSessionId, RegId]
-            end,
-        KWArgs = #{procedure => bondy_registry_entry:uri(Entry)},
-        Topic =
-            case Type of
-                created -> ?WAMP_REG_ON_CREATE;
-                added -> ?WAMP_REG_ON_REGISTER;
-                deleted -> ?WAMP_REG_ON_DELETE;
-                removed -> ?WAMP_REG_ON_UNREGISTER
-            end,
-        Ctxt = bondy_context:local_context(RealmUri, Ref),
-
-        bondy_broker:publish(ReqId, #{}, Topic, Args, KWArgs, Ctxt)
-    end,
-    {ok, {Fun, SessionId}};
-%% SUBSCRIPTION META API
-
-async_handle_event({[bondy, broker, subscription, Type], Entry}, Ref) when
-    Type == created; Type == added; Type == deleted; Type == removed
-->
-    RealmUri = bondy_registry_entry:realm_uri(Entry),
-    SessionId = bondy_registry_entry:session_id(Entry),
-
-    Fun = fun() ->
-        ExtSessionId = bondy_utils:external_session_id(SessionId),
-        %% We use a global ID as this is not a publishers request
-        ReqId = bondy_message_id:global(),
-        RegId = bondy_registry_entry:id(Entry),
-        Args =
-            case Type == created of
-                true ->
-                    [
-                        ExtSessionId,
-                        bondy_registry_entry:to_external(Entry, wamp_meta)
-                    ];
-                false ->
-                    [ExtSessionId, RegId]
-            end,
-        %% Based on https://github.com/wamp-proto/wamp-proto/issues/349
-        KWArgs = #{topic => bondy_registry_entry:uri(Entry)},
-        Topic =
-            case Type of
-                created -> ?WAMP_SUBSCRIPTION_ON_CREATE;
-                added -> ?WAMP_SUBSCRIPTION_ON_SUBSCRIBE;
-                deleted -> ?WAMP_SUBSCRIPTION_ON_DELETE;
-                removed -> ?WAMP_SUBSCRIPTION_ON_UNSUBSCRIBE
-            end,
-        Ctxt = bondy_context:local_context(RealmUri, Ref),
-
-        bondy_broker:publish(ReqId, #{}, Topic, Args, KWArgs, Ctxt)
-    end,
-    {ok, {Fun, SessionId}};
+%% NOTE: the registration/subscription meta events no longer ride this
+%% handler — they are demand-gated and enqueued directly by
+%% `bondy_meta_events` at the `bondy_dealer`/`bondy_broker` emission
+%% sites (see METRICS_GAP_ANALYSIS.md Part III).
 async_handle_event(_, _) ->
     ok.

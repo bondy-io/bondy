@@ -55,6 +55,7 @@ family, never a scrape error.
 ) -> ok.
 
 collect_mf(_Registry, CB) ->
+    ok = collect_bondy_metrics_families(CB),
     case lists:keymember(bondy_router, 1, application:which_applications()) of
         true ->
             lists:foreach(
@@ -89,6 +90,76 @@ deregister_cleanup(_) -> ok.
 %% =============================================================================
 
 %% @private
+%% Renders the `bondy_metrics` (BIF-counter) families declared via
+%% `bondy_metrics:declare/1`. All the deferred cost of the
+%% wait-free capture path lands here, on the scraper: one registry walk
+%% per declared family. Defensive like every other source in this
+%% collector — a missing registry table or a bad row skips the family,
+%% never fails the scrape.
+collect_bondy_metrics_families(CB) ->
+    maps:foreach(
+        fun(Name, Descriptor) ->
+            Help = maps:get(help, Descriptor, <<>>),
+            Rows =
+                try
+                    bondy_metrics:family(Name)
+                catch
+                    _:_ -> []
+                end,
+            case Rows of
+                [] ->
+                    ok;
+                _ ->
+                    emit_family(CB, Name, Help, Rows)
+            end
+        end,
+        bondy_metrics:declared()
+    ).
+
+%% @private
+%% The type is fixed per name at first touch (`bondy_metrics:operate/3`),
+%% so inspecting the first row is authoritative for the family.
+emit_family(CB, Name, Help, [#{type := histogram} | _] = Rows) ->
+    Specs = [
+        {
+            label_pairs(Label),
+            cumulative_buckets(Snapshot),
+            maps:get(count, Snapshot),
+            maps:get(sum, Snapshot)
+        }
+     || #{label := Label, value := Snapshot} <- Rows
+    ],
+    CB(prometheus_model_helpers:create_mf(Name, Help, histogram, Specs));
+emit_family(CB, Name, Help, [#{type := Type} | _] = Rows) ->
+    Metrics = [
+        {label_pairs(Label), Value}
+     || #{label := Label, value := Value} <- Rows
+    ],
+    CB(prometheus_model_helpers:create_mf(Name, Help, Type, Metrics)).
+
+%% @private
+%% Deterministic label ordering across rows of a family.
+label_pairs(Label) when is_map(Label) ->
+    lists:sort(maps:to_list(Label)).
+
+%% @private
+%% Converts a sparse ascending `[{BucketIndex, Count}]` snapshot into the
+%% Prometheus cumulative form `[{UpperBound, CumulativeCount}]`,
+%% terminated with the mandatory `+Inf` bucket. Bounds come from the
+%% log-linear layout's inclusive upper bounds (`hist_bucket_high/1`),
+%% which is exactly the `le` semantic.
+cumulative_buckets(#{count := Total, buckets := Sparse}) ->
+    {Buckets, _} = lists:mapfoldl(
+        fun({I, C}, Acc0) ->
+            Acc = Acc0 + C,
+            {{bondy_metrics:hist_bucket_high(I), Acc}, Acc}
+        end,
+        0,
+        Sparse
+    ),
+    Buckets ++ [{infinity, Total}].
+
+%% @private
 %% Scrape-time families. Each fun returns `[{Labels, Value}]`; an empty
 %% list (or a crash, caught by the caller) skips the family.
 families() ->
@@ -103,34 +174,36 @@ families() ->
             "Pending RPC promises (calls/invocations awaiting a yield or "
             "error). Rising values mean callee saturation.", gauge,
             fun rpc_promises/0},
+        {bondy_rpc_inflight_invocations,
+            "Pending RPC promises per procedure. Rising values mean callee "
+            "saturation for that procedure. Computed from the live promise "
+            "store at scrape time (drift-free).", gauge,
+            fun rpc_promises_by_procedure/0},
         {bondy_registry_size,
             "Registry substrate size (exact-match entries, per-URI "
             "counters and trie nodes; approximate entry count).", gauge,
             fun() -> registry_info_rows(size) end},
-        {bondy_registry_memory,
-            "Registry substrate memory.", gauge,
-            fun() -> registry_info_rows(memory) end},
-        {bondy_listener_connections,
-            "Active connections per ranch listener.", gauge,
-            fun() -> listener_gauge_rows(active_connections) end},
-        {bondy_listener_max_connections,
-            "Connection limit per ranch listener.", gauge,
-            fun() -> listener_gauge_rows(max_connections) end},
+        {bondy_registry_memory, "Registry substrate memory.", gauge, fun() ->
+            registry_info_rows(memory)
+        end},
+        {bondy_listener_connections, "Active connections per ranch listener.",
+            gauge, fun() -> listener_gauge_rows(active_connections) end},
+        {bondy_listener_max_connections, "Connection limit per ranch listener.",
+            gauge, fun() -> listener_gauge_rows(max_connections) end},
         {bondy_listener_accepts_total,
             "Connections accepted per ranch listener since start.", counter,
             fun() -> listener_metric_rows(accept) end},
         {bondy_listener_terminates_total,
-            "Connections terminated per ranch listener since start.",
-            counter, fun() -> listener_metric_rows(terminate) end},
-        {bondy_jobs_queue_depth,
-            "Queued jobs per load-regulation pool shard.", gauge,
-            fun() -> jobs_queue_rows(depth) end},
+            "Connections terminated per ranch listener since start.", counter,
+            fun() -> listener_metric_rows(terminate) end},
+        {bondy_jobs_queue_depth, "Queued jobs per load-regulation pool shard.",
+            gauge, fun() -> jobs_queue_rows(depth) end},
         {bondy_jobs_enqueued_total,
             "Jobs enqueued per load-regulation pool shard since start.",
             counter, fun() -> jobs_queue_rows(enqueued) end},
         {bondy_rate_limiter_buckets,
-            "Live rate-limiter entries (keyspace growth / GC health).",
-            gauge, fun rate_limiter_rows/0},
+            "Live rate-limiter entries (keyspace growth / GC health).", gauge,
+            fun rate_limiter_rows/0},
         {bondy_oidc_flows_inflight,
             "Pending OIDC/PKCE login flows awaiting the callback.", gauge,
             fun oidc_inflight/0},
@@ -191,6 +264,18 @@ rpc_promises() ->
     end.
 
 %% @private
+rpc_promises_by_procedure() ->
+    case catch bondy_rpc_promise:count_by_procedure() of
+        Counts when is_map(Counts) ->
+            [
+                {[{procedure_uri, Uri}], N}
+             || Uri := N <- Counts
+            ];
+        _ ->
+            []
+    end.
+
+%% @private
 registry_info_rows(Key) ->
     case catch bondy_registry:info() of
         #{} = Info ->
@@ -221,7 +306,8 @@ listener_metric_rows(Suffix) ->
                     Total = maps:fold(
                         fun
                             (K, V, Acc) when
-                                is_tuple(K), is_integer(V),
+                                is_tuple(K),
+                                is_integer(V),
                                 element(tuple_size(K), K) == Suffix
                             ->
                                 Acc + V;

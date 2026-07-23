@@ -71,6 +71,7 @@ workers; each partition owns its own slice of the indices.
 -export([remove_all/5]).
 
 %% INDEX BASED MATCHING API
+-export([has_matches/3]).
 -export([match/1]).
 -export([match/3]).
 -export([match/4]).
@@ -454,6 +455,24 @@ match(Cont0) ->
             }),
             ?EOT
     end.
+
+-doc """
+Returns `true` iff at least one stored entry (local or remote, any
+match policy) subsumes `Uri` — the boolean form of `find_matches/3`
+(the routing direction), answered fail-fast in the calling process
+(no partition server round-trip).
+
+This is the demand predicate for WAMP meta events: emitters call it
+before constructing a meta-event publication so that, in the common
+case of zero meta-topic subscribers, no work is done at all (see
+METRICS_GAP_ANALYSIS.md Part III).
+""".
+-spec has_matches(Type :: entry_type(), RealmUri :: uri(), Uri :: uri()) ->
+    boolean().
+
+has_matches(Type, RealmUri, Uri) ->
+    Store = bondy_registry_partition:store(RealmUri),
+    bondy_registry_store:has_matches(Store, Type, RealmUri, Uri).
 
 -doc "Calls `match/4`".
 -spec match

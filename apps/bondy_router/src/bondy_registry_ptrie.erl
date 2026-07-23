@@ -137,6 +137,7 @@ under the same `{URI, Policy}`); see `bondy_registry_ptrie:update/4`.
 -export([lookup/2]).
 -export([lookup/3]).
 -export([match/2]).
+-export([has_match/2]).
 -export([fold/3]).
 -export([truncate/1]).
 -export([size/1]).
@@ -406,6 +407,27 @@ match(#handle{} = H, Target) when is_binary(Target) ->
         case ets:lookup(H#handle.node_tab, RootId) of
             [] -> [];
             [Root] -> match_walk(H#handle.node_tab, Root, Target, [], [])
+        end
+    end).
+
+-doc """
+Returns `true` iff at least one leaf matches `Target` (same matching
+relation as `match/2`), short-circuiting on the first match.
+
+This is the existence form of `match/2`: it stops walking the moment a
+qualifying leaf is found and allocates no result list, so it is O(walk
+to first match) rather than O(all matches). Use it for demand
+predicates where only the boolean matters — never build `match/2 =/= []`
+for that, which walks and materialises every match.
+""".
+-spec has_match(Handle :: handle(), Target :: key()) -> boolean().
+
+has_match(#handle{} = H, Target) when is_binary(Target) ->
+    with_epoch(H, fun() ->
+        {RootId, _V} = read_root(H),
+        case ets:lookup(H#handle.node_tab, RootId) of
+            [] -> false;
+            [Root] -> has_match_walk(H#handle.node_tab, Root, Target)
         end
     end).
 
@@ -1362,6 +1384,68 @@ descend_wildcard(Tab, Node, TargetRest, PathHere, Acc) ->
                         [Child] ->
                             ChildPath = [PathHere, ?WILDCARD_BYTE],
                             match_walk(Tab, Child, NewRest, ChildPath, Acc)
+                    end
+            end
+    end.
+
+%% @private
+%% Existence form of `match_walk`: same traversal and the same per-node
+%% leaf-qualification rules (see `collect_leaves_for_match`), but returns
+%% a boolean and short-circuits via `orelse` on the first qualifying leaf
+%% — no accumulator, no allocation. The matching *rules*
+%% (`walk_prefix_bytes`, `skip_segment`, `child_get`) are shared with
+%% `match_walk`; only the control flow (collect-all vs. exists) differs.
+has_match_walk(Tab, Node, TargetRest) ->
+    case walk_prefix_bytes(Node#pnode.prefix, TargetRest) of
+        no_match ->
+            false;
+        {match, NewTargetRest} ->
+            node_has_leaf(Node, NewTargetRest) orelse
+                has_descend_match(Tab, Node, NewTargetRest)
+    end.
+
+%% @private
+%% Mirrors the policy predicate in `collect_leaves_for_match`: a `prefix`
+%% leaf qualifies unconditionally (reaching the node means Target has the
+%% stored key as a byte-prefix); `exact`/`wildcard` qualify only when
+%% Target is fully consumed at this node.
+node_has_leaf(#pnode{leaves = L}, TargetRest) ->
+    maps:is_key(prefix, L) orelse
+        (TargetRest =:= <<>> andalso
+            (maps:is_key(exact, L) orelse maps:is_key(wildcard, L))).
+
+%% @private
+has_descend_match(_Tab, _Node, <<>>) ->
+    false;
+has_descend_match(Tab, Node, <<TargetByte, RestAfter/binary>> = TargetRest) ->
+    has_descend_literal(Tab, Node, TargetByte, RestAfter) orelse
+        has_descend_wildcard(Tab, Node, TargetRest).
+
+%% @private
+has_descend_literal(Tab, Node, TargetByte, RestAfter) ->
+    case child_get(TargetByte, Node#pnode.children) of
+        undefined ->
+            false;
+        {node, ChildId} ->
+            case ets:lookup(Tab, ChildId) of
+                [] -> false;
+                [Child] -> has_match_walk(Tab, Child, RestAfter)
+            end
+    end.
+
+%% @private
+has_descend_wildcard(Tab, Node, TargetRest) ->
+    case child_get(?WILDCARD_BYTE, Node#pnode.children) of
+        undefined ->
+            false;
+        {node, ChildId} ->
+            case skip_segment(TargetRest) of
+                end_of_target ->
+                    false;
+                {ok, NewRest} ->
+                    case ets:lookup(Tab, ChildId) of
+                        [] -> false;
+                        [Child] -> has_match_walk(Tab, Child, NewRest)
                     end
             end
     end.

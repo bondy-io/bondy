@@ -22,12 +22,15 @@ metrics_test_() ->
         fun counter_with_explicit_delta/0,
         fun counter_label_isolation/0,
         fun gauge_writes_absolute_value/0,
+        fun gauge_delta_adds/0,
         fun value_returns_undefined_for_unknown/0,
         fun type_clash_returns_error/0,
         fun with_name_returns_all_labels/0,
         fun delete_drops_the_metric/0,
         fun all_returns_every_metric/0,
-        fun info_returns_metadata_without_reading_value/0
+        fun info_returns_metadata_without_reading_value/0,
+        fun declare_stores_open_descriptor/0,
+        fun declare_is_idempotent/0
     ]}.
 
 %% =============================================================================
@@ -72,6 +75,31 @@ counter_label_isolation() ->
     bondy_metrics:delete(#{name => Name, label => LA}),
     bondy_metrics:delete(#{name => Name, label => LB}).
 
+declare_stores_open_descriptor() ->
+    %% The descriptor is an open map: `help` is required, and any extra
+    %% metadata (a future `unit`, here) is preserved verbatim in
+    %% declared/0 without an API change — the extensibility contract.
+    Name = mk_name(),
+    ok = bondy_metrics:declare(#{
+        name => Name, help => <<"H">>, unit => <<"milliseconds">>
+    }),
+    Declared = bondy_metrics:declared(),
+    ?assertEqual(
+        #{help => <<"H">>, unit => <<"milliseconds">>},
+        maps:get(Name, Declared)
+    ),
+    %% `name` is the key, not part of the descriptor.
+    ?assertNot(maps:is_key(name, maps:get(Name, Declared))).
+
+declare_is_idempotent() ->
+    Name = mk_name(),
+    ok = bondy_metrics:declare(#{name => Name, help => <<"first">>}),
+    ok = bondy_metrics:declare(#{name => Name, help => <<"second">>}),
+    ?assertEqual(
+        #{help => <<"second">>},
+        maps:get(Name, bondy_metrics:declared())
+    ).
+
 gauge_writes_absolute_value() ->
     Name = mk_name(),
     ok = bondy_metrics:gauge(#{name => Name, value => 100}),
@@ -79,6 +107,18 @@ gauge_writes_absolute_value() ->
     %% Overwrite with a smaller value — gauges go down too.
     ok = bondy_metrics:gauge(#{name => Name, value => 42}),
     ?assertEqual(42, bondy_metrics:value(#{name => Name})),
+    bondy_metrics:delete(#{name => Name}).
+
+gauge_delta_adds() ->
+    Name = mk_name(),
+    ok = bondy_metrics:gauge(#{name => Name, delta => 1}),
+    ok = bondy_metrics:gauge(#{name => Name, delta => 2}),
+    ?assertEqual(3, bondy_metrics:value(#{name => Name})),
+    ok = bondy_metrics:gauge(#{name => Name, delta => -3}),
+    ?assertEqual(0, bondy_metrics:value(#{name => Name})),
+    %% `value` still writes the absolute value on the same gauge.
+    ok = bondy_metrics:gauge(#{name => Name, value => 7}),
+    ?assertEqual(7, bondy_metrics:value(#{name => Name})),
     bondy_metrics:delete(#{name => Name}).
 
 value_returns_undefined_for_unknown() ->

@@ -1171,6 +1171,4 @@ update_process_metadata(#wamp_state{} = State) ->
     }).
 
 notify(M, State) ->
-    bondy_event_manager:notify(
-        {[bondy, wamp, message], M, State#wamp_state.context}
-    ).
+    bondy_telemetry:wamp_message(M, State#wamp_state.context).

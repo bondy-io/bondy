@@ -77,6 +77,7 @@ back to the origin `wamp_call()` and Caller
 -export([caller/1]).
 -export([evict_expired/1]).
 -export([expiry/1]).
+-export([count_by_procedure/0]).
 -export([find/1]).
 -export([flush/2]).
 -export([flush/3]).
@@ -430,6 +431,46 @@ invocation_key_pattern(RealmUri, Caller, CallId, Callee, InvocationId) when
         invocation_id = InvocationId,
         expiry = '_'
     }.
+
+-doc """
+Returns the count of in-flight promises per procedure URI across all
+partitions.
+
+A scrape-time aggregation (used by `bondy_prometheus_collector` for the
+`bondy_rpc_inflight_invocations` family): computed from the live
+promise store with a match-spec select, so it can never drift the way a
+hot-path inc/dec gauge would on a missed settlement path. Cost is
+O(in-flight promises), paid by the scraper.
+""".
+-spec count_by_procedure() -> #{uri() => pos_integer()}.
+
+count_by_procedure() ->
+    MS = [
+        {
+            #bondy_rpc_promise{procedure_uri = '$1', _ = '_'},
+            [{is_binary, '$1'}],
+            ['$1']
+        }
+    ],
+    lists:foldl(
+        fun(Tab, Acc0) ->
+            try ets:select(Tab, MS) of
+                Uris ->
+                    lists:foldl(
+                        fun(Uri, Acc) ->
+                            maps:update_with(Uri, fun(N) -> N + 1 end, 1, Acc)
+                        end,
+                        Acc0,
+                        Uris
+                    )
+            catch
+                _:_ ->
+                    Acc0
+            end
+        end,
+        #{},
+        ?TABLES
+    ).
 
 -doc """
 Adds the promise `P` to the promise table.

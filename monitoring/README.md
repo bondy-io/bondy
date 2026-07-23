@@ -74,14 +74,25 @@ The provisioned dashboard is **Bondy — bondy_db / oplog / MST** in the
   depth (async-work backpressure), Partisan connection counts per
   peer/channel, rate-limiter bucket and OIDC flow table sizes, and
   mailbox depth of critical singleton processes.
-- **WAMP / HTTP / BEAM VM** — router-level traffic (message mix by
-  type, RPC vs PubSub, session churn and duration), **call round-trip
-  latency** (heatmap, quantiles and slowest-procedures ranking, observed
-  at RPC-promise resolution), registration/subscription churn,
-  realm/user lifecycle events, HTTP listener health, and VM depth
-  including the msacc scheduler-time breakdown and system-monitor
-  events. RPC promise timeouts and rate-limiter denials live in the
-  Router internals row and should sit at zero.
+- **WAMP — sessions & transports** — session churn plus **close
+  reasons** (the "why are my clients dropping" diagnostic), session
+  duration, socket counts, router-initiated **ping RTT** per transport,
+  and a drops/shed stat that should sit at zero (the NATS
+  "slow consumers" analog).
+- **WAMP — messaging & RPC** — message mix by type, RPC vs PubSub
+  traffic, **call round-trip latency** (heatmap, quantiles,
+  slowest-procedures ranking) plus **latency attribution** (callee
+  execution vs router overhead, from the invocation-leg histogram),
+  **in-flight invocations per procedure** (scrape-time, drift-free —
+  the per-procedure consumer-lag analog), dropped messages/events by
+  reason, registration/subscription churn and realm/user lifecycle
+  events.
+- **HTTP — API gateway** — aggregate status-class/error/duration
+  panels plus **per-route golden signals** (rate, error %, p95 duration
+  by route template — bounded cardinality, RED-style).
+- **BEAM VM** — memory, msacc scheduler-time breakdown, run queues, GC
+  and system-monitor events. RPC promise timeouts and rate-limiter
+  denials live in the Router internals row and should sit at zero.
 
 ## Notes
 

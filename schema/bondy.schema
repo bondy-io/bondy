@@ -3445,6 +3445,22 @@ end}.
   {datatype, {duration, ms}}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc Controls the production of WAMP meta events (wamp.session.*,
+%% wamp.subscription.*, wamp.registration.* topics).
+%% - demand (default): a meta event is produced only when at least one
+%%   session (on any node) has a subscription matching the meta topic.
+%%   Aggregate metrics are always maintained regardless.
+%% - on: always produce meta events (pre-1.0 behaviour).
+%% - off: never produce meta events.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "wamp.meta_events",
+"bondy_router.wamp_meta_events", [
+  {default, demand},
+  {datatype, {enum, [demand, on, off]}}
+]}.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc The maximum timeout value for WAMP (RPC) Calls for the CALL.Options.

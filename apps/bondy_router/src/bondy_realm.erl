@@ -2615,15 +2615,20 @@ fold_props(_, _, Realm) ->
     Realm.
 
 %% @private
+%% The metric aggregate rides telemetry; the gen_event notification
+%% remains for the WAMP meta-event publisher.
 on_create(Realm) ->
+    ok = bondy_telemetry:realm_event(created, Realm#realm.uri),
     bondy_event_manager:notify({[bondy, realm, created], Realm#realm.uri}).
 
 %% @private
 on_update(Realm) ->
+    ok = bondy_telemetry:realm_event(updated, Realm#realm.uri),
     bondy_event_manager:notify({[bondy, realm, updated], Realm#realm.uri}).
 
 %% @private
 on_delete(Uri) ->
+    ok = bondy_telemetry:realm_event(deleted, Uri),
     bondy_event_manager:notify({[bondy, realm, deleted], Uri}).
 
 %% @private

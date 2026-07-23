@@ -1672,7 +1672,10 @@ dispatch_table_path(
         realm_uri => Realm,
         deprecated => Deprecated,
         security => Sec,
-        languages => Languages
+        languages => Languages,
+        %% The route TEMPLATE (bounded cardinality), used as the `route`
+        %% label of the per-request HTTP metrics.
+        route => AbsPath
     },
     lists:flatten([
         [

@@ -74,7 +74,8 @@ all() ->
         match_no_match_returns_empty,
         match_encode_decode_round_trip,
         match_wildcard_must_consume_non_empty_segment,
-        prop_match_agrees_with_reference
+        prop_match_agrees_with_reference,
+        prop_has_match_agrees_with_match
     ].
 
 init_per_suite(Config) ->
@@ -1092,6 +1093,42 @@ prop_match_agrees_with_reference(Config) ->
                         ct:pal(
                             "target=~p~nregistered=~p~nactual=~p~nexpected=~p",
                             [Target, LatestRegistered, Actual, Expected]
+                        ),
+                        false
+                end
+            end
+        )
+    ).
+
+prop_has_match_agrees_with_match(Config) ->
+    %% The short-circuit existence walk (`has_match/2`) must agree with
+    %% the full walk on non-emptiness for every registered set and target.
+    H = ?config(handle, Config),
+    run_prop(
+        ?FORALL(
+            {Registered, Target},
+            {list(registered_pattern()), uri_target()},
+            begin
+                clear(H),
+                [
+                    ok = bondy_registry_ptrie:insert(H, K, P, V)
+                 || {K, P, V} <- Registered
+                ],
+                Expected = bondy_registry_ptrie:match(H, Target) =/= [],
+                Actual = bondy_registry_ptrie:has_match(H, Target),
+                case Actual =:= Expected of
+                    true ->
+                        true;
+                    false ->
+                        ct:pal(
+                            "target=~p~nregistered=~p~n"
+                            "has_match=~p~nmatch_nonempty=~p",
+                            [
+                                Target,
+                                dedup_by_kp(Registered),
+                                Actual,
+                                Expected
+                            ]
                         ),
                         false
                 end

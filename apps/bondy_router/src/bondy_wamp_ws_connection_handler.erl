@@ -49,7 +49,13 @@ WebSocket subprotocol registry.
     ping_idle_timeout :: non_neg_integer(),
     ping_tref :: optional(reference()),
     ping_payload :: binary(),
+    %% Monotonic ms timestamp of the most recent router-initiated ping,
+    %% used to observe the RTT when the matching pong arrives.
+    ping_sent_at :: optional(integer()),
     ping_retry :: optional(bondy_retry:t()),
+    %% Monotonic seconds at websocket_init, for the socket duration
+    %% observation on terminate (also the "socket_open was emitted" guard).
+    start_time :: optional(integer()),
     protocol_state :: optional(bondy_wamp_protocol:state())
 }).
 
@@ -195,7 +201,10 @@ websocket_init(#state{protocol_state = PSt} = State) ->
 
     ?LOG_INFO(#{description => "Established connection with client."}),
 
-    {[], reset_ping(State), hibernate}.
+    ok = bondy_telemetry:socket_open(wamp, ws),
+    State1 = State#state{start_time = erlang:monotonic_time(second)},
+
+    {[], reset_ping(State1), hibernate}.
 
 -doc """
 Called for every frame received from the client.
@@ -221,8 +230,9 @@ websocket_handle(pong, State) ->
     %% A Pong frame MAY be sent unsolicited.  This serves as a unidirectional
     %% heartbeat. A response to an unsolicited Pong frame is not expected.
     {[], reset_ping(State), hibernate};
-websocket_handle({pong, Data}, #state{ping_payload = Data} = State) ->
+websocket_handle({pong, Data}, #state{ping_payload = Data} = State0) ->
     %% We've got an answer to a Bondy-initiated ping.
+    State = observe_ping_rtt(State0),
     {[], reset_ping(State), hibernate};
 websocket_handle({T, Data}, #state{frame_type = T} = State0) ->
     ProtoState0 = State0#state.protocol_state,
@@ -364,20 +374,20 @@ terminate({error, badencoding = Reason}, _Req, State) ->
         description => "Connection closed",
         reason => Reason
     }),
-    do_terminate(State);
+    do_terminate(State, true);
 terminate({error, badframe = Reason}, _Req, State) ->
     %% A protocol error has been detected.
     ?LOG_ERROR(#{
         description => "Connection closed",
         reason => Reason
     }),
-    do_terminate(State);
+    do_terminate(State, true);
 terminate({error, Reason}, _Req, State) ->
     ?LOG_ERROR(#{
         description => "Connection closed",
         reason => Reason
     }),
-    do_terminate(State);
+    do_terminate(State, true);
 terminate({crash, Class, Reason}, _Req, State) ->
     %% A crash occurred in the handler.
     ?LOG_ERROR(#{
@@ -385,13 +395,13 @@ terminate({crash, Class, Reason}, _Req, State) ->
         class => Class,
         reason => Reason
     }),
-    do_terminate(State);
+    do_terminate(State, true);
 terminate(Other, _Req, State) ->
     ?LOG_ERROR(#{
         description => "Connection closed",
         reason => Other
     }),
-    do_terminate(State).
+    do_terminate(State, true).
 
 %% =============================================================================
 %% PRIVATE
@@ -499,9 +509,28 @@ select_subprotocol(L) when is_list(L) ->
     end.
 
 %% @private
-do_terminate(undefined) ->
-    ok;
 do_terminate(State) ->
+    do_terminate(State, false).
+
+%% @private
+%% Emits the socket metrics ([bondy, socket, closed] with the connection
+%% duration, plus [bondy, socket, error] for error-class terminations)
+%% iff websocket_init ran (start_time set), mirroring the raw-socket
+%% handler's contract.
+do_terminate(undefined, _) ->
+    ok;
+do_terminate(State, IsError) ->
+    case State#state.start_time of
+        StartTime when is_integer(StartTime) ->
+            Seconds = erlang:monotonic_time(second) - StartTime,
+            ok = bondy_telemetry:socket_closed(wamp, ws, Seconds),
+            case IsError of
+                true -> ok = bondy_telemetry:socket_error(wamp, ws);
+                false -> ok
+            end;
+        undefined ->
+            ok
+    end,
     ok = cancel_timer(State#state.ping_tref),
     bondy_wamp_protocol:terminate(State#state.protocol_state).
 
@@ -574,6 +603,19 @@ reset_ping(#state{} = State) ->
     }.
 
 %% @private
+%% Observes the ping round-trip time when a pong answers a
+%% router-initiated ping. Retries resend the same payload, so the RTT is
+%% measured from the most recent send.
+observe_ping_rtt(#state{ping_sent_at = SentAt} = State) when
+    is_integer(SentAt)
+->
+    Rtt = erlang:monotonic_time(millisecond) - SentAt,
+    ok = bondy_telemetry:ping_rtt(wamp, ws, Rtt),
+    State#state{ping_sent_at = undefined};
+observe_ping_rtt(State) ->
+    State.
+
+%% @private
 disable_ping(#state{ping_retry = undefined} = State) ->
     State;
 disable_ping(#state{} = State) ->
@@ -607,7 +649,10 @@ maybe_send_ping(Limit, State) when
 maybe_send_ping(_Time, #state{} = State0) ->
     %% We schedule the next retry
     Ref = bondy_retry:fire(State0#state.ping_retry),
-    State = State0#state{ping_tref = Ref},
+    State = State0#state{
+        ping_tref = Ref,
+        ping_sent_at = erlang:monotonic_time(millisecond)
+    },
 
     %% https://datatracker.ietf.org/doc/html/rfc6455#page-37
     %% If an endpoint receives a Ping frame and has not yet sent Pong

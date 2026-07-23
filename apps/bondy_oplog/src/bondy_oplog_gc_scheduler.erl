@@ -398,9 +398,10 @@ run_trigger(Name, InstanceId, Fun) when is_function(Fun, 1) ->
         }
     ),
     case Outcome of
-        {error, {unconfirmed, _} = Stall} ->
-            gen_server:cast(Name, {stalled, InstanceId, Stall});
-        {error, membership_unavailable = Stall} ->
+        {error, Stall} ->
+            %% EVERY stall reason is reported — no_frontier included: a
+            %% down-but-not-retired member whose confirmed root has gone
+            %% stale stalls as no_frontier, and that must not be silent.
             gen_server:cast(Name, {stalled, InstanceId, Stall});
         _ ->
             ok
@@ -432,23 +433,68 @@ maybe_log_stall(InstanceId, Reason, State) ->
             ?LOG_WARNING(#{
                 description =>
                     "Reclamation stalled: no causal stability for this "
-                    "instance, nothing reclaimed. A member that stays in "
-                    "this state must be retired by a deliberate membership "
-                    "act (it never ages out).",
+                    "instance, nothing reclaimed. See member_status for "
+                    "the member(s) holding stability down (highest "
+                    "last_sync_age_ms, or never_synced). Bring them back "
+                    "online, or retire them with a deliberate cluster "
+                    "membership removal — a stalled member never ages "
+                    "out.",
                 scheduler => State#state.name,
                 instance => InstanceId,
                 reason =>
                     case Reason of
                         {unconfirmed, _} -> unconfirmed;
+                        {Tag, []} when is_atom(Tag) -> Tag;
                         _ -> Reason
                     end,
-                missing_members => Missing
+                missing_members => Missing,
+                member_status => member_status(InstanceId)
             }),
             State#state{
                 last_stall_log =
                     (State#state.last_stall_log)#{InstanceId => Now}
             }
     end.
+
+%% @private
+%% Per-member sync recency for the stall log: the operator's call to
+%% action requires NAMING the member holding stability down, which the
+%% stall reason alone does not always do (a down member with a stale
+%% confirmed root stalls as `no_frontier`, naming nobody). `never_synced`
+%% means the member has no peer-state entry for this instance at all
+%% (e.g. it has been down since this node booted). Runs only on the
+%% rate-limited log path; total.
+member_status(InstanceId) ->
+    try
+        {ok, Members} = bondy_oplog_instance:reclamation_members(),
+        States = bondy_oplog_peer_state:get_instance_peer_states(
+            InstanceId, 0
+        ),
+        ByPeer = maps:from_list([
+            {to_bin(P), S}
+         || #{peer := P} = S <- States
+        ]),
+        Now = os:system_time(millisecond),
+        lists:map(
+            fun(Member) ->
+                case maps:get(to_bin(Member), ByPeer, undefined) of
+                    #{last_sync := T} ->
+                        #{member => Member, last_sync_age_ms => Now - T};
+                    undefined ->
+                        #{member => Member, status => never_synced}
+                end
+            end,
+            Members
+        )
+    catch
+        _:_ ->
+            unavailable
+    end.
+
+%% @private
+to_bin(V) when is_atom(V) -> atom_to_binary(V, utf8);
+to_bin(V) when is_binary(V) -> V;
+to_bin(V) when is_list(V) -> list_to_binary(V).
 
 %% @private
 safe_list_instances() ->

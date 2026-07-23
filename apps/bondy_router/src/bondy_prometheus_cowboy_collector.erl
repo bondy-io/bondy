@@ -115,7 +115,7 @@ Set this module to `labels_module` configuration option.
 ]).
 -define(DEFAULT_EARLY_ERROR_LABELS, []).
 -define(DEFAULT_PROTOCOL_UPGRADE_LABELS, []).
--define(DEFAULT_REQUEST_LABELS, [method, reason, status_class]).
+-define(DEFAULT_REQUEST_LABELS, [route, method, reason, status_class]).
 -define(DEFAULT_ERROR_LABELS, [method, reason, error]).
 -define(DEFAULT_LABELS_MODULE, undefined).
 -define(DEFAULT_REGISTRY, default).
@@ -276,6 +276,12 @@ label_value(port, #{listener_port := Port}) ->
     Port;
 label_value(method, #{req := Req}) ->
     cowboy_req:method(Req);
+label_value(route, #{user_data := UserData}) when is_map(UserData) ->
+    %% Route TEMPLATE injected by the gateway rest handler via
+    %% `metrics_user_data` (undefined for non-gateway requests).
+    maps:get(route, UserData, undefined);
+label_value(route, _) ->
+    undefined;
 label_value(status, #{resp_status := Status}) ->
     Status;
 label_value(status_class, #{resp_status := undefined}) ->

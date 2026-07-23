@@ -54,13 +54,14 @@ init([]) ->
     %% prometheus is a dependency app of bondy_router, so it is running by
     %% the time this handler is installed; the catch covers embedded or
     %% test setups that install the handler without it.
-    _ = (catch prometheus_counter:declare([
-        {name, bondy_sysmon_events_total},
-        {help,
-            "BEAM system-monitor events received (long_gc, long_schedule, "
-            "large_heap, busy_port, busy_dist_port, ...)."},
-        {labels, [type]}
-    ])),
+    _ =
+        (catch prometheus_counter:declare([
+            {name, bondy_sysmon_events_total},
+            {help,
+                "BEAM system-monitor events received (long_gc, long_schedule, "
+                "large_heap, busy_port, busy_dist_port, ...)."},
+            {labels, [type]}
+        ])),
     State = #state{},
     {ok, State, hibernate}.
 

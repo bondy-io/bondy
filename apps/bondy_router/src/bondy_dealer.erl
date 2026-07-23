@@ -1400,18 +1400,37 @@ no_matching_promise(M) ->
     ok.
 
 %% @private
-%% Emits the call round-trip latency (promise creation to first response)
-%% for the promise that resolved a CALL. Async via the event manager;
-%% `bondy_prometheus` observes it into `bondy_wamp_call_latency_milliseconds`.
+%% Emits the latency (promise creation to first response) for a settled
+%% promise, inline via telemetry (`bondy_prometheus` sinks it into
+%% `bondy_wamp_call_latency_milliseconds` /
+%% `bondy_wamp_invocation_latency_milliseconds`).
+%%
+%% A call promise measures the full CALL round trip. An invocation
+%% promise measures the INVOCATION→YIELD leg (≈ callee execution +
+%% transport) — and when its caller is LOCAL it is also the only promise
+%% for the call, so it doubles as the call round-trip observation (a
+%% remote caller's node observes call latency on its own call promise).
 notify_call_latency(Promise) ->
     case bondy_rpc_promise:procedure_uri(Promise) of
         Uri when is_binary(Uri) ->
             Elapsed =
                 erlang:system_time(millisecond) -
                     bondy_rpc_promise:timestamp(Promise),
-            bondy_event_manager:notify(
-                {[bondy, wamp, call, latency], Uri, max(0, Elapsed)}
-            );
+            case bondy_rpc_promise:type(Promise) of
+                call ->
+                    bondy_telemetry:rpc_latency(call, Uri, Elapsed);
+                invocation ->
+                    ok = bondy_telemetry:rpc_latency(
+                        invocation, Uri, Elapsed
+                    ),
+                    Caller = bondy_rpc_promise:caller(Promise),
+                    case bondy_ref:is_local(Caller) of
+                        true ->
+                            bondy_telemetry:rpc_latency(call, Uri, Elapsed);
+                        false ->
+                            ok
+                    end
+            end;
         _ ->
             ok
     end.
@@ -1839,19 +1858,24 @@ call_opts(_) -> #{}.
 %% =============================================================================
 
 %% @private
+%% The aggregate metric is counted unconditionally (telemetry); the WAMP
+%% meta-event publication is demand-gated (see bondy_meta_events).
 on_register(true, Entry) ->
-    bondy_event_manager:notify({[bondy, dealer, registration, created], Entry});
-%% @private
+    ok = bondy_telemetry:registry_event(registration, created, Entry),
+    bondy_meta_events:maybe_publish(created, Entry);
 on_register(false, Entry) ->
-    bondy_event_manager:notify({[bondy, dealer, registration, added], Entry}).
+    ok = bondy_telemetry:registry_event(registration, added, Entry),
+    bondy_meta_events:maybe_publish(added, Entry).
 
 %% @private
 on_unregister(Entry) ->
-    bondy_event_manager:notify({[bondy, dealer, registration, removed], Entry}).
+    ok = bondy_telemetry:registry_event(registration, removed, Entry),
+    bondy_meta_events:maybe_publish(removed, Entry).
 
 %% @private
 on_delete(Entry) ->
-    bondy_event_manager:notify({[bondy, dealer, registration, deleted], Entry}).
+    ok = bondy_telemetry:registry_event(registration, deleted, Entry),
+    bondy_meta_events:maybe_publish(deleted, Entry).
 
 %% @private
 -doc """

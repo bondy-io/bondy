@@ -309,6 +309,9 @@ store(#session{} = S0) ->
         true == ets:insert_new(Tab, S) orelse
             error({integrity_constraint_violation, Id}),
 
+        %% Metrics ride telemetry; the gen_event notification remains for
+        %% the WAMP meta-event publisher.
+        ok = bondy_telemetry:session_opened(S),
         ok = bondy_event_manager:notify({[bondy, session, opened], S}),
 
         {ok, S}
@@ -362,8 +365,10 @@ close(#session{} = S, Reason) when
     %% Revoke Tickets and Tokens
     ok = maybe_revoke_tickets(S, Reason),
 
-    %% Notify internally
+    %% Notify internally. Metrics ride telemetry; the gen_event
+    %% notification remains for the WAMP meta-event publisher.
     Secs = erlang:system_time(second) - S#session.created,
+    ok = bondy_telemetry:session_closed(S, Secs, Reason),
     ok = bondy_event_manager:notify({[bondy, session, closed], S, Secs}),
 
     ?LOG_INFO(#{

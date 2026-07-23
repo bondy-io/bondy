@@ -53,6 +53,7 @@
         %% 1st-party deps
         mops,
         bondy_wamp,
+        bondy_metrics,
         bondy_stdlib,
         bondy_regulator,
         %% bondy implements bondy_connect_local's handler behaviour and

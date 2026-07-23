@@ -891,30 +891,36 @@ fold_matches([], _Fun, Acc) ->
 %% =============================================================================
 
 %% @private
+%% The aggregate metric is counted unconditionally (telemetry); the WAMP
+%% meta-event publication is demand-gated (see bondy_meta_events).
 -spec on_create(bondy_registry_entry:t()) -> ok.
 
 on_create(Entry) ->
     ok = maybe_send_retained(Entry),
-    bondy_event_manager:notify({[bondy, broker, subscription, created], Entry}).
+    ok = bondy_telemetry:registry_event(subscription, created, Entry),
+    bondy_meta_events:maybe_publish(created, Entry).
 
 %% @private
 -spec on_subscribe(bondy_registry_entry:t()) -> ok.
 
 on_subscribe(Entry) ->
     ok = maybe_send_retained(Entry),
-    bondy_event_manager:notify({[bondy, broker, subscription, added], Entry}).
+    ok = bondy_telemetry:registry_event(subscription, added, Entry),
+    bondy_meta_events:maybe_publish(added, Entry).
 
 %% @private
 -spec on_unsubscribe(bondy_registry_entry:t()) -> ok.
 
 on_unsubscribe(Entry) ->
-    bondy_event_manager:notify({[bondy, broker, subscription, removed], Entry}).
+    ok = bondy_telemetry:registry_event(subscription, removed, Entry),
+    bondy_meta_events:maybe_publish(removed, Entry).
 
 %% @private
 -spec on_delete(bondy_registry_entry:t()) -> ok.
 
 on_delete(Entry) ->
-    bondy_event_manager:notify({[bondy, broker, subscription, deleted], Entry}).
+    ok = bondy_telemetry:registry_event(subscription, deleted, Entry),
+    bondy_meta_events:maybe_publish(deleted, Entry).
 
 %% =============================================================================
 %% PRIVATE: EVENT RETENTION

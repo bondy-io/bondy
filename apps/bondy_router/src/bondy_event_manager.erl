@@ -102,7 +102,9 @@ been fired.
 
 add_callback(Fun) when is_function(Fun, 1) ->
     Handler = {?MODULE, make_ref()},
-    gen_event:add_handler(?MODULE, Handler, [Fun]),
+    %% Pass the fun unwrapped: init/1 binds its whole argument as the
+    %% callback, so `[Fun]` would make every handle_event fail.
+    gen_event:add_handler(?MODULE, Handler, Fun),
     {ok, Handler}.
 
 -doc """

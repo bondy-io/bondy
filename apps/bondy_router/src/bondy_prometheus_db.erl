@@ -27,9 +27,11 @@ Two mechanisms are combined:
   `bondy_observer_cli` Cluster and Sync panes show: Partisan
   membership/connectivity, per-instance lifecycle and applied-frontier
   signature, WAL writer state, per-(instance, peer) sync recency, substrate
-  AE freshness lag, scheduler state, plus a passthrough of every
-  counter/gauge registered in `bondy_metrics` (e.g.
-  `bondy_oplog_core_reads_total`).
+  AE freshness lag, scheduler state. The wait-free `bondy_metrics`
+  counters populated by `bondy_oplog_core_metrics` (e.g.
+  `bondy_oplog_core_reads_total`) are declared there via
+  `bondy_metrics:declare/1` and rendered by the declared-families
+  collector (`bondy_prometheus_collector`), not by this module.
 
 Cross-node convergence is derivable in PromQL without any scrape-time
 network traffic: `bondy_oplog_instance_frontier_hash` is a stable hash of
@@ -94,6 +96,12 @@ the collector. Idempotent; called from `bondy_prometheus:setup/0` at boot.
 
 setup() ->
     ok = declare_metrics(),
+    %% The core-substrate `bondy_metrics` families are declared where they
+    %% are populated — in `bondy_oplog_core_metrics:init/1` — via
+    %% `bondy_metrics:declare/1`, so they are not declared here. They reach
+    %% /metrics through the declared-families collector
+    %% (`bondy_prometheus_collector`), which replaced an earlier blanket
+    %% passthrough that duplicated every already-declared family.
     case
         telemetry:attach_many(
             ?HANDLER_ID, events(), fun ?MODULE:handle_event/4, undefined
@@ -177,8 +185,8 @@ collect_mf(_Registry, CB) ->
             ),
             collect_wal(CB),
             collect_sync_scheduler(CB),
-            collect_leveled(CB),
-            collect_bondy_metrics(CB);
+            _ = collect_leveled(CB),
+            ok;
         false ->
             ok
     end.
@@ -989,8 +997,8 @@ families() ->
             gauge, fun gc_scheduler_inflight/0},
         {bondy_alarms, "Number of active alarms on the node.", gauge,
             fun alarm_count/0},
-        {bondy_alarm_active, "1 per active alarm, labelled by alarm id.",
-            gauge, fun alarm_rows/0},
+        {bondy_alarm_active, "1 per active alarm, labelled by alarm id.", gauge,
+            fun alarm_rows/0},
         {bondy_node_ready,
             "1 when the node reports ready (same flag the /ready probe "
             "serves).", gauge, fun node_ready/0}
@@ -1226,11 +1234,10 @@ collect_leveled(CB) ->
         {bondy_leveled_penciller_cache_size,
             "Leveled penciller in-memory (L0) cache size.",
             penciller_inmem_cache_size},
-        {bondy_leveled_active_journal_files,
-            "Active journal (CDB) files.", n_active_journal_files},
+        {bondy_leveled_active_journal_files, "Active journal (CDB) files.",
+            n_active_journal_files},
         {bondy_leveled_journal_compaction_score,
-            "Last journal compaction score.",
-            journal_last_compaction_score}
+            "Last journal compaction score.", journal_last_compaction_score}
     ],
     lists:foreach(
         fun({Name, Help, Key}) ->
@@ -1266,8 +1273,7 @@ collect_leveled(CB) ->
                     BL = bookie_labels(Labels),
                     [
                         {[{kind, l0} | BL], bool_to_int(L0 == true)},
-                        {[{kind, manifest} | BL],
-                            bool_to_int(Manifest == true)}
+                        {[{kind, manifest} | BL], bool_to_int(Manifest == true)}
                     ];
                 _ ->
                     []
@@ -1306,8 +1312,10 @@ collect_leveled(CB) ->
             case maps:get(fetch_count_by_level, S, undefined) of
                 M when is_map(M) ->
                     [
-                        {[{level, Level} | bookie_labels(Labels)],
-                            maps:get(count, Counters, 0)}
+                        {
+                            [{level, Level} | bookie_labels(Labels)],
+                            maps:get(count, Counters, 0)
+                        }
                      || {Level, Counters} <- maps:to_list(M),
                         is_map(Counters)
                     ];
@@ -1439,51 +1447,6 @@ gc_scheduler_inflight() ->
         #{in_flight := N} when is_integer(N) -> [{[], N}];
         _ -> []
     end.
-
-%% @private
-%% Re-exposes every counter/gauge accumulated in `bondy_metrics` (the
-%% storage stack's wait-free registry, e.g. `bondy_oplog_core_reads_total`)
-%% under its own name. Histogram-typed entries are skipped: their quantiles
-%% are already exported as gauges from the periodic
-%% `[bondy_oplog, instance, write_latency]` roll-up event.
-collect_bondy_metrics(CB) ->
-    Rows =
-        try
-            bondy_metrics:all()
-        catch
-            _:_ -> []
-        end,
-    ByName = lists:foldl(
-        fun
-            (#{type := histogram}, Acc) ->
-                Acc;
-            (#{name := N, label := L, type := T, value := V}, Acc) ->
-                Row = {label_map_to_list(L), V},
-                maps:update_with(
-                    {N, T}, fun(Acc1) -> [Row | Acc1] end, [Row], Acc
-                )
-        end,
-        #{},
-        Rows
-    ),
-    maps:foreach(
-        fun({Name, Type}, Metrics) ->
-            PromType =
-                case Type of
-                    counter -> counter;
-                    _ -> gauge
-                end,
-            CB(
-                prometheus_model_helpers:create_mf(
-                    Name,
-                    "bondy_metrics registry passthrough.",
-                    PromType,
-                    Metrics
-                )
-            )
-        end,
-        ByName
-    ).
 
 %% =============================================================================
 %% PRIVATE: RUNTIME STATE READERS
@@ -1704,12 +1667,3 @@ result_label(_) -> unknown.
 %% @private
 bool_to_int(true) -> 1;
 bool_to_int(false) -> 0.
-
-%% @private
-label_map_to_list(L) when is_map(L) ->
-    lists:keysort(1, [{K, label_value(V)} || {K, V} <- maps:to_list(L)]).
-
-%% @private
-label_value(V) when is_atom(V) orelse is_binary(V) -> V;
-label_value(V) when is_integer(V) -> integer_to_binary(V);
-label_value(V) -> label(V).

@@ -29,6 +29,9 @@ A ranch handler for the wamp protocol over either tcp or tls transports.
     ping_idle_timeout :: non_neg_integer(),
     ping_tref :: optional(reference()),
     ping_payload :: binary(),
+    %% Monotonic ms timestamp of the most recent router-initiated ping,
+    %% used to observe the RTT when the matching pong arrives.
+    ping_sent_at :: optional(integer()),
     ping_retry :: optional(bondy_retry:t()),
     hibernate = false :: boolean(),
     start_time :: integer(),
@@ -453,7 +456,7 @@ handle_inbound(<<0:5, 2:3, Len:24, Payload:Len/binary, Rest/binary>>, State) ->
 
     case Payload == State#state.ping_payload of
         true ->
-            handle_inbound(Rest, State);
+            handle_inbound(Rest, observe_ping_rtt(State));
         false ->
             ?LOG_ERROR(#{
                 description => "Invalid pong message from peer",
@@ -671,10 +674,8 @@ error_number(maximum_connection_count_reached) -> ?RAW_ERROR(4).
 %% error_reason(4) -> maximum_connection_count_reached.
 
 %% @private
-socket_opened(St) ->
-    bondy_event_manager:notify(
-        {[bondy, socket, open], wamp, raw, St#state.peername}
-    ).
+socket_opened(_St) ->
+    bondy_telemetry:socket_open(wamp, raw).
 
 %% @private
 close_socket(Reason, St) ->
@@ -684,16 +685,12 @@ close_socket(Reason, St) ->
     Seconds = erlang:monotonic_time(second) - St#state.start_time,
 
     %% We report socket stats
-    ok = bondy_event_manager:notify(
-        {[bondy, socket, closed], wamp, raw, St#state.peername, Seconds}
-    ),
+    ok = bondy_telemetry:socket_closed(wamp, raw, Seconds),
 
     case Reason of
         {tcp_error, _, _} ->
             %% We increase the socker error counter
-            ok = bondy_event_manager:notify(
-                {[bondy, socket, error], wamp, raw, St#state.peername}
-            );
+            ok = bondy_telemetry:socket_error(wamp, raw);
         _ ->
             ok
     end.
@@ -821,6 +818,22 @@ maybe_send_ping(_Time, #state{} = State0) ->
 
     %% We schedule the next retry
     Ref = bondy_retry:fire(State0#state.ping_retry),
-    State = State0#state{ping_tref = Ref},
+    State = State0#state{
+        ping_tref = Ref,
+        ping_sent_at = erlang:monotonic_time(millisecond)
+    },
 
     {noreply, State}.
+
+%% @private
+%% Observes the ping round-trip time when a pong answers a
+%% router-initiated ping. Retries resend the same payload, so the RTT is
+%% measured from the most recent send.
+observe_ping_rtt(#state{ping_sent_at = SentAt} = State) when
+    is_integer(SentAt)
+->
+    Rtt = erlang:monotonic_time(millisecond) - SentAt,
+    ok = bondy_telemetry:ping_rtt(wamp, raw, Rtt),
+    State#state{ping_sent_at = undefined};
+observe_ping_rtt(State) ->
+    State.

@@ -183,6 +183,7 @@ Indeces for matching bondy_registry_entry(s).
 
 %% INDEX-BASED APIs
 -export([continuation_info/1]).
+-export([has_matches/4]).
 -export([match/1]).
 -export([match/5]).
 -export([match_exact/1]).
@@ -776,6 +777,93 @@ continuation_info(#continuation{type = Type, realm_uri = RealmUri}) ->
 %% =============================================================================
 %% INDEX-BASED APIS
 %% =============================================================================
+
+-doc """
+Returns `true` iff at least one stored entry (local or remote, any
+match policy) subsumes `Uri` — the boolean form of `find_matches/5`,
+the routing direction the broker uses to deliver a publication.
+
+Used as the demand predicate for WAMP meta events (see
+METRICS_GAP_ANALYSIS.md Part III): the common case is *no* match, which
+each policy section answers fail-fast (an ETS miss for `exact`, a
+missing-branch ptrie walk for `prefix`/`wildcard`), so this is cheap
+enough to call on the registry's own write path. Deliberately composed
+from the same per-policy sections the publish path uses — never from
+the per-URI entry counters, which exist only for on_create/on_delete
+detection and are slated for removal.
+""".
+-spec has_matches(
+    Store :: t(), Type :: entry_type(), RealmUri :: uri(), Uri :: uri()
+) -> boolean().
+
+has_matches(Store, Type, RealmUri, Uri) ->
+    %% Existence-only, at the INDEX layer — never through the find_*
+    %% sections, which `project/2` each matched index entry into a full
+    %% `#entry{}` with a per-match ETS lookup. Answering a boolean must
+    %% not materialise the match set on the registry's write path.
+    has_exact_match(Store, Type, RealmUri, Uri) orelse
+        has_ptrie_match(Store, Type, RealmUri, Uri).
+
+%% @private
+%% Exact policy: a bounded (limit 1) ETS existence probe on the exact
+%% index — no `project/2`. Subscriptions check both the local and the
+%% remote exact index (a remote-only subscriber still counts).
+has_exact_match(Store, registration, RealmUri, Uri) ->
+    Pattern = #reg_idx{
+        key = {RealmUri, Uri},
+        entry_key = '_',
+        is_proxy = '_',
+        invoke = '_',
+        timestamp = '_'
+    },
+    ets_has_row(Store#bondy_registry_store.reg_exact_idx_tab, Pattern);
+has_exact_match(Store, subscription, RealmUri, Uri) ->
+    LocalPattern = #sub_idx{
+        key = {RealmUri, Uri},
+        protocol_session_id = '_',
+        entry_key = '_',
+        is_proxy = '_'
+    },
+    RemotePattern = #remote_sub_idx{
+        key = {RealmUri, ?EXACT_MATCH, Uri},
+        node = '_'
+    },
+    ets_has_row(
+        Store#bondy_registry_store.sub_local_exact_idx_tab, LocalPattern
+    ) orelse
+        ets_has_row(
+            Store#bondy_registry_store.sub_remote_exact_idx_tab, RemotePattern
+        ).
+
+%% @private
+%% Prefix and wildcard policy: a short-circuiting ptrie existence walk
+%% (`bondy_registry_ptrie:has_match/2`) — stops at the first match, no
+%% list, no `project/2`. This is the arm that would otherwise cliff on a
+%% broad subscriber (e.g. a `wamp.` prefix meta-event monitor).
+has_ptrie_match(Store, Type, RealmUri, Uri) ->
+    Target = <<RealmUri/binary, $., Uri/binary>>,
+    {PrefixPtrie, WildcardPtrie} = prefix_wildcard_ptries(Store, Type),
+    bondy_registry_ptrie:has_match(PrefixPtrie, Target) orelse
+        bondy_registry_ptrie:has_match(WildcardPtrie, Target).
+
+%% @private
+prefix_wildcard_ptries(Store, registration) ->
+    {
+        Store#bondy_registry_store.reg_prefix_idx_ptrie,
+        Store#bondy_registry_store.reg_wc_idx_ptrie
+    };
+prefix_wildcard_ptries(Store, subscription) ->
+    {
+        Store#bondy_registry_store.sub_prefix_idx_ptrie,
+        Store#bondy_registry_store.sub_wc_idx_ptrie
+    }.
+
+%% @private
+%% `true` iff the table has at least one row matching `Pattern`, bounded
+%% to the first (the match spec yields `true`, `ets:select/3` limit 1
+%% short-circuits). Never materialises the full match set.
+ets_has_row(Tab, Pattern) ->
+    ets:select(Tab, [{Pattern, [], [true]}], 1) =/= '$end_of_table'.
 
 -doc """
 Finds entries matching `Type`, `RealmUri` and `Uri`.

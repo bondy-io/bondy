@@ -1467,6 +1467,7 @@ do_get(RealmUri, Key) ->
 -spec do_on_update(uri(), username_int(), IsCreate :: boolean()) -> ok.
 
 do_on_update(RealmUri, Username, true) ->
+    ok = bondy_telemetry:user_event(added, RealmUri, Username),
     bondy_event_manager:notify({[bondy, user, added], RealmUri, Username}),
     ok;
 do_on_update(RealmUri, Username, false) ->
@@ -1475,6 +1476,7 @@ do_on_update(RealmUri, Username, false) ->
     %% 2. Closing sessions on a credential change is handled by
     %%    on_credentials_change/2 — it has the calling session to exclude.
     %% 3. Publish the event.
+    ok = bondy_telemetry:user_event(updated, RealmUri, Username),
     bondy_event_manager:notify({[bondy, user, updated], RealmUri, Username}),
     ok.
 
@@ -1487,6 +1489,7 @@ do_on_delete(RealmUri, Username) ->
     %% 2. Close all local sessions.
     ok = close_sessions(RealmUri, Username, ?BONDY_USER_DELETED),
     %% 3. Publish the event.
+    ok = bondy_telemetry:user_event(deleted, RealmUri, Username),
     bondy_event_manager:notify({[bondy, user, deleted], RealmUri, Username}),
     ok.
 
@@ -1969,6 +1972,7 @@ on_credentials_change(RealmUri, User) ->
     %% The `{[bondy, user, updated], ...}` event fires from do_on_update/3 at the
     %% store chokepoint; here we publish the credentials-specific event and close
     %% the affected sessions (excluding the caller's own).
+    ok = bondy_telemetry:user_event(credentials_updated, RealmUri, Username),
     bondy_event_manager:notify(
         {[bondy, user, credentials, updated], RealmUri, Username}
     ),

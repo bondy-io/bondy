@@ -44,6 +44,7 @@ all() ->
         grant_merge_event_fires_on_remote_write,
         concurrent_membership_adds_both_survive,
         registry_registration_converges_and_presence,
+        meta_event_demand_visible_cross_node,
         remote_user_delete_closes_peer_sessions,
         token_version_rejected_cross_node
     ].
@@ -265,6 +266,35 @@ registry_registration_converges_and_presence(Config) ->
     %% reactor drops it from its trie.
     ok = erpc:call(N1, ?MODULE, do_remove_registration, [Uri, Proc]),
     [ok = wait_reg_count(N, Uri, Proc, 0) || N <- [N1, N2, N3]],
+    ok.
+
+%% The meta-event demand predicate (bondy_registry:has_matches/3, see
+%% METRICS_GAP_ANALYSIS.md Part III) must see REMOTE meta-topic subscribers:
+%% a subscription created on node 1 makes the predicate true on node 2 once
+%% the registry converges, so a registry operation on node 2 still publishes
+%% its meta event when the only observer lives on node 1. And it must flip
+%% back to false when the subscription is removed.
+meta_event_demand_visible_cross_node(Config) ->
+    [N1, N2 | _] = nodes_of(Config),
+    Uri = <<"com.bondy.aae_meta_demand">>,
+    Meta = <<"wamp.subscription.on_subscribe">>,
+
+    ok = erpc:call(N1, ?MODULE, do_create_simple_realm, [Uri]),
+    ?assertEqual(
+        false,
+        erpc:call(N1, bondy_registry, has_matches, [subscription, Uri, Meta])
+    ),
+
+    ok = erpc:call(N1, ?MODULE, do_add_meta_subscription, [Uri, Meta]),
+    ?assertEqual(
+        true,
+        erpc:call(N1, bondy_registry, has_matches, [subscription, Uri, Meta])
+    ),
+    ok = wait_has_matches(N2, Uri, Meta, true),
+
+    ok = erpc:call(N1, ?MODULE, do_remove_meta_subscription, [Uri, Meta]),
+    ok = wait_has_matches(N1, Uri, Meta, false),
+    ok = wait_has_matches(N2, Uri, Meta, false),
     ok.
 
 %% react_user fires cross-node on a real user DELETE (STORAGE_ARCHITECTURE §9.5):
@@ -630,6 +660,58 @@ do_reg_entries(Uri, Proc) ->
         L when is_list(L) -> L;
         {L, _Cont} when is_list(L) -> L;
         _ -> []
+    end.
+
+%% @private
+wait_has_matches(Node, Uri, Topic, Expected) ->
+    %% This case runs late in a heavy suite where the periodic sync
+    %% scheduler has slowed (see the ?CONVERGE_MS note), so give the
+    %% cross-node registry convergence a doubled budget rather than share
+    %% the ceiling that is already documented as marginal at this depth.
+    Deadline = erlang:monotonic_time(millisecond) + 2 * ?CONVERGE_MS,
+    wait_until_eq(
+        fun() ->
+            erpc:call(Node, bondy_registry, has_matches, [
+                subscription, Uri, Topic
+            ])
+        end,
+        Expected,
+        Node,
+        Deadline
+    ).
+
+%% @private
+%% The subscriber must be a LIVE process on this node: a process-less
+%% callback ref works for registrations but a subscription without a
+%% live target can be reaped by registry hygiene between assertions
+%% (observed as a full-suite-only flake). The keeper simply outlives the
+%% erpc worker.
+do_add_meta_subscription(Uri, Topic) ->
+    Keeper = spawn(?MODULE, keeper_loop, []),
+    Ref = bondy_ref:new(internal, Keeper, bondy_session_id:new()),
+    case bondy_registry:add(subscription, Uri, Topic, #{}, Ref) of
+        {ok, _, _} -> ok;
+        {ok, _} -> ok;
+        Other -> error({subscription_add_failed, Other})
+    end.
+
+%% @private
+%% Tolerant of an already-reaped entry: the subscription is backed by a
+%% fabricated session id, so registry hygiene may reap it after the
+%% cross-node assertion has already observed it. Either way the
+%% subsequent `wait_has_matches(_, false)` confirms the removed state
+%% converges.
+do_remove_meta_subscription(Uri, Topic) ->
+    case bondy_registry:match(subscription, Uri, Topic) of
+        {[Entry | _], _Nodes} -> bondy_registry:remove(Entry);
+        _ -> ok
+    end.
+
+%% @private
+%% Long-lived subscriber target for do_add_meta_subscription/2.
+keeper_loop() ->
+    receive
+        stop -> ok
     end.
 
 %% @private

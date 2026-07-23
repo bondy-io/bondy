@@ -199,6 +199,23 @@ handle_event(_Event, _Meas, _Meta, _Cfg) ->
 
 init(Opts) ->
     process_flag(trap_exit, true),
+    %% Declare our exposition families where we define and populate them,
+    %% so an exporter above us renders them without this app having to
+    %% reach up (single source of truth for the family names lives here).
+    ok = bondy_metrics:declare(#{
+        name => ?M_READS, help => <<"Substrate point reads, by namespace.">>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => ?M_RANGES, help => <<"Substrate range reads, by namespace.">>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => ?M_CACHE_HITS,
+        help => <<"Substrate point-read cache hits, by namespace.">>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => ?M_CACHE_MISSES,
+        help => <<"Substrate point-read cache misses, by namespace.">>
+    }),
     {Enabled, IntervalMs} =
         case resolve_interval(Opts) of
             disabled -> {false, 0};

@@ -3810,7 +3810,7 @@
     {
       "id": 61,
       "type": "timeseries",
-      "title": "Registry trie (per node)",
+      "title": "Registry size & memory (per node)",
       "datasource": {
         "type": "prometheus",
         "uid": "bondy-prometheus"
@@ -3823,22 +3823,22 @@
       },
       "targets": [
         {
-          "refId": "A",
-          "expr": "sum by (node) (bondy_registry_trie_size{node=~\"$node\"})",
-          "legendFormat": "size {{node}}",
           "datasource": {
             "type": "prometheus",
             "uid": "bondy-prometheus"
-          }
+          },
+          "expr": "sum by (node) (bondy_registry_size{node=~\"$node\"})",
+          "legendFormat": "size {{node}}",
+          "refId": "A"
         },
         {
-          "refId": "B",
-          "expr": "sum by (node) (bondy_registry_trie_memory{node=~\"$node\"})",
-          "legendFormat": "memory {{node}}",
           "datasource": {
             "type": "prometheus",
             "uid": "bondy-prometheus"
-          }
+          },
+          "expr": "sum by (node) (bondy_registry_memory{node=~\"$node\"})",
+          "legendFormat": "memory (bytes) {{node}}",
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -3876,7 +3876,8 @@
           "mode": "multi",
           "sort": "desc"
         }
-      }
+      },
+      "description": "Registry substrate size (approximate entry count) and memory, from bondy_registry:info/0 at scrape time. (The old bondy_registry_trie_* names came from a collector that was never registered \u2014 dead since authoring.)"
     },
     {
       "id": 62,
@@ -5883,9 +5884,6 @@
       "description": "message_queue_len of critical singletons; a backed-up bondy_event_manager delays ALL eventing and metrics."
     },
     {
-      "id": 95,
-      "type": "row",
-      "title": "WAMP \u2014 sessions, messages & sockets",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -5893,7 +5891,10 @@
         "x": 0,
         "y": 236
       },
-      "panels": []
+      "id": 135,
+      "panels": [],
+      "title": "WAMP \u2014 sessions & transports",
+      "type": "row"
     },
     {
       "id": 96,
@@ -5950,6 +5951,65 @@
         "textMode": "auto"
       },
       "description": "Event-driven gauge, all selected nodes."
+    },
+    {
+      "id": 126,
+      "type": "stat",
+      "title": "Drops / shed (5m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 241
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(increase(bondy_wamp_dropped_total[5m])) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "auto"
+      },
+      "description": "Messages/events Bondy declined to deliver in the last 5m (bondy_wamp_dropped_total: load shedding etc.). Non-zero means a WAMP feature is degrading under load \u2014 the NATS \"slow consumers\" analog."
     },
     {
       "id": 97,
@@ -6023,9 +6083,9 @@
       }
     },
     {
-      "id": 98,
-      "type": "heatmap",
-      "title": "Session duration",
+      "id": 127,
+      "type": "timeseries",
+      "title": "Session close reasons",
       "datasource": {
         "type": "prometheus",
         "uid": "bondy-prometheus"
@@ -6035,6 +6095,70 @@
         "w": 10,
         "x": 14,
         "y": 237
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (reason) (rate(bondy_sessions_closed_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ops",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 45,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Sessions closed per second by WAMP close reason URI. A spike of abnormal reasons (ping timeouts, errors) is the \"why are my clients dropping\" diagnostic."
+    },
+    {
+      "id": 98,
+      "type": "heatmap",
+      "title": "Session duration",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 245
       },
       "targets": [
         {
@@ -6083,6 +6207,172 @@
       }
     },
     {
+      "id": 108,
+      "type": "timeseries",
+      "title": "Sockets & connections",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 245
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (node, transport) (bondy_sockets_total{node=~\"$node\"})",
+          "legendFormat": "active {{transport}} {{node}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (node, transport) (rate(bondy_socket_errors_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "errors/s {{transport}} {{node}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (listener) (bondy_listener_connections{listener=~\".*http.*\"})",
+          "legendFormat": "http {{listener}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "WAMP transport sockets by transport (raw = TCP raw socket, ws = WebSocket) with error rates, plus HTTP-layer connections per ranch listener (plain HTTP has no per-connection Bondy process; ranch is its source of truth and includes pre-upgrade WS connections)."
+    },
+    {
+      "id": 128,
+      "type": "timeseries",
+      "title": "Ping RTT (quantiles)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 245
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, transport) (rate(bondy_ping_rtt_milliseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{transport}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, transport) (rate(bondy_ping_rtt_milliseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "p99 {{transport}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ms",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Round-trip time of router-initiated transport pings, per transport (ws | raw). Client connectivity health as seen from the router."
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 253
+      },
+      "id": 136,
+      "panels": [],
+      "title": "WAMP \u2014 messaging & RPC",
+      "type": "row"
+    },
+    {
       "id": 99,
       "type": "timeseries",
       "title": "WAMP message mix",
@@ -6092,19 +6382,172 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
-        "y": 245
+        "y": 254
       },
       "targets": [
         {
-          "refId": "A",
-          "expr": "sum by (__name__) (rate({__name__=~\"bondy_wamp_.+_messages_total\",node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "{{__name__}}",
           "datasource": {
             "type": "prometheus",
             "uid": "bondy-prometheus"
-          }
+          },
+          "expr": "sum(rate(bondy_wamp_hello_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "hello",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_welcome_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "welcome",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_abort_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "abort",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_goodbye_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "goodbye",
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_call_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "call",
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_result_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "result",
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_invocation_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "invocation",
+          "refId": "G"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_yield_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "yield",
+          "refId": "H"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_error_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "error",
+          "refId": "I"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_publish_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "publish",
+          "refId": "J"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_event_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "event",
+          "refId": "K"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_published_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "published",
+          "refId": "L"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_register_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "register",
+          "refId": "M"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_registered_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "registered",
+          "refId": "N"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_subscribe_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "subscribe",
+          "refId": "O"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_subscribed_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "subscribed",
+          "refId": "P"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_unregister_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "unregister",
+          "refId": "Q"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_wamp_unsubscribe_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "unsubscribe",
+          "refId": "R"
         }
       ],
       "fieldConfig": {
@@ -6143,7 +6586,7 @@
           "sort": "desc"
         }
       },
-      "description": "Routed messages per second by WAMP message type (stacked = total routing throughput).",
+      "description": "WAMP messages routed per second, by message type. One query per type family: rate() drops __name__, so a multi-name regex selector collides (\"vector cannot contain metrics with the same labelset\") \u2014 this panel was broken since authoring.",
       "transformations": [
         {
           "id": "renameByRegex",
@@ -6164,9 +6607,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 12,
-        "y": 245
+        "w": 8,
+        "x": 8,
+        "y": 254
       },
       "targets": [
         {
@@ -6262,9 +6705,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 18,
-        "y": 245
+        "w": 8,
+        "x": 16,
+        "y": 254
       },
       "targets": [
         {
@@ -6335,7 +6778,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 253
+        "y": 262
       },
       "targets": [
         {
@@ -6396,7 +6839,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 253
+        "y": 262
       },
       "targets": [
         {
@@ -6465,6 +6908,87 @@
       }
     },
     {
+      "id": 129,
+      "type": "timeseries",
+      "title": "Callee vs router time (p95)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 262
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(bondy_wamp_call_latency_milliseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "call (total) p95",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(bondy_wamp_invocation_latency_milliseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "callee execution p95",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "clamp_min(histogram_quantile(0.95, sum by (le) (rate(bondy_wamp_call_latency_milliseconds_bucket{node=~\"$node\"}[$__rate_interval]))) - histogram_quantile(0.95, sum by (le) (rate(bondy_wamp_invocation_latency_milliseconds_bucket{node=~\"$node\"}[$__rate_interval]))), 0)",
+          "legendFormat": "router overhead p95 (approx)",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ms",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Latency attribution: call = full CALL round trip; callee = INVOCATION to YIELD leg (application execution + transport); router overhead = the difference (approximate \u2014 quantiles do not subtract exactly). Answers \"is it Bondy or is it the callee?\"."
+    },
+    {
       "id": 104,
       "type": "bargauge",
       "title": "Slowest procedures (p95, top 10)",
@@ -6475,8 +6999,8 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
-        "y": 253
+        "x": 0,
+        "y": 270
       },
       "targets": [
         {
@@ -6524,6 +7048,200 @@
       }
     },
     {
+      "id": 130,
+      "type": "bargauge",
+      "title": "In-flight invocations by procedure (top 10)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 270
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, sum by (procedure_uri) (bondy_rpc_inflight_invocations))",
+          "legendFormat": "{{procedure_uri}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "continuous-BlPu"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "valueMode": "color",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "description": "Pending invocations per procedure, computed from the live promise store at scrape time (drift-free). Rising values mean that procedure's callee is saturating \u2014 the per-procedure consumer-lag analog."
+    },
+    {
+      "id": 131,
+      "type": "timeseries",
+      "title": "Dropped by reason",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 270
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (reason, family) (rate(bondy_wamp_dropped_total[$__rate_interval]))",
+          "legendFormat": "{{reason}} {{family}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ops",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "bondy_wamp_dropped_total rate by reason and family (e.g. shed meta events under load). Should be zero."
+    },
+    {
+      "id": 109,
+      "type": "timeseries",
+      "title": "WAMP errors",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 278
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (node) (rate(bondy_wamp_error_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "wamp error {{node}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (node) (rate(bondy_wamp_abort_messages_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "abort {{node}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ops",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "id": 105,
       "type": "timeseries",
       "title": "Registration & subscription churn",
@@ -6534,8 +7252,8 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 0,
-        "y": 261
+        "x": 8,
+        "y": 278
       },
       "targets": [
         {
@@ -6596,8 +7314,8 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 8,
-        "y": 261
+        "x": 16,
+        "y": 278
       },
       "targets": [
         {
@@ -6667,8 +7385,8 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
-        "y": 261
+        "x": 0,
+        "y": 286
       },
       "targets": [
         {
@@ -6717,160 +7435,17 @@
       }
     },
     {
-      "id": 108,
-      "type": "timeseries",
-      "title": "Sockets",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 269
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (node) (bondy_sockets_total{node=~\"$node\"})",
-          "legendFormat": "active {{node}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        },
-        {
-          "refId": "B",
-          "expr": "sum by (node) (rate(bondy_socket_errors_total{node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "errors/s {{node}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "short",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "description": "WAMP raw-TCP sockets (WebSocket connections are counted via HTTP protocol upgrades)."
-    },
-    {
-      "id": 109,
-      "type": "timeseries",
-      "title": "WAMP errors",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 269
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (node) (rate(bondy_wamp_error_messages_total{node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "wamp error {{node}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        },
-        {
-          "refId": "B",
-          "expr": "sum by (node) (rate(bondy_wamp_abort_messages_total{node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "abort {{node}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "ops",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 110,
-      "type": "row",
-      "title": "HTTP \u2014 API gateway & admin listeners",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 277
+        "y": 294
       },
-      "panels": []
+      "id": 137,
+      "panels": [],
+      "title": "HTTP \u2014 API gateway & admin listeners",
+      "type": "row"
     },
     {
       "id": 111,
@@ -6884,7 +7459,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 278
+        "y": 295
       },
       "targets": [
         {
@@ -6946,7 +7521,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 278
+        "y": 295
       },
       "targets": [
         {
@@ -7015,66 +7590,6 @@
       }
     },
     {
-      "id": 113,
-      "type": "heatmap",
-      "title": "Request duration",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 278
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (le) (rate(bondy_http_request_duration_microseconds_bucket{node=~\"$node\"}[$__rate_interval]))",
-          "format": "heatmap",
-          "legendFormat": "{{le}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "calculate": false,
-        "cellGap": 1,
-        "color": {
-          "mode": "scheme",
-          "scheme": "Spectral",
-          "steps": 48,
-          "reverse": true
-        },
-        "yAxis": {
-          "unit": "\u00b5s",
-          "decimals": 0
-        },
-        "rowsFrame": {
-          "layout": "auto"
-        },
-        "tooltip": {
-          "mode": "single",
-          "showColorScale": true
-        },
-        "legend": {
-          "show": true
-        },
-        "exemplars": {
-          "color": "rgba(255,0,255,0.7)"
-        }
-      }
-    },
-    {
       "id": 114,
       "type": "timeseries",
       "title": "Request duration (quantiles)",
@@ -7085,8 +7600,8 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 0,
-        "y": 286
+        "x": 16,
+        "y": 295
       },
       "targets": [
         {
@@ -7155,6 +7670,255 @@
       }
     },
     {
+      "id": 132,
+      "type": "timeseries",
+      "title": "Request rate by route",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 303
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (route) (rate(bondy_http_requests_total{route!=\"undefined\"}[$__rate_interval]))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "API Gateway requests per second by route template."
+    },
+    {
+      "id": 133,
+      "type": "timeseries",
+      "title": "Error rate by route (%)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 303
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "100 * sum by (route) (rate(bondy_http_requests_total{route!=\"undefined\",status_class=~\"client-error|server-error\"}[$__rate_interval])) / sum by (route) (rate(bondy_http_requests_total{route!=\"undefined\"}[$__rate_interval]))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "percent",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Share of requests per route answered with a 4xx/5xx class status."
+    },
+    {
+      "id": 134,
+      "type": "timeseries",
+      "title": "Request duration p95 by route",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 303
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(bondy_http_request_duration_microseconds_bucket{route!=\"undefined\"}[$__rate_interval])))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "\u00b5s",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "API Gateway request duration p95 per route template."
+    },
+    {
+      "id": 113,
+      "type": "heatmap",
+      "title": "Request duration",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 311
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (le) (rate(bondy_http_request_duration_microseconds_bucket{node=~\"$node\"}[$__rate_interval]))",
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": false,
+        "cellGap": 1,
+        "color": {
+          "mode": "scheme",
+          "scheme": "Spectral",
+          "steps": 48,
+          "reverse": true
+        },
+        "yAxis": {
+          "unit": "\u00b5s",
+          "decimals": 0
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "tooltip": {
+          "mode": "single",
+          "showColorScale": true
+        },
+        "legend": {
+          "show": true
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        }
+      }
+    },
+    {
       "id": 115,
       "type": "row",
       "title": "BEAM VM",
@@ -7163,7 +7927,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 294
+        "y": 319
       },
       "panels": []
     },
@@ -7179,7 +7943,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 295
+        "y": 320
       },
       "targets": [
         {
@@ -7241,17 +8005,71 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 295
+        "y": 320
       },
       "targets": [
         {
-          "refId": "A",
-          "expr": "sum by (__name__) (rate({__name__=~\"erlang_vm_msacc_.+_seconds_total\",node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "{{__name__}}",
           "datasource": {
             "type": "prometheus",
             "uid": "bondy-prometheus"
-          }
+          },
+          "expr": "sum(rate(erlang_vm_msacc_emulator_seconds_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "emulator",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(erlang_vm_msacc_gc_seconds_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "gc",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(erlang_vm_msacc_check_io_seconds_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "check_io",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(erlang_vm_msacc_port_seconds_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "port",
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(erlang_vm_msacc_aux_seconds_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "aux",
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(erlang_vm_msacc_other_seconds_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "other",
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(erlang_vm_msacc_sleep_seconds_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "sleep",
+          "refId": "G"
         }
       ],
       "fieldConfig": {
@@ -7290,7 +8108,7 @@
           "sort": "desc"
         }
       },
-      "description": "Microstate accounting: where scheduler threads spend time. Healthy = mostly emulator + sleep; watch gc and port shares.",
+      "description": "BEAM scheduler wall-time share by microstate-accounting state. One query per state metric (multi-name rate() selectors collide after __name__ is dropped).",
       "transformations": [
         {
           "id": "renameByRegex",
@@ -7313,7 +8131,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 295
+        "y": 320
       },
       "targets": [
         {
@@ -7393,7 +8211,7 @@
         "h": 7,
         "w": 4,
         "x": 0,
-        "y": 303
+        "y": 328
       },
       "targets": [
         {
@@ -7455,7 +8273,7 @@
         "h": 7,
         "w": 4,
         "x": 4,
-        "y": 303
+        "y": 328
       },
       "targets": [
         {
@@ -7517,7 +8335,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 303
+        "y": 328
       },
       "targets": [
         {
@@ -7579,7 +8397,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 303
+        "y": 328
       },
       "targets": [
         {
@@ -7641,7 +8459,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 310
+        "y": 335
       },
       "targets": [
         {
@@ -7712,7 +8530,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 310
+        "y": 335
       },
       "targets": [
         {
@@ -7774,7 +8592,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 310
+        "y": 335
       },
       "targets": [
         {

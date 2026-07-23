@@ -27,6 +27,7 @@ on first-touch and never moves.
 | Layer | Concern |
 |---|---|
 | ETS `bondy_metrics_tab` | `{ {Name, Label} => #{type, ref} }` — first-touch registry |
+| ETS `bondy_metrics_declared_tab` | `{ Name => descriptor() }` — exposition declaration registry (`declare/1`) |
 | `counters:new(Slots, [write_concurrency])` | per-metric atomic array (1 slot for counter/gauge, `2 + num_buckets` for histogram) |
 
 Allocating a counter races safely: the loser of an `insert_new` race
@@ -39,8 +40,9 @@ it).
 - **counter** — monotonically increasing; `counter/1` accepts an
   optional `delta` (default `1`) and adds it.
 - **gauge** — arbitrary up/down value; `gauge/1` accepts a `value`
-  and writes it directly via `counters:put/3`. There is no delta form
-  because gauges are stateful observations, not increments.
+  (absolute, written via `counters:put/3`) or a `delta` (added via
+  `counters:add/3`, for occupancy-style gauges whose writers only see
+  increments and decrements).
 - **histogram** — a wait-free, fixed-bucket log-linear histogram for
   observing a stream of non-negative values (latencies, sizes).
   `histogram/1` records one observation: a single `counters:add` to
@@ -85,6 +87,9 @@ need a separate persistence layer.
 
 -define(SERVER, ?MODULE).
 -define(TAB, bondy_metrics_tab).
+%% Registry of declared exposition families, one `{name(), descriptor()}`
+%% row each.
+-define(DECLARED_TAB, bondy_metrics_declared_tab).
 -define(POS, 1).
 
 %% Histogram bucket layout. ?HIST_SUB_BITS significant bits below the
@@ -112,6 +117,10 @@ need a separate persistence layer.
     delta => integer(),
     value => integer()
 }.
+-type declaration() :: #{name := name(), help := binary(), _ => _}.
+%% Everything except `name`, keyed by name in `declared/0`. Open map so
+%% future metadata (e.g. `unit`) is a non-breaking addition.
+-type descriptor() :: #{help := binary(), _ => _}.
 -type entry() :: #{type := type(), ref := counters:counters_ref()}.
 -type histogram() :: #{
     count := non_neg_integer(),
@@ -120,6 +129,7 @@ need a separate persistence layer.
 }.
 
 -export_type([name/0, label/0, type/0, spec/0, histogram/0]).
+-export_type([declaration/0, descriptor/0]).
 
 -export([child_spec/0]).
 -export([start_link/0]).
@@ -129,9 +139,14 @@ need a separate persistence layer.
 -export([gauge/1]).
 -export([histogram/1]).
 
+%% Exposition declaration registry
+-export([declare/1]).
+-export([declared/0]).
+
 %% Reads
 -export([value/1]).
 -export([with_name/1]).
+-export([family/1]).
 -export([all/0]).
 -export([info/1]).
 -export([histogram_snapshot/1]).
@@ -194,7 +209,12 @@ counter(#{name := Name} = M) ->
     ).
 
 ?DOC("""
-Write an absolute value to a gauge. Allocates on first touch.
+Write to a gauge. Allocates on first touch.
+
+With `value` writes the absolute value (`counters:put/3`); with `delta`
+adds to the current value (`counters:add/3`) — the up/down form used by
+occupancy gauges (e.g. open sessions) whose writers only know about
+increments. `value` wins when both are given.
 
 Returns `ok` on success or `{error, {wrong_type, _}}` if the name is
 already in use by a metric of a different type.
@@ -207,6 +227,13 @@ gauge(#{name := Name, value := V} = M) when is_integer(V) ->
         {Name, Label},
         gauge,
         fun(Ref) -> counters:put(Ref, ?POS, V) end
+    );
+gauge(#{name := Name, delta := D} = M) when is_integer(D) ->
+    Label = maps:get(label, M, #{}),
+    operate(
+        {Name, Label},
+        gauge,
+        fun(Ref) -> counters:add(Ref, ?POS, D) end
     ).
 
 ?DOC("""
@@ -236,6 +263,49 @@ histogram(#{name := Name, value := V} = M) when is_integer(V) ->
     ).
 
 ?DOC("""
+Declares a metric family for exposition, recording its help text.
+
+This is the single source of truth for *which* `bondy_metrics` families
+an exporter should expose and their descriptions. It lives here, next to
+the primitive, so every layer declares a family **where it defines and
+populates it** — a lower app (e.g. a storage layer) does not have to
+reach up into an exporter that sits above it. Exporters read `declared/0`
+and render only what is declared, so ad-hoc/internal counters never leak.
+
+Takes a map spec — consistent with `counter/1`/`gauge/1`/`histogram/1`,
+and open for extension: `name` and `help` are required, and any further
+keys (e.g. a future `unit`) are stored verbatim in the family's
+descriptor and surfaced by `declared/0` without an API change. The type
+(counter/gauge/histogram) is deliberately NOT declared here — it is
+fixed by first-touch on the metric itself (`counter/1` vs `gauge/1` vs
+`histogram/1`), the single source of truth; declaring a type would let
+it disagree with reality.
+
+Idempotent; re-declaring replaces the descriptor. Wait-free — a single
+`ets:insert` into a public table, off the gen_server; safe to call at
+any rate (though the intent is setup code). Like the counters,
+declarations do not survive a `bondy_metrics` restart — the registering
+setup runs again on a full restart.
+""").
+-spec declare(Declaration :: declaration()) -> ok.
+
+declare(#{name := Name, help := Help} = Spec) when
+    is_atom(Name) andalso is_binary(Help)
+->
+    true = ets:insert(?DECLARED_TAB, {Name, maps:remove(name, Spec)}),
+    ok.
+
+?DOC("""
+Returns the declared exposition families as `#{Name => descriptor()}`,
+where each descriptor is an open map carrying at least `help` (plus any
+extra metadata passed to `declare/1`).
+""").
+-spec declared() -> #{name() => descriptor()}.
+
+declared() ->
+    maps:from_list(ets:tab2list(?DECLARED_TAB)).
+
+?DOC("""
 Read the current value of one (Name, Label) pair. Returns `undefined`
 when the metric does not exist.
 """).
@@ -257,6 +327,26 @@ Return `[{Label, Value}]` for every metric registered under `Name`.
 with_name(Name) when is_atom(Name) ->
     MS = [{{{Name, '$1'}, '$2'}, [], [{{'$1', '$2'}}]}],
     [{L, read(Entry)} || {L, Entry} <- ets:select(?TAB, MS)].
+
+?DOC("""
+Return every metric registered under `Name` in exposition form: one
+`#{label, type, value}` row per label combination. For counters and
+gauges `value` is the integer reading; for histograms it is the full
+cumulative snapshot (`histogram()`), so exposition layers can render
+buckets without a second lookup per row.
+""").
+-spec family(name()) ->
+    [
+        #{
+            label := label(),
+            type := type(),
+            value := integer() | histogram()
+        }
+    ].
+
+family(Name) when is_atom(Name) ->
+    MS = [{{{Name, '$1'}, '$2'}, [], [{{'$1', '$2'}}]}],
+    [family_row(L, Entry) || {L, Entry} <- ets:select(?TAB, MS)].
 
 ?DOC("""
 Return every metric on the node, intended for exposition. Each row is
@@ -460,6 +550,18 @@ init([]) ->
         {read_concurrency, true},
         {write_concurrency, true}
     ]),
+    %% Exposition declaration registry: `#{Name => Help}` as one row per
+    %% family. A public table so `declare/1` is a wait-free `ets:insert`
+    %% off the gen_server, like the counter hot path. Shares the counter
+    %% table's lifecycle — a gen_server restart wipes both (see moduledoc).
+    _ = ets:new(?DECLARED_TAB, [
+        set,
+        public,
+        named_table,
+        {keypos, 1},
+        {read_concurrency, true},
+        {write_concurrency, true}
+    ]),
     {ok, #state{}}.
 
 handle_call({delete, Key}, _From, State) ->
@@ -515,6 +617,17 @@ lookup_entry(Key) ->
         [{_, Entry}] -> {ok, Entry};
         [] -> not_found
     end.
+
+%% @private
+family_row(Label, #{type := histogram, ref := Ref}) ->
+    Snapshot = #{
+        count => counters:get(Ref, ?HIST_COUNT_POS),
+        sum => counters:get(Ref, ?HIST_SUM_POS),
+        buckets => read_hist_buckets(Ref, hist_num_buckets() - 1, [])
+    },
+    #{label => Label, type => histogram, value => Snapshot};
+family_row(Label, #{type := Type, ref := Ref}) ->
+    #{label => Label, type => Type, value => counters:get(Ref, ?POS)}.
 
 read(#{ref := Ref}) -> counters:get(Ref, ?POS).
 
