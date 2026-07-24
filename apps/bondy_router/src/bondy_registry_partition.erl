@@ -82,6 +82,7 @@
 -export([find/1]).
 -export([find/3]).
 -export([find/4]).
+-export([list_local/5]).
 -export([fold/4]).
 -export([fold/5]).
 -export([fold/6]).
@@ -490,6 +491,24 @@ and URI use the `match_` functions instead.
 
 find(Partition, Type, Pattern, Opts) when ?IS_TYPE(Type) ->
     bondy_registry_store:find(store(Partition), Type, Pattern, Opts).
+
+-doc """
+A keyset page of node-local entries of `Type` in `RealmUri` — see
+`bondy_registry_store:list_local/5`. The node-local leg of the distributed
+meta introspection walk.
+""".
+-spec list_local(
+    Partition :: pid(),
+    Type :: entry_type(),
+    RealmUri :: uri(),
+    AfterId :: id() | undefined,
+    Limit :: pos_integer()
+) -> [entry()].
+
+list_local(Partition, Type, RealmUri, AfterId, Limit) when ?IS_TYPE(Type) ->
+    bondy_registry_store:list_local(
+        store(Partition), Type, RealmUri, AfterId, Limit
+    ).
 
 -doc "".
 -spec fold(

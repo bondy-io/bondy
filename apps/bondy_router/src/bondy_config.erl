@@ -42,7 +42,12 @@ An implementation of the `app_config` behaviour.
         %% progressive call the WAMP `timeout` is an inter-result
         %% inactivity window that each progressive result restarts; the
         %% deadline caps the total duration regardless of progress.
-        '_deadline'
+        '_deadline',
+        %% Keyset pagination for the `bondy.*` meta list/match procedures:
+        %% `_limit` bounds the page size, `_cursor` is the opaque wire cursor
+        %% returned as a prior page's `cursor`.
+        '_limit',
+        '_cursor'
     ]},
     {cancel, [
         '_routing_key'

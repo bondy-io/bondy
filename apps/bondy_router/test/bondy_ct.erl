@@ -774,7 +774,7 @@ start_cluster(Names, Config) when is_list(Names) ->
     %% A name is an atom, or `{Name, ExtraEnv}' where ExtraEnv is a list of
     %% `{KeyPath, Value}' overrides applied on top of the per-node env — for
     %% boot-time configuration a testcase cannot set after the fact (e.g.
-    %% `[bondy_router, registry_rib_mode]').
+    %% `[partisan, peer_port]').
     Specs = [
         case N of
             {Name, Extra} when is_atom(Name), is_list(Extra) -> {Name, Extra};

@@ -1261,41 +1261,20 @@ end}.
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc The registry RIB (Routing Information Base): replicated per-node
-%% routing summary cells — one per (realm, match policy, URI, node) — written
-%% by each node for its own local registrations and subscriptions, alongside
-%% the replicated full entries.
-%%   off  - summaries are not written.
-%%   dual - every local registry change also maintains this node's summary
-%%          cells; peers compile merged cells into a stub view. Routing still
-%%          uses the full-entry replication — the summaries are validated
-%%          against it (bondy_registry_rib:check/1) in preparation for
-%%          routing on summaries alone.
-%%   read - routing consumes the summaries: remote callees and remote
-%%          subscriber nodes are discovered via the stub view, and forwarded
-%%          cluster CALLs are node-addressed — the node receiving one
-%%          re-selects the callee among its own live local registrations
-%%          (owner-side completion) instead of trusting the sender's —
-%%          possibly stale — choice of entry. Full entries still replicate
-%%          as the rollback net. Safe in mixed clusters: a node without this
-%%          mode ignores the tag and keeps the entry-addressed behaviour.
-%%   write - as read, plus full entries stop replicating: the registry keeps
-%%          them in node-local memory and the summary cells are the only
-%%          replicated registry state. Requires every node to run at least
-%%          in read mode first (nodes still routing on full entries would
-%%          not see this node's work). Takes effect at boot — changing to or
-%%          from write requires a restart.
-%% @end
+%% The registry RIB (Routing Information Base): each node publishes a compact
+%% replicated summary cell — one per (realm, match policy, URI, node) — for its
+%% own local registrations and subscriptions, and cross-node routing is decided
+%% from the merged summaries. Full registry entries are kept node-local, never
+%% replicated, so a registration's replicated footprint is one summary cell per
+%% owning node instead of a full entry on every node. This is unconditional —
+%% there is no mode knob. The two settings below tune observability and flap
+%% control; they do not change what the registry replicates.
 %% -----------------------------------------------------------------------------
-{mapping, "registry.rib", "bondy_router.registry_rib_mode", [
-  {datatype, {enum, [off, dual, read, write]}},
-  {default, dual}
-]}.
 
 %% -----------------------------------------------------------------------------
 %% @doc Interval of the periodic RIB consistency sweep, which compares the
 %% replicated routing summaries against the ground truth per realm and logs
-%% any divergence. `0` disables the sweep. Skipped while registry.rib = off.
+%% any divergence. `0` disables the sweep.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "registry.rib.check_interval",

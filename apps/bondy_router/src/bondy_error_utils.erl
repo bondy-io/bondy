@@ -297,6 +297,30 @@ map({_, _} = Error) ->
         <<"message">> => <<"An unknown error occurred.">>,
         <<"description">> => iolist_to_binary(io_lib:format("~p", [Error]))
     };
+map(unavailable) ->
+    #{
+        <<"code">> => unavailable,
+        <<"message">> =>
+            <<"The request could not be completed at this time.">>,
+        <<"description">> =>
+            <<"One or more cluster nodes could not be reached, so the result "
+                "could not be confirmed. Retry; a repeated failure indicates a "
+                "node or network problem.">>
+    };
+map(too_many_results) ->
+    #{
+        <<"code">> => too_many_results,
+        <<"message">> =>
+            <<"The result set is too large for this procedure.">>,
+        <<"description">> =>
+            <<
+                "This spec-compliant 'wamp.*' meta procedure returns a bounded "
+                "result, and the set exceeds that bound on this cluster. Use "
+                "the paginated 'bondy.*' equivalent (e.g. "
+                "'bondy.registration.list') with the '_limit' and '_cursor' "
+                "options."
+            >>
+    };
 map({Code, Mssg, Desc}) ->
     #{
         <<"code">> => Code,

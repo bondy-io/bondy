@@ -240,7 +240,9 @@ wait_topic_routable(OnNode, Uri, Topic) ->
 wait_remote_registration(OnNode, Uri, Proc) ->
     wait_until(
         fun() ->
-            erpc:call(OnNode, ?MODULE, do_has_registration, [Uri, Proc])
+            erpc:call(OnNode, bondy_registry, has_matches, [
+                registration, Uri, Proc
+            ])
         end,
         {remote_registration, OnNode, Proc}
     ).
@@ -277,14 +279,6 @@ do_create_open_realm(Uri) ->
 %% @private
 do_has_realm(Uri) ->
     bondy_realm:exists(Uri).
-
-%% @private
-do_has_registration(Uri, Proc) ->
-    case bondy_registry:match(registration, Uri, Proc) of
-        L when is_list(L) -> L =/= [];
-        {L, _Cont} when is_list(L) -> L =/= [];
-        _ -> false
-    end.
 
 %% @private
 %% A long-lived delivery probe on THIS node, registered as

@@ -20,6 +20,15 @@ Handles the following META API wamp calls:
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_uris.hrl").
 
+%% The `wamp.*` enumeration ceiling lives in `bondy_registry_meta:max_results/0`
+%% (Crossbar specified these procedures for a single-node router; on a
+%% distributed one the cluster-wide set is unbounded, so past the ceiling a
+%% `wamp.*` list/match returns `{error, too_many_results}` and the caller is
+%% steered to the paginated `bondy.*` family).
+%%
+%% Sentinel for "list the whole realm" vs a URI to match.
+-define(ALL, all).
+
 -export([handle_call/2]).
 -export([handle_invocation/2]).
 
@@ -276,90 +285,89 @@ summary(Type, RealmUri) ->
         ?PREFIX_MATCH => [],
         ?WILDCARD_MATCH => []
     },
-    try
-        case bondy_registry:entries(Type, RealmUri, '_') of
-            [] ->
-                {ok, Default};
-            Entries ->
-                Grouped = bondy_utils:groups_from_list(
-                    fun(E) -> bondy_registry_entry:match_policy(E) end,
-                    fun(E) -> bondy_registry_entry:id(E) end,
-                    Entries
-                ),
-                Map = maps:merge(Default, Grouped),
-                {ok, Map}
-        end
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            {error, Reason}
+    case bounded_ext(Type, RealmUri, ?ALL) of
+        {ok, Externals} ->
+            Grouped = lists:foldl(
+                fun(Ext, Acc) ->
+                    Policy = maps:get(match, Ext),
+                    Id = maps:get(id, Ext),
+                    maps:update_with(Policy, fun(L) -> [Id | L] end, [Id], Acc)
+                end,
+                Default,
+                Externals
+            ),
+            {ok, Grouped};
+        {error, _} = Error ->
+            Error
     end.
 
 %% @private
+%% Run a bounded `bondy_registry_meta` enumeration at the wamp.* ceiling:
+%% `{ok, Externals}` (<= ?WAMP_META_MAX `wamp_meta` maps) or
+%% `{error, too_many_results}` when more exist. `?ALL` lists the realm; a URI
+%% matches it.
+bounded_ext(Type, RealmUri, ?ALL) ->
+    bounded_page(bondy_registry_meta:list(Type, RealmUri, page_limit()));
+bounded_ext(Type, RealmUri, Uri) ->
+    bounded_page(bondy_registry_meta:match(Type, RealmUri, Uri, page_limit())).
+
+%% @private
+bounded_page({ok, #{values := Values, has_more := false}}) ->
+    {ok, Values};
+bounded_page({ok, #{has_more := true}}) ->
+    {error, too_many_results};
+bounded_page({error, _} = Error) ->
+    Error.
+
+%% @private
+%% Fetch one past the ceiling so the bounded enumeration can tell "exactly the
+%% ceiling" from "more exist" without a count.
+page_limit() ->
+    #{limit => bondy_registry_meta:max_results() + 1}.
+
+%% @private
+%% Cluster-wide get-by-id: ids are node-local and random, so this is a bounded
+%% broadcast resolved by the meta engine (see `bondy_registry_meta:get/3`).
 get(Type, [_, _] = L) ->
     get(Type, L ++ [#{}]);
 get(Type, [RealmUri, RegId, _Details]) ->
-    try
-        case bondy_registry:lookup(Type, RealmUri, RegId) of
-            {error, not_found} ->
-                {error, bondy_wamp_api_utils:no_such_registration_error(RegId)};
-            Entry ->
-                {ok, bondy_registry_entry:to_external(Entry, wamp_meta)}
-        end
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            {error, Reason}
+    case bondy_registry_meta:get(Type, RealmUri, RegId) of
+        {ok, External} ->
+            {ok, External};
+        {error, not_found} ->
+            {error, bondy_wamp_api_utils:no_such_registration_error(RegId)};
+        {error, unavailable} = Error ->
+            %% A node holding the entry could not be reached — surfaced as
+            %% `bondy.error.unavailable`, NOT `no_such_registration`.
+            Error
     end.
 
 %% @private
+%% The single entry id managing `Uri` (WAMP lookup returns one id or nothing),
+%% resolved cluster-wide via the meta engine.
 lookup(Type, [_, _] = L) ->
     lookup(Type, L ++ [#{}]);
-lookup(Type, [RealmUri, Uri, Opts]) ->
-    try
-        case bondy_registry:match(Type, RealmUri, Uri, Opts) of
-            {[], '$end_of_table'} ->
-                ok;
-            {Entries, '$end_of_table'} ->
-                {ok, bondy_registry_entry:id(hd(Entries))}
-        end
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            {error, Reason}
+lookup(Type, [RealmUri, Uri, _Opts]) ->
+    case bondy_registry_meta:match(Type, RealmUri, Uri, #{limit => 1}) of
+        {ok, #{values := [Ext | _]}} ->
+            {ok, maps:get(id, Ext)};
+        {ok, #{values := []}} ->
+            ok;
+        {error, _} = Error ->
+            Error
     end.
 
 %% @private
+%% All entry ids matching `Uri`, cluster-wide but bounded (spec-shaped flat id
+%% list). Overflows to `{error, too_many_results}` past the wamp.* ceiling.
 match(Type, [_, _] = L) ->
     match(Type, L ++ [#{}]);
-match(Type, [RealmUri, Uri, Opts]) ->
-    try
-        case bondy_registry:match(Type, RealmUri, Uri, Opts) of
-            {[], '$end_of_table'} ->
-                {ok, []};
-            {Entries, '$end_of_table'} ->
-                {ok, [bondy_registry_entry:id(E) || E <- Entries]}
-        end
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            {error, Reason}
+match(Type, [RealmUri, Uri, _Opts]) ->
+    case bounded_ext(Type, RealmUri, Uri) of
+        {ok, Externals} ->
+            {ok, [maps:get(id, Ext) || Ext <- Externals]};
+        {error, _} = Error ->
+            Error
     end.
 
 %% @private

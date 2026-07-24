@@ -44,11 +44,14 @@ init([]) ->
         auto_shutdown => never
     },
 
-    %% Start partitions first
+    %% Start partitions first, then the registry worker, then the per-node
+    %% meta responder (the peer leg of the distributed introspection walk),
+    %% which reads through the registry so it must come up after it.
     Children =
         partitions() ++
             [
-                ?WORKER(bondy_registry, [], permanent, 5000)
+                ?WORKER(bondy_registry, [], permanent, 5000),
+                bondy_registry_meta:child_spec()
             ],
 
     {ok, {SupFlags, Children}}.

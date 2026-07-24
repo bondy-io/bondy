@@ -87,18 +87,14 @@ adapter's `paginated_select`.
     mode = partition :: mode()
 }).
 
-%% An opaque resumption token: the storage key of the last emitted row,
-%% scoped to the relation/schema/mode that minted it. `shard` is the shard
-%% the key came from in `partition` mode (so resumption continues that shard
-%% before walking the rest), and `undefined` in `global` mode.
--record(cursor, {
-    key :: binary(),
-    schema_hash :: binary(),
-    shard = undefined :: non_neg_integer() | undefined
-}).
-
 -opaque relation() :: #relation{}.
--opaque cursor() :: #cursor{}.
+
+%% The resumption token is a `bondy_pagination:cursor()`. Its fingerprint is
+%% this relation's `schema_hash` (so a re-key / re-shard / mode change rejects
+%% it); its payload is the walk position: `#{key := binary()}` in `global`
+%% mode, plus `shard := non_neg_integer()` in `partition` mode (so resumption
+%% continues that shard before walking the rest).
+-type cursor() :: bondy_pagination:cursor().
 
 %% How `list/3` assembles a page from a multi-shard relation. `partition`
 %% (default) walks shards and is partition-ordered; `global` scatter-merges
@@ -117,11 +113,10 @@ adapter's `paginated_select`.
     cursor => cursor() | undefined
 }.
 
--type result_set() :: #{
-    values := [term()],
-    next := cursor() | undefined,
-    has_more := boolean()
-}.
+%% The page shape is the shared `bondy_pagination` contract, built via
+%% `bondy_pagination:result/2` — one definition of the page envelope, cluster-
+%% wide.
+-type result_set() :: bondy_pagination:result_set().
 
 -export_type([relation/0]).
 -export_type([cursor/0]).
@@ -302,8 +297,8 @@ endpoint. The inverse is `decode_cursor/2`.
 """.
 -spec encode_cursor(Cursor :: cursor()) -> binary().
 
-encode_cursor(#cursor{} = Cursor) ->
-    base64:encode(term_to_binary(Cursor)).
+encode_cursor(Cursor) ->
+    bondy_pagination:encode_cursor(Cursor).
 
 -doc """
 Decode a wire cursor produced by `encode_cursor/1`, validating that it was
@@ -318,17 +313,7 @@ page), or `{error, malformed}` if the binary is not a decodable cursor.
     {ok, cursor()} | {error, stale | malformed}.
 
 decode_cursor(#relation{schema_hash = Hash}, Bin) when is_binary(Bin) ->
-    try binary_to_term(base64:decode(Bin), [safe]) of
-        #cursor{schema_hash = Hash} = Cursor ->
-            {ok, Cursor};
-        #cursor{} ->
-            {error, stale};
-        _ ->
-            {error, malformed}
-    catch
-        _:_ ->
-            {error, malformed}
-    end.
+    bondy_pagination:decode_cursor(Hash, Bin).
 
 %% =============================================================================
 %% PRIVATE
@@ -386,7 +371,8 @@ advance(LastKey) ->
 %% emitted key.
 scan_low(undefined) ->
     <<>>;
-scan_low(#cursor{key = Key}) ->
+scan_low(Cursor) ->
+    #{key := Key} = bondy_pagination:payload(Cursor),
     <<Key/binary, 0>>.
 
 %% @private
@@ -399,17 +385,11 @@ finalize_page(Relation, Accepted, Limit) ->
         true ->
             Page = lists:sublist(Accepted, Limit),
             {LastKey, _} = lists:last(Page),
-            #{
-                values => values(Page),
-                next => mk_cursor(Relation, LastKey),
-                has_more => true
-            };
+            bondy_pagination:result(
+                values(Page), mk_cursor(Relation, LastKey)
+            );
         false ->
-            #{
-                values => values(Accepted),
-                next => undefined,
-                has_more => false
-            }
+            bondy_pagination:result(values(Accepted), undefined)
     end.
 
 %% =============================================================================
@@ -497,17 +477,11 @@ finalize_page_p(Relation, Accepted, Limit) ->
         true ->
             Page = lists:sublist(Accepted, Limit),
             {Shard, LastKey, _} = lists:last(Page),
-            #{
-                values => values_p(Page),
-                next => mk_cursor_p(Relation, Shard, LastKey),
-                has_more => true
-            };
+            bondy_pagination:result(
+                values_p(Page), mk_cursor_p(Relation, Shard, LastKey)
+            );
         false ->
-            #{
-                values => values_p(Accepted),
-                next => undefined,
-                has_more => false
-            }
+            bondy_pagination:result(values_p(Accepted), undefined)
     end.
 
 %% @private
@@ -516,15 +490,16 @@ values_p(Triples) ->
 
 %% @private
 mk_cursor_p(#relation{schema_hash = Hash}, Shard, Key) ->
-    #cursor{key = Key, shard = Shard, schema_hash = Hash}.
+    bondy_pagination:new_cursor(Hash, #{key => Key, shard => Shard}).
 
 %% @private
 %% The shard the page starts at: a cursor pins its shard; a fresh page
 %% starts at shard 0.
-start_shard(#cursor{shard = Shard}) when is_integer(Shard) ->
-    Shard;
 start_shard(undefined) ->
-    0.
+    0;
+start_shard(Cursor) ->
+    #{shard := Shard} = bondy_pagination:payload(Cursor),
+    Shard.
 
 %% @private
 do_fold(
@@ -562,7 +537,7 @@ values(Pairs) ->
 
 %% @private
 mk_cursor(#relation{schema_hash = Hash}, Key) ->
-    #cursor{key = Key, schema_hash = Hash}.
+    bondy_pagination:new_cursor(Hash, #{key => Key}).
 
 %% @private
 schema_hash(Tag, Schema) ->
@@ -574,7 +549,8 @@ schema_hash(Tag, Schema) ->
 %% caller threaded a foreign or pre-re-key cursor, a programming error.
 assert_cursor(_Relation, undefined) ->
     ok;
-assert_cursor(#relation{schema_hash = Hash}, #cursor{schema_hash = Hash}) ->
-    ok;
-assert_cursor(#relation{tag = Tag}, #cursor{}) ->
-    error({stale_cursor, Tag}).
+assert_cursor(#relation{schema_hash = Hash, tag = Tag}, Cursor) ->
+    case bondy_pagination:fingerprint(Cursor) of
+        Hash -> ok;
+        _ -> error({stale_cursor, Tag})
+    end.

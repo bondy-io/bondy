@@ -89,28 +89,19 @@ the dispatcher is configured to effectively never restart.
 
 -define(RESUBSCRIBE_AFTER, 500).
 
-%% The node-local table that resolves a registry `clear` (a tombstone with no
-%% value) back to the entry it removed, keyed by the cell's `{namespace, key}`.
-%% Populated on every registry `set`; the bondy_db projection cannot serve the
-%% lookup because the merge has already removed the cell. Claimed via
-%% `bondy_table_manager` so it survives a reactor restart.
--define(REG_ENTRIES_TAB, bondy_aae_registry_entries).
-
 %% One reacted-on bondy_db table. `ns`/`ref` are filled once the namespace
 %% catalogue has provisioned the table and the subscription is established;
 %% until then they are `undefined` and the subscription is retried.
 -record(sub, {
     table :: atom(),
     label :: string(),
-    kind :: user | realm | grant | member | source | registry | rib,
+    kind :: user | realm | grant | member | source | rib,
     ns :: atom() | undefined,
     ref :: reference() | undefined
 }).
 
 -record(state, {
-    subs = [] :: [#sub{}],
-    %% The registry tombstone resolver (see ?REG_ENTRIES_TAB).
-    entries :: ets:table()
+    subs = [] :: [#sub{}]
 }).
 
 %% API
@@ -124,9 +115,7 @@ the dispatcher is configured to effectively never restart.
 -export([react_grant/4]).
 -export([react_member/2]).
 -export([react_source/4]).
--export([react_registry/4]).
 -export([react_rib/3]).
--export([owner_up/1]).
 -export([unfold_user_key/1]).
 -export([unfold_realm_key/1]).
 -export([unfold_grant_key/1]).
@@ -152,41 +141,24 @@ start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 -doc """
-Returns the registry entries this node holds that are owned by `Node`, taken from
-the reactor's tombstone table (every peer registration this node has merged is
-recorded there on its `set`). This is the authoritative by-owner enumeration the
-registry presence machine (`bondy_registry`) masks / unmasks / evicts on a
-membership change — it does not depend on the registry's per-node index. Returns
-`[]` before the reactor has started.
+Returns the registry entries this node holds that are owned by `Node`. Full
+registry entries are never replicated — a node keeps only its own, in local
+memory — so this node holds no entries owned by a remote `Node` and the result
+is always `[]`. Retained as the by-owner enumeration the registry presence
+machine consults on a membership change.
 """.
 -spec remote_entries_of(node()) -> [bondy_registry_entry:t()].
 
-remote_entries_of(Node) ->
-    case ets:whereis(?REG_ENTRIES_TAB) of
-        undefined ->
-            [];
-        _ ->
-            ets:foldl(
-                fun({_K, Entry}, Acc) ->
-                    case catch bondy_registry_entry:node(Entry) of
-                        Node -> [Entry | Acc];
-                        _ -> Acc
-                    end
-                end,
-                [],
-                ?REG_ENTRIES_TAB
-            )
-    end.
+remote_entries_of(_Node) ->
+    [].
 
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
 
 init([]) ->
-    Entries = ensure_entries_table(),
     _ = bondy_registry_rib:ensure_stubs_table(),
-    {ok, #state{subs = reacted_tables(), entries = Entries},
-        {continue, subscribe}}.
+    {ok, #state{subs = reacted_tables()}, {continue, subscribe}}.
 
 handle_continue(subscribe, State) ->
     {noreply, subscribe(State)}.
@@ -264,16 +236,6 @@ reacted_tables() ->
             kind = source
         },
         #sub{
-            table = ?BONDY_DB_REGISTRATION_TAB,
-            label = "bondy_registration",
-            kind = registry
-        },
-        #sub{
-            table = ?BONDY_DB_SUBSCRIPTION_TAB,
-            label = "bondy_subscription",
-            kind = registry
-        },
-        #sub{
             table = ?BONDY_DB_REGISTRATION_RIB_TAB,
             label = "bondy_registration_rib",
             kind = rib
@@ -284,20 +246,6 @@ reacted_tables() ->
             kind = rib
         }
     ].
-
-%% @private
-%% The registry tombstone resolver, claimed so it outlives a reactor restart.
-ensure_entries_table() ->
-    Opts = [
-        set,
-        {keypos, 1},
-        named_table,
-        public,
-        {read_concurrency, true},
-        {write_concurrency, true}
-    ],
-    {ok, Tab} = bondy_table_manager:add_or_claim(?REG_ENTRIES_TAB, Opts),
-    Tab.
 
 %% @private
 %% (Re)subscribe to every reacted-on namespace whose table the catalogue has
@@ -335,7 +283,7 @@ ensure_subscribed(#sub{table = Table, label = Label} = Sub) ->
 %% @private
 %% Route a delivered merge event to the reaction for its namespace. An event for
 %% a namespace not (yet) bound — or with no reaction — is ignored.
-react(NS, Key, Op, Old, #state{subs = Subs, entries = Entries}) ->
+react(NS, Key, Op, Old, #state{subs = Subs}) ->
     case lists:keyfind(NS, #sub.ns, Subs) of
         #sub{kind = user} ->
             react_user(Key, Op, Old);
@@ -347,8 +295,6 @@ react(NS, Key, Op, Old, #state{subs = Subs, entries = Entries}) ->
             react_member(Key, Op);
         #sub{kind = source, label = Label} ->
             react_source(Label, Key, Op, Old);
-        #sub{kind = registry} ->
-            react_registry(Entries, NS, Key, Op);
         #sub{kind = rib, table = Table} ->
             react_rib(Table, Key, Op);
         false ->
@@ -524,35 +470,6 @@ react_member(Key, _Op) ->
     bondy_session_manager:invalidate_rbac_all(RealmUri).
 
 %% @private
-%% React to a peer's registry change (bondy_registration / bondy_subscription).
-%% A `set` (CREATE) adds the entry to this node's routing trie when its owner
-%% node is connected, or records it masked (per-node remote index only) when the
-%% owner is down; either way it is remembered in `Entries` so a later `clear` can
-%% be resolved. A `clear` (the owner's DELETE / self-clean, or a rendezvous-hashed
-%% EVICT) removes it from the trie and the remote index. The bondy_db projection
-%% is maintained by the merge itself; only the materialised trie is touched here.
-%%
-%% Under RIB `write` mode remote full entries are never compiled: this node
-%% keeps its own entries out of replication and routes remote work on the
-%% stubs, so a peer's full-entry cells (a peer still replicating them, or a
-%% stale echo) are routing-inert — compiling them would resurrect the very
-%% view the mode retires.
-react_registry(Entries, NS, Key, Op) ->
-    case bondy_registry_rib:mode() of
-        write ->
-            ok;
-        _ ->
-            case registry_op(Op) of
-                {set, Value} ->
-                    react_registry_set(Entries, NS, Key, Value);
-                clear ->
-                    react_registry_clear(Entries, NS, Key);
-                ignore ->
-                    ok
-            end
-    end.
-
-%% @private
 %% Normalise the fold-event op a registry cell merge delivers. Registry writes use
 %% bondy_db's short forms (`{set, Value}` / `clear`); the explicit `{set, Hlc,
 %% Value}` / `{clear, Hlc}` forms are accepted too. Anything else is ignored — the
@@ -567,44 +484,6 @@ registry_op({clear, _Hlc}) ->
     clear;
 registry_op(_) ->
     ignore.
-
-%% @private
-react_registry_set(Entries, NS, Key, Value) ->
-    case registry_entry(Value) of
-        {ok, Entry} ->
-            true = ets:insert(Entries, {{NS, Key}, Entry}),
-            Partition = bondy_registry:pick_partition(
-                bondy_registry_entry:realm_uri(Entry)
-            ),
-            case owner_up(Entry) of
-                true ->
-                    _ = bondy_registry_partition:add_indices(Partition, Entry),
-                    ok;
-                false ->
-                    %% Owner node is down: retain the entry (enumerable per node
-                    %% for a later RESUME / EVICT) but keep it out of the routing
-                    %% trie (presence SUSPEND for a late-joiner, §9.6).
-                    bondy_registry_partition:index_remote(Partition, Entry)
-            end;
-        error ->
-            ok
-    end.
-
-%% @private
-react_registry_clear(Entries, NS, Key) ->
-    case ets:take(Entries, {NS, Key}) of
-        [{_, Entry}] ->
-            Partition = bondy_registry:pick_partition(
-                bondy_registry_entry:realm_uri(Entry)
-            ),
-            _ = bondy_registry_partition:remove_indices(Partition, Entry),
-            ok;
-        [] ->
-            %% Never saw the matching `set` (e.g. this node started after the
-            %% entry was created and removed), or already removed. The trie has
-            %% nothing to drop.
-            ok
-    end.
 
 %% @private
 %% A peer's RIB summary cell arrived (or was removed) via anti-entropy:
@@ -625,23 +504,6 @@ react_rib(Table, Key, Op) ->
         ignore ->
             ok
     end.
-
-%% @private
-%% Whether a registry entry's owning node is currently reachable in this node's
-%% Partisan view. Routing should only select entries whose owner is connected;
-%% an entry owned by a disconnected node is masked. A self-owned entry (only seen
-%% here transiently) counts as up.
-owner_up(Entry) ->
-    Node = bondy_registry_entry:node(Entry),
-    Node =:= partisan:node() orelse partisan:is_connected(Node).
-
-%% @private
-%% The `#entry{}` carried by a registry cell's value (`bondy_registry_store:wrap/1`
-%% stores it under `entry`). Anything else is ignored defensively.
-registry_entry(#{entry := Entry}) ->
-    {ok, Entry};
-registry_entry(_) ->
-    error.
 
 %% @private
 %% security_users is realm-sharded, so its cell key is the G-1 realm-folded

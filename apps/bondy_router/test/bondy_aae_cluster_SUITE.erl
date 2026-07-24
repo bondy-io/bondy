@@ -44,7 +44,6 @@ all() ->
         realm_merge_event_fires_on_remote_write,
         grant_merge_event_fires_on_remote_write,
         concurrent_membership_adds_both_survive,
-        registry_registration_converges_and_presence,
         rib_summary_converges_to_stub,
         rib_read_mode_cross_node_call,
         rib_stub_pubsub_cross_node,
@@ -229,51 +228,6 @@ concurrent_membership_adds_both_survive(Config) ->
     ok = wait_for_merge_event(N2, <<"g_a">>, 15000),
     ok.
 
-%% The registry presence machine end-to-end (STORAGE_ARCHITECTURE §9.6). The
-%% `registry` is an EPHEMERAL, memory-topology bondy_db DB; this is the only test
-%% that exercises AAE over that topology (the others use the durable `core`).
-%%
-%% A registration authored on node 1 must:
-%%   1. converge into nodes 2 & 3's ROUTING TRIE (the materialised view the merge
-%%      reactor maintains, separate from the projection AAE merges into) — i.e. a
-%%      peer learns it can route to node 1's callee;
-%%   2. be MASKED on node 2 when node 1 is seen down (presence SUSPEND) and
-%%      RESTORED when it returns (presence RESUME) — without node 1 re-asserting,
-%%      which is what makes a partition heal transparent to a connected client;
-%%   3. be removed cluster-wide when node 1 DELETEs it (the `clear` rides AAE and
-%%      every peer's merge reactor drops it from its trie).
-registry_registration_converges_and_presence(Config) ->
-    [N1, N2, N3] = nodes_of(Config),
-    Uri = <<"com.bondy.aae_registry">>,
-    Proc = <<"com.example.aae_proc">>,
-
-    %% Realm authored on node 1, converged everywhere (registrations are scoped to
-    %% it; the realm rides the durable core).
-    ok = erpc:call(N1, ?MODULE, do_create_simple_realm, [Uri]),
-
-    %% A registration on node 1 must appear in every node's trie (1 match each).
-    ok = erpc:call(N1, ?MODULE, do_add_registration, [Uri, Proc]),
-    ?assertEqual(1, erpc:call(N1, ?MODULE, do_reg_count, [Uri, Proc])),
-    [ok = wait_reg_count(N, Uri, Proc, 1) || N <- [N2, N3]],
-
-    %% Presence SUSPEND: tell node 2 that node 1 is down → its entry is masked
-    %% (out of the routing trie), retained for a RESUME.
-    Owner = erpc:call(N2, ?MODULE, do_owner_node, [Uri, Proc]),
-    ?assert(Owner =/= undefined andalso Owner =/= node()),
-    ok = erpc:call(N2, ?MODULE, do_signal, [{nodedown, Owner}]),
-    ok = wait_reg_count(N2, Uri, Proc, 0),
-
-    %% Presence RESUME: node 1 returns → node 2 unmasks it back into the trie,
-    %% WITHOUT node 1 re-asserting (node 1 was never told anything).
-    ok = erpc:call(N2, ?MODULE, do_signal, [{nodeup, Owner}]),
-    ok = wait_reg_count(N2, Uri, Proc, 1),
-
-    %% DELETE on node 1 converges: the `clear` rides AAE and every peer's merge
-    %% reactor drops it from its trie.
-    ok = erpc:call(N1, ?MODULE, do_remove_registration, [Uri, Proc]),
-    [ok = wait_reg_count(N, Uri, Proc, 0) || N <- [N1, N2, N3]],
-    ok.
-
 %% The registry RIB dual-write across nodes: a registration on node 1 writes
 %% node 1's summary cell, the cell rides AAE to node 2 whose merge reactor
 %% compiles it into a stub; the unregister clears the cell and the stub
@@ -308,12 +262,12 @@ rib_summary_converges_to_stub(Config) ->
     ok = wait_rib_check_empty(N2, Uri),
     ok.
 
-%% The full RIB `read`-mode routing loop, end to end: a callee registered on
-%% node 1, a CALL made on node 2 with `read` mode on. Node 2 discovers the
-%% callee from the STUB view (its summary converged via AAE), forwards the
-%% CALL node-addressed, node 1 completes the selection among its live local
-%% registrations (owner-side completion), applies the callback, and the
-%% RESULT rides the promise reverse path back to node 2's caller.
+%% The full RIB cross-node routing loop, end to end: a callee registered on
+%% node 1, a CALL made on node 2. Node 2 discovers the callee from the STUB
+%% view (its summary converged via AAE), forwards the CALL node-addressed,
+%% node 1 completes the selection among its live local registrations
+%% (owner-side completion), applies the callback, and the RESULT rides the
+%% promise reverse path back to node 2's caller.
 rib_read_mode_cross_node_call(Config) ->
     [N1, N2, _N3] = nodes_of(Config),
     Uri = <<"com.bondy.aae_ribcall">>,
@@ -323,27 +277,18 @@ rib_read_mode_cross_node_call(Config) ->
     ok = erpc:call(N1, ?MODULE, do_register_echo, [Uri, Proc]),
     N1Str = erpc:call(N1, bondy_config, nodestring, []),
 
-    %% Discovery source under `read` is the stub view — wait for it.
+    %% Discovery source is the stub view — wait for it.
     ok = wait_rib_stub_count(N2, Uri, Proc, N1Str, 1),
 
-    ok = erpc:call(
-        N2, application, set_env, [bondy_router, registry_rib_mode, read]
-    ),
-    try
-        ?assertMatch(
-            #result{args = [<<"pong">>]},
-            erpc:call(N2, ?MODULE, do_rib_call, [Uri, Proc])
-        )
-    after
-        ok = erpc:call(
-            N2, application, set_env, [bondy_router, registry_rib_mode, dual]
-        )
-    end.
+    ?assertMatch(
+        #result{args = [<<"pong">>]},
+        erpc:call(N2, ?MODULE, do_rib_call, [Uri, Proc])
+    ).
 
-%% The broker's cross-node event forwarding under RIB `read` mode: remote
-%% subscriber NODES are discovered from the subscription stubs (one relayed
-%% PUBLISH per node; the receiving node matches and delivers locally). The
-%% prefix subscription is the load-bearing case — with routing on stubs the
+%% The broker's cross-node event forwarding on the RIB: remote subscriber
+%% NODES are discovered from the subscription stubs (one relayed PUBLISH per
+%% node; the receiving node matches and delivers locally). The prefix
+%% subscription is the load-bearing case — with routing on stubs the
 %% publishing node's local match is restricted to local subscribers, so only
 %% the stub view can name node 1.
 rib_stub_pubsub_cross_node(Config) ->
@@ -366,34 +311,22 @@ rib_stub_pubsub_cross_node(Config) ->
     ok = wait_rib_sub_node(N2, Uri, TopicA, N1),
     ok = wait_rib_sub_node(N2, Uri, TopicB, N1),
 
-    ok = erpc:call(
-        N2, application, set_env, [bondy_router, registry_rib_mode, read]
-    ),
-    try
-        ok = erpc:call(N2, ?MODULE, do_rib_publish, [Uri, TopicA, [<<"a">>]]),
-        ok = erpc:call(N2, ?MODULE, do_rib_publish, [Uri, TopicB, [<<"b">>]]),
-        ok = wait_probe_args(N1, [<<"a">>, <<"b">>])
-    after
-        ok = erpc:call(
-            N2, application, set_env, [bondy_router, registry_rib_mode, dual]
-        )
-    end.
+    ok = erpc:call(N2, ?MODULE, do_rib_publish, [Uri, TopicA, [<<"a">>]]),
+    ok = erpc:call(N2, ?MODULE, do_rib_publish, [Uri, TopicB, [<<"b">>]]),
+    ok = wait_probe_args(N1, [<<"a">>, <<"b">>]).
 
-%% RIB `write` mode end to end, on a dedicated 2-node cluster booted with the
-%% mode (it pins the entry backend at store creation): full entries never
+%% RIB routing end to end, on a dedicated 2-node cluster: full entries never
 %% enter bondy_db — the replicated full-entry tables stay EMPTY on every
 %% node — yet cross-node calls and publications route on the summary cells
-%% alone, and the write-mode consistency gate holds.
+%% alone, and the consistency gate holds.
 rib_write_mode_cluster(Config) ->
     %% Distinct names and Partisan ports — the suite's main cluster occupies
     %% bondy1..3 on 18087..18089.
     Names = [
         {bondy_w1, [
-            {[bondy_router, registry_rib_mode], write},
             {[partisan, peer_port], 18190}
         ]},
         {bondy_w2, [
-            {[bondy_router, registry_rib_mode], write},
             {[partisan, peer_port], 18191}
         ]}
     ],
@@ -482,9 +415,6 @@ rib_retry_reroutes_to_live_node(Config) ->
         N2, bondy_registry_rib, on_remote_set, [registration, StaleKey, Stale]
     ),
 
-    ok = erpc:call(
-        N2, application, set_env, [bondy_router, registry_rib_mode, read]
-    ),
     try
         ?assertMatch(
             #result{args = [<<"pong">>]},
@@ -493,9 +423,6 @@ rib_retry_reroutes_to_live_node(Config) ->
             ])
         )
     after
-        ok = erpc:call(
-            N2, application, set_env, [bondy_router, registry_rib_mode, dual]
-        ),
         ok = erpc:call(
             N2, bondy_registry_rib, on_remote_clear, [registration, StaleKey]
         )

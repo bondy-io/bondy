@@ -142,8 +142,10 @@
 -define(BONDY_REALM_UPDATE, <<"bondy.realm.update">>).
 
 -define(BONDY_REGISTRATION_LIST, <<"bondy.registration.list">>).
+-define(BONDY_REGISTRATION_MATCH, <<"bondy.registration.match">>).
 -define(BONDY_REGISTRATION_CALLEE_LIST, <<"bondy.registration.callee.list">>).
 -define(BONDY_SUBSCRIPTION_LIST, <<"bondy.subscription.list">>).
+-define(BONDY_SUBSCRIPTION_MATCH, <<"bondy.subscription.match">>).
 -define(BONDY_TELEMETRY_METRICS, <<"bondy.telemetry.metrics">>).
 
 %% =============================================================================
@@ -206,6 +208,7 @@
 -define(BONDY_ERROR_NOT_FOUND, <<"bondy.error.not_found">>).
 -define(BONDY_ERROR_NOT_IN_SESSION, <<"bondy.error.not_in_session">>).
 -define(BONDY_ERROR_TIMEOUT, <<"bondy.error.timeout">>).
+-define(BONDY_ERROR_TOO_MANY_RESULTS, <<"bondy.error.too_many_results">>).
 -define(BONDY_ERROR_INCONSISTENCY_ERROR, <<"bondy.error.inconsistency_error">>).
 
 %% =============================================================================

@@ -753,15 +753,17 @@ forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
             %% (no use of via here)
             bondy:send(RealmUri, To, Invocation, SendOpts)
     end;
-forward(#cancel{} = M, Callee, #{from := Caller} = Opts) ->
+forward(#cancel{} = M, _Addressed, #{from := Caller} = Opts) ->
     %% A remote Caller (or its node, after the caller died) is cancelling
-    %% a previous CALL made to a local Callee. The CANCEL carries the CALL
-    %% request id; the invocation id is local knowledge, recovered from
-    %% the invocation promise. Mode semantics: `kill` keeps the promise
-    %% (the callee's ERROR settles the call), `killnowait` and `skip` take
-    %% it so any late response is discarded; `skip` sends no INTERRUPT.
-    %% The INTERRUPT is only sent to a callee that announced
-    %% call_canceling.
+    %% a previous CALL made to a local Callee. The CALL request id plus the
+    %% Caller identify the invocation uniquely, so the invocation id and the
+    %% actual local callee are recovered from the invocation promise — the
+    %% CANCEL may be node-addressed (carrying only the owner node, not the
+    %% resolved callee) when routing ran on the RIB, so the address the
+    %% CANCEL arrived on is not the callee. Mode semantics: `kill` keeps the
+    %% promise (the callee's ERROR settles the call), `killnowait` and `skip`
+    %% take it so any late response is discarded; `skip` sends no INTERRUPT.
+    %% The INTERRUPT is only sent to a callee that announced call_canceling.
 
     %% Fails with no_realm exception if not present
     RealmUri = ?GET_REALM_URI(Opts),
@@ -773,7 +775,7 @@ forward(#cancel{} = M, Callee, #{from := Caller} = Opts) ->
         RealmUri,
         Caller,
         CallId,
-        Callee,
+        '_',
         '_'
     ),
 
@@ -787,6 +789,7 @@ forward(#cancel{} = M, Callee, #{from := Caller} = Opts) ->
         {ok, _Promise} when Mode == skip ->
             ok;
         {ok, Promise} ->
+            Callee = bondy_rpc_promise:callee(Promise),
             Interruptible = session_feature(
                 bondy_ref:session_id(Callee), callee, call_canceling
             ),
@@ -1896,13 +1899,7 @@ handle_call(Msg, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
         registration, RealmUri, ProcUri, reg_match_opts()
     ),
 
-    Chosen =
-        case bondy_registry_rib:stub_routing() of
-            true ->
-                choose_rib(Matches, RealmUri, ProcUri, Opts);
-            false ->
-                choose(Matches, Opts)
-        end,
+    Chosen = choose_rib(Matches, RealmUri, ProcUri, Opts),
 
     case Chosen of
         {ok, Entry} ->
@@ -2489,7 +2486,12 @@ send_rib_call(
                 procedure_uri => ProcUri,
                 timeout => Timeout,
                 deadline => promise_deadline(Call#call.options),
-                rib_retry => Retry
+                rib_retry => Retry,
+                %% Node-addressed: the callee is whichever local registration
+                %% the owner node completes to. Address the node so a caller
+                %% CANCEL or a caller-death flush relays there — the owner node
+                %% resolves its invocation and INTERRUPTs (see forward/3).
+                callee => NodeRef
             },
             maps:get(receive_progress, Call#call.options, false)
         )
@@ -2683,16 +2685,13 @@ rib_rebind(M, _) ->
     M.
 
 %% @private
-%% When routing runs on the RIB a forwarded cluster CALL is node-addressed:
-%% tag it so the receiving node re-selects among ITS live local
-%% registrations instead of trusting this node's — possibly stale — choice
-%% of entry. Bridge-relay targets keep the entry-addressed contract (the
-%% edge owns its registry), and a receiving node without the mode ignores
-%% the tag (safe in mixed clusters).
+%% A forwarded cluster CALL is node-addressed: tag it so the receiving node
+%% re-selects among ITS live local registrations instead of trusting this
+%% node's — possibly stale — choice of entry. Bridge-relay targets keep the
+%% entry-addressed contract (the edge owns its registry).
 maybe_rib_completion(Opts, Ref) ->
     case
-        bondy_registry_rib:stub_routing() andalso
-            not bondy_ref:is_local(Ref) andalso
+        not bondy_ref:is_local(Ref) andalso
             bondy_ref:type(Ref) =/= bridge_relay
     of
         true ->
@@ -2778,11 +2777,11 @@ reply_no_eligible_callee(#call{} = Msg, #{from := Caller} = Opts) ->
 %% - invocation promise → the callee is local: INTERRUPT it directly
 %%   (skipped for self-calls — the callee IS the dying session — and for
 %%   callees that did not announce `call_canceling`).
-%% - call promise → the callee is remote or bridged: relay a CANCEL
+%% - call promise → the callee is remote (a resolved entry or, for a
+%%   node-addressed RIB call, the owner node) or bridged: relay a CANCEL
 %%   (mode killnowait) keyed by the call id; the callee's node resolves
 %%   its invocation promise and INTERRUPTs (see forward/3). A promise
-%%   without a callee (node-addressed routing retry) cannot be routed to
-%%   and simply expires.
+%%   without a callee cannot be routed to and simply expires.
 caller_flush_fun(Ref) ->
     RefSessionId = bondy_ref:session_id(Ref),
 
