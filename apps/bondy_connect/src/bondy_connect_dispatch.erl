@@ -100,7 +100,9 @@ effects are demonitors), and that pairing removes a whole class of lockstep bugs
 -export([worker_started/4]).
 -export([handler_done/3]).
 -export([event_done/2]).
+-export([has_invocation/2]).
 -export([interrupt/3]).
+-export([progressive_yield/3]).
 -export([worker_down/3]).
 -export([clear_subscription/2]).
 -export([kill_all/1]).
@@ -237,6 +239,35 @@ worker_started(event, SubId, {error, Reason}, #dispatch{queues = Queues} = D) ->
             drain_next(SubId, Entry, D);
         undefined ->
             {D, []}
+    end.
+
+-doc """
+Returns true while invocation `ReqId` is still in flight (admitted and not
+yet finished, interrupted or crashed). Used by the connection to decide
+whether a worker's progressive result may still be forwarded.
+""".
+-spec has_invocation(ReqId :: pos_integer(), t()) -> boolean().
+
+has_invocation(ReqId, #dispatch{invocations = Inv}) ->
+    is_map_key(ReqId, Inv).
+
+-doc """
+Build the progressive YIELD (`Options.progress = true`) a worker emits for
+an in-flight invocation. Unlike `handler_done/3` this releases nothing —
+the worker keeps running and its final reply still settles the invocation.
+""".
+-spec progressive_yield(
+    ReqId :: pos_integer(),
+    Args :: list() | undefined,
+    KWArgs :: map() | undefined
+) -> wamp_yield().
+
+progressive_yield(ReqId, Args, KWArgs) ->
+    case normalize_payload(Args, KWArgs) of
+        {undefined, undefined} ->
+            bondy_wamp_message:yield(ReqId, #{progress => true});
+        {A, K} ->
+            bondy_wamp_message:yield(ReqId, #{progress => true}, A, K)
     end.
 
 -doc """

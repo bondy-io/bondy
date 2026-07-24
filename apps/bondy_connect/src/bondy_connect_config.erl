@@ -19,18 +19,22 @@ defaults are secure-by-default (`verify_peer`).
 
 -include("bondy_connect.hrl").
 
-%% The advanced-profile features the client actually implements (M3). The rule
+%% The advanced-profile features the client actually implements. The rule
 %% is **advertise == handle**: we only claim a feature whose behaviour the
-%% client honours. Notably `progressive_call_results`/`progressive_calls` are
-%% **not** advertised — they are deferred (the router does not yet round-trip
-%% them) and advertising a feature we cannot honour would violate the contract.
+%% client honours. `progressive_call_results` is advertised for both RPC
+%% roles: as caller via `call_async/5` with `receive_progress => true`
+%% ({progress, Payload} deliveries before the terminal reply), as callee
+%% via the `progress` fun injected into the handler details. Note the WAMP
+%% spec pairs it with `call_canceling`, which both roles announce.
+%% `progressive_calls` (caller-side argument streaming) remains deferred.
 -define(DEFAULT_ROLES, #{
     caller => #{
         features => #{
             call_timeout => true,
             call_canceling => true,
             caller_identification => true,
-            call_retries => true
+            call_retries => true,
+            progressive_call_results => true
         }
     },
     callee => #{
@@ -39,7 +43,8 @@ defaults are secure-by-default (`verify_peer`).
             caller_identification => true,
             pattern_based_registration => true,
             shared_registration => true,
-            registration_revocation => true
+            registration_revocation => true,
+            progressive_call_results => true
         }
     },
     publisher => #{

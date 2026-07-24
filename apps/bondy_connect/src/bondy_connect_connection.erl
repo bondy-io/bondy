@@ -42,10 +42,15 @@ is fail-fast by default (configurable via `reconnect.retry_initial_connect`).
 ## Roles (M2)
 
 - **caller** — `call/5` (synchronous) and `call_async/5` (a token reply to the
-  caller pid); per-request timeouts; `RESULT`/`ERROR` correlation.
+  caller pid); per-request timeouts; `RESULT`/`ERROR` correlation;
+  `cancel/3`; progressive call results via `call_async/5` with
+  `receive_progress => true` (each progressive result is delivered as
+  `{bondy_connect, Token, {progress, map()}}` before the terminal reply).
 - **callee** — `register/4`/`unregister/2`; inbound `INVOCATION` is dispatched
   to an isolated, monitored, load-regulated `bondy_connect_handler` worker
-  whose result becomes a `YIELD` or `ERROR`.
+  whose result becomes a `YIELD` or `ERROR`; `INTERRUPT` kills the worker;
+  when the caller requested progressive results the handler receives a
+  `progress` fun in its details whose calls become progressive `YIELD`s.
 - **publisher** — `publish/5` (fire-and-forget, or acknowledged `PUBLISHED`).
 - **subscriber** — `subscribe/4`/`unsubscribe/2`; inbound `EVENT` is dispatched
   to a worker, **FIFO per subscription** by default (opt-in `unordered`).
@@ -53,8 +58,8 @@ is fail-fast by default (configurable via `reconnect.retry_initial_connect`).
 Correlation, the registry, the per-subscription dispatch queues and the load
 counter all live in the `gen_statem` data — never shared ETS (fixes the awre
 race), auto-reclaimed on death. `process_flag(sensitive, true)` is set while
-authenticating and cleared on `established`. Reconnect/ping and
-CANCEL/INTERRUPT/progressive arrive in later phases.
+authenticating and cleared on `established`. Progressive calls
+(caller-side argument streaming) are not implemented.
 """.
 
 -behaviour(gen_statem).
@@ -139,9 +144,16 @@ start_link(Config, ConnSup) ->
 await_ready(Pid, Timeout) ->
     call_safe(Pid, await_ready, Timeout).
 
--doc "Issue a synchronous CALL and wait for the RESULT/ERROR.".
+-doc """
+Issue a synchronous CALL and wait for the RESULT/ERROR.
+
+`receive_progress` is rejected here: a synchronous single-reply API cannot
+represent a stream of progressive results — use `call_async/5` for that.
+""".
 -spec call(pid(), uri(), list(), map(), map()) ->
     {ok, map()} | {error, term()}.
+call(_, _, _, _, #{receive_progress := true}) ->
+    {error, {invalid_option, receive_progress}};
 call(Pid, Uri, Args, KWArgs, Opts) ->
     Timeout = maps:get(timeout, Opts, ?DEFAULT_CALL_TIMEOUT),
     call_safe(
@@ -152,6 +164,12 @@ call(Pid, Uri, Args, KWArgs, Opts) ->
 Issue an asynchronous CALL. Returns `{ok, Token}`; the RESULT/ERROR is later
 delivered to the calling process as `{bondy_connect, Token, Reply}` where
 `Reply` is `{ok, map()}` or `{error, term()}`.
+
+With `receive_progress => true` any progressive results arrive first, each
+as `{bondy_connect, Token, {progress, map()}}`; the `{ok, map()}` (or
+`{error, term()}`) delivery remains the single terminal message. The
+per-call timeout bounds the whole call — progressive results do not extend
+it.
 """.
 -spec call_async(pid(), uri(), list(), map(), map()) ->
     {ok, reference()} | {error, term()}.
@@ -389,12 +407,28 @@ established(
     {call, {Owner, _} = From}, {call_async, Uri, Args, KWArgs, Opts}, Data
 ) ->
     Token = make_ref(),
+    %% A progressive call is marked in the pending entry's meta so inbound
+    %% progressive RESULTs are delivered to the owner without settling it.
+    %% The timeout is kept because — per the WAMP spec — for a progressive
+    %% call it is an inter-result inactivity window that each progressive
+    %% result restarts; the optional `_deadline` caps the total duration.
+    Meta =
+        case maps:get(receive_progress, Opts, false) of
+            true ->
+                #{
+                    receive_progress => true,
+                    timeout => call_timeout(Opts),
+                    deadline => call_deadline(Opts)
+                };
+            false ->
+                #{}
+        end,
     Data1 = do_request(
         call,
         {async, Owner, Token},
         call_msg(Uri, Args, KWArgs, Opts),
         call_timeout(Opts),
-        #{},
+        Meta,
         Data
     ),
     {keep_state, Data1, [{reply, From, {ok, Token}}]};
@@ -412,6 +446,21 @@ established({call, From}, {publish, Topic, Args, KWArgs, Opts}, Data) ->
     do_publish(From, Topic, Args, KWArgs, Opts, Data);
 established({call, From}, await_ready, Data) ->
     {keep_state, Data, [{reply, From, ok}]};
+established(info, {handler_progress, ReqId, Args, KWArgs}, Data) ->
+    %% A worker servicing an INVOCATION emitted a progressive result via
+    %% its injected progress fun. Forwarded only while the invocation is
+    %% still in flight — a worker racing its own INTERRUPT or completion
+    %% is dropped silently. The final YIELD is produced by handler_done.
+    case bondy_connect_dispatch:has_invocation(ReqId, disp(Data)) of
+        true ->
+            Yield = bondy_connect_dispatch:progressive_yield(
+                ReqId, Args, KWArgs
+            ),
+            _ = send_msg(Yield, Data),
+            {keep_state, Data};
+        false ->
+            {keep_state, Data}
+    end;
 established(info, {handler_done, ReqId, Reply}, Data) ->
     {keep_state,
         run_dispatch(
@@ -610,9 +659,16 @@ route_established(Record, Data) ->
     end.
 
 %% @private Application-message routing.
-route_app(#result{request_id = ReqId} = R, Data) ->
-    Data1 = resolve_pending(ReqId, {ok, result_payload(R)}, Data),
-    {continue, established, Data1};
+route_app(#result{request_id = ReqId, details = Details} = R, Data) ->
+    case maps:get(progress, Details, false) of
+        true ->
+            %% A progressive RESULT does not settle the pending CALL.
+            {continue, established,
+                notify_progress(ReqId, result_payload(R), Data)};
+        false ->
+            Data1 = resolve_pending(ReqId, {ok, result_payload(R)}, Data),
+            {continue, established, Data1}
+    end;
 route_app(#error{request_type = ?CALL, request_id = ReqId} = E, Data) ->
     Data1 = resolve_pending(ReqId, {error, error_payload(E)}, Data),
     {continue, established, Data1};
@@ -1117,6 +1173,54 @@ resolve_pending(ReqId, Reply, #data{pending = Pending} = Data) ->
             Data
     end.
 
+%% @private A progressive RESULT for a pending CALL: deliver a
+%% `{progress, Payload}` notification to the async owner and re-arm the
+%% entry's timer — per the WAMP spec a progressive call's timeout is the
+%% limit between results, so each progressive result restarts it (capped
+%% by the `_deadline` option when given); the final RESULT/ERROR settles
+%% the entry. Sync calls never request progressive results (call/5
+%% rejects the option), so a progressive RESULT for a sync or unmarked
+%% entry means the router sent progress we did not ask for: drop it
+%% rather than surface an unexpected reply shape.
+notify_progress(ReqId, Payload, #data{pending = Pending} = Data) ->
+    case maps:find(ReqId, Pending) of
+        {ok,
+            #{
+                from := {async, Pid, Token},
+                meta := #{receive_progress := true},
+                timer := TRef
+            } = Entry} ->
+            Pid ! {bondy_connect, Token, {progress, Payload}},
+            _ = cancel_timer(TRef),
+            Entry1 = Entry#{timer := restart_req_timer(ReqId, Entry)},
+            Data#data{pending = maps:put(ReqId, Entry1, Pending)};
+        {ok, _} ->
+            ?LOG_DEBUG(#{
+                description =>
+                    "Ignoring progressive RESULT for a call that did not "
+                    "request progressive results.",
+                request_id => ReqId
+            }),
+            Data;
+        error ->
+            Data
+    end.
+
+%% @private Re-arm a progressive entry's inactivity timer: the per-call
+%% timeout, capped so it never fires later than the call's absolute
+%% deadline (when one was given).
+restart_req_timer(ReqId, #{meta := Meta}) ->
+    Timeout = maps:get(timeout, Meta, ?DEFAULT_CALL_TIMEOUT),
+    After =
+        case maps:get(deadline, Meta, infinity) of
+            infinity ->
+                Timeout;
+            Deadline ->
+                Remaining = Deadline - erlang:monotonic_time(millisecond),
+                max(0, min(Timeout, Remaining))
+        end,
+    erlang:start_timer(After, self(), {req_timeout, ReqId}).
+
 %% @private A per-request timeout fired before its ack/result arrived.
 handle_req_timeout(ReqId, TRef, #data{pending = Pending} = Data) ->
     case maps:find(ReqId, Pending) of
@@ -1459,10 +1563,21 @@ resolve_subscription(Uri, Data) when is_binary(Uri) ->
 call_msg(Uri, Args, KWArgs, Opts) ->
     %% Advanced-profile caller options passed through to the dealer:
     %% `timeout`/`disclose_me` (caller_identification), `runmode`/`rkey`
-    %% (sharded/partitioned routing) and `retries` (call_retries).
-    %% `receive_progress` is accepted but progressive results are deferred.
+    %% (sharded/partitioned routing), `retries` (call_retries),
+    %% `receive_progress` (progressive_call_results, call_async only) and
+    %% `_deadline` (Bondy extension: absolute cap for a progressive call,
+    %% whose `timeout` is an inter-result inactivity window).
     WireOpts = maps:with(
-        [timeout, disclose_me, receive_progress, runmode, rkey, retries], Opts
+        [
+            timeout,
+            disclose_me,
+            receive_progress,
+            runmode,
+            rkey,
+            retries,
+            '_deadline'
+        ],
+        Opts
     ),
     %% request id is filled in by do_request/set_request_id.
     bondy_wamp_message:call(1, WireOpts, Uri, Args, KWArgs).
@@ -1474,6 +1589,16 @@ set_request_id(#call{} = M, ReqId) ->
 %% @private
 call_timeout(Opts) ->
     maps:get(timeout, Opts, ?DEFAULT_CALL_TIMEOUT).
+
+%% @private Absolute (monotonic) deadline from the `_deadline` option, or
+%% `infinity`.
+call_deadline(Opts) ->
+    case maps:get('_deadline', Opts, undefined) of
+        D when is_integer(D) andalso D > 0 ->
+            erlang:monotonic_time(millisecond) + D;
+        _ ->
+            infinity
+    end.
 
 %% @private
 send_msg(Msg, #data{transport_mod = Mod, transport = T}) ->
@@ -1511,8 +1636,12 @@ undefined_to(undefined, Default) -> Default;
 undefined_to(Value, _Default) -> Value.
 
 %% @private
-result_payload(#result{args = Args, kwargs = KWArgs}) ->
-    #{args => undefined_to(Args, []), kwargs => undefined_to(KWArgs, #{})}.
+result_payload(#result{details = Details, args = Args, kwargs = KWArgs}) ->
+    #{
+        args => undefined_to(Args, []),
+        kwargs => undefined_to(KWArgs, #{}),
+        details => undefined_to(Details, #{})
+    }.
 
 %% @private
 error_payload(#error{error_uri = Uri, args = Args, kwargs = KWArgs}) ->

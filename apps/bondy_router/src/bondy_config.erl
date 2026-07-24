@@ -37,7 +37,12 @@ An implementation of the `app_config` behaviour.
         %% plus one retry). Consulted by the dealer's bounded
         %% pre-invocation retry; retries never extend the call timeout and
         %% never occur once an invocation may have been delivered.
-        '_routing_max_candidates'
+        '_routing_max_candidates',
+        %% Absolute time budget for the whole call in milliseconds. For a
+        %% progressive call the WAMP `timeout` is an inter-result
+        %% inactivity window that each progressive result restarts; the
+        %% deadline caps the total duration regardless of progress.
+        '_deadline'
     ]},
     {cancel, [
         '_routing_key'

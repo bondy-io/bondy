@@ -891,26 +891,44 @@ stop_nodes(Nodes) ->
 %% @private
 start_disterl() ->
     {ok, Hostname} = inet:gethostname(),
-    Nodename = list_to_atom("runner@" ++ Hostname),
-    %% OTP 24+ `net_kernel:start/2' options-map API (the legacy
-    %% `net_kernel:start([Name, shortnames])' list form is deprecated and behaves
-    %% inconsistently on OTP 28). Always return `ok' — the epmd-retry branch must
-    %% not leak `{ok, Pid}'.
+    %% Preferred stable name first; when another CT run on this host
+    %% already holds it (an epmd name clash — e.g. two repos running CT
+    %% concurrently) fall back to a per-OS-pid unique name. Nothing
+    %% depends on the literal name: peers only reuse the host part (see
+    %% controller_host/0).
+    Names = [
+        list_to_atom("runner@" ++ Hostname),
+        list_to_atom("runner_" ++ os:getpid() ++ "@" ++ Hostname)
+    ],
+    start_disterl(Names).
+
+%% @private
+%% OTP 24+ `net_kernel:start/2' options-map API (the legacy
+%% `net_kernel:start([Name, shortnames])' list form is deprecated and behaves
+%% inconsistently on OTP 28). Always return `ok' — the retry branches must
+%% not leak `{ok, Pid}'.
+start_disterl([Nodename | Rest]) ->
     Opts = #{name_domain => shortnames},
     case net_kernel:start(Nodename, Opts) of
         {ok, _} ->
             ok;
         {error, {already_started, _}} ->
             ok;
-        {error, {
-            {shutdown, {
-                failed_to_start_child, net_kernel, {'EXIT', nodistribution}
-            }},
-            _
-        }} ->
-            os:cmd(os:find_executable("epmd") ++ " -daemon"),
-            {ok, _} = net_kernel:start(Nodename, Opts),
-            ok
+        {error, Reason} when Rest =/= [] ->
+            %% A missing epmd daemon and a name clash both surface as
+            %% nodistribution: make sure epmd is up, then try the next
+            %% candidate name.
+            _ = os:cmd(os:find_executable("epmd") ++ " -daemon"),
+            logger:info(#{
+                description =>
+                    "Failed to start distribution; retrying with the next "
+                    "candidate node name.",
+                nodename => Nodename,
+                reason => Reason
+            }),
+            start_disterl(Rest);
+        {error, _} = Error ->
+            error({nodistribution, Error})
     end.
 
 %% @private

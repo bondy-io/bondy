@@ -3758,10 +3758,11 @@ end}.
 ]}.
 {mapping, "wamp.dealer.progressive_call_results",
 "bondy_router.wamp.dealer.features.progressive_call_results", [
-  {default, false},
-    %% Disabled until implemented
-  {datatype, {flag, off, off}},
-  hidden
+  %% Default off: in a mixed-version cluster a node without support would
+  %% settle a call on the first progressive result. Enable only once every
+  %% node in the cluster supports it.
+  {default, off},
+  {datatype, flag}
 ]}.
 {mapping, "wamp.dealer.progressive_calls",
 "bondy_router.wamp.dealer.features.progressive_calls", [

@@ -20,6 +20,9 @@ Result protocol back to the connection (`Conn`):
 
 - invocation → `{handler_done, ReqId, Reply}` where `Reply` is
   `{yield, Args, KWArgs}` or `{error, Uri, Args, KWArgs}`.
+- invocation progress → `{handler_progress, ReqId, Args, KWArgs}`, emitted
+  while the handler runs via the `progress` fun injected into the details
+  when the caller requested progressive results.
 - event → `{event_done, SubId, self()}` (always sent, even on handler error, so
   the connection's per-subscription FIFO can advance).
 """.
@@ -46,7 +49,8 @@ start_link(Job) when is_map(Job) ->
 -doc false.
 -spec run(map()) -> ok.
 run(#{kind := invocation, conn := Conn, req_id := ReqId} = Job) ->
-    #{handler := H, args := Args, kwargs := KWArgs, details := Details} = Job,
+    #{handler := H, args := Args, kwargs := KWArgs, details := Details0} = Job,
+    Details = maybe_progress_fun(Details0, Conn, ReqId),
     Reply = invoke_call(H, Args, KWArgs, Details),
     Conn ! {handler_done, ReqId, Reply},
     ok;
@@ -59,6 +63,24 @@ run(#{kind := event, conn := Conn, sub_id := SubId} = Job) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% When the caller asked for progressive results
+%% (`INVOCATION.Details.receive_progress`), hand the user handler a
+%% `progress` fun alongside the WAMP details: calling it emits a
+%% progressive YIELD through the connection while the handler keeps
+%% running; the handler's return value remains the final result. Without
+%% the flag the details are passed through untouched, so a handler must
+%% check for the fun before using it.
+maybe_progress_fun(#{receive_progress := true} = Details, Conn, ReqId) ->
+    Details#{
+        progress => fun(Args, KWArgs) ->
+            Conn ! {handler_progress, ReqId, Args, KWArgs},
+            ok
+        end
+    };
+maybe_progress_fun(Details, _, _) ->
+    Details.
 
 %% @private
 invoke_call(H, Args, KWArgs, Details) ->

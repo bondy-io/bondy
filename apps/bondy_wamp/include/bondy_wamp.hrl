@@ -1538,7 +1538,15 @@ end).
 
 -type wamp_yield() :: #yield{}.
 
--define(YIELD_OPTIONS_SPEC, ?PPT_DETAILS_SPEC).
+-define(YIELD_OPTIONS_SPEC, ?PPT_DETAILS_SPEC#{
+    %% Set by the callee to mark a progressive result. Carried into
+    %% RESULT.Details.progress by the dealer.
+    progress => #{
+        alias => <<"progress">>,
+        required => false,
+        datatype => boolean
+    }
+}).
 
 %% =============================================================================
 %% URIs

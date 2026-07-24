@@ -137,8 +137,11 @@ call(Conn, Uri, Args, KWArgs) ->
 
 -doc """
 Call a procedure. `Opts` may carry `timeout` (ms). Returns
-`{ok, #{args := list(), kwargs := map()}}` or
+`{ok, #{args := list(), kwargs := map(), details := map()}}` or
 `{error, #{uri := binary(), ...}}` / `{error, Reason}`.
+
+`receive_progress` is rejected here — progressive call results require
+`call_async/5`.
 """.
 -spec call(conn(), binary(), Args :: list(), KWArgs :: map(), Opts :: map()) ->
     {ok, map()} | {error, term()}.
@@ -162,6 +165,11 @@ call_async(Conn, Uri, Args, KWArgs) ->
 -doc """
 Issue a call without blocking. Returns `{ok, Token}`; the reply is later sent to
 the calling process as `{bondy_connect, Token, {ok, Result} | {error, Reason}}`.
+
+With `Opts` carrying `receive_progress => true` (and the router supporting
+progressive call results) each progressive result arrives first as
+`{bondy_connect, Token, {progress, Result}}`; the `{ok, _}`/`{error, _}`
+delivery remains the single terminal message.
 """.
 -spec call_async(conn(), binary(), list(), map(), map()) ->
     {ok, reference()} | {error, term()}.

@@ -75,3 +75,49 @@ call_test(_) ->
         },
         bondy_wamp_message:call(1, Opts1, Uri, [<<>>])
     ).
+
+yield_progress_test(_) ->
+    %% The progress option is part of the YIELD options vocabulary and
+    %% survives validation (both as atom and via its binary alias).
+    ?assertEqual(
+        #yield{
+            request_id = 1,
+            options = #{progress => true},
+            args = [<<"chunk">>],
+            kwargs = undefined
+        },
+        bondy_wamp_message:yield(1, #{progress => true}, [<<"chunk">>])
+    ),
+
+    ?assertEqual(
+        #yield{
+            request_id = 1,
+            options = #{progress => true},
+            args = undefined,
+            kwargs = undefined
+        },
+        bondy_wamp_message:yield(1, #{<<"progress">> => true})
+    ),
+
+    %% Unknown options are still stripped.
+    ?assertEqual(
+        #yield{
+            request_id = 1,
+            options = #{},
+            args = undefined,
+            kwargs = undefined
+        },
+        bondy_wamp_message:yield(1, #{frobnicate => true})
+    ).
+
+result_from_progress_test(_) ->
+    %% result_from/3 builds RESULT.Details from the YIELD options, so a
+    %% progressive YIELD produces a RESULT with Details.progress = true.
+    Yield = bondy_wamp_message:yield(
+        99, #{progress => true}, [<<"chunk">>]
+    ),
+    Result = bondy_wamp_message:result_from(Yield, 1, Yield#yield.options),
+
+    ?assertEqual(1, Result#result.request_id),
+    ?assertEqual(true, maps:get(progress, Result#result.details)),
+    ?assertEqual([<<"chunk">>], Result#result.args).

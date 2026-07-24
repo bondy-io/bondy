@@ -32,13 +32,17 @@ back to the origin `wamp_call()` and Caller
 }).
 
 %% Wildcards are allowed only when key is used as pattern.
-%% The order of the key fields was defined based on the most common search
-%% pattern which is the one performed during a YIELD | ERROR which contains
-%% grounded values for callee_session_id and invocation_id (realm_uri is always
-%% grounded).
-%% We opted to have a single entry for all use cases but this might change in
-%% the future. As a result all other searches (e.g. CANCEL, INTERRUPT and
-%% specially the eviction search) are suboptimal.
+%% All lookups are ets:select/3 over the (realm_uri, type)-bound prefix of
+%% this ordered_set: the most common patterns (YIELD | ERROR ground
+%% callee_session_id and invocation_id; CANCEL grounds caller_session_id
+%% and call_id) leave earlier key fields as wildcards, so every match is a
+%% scan of that prefix region, bounded by the realm partition's in-flight
+%% promises of that type. Progressive call results repeat the YIELD lookup
+%% once per progressive result, so under heavy streaming with many
+%% in-flight promises this is the first place to revisit (e.g. a
+%% callee-first key or a secondary index).
+%% We opted to have a single entry for all use cases but this might change
+%% in the future.
 -record(bondy_rpc_promise_key, {
     realm_uri :: uri(),
     type :: call | invocation,
@@ -59,10 +63,17 @@ back to the origin `wamp_call()` and Caller
 -type opts() :: #{
     call_id => id(),
     procedure_uri => uri(),
+    %% For call promises: the resolved remote/bridged callee target, so a
+    %% CANCEL (user-issued or caller-death) can be routed to the callee's
+    %% node.
+    callee => bondy_ref:t(),
     via =>
         bondy_ref:relay()
         | bondy_ref:bridge_relay(),
-    timeout => timeout()
+    timeout => timeout(),
+    %% Absolute expiry cap in milliseconds (system time). Progressive
+    %% results slide the expiry (see refresh/1) but never past this.
+    deadline => pos_integer() | infinity
 }.
 
 -export_type([t/0]).
@@ -91,6 +102,7 @@ back to the origin `wamp_call()` and Caller
 -export([new_invocation/6]).
 -export([procedure_uri/1]).
 -export([realm_uri/1]).
+-export([refresh/1]).
 -export([take/1]).
 -export([take/2]).
 -export([timeout/1]).
@@ -116,6 +128,11 @@ new_call(RealmUri, Caller, CallId, Opts) ->
     %% We validate the arguments
     bondy_ref:is_type(Caller) orelse
         error({badarg, {caller, Caller}}),
+
+    Callee = maps:get(callee, Opts, undefined),
+    Callee == undefined orelse
+        bondy_ref:is_type(Callee) orelse
+        error({badarg, {callee, Callee}}),
 
     Via =
         case maps:get(via, Opts, undefined) of
@@ -147,7 +164,10 @@ new_call(RealmUri, Caller, CallId, Opts) ->
     CallerSessionId = bondy_ref:session_id(Caller),
 
     Now = erlang:system_time(millisecond),
-    Expiry = calc_expiry(TTL, Now),
+    %% min/2 works because integer() < infinity in term order
+    Expiry = min(
+        calc_expiry(TTL, Now), maps:get(deadline, Opts, infinity)
+    ),
 
     Key = #bondy_rpc_promise_key{
         realm_uri = RealmUri,
@@ -158,13 +178,14 @@ new_call(RealmUri, Caller, CallId, Opts) ->
     },
 
     %% We create the promise
-    Keys = [via, procedure_uri, timeout],
+    Keys = [callee, via, procedure_uri, timeout],
     Info = maps:without(Keys, Opts),
 
     #bondy_rpc_promise{
         key = Key,
         procedure_uri = Uri,
         caller = Caller,
+        callee = Callee,
         via = Via,
         info = Info,
         timeout = TTL,
@@ -224,7 +245,10 @@ new_invocation(RealmUri, Caller, CallId, Callee, InvocationId, Opts) when
     CallerSessionId = bondy_ref:session_id(Caller),
 
     Now = erlang:system_time(millisecond),
-    Expiry = calc_expiry(TTL, Now),
+    %% min/2 works because integer() < infinity in term order
+    Expiry = min(
+        calc_expiry(TTL, Now), maps:get(deadline, Opts, infinity)
+    ),
 
     Key = #bondy_rpc_promise_key{
         realm_uri = RealmUri,
@@ -537,6 +561,46 @@ find(#bondy_rpc_promise_key{} = Key) ->
     do_find(Key, active).
 
 -doc """
+Slides the promise's expiry forward to `now + timeout`, capped by the
+promise's absolute deadline (the `deadline` option given at creation, if
+any).
+
+Used for progressive call results: per the WAMP spec, for a progressive
+call the timeout is the limit between the call and the first result and
+between results thereafter, so each progressive result restarts it.
+
+A promise without a timeout is left untouched. A promise that was settled
+concurrently is a no-op (`error`).
+""".
+-spec refresh(t()) -> ok | error.
+
+refresh(#bondy_rpc_promise{key = Key, timeout = TTL} = P0) when
+    is_integer(TTL) andalso TTL > 0
+->
+    Now = erlang:system_time(millisecond),
+    Deadline = maps:get(deadline, P0#bondy_rpc_promise.info, infinity),
+    %% min/2 works because integer() < infinity in term order
+    Expiry = min(TTL + Now, Deadline),
+    Tab = ?TAB(Key#bondy_rpc_promise_key.realm_uri),
+
+    %% The expiry is part of the key, so a refresh is a take + insert of
+    %% the updated record. Not atomic; the only concurrent writer for a
+    %% given promise is its settlement, in which case we must not
+    %% resurrect it.
+    case ets:take(Tab, Key) of
+        [#bondy_rpc_promise{} = P1] ->
+            P = P1#bondy_rpc_promise{
+                key = Key#bondy_rpc_promise_key{expiry = Expiry}
+            },
+            true = ets:insert(Tab, P),
+            ok;
+        [] ->
+            error
+    end;
+refresh(#bondy_rpc_promise{}) ->
+    ok.
+
+-doc """
 Removes all expired items.
 If the option `on_evict` was set, the bound function will be called passing
 the expired item as argument.
@@ -572,20 +636,28 @@ flush(RealmUri, Ref) ->
 -doc """
 Removes all pending promises from the queue for the reference.
 
-When `Ref` is a concrete `bondy_ref:t()` and `Opts` contains the key
-`on_callee_flush`, the bound function is invoked once per `invocation`
-promise being removed (i.e. promises where `Ref` is the callee) before the
-promise is deleted. This is used by the dealer to fast-fail in-flight
-calls when the callee session dies, avoiding waits up to the call timeout.
+When `Ref` is a concrete `bondy_ref:t()`, two optional callbacks in `Opts`
+are invoked once per matching promise before it is deleted:
 
-The callback is not invoked for `call` promises (where `Ref` is the caller)
-as there is no longer a caller to notify. It is also not invoked when
-`Ref` is `_` (bulk flush).
+- `on_callee_flush` — invoked per `invocation` promise where `Ref` is the
+callee. Used by the dealer to fast-fail in-flight calls when the callee
+session dies, avoiding waits up to the call timeout.
+- `on_caller_flush` — invoked per promise where `Ref` is the caller: for
+`invocation` promises the callee is local; for `call` promises the callee
+is remote or bridged (its ref is in the promise when known). Used by the
+dealer to INTERRUPT callees still working on behalf of a caller session
+that died (e.g. a callee producing progressive results that no one will
+consume).
+
+No callback is invoked when `Ref` is `_` (bulk flush).
 """.
 -spec flush(
     RealmUri :: uri(),
     bondy_ref:t() | '_',
-    Opts :: #{on_callee_flush => fun((t()) -> ok)}
+    Opts :: #{
+        on_callee_flush => fun((t()) -> ok),
+        on_caller_flush => fun((t()) -> ok)
+    }
 ) -> ok.
 
 flush(RealmUri, '_', _Opts) ->
@@ -604,16 +676,31 @@ flush(RealmUri, '_', _Opts) ->
 flush(RealmUri, Ref, Opts) ->
     Tab = ?TAB(RealmUri),
     OnCalleeFlush = maps:get(on_callee_flush, Opts, undefined),
+    OnCallerFlush = maps:get(on_caller_flush, Opts, undefined),
 
     is_function(OnCalleeFlush, 1) orelse
         undefined == OnCalleeFlush orelse
         error({badarg, {on_callee_flush, OnCalleeFlush}}),
 
-    %% As caller — no notify (caller is already gone)
-    _ = do_flush(Tab, call_key_pattern(RealmUri, Ref, '_')),
+    is_function(OnCallerFlush, 1) orelse
+        undefined == OnCallerFlush orelse
+        error({badarg, {on_caller_flush, OnCallerFlush}}),
+
+    %% As caller — call promises (remote/bridged callee) and in-flight
+    %% invocation promises (local callee): optionally notify so the dealer
+    %% can INTERRUPT the callee. The caller itself is gone — there is
+    %% nothing to send it.
+    _ = do_flush_with_callback(
+        Tab, call_key_pattern(RealmUri, Ref, '_'), OnCallerFlush
+    ),
+    _ = do_flush_with_callback(
+        Tab,
+        invocation_key_pattern(RealmUri, Ref, '_', '_', '_'),
+        OnCallerFlush
+    ),
 
     %% As callee — optionally invoke callback per promise before deletion
-    _ = do_flush_as_callee(
+    _ = do_flush_with_callback(
         Tab,
         invocation_key_pattern(RealmUri, '_', '_', Ref, '_'),
         OnCalleeFlush
@@ -643,17 +730,17 @@ do_flush(Tab, Key) ->
     ets:select_delete(Tab, MS).
 
 %% @private
-do_flush_as_callee(Tab, Key, undefined) ->
+do_flush_with_callback(Tab, Key, undefined) ->
     do_flush(Tab, Key);
-do_flush_as_callee(Tab, Key, OnFlush) ->
+do_flush_with_callback(Tab, Key, OnFlush) ->
     [{MatchPattern, _, _}] = match_spec(Key),
     MS = [{MatchPattern, [], ['$_']}],
-    do_flush_as_callee_loop(Tab, OnFlush, ets:select(Tab, MS, 100)).
+    do_flush_with_callback_loop(Tab, OnFlush, ets:select(Tab, MS, 100)).
 
 %% @private
-do_flush_as_callee_loop(_, _, '$end_of_table') ->
+do_flush_with_callback_loop(_, _, '$end_of_table') ->
     ok;
-do_flush_as_callee_loop(Tab, OnFlush, {Promises, Cont}) ->
+do_flush_with_callback_loop(Tab, OnFlush, {Promises, Cont}) ->
     _ = [
         begin
             %% This is an ordered_set so take always returns
@@ -669,7 +756,7 @@ do_flush_as_callee_loop(Tab, OnFlush, {Promises, Cont}) ->
         end
      || #bondy_rpc_promise{key = K} <- Promises
     ],
-    do_flush_as_callee_loop(Tab, OnFlush, ets:select(Cont)).
+    do_flush_with_callback_loop(Tab, OnFlush, ets:select(Cont)).
 
 %% @private
 do_evict_expired(Tab, OnEvict) ->
