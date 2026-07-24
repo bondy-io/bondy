@@ -1137,7 +1137,12 @@ collect_wal(CB) ->
         {bondy_oplog_wal_waiters, "Callers blocked awaiting WAL durability.",
             waiter_count},
         {bondy_oplog_wal_head_lag_milliseconds,
-            "Age of the newest unfsynced append.", head_lag_ms}
+            "Age of the newest unfsynced append.", head_lag_ms},
+        {bondy_oplog_wal_consumer_lag_bytes,
+            "Bytes appended but not yet committed by the log's consumer "
+            "(the applier) - the drain backlog. A converged-looking node "
+            "with a growing lag has a wedged or starved drain.",
+            consumer_lag_bytes}
     ],
     lists:foreach(
         fun({Name, Help, Key}) ->

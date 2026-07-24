@@ -341,6 +341,14 @@ tables() ->
         %% random realm-unique `entry_id`; the `by_session` index
         %% (registry_indexes/0) serves session-close cleanup (`remove_all`) as a
         %% bounded reverse lookup instead of a realm scan.
+        %%
+        %% Under RIB `write` mode (`registry.rib`) these two tables stay
+        %% provisioned but hold nothing: the registry store keeps full entries
+        %% in partition-local ETS (they never enter replication) and the RIB
+        %% summary tables below carry the replicated routing state. They remain
+        %% declared as the rollback net — flipping the mode back re-populates
+        %% them as sessions re-register — and as the landing zone for peers
+        %% that still replicate full entries in a mode-mixed cluster.
         #{
             name => ?BONDY_DB_REGISTRATION_TAB,
             db => registry,
@@ -356,6 +364,32 @@ tables() ->
             fold => lww,
             publish => true,
             indexes => registry_indexes()
+        },
+
+        %% registry RIB — the replicated routing summary cells: one cell per
+        %% (Realm, MatchPolicy, Uri, Node) carrying `#{invoke, count,
+        %% earliest, latest}` (registrations) or `#{count}` (subscriptions).
+        %% Only the node named in the key ever writes the cell — single-writer
+        %% by construction, so `lww` is exact. `publish => true` wires the
+        %% merge-side hook: `bondy_aae_reactor` delegates merged peer cells to
+        %% `bondy_registry_rib`, which maintains the local stub view routing
+        %% consumes under RIB `read`/`write` mode. Under `write` mode these
+        %% cells are the ONLY replicated registry state — the full-entry
+        %% tables above hold nothing (entries stay in partition-local ETS).
+        %% Maintained by `bondy_registry_rib`.
+        #{
+            name => ?BONDY_DB_REGISTRATION_RIB_TAB,
+            db => registry,
+            durability => ephemeral,
+            fold => lww,
+            publish => true
+        },
+        #{
+            name => ?BONDY_DB_SUBSCRIPTION_RIB_TAB,
+            db => registry,
+            durability => ephemeral,
+            fold => lww,
+            publish => true
         }
     ].
 

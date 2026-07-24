@@ -622,6 +622,12 @@ init([]) ->
     %% pull this node's pre-restart entries back.
     _ = erlang:send_after(self_clean_boot_ms(), self(), self_clean),
 
+    %% Periodic RIB consistency sweep: compares the replicated routing
+    %% summaries against the ground truth per realm
+    %% (`bondy_registry_rib:check/1`) and logs any divergence — the
+    %% production form of the gate the test suites assert on.
+    ok = schedule_rib_check(),
+
     State = #state{
         start_ts = erlang:system_time(millisecond)
     },
@@ -653,16 +659,23 @@ handle_info({nodeup, Node} = Event, State) ->
     %% the owner self-cleanup sweep on its own side.
     ?LOG_DEBUG(#{event => Event}),
     State1 = cancel_evict(Node, State),
+    T0 = erlang:monotonic_time(millisecond),
     ok = resume(Node),
+    ok = observe_presence(unmask, T0),
+    ok = gauge_suspended(State1),
     {noreply, State1};
 handle_info({nodedown, Node} = Event, State) ->
     %% A peer disconnected (presence SUSPEND, §9.6): mask its entries for routing
     %% immediately and arm an EVICT timer to GC them if it never returns.
     ?LOG_DEBUG(#{event => Event}),
+    T0 = erlang:monotonic_time(millisecond),
     ok = suspend(Node),
+    ok = observe_presence(mask, T0),
     Tref = erlang:send_after(evict_grace_ms(), self(), {evict, Node}),
     Timers = (State#state.timers)#{Node => Tref},
-    {noreply, State#state{timers = Timers}};
+    State1 = State#state{timers = Timers},
+    ok = gauge_suspended(State1),
+    {noreply, State1};
 handle_info({evict, Node} = Event, State) ->
     %% The grace period elapsed (presence EVICT, §9.6). If the node is still gone
     %% and this node is its rendezvous-hashed cleanup peer, issue a replicated
@@ -670,7 +683,9 @@ handle_info({evict, Node} = Event, State) ->
     ?LOG_DEBUG(#{event => Event}),
     Timers = maps:remove(Node, State#state.timers),
     ok = maybe_evict(Node),
-    {noreply, State#state{timers = Timers}};
+    State1 = State#state{timers = Timers},
+    ok = gauge_suspended(State1),
+    {noreply, State1};
 handle_info(self_clean = Event, State) ->
     %% Owner self-cleanup invariant (§9.6.1). Defensive: a sweep walks the realm
     %% list and the registry projection, none of which may take the registry
@@ -690,6 +705,25 @@ handle_info(self_clean = Event, State) ->
                 0
         end,
     _ = erlang:send_after(self_clean_next_ms(Cleaned), self(), self_clean),
+    {noreply, State};
+handle_info(rib_check = Event, State) ->
+    %% Periodic RIB consistency sweep. Defensive: the check scans the
+    %% registry projections realm by realm and must never take the registry
+    %% server down.
+    ?LOG_DEBUG(#{event => Event}),
+    _ =
+        try
+            rib_check()
+        catch
+            Class:Reason:Stacktrace ->
+                ?LOG_WARNING(#{
+                    description => "Registry RIB consistency sweep failed",
+                    class => Class,
+                    reason => Reason,
+                    stacktrace => Stacktrace
+                })
+        end,
+    ok = schedule_rib_check(),
     {noreply, State};
 handle_info(Info, State) ->
     ?LOG_DEBUG(#{
@@ -1155,9 +1189,9 @@ rebuild_indices(Type, Now, Node) ->
             %% Registry not provisioned (e.g. the catalogue is idle) — nothing
             %% to rebuild.
             ok;
-        Table ->
+        _Table ->
             _ = [
-                rebuild_realm_indices(Table, RealmUri, Now, Node)
+                rebuild_realm_indices(Type, RealmUri, Now, Node)
              || Realm <- bondy_realm:list(),
                 (RealmUri = bondy_realm:uri(Realm)) =/= undefined
             ],
@@ -1165,17 +1199,24 @@ rebuild_indices(Type, Now, Node) ->
     end.
 
 %% @private
-rebuild_realm_indices(Table, RealmUri, Now, Node) ->
-    case bondy_db:list(Table, RealmUri) of
-        {ok, Rows} ->
-            Partition = pick_partition(RealmUri),
-            _ = [
-                maybe_restore_index(Partition, Entry, Now, Node)
-             || {_Key, #{entry := Entry}, _Hlc} <- Rows
-            ],
+%% Enumeration goes through the store so it reads whichever entry backend
+%% the store runs on (bondy_db, or partition-local ETS under RIB `write`
+%% mode).
+rebuild_realm_indices(Type, RealmUri, Now, Node) ->
+    Partition = pick_partition(RealmUri),
+    case bondy_registry_partition:store(Partition) of
+        undefined ->
             ok;
-        {error, _} ->
-            ok
+        Store ->
+            bondy_registry_store:foreach(
+                Store,
+                Type,
+                RealmUri,
+                fun({_Key, Entry}) ->
+                    maybe_restore_index(Partition, Entry, Now, Node)
+                end,
+                []
+            )
     end.
 
 %% @private
@@ -1424,6 +1465,91 @@ is_stale_session(Entry) ->
         SessionId ->
             bondy_session:lookup(SessionId) =:= {error, not_found}
     end.
+
+%% @private
+%% Runs the RIB consistency check for every realm, logs each divergent one
+%% (realm, divergence count and a bounded sample) and gauges the node-wide
+%% total. Skipped entirely when the RIB is off.
+rib_check() ->
+    case bondy_registry_rib:mode() of
+        off ->
+            ok;
+        _ ->
+            Total = lists:foldl(
+                fun(Realm, Acc) ->
+                    RealmUri = bondy_realm:uri(Realm),
+                    case bondy_registry_rib:check(RealmUri) of
+                        [] ->
+                            Acc;
+                        Divergences ->
+                            ?LOG_WARNING(#{
+                                description =>
+                                    "Registry RIB summaries diverge from "
+                                    "the ground truth for realm",
+                                realm_uri => RealmUri,
+                                count => length(Divergences),
+                                sample => lists:sublist(Divergences, 3)
+                            }),
+                            Acc + length(Divergences)
+                    end
+                end,
+                0,
+                bondy_realm:list()
+            ),
+            registry_metric(gauge, #{
+                name => bondy_registry_rib_divergences, value => Total
+            })
+    end.
+
+%% @private
+%% The number of currently SUSPENDed peers is exactly the number of armed
+%% EVICT timers, so the gauge is set absolutely from the timers map after
+%% every presence transition.
+gauge_suspended(#state{timers = Timers}) ->
+    registry_metric(gauge, #{
+        name => bondy_registry_presence_suspended_nodes,
+        value => map_size(Timers)
+    }).
+
+%% @private
+observe_presence(Op, T0) ->
+    registry_metric(histogram, #{
+        name => bondy_registry_presence_mask_duration_ms,
+        label => #{op => Op},
+        value => erlang:monotonic_time(millisecond) - T0
+    }).
+
+%% @private
+%% Record a metric without ever raising — nothing here may take the
+%% registry server down.
+registry_metric(Type, Spec) ->
+    try
+        case Type of
+            gauge -> bondy_metrics:gauge(Spec);
+            histogram -> bondy_metrics:histogram(Spec)
+        end
+    catch
+        _:_ ->
+            ok
+    end.
+
+%% @private
+%% Arms the next RIB consistency sweep. `registry.rib.check_interval`
+%% (default 5 min); `0` disables the sweep.
+schedule_rib_check() ->
+    case rib_check_interval_ms() of
+        0 ->
+            ok;
+        Interval when is_integer(Interval), Interval > 0 ->
+            _ = erlang:send_after(Interval, self(), rib_check),
+            ok
+    end.
+
+%% @private
+rib_check_interval_ms() ->
+    application:get_env(
+        bondy_router, registry_rib_check_interval, timer:minutes(5)
+    ).
 
 %% @private
 %% Grace before a departed node's entries are EVICTed (default 24h). A node that

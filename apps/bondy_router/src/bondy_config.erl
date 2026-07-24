@@ -31,7 +31,13 @@ An implementation of the `app_config` behaviour.
 
 -define(WAMP_EXT_OPTIONS, [
     {call, [
-        '_routing_key'
+        '_routing_key',
+        %% Total distinct cluster nodes a CALL may be routed to before a
+        %% routing failure is final (default 2 — the original candidate
+        %% plus one retry). Consulted by the dealer's bounded
+        %% pre-invocation retry; retries never extend the call timeout and
+        %% never occur once an invocation may have been delivered.
+        '_routing_max_candidates'
     ]},
     {cancel, [
         '_routing_key'

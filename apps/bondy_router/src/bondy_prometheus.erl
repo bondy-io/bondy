@@ -135,6 +135,7 @@ setup() ->
     ok = declare_wamp_metrics(),
     ok = declare_message_families(),
     ok = declare_net_session_families(),
+    ok = declare_rib_families(),
     %% All event-driven metrics are captured inline in the emitting
     %% process (bondy_telemetry) and sunk into bondy_metrics by the
     %% handlers below. Attaching is idempotent.
@@ -274,6 +275,71 @@ declare_message_families() ->
             yield
         ]
     ).
+
+%% @private
+%% Declares the registry RIB routing families, captured wait-free via
+%% `bondy_metrics` at their population sites: the dealer (retry and
+%% owner-side completion), `bondy_registry_rib` (occupancy and damping)
+%% and `bondy_registry` (presence and the divergence sweep).
+declare_rib_families() ->
+    ok = bondy_metrics:declare(#{
+        name => bondy_rpc_rib_retries_total,
+        help => <<
+            "Pre-invocation retries of cluster CALLs after an owner-side "
+            "completion miss, by outcome: node (re-routed to another "
+            "node), local (absorbed by a local registration), exhausted "
+            "(no candidate, budget or time left — the error was final)."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_rpc_rib_completions_total,
+        help => <<
+            "Owner-side completions of node-addressed cluster CALLs, by "
+            "outcome (ok | miss)."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_registry_rib_members,
+        help => <<
+            "Live local registry entries feeding this node's replicated "
+            "routing summaries."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_registry_rib_stub_cells,
+        help => <<
+            "Remote routing summary stubs held by this node, by registry "
+            "type."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_registry_rib_damping_suppressions_total,
+        help => <<
+            "Routing summary updates suppressed by the damping window "
+            "(count/latest-only changes coalesced into a trailing write)."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_registry_rib_divergences,
+        help => <<
+            "Keys where the routing summaries disagree with the ground "
+            "truth, as of the last periodic consistency sweep."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_registry_presence_suspended_nodes,
+        help => <<
+            "Peer nodes currently SUSPENDed (down, within the EVICT "
+            "grace period) whose registry entries are masked."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_registry_presence_mask_duration_ms,
+        help => <<
+            "A histogram of the time to mask (SUSPEND) or unmask "
+            "(RESUME) a peer node's registry entries, by op."
+        >>
+    }).
 
 %% @private
 %% Declares the socket and session families captured wait-free via

@@ -618,6 +618,29 @@ or `bridge_relay` i.e. edge client or server.
 -spec forward(wamp_message(), To :: bondy_ref:t(), Opts :: map()) ->
     ok | no_return().
 
+forward(#call{} = Msg, _Hint, #{rib_completion := true} = Opts0) ->
+    %% A node-addressed forwarded CALL: the caller node routed to this NODE,
+    %% and the entry it selected from its replica travelled only as a hint —
+    %% it may be stale. Re-select among the live LOCAL registrations for the
+    %% procedure and dispatch to the winner; with none, fail fast back to the
+    %% caller, whose call promise matches the ERROR. Local-only selection
+    %% also guarantees a forwarded call is never forwarded again.
+    Opts = maps:remove(rib_completion, Opts0),
+    RealmUri = ?GET_REALM_URI(Opts),
+    ProcUri = Msg#call.procedure_uri,
+
+    case rib_local_callee(RealmUri, ProcUri, Msg, Opts) of
+        {ok, Entry} ->
+            ok = rib_count(bondy_rpc_rib_completions_total, #{outcome => ok}),
+            forward(
+                rib_rebind(Msg, Entry),
+                bondy_registry_entry:ref(Entry),
+                Opts
+            );
+        {error, _} ->
+            ok = rib_count(bondy_rpc_rib_completions_total, #{outcome => miss}),
+            reply_no_eligible_callee(Msg, Opts)
+    end;
 forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
     %% A remote Caller is making a CALL to a local Callee or local bridged
     %% Callee.
@@ -772,7 +795,14 @@ forward(#error{request_type = ?CALL} = M, Caller, Opts) ->
     case bondy_rpc_promise:take(Key, Status) of
         {ok, Promise} ->
             ok = notify_call_latency(Promise),
-            bondy:send(RealmUri, Caller, M, #{});
+            case maybe_rib_retry(M, Promise, RealmUri, Caller) of
+                true ->
+                    %% Re-routed to another candidate node (or completed
+                    %% locally) — the caller keeps waiting on the same call.
+                    ok;
+                false ->
+                    bondy:send(RealmUri, Caller, strip_rib_details(M), #{})
+            end;
         error ->
             %% The promise timed out already and local promise manager evicted
             %% it sending the timeout error message to caller
@@ -1503,25 +1533,23 @@ handle_call(Msg, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
     CallId = Msg#call.request_id,
     RealmUri = bondy_context:realm_uri(Ctxt),
     %% choose/2 expects a match result w/continuations
-    MatchOpts =
-        case
-            bondy_config:get([
-                wamp, dealer, features, pattern_based_registration
-            ])
-        of
-            true ->
-                #{limit => ?MATCH_LIMIT, match => '_'};
-            false ->
-                #{limit => ?MATCH_LIMIT, match => ?EXACT_MATCH}
-        end,
-
     Matches = bondy_registry:find_matches(
-        registration, RealmUri, ProcUri, MatchOpts
+        registration, RealmUri, ProcUri, reg_match_opts()
     ),
 
-    case choose(Matches, Opts) of
+    Chosen =
+        case bondy_registry_rib:stub_routing() of
+            true ->
+                choose_rib(Matches, RealmUri, ProcUri, Opts);
+            false ->
+                choose(Matches, Opts)
+        end,
+
+    case Chosen of
         {ok, Entry} ->
             do_call(CallId, ProcUri, Fun, Opts, Ctxt, Entry);
+        {forward_node, Nodestring} ->
+            rib_forward_call(Msg, CallId, ProcUri, Opts, Ctxt, Nodestring);
         {error, noproc} ->
             %% The matches were all dead (local process dead or remote target
             %% unreachable)
@@ -1594,7 +1622,7 @@ do_call(CallId, ProcUri, UserFun, Opts, Ctxt0, Entry) ->
                 timeout => Timeout
             },
 
-            Promise =
+            {Promise, SendOpts1} =
                 case Msg of
                     #call{} ->
                         %% The callee is on another node or bridged
@@ -1604,29 +1632,31 @@ do_call(CallId, ProcUri, UserFun, Opts, Ctxt0, Entry) ->
                         %% ERROR.
                         %% The remote node will store an invocation
                         %% promise.
-                        bondy_rpc_promise:new_call(
+                        P = bondy_rpc_promise:new_call(
                             RealmUri,
                             Caller,
                             CallId,
                             PromiseOpts
-                        );
+                        ),
+                        {P, maybe_rib_completion(SendOpts, Ref)};
                     #invocation{request_id = InvocationId} ->
                         %% The callee is local.
                         %% We will store an invocation promise
                         %% to match the incoming YIELD | ERROR.
-                        bondy_rpc_promise:new_invocation(
+                        P = bondy_rpc_promise:new_invocation(
                             RealmUri,
                             Caller,
                             CallId,
                             Callee,
                             InvocationId,
                             PromiseOpts
-                        )
+                        ),
+                        {P, SendOpts}
                 end,
 
             ok = bondy_rpc_promise:add(Promise),
 
-            ok = bondy:send(RealmUri, Callee, Msg, SendOpts)
+            ok = bondy:send(RealmUri, Callee, Msg, SendOpts1)
     end.
 
 -doc """
@@ -1885,6 +1915,457 @@ session dies, so callers fast-fail instead of waiting for the call
 timeout. The reply is routed back through any relays stored in the
 promise's `via` queue.
 """.
+%% @private
+%% Hierarchical (RIB `read` mode) selection: the caller picks a NODE — self,
+%% or a peer advertising the procedure in the stub view — and the winning
+%% node completes the selection among its own live local registrations.
+%% Groups (pattern × policy) are tried in match-policy precedence order,
+%% mirroring `choose/2`. Remote FULL entries in the trie are deliberately
+%% ignored: under `read`, remote reachability comes from the stubs alone
+%% (the full-entry replication is the rollback net).
+choose_rib(Matches, RealmUri, ProcUri, Opts) ->
+    Entries =
+        case Matches of
+            ?EOT -> [];
+            {L, _} -> L;
+            L when is_list(L) -> L
+        end,
+    Locals = [E || E <- Entries, bondy_registry_entry:is_local(E)],
+    StubGroups = bondy_registry_rib:match_stubs(RealmUri, ProcUri),
+    try_rib_groups(rib_groups(Locals, StubGroups), RealmUri, ProcUri, Opts).
+
+%% @private
+%% Merge local entries and remote stubs into per-(pattern, policy) groups,
+%% ordered by match-policy precedence (exact, then prefix most-specific
+%% first, then wildcard).
+rib_groups(Locals, StubGroups) ->
+    M0 = lists:foldr(
+        fun(E, Acc) ->
+            K = {
+                bondy_registry_entry:uri(E),
+                bondy_registry_entry:match_policy(E)
+            },
+            Invoke = bondy_registry_entry:get_option(
+                invoke, E, ?INVOKE_SINGLE
+            ),
+            maps:update_with(
+                K,
+                fun({Inv, Es, Ss}) -> {Inv, [E | Es], Ss} end,
+                {Invoke, [E], []},
+                Acc
+            )
+        end,
+        #{},
+        Locals
+    ),
+    M1 = lists:foldl(
+        fun({Pattern, Policy, Ns}, Acc) ->
+            K = {Pattern, Policy},
+            Invoke =
+                case Ns of
+                    [{_, S} | _] -> maps:get(invoke, S, ?INVOKE_SINGLE);
+                    [] -> ?INVOKE_SINGLE
+                end,
+            maps:update_with(
+                K,
+                fun({Inv, Es, _}) -> {Inv, Es, Ns} end,
+                {Invoke, [], Ns},
+                Acc
+            )
+        end,
+        M0,
+        StubGroups
+    ),
+    Keys = lists:sort(
+        fun(A, B) -> rib_rank(A) =< rib_rank(B) end, maps:keys(M1)
+    ),
+    [{K, maps:get(K, M1)} || K <- Keys].
+
+%% @private
+rib_rank({Pattern, ?EXACT_MATCH}) -> {0, -byte_size(Pattern)};
+rib_rank({Pattern, ?PREFIX_MATCH}) -> {1, -byte_size(Pattern)};
+rib_rank({Pattern, _}) -> {2, -byte_size(Pattern)}.
+
+%% @private
+%% Node-stage selection per group: `self` (summarised from the group's local
+%% entries) competes with the remote stub nodes; `self` winning falls into
+%% the existing local load balancer, a peer winning yields a node-addressed
+%% forward. A group with no live candidates falls through to the next.
+try_rib_groups([], _, _, _) ->
+    {error, noproc};
+try_rib_groups(
+    [{_K, {Invoke, LocalsG, Stubs0}} | Rest], RealmUri, ProcUri, Opts
+) ->
+    %% Retry exclusion: nodes that already answered a completion miss for
+    %% this call are out of the candidate set (self never misses — a local
+    %% win invokes directly).
+    Stubs =
+        case maps:get(rib_exclude, Opts, []) of
+            [] ->
+                Stubs0;
+            Excluded ->
+                [S || {N, _} = S <- Stubs0, not lists:member(N, Excluded)]
+        end,
+    SelfUnits =
+        case LocalsG of
+            [] ->
+                [];
+            _ ->
+                Created = [bondy_registry_entry:created(E) || E <- LocalsG],
+                [
+                    {self, #{
+                        count => length(LocalsG),
+                        earliest => lists:min(Created),
+                        latest => lists:max(Created)
+                    }}
+                ]
+        end,
+    LBOpts = lb_opts(Invoke, Opts),
+
+    Result = bondy_rpc_load_balancer:select_node(
+        SelfUnits ++ Stubs,
+        LBOpts#{realm_uri => RealmUri, uri => ProcUri}
+    ),
+
+    case Result of
+        {ok, self} ->
+            case bondy_rpc_load_balancer:select(LocalsG, LBOpts) of
+                {ok, _} = OK ->
+                    OK;
+                {error, _} ->
+                    try_rib_groups(Rest, RealmUri, ProcUri, Opts)
+            end;
+        {ok, Nodestring} when is_binary(Nodestring) ->
+            {forward_node, Nodestring};
+        {error, noproc} ->
+            try_rib_groups(Rest, RealmUri, ProcUri, Opts)
+    end.
+
+%% @private
+%% Forward `Msg` node-addressed to `Nodestring` for owner-side completion:
+%% no entry is chosen here — the call is prepared entry-less and the owner
+%% binds its own selected registration (`rib_rebind/2`). The address ref
+%% only carries the node; the receiving clause ignores it as a callee.
+rib_forward_call(Msg, CallId, ProcUri, Opts, Ctxt, Nodestring) ->
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    Caller = bondy_context:ref(Ctxt),
+    Call = prepare_call_rib(Msg, ProcUri, Ctxt),
+    Timeout = bondy_utils:timeout(call_opts(Opts)),
+    %% The retry budget rides in the call promise: on a PRE-invocation miss
+    %% (the owner found no live local callee) the promise's taker re-selects
+    %% among the remaining candidate nodes. The prepared entry-less CALL is
+    %% node-agnostic, so it is stored as-is for re-sending.
+    Max = routing_max_candidates(Msg#call.options),
+    Retry = #{
+        call => Call,
+        opts => Opts,
+        tried => [Nodestring],
+        remaining => Max - 1
+    },
+    send_rib_call(
+        RealmUri,
+        Caller,
+        CallId,
+        ProcUri,
+        Call,
+        Opts,
+        Nodestring,
+        Timeout,
+        Retry
+    ).
+
+%% @private
+%% Send a node-addressed entry-less CALL to `Nodestring` under a fresh call
+%% promise carrying the retry state. Shared by the first send and by every
+%% retry (which passes the REMAINING time as `Timeout`, so retries never
+%% extend the original call deadline).
+send_rib_call(
+    RealmUri, Caller, CallId, ProcUri, Call, Opts, Nodestring, Timeout, Retry
+) ->
+    NodeRef = bondy_ref:new(internal, self(), undefined, Nodestring),
+    {To, SendOpts} = bondy:prepare_send(NodeRef, Opts#{from => Caller}),
+
+    Promise = bondy_rpc_promise:new_call(RealmUri, Caller, CallId, #{
+        procedure_uri => ProcUri,
+        timeout => Timeout,
+        rib_retry => Retry
+    }),
+    ok = bondy_rpc_promise:add(Promise),
+
+    ok = bondy:send(RealmUri, To, Call, SendOpts#{rib_completion => true}).
+
+%% @private
+%% Total distinct nodes a CALL may be routed to before its failure is
+%% final: the `CALL.Options._routing_max_candidates` extension (declared in
+%% bondy_config's WAMP extended_options), default 2 — the original
+%% candidate plus one retry. Extension options pass validation untyped, so
+%% anything but a usable integer falls back to the default.
+routing_max_candidates(CallOpts) ->
+    case maps:get('_routing_max_candidates', CallOpts, 2) of
+        N when is_integer(N) andalso N >= 1 ->
+            N;
+        _ ->
+            2
+    end.
+
+%% @private
+%% Bounded pre-invocation retry: when a node-addressed CALL comes back with
+%% the owner's completion-miss error — guaranteed pre-invocation, so
+%% at-most-once invocation is preserved — re-run node selection excluding
+%% every node already tried, within the original call deadline and the
+%% `routing_max_candidates` budget. Any other ERROR (including a
+%% no_eligible_callee produced by a callee-death flush, which lacks the
+%% marker because an invocation WAS in flight) is final. Returns `true`
+%% iff the call was re-routed and the caller must keep waiting.
+maybe_rib_retry(
+    #error{
+        error_uri = ?WAMP_NO_ELIGIBLE_CALLE,
+        details = #{rib_completion_miss := true}
+    } = M,
+    Promise,
+    RealmUri,
+    Caller
+) ->
+    case bondy_rpc_promise:info(Promise) of
+        #{rib_retry := #{remaining := N} = Retry} when N > 0 ->
+            case promise_remaining_time(Promise) of
+                0 ->
+                    rib_retry_exhausted();
+                Timeout ->
+                    rib_retry(M, Promise, RealmUri, Caller, Retry, Timeout)
+            end;
+        #{rib_retry := _} ->
+            %% Candidate budget spent.
+            rib_retry_exhausted();
+        _ ->
+            %% Not a node-addressed call of ours — nothing to retry.
+            false
+    end;
+maybe_rib_retry(_, _, _, _) ->
+    false.
+
+%% @private
+rib_retry_exhausted() ->
+    ok = rib_count(bondy_rpc_rib_retries_total, #{outcome => exhausted}),
+    false.
+
+%% @private
+%% Record a routing metric without ever raising — this runs on the relayed
+%% ERROR path, where a metrics hiccup must never cost the caller its reply.
+rib_count(Name, Label) ->
+    try
+        bondy_metrics:counter(#{name => Name, label => Label})
+    catch
+        _:_ ->
+            ok
+    end.
+
+%% @private
+%% Milliseconds left before the original call deadline, `infinity` for an
+%% unbounded call, `0` when already past it.
+promise_remaining_time(Promise) ->
+    case bondy_rpc_promise:expiry(Promise) of
+        infinity ->
+            infinity;
+        Expiry when is_integer(Expiry) ->
+            max(0, Expiry - erlang:system_time(millisecond))
+    end.
+
+%% @private
+%% Re-select and re-route a node-addressed CALL after a completion miss.
+%% Selection re-runs from a FRESH match (the local view may have learned of
+%% the miss meanwhile) with the failed nodes excluded; `self` competes
+%% again, so a local registration can absorb the retry — dispatched exactly
+%% as owner-side completion dispatches it (the stored CALL is entry-less).
+rib_retry(M, Promise, RealmUri, Caller, Retry, Timeout) ->
+    #{call := Call0, opts := Opts0, tried := Tried, remaining := N} = Retry,
+    CallId = M#error.request_id,
+    ProcUri = bondy_rpc_promise:procedure_uri(Promise),
+
+    %% The retried leg runs on the REMAINING time, not a fresh budget.
+    Call = rib_call_with_timeout(Call0, Timeout),
+
+    Matches = bondy_registry:find_matches(
+        registration, RealmUri, ProcUri, reg_match_opts()
+    ),
+
+    case choose_rib(Matches, RealmUri, ProcUri, Opts0#{rib_exclude => Tried}) of
+        {ok, Entry} ->
+            ok = rib_count(bondy_rpc_rib_retries_total, #{outcome => local}),
+            ok = forward(
+                rib_rebind(Call, Entry),
+                bondy_registry_entry:ref(Entry),
+                #{realm_uri => RealmUri, from => Caller}
+            ),
+            true;
+        {forward_node, Nodestring} ->
+            ok = rib_count(bondy_rpc_rib_retries_total, #{outcome => node}),
+            ok = send_rib_call(
+                RealmUri,
+                Caller,
+                CallId,
+                ProcUri,
+                Call,
+                Opts0,
+                Nodestring,
+                Timeout,
+                Retry#{tried := [Nodestring | Tried], remaining := N - 1}
+            ),
+            true;
+        {error, noproc} ->
+            %% No untried candidate is left — the miss is final.
+            rib_retry_exhausted()
+    end.
+
+%% @private
+rib_call_with_timeout(#call{options = O} = C, Timeout) when
+    is_integer(Timeout)
+->
+    C#call{options = O#{timeout => Timeout}};
+rib_call_with_timeout(C, _) ->
+    C.
+
+%% @private
+%% The completion-miss marker is routing-internal — never relay it to the
+%% client.
+strip_rib_details(#error{details = Details} = M) when is_map(Details) ->
+    M#error{details = maps:remove(rib_completion_miss, Details)};
+strip_rib_details(M) ->
+    M.
+
+%% @private
+%% As `prepare_call/4` but entry-less: `registration_id => undefined` marks
+%% the call node-addressed so the owner binds its own selection. Without an
+%% entry there are no entry options, so caller disclosure follows the
+%% defaults and entry-opted session disclosure is not available.
+prepare_call_rib(M, Uri, Ctxt) ->
+    Opts = M#call.options,
+    Details0 = maps:with(?WAMP_PPT_ATTRS, Opts),
+    Details1 = Details0#{procedure => Uri, trust_level => 0},
+    Details = maybe_disclose_caller(Details1, Ctxt, #{}, Opts),
+    M#call{
+        options = Opts#{
+            '$private' => #{
+                call_id => M#call.request_id,
+                registration_id => undefined,
+                invocation_details => Details
+            }
+        }
+    }.
+
+%% @private
+%% Bind an entry-less node-addressed CALL to the owner-selected entry: the
+%% owner's registration id replaces the `undefined` marker and, for a
+%% callback entry, the statically defined arguments are appended (the caller
+%% could not — it never chose an entry). An entry-addressed CALL (a sender
+%% without `read` mode) passes through untouched.
+rib_rebind(
+    #call{options = #{'$private' := #{registration_id := undefined} = P} = O} =
+        M,
+    Entry
+) ->
+    RegId =
+        case bondy_registry_entry:is_proxy(Entry) of
+            true -> bondy_registry_entry:origin_id(Entry);
+            false -> bondy_registry_entry:id(Entry)
+        end,
+    Args = maybe_append_callback_args(M#call.args, Entry),
+    M#call{
+        options = O#{'$private' := P#{registration_id := RegId}},
+        args = Args
+    };
+rib_rebind(M, _) ->
+    M.
+
+%% @private
+%% When routing runs on the RIB a forwarded cluster CALL is node-addressed:
+%% tag it so the receiving node re-selects among ITS live local
+%% registrations instead of trusting this node's — possibly stale — choice
+%% of entry. Bridge-relay targets keep the entry-addressed contract (the
+%% edge owns its registry), and a receiving node without the mode ignores
+%% the tag (safe in mixed clusters).
+maybe_rib_completion(Opts, Ref) ->
+    case
+        bondy_registry_rib:stub_routing() andalso
+            not bondy_ref:is_local(Ref) andalso
+            bondy_ref:type(Ref) =/= bridge_relay
+    of
+        true ->
+            Opts#{rib_completion => true};
+        false ->
+            Opts
+    end.
+
+%% @private
+%% Owner-side completion for a node-addressed forwarded CALL: select among
+%% the live LOCAL registrations only. Match-policy precedence and the
+%% per-group invocation-policy selection are the same as for a caller-side
+%% CALL (`choose/2`); the continuation is dropped deliberately — re-fetching
+%% it would reintroduce remote entries.
+rib_local_callee(RealmUri, ProcUri, Msg, Opts) ->
+    Matches = bondy_registry:find_matches(
+        registration, RealmUri, ProcUri, reg_match_opts()
+    ),
+    Entries =
+        case Matches of
+            ?EOT -> [];
+            {L, _Cont} -> L;
+            L when is_list(L) -> L
+        end,
+    Locals = [E || E <- Entries, bondy_registry_entry:is_local(E)],
+    choose({Locals, ?EOT}, Opts#{call_opts => Msg#call.options}).
+
+%% @private
+%% The registration match options a CALL routes with: all match policies
+%% when pattern-based registration is enabled, exact only otherwise.
+reg_match_opts() ->
+    case
+        bondy_config:get([wamp, dealer, features, pattern_based_registration])
+    of
+        true ->
+            #{limit => ?MATCH_LIMIT, match => '_'};
+        false ->
+            #{limit => ?MATCH_LIMIT, match => ?EXACT_MATCH}
+    end.
+
+%% @private
+%% A node-addressed forwarded CALL found no live local callee (a stale
+%% route): return ?WAMP_NO_ELIGIBLE_CALLE to the caller node, whose call
+%% promise matches the ERROR. The `rib_completion_miss` detail marks the
+%% failure as PRE-invocation — no INVOCATION was dispatched — which makes
+%% it the one no_eligible_callee the caller node may safely retry on
+%% another candidate node. The same error produced by a callee-death flush
+%% (an invocation WAS in flight) never carries the marker and is never
+%% retried, preserving at-most-once invocation.
+reply_no_eligible_callee(#call{} = Msg, #{from := Caller} = Opts) ->
+    RealmUri = ?GET_REALM_URI(Opts),
+    Reason = <<"There are no eligible callees for the procedure.">>,
+    Error0 = bondy_wamp_message:error_from(
+        Msg,
+        #{},
+        ?WAMP_NO_ELIGIBLE_CALLE,
+        [Reason],
+        #{
+            message => Reason,
+            description => <<
+                "The node this call was routed to no longer has a live "
+                "registration for the procedure."
+            >>
+        }
+    ),
+    %% The marker is stamped on the record AFTER construction, deliberately
+    %% bypassing the details validation: it must never be part of the
+    %% client-facing details vocabulary, so a client-crafted ERROR carrying
+    %% it is stripped at wire decode (unknown key) and can never force a
+    %% retry of a delivered invocation. Only this node-internal path can
+    %% produce it; peers relay records verbatim.
+    Error = Error0#error{
+        details = (Error0#error.details)#{rib_completion_miss => true}
+    },
+    {To, SendOpts} = bondy:prepare_send(Caller, Opts),
+    bondy:send(RealmUri, To, Error, SendOpts).
+
+%% @private
 send_no_eligible_callee(Promise) ->
     RealmUri = bondy_rpc_promise:realm_uri(Promise),
     Caller = bondy_rpc_promise:caller(Promise),

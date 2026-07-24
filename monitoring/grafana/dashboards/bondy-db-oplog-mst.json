@@ -640,12 +640,10 @@
               "options": {
                 "1": {
                   "text": "up",
-                  "color": "green",
                   "index": 0
                 },
                 "0": {
                   "text": "down",
-                  "color": "red",
                   "index": 1
                 }
               }
@@ -663,8 +661,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "transparent",
+                "color": "red",
                 "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
               }
             ]
           }
@@ -3045,6 +3047,131 @@
           "values": false
         }
       }
+    },
+    {
+      "id": 148,
+      "type": "timeseries",
+      "title": "WAL consumer lag \u2014 drain backlog (top 10 shards)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 102
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, bondy_oplog_wal_consumer_lag_bytes{node=~\"$node\"})",
+          "legendFormat": "{{node}} {{instance_id}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "bytes",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Bytes appended to a shard's WAL but not yet committed by its applier. A steady zero is healthy; a plateau or climb while the node reports converged means the drain is wedged or starved \u2014 the bondy_oplog_drain_stalled alarm fires on the stuck node (see Active alarms)."
+    },
+    {
+      "id": 149,
+      "type": "timeseries",
+      "title": "Reclamation stalled (per shard, by reason)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 102
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (node, instance_id, reason) (rate(bondy_oplog_reclamation_stalled_total{node=~\"$node\"}[$__rate_interval])) > 0",
+          "legendFormat": "{{node}} {{instance_id}} {{reason}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ops",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Shards whose reclamation tick could not certify causal stability, by reason. idle = this replica's tree is empty (fully compacted or never written) - the steady state of a converged quiescent shard; benign, never logged. unconfirmed = a member has no confirmed sync root while this replica HOLDS events - actionable: the named member is down or gone (retire it deliberately if permanent). no_frontier = members confirmed but no local key is covered by every confirmed root - typically a stale confirmed root from a down member."
     },
     {
       "id": 48,
@@ -7919,6 +8046,583 @@
       }
     },
     {
+      "id": 138,
+      "type": "row",
+      "title": "Registry RIB \u2014 routing summaries, retry & presence",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 319
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 139,
+      "type": "timeseries",
+      "title": "Local RIB members (per node)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 320
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bondy_registry_rib_members{node=~\"$node\"}",
+          "legendFormat": "{{node}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Live local registry entries feeding each node's replicated routing summaries."
+    },
+    {
+      "id": 140,
+      "type": "timeseries",
+      "title": "Remote stub cells (per node, per type)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 320
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bondy_registry_rib_stub_cells{node=~\"$node\"}",
+          "legendFormat": "{{node}} {{type}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Remote routing summary stubs held per node, by registry type. Under RIB read/write mode this is the whole remote routing view."
+    },
+    {
+      "id": 141,
+      "type": "timeseries",
+      "title": "RIB divergences (last sweep)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 320
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bondy_registry_rib_divergences{node=~\"$node\"}",
+          "legendFormat": "{{node}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Keys where routing summaries disagree with the ground truth, as of each node's last periodic consistency sweep. Anything non-zero that does not self-heal within a sweep interval deserves attention."
+    },
+    {
+      "id": 142,
+      "type": "timeseries",
+      "title": "Pre-invocation retries (rate, by outcome)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 328
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (node, outcome) (rate(bondy_rpc_rib_retries_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "{{node}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ops",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Cluster CALLs re-routed after an owner-side completion miss: node = re-routed to another node, local = absorbed by a local registration, exhausted = the error was final. A sustained rate means the routing summaries are running stale."
+    },
+    {
+      "id": 143,
+      "type": "timeseries",
+      "title": "Owner-side completions (rate, by outcome)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 328
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (node, outcome) (rate(bondy_rpc_rib_completions_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "{{node}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ops",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Node-addressed forwarded CALLs completed by the owner: ok = a live local registration was selected, miss = none left (the caller retries or fails)."
+    },
+    {
+      "id": 144,
+      "type": "timeseries",
+      "title": "Damping suppressions (rate)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 328
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (node) (rate(bondy_registry_rib_damping_suppressions_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "{{node}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ops",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Summary updates coalesced by the damping window (count/latest-only changes). Zero when registry.rib.damping is off."
+    },
+    {
+      "id": 145,
+      "type": "timeseries",
+      "title": "Suspended peers (per node)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 336
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "bondy_registry_presence_suspended_nodes{node=~\"$node\"}",
+          "legendFormat": "{{node}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Peer nodes currently SUSPENDed (down, within the EVICT grace period) as seen by each node; their registry entries are masked out of routing."
+    },
+    {
+      "id": 146,
+      "type": "timeseries",
+      "title": "Mask/unmask latency p95",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 336
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, op) (rate(bondy_registry_presence_mask_duration_ms_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "{{op}} p95",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ms",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Time to mask (SUSPEND) or unmask (RESUME) a peer's registry entries on a presence transition."
+    },
+    {
+      "id": 147,
+      "type": "stat",
+      "title": "RIB divergences (now)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 336
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(bondy_registry_rib_divergences{node=~\"$node\"})",
+          "legendFormat": "",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
+      },
+      "description": "Node-wide total of routing-summary divergences at the last sweep. Green means the RIB agrees with the ground truth everywhere."
+    },
+    {
       "id": 115,
       "type": "row",
       "title": "BEAM VM",
@@ -7927,7 +8631,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 319
+        "y": 345
       },
       "panels": []
     },
@@ -7943,7 +8647,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 320
+        "y": 346
       },
       "targets": [
         {
@@ -8005,7 +8709,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 320
+        "y": 346
       },
       "targets": [
         {
@@ -8131,7 +8835,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 320
+        "y": 346
       },
       "targets": [
         {
@@ -8211,7 +8915,7 @@
         "h": 7,
         "w": 4,
         "x": 0,
-        "y": 328
+        "y": 354
       },
       "targets": [
         {
@@ -8273,7 +8977,7 @@
         "h": 7,
         "w": 4,
         "x": 4,
-        "y": 328
+        "y": 354
       },
       "targets": [
         {
@@ -8335,7 +9039,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 328
+        "y": 354
       },
       "targets": [
         {
@@ -8397,7 +9101,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 328
+        "y": 354
       },
       "targets": [
         {
@@ -8459,7 +9163,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 335
+        "y": 361
       },
       "targets": [
         {
@@ -8530,7 +9234,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 335
+        "y": 361
       },
       "targets": [
         {
@@ -8592,7 +9296,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 335
+        "y": 361
       },
       "targets": [
         {

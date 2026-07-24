@@ -102,7 +102,7 @@ the dispatcher is configured to effectively never restart.
 -record(sub, {
     table :: atom(),
     label :: string(),
-    kind :: user | realm | grant | member | source | registry,
+    kind :: user | realm | grant | member | source | registry | rib,
     ns :: atom() | undefined,
     ref :: reference() | undefined
 }).
@@ -125,6 +125,7 @@ the dispatcher is configured to effectively never restart.
 -export([react_member/2]).
 -export([react_source/4]).
 -export([react_registry/4]).
+-export([react_rib/3]).
 -export([owner_up/1]).
 -export([unfold_user_key/1]).
 -export([unfold_realm_key/1]).
@@ -183,6 +184,7 @@ remote_entries_of(Node) ->
 
 init([]) ->
     Entries = ensure_entries_table(),
+    _ = bondy_registry_rib:ensure_stubs_table(),
     {ok, #state{subs = reacted_tables(), entries = Entries},
         {continue, subscribe}}.
 
@@ -270,6 +272,16 @@ reacted_tables() ->
             table = ?BONDY_DB_SUBSCRIPTION_TAB,
             label = "bondy_subscription",
             kind = registry
+        },
+        #sub{
+            table = ?BONDY_DB_REGISTRATION_RIB_TAB,
+            label = "bondy_registration_rib",
+            kind = rib
+        },
+        #sub{
+            table = ?BONDY_DB_SUBSCRIPTION_RIB_TAB,
+            label = "bondy_subscription_rib",
+            kind = rib
         }
     ].
 
@@ -337,6 +349,8 @@ react(NS, Key, Op, Old, #state{subs = Subs, entries = Entries}) ->
             react_source(Label, Key, Op, Old);
         #sub{kind = registry} ->
             react_registry(Entries, NS, Key, Op);
+        #sub{kind = rib, table = Table} ->
+            react_rib(Table, Key, Op);
         false ->
             ok
     end.
@@ -517,14 +531,25 @@ react_member(Key, _Op) ->
 %% be resolved. A `clear` (the owner's DELETE / self-clean, or a rendezvous-hashed
 %% EVICT) removes it from the trie and the remote index. The bondy_db projection
 %% is maintained by the merge itself; only the materialised trie is touched here.
+%%
+%% Under RIB `write` mode remote full entries are never compiled: this node
+%% keeps its own entries out of replication and routes remote work on the
+%% stubs, so a peer's full-entry cells (a peer still replicating them, or a
+%% stale echo) are routing-inert — compiling them would resurrect the very
+%% view the mode retires.
 react_registry(Entries, NS, Key, Op) ->
-    case registry_op(Op) of
-        {set, Value} ->
-            react_registry_set(Entries, NS, Key, Value);
-        clear ->
-            react_registry_clear(Entries, NS, Key);
-        ignore ->
-            ok
+    case bondy_registry_rib:mode() of
+        write ->
+            ok;
+        _ ->
+            case registry_op(Op) of
+                {set, Value} ->
+                    react_registry_set(Entries, NS, Key, Value);
+                clear ->
+                    react_registry_clear(Entries, NS, Key);
+                ignore ->
+                    ok
+            end
     end.
 
 %% @private
@@ -578,6 +603,26 @@ react_registry_clear(Entries, NS, Key) ->
             %% Never saw the matching `set` (e.g. this node started after the
             %% entry was created and removed), or already removed. The trie has
             %% nothing to drop.
+            ok
+    end.
+
+%% @private
+%% A peer's RIB summary cell arrived (or was removed) via anti-entropy:
+%% delegate to `bondy_registry_rib`, which maintains this node's stub store.
+%% The cell key is self-contained (realm included), so a `clear` needs no
+%% tombstone resolution. Total: unexpected ops are ignored.
+react_rib(Table, Key, Op) ->
+    Type =
+        case Table of
+            ?BONDY_DB_REGISTRATION_RIB_TAB -> registration;
+            ?BONDY_DB_SUBSCRIPTION_RIB_TAB -> subscription
+        end,
+    case registry_op(Op) of
+        {set, Summary} ->
+            bondy_registry_rib:on_remote_set(Type, Key, Summary);
+        clear ->
+            bondy_registry_rib:on_remote_clear(Type, Key);
+        ignore ->
             ok
     end.
 

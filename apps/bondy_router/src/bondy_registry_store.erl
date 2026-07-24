@@ -38,7 +38,26 @@ Indeces for matching bondy_registry_entry(s).
     sub_wc_idx_ptrie :: bondy_registry_ptrie:handle(),
     %% Counter per URI, used to distinguish on_create vs.
     %% on_register|on_subscribe — concurrent r/w
-    counters_tab :: ets:tab()
+    counters_tab :: ets:tab(),
+    %% One row per live LOCAL entry, keyed
+    %% {Type, Realm, Policy, Uri, Created, EntryId} — the source
+    %% bondy_registry_rib derives the replicated routing summaries from.
+    %% ordered_set — concurrent r/w atomic row ops
+    rib_members_tab :: ets:tab(),
+    %% Where full entries persist, pinned at store creation from the RIB
+    %% mode: `db` (bondy_db, replicated — every mode up to `read`) or
+    %% `local` (the two tables below — RIB `write` mode, where the summary
+    %% cells are the only replicated registry state). Boot-time: flipping
+    %% the mode across `write` requires a restart.
+    entry_backend :: db | local,
+    %% `local` backend main store: {Type, Realm, EntryId} -> entry().
+    %% ordered_set so realm-scoped maintenance scans are bounded
+    %% prefix selects
+    local_entry_tab :: ets:tab(),
+    %% `local` backend session index (bag):
+    %% {Type, Realm, SessionId} -> EntryId. Serves session-close cleanup
+    %% (`remove_all`) without a realm scan.
+    local_session_idx_tab :: ets:tab()
 }).
 
 -record(reg_idx, {
@@ -157,6 +176,7 @@ Indeces for matching bondy_registry_entry(s).
 -export([new/1]).
 -export([info/1]).
 -export([ptrie_handles/1]).
+-export([rib_members_tab/1]).
 
 %% ENTRY API
 -export([add/2]).
@@ -260,6 +280,26 @@ new(PartitionIndex) ->
         gen_name(counters_tab, PartitionIndex),
         [set | key_value:put(keypos, 1, Opts)]
     ),
+    {ok, RIB1} = bondy_table_manager:add_or_claim(
+        gen_name(rib_members_tab, PartitionIndex),
+        [ordered_set | key_value:put(keypos, 1, Opts)]
+    ),
+
+    %% Local entry backend (created regardless of mode — tiny when unused —
+    %% so the record shape does not depend on configuration).
+    {ok, L1} = bondy_table_manager:add_or_claim(
+        gen_name(local_entry_tab, PartitionIndex),
+        [ordered_set | key_value:put(keypos, 1, Opts)]
+    ),
+    {ok, L2} = bondy_table_manager:add_or_claim(
+        gen_name(local_session_idx_tab, PartitionIndex),
+        [bag | key_value:put(keypos, 1, Opts)]
+    ),
+    Backend =
+        case bondy_registry_rib:mode() of
+            write -> local;
+            _ -> db
+        end,
 
     #bondy_registry_store{
         partition = self(),
@@ -274,8 +314,22 @@ new(PartitionIndex) ->
         sub_prefix_idx_ptrie = S3,
         sub_wc_idx_ptrie = S4,
         %% Common
-        counters_tab = C1
+        counters_tab = C1,
+        rib_members_tab = RIB1,
+        entry_backend = Backend,
+        local_entry_tab = L1,
+        local_session_idx_tab = L2
     }.
+
+-doc """
+The RIB members table for this store slice — one row per live local entry,
+consumed by `bondy_registry_rib` to derive this node's replicated routing
+summaries.
+""".
+-spec rib_members_tab(Store :: t()) -> ets:tab().
+
+rib_members_tab(#bondy_registry_store{rib_members_tab = Tab}) ->
+    Tab.
 
 -spec info(Store :: t()) -> #{size => integer(), memory => integer()}.
 
@@ -284,7 +338,10 @@ info(#bondy_registry_store{} = Store) ->
         Store#bondy_registry_store.reg_exact_idx_tab,
         Store#bondy_registry_store.sub_local_exact_idx_tab,
         Store#bondy_registry_store.sub_remote_exact_idx_tab,
-        Store#bondy_registry_store.counters_tab
+        Store#bondy_registry_store.counters_tab,
+        Store#bondy_registry_store.rib_members_tab,
+        Store#bondy_registry_store.local_entry_tab,
+        Store#bondy_registry_store.local_session_idx_tab
     ],
 
     Ptries = ptrie_handles(Store),
@@ -424,7 +481,30 @@ take(Store, Entry) ->
 -spec take(Store :: t(), Type :: entry_type(), EntryKey :: entry_key()) ->
     {ok, Entry :: entry()} | {error, not_found}.
 
-take(#bondy_registry_store{} = Store, Type, EntryKey) when ?IS_TYPE(Type) ->
+take(
+    #bondy_registry_store{entry_backend = local} = Store, Type, EntryKey
+) when ?IS_TYPE(Type) ->
+    ok = validate_key(EntryKey),
+    RealmUri = bondy_registry_entry:realm_uri(EntryKey),
+    EntryId = bondy_registry_entry:id(EntryKey),
+
+    case
+        ets:take(
+            Store#bondy_registry_store.local_entry_tab,
+            {Type, RealmUri, EntryId}
+        )
+    of
+        [{_, Entry}] ->
+            ok = delete_local_session_idx(Store, Type, EntryKey),
+            ok = db_clear_if_present(Type, RealmUri, EntryId),
+            Result = delete_indices(Store, Entry),
+            resulto:then(Result, fun(_) -> {ok, Entry} end);
+        [] ->
+            {error, not_found}
+    end;
+take(#bondy_registry_store{entry_backend = db} = Store, Type, EntryKey) when
+    ?IS_TYPE(Type)
+->
     ok = validate_key(EntryKey),
     Table = db_table(Type),
     RealmUri = bondy_registry_entry:realm_uri(EntryKey),
@@ -516,20 +596,13 @@ lookup(Store, Type, EntryKey) when ?IS_TYPE(Type) ->
     Opts :: store_opts()
 ) -> {ok, Entry :: entry()} | {error, not_found}.
 
-lookup(#bondy_registry_store{} = _Store, Type, EntryKey, _Opts0) when
+lookup(#bondy_registry_store{} = Store, Type, EntryKey, _Opts0) when
     ?IS_TYPE(Type)
 ->
     ok = validate_key(EntryKey),
-    Table = db_table(Type),
     RealmUri = bondy_registry_entry:realm_uri(EntryKey),
-    Key = db_key(bondy_registry_entry:id(EntryKey)),
-
-    case bondy_db:read(Table, RealmUri, Key) of
-        {ok, {Value, _Hlc}} ->
-            {ok, unwrap(Value)};
-        {error, not_found} ->
-            {error, not_found}
-    end.
+    EntryId = bondy_registry_entry:id(EntryKey),
+    entry_read(Store, Type, RealmUri, EntryId).
 
 -doc "".
 -spec lookup(
@@ -541,19 +614,12 @@ lookup(#bondy_registry_store{} = _Store, Type, EntryKey, _Opts0) when
 ) ->
     {ok, Entry :: entry()} | {error, not_found}.
 
-lookup(#bondy_registry_store{} = _Store, Type, RealmUri, EntryId, _Opts0) when
+lookup(#bondy_registry_store{} = Store, Type, RealmUri, EntryId, _Opts0) when
     ?IS_TYPE(Type)
 ->
-    %% `entry_id` is the bondy_db primary key, so lookup-by-id is a point read
-    %% (no `session_id` needed — ids are random realm-unique).
-    Table = db_table(Type),
-
-    case bondy_db:read(Table, RealmUri, db_key(EntryId)) of
-        {ok, {Value, _Hlc}} ->
-            {ok, unwrap(Value)};
-        {error, not_found} ->
-            {error, not_found}
-    end.
+    %% `entry_id` is the primary key in either backend, so lookup-by-id is a
+    %% point read (no `session_id` needed — ids are random realm-unique).
+    entry_read(Store, Type, RealmUri, EntryId).
 
 -doc "".
 -spec find(continuation()) -> find_result().
@@ -588,12 +654,12 @@ find(Store, Type, Pattern) when ?IS_TYPE(Type) ->
 -spec find(t(), entry_type(), entry_key(), store_opts()) ->
     find_result().
 
-find(_Store, Type, Pattern, Opts0) when ?IS_TYPE(Type) ->
+find(Store, Type, Pattern, Opts0) when ?IS_TYPE(Type) ->
     ok = validate_key(Pattern),
     RealmUri = bondy_registry_entry:realm_uri(Pattern),
     Session = bondy_registry_entry:session_id(Pattern),
     EntryId = bondy_registry_entry:id(Pattern),
-    Pairs = find_pairs(Type, RealmUri, Session, EntryId),
+    Pairs = find_pairs(Store, Type, RealmUri, Session, EntryId),
 
     %% Match the plum_db contract, keyed on `{limit, _}`: a bounded request gets
     %% the `{List, Cont}` form (`?EOT` for empty); an unbounded one a bare list.
@@ -614,14 +680,12 @@ find(_Store, Type, Pattern, Opts0) when ?IS_TYPE(Type) ->
 %% fields are bound:
 %% - `entry_id` bound -> point read on the primary key (+ session filter);
 %% - `entry_id` wild, `session_id` = undefined -> realm scan filtered to the
-%%   (rare) session-less entries, which the `by_session` index does not carry;
-%% - `entry_id` wild, `session_id` bound -> bounded `by_session` index lookup;
+%%   (rare) session-less entries, which the session index does not carry;
+%% - `entry_id` wild, `session_id` bound -> bounded session-index lookup;
 %% - both wild -> whole-realm list (admin; no hot caller).
-find_pairs(Type, RealmUri, Session, EntryId) when EntryId =/= '_' ->
-    Table = db_table(Type),
-    case bondy_db:read(Table, RealmUri, db_key(EntryId)) of
-        {ok, {Value, _Hlc}} ->
-            Entry = unwrap(Value),
+find_pairs(Store, Type, RealmUri, Session, EntryId) when EntryId =/= '_' ->
+    case entry_read(Store, Type, RealmUri, EntryId) of
+        {ok, Entry} ->
             case session_matches(Session, Entry) of
                 true -> [{bondy_registry_entry:key(Entry), Entry}];
                 false -> []
@@ -629,24 +693,39 @@ find_pairs(Type, RealmUri, Session, EntryId) when EntryId =/= '_' ->
         {error, not_found} ->
             []
     end;
-find_pairs(Type, RealmUri, undefined, '_') ->
-    %% Session-less (internal / callback) entries get no `by_session` index
-    %% entry (the index skips an `undefined` term), so dedup them via a realm
+find_pairs(Store, Type, RealmUri, undefined, '_') ->
+    %% Session-less (internal / callback) entries get no session-index entry
+    %% (the index skips an `undefined` term), so find them via a realm
     %% scan filtered to session-less entries. Rare (internal subscribers only).
-    Table = db_table(Type),
-    case bondy_db:list(Table, RealmUri) of
-        {ok, Rows} ->
-            [
-                pair(V)
-             || {_K, V, _Hlc} <- Rows,
-                bondy_registry_entry:session_id(unwrap(V)) =:= undefined
-            ];
-        {error, _} ->
-            []
-    end;
-find_pairs(Type, RealmUri, Session, '_') when Session =/= '_' ->
-    session_pairs(Type, RealmUri, Session);
-find_pairs(Type, RealmUri, '_', '_') ->
+    [
+        Pair
+     || {_K, E} = Pair <- realm_pairs(Store, Type, RealmUri),
+        bondy_registry_entry:session_id(E) =:= undefined
+    ];
+find_pairs(Store, Type, RealmUri, Session, '_') when Session =/= '_' ->
+    session_pairs(Store, Type, RealmUri, Session);
+find_pairs(Store, Type, RealmUri, '_', '_') ->
+    realm_pairs(Store, Type, RealmUri).
+
+%% @private
+%% All `{EntryKey, Entry}` pairs of `(Type, RealmUri)` from the entry
+%% backend: a bounded prefix select on the local table, or the bondy_db
+%% realm list.
+realm_pairs(
+    #bondy_registry_store{entry_backend = local} = Store, Type, RealmUri
+) ->
+    MS = [
+        {
+            {{Type, RealmUri, '_'}, '$1'},
+            [],
+            ['$1']
+        }
+    ],
+    [
+        {bondy_registry_entry:key(E), E}
+     || E <- ets:select(Store#bondy_registry_store.local_entry_tab, MS)
+    ];
+realm_pairs(#bondy_registry_store{entry_backend = db}, Type, RealmUri) ->
     Table = db_table(Type),
     case bondy_db:list(Table, RealmUri) of
         {ok, Rows} ->
@@ -663,12 +742,36 @@ session_matches(Session, Entry) ->
 
 %% @private
 %% All `{EntryKey, Entry}` pairs for a `(RealmUri, SessionId)` via the
-%% `by_session` index. The index is maintained asynchronously, so flush it first
-%% (`await_index/2`) for read-your-writes: session-close cleanup (`remove_all`)
-%% MUST see every entry the session created — including one made microseconds
-%% before disconnect — or the entry leaks; the idempotent-SUBSCRIBE check relies
-%% on the same freshness.
-session_pairs(Type, RealmUri, Session) ->
+%% session index. Session-close cleanup (`remove_all`) MUST see every entry
+%% the session created — including one made microseconds before disconnect —
+%% or the entry leaks; the idempotent-SUBSCRIBE check relies on the same
+%% freshness. The local backend's index is maintained synchronously on the
+%% write path; the bondy_db `by_session` index is asynchronous, so it is
+%% flushed first (`await_index/2`).
+session_pairs(
+    #bondy_registry_store{entry_backend = local} = Store,
+    Type,
+    RealmUri,
+    Session
+) ->
+    Hits = ets:lookup(
+        Store#bondy_registry_store.local_session_idx_tab,
+        {Type, RealmUri, Session}
+    ),
+    lists:filtermap(
+        fun({_, EntryId}) ->
+            case entry_read(Store, Type, RealmUri, EntryId) of
+                {ok, Entry} ->
+                    {true, {bondy_registry_entry:key(Entry), Entry}};
+                {error, not_found} ->
+                    false
+            end
+        end,
+        Hits
+    );
+session_pairs(
+    #bondy_registry_store{entry_backend = db}, Type, RealmUri, Session
+) ->
     Table = db_table(Type),
     _ = bondy_db:await_index(Table, by_session),
     case bondy_db:index_get(Table, RealmUri, by_session, Session, #{}) of
@@ -730,18 +833,19 @@ mirroring the old `plum_db:fold/4` shape.
     Opts :: store_opts()
 ) -> any().
 
-fold(_Store, Type, RealmUri, Fun, Acc0, Opts0) when ?IS_TYPE(Type) ->
+fold(Store, Type, RealmUri, Fun, Acc0, Opts0) when ?IS_TYPE(Type) ->
     Pairs =
         case lists:keyfind(match, 1, Opts0) of
             {match, Pattern} ->
                 find_pairs(
+                    Store,
                     Type,
                     RealmUri,
                     bondy_registry_entry:session_id(Pattern),
                     bondy_registry_entry:id(Pattern)
                 );
             false ->
-                find_pairs(Type, RealmUri, '_', '_')
+                find_pairs(Store, Type, RealmUri, '_', '_')
         end,
     try
         lists:foldl(Fun, Acc0, Pairs)
@@ -758,14 +862,8 @@ fold(_Store, Type, RealmUri, Fun, Acc0, Opts0) when ?IS_TYPE(Type) ->
     Opts :: store_opts()
 ) -> ok.
 
-foreach(_Store, Type, RealmUri, Fun, _Opts0) when ?IS_TYPE(Type) ->
-    Table = db_table(Type),
-    case bondy_db:list(Table, RealmUri) of
-        {ok, Rows} ->
-            lists:foreach(fun({_K, V, _Hlc}) -> Fun(pair(V)) end, Rows);
-        {error, _} ->
-            ok
-    end.
+foreach(Store, Type, RealmUri, Fun, _Opts0) when ?IS_TYPE(Type) ->
+    lists:foreach(Fun, realm_pairs(Store, Type, RealmUri)).
 
 -doc "".
 -spec continuation_info(continuation()) ->
@@ -1292,6 +1390,37 @@ db_key(EntryId) when is_integer(EntryId) ->
     term_to_binary(EntryId).
 
 %% @private
+%% Point read of an entry by primary key from the store's entry backend.
+-spec entry_read(t(), entry_type(), uri(), id()) ->
+    {ok, entry()} | {error, not_found}.
+
+entry_read(
+    #bondy_registry_store{entry_backend = local} = Store,
+    Type,
+    RealmUri,
+    EntryId
+) ->
+    case
+        ets:lookup(
+            Store#bondy_registry_store.local_entry_tab,
+            {Type, RealmUri, EntryId}
+        )
+    of
+        [{_, Entry}] ->
+            {ok, Entry};
+        [] ->
+            {error, not_found}
+    end;
+entry_read(#bondy_registry_store{entry_backend = db}, Type, RealmUri, EntryId) ->
+    Table = db_table(Type),
+    case bondy_db:read(Table, RealmUri, db_key(EntryId)) of
+        {ok, {Value, _Hlc}} ->
+            {ok, unwrap(Value)};
+        {error, not_found} ->
+            {error, not_found}
+    end.
+
+%% @private
 %% Wrap an entry as its durable cell value: the `#entry{}` preserved verbatim
 %% under `entry`, with `session_id` denormalised to the top level so the
 %% `by_session` secondary index can extract it (the index engine navigates maps
@@ -1309,12 +1438,34 @@ unwrap(#{entry := Entry}) ->
     Entry.
 
 %% @private
-%% Inserts the entry into its bondy_db table (ephemeral, memory topology). The
-%% in-memory match indices (trie / ETS) are maintained separately by
-%% `store_indices/2`.
+%% Inserts the entry into its backend: the bondy_db table (ephemeral, memory
+%% topology, replicated) or — RIB `write` mode — the partition-local entry
+%% table, where it never enters replication. The in-memory match indices
+%% (trie / ETS) are maintained separately by `store_indices/2`.
 -spec store(t(), Entry :: bondy_registry_entry:t()) -> ok | {error, any()}.
 
-store(_T, Entry) ->
+store(#bondy_registry_store{entry_backend = local} = Store, Entry) ->
+    Type = bondy_registry_entry:type(Entry),
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    EntryId = bondy_registry_entry:id(Entry),
+    true = ets:insert(
+        Store#bondy_registry_store.local_entry_tab,
+        {{Type, RealmUri, EntryId}, Entry}
+    ),
+    case bondy_registry_entry:session_id(Entry) of
+        undefined ->
+            %% A callback / internal entry — session-close never targets it,
+            %% so it needs no session index row (matches the bondy_db
+            %% `by_session` behaviour, which skips `undefined`).
+            ok;
+        SessionId ->
+            true = ets:insert(
+                Store#bondy_registry_store.local_session_idx_tab,
+                {{Type, RealmUri, SessionId}, EntryId}
+            ),
+            ok
+    end;
+store(#bondy_registry_store{entry_backend = db}, Entry) ->
     Table = db_table(bondy_registry_entry:type(Entry)),
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Key = db_key(bondy_registry_entry:id(Entry)),
@@ -1328,7 +1479,25 @@ store(_T, Entry) ->
     Opts :: map()
 ) -> ok | {error, any()}.
 
-delete(#bondy_registry_store{} = _Store, Type, EntryKey, _Opts) when
+delete(
+    #bondy_registry_store{entry_backend = local} = Store, Type, EntryKey, _Opts
+) when
+    ?IS_TYPE(Type)
+->
+    RealmUri = bondy_registry_entry:realm_uri(EntryKey),
+    EntryId = bondy_registry_entry:id(EntryKey),
+    true = ets:delete(
+        Store#bondy_registry_store.local_entry_tab,
+        {Type, RealmUri, EntryId}
+    ),
+    ok = delete_local_session_idx(Store, Type, EntryKey),
+    %% Hygiene for the replicated table: while some peers still replicate
+    %% full entries, a stale echo of this entry can have merged into the
+    %% local projection (e.g. after a restart). Clear it — the clear
+    %% replicates, cleaning it everywhere — but only if a row exists, so the
+    %% steady state (nothing replicated) emits no operation at all.
+    db_clear_if_present(Type, RealmUri, EntryId);
+delete(#bondy_registry_store{entry_backend = db}, Type, EntryKey, _Opts) when
     ?IS_TYPE(Type)
 ->
     %% bondy_db `clear` is HLC-ordered and idempotent; the plum_db `broadcast`
@@ -1337,6 +1506,37 @@ delete(#bondy_registry_store{} = _Store, Type, EntryKey, _Opts) when
     RealmUri = bondy_registry_entry:realm_uri(EntryKey),
     Key = db_key(bondy_registry_entry:id(EntryKey)),
     bondy_db:apply(Table, RealmUri, Key, clear).
+
+%% @private
+%% Drop the local session-index row for an entry key. `delete_object` needs
+%% the exact row, so a key without a session id (callback / internal) is a
+%% no-op — no row was written for it.
+delete_local_session_idx(Store, Type, EntryKey) ->
+    case bondy_registry_entry:session_id(EntryKey) of
+        undefined ->
+            ok;
+        SessionId ->
+            RealmUri = bondy_registry_entry:realm_uri(EntryKey),
+            EntryId = bondy_registry_entry:id(EntryKey),
+            true = ets:delete_object(
+                Store#bondy_registry_store.local_session_idx_tab,
+                {{Type, RealmUri, SessionId}, EntryId}
+            ),
+            ok
+    end.
+
+%% @private
+%% Clear an entry's row in the replicated bondy_db table iff one exists
+%% (`local` backend hygiene — see `delete/4`).
+db_clear_if_present(Type, RealmUri, EntryId) ->
+    Table = db_table(Type),
+    Key = db_key(EntryId),
+    case bondy_db:read(Table, RealmUri, Key) of
+        {ok, _} ->
+            bondy_db:apply(Table, RealmUri, Key, clear);
+        {error, not_found} ->
+            ok
+    end.
 
 %% =============================================================================
 %% PRIVATE: INDICES

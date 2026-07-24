@@ -255,6 +255,19 @@ instances are unaffected.
     %% reached. The next `drain_resume` cast (or, defensively, the
     %% backstop poll timer) re-arms `self() ! drain`.
     drain_deferred = false :: boolean(),
+    %% Drain-stall detection. `drain_max_pos` is the highest consumer
+    %% position ever COMMITTED (`{Segment, FrameOffset}` — segment ids are
+    %% never reused, so lexicographic order is total); only a commit BEYOND
+    %% it counts as progress, so a drain that keeps re-reading old ground
+    %% cannot masquerade as healthy. `drain_progress_at` is when progress
+    %% (or a caught-up idle) was last observed; actively processing frames
+    %% for longer than `drain_stall_alarm_ms` without it raises the
+    %% `{bondy_oplog_drain_stalled, InstanceId}` alarm (cleared on the next
+    %% progress). `0` disables the detector.
+    drain_progress_at :: integer() | undefined,
+    drain_max_pos :: {non_neg_integer(), non_neg_integer()} | undefined,
+    drain_stalled = false :: boolean(),
+    drain_stall_alarm_ms = 60000 :: non_neg_integer(),
     %% Root hash of the MST snapshot whose `cell_apply` events have
     %% already been folded into the projection. `do_replay_cell_events/1`
     %% diffs the live MST against this root via `bondy_mst:diff_to_list/2`
@@ -427,6 +440,17 @@ instances are unaffected.
 -export([unregister_table/2]).
 -export([open_drain_gate/1]).
 -export([resume_position/2]).
+
+-ifdef(TEST).
+%% Exposed for deterministic unit testing of the drain-stall detector,
+%% decoupled from the clock (the /2 forms take `Now`) and from a running
+%% applier (`stall_test_state/1` builds a minimal state).
+-export([check_drain_stall/2]).
+-export([note_drain_progress/2]).
+-export([note_drain_idle/2]).
+-export([stall_test_state/1]).
+-export([stall_test_fields/1]).
+-endif.
 -export([collect_frames/2]).
 -export([diff_pairs/3]).
 
@@ -1145,10 +1169,24 @@ do_init_2(
                         max_install_in_flight = InFlightCap,
                         lifecycle = Lifecycle,
                         drain_gate = DrainGate,
-                        boot_replay = BootReplay
+                        boot_replay = BootReplay,
+                        drain_progress_at = erlang:monotonic_time(millisecond),
+                        %% Seed the progress watermark from the resumed
+                        %% offset: on restart, re-reading up to a position
+                        %% we had already committed is NOT progress.
+                        drain_max_pos = consumer_offset_pos(CO),
+                        drain_stall_alarm_ms = application:get_env(
+                            bondy_oplog, drain_stall_alarm_ms, 60000
+                        )
                     },
                     ok = bondy_oplog_registry:set_applier_pid(
                         InstanceId, self()
+                    ),
+                    %% A predecessor that crashed while stalled leaves its
+                    %% alarm behind; this incarnation owns the id now
+                    %% (re-raised by the detector if the stall persists).
+                    alarm_handler:clear_alarm(
+                        {bondy_oplog_drain_stalled, InstanceId}
                     ),
                     %% When the drain is gated (a collapsed per-shard instance
                     %% whose sibling tables have not all registered yet), defer
@@ -1894,6 +1932,115 @@ start_pos_from_consumer_offset(CO) ->
     end.
 
 %% @private
+%% The committed `{Segment, FrameOffset}` of a consumer offset, or
+%% `undefined` when nothing was ever committed.
+consumer_offset_pos(CO) ->
+    case bondy_oplog_wal_state:commit_count(CO) of
+        0 ->
+            undefined;
+        _ ->
+            {
+                bondy_oplog_wal_state:committed_segment(CO),
+                bondy_oplog_wal_state:committed_frame_offset(CO)
+            }
+    end.
+
+%% @private
+%% A commit persisted: it counts as progress only when it lands BEYOND the
+%% highest position ever committed — a re-read of already-covered ground
+%% (the failure shape of a mispositioned resume) commits equal-or-lower
+%% positions and must not reset the stall clock. Progress clears a raised
+%% alarm.
+note_drain_progress(State) ->
+    note_drain_progress(erlang:monotonic_time(millisecond), State).
+
+note_drain_progress(Now, #state{consumer_offset = CO} = State) ->
+    Pos = consumer_offset_pos(CO),
+    Max = State#state.drain_max_pos,
+    case Pos =/= undefined andalso (Max == undefined orelse Pos > Max) of
+        true ->
+            clear_drain_stall(State#state{
+                drain_max_pos = Pos,
+                drain_progress_at = Now
+            });
+        false ->
+            State
+    end.
+
+%% @private
+%% Caught up with the log (nothing to read): reset the stall clock — an
+%% idle consumer is healthy regardless of how long it stays idle.
+note_drain_idle(State) ->
+    note_drain_idle(erlang:monotonic_time(millisecond), State).
+
+note_drain_idle(Now, State) ->
+    clear_drain_stall(State#state{drain_progress_at = Now}).
+
+%% @private
+check_drain_stall(State) ->
+    check_drain_stall(erlang:monotonic_time(millisecond), State).
+
+check_drain_stall(_Now, #state{drain_stall_alarm_ms = 0} = State) ->
+    State;
+check_drain_stall(_Now, #state{drain_stalled = true} = State) ->
+    State;
+check_drain_stall(Now, #state{drain_progress_at = At} = State) ->
+    Stalled =
+        is_integer(At) andalso Now - At > State#state.drain_stall_alarm_ms,
+    case Stalled of
+        false ->
+            State;
+        true ->
+            Info = #{
+                instance_id => State#state.instance_id,
+                stalled_for_ms => Now - At,
+                committed_position => State#state.drain_max_pos
+            },
+            ?LOG_WARNING(Info#{
+                description =>
+                    "WAL drain is processing frames without committing any "
+                    "new position - the log consumer is stalled. Applied "
+                    "state on this node is falling behind its own WAL even "
+                    "if anti-entropy reports the node converged."
+            }),
+            alarm_handler:set_alarm(
+                {{bondy_oplog_drain_stalled, State#state.instance_id}, Info}
+            ),
+            State#state{drain_stalled = true}
+    end.
+
+%% @private
+clear_drain_stall(#state{drain_stalled = true} = State) ->
+    alarm_handler:clear_alarm(
+        {bondy_oplog_drain_stalled, State#state.instance_id}
+    ),
+    State#state{drain_stalled = false};
+clear_drain_stall(State) ->
+    State.
+
+-ifdef(TEST).
+%% Build a minimal applier state carrying only what the stall detector
+%% reads; every other field stays at its record default.
+stall_test_state(Map) when is_map(Map) ->
+    #state{
+        instance_id = maps:get(instance_id, Map, <<"stall-test">>),
+        consumer_offset = maps:get(consumer_offset, Map, undefined),
+        drain_progress_at = maps:get(drain_progress_at, Map, 0),
+        drain_max_pos = maps:get(drain_max_pos, Map, undefined),
+        drain_stalled = maps:get(drain_stalled, Map, false),
+        drain_stall_alarm_ms = maps:get(drain_stall_alarm_ms, Map, 60000)
+    }.
+
+%% The detector-owned fields of a state, for assertions.
+stall_test_fields(#state{} = S) ->
+    #{
+        drain_progress_at => S#state.drain_progress_at,
+        drain_max_pos => S#state.drain_max_pos,
+        drain_stalled => S#state.drain_stalled
+    }.
+-endif.
+
+%% @private
 %% Open the drain reader at the resume position, falling back to the earliest
 %% live segment when the committed segment has been compacted away beneath the
 %% consumer. Truncation runs strictly behind the committed offset, so this
@@ -1956,7 +2103,13 @@ drain_loop_step(
     %% pre-A2 path.
     case collect_frames(Iter, Max) of
         {frames, Batch, {NextSeg, NextOff}, NewIter, More} ->
-            StateA = apply_batch(State0, Batch),
+            %% Actively processing frames: if no commit has advanced past
+            %% the progress watermark for the stall window, raise the
+            %% alarm — this is the shape of a drain grinding over old
+            %% ground (or wedged downstream) while the node otherwise
+            %% looks converged.
+            StateS = check_drain_stall(State0),
+            StateA = apply_batch(StateS, Batch),
             {LastHlc, Count} = batch_summary(Batch),
             State1 = boot_replay_accrue(
                 bump_offset(
@@ -1976,7 +2129,8 @@ drain_loop_step(
                     {ok, commit_now(State1)}
             end;
         {empty, _Iter} ->
-            {ok, commit_now(State0)};
+            %% Caught up — an idle log is never a stall.
+            {ok, commit_now(note_drain_idle(State0))};
         {error, Reason} ->
             ?LOG_ERROR(#{
                 description =>
@@ -3862,7 +4016,7 @@ commit_now(
             Seg = bondy_oplog_wal_state:committed_segment(CO),
             ok = notify_committed_segment(InstanceId, WalPid, Seg),
             ok = bump_ae_targets(State),
-            State#state{uncommitted = 0};
+            note_drain_progress(State#state{uncommitted = 0});
         {error, Reason} ->
             ?LOG_WARNING(#{
                 description =>

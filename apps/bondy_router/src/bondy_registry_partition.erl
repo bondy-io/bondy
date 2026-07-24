@@ -59,6 +59,7 @@
 %% SERVER API
 -export([async_execute/2]).
 -export([async_execute/3]).
+-export([execute_after/4]).
 -export([execute/2]).
 -export([execute/3]).
 -export([execute/4]).
@@ -200,6 +201,26 @@ async_execute(Partition, Fun, Args) when
 ->
     gen_server:cast(Partition, {execute, Fun, Args}).
 
+-doc """
+As `async_execute/3` but the execution is deferred by `Delay` milliseconds.
+Runs in the partition server like every other execute, so it serialises
+with them.
+""".
+-spec execute_after(
+    Delay :: non_neg_integer(),
+    Partition :: pid(),
+    Fun :: execute_fun(),
+    Args :: [any()]
+) -> ok.
+
+execute_after(Delay, Partition, Fun, Args) when
+    is_integer(Delay) andalso Delay >= 0 andalso
+        is_pid(Partition) andalso is_list(Args) andalso
+        is_function(Fun, length(Args))
+->
+    _ = erlang:send_after(Delay, Partition, {execute, Fun, Args}),
+    ok.
+
 %% =============================================================================
 %% CRUD API
 %% =============================================================================
@@ -212,9 +233,13 @@ Fails with `badarg` if  `Entry` is not a proxy entry.
     {ok, IsFirstEntry :: boolean()} | {error, any()}.
 
 add(Partition, Entry) when is_pid(Partition) ->
-    Result = bondy_registry_store:add(store(Partition), Entry),
+    Store = store(Partition),
+    Result = bondy_registry_store:add(Store, Entry),
     resulto:then(Result, fun(Value) ->
         _ = add_remote_index(Entry),
+        ok = bondy_registry_rib:on_entry_added(
+            Partition, bondy_registry_store:rib_members_tab(Store), Entry
+        ),
         {ok, Value}
     end).
 
@@ -319,6 +344,9 @@ remove(Partition, Entry, Opts0) when is_pid(Partition) ->
     Opts = key_value:put(broadcast, true, Opts0),
     Result = bondy_registry_store:remove(Store, Entry, Opts),
     resulto:then(Result, fun(undefined) ->
+        ok = bondy_registry_rib:on_entry_removed(
+            Partition, bondy_registry_store:rib_members_tab(Store), Entry
+        ),
         delete_remote_index(Entry)
     end).
 
@@ -331,6 +359,9 @@ take(Partition, Entry) when is_pid(Partition) ->
     Result = bondy_registry_store:take(Store, Entry),
     resulto:then(Result, fun(Value) ->
         ok = delete_remote_index(Value),
+        ok = bondy_registry_rib:on_entry_removed(
+            Partition, bondy_registry_store:rib_members_tab(Store), Value
+        ),
         {ok, Value}
     end).
 
@@ -627,6 +658,10 @@ handle_cast(Event, State) ->
 handle_info({'ETS-TRANSFER', _, _, _}, State) ->
     %% The store and remote_index ets tables use bondy_table_manager.
     %% We ignore as tables are named.
+    {noreply, State};
+handle_info({execute, Fun, Args}, State) ->
+    %% A deferred execute (`execute_after/4`) coming due.
+    _ = do_execute(State, Fun, Args),
     {noreply, State};
 handle_info({'EXIT', Pid, Reason}, #state{janitors = Js} = State) ->
     case maps:take(Pid, Js) of

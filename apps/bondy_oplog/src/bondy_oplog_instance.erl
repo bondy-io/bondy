@@ -5043,6 +5043,11 @@ any `{error, _}`:
 - `{error, membership_unavailable}` — the membership service cannot be read.
   NOT the same as solo; conflating them would license maximal reclamation on
   a node that merely cannot see its membership service.
+- `{error, idle}` — this replica's MST holds no events (fully compacted or
+  never written): no frontier can exist and there is nothing whose
+  stability needs certifying. The steady state of a converged quiescent
+  shard in a cluster — NOT operator-actionable, and reported distinctly so
+  the actionable reasons below stay meaningful.
 - `{error, {unconfirmed, Peers}}` — members with no confirmed root; a silent
   member holds stability down instead of vanishing (A4).
 - `{error, no_frontier}` — no local key is confirmed by every member.
@@ -5157,8 +5162,26 @@ reclamation_stability_point(State) ->
             %% holds — see `stability_point/1`.
             {ok, bondy_oplog_hlc:now(State#state.hlc)};
         {ok, Members} ->
-            confirmed_stability_point(State, Members)
+            case local_mst_empty(State) of
+                true ->
+                    %% Clustered but this replica's tree is empty (fully
+                    %% compacted, or never written): a frontier over local
+                    %% keys cannot exist by construction, and there is
+                    %% nothing whose stability needs certifying. Reported
+                    %% as `idle` — distinct from `unconfirmed`/
+                    %% `no_frontier`, which name actionable conditions —
+                    %% and it clears itself on the next local event.
+                    {error, idle};
+                false ->
+                    confirmed_stability_point(State, Members)
+            end
     end.
+
+%% @private
+local_mst_empty(#state{mst = undefined}) ->
+    true;
+local_mst_empty(#state{mst = MST}) ->
+    bondy_mst:root(MST) =:= undefined.
 
 %% @private
 confirmed_stability_point(#state{mst = undefined}, _Members) ->

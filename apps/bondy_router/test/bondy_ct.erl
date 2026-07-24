@@ -190,6 +190,10 @@
         {session_manager_pool, [{size, 32}]},
         {job_manager_queue, [{ttl, 60000}, {max_size, 160000}]},
         {job_manager_pool, [{size, 16}]},
+        %% The relay forward options the cuttlefish schema would provide
+        %% (`router.forward.*` defaults) — read by the cross-node EVENT /
+        %% INVOCATION relay paths.
+        {router, [{forward, #{ack => false, retransmission => false}}]},
         {router_pool, [{capacity, 1000000}, {size, 16}, {type, transient}]},
         {load_regulation_enabled, true},
         {registry, [
@@ -764,9 +768,20 @@ start_cluster(Names, Config) when is_list(Names) ->
     PrivDir = proplists:get_value(priv_dir, Config),
     PrivDir =/= undefined orelse error({missing_priv_dir, Config}),
     Cookie = atom_to_list(erlang:get_cookie()),
+    %% A name is an atom, or `{Name, ExtraEnv}' where ExtraEnv is a list of
+    %% `{KeyPath, Value}' overrides applied on top of the per-node env — for
+    %% boot-time configuration a testcase cannot set after the fact (e.g.
+    %% `[bondy_router, registry_rib_mode]').
+    Specs = [
+        case N of
+            {Name, Extra} when is_atom(Name), is_list(Extra) -> {Name, Extra};
+            Name when is_atom(Name) -> {Name, []}
+        end
+     || N <- Names
+    ],
     Nodes = [
-        start_node(Name, Idx, PrivDir, Cookie)
-     || {Name, Idx} <- lists:zip(Names, lists:seq(1, length(Names)))
+        start_node(Name, Idx, PrivDir, Cookie, Extra)
+     || {{Name, Extra}, Idx} <- lists:zip(Specs, lists:seq(1, length(Specs)))
     ],
     ok = form_cluster(Nodes),
     ok = wait_for_members(Nodes, length(Nodes), 30000),
@@ -961,7 +976,7 @@ join(Node, Peer, _Config) ->
 %% @private
 %% Boots one peer node, makes this module loadable on it, and starts
 %% `bondy_router' from an isolated per-node env.
-start_node(Name, Idx, PrivDir, Cookie) ->
+start_node(Name, Idx, PrivDir, Cookie, ExtraEnv) ->
     DataDir = filename:join(PrivDir, atom_to_list(Name)),
     ok = filelib:ensure_dir(filename:join(DataDir, ".keep")),
     %% Match the controller's host (and thus its short/long name domain) so the
@@ -983,7 +998,12 @@ start_node(Name, Idx, PrivDir, Cookie) ->
     {?MODULE, Bin, File} = code:get_object_code(?MODULE),
     {module, ?MODULE} =
         erpc:call(Node, code, load_binary, [?MODULE, File, Bin]),
-    Env = node_env(DataDir, 18086 + Idx),
+    Env0 = node_env(DataDir, 18086 + Idx),
+    Env = lists:foldl(
+        fun({Path, Value}, Acc) -> key_value:set(Path, Value, Acc) end,
+        Env0,
+        ExtraEnv
+    ),
     ok = erpc:call(Node, ?MODULE, peer_boot, [Env], 60000),
     {Name, Node, Peer}.
 

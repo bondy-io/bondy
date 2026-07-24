@@ -105,10 +105,18 @@ stability point the batch ran at.
 ### `[bondy_oplog, reclamation, stalled]`
 
 Emitted on every reclamation attempt that reclaims nothing, naming why.
-Measurement: `count`. Metadata: `instance_id`, `reason` (`unconfirmed`,
-`membership_unavailable`, `no_frontier`, `non_event_frontier`,
-`no_applier`), and `missing_members` — for `unconfirmed`, the members
-holding stability down. Never rate-limited.
+Measurement: `count`. Metadata: `instance_id`, `reason` (`idle`,
+`unconfirmed`, `membership_unavailable`, `no_frontier`,
+`non_event_frontier`, `no_applier`), and `missing_members` — for
+`unconfirmed`, the members holding stability down. Never rate-limited.
+
+`idle` is the benign steady state of a converged quiescent shard: this
+replica's tree is empty (fully compacted or never written), so there is
+nothing whose stability needs certifying. It is the only reason that never
+produces the rate-limited stall log line — it is not operator-actionable
+and it ends on the shard's next local event. See the deletion and
+reclamation guide for the full reason table and the known quiescent-shard
+liveness gap this classification deliberately leaves open.
 
 ### `[bondy_oplog, scheduler, gc, trigger_outcome]`
 

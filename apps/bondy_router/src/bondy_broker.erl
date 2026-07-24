@@ -634,7 +634,9 @@ do_publish(#publish{} = M, Ctxt) ->
 
     %% We find matching subscriptions
     MatchOpts = make_match_opts(SessionId, Opts),
-    Subscriptions = match_subscriptions(TopicUri, RealmUri, MatchOpts),
+    Subscriptions = match_subscriptions_for_publish(
+        TopicUri, RealmUri, MatchOpts
+    ),
 
     %% We generate a new publication id
     PubId = bondy_message_id:global(),
@@ -739,6 +741,43 @@ do_publish(RealmUri, {_, _} = MatchResult, MakeEvent, Fwd, Origin) when
     %% (local) Bridge Relays and Cluster Peer nodestrings where we found at
     %% least one subscriber
     fold_matches(MatchResult, Fun, ok).
+
+%% @private
+%% The match set for a locally-originated publication. When routing runs on
+%% the registry RIB, remote reachability comes from the subscription stubs —
+%% one relayed PUBLISH per node with a matching subscription, the receiving
+%% node matching and delivering locally — and the entry match is restricted
+%% to local subscribers, so remote full entries (which may still replicate
+%% as the rollback net) are never consumed. Otherwise the full-entry match
+%% provides both sides, as before. Stub nodes ride on the first page only —
+%% mirroring the full-entry contract, where continuations page local entries
+%% and the node list is complete on the first result.
+match_subscriptions_for_publish(TopicUri, RealmUri, MatchOpts) ->
+    case bondy_registry_rib:stub_routing() of
+        true ->
+            LocalOpts = MatchOpts#{nodestring => bondy_config:nodestring()},
+            Result = match_subscriptions(TopicUri, RealmUri, LocalOpts),
+            Nodes = bondy_registry_rib:subscription_nodes(
+                RealmUri, TopicUri, MatchOpts
+            ),
+            merge_stub_nodes(Result, Nodes);
+        false ->
+            match_subscriptions(TopicUri, RealmUri, MatchOpts)
+    end.
+
+%% @private
+%% Merge the stub-derived node set into a local match result, preserving its
+%% shape. Any nodes the local match reported (possible while full entries
+%% still replicate) are unioned in — over-forwarding is safe, the receiving
+%% node delivers only to its own live matching subscribers.
+merge_stub_nodes(?EOT, []) ->
+    ?EOT;
+merge_stub_nodes(?EOT, Nodes) ->
+    {[], Nodes};
+merge_stub_nodes({L, R}, Nodes) when is_list(L), is_list(R) ->
+    {L, lists:usort(R ++ Nodes)};
+merge_stub_nodes({{L, R}, Cont}, Nodes) when is_list(L), is_list(R) ->
+    {{L, lists:usort(R ++ Nodes)}, Cont}.
 
 %% @private
 make_match_opts(SessionId, Opts) ->

@@ -999,13 +999,6 @@ cluster.peer_discovery.type = list
 ##   - a time duration with units, e.g. '10s' for 10 seconds
 
 ##
-## Default: 1m
-##
-## Acceptable values:
-##   - a time duration with units, e.g. '10s' for 10 seconds
-aae.exchange_timer = 1m
-
-##
 ##
 ## Default: on
 ##

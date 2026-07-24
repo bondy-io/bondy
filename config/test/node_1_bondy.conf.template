@@ -1,8 +1,6 @@
 log.handlers.default.level = info
 log.level = info
 
-aae.exchange_timer = 1m
-
 
 admin_api.http.enabled = on
 admin_api.http.port = 18081

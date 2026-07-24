@@ -761,8 +761,10 @@ initial_round_budget(MissingCount, PerRound) ->
 %% A successful round (`{ok, Root}`, `Record =:= true`) freshens this
 %% instance's AE targets — INCLUDING when `Root =:= undefined` (an empty
 %% instance verified caught-up with the peer). The empty case is exactly the
-%% idle low-churn shard the auth freshness fence depends on, so it MUST bump;
-%% only the peer-state checkpoint (which needs a concrete root) is skipped.
+%% idle low-churn shard the auth freshness fence depends on, so it MUST bump.
+%% The peer-state record also always lands: with an empty peer tree it
+%% advances recency only (no root to confirm — see
+%% `bondy_oplog_peer_state:record_sync_complete/3`).
 maybe_record({ok, _LocalRoot}, Instance, Peer, true, PeerRoot) ->
     %% Checkpoint the PEER's root, not ours.
     %%
@@ -831,10 +833,14 @@ maybe_confirm_root(_, _, _, _, _, _, _) ->
     ok.
 
 %% @private
-maybe_checkpoint_root(Root, Instance, Peer) when is_binary(Root) ->
-    bondy_oplog_peer_state:record_sync_complete(Peer, Instance, Root);
-maybe_checkpoint_root(undefined, _Instance, _Peer) ->
-    ok.
+%% Every completed round records — `undefined` (an empty peer tree, e.g. a
+%% fully-compacted quiescent shard) advances the peer's sync recency
+%% without confirming a root, so the last-sync age stays truthful on
+%% converged idle shards instead of climbing forever.
+maybe_checkpoint_root(Root, Instance, Peer) when
+    is_binary(Root) orelse Root =:= undefined
+->
+    bondy_oplog_peer_state:record_sync_complete(Peer, Instance, Root).
 
 %% @private
 %% Adopt the peer's applied-frontier after a CONVERGED round (`{ok, _}`).

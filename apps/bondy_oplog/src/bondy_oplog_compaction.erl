@@ -46,5 +46,12 @@ Runs one compaction cycle for `InstanceId`. Returns:
 compact(InstanceId) when is_binary(InstanceId) ->
     PeerStates =
         bondy_oplog_peer_state:get_instance_peer_states(InstanceId),
-    PeerRoots = [maps:get(root_hash, P) || P <- PeerStates],
+    %% A rootless entry (rounds only ever completed against an empty peer
+    %% tree) constrains nothing: same treatment as a peer this table has
+    %% never seen — compaction may proceed and that peer, if it ever needs
+    %% the truncated prefix, takes the bootstrap path.
+    PeerRoots = [
+        R
+     || #{root_hash := R} <- PeerStates, is_binary(R)
+    ],
     bondy_oplog_instance:compact(InstanceId, PeerRoots).

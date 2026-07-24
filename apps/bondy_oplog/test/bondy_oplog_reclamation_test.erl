@@ -44,6 +44,7 @@ reclamation_test_() ->
         fun solo_stability_point_is_a_fresh_tick/0,
         fun solo_reclaims_the_tail_tombstone/0,
         fun membership_error_reclaims_nothing/0,
+        fun empty_tree_is_idle_not_stalled/0,
         fun unconfirmed_member_blocks_stability/0,
         fun confirmed_frontier_is_hand_computed/0,
         fun non_event_frontier_is_a_named_error/0,
@@ -115,11 +116,51 @@ membership_error_reclaims_nothing() ->
     teardown(Id).
 
 %% -----------------------------------------------------------------------------
+%% Empty local tree in a cluster — vacuous, reported as `idle`
+%% -----------------------------------------------------------------------------
+
+%% A clustered replica whose MST holds no events (never written, or fully
+%% compacted) can have no frontier by construction and holds nothing whose
+%% stability needs certifying: the outcome is the distinct, non-actionable
+%% `idle` — NOT `unconfirmed` (which tells the operator to revive a member
+%% that is alive and converged). The first local event ends the idle state
+%% and the ordinary confirmation discipline takes over.
+empty_tree_is_idle_not_stalled() ->
+    Id = start_instance(),
+    Ghost = 'ghost@nowhere',
+    ok = meck:new(partisan_peer_service, [passthrough]),
+    try
+        ok = meck:expect(partisan_peer_service, members, fun() ->
+            {ok, [partisan:node(), Ghost]}
+        end),
+        ?assertEqual(
+            {error, idle},
+            bondy_oplog_instance:reclaim_stable_cells(Id)
+        ),
+
+        %% A local event ends idle: the same unconfirmed member now
+        %% genuinely holds stability down.
+        _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"k">>, {set, <<"v">>}}),
+        ok = bondy_oplog_instance:await_apply(Id),
+        ?assertEqual(
+            {error, {unconfirmed, [Ghost]}},
+            bondy_oplog_instance:reclaim_stable_cells(Id)
+        )
+    after
+        meck:unload(partisan_peer_service)
+    end,
+    teardown(Id).
+
+%% -----------------------------------------------------------------------------
 %% Partially confirmed — a silent member holds stability down
 %% -----------------------------------------------------------------------------
 
 unconfirmed_member_blocks_stability() ->
     Id = start_instance(),
+    %% The instance must HOLD an event: an empty tree is the vacuous
+    %% `idle` case (tested separately), not a member-blocked stall.
+    _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"held">>, {set, <<"v">>}}),
+    ok = bondy_oplog_instance:await_apply(Id),
     Ghost = 'ghost@nowhere',
     ok = meck:new(partisan_peer_service, [passthrough]),
     try
@@ -218,6 +259,10 @@ non_event_frontier_is_a_named_error() ->
 
 stall_is_observable_within_one_interval() ->
     Id = start_instance(),
+    %% Hold an event so the ghost member genuinely blocks stability (an
+    %% empty tree would be the non-actionable `idle`, which never warns).
+    _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"held">>, {set, <<"v">>}}),
+    ok = bondy_oplog_instance:await_apply(Id),
     Ghost = 'dead-member@nowhere',
     Self = self(),
     HandlerId = {?MODULE, stall_probe},

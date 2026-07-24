@@ -2640,8 +2640,74 @@ build_info(#state{} = State) ->
         max_total_wal_size => State#state.max_total_wal_size,
         max_live_segments => State#state.max_live_segments,
         backpressure => current_backpressure(State),
-        head_lag_ms => head_lag_ms(State)
+        head_lag_ms => head_lag_ms(State),
+        consumer_lag_bytes => consumer_lag_bytes(State)
     }.
+
+%% @private
+%% Bytes appended but not yet committed by the log's consumer (the
+%% applier): the distance from the durable consumer offset to the append
+%% head. Reads `consumer.offset` from disk — the consumer owns that file —
+%% so the figure stays available even when the consumer itself is
+%% unresponsive, which is precisely when it matters: a node whose MSTs
+%% compare "converged" can still hold an undrained WAL tail, and this is
+%% the number that exposes it. Conservative on edge cases: an offset that
+%% was never committed, or whose segment was already swept, counts every
+%% live byte as lag. `undefined` on any read failure (the caller filters).
+consumer_lag_bytes(#state{dir = Dir} = State) ->
+    try
+        CO =
+            case bondy_oplog_wal_state:read_consumer_offset(Dir) of
+                {ok, CO0} -> CO0;
+                {error, _} -> bondy_oplog_wal_state:new_consumer_offset()
+            end,
+        case bondy_oplog_wal_state:commit_count(CO) of
+            0 ->
+                State#state.bytes_total;
+            _ ->
+                consumer_lag_bytes(
+                    State,
+                    bondy_oplog_wal_state:committed_segment(CO),
+                    bondy_oplog_wal_state:committed_frame_offset(CO)
+                )
+        end
+    catch
+        _:_ ->
+            undefined
+    end.
+
+%% @private
+consumer_lag_bytes(#state{segment_id = Head} = State, CSeg, COff) when
+    CSeg =:= Head
+->
+    max(0, State#state.current_offset - COff);
+consumer_lag_bytes(#state{segment_id = Head} = State, CSeg, COff) when
+    CSeg < Head
+->
+    Dir = State#state.dir,
+    Live = [
+        Id
+     || {Id, _} <-
+            bondy_oplog_wal_manifest:live_segments(State#state.manifest)
+    ],
+    case lists:member(CSeg, Live) of
+        false ->
+            %% The committed segment was already swept beneath the offset —
+            %% stale; count the whole live log.
+            State#state.bytes_total;
+        true ->
+            Middle = lists:sum([
+                filelib:file_size(segment_path(Dir, Id))
+             || Id <- Live, Id > CSeg, Id < Head
+            ]),
+            Tail = max(
+                0, filelib:file_size(segment_path(Dir, CSeg)) - COff
+            ),
+            Tail + Middle + State#state.current_offset
+    end;
+consumer_lag_bytes(_State, _CSeg, _COff) ->
+    %% Offset ahead of the head — a rotation race; nothing meaningful.
+    0.
 
 %% @private
 %% Snapshot of the current backpressure status. `ok` when no hard cap

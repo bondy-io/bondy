@@ -28,7 +28,17 @@ groups() ->
         {rpc, [sequence], [
             register_invoke_single,
             register_shared,
-            register_callback
+            register_callback,
+            registry_rib_dual_write,
+            rib_completion_selects_local,
+            rib_completion_no_local_fails_fast,
+            rib_self_heal_stale_cell,
+            rib_retry_local_win,
+            rib_retry_next_node,
+            rib_retry_exhausted,
+            rib_retry_requires_marker,
+            rib_damping_trailing_update,
+            rib_metrics_surface
         ]},
         {pubsub, [sequence], [
             sub_add_local_exact_1,
@@ -446,6 +456,689 @@ register_callback(Config) ->
         {error, already_exists},
         bondy_dealer:register(Uri1, Opts, RealmUri, Ref3)
     ).
+
+%% Proves the RIB dual-write path end-to-end: local register/unregister
+%% drives this node's replicated summary cell via the partition hooks + the
+%% serialised recompute. The recompute is async (a cast to the partition
+%% server), so cell assertions poll.
+registry_rib_dual_write(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Opts = #{invoke => ?INVOKE_ROUND_ROBIN},
+    Ref = bondy_ref:new(internal),
+    Table = bondy_namespace_catalog:table(?BONDY_DB_REGISTRATION_RIB_TAB),
+    Key = term_to_binary(
+        {RealmUri, ?EXACT_MATCH, Uri, bondy_config:nodestring()}
+    ),
+
+    %% Two shared registrations -> one summary cell, count 2.
+    ?assertMatch({ok, _}, bondy_dealer:register(Uri, Opts, RealmUri, Ref)),
+    ?assertMatch({ok, _}, bondy_dealer:register(Uri, Opts, RealmUri, Ref)),
+
+    ?assert(
+        await_cell(Table, RealmUri, Key, fun
+            (
+                {ok, {
+                    #{invoke := I, count := 2, earliest := E, latest := L}, _
+                }}
+            ) when
+                I == ?INVOKE_ROUND_ROBIN, E =< L
+            ->
+                true;
+            (_) ->
+                false
+        end),
+        "Two shared registrations must summarise to one cell with count 2"
+    ),
+
+    %% Removing one registration shrinks the cell to count 1.
+    Entries = bondy_registry:find_matches(registration, RealmUri, Uri),
+    ?assertEqual(2, length(Entries)),
+    [E1, E2] = Entries,
+    ok = bondy_registry:remove(E1),
+
+    ?assert(
+        await_cell(Table, RealmUri, Key, fun
+            ({ok, {#{count := 1}, _}}) -> true;
+            (_) -> false
+        end),
+        "Removing one of two registrations must leave count 1"
+    ),
+
+    %% Removing the last registration clears the cell (presence `dead`).
+    ok = bondy_registry:remove(E2),
+
+    ?assert(
+        await_cell(Table, RealmUri, Key, fun
+            ({error, not_found}) -> true;
+            (_) -> false
+        end),
+        "Removing the last registration must clear the cell"
+    ),
+
+    %% Subscriptions: reachability-only cells (`#{count}`).
+    Ctxt = key_value:get(context, Config),
+    SubUri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    add_subscription_test(
+        subscription, RealmUri, SubUri, #{match => ?EXACT_MATCH}, Ctxt
+    ),
+    SubTable = bondy_namespace_catalog:table(?BONDY_DB_SUBSCRIPTION_RIB_TAB),
+    SubKey = term_to_binary(
+        {RealmUri, ?EXACT_MATCH, SubUri, bondy_config:nodestring()}
+    ),
+
+    ?assert(
+        await_cell(SubTable, RealmUri, SubKey, fun
+            ({ok, {#{count := 1}, _}}) -> true;
+            (_) -> false
+        end),
+        "A local subscription must produce a count-only cell"
+    ),
+
+    {[SubEntry], []} =
+        bondy_registry:find_matches(subscription, RealmUri, SubUri),
+    ok = bondy_registry:remove(SubEntry),
+
+    ?assert(
+        await_cell(SubTable, RealmUri, SubKey, fun
+            ({error, not_found}) -> true;
+            (_) -> false
+        end),
+        "Removing the subscription must clear the cell"
+    ),
+
+    %% The consistency gate over the whole realm — including every entry the
+    %% earlier cases in this suite left registered: the node set derivable
+    %% from summaries must equal the node set derivable from full entries.
+    %% Recomputes are async, so poll to a fixpoint.
+    ?assert(
+        await(fun() -> bondy_registry_rib:check(RealmUri) =:= [] end, 500),
+        lists:flatten(
+            io_lib:format(
+                "RIB summaries must agree with the full-entry view, got: ~p",
+                [bondy_registry_rib:check(RealmUri)]
+            )
+        )
+    ).
+
+%% Owner-side completion: a node-addressed forwarded CALL (`rib_completion`
+%% tag) must IGNORE the sender's entry hint and re-select among this node's
+%% live local registrations — here a callback procedure, so the selected
+%% callee is applied and the RESULT is sent back to the caller ref.
+rib_completion_selects_local(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Ref = bondy_ref:new(internal, {?MODULE, rib_echo}),
+    ?assertMatch(
+        {ok, _},
+        bondy_dealer:register(Uri, #{invoke => ?INVOKE_SINGLE}, RealmUri, Ref)
+    ),
+
+    Caller = bondy_ref:new(internal),
+    %% A deliberately bogus hint: completion must not trust it.
+    Hint = bondy_ref:new(internal),
+    Call = bondy_wamp_message:call(1, #{}, Uri),
+
+    ok = bondy_dealer:forward(Call, Hint, #{
+        realm_uri => RealmUri,
+        from => Caller,
+        rib_completion => true
+    }),
+
+    receive
+        {?BONDY_REQ, _, RealmUri, #result{args = [<<"pong">>]}} ->
+            ok;
+        {?BONDY_REQ, _, RealmUri, Other} ->
+            error({unexpected_response, Other})
+    after 5000 ->
+        error(no_response)
+    end.
+
+%% Owner-side completion with NO live local registration (a stale route)
+%% must fail fast back to the caller with wamp.error.no_eligible_callee —
+%% never hang, never re-forward.
+rib_completion_no_local_fails_fast(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+
+    Caller = bondy_ref:new(internal),
+    Call = bondy_wamp_message:call(1, #{}, Uri),
+
+    ok = bondy_dealer:forward(Call, bondy_ref:new(internal), #{
+        realm_uri => RealmUri,
+        from => Caller,
+        rib_completion => true
+    }),
+
+    receive
+        {?BONDY_REQ, _, RealmUri, #error{
+            request_type = ?CALL,
+            request_id = 1,
+            error_uri = ?WAMP_NO_ELIGIBLE_CALLE
+        }} ->
+            ok;
+        {?BONDY_REQ, _, RealmUri, Other} ->
+            error({unexpected_response, Other})
+    after 5000 ->
+        error(no_response)
+    end.
+
+%% A merged RIB cell naming THIS node is an echo of our own writes; when it
+%% does not match local truth — e.g. peers merging back a pre-restart cell —
+%% the reaction re-derives the summary from the members table: a stale cell
+%% is cleared, a clobbered one re-asserted. This closes the resurrection
+%% hole for a rebooted node whose peers still hold its old summaries.
+rib_self_heal_stale_cell(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Table = bondy_namespace_catalog:table(?BONDY_DB_REGISTRATION_RIB_TAB),
+    Key = term_to_binary(
+        {RealmUri, ?EXACT_MATCH, Uri, bondy_config:nodestring()}
+    ),
+    Stale = #{invoke => ?INVOKE_SINGLE, count => 1, earliest => 1, latest => 1},
+
+    %% Plant a stale self cell, as an AAE merge-back would, and simulate its
+    %% merge event reaching the reactor. There is no local registration for
+    %% the URI, so the self-heal recompute must clear it.
+    ok = bondy_db:apply(Table, RealmUri, Key, {set, Stale}),
+    ok = bondy_registry_rib:on_remote_set(registration, Key, Stale),
+    ?assert(
+        await_cell(Table, RealmUri, Key, fun
+            ({error, not_found}) -> true;
+            (_) -> false
+        end),
+        "A stale self cell with no local members must be cleared"
+    ),
+
+    %% With a live local registration the same echo re-asserts the truth.
+    Ref = bondy_ref:new(internal),
+    {ok, _} = bondy_dealer:register(
+        Uri, #{invoke => ?INVOKE_SINGLE}, RealmUri, Ref
+    ),
+    ?assert(
+        await_cell(Table, RealmUri, Key, fun
+            ({ok, {#{count := 1}, _}}) -> true;
+            (_) -> false
+        end)
+    ),
+    Bogus = Stale#{count => 7},
+    ok = bondy_db:apply(Table, RealmUri, Key, {set, Bogus}),
+    ok = bondy_registry_rib:on_remote_set(registration, Key, Bogus),
+    ?assert(
+        await_cell(Table, RealmUri, Key, fun
+            ({ok, {#{count := 1}, _}}) -> true;
+            (_) -> false
+        end),
+        "A clobbered self cell must be re-asserted from local truth"
+    ),
+
+    %% Cleanup: leave the realm as we found it.
+    Entries = bondy_registry:find_matches(registration, RealmUri, Uri),
+    _ = [ok = bondy_registry:remove(E) || E <- Entries],
+    ok.
+
+%% Bounded pre-invocation retry, local absorption: a node-addressed CALL
+%% came back with the owner's completion-miss ERROR; with budget left and a
+%% live LOCAL registration, the retry must re-select — `self` competes
+%% again — and complete the call locally instead of relaying the error.
+rib_retry_local_win(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Ref = bondy_ref:new(internal, {?MODULE, rib_echo}),
+    ?assertMatch(
+        {ok, _},
+        bondy_dealer:register(Uri, #{invoke => ?INVOKE_SINGLE}, RealmUri, Ref)
+    ),
+
+    Caller = bondy_ref:new(internal),
+    CallId = 71,
+    ok = add_rib_retry_promise(
+        RealmUri, Caller, CallId, Uri, [<<"deadnode@nohost">>], 1
+    ),
+    ok = bondy_dealer:forward(
+        completion_miss_error(CallId, #{rib_completion_miss => true}),
+        Caller,
+        #{realm_uri => RealmUri}
+    ),
+
+    receive
+        {?BONDY_REQ, _, RealmUri, #result{args = [<<"pong">>]}} ->
+            ok;
+        {?BONDY_REQ, _, RealmUri, Other} ->
+            error({unexpected_response, Other})
+    after 5000 ->
+        error(no_response)
+    end.
+
+%% Retry, next-node leg: no local registration, one UNTRIED stub node
+%% remains. The retry must re-forward node-addressed to it — no error to
+%% the caller — under a NEW call promise carrying the shrunk budget and
+%% the failed node in the tried set.
+rib_retry_next_node(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Dead = <<"deadnode@nohost">>,
+    Next = <<"nextnode@nohost">>,
+    StubKey = term_to_binary({RealmUri, ?EXACT_MATCH, Uri, Next}),
+    Summary = #{
+        invoke => ?INVOKE_SINGLE, count => 1, earliest => 1, latest => 1
+    },
+    ok = bondy_registry_rib:on_remote_set(registration, StubKey, Summary),
+
+    Caller = bondy_ref:new(internal),
+    CallId = 72,
+    ok = add_rib_retry_promise(RealmUri, Caller, CallId, Uri, [Dead], 1),
+    ok = bondy_dealer:forward(
+        completion_miss_error(CallId, #{rib_completion_miss => true}),
+        Caller,
+        #{realm_uri => RealmUri}
+    ),
+
+    %% No response reaches the caller — the call is in flight again.
+    receive
+        {?BONDY_REQ, _, RealmUri, Unexpected} ->
+            error({unexpected_response, Unexpected})
+    after 1000 ->
+        ok
+    end,
+
+    %% The re-routed leg holds a fresh promise: budget spent, both nodes
+    %% recorded as tried.
+    Key = bondy_rpc_promise:call_key_pattern(RealmUri, Caller, CallId),
+    {ok, Promise} = bondy_rpc_promise:find(Key),
+    ?assertMatch(
+        #{rib_retry := #{remaining := 0, tried := [Next, Dead]}},
+        bondy_rpc_promise:info(Promise)
+    ),
+    %% Cleanup: the in-flight leg targets a fictional node.
+    _ = bondy_rpc_promise:take(Key),
+    ok = bondy_registry_rib:on_remote_clear(registration, StubKey).
+
+%% Retry with an exhausted budget: the completion-miss ERROR is final and
+%% must reach the caller with the routing-internal marker stripped.
+rib_retry_exhausted(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Ref = bondy_ref:new(internal, {?MODULE, rib_echo}),
+    ?assertMatch(
+        {ok, _},
+        bondy_dealer:register(Uri, #{invoke => ?INVOKE_SINGLE}, RealmUri, Ref)
+    ),
+
+    Caller = bondy_ref:new(internal),
+    CallId = 73,
+    ok = add_rib_retry_promise(
+        RealmUri, Caller, CallId, Uri, [<<"deadnode@nohost">>], 0
+    ),
+    ok = bondy_dealer:forward(
+        completion_miss_error(CallId, #{rib_completion_miss => true}),
+        Caller,
+        #{realm_uri => RealmUri}
+    ),
+
+    receive
+        {?BONDY_REQ, _, RealmUri, #error{
+            request_type = ?CALL,
+            request_id = CallId,
+            error_uri = ?WAMP_NO_ELIGIBLE_CALLE,
+            details = Details
+        }} ->
+            ?assertNot(maps:is_key(rib_completion_miss, Details));
+        {?BONDY_REQ, _, RealmUri, Other} ->
+            error({unexpected_response, Other})
+    after 5000 ->
+        error(no_response)
+    end.
+
+%% A no_eligible_callee WITHOUT the completion-miss marker — e.g. produced
+%% by a callee-death flush, where an invocation WAS in flight — must never
+%% be retried, even with budget and a live local alternative: at-most-once
+%% invocation would otherwise break.
+rib_retry_requires_marker(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Ref = bondy_ref:new(internal, {?MODULE, rib_echo}),
+    ?assertMatch(
+        {ok, _},
+        bondy_dealer:register(Uri, #{invoke => ?INVOKE_SINGLE}, RealmUri, Ref)
+    ),
+
+    Caller = bondy_ref:new(internal),
+    CallId = 74,
+    ok = add_rib_retry_promise(
+        RealmUri, Caller, CallId, Uri, [<<"deadnode@nohost">>], 1
+    ),
+    ok = bondy_dealer:forward(
+        completion_miss_error(CallId, #{}),
+        Caller,
+        #{realm_uri => RealmUri}
+    ),
+
+    receive
+        {?BONDY_REQ, _, RealmUri, #error{
+            request_type = ?CALL,
+            request_id = CallId,
+            error_uri = ?WAMP_NO_ELIGIBLE_CALLE
+        }} ->
+            ok;
+        {?BONDY_REQ, _, RealmUri, Other} ->
+            error({unexpected_response, Other})
+    after 5000 ->
+        error(no_response)
+    end.
+
+%% RIB update damping end to end, through the partition server: with a
+%% window on, extra shared registrations (count-only changes) are
+%% suppressed, then the TRAILING recompute — deferred on the partition
+%% server — lands the final count once the window closes. Removal of the
+%% last registration (a reachability transition) clears immediately.
+rib_damping_trailing_update(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Table = bondy_namespace_catalog:table(?BONDY_DB_REGISTRATION_RIB_TAB),
+    Key = term_to_binary(
+        {RealmUri, ?EXACT_MATCH, Uri, bondy_config:nodestring()}
+    ),
+    Opts = #{invoke => ?INVOKE_ROUND_ROBIN},
+    Ref = bondy_ref:new(internal),
+    ok = application:set_env(bondy_router, registry_rib_damping, 3000),
+    try
+        %% Creation (0→1) writes through.
+        ?assertMatch({ok, _}, bondy_dealer:register(Uri, Opts, RealmUri, Ref)),
+        ?assert(
+            await_cell(Table, RealmUri, Key, fun
+                ({ok, {#{count := 1}, _}}) -> true;
+                (_) -> false
+            end)
+        ),
+
+        %% Two more registrations: count-only changes, suppressed within
+        %% the window...
+        ?assertMatch({ok, _}, bondy_dealer:register(Uri, Opts, RealmUri, Ref)),
+        ?assertMatch({ok, _}, bondy_dealer:register(Uri, Opts, RealmUri, Ref)),
+        timer:sleep(200),
+        ?assertMatch(
+            {ok, {#{count := 1}, _}},
+            bondy_db:read(Table, RealmUri, Key),
+            "count-only changes within the window must be suppressed"
+        ),
+
+        %% ...until the trailing recompute lands the final value.
+        ?assert(
+            await_cell(
+                Table,
+                RealmUri,
+                Key,
+                fun
+                    ({ok, {#{count := 3}, _}}) -> true;
+                    (_) -> false
+                end,
+                800
+            ),
+            "the trailing update must land once the window closes"
+        )
+    after
+        application:unset_env(bondy_router, registry_rib_damping)
+    end,
+
+    %% Cleanup: removing the last registration clears immediately.
+    Entries = bondy_registry:find_matches(registration, RealmUri, Uri),
+    _ = [ok = bondy_registry:remove(E) || E <- Entries],
+    ?assert(
+        await_cell(Table, RealmUri, Key, fun
+            ({error, not_found}) -> true;
+            (_) -> false
+        end)
+    ).
+
+%% The RIB observability surface: every family moves at its capture site.
+%% Values are read as deltas — the suite's earlier cases already moved
+%% most of these counters.
+rib_metrics_surface(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    V = fun(Name, Label) ->
+        case bondy_metrics:value(#{name => Name, label => Label}) of
+            undefined -> 0;
+            N -> N
+        end
+    end,
+
+    %% Occupancy: the members gauge follows local entry lifecycle.
+    Members0 = V(bondy_registry_rib_members, #{}),
+    Ref = bondy_ref:new(internal, {?MODULE, rib_echo}),
+    {ok, _} = bondy_dealer:register(
+        Uri, #{invoke => ?INVOKE_SINGLE}, RealmUri, Ref
+    ),
+    ?assertEqual(Members0 + 1, V(bondy_registry_rib_members, #{})),
+
+    %% Stub occupancy follows remote cell lifecycle, by type.
+    Stubs0 = V(bondy_registry_rib_stub_cells, #{type => registration}),
+    PeerKey = term_to_binary(
+        {RealmUri, ?EXACT_MATCH, Uri, <<"metrics_peer@nohost">>}
+    ),
+    Summary = #{
+        invoke => ?INVOKE_SINGLE, count => 1, earliest => 1, latest => 1
+    },
+    ok = bondy_registry_rib:on_remote_set(registration, PeerKey, Summary),
+    ?assertEqual(
+        Stubs0 + 1, V(bondy_registry_rib_stub_cells, #{type => registration})
+    ),
+    %% Upserting the same stub must not drift the gauge.
+    ok = bondy_registry_rib:on_remote_set(registration, PeerKey, Summary),
+    ?assertEqual(
+        Stubs0 + 1, V(bondy_registry_rib_stub_cells, #{type => registration})
+    ),
+    ok = bondy_registry_rib:on_remote_clear(registration, PeerKey),
+    ?assertEqual(
+        Stubs0, V(bondy_registry_rib_stub_cells, #{type => registration})
+    ),
+
+    %% Retry outcomes: a completion miss absorbed by the local
+    %% registration counts as a `local` retry.
+    Local0 = V(bondy_rpc_rib_retries_total, #{outcome => local}),
+    Caller = bondy_ref:new(internal),
+    ok = add_rib_retry_promise(
+        RealmUri, Caller, 91, Uri, [<<"deadnode@nohost">>], 1
+    ),
+    ok = bondy_dealer:forward(
+        completion_miss_error(91, #{rib_completion_miss => true}),
+        Caller,
+        #{realm_uri => RealmUri}
+    ),
+    receive
+        {?BONDY_REQ, _, RealmUri, #result{}} -> ok
+    after 5000 ->
+        error(no_response)
+    end,
+    ?assertEqual(
+        Local0 + 1, V(bondy_rpc_rib_retries_total, #{outcome => local})
+    ),
+
+    %% Owner-side completion outcomes.
+    Ok0 = V(bondy_rpc_rib_completions_total, #{outcome => ok}),
+    Miss0 = V(bondy_rpc_rib_completions_total, #{outcome => miss}),
+    ok = bondy_dealer:forward(
+        bondy_wamp_message:call(92, #{}, Uri),
+        bondy_ref:new(internal),
+        #{realm_uri => RealmUri, from => Caller, rib_completion => true}
+    ),
+    receive
+        {?BONDY_REQ, _, RealmUri, #result{}} -> ok
+    after 5000 ->
+        error(no_response)
+    end,
+    NoProc = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    ok = bondy_dealer:forward(
+        bondy_wamp_message:call(93, #{}, NoProc),
+        bondy_ref:new(internal),
+        #{realm_uri => RealmUri, from => Caller, rib_completion => true}
+    ),
+    receive
+        {?BONDY_REQ, _, RealmUri, #error{request_id = 93}} -> ok
+    after 5000 ->
+        error(no_response)
+    end,
+    ?assertEqual(Ok0 + 1, V(bondy_rpc_rib_completions_total, #{outcome => ok})),
+    ?assertEqual(
+        Miss0 + 1, V(bondy_rpc_rib_completions_total, #{outcome => miss})
+    ),
+
+    %% Damping suppressions: two shared registrations — the second is a
+    %% count-only summary change, suppressed within the window.
+    Supp0 = V(bondy_registry_rib_damping_suppressions_total, #{}),
+    Uri2 = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    RRopts = #{invoke => ?INVOKE_ROUND_ROBIN},
+    %% A plain internal ref: a callback ref cannot share a registration.
+    RRref = bondy_ref:new(internal),
+    ok = application:set_env(bondy_router, registry_rib_damping, 3000),
+    try
+        {ok, _} = bondy_dealer:register(Uri2, RRopts, RealmUri, RRref),
+        {ok, _} = bondy_dealer:register(Uri2, RRopts, RealmUri, RRref),
+        ?assert(
+            await(
+                fun() ->
+                    V(bondy_registry_rib_damping_suppressions_total, #{}) >
+                        Supp0
+                end,
+                500
+            ),
+            "the count-only summary change must be suppressed and counted"
+        )
+    after
+        application:unset_env(bondy_router, registry_rib_damping)
+    end,
+
+    %% Presence: a (fake) peer going down is SUSPENDed and gauged; coming
+    %% back RESUMEs it. Mask/unmask latencies are observed.
+    Susp0 = V(bondy_registry_presence_suspended_nodes, #{}),
+    Mask0 = V(bondy_registry_presence_mask_duration_ms, #{op => mask}),
+    bondy_registry ! {nodedown, 'metrics_peer@nohost'},
+    ?assert(
+        await(
+            fun() ->
+                V(bondy_registry_presence_suspended_nodes, #{}) =:= Susp0 + 1
+            end,
+            500
+        )
+    ),
+    bondy_registry ! {nodeup, 'metrics_peer@nohost'},
+    ?assert(
+        await(
+            fun() ->
+                V(bondy_registry_presence_suspended_nodes, #{}) =:= Susp0
+            end,
+            500
+        )
+    ),
+    ?assertEqual(
+        Mask0 + 1, V(bondy_registry_presence_mask_duration_ms, #{op => mask})
+    ),
+
+    %% The divergence sweep gauges the node-wide total. The raw read
+    %% distinguishes "sweep ran, converged" (0) from "never gauged"
+    %% (undefined).
+    bondy_registry ! rib_check,
+    ?assert(
+        await(
+            fun() ->
+                0 =:=
+                    bondy_metrics:value(#{
+                        name => bondy_registry_rib_divergences
+                    })
+            end,
+            500
+        ),
+        "the sweep must gauge zero divergences on a converged node"
+    ),
+
+    %% Cleanup.
+    _ = [
+        begin
+            Entries = bondy_registry:find_matches(registration, RealmUri, U),
+            [ok = bondy_registry:remove(E) || E <- Entries]
+        end
+     || U <- [Uri, Uri2]
+    ],
+    ok.
+
+%% @private
+%% A caller-side call promise as `rib_forward_call` leaves it: the prepared
+%% entry-less CALL plus the retry state.
+add_rib_retry_promise(RealmUri, Caller, CallId, Uri, Tried, Remaining) ->
+    Call0 = bondy_wamp_message:call(CallId, #{}, Uri),
+    Call = Call0#call{
+        options = (Call0#call.options)#{
+            '$private' => #{
+                call_id => CallId,
+                registration_id => undefined,
+                invocation_details => #{procedure => Uri, trust_level => 0}
+            }
+        }
+    },
+    Promise = bondy_rpc_promise:new_call(RealmUri, Caller, CallId, #{
+        procedure_uri => Uri,
+        timeout => 10000,
+        rib_retry => #{
+            call => Call,
+            opts => #{call_opts => #{}},
+            tried => Tried,
+            remaining => Remaining
+        }
+    }),
+    bondy_rpc_promise:add(Promise).
+
+%% @private
+%% The completion-miss ERROR as the owner node sends it (the marker is
+%% stamped on the record, mirroring `reply_no_eligible_callee`).
+completion_miss_error(CallId, Details) ->
+    Error = bondy_wamp_message:error(
+        ?CALL,
+        CallId,
+        #{},
+        ?WAMP_NO_ELIGIBLE_CALLE,
+        [<<"There are no eligible callees for the procedure.">>]
+    ),
+    Error#error{details = maps:merge(Error#error.details, Details)}.
+
+%% The callback target for rib_completion_selects_local. The dynamic
+%% callback convention: return {ok, Details, Args, KWArgs} -> RESULT.
+rib_echo() ->
+    {ok, #{}, [<<"pong">>], #{}}.
+
+rib_echo(_) ->
+    rib_echo().
+
+rib_echo(_, _) ->
+    rib_echo().
+
+%% @private
+await(_Pred, 0) ->
+    false;
+await(Pred, N) ->
+    case Pred() of
+        true ->
+            true;
+        false ->
+            timer:sleep(10),
+            await(Pred, N - 1)
+    end.
+
+%% @private
+%% Polls the RIB cell until `Pred(ReadResult)` or ~5s.
+await_cell(Table, RealmUri, Key, Pred) ->
+    await_cell(Table, RealmUri, Key, Pred, 500).
+
+await_cell(_, _, _, _, 0) ->
+    false;
+await_cell(Table, RealmUri, Key, Pred, N) ->
+    case Pred(bondy_db:read(Table, RealmUri, Key)) of
+        true ->
+            true;
+        false ->
+            timer:sleep(10),
+            await_cell(Table, RealmUri, Key, Pred, N - 1)
+    end.
 
 project(?EOT) ->
     [];

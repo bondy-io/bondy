@@ -70,7 +70,11 @@ process can read it without round-tripping the gen_server.
 %% Stored as `set` ETS records keyed by the `peer_instance` 2-tuple.
 -record(peer_instance_state, {
     peer_instance :: {peer_id(), instance_id()},
-    root_hash :: binary(),
+    %% `undefined` when every completed round so far found the peer's tree
+    %% empty (e.g. fully compacted): the round freshens the timestamps but
+    %% there is no root to confirm — and only a confirmed (binary) root
+    %% counts for stability.
+    root_hash :: binary() | undefined,
     %% ms since UNIX epoch
     last_sync :: integer(),
     %% ms since UNIX epoch
@@ -84,7 +88,7 @@ process can read it without round-tripping the gen_server.
 -type peer_state_entry() :: #{
     peer := peer_id(),
     instance := instance_id(),
-    root_hash := binary(),
+    root_hash := binary() | undefined,
     last_sync := integer(),
     last_seen := integer()
 }.
@@ -156,11 +160,17 @@ child_spec(Opts) ->
 ?DOC("""
 Records the successful completion of an anti-entropy round between the
 local replica and `Peer` for `Instance`. `RootHash` is the root hash
-shared by both replicas at the end of the round.
+shared by both replicas at the end of the round, or `undefined` when the
+peer's tree was empty (a fully-compacted quiescent shard) — the round
+still completed, so recency MUST advance, but there is nothing to
+confirm: a previously confirmed root is preserved, and a row that never
+had one stays unconfirmed (`confirmed_peer_states/2` requires a binary
+root).
 
 Updates `last_sync` and `last_seen` to `os:system_time(millisecond)`.
 """).
--spec record_sync_complete(peer_id(), instance_id(), binary()) -> ok.
+-spec record_sync_complete(peer_id(), instance_id(), binary() | undefined) ->
+    ok.
 
 record_sync_complete(Peer, Instance, RootHash) ->
     record_sync_complete(
@@ -168,7 +178,7 @@ record_sync_complete(Peer, Instance, RootHash) ->
     ).
 
 -spec record_sync_complete(
-    peer_id(), instance_id(), binary(), integer()
+    peer_id(), instance_id(), binary() | undefined, integer()
 ) -> ok.
 
 record_sync_complete(Peer, Instance, RootHash, Now) ->
@@ -211,10 +221,11 @@ forget_instance(InstanceId) ->
 
 ?DOC("""
 Returns the most recently recorded root hash from `Peer` for
-`Instance`, or `not_found`.
+`Instance` (`undefined` when rounds have completed but only ever against
+an empty peer tree), or `not_found`.
 """).
 -spec get_peer_root_hash(peer_id(), instance_id()) ->
-    {ok, binary()} | not_found.
+    {ok, binary() | undefined} | not_found.
 
 get_peer_root_hash(Peer, Instance) ->
     case ets:lookup(?TABLE, {Peer, Instance}) of
@@ -299,9 +310,16 @@ confirmed_peer_states(_Instance, []) ->
     %% needs no confirmation at all.
     {ok, []};
 confirmed_peer_states(Instance, Members) when is_list(Members) ->
-    %% `0` ⇒ no recency filter, deliberately.
+    %% `0` ⇒ no recency filter, deliberately. A row whose `root_hash` is
+    %% `undefined` (rounds completed, but only ever against an empty peer
+    %% tree) proves recency, NOT confirmation — it must never satisfy the
+    %% stability requirement.
     States = get_instance_peer_states(Instance, 0),
-    Confirmed = #{maps:get(peer, S) => S || S <- States},
+    Confirmed =
+        #{
+            maps:get(peer, S) => S
+         || S <- States, is_binary(maps:get(root_hash, S))
+        },
 
     case [P || P <- Members, not is_map_key(P, Confirmed)] of
         [] ->
@@ -421,9 +439,25 @@ handle_call(_Req, _From, State) ->
     {reply, {error, badcall}, State}.
 
 handle_cast({record_sync_complete, Peer, Instance, Hash, Now}, State) ->
+    Key = {Peer, Instance},
+    %% A rootless completion (peer tree empty) refreshes recency but must
+    %% not ERASE a previously confirmed root: the peer checkpointed that
+    %% root's content before compacting, so keeping it is conservative —
+    %% the stability frontier stays where it was rather than regressing to
+    %% unconfirmed.
+    Root =
+        case Hash of
+            undefined ->
+                case ets:lookup(?TABLE, Key) of
+                    [#peer_instance_state{root_hash = Prev}] -> Prev;
+                    [] -> undefined
+                end;
+            _ ->
+                Hash
+        end,
     Entry = #peer_instance_state{
-        peer_instance = {Peer, Instance},
-        root_hash = Hash,
+        peer_instance = Key,
+        root_hash = Root,
         last_sync = Now,
         last_seen = Now
     },

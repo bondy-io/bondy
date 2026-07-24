@@ -132,6 +132,7 @@ Sampling [See references](https://pdfs.semanticscholar.org/b9a9/52ed1b8bfae2e976
 -export([iterate/1]).
 -export([iterate/2]).
 -export([select/2]).
+-export([select_node/2]).
 
 %% =============================================================================
 %% API
@@ -237,6 +238,120 @@ do_select({error, _} = Error) ->
     Error;
 do_select({Entry, _Iter}) ->
     {ok, Entry}.
+
+-doc """
+The NODE stage of hierarchical (RIB) selection: picks one node among the
+units advertising a procedure, honouring the invocation policy over the
+units' routing summaries. Each unit is `{self | Nodestring, Summary}` where
+`Summary` carries `count` (the selection weight), `earliest` and `latest`.
+The winning node completes the selection among its own live local
+registrations (owner-side completion), which is what makes the two-stage
+distribution equivalent to the single-stage one.
+
+Node-local state only (the round-robin cursor lives in this node's rpc
+state table), mirroring the per-caller-node semantics of `select/2`.
+""".
+-spec select_node(
+    Units :: [{self | binary(), map()}],
+    Opts :: map()
+) -> {ok, self | binary()} | {error, noproc}.
+
+select_node([], _) ->
+    {error, noproc};
+select_node([{Id, _}], _) ->
+    {ok, Id};
+select_node(Units0, Opts) ->
+    %% Deterministic base order: `self` (an atom) sorts before nodestrings.
+    Units = lists:keysort(1, Units0),
+
+    case node_strategy(maps:get(strategy, Opts, ?INVOKE_SINGLE)) of
+        Extremal when Extremal == single orelse Extremal == first ->
+            %% `single`: at most one unit exists in steady state; a
+            %% conflicting duplicate (partition heal) tie-breaks on the
+            %% oldest registration, mirroring first-wins resolution.
+            {ok, element(1, extremal_unit(earliest, fun erlang:min/2, Units))};
+        last ->
+            {ok, element(1, extremal_unit(latest, fun erlang:max/2, Units))};
+        round_robin ->
+            {ok, weighted_rotation(Units, Opts)};
+        jump_consistent_hash ->
+            case maps:get('_routing_key', Opts, undefined) of
+                undefined ->
+                    {ok, weighted_random(Units)};
+                Key ->
+                    Bucket = bondy_consistent_hashing:bucket(
+                        Key, length(Units), jch
+                    ),
+                    {ok, element(1, lists:nth(Bucket + 1, Units))}
+            end;
+        _ ->
+            %% random | queue_least_loaded[_sample]: the caller cannot probe
+            %% remote mailboxes, so the node stage is weighted random; the
+            %% owner stage applies the accurate local policy.
+            {ok, weighted_random(Units)}
+    end.
+
+%% @private
+%% Accepts the WAMP invoke option (binary) or the internal strategy atom.
+node_strategy(?INVOKE_SINGLE) -> single;
+node_strategy(?INVOKE_ROUND_ROBIN) -> round_robin;
+node_strategy(?INVOKE_RANDOM) -> random;
+node_strategy(?INVOKE_FIRST) -> first;
+node_strategy(?INVOKE_LAST) -> last;
+node_strategy(B) when is_binary(B) -> binary_to_existing_atom(B, utf8);
+node_strategy(A) when is_atom(A) -> A.
+
+%% @private
+%% The unit with the extremal (min/max) summary `Field`; ties keep the
+%% earlier unit in the deterministic base order.
+extremal_unit(Field, MinMax, [H | T]) ->
+    lists:foldl(
+        fun({_, S} = U, {_, SAcc} = Acc) ->
+            A = maps:get(Field, S, 0),
+            B = maps:get(Field, SAcc, 0),
+            case A =/= B andalso MinMax(A, B) == A of
+                true -> U;
+                false -> Acc
+            end
+        end,
+        H,
+        T
+    ).
+
+%% @private
+weighted_random([{Id, _}]) ->
+    Id;
+weighted_random(Units) ->
+    Total = lists:sum([weight(S) || {_, S} <- Units]),
+    nth_weighted(rand:uniform(Total) - 1, Units).
+
+%% @private
+%% A deterministic weighted rotation: a per-(realm, uri) counter walks the
+%% cumulative weights, so each unit is visited `count` times per cycle.
+weighted_rotation(Units, Opts) ->
+    RealmUri = maps:get(realm_uri, Opts),
+    Uri = maps:get(uri, Opts),
+    Tab = rpc_state_table(RealmUri, Uri),
+    %% The rpc state table keys on ELEMENT 2 (its other rows are records),
+    %% so the counter row is a 3-tuple: tag, key, counter. The key carries
+    %% the `rib_rr` discriminator so it can never collide with the
+    %% `#last_invocation{}` rows keyed `{RealmUri, Uri}` in the same table.
+    Key = {rib_rr, RealmUri, Uri},
+    N = ets:update_counter(Tab, Key, {3, 1}, {rib_rr_counter, Key, -1}),
+    Total = lists:sum([weight(S) || {_, S} <- Units]),
+    nth_weighted(N rem Total, Units).
+
+%% @private
+%% The unit owning zero-based position `N` on the cumulative weight line.
+nth_weighted(N, [{Id, S} | T]) ->
+    case weight(S) of
+        W when N < W -> Id;
+        W -> nth_weighted(N - W, T)
+    end.
+
+%% @private
+weight(Summary) ->
+    max(1, maps:get(count, Summary, 1)).
 
 %% @private
 -spec next(iterator()) ->

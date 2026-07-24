@@ -25,6 +25,7 @@ peer_state_test_() ->
         fun touch_peer_refreshes_last_seen/0,
         fun strict_read_ignores_recency/0,
         fun strict_read_names_unconfirmed_members/0,
+        fun rootless_round_refreshes_without_confirming/0,
         fun strict_read_solo_instance_is_stable/0,
         fun reclamation_members_solo/0,
         fun reclamation_members_error_is_not_solo/0
@@ -230,6 +231,49 @@ touch_peer_refreshes_last_seen() ->
 %% Force the gen_server's cast queue to drain by issuing a synchronous
 %% round-trip. (`info/0` is intentionally lock-free and does not enter
 %% the gen_server, so it cannot be used for this.)
+%% A completed round against an empty peer tree (RootHash = `undefined` —
+%% e.g. a fully-compacted quiescent shard) advances the peer's recency, so
+%% the last-sync age stays truthful, but must NEVER count as confirmation;
+%% and once a root IS confirmed, later rootless rounds refresh recency
+%% while preserving it.
+rootless_round_refreshes_without_confirming() ->
+    P = mk_peer(),
+    I = mk_inst(),
+    T1 = os:system_time(millisecond) - 3000,
+
+    %% No prior row: a rootless completion creates a recency-only entry.
+    ok = bondy_oplog_peer_state:record_sync_complete(P, I, undefined, T1),
+    sync(),
+    ?assertMatch(
+        [#{peer := P, root_hash := undefined, last_sync := T1}],
+        bondy_oplog_peer_state:get_instance_peer_states(I, 0)
+    ),
+    ?assertEqual(
+        {unconfirmed, [P]},
+        bondy_oplog_peer_state:confirmed_peer_states(I, [P])
+    ),
+
+    %% A binary root confirms.
+    H = <<9:256>>,
+    T2 = T1 + 1000,
+    ok = bondy_oplog_peer_state:record_sync_complete(P, I, H, T2),
+    sync(),
+    ?assertMatch(
+        {ok, [#{peer := P, root_hash := H, last_sync := T2}]},
+        bondy_oplog_peer_state:confirmed_peer_states(I, [P])
+    ),
+
+    %% A later rootless completion refreshes recency and PRESERVES the
+    %% confirmed root — the stability frontier must not regress just
+    %% because the peer compacted.
+    T3 = T2 + 1000,
+    ok = bondy_oplog_peer_state:record_sync_complete(P, I, undefined, T3),
+    sync(),
+    ?assertMatch(
+        {ok, [#{peer := P, root_hash := H, last_sync := T3}]},
+        bondy_oplog_peer_state:confirmed_peer_states(I, [P])
+    ).
+
 sync() ->
     bondy_oplog_peer_state:sync().
 

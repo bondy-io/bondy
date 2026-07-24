@@ -222,17 +222,17 @@
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc Provision ALL declared bondy_db `core` tables at boot, not just the ones
-%% flagged `migrated` in `bondy_namespace_catalog`. Off by default: a default
-%% node provisions only the migrated tables. All domains are now migrated, so
-%% this is a diagnostic switch — enable it to force-provision every declared
-%% table (e.g. a dormant net-new table) and confirm it appears in
-%% `bondy_db:info`.
+%% @doc How long a per-shard WAL drain may actively process frames without
+%% committing any NEW consumer position before the node raises the
+%% bondy_oplog_drain_stalled alarm (visible in /metrics via bondy_alarms and
+%% cleared automatically when the drain progresses again). This is the guard
+%% against a wedged or ground-re-reading log consumer on a node that
+%% anti-entropy otherwise reports as converged. `0` disables the detector.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.catalog", "bondy_router.oplog_catalog_enabled", [
-  {datatype, {flag, on, off}},
-  {default, off}
+{mapping, "oplog.drain.stall_alarm", "bondy_oplog.drain_stall_alarm_ms", [
+  {datatype, {duration, ms}},
+  {default, "1m"}
 ]}.
 
 %% -----------------------------------------------------------------------------
@@ -1241,6 +1241,66 @@ end}.
   {default, off_heap},
   {datatype, {enum, [off_heap, on_heap]}},
   hidden
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The registry RIB (Routing Information Base): replicated per-node
+%% routing summary cells — one per (realm, match policy, URI, node) — written
+%% by each node for its own local registrations and subscriptions, alongside
+%% the replicated full entries.
+%%   off  - summaries are not written.
+%%   dual - every local registry change also maintains this node's summary
+%%          cells; peers compile merged cells into a stub view. Routing still
+%%          uses the full-entry replication — the summaries are validated
+%%          against it (bondy_registry_rib:check/1) in preparation for
+%%          routing on summaries alone.
+%%   read - routing consumes the summaries: remote callees and remote
+%%          subscriber nodes are discovered via the stub view, and forwarded
+%%          cluster CALLs are node-addressed — the node receiving one
+%%          re-selects the callee among its own live local registrations
+%%          (owner-side completion) instead of trusting the sender's —
+%%          possibly stale — choice of entry. Full entries still replicate
+%%          as the rollback net. Safe in mixed clusters: a node without this
+%%          mode ignores the tag and keeps the entry-addressed behaviour.
+%%   write - as read, plus full entries stop replicating: the registry keeps
+%%          them in node-local memory and the summary cells are the only
+%%          replicated registry state. Requires every node to run at least
+%%          in read mode first (nodes still routing on full entries would
+%%          not see this node's work). Takes effect at boot — changing to or
+%%          from write requires a restart.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "registry.rib", "bondy_router.registry_rib_mode", [
+  {datatype, {enum, [off, dual, read, write]}},
+  {default, dual}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Interval of the periodic RIB consistency sweep, which compares the
+%% replicated routing summaries against the ground truth per realm and logs
+%% any divergence. `0` disables the sweep. Skipped while registry.rib = off.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "registry.rib.check_interval",
+"bondy_router.registry_rib_check_interval", [
+  {datatype, {duration, ms}},
+  {default, "5m"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc RIB update damping (route-flap control), owner side. Reachability
+%% transitions — a procedure's first registration on this node, or its last
+%% one leaving — always propagate immediately. With a non-zero window, an
+%% update that changes ONLY the summary's count / latest fields (i.e. the
+%% node keeps serving the procedure, just with a different number of
+%% callees) is coalesced: at most one such cell write per window, with a
+%% trailing update carrying the final value. `0` (default) disables damping
+%% and every summary change is written through.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "registry.rib.damping", "bondy_router.registry_rib_damping", [
+  {datatype, {duration, ms}},
+  {default, 0}
 ]}.
 
 %% =============================================================================
@@ -5266,22 +5326,6 @@ end}.
 
 
 
-
-
-%% =============================================================================
-%% ACTIVE ANTI-ENTROPY
-%% =============================================================================
-
-
-%% Controls when will the AAE system will trigger the next
-%% data exchange.
-{mapping, "aae.exchange_timer",
-"partisan.exchange_tick_period", [
-  %% TODO this should be something like partisan.broadcast_mods.plum_db.
-  %% exchange_tick_period cause it overridden by cluster.exchange_tick_period
-  {default, "10s"},
-  {datatype, {duration, ms}}
-]}.
 
 
 %% =============================================================================

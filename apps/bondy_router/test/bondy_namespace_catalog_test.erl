@@ -23,10 +23,10 @@ declarations_test_() ->
     Core = [S || S <- Tables, maps:get(db, S) =:= core],
     Registry = [S || S <- Tables, maps:get(db, S) =:= registry],
     [
-        {"fifteen tables declared", ?_assertEqual(15, length(Tables))},
-        {"thirteen core, two registry", fun() ->
+        {"seventeen tables declared", ?_assertEqual(17, length(Tables))},
+        {"thirteen core, four registry", fun() ->
             ?assertEqual(13, length(Core)),
-            ?assertEqual(2, length(Registry))
+            ?assertEqual(4, length(Registry))
         end},
         {"realm_keys is a durable core aw table", fun() ->
             %% Realm key material, split out of the realm identity cell so the
@@ -96,7 +96,30 @@ declarations_test_() ->
                                  || I <- maps:get(indexes, S, [])
                                 ]
                     end,
-                    Registry
+                    [
+                        maps:get(bondy_registration, ByName),
+                        maps:get(bondy_subscription, ByName)
+                    ]
+                )
+            )
+        end},
+        {"RIB tables are ephemeral lww, published, no indexes", fun() ->
+            %% The replicated routing summary cells: single-writer-per-key so
+            %% `lww` is exact; `publish => true` readies merge-side reactor
+            %% consumption; point-read by cell key only, so no secondary
+            %% index.
+            ?assert(
+                lists:all(
+                    fun(S) ->
+                        maps:get(fold, S) =:= lww andalso
+                            maps:get(durability, S) =:= ephemeral andalso
+                            maps:get(publish, S, false) =:= true andalso
+                            [] =:= maps:get(indexes, S, [])
+                    end,
+                    [
+                        maps:get(bondy_registration_rib, ByName),
+                        maps:get(bondy_subscription_rib, ByName)
+                    ]
                 )
             )
         end},
@@ -188,6 +211,15 @@ provisions_all() ->
             #{entity_type := bondy_subscription, db_name := registry},
             ?CAT:table(bondy_subscription)
         ),
+        %% The RIB summary tables ride the same ephemeral registry DB.
+        ?assertMatch(
+            #{entity_type := bondy_registration_rib, db_name := registry},
+            ?CAT:table(bondy_registration_rib)
+        ),
+        ?assertMatch(
+            #{entity_type := bondy_subscription_rib, db_name := registry},
+            ?CAT:table(bondy_subscription_rib)
+        ),
         %% Fold → CRDT wiring: the membership table carries the ew_flag CRDT
         %% (cell-per-fact add-wins); lww tables resolve to lww_register. (No mv
         %% table is provisioned — grants + sources were cut as lww per the
@@ -207,6 +239,7 @@ provisions_all() ->
         %% info/0 summary.
         Info = ?CAT:info(),
         ?assertMatch(#{core := #{kind := db}}, Info),
+        %% info/0's tables map covers the core DB tables only.
         ?assertEqual(13, map_size(maps:get(tables, Info)))
     after
         ok = stop_catalog(Pid),

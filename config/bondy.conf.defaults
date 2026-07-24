@@ -300,7 +300,6 @@ oplog.aae.load_adaptive = off
 oplog.aae.load_run_queue_threshold = 2.0
 oplog.aae.max_concurrency = 3
 oplog.aae.max_pages_in_flight = 2048
-oplog.catalog = off
 oplog.core.gc_heap_delta = 16MB
 oplog.core.gc_interval = 2s
 oplog.core.on_topology_mismatch = warn

@@ -160,6 +160,78 @@ The pass deliberately never bans an origin on its own. Banning a live origin
 would silently refuse its writes — divergence, not hygiene — and the
 membership plane already refuses connections from non-members.
 
+## Watching stability: stall reasons, recency, and the idle state
+
+Reclamation fails silently in both directions — nothing visibly breaks
+whether it is working or wedged — so every attempt that certifies no
+stability reports why. The telemetry
+(`bondy_oplog_reclamation_stalled_total`, labelled by instance and reason)
+is emitted on every attempt; the log line naming the members involved is
+rate-limited per instance. The reasons, and what each asks of you:
+
+| Reason | Meaning | Action |
+|---|---|---|
+| `idle` | This replica's tree is empty: nothing to certify. | None. |
+| `unconfirmed` | A member has never confirmed a root for this shard while this replica holds events. | Revive the member, or retire it via a membership removal. |
+| `no_frontier` | Members confirmed, but no local event is covered by every confirmed root — typically a stale root from a member that has stopped syncing. | Same as `unconfirmed`. |
+| `membership_unavailable` | The membership service cannot be read. | Investigate the node, not the peers. |
+| `non_event_frontier` | The frontier computation returned a non-event key. | A bug; report it. |
+
+Two distinctions behind this table are worth understanding, because both
+exist to keep a converged, quiescent cluster *quiet*.
+
+**Sync recency is not confirmation.** MST compaction truncates a fully
+checkpointed tree, so the steady state of a shard nobody writes to is an
+*empty* tree on every replica — and a sync round between two empty trees
+completes with no root to swap. Such a round still refreshes the peer's
+recency (`last_sync`, and the last-sync-age gauge built on it, stay
+truthful), but it confirms nothing: only a concrete root is evidence about
+what both replicas hold, so only a concrete root participates in
+stability. A root confirmed *before* the peer compacted is kept — the peer
+checkpointed that content, so preserving it is conservative — which is why
+a peer's compaction never regresses the frontier.
+
+**An empty tree has nothing to certify.** When this replica's own tree is
+empty, no frontier over local events can exist by construction, and there
+is no event whose stability needs certifying. Reporting that as
+`unconfirmed` would be worse than noise: the prescribed remedy — revive or
+retire the member — is wrong advice about members that are alive and
+converged, and the repetition would bury the stalls that do need it. The
+`idle` outcome names this state precisely, never reaches the warning log,
+remains visible in the telemetry, and ends the moment a local event lands.
+
+### A known, deliberate liveness gap
+
+One narrow state is left unresolved by design, and it is worth stating
+exactly. Suppose cells become reclaimable on a shard, and then the whole
+cluster goes quiescent on that shard long enough for compaction to empty
+every replica's tree *before* stability was ever certified past them. The
+shard now reports `idle` on every node, and those cells sit unreclaimed —
+correct, hidden from reads, but still occupying space — for as long as the
+shard stays silent.
+
+This is tolerated for three reasons. First, the asymmetry that governs this
+whole design: an unreclaimed cell costs bytes, a wrongly reclaimed one
+costs data, permanently and silently. Second, the state is bounded and
+self-healing: the first write to the shard — on any node — regrows a root,
+the next sync round confirms it, stability lands beyond the backlog, and
+one sweep discards all of it. A shard that never receives that write is
+also a shard whose leftover bytes never grow. Third, the sound fix is not a
+patch. It would be a clustered analogue of the solo carve-out — "every
+member confirmed-empty, therefore a fresh tick is stable" — and the solo
+argument rests on clock domination over events *this* node minted or
+absorbed, which does not transfer to other members without a new
+argument bounding the HLCs a peer may still mint after its confirmed-empty
+round. That is an extension to the stability theorem first, an
+implementation second.
+
+Two cheaper routes were considered and rejected. Ordering the collectors so
+reclamation always runs before compaction cannot be guaranteed — compaction
+can be licensed while stability is unreachable. And deferring compaction
+while a reclamation backlog exists inverts the trade this design is built
+on: a silent member would then block *compaction* too, turning bounded
+projection bytes into unbounded log and tree growth.
+
 ## What could have been, and why not
 
 Two simpler designs were rejected, and the reasons are instructive.
@@ -187,8 +259,11 @@ id belonged to which node.
   when stability licenses it. The two are decoupled by design.
 - Reclamation is quiet when healthy and loud when stalled: a member that
   cannot confirm surfaces within one scheduler interval as telemetry naming
-  the missing member, and as a rate-limited log line. A stall is always a
-  fact about membership, and the remedy is always a membership decision.
+  the missing member, and as a rate-limited log line. An *actionable* stall
+  is always a fact about membership, and the remedy is always a membership
+  decision; the one non-actionable outcome — `idle`, the empty tree of a
+  converged quiescent shard — is counted but never logged (see "Watching
+  stability" above).
 - Everything here is on by default. Every knob mentioned — including how to
   disable reclamation or retirement — is covered in the
   [reclamation configuration reference](../configuration/reclamation_options.md).

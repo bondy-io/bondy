@@ -7,6 +7,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_security.hrl").
 
 -compile([nowarn_export_all, export_all]).
@@ -44,6 +45,11 @@ all() ->
         grant_merge_event_fires_on_remote_write,
         concurrent_membership_adds_both_survive,
         registry_registration_converges_and_presence,
+        rib_summary_converges_to_stub,
+        rib_read_mode_cross_node_call,
+        rib_stub_pubsub_cross_node,
+        rib_write_mode_cluster,
+        rib_retry_reroutes_to_live_node,
         meta_event_demand_visible_cross_node,
         remote_user_delete_closes_peer_sessions,
         token_version_rejected_cross_node
@@ -267,6 +273,233 @@ registry_registration_converges_and_presence(Config) ->
     ok = erpc:call(N1, ?MODULE, do_remove_registration, [Uri, Proc]),
     [ok = wait_reg_count(N, Uri, Proc, 0) || N <- [N1, N2, N3]],
     ok.
+
+%% The registry RIB dual-write across nodes: a registration on node 1 writes
+%% node 1's summary cell, the cell rides AAE to node 2 whose merge reactor
+%% compiles it into a stub; the unregister clears the cell and the stub
+%% follows. The `check/1` consistency gate (full-entry view vs summary view)
+%% holds on both nodes once converged.
+rib_summary_converges_to_stub(Config) ->
+    [N1, N2, _N3] = nodes_of(Config),
+    Uri = <<"com.bondy.aae_rib">>,
+    Proc = <<"com.example.aae_rib_proc">>,
+
+    ok = erpc:call(N1, ?MODULE, do_create_simple_realm, [Uri]),
+    ok = erpc:call(N1, ?MODULE, do_add_registration, [Uri, Proc]),
+    N1Str = erpc:call(N1, bondy_config, nodestring, []),
+
+    %% Stage 1 — the owner wrote its own summary cell (the recompute is a
+    %% cast to the partition server, so poll).
+    ok = wait_rib_cell(N1, Uri, Proc, N1Str),
+
+    %% Stage 2 — the cell rode AAE into N2's projection.
+    ok = wait_rib_cell(N2, Uri, Proc, N1Str),
+
+    %% Stage 3 — N2's merge reactor compiled it into a stub.
+    ok = wait_rib_stub_count(N2, Uri, Proc, N1Str, 1),
+
+    %% The dual-write consistency gate holds on both nodes once converged.
+    ok = wait_rib_check_empty(N1, Uri),
+    ok = wait_rib_check_empty(N2, Uri),
+
+    %% The unregister clears the cell; the stub follows.
+    ok = erpc:call(N1, ?MODULE, do_remove_registration, [Uri, Proc]),
+    ok = wait_rib_stub_count(N2, Uri, Proc, N1Str, 0),
+    ok = wait_rib_check_empty(N2, Uri),
+    ok.
+
+%% The full RIB `read`-mode routing loop, end to end: a callee registered on
+%% node 1, a CALL made on node 2 with `read` mode on. Node 2 discovers the
+%% callee from the STUB view (its summary converged via AAE), forwards the
+%% CALL node-addressed, node 1 completes the selection among its live local
+%% registrations (owner-side completion), applies the callback, and the
+%% RESULT rides the promise reverse path back to node 2's caller.
+rib_read_mode_cross_node_call(Config) ->
+    [N1, N2, _N3] = nodes_of(Config),
+    Uri = <<"com.bondy.aae_ribcall">>,
+    Proc = <<"com.example.aae_rib_echo">>,
+
+    ok = erpc:call(N1, ?MODULE, do_create_open_realm, [Uri]),
+    ok = erpc:call(N1, ?MODULE, do_register_echo, [Uri, Proc]),
+    N1Str = erpc:call(N1, bondy_config, nodestring, []),
+
+    %% Discovery source under `read` is the stub view — wait for it.
+    ok = wait_rib_stub_count(N2, Uri, Proc, N1Str, 1),
+
+    ok = erpc:call(
+        N2, application, set_env, [bondy_router, registry_rib_mode, read]
+    ),
+    try
+        ?assertMatch(
+            #result{args = [<<"pong">>]},
+            erpc:call(N2, ?MODULE, do_rib_call, [Uri, Proc])
+        )
+    after
+        ok = erpc:call(
+            N2, application, set_env, [bondy_router, registry_rib_mode, dual]
+        )
+    end.
+
+%% The broker's cross-node event forwarding under RIB `read` mode: remote
+%% subscriber NODES are discovered from the subscription stubs (one relayed
+%% PUBLISH per node; the receiving node matches and delivers locally). The
+%% prefix subscription is the load-bearing case — with routing on stubs the
+%% publishing node's local match is restricted to local subscribers, so only
+%% the stub view can name node 1.
+rib_stub_pubsub_cross_node(Config) ->
+    [N1, N2, _N3] = nodes_of(Config),
+    Uri = <<"com.bondy.aae_ribpub">>,
+    TopicA = <<"com.example.ribpub.alpha">>,
+    Prefix = <<"com.example.ribpub.pfx.">>,
+    TopicB = <<"com.example.ribpub.pfx.beta">>,
+
+    ok = erpc:call(N1, ?MODULE, do_create_open_realm, [Uri]),
+    ok = erpc:call(N1, ?MODULE, do_start_event_probe, [
+        Uri,
+        [
+            {TopicA, #{match => ?EXACT_MATCH}},
+            {Prefix, #{match => ?PREFIX_MATCH}}
+        ]
+    ]),
+
+    %% N2 discovers N1 as a subscriber node for both topics via stubs.
+    ok = wait_rib_sub_node(N2, Uri, TopicA, N1),
+    ok = wait_rib_sub_node(N2, Uri, TopicB, N1),
+
+    ok = erpc:call(
+        N2, application, set_env, [bondy_router, registry_rib_mode, read]
+    ),
+    try
+        ok = erpc:call(N2, ?MODULE, do_rib_publish, [Uri, TopicA, [<<"a">>]]),
+        ok = erpc:call(N2, ?MODULE, do_rib_publish, [Uri, TopicB, [<<"b">>]]),
+        ok = wait_probe_args(N1, [<<"a">>, <<"b">>])
+    after
+        ok = erpc:call(
+            N2, application, set_env, [bondy_router, registry_rib_mode, dual]
+        )
+    end.
+
+%% RIB `write` mode end to end, on a dedicated 2-node cluster booted with the
+%% mode (it pins the entry backend at store creation): full entries never
+%% enter bondy_db — the replicated full-entry tables stay EMPTY on every
+%% node — yet cross-node calls and publications route on the summary cells
+%% alone, and the write-mode consistency gate holds.
+rib_write_mode_cluster(Config) ->
+    %% Distinct names and Partisan ports — the suite's main cluster occupies
+    %% bondy1..3 on 18087..18089.
+    Names = [
+        {bondy_w1, [
+            {[bondy_router, registry_rib_mode], write},
+            {[partisan, peer_port], 18190}
+        ]},
+        {bondy_w2, [
+            {[bondy_router, registry_rib_mode], write},
+            {[partisan, peer_port], 18191}
+        ]}
+    ],
+    Nodes = bondy_ct:start_cluster(Names, Config),
+    [W1, W2] = [Node || {_, Node, _} <- Nodes],
+    try
+        _ = [push_module(N, ?MODULE) || N <- [W1, W2]],
+
+        Uri = <<"com.bondy.aae_ribwrite">>,
+        Proc = <<"com.example.ribwrite.echo">>,
+        TopicA = <<"com.example.ribwrite.alpha">>,
+        Prefix = <<"com.example.ribwrite.pfx.">>,
+        TopicB = <<"com.example.ribwrite.pfx.beta">>,
+
+        ok = erpc:call(W1, ?MODULE, do_create_open_realm, [Uri]),
+        %% The realm itself replicates via the durable core DB — wait for it
+        %% on W2 before opening a session there.
+        ok = wait_realm(W2, Uri),
+
+        ok = erpc:call(W1, ?MODULE, do_register_echo, [Uri, Proc]),
+        ok = erpc:call(W1, ?MODULE, do_start_event_probe, [
+            Uri,
+            [
+                {TopicA, #{match => ?EXACT_MATCH}},
+                {Prefix, #{match => ?PREFIX_MATCH}}
+            ]
+        ]),
+        W1Str = erpc:call(W1, bondy_config, nodestring, []),
+
+        %% The summaries replicate...
+        ok = wait_rib_stub_count(W2, Uri, Proc, W1Str, 1),
+        ok = wait_rib_sub_node(W2, Uri, TopicA, W1),
+        ok = wait_rib_sub_node(W2, Uri, TopicB, W1),
+
+        %% ...while the full-entry tables hold NOTHING anywhere — the whole
+        %% point of write mode: entries live in the owner's local ETS only.
+        ?assertEqual([], erpc:call(W1, ?MODULE, do_list_entry_rows, [Uri])),
+        ?assertEqual([], erpc:call(W2, ?MODULE, do_list_entry_rows, [Uri])),
+
+        %% Cross-node CALL on summaries alone.
+        ?assertMatch(
+            #result{args = [<<"pong">>]},
+            erpc:call(W2, ?MODULE, do_rib_call, [Uri, Proc])
+        ),
+
+        %% Cross-node pub/sub on summaries alone.
+        ok = erpc:call(W2, ?MODULE, do_rib_publish, [Uri, TopicA, [<<"a">>]]),
+        ok = erpc:call(W2, ?MODULE, do_rib_publish, [Uri, TopicB, [<<"b">>]]),
+        ok = wait_probe_args(W1, [<<"a">>, <<"b">>]),
+
+        %% The write-mode consistency gate: cells match the members table
+        %% (own) and the stub store (peers) on both nodes.
+        ok = wait_rib_check_empty(W1, Uri),
+        ok = wait_rib_check_empty(W2, Uri)
+    after
+        ok = bondy_ct:stop_cluster(Nodes)
+    end.
+
+%% Bounded pre-invocation retry end to end: node 2 (read mode) is fed a
+%% STALE stub naming node 3 — which has NO registration — with `earliest`
+%% biased so the `single` policy deterministically routes the first leg
+%% there. Node 3's owner-side completion misses (pre-invocation, marked),
+%% node 2 retries excluding node 3, selects node 1's live stub, and the
+%% call completes. One CALL, one delivered invocation.
+rib_retry_reroutes_to_live_node(Config) ->
+    [N1, N2, N3] = nodes_of(Config),
+    Uri = <<"com.bondy.aae_ribretry">>,
+    Proc = <<"com.example.ribretry.echo">>,
+
+    ok = erpc:call(N1, ?MODULE, do_create_open_realm, [Uri]),
+    ok = erpc:call(N1, ?MODULE, do_register_echo, [Uri, Proc]),
+    N1Str = erpc:call(N1, bondy_config, nodestring, []),
+    N3Str = erpc:call(N3, bondy_config, nodestring, []),
+
+    %% The live stub converges normally...
+    ok = wait_rib_stub_count(N2, Uri, Proc, N1Str, 1),
+
+    %% ...then a stale one is planted directly in N2's stub store, with an
+    %% `earliest` no real registration can beat, so `single` (min earliest)
+    %% must pick N3 first.
+    StaleKey = term_to_binary({Uri, ?EXACT_MATCH, Proc, N3Str}),
+    Stale = #{
+        invoke => ?INVOKE_SINGLE, count => 1, earliest => 1, latest => 1
+    },
+    ok = erpc:call(
+        N2, bondy_registry_rib, on_remote_set, [registration, StaleKey, Stale]
+    ),
+
+    ok = erpc:call(
+        N2, application, set_env, [bondy_router, registry_rib_mode, read]
+    ),
+    try
+        ?assertMatch(
+            #result{args = [<<"pong">>]},
+            erpc:call(N2, ?MODULE, do_rib_call, [
+                Uri, Proc, #{'_routing_max_candidates' => 2}
+            ])
+        )
+    after
+        ok = erpc:call(
+            N2, application, set_env, [bondy_router, registry_rib_mode, dual]
+        ),
+        ok = erpc:call(
+            N2, bondy_registry_rib, on_remote_clear, [registration, StaleKey]
+        )
+    end.
 
 %% The meta-event demand predicate (bondy_registry:has_matches/3, see
 %% METRICS_GAP_ANALYSIS.md Part III) must see REMOTE meta-topic subscribers:
@@ -524,6 +757,111 @@ wait_reg_count(Node, Uri, Proc, Count) ->
     ).
 
 %% @private
+%% Polls until `Node's local projection holds `Owner's registration summary
+%% cell.
+wait_rib_cell(Node, Uri, Proc, Owner) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    wait_until_eq(
+        fun() ->
+            erpc:call(Node, ?MODULE, do_has_rib_cell, [Uri, Proc, Owner])
+        end,
+        true,
+        Node,
+        Deadline
+    ).
+
+%% @private
+do_has_rib_cell(Uri, Proc, Owner) ->
+    Table = bondy_namespace_catalog:table(bondy_registration_rib),
+    Key = term_to_binary({Uri, <<"exact">>, Proc, Owner}),
+    case bondy_db:read(Table, Uri, Key) of
+        {ok, _} -> true;
+        _ -> false
+    end.
+
+%% @private
+%% Polls until `Node' holds `Count' stubs for `Owner's registration summary.
+wait_rib_stub_count(Node, Uri, Proc, Owner, Count) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    wait_until_eq(
+        fun() ->
+            Stubs = erpc:call(
+                Node,
+                bondy_registry_rib,
+                stub_nodes,
+                [registration, Uri, <<"exact">>, Proc]
+            ),
+            length([N || {N, _} <- Stubs, N =:= Owner])
+        end,
+        Count,
+        Node,
+        Deadline
+    ).
+
+%% @private
+%% Polls until `Node's stub view names `SubNode' as a subscriber node for
+%% `Topic' (any match policy).
+wait_rib_sub_node(Node, Uri, Topic, SubNode) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    wait_until_eq(
+        fun() ->
+            Ns = erpc:call(
+                Node,
+                bondy_registry_rib,
+                subscription_nodes,
+                [Uri, Topic, #{}]
+            ),
+            lists:member(SubNode, Ns)
+        end,
+        true,
+        Node,
+        Deadline
+    ).
+
+%% @private
+%% Polls `Node's event probe until every element of `Args' has arrived as
+%% the single positional argument of a delivered EVENT.
+wait_probe_args(Node, Args) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    wait_until_eq(
+        fun() ->
+            Seen = [
+                A
+             || #event{args = [A]} <-
+                    erpc:call(Node, ?MODULE, do_probe_drain, [])
+            ],
+            [] =:= Args -- Seen
+        end,
+        true,
+        Node,
+        Deadline
+    ).
+
+%% @private
+%% Polls until the realm has replicated to `Node' (rides the durable core
+%% DB, a different AAE lane than the registry).
+wait_realm(Node, Uri) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    wait_until_eq(
+        fun() -> erpc:call(Node, ?MODULE, do_has_realm, [Uri]) end,
+        true,
+        Node,
+        Deadline
+    ).
+
+%% @private
+%% Polls until `Node's RIB summary view agrees with its full-entry view for
+%% the realm (`bondy_registry_rib:check/1` returns []).
+wait_rib_check_empty(Node, Uri) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    wait_until_eq(
+        fun() -> erpc:call(Node, bondy_registry_rib, check, [Uri]) end,
+        [],
+        Node,
+        Deadline
+    ).
+
+%% @private
 apply_on(Node, Table, Band, Key, Val) ->
     erpc:call(Node, ?MODULE, do_apply, [Table, Band, Key, Val]).
 
@@ -621,6 +959,166 @@ do_namespace(Table) ->
 do_create_simple_realm(Uri) ->
     _ = bondy_realm:create(Uri),
     ok.
+
+%% @private
+%% A realm with security disabled, so an anonymous local context can CALL.
+do_create_open_realm(Uri) ->
+    Realm = bondy_realm:create(Uri),
+    ok = bondy_realm:disable_security(Realm),
+    ok.
+
+%% @private
+%% Register the echo callback on THIS node.
+do_register_echo(Uri, Proc) ->
+    Ref = bondy_ref:new(internal, {?MODULE, rib_echo}),
+    case bondy_dealer:register(Proc, #{invoke => <<"single">>}, Uri, Ref) of
+        {ok, _} -> ok;
+        Other -> error({register_failed, Other})
+    end.
+
+%% The dynamic-callback convention: {ok, Details, Args, KWArgs} -> RESULT.
+rib_echo() ->
+    {ok, #{}, [<<"pong">>], #{}}.
+
+rib_echo(_) ->
+    rib_echo().
+
+rib_echo(_, _) ->
+    rib_echo().
+
+%% @private
+%% Make a CALL from THIS node using a minimal anonymous local context whose
+%% caller ref targets this process; returns the WAMP response message.
+do_rib_call(RealmUri, Proc) ->
+    do_rib_call(RealmUri, Proc, #{}).
+
+%% @private
+%% As `do_rib_call/2` with CALL options — going through the message
+%% constructor, so bondy extensions (e.g. `routing_max_candidates`) also
+%% exercise the options validation.
+do_rib_call(RealmUri, Proc, CallOpts) ->
+    Peer = {{127, 0, 0, 1}, 10999},
+    Session = bondy_session:new(RealmUri, #{
+        peer => Peer,
+        authid => <<"rib">>,
+        authmethod => ?WAMP_ANON_AUTH,
+        is_anonymous => true,
+        security_enabled => false,
+        authroles => [<<"anonymous">>],
+        roles => #{caller => #{}}
+    }),
+    Ctxt = bondy_context:new(Peer, {ws, text, json}, #{session => Session}),
+    Call = bondy_wamp_message:call(1, CallOpts, Proc),
+    ok = bondy_dealer:forward(Call, Ctxt),
+    receive
+        {'$bondy_request', _, _, M} -> M
+    after 30000 ->
+        timeout
+    end.
+
+%% @private
+%% Publish from THIS node using a minimal anonymous local context (like
+%% `do_rib_call/2` but for the broker path).
+do_rib_publish(RealmUri, Topic, Args) ->
+    Peer = {{127, 0, 0, 1}, 10998},
+    Session = bondy_session:new(RealmUri, #{
+        peer => Peer,
+        authid => <<"ribpub">>,
+        authmethod => ?WAMP_ANON_AUTH,
+        is_anonymous => true,
+        security_enabled => false,
+        authroles => [<<"anonymous">>],
+        roles => #{publisher => #{}}
+    }),
+    Ctxt = bondy_context:new(Peer, {ws, text, json}, #{session => Session}),
+    Publish = bondy_wamp_message:publish(1, #{}, Topic, Args),
+    ok = bondy_broker:forward(Publish, Ctxt).
+
+%% @private
+%% Spawns a long-lived event probe on THIS node, registered as
+%% `rib_event_probe': one internal subscriber ref carrying the probe pid,
+%% subscribed to each `{Topic, Opts}'. Records every EVENT it is delivered.
+do_start_event_probe(RealmUri, Subscriptions) ->
+    Parent = self(),
+    Pid = spawn(fun() -> probe_init(RealmUri, Subscriptions, Parent) end),
+    receive
+        {Pid, ready} -> ok
+    after 5000 ->
+        error(probe_start_timeout)
+    end,
+    %% Re-register if a previous test left one behind.
+    catch unregister(rib_event_probe),
+    true = register(rib_event_probe, Pid),
+    ok.
+
+%% @private
+probe_init(RealmUri, Subscriptions, Parent) ->
+    %% A STORED session backs the subscriptions: the registry requires a
+    %% session id on the subscribe path, and the owner self-clean sweep
+    %% reaps entries whose session cannot be looked up — this probe must
+    %% outlive several convergence waits.
+    Session0 = bondy_session:new(RealmUri, #{
+        peer => {{127, 0, 0, 1}, 10997},
+        authid => <<"ribprobe">>,
+        authmethod => ?WAMP_ANON_AUTH,
+        is_anonymous => true,
+        security_enabled => false,
+        authroles => [<<"anonymous">>],
+        roles => #{subscriber => #{}}
+    }),
+    {ok, Session} = bondy_session:store(Session0),
+    Ref = bondy_ref:new(internal, self(), bondy_session:id(Session)),
+    _ = [
+        case bondy_registry:add(subscription, RealmUri, Topic, Opts, Ref) of
+            {ok, _, _} -> ok;
+            {ok, _} -> ok;
+            Other -> error({subscription_add_failed, Other})
+        end
+     || {Topic, Opts} <- Subscriptions
+    ],
+    Parent ! {self(), ready},
+    probe_loop([]).
+
+%% @private
+probe_loop(Acc) ->
+    receive
+        {get, From} ->
+            From ! {rib_event_probe_events, lists:reverse(Acc)},
+            probe_loop(Acc);
+        {'$bondy_request', _, _, #event{} = E} ->
+            probe_loop([E | Acc]);
+        _Other ->
+            probe_loop(Acc)
+    end.
+
+%% @private
+do_probe_drain() ->
+    rib_event_probe ! {get, self()},
+    receive
+        {rib_event_probe_events, Events} -> Events
+    after 5000 ->
+        error(probe_drain_timeout)
+    end.
+
+%% @private
+%% Every row the replicated full-entry registry tables hold for the realm on
+%% THIS node — the write-mode proof asserts this stays empty.
+do_list_entry_rows(RealmUri) ->
+    lists:append([
+        begin
+            Table = table_handle(Name),
+            {ok, Rows} = bondy_db:list(Table, RealmUri),
+            Rows
+        end
+     || Name <- [bondy_registration, bondy_subscription]
+    ]).
+
+%% @private
+do_has_realm(Uri) ->
+    case bondy_realm:lookup(Uri) of
+        {ok, _} -> true;
+        _ -> false
+    end.
 
 %% @private
 %% Add a callback registration owned by THIS node for `Proc`. A callback ref is

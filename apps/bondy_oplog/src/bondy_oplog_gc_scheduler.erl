@@ -418,6 +418,15 @@ outcome_label({error, _}) -> error.
 %% See the `{stalled, _, _}` cast. The rate limit is per instance and
 %% applies to the LOG only; the telemetry emitted by the trigger and by
 %% `bondy_oplog_instance:reclaim_stable_cells/1` is never limited.
+%%
+%% `idle` — an empty local tree, the steady state of a converged quiescent
+%% shard — is not operator-actionable, so it never reaches the warning:
+%% logging it would tell the operator to revive members that are alive and
+%% converged, and its noise would bury the stalls that DO need action. It
+%% remains observable through the never-limited telemetry (the
+%% `bondy_oplog_reclamation_stalled_total` family, reason `idle`).
+maybe_log_stall(_InstanceId, idle, State) ->
+    State;
 maybe_log_stall(InstanceId, Reason, State) ->
     Now = erlang:monotonic_time(millisecond),
     Last = maps:get(InstanceId, State#state.last_stall_log, undefined),

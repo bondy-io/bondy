@@ -1,5 +1,3 @@
-aae.exchange_timer = 1m
-
 admin_api.http.acceptors_pool_size = 200
 admin_api.http.backlog = 1024
 admin_api.http.enabled = on
