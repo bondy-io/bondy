@@ -1173,6 +1173,23 @@ end}.
 
 
 %% -----------------------------------------------------------------------------
+%% @doc The total number of messages that can be queued across the router
+%% flow pool workers (the pool preserving WAMP per-flow ordering) before new
+%% messages for a saturated flow are shed. Deliberately much smaller than
+%% `load_regulation.router.pool.capacity`: an ordered lane cannot overflow
+%% work to another worker, so a large bound only buys memory pressure, not
+%% throughput. Each worker's share is this value divided by
+%% `load_regulation.router.pool.size`.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "load_regulation.router.flow_pool.capacity",
+"bondy_router.router_flow_pool.capacity", [
+  {default, 100000},
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% -----------------------------------------------------------------------------
 %% @doc The capacity of the session manager process pool, i.e. the maximum
 %% number of active erlang processes handling session events (default = 32).
 %% @end

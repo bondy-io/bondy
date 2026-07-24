@@ -22,8 +22,19 @@ the router will handle the message synchronously i.e. blocking the
 calling processes (usually the one that handles the transport connection
 e.g. `bondy_wamp_ws_connection_handler`).
 
-The router also handles messages synchronously in those
-cases where it needs to preserve message ordering guarantees.
+The router preserves the WAMP ordering guarantees — which are pairwise
+between a source and a destination session — in two ways:
+
+* CALL (and SUBSCRIBE, REGISTER and their inverses) are handled
+  synchronously in the calling transport process, relying on Erlang's
+  signal ordering between a pair of processes.
+* PUBLISH, YIELD, CANCEL and ERROR are handled asynchronously on the
+  flow pool (`bondy_router_worker:cast/2`), serialised per source session,
+  so e.g. two publications by one publisher never race while distinct
+  publishers still run concurrently. On the flow pool an overload sheds
+  the message (at-most-once, gaps permissible) instead of falling back to
+  synchronous handling, which would reorder it ahead of the messages
+  already queued for the same session.
 
 This module handles only the concurrency and basic routing logic,
 delegating the rest to either `m:bondy_broker` for PubSub interactions,
@@ -78,6 +89,7 @@ all interactions targeting a remote peer.
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_uris.hrl").
 
 -type event() :: {wamp_message(), bondy_context:t()}.
 
@@ -186,7 +198,13 @@ forward(M, #{session := _} = Ctxt) when
     ok = sync_forward({M, Ctxt}),
     {ok, Ctxt};
 forward(M, #{session := _} = Ctxt) ->
-    async_forward(M, Ctxt).
+    %% PUBLISH, YIELD, CANCEL and ERROR (invocation/interrupt).
+    %% These carry per-source ordering obligations — events from one
+    %% publisher must reach each subscriber in publication order, and the
+    %% results of one call (e.g. progressive) must reach the caller in
+    %% yield order — so they are serialised per source session on the flow
+    %% pool instead of racing on the unordered router pool.
+    ordered_forward(M, Ctxt).
 
 -doc """
 This function is called by `bondy_relay` for messages
@@ -203,14 +221,12 @@ forward(Msg, To, #{realm_uri := RealmUri} = Opts) ->
             %% remote peer.
             do_forward(Msg, To, Opts);
         false ->
-            %% We need to route the message through a relay
-            RelayOpts =
-                case bondy_config:get([router, forward]) of
-                    #{ack := true} = RelayOpts0 ->
-                        RelayOpts0#{partition_key => erlang:phash2(RealmUri)};
-                    #{ack := false} = RelayOpts0 ->
-                        RelayOpts0
-                end,
+            %% We need to route the message through a relay.
+            %% The partition key pins the flow to one channel connection so
+            %% the wire preserves its order (see bondy_relay:routing_opts/2).
+            RelayOpts = bondy_relay:routing_opts(
+                maps:get(from, Opts, undefined), To
+            ),
 
             case bondy:peek_via(Opts) of
                 undefined ->
@@ -359,6 +375,75 @@ async_forward(M, Ctxt0) ->
                 message => M
             }),
             %% TODO Maybe publish metaevent and stats
+            {ok, Ctxt0}
+    end.
+
+%% @private
+-doc """
+Forwards a message on the flow pool, serialised by the source session ref.
+
+All messages a session submits through this function execute on the same
+flow pool worker in submission order, which — together with the per-flow
+`partition_key` on relay egress and the keyed dispatch on relay ingress —
+preserves the WAMP pairwise ordering guarantees end to end. Messages with
+different source sessions run concurrently on other workers.
+
+On overload the message is shed: executing it in the calling process (the
+old fallback for the unordered pool) would overtake the messages already
+queued for the same session. Delivery is at-most-once and gaps are
+permissible; a PUBLISH with `acknowledge` set gets an ERROR back.
+""".
+-spec ordered_forward(M :: wamp_message(), Ctxt :: bondy_context:t()) ->
+    {ok, bondy_context:t()}
+    | {reply, Reply :: wamp_message(), bondy_context:t()}.
+
+ordered_forward(M, Ctxt0) ->
+    Event = {M, Ctxt0},
+    Meta = bondy:get_process_metadata(),
+    Key = bondy_context:ref(Ctxt0),
+
+    Fun = fun() ->
+        %% We copy the process meta (we do not need to unset because the
+        %% worker will do it for us).
+        ok = bondy:set_process_metadata(Meta),
+        sync_forward(Event)
+    end,
+
+    try bondy_router_worker:cast(Key, Fun) of
+        ok ->
+            {ok, Ctxt0};
+        {error, overload} ->
+            ok = bondy_router_worker:report_shed(router),
+            case acknowledge_message(M) of
+                true ->
+                    Reason = <<"The router is overloaded.">>,
+                    Reply = bondy_wamp_message:error_from(
+                        M,
+                        #{},
+                        ?BONDY_ERROR_TOO_MANY_REQUESTS,
+                        [Reason],
+                        #{message => Reason}
+                    ),
+                    {reply, Reply, Ctxt0};
+                false ->
+                    {ok, Ctxt0}
+            end
+    catch
+        Class:Reason:Stacktrace ->
+            Ctxt = bondy_context:realm_uri(Ctxt0),
+            SessionId = bondy_context:session_id(Ctxt0),
+            ExtId = bondy_session_id:to_external(SessionId),
+
+            ?LOG_ERROR(#{
+                description => "Error while routing message",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace,
+                protocol_session_id => ExtId,
+                session_id => SessionId,
+                context => Ctxt,
+                message => M
+            }),
             {ok, Ctxt0}
     end.
 

@@ -32,7 +32,7 @@ and EVENT messages between WAMP clients connected to different Bondy peers
 |    |          v         |                    |         v          |    |
 | +---------------------+ |                    | +---------------------+ |
 | | bondy_router_worker | |                    | | bondy_router_worker | |
-| |    (router_pool)    | |                    | |    (router_pool)    | |
+| |     (flow pool)     | |                    | |     (flow pool)     | |
 | |                     | |                    | |                     | |
 | |                     | |                    | |                     | |
 | |                     | |                    | |                     | |
@@ -68,6 +68,7 @@ and EVENT messages between WAMP clients connected to different Bondy peers
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
+-include("bondy.hrl").
 
 -record(state, {
     ref :: bondy_ref:t()
@@ -76,6 +77,7 @@ and EVENT messages between WAMP clients connected to different Bondy peers
 %% API
 -export([forward/2]).
 -export([forward/3]).
+-export([routing_opts/2]).
 -export([start_link/0]).
 
 %% GEN_SERVER CALLBACKS
@@ -129,6 +131,34 @@ forward(Nodes, Msg, Opts0) when is_list(Nodes) ->
     ],
     ok.
 
+-doc """
+Returns the options to use when forwarding a WAMP message that flows from
+source ref `From` to destination ref `To` — the `router.forward` options
+plus a `partition_key` derived from the pair.
+
+The partition key pins every message of the same flow to one connection of
+the (possibly parallel) `wamp_relay` Partisan channel, so the wire preserves
+per-flow order while unrelated flows still spread across connections. WAMP
+ordering guarantees are all pairwise between a source and a destination
+session — events between a publisher and a subscriber, invocations between
+a caller and a callee — so the pair is the finest key that preserves them.
+
+`To` is `undefined` for PUBLISH forwards (they are node-addressed): the key
+degrades to per-publisher, which those guarantees still require since the
+receiving node mints the EVENTs for all its local subscribers from the
+relayed PUBLISH.
+
+The receiving node's ingress uses the same pair to pick a flow pool worker
+(see `handle_cast/2`), so a flow is a single ordered pipeline end to end.
+""".
+-spec routing_opts(
+    From :: optional(bondy_ref:t()), To :: optional(bondy_ref:t())
+) -> map().
+
+routing_opts(From, To) ->
+    Opts = bondy_config:get([router, forward]),
+    Opts#{partition_key => erlang:phash2({From, To})}.
+
 %% =============================================================================
 %% API : GEN_SERVER CALLBACKS
 %% =============================================================================
@@ -148,9 +178,6 @@ handle_call(Event, From, State) ->
 handle_cast({forward, To, Msg, Opts0} = M, State) ->
     %% We are receiving a message from peer
     try
-        %% This in theory breaks the CALL order guarantee!!!
-        %% We either implement causality or we just use hashing over a pool of
-        %% workers by {CallerID, CalleeId}
         Job = fun() ->
             try
                 Opts = Opts0#{relayed_by => State#state.ref},
@@ -168,18 +195,26 @@ handle_cast({forward, To, Msg, Opts0} = M, State) ->
             end
         end,
 
-        case bondy_router_worker:cast(Job) of
+        %% We receive the relayed messages of a flow in wire order (the
+        %% sender pins each flow to one channel connection — see
+        %% routing_opts/2 — and this server's mailbox is FIFO). Dispatching
+        %% by the same source/destination pair serialises the flow on one
+        %% flow pool worker, preserving that order through delivery, while
+        %% different flows keep running concurrently.
+        Key = {maps:get(from, Opts0, undefined), To},
+
+        case bondy_router_worker:cast(Key, Job) of
             ok ->
                 ok;
             {error, overload} ->
+                %% We shed the message: delivery is at-most-once and gaps
+                %% are permissible, whereas executing it here (or on another
+                %% worker) would overtake the messages already queued for
+                %% the same flow.
                 %% TODO send back WAMP message
                 %% We should synchronoulsy call bondy_router:forward to get back
                 %% a WAMP ERROR we can send back to the Opts.from
-                ?LOG_DEBUG(#{
-                    description => "Error while forwarding peer message",
-                    reason => overload
-                }),
-                ok
+                ok = bondy_router_worker:report_shed(relay)
         end,
 
         {noreply, State}

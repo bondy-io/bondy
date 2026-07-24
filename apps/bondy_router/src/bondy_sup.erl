@@ -50,6 +50,10 @@ init([]) ->
         ?EVENT_MANAGER(bondy_event_manager, permanent, 5000),
         ?EVENT_MANAGER(bondy_wamp_event_manager, permanent, 5000),
         ?SUPERVISOR(bondy_jobs_sup, [], permanent, infinity),
+        %% Router flow pool: keyed FIFO workers used to preserve WAMP
+        %% per-source ordering (see bondy_router_worker:cast/2). Must be up
+        %% before bondy_relay so relayed traffic can be dispatched.
+        ?SUPERVISOR(bondy_router_flow_sup, [], permanent, infinity),
         ?SUPERVISOR(bondy_registry_sup, [], permanent, infinity),
         %% OIDC support
         ?WORKER(bondy_oidc_state, [], permanent, 5000),

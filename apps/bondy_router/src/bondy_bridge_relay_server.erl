@@ -777,12 +777,15 @@ handle_in({forward, _, #publish{} = M, _Opts}, SessionId, State) ->
         bondy_broker:publish(ReqId, Opts, TopicUri, Args, KWArg, Ctxt)
     end,
 
-    case bondy_router_worker:cast(Job) of
+    %% Keyed by the bridged session ref so republications of one remote
+    %% publisher stay in arrival order (per-key FIFO on the flow pool).
+    %% On overload we shed: delivery is at-most-once and executing inline
+    %% would overtake the publications already queued for this session.
+    case bondy_router_worker:cast({Ref, undefined}, Job) of
         ok ->
             ok;
         {error, overload} ->
-            %% TODO return proper return ...but we should move this to router
-            error(overload)
+            ok = bondy_router_worker:report_shed(bridge_relay)
     end,
 
     Actions = [
@@ -791,23 +794,25 @@ handle_in({forward, _, #publish{} = M, _Opts}, SessionId, State) ->
     ],
     {keep_state_and_data, Actions};
 handle_in({forward, To, Msg, Opts}, SessionId, State) ->
-    %% using cast here in theory breaks the CALL order guarantee!!!
-    %% We either need to implement Partisan 4 plus:
-    %% a) causality or
-    %% b) a pool of relays (selecting one by hashing {CallerID, CalleeId}) and
-    %% do it sync
     RealmUri = session_realm(SessionId, State),
 
     Fwd = fun() ->
         bondy_router:forward(Msg, To, Opts#{realm_uri => RealmUri})
     end,
 
-    case bondy_router_worker:cast(Fwd) of
+    %% Keyed by the source/destination pair so each WAMP flow arriving on
+    %% this connection is executed in arrival order (per-key FIFO on the
+    %% flow pool), preserving e.g. the caller-to-callee invocation order.
+    %% On overload we shed rather than crash the connection: delivery is
+    %% at-most-once and executing inline would overtake the messages
+    %% already queued for the same flow.
+    Key = {maps:get(from, Opts, undefined), To},
+
+    case bondy_router_worker:cast(Key, Fwd) of
         ok ->
             ok;
         {error, overload} ->
-            %% TODO return proper return ...but we should move this to router
-            error(overload)
+            ok = bondy_router_worker:report_shed(bridge_relay)
     end,
     Actions = [
         ping_idle_timeout(State),

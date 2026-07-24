@@ -247,9 +247,13 @@ corresponding to **Call 1** and then **Call 2**. This also holds if
 **Procedure 1** and **Procedure 2** are identical.
 
 In other words, WAMP guarantees ordering of invocations between any
-given *pair* of *Caller* and *Callee*. The current implementation
-relies on Distributed Erlang which guarantees message ordering between
-processes in different nodes.
+given *pair* of *Caller* and *Callee*. The implementation preserves this
+by handling CALL synchronously in the caller's transport process (Erlang
+guarantees signal order between a pair of processes) and, when the callee
+is on another node, by pinning the caller/callee pair to one relay
+channel connection on egress and to one flow pool worker on ingress (see
+`bondy_relay:routing_opts/2` and `bondy_router_worker:cast/2`), so the
+pair's messages form a single FIFO pipeline end to end.
 
 There are no guarantees on the order of call results and errors in
 relation to *different* calls, since the execution of calls upon
@@ -672,12 +676,22 @@ forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
             %% node.
             {To, SendOpts} = bondy:prepare_send(Callee, Opts),
             bondy:send(RealmUri, To, Msg, SendOpts);
-        _ when CalleeType == client ->
+        _ when CalleeType == client orelse CalleeType == internal ->
+            %% A pid- or name-target callee. `internal` covers non-callback
+            %% refs admitted by register/4 (a callback target is handled by
+            %% the first clause); they receive INVOCATION like any client.
             %% We now turn the CALL into an INVOCATION.
             {To, SendOpts} = bondy:prepare_send(Callee, Opts),
 
-            CalleeSessionId = bondy_ref:session_id(Callee),
-            InvocationId = bondy_message_id:session(RealmUri, CalleeSessionId),
+            %% Internal refs may carry no session; fall back to a global
+            %% id rather than a session-scoped one.
+            InvocationId =
+                case bondy_ref:session_id(Callee) of
+                    undefined ->
+                        bondy_message_id:global();
+                    CalleeSessionId ->
+                        bondy_message_id:session(RealmUri, CalleeSessionId)
+                end,
             Timeout = bondy_utils:timeout(Opts),
 
             Invocation = call_to_invocation(Msg, InvocationId),

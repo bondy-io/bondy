@@ -195,6 +195,9 @@
         %% INVOCATION relay paths.
         {router, [{forward, #{ack => false, retransmission => false}}]},
         {router_pool, [{capacity, 1000000}, {size, 16}, {type, transient}]},
+        %% The ordered flow pool's capacity (`router.flow_pool.capacity`).
+        %% The rest of its geometry is stamped by bondy_router_flow_sup.
+        {router_flow_pool, [{capacity, 100000}]},
         {load_regulation_enabled, true},
         {registry, [
             {partition_spawn_opts, [

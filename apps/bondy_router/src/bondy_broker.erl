@@ -18,7 +18,15 @@ If *Subscriber A* is subscribed to both *Topic 1* and *Topic 2*, and
 identical.
 
 In other words, WAMP guarantees ordering of events between any given
-*pair* of *Publisher* & *Subscriber*.
+*pair* of *Publisher* & *Subscriber*. The implementation preserves this
+by serialising each publisher's publications on one flow pool worker
+(`bondy_router_worker:cast/2`) and, for subscribers on other nodes, by
+pinning the publisher's relayed publications to one relay channel
+connection on egress and to one flow pool worker on the receiving node
+(see `bondy_relay:routing_opts/2`), so a publisher's events reach every
+subscriber in publication order — across topics — while distinct
+publishers run concurrently.
+
 Further, if *Subscriber A* subscribes to *Topic 1*, the "SUBSCRIBED"
 message will be sent by the *Broker* to *Subscriber A* before any
 "EVENT" message for *Topic 1*.
@@ -882,15 +890,11 @@ forward_using_relay(M, FwdOpts, NodeOrNodes) when
 
     RelayMsg = {forward, undefined, M, FwdOpts},
 
-    #{realm_uri := RealmUri} = FwdOpts,
-
-    RelayOpts =
-        case bondy_config:get([router, forward]) of
-            #{ack := true} = RelayOpts0 ->
-                RelayOpts0#{partition_key => erlang:phash2(RealmUri)};
-            #{ack := false} = RelayOpts0 ->
-                RelayOpts0
-        end,
+    %% The publisher ref keys the flow: a PUBLISH is node-addressed (no
+    %% destination ref), and per-publisher order is exactly what the WAMP
+    %% event ordering guarantee needs at each receiving node (see
+    %% bondy_relay:routing_opts/2).
+    RelayOpts = bondy_relay:routing_opts(maps:get(from, FwdOpts), undefined),
 
     %% Its fine if we get a not_yet_connected error as we are enabling
     %% retransmission.
