@@ -59,9 +59,6 @@ shared state inline. Instead:
 
 Remote entries never touch this module: their owner maintains their cells and
 they reach this node via AAE merge.
-
-Gated by the `bondy_router` app env `registry_rib_mode`
-(`off | dual | read | write`, default `dual`; see `mode/0`).
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -93,14 +90,12 @@ Gated by the `bondy_router` app env `registry_rib_mode`
 -export([check/1]).
 -export([ensure_stubs_table/0]).
 -export([match_stubs/2]).
--export([mode/0]).
 -export([on_entry_added/3]).
 -export([on_entry_removed/3]).
 -export([on_remote_clear/2]).
 -export([on_remote_set/3]).
 -export([recompute/5]).
 -export([stub_nodes/4]).
--export([stub_routing/0]).
 -export([subscription_nodes/3]).
 
 %% =============================================================================
@@ -387,31 +382,18 @@ read from the local projection). Returns `[]` when the two views agree —
 the precondition for routing on summaries — or one divergence per
 disagreeing key.
 
-The ground truth depends on the mode. Up to `read`, full entries still
-replicate, so it is the replicated full-entry cells — a genuinely
-independent cross-node view. Under `write` nothing but the summaries
-replicates, so the truth is what this node can attest: its own members
-table (which must agree with its own cells) and its stub store (which must
-agree with the merged peer cells).
+Full entries never replicate, so the ground truth is what this node can
+attest: its own members table (which must agree with its own cells) and its
+stub store (which must agree with the merged peer cells).
 """.
 -spec check(RealmUri :: uri()) -> [divergence()].
 
 check(RealmUri) ->
-    Expected =
-        case mode() of
-            write ->
-                maps:merge_with(
-                    fun(_, A, B) -> A ++ B end,
-                    member_nodes(RealmUri),
-                    stub_truth_nodes(RealmUri)
-                );
-            _ ->
-                maps:merge_with(
-                    fun(_, A, B) -> A ++ B end,
-                    entry_nodes(registration, RealmUri),
-                    entry_nodes(subscription, RealmUri)
-                )
-        end,
+    Expected = maps:merge_with(
+        fun(_, A, B) -> A ++ B end,
+        member_nodes(RealmUri),
+        stub_truth_nodes(RealmUri)
+    ),
     Actual = maps:merge_with(
         fun(_, A, B) -> A ++ B end,
         cell_nodes(registration, RealmUri),
@@ -432,52 +414,11 @@ check(RealmUri) ->
 %% PRIVATE
 %% =============================================================================
 
--doc """
-The RIB mode (`registry.rib` config):
-
-- `off` — summaries are neither written nor consumed.
-- `dual` — summaries are maintained and validated (`check/1`) but routing
-  still uses the full-entry replication.
-- `read` — routing consumes the summaries: remote callees and subscriber
-  nodes are discovered via stubs, forwarded cluster CALLs are
-  node-addressed and the receiving node re-selects among its live local
-  registrations (owner-side completion). Full entries still replicate as
-  the rollback net.
-- `write` — as `read`, plus full entries stop replicating altogether: the
-  registry store keeps them in node-local ETS instead of bondy_db, so the
-  summary cells are the only replicated registry state. Chosen at boot
-  (each store slice pins its entry backend at creation) — flipping the
-  mode across `write` requires a restart.
-""".
--spec mode() -> off | dual | read | write.
-
-mode() ->
-    application:get_env(bondy_router, registry_rib_mode, dual).
-
--doc """
-Whether routing consumes the RIB (`mode/0` is `read` or `write`): remote
-discovery — callee nodes for the dealer, subscriber nodes for the broker —
-runs on the stubs, and remote full entries (if any still replicate) are
-ignored for routing.
-""".
--spec stub_routing() -> boolean().
-
-stub_routing() ->
-    case mode() of
-        read -> true;
-        write -> true;
-        _ -> false
-    end.
-
-%% =============================================================================
-%% PRIVATE (continued)
-%% =============================================================================
-
 %% @private
-%% RIB maintenance applies only to local entries (remote owners maintain their
-%% own cells) and only when the feature is enabled.
+%% RIB maintenance applies only to local entries — remote owners maintain
+%% their own cells, which reach this node via AAE merge.
 is_active(Entry) ->
-    mode() =/= off andalso bondy_registry_entry:is_local(Entry).
+    bondy_registry_entry:is_local(Entry).
 
 %% @private
 %% The members row for an entry. `Invoke` is carried on registration rows so
@@ -888,31 +829,6 @@ stub_truth_nodes(RealmUri) ->
     end.
 
 %% @private
-%% The node set per (Type, Policy, Uri) derivable from the replicated
-%% full-entry cells: the ground truth the summaries must agree with.
-entry_nodes(Type, RealmUri) ->
-    Table = entry_db_table(Type),
-    {ok, Rows} = bondy_db:list(Table, RealmUri),
-    lists:foldl(
-        fun
-            ({_Key, #{entry := Entry}, _Hlc}, Acc) ->
-                K = {
-                    Type,
-                    bondy_registry_entry:match_policy(Entry),
-                    bondy_registry_entry:uri(Entry)
-                },
-                N = bondy_registry_entry:nodestring(Entry),
-                maps:update_with(K, fun(Ns) -> [N | Ns] end, [N], Acc);
-            (_, Acc) ->
-                %% A retracted cell (the fold's empty value) or a foreign
-                %% shape — nothing routable.
-                Acc
-        end,
-        #{},
-        Rows
-    ).
-
-%% @private
 %% The node set per (Type, Policy, Uri) derivable from the RIB summary
 %% cells in the local projection — this node's own cells plus every merged
 %% peer cell.
@@ -958,12 +874,6 @@ db_table(registration) ->
     db_table_for(?BONDY_DB_REGISTRATION_RIB_TAB);
 db_table(subscription) ->
     db_table_for(?BONDY_DB_SUBSCRIPTION_RIB_TAB).
-
-%% @private
-entry_db_table(registration) ->
-    db_table_for(?BONDY_DB_REGISTRATION_TAB);
-entry_db_table(subscription) ->
-    db_table_for(?BONDY_DB_SUBSCRIPTION_TAB).
 
 %% @private
 db_table_for(Name) ->

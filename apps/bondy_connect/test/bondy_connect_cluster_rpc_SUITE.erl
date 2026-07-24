@@ -133,10 +133,12 @@ progressive_across_cluster(Config) ->
     end,
     {ok, _} = bondy_connect:register(Callee, ?PROC, Handler),
 
-    %% Wait until node1 can route to node2's registration.
+    %% Wait until node1 can route to node2's registration: its RIB stub view
+    %% has the callee (full entries are not replicated cross-node).
     ok = wait_until(
         fun() ->
-            erpc:call(Node1, bondy_dealer, callees, [?REALM, ?PROC]) =/= []
+            erpc:call(Node1, bondy_registry_rib, match_stubs, [?REALM, ?PROC]) =/=
+                []
         end,
         30000,
         registration_not_visible_on_node1
@@ -193,7 +195,8 @@ progressive_across_cluster_feature_disabled(Config) ->
 
     ok = wait_until(
         fun() ->
-            erpc:call(Node1, bondy_dealer, callees, [?REALM, Proc]) =/= []
+            erpc:call(Node1, bondy_registry_rib, match_stubs, [?REALM, Proc]) =/=
+                []
         end,
         30000,
         registration_not_visible_on_node1
@@ -240,7 +243,8 @@ progressive_remote_cancel_interrupts_callee(Config) ->
 
     ok = wait_until(
         fun() ->
-            erpc:call(Node1, bondy_dealer, callees, [?REALM, Proc]) =/= []
+            erpc:call(Node1, bondy_registry_rib, match_stubs, [?REALM, Proc]) =/=
+                []
         end,
         30000,
         registration_not_visible_on_node1
@@ -301,7 +305,8 @@ progressive_remote_caller_death_interrupts_callee(Config) ->
 
     ok = wait_until(
         fun() ->
-            erpc:call(Node1, bondy_dealer, callees, [?REALM, Proc]) =/= []
+            erpc:call(Node1, bondy_registry_rib, match_stubs, [?REALM, Proc]) =/=
+                []
         end,
         30000,
         registration_not_visible_on_node1

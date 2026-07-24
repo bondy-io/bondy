@@ -751,33 +751,26 @@ do_publish(RealmUri, {_, _} = MatchResult, MakeEvent, Fwd, Origin) when
     fold_matches(MatchResult, Fun, ok).
 
 %% @private
-%% The match set for a locally-originated publication. When routing runs on
-%% the registry RIB, remote reachability comes from the subscription stubs —
-%% one relayed PUBLISH per node with a matching subscription, the receiving
-%% node matching and delivering locally — and the entry match is restricted
-%% to local subscribers, so remote full entries (which may still replicate
-%% as the rollback net) are never consumed. Otherwise the full-entry match
-%% provides both sides, as before. Stub nodes ride on the first page only —
-%% mirroring the full-entry contract, where continuations page local entries
+%% The match set for a locally-originated publication. Remote reachability
+%% comes from the subscription stubs — one relayed PUBLISH per node with a
+%% matching subscription, the receiving node matching and delivering locally
+%% — and the entry match is restricted to local subscribers, since full
+%% entries are never replicated. Stub nodes ride on the first page only,
+%% mirroring the local-entry contract where continuations page local entries
 %% and the node list is complete on the first result.
 match_subscriptions_for_publish(TopicUri, RealmUri, MatchOpts) ->
-    case bondy_registry_rib:stub_routing() of
-        true ->
-            LocalOpts = MatchOpts#{nodestring => bondy_config:nodestring()},
-            Result = match_subscriptions(TopicUri, RealmUri, LocalOpts),
-            Nodes = bondy_registry_rib:subscription_nodes(
-                RealmUri, TopicUri, MatchOpts
-            ),
-            merge_stub_nodes(Result, Nodes);
-        false ->
-            match_subscriptions(TopicUri, RealmUri, MatchOpts)
-    end.
+    LocalOpts = MatchOpts#{nodestring => bondy_config:nodestring()},
+    Result = match_subscriptions(TopicUri, RealmUri, LocalOpts),
+    Nodes = bondy_registry_rib:subscription_nodes(
+        RealmUri, TopicUri, MatchOpts
+    ),
+    merge_stub_nodes(Result, Nodes).
 
 %% @private
 %% Merge the stub-derived node set into a local match result, preserving its
-%% shape. Any nodes the local match reported (possible while full entries
-%% still replicate) are unioned in — over-forwarding is safe, the receiving
-%% node delivers only to its own live matching subscribers.
+%% shape. Any remote nodes the local match happened to report are unioned in
+%% — over-forwarding is safe, the receiving node delivers only to its own
+%% live matching subscribers.
 merge_stub_nodes(?EOT, []) ->
     ?EOT;
 merge_stub_nodes(?EOT, Nodes) ->

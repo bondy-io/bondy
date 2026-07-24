@@ -472,7 +472,18 @@ METRICS_GAP_ANALYSIS.md Part III).
 
 has_matches(Type, RealmUri, Uri) ->
     Store = bondy_registry_partition:store(RealmUri),
-    bondy_registry_store:has_matches(Store, Type, RealmUri, Uri).
+    bondy_registry_store:has_matches(Store, Type, RealmUri, Uri) orelse
+        rib_has_matches(Type, RealmUri, Uri).
+
+%% @private
+%% Demand from remote nodes: full entries are not replicated, so a matching
+%% registration or subscription owned by a peer is visible here only as a RIB
+%% summary. Consult the stub view so the demand predicate stays true when the
+%% only matching peer lives on another node.
+rib_has_matches(subscription, RealmUri, Uri) ->
+    bondy_registry_rib:subscription_nodes(RealmUri, Uri, #{}) =/= [];
+rib_has_matches(registration, RealmUri, Uri) ->
+    bondy_registry_rib:match_stubs(RealmUri, Uri) =/= [].
 
 -doc "Calls `match/4`".
 -spec match
@@ -1469,37 +1480,32 @@ is_stale_session(Entry) ->
 %% @private
 %% Runs the RIB consistency check for every realm, logs each divergent one
 %% (realm, divergence count and a bounded sample) and gauges the node-wide
-%% total. Skipped entirely when the RIB is off.
+%% total.
 rib_check() ->
-    case bondy_registry_rib:mode() of
-        off ->
-            ok;
-        _ ->
-            Total = lists:foldl(
-                fun(Realm, Acc) ->
-                    RealmUri = bondy_realm:uri(Realm),
-                    case bondy_registry_rib:check(RealmUri) of
-                        [] ->
-                            Acc;
-                        Divergences ->
-                            ?LOG_WARNING(#{
-                                description =>
-                                    "Registry RIB summaries diverge from "
-                                    "the ground truth for realm",
-                                realm_uri => RealmUri,
-                                count => length(Divergences),
-                                sample => lists:sublist(Divergences, 3)
-                            }),
-                            Acc + length(Divergences)
-                    end
-                end,
-                0,
-                bondy_realm:list()
-            ),
-            registry_metric(gauge, #{
-                name => bondy_registry_rib_divergences, value => Total
-            })
-    end.
+    Total = lists:foldl(
+        fun(Realm, Acc) ->
+            RealmUri = bondy_realm:uri(Realm),
+            case bondy_registry_rib:check(RealmUri) of
+                [] ->
+                    Acc;
+                Divergences ->
+                    ?LOG_WARNING(#{
+                        description =>
+                            "Registry RIB summaries diverge from "
+                            "the ground truth for realm",
+                        realm_uri => RealmUri,
+                        count => length(Divergences),
+                        sample => lists:sublist(Divergences, 3)
+                    }),
+                    Acc + length(Divergences)
+            end
+        end,
+        0,
+        bondy_realm:list()
+    ),
+    registry_metric(gauge, #{
+        name => bondy_registry_rib_divergences, value => Total
+    }).
 
 %% @private
 %% The number of currently SUSPENDed peers is exactly the number of armed

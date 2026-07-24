@@ -28,9 +28,7 @@ recompute_test_() ->
             {timeout, 60, {"registration summary lifecycle", fun regs/0}},
             {timeout, 60, {"subscription summary lifecycle", fun subs/0}},
             {timeout, 60, {"remote stub lifecycle", fun stubs/0}},
-            {timeout, 60, {"divergence check", fun divergence/0}},
             {timeout, 60, {"subscriber node discovery", fun sub_nodes/0}},
-            {timeout, 60, {"stub routing predicate", fun stub_routing/0}},
             {timeout, 60, {"update damping", fun damping/0}}
         ]}.
 
@@ -168,64 +166,6 @@ stubs() ->
             registration, ?REALM, ?EXACT_MATCH, ?URI
         )
     ).
-
-%% `check/1` compares the full-entry node view with the RIB cell view.
-divergence() ->
-    with_catalog(fun(Tab) ->
-        RibTable = ?CAT:table(?BONDY_DB_REGISTRATION_RIB_TAB),
-        EntryTable = ?CAT:table(?BONDY_DB_REGISTRATION_TAB),
-
-        %% Nothing on either side: no divergence.
-        ?assertEqual([], bondy_registry_rib:check(?REALM)),
-
-        %% A full entry without a matching RIB cell diverges...
-        Entry = bondy_registry_entry:new(
-            registration,
-            1,
-            ?REALM,
-            bondy_ref:new(internal),
-            ?URI,
-            #{match => ?EXACT_MATCH}
-        ),
-        ok = bondy_db:apply(
-            EntryTable,
-            ?REALM,
-            term_to_binary(1),
-            {set, #{session_id => undefined, entry => Entry}}
-        ),
-        Self = bondy_config:nodestring(),
-        ?assertMatch(
-            [
-                {
-                    {registration, ?EXACT_MATCH, ?URI},
-                    #{full_entries := [Self], rib := []}
-                }
-            ],
-            bondy_registry_rib:check(?REALM)
-        ),
-
-        %% ...until the summary recompute writes the cell.
-        row(Tab, registration, ?EXACT_MATCH, 100, 1, ?INVOKE_SINGLE),
-        ok = recompute(Tab, registration),
-        ?assertEqual([], bondy_registry_rib:check(?REALM)),
-
-        %% A RIB cell with no matching entries (e.g. a stale summary)
-        %% diverges the other way.
-        ok = bondy_db:apply(EntryTable, ?REALM, term_to_binary(1), clear),
-        ?assertMatch(
-            [
-                {
-                    {registration, ?EXACT_MATCH, ?URI},
-                    #{full_entries := [], rib := [Self]}
-                }
-            ],
-            bondy_registry_rib:check(?REALM)
-        ),
-        ok = bondy_db:apply(
-            RibTable, ?REALM, cell_key(?EXACT_MATCH, ?URI), clear
-        ),
-        ?assertEqual([], bondy_registry_rib:check(?REALM))
-    end).
 
 %% `subscription_nodes/3` — the broker's forwarding set: every remote node
 %% with a subscription matching the topic, across policies, deduped, as
@@ -375,26 +315,6 @@ damping() ->
             application:unset_env(bondy_router, registry_rib_damping)
         end
     end).
-
-%% `stub_routing/0` is the read-or-write predicate.
-stub_routing() ->
-    Prev = application:get_env(bondy_router, registry_rib_mode, dual),
-    try
-        Cases = [
-            {off, false}, {dual, false}, {read, true}, {write, true}
-        ],
-        lists:foreach(
-            fun({Mode, Expected}) ->
-                ok = application:set_env(
-                    bondy_router, registry_rib_mode, Mode
-                ),
-                ?assertEqual(Expected, bondy_registry_rib:stub_routing())
-            end,
-            Cases
-        )
-    after
-        application:set_env(bondy_router, registry_rib_mode, Prev)
-    end.
 
 %% =============================================================================
 %% Helpers
