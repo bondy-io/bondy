@@ -52,6 +52,7 @@ from its own local registry. The node-local leg reads full entries
 
 -behaviour(partisan_gen_server).
 
+-include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_db_tables.hrl").
 
@@ -248,15 +249,51 @@ init([]) ->
     {ok, #{}}.
 
 -doc """
-The peer leg of the distributed walk: page THIS node's local registry and
-reply with `{Id, External}` pairs in ascending `EntryId` order.
+The peer leg of the distributed walk. **Spawn-and-go**: the local read runs in a
+short-lived worker that answers via `partisan_gen_server:reply/2`, so this
+responder's mailbox frees immediately and requests from every coordinator run
+concurrently — a serial responder would funnel the node's whole incoming
+introspection rate through one process. The coordinator side is functional (it
+runs in the calling request process); only this peer receiver is a process,
+because with disterl off a cross-node request must reach a REGISTERED name.
 """.
-handle_call({page, Type, RealmUri, Query, AfterId, Need}, _From, State) ->
-    {reply, {ok, local_page(Type, RealmUri, Query, AfterId, Need)}, State};
-handle_call({get, Type, RealmUri, Id}, _From, State) ->
-    {reply, {ok, local_get(Type, RealmUri, Id)}, State};
+handle_call({page, Type, RealmUri, Query, AfterId, Need}, From, State) ->
+    _ = spawn(fun() ->
+        partisan_gen_server:reply(
+            From,
+            peer_reply(fun() ->
+                local_page(Type, RealmUri, Query, AfterId, Need)
+            end)
+        )
+    end),
+    {noreply, State};
+handle_call({get, Type, RealmUri, Id}, From, State) ->
+    _ = spawn(fun() ->
+        partisan_gen_server:reply(
+            From, peer_reply(fun() -> local_get(Type, RealmUri, Id) end)
+        )
+    end),
+    {noreply, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
+
+%% @private
+%% Wrap a peer-side read as the `{ok, _}` a coordinator expects; a raised error
+%% becomes `{error, _}` so the coordinator sees a definite failure (→ empty page
+%% for `page`, `unavailable` for `get`) rather than waiting out its timeout.
+peer_reply(Fun) ->
+    try
+        {ok, Fun()}
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_WARNING(#{
+                description => "registry meta peer read raised",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            {error, Reason}
+    end.
 
 handle_cast(_Msg, State) ->
     {noreply, State}.

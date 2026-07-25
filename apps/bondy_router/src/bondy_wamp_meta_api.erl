@@ -5,14 +5,23 @@
 
 -module(bondy_wamp_meta_api).
 -moduledoc """
-Handles the following META API wamp calls:
+The spec-compliant `wamp.*` registry/subscription meta procedures
+(`wamp.registration.*` and `wamp.subscription.*`: `list`, `lookup`, `match`,
+`get`, `list_callees`/`list_subscribers`, `count_callees`/`count_subscribers`).
 
-- `wamp.subscription.list`: Retrieves subscription IDs listed according to match policies.
-- `wamp.subscription.lookup`: Obtains the subscription (if any) managing a topic, according to some match policy.
-- `wamp.subscription.match`: Retrieves a list of IDs of subscriptions matching a topic URI, irrespective of match policy.
-- `wamp.subscription.get`: Retrieves information on a particular subscription.
-- `wamp.subscription.list_subscribers`: Retrieves a list of session IDs for sessions currently attached to the subscription.
-- `wamp.subscription.count_subscribers`: Obtains the number of sessions currently attached to the subscription.
+These keep the shapes Crossbar froze for a single-node router (grouped-by-policy
+`list`, flat-id `match`), so they are **not** paginated. On a distributed router
+the cluster-wide set is unbounded, so each enumeration is **bounded** via
+`bondy_registry_meta:max_results/0`: past the ceiling it returns
+`{error, too_many_results}` (→ `bondy.error.too_many_results`) and steers the
+caller to the paginated `bondy.*` family (`bondy_registry_api`). `get`-by-id is a
+cluster-wide broadcast and may return `{error, unavailable}` (→
+`bondy.error.unavailable`) rather than a false `no_such_registration` when a node
+holding the entry cannot be reached.
+
+`*.list_callees`/`*.list_subscribers` and `*.count_callees`/`*.count_subscribers`
+are per-entry (by-id) operations and remain `not_implemented` — see
+`_design/REGISTRY_META_API.md` §6.
 """.
 -behaviour(bondy_wamp_callback).
 

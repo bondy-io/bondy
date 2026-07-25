@@ -5,8 +5,15 @@
 
 -module(bondy_registry_api).
 -moduledoc """
-Implements the `bondy_wamp_api` behaviour for the registry WAMP API, dispatching
-procedure calls that list registrations, subscriptions and callees for a realm.
+The `bondy.*` registry introspection procedures — the **paginated** family
+(`bondy.registration.list|match`, `bondy.subscription.list|match`), plus
+`bondy.registration.callee.list`.
+
+A thin adapter over `bondy_registry_meta`: it reads the `_limit` / `_cursor`
+extension options (bounded by `bondy_registry_meta:{default,max}_page_size/0`),
+runs the distributed keyset page, and externalises it with
+`bondy_pagination:to_external/1`. The spec-frozen, bounded `wamp.*` equivalents
+live in `bondy_wamp_meta_api`.
 """.
 -behaviour(bondy_wamp_api).
 
