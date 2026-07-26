@@ -220,9 +220,12 @@ handle_info({'DOWN', _Ref, process, Pid, Reason}, #state{worker = Pid} = State) 
         }),
     State#state.pending andalso gen_server:cast(?MODULE, membership_update),
     {noreply, State#state{worker = undefined, pending = false}};
-handle_info({gen_event_EXIT, _Handler, _Reason}, State) ->
-    %% Our membership subscription died with the events manager; re-arm.
-    State#state.enabled andalso (ok = subscribe_membership()),
+handle_info({partisan_membership, _Members}, State) ->
+    %% A membership change pushed by Partisan. The payload is ignored (see
+    %% subscribe_membership/0); the single-flight worker re-reads the current
+    %% member set itself. The periodic tick is the safety net if a push is ever
+    %% missed (e.g. the subscription is dropped without this process dying).
+    State#state.enabled andalso gen_server:cast(?MODULE, membership_update),
     {noreply, State};
 handle_info(retirement_tick, State) ->
     State#state.enabled andalso
@@ -251,13 +254,13 @@ schedule_periodic() ->
     ok.
 
 %% @private
-%% The payload of a membership update is ignored on purpose: the worker
-%% re-reads `partisan_peer_service:members/0` itself, so a stale or
-%% representation-specific payload can never drive a cleanup.
+%% Subscribe this process to Partisan membership-change notifications; each
+%% change is delivered as a `{partisan_membership, Members}` message (handled in
+%% handle_info/2). The payload is ignored on purpose: the worker re-reads the
+%% member set from `bondy_oplog_instance:reclamation_members/0` itself, so a
+%% stale or representation-specific payload can never drive a cleanup.
 subscribe_membership() ->
-    partisan_peer_service:add_sup_callback(fun(_MembershipState) ->
-        gen_server:cast(?MODULE, membership_update)
-    end).
+    partisan_membership:subscribe().
 
 %% @private
 %% Forget every recorded peer that is no longer a member. Node-keyed and

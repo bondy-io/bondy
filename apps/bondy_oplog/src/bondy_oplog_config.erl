@@ -86,6 +86,9 @@ here.
 -export([set_aae_max_concurrency/1]).
 -export([aae_max_pages_in_flight/0]).
 -export([aae_pages_per_round/0]).
+-export([sync_max_response_bytes/0]).
+-export([sync_response_headroom/0]).
+-export([partisan_max_message_size/0]).
 -export([aae_load_adaptive/0]).
 -export([set_aae_load_adaptive/1]).
 -export([aae_load_run_queue_threshold/0]).
@@ -432,6 +435,62 @@ each pull a third — same node-wide peak, three-way fairness, each a bit slower
 
 aae_pages_per_round() ->
     max(1, aae_max_pages_in_flight() div aae_max_concurrency()).
+
+-doc """
+The Partisan inter-node frame cap (`max_message_size`), read live so the sync
+ceiling below tracks it. A peer frame over this cap is rejected before decode
+(`emsgsize`) and the peer is dropped. Falls back to Partisan's own default if
+the config is not yet readable.
+""".
+-spec partisan_max_message_size() -> pos_integer().
+
+partisan_max_message_size() ->
+    try partisan_config:get(max_message_size) of
+        N when is_integer(N) andalso N > 0 -> N;
+        _ -> 67108864
+    catch
+        _:_ -> 67108864
+    end.
+
+-doc """
+Fraction of the Partisan frame cap a single AAE sync response may fill (default
+`0.8`). This is the headroom that keeps a packed response under
+`max_message_size` after the overhead the packer does NOT measure — the response
+map's keys and slots, the sync-protocol envelope, and Partisan's own framing. It
+is therefore capped at `0.95`: a value of `1.0` would leave no room for that
+overhead and could push the serialized frame past `max_message_size`, causing
+the `emsgsize` peer-drop this whole mechanism exists to prevent. Values `> 0.95`
+are clamped to `0.95`; non-positive / non-numeric values fall back to the
+default.
+""".
+-spec sync_response_headroom() -> float().
+
+sync_response_headroom() ->
+    case application:get_env(?APP, sync_response_headroom, 0.8) of
+        F when is_number(F) andalso F > 0 -> min(float(F), 0.95);
+        _ -> 0.8
+    end.
+
+-doc """
+The byte ceiling for a single AAE sync response — a `get_pages` page map or a
+catalogue-snapshot cell batch. Derived from `partisan_max_message_size/0` times
+`sync_response_headroom/0`, so it moves in lockstep with the transport frame
+cap: the responder packs a response up to this size and leaves the remainder for
+the next round, and never emits a frame Partisan would reject. An explicit
+`sync_max_response_bytes` env overrides the derivation.
+""".
+-spec sync_max_response_bytes() -> pos_integer().
+
+sync_max_response_bytes() ->
+    case application:get_env(?APP, sync_max_response_bytes, undefined) of
+        N when is_integer(N) andalso N > 0 ->
+            N;
+        _ ->
+            max(
+                1,
+                round(partisan_max_message_size() * sync_response_headroom())
+            )
+    end.
 
 -doc """
 Whether AAE yields its throttleable dispatches while the node is busy (default

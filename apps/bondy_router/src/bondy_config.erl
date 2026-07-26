@@ -108,6 +108,7 @@ An implementation of the `app_config` behaviour.
     %% - lazy_tick_period <- cluster.lazy_tick_period
     %% - peer_port <- cluster.peer_port
     %% - parallelism <- cluster.parallelism
+    %% - max_message_size <- cluster.max_message_size
     %% - peer_service_manager <- cluster.overlay.topology
     %% - partisan.tls <- cluster.tls.enabled
     %% - partisan.tls_server_options.* <- cluster.tls.server.*

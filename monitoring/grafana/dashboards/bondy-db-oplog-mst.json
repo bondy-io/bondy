@@ -10,7 +10,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 6,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -9348,6 +9348,157 @@
         }
       },
       "description": "long_gc / long_schedule / large_heap / busy_port / busy_dist_port. Red cells mark scheduler stalls or GC pressure."
+    },
+    {
+      "id": 150,
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 369
+      },
+      "title": "AAE Sync \u2014 Oversized items (values too large to replicate over Partisan)",
+      "panels": []
+    },
+    {
+      "id": 151,
+      "type": "timeseries",
+      "title": "Oversized AAE sync items skipped \u2014 rate",
+      "description": "Rate of AAE sync items (MST pages or catalogue cells) skipped because a single item's serialized size exceeds the sync response ceiling (Partisan max_message_size \u00d7 headroom). Non-zero means stored values are too large to replicate \u2014 raise cluster.max_message_size. Alert (the operator alarm): sum(increase(bondy_oplog_sync_oversized_item_total[15m])) > 0 \u2014 it self-clears once skipping stops.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 370
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (kind) (rate(bondy_oplog_sync_oversized_item_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "{{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 152,
+      "type": "timeseries",
+      "title": "Largest skipped AAE sync item",
+      "description": "Largest AAE sync item skipped (over the visible range, by kind) because it exceeds the frame cap. Indicates how high cluster.max_message_size must be raised. A first-class SASL alarm (bondy_oplog_sync_oversized_items) also fires while skipping is ongoing \u2014 see the cluster overview's Active alarms.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 370
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "bytes",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "gradientMode": "none",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "max by (kind) (max_over_time(bondy_oplog_sync_oversized_item_last_bytes{node=~\"$node\"}[$__range]))",
+          "legendFormat": "{{kind}}"
+        }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "title": "Cluster Overview",
+      "type": "link",
+      "tags": [],
+      "url": "/d/bondy-cluster-overview",
+      "icon": "dashboard",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": true
     }
   ]
 }

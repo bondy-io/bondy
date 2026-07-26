@@ -87,6 +87,20 @@ Errors propagate as `{error, Reason}` (e.g. `{instance_not_running, Id}`).
 -export([handle_info/2]).
 -export([terminate/2]).
 
+-ifdef(TEST).
+-export([cap_pages/2]).
+-export([check_oversized_alarm/1]).
+-endif.
+
+%% Oversized-item alarm: raised while AAE sync is skipping items too large to
+%% replicate over the transport frame. Driven off the sync_metrics counter, so
+%% it covers pages AND cells uniformly and needs no back-edge from the detection
+%% sites. The condition self-heals when the operator raises the frame cap.
+-define(OVERSIZED_ALARM_ID, bondy_oplog_sync_oversized_items).
+%% Poll cadence and the quiet window after which the alarm clears.
+-define(OVERSIZED_POLL_MS, 30000).
+-define(OVERSIZED_CLEAR_MS, 300000).
+
 %% =============================================================================
 %% LIFECYCLE
 %% =============================================================================
@@ -291,9 +305,50 @@ do_get_pages(InstanceId, Hashes) ->
                     %% which the caller cannot distinguish from a bug.
                     {ok, {unavailable, HashList}};
                 _ ->
-                    {ok, Pages}
+                    {ok, cap_pages(InstanceId, Pages)}
             end
     end.
+
+%% @private
+%% Pack pages into a response no larger than the sync byte ceiling (derived from
+%% Partisan's frame cap), so the reply never trips `max_message_size` and drops
+%% the peer. Pages beyond the ceiling are left out; the requester merges what it
+%% gets and re-derives its `missing_set` next round, so a capped response just
+%% costs one more round. At least one fitting page is always included, so the
+%% caller never sees an (error-signalling) empty map while progress is possible.
+%% A single page whose serialized size alone exceeds the ceiling cannot be
+%% delivered within the frame cap at all: it is skipped and reported, so it never
+%% poisons the peer connection — it simply cannot replicate until the cap is
+%% raised above it.
+cap_pages(InstanceId, Pages) ->
+    MaxBytes = bondy_oplog_config:sync_max_response_bytes(),
+    {Capped, _Used} = maps:fold(
+        fun(Hash, Page, {Acc, Used} = Keep) ->
+            %% Measure the wire footprint of the whole map entry — the hash
+            %% KEY plus the page value — not just the value, so the packed
+            %% response matches what actually serializes into the frame.
+            Size = erlang:external_size(Hash) + erlang:external_size(Page),
+            if
+                Size > MaxBytes ->
+                    ok = bondy_oplog_sync_metrics:report_oversized(
+                        page, {InstanceId, Hash}, Size, MaxBytes
+                    ),
+                    Keep;
+                Acc =:= #{} ->
+                    %% Always ship at least one fitting page so the stream makes
+                    %% progress even when the remaining budget is small.
+                    {Acc#{Hash => Page}, Size};
+                Used + Size =< MaxBytes ->
+                    {Acc#{Hash => Page}, Used + Size};
+                true ->
+                    %% Ceiling reached; leave the rest for the next round.
+                    Keep
+            end
+        end,
+        {#{}, 0},
+        Pages
+    ),
+    Capped.
 
 %% =============================================================================
 %% partisan_gen_server CALLBACKS
@@ -304,7 +359,13 @@ init([]) ->
     %% Serves sync/catalogue-snapshot requests in bursts; off_heap mailbox
     %% so a request burst backlog isn't re-scanned by the GC.
     process_flag(message_queue_data, off_heap),
-    {ok, #{}}.
+    ok = bondy_oplog_sync_metrics:declare(),
+    ok = schedule_oversized_poll(),
+    {ok, #{
+        oversized_alarm => false,
+        oversized_total => 0,
+        oversized_last_increase => 0
+    }}.
 
 handle_call({sync_protocol, InstanceId, Request}, From, State) ->
     %% Spawn-and-go: free the responder's mailbox immediately. The
@@ -334,8 +395,70 @@ handle_call(_Req, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+handle_info(check_oversized_alarm, State0) ->
+    State = check_oversized_alarm(State0),
+    ok = schedule_oversized_poll(),
+    {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, _State) ->
+    %% Best-effort: don't leave a stale alarm across a responder restart. The
+    %% new incarnation re-asserts within one poll if the condition persists.
+    ok = clear_oversized_alarm(),
+    ok.
+
+%% =============================================================================
+%% PRIVATE — oversized-item alarm
+%% =============================================================================
+
+%% @private
+schedule_oversized_poll() ->
+    _ = erlang:send_after(?OVERSIZED_POLL_MS, self(), check_oversized_alarm),
+    ok.
+
+%% @private
+%% Drive the SASL alarm off the sync_metrics oversized counter: assert while it
+%% is still climbing, clear after `?OVERSIZED_CLEAR_MS` with no further skips
+%% (the operator raised the frame cap). The `oversized_alarm` flag makes set and
+%% clear happen once per episode, so a prepending alarm handler never
+%% accumulates duplicate entries.
+check_oversized_alarm(State) ->
+    #{
+        oversized_alarm := Alarmed,
+        oversized_total := PrevTotal,
+        oversized_last_increase := LastIncrease
+    } = State,
+    Total = bondy_oplog_sync_metrics:oversized_total(),
+    Now = erlang:monotonic_time(millisecond),
+    if
+        Total > PrevTotal ->
+            Alarmed orelse set_oversized_alarm(),
+            State#{
+                oversized_alarm => true,
+                oversized_total => Total,
+                oversized_last_increase => Now
+            };
+        Alarmed andalso Now - LastIncrease >= ?OVERSIZED_CLEAR_MS ->
+            ok = clear_oversized_alarm(),
+            State#{oversized_alarm => false};
+        true ->
+            State
+    end.
+
+%% @private
+set_oversized_alarm() ->
+    Desc = <<
+        "AAE sync is skipping items too large to replicate: a stored value "
+        "exceeds the inter-node frame cap (cluster.max_message_size). The "
+        "affected data cannot converge until the cap is raised above it. See "
+        "the bondy_oplog_sync_oversized_item_last_bytes metric and the WARNING "
+        "logs for the size and identity."
+    >>,
+    _ = catch alarm_handler:set_alarm({?OVERSIZED_ALARM_ID, Desc}),
+    ok.
+
+%% @private
+clear_oversized_alarm() ->
+    _ = catch alarm_handler:clear_alarm(?OVERSIZED_ALARM_ID),
     ok.

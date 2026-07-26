@@ -4837,6 +4837,20 @@ end}.
   {datatype, integer}
 ]}.
 
+%% @doc Maximum size of an inter-node (Partisan peer) message. It bounds the
+%% length-prefixed framing on both the connect and accept paths, so an oversized
+%% frame is rejected before it is assembled or decoded — closing a
+%% pre-authentication memory-exhaustion / decompression-bomb vector. A peer that
+%% sends a frame over this cap has its connection closed (the socket reports
+%% 'emsgsize') and is dropped from the active view until it reconnects. Raise it
+%% only if the cluster legitimately exchanges peer messages larger than the
+%% default, for example very large application broadcasts or anti-entropy deltas.
+{mapping, "cluster.max_message_size",
+"partisan.max_message_size", [
+  {default, "64MB"},
+  {datatype, bytesize}
+]}.
+
 {mapping, "cluster.channels.default.parallelism",
 "bondy_router.channels.undefined.parallelism", [
   {default, 1},

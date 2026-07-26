@@ -83,7 +83,8 @@ touch the pack store's process-bound file descriptors.
 %% =============================================================================
 
 -doc "Top summary block: AAE state, interval, instance/peer counts, in-sync tally.".
--spec attributes(State :: term()) -> {[[map()]], NewState :: term()}.
+-spec attributes(State :: term()) ->
+    #{rows := [[map()]], state := NewState :: term()}.
 
 attributes(State) ->
     Instances = instances(),
@@ -112,22 +113,26 @@ attributes(State) ->
             cell("", 8)
         ]
     ],
-    {Rows, State}.
+    #{rows => Rows, state => State}.
 
 -doc "Per `(instance, peer)` table columns.".
--spec sheet_header() -> [map()].
+-spec sheet_header() -> #{columns := [map()], default_sort := atom()}.
 
 sheet_header() ->
-    [
-        #{title => "Instance", width => 16},
-        #{title => "Peer", width => 28},
-        #{title => "Local dig", width => 14},
-        #{title => "Peer dig", width => 14},
-        #{title => "Status", width => 12}
-    ].
+    #{
+        columns => [
+            #{id => instance, title => "Instance", width => 16},
+            #{id => peer, title => "Peer", width => 28},
+            #{id => local_dig, title => "Local dig", width => 14},
+            #{id => peer_dig, title => "Peer dig", width => 14},
+            #{id => status, title => "Status", width => 12}
+        ],
+        default_sort => instance
+    }.
 
 -doc "One row per `(instance, connected-peer)`; `solo` when there are no peers.".
--spec sheet_body(State :: term()) -> {[list()], NewState :: term()}.
+-spec sheet_body(State :: term()) ->
+    #{rows := [map()], state := NewState :: term()}.
 
 sheet_body(State) ->
     Peers = peers(),
@@ -137,18 +142,18 @@ sheet_body(State) ->
             Local = local_sig(Id),
             case Peers of
                 [] ->
-                    [[to_str(Id), "(solo)", local_cell(Local), "-", "solo"]];
+                    [row(to_str(Id), "(solo)", local_cell(Local), "-", "solo")];
                 _ ->
                     [
                         begin
                             Peer = peer_sig(P, Id),
-                            [
+                            row(
                                 to_str(Id),
                                 to_str(P),
                                 local_cell(Local),
                                 peer_cell(Peer),
                                 status_label(status(Life, Local, Peer))
-                            ]
+                            )
                         end
                      || P <- Peers
                     ]
@@ -156,7 +161,19 @@ sheet_body(State) ->
         end,
         instances()
     ),
-    {Rows, State}.
+    #{rows => Rows, state => State}.
+
+%% @private
+row(Instance, Peer, LocalDig, PeerDig, Status) ->
+    #{
+        cells => #{
+            instance => Instance,
+            peer => Peer,
+            local_dig => LocalDig,
+            peer_dig => PeerDig,
+            status => Status
+        }
+    }.
 
 %% =============================================================================
 %% PRIVATE

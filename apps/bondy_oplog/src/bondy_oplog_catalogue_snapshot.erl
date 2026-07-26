@@ -51,6 +51,10 @@ skip-if-older check on `pre_bootstrap`.
 -export([init/2]).
 -export([next/2]).
 
+-ifdef(TEST).
+-export([cap_cells/4]).
+-endif.
+
 %% Default bucket for catalogue projections. Matches the convention in
 %% `bondy_oplog_applier_cell_apply_test` and the e2e test suites: cell
 %% events are appended with `Bucket = <<>>`.
@@ -288,6 +292,7 @@ init_with_target(InstanceId, NS, Index, Shard, Bucket) ->
 %% @private
 do_next(Cursor, CState) ->
     #{
+        instance_id := InstanceId,
         ns := NS,
         index := Index,
         shard := Shard,
@@ -322,9 +327,20 @@ do_next(Cursor, CState) ->
                             do_next(Cursor, NextState)
                     end;
                 {ok, Pairs} ->
-                    Cells = [{Bucket, K, F} || {K, F} <- Pairs],
-                    {LastK, _} = lists:last(Pairs),
-                    case bondy_oplog_catalogue_cursor:advance(Cursor, LastK) of
+                    MaxBytes = bondy_oplog_config:sync_max_response_bytes(),
+                    {Cells, AdvanceKey} = cap_cells(
+                        InstanceId, Bucket, Pairs, MaxBytes
+                    ),
+                    %% AdvanceKey is the last key decided this round (kept, or
+                    %% skipped because it was oversized). The cursor advances to
+                    %% it so the next round resumes strictly after it: a
+                    %% byte-capped round leaves the untouched tail for the next
+                    %% call, and an all-oversized round yields an empty-but-
+                    %% advanced batch the initiator loops past. `Pairs` is
+                    %% non-empty here, so AdvanceKey is always defined.
+                    case
+                        bondy_oplog_catalogue_cursor:advance(Cursor, AdvanceKey)
+                    of
                         ok ->
                             {ok, {batch, {Cursor, Cells}}};
                         not_found ->
@@ -336,6 +352,47 @@ do_next(Cursor, CState) ->
                 {error, Reason} ->
                     {error, Reason}
             end
+    end.
+
+%% @private
+%% Pack cells into a batch no larger than the sync byte ceiling (derived from
+%% Partisan's frame cap), mirroring the responder's page capping so bootstrap
+%% snapshots never exceed the transport frame. Returns the kept cells (in key
+%% order) and the key to advance the cursor to — the last key decided, so the
+%% untouched tail is re-scanned next round and never lost. A single cell whose
+%% serialized size alone exceeds the ceiling cannot be framed to a peer; it is
+%% reported and skipped (advanced past), so it never trips the frame cap — it
+%% simply cannot replicate until `cluster.max_message_size` is raised above it.
+cap_cells(InstanceId, Bucket, Pairs, MaxBytes) ->
+    cap_cells(InstanceId, Bucket, Pairs, MaxBytes, 0, [], undefined).
+
+%% @private
+cap_cells(_InstanceId, _Bucket, [], _MaxBytes, _Used, KeptRev, Advance) ->
+    {lists:reverse(KeptRev), Advance};
+cap_cells(
+    InstanceId, Bucket, [{K, F} | Rest], MaxBytes, Used, KeptRev, Advance
+) ->
+    Cell = {Bucket, K, F},
+    Size = erlang:external_size(Cell),
+    if
+        Size > MaxBytes ->
+            ok = bondy_oplog_sync_metrics:report_oversized(
+                cell, {InstanceId, Bucket, K}, Size, MaxBytes
+            ),
+            cap_cells(InstanceId, Bucket, Rest, MaxBytes, Used, KeptRev, K);
+        KeptRev =:= [] orelse Used + Size =< MaxBytes ->
+            cap_cells(
+                InstanceId,
+                Bucket,
+                Rest,
+                MaxBytes,
+                Used + Size,
+                [Cell | KeptRev],
+                K
+            );
+        true ->
+            %% Ceiling reached; leave {K, F} and the rest for the next round.
+            {lists:reverse(KeptRev), Advance}
     end.
 
 %% @private

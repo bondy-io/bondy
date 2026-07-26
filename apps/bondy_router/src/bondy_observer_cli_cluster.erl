@@ -44,7 +44,8 @@ cell rather than crashing the render loop.
 %% =============================================================================
 
 -doc "Top summary block: node, membership size, connected count, manager.".
--spec attributes(State :: term()) -> {[[map()]], NewState :: term()}.
+-spec attributes(State :: term()) ->
+    #{rows := [[map()]], state := NewState :: term()}.
 
 attributes(State) ->
     Self = self_node(),
@@ -69,21 +70,25 @@ attributes(State) ->
             )
         ]
     ],
-    {Rows, State}.
+    #{rows => Rows, state => State}.
 
 -doc "Per-node table columns.".
--spec sheet_header() -> [map()].
+-spec sheet_header() -> #{columns := [map()], default_sort := atom()}.
 
 sheet_header() ->
-    [
-        #{title => "Node", width => 36},
-        #{title => "Membership", width => 14},
-        #{title => "Connected", width => 12},
-        #{title => "Self", width => 8}
-    ].
+    #{
+        columns => [
+            #{id => node, title => "Node", width => 36},
+            #{id => membership, title => "Membership", width => 14},
+            #{id => connected, title => "Connected", width => 12},
+            #{id => self, title => "Self", width => 8}
+        ],
+        default_sort => node
+    }.
 
 -doc "One row per known node (membership view ∪ connected ∪ self).".
--spec sheet_body(State :: term()) -> {[list()], NewState :: term()}.
+-spec sheet_body(State :: term()) ->
+    #{rows := [map()], state := NewState :: term()}.
 
 sheet_body(State) ->
     Self = self_node(),
@@ -99,11 +104,18 @@ sheet_body(State) ->
                     true -> "member";
                     false -> "non-member"
                 end,
-            [to_str(N), Membership, yes_no(IsConnected), yes_no(IsSelf)]
+            #{
+                cells => #{
+                    node => to_str(N),
+                    membership => Membership,
+                    connected => yes_no(IsConnected),
+                    self => yes_no(IsSelf)
+                }
+            }
         end
      || N <- Nodes
     ],
-    {Rows, State}.
+    #{rows => Rows, state => State}.
 
 %% =============================================================================
 %% PRIVATE

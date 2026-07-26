@@ -41,6 +41,10 @@ services:
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
       GF_USERS_DEFAULT_THEME: system
+      # The Infinity datasource shapes JSON/an API into Grafana Node Graph
+      # frames — used for the cluster topology graph (see
+      # _design/OBSERVABILITY_GAPS.md).
+      GF_INSTALL_PLUGINS: yesoreyeram-infinity-datasource
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro

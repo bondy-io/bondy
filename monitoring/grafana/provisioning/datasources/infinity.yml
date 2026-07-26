@@ -1,0 +1,20 @@
+apiVersion: 1
+
+# The Infinity datasource shapes JSON / CSV / an HTTP API into Grafana Node
+# Graph frames (nodes + edges). It backs the Bondy cluster topology graph — see
+# _design/OBSERVABILITY_GAPS.md. Two feed options are supported:
+#   A) a Bondy `/cluster/topology` JSON endpoint (recommended, richest), or
+#   B) the Prometheus HTTP API (`http://prometheus:9090`, the base URL below),
+#      shaping bondy_node_ready (nodes) and bondy_cluster_peer_connected (edges).
+datasources:
+  - name: Infinity
+    uid: bondy-infinity
+    type: yesoreyeram-infinity-datasource
+    access: proxy
+    isDefault: false
+    editable: true
+    jsonData:
+      # Base URL for relative queries; point node-graph queries at
+      # `/api/v1/query?query=...` for the Prometheus-shaping option, or at a
+      # Bondy `/cluster/topology` endpoint once it exists.
+      url: http://prometheus:9090

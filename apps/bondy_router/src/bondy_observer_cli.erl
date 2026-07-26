@@ -40,14 +40,14 @@ plugins() ->
             title => "Cluster",
             interval => 2000,
             shortcut => "C",
-            sort_column => 1
+            sort => node
         },
         #{
             module => bondy_observer_cli_sync,
             title => "Sync",
             interval => 2000,
             shortcut => "Y",
-            sort_column => 5
+            sort => status
         }
     ].
 
