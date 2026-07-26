@@ -36,7 +36,7 @@ For our work-in-progress documentation for v1.0.0 go to [https://developer.bondy
 * [x] Cryptosign
 * [x] Ticket
 * [x] WAMP-CRA
-* [ ] WAMP-SCRAM (WIP)
+* [x] WAMP-SCRAM
 * [x] Cookie (Using Ticket)
 
 
@@ -51,7 +51,7 @@ In addition Bondy provides:
 ### Advanced RPC features
 * [x] Call Canceling
 * [x] Call Timeouts
-* [x] Call Trust Levels
+* [ ] Call Trust Levels (WIP -- `INVOCATION.Details.trust_level` is always `0`; no trust-level policy engine yet)
 * [x] Caller Identification
 * [x] Pattern-based registration
 * [x] Shared Registration
@@ -61,29 +61,41 @@ In addition Bondy provides:
      * [x] Hot Stand-by
           * [x] First
           * [x] Last
-* [ ] Payload Passthru Mode (WIP)
-* [ ] Registration Revocation (WIP)
+* [ ] Sharded Registration
+* [x] Payload Passthru Mode
+* [ ] Registration Revocation (WIP -- callee-side handling is implemented in `bondy_connect`; the Dealer cannot yet trigger a revocation itself)
+* [x] Registration Meta API
+* [ ] Procedure Reflection
+* [ ] Call Re-Routing
 * [x] Progressive Call Results
-* [x] Progressive Calls
+* [ ] Progressive Calls -- streaming call **arguments** from caller to callee. Only Progressive Call *Results* (callee to caller) is implemented; see [`doc/guides/router/progressive_call_results.md`](doc/guides/router/progressive_call_results.md).
 
 
 ### Advanced Pub/Sub features
 * [x] Event Retention
 * [x] Pattern-based Subscriptions
-* [x] Publication Trust Levels
+* [ ] Publication Trust Levels (WIP -- `EVENT.Details.trust_level` is not yet computed)
 * [x] Publisher Exclusion
 * [x] Publisher Identification
 * [x] Subscriber Black- and Whitelisting
-* [ ] Payload Passthru Mode (WIP)
+* [x] Payload Passthru Mode
 * [ ] Sharded Subscriptions
 * [ ] Subscription Revocation
+* [x] Subscription Meta API
+* [ ] Event History
+* [ ] Topic Reflection
+
+### Other Advanced Features
+
+* [ ] Session Meta API (WIP -- `on_join`/`on_leave` events and `wamp.session.get` are implemented; the `list`/`count`/`kill*` session-management procedures are not)
+* [ ] Testament
 
 ### WAMP Transports
 
 * [x] WebSockets
 * [x] RawSockets
 * [x] HTTP Longpoll
-* [ ] E2E encryption
+* [x] E2E encryption (via Payload Passthru Mode)
 
 In addition Bondy provides:
 
