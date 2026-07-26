@@ -3760,10 +3760,11 @@ end}.
 ]}.
 {mapping, "wamp.dealer.progressive_calls",
 "bondy_router.wamp.dealer.features.progressive_calls", [
-  {default, false},
-    %% Disabled until implemented
-  {datatype, {flag, off, off}},
-  hidden
+  %% Default off: in a mixed-version cluster a node without support cannot
+  %% continue a caller's argument stream. Enable only once every node in the
+  %% cluster supports it.
+  {default, off},
+  {datatype, flag}
 ]}.
 {mapping, "wamp.dealer.reflection",
 "bondy_router.wamp.dealer.features.reflection", [

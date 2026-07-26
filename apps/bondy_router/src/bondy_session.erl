@@ -27,6 +27,12 @@ data will be lost.
 
 -define(SESSION_SPACE, ?MODULE).
 -define(EOT, '$end_of_table').
+%% Advanced-profile features a peer must announce EXPLICITLY to obtain — no
+%% inheritance from the router's advertised set (see merge_feature_flags/2). The
+%% progressive features are opt-in per call and cannot be silently degraded
+%% mid-stream, so a peer that never announced them must not be treated as
+%% supporting them.
+-define(STRICT_OPTIN_FEATURES, [progressive_call_results, progressive_calls]).
 
 -record(session, {
     id :: bondy_session_id:t(),
@@ -857,7 +863,23 @@ parse_roles(Roles) ->
     ).
 
 %% @private
-merge_feature_flags(Router, Req) when is_map(Router) andalso is_map(Req) ->
+merge_feature_flags(Router, Req0) when is_map(Router) andalso is_map(Req0) ->
+    %% Base rule: a feature is enabled iff the router advertises it AND the
+    %% client announced it true; but `merge_with` keeps the router's value for a
+    %% feature the client OMITS, so an omitted feature is inherited from the
+    %% router's advertised default. That is fine for ordinary capabilities, but
+    %% the strict opt-in features (above) must default to `false` when the client
+    %% did not announce them, turning the merge below into a real AND for them.
+    Req = lists:foldl(
+        fun(F, Acc) ->
+            case maps:is_key(F, Router) andalso not maps:is_key(F, Acc) of
+                true -> Acc#{F => false};
+                false -> Acc
+            end
+        end,
+        Req0,
+        ?STRICT_OPTIN_FEATURES
+    ),
     Combiner = fun
         (_, true, true) -> true;
         (_, _, _) -> false

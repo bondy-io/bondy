@@ -1198,6 +1198,13 @@ end).
             required => false,
             datatype => boolean
         },
+        %% Progressive Calls (argument streaming): set on every non-final CALL of
+        %% the stream; the final CALL omits it. All chunks reuse one request id.
+        progress => #{
+            alias => <<"progress">>,
+            required => false,
+            datatype => boolean
+        },
         disclose_me => #{
             alias => <<"disclose_me">>,
             required => false,
@@ -1483,6 +1490,13 @@ end).
     %% Tells callee to produce progressive results
     receive_progress => #{
         alias => <<"receive_progress">>,
+        required => false,
+        datatype => boolean
+    },
+    %% Progressive Calls: marks a non-final INVOCATION of a streamed-argument
+    %% call; the final chunk omits it. All chunks reuse one invocation id.
+    progress => #{
+        alias => <<"progress">>,
         required => false,
         datatype => boolean
     },

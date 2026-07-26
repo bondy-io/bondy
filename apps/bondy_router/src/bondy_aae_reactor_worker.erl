@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_aae_reactor_worker).
 -moduledoc """
 One shard of the AAE merge-reaction pool.
@@ -42,13 +41,9 @@ next anti-entropy exchange.
 -export([terminate/2]).
 -export([code_change/3]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
 
 -spec start_link(Index :: non_neg_integer()) ->
     {ok, pid()} | {error, term()}.
@@ -56,13 +51,9 @@ next anti-entropy exchange.
 start_link(Index) ->
     gen_server:start_link(?MODULE, [Index], []).
 
-
-
 %% =============================================================================
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
-
-
 
 init([Index]) ->
     %% Register this worker under its pool name so the reactor can address it by
@@ -71,7 +62,6 @@ init([Index]) ->
     true = gproc_pool:connect_worker(?AAE_REACTOR_POOL, WorkerName),
     {ok, #state{index = Index}}.
 
-
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
@@ -79,7 +69,6 @@ handle_call(Event, From, State) ->
         from => From
     }),
     {reply, {error, {unsupported_call, Event}}, State}.
-
 
 handle_cast({react, Sub, Key, Op, Old}, State) ->
     ok = safe_react(Sub, Key, Op, Old),
@@ -91,7 +80,6 @@ handle_cast(Event, State) ->
     }),
     {noreply, State}.
 
-
 handle_info(Info, State) ->
     ?LOG_DEBUG(#{
         reason => unexpected_event,
@@ -99,21 +87,15 @@ handle_info(Info, State) ->
     }),
     {noreply, State}.
 
-
 terminate(_Reason, _State) ->
     ok.
-
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 %% Run one reaction without ever raising — a malformed peer event must not take

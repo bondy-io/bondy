@@ -101,6 +101,7 @@ effects are demonitors), and that pairing removes a whole class of lockstep bugs
 -export([handler_done/3]).
 -export([event_done/2]).
 -export([has_invocation/2]).
+-export([worker_pid/2]).
 -export([interrupt/3]).
 -export([progressive_yield/3]).
 -export([worker_down/3]).
@@ -250,6 +251,21 @@ whether a worker's progressive result may still be forwarded.
 
 has_invocation(ReqId, #dispatch{invocations = Inv}) ->
     is_map_key(ReqId, Inv).
+
+-doc """
+The pid of the worker servicing invocation `ReqId`, or `error` if none is in
+flight (never started, or already finished/interrupted). Used to deliver a
+progressive-input argument chunk to the live worker.
+""".
+-spec worker_pid(ReqId :: term(), t()) -> {ok, pid()} | error.
+
+worker_pid(ReqId, #dispatch{invocations = Inv}) ->
+    case maps:find(ReqId, Inv) of
+        {ok, {Pid, _MonRef}} ->
+            {ok, Pid};
+        error ->
+            error
+    end.
 
 -doc """
 Build the progressive YIELD (`Options.progress = true`) a worker emits for

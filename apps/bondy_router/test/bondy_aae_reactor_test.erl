@@ -425,11 +425,9 @@ react_rib_stub_lifecycle_test() ->
         meck:unload(bondy_config)
     end.
 
-
 %% =============================================================================
 %% POOL ROUTING (bondy_aae_reactor_worker + gproc_pool)
 %% =============================================================================
-
 
 %% The reactor hashes each merge event by cell Key to a worker in the
 %% ?AAE_REACTOR_POOL: same key -> same worker (a cell's set/clear stay ordered),
@@ -450,9 +448,10 @@ setup_pool() ->
     _ = catch gproc_pool:new(?AAE_REACTOR_POOL, hash, [{size, N}]),
     [
         begin
-            _ = catch gproc_pool:add_worker(
-                ?AAE_REACTOR_POOL, {bondy_aae_reactor_worker, I}, I
-            ),
+            _ =
+                catch gproc_pool:add_worker(
+                    ?AAE_REACTOR_POOL, {bondy_aae_reactor_worker, I}, I
+                ),
             {ok, Pid} = bondy_aae_reactor_worker:start_link(I),
             true = unlink(Pid),
             Pid

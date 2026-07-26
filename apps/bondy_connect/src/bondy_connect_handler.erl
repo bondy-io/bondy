@@ -50,7 +50,8 @@ start_link(Job) when is_map(Job) ->
 -spec run(map()) -> ok.
 run(#{kind := invocation, conn := Conn, req_id := ReqId} = Job) ->
     #{handler := H, args := Args, kwargs := KWArgs, details := Details0} = Job,
-    Details = maybe_progress_fun(Details0, Conn, ReqId),
+    Details1 = maybe_progress_fun(Details0, Conn, ReqId),
+    Details = maybe_input_fun(Details1),
     Reply = invoke_call(H, Args, KWArgs, Details),
     Conn ! {handler_done, ReqId, Reply},
     ok;
@@ -81,6 +82,32 @@ maybe_progress_fun(#{receive_progress := true} = Details, Conn, ReqId) ->
     };
 maybe_progress_fun(Details, _, _) ->
     Details.
+
+%% @private
+%% Mirror of `maybe_progress_fun/3` for the INPUT direction. For a
+%% progressive-INPUT invocation (`INVOCATION.Details.progress => true`, more
+%% argument chunks arriving), inject an `input` fun the handler calls to PULL the
+%% next chunk: `Input()` blocks on the chunk the connection forwards to this
+%% worker and returns `{more, Args, KWArgs}` while the stream continues or
+%% `{last, Args, KWArgs}` for the final chunk. The invocation's own args are the
+%% first chunk; the handler pulls the rest until `{last, _, _}`. Without the flag
+%% the details are untouched, so a handler must check for the key.
+maybe_input_fun(#{progress := true} = Details) ->
+    Details#{input => fun pull_input/0};
+maybe_input_fun(Details) ->
+    Details.
+
+%% @private
+%% Block until the connection forwards the next argument chunk to this worker.
+%% A stalled stream is bounded by the router's inter-chunk deadline, which
+%% INTERRUPTs the invocation and kills this worker.
+pull_input() ->
+    receive
+        {handler_input, Args, KWArgs, true} ->
+            {last, Args, KWArgs};
+        {handler_input, Args, KWArgs, false} ->
+            {more, Args, KWArgs}
+    end.
 
 %% @private
 invoke_call(H, Args, KWArgs, Details) ->

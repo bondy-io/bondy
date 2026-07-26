@@ -26,7 +26,9 @@ defaults are secure-by-default (`verify_peer`).
 %% ({progress, Payload} deliveries before the terminal reply), as callee
 %% via the `progress` fun injected into the handler details. Note the WAMP
 %% spec pairs it with `call_canceling`, which both roles announce.
-%% `progressive_calls` (caller-side argument streaming) remains deferred.
+%% `progressive_calls` (caller-side argument streaming) is likewise advertised
+%% for both roles: as caller via `call_stream/5` + `send_input`/`finish_input`,
+%% as callee via the `input` fun injected into the handler details.
 -define(DEFAULT_ROLES, #{
     caller => #{
         features => #{
@@ -34,7 +36,8 @@ defaults are secure-by-default (`verify_peer`).
             call_canceling => true,
             caller_identification => true,
             call_retries => true,
-            progressive_call_results => true
+            progressive_call_results => true,
+            progressive_calls => true
         }
     },
     callee => #{
@@ -44,7 +47,8 @@ defaults are secure-by-default (`verify_peer`).
             pattern_based_registration => true,
             shared_registration => true,
             registration_revocation => true,
-            progressive_call_results => true
+            progressive_call_results => true,
+            progressive_calls => true
         }
     },
     publisher => #{

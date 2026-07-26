@@ -171,7 +171,6 @@ count(Type, RealmUri, Uri) when is_binary(Uri) ->
     ]),
     {ok, Local + Remote}.
 
-
 -doc """
 The number of callees (`registration`) / subscribers (`subscription`) for the
 entry identified by `Id`, cluster-wide. `Id` is first resolved to its
@@ -193,7 +192,6 @@ count_members(Type, RealmUri, Id) ->
     with_resolved_uri(Type, RealmUri, Id, fun(Uri) ->
         count(Type, RealmUri, Uri)
     end).
-
 
 -doc """
 The WAMP session ids of the callees (`registration`) / subscribers
@@ -219,20 +217,17 @@ list_members(Type, RealmUri, Id) ->
         {ok, gather_members(Type, RealmUri, Uri)}
     end).
 
-
 -doc "Default page size for the `bondy.*` paginated procedures.".
 -spec default_page_size() -> pos_integer().
 
 default_page_size() ->
     bondy_config:get([registry, meta, default_page_size], ?DEFAULT_PAGE_SIZE).
 
-
 -doc "Ceiling page size for the `bondy.*` paginated procedures.".
 -spec max_page_size() -> pos_integer().
 
 max_page_size() ->
     bondy_config:get([registry, meta, max_page_size], ?MAX_PAGE_SIZE).
-
 
 -doc """
 Ceiling for the bounded (non-paginated) `wamp.*` enumerations: beyond it a

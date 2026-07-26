@@ -104,9 +104,10 @@
 -define(COMMON_RPC_FEATURES, #{
     %% Session-level capability (feeds HELLO feature negotiation in
     %% bondy_session:parse_roles/1). Runtime activation is still gated by
-    %% the wamp.dealer.progressive_call_results config flag, default off.
+    %% the wamp.dealer.progressive_call_results / wamp.dealer.progressive_calls
+    %% config flags, both default off.
     progressive_call_results => true,
-    progressive_calls => false,
+    progressive_calls => true,
     call_timeout => true,
     call_canceling => true,
     caller_identification => true,

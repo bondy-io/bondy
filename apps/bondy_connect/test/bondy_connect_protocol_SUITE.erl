@@ -117,9 +117,9 @@ start_builds_hello(_) ->
     ?assertEqual(establishing, bondy_connect_protocol:state_name(St1)).
 
 %% The default HELLO advertises exactly the advanced-profile features the client
-%% implements — advertise == handle. progressive_call_results is implemented
-%% for both RPC roles (paired with call_canceling per the WAMP spec);
-%% progressive_calls (argument streaming) remains deferred and must be absent.
+%% implements — advertise == handle. progressive_call_results and
+%% progressive_calls (argument streaming) are both implemented for the two RPC
+%% roles, each paired with call_canceling per the WAMP spec.
 hello_advertises_feature_matrix(_) ->
     {ok, Hello, _St} = bondy_connect_protocol:start(
         protocol(#{method => <<"anonymous">>})
@@ -131,29 +131,24 @@ hello_advertises_feature_matrix(_) ->
     ?assert(feature(caller, caller_identification, Roles)),
     ?assert(feature(caller, call_retries, Roles)),
     ?assert(feature(caller, progressive_call_results, Roles)),
+    ?assert(feature(caller, progressive_calls, Roles)),
 
     ?assert(feature(callee, call_canceling, Roles)),
     ?assert(feature(callee, pattern_based_registration, Roles)),
     ?assert(feature(callee, shared_registration, Roles)),
     ?assert(feature(callee, registration_revocation, Roles)),
     ?assert(feature(callee, progressive_call_results, Roles)),
+    ?assert(feature(callee, progressive_calls, Roles)),
 
     ?assert(feature(publisher, publisher_exclusion, Roles)),
     ?assert(feature(publisher, subscriber_blackwhite_listing, Roles)),
     ?assert(feature(subscriber, pattern_based_subscription, Roles)),
 
-    %% Deferred features must be absent from every role; a pub/sub role
-    %% must not claim an RPC feature.
+    %% A pub/sub role must not claim an RPC feature.
     [
         begin
             Features = maps:get(features, maps:get(Role, Roles, #{}), #{}),
-            ?assertNot(maps:is_key(progressive_calls, Features))
-        end
-     || Role <- [caller, callee, publisher, subscriber]
-    ],
-    [
-        begin
-            Features = maps:get(features, maps:get(Role, Roles, #{}), #{}),
+            ?assertNot(maps:is_key(progressive_calls, Features)),
             ?assertNot(maps:is_key(progressive_call_results, Features))
         end
      || Role <- [publisher, subscriber]

@@ -303,9 +303,11 @@ map(unavailable) ->
         <<"message">> =>
             <<"The request could not be completed at this time.">>,
         <<"description">> =>
-            <<"One or more cluster nodes could not be reached, so the result "
+            <<
+                "One or more cluster nodes could not be reached, so the result "
                 "could not be confirmed. Retry; a repeated failure indicates a "
-                "node or network problem.">>
+                "node or network problem."
+            >>
     };
 map(too_many_results) ->
     #{

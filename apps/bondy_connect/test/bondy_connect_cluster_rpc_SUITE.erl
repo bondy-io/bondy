@@ -36,7 +36,12 @@ all() ->
         progressive_across_cluster,
         progressive_across_cluster_feature_disabled,
         progressive_remote_cancel_interrupts_callee,
-        progressive_remote_caller_death_interrupts_callee
+        progressive_remote_caller_death_interrupts_callee,
+        progressive_input_across_cluster,
+        progressive_input_across_cluster_callee_unsupported,
+        progressive_input_remote_cancel_interrupts_callee,
+        progressive_input_remote_caller_death_interrupts_callee,
+        progressive_input_remote_callee_death_errors_caller
     ].
 
 suite() ->
@@ -336,6 +341,245 @@ progressive_remote_caller_death_interrupts_callee(Config) ->
 
     ok = bondy_connect:disconnect(Callee).
 
+progressive_input_across_cluster(Config) ->
+    %% The INPUT mirror of progressive_across_cluster: the caller on node1
+    %% opens a progressive call with call_stream and streams the sequence
+    %% 1..N as chunks; each CALL crosses node1 -> node2, where the callee
+    %% PULLS the chunks (in arrival order) via the input fun and replies with
+    %% the collected list. A reordering anywhere on the relayed path would make
+    %% the list differ from 1..N.
+    [{_, Node1, _}, {_, _Node2, _}] = ?config(nodes, Config),
+
+    N = 10,
+    Callee = connect(?NODE2_WAMP_PORT),
+    Handler = fun([First], _KWArgs, Details) ->
+        Input = maps:get(input, Details),
+        {reply, [collect_input_list(Input, [First])]}
+    end,
+    Proc = <<"com.example.cluster.progressive.input">>,
+    {ok, _} = bondy_connect:register(Callee, Proc, Handler),
+
+    ok = wait_until(
+        fun() ->
+            erpc:call(Node1, bondy_registry_rib, match_stubs, [?REALM, Proc]) =/=
+                []
+        end,
+        30000,
+        registration_not_visible_on_node1
+    ),
+
+    Caller = connect(?NODE1_WAMP_PORT),
+    {ok, Token} = bondy_connect:call_stream(Caller, Proc, [1], #{}, #{}),
+    _ = [
+        ok = bondy_connect:send_input(Caller, Token, [I], #{})
+     || I <- lists:seq(2, N - 1)
+    ],
+    ok = bondy_connect:finish_input(Caller, Token, [N], #{}),
+
+    {ok, #{args := [Collected]}} = next_reply(Token),
+    ?assertEqual(lists:seq(1, N), Collected),
+
+    receive
+        {bondy_connect, Token, Extra} -> ct:fail({extra_reply, Extra})
+    after 300 -> ok
+    end,
+
+    ok = bondy_connect:disconnect(Caller),
+    ok = bondy_connect:disconnect(Callee).
+
+progressive_input_across_cluster_callee_unsupported(Config) ->
+    %% The remote callee did NOT announce progressive_calls. A progressive
+    %% input CALL must be rejected at the callee's OWN node (no silent degrade
+    %% for a started stream) and the caller must get option_not_allowed — the
+    %% handler must never run. This exercises the owner-node callee gate that
+    %% closes the distributed hole (the caller gate alone cannot see a remote
+    %% callee's features).
+    [{_, Node1, _}, {_, _Node2, _}] = ?config(nodes, Config),
+
+    TestPid = self(),
+    Callee = connect_roles(
+        ?NODE2_WAMP_PORT, callee_roles_without_progressive_calls()
+    ),
+    Handler = fun(_, _, _) ->
+        TestPid ! handler_ran,
+        {reply, [<<"unexpected">>]}
+    end,
+    Proc = <<"com.example.cluster.progressive.input.unsupported">>,
+    {ok, _} = bondy_connect:register(Callee, Proc, Handler),
+
+    ok = wait_until(
+        fun() ->
+            erpc:call(Node1, bondy_registry_rib, match_stubs, [?REALM, Proc]) =/=
+                []
+        end,
+        30000,
+        registration_not_visible_on_node1
+    ),
+
+    Caller = connect(?NODE1_WAMP_PORT),
+    {ok, Token} = bondy_connect:call_stream(Caller, Proc, [1], #{}, #{}),
+
+    ?assertMatch(
+        {error, #{uri := <<"wamp.error.option_not_allowed">>}},
+        next_reply(Token)
+    ),
+
+    receive
+        handler_ran -> ct:fail(handler_should_not_run)
+    after 300 -> ok
+    end,
+
+    ok = bondy_connect:disconnect(Caller),
+    ok = bondy_connect:disconnect(Callee).
+
+progressive_input_remote_cancel_interrupts_callee(Config) ->
+    %% Cancelling a progressive-INPUT call whose callee is on another node:
+    %% the caller opens the stream (call_stream), the callee starts running on
+    %% node2, then the caller cancels. node1 answers the caller immediately
+    %% (killnowait) and relays the CANCEL to node2, which resolves its
+    %% invocation promise and INTERRUPTs the callee worker.
+    [{_, Node1, _}, {_, _Node2, _}] = ?config(nodes, Config),
+
+    TestPid = self(),
+    Callee = connect(?NODE2_WAMP_PORT),
+    Handler = fun(_, _, _Details) ->
+        TestPid ! {worker, self()},
+        Loop = fun Loop() ->
+            timer:sleep(50),
+            Loop()
+        end,
+        Loop()
+    end,
+    Proc = <<"com.example.cluster.progressive.input.cancel">>,
+    {ok, _} = bondy_connect:register(Callee, Proc, Handler),
+
+    ok = wait_until(
+        fun() ->
+            erpc:call(Node1, bondy_registry_rib, match_stubs, [?REALM, Proc]) =/=
+                []
+        end,
+        30000,
+        registration_not_visible_on_node1
+    ),
+
+    Caller = connect(?NODE1_WAMP_PORT),
+    {ok, Token} = bondy_connect:call_stream(Caller, Proc, [1], #{}, #{}),
+
+    WorkerPid =
+        receive
+            {worker, W} -> W
+        after 5000 -> ct:fail(no_worker)
+        end,
+    MRef = monitor(process, WorkerPid),
+
+    ok = bondy_connect:cancel(Caller, Token, killnowait),
+
+    {ok, Terminal} = drain_progress(Token, 10000),
+    ?assertMatch({error, #{uri := <<"wamp.error.canceled">>}}, Terminal),
+
+    receive
+        {'DOWN', MRef, process, WorkerPid, _} -> ok
+    after 5000 ->
+        ct:fail(worker_not_interrupted)
+    end,
+
+    ok = bondy_connect:disconnect(Caller),
+    ok = bondy_connect:disconnect(Callee).
+
+progressive_input_remote_caller_death_interrupts_callee(Config) ->
+    %% The caller's session dies on node1 mid-stream: node1 flushes the call
+    %% promise and relays a CANCEL (killnowait) to node2, which INTERRUPTs the
+    %% callee — an abandoned input stream must not keep a remote worker alive.
+    [{_, Node1, _}, {_, _Node2, _}] = ?config(nodes, Config),
+
+    TestPid = self(),
+    Callee = connect(?NODE2_WAMP_PORT),
+    Handler = fun(_, _, _Details) ->
+        TestPid ! {worker, self()},
+        Loop = fun Loop() ->
+            timer:sleep(50),
+            Loop()
+        end,
+        Loop()
+    end,
+    Proc = <<"com.example.cluster.progressive.input.abandon">>,
+    {ok, _} = bondy_connect:register(Callee, Proc, Handler),
+
+    ok = wait_until(
+        fun() ->
+            erpc:call(Node1, bondy_registry_rib, match_stubs, [?REALM, Proc]) =/=
+                []
+        end,
+        30000,
+        registration_not_visible_on_node1
+    ),
+
+    Caller = connect(?NODE1_WAMP_PORT),
+    {ok, _Token} = bondy_connect:call_stream(Caller, Proc, [1], #{}, #{}),
+
+    WorkerPid =
+        receive
+            {worker, W} -> W
+        after 5000 -> ct:fail(no_worker)
+        end,
+    MRef = monitor(process, WorkerPid),
+
+    ok = bondy_connect:disconnect(Caller),
+
+    receive
+        {'DOWN', MRef, process, WorkerPid, _} -> ok
+    after 5000 ->
+        ct:fail(worker_not_interrupted)
+    end,
+
+    ok = bondy_connect:disconnect(Callee).
+
+progressive_input_remote_callee_death_errors_caller(Config) ->
+    %% The callee's session dies on node2 mid-input-stream: the caller must not
+    %% hang waiting to feed a callee that is gone. node2 flushes its invocation
+    %% promise and fast-fails the caller, whose call promise matches the ERROR.
+    [{_, Node1, _}, {_, _Node2, _}] = ?config(nodes, Config),
+
+    TestPid = self(),
+    Callee = connect(?NODE2_WAMP_PORT),
+    Handler = fun(_, _, _Details) ->
+        TestPid ! {worker, self()},
+        Loop = fun Loop() ->
+            timer:sleep(50),
+            Loop()
+        end,
+        Loop()
+    end,
+    Proc = <<"com.example.cluster.progressive.input.calleedeath">>,
+    {ok, _} = bondy_connect:register(Callee, Proc, Handler),
+
+    ok = wait_until(
+        fun() ->
+            erpc:call(Node1, bondy_registry_rib, match_stubs, [?REALM, Proc]) =/=
+                []
+        end,
+        30000,
+        registration_not_visible_on_node1
+    ),
+
+    Caller = connect(?NODE1_WAMP_PORT),
+    {ok, Token} = bondy_connect:call_stream(Caller, Proc, [1], #{}, #{}),
+
+    _ =
+        receive
+            {worker, _} -> ok
+        after 5000 -> ct:fail(no_worker)
+        end,
+
+    %% Kill the callee mid-stream.
+    ok = bondy_connect:disconnect(Callee),
+
+    %% The caller must receive a terminal error, not hang.
+    {ok, Terminal} = drain_progress(Token, 10000),
+    ?assertMatch({error, _}, Terminal),
+
+    ok = bondy_connect:disconnect(Caller).
+
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
@@ -381,6 +625,52 @@ connect(Port, Deadline) ->
     end.
 
 %% @private
+%% Connect announcing an explicit `roles` map instead of the client defaults —
+%% used to model a callee that deliberately does NOT announce progressive_calls.
+%% Retries like connect/1 while RBAC data replicates.
+connect_roles(Port, Roles) ->
+    connect_roles(Port, Roles, erlang:monotonic_time(millisecond) + 15000).
+
+%% @private
+connect_roles(Port, Roles, Deadline) ->
+    Spec = #{
+        transport => tcp,
+        endpoint => {?HOST, Port},
+        realm => ?REALM,
+        auth => #{method => ?WAMP_ANON_AUTH},
+        serializers => [json],
+        roles => Roles
+    },
+    case bondy_connect:connect(Spec) of
+        {ok, Conn} ->
+            Conn;
+        {error, Reason} ->
+            case erlang:monotonic_time(millisecond) >= Deadline of
+                true ->
+                    ct:fail({connect_failed, Port, Reason});
+                false ->
+                    timer:sleep(200),
+                    connect_roles(Port, Roles, Deadline)
+            end
+    end.
+
+%% @private
+%% A callee role set that simply OMITS progressive_calls — the router's
+%% owner-node gate must then reject a progressive input CALL to this callee.
+%% progressive_calls is strict opt-in: a peer that does not announce it does not
+%% get it (no inheritance from the router's advertised default), so omission is
+%% enough to model an unsupporting callee.
+callee_roles_without_progressive_calls() ->
+    #{
+        callee => #{
+            features => #{
+                call_canceling => true,
+                progressive_call_results => true
+            }
+        }
+    }.
+
+%% @private
 next_reply(Token) ->
     receive
         {bondy_connect, Token, Reply} -> Reply
@@ -393,12 +683,26 @@ next_reply(Token) ->
 %% on every node for realism.
 set_progressive_feature(Config, Bool) when is_boolean(Bool) ->
     _ = [
-        ok = erpc:call(Node, bondy_config, set, [
-            [wamp, dealer, features, progressive_call_results], Bool
-        ])
+        begin
+            ok = erpc:call(Node, bondy_config, set, [
+                [wamp, dealer, features, progressive_call_results], Bool
+            ]),
+            ok = erpc:call(Node, bondy_config, set, [
+                [wamp, dealer, features, progressive_calls], Bool
+            ])
+        end
      || {_, Node, _} <- ?config(nodes, Config)
     ],
     ok.
+
+%% @private
+%% Order-preserving accumulation of each chunk's single integer, in arrival
+%% order, until the final chunk closes the stream.
+collect_input_list(Input, Acc) ->
+    case Input() of
+        {more, [N], _} -> collect_input_list(Input, [N | Acc]);
+        {last, [N], _} -> lists:reverse([N | Acc])
+    end.
 
 %% @private
 wait_until(Fun, Timeout, FailReason) ->

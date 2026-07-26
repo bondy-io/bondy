@@ -68,7 +68,7 @@ In addition Bondy provides:
 * [ ] Procedure Reflection
 * [ ] Call Re-Routing
 * [x] Progressive Call Results
-* [ ] Progressive Calls -- streaming call **arguments** from caller to callee. Only Progressive Call *Results* (callee to caller) is implemented; see [`doc/guides/router/progressive_call_results.md`](doc/guides/router/progressive_call_results.md).
+* [x] Progressive Calls -- streaming call **arguments** from caller to callee; see [`doc/guides/router/progressive_calls.md`](doc/guides/router/progressive_calls.md).
 
 
 ### Advanced Pub/Sub features

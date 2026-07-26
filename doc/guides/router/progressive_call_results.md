@@ -8,7 +8,8 @@ streaming file chunks, and long-running computations that report partial
 output.
 
 The related feature *Progressive Calls* (streaming call **arguments** from
-caller to callee) is **not** implemented.
+caller to callee) is the mirror image and is documented separately in
+[`progressive_calls.md`](progressive_calls.md).
 
 ## Message flow
 

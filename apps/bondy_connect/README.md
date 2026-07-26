@@ -46,8 +46,10 @@ handle) -- see `bondy_connect_config.erl`.
 * [x] Progressive Call Results -- as caller (`call_async/5` with
       `receive_progress => true`) and as callee (the `progress` fun injected
       into the handler details)
-* [ ] Progressive Calls -- deferred (streaming call **arguments** from
-      caller to callee)
+* [x] Progressive Calls -- as caller (`call_stream/5` to open the stream,
+      then `send_input/4` and `finish_input/4` for each further argument
+      chunk) and as callee (the `input` fun injected into the handler details,
+      pulled until it returns `{last, _, _}`)
 * [ ] Call Retries (WIP -- `CALL.Options.retries` is accepted and forwarded
       on the wire, but neither the client nor the Dealer currently act on it)
 * [ ] Sharded Registration

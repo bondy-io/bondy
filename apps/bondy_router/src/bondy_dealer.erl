@@ -599,6 +599,14 @@ forward(M, Ctxt) ->
         throw:not_found ->
             Reply = not_found_error(M, Ctxt),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
+        throw:{progressive_calls_unsupported, Role} ->
+            %% A progressive-input CALL whose caller/callee did not announce the
+            %% feature — rejected (no silent degrade for a started stream).
+            Reply = progressive_calls_error(M, {unsupported, Role}),
+            bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
+        throw:{progressive_calls_violation, _} ->
+            Reply = progressive_calls_error(M, violation),
+            bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
         Class:Reason:Stacktrace ->
             TraceId = bondy_utils:uuid(),
             ?LOG_ERROR(#{
@@ -638,18 +646,42 @@ forward(#call{} = Msg, _Hint, #{rib_completion := true} = Opts0) ->
     Opts = maps:remove(rib_completion, Opts0),
     RealmUri = ?GET_REALM_URI(Opts),
     ProcUri = Msg#call.procedure_uri,
+    Caller = maps:get(from, Opts, undefined),
+    CallId = key_value:get(['$private', call_id], Msg#call.options, undefined),
 
-    case rib_local_callee(RealmUri, ProcUri, Msg, Opts) of
-        {ok, Entry} ->
-            ok = rib_count(bondy_rpc_rib_completions_total, #{outcome => ok}),
-            forward(
-                rib_rebind(Msg, Entry),
-                bondy_registry_entry:ref(Entry),
-                Opts
-            );
-        {error, _} ->
-            ok = rib_count(bondy_rpc_rib_completions_total, #{outcome => miss}),
-            reply_no_eligible_callee(Msg, Opts)
+    case
+        is_feature_enabled(progressive_calls) andalso
+            find_input_stream(RealmUri, Caller, CallId)
+    of
+        {invocation_chunk, Promise} ->
+            %% A subsequent chunk of an in-flight remote progressive stream:
+            %% deliver it to the callee already handling the open invocation
+            %% rather than re-selecting (which would start a new invocation).
+            forward_input_chunk(Msg, Promise, RealmUri, Caller);
+        violation ->
+            %% The request id is live on a NON-progressive call. node1 rejects
+            %% this before forwarding, so reaching here is defensive — reject
+            %% with the same vocabulary the origin node uses (symmetric rule).
+            reply_progressive_calls_error(Msg, violation, Opts);
+        _ ->
+            %% Feature off (short-circuit `false`) or no open stream (`none`):
+            %% a first chunk or a plain call. Re-select a live local callee.
+            case rib_local_callee(RealmUri, ProcUri, Msg, Opts) of
+                {ok, Entry} ->
+                    ok = rib_count(
+                        bondy_rpc_rib_completions_total, #{outcome => ok}
+                    ),
+                    forward(
+                        rib_rebind(Msg, Entry),
+                        bondy_registry_entry:ref(Entry),
+                        Opts
+                    );
+                {error, _} ->
+                    ok = rib_count(
+                        bondy_rpc_rib_completions_total, #{outcome => miss}
+                    ),
+                    reply_no_eligible_callee(Msg, Opts)
+            end
     end;
 forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
     %% A remote Caller is making a CALL to a local Callee or local bridged
@@ -660,6 +692,14 @@ forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
     %% Fails with no_realm exception if not present
     RealmUri = ?GET_REALM_URI(Opts),
     CalleeType = bondy_ref:type(Callee),
+
+    %% Owner-node gate for a progressive-input first chunk: a CALL carrying
+    %% `progress` is admissible only if this (local) callee announced
+    %% `progressive_calls`. Computed as a bound boolean so the guarded clause
+    %% below can reject before an invocation is ever built — the mirror of the
+    %% caller gate, closing the distributed no-silent-degrade hole. Non-callee
+    %% target types take their own clauses first and never consult it.
+    Admissible = progressive_input_admissible(Msg, Callee),
 
     case bondy_ref:target_type(Callee) of
         callback ->
@@ -679,9 +719,21 @@ forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
         _ when CalleeType == bridge_relay ->
             %% We need to send the CALL to the bridge relay,
             %% no need for a call promise here as there is one on the Caller's
-            %% node.
+            %% node. A progressive-input first chunk is NOT gated here: this hop
+            %% cannot see the edge callee's features (its session lives on the
+            %% edge node), so the gate runs at the edge node that hosts the
+            %% callee — the same "gate at the callee's node" rule as a cluster
+            %% callee.
             {To, SendOpts} = bondy:prepare_send(Callee, Opts),
             bondy:send(RealmUri, To, Msg, SendOpts);
+        _ when
+            (CalleeType == client orelse CalleeType == internal) andalso
+                not Admissible
+        ->
+            %% Progressive-input first chunk to a callee that did not announce
+            %% `progressive_calls`: reject (no silent degrade for a started
+            %% stream); the ERROR relays back to the caller's node.
+            reply_progressive_calls_error(Msg, {unsupported, callee}, Opts);
         _ when CalleeType == client orelse CalleeType == internal ->
             %% A pid- or name-target callee. `internal` covers non-callback
             %% refs admitted by register/4 (a callback target is handled by
@@ -726,16 +778,19 @@ forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
                 ['$private', call_id], Msg#call.options, undefined
             ),
 
-            PromiseOpts = maybe_mark_progress(
-                #{
-                    procedure_uri => Msg#call.procedure_uri,
-                    via => Via,
-                    timeout => Timeout,
-                    deadline => promise_deadline(Msg#call.options)
-                },
-                maps:get(
-                    receive_progress, Invocation#invocation.details, false
-                )
+            PromiseOpts = maybe_mark_progressive_input(
+                maybe_mark_progress(
+                    #{
+                        procedure_uri => Msg#call.procedure_uri,
+                        via => Via,
+                        timeout => Timeout,
+                        deadline => promise_deadline(Msg#call.options)
+                    },
+                    maps:get(
+                        receive_progress, Invocation#invocation.details, false
+                    )
+                ),
+                Invocation
             ),
 
             Promise = bondy_rpc_promise:new_invocation(
@@ -1685,6 +1740,210 @@ maybe_mark_progress(PromiseOpts, _) ->
     PromiseOpts.
 
 %% @private
+%% Mark a promise as the target of a progressive INPUT stream (the mirror of
+%% `receive_progress` for the results side). While marked, a CALL reusing the
+%% caller's request id is treated as the next argument chunk (forwarded as another
+%% INVOCATION with the same invocation id) rather than a duplicate; the promise is
+%% NOT settled by the final input chunk — only by the eventual RESULT/ERROR. We
+%% stash the `registration_id` and the base `invocation_details` so a subsequent
+%% chunk can rebuild the INVOCATION without re-choosing a callee.
+maybe_mark_progressive_input(PromiseOpts, #invocation{} = Inv) ->
+    case maps:get(progress, Inv#invocation.details, false) of
+        true ->
+            PromiseOpts#{
+                progressive_input => true,
+                registration_id => Inv#invocation.registration_id,
+                invocation_details => Inv#invocation.details
+            };
+        false ->
+            PromiseOpts
+    end;
+maybe_mark_progressive_input(PromiseOpts, _) ->
+    PromiseOpts.
+
+%% @private
+%% Mark a CALL promise (the caller-node side of a remote call) as the target of
+%% a progressive INPUT stream. Unlike the invocation promise there is no
+%% registration_id / invocation_details to stash — the caller node never chose a
+%% callee; it only re-forwards subsequent chunks to the same owner node
+%% (`callee` on the promise is that node ref). The invocation promise is created
+%% and marked on the owner node.
+maybe_mark_progressive_call_input(PromiseOpts, #call{
+    options = #{progress := true}
+}) ->
+    PromiseOpts#{progressive_input => true};
+maybe_mark_progressive_call_input(PromiseOpts, _) ->
+    PromiseOpts.
+
+%% @private
+%% Is this CALL a subsequent chunk of an in-flight progressive-input stream? A
+%% CALL that reuses the caller's request id matches the open invocation promise
+%% for `(Caller, CallId)`; if that promise is marked `progressive_input` it is
+%% the next chunk, otherwise it is a duplicate request id on a live call (a
+%% protocol violation). A fresh request id matches nothing (`none`) — the common
+%% path. Single-node: the invocation promise. The caller-side call promise for a
+%% remote callee is handled by the distributed increment.
+find_input_stream(RealmUri, Caller, CallId) ->
+    InvPattern = bondy_rpc_promise:invocation_key_pattern(
+        RealmUri, Caller, CallId, '_', '_'
+    ),
+    case bondy_rpc_promise:find(InvPattern) of
+        {ok, Promise} ->
+            %% Local callee (single node) or the owner node of a remote
+            %% callee: the open invocation promise is the stream target.
+            classify_input_stream(invocation_chunk, Promise);
+        error ->
+            CallPattern = bondy_rpc_promise:call_key_pattern(
+                RealmUri, Caller, CallId
+            ),
+            case bondy_rpc_promise:find(CallPattern) of
+                {ok, Promise} ->
+                    %% Caller node of a remote callee: the open call promise
+                    %% re-forwards each chunk to the owner node.
+                    classify_input_stream(call_chunk, Promise);
+                error ->
+                    none
+            end
+    end.
+
+%% @private
+%% A promise matched the request id. It is a stream chunk iff the promise was
+%% marked `progressive_input`; otherwise the id is live on a non-progressive
+%% call — a protocol violation (D1).
+classify_input_stream(Kind, Promise) ->
+    case bondy_rpc_promise:get(progressive_input, Promise, false) of
+        true ->
+            {Kind, Promise};
+        false ->
+            violation
+    end.
+
+%% @private
+%% Forward a subsequent argument chunk as another INVOCATION to the callee
+%% already handling the stream, reusing the invocation id and registration id
+%% stashed on the promise at the first chunk. `progress` marks a non-final chunk;
+%% the final CALL (no `progress`) yields an INVOCATION without it, so the callee
+%% learns the input is complete. The promise is refreshed (inter-chunk timeout)
+%% but NOT settled — the eventual RESULT/ERROR settles it.
+forward_input_chunk(Msg, Promise, RealmUri, Caller) ->
+    Callee = bondy_rpc_promise:callee(Promise),
+    InvocationId = bondy_rpc_promise:invocation_id(Promise),
+    RegId = bondy_rpc_promise:get(registration_id, Promise, undefined),
+    Base = bondy_rpc_promise:get(invocation_details, Promise, #{}),
+    Details =
+        case maps:get(progress, Msg#call.options, false) of
+            true ->
+                Base#{progress => true};
+            false ->
+                maps:remove(progress, Base)
+        end,
+    Invocation = bondy_wamp_message:invocation_from(
+        Msg, InvocationId, RegId, Details
+    ),
+    _ = bondy_rpc_promise:refresh(Promise),
+    bondy:send(RealmUri, Callee, Invocation, #{from => Caller}).
+
+%% @private
+%% Caller-node counterpart of `forward_input_chunk/4` for a REMOTE callee: the
+%% chunk is re-forwarded to the same owner node the first chunk was routed to
+%% (`callee` on the call promise is that node ref), node-addressed with
+%% `rib_completion` so the owner re-resolves it against the open invocation
+%% promise (see `forward/3`). The owner rebuilds the INVOCATION from the
+%% `invocation_details` it stashed on the FIRST chunk, so for a subsequent chunk
+%% it consumes only `'$private'.call_id` (to match the promise) and
+%% `Options.progress` (final vs not) from this message. We nonetheless re-run the
+%% full `prepare_call_rib/3` — which also rebuilds those unused details — so the
+%% wire envelope is identical to the first chunk (one code path, and correct if a
+%% future owner ever needs the details, e.g. a retry re-selecting a callee). The
+%% call promise is refreshed but NOT settled — the eventual RESULT/ERROR settles
+%% it.
+forward_call_chunk(Msg, Promise, RealmUri, Caller, Ctxt) ->
+    NodeRef = bondy_rpc_promise:callee(Promise),
+    Call = prepare_call_rib(Msg, Msg#call.procedure_uri, Ctxt),
+    {To, SendOpts} = bondy:prepare_send(NodeRef, #{from => Caller}),
+    _ = bondy_rpc_promise:refresh(Promise),
+    bondy:send(RealmUri, To, Call, SendOpts#{rib_completion => true}).
+
+%% @private
+%% First-chunk caller gate for a progressive-input CALL. The caller is local to
+%% the node running `handle_call_matched` whatever the callee's location, so this
+%% fires for both local and forwarded (remote-callee) routing. Unlike the results
+%% feature there is NO silent degrade — an unsupported caller is rejected, since
+%% it has already begun streaming.
+maybe_gate_progressive_caller(#call{options = #{progress := true}}, Ctxt) ->
+    bondy_context:is_feature_enabled(Ctxt, caller, progressive_calls) orelse
+        throw({progressive_calls_unsupported, caller}),
+    ok;
+maybe_gate_progressive_caller(_, _) ->
+    ok.
+
+%% @private
+%% First-chunk callee gate for a progressive-input CALL routed to a LOCAL callee.
+%% A remote/bridged callee is gated at its own node (see the client clause of
+%% `forward/3`), so this only rejects when the chosen entry lives here.
+maybe_gate_progressive_callee(#call{options = #{progress := true}}, Entry) ->
+    Callee = bondy_registry_entry:ref(Entry),
+    case bondy_ref:is_local(Callee) of
+        true ->
+            progressive_callee_supported(Callee) orelse
+                throw({progressive_calls_unsupported, callee}),
+            ok;
+        false ->
+            ok
+    end;
+maybe_gate_progressive_callee(_, _) ->
+    ok.
+
+%% @private
+%% Owner-node predicate mirroring `maybe_gate_progressive_callee/2` for a callee
+%% reached via `forward/3` (a remote caller). A progressive-input CALL is
+%% admissible only if the local callee announced `progressive_calls`; a
+%% non-progressive CALL is always admissible. Returns a boolean (not a throw)
+%% because `forward/3` runs on the relay-inbound path with no caller context to
+%% unwind to — the rejection is sent back explicitly.
+progressive_input_admissible(#call{options = #{progress := true}}, Callee) ->
+    progressive_callee_supported(Callee);
+progressive_input_admissible(_, _) ->
+    true.
+
+%% @private
+%% Whether a callee's negotiated session role announced `progressive_calls`. The
+%% one place the "callee supports progressive input" rule lives, shared by the
+%% local gate and the owner-node predicate.
+progressive_callee_supported(Callee) ->
+    session_feature(bondy_ref:session_id(Callee), callee, progressive_calls).
+
+%% @private
+%% Build the client-facing ERROR for a rejected progressive-input CALL. Shared
+%% by the local-caller path (the `forward/2` catch clauses) and the owner-node
+%% path (`reply_progressive_calls_error/3`), so both reject an unsupported peer
+%% or a reused request id with one message vocabulary.
+progressive_calls_error(#call{} = Msg, {unsupported, Role}) ->
+    Reason = iolist_to_binary([
+        "The ",
+        atom_to_binary(Role, utf8),
+        " does not support the progressive_calls feature."
+    ]),
+    bondy_wamp_message:error_from(
+        Msg, #{}, ?WAMP_OPTION_NOT_ALLOWED, [Reason], #{message => Reason}
+    );
+progressive_calls_error(#call{} = Msg, violation) ->
+    Reason = <<"A request id of an in-flight call was reused.">>,
+    bondy_wamp_message:error_from(
+        Msg, #{}, ?WAMP_PROTOCOL_VIOLATION, [Reason], #{message => Reason}
+    ).
+
+%% @private
+%% Send a progressive-input rejection back to the caller from the callee's owner
+%% node. The ERROR follows the `via` route stashed in `Opts` back to the origin
+%% node, whose call promise matches it and fails the caller's call fast.
+reply_progressive_calls_error(#call{} = Msg, Kind, #{from := Caller} = Opts) ->
+    RealmUri = ?GET_REALM_URI(Opts),
+    Error = progressive_calls_error(Msg, Kind),
+    {To, SendOpts} = bondy:prepare_send(Caller, Opts),
+    bondy:send(RealmUri, To, Error, SendOpts).
+
+%% @private
 %% Absolute expiry cap from the CALL.Options._deadline extension (ms from
 %% now). For a progressive call the WAMP timeout is an inter-result
 %% inactivity window that each progressive result restarts, so without a
@@ -1894,6 +2153,43 @@ Throws `{not_authorized, binary()}`.
 handle_call(Msg, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
     CallId = Msg#call.request_id,
     RealmUri = bondy_context:realm_uri(Ctxt),
+    Caller = bondy_context:ref(Ctxt),
+
+    %% Progressive Calls: only when the dealer feature is enabled do we check
+    %% whether this CALL reuses the caller's request id — i.e. is a subsequent
+    %% argument chunk of an in-flight progressive-input stream. The feature is
+    %% off by default, so a normal deployment pays no per-call promise lookup.
+    case
+        is_feature_enabled(progressive_calls) andalso
+            find_input_stream(RealmUri, Caller, CallId)
+    of
+        {invocation_chunk, Promise} ->
+            %% Local callee (or owner node): forward another INVOCATION to the
+            %% same callee/invocation id; do not re-choose or create a promise.
+            forward_input_chunk(Msg, Promise, RealmUri, Caller);
+        {call_chunk, Promise} ->
+            %% Caller node of a remote callee: re-forward the chunk to the same
+            %% owner node the first chunk was routed to; do not re-run routing.
+            forward_call_chunk(Msg, Promise, RealmUri, Caller, Ctxt);
+        violation ->
+            %% The request id is live on a NON-progressive call.
+            throw({progressive_calls_violation, CallId});
+        _ ->
+            %% Feature off (short-circuit `false`) or no open stream (`none`):
+            %% a first chunk of a stream, or a plain call.
+            handle_call_matched(Msg, ProcUri, Fun, Opts, Ctxt, CallId, RealmUri)
+    end.
+
+%% @private
+handle_call_matched(Msg, ProcUri, Fun, Opts, Ctxt, CallId, RealmUri) ->
+    %% Progressive-input first chunk: the caller must have announced
+    %% `progressive_calls` (a stream cannot be silently degraded the way
+    %% progressive results can). The caller is local to this node regardless of
+    %% where the callee is chosen, so gate it before routing; the callee is
+    %% gated where it lives — locally below, or at its owning node for a
+    %% forwarded call (see the client clause of forward/3).
+    ok = maybe_gate_progressive_caller(Msg, Ctxt),
+
     %% choose/2 expects a match result w/continuations
     Matches = bondy_registry:find_matches(
         registration, RealmUri, ProcUri, reg_match_opts()
@@ -1903,6 +2199,7 @@ handle_call(Msg, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
 
     case Chosen of
         {ok, Entry} ->
+            ok = maybe_gate_progressive_callee(Msg, Entry),
             do_call(CallId, ProcUri, Fun, Opts, Ctxt, Entry);
         {forward_node, Nodestring} ->
             rib_forward_call(Msg, CallId, ProcUri, Opts, Ctxt, Nodestring);
@@ -1998,11 +2295,16 @@ do_call(CallId, ProcUri, UserFun, Opts, Ctxt0, Entry) ->
                             RealmUri,
                             Caller,
                             CallId,
-                            maybe_mark_progress(
-                                PromiseOpts#{callee => Callee},
-                                maps:get(
-                                    receive_progress, Msg#call.options, false
-                                )
+                            maybe_mark_progressive_call_input(
+                                maybe_mark_progress(
+                                    PromiseOpts#{callee => Callee},
+                                    maps:get(
+                                        receive_progress,
+                                        Msg#call.options,
+                                        false
+                                    )
+                                ),
+                                Msg
                             )
                         ),
                         {P, maybe_rib_completion(SendOpts, Ref)};
@@ -2019,13 +2321,16 @@ do_call(CallId, ProcUri, UserFun, Opts, Ctxt0, Entry) ->
                             CallId,
                             Callee,
                             InvocationId,
-                            maybe_mark_progress(
-                                PromiseOpts,
-                                maps:get(
-                                    receive_progress,
-                                    Msg#invocation.details,
-                                    false
-                                )
+                            maybe_mark_progressive_input(
+                                maybe_mark_progress(
+                                    PromiseOpts,
+                                    maps:get(
+                                        receive_progress,
+                                        Msg#invocation.details,
+                                        false
+                                    )
+                                ),
+                                Msg
                             )
                         ),
                         {P, SendOpts}
@@ -2212,7 +2517,8 @@ prepare_call_options(Opts, CallId, Uri, Entry, Ctxt) ->
     Details0 = maps:with(?WAMP_PPT_ATTRS, Opts),
     Details1 = Details0#{procedure => Uri, trust_level => 0},
     Details2 = maybe_receive_progress(Details1, Opts),
-    Details3 = maybe_disclose_caller(Details2, Ctxt, EOpts, Opts),
+    Details2b = maybe_progress(Details2, Opts),
+    Details3 = maybe_disclose_caller(Details2b, Ctxt, EOpts, Opts),
     Details = maybe_disclose_session(Details3, Ctxt, EOpts, Opts),
 
     %% We build the invocation details with local data, and store under
@@ -2232,6 +2538,16 @@ prepare_call_options(Opts, CallId, Uri, Entry, Ctxt) ->
 maybe_receive_progress(Details, #{receive_progress := true}) ->
     Details#{receive_progress => true};
 maybe_receive_progress(Details, _) ->
+    Details.
+
+%% @private
+%% Carry CALL.Options.progress (a progressive-input chunk marker) into the
+%% INVOCATION details. The call was already gated at `handle_call/5` (dealer +
+%% caller + callee all announced `progressive_calls`), so this only runs for a
+%% supported progressive call; a plain call never carries `progress`.
+maybe_progress(Details, #{progress := true}) ->
+    Details#{progress => true};
+maybe_progress(Details, _) ->
     Details.
 
 %% @private
@@ -2481,19 +2797,23 @@ send_rib_call(
         RealmUri,
         Caller,
         CallId,
-        maybe_mark_progress(
-            #{
-                procedure_uri => ProcUri,
-                timeout => Timeout,
-                deadline => promise_deadline(Call#call.options),
-                rib_retry => Retry,
-                %% Node-addressed: the callee is whichever local registration
-                %% the owner node completes to. Address the node so a caller
-                %% CANCEL or a caller-death flush relays there — the owner node
-                %% resolves its invocation and INTERRUPTs (see forward/3).
-                callee => NodeRef
-            },
-            maps:get(receive_progress, Call#call.options, false)
+        maybe_mark_progressive_call_input(
+            maybe_mark_progress(
+                #{
+                    procedure_uri => ProcUri,
+                    timeout => Timeout,
+                    deadline => promise_deadline(Call#call.options),
+                    rib_retry => Retry,
+                    %% Node-addressed: the callee is whichever local
+                    %% registration the owner node completes to. Address the
+                    %% node so a caller CANCEL or a caller-death flush relays
+                    %% there — the owner node resolves its invocation and
+                    %% INTERRUPTs (see forward/3).
+                    callee => NodeRef
+                },
+                maps:get(receive_progress, Call#call.options, false)
+            ),
+            Call
         )
     ),
     ok = bondy_rpc_promise:add(Promise),
@@ -2649,7 +2969,8 @@ prepare_call_rib(M, Uri, Ctxt) ->
     Details0 = maps:with(?WAMP_PPT_ATTRS, Opts),
     Details1 = Details0#{procedure => Uri, trust_level => 0},
     Details2 = maybe_receive_progress(Details1, Opts),
-    Details = maybe_disclose_caller(Details2, Ctxt, #{}, Opts),
+    Details3 = maybe_progress(Details2, Opts),
+    Details = maybe_disclose_caller(Details3, Ctxt, #{}, Opts),
     M#call{
         options = Opts#{
             '$private' => #{

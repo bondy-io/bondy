@@ -33,6 +33,9 @@ all() ->
         per_call_timeout,
         load_rejection_under_burst,
         progressive_end_to_end,
+        progressive_input_end_to_end,
+        progressive_input_ordering,
+        progressive_input_caller_unsupported,
         progressive_feature_disabled,
         progressive_sync_call_rejected,
         progressive_caller_death_interrupts_callee,
@@ -57,13 +60,17 @@ init_per_testcase(progressive_feature_disabled, Config) ->
     Config;
 init_per_testcase(Case, Config) ->
     case lists:prefix("progressive", atom_to_list(Case)) of
-        true -> ok = set_progressive_feature(true);
-        false -> ok
+        true ->
+            ok = set_progressive_feature(true),
+            ok = set_progressive_calls_feature(true);
+        false ->
+            ok
     end,
     Config.
 
 end_per_testcase(_, _Config) ->
-    ok = set_progressive_feature(false).
+    ok = set_progressive_feature(false),
+    ok = set_progressive_calls_feature(false).
 
 %% =============================================================================
 %% TESTS
@@ -260,6 +267,117 @@ progressive_end_to_end(_) ->
     %% Terminal means terminal — nothing further arrives for this token.
     receive
         {bondy_connect, Token, Extra} -> ct:fail({extra_reply, Extra})
+    after 300 -> ok
+    end,
+
+    ok = bondy_connect:disconnect(Caller),
+    ok = bondy_connect:disconnect(Callee).
+
+progressive_input_end_to_end(_) ->
+    %% The mirror of progressive_end_to_end for the INPUT direction. The caller
+    %% opens a progressive call with call_stream (the first argument chunk),
+    %% streams two more chunks with send_input, then closes the stream with
+    %% finish_input. The callee handler receives the first chunk as its args and
+    %% PULLS the rest through the input fun until the final chunk, summing every
+    %% chunk and replying with the total.
+    Callee = connect(),
+    Handler = fun([First], _KWArgs, Details) ->
+        Input = maps:get(input, Details),
+        {reply, [collect_input(Input, First)]}
+    end,
+    {ok, _} = bondy_connect:register(
+        Callee, <<"com.example.progressive.input">>, Handler
+    ),
+
+    Caller = connect(),
+    {ok, Token} = bondy_connect:call_stream(
+        Caller, <<"com.example.progressive.input">>, [1], #{}, #{}
+    ),
+    ok = bondy_connect:send_input(Caller, Token, [2], #{}),
+    ok = bondy_connect:finish_input(Caller, Token, [3], #{}),
+
+    ?assertMatch({ok, #{args := [6]}}, next_reply(Token)),
+
+    %% Terminal means terminal — nothing further arrives for this token.
+    receive
+        {bondy_connect, Token, Extra} -> ct:fail({extra_reply, Extra})
+    after 300 -> ok
+    end,
+
+    ok = bondy_connect:disconnect(Caller),
+    ok = bondy_connect:disconnect(Callee).
+
+progressive_input_ordering(_) ->
+    %% Order-sensitive counterpart of progressive_input_end_to_end. The caller
+    %% streams the sequence 1..20 as separate chunks; the callee collects each
+    %% chunk (in arrival order) into a list and replies with it. A reordering
+    %% anywhere on the caller->dealer->callee path would make the collected list
+    %% differ from 1..20, so the assertion is a direct check of inter-chunk
+    %% ordering (which addition in the sum test would mask).
+    N = 20,
+    Callee = connect(),
+    Handler = fun([First], _KWArgs, Details) ->
+        Input = maps:get(input, Details),
+        {reply, [collect_input_list(Input, [First])]}
+    end,
+    {ok, _} = bondy_connect:register(
+        Callee, <<"com.example.progressive.ordering">>, Handler
+    ),
+
+    Caller = connect(),
+    {ok, Token} = bondy_connect:call_stream(
+        Caller, <<"com.example.progressive.ordering">>, [1], #{}, #{}
+    ),
+    _ = [
+        ok = bondy_connect:send_input(Caller, Token, [I], #{})
+     || I <- lists:seq(2, N - 1)
+    ],
+    ok = bondy_connect:finish_input(Caller, Token, [N], #{}),
+
+    {ok, #{args := [Collected]}} = next_reply(Token),
+    ?assertEqual(lists:seq(1, N), Collected),
+
+    ok = bondy_connect:disconnect(Caller),
+    ok = bondy_connect:disconnect(Callee).
+
+progressive_input_caller_unsupported(_) ->
+    %% A caller that does not announce progressive_calls (strict opt-in: the
+    %% negotiated caller role lacks it) must be rejected when it opens a
+    %% progressive input stream. The CALL fails with option_not_allowed and the
+    %% callee handler never runs — no silent degrade for a started stream.
+    TestPid = self(),
+    Callee = connect(),
+    Handler = fun(_, _, _) ->
+        TestPid ! handler_ran,
+        {reply, [<<"unexpected">>]}
+    end,
+    {ok, _} = bondy_connect:register(
+        Callee, <<"com.example.progressive.input.caller_off">>, Handler
+    ),
+
+    {ok, Caller} = bondy_connect:connect(
+        spec(#{
+            roles => #{
+                caller => #{
+                    features => #{
+                        call_canceling => true,
+                        progressive_call_results => true
+                    }
+                }
+            }
+        })
+    ),
+    {ok, Token} = bondy_connect:call_stream(
+        Caller, <<"com.example.progressive.input.caller_off">>, [1], #{}, #{}
+    ),
+
+    ?assertMatch(
+        {error, #{uri := <<"wamp.error.option_not_allowed">>}},
+        next_reply(Token)
+    ),
+
+    receive
+        handler_ran -> ct:fail(handler_should_not_run)
     after 300 -> ok
     end,
 
@@ -492,6 +610,27 @@ set_progressive_feature(Bool) when is_boolean(Bool) ->
     bondy_config:set(
         [wamp, dealer, features, progressive_call_results], Bool
     ).
+
+set_progressive_calls_feature(Bool) when is_boolean(Bool) ->
+    bondy_config:set(
+        [wamp, dealer, features, progressive_calls], Bool
+    ).
+
+%% Pull every input chunk through the handler's `input` fun, accumulating the
+%% single integer each chunk carries, until the final chunk closes the stream.
+collect_input(Input, Acc) ->
+    case Input() of
+        {more, [N], _} -> collect_input(Input, Acc + N);
+        {last, [N], _} -> Acc + N
+    end.
+
+%% Order-preserving variant: accumulate each chunk's single integer in arrival
+%% order, returning the list once the final chunk closes the stream.
+collect_input_list(Input, Acc) ->
+    case Input() of
+        {more, [N], _} -> collect_input_list(Input, [N | Acc]);
+        {last, [N], _} -> lists:reverse([N | Acc])
+    end.
 
 %% @private
 connect() ->

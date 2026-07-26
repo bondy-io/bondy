@@ -111,6 +111,9 @@ authenticating and cleared on `established`. Progressive calls
 -export([await_ready/2]).
 -export([call/5]).
 -export([call_async/5]).
+-export([call_stream/5]).
+-export([send_input/4]).
+-export([finish_input/4]).
 -export([cancel/3]).
 -export([register/4]).
 -export([unregister/2]).
@@ -177,6 +180,28 @@ call_async(Pid, Uri, Args, KWArgs, Opts) ->
     call_safe(
         Pid, {call_async, Uri, Args, KWArgs, Opts}, ?DEFAULT_ADMIN_TIMEOUT
     ).
+
+-doc """
+Begin a progressive call (caller argument streaming): send the first CALL with
+`Options.progress = true`, returning `{ok, Token}`. Subsequent chunks reuse the
+one request id via `send_input/4` / `finish_input/4`.
+""".
+-spec call_stream(pid(), uri(), list(), map(), map()) ->
+    {ok, reference()} | {error, term()}.
+call_stream(Pid, Uri, Args, KWArgs, Opts) ->
+    call_safe(
+        Pid, {call_stream, Uri, Args, KWArgs, Opts}, ?DEFAULT_ADMIN_TIMEOUT
+    ).
+
+-doc "Send a non-final argument chunk of a progressive call.".
+-spec send_input(pid(), reference(), list(), map()) -> ok | {error, term()}.
+send_input(Pid, Token, Args, KWArgs) ->
+    call_safe(Pid, {send_input, Token, Args, KWArgs}, ?DEFAULT_ADMIN_TIMEOUT).
+
+-doc "Send the final argument chunk of a progressive call.".
+-spec finish_input(pid(), reference(), list(), map()) -> ok | {error, term()}.
+finish_input(Pid, Token, Args, KWArgs) ->
+    call_safe(Pid, {finish_input, Token, Args, KWArgs}, ?DEFAULT_ADMIN_TIMEOUT).
 
 -doc """
 Cancel an in-flight asynchronous call identified by its `Token` (returned by
@@ -432,6 +457,41 @@ established(
         Data
     ),
     {keep_state, Data1, [{reply, From, {ok, Token}}]};
+established(
+    {call, {Owner, _} = From}, {call_stream, Uri, Args, KWArgs, Opts}, Data
+) ->
+    Token = make_ref(),
+    %% First chunk of a progressive-input stream. The pending entry (for the
+    %% terminal RESULT/ERROR) is stashed with the procedure URI so subsequent
+    %% chunks — which reuse the request id — can rebuild a well-formed CALL
+    %% (the dealer re-authorizes each CALL by URI). A `receive_progress` opt
+    %% still enables progressive results on the way back.
+    Meta0 =
+        case maps:get(receive_progress, Opts, false) of
+            true ->
+                #{
+                    receive_progress => true,
+                    timeout => call_timeout(Opts),
+                    deadline => call_deadline(Opts)
+                };
+            false ->
+                #{}
+        end,
+    Data1 = do_request(
+        call,
+        {async, Owner, Token},
+        call_msg(Uri, Args, KWArgs, Opts#{progress => true}),
+        call_timeout(Opts),
+        Meta0#{stream_uri => Uri},
+        Data
+    ),
+    {keep_state, Data1, [{reply, From, {ok, Token}}]};
+established({call, From}, {send_input, Token, Args, KWArgs}, Data) ->
+    Reply = send_input_chunk(Token, Args, KWArgs, #{progress => true}, Data),
+    {keep_state, Data, [{reply, From, Reply}]};
+established({call, From}, {finish_input, Token, Args, KWArgs}, Data) ->
+    Reply = send_input_chunk(Token, Args, KWArgs, #{}, Data),
+    {keep_state, Data, [{reply, From, Reply}]};
 established({call, From}, {cancel, Token, Mode}, Data) ->
     do_cancel(From, Token, Mode, Data);
 established({call, From}, {register, Uri, Handler, Opts}, Data) ->
@@ -753,6 +813,29 @@ find_async_call(Token, #data{async_index = Index}) ->
     maps:find(Token, Index).
 
 %% @private
+%% Send a subsequent (or final) argument chunk of a progressive call, reusing the
+%% stream's request id and procedure URI (stashed on the pending entry). Does NOT
+%% create a pending entry or bump the request-id counter — the terminal
+%% RESULT/ERROR settles the single entry created by the first chunk. `ChunkOpts`
+%% carries `progress => true` for a non-final chunk and is empty for the final.
+send_input_chunk(Token, Args, KWArgs, ChunkOpts, Data) ->
+    case find_async_call(Token, Data) of
+        {ok, ReqId} ->
+            case peek_pending(ReqId, Data) of
+                {ok, #{meta := #{stream_uri := Uri}}} ->
+                    Msg = set_request_id(
+                        call_msg(Uri, Args, KWArgs, ChunkOpts), ReqId
+                    ),
+                    _ = send_msg(Msg, Data),
+                    ok;
+                _ ->
+                    {error, not_a_progressive_call}
+            end;
+        error ->
+            {error, unknown_token}
+    end.
+
+%% @private
 cancel_mode(skip) -> {ok, <<"skip">>};
 cancel_mode(kill) -> {ok, <<"kill">>};
 cancel_mode(killnowait) -> {ok, <<"killnowait">>};
@@ -1023,27 +1106,58 @@ handle_invocation(#invocation{} = Msg, Data) ->
         args = Args,
         kwargs = KWArgs
     } = Msg,
-    case bondy_connect_registry:registration(RegId, Data#data.registry) of
-        {ok, #{handler := Handler}} ->
-            Job = #{
-                kind => invocation,
-                conn => self(),
-                req_id => ReqId,
-                handler => Handler,
-                args => undefined_to(Args, []),
-                kwargs => undefined_to(KWArgs, #{}),
-                details => Details
-            },
-            run_dispatch(
-                bondy_connect_dispatch:admit_invocation(ReqId, Job, disp(Data)),
-                Data
-            );
+    case bondy_connect_dispatch:has_invocation(ReqId, disp(Data)) of
+        true ->
+            %% A subsequent argument chunk of a progressive-input call: route it
+            %% to the worker already servicing this invocation rather than
+            %% spawning a second one (the router reuses the invocation id for
+            %% every chunk of the stream).
+            _ = route_input_chunk(ReqId, Details, Args, KWArgs, Data),
+            Data;
+        false ->
+            case
+                bondy_connect_registry:registration(RegId, Data#data.registry)
+            of
+                {ok, #{handler := Handler}} ->
+                    Job = #{
+                        kind => invocation,
+                        conn => self(),
+                        req_id => ReqId,
+                        handler => Handler,
+                        args => undefined_to(Args, []),
+                        kwargs => undefined_to(KWArgs, #{}),
+                        details => Details
+                    },
+                    run_dispatch(
+                        bondy_connect_dispatch:admit_invocation(
+                            ReqId, Job, disp(Data)
+                        ),
+                        Data
+                    );
+                error ->
+                    Err = bondy_wamp_message:error(
+                        ?INVOCATION, ReqId, #{}, ?WAMP_NO_SUCH_REGISTRATION
+                    ),
+                    _ = send_msg(Err, Data),
+                    Data
+            end
+    end.
+
+%% @private
+%% Deliver a progressive-input argument chunk to the worker already servicing the
+%% invocation. `progress => true` in the details marks a non-final chunk; its
+%% absence marks the final one (input complete). If the worker is gone (e.g. the
+%% invocation was interrupted) the chunk is dropped.
+route_input_chunk(ReqId, Details, Args, KWArgs, Data) ->
+    IsFinal = not maps:get(progress, Details, false),
+    case bondy_connect_dispatch:worker_pid(ReqId, disp(Data)) of
+        {ok, Pid} ->
+            Pid !
+                {handler_input, undefined_to(Args, []),
+                    undefined_to(KWArgs, #{}), IsFinal},
+            ok;
         error ->
-            Err = bondy_wamp_message:error(
-                ?INVOCATION, ReqId, #{}, ?WAMP_NO_SUCH_REGISTRATION
-            ),
-            _ = send_msg(Err, Data),
-            Data
+            ok
     end.
 
 %% @private The router asked us to cancel an in-flight INVOCATION (the caller
@@ -1572,6 +1686,8 @@ call_msg(Uri, Args, KWArgs, Opts) ->
             timeout,
             disclose_me,
             receive_progress,
+            %% progressive_calls: marks a non-final CALL of an argument stream.
+            progress,
             runmode,
             rkey,
             retries,

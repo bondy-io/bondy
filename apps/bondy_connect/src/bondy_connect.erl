@@ -56,6 +56,9 @@ connection.
 -export([call_async/3]).
 -export([call_async/4]).
 -export([call_async/5]).
+-export([call_stream/5]).
+-export([send_input/4]).
+-export([finish_input/4]).
 -export([cancel/2]).
 -export([cancel/3]).
 -export([register/3]).
@@ -176,6 +179,37 @@ delivery remains the single terminal message.
 call_async(Conn, Uri, Args, KWArgs, Opts) ->
     with_conn(Conn, fun(Pid) ->
         bondy_connect_connection:call_async(Pid, Uri, Args, KWArgs, Opts)
+    end).
+
+-doc """
+Begin a **progressive call** — stream the CALL arguments to the callee in chunks.
+Sends the first CALL with `Options.progress = true` and returns `{ok, Token}`;
+send further chunks with `send_input/4` and the last with `finish_input/4` (all
+reuse the one request id). The reply is delivered as for `call_async/5`. Requires
+the router and the callee to have announced the `progressive_calls` feature.
+""".
+-spec call_stream(conn(), binary(), list(), map(), map()) ->
+    {ok, reference()} | {error, term()}.
+call_stream(Conn, Uri, Args, KWArgs, Opts) ->
+    with_conn(Conn, fun(Pid) ->
+        bondy_connect_connection:call_stream(Pid, Uri, Args, KWArgs, Opts)
+    end).
+
+-doc "Send a non-final argument chunk of a progressive call. See `call_stream/5`.".
+-spec send_input(conn(), reference(), list(), map()) -> ok | {error, term()}.
+send_input(Conn, Token, Args, KWArgs) ->
+    with_conn(Conn, fun(Pid) ->
+        bondy_connect_connection:send_input(Pid, Token, Args, KWArgs)
+    end).
+
+-doc """
+Send the final argument chunk of a progressive call, completing the input stream.
+See `call_stream/5`.
+""".
+-spec finish_input(conn(), reference(), list(), map()) -> ok | {error, term()}.
+finish_input(Conn, Token, Args, KWArgs) ->
+    with_conn(Conn, fun(Pid) ->
+        bondy_connect_connection:finish_input(Pid, Token, Args, KWArgs)
     end).
 
 -doc "Cancel an in-flight async call (mode `killnowait`). See `cancel/3`.".

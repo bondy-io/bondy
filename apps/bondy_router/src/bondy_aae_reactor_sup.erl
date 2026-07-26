@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_aae_reactor_sup).
 -moduledoc """
 Supervisor for the AAE merge-reaction subsystem: a `gproc_pool` of
@@ -27,24 +26,16 @@ re-subscribes — neither needs the other restarted.
 %% SUPERVISOR CALLBACKS
 -export([init/1]).
 
-
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
-
-
 
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
-
-
 
 init([]) ->
     SupFlags = #{
@@ -55,26 +46,24 @@ init([]) ->
     },
 
     %% Workers first, reactor last (see moduledoc).
-    Children = shards() ++ [
-        #{
-            id => bondy_aae_reactor,
-            start => {bondy_aae_reactor, start_link, []},
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [bondy_aae_reactor]
-        }
-    ],
+    Children =
+        shards() ++
+            [
+                #{
+                    id => bondy_aae_reactor,
+                    start => {bondy_aae_reactor, start_link, []},
+                    restart => permanent,
+                    shutdown => 5000,
+                    type => worker,
+                    modules => [bondy_aae_reactor]
+                }
+            ],
 
     {ok, {SupFlags, Children}}.
-
-
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
 
 %% @private
 shards() ->

@@ -106,6 +106,16 @@ validate(hello, Details0, Extensions) ->
             ok
     end,
 
+    %% Progressive Calls pairs with call_canceling too (a streamed call must be
+    %% cancellable mid-stream). Read the canonical `[Role, features, Feature]`
+    %% path from `Roles` — the same path `bondy_dealer:session_feature/3` uses.
+    %% (NOTE: the `progressive_call_results` checks above read `[Role, Feature]`
+    %% from `Details`, which does not descend into the nested `features` map, so
+    %% that pre-existing pairing check does not currently fire — tracked
+    %% separately.)
+    ok = require_call_canceling(caller, progressive_calls, Roles),
+    ok = require_call_canceling(callee, progressive_calls, Roles),
+
     Details;
 validate(welcome, Details, Extensions) ->
     Spec = ?WELCOME_DETAILS_SPEC,
@@ -140,3 +150,30 @@ validate(invocation, Details, Extensions) ->
     bondy_wamp_utils:validate_map(Details, Spec, Extensions);
 validate(_, _, _) ->
     error(badarg).
+
+%% @private
+%% WAMP advanced-profile pairing: a role that announces `Feature` MUST also
+%% announce `call_canceling`, otherwise the HELLO is rejected. `Roles` is the
+%% `HELLO.Details.roles` map; features are read at `[Role, features, Feature]`.
+require_call_canceling(Role, Feature, Roles) ->
+    case key_value:get([Role, features, Feature], Roles, false) of
+        true ->
+            key_value:get([Role, features, call_canceling], Roles, false) orelse
+                error(#{
+                    code => invalid_feature_request,
+                    message => <<"Invalid feature requested">>,
+                    description => iolist_to_binary([
+                        "The feature ",
+                        atom_to_binary(Feature, utf8),
+                        " was requested for the ",
+                        atom_to_binary(Role, utf8),
+                        " role but call_canceling was not; both are required "
+                        "for ",
+                        atom_to_binary(Feature, utf8),
+                        "."
+                    ])
+                }),
+            ok;
+        false ->
+            ok
+    end.
