@@ -19,9 +19,13 @@ cluster-wide broadcast and may return `{error, unavailable}` (→
 `bondy.error.unavailable`) rather than a false `no_such_registration` when a node
 holding the entry cannot be reached.
 
-`*.list_callees`/`*.list_subscribers` and `*.count_callees`/`*.count_subscribers`
-are per-entry (by-id) operations and remain `not_implemented` — see
-`_design/REGISTRY_META_API.md` §6.
+`*.count_callees`/`*.count_subscribers` and `*.list_callees`/`*.list_subscribers`
+take a registration/subscription id: `bondy_registry_meta` resolves it to its URI
+(a cluster-wide broadcast `get`) and then counts (from RIB summaries) or gathers
+the member session ids (each owner node contributes its local sessions — the ids
+are not replicated under write-only RIB, only summary counts, so they are
+collected on demand). Best-effort AP; `{error, unavailable}` when the resolving
+`get` cannot confirm the id.
 """.
 -behaviour(bondy_wamp_callback).
 
@@ -380,37 +384,23 @@ match(Type, [RealmUri, Uri, _Opts]) ->
     end.
 
 %% @private
-list_registration_callees(_RealmUri, _RegId) ->
-    %% try
-    %%     case bondy_registry:entries(registration, RealmUri, '_') of
-    %%         {[], '$end_of_table'} ->
-    %% {error, bondy_wamp_api_utils:no_such_registration_error(RegId)};
-    %%         {[Entries], '$end_of_table'} ->
-    %%             Sessions = [bondy_registry_entry:protocol_session_id(E) || E <- Entries],
-    %%             {ok, Sessions}
-    %%     end
-    %% catch
-    %%     _:Reason ->
-    %%         {error, Reason}
-    %% end.
-    {error, not_implemented}.
+%% The WAMP session ids of the callees of the registration `RegId`, cluster-wide
+%% (`bondy_registry_meta` resolves the id to its URI, then gathers each owner
+%% node's local callee sessions — under write-only RIB the ids are not
+%% replicated, only summary counts, so they are collected on demand).
+list_registration_callees(RealmUri, RegId) ->
+    bondy_registry_meta:list_members(registration, RealmUri, RegId).
 
-count_callees(_RealmUri, _Uri) ->
-    %% try
-    %%     case bondy_registry:match(registration, RealmUri, Uri) of
-    %%         {[], '$end_of_table'} ->
-    %%             {ok, 0};
-    %%         {[Entries], '$end_of_table'} ->
-    %%             {ok, length(Entries)}
-    %%     end
-    %% catch
-    %%     _:Reason ->
-    %%         {error, Reason}
-    %% end.
-    {error, not_implemented}.
+%% @private
+%% The number of callees of the registration `RegId`, cluster-wide (local matches
+%% plus the RIB summary counts; best-effort AP).
+count_callees(RealmUri, RegId) ->
+    bondy_registry_meta:count_members(registration, RealmUri, RegId).
 
-list_subscription_subscribers(_RealmUri, _RegId) ->
-    {error, not_implemented}.
+%% @private
+list_subscription_subscribers(RealmUri, SubId) ->
+    bondy_registry_meta:list_members(subscription, RealmUri, SubId).
 
-count_subscribers(_RealmUri, _RegId) ->
-    {error, not_implemented}.
+%% @private
+count_subscribers(RealmUri, SubId) ->
+    bondy_registry_meta:count_members(subscription, RealmUri, SubId).

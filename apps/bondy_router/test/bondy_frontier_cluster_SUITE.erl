@@ -124,7 +124,9 @@ asymmetric_compaction_keeps_oracle_in_sync(Config) ->
         quiesce(N1, N2),
         ok = erpc:call(N1, ?MODULE, do_drain_all, []),
         ok = erpc:call(N2, ?MODULE, do_drain_all, []),
-        {Sigs1, Sigs2} = await_pairwise_sigs(N1, N2, Targets),
+        %% Frozen: do NOT drive sync here (a trigger would re-pull and defeat the
+        %% quiesce); the drained baseline settles on its own.
+        {Sigs1, Sigs2} = await_pairwise_sigs(N1, N2, Targets, false),
 
         lists:foreach(
             fun(I) ->
@@ -222,8 +224,13 @@ both_compacted_frontier_detects_real_divergence(Config) ->
             Targets
         ),
 
-        SigsC1 = erpc:call(N1, ?MODULE, do_instance_sigs, []),
-        SigsC2 = erpc:call(N2, ?MODULE, do_instance_sigs, []),
+        %% Wait for both compactions to settle to `undefined` roots before
+        %% asserting: `do_compact` returns before the root_hash has finished
+        %% collapsing, so a one-shot read races it. The cluster is frozen
+        %% (quiesced above), so no re-pull can re-populate the compacted MST —
+        %% the barrier just polls the local settle.
+        SigsC1 = await_instance_sigs(N1, Targets, fun(R) -> R =:= undefined end),
+        SigsC2 = await_instance_sigs(N2, Targets, fun(R) -> R =:= undefined end),
         lists:foreach(
             fun(I) ->
                 {Fc1, Rc1} = maps:get(I, SigsC1),
@@ -454,11 +461,22 @@ await_instance_sigs(Node, Targets, Pred) ->
 %% frontier and same binary MST root on both. See the baseline comment in
 %% `asymmetric_compaction_keeps_oracle_in_sync/1` for why a one-shot
 %% snapshot is not enough. Errors with per-node diagnostics at the deadline.
+%% Pre-freeze use (sync still LIVE): drive the pull-only sync on both nodes each
+%% poll so a load-starved background scheduler cannot leave the lagging MST pages
+%% undelivered past the deadline — the same active drive `seed_and_converge`
+%% uses. This is only safe while the cluster is unfrozen and nothing is
+%% compacted; a post-`quiesce` caller MUST pass `DriveSync = false` (a trigger
+%% then would re-pull and defeat the freeze).
 await_pairwise_sigs(N1, N2, Targets) ->
-    await_pairwise_sigs(N1, N2, Targets, now_ms() + ?CONVERGE_MS).
+    await_pairwise_sigs(N1, N2, Targets, true).
 
 %% @private
-await_pairwise_sigs(N1, N2, Targets, Deadline) ->
+await_pairwise_sigs(N1, N2, Targets, DriveSync) ->
+    await_pairwise_sigs(N1, N2, Targets, DriveSync, now_ms() + ?CONVERGE_MS).
+
+%% @private
+await_pairwise_sigs(N1, N2, Targets, DriveSync, Deadline) ->
+    _ = DriveSync andalso drive_sync([N1, N2]),
     S1 = erpc:call(N1, ?MODULE, do_instance_sigs, [Targets]),
     S2 = erpc:call(N2, ?MODULE, do_instance_sigs, [Targets]),
     Settled = lists:all(
@@ -484,8 +502,19 @@ await_pairwise_sigs(N1, N2, Targets, Deadline) ->
                     ]}
                 ),
             timer:sleep(200),
-            await_pairwise_sigs(N1, N2, Targets, Deadline)
+            await_pairwise_sigs(N1, N2, Targets, DriveSync, Deadline)
     end.
+
+%% @private
+%% Trigger a (pull-only) AAE sync on each node so convergence is actively driven
+%% rather than left to the background scheduler, which starves under full-suite
+%% CT load. Best-effort: a node mid-restart just misses this tick.
+drive_sync(Nodes) ->
+    _ = [
+        catch erpc:call(N, bondy_oplog_sync_scheduler, trigger, [])
+     || N <- Nodes
+    ],
+    ok.
 
 %% @private
 await_instance_sigs(Node, Targets, Pred, Deadline) ->

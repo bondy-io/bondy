@@ -91,9 +91,11 @@ from its own local registry. The node-local leg reads full entries
 
 %% API
 -export([count/3]).
+-export([count_members/3]).
 -export([default_page_size/0]).
 -export([get/3]).
 -export([list/3]).
+-export([list_members/3]).
 -export([match/4]).
 -export([max_page_size/0]).
 -export([max_results/0]).
@@ -168,6 +170,54 @@ count(Type, RealmUri, Uri) when is_binary(Uri) ->
             bondy_registry_rib:match_summaries(Type, RealmUri, Uri)
     ]),
     {ok, Local + Remote}.
+
+
+-doc """
+The number of callees (`registration`) / subscribers (`subscription`) for the
+entry identified by `Id`, cluster-wide. `Id` is first resolved to its
+procedure/topic URI (a broadcast `get/3`), then counted as `count/3` for that
+URI: the members whose registration/subscription matches it (routing demand),
+which for a plain exact registration is exactly its callee count. Best-effort AP.
+
+Backs the WAMP `count_callees` / `count_subscribers` meta procedures. Returns
+`{error, not_found}` when `Id` exists on no reachable node, or `{error,
+unavailable}` when a node could not be reached to confirm the id's absence.
+""".
+-spec count_members(
+    Type :: entry_type(),
+    RealmUri :: uri(),
+    Id :: id()
+) -> {ok, non_neg_integer()} | {error, not_found | unavailable}.
+
+count_members(Type, RealmUri, Id) ->
+    with_resolved_uri(Type, RealmUri, Id, fun(Uri) ->
+        count(Type, RealmUri, Uri)
+    end).
+
+
+-doc """
+The WAMP session ids of the callees (`registration`) / subscribers
+(`subscription`) for the entry identified by `Id`, cluster-wide. `Id` is resolved
+to its URI (a broadcast `get/3`); then every node the RIB says holds a matching
+entry is asked for its LOCAL member session ids and the union is returned. The
+session ids themselves are never replicated (only summary counts are), so they
+are gathered from each owner on demand. Best-effort AP: an unreachable node's
+members are silently omitted.
+
+Backs the WAMP `list_callees` / `list_subscribers` meta procedures. Returns
+`{error, not_found}` / `{error, unavailable}` from the resolving `get/3` as for
+`count_members/3`.
+""".
+-spec list_members(
+    Type :: entry_type(),
+    RealmUri :: uri(),
+    Id :: id()
+) -> {ok, [id()]} | {error, not_found | unavailable}.
+
+list_members(Type, RealmUri, Id) ->
+    with_resolved_uri(Type, RealmUri, Id, fun(Uri) ->
+        {ok, gather_members(Type, RealmUri, Uri)}
+    end).
 
 
 -doc "Default page size for the `bondy.*` paginated procedures.".
@@ -271,6 +321,13 @@ handle_call({get, Type, RealmUri, Id}, From, State) ->
     _ = spawn(fun() ->
         partisan_gen_server:reply(
             From, peer_reply(fun() -> local_get(Type, RealmUri, Id) end)
+        )
+    end),
+    {noreply, State};
+handle_call({members, Type, RealmUri, Uri}, From, State) ->
+    _ = spawn(fun() ->
+        partisan_gen_server:reply(
+            From, peer_reply(fun() -> local_members(Type, RealmUri, Uri) end)
         )
     end),
     {noreply, State};
@@ -463,6 +520,69 @@ extract_entries({Entries, _}) when is_list(Entries) ->
     Entries;
 extract_entries(Entries) when is_list(Entries) ->
     Entries.
+
+%% @private
+%% Resolve `Id` to its URI via the broadcast `get/3`, then apply `Fun(Uri)`.
+%% `get/3`'s `not_found` / `unavailable` are propagated unchanged.
+with_resolved_uri(Type, RealmUri, Id, Fun) ->
+    case get(Type, RealmUri, Id) of
+        {ok, External} ->
+            Fun(maps:get(uri, External));
+        {error, _} = Error ->
+            Error
+    end.
+
+%% @private
+%% The union of every RIB-targeted node's LOCAL member session ids for `Uri`,
+%% node-at-a-time (the same uri-scoped node set as a `match` walk). Best-effort:
+%% an unreachable node contributes none.
+gather_members(Type, RealmUri, Uri) ->
+    PerNode = [
+        node_members(Type, RealmUri, Uri, Node)
+     || Node <- node_set(Type, RealmUri, Uri)
+    ],
+    lists:usort(lists:append(PerNode)).
+
+%% @private
+node_members(Type, RealmUri, Uri, Node) ->
+    case Node =:= partisan:node() of
+        true ->
+            local_members(Type, RealmUri, Uri);
+        false ->
+            remote_members(Type, RealmUri, Uri, Node)
+    end.
+
+%% @private
+%% Best-effort: an unreachable or erroring peer contributes an empty member list.
+remote_members(Type, RealmUri, Uri, Node) ->
+    Target = {?MODULE, Node},
+    Msg = {members, Type, RealmUri, Uri},
+    try partisan_gen_server:call(Target, Msg, [{timeout, ?NODE_TIMEOUT}]) of
+        {ok, Members} when is_list(Members) ->
+            Members;
+        _ ->
+            []
+    catch
+        exit:_ ->
+            []
+    end.
+
+%% @private
+%% This node's local member session ids for `Uri`: the WAMP session id of each
+%% local matching entry that has a session. Internal / callback entries have no
+%% session and are skipped.
+local_members(Type, RealmUri, Uri) ->
+    lists:filtermap(
+        fun(Entry) ->
+            case bondy_registry_entry:session_id(Entry) of
+                SessionId when is_binary(SessionId) ->
+                    {true, bondy_session_id:to_external(SessionId)};
+                _ ->
+                    false
+            end
+        end,
+        local_match(Type, RealmUri, Uri)
+    ).
 
 %% @private
 %% Parallel broadcast: query every node at once and take the first hit, so a

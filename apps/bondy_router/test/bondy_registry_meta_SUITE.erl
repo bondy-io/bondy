@@ -29,6 +29,7 @@ all() ->
         list_last_page_has_no_cursor,
         count_exact_match,
         count_agrees_with_match_enumeration,
+        members_by_id,
         stale_cursor_rejected,
         wamp_get_maps_engine_outcomes_to_uris,
         get_cancellation_reaps_workers
@@ -148,6 +149,50 @@ count_agrees_with_match_enumeration(Config) ->
         bondy_registry_meta:match(registration, RealmUri, Uri, #{limit => 1000}),
     ?assertEqual(length(Values), Count),
     ?assertEqual(1, Count).
+
+%% count_members/list_members take a registration/subscription id: resolve it to
+%% its URI (a broadcast get) and then count (from summaries + local) / gather the
+%% member WAMP session ids. Single node: each setup URI has exactly one callee.
+members_by_id(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    Ctxt = ?config(context, Config),
+    Ref = bondy_context:ref(Ctxt),
+    [RegId | _] = ?config(ids, Config),
+
+    %% Registration id -> its URI -> one callee.
+    ?assertEqual(
+        {ok, 1},
+        bondy_registry_meta:count_members(registration, RealmUri, RegId)
+    ),
+    {ok, RegMembers} =
+        bondy_registry_meta:list_members(registration, RealmUri, RegId),
+    ?assertMatch([SessionId] when is_integer(SessionId), RegMembers),
+
+    %% Same path for a subscription, resolved by its own id.
+    Topic = <<"com.meta.topic.members">>,
+    {ok, {SubEntry, true}} = bondy_registry:add(
+        subscription, RealmUri, Topic, #{match => ?EXACT_MATCH}, Ref
+    ),
+    SubId = bondy_registry_entry:id(SubEntry),
+    ?assertEqual(
+        {ok, 1},
+        bondy_registry_meta:count_members(subscription, RealmUri, SubId)
+    ),
+    ?assertMatch(
+        {ok, [_]},
+        bondy_registry_meta:list_members(subscription, RealmUri, SubId)
+    ),
+
+    %% An id that resolves on no node is a definite not_found (not unavailable).
+    BogusId = 9999999999,
+    ?assertEqual(
+        {error, not_found},
+        bondy_registry_meta:count_members(registration, RealmUri, BogusId)
+    ),
+    ?assertEqual(
+        {error, not_found},
+        bondy_registry_meta:list_members(subscription, RealmUri, BogusId)
+    ).
 
 %% Regression guard for the get-by-id process hygiene: when the caller dies
 %% mid-flight (client disconnect / cancel), the middleman must reap its linked
