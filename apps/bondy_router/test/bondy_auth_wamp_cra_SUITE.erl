@@ -11,7 +11,6 @@
 
 -define(U1, <<"user_1">>).
 -define(U2, <<"user_2">>).
--define(U3, <<"user_3">>).
 -define(U_NOPASS, <<"user_no_password">>).
 -define(P1, <<"aWe11KeptSecret">>).
 -define(P2, <<"An0therWe11KeptSecret">>).

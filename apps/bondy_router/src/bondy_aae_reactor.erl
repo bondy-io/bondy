@@ -25,8 +25,8 @@ is ignored here.
 | `security_group_grants` | grant/revoke  | invalidate this node's cached RBAC contexts for the realm (§9.5) + conflict alarm |
 | `security_group_members`| add/remove    | invalidate this node's cached RBAC contexts for the realm (§9.5) |
 | `security_sources`      | set/delete    | conflict alarm only (sources gate *new* connections; no live-session effect) |
-| `bondy_registration`    | create/delete | add / remove the peer's registration in this node's routing trie |
-| `bondy_subscription`    | create/delete | add / remove the peer's subscription in this node's routing trie |
+| `bondy_registration_rib`| set / clear   | record / remove the peer's registration RIB summary (`bondy_registry_rib`) |
+| `bondy_subscription_rib`| set / clear   | record / remove the peer's subscription RIB summary (`bondy_registry_rib`) |
 
 The **conflict alarm** is the lww safety valve for the authorization tables
 (design §3): grants and sources deliberately stay last-writer-wins, so when a
@@ -46,31 +46,23 @@ re-reads the subject's current grants. Grant invalidation is realm-wide because 
 group-grant change affects every member; over-invalidating unaffected sessions
 costs only a one-time context rebuild, so both grant tables share one reaction.
 
-## Registry reactions (presence, §9.6)
+## Registry reactions (RIB summaries)
 
-The `registry` tables are an AP namespace whose routing trie is a materialised
-view *separate* from the bondy_db projection that anti-entropy merges into. A
-peer's registration therefore reaches this node's projection via AAE, but its
-trie — what routing actually selects — only learns of it here. A `set` (CREATE)
-adds the entry to the trie when its owner node is currently connected, or records
-it masked (per-node remote index only) when the owner is down, so a node that
-joins after the owner failed never routes to it. A `clear` (the owner's DELETE /
-self-clean, or a rendezvous-hashed EVICT) removes it. Because a `clear` carries
-no value, the cleared entry is resolved from a small node-local table this reactor
-maintains on each `set` (keyed by the cell's `{namespace, key}`); the bondy_db
-projection cannot serve the lookup, as the merge has already removed the cell.
-
-Node-level masking on `node_down` / `node_up` (presence SUSPEND / RESUME) is
-*not* driven from here — every node derives it from its own Partisan view in
-`bondy_registry`, so it needs no replicated event. Only cluster-wide *removals*
-ride AAE as `clear`s, and those are what this reactor applies.
+The `registry` tables are an AP namespace. Full registry entries are never
+replicated — each node keeps only its own, in local memory. What crosses the
+cluster is a per-node **RIB summary** (a count of a peer's registrations /
+subscriptions for a `{realm, procedure}`), and it is those summary cells this
+reactor consumes: a `set` records or updates the peer's summary, a `clear`
+removes it — both delegated to `bondy_registry_rib`, which maintains this node's
+stub store. The stub store is what routing consults to decide which peer nodes
+to forward to. The RIB cell key is self-contained (realm included), so a `clear`
+needs no tombstone resolution.
 
 A peer's user *credential change* (a `set` whose password / authorized keys
 differ from the pre-merge value carried by the event) closes this node's
 sessions for the user, mirroring the local credential-change chokepoint
-(`bondy_rbac_user`) and the legacy plum_db `on_merge` behaviour. A metadata-only
-`set` is a no-op. A realm `set` (create / update) likewise needs no
-session-close.
+(`bondy_rbac_user`). A metadata-only `set` is a no-op. A realm `set` (create /
+update) likewise needs no session-close.
 
 ## Subscription lifecycle
 
@@ -106,7 +98,6 @@ the dispatcher is configured to effectively never restart.
 
 %% API
 -export([start_link/0]).
--export([remote_entries_of/1]).
 
 -ifdef(TEST).
 %% Exposed for unit testing the reaction logic without a running cluster.
@@ -139,18 +130,6 @@ the dispatcher is configured to effectively never restart.
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
-
--doc """
-Returns the registry entries this node holds that are owned by `Node`. Full
-registry entries are never replicated — a node keeps only its own, in local
-memory — so this node holds no entries owned by a remote `Node` and the result
-is always `[]`. Retained as the by-owner enumeration the registry presence
-machine consults on a membership change.
-""".
--spec remote_entries_of(node()) -> [bondy_registry_entry:t()].
-
-remote_entries_of(_Node) ->
-    [].
 
 %% =============================================================================
 %% GEN_SERVER CALLBACKS

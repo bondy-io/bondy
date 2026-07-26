@@ -27,34 +27,6 @@ credentials, resource owner password and refresh token grant flows.
     <<"content-type">> => <<"application/json; charset=utf-8">>
 }).
 
--define(AUTH_CODE_SPEC, #{
-    ?GRANT_TYPE => #{
-        required => true,
-        allow_null => false,
-        datatype => {in, [<<"authorization_code">>]}
-    },
-    <<"client_id">> => #{
-        required => true,
-        allow_null => false,
-        datatype => binary
-    },
-    <<"client_secret">> => #{
-        required => true,
-        allow_null => false,
-        datatype => binary
-    },
-    <<"redirect_uri">> => #{
-        required => true,
-        allow_null => false,
-        datatype => binary
-    },
-    <<"code">> => #{
-        required => true,
-        allow_null => false,
-        datatype => binary
-    }
-}).
-
 %% Resource Owner Password Credentials Grant
 %% curl -v -X POST http://192.168.1.41/api/0.2.0/oauth/token -d \
 %% "grant_type=password&username=admin&password=admin&scope=*"
@@ -92,29 +64,6 @@ credentials, resource owner password and refresh token grant flows.
 %% Client Credentials Grant
 %% curl -v -X POST http://192.168.1.41/api/0.2.0/oauth/token -d \
 %% "grant_type=client_credentials&client_id=test&client_secret=test&scope=*"
--define(CLIENT_CREDENTIALS_SPEC, #{
-    ?GRANT_TYPE => #{
-        required => true,
-        allow_null => false,
-        datatype => {in, [<<"client_credentials">>]}
-    },
-    <<"client_id">> => #{
-        required => true,
-        allow_null => false,
-        datatype => binary
-    },
-    <<"client_secret">> => #{
-        required => true,
-        allow_null => false,
-        datatype => binary
-    },
-    <<"scope">> => #{
-        required => true,
-        allow_null => false,
-        datatype => binary,
-        default => <<"all">>
-    }
-}).
 
 %% Refresh Token
 %% curl -v -X POST http://192.168.1.41/api/0.2.0/oauth/token -d \

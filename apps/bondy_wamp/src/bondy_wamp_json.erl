@@ -26,8 +26,6 @@ options over the Erlang `json` module.
         ?IS_UINT(Mi) andalso
         ?IS_PNUM(S))
 ).
--define(SECONDS_PER_MINUTE, 60).
--define(SECONDS_PER_HOUR, 3600).
 
 -type encode_opt() ::
     {float_format, [float_format()]}

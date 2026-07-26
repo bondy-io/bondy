@@ -33,7 +33,6 @@ cell rather than crashing the render loop.
 %% its private records).
 -define(GREEN, <<"\e[32;1m">>).
 -define(RED, <<"\e[31m">>).
--define(YELLOW, <<"\e[33m">>).
 
 %% OBSERVER_CLI_PLUGIN CALLBACKS
 -export([attributes/1]).

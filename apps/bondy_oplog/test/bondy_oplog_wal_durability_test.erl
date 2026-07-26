@@ -34,7 +34,6 @@
 -include("bondy_oplog_wal.hrl").
 
 -define(SEG_HEADER, ?BONDY_OPLOG_WAL_SEGMENT_HEADER_BYTES).
--define(FRAME_HEADER, ?BONDY_OPLOG_WAL_FRAME_HEADER_BYTES).
 
 %% =============================================================================
 %% Fixture helpers

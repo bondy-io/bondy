@@ -325,20 +325,6 @@ declare_rib_families() ->
             "Keys where the routing summaries disagree with the ground "
             "truth, as of the last periodic consistency sweep."
         >>
-    }),
-    ok = bondy_metrics:declare(#{
-        name => bondy_registry_presence_suspended_nodes,
-        help => <<
-            "Peer nodes currently SUSPENDed (down, within the EVICT "
-            "grace period) whose registry entries are masked."
-        >>
-    }),
-    ok = bondy_metrics:declare(#{
-        name => bondy_registry_presence_mask_duration_ms,
-        help => <<
-            "A histogram of the time to mask (SUSPEND) or unmask "
-            "(RESUME) a peer node's registry entries, by op."
-        >>
     }).
 
 %% @private

@@ -12,17 +12,6 @@ represented as RBAC users belonging to the `resource_owners` group.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy_oauth.hrl").
 
--define(VALIDATE_USERNAME, fun
-    (<<"all">>) ->
-        false;
-    ("all") ->
-        false;
-    (all) ->
-        false;
-    (_) ->
-        true
-end).
-
 -define(ADD_SPEC, #{
     <<"groups">> => #{
         alias => groups,
@@ -47,7 +36,6 @@ end).
         datatype => {list, binary}
     }
 }).
--define(TYPE, outh2_resource_owner).
 
 -type t() :: bondy_rbac_user:t().
 

@@ -9,11 +9,6 @@ Handles the packing/unpacking and encoding/decoding of WAMP messages.
 """.
 -include("bondy_wamp.hrl").
 
-%% ASCII record separator
--define(JSON_BATCHED_SEPARATOR, <<$\30>>).
--define(JSON_BATCH_FRAME(Bin), <<Bib/binary, $\30>>).
--define(MSGPACK_BATCH_FRAME(Bin), <<Bib/binary, $\30>>).
-
 %% -export([frame/2]).
 %% -export([unframe/2]).
 -export([pack/1]).

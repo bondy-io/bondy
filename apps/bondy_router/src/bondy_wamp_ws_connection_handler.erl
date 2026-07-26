@@ -36,9 +36,6 @@ WebSocket subprotocol registry.
 -include("http_api.hrl").
 -include("bondy.hrl").
 
-%% Cowboy will automatically close the Websocket connection when no data
-%% arrives on the socket after ?IDLE_TIMEOUT
--define(IDLE_TIMEOUT, 60000 * 10).
 -define(SUBPROTO_HEADER, <<"sec-websocket-protocol">>).
 
 -record(state, {

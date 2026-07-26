@@ -81,7 +81,6 @@ mappings is always present (e.g. `wamp.error.not_found` → 404,
 -define(DEFAULTS_KEY, <<"defaults">>).
 -define(STATUS_CODES_KEY, <<"status_codes">>).
 -define(LANGUAGES_KEY, <<"languages">>).
--define(MOD_PREFIX, "bondy_http_api_gateway_rest_handler_").
 
 -define(DEFAULT_CONN_TIMEOUT, 8000).
 -define(DEFAULT_TIMEOUT, 60000).
@@ -90,7 +89,6 @@ mappings is always present (e.g. `wamp.error.not_found` → 404,
 -define(DEFAULT_ACCEPTS, [<<"application/json">>, <<"application/msgpack">>]).
 -define(DEFAULT_PROVIDES, [<<"application/json">>, <<"application/msgpack">>]).
 -define(DEFAULT_HEADERS, #{}).
--define(DEFAULT_SECURITY, #{}).
 -define(DEFAULT_SCHEMES, [<<"http">>]).
 
 %% MAP VALIDATION SPECS to use with maps_utils.erl
@@ -870,15 +868,6 @@ mappings is always present (e.g. `wamp.error.not_found` → 404,
         datatype => [timeout, ?MOPS_PROXY_FUN_TYPE]
     }
 }).
-
--define(MAP_OR_FUNCTION, fun
-    (X) when is_map(X) ->
-        true;
-    (F) when is_function(F) ->
-        true;
-    (_) ->
-        false
-end).
 
 -define(DEFAULT_WAMP_ACTION, #{
     <<"options">> => #{},

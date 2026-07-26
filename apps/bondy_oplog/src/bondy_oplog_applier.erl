@@ -500,7 +500,6 @@ instances are unaffected.
 %% overridable per index via the spec's `max_inflight`. Large by design —
 %% back-pressure is a safety valve for a pathologically hot shard, not a
 %% steady-state throttle.
--define(DEFAULT_MAX_INFLIGHT, 100000).
 
 %% =============================================================================
 %% API

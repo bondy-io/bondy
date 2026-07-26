@@ -24,8 +24,6 @@
 -include("bondy_oplog.hrl").
 -include("bondy_oplog_wal.hrl").
 
--define(SEG_HEADER, ?BONDY_OPLOG_WAL_SEGMENT_HEADER_BYTES).
-
 %% =============================================================================
 %% Fixtures
 %% =============================================================================

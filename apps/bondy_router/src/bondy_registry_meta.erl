@@ -5,16 +5,16 @@
 
 -module(bondy_registry_meta).
 -moduledoc """
-The distributed engine behind the **WAMP Meta API** registration/subscription
+The distributed helper behind the **WAMP Meta API** registration/subscription
 introspection procedures (`wamp.*.list|match|lookup|get|count_*` and their
 paginated `bondy.*` counterparts) — the read side of the registry, as opposed
 to the routing side (`bondy_registry`).
 
-This is deliberately WAMP-meta-specific, not a general query engine: its values
+This is deliberately WAMP-meta-specific, not a general API: its values
 are `wamp_meta` external maps (`bondy_registry_entry:to_external/2`), produced
 on the node that owns the entry so full records never cross the wire.
 
-Under write-only RIB routing a node holds full entries only for its LOCAL
+Under RIB routing a node holds full entries only for its LOCAL
 registrations/subscriptions; remote ones exist here only as RIB summaries. So
 "list/match the entries of a realm" cannot be answered from one node — it is a
 distributed query. This module runs that query:

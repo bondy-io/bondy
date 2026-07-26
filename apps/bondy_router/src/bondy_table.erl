@@ -12,8 +12,6 @@ Provides `new/3`, `get/2,3`, `find/2`, `put/3`, `delete/2` and
 `bondy_table_manager`, and normalises ETS errors into `badtable`/`badkey`.
 """.
 
--define(TAB, ?MODULE).
-
 -type update_op() ::
     integer()
     | {

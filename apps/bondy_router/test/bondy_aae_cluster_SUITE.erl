@@ -672,8 +672,8 @@ wait_close_recorded(Node, Uri, User) ->
 
 %% @private
 %% Polls `Node` until its routing trie holds exactly `Count` registrations
-%% matching the procedure (the merge reactor / presence machine having
-%% converged), forcing a sync tick each round.
+%% matching the procedure (the merge reactor having converged), forcing a sync
+%% tick each round.
 wait_reg_count(Node, Uri, Proc, Count) ->
     Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
     wait_until_eq(
@@ -1138,13 +1138,6 @@ keeper_loop() ->
     receive
         stop -> ok
     end.
-
-%% @private
-%% Deliver a synthetic Partisan membership event to this node's registry server
-%% (the presence SUSPEND / RESUME seam, normally fed by `partisan:monitor_nodes`).
-do_signal(Msg) ->
-    bondy_registry ! Msg,
-    ok.
 
 %% @private
 do_create_user_realm(Uri, User) ->

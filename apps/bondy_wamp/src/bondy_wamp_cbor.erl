@@ -38,9 +38,6 @@ options over the `bondy_cbor` module.
 -define(CBOR_TAG, 6).
 -define(CBOR_SIMPLE, 7).
 
-%% CBOR break code for indefinite-length items
--define(CBOR_BREAK, 16#ff).
-
 -type encode_opt() :: {check_duplicate_keys, boolean()}.
 
 -type decode_opt() :: {decoders, bondy_cbor:decoders()}.

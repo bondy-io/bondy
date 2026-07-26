@@ -180,7 +180,6 @@ it).
 -endif.
 
 -define(DEFAULT_SHARD_COUNT, 8).
--define(DEFAULT_FOLD, lww_register).
 -define(INDEX, primary).
 
 %% Reserved bucket/key for the latency idle probe. A bucket no user query

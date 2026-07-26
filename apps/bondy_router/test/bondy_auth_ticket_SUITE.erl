@@ -13,7 +13,6 @@
 -define(U2, <<"user_2">>).
 -define(APP, <<"app_1">>).
 -define(P1, <<"aWe11KeptSecret">>).
--define(P2, <<"An0therWe11KeptSecret">>).
 
 -compile([nowarn_export_all, export_all]).
 

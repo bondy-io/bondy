@@ -23,13 +23,6 @@ genuine app-wide MST setting appears, add its accessor here, mirroring
 """).
 
 -define(APP, bondy_mst).
--define(ERROR, '$error_badarg').
--define(FUN_WITH_ARITY(N), fun
-    ({Mod, Fun}) when is_atom(Mod); is_atom(Fun) ->
-        erlang:function_exported(Mod, Fun, N);
-    (_) ->
-        false
-end).
 
 -export([get/1]).
 -export([get/2]).

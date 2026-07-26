@@ -17,13 +17,11 @@
 
 -define(IS_TYPE(X), (X == registration orelse X == subscription)).
 -define(SERVER_NAME(Index), {?MODULE, Index}).
--define(REGISTRY_REMOTE_IDX_KEY(Index), {?SERVER_NAME(Index), remote_tab}).
 -define(REGISTRY_STORE_KEY(Index), {?SERVER_NAME(Index), store}).
 
 -record(state, {
     index :: integer(),
     store :: bondy_registry_store:t(),
-    remote_tab :: bondy_registry_remote_index:t(),
     %% One janitor per ptrie handle in the store. The map is keyed by pid
     %% so an `{'EXIT', Pid, _}` lookup tells us which handle to respawn
     %% against. The handle survives janitor crashes — its ETS tables are
@@ -65,7 +63,6 @@
 -export([execute/4]).
 -export([info/1]).
 -export([pick/1]).
--export([remote_index/1]).
 -export([start_link/1]).
 -export([store/1]).
 
@@ -75,10 +72,6 @@
 -export([continuation_info/1]).
 -export([dirty_delete/2]).
 -export([dirty_delete/3]).
--export([index_remote/2]).
--export([mask/2]).
--export([remove_indices/2]).
--export([unmask/2]).
 -export([find/1]).
 -export([find/3]).
 -export([find/4]).
@@ -149,16 +142,6 @@ Returns statistical information about the partition.
 
 info(Partition) when is_pid(Partition) ->
     bondy_registry_store:info(store(Partition)).
-
--spec remote_index(Arg :: pid() | nodestring() | node()) ->
-    bondy_registry_remote_index:t() | undefined.
-
-remote_index(Pid) when is_pid(Pid) ->
-    persistent_term:get(?REGISTRY_REMOTE_IDX_KEY(Pid), undefined);
-remote_index(Node) when is_atom(Node) ->
-    remote_index(atom_to_binary(Node, utf8));
-remote_index(Arg) when is_binary(Arg) ->
-    remote_index(pick(Arg)).
 
 -spec execute(Partition :: pid(), Fun :: execute_fun()) ->
     execute_ret() | {error, timeout}.
@@ -237,7 +220,6 @@ add(Partition, Entry) when is_pid(Partition) ->
     Store = store(Partition),
     Result = bondy_registry_store:add(Store, Entry),
     resulto:then(Result, fun(Value) ->
-        _ = add_remote_index(Entry),
         ok = bondy_registry_rib:on_entry_added(
             Partition, bondy_registry_store:rib_members_tab(Store), Entry
         ),
@@ -265,57 +247,8 @@ through a trie server.
 add_indices(Partition, Entry) when is_pid(Partition) ->
     Result = bondy_registry_store:add_indices(store(Partition), Entry),
     resulto:then(Result, fun(undefined) ->
-        _ = add_remote_index(Entry),
         ok
     end).
-
--doc """
-Adds ONLY the per-node remote index for a remote entry, leaving the match
-indices (trie / ETS bags) untouched. Used by the presence-FSM reactor to record
-a peer's replicated entry whose owner node is currently down: the entry is
-retained (and enumerable per node for a later `unmask/2` or EVICT) but not
-selectable for routing. The bondy_db projection is not touched (the AAE merge
-already wrote it).
-""".
--spec index_remote(Partition :: pid(), Entry :: entry()) -> ok.
-
-index_remote(Partition, Entry) when is_pid(Partition) ->
-    _ = add_remote_index(Entry),
-    ok.
-
--doc """
-Masks a remote entry for routing (presence SUSPEND, design §9.6): removes its
-match indices (trie / ETS bags) so it is no longer selectable, while LEAVING the
-per-node remote index and the bondy_db projection in place so `unmask/2` can
-restore it when the owner node returns. Idempotent.
-""".
--spec mask(Partition :: pid(), Entry :: entry()) -> ok | {error, any()}.
-
-mask(Partition, Entry) when is_pid(Partition) ->
-    bondy_registry_store:delete_indices(store(Partition), Entry).
-
--doc """
-Restores a previously `mask/2`-ed remote entry's match indices (presence RESUME,
-design §9.6). The per-node remote index was retained by the mask, so only the
-match indices are re-added. Does not touch the bondy_db projection. Idempotent.
-""".
--spec unmask(Partition :: pid(), Entry :: entry()) -> ok | {error, any()}.
-
-unmask(Partition, Entry) when is_pid(Partition) ->
-    bondy_registry_store:add_indices(store(Partition), Entry).
-
--doc """
-Removes a remote entry's in-memory indices (match indices AND the per-node remote
-index) WITHOUT touching the bondy_db projection — the AAE merge of the owner's
-`clear` (a DELETE / self-clean / EVICT, design §9.6) already removed the
-projection cell, and this brings the materialised view into line. Idempotent.
-""".
--spec remove_indices(Partition :: pid(), Entry :: entry()) ->
-    ok | {error, any()}.
-
-remove_indices(Partition, Entry) when is_pid(Partition) ->
-    Result = bondy_registry_store:delete_indices(store(Partition), Entry),
-    resulto:then(Result, fun(_) -> delete_remote_index(Entry) end).
 
 -doc "".
 -spec remove(Partition :: pid(), Entry :: entry()) -> ok.
@@ -347,8 +280,7 @@ remove(Partition, Entry, Opts0) when is_pid(Partition) ->
     resulto:then(Result, fun(undefined) ->
         ok = bondy_registry_rib:on_entry_removed(
             Partition, bondy_registry_store:rib_members_tab(Store), Entry
-        ),
-        delete_remote_index(Entry)
+        )
     end).
 
 -doc "Removes an entry (and its indices) from the store returning it.".
@@ -359,7 +291,6 @@ take(Partition, Entry) when is_pid(Partition) ->
     Store = store(Partition),
     Result = bondy_registry_store:take(Store, Entry),
     resulto:then(Result, fun(Value) ->
-        ok = delete_remote_index(Value),
         ok = bondy_registry_rib:on_entry_removed(
             Partition, bondy_registry_store:rib_members_tab(Store), Value
         ),
@@ -386,7 +317,6 @@ doing (1) anyway, but we need to check, e.g. timestamp differences?
 dirty_delete(Partition, Entry) when is_pid(Partition) ->
     Result = bondy_registry_store:dirty_delete(store(Partition), Entry),
     resulto:then(Result, fun(Value) ->
-        ok = delete_remote_index(Entry),
         {ok, Value}
     end).
 
@@ -414,7 +344,6 @@ dirty_delete(Partition, Type, EntryKey) when is_pid(Partition) ->
     Store = store(Partition),
     Result = bondy_registry_store:dirty_delete(Store, Type, EntryKey),
     resulto:then(Result, fun(Entry) ->
-        ok = delete_remote_index(Entry),
         {ok, Entry}
     end).
 
@@ -639,15 +568,11 @@ init([Index]) ->
     Store = bondy_registry_store:new(Index),
     _ = persistent_term:put(?REGISTRY_STORE_KEY(self()), Store),
 
-    Tab = bondy_registry_remote_index:new(Index),
-    _ = persistent_term:put(?REGISTRY_REMOTE_IDX_KEY(self()), Tab),
-
     Janitors = start_janitors(bondy_registry_store:ptrie_handles(Store)),
 
     State = #state{
         index = Index,
         store = Store,
-        remote_tab = Tab,
         janitors = Janitors,
         start_ts = erlang:system_time()
     },
@@ -675,7 +600,7 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 handle_info({'ETS-TRANSFER', _, _, _}, State) ->
-    %% The store and remote_index ets tables use bondy_table_manager.
+    %% The store ets tables use bondy_table_manager.
     %% We ignore as tables are named.
     {noreply, State};
 handle_info({execute, Fun, Args}, State) ->
@@ -730,7 +655,6 @@ code_change(_OldVsn, State, _Extra) ->
 
 cleanup(#state{janitors = Js}) ->
     _ = persistent_term:erase(?REGISTRY_STORE_KEY(self())),
-    _ = persistent_term:erase(?REGISTRY_REMOTE_IDX_KEY(self())),
     %% Stop janitors before our ETS tables die so any in-flight sweep
     %% finishes against valid tables. `gen_server:stop/3` returns once the
     %% janitor has exited; the link signal we receive after is harmless
@@ -786,22 +710,4 @@ do_execute(_State, Fun, Args) ->
                 reason => Reason,
                 stacktrace => Stacktrace
             })
-    end.
-
-add_remote_index(Entry) ->
-    try
-        Idx = remote_index(bondy_registry_entry:nodestring(Entry)),
-        bondy_registry_remote_index:add(Idx, Entry)
-    catch
-        _:_ ->
-            ok
-    end.
-
-delete_remote_index(Entry) ->
-    try
-        Idx = remote_index(bondy_registry_entry:nodestring(Entry)),
-        bondy_registry_remote_index:delete(Idx, Entry)
-    catch
-        _:_ ->
-            ok
     end.

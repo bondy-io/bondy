@@ -1009,32 +1009,6 @@ rib_metrics_surface(Config) ->
         application:unset_env(bondy_router, registry_rib_damping)
     end,
 
-    %% Presence: a (fake) peer going down is SUSPENDed and gauged; coming
-    %% back RESUMEs it. Mask/unmask latencies are observed.
-    Susp0 = V(bondy_registry_presence_suspended_nodes, #{}),
-    Mask0 = V(bondy_registry_presence_mask_duration_ms, #{op => mask}),
-    bondy_registry ! {nodedown, 'metrics_peer@nohost'},
-    ?assert(
-        await(
-            fun() ->
-                V(bondy_registry_presence_suspended_nodes, #{}) =:= Susp0 + 1
-            end,
-            500
-        )
-    ),
-    bondy_registry ! {nodeup, 'metrics_peer@nohost'},
-    ?assert(
-        await(
-            fun() ->
-                V(bondy_registry_presence_suspended_nodes, #{}) =:= Susp0
-            end,
-            500
-        )
-    ),
-    ?assertEqual(
-        Mask0 + 1, V(bondy_registry_presence_mask_duration_ms, #{op => mask})
-    ),
-
     %% The divergence sweep gauges the node-wide total. The raw read
     %% distinguishes "sweep ran, converged" (0) from "never gauged"
     %% (undefined).

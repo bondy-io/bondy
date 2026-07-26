@@ -5,7 +5,7 @@
 
 -module(bondy_admin_ready_http_handler).
 -moduledoc """
-A Cowboy HTTP handler for the Admin API readiness (`/ready`) probe.
+An HTTP handler for the Admin API readiness (`/ready`) probe.
 
 Replies with `204 No Content` once the node status is `ready`, otherwise with
 `503 Service Unavailable`.

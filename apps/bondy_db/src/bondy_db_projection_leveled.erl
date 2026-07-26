@@ -132,8 +132,6 @@ value-present frames, exactly as `get/3` does).
 
 %% Lexicographically minimal/maximal SubKey sentinels for prefix scans
 %% over a single Key (encompasses ?SK_STATE and ?SK_VALUE).
--define(SK_LOW, <<>>).
--define(SK_HIGH, <<255, 255, 255, 255>>).
 
 -type handle() :: #{bookie := pid() | {pt, term()}}.
 

@@ -16,10 +16,6 @@ globally (for now). Entries are immutable.
 """.
 
 -define(IS_TYPE(X), (X == registration orelse X == subscription)).
--define(PDB_MATCH_OPTS, [
-    {resolver, lww},
-    {remove_tombstones, true}
-]).
 
 %% The WAMP spec defines that the id MUST be drawn randomly from a uniform
 %% distribution over the complete range [1, 2^53], but in a distributed

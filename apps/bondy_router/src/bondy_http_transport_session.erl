@@ -137,9 +137,6 @@ For Longpoll transports, the gen_server additionally manages:
 %% Inactivity check interval (half the TTL, minimum 5 seconds)
 -define(MIN_CHECK_INTERVAL, 5000).
 
-%% Default batch size for dequeue operations
--define(DEQUEUE_BATCH_SIZE, 50).
-
 %% =============================================================================
 %% API
 %% =============================================================================

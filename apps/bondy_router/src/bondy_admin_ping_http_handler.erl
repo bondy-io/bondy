@@ -5,7 +5,7 @@
 
 -module(bondy_admin_ping_http_handler).
 -moduledoc """
-A Cowboy HTTP handler for the Admin API liveness (`/ping`) probe.
+An HTTP handler for the Admin API liveness (`/ping`) probe.
 
 Replies with `204 No Content` to signal that the node is alive.
 """.

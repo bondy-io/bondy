@@ -208,7 +208,6 @@
 -define(BONDY_ERROR_NOT_FOUND, <<"bondy.error.not_found">>).
 -define(BONDY_ERROR_NOT_IN_SESSION, <<"bondy.error.not_in_session">>).
 -define(BONDY_ERROR_TIMEOUT, <<"bondy.error.timeout">>).
--define(BONDY_ERROR_TOO_MANY_RESULTS, <<"bondy.error.too_many_results">>).
 -define(BONDY_ERROR_INCONSISTENCY_ERROR, <<"bondy.error.inconsistency_error">>).
 
 %% =============================================================================

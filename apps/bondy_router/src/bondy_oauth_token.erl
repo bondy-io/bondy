@@ -25,7 +25,6 @@ Tokens are sharded by key. Cross-node replication awaits bondy_db anti-entropy (
 -define(NOW, erlang:system_time(second)).
 % 0 mins
 -define(LEEWAY_SECS, 2 * 0).
--define(EXPIRY_TIME_SECS(Ts, Secs), Ts + Secs + ?LEEWAY_SECS).
 -define(IS_GRANT_TYPE(X),
     (X == client_credentials orelse
         X == password orelse
@@ -43,7 +42,6 @@ Tokens are sharded by key. Cross-node replication awaits bondy_db anti-entropy (
     bondy_config:get([oauth2, password_grant_duration])
 ).
 -define(REFRESH_TOKEN_TTL, bondy_config:get([oauth2, refresh_token_duration])).
--define(REFRESH_TOKEN_LEN, bondy_config:get([oauth2, refresh_token_length])).
 -define(MAX_TOKENS, bondy_config:get([oauth2, max_tokens_per_user])).
 %% Legacy-backup compatibility (bondy_export legacy import): a pre-existing
 %% (plum_db-era) refresh token is a bare opaque string that the current,

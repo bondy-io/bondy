@@ -23,7 +23,6 @@
 
 %% Mirror of the `?A_*` atomics slots in `bondy_oplog_wal_mem`. Coupled by
 %% contract; kept here so the test can set `committed` without the gen_server.
--define(A_RESERVED, 1).
 -define(A_COMMITTED, 2).
 
 -export([prop_contiguous_exactly_once/0]).

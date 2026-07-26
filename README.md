@@ -63,8 +63,8 @@ In addition Bondy provides:
           * [x] Last
 * [ ] Payload Passthru Mode (WIP)
 * [ ] Registration Revocation (WIP)
-* [ ] Progressive Call Results
-* [ ] Progressive Calls
+* [x] Progressive Call Results
+* [x] Progressive Calls
 
 
 ### Advanced Pub/Sub features
@@ -94,7 +94,6 @@ In addition Bondy provides:
 * [x] JSON
 * [x] Msgpack
 * [x] CBOR
-* [x] BERT
 * [x] Erlang (subset)
 * [ ] JSON batched
 * [ ] Msgpack batched
