@@ -72,7 +72,7 @@ init([]) ->
         ?WORKER(bondy_http_gateway, [], permanent, 5000),
         %% Node-local reactor for bondy_db remote-merge (AAE) changes; depends
         %% on the namespace catalogue (above) having provisioned the tables.
-        ?WORKER(bondy_aae_reactor, [], permanent, 5000),
+        ?SUPERVISOR(bondy_aae_reactor_sup, [], permanent, infinity),
         ?SUPERVISOR(bondy_bridge_relay_sup, [], permanent, infinity)
     ],
     {ok, {SupFlags, Children}}.

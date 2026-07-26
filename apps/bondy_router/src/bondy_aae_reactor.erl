@@ -76,6 +76,7 @@ the dispatcher is configured to effectively never restart.
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
+-include("bondy.hrl").
 -include("bondy_db_tables.hrl").
 -include("bondy_uris.hrl").
 
@@ -98,6 +99,7 @@ the dispatcher is configured to effectively never restart.
 
 %% API
 -export([start_link/0]).
+-export([apply_reaction/4]).
 
 -ifdef(TEST).
 %% Exposed for unit testing the reaction logic without a running cluster.
@@ -111,6 +113,7 @@ the dispatcher is configured to effectively never restart.
 -export([unfold_realm_key/1]).
 -export([unfold_grant_key/1]).
 -export([unfold_member_key/1]).
+-export([make_sub/3]).
 -endif.
 
 %% GEN_SERVER CALLBACKS
@@ -153,10 +156,12 @@ handle_info(retry_subscribe, State) ->
 handle_info(
     {bondy_oplog_core_merge_event, NS, Key, _Hlc, Op, Old}, State
 ) ->
-    %% A peer's change to a reacted-on table arrived via anti-entropy; route it
-    %% to the matching reaction by namespace. `Old` is the pre-merge cell value
-    %% (`undefined` when the cell did not exist).
-    ok = react(NS, Key, Op, Old, State),
+    %% A peer's change to a reacted-on table arrived via anti-entropy. Resolve
+    %% the reaction by namespace and hand it to the pool worker for this cell
+    %% `Key` — the reaction runs there, not inline, so one node's anti-entropy
+    %% side-effects no longer serialise through this process. `Old` is the
+    %% pre-merge cell value (`undefined` when the cell did not exist).
+    ok = route(NS, Key, Op, Old, State),
     {noreply, State};
 handle_info({bondy_oplog_core_event, _NS, _Key, _Hlc, _Op}, State) ->
     %% Local write — its side-effects fire inline at the write chokepoint.
@@ -260,25 +265,52 @@ ensure_subscribed(#sub{table = Table, label = Label} = Sub) ->
     end.
 
 %% @private
-%% Route a delivered merge event to the reaction for its namespace. An event for
-%% a namespace not (yet) bound — or with no reaction — is ignored.
-react(NS, Key, Op, Old, #state{subs = Subs}) ->
+%% Resolve a delivered merge event's namespace to its subscription and cast the
+%% reaction to the pool worker for this cell `Key` (hashed, so a cell's
+%% `set`/`clear` land on one worker in order; distinct keys spread across the
+%% pool). An event for a namespace not (yet) bound — or with no worker — is
+%% ignored.
+route(NS, Key, Op, Old, #state{subs = Subs}) ->
     case lists:keyfind(NS, #sub.ns, Subs) of
-        #sub{kind = user} ->
-            react_user(Key, Op, Old);
-        #sub{kind = realm} ->
-            react_realm(Key, Op);
-        #sub{kind = grant, label = Label} ->
-            react_grant(Label, Key, Op, Old);
-        #sub{kind = member} ->
-            react_member(Key, Op);
-        #sub{kind = source, label = Label} ->
-            react_source(Label, Key, Op, Old);
-        #sub{kind = rib, table = Table} ->
-            react_rib(Table, Key, Op);
+        #sub{} = Sub ->
+            case gproc_pool:pick_worker(?AAE_REACTOR_POOL, Key) of
+                Worker when is_pid(Worker) ->
+                    gen_server:cast(Worker, {react, Sub, Key, Op, Old});
+                _ ->
+                    ?LOG_WARNING(#{
+                        description =>
+                            "Dropping AAE merge reaction, no pool worker",
+                        namespace => NS
+                    }),
+                    ok
+            end;
         false ->
             ok
     end.
+
+-doc """
+Run the reaction for a resolved subscription `Sub` against a delivered merge
+event `(Key, Op, Old)`. Runs in the pool worker process (see
+`bondy_aae_reactor_worker`); split out from routing so the worker need not know
+the reaction taxonomy. Dispatch is by the subscription `kind`, mirroring the
+`reacted_tables/0` set.
+""".
+-spec apply_reaction(
+    Sub :: #sub{}, Key :: term(), Op :: term(), Old :: term() | undefined
+) -> ok.
+
+apply_reaction(#sub{kind = user}, Key, Op, Old) ->
+    react_user(Key, Op, Old);
+apply_reaction(#sub{kind = realm}, Key, Op, _Old) ->
+    react_realm(Key, Op);
+apply_reaction(#sub{kind = grant, label = Label}, Key, Op, Old) ->
+    react_grant(Label, Key, Op, Old);
+apply_reaction(#sub{kind = member}, Key, Op, _Old) ->
+    react_member(Key, Op);
+apply_reaction(#sub{kind = source, label = Label}, Key, Op, Old) ->
+    react_source(Label, Key, Op, Old);
+apply_reaction(#sub{kind = rib, table = Table}, Key, Op, _Old) ->
+    react_rib(Table, Key, Op).
 
 %% @private
 %% React to a remote security_users change. A `clear` (delete) closes this
@@ -533,3 +565,11 @@ unfold_member_key(Key) ->
         _ ->
             error({malformed_member_cell_key, Key})
     end.
+
+-ifdef(TEST).
+%% @private
+%% TEST-only: build a `#sub{}` for exercising `apply_reaction/4` dispatch without
+%% a running subscription (`ns`/`ref` are unused on the reaction path).
+make_sub(Kind, Label, Table) ->
+    #sub{kind = Kind, label = Label, table = Table}.
+-endif.

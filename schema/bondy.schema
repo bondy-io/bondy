@@ -1208,6 +1208,21 @@ end}.
 ]}.
 
 %% -----------------------------------------------------------------------------
+%% @doc The capacity of the anti-entropy merge-reaction worker pool, i.e. the
+%% maximum number of erlang processes applying remote-merge reactions (session
+%% close, RBAC cache invalidation, routing RIB stub updates) in parallel. Events
+%% are sharded by cell key, so a given cell's changes always run on the same
+%% worker and stay ordered (default = 16).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "load_regulation.aae_reactor.pool.size",
+"bondy_router.aae_reactor_pool.size", [
+  {default, 16},
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% -----------------------------------------------------------------------------
 %% @doc The maximun number of elements in the FIFO queue after which older items
 %% are evicted. This is the sum of all queues (1 per worker)
 %% -----------------------------------------------------------------------------

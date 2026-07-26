@@ -31,6 +31,7 @@
 -define(CHARS2LIST(Chars), unicode:characters_to_list(Chars, utf8)).
 
 -define(JOBS_POOLNAME, jobs_pool).
+-define(AAE_REACTOR_POOL, aae_reactor_pool).
 
 -define(SUPERVISOR(Id, Args, Restart, Timeout), #{
     id => Id,

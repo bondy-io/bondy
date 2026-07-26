@@ -7,6 +7,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
+-include("bondy.hrl").
 -include("bondy_uris.hrl").
 -include("bondy_db_tables.hrl").
 
@@ -422,4 +423,97 @@ react_rib_stub_lifecycle_test() ->
         )
     after
         meck:unload(bondy_config)
+    end.
+
+
+%% =============================================================================
+%% POOL ROUTING (bondy_aae_reactor_worker + gproc_pool)
+%% =============================================================================
+
+
+%% The reactor hashes each merge event by cell Key to a worker in the
+%% ?AAE_REACTOR_POOL: same key -> same worker (a cell's set/clear stay ordered),
+%% the worker dispatches by the sub's kind to the reaction, and a malformed event
+%% is swallowed (best-effort AP) rather than taking the worker down.
+pool_test_() ->
+    {setup, fun setup_pool/0, fun cleanup_pool/1, fun(Workers) ->
+        [
+            same_key_same_worker(Workers),
+            worker_dispatches_by_kind(Workers),
+            worker_survives_bad_event(Workers)
+        ]
+    end}.
+
+setup_pool() ->
+    {ok, _} = application:ensure_all_started(gproc),
+    N = 4,
+    _ = catch gproc_pool:new(?AAE_REACTOR_POOL, hash, [{size, N}]),
+    [
+        begin
+            _ = catch gproc_pool:add_worker(
+                ?AAE_REACTOR_POOL, {bondy_aae_reactor_worker, I}, I
+            ),
+            {ok, Pid} = bondy_aae_reactor_worker:start_link(I),
+            true = unlink(Pid),
+            Pid
+        end
+     || I <- lists:seq(1, N)
+    ].
+
+cleanup_pool(Workers) ->
+    _ = [catch gen_server:stop(P) || P <- Workers],
+    _ = catch gproc_pool:force_delete(?AAE_REACTOR_POOL),
+    ok.
+
+%% Same cell key always hashes to the same worker (ordering); a pid is returned
+%% (pool wiring).
+same_key_same_worker(_) ->
+    fun() ->
+        K = <<"com.example.ordered.proc">>,
+        W1 = gproc_pool:pick_worker(?AAE_REACTOR_POOL, K),
+        W2 = gproc_pool:pick_worker(?AAE_REACTOR_POOL, K),
+        ?assert(is_pid(W1)),
+        ?assertEqual(W1, W2)
+    end.
+
+%% A cast routed to a worker dispatches by the sub's kind: a user `clear` closes
+%% this node's sessions for that user.
+worker_dispatches_by_kind(_) ->
+    fun() ->
+        ok = meck:new(bondy_rbac_user, [passthrough]),
+        ok = meck:expect(
+            bondy_rbac_user, close_sessions, fun(_, _, _) -> ok end
+        ),
+        try
+            Sub = bondy_aae_reactor:make_sub(
+                user, "security_users", ?BONDY_DB_USER_TAB
+            ),
+            Worker = gproc_pool:pick_worker(?AAE_REACTOR_POOL, ?USER_KEY),
+            gen_server:cast(Worker, {react, Sub, ?USER_KEY, clear, undefined}),
+            %% A sync call is served after the preceding cast, so once it
+            %% returns the reaction has run.
+            _ = gen_server:call(Worker, flush),
+            ?assert(
+                meck:called(
+                    bondy_rbac_user,
+                    close_sessions,
+                    [?REALM, ?USER, ?BONDY_USER_DELETED]
+                )
+            )
+        after
+            meck:unload(bondy_rbac_user)
+        end
+    end.
+
+%% A malformed reaction payload is logged and swallowed — the worker stays alive
+%% and responsive so its queued backlog is not lost.
+worker_survives_bad_event(_) ->
+    fun() ->
+        Worker = gproc_pool:pick_worker(?AAE_REACTOR_POOL, <<"whatever">>),
+        gen_server:cast(Worker, {react, not_a_sub, <<"k">>, clear, undefined}),
+        ?assertEqual(
+            {error, {unsupported_call, flush}},
+            gen_server:call(Worker, flush)
+        ),
+        ?assert(is_process_alive(Worker))
     end.
