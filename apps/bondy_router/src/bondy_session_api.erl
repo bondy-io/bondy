@@ -10,7 +10,6 @@ and `bondy.session.self`.
 """.
 -behaviour(bondy_wamp_api).
 
--include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
 -export([get/3]).
@@ -21,31 +20,20 @@ and `bondy.session.self`.
 %% API
 %% =============================================================================
 
-get(Key, SessionId, _Details) ->
-    try
-        case bondy_session:lookup(Key) of
-            {ok, Session} ->
-                case bondy_session:external_id(Session) of
-                    SessionId ->
-                        {ok, #{}, [bondy_session:to_external(Session)], #{}};
-                    OtherId ->
-                        ?LOG_WARNING(#{
-                            description =>
-                                "Session data inconsistency. SessionId should be " ++
-                                integer_to_list(SessionId) ++ ".",
-                            session_id => OtherId
-                        }),
-                        throw(no_such_session)
-                end;
-            {error, not_found} ->
-                throw(no_such_session)
-        end
-    catch
-        throw:no_such_session ->
-            Uri = ?WAMP_NO_SUCH_SESSION,
-            Msg = <<"No session exists for the supplied identifier">>,
-            {error, Uri, #{}, [Msg]}
-    end.
+get(RealmUri, Guid, _Details) when is_binary(Guid) ->
+    %% Callback for the per-node `wamp.session.<hash>..get` wildcard. `Guid` is
+    %% the client-facing session id (`{NodeHash}.{Rest}`), which is also the
+    %% internal session store key; the lookup is realm-scoped so a caller cannot
+    %% read a session in another realm co-located on this node.
+    case bondy_session:lookup(RealmUri, Guid) of
+        {ok, Session} ->
+            {ok, #{}, [bondy_session:to_external(Session)], #{}};
+        {error, not_found} ->
+            no_such_session_error()
+    end;
+
+get(_RealmUri, _Guid, _Details) ->
+    no_such_session_error().
 
 %% =============================================================================
 %% CALBACKS
@@ -76,3 +64,13 @@ handle_call(~"bondy.session.self", #call{} = M, Ctxt) ->
             R = bondy_wamp_message:result(M#call.request_id, #{}, [Ext]),
             {reply, R}
     end.
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+no_such_session_error() ->
+    Uri = ?WAMP_NO_SUCH_SESSION,
+    Msg = <<"No session exists for the supplied identifier">>,
+    {error, Uri, #{}, [Msg]}.
