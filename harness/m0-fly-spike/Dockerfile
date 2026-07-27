@@ -23,16 +23,16 @@
 # =============================================================================
 # Build stage 1 — OTP-28 release build
 # =============================================================================
-FROM erlang:28.5.0 AS builder
+FROM erlang:28.5.0.3 AS builder
 
+# Only what the surviving native NIFs need (RocksDB is gone — no snappy/openssl-dev):
+#   build-essential (crc32cer C++, lz4/ezstd C) · cmake (crc32cer's `make nif`) ·
+#   git (rebar3 git deps + crc32cer fetches google/crc32c at build).
 RUN --mount=type=cache,id=apt,sharing=locked,target=/var/cache/apt apt-get update && \
     apt-get -y install --no-install-recommends \
     build-essential \
     cmake \
-    git \
-    libssl-dev \
-    libsnappy-dev \
-    curl && \
+    git && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /bondy/src
@@ -66,6 +66,10 @@ ENV HOME="/bondy"
 # Runtime packages: the deployment/Dockerfile minimal set PLUS the fault toolbox.
 # The fault tools are only ever driven by root over `fly ssh console`; the Bondy
 # process itself runs as the unprivileged `bondy` user (below).
+#   base runtime:
+#     libstdc++6     : C++ stdlib for the crc32cer NIF (google/crc32c is C++);
+#                      previously pulled in transitively by libsnappy1v5, which
+#                      is gone with RocksDB — so request it explicitly.
 #   fault toolbox:
 #     iptables       : partition (drop peer traffic on 18086)
 #     iproute2       : tc netem (delay/loss) + ss (connection confirmation)
@@ -78,7 +82,7 @@ ENV HOME="/bondy"
 RUN apt-get update && \
     apt-get -y upgrade && \
     apt-get -y install --no-install-recommends \
-        bash procps openssl libsnappy1v5 \
+        bash procps openssl libstdc++6 \
         iproute2 iptables libfaketime stress-ng util-linux \
         libcap2-bin curl iputils-ping \
     && apt-get -y autoremove && apt-get clean \

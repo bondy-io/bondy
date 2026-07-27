@@ -7,20 +7,27 @@
 # =============================================================================
 # Build stage 1
 # =============================================================================
-FROM erlang:27.3.4 AS builder
+FROM erlang:28.5.0.3 AS builder
 
-# Install build dependencies.
-# libsnappy-dev (headers) is correct HERE — the NIFs that link snappy are
-# compiled in this stage. The runtime stage only needs the shared library.
+# Build dependencies. RocksDB is gone, so the packages that existed only for it
+# are removed: libsnappy-dev (RocksDB linked system snappy), plus libssl-dev and
+# curl (no surviving NIF needs OpenSSL headers, and nothing at build fetches over
+# HTTP). What stays is exactly what the surviving native NIFs need to compile:
+#   - build-essential : gcc/g++/make/patch — crc32cer (C++), lz4 & ezstd (C)
+#   - cmake           : crc32cer's `make nif` invokes cmake — NOT a RocksDB
+#                       leftover (crc32cer backs brod's Kafka CRC32C)
+#   - git             : rebar3 git deps AND crc32cer's cmake ExternalProject
+#                       fetches google/crc32c 1.1.2 at build time
 RUN --mount=type=cache,id=apt,sharing=locked,target=/var/cache/apt apt-get update && \
     apt-get -y install --no-install-recommends \
     build-essential \
     cmake \
-    git \
-    libssl-dev \
-    libsnappy-dev \
-    curl && \
+    git && \
     rm -rf /var/lib/apt/lists/*
+
+# google/crc32c 1.1.2 ships a pre-3.5 CMakeLists; give modern cmake a policy floor
+# so crc32cer's ExternalProject configures.
+ENV CMAKE_POLICY_VERSION_MINIMUM=3.5
 
 WORKDIR /bondy/src
 
@@ -72,7 +79,14 @@ ENV HOME "/bondy"
 #   - procps    : ps, top, free, kill, sysctl, etc. (ops diagnostics)
 #   - iproute2  : ip, ss (replaces the deprecated net-tools)
 #   - openssl   : required by the Erlang crypto application
-#   - libsnappy1v5 : runtime shared lib for snappy compression (not the -dev headers)
+#   - libstdc++6 : runtime C++ stdlib for the crc32cer NIF (google/crc32c is
+#                 C++). It USED to arrive transitively via libsnappy1v5 (also
+#                 C++); with RocksDB/snappy removed it must be requested
+#                 explicitly or the Kafka CRC32C NIF fails to load.
+#
+# Removed with RocksDB:
+#   - libsnappy1v5 : RocksDB was the only consumer of system snappy; no
+#                 surviving NIF links it (lz4/ezstd vendor their own sources).
 #
 # Deliberately NOT installed (each removed a CVE class):
 #   - sudo      : container runs as the single non-root `bondy` user; no use for
@@ -89,7 +103,7 @@ ENV HOME "/bondy"
 RUN apt-get update && \
     apt-get -y upgrade && \
     apt-get -y install --no-install-recommends \
-        bash procps iproute2 openssl libsnappy1v5 \
+        bash procps iproute2 openssl libstdc++6 \
     && apt-get -y autoremove && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 -r bondy \

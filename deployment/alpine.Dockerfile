@@ -4,9 +4,11 @@
 # Build stage 1
 # ===========================================================================
 
-FROM erlang:27.3.4-alpine AS builder
+FROM erlang:28.5.0.3-alpine AS builder
 
-# Install build dependencies
+# Build dependencies. snappy-dev is removed with RocksDB (its only consumer);
+# build-base/cmake/git/patch stay for the surviving native NIFs — notably
+# crc32cer, whose cmake build fetches and patches google/crc32c at build time.
 RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
     ln -s /var/cache/apk /etc/apk/cache && \
     apk add --no-cache \
@@ -18,11 +20,13 @@ RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
         patch \
         ncurses \
         openssl \
-        snappy-dev \
         jq \
         curl \
         bash \
         nano
+
+# google/crc32c 1.1.2 ships a pre-3.5 CMakeLists; give modern cmake a policy floor.
+ENV CMAKE_POLICY_VERSION_MINIMUM=3.5
 
 WORKDIR /bondy/src
 
@@ -41,7 +45,9 @@ RUN rebar3 as docker tar && \
 # Build stage 2
 # ===========================================================================
 
-FROM alpine:3.20 as runner
+# Keep this Alpine version >= the erlang:*-alpine builder base (musl ABI must be
+# equal-or-newer, or the stage-1 NIFs fail to load). Verify on first build.
+FROM alpine:3.22 as runner
 
 # We define defaults
 # We assume you have DNS. Erlang will take the FQDN and generate
