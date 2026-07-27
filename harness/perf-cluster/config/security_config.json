@@ -1,0 +1,26 @@
+[
+  {
+    "uri": "com.leapsight.perf",
+    "description": "Perf load-test realm: anonymous clients may pub/sub/register/call on any URI. NOT for production.",
+    "security_enabled": true,
+    "authmethods": ["anonymous"],
+    "sources": [
+      { "usernames": ["anonymous"], "authmethod": "anonymous", "cidr": "0.0.0.0/0", "meta": {} },
+      { "usernames": ["anonymous"], "authmethod": "anonymous", "cidr": "::/0", "meta": {} }
+    ],
+    "grants": [
+      {
+        "permissions": [
+          "wamp.register", "wamp.unregister",
+          "wamp.subscribe", "wamp.unsubscribe",
+          "wamp.call", "wamp.cancel", "wamp.publish"
+        ],
+        "uri": "",
+        "match": "prefix",
+        "roles": ["anonymous"]
+      }
+    ],
+    "groups": [],
+    "users": []
+  }
+]

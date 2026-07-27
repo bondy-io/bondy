@@ -7,3 +7,11 @@ erlang_ls.config.template
 doc
 examples
 deployment
+jepsen
+bench
+_design
+## M0 config template is delivered to the VM via fly.toml [[files]] (read from
+## disk at deploy), never baked into the image — keep it out of the build
+## context so editing it does not bust the release build cache.
+harness/m0-fly-spike/config
+harness/perf-cluster/config

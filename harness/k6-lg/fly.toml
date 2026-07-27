@@ -1,0 +1,21 @@
+# =============================================================================
+# k6 load-generator app (co-located with bondy-perf-1 in lhr).
+# A single idle machine; run-lg.sh execs `k6 run` in it over fly ssh so the
+# load originates inside Fly's lhr datacenter (no transatlantic RTT).
+#
+# Deploy from the REPO ROOT:
+#   fly deploy --config harness/k6-lg/fly.toml --dockerfile harness/k6-lg/Dockerfile --remote-only
+# =============================================================================
+
+app            = "bondy-perf-lg"
+primary_region = "lhr"
+
+# No [http_service]: this app never receives inbound traffic, it only makes
+# outbound WS connections to the perf cluster.
+
+# Dedicated CPUs so the load generator itself is not the bottleneck (the whole
+# point of co-locating). performance-2x handles the smoke with headroom.
+# Sized to hold thousands of k6 VUs (each ~1-3 MB) + drive tens of k msg/s.
+[[vm]]
+  size   = "performance-4x"
+  memory = "16gb"

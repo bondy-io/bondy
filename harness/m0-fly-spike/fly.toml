@@ -7,7 +7,8 @@
 #              --dockerfile harness/m0-fly-spike/Dockerfile --remote-only
 # then `fly scale count 3`. The orchestrator (run-spike.sh) does all of this.
 #
-# [[files]] local_path is resolved relative to THIS file's directory.
+# [[files]] local_path is resolved relative to the deploy CWD (the repo root),
+# NOT this file's directory — so the paths below are repo-root-relative.
 # =============================================================================
 
 app            = "bondy-perf-m0"
@@ -27,10 +28,9 @@ kill_timeout   = "30s"
   ERL_CRASH_DUMP                = "/dev/null"
   ERL_DIST_PORT                 = "27784"
 
-# One volume per machine (flyctl auto-provisions on `fly scale count`).
-[mounts]
-  source      = "m0_data"
-  destination = "/bondy/data"
+# No [mounts]: M0 is a capability spike, not a durability test, so /bondy/data
+# lives on ephemeral machine storage — this avoids volume provisioning entirely.
+# Real perf/correctness runs (M6+) reintroduce a per-machine volume.
 
 # Keep every machine up — faults must act on a running node, never on one that
 # Fly autostopped underneath us (05 R9).
@@ -60,17 +60,17 @@ kill_timeout   = "30s"
     type         = "http"
     interval     = "15s"
     timeout      = "10s"
-    grace_period = "30s"
+    grace_period = "60s"          ## cold Bondy boot (AAE + leveled + listeners) can exceed 30s
     method       = "get"
     path         = "/ping"
 
 [[files]]
   guest_path = "/bondy/setup.sh"
-  local_path = "setup.sh"
+  local_path = "harness/m0-fly-spike/setup.sh"
 
 [[files]]
   guest_path = "/bondy/etc/bondy.conf.template"
-  local_path = "config/bondy.conf.template"
+  local_path = "harness/m0-fly-spike/config/bondy.conf.template"
 
 [[metrics]]
   port = 18081

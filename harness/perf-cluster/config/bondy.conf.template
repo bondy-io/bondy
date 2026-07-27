@@ -1,0 +1,108 @@
+## =============================================================================
+## Bondy config -- perf cluster (harness/perf-cluster)
+## =============================================================================
+## Same tuned profile as the M0 spike (all keys verified against schema/bondy.schema),
+## PLUS a security realm config so anonymous WAMP-over-WS clients can connect and
+## pub/sub/call for load testing.
+##
+## ASCII ONLY, and no stray dollar-brace references anywhere. bin/replace-env-vars
+## expands every dollar-brace NAME token in the whole file (comments included)
+## before cuttlefish parses it; an undefined NAME aborts the node boot.
+## =============================================================================
+
+## --- node identity / cluster (Fly 6PN DNS discovery, no seed node) ------------
+cluster.overlay.topology                    = fullmesh
+cluster.automatic_leave                     = off
+## Private 6PN mesh, no cluster mTLS provisioned -> allow the insecure peer plane
+## (guard_peer_plane would otherwise refuse to boot). Production uses real mTLS.
+cluster.tls.allow_insecure                  = on
+cluster.peer_ip                             = ${FLY_PRIVATE_IP}
+cluster.peer_port                           = 18086
+cluster.peer_discovery.enabled              = on
+cluster.peer_discovery.type                 = dns
+cluster.peer_discovery.initial_delay        = 10s
+cluster.peer_discovery.polling_interval     = 10s
+cluster.peer_discovery.timeout              = 5s
+cluster.peer_discovery.config.record_type   = aaaa
+cluster.peer_discovery.config.query         = ${FLY_APP_NAME}.internal
+## node_basename is the part BEFORE @ in the Erlang node name (setup.sh sets
+## BONDY_ERL_NODENAME=bondy@<ip>), so it MUST be `bondy`, not the app name.
+cluster.peer_discovery.config.node_basename = bondy
+cluster.peer_discovery.config.nameservers.1 = fdaa::3
+cluster.channels.wamp_relay.parallelism     = 2
+
+## --- anti-entropy: MUST be on -- 500ms sync tick ------------------------------
+oplog.aae                                   = on
+oplog.aae.interval                          = 500ms
+
+## --- routing / ordering (flow lanes enforce per-pair FIFO) --------------------
+router.forward.ack                          = off
+router.forward.retransmission               = off
+load_regulation.router.flow_pool.capacity   = 100000
+
+## --- registry RIB: write-only architecture ------------------------------------
+registry.rib.check_interval                 = 5m
+
+## --- progressive / streaming RPC ----------------------------------------------
+wamp.dealer.progressive_call_results        = on
+wamp.dealer.progressive_calls               = on
+
+## --- AAE reactor pool ---------------------------------------------------------
+load_regulation.aae_reactor.pool.size       = 16
+
+## --- Partisan max message size ------------------------------------------------
+cluster.max_message_size                    = 64MB
+
+## --- rpc ----------------------------------------------------------------------
+wamp.call_timeout                           = 30s
+
+## --- listeners: WebSocket only (WAMP-TCP/TLS disabled) ------------------------
+## /ws for clients on 18080 (Fly edge terminates TLS -> cleartext WS internally).
+## Admin API (18081) carries /metrics, /ping, /ready.
+admin_api.http.enabled                      = on
+admin_api.http.ip                           = 0.0.0.0
+admin_api.http.port                         = 18081
+api_gateway.http.enabled                    = on
+api_gateway.http.ip                         = 0.0.0.0
+api_gateway.http.port                       = 18080
+wamp.tcp.enabled                            = off
+admin_api.https.enabled                     = off
+api_gateway.https.enabled                   = off
+wamp.tls.enabled                            = off
+wamp.websocket.idle_timeout                 = 8h
+
+## --- acceptor pools + connection limits (the /ws listener) --------------------
+## Acceptor pool = concurrent accept()ors; sized for connection-establishment
+## bursts (200, the schema default, pinned explicitly). nodelay disables Nagle.
+api_gateway.http.acceptors_pool_size        = 200
+api_gateway.http.max_connections            = 100000
+api_gateway.http.backlog                    = 4096      ## default 1024; bump for burst accept
+api_gateway.http.nodelay                    = on
+admin_api.http.acceptors_pool_size          = 50        ## metrics/health only, low traffic
+
+## --- worker pools -------------------------------------------------------------
+## Process pools multiplex over schedulers (= vCPUs), so size ~ to cores, NOT the
+## session count. Defaults are generous for a 2-vCPU box; scale up on bigger VMs.
+load_regulation.router.pool.type            = transient  ## permanent avoids per-job spawn (a further lever)
+load_regulation.router.pool.size            = 16         ## routing workers (ingress flow-pool jobs)
+load_regulation.router.pool.capacity        = 2000000    ## max concurrent router procs
+## load_regulation.router.flow_pool.capacity + aae_reactor.pool.size set above.
+load_regulation.session_manager.pool.size   = 32         ## session-lifecycle workers
+load_regulation.job_manager.pool.size       = 16
+
+## vm.process.limit / vm.port.limit left at their 2,097,152 (2M) default -- already
+## far above 3000 sessions/node, so no override needed. (NB the real keys use dots,
+## not underscores; the stale `vm.process_limit` form would fail cuttlefish.)
+
+## --- security: the perf realm (anonymous pub/sub/rpc) -------------------------
+security.config_file                        = ${BONDY_ETC_DIR}/security_config.json
+## Anonymous auth defaults to `local` (loopback only, like RabbitMQ's guest);
+## remote k6 clients need `on` (still gated by the realm's own anonymous sources).
+security.allow_anonymous_user               = on
+
+## --- data (durable core DB; ephemeral machine storage) ------------------------
+platform_data_dir                           = ${BONDY_DATA_DIR}
+
+## --- logging ------------------------------------------------------------------
+log.level                                   = info
+log.handlers.default.level                  = info

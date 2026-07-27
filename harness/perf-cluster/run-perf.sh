@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Perf cluster deploy -- 3-node Bondy on Fly that accepts anonymous WS clients.
+# Reuses the proven M0 image. Run from the REPO ROOT. Prints the WS URL + the
+# k6 command to run the smoke.
+#
+#   FLY_ORG=<org> [NODES=3] ./harness/perf-cluster/run-perf.sh
+#   M0_SKIP_DEPLOY=1 ... to just re-check health + reprint the run command.
+# =============================================================================
+set -euo pipefail
+if [ "${BASH_VERSINFO:-0}" -lt 4 ]; then
+  echo "ERROR: bash >= 4 required (found ${BASH_VERSION:-?}). Try: brew install bash" >&2
+  exit 1
+fi
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/../.." && pwd)"
+APP="bondy-perf-1"
+ORG="${FLY_ORG:-leapsight}"
+REGION="${FLY_REGION:-lhr}"
+NODES="${NODES:-3}"
+REALM="com.leapsight.perf"
+CONFIG="harness/perf-cluster/fly.toml"
+DOCKERFILE="harness/m0-fly-spike/Dockerfile"
+
+cd "$ROOT"
+say() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
+die() { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
+
+command -v fly >/dev/null || die "flyctl not on PATH"
+command -v jq  >/dev/null || die "jq not on PATH"
+fly auth whoami >/dev/null 2>&1 || die "not logged in -- run: fly auth login"
+
+if [ "${M0_SKIP_DEPLOY:-0}" != "1" ]; then
+  if ! fly apps list --json | jq -e --arg a "$APP" '.[]|select(.Name==$a)' >/dev/null 2>&1; then
+    say "creating app $APP in org $ORG"; fly apps create "$APP" --org "$ORG"
+  fi
+  say "deploying (remote build) -- reusing the M0 image"
+  fly deploy --config "$CONFIG" --dockerfile "$DOCKERFILE" \
+    --app "$APP" --regions "$REGION" --remote-only --ha=false --yes
+  say "scaling to $NODES machines in $REGION"
+  fly scale count "$NODES" --app "$APP" --region "$REGION" --yes
+fi
+
+say "waiting for $NODES healthy machines"
+for i in $(seq 1 40); do
+  started=$(fly machines list --app "$APP" --json | jq '[.[]|select(.state=="started")]|length')
+  passing=$(fly machines list --app "$APP" --json | jq '[.[]|.checks[]?|select(.status=="passing")]|length')
+  printf '  [%2d/40] started=%s checks_passing=%s\n' "$i" "$started" "$passing"
+  [ "${started:-0}" -ge "$NODES" ] && [ "${passing:-0}" -ge "$NODES" ] && break
+  sleep 15
+done
+[ "${started:-0}" -ge "$NODES" ] || die "cluster did not reach $NODES started machines"
+
+WS_URL="wss://${APP}.fly.dev/ws"
+say "perf cluster ready"
+cat <<EOF
+
+  Nodes:  $NODES ($REGION)
+  WS URL: $WS_URL
+  Realm:  $REALM   (anonymous auth)
+
+  Run the pub/sub smoke (needs k6: brew install k6):
+
+    k6 run -e WS_URL=$WS_URL -e REALM=$REALM -e VUS=50 \\
+       harness/k6/pubsub_smoke.js
+
+  Or via just:  just perf-smoke
+
+  Tear down:    just perf-down   (stop)  |  just perf-destroy  (delete app)
+EOF

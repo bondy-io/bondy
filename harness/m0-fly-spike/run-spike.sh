@@ -85,9 +85,10 @@ rm -f "$OUT"/*.ndjson
 for i in "${!IDS[@]}"; do
   id="${IDS[$i]}"; peer="${IPS[$(( (i+1) % N ))]}"
   say "probing $id (peer $peer)"
-  # `fly ssh console` connects as root; probe is baked into the image.
+  # `fly ssh console` connects as root; pipe the LOCAL probe over stdin so probe
+  # edits take effect without rebuilding/redeploying the image.
   if ! fly ssh console --app "$APP" --machine "$id" \
-        -C "/usr/local/bin/bondy-probe.sh $peer eth0" 2>"$OUT/$id.stderr" \
+        -C "bash -s -- $peer eth0" < "$HERE/probe.sh" 2>"$OUT/$id.stderr" \
         | tee "$OUT/$id.ndjson"; then
     echo "  (probe on $id returned non-zero — see $OUT/$id.stderr)"
   fi

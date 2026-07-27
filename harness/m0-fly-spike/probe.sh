@@ -64,19 +64,23 @@ emit "net_admin_cap" true "$NETADMIN" "$NETADMIN" true \
 # 1. Partition — drop Partisan peer traffic (iptables/ip6tables on :18086)
 # =============================================================================
 if [ -n "$PEER" ] && have "$IPT"; then
-  before=$(ss -tn "dport = :$PEER_PORT or sport = :$PEER_PORT" 2>/dev/null | grep -c ESTAB)
+  # Confirm at the NETWORK layer, not via ESTAB count: a DROP rule leaves an
+  # already-established socket in ESTAB for minutes, so the real signal is that
+  # a NEW TCP connection to the peer's Partisan port succeeds before the rule
+  # and is blocked (SYN black-holed -> connect times out) after it.
+  reach_before=no; timeout 4 bash -c "exec 3<>/dev/tcp/$PEER/$PEER_PORT" 2>/dev/null && reach_before=yes
   "$IPT" -A INPUT  -s "$PEER" -p tcp --dport "$PEER_PORT" -j DROP 2>/dev/null
   a1=$?
   "$IPT" -A OUTPUT -d "$PEER" -p tcp --dport "$PEER_PORT" -j DROP 2>/dev/null
   applied=false; [ "$a1" -eq 0 ] && applied=true
-  sleep 6   # let the existing peer connection notice the black-hole
-  after=$(ss -tn "dport = :$PEER_PORT or sport = :$PEER_PORT" 2>/dev/null | grep -c ESTAB)
-  mem=$(curl -s "$ADMIN/metrics" 2>/dev/null | grep -E '^bondy_cluster_membership_size' | awk '{print $2}' | head -1)
-  confirmed=false; [ "${after:-0}" -lt "${before:-0}" ] && confirmed=true
+  reach_after=yes; timeout 6 bash -c "exec 3<>/dev/tcp/$PEER/$PEER_PORT" 2>/dev/null || reach_after=no
+  sleep 10  # secondary: give Partisan's failure detector a moment to react
+  mem=$(curl -s "$ADMIN/metrics" 2>/dev/null | grep -E '^bondy_cluster_all_members_connected' | awk '{print $2}' | head -1)
+  confirmed=false; [ "$reach_before" = yes ] && [ "$reach_after" = no ] && confirmed=true
   "$IPT" -D INPUT  -s "$PEER" -p tcp --dport "$PEER_PORT" -j DROP 2>/dev/null
   "$IPT" -D OUTPUT -d "$PEER" -p tcp --dport "$PEER_PORT" -j DROP 2>/dev/null
   emit "partition_iptables" true "$applied" "$confirmed" true \
-       "$IPT peer=$PEER estab ${before:-?}->${after:-?} membership_size=${mem:-NA}"
+       "$IPT peer=$PEER port_reach $reach_before->$reach_after all_connected=${mem:-NA}"
 else
   emit "partition_iptables" true false false true "no peer arg or $IPT missing"
 fi
@@ -144,7 +148,9 @@ fi
 # =============================================================================
 # 6. Signal capability — can we signal the BEAM? (do NOT actually kill it)
 # =============================================================================
-BEAM=$(pgrep -f beam.smp | head -1)
+# Match the process NAME (comm=beam.smp); `pgrep -f` would miss it because the
+# BEAM's argv is "/bondy/bin/bondy ...", which does not contain "beam.smp".
+BEAM=$(pgrep -x beam.smp | head -1)
 if [ -n "$BEAM" ]; then
   kill -0 "$BEAM" 2>/dev/null
   ok=false; [ $? -eq 0 ] && ok=true

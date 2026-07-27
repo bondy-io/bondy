@@ -630,3 +630,55 @@ m0-destroy:
     @echo "This destroys the bondy-perf-m0 app and all its volumes."
     @read -p "Type 'destroy' to confirm: " c && [ "$c" = "destroy" ] || (echo aborted; exit 1)
     fly apps destroy bondy-perf-m0 --yes
+
+# =============================================================================
+# Test harness — perf cluster + k6 smoke (harness/perf-cluster, harness/k6)
+# Requires `fly auth login` + a Fly org; the smoke needs k6 (brew install k6).
+# =============================================================================
+
+# Deploy the 3-node perf cluster (anonymous WS realm) + print the k6 command.
+#   FLY_ORG=<org> just perf-deploy
+perf-deploy:
+    ./harness/perf-cluster/run-perf.sh
+
+# Re-check health + reprint the run command (no redeploy).
+perf-info:
+    M0_SKIP_DEPLOY=1 ./harness/perf-cluster/run-perf.sh
+
+# Run the pub/sub smoke against the perf cluster (default 50 VUs).
+#   just perf-smoke 200
+perf-smoke vus="50":
+    k6 run -e WS_URL=wss://bondy-perf-1.fly.dev/ws -e REALM=com.leapsight.perf -e VUS={{vus}} harness/k6/pubsub_smoke.js
+
+perf-logs:
+    fly logs --app bondy-perf-1
+
+perf-shell:
+    fly ssh console --app bondy-perf-1
+
+# Stop all machines (halt compute cost).
+perf-down:
+    #!/usr/bin/env bash
+    set -eu
+    ids=$(fly machines list --app bondy-perf-1 --json | jq -r '.[].id')
+    for id in $ids; do echo "stopping $id"; fly machines stop "$id" --app bondy-perf-1; done
+
+# DESTRUCTIVE — destroy the bondy-perf-1 app.
+perf-destroy:
+    @echo "This destroys the bondy-perf-1 app and all its machines."
+    @read -p "Type 'destroy' to confirm: " c && [ "$c" = "destroy" ] || (echo aborted; exit 1)
+    fly apps destroy bondy-perf-1 --yes
+
+# Deploy a co-located k6 load generator in lhr and run the smoke from INSIDE Fly
+# (no WAN). First run builds+deploys the LG; use perf-lg-run to reuse it.
+#   FLY_ORG=<org> just perf-lg 200
+perf-lg vus="50":
+    VUS={{vus}} ./harness/k6-lg/run-lg.sh
+
+# Re-run the smoke on the already-deployed LG (no redeploy).
+perf-lg-run vus="50":
+    SKIP_DEPLOY=1 VUS={{vus}} ./harness/k6-lg/run-lg.sh
+
+# Destroy the LG app.
+perf-lg-destroy:
+    fly apps destroy bondy-perf-lg --yes

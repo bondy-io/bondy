@@ -1,0 +1,82 @@
+# =============================================================================
+# Perf cluster -- 3-node Bondy that accepts anonymous WAMP-over-WS clients.
+# Design: _design/test-harness (M2/M7). Reuses the proven M0 image
+# (harness/m0-fly-spike/Dockerfile). Pinned tag: develop-perf.1.
+#
+# Deploy from the REPO ROOT (build context = repo root for `COPY . /bondy/src`):
+#   fly deploy --config harness/perf-cluster/fly.toml \
+#              --dockerfile harness/m0-fly-spike/Dockerfile --remote-only
+# run-perf.sh does all of this. [[files]] local_path is deploy-CWD-relative
+# (repo root), so the paths below are repo-root-relative.
+# =============================================================================
+
+app            = "bondy-perf-1"
+primary_region = "lhr"
+kill_signal    = "SIGTERM"
+kill_timeout   = "30s"
+
+[experimental]
+  entrypoint = ["/bin/bash", "-c", "source /bondy/setup.sh && exec bin/bondy foreground"]
+
+[env]
+  BONDY_DATA_DIR                = "/bondy/data"
+  BONDY_ETC_DIR                 = "/bondy/etc"
+  BONDY_ERL_DISTRIBUTED_COOKIE  = "bondy"
+  BONDY_LOG_LEVEL               = "info"
+  ERL_CRASH_DUMP                = "/dev/null"
+  ERL_DIST_PORT                 = "27784"
+
+# Public WAMP-over-WebSocket endpoint. Fly's edge terminates TLS on 443 and
+# forwards to internal 18080 (cleartext WS), so clients use wss://<app>.fly.dev/ws.
+[http_service]
+  internal_port        = 18080
+  auto_stop_machines   = false
+  auto_start_machines  = false
+  min_machines_running = 3
+
+  [http_service.concurrency]
+    type       = "connections"
+    hard_limit = 100000
+    soft_limit = 100000
+
+[[services]]
+  protocol      = "tcp"
+  internal_port = 18081                 # admin API: /ping /ready /metrics
+
+  [services.concurrency]
+    type       = "connections"
+    hard_limit = 1024
+    soft_limit = 1024
+
+[checks]
+  [checks.admin-http-alive]
+    port         = 18081
+    type         = "http"
+    interval     = "15s"
+    timeout      = "10s"
+    grace_period = "60s"
+    method       = "get"
+    path         = "/ping"
+
+[[files]]
+  guest_path = "/bondy/setup.sh"
+  local_path = "harness/perf-cluster/setup.sh"
+
+[[files]]
+  guest_path = "/bondy/etc/bondy.conf.template"
+  local_path = "harness/perf-cluster/config/bondy.conf.template"
+
+[[files]]
+  guest_path = "/bondy/etc/security_config.json"
+  local_path = "harness/perf-cluster/config/security_config.json"
+
+[[metrics]]
+  port = 18081
+  path = "/metrics"
+
+# performance-8x (8 dedicated cores/node = 24 across the cluster) to test whether
+# 9k sessions (3k/node) is a per-node CPU-capacity limit. Memory is not the
+# constraint (~0.5 MB/session), so 16 GB is ample headroom.
+[[vm]]
+  size   = "performance-8x"
+  memory = "16gb"

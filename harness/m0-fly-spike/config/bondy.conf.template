@@ -1,20 +1,28 @@
 ## =============================================================================
-## Bondy config — M0 Fly fault-injection spike (harness/m0-fly-spike)
+## Bondy config -- M0 Fly fault-injection spike (harness/m0-fly-spike)
 ## =============================================================================
-## Pinned tag: develop-perf.1 (4995ea12). Derived from _design/test-harness/03 §2
+## Pinned tag: develop-perf.1 (4995ea12). Derived from _design/test-harness/03 #2
 ## and reconciled key-by-key against schema/bondy.schema at the pinned tag
-## (every key/datatype/default below was verified to exist — a wrong key fails
+## (every key/datatype/default below was verified to exist -- a wrong key fails
 ## cuttlefish validation and the node never boots).
+##
+## ASCII ONLY, and no stray variable references anywhere. bin/replace-env-vars
+## expands every dollar-brace NAME token in the whole file (comments included)
+## before cuttlefish parses it; an undefined NAME aborts the node boot.
 ##
 ## Scope: M0 only needs a 3-node cluster that BOOTS and FORMS a full mesh so the
 ## capability probe can inject faults. Client realms and load are out of scope
-## for M0 (they arrive at M2/M6). The full tuned profile is validated by the M0
-## boot itself — this is the first place the pinned tag's config is exercised.
+## for M0 (they arrive at M2/M6).
 ## =============================================================================
 
 ## --- node identity / cluster (Fly 6PN DNS discovery, no seed node) ------------
 cluster.overlay.topology                    = fullmesh
 cluster.automatic_leave                     = off
+## M0 runs on Fly's private 6PN mesh with no cluster mTLS provisioned.
+## bondy_app:guard_peer_plane refuses to boot a discovering node on an insecure
+## peer plane unless this override is set. Real perf/correctness runs (M6) use
+## the production mTLS from deployment/fly/CLUSTER_MTLS.md instead.
+cluster.tls.allow_insecure                  = on
 cluster.peer_ip                             = ${FLY_PRIVATE_IP}
 cluster.peer_port                           = 18086
 cluster.peer_discovery.enabled              = on
@@ -25,13 +33,13 @@ cluster.peer_discovery.timeout              = 5s
 cluster.peer_discovery.config.record_type   = aaaa
 cluster.peer_discovery.config.query         = ${FLY_APP_NAME}.internal
 ## node_basename is the part BEFORE @ in the Erlang node name. setup.sh sets
-## BONDY_ERL_NODENAME=bondy@<ip>, so this MUST be `bondy` — NOT ${FLY_APP_NAME}
+## BONDY_ERL_NODENAME=bondy@<ip>, so this MUST be `bondy`, NOT ${FLY_APP_NAME}
 ## (the app is bondy-perf-m0; using the app name would build wrong peer names).
 cluster.peer_discovery.config.node_basename = bondy
 cluster.peer_discovery.config.nameservers.1 = fdaa::3
 cluster.channels.wamp_relay.parallelism     = 2
 
-## --- anti-entropy: MUST be on (00 §3 landmine) — 500ms sync tick --------------
+## --- anti-entropy: MUST be on (00 #3 landmine) -- 500ms sync tick -------------
 oplog.aae                                   = on
 oplog.aae.interval                          = 500ms
 
@@ -57,7 +65,7 @@ load_regulation.aae_reactor.pool.size       = 16
 
 ## --- Partisan max message size ------------------------------------------------
 ## A cell/frame over this ceiling is correctly skipped and never replicates
-## (a P3 "permanent divergence that is CORRECT" — 05 R21). Default kept explicit.
+## (a P3 "permanent divergence that is CORRECT" -- 05 R21). Default kept explicit.
 cluster.max_message_size                    = 64MB
 
 ## --- rpc ----------------------------------------------------------------------
@@ -72,9 +80,14 @@ api_gateway.http.enabled                    = on
 api_gateway.http.ip                         = 0.0.0.0
 api_gateway.http.port                       = 18080
 wamp.tcp.enabled                            = off
+## TLS/HTTPS listeners off: no server certs are provisioned for the spike (M0 is
+## HTTP/WS only). Avoids the keycert.pem enoent warnings at boot.
+admin_api.https.enabled                     = off
+api_gateway.https.enabled                   = off
+wamp.tls.enabled                            = off
 wamp.websocket.idle_timeout                 = 8h
 
-## --- data (durable core DB on the Fly volume) ---------------------------------
+## --- data (durable core DB; ephemeral machine storage for M0) -----------------
 platform_data_dir                           = ${BONDY_DATA_DIR}
 
 ## --- logging ------------------------------------------------------------------
@@ -82,10 +95,10 @@ log.level                                   = info
 log.handlers.default.level                  = info
 
 ## =============================================================================
-## FINDING (2026-07-27, code-verified): `registry_presence_evict_after` listed in
-## 03 §2 is NOT a cuttlefish key at the pinned tag — schema/bondy.schema has no
-## presence/evict mapping — so it is OMITTED here (including it would fail boot).
-## The EVICT grace therefore stays at its code default (24h). Before any
-## EVICT-dependent milestone (M4/M5) the real override (code -define or
-## advanced.config) must be located, and 03 §2 corrected. See FLY_FAULT_CAPABILITY.md.
+## FINDING (2026-07-27, code-verified): `registry_presence_evict_after` from
+## 03 #2 is NOT a cuttlefish key at the pinned tag (schema/bondy.schema has no
+## presence/evict mapping) -- so it is OMITTED (including it would fail boot).
+## EVICT grace stays at its code default (24h). Before any EVICT-dependent
+## milestone (M4/M5), locate the real override (code -define or advanced.config)
+## and correct 03 #2. See FLY_FAULT_CAPABILITY.md.
 ## =============================================================================

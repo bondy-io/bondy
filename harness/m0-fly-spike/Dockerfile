@@ -89,12 +89,12 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 -r bondy \
     && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "bondy" bondy \
-    && mkdir -p /bondy/etc \
-    && chown bondy:bondy /bondy/etc
+    && mkdir -p /bondy/etc /bondy/data /bondy/log /bondy/tmp \
+    && chown -R bondy:bondy /bondy/etc /bondy/data /bondy/log /bondy/tmp
 
-# The M0 capability probe (root-run via fly ssh). Baked into the image so the
-# orchestrator can invoke it without shipping a script over the wire each time.
-COPY --chmod=0755 harness/m0-fly-spike/probe.sh /usr/local/bin/bondy-probe.sh
+# The M0 capability probe is NOT baked in: run-spike.sh pipes it over `fly ssh`
+# stdin (`bash -s`), so probe edits take effect without an image rebuild. Only
+# the fault toolbox above needs to be present in the image.
 
 WORKDIR /bondy
 USER bondy:bondy
@@ -105,6 +105,8 @@ EXPOSE 18080/tcp
 EXPOSE 18081/tcp
 EXPOSE 18086/tcp
 
-VOLUME ["/bondy/etc", "/bondy/data", "/bondy/log", "/bondy/tmp"]
+## No VOLUME for M0: the spike keeps /bondy/data on the bondy-owned image dir
+## (created + chowned above) so the durable core DB tree is writable without a
+## Fly volume. Real perf/correctness runs (M6) mount a per-machine volume.
 
 ENTRYPOINT ["bondy", "foreground"]
