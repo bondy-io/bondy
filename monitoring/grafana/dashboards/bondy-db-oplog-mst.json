@@ -10,7 +10,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 6,
+  "version": 7,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -9485,6 +9485,548 @@
           },
           "expr": "max by (kind) (max_over_time(bondy_oplog_sync_oversized_item_last_bytes{node=~\"$node\"}[$__range]))",
           "legendFormat": "{{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 153,
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 378
+      },
+      "title": "Cluster \u2014 inter-node links (Partisan telemetry)",
+      "panels": []
+    },
+    {
+      "id": 154,
+      "type": "timeseries",
+      "title": "Inter-node RTT (quantiles)",
+      "description": "Partisan heartbeat round-trip across all peers/channels.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 379
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(bondy_cluster_peer_rtt_milliseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.9, sum by (le) (rate(bondy_cluster_peer_rtt_milliseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "p90"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(bondy_cluster_peer_rtt_milliseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 155,
+      "type": "heatmap",
+      "title": "Inter-node RTT (heatmap)",
+      "description": "RTT distribution over time.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 379
+      },
+      "options": {
+        "calculate": false,
+        "cellGap": 1,
+        "color": {
+          "scheme": "Spectral",
+          "mode": "scheme"
+        },
+        "yAxis": {
+          "unit": "ms"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (le) (rate(bondy_cluster_peer_rtt_milliseconds_bucket{node=~\"$node\"}[$__rate_interval]))",
+          "format": "heatmap",
+          "legendFormat": "{{le}}"
+        }
+      ]
+    },
+    {
+      "id": 156,
+      "type": "timeseries",
+      "title": "Send backpressure \u2014 pending bytes (by peer, side)",
+      "description": "Bytes queued to send but not flushed. Sustained > 0 = link can't keep up.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 379
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "max by (peer, side) (bondy_cluster_peer_send_pending_bytes{node=~\"$node\"})",
+          "legendFormat": "{{peer}} {{side}}"
+        }
+      ]
+    },
+    {
+      "id": 157,
+      "type": "timeseries",
+      "title": "Connection churn (up / down by reason)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 387
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_cluster_connection_up_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "up"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (reason) (rate(bondy_cluster_connection_down_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "down: {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 158,
+      "type": "timeseries",
+      "title": "Channel connections vs target (under-provisioned)",
+      "description": "size < target means a channel is running under its configured parallelism.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 387
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (channel) (bondy_cluster_channel_connections{node=~\"$node\"})",
+          "legendFormat": "size {{channel}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (channel) (bondy_cluster_channel_connections_target{node=~\"$node\"})",
+          "legendFormat": "target {{channel}}"
+        }
+      ]
+    },
+    {
+      "id": 159,
+      "type": "timeseries",
+      "title": "Membership: size + change rate",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 387
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "max(bondy_cluster_membership_size{node=~\"$node\"})",
+          "legendFormat": "members"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum by (direction) (rate(bondy_cluster_membership_changes_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "{{direction}}/s"
+        }
+      ]
+    },
+    {
+      "id": 160,
+      "type": "timeseries",
+      "title": "Connect & TLS-handshake latency (p99, by result)",
+      "description": "A spike in handshake result=error is the slowloris signal.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 395
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, result) (rate(bondy_cluster_connect_latency_milliseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "connect {{result}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, result) (rate(bondy_cluster_tls_handshake_milliseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "handshake {{result}}"
+        }
+      ]
+    },
+    {
+      "id": 161,
+      "type": "timeseries",
+      "title": "Connect / handshake failure rate",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 395
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_cluster_connect_latency_milliseconds_count{node=~\"$node\",result=\"error\"}[$__rate_interval]))",
+          "legendFormat": "connect errors"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(rate(bondy_cluster_tls_handshake_milliseconds_count{node=~\"$node\",result=\"error\"}[$__rate_interval]))",
+          "legendFormat": "handshake errors"
         }
       ]
     }

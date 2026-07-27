@@ -23,6 +23,7 @@ We follow the Prometheus metric and label naming practices described at
 -export([handle_registry_event/4]).
 -export([handle_rpc_latency/4]).
 -export([handle_lifecycle_event/4]).
+-export([handle_partisan_event/4]).
 -export([days_duration_buckets/0]).
 -export([hours_duration_buckets/0]).
 -export([minutes_duration_buckets/0]).
@@ -136,6 +137,7 @@ setup() ->
     ok = declare_message_families(),
     ok = declare_net_session_families(),
     ok = declare_rib_families(),
+    ok = declare_partisan_families(),
     %% All event-driven metrics are captured inline in the emitting
     %% process (bondy_telemetry) and sunk into bondy_metrics by the
     %% handlers below. Attaching is idempotent.
@@ -177,6 +179,25 @@ setup() ->
             [bondy, user, event]
         ],
         fun ?MODULE:handle_lifecycle_event/4,
+        undefined
+    ),
+    %% Partisan inter-node telemetry (doc_extras/telemetry.md). Only the events
+    %% Bondy's overlay actually emits are attached — the HyParView, Thicket
+    %% (interior_load) and causal-messaging events never fire under the
+    %% pluggable manager + full-membership + Plumtree defaults.
+    _ = telemetry:attach_many(
+        {?MODULE, partisan_events},
+        [
+            [partisan, connection, client, connect],
+            [partisan, socket, server, handshake],
+            [partisan, connection, client, heartbeat],
+            [partisan, connection, server, heartbeat],
+            [partisan, connection, up],
+            [partisan, connection, down],
+            [partisan, channel, connections],
+            [partisan, membership, changed]
+        ],
+        fun ?MODULE:handle_partisan_event/4,
         undefined
     ),
     ok = bondy_prometheus_cowboy_collector:setup(),
@@ -325,6 +346,74 @@ declare_rib_families() ->
             "Keys where the routing summaries disagree with the ground "
             "truth, as of the last periodic consistency sweep."
         >>
+    }).
+
+%% @private
+%% Declares the inter-node (Partisan) families sunk from Partisan's telemetry
+%% by `handle_partisan_event/4`. All are node-wide; the emitting node is the
+%% scrape `node` label, the remote is `peer`.
+declare_partisan_families() ->
+    ok = bondy_metrics:declare(#{
+        name => bondy_cluster_peer_rtt_milliseconds,
+        help => <<
+            "Inter-node Partisan heartbeat round-trip time, by peer, channel "
+            "and side (client|server)."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_cluster_peer_send_pending_bytes,
+        help => <<
+            "Bytes queued to send but not yet flushed to the kernel on the "
+            "Partisan peer socket — send backpressure — by peer, channel, side."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_cluster_connect_latency_milliseconds,
+        help => <<
+            "Latency of an outbound Partisan connection attempt (including TLS "
+            "handshake), by result (ok|error)."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_cluster_tls_handshake_milliseconds,
+        help => <<
+            "Latency of an inbound Partisan TLS handshake, by result; a spike "
+            "in result=error is the slowloris signal."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_cluster_connection_up_total,
+        help => <<"Partisan connections established, by peer and channel.">>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_cluster_connection_down_total,
+        help => <<
+            "Partisan connections torn down, by peer, channel and exit reason."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_cluster_channel_connections,
+        help => <<
+            "Current Partisan connection count for a peer/channel; below the "
+            "target it is under-provisioned."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_cluster_channel_connections_target,
+        help => <<
+            "Configured target connection count (parallelism) for a "
+            "peer/channel."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_cluster_membership_changes_total,
+        help => <<
+            "Partisan membership changes, by direction (added|removed)."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_cluster_membership_size,
+        help => <<"Current Partisan cluster member count.">>
     }).
 
 %% @private
@@ -540,6 +629,115 @@ handle_lifecycle_event([bondy, Subject, event], _Meas, Meta, _Config) ->
     end;
 handle_lifecycle_event(_, _, _, _) ->
     ok.
+
+%% @private
+%% Telemetry sink for Partisan's inter-node events (doc_extras/telemetry.md).
+%% Wait-free `bondy_metrics` writes only. `node` is omitted from every label —
+%% it is the emitting node and comes from the Prometheus scrape target; `peer`
+%% is the remote (`peer_node`). Values are already integers from Partisan.
+handle_partisan_event([partisan, connection, Side, heartbeat], Meas, Meta, _) when
+    Side == client orelse Side == server
+->
+    Label = #{
+        peer => maps:get(peer_node, Meta, undefined),
+        channel => maps:get(channel, Meta, undefined),
+        side => Side
+    },
+    _ = bondy_metrics:histogram(#{
+        name => bondy_cluster_peer_rtt_milliseconds,
+        label => Label,
+        value => pint(maps:get(latency, Meas, 0))
+    }),
+    _ = bondy_metrics:gauge(#{
+        name => bondy_cluster_peer_send_pending_bytes,
+        label => Label,
+        value => pint(maps:get(send_pend, Meas, 0))
+    }),
+    ok;
+handle_partisan_event([partisan, connection, client, connect], Meas, Meta, _) ->
+    _ = bondy_metrics:histogram(#{
+        name => bondy_cluster_connect_latency_milliseconds,
+        label => #{result => maps:get(result, Meta, undefined)},
+        value => pint(maps:get(latency, Meas, 0))
+    }),
+    ok;
+handle_partisan_event([partisan, socket, server, handshake], Meas, Meta, _) ->
+    _ = bondy_metrics:histogram(#{
+        name => bondy_cluster_tls_handshake_milliseconds,
+        label => #{result => maps:get(result, Meta, undefined)},
+        value => pint(maps:get(latency, Meas, 0))
+    }),
+    ok;
+handle_partisan_event([partisan, connection, up], Meas, Meta, _) ->
+    _ = bondy_metrics:counter(#{
+        name => bondy_cluster_connection_up_total,
+        label => #{
+            peer => maps:get(peer_node, Meta, undefined),
+            channel => maps:get(channel, Meta, undefined)
+        },
+        delta => pint(maps:get(count, Meas, 1))
+    }),
+    ok;
+handle_partisan_event([partisan, connection, down], Meas, Meta, _) ->
+    _ = bondy_metrics:counter(#{
+        name => bondy_cluster_connection_down_total,
+        label => #{
+            peer => maps:get(peer_node, Meta, undefined),
+            channel => maps:get(channel, Meta, undefined),
+            reason => maps:get(reason, Meta, undefined)
+        },
+        delta => pint(maps:get(count, Meas, 1))
+    }),
+    ok;
+handle_partisan_event([partisan, channel, connections], Meas, Meta, _) ->
+    Label = #{
+        peer => maps:get(peer_node, Meta, undefined),
+        channel => maps:get(channel, Meta, undefined)
+    },
+    _ = bondy_metrics:gauge(#{
+        name => bondy_cluster_channel_connections,
+        label => Label,
+        value => pint(maps:get(size, Meas, 0))
+    }),
+    case maps:get(target, Meas, undefined) of
+        Target when is_integer(Target) ->
+            _ = bondy_metrics:gauge(#{
+                name => bondy_cluster_channel_connections_target,
+                label => Label,
+                value => Target
+            });
+        _ ->
+            ok
+    end,
+    ok;
+handle_partisan_event([partisan, membership, changed], Meas, _Meta, _) ->
+    Added = pint(maps:get(added, Meas, 0)),
+    Removed = pint(maps:get(removed, Meas, 0)),
+    Added > 0 andalso
+        bondy_metrics:counter(#{
+            name => bondy_cluster_membership_changes_total,
+            label => #{direction => added},
+            delta => Added
+        }),
+    Removed > 0 andalso
+        bondy_metrics:counter(#{
+            name => bondy_cluster_membership_changes_total,
+            label => #{direction => removed},
+            delta => Removed
+        }),
+    _ = bondy_metrics:gauge(#{
+        name => bondy_cluster_membership_size,
+        value => pint(maps:get(total, Meas, 0))
+    }),
+    ok;
+handle_partisan_event(_, _, _, _) ->
+    ok.
+
+%% @private
+%% Coerce a telemetry measurement to a non-negative integer for bondy_metrics.
+pint(V) when is_integer(V) andalso V >= 0 -> V;
+pint(V) when is_number(V) andalso V >= 0 -> trunc(V);
+pint(_) -> 0.
 
 %% @private
 %% Telemetry sink for `[bondy, rpc, latency]` (emitted by
