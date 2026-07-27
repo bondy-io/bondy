@@ -27,6 +27,8 @@ start_link() ->
 %% =============================================================================
 
 init([]) ->
+    %% Owned by this (stable) supervisor process so it survives worker restarts.
+    ok = bondy_session_manager:ensure_reg_realms_table(),
     {PoolName, WorkerNames} = init_pool(),
     SupFlags = #{
         strategy => one_for_one,

@@ -34,7 +34,6 @@ map manipulation.
 -export([maybe_slice/3]).
 -export([peername/2]).
 -export([pid_to_bin/1]).
--export([session_id_to_uri_part/1]).
 -export([system_time_to_rfc3339/2]).
 -export([tc/3]).
 -export([timed_mac/3]).
@@ -178,14 +177,6 @@ decode(msgpack, Term) ->
 decode(ContentType, Term) ->
     %% We cannot decode this so create a wrapped data object
     #{<<"type">> => ContentType, <<"content">> => Term}.
-
--doc """
-Converts a session identifier into a 0-padded binary string.
-""".
--spec session_id_to_uri_part(id()) -> binary().
-
-session_id_to_uri_part(SessionId) ->
-    list_to_binary(io_lib:format("~16..0B", [SessionId])).
 
 -spec external_session_id(optional(bondy_session_id:t())) -> optional(id()).
 

@@ -43,7 +43,6 @@ collected on demand). Best-effort AP; `{error, unavailable}` when the resolving
 -define(ALL, all).
 
 -export([handle_call/2]).
--export([handle_invocation/2]).
 
 %% =============================================================================
 %% API
@@ -59,28 +58,34 @@ collected on demand). Best-effort AP; `{error, unavailable}` when the resolving
     | {reply, wamp_result() | wamp_error()}.
 
 handle_call(#call{procedure_uri = ?WAMP_SESSION_GET} = M0, Ctxt) ->
-    [_, SessionId] = bondy_wamp_api_utils:validate_call_args(M0, Ctxt, 2),
-    %% Session data is local to each node, so when a session is created we
-    %% register a unique 'get' procedure URI.
-    %% We ask the dealer to lookup the entry in the registry and forward to the
-    %% existing session's node.
-    %% In the other node we will handle this call in the following clause.
-    %% Part is a 16 byte binary.
-    Part = bondy_utils:session_id_to_uri_part(SessionId),
-    Uri = <<"wamp.session.", Part/binary, ".get">>,
-    Opts = maps:put(x_procedure, ?WAMP_SESSION_GET, M0#call.options),
-    M1 = M0#call{procedure_uri = Uri, options = Opts},
+    [_, Guid] = bondy_wamp_api_utils:validate_call_args(M0, Ctxt, 2),
+    %% Sessions are not replicated, so we route the call to the node that owns
+    %% the session. The client-facing session id (`Guid`) is `{NodeHash}.{Rest}`;
+    %% its own dot aligns with WAMP URI segments, so the routing URI is plain
+    %% concatenation `wamp.session.{NodeHash}.{Rest}.get`. Each node registers a
+    %% wildcard `wamp.session.{NodeHash}..get` (see bondy_session_manager), so the
+    %% dealer forwards to the owning node with no per-session registration.
+    case is_binary(Guid) andalso bondy_session_id:is_type(Guid) of
+        true ->
+            Uri = <<"wamp.session.", Guid/binary, ".get">>,
+            Opts = maps:put(x_procedure, ?WAMP_SESSION_GET, M0#call.options),
+            M1 = M0#call{procedure_uri = Uri, options = Opts},
 
-    %5 As we are rewriting the call, if the session does not exist we will get
-    %% either noproc or no_such_procedure and we want to reply not_found
-    MakeError = fun
-        (no_such_procedure) ->
-            no_such_session_error(?CALL, M0#call.request_id);
-        (_) ->
-            undefined
-    end,
+            %% As we are rewriting the call, if the session does not exist we
+            %% will get either noproc or no_such_procedure and we want to reply
+            %% not_found.
+            MakeError = fun
+                (no_such_procedure) ->
+                    no_such_session_error(?CALL, M0#call.request_id);
+                (_) ->
+                    undefined
+            end,
 
-    {continue, M1, MakeError};
+            {continue, M1, MakeError};
+        false ->
+            E = no_such_session_error(?CALL, M0#call.request_id),
+            {reply, E}
+    end;
 handle_call(#call{procedure_uri = ?WAMP_REG_LIST} = M, Ctxt) ->
     [RealmUri] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
     case summary(registration, RealmUri) of
@@ -226,43 +231,6 @@ handle_call(
 handle_call(#call{} = M, _) ->
     E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E}.
-
-handle_invocation(#invocation{} = M, Ctxt) ->
-    Procedure = maps:get(procedure, M#invocation.details),
-    do_handle_invocation(M, Ctxt, Procedure).
-
-%% To be replaced by RPC
-do_handle_invocation(M, Ctxt, <<"wamp.session.", Part:16/binary, ".get">>) ->
-    Args = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
-    [RealmUri, SessionId] = Args,
-
-    case binary_to_integer(Part) == SessionId of
-        true ->
-            case bondy_session:lookup(RealmUri, SessionId) of
-                {ok, Session} ->
-                    R = bondy_wamp_message:yield(
-                        M#invocation.request_id,
-                        #{},
-                        [bondy_session:to_external(Session)]
-                    ),
-                    {reply, R};
-                {error, not_found} ->
-                    E = no_such_session_error(
-                        ?INVOCATION, M#invocation.request_id
-                    ),
-                    {reply, E}
-            end;
-        false ->
-            E = bondy_wamp_message:error_from(
-                M,
-                #{},
-                ?BONDY_ERROR_INTERNAL,
-                [
-                    <<"Bondy callback procedure malformed. Uri session_id part does not match session_id argument.">>
-                ]
-            ),
-            {reply, E}
-    end.
 
 %% =============================================================================
 %% PRIVATE

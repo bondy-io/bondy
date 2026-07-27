@@ -209,6 +209,7 @@ An implementation of the `app_config` behaviour.
 
 -export([node/0]).
 -export([nodestring/0]).
+-export([node_hash/0]).
 -export([node_spec/0]).
 -export([listener_transport_opts/1]).
 -export([listener_protocol_opts/1]).
@@ -289,9 +290,36 @@ nodestring() ->
         undefined ->
             Nodestring = atom_to_binary(partisan_config:get(name), utf8),
             ok = set(nodestring, Nodestring),
+            %% Derive the node routing hash at the same time, cached the same
+            %% way (see node_hash/0).
+            ok = set(node_hash, compute_node_hash(Nodestring)),
             Nodestring;
         Nodestring ->
             Nodestring
+    end.
+
+-doc """
+Returns a short, fixed-length, URL-safe hash of this node — the leading 64 bits
+of `SHA-256(nodestring)` encoded in base62 (~11 chars, no `.`). It identifies the
+node for session routing: the session id embeds it so `wamp.session.get` can be
+routed to the owning node without a per-session registration.
+
+Two distinct nodes collide with cryptographically negligible probability
+(~`n^2 / 2^65`), independent of nodestring length (so long Kubernetes nodestrings
+do not bloat session ids). Cached identically to (and alongside) `nodestring/0`.
+""".
+-spec node_hash() -> binary().
+
+node_hash() ->
+    case get(node_hash, undefined) of
+        undefined ->
+            %% nodestring/0 populates node_hash alongside itself; this branch
+            %% only runs if nodestring was cached before node_hash existed.
+            NodeHash = compute_node_hash(nodestring()),
+            ok = set(node_hash, NodeHash),
+            NodeHash;
+        NodeHash ->
+            NodeHash
     end.
 
 -spec node_spec() -> partisan:node_spec().
@@ -324,6 +352,14 @@ listener_protocol_opts(Name) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% Leading 64 bits of SHA-256(nodestring), base62-encoded: fixed-length,
+%% URL-safe, dot-free. See node_hash/0 for the collision analysis.
+compute_node_hash(Nodestring) when is_binary(Nodestring) ->
+    <<H:64, _/binary>> = crypto:hash(sha256, Nodestring),
+    %% base62:encode/1 returns a string (iolist); the node hash must be a binary.
+    iolist_to_binary(base62:encode(H)).
 
 %% @private
 -doc """

@@ -31,6 +31,8 @@ such a large number space.
 
 -export([new/0]).
 -export([new/1]).
+-export([node_hash/0]).
+-export([node_hash/1]).
 -export([to_external/1]).
 -export([is_type/1]).
 
@@ -73,24 +75,106 @@ new(ExternalId) when
     %% We encode using base62
     Base62 = base62:encode(Id),
 
-    %% We pad to 27 chars and return as binary
-    iolist_to_binary(string:pad(Base62, ?ENCODED_LEN, leading, $0)).
+    %% We pad to 27 chars
+    Existing = iolist_to_binary(string:pad(Base62, ?ENCODED_LEN, leading, $0)),
+
+    %% We prepend the OWNING NODE's hash as a distinct, dot-separated segment.
+    %% This keeps the existing 27-char id whole (it still encodes the WAMP integer
+    %% id + the random payload) and makes the id SELF-LOCATING: because the `.`
+    %% aligns with WAMP URI segments, `wamp.session.{NodeHash}.{Existing}.get`
+    %% composes by plain concatenation, and one per-node wildcard registration
+    %% `wamp.session.{NodeHash}..get` routes the RPC to the owning node WITHOUT a
+    %% per-session registration.
+    <<(node_hash())/binary, $., Existing/binary>>.
+
+-doc """
+Returns the stable, URL-safe hash of the local node (see
+`bondy_config:node_hash/0`), used as the self-locating segment of a session id.
+
+It is the leading 64 bits of `SHA-256(nodestring)` in base62, so distinct nodes
+collide with cryptographically negligible probability (~`n^2 / 2^65`). A
+collision would misroute `wamp.session.get` to a same-hash peer that does not own
+the session, yielding a spurious `not_found`; at 64 bits this is far below every
+other failure mode in the system.
+""".
+-spec node_hash() -> binary().
+
+node_hash() ->
+    bondy_config:node_hash().
+
+-doc "Returns the owning-node hash segment of a session id, or `undefined`.".
+-spec node_hash(t()) -> binary() | undefined.
+
+node_hash(Id) when is_binary(Id) ->
+    case binary:split(Id, <<$.>>) of
+        [NodeHash, _Existing] -> NodeHash;
+        [_] -> undefined
+    end.
 
 -doc """
 Returns the external session identifier i.e. the WAMP Session ID.
 """.
 -spec to_external(Base62 :: binary()) -> WAMPSessionId :: id().
 
-to_external(Base62) when is_binary(Base62) ->
-    %% We decode the string
-    Bin = base62:decode(Base62),
+to_external(Id) when is_binary(Id) ->
+    %% Decode the existing (dot-suffix) segment, which still encodes the WAMP id
+    %% in its first 56 bits — the node-hash prefix is not part of the WAMP id.
+    Bin = base62:decode(existing_part(Id)),
 
     %% We extract the first segment (56-bits) as an integer
     <<ExternalId:?EXT_LEN/integer, _/binary>> = <<Bin:?LEN/integer>>,
 
     ExternalId.
 
-is_type(Base62) when is_binary(Base62) andalso byte_size(Base62) =:= 27 ->
-    true;
+is_type(Id) when is_binary(Id) ->
+    byte_size(existing_part(Id)) =:= ?ENCODED_LEN;
 is_type(_) ->
     false.
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+%% The original 27-char base62 id (the segment after the node-hash prefix). Falls
+%% back to the whole binary for a legacy (prefix-less) id.
+existing_part(Id) ->
+    case binary:split(Id, <<$.>>) of
+        [_NodeHash, Existing] -> Existing;
+        [Existing] -> Existing
+    end.
+
+%% =============================================================================
+%% TESTS
+%% =============================================================================
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+%% @private A valid 27-char base62 "existing" id (no node-hash prefix), built
+%% deterministically so tests need neither bondy_config nor randomness.
+mk_existing(Ext) ->
+    <<Id160:?LEN/integer>> = <<Ext:?EXT_LEN/integer, 0:(?LEN - ?EXT_LEN)/integer>>,
+    iolist_to_binary(string:pad(base62:encode(Id160), ?ENCODED_LEN, leading, $0)).
+
+composite_parse_test() ->
+    Existing = mk_existing(123456789),
+    Id = <<"777.", Existing/binary>>,
+    ?assertEqual(<<"777">>, node_hash(Id)),
+    ?assertEqual(Existing, existing_part(Id)),
+    ?assert(is_type(Id)).
+
+to_external_skips_prefix_test() ->
+    Ext = 123456789,
+    Existing = mk_existing(Ext),
+    Id = <<"777.", Existing/binary>>,
+    %% The WAMP id must survive the node-hash prefix (and the legacy form).
+    ?assertEqual(Ext, to_external(Id)),
+    ?assertEqual(Ext, to_external(Existing)).
+
+legacy_id_test() ->
+    Existing = mk_existing(42),
+    ?assert(is_type(Existing)),
+    ?assertEqual(undefined, node_hash(Existing)).
+
+-endif.

@@ -18,6 +18,12 @@ individually or in bulk.
 -include("bondy_uris.hrl").
 -include("bondy.hrl").
 
+%% Node-local set of realms whose per-node `wamp.session.<hash>..get` wildcard is
+%% already registered, so register_procedures/1 registers it once per realm
+%% instead of once per session. Owned by bondy_session_manager_sup (stable across
+%% worker restarts).
+-define(REG_REALMS_TAB, bondy_session_manager_registered_realms).
+
 -record(state, {
     name :: atom(),
     monitor_refs = #{} :: #{id() => reference()}
@@ -34,6 +40,7 @@ individually or in bulk.
 
 %% API
 -export([start_link/2]).
+-export([ensure_reg_realms_table/0]).
 -export([pool/0]).
 -export([open/1]).
 -export([open/3]).
@@ -60,6 +67,24 @@ start_link(PoolName, WorkerName) ->
     gen_server:start_link(
         {local, WorkerName}, ?MODULE, [PoolName, WorkerName], []
     ).
+
+-doc """
+Creates the node-local table tracking which realms already have their per-node
+`wamp.session.<hash>..get` wildcard registered. Called once by
+`bondy_session_manager_sup` (its owner) before the worker pool starts.
+""".
+-spec ensure_reg_realms_table() -> ok.
+
+ensure_reg_realms_table() ->
+    Opts = [
+        named_table,
+        public,
+        set,
+        {read_concurrency, true},
+        {write_concurrency, true}
+    ],
+    _ = (catch ets:new(?REG_REALMS_TAB, Opts)),
+    ok.
 
 -spec pool() -> pool().
 
@@ -338,34 +363,56 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 
 %% @private
+%% Ensures this node's `wamp.session.<hash>..get` wildcard is registered for the
+%% session's realm — once per realm, not once per session.
+%%
+%% `wamp.session.get` is served by routing to the node that owns the (non-
+%% replicated) session. The client-facing session id is `{NodeHash}.{Rest}`, so
+%% the meta API rewrites the call to `wamp.session.{NodeHash}.{Rest}.get`; the
+%% wildcard `wamp.session.{NodeHash}..get` registered here matches every such
+%% URI for a session owned by this node, letting the dealer forward it with no
+%% per-session registration (the old per-session exact registration cost a
+%% `bondy_wamp_callback:validate_target/2` on every session open).
 register_procedures(Session) ->
-    %% wamp.session.{ID}.get
-    %% -------------------------------------------------------------------------
-    %% The wamp.session.get implementation forwards the call to this dynamic
-    %% URI. This is required because sessions are not replicated, so we need a
-    %% way to located the node where the session lives to route the call to it.
-    %% If we have more session methods then we should implement prefix
-    %% registration i.e. wamp.session.{ID}.*
-    SessionId = bondy_session:id(Session),
-    Extid = bondy_session_id:to_external(SessionId),
-    Part = bondy_utils:session_id_to_uri_part(Extid),
-
-    ProcUri = <<"wamp.session.", Part/binary, ".get">>,
-
-    %% Notice we are implementing this as callback reference,
-    %% this means a different reference per callback. In case we needed to
-    %% support many more callbacks we would be better of using the session
-    %% manager process as target, having a single reference for all procedures,
-    %% reducing memory consumption.
     RealmUri = bondy_session:realm_uri(Session),
-    MF = {bondy_session_api, get},
-    Ref = bondy_ref:new(internal, MF, SessionId),
 
-    Args = [SessionId],
-    Opts = #{match => ?EXACT_MATCH, callback_args => Args},
-    {ok, _} = bondy_dealer:register(ProcUri, Opts, RealmUri, Ref),
+    %% ets:insert_new is atomic, so exactly one worker registers per realm.
+    case ets:insert_new(?REG_REALMS_TAB, {RealmUri}) of
+        true ->
+            try
+                ok = register_node_session_get(RealmUri)
+            catch
+                Class:Reason:Stacktrace ->
+                    %% Undo the guard so a later open retries the registration.
+                    true = ets:delete(?REG_REALMS_TAB, RealmUri),
+                    erlang:raise(Class, Reason, Stacktrace)
+            end;
+        false ->
+            ok
+    end.
 
-    ok.
+%% @private
+register_node_session_get(RealmUri) ->
+    NodeHash = bondy_session_id:node_hash(),
+
+    %% The empty component between the two dots is the wildcard that matches the
+    %% session's `{Rest}` URI segment.
+    ProcUri = <<"wamp.session.", NodeHash/binary, "..get">>,
+
+    %% A single node-level callback reference (no owning session). The handler
+    %% resolves the session from the guid passed in the call, so the only static
+    %% argument is the realm (used for the realm-scoped lookup).
+    Ref = bondy_ref:new(internal, {bondy_session_api, get}),
+    Opts = #{match => ?WILDCARD_MATCH, callback_args => [RealmUri]},
+
+    case bondy_dealer:register(ProcUri, Opts, RealmUri, Ref) of
+        {ok, _} ->
+            ok;
+        {error, already_exists} ->
+            %% The guard and the registry can diverge only across a supervisor
+            %% restart; the existing wildcard is exactly what we wanted.
+            ok
+    end.
 
 %% @private
 cleanup(Session) ->
