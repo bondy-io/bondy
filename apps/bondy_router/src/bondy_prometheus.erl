@@ -635,7 +635,9 @@ handle_lifecycle_event(_, _, _, _) ->
 %% Wait-free `bondy_metrics` writes only. `node` is omitted from every label —
 %% it is the emitting node and comes from the Prometheus scrape target; `peer`
 %% is the remote (`peer_node`). Values are already integers from Partisan.
-handle_partisan_event([partisan, connection, Side, heartbeat], Meas, Meta, _) when
+handle_partisan_event(
+    [partisan, connection, Side, heartbeat], Meas, Meta, _
+) when
     Side == client orelse Side == server
 ->
     Label = #{

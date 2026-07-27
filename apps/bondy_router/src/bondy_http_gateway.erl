@@ -1026,6 +1026,8 @@ admin_base_routes() ->
             {"/ws", bondy_wamp_ws_connection_handler, #{}},
             {"/ping", bondy_admin_ping_http_handler, #{}},
             {"/ready", bondy_admin_ready_http_handler, #{}},
+            {"/cluster/topology", bondy_admin_cluster_topology_http_handler,
+                #{}},
             {"/metrics/[:registry]", prometheus_cowboy2_handler, []}
         ]}
     ].

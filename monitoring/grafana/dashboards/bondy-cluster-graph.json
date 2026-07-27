@@ -1,0 +1,115 @@
+{
+  "uid": "bondy-cluster-graph",
+  "title": "Bondy \u2014 Cluster Graph",
+  "description": "Cluster topology node graph (Partisan members + connections + RTT) via the /cluster/topology endpoint and the Infinity datasource.",
+  "tags": [
+    "bondy",
+    "cluster",
+    "topology",
+    "nodegraph"
+  ],
+  "timezone": "",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "editable": true,
+  "graphTooltip": 0,
+  "templating": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "Cluster Overview",
+      "type": "link",
+      "url": "/d/bondy-cluster-overview",
+      "icon": "dashboard",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": true
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "About this graph",
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Cluster topology** from one node's view (`GET /cluster/topology` on the Bondy admin listener, via the **Infinity** datasource). Nodes are cluster members \u2014 the green/red ring is health (connected + no alarms); edges are live Partisan connections, with **average heartbeat RTT** and connection count. Point the query URL at the admin port of the node whose view you want (dev: `:18081`/`:18181`/`:18281`).\n\n> \u26a0\ufe0f The Infinity node-graph query *format* (`nodegraph-nodes`/`nodegraph-edges`) and column inference should be confirmed once in a live Grafana; the endpoint already emits the exact Node Graph field names, so no column remapping should be needed."
+      }
+    },
+    {
+      "id": 2,
+      "type": "nodeGraph",
+      "title": "Bondy cluster \u2014 node graph",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "bondy-infinity"
+      },
+      "gridPos": {
+        "h": 20,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "options": {
+        "nodes": {
+          "mainStatUnit": "",
+          "secondaryStatUnit": ""
+        },
+        "edges": {
+          "mainStatUnit": "ms"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "bondy-infinity"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "nodegraph-nodes",
+          "url": "http://host.docker.internal:18081/cluster/topology",
+          "url_options": {
+            "method": "GET"
+          },
+          "parser": "backend",
+          "root_selector": "nodes",
+          "columns": []
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "bondy-infinity"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "nodegraph-edges",
+          "url": "http://host.docker.internal:18081/cluster/topology",
+          "url_options": {
+            "method": "GET"
+          },
+          "parser": "backend",
+          "root_selector": "edges",
+          "columns": []
+        }
+      ]
+    }
+  ]
+}

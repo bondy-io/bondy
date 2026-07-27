@@ -9,7 +9,7 @@
   ],
   "timezone": "",
   "schemaVersion": 39,
-  "version": 3,
+  "version": 6,
   "refresh": "10s",
   "time": {
     "from": "now-1h",
@@ -49,6 +49,33 @@
       "tags": [],
       "url": "/d/bondy-db-oplog-mst",
       "icon": "external link",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "Router / WAMP",
+      "type": "link",
+      "url": "/d/bondy-router-wamp",
+      "icon": "dashboard",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "Cluster Graph (topology)",
+      "type": "link",
+      "url": "/d/bondy-cluster-graph",
+      "icon": "dashboard",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "Runtime / BEAM",
+      "type": "link",
+      "url": "/d/bondy-runtime-beam",
+      "icon": "dashboard",
       "targetBlank": false,
       "keepTime": true,
       "includeVars": true
