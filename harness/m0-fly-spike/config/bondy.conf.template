@@ -1,0 +1,91 @@
+## =============================================================================
+## Bondy config — M0 Fly fault-injection spike (harness/m0-fly-spike)
+## =============================================================================
+## Pinned tag: develop-perf.1 (4995ea12). Derived from _design/test-harness/03 §2
+## and reconciled key-by-key against schema/bondy.schema at the pinned tag
+## (every key/datatype/default below was verified to exist — a wrong key fails
+## cuttlefish validation and the node never boots).
+##
+## Scope: M0 only needs a 3-node cluster that BOOTS and FORMS a full mesh so the
+## capability probe can inject faults. Client realms and load are out of scope
+## for M0 (they arrive at M2/M6). The full tuned profile is validated by the M0
+## boot itself — this is the first place the pinned tag's config is exercised.
+## =============================================================================
+
+## --- node identity / cluster (Fly 6PN DNS discovery, no seed node) ------------
+cluster.overlay.topology                    = fullmesh
+cluster.automatic_leave                     = off
+cluster.peer_ip                             = ${FLY_PRIVATE_IP}
+cluster.peer_port                           = 18086
+cluster.peer_discovery.enabled              = on
+cluster.peer_discovery.type                 = dns
+cluster.peer_discovery.initial_delay        = 10s
+cluster.peer_discovery.polling_interval     = 10s
+cluster.peer_discovery.timeout              = 5s
+cluster.peer_discovery.config.record_type   = aaaa
+cluster.peer_discovery.config.query         = ${FLY_APP_NAME}.internal
+## node_basename is the part BEFORE @ in the Erlang node name. setup.sh sets
+## BONDY_ERL_NODENAME=bondy@<ip>, so this MUST be `bondy` — NOT ${FLY_APP_NAME}
+## (the app is bondy-perf-m0; using the app name would build wrong peer names).
+cluster.peer_discovery.config.node_basename = bondy
+cluster.peer_discovery.config.nameservers.1 = fdaa::3
+cluster.channels.wamp_relay.parallelism     = 2
+
+## --- anti-entropy: MUST be on (00 §3 landmine) — 500ms sync tick --------------
+oplog.aae                                   = on
+oplog.aae.interval                          = 500ms
+
+## --- routing / ordering -------------------------------------------------------
+## Flow lanes (commit 9bc267e2) enforce per-pair FIFO independent of forward.ack,
+## so ack/retransmission stay off (flip on only to test retransmission).
+router.forward.ack                          = off
+router.forward.retransmission               = off
+load_regulation.router.flow_pool.capacity   = 100000
+
+## --- registry RIB: write-only architecture, no mode ladder --------------------
+## Routing is unconditional on summary stubs; full entries never replicate.
+registry.rib.check_interval                 = 5m
+## registry.rib.damping left at default (0 = write-through).
+
+## --- progressive / streaming RPC: off by default; enabled for the streaming
+## workload (clients must also announce the features in HELLO) ------------------
+wamp.dealer.progressive_call_results        = on
+wamp.dealer.progressive_calls               = on
+
+## --- AAE reactor pool (gproc hash pool; per-key FIFO preserved) ---------------
+load_regulation.aae_reactor.pool.size       = 16
+
+## --- Partisan max message size ------------------------------------------------
+## A cell/frame over this ceiling is correctly skipped and never replicates
+## (a P3 "permanent divergence that is CORRECT" — 05 R21). Default kept explicit.
+cluster.max_message_size                    = 64MB
+
+## --- rpc ----------------------------------------------------------------------
+wamp.call_timeout                           = 30s
+
+## --- listeners: WebSocket only (WAMP-TCP/TLS disabled) ------------------------
+## Admin API (18081) carries /metrics, /ping, /ready. Clients use /ws on 18080.
+admin_api.http.enabled                      = on
+admin_api.http.ip                           = 0.0.0.0
+admin_api.http.port                         = 18081
+api_gateway.http.enabled                    = on
+api_gateway.http.ip                         = 0.0.0.0
+api_gateway.http.port                       = 18080
+wamp.tcp.enabled                            = off
+wamp.websocket.idle_timeout                 = 8h
+
+## --- data (durable core DB on the Fly volume) ---------------------------------
+platform_data_dir                           = ${BONDY_DATA_DIR}
+
+## --- logging ------------------------------------------------------------------
+log.level                                   = info
+log.handlers.default.level                  = info
+
+## =============================================================================
+## FINDING (2026-07-27, code-verified): `registry_presence_evict_after` listed in
+## 03 §2 is NOT a cuttlefish key at the pinned tag — schema/bondy.schema has no
+## presence/evict mapping — so it is OMITTED here (including it would fail boot).
+## The EVICT grace therefore stays at its code default (24h). Before any
+## EVICT-dependent milestone (M4/M5) the real override (code -define or
+## advanced.config) must be located, and 03 §2 corrected. See FLY_FAULT_CAPABILITY.md.
+## =============================================================================

@@ -588,3 +588,45 @@ jepsen-clean:
     rm -rf {{justfile_directory()}}/jepsen/jepsen.bondymst/target
     rm -rf {{justfile_directory()}}/jepsen/jepsen.bondymst/store
     rm -rf {{justfile_directory()}}/jepsen/bondy_mst_jepsen/_build
+
+# =============================================================================
+# Test harness — M0 Fly fault-injection spike (harness/m0-fly-spike)
+# Design: _design/test-harness/06 §M0. Requires `fly auth login` + a Fly org.
+# =============================================================================
+
+# One-shot: build+deploy 3 nodes, probe fault capability, render the report.
+#   FLY_ORG=<org> just m0-run
+m0-run:
+    ./harness/m0-fly-spike/run-spike.sh
+
+# Build+deploy the 3-node M0 cluster only (remote build), then scale to 3.
+m0-deploy:
+    fly deploy --config harness/m0-fly-spike/fly.toml \
+      --dockerfile harness/m0-fly-spike/Dockerfile \
+      --app bondy-perf-m0 --remote-only --ha=false --yes
+    fly scale count 3 --app bondy-perf-m0 --yes
+
+# Re-probe an already-running cluster (skip deploy + scale).
+m0-probe:
+    M0_SKIP_DEPLOY=1 ./harness/m0-fly-spike/run-spike.sh
+
+# Tail cluster logs.
+m0-logs:
+    fly logs --app bondy-perf-m0
+
+# SSH into a node (auto-starts one if stopped).
+m0-shell:
+    fly ssh console --app bondy-perf-m0
+
+# Stop all machines (idle cost drops to volume-only).
+m0-down:
+    #!/usr/bin/env bash
+    set -eu
+    ids=$(fly machines list --app bondy-perf-m0 --json | jq -r '.[].id')
+    for id in $ids; do echo "stopping $id"; fly machines stop "$id" --app bondy-perf-m0; done
+
+# DESTRUCTIVE — destroy the app AND its volumes (probe output is lost).
+m0-destroy:
+    @echo "This destroys the bondy-perf-m0 app and all its volumes."
+    @read -p "Type 'destroy' to confirm: " c && [ "$c" = "destroy" ] || (echo aborted; exit 1)
+    fly apps destroy bondy-perf-m0 --yes

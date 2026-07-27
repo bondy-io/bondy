@@ -1,0 +1,83 @@
+# =============================================================================
+# M0 Fly fault-injection spike — 3-node Bondy router cluster.
+# Design: _design/test-harness/06 §M0, 03 §3. Pinned tag: develop-perf.1.
+#
+# Deploy from the REPO ROOT (build context = repo root for `COPY . /bondy/src`):
+#   fly deploy --config harness/m0-fly-spike/fly.toml \
+#              --dockerfile harness/m0-fly-spike/Dockerfile --remote-only
+# then `fly scale count 3`. The orchestrator (run-spike.sh) does all of this.
+#
+# [[files]] local_path is resolved relative to THIS file's directory.
+# =============================================================================
+
+app            = "bondy-perf-m0"
+primary_region = "lhr"
+kill_signal    = "SIGTERM"
+kill_timeout   = "30s"
+
+[experimental]
+  # Source the bring-up hook (node name from 6PN IP) then exec Bondy.
+  entrypoint = ["/bin/bash", "-c", "source /bondy/setup.sh && exec bin/bondy foreground"]
+
+[env]
+  BONDY_DATA_DIR                = "/bondy/data"
+  BONDY_ETC_DIR                 = "/bondy/etc"
+  BONDY_ERL_DISTRIBUTED_COOKIE  = "bondy"
+  BONDY_LOG_LEVEL               = "info"
+  ERL_CRASH_DUMP                = "/dev/null"
+  ERL_DIST_PORT                 = "27784"
+
+# One volume per machine (flyctl auto-provisions on `fly scale count`).
+[mounts]
+  source      = "m0_data"
+  destination = "/bondy/data"
+
+# Keep every machine up — faults must act on a running node, never on one that
+# Fly autostopped underneath us (05 R9).
+[http_service]
+  internal_port       = 18080          # WAMP-over-WebSocket (/ws)
+  auto_stop_machines  = false
+  auto_start_machines = false
+  min_machines_running = 3
+
+  [http_service.concurrency]
+    type       = "connections"
+    hard_limit = 16384
+    soft_limit = 16384
+
+[[services]]
+  protocol      = "tcp"
+  internal_port = 18081                 # admin API: /ping /ready /metrics
+
+  [services.concurrency]
+    type       = "connections"
+    hard_limit = 1024
+    soft_limit = 1024
+
+[checks]
+  [checks.admin-http-alive]
+    port         = 18081
+    type         = "http"
+    interval     = "15s"
+    timeout      = "10s"
+    grace_period = "30s"
+    method       = "get"
+    path         = "/ping"
+
+[[files]]
+  guest_path = "/bondy/setup.sh"
+  local_path = "setup.sh"
+
+[[files]]
+  guest_path = "/bondy/etc/bondy.conf.template"
+  local_path = "config/bondy.conf.template"
+
+[[metrics]]
+  port = 18081
+  path = "/metrics"
+
+# M0 is a capability spike, not a load run — modest guests are enough to form the
+# mesh and run the probe. Real perf runs use performance-2x/8GB (03, Q9).
+[[vm]]
+  size   = "shared-cpu-2x"
+  memory = "2gb"

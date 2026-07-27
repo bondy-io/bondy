@@ -1,0 +1,3 @@
+# Probe run artifacts (raw NDJSON, stderr). The rendered FLY_FAULT_CAPABILITY.md
+# is committed; the raw per-node output is not.
+out/
