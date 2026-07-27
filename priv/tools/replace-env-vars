@@ -179,7 +179,14 @@ replace_env_vars([Char|Str]) ->
     [Char | replace_env_vars(Str)].
 
 until_var_end(Str) ->
-    case re:run(list_to_binary(Str), "([a-zA-Z_]+[a-zA-Z0-9_]*)}", [{capture, [1], list}]) of
+    %% Str is a Unicode charlist (from unicode:characters_to_list/1) and may hold
+    %% codepoints > 255 anywhere later in the file. list_to_binary/1 crashes with
+    %% badarg on those, taking the whole node boot down with an opaque escript
+    %% error. Encode as UTF-8 and match with the `unicode' option instead. The
+    %% capture is the var name, always ASCII ([a-zA-Z_][a-zA-Z0-9_]*), so its
+    %% length matches Str codepoint-for-codepoint and drop_varname/2 stays correct.
+    Subject = unicode:characters_to_binary(Str),
+    case re:run(Subject, "([a-zA-Z_]+[a-zA-Z0-9_]*)}", [unicode, {capture, [1], list}]) of
         nomatch ->
             error;
         {match, [Name]} ->
