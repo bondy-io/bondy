@@ -93,7 +93,7 @@ callback_realm_isolation(Config) ->
     %% Same guid, different realm: the lookup is realm-scoped, so a caller in
     %% another realm co-located on this node cannot read the session.
     Result = bondy_session_api:get(<<"other.realm.not.owning">>, Guid, #{}),
-    ?assertMatch({error, ?WAMP_NO_SUCH_SESSION, _, _}, Result),
+    ?assertMatch({error, ?WAMP_NO_SUCH_SESSION, _, _, _}, Result),
     ok.
 
 callback_unknown_guid(Config) ->
@@ -102,7 +102,7 @@ callback_unknown_guid(Config) ->
     %% Well-formed but never-opened guid.
     Guid = bondy_session_id:new(),
     Result = bondy_session_api:get(RealmUri, Guid, #{}),
-    ?assertMatch({error, ?WAMP_NO_SUCH_SESSION, _, _}, Result),
+    ?assertMatch({error, ?WAMP_NO_SUCH_SESSION, _, _, _}, Result),
     ok.
 
 callback_non_binary_guid(Config) ->
@@ -111,7 +111,7 @@ callback_non_binary_guid(Config) ->
     %% A non-binary identifier (e.g. a legacy integer external id) must be
     %% rejected cleanly rather than crash the callback.
     Result = bondy_session_api:get(RealmUri, 123456789, #{}),
-    ?assertMatch({error, ?WAMP_NO_SUCH_SESSION, _, _}, Result),
+    ?assertMatch({error, ?WAMP_NO_SUCH_SESSION, _, _, _}, Result),
     ok.
 
 %% =============================================================================

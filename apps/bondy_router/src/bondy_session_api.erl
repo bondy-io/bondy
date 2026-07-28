@@ -70,7 +70,9 @@ handle_call(~"bondy.session.self", #call{} = M, Ctxt) ->
 %% =============================================================================
 
 %% @private
+%% The dealer's apply_dynamic_callback/3 expects a callback error as the 5-tuple
+%% {error, Uri, Details, Args, KWArgs} (success is the 4-tuple {ok, D, A, K}).
 no_such_session_error() ->
     Uri = ?WAMP_NO_SUCH_SESSION,
     Msg = <<"No session exists for the supplied identifier">>,
-    {error, Uri, #{}, [Msg]}.
+    {error, Uri, #{}, [Msg], #{}}.
