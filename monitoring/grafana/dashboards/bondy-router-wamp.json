@@ -9,7 +9,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -72,6 +72,15 @@
       "title": "Runtime / BEAM",
       "type": "link",
       "url": "/d/bondy-runtime-beam",
+      "icon": "dashboard",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": true
+    },
+    {
+      "title": "HTTP Connector",
+      "type": "link",
+      "url": "/d/bondy-http-connector",
       "icon": "dashboard",
       "targetBlank": false,
       "keepTime": true,

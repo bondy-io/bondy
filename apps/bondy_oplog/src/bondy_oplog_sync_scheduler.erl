@@ -295,6 +295,7 @@ retries.
 -export([set_peer_source/2]).
 -export([set_interval_ms/1]).
 -export([info/0]).
+-export([inflight_for/1]).
 -export([default_dispatch/2]).
 
 -define(RR_TAB, bondy_oplog_sync_scheduler_rr).
@@ -407,6 +408,25 @@ Returns the scheduler's current configuration. Cheap.
 info() ->
     gen_server:call(?MODULE, info).
 
+?DOC("""
+Diagnostic aid: the in-flight sync sessions currently dispatched for
+`InstanceId` (bootstrap or live, against any peer), each with its age
+in milliseconds since dispatch. Reads the in-flight table directly, no
+gen_server round trip. An entry whose age is large relative to normal
+round-trip expectations indicates a session that is not completing —
+useful to distinguish "never dispatched" from "dispatched but stuck"
+when diagnosing a convergence stall.
+""").
+-spec inflight_for(instance_id()) ->
+    [{pid(), bootstrap | live, peer_id() | undefined, AgeMs :: non_neg_integer()}].
+
+inflight_for(InstanceId) ->
+    _ = ensure_table(?INFLIGHT_TAB),
+    Now = now_ms(),
+    Pattern = {'$1', InstanceId, '$2', '$3', '$4'},
+    Rows = ets:select(?INFLIGHT_TAB, [{Pattern, [], [['$1', '$2', '$3', '$4']]}]),
+    [{Pid, Kind, Peer, Now - StartedAt} || [Pid, Kind, Peer, StartedAt] <- Rows].
+
 %% =============================================================================
 %% gen_server CALLBACKS
 %% =============================================================================
@@ -503,7 +523,7 @@ handle_info(tick, State) ->
     {noreply, schedule_tick(run_tick(State))};
 handle_info({'DOWN', _MonRef, process, Pid, Reason}, State) ->
     case ets:lookup(?INFLIGHT_TAB, Pid) of
-        [{Pid, InstanceId, Kind, Peer}] ->
+        [{Pid, InstanceId, Kind, Peer, _StartedAt}] ->
             ets:delete(?INFLIGHT_TAB, Pid),
             %% Bootstrap failures drive the per-instance retry backoff; live
             %% sync failures are self-healing (the next tick re-dispatches
@@ -880,7 +900,7 @@ dispatch_bootstrap(InstanceId, Peer, Strategy) ->
 track_inflight(Pid, InstanceId) ->
     _ = ensure_table(?INFLIGHT_TAB),
     _ = erlang:monitor(process, Pid),
-    ets:insert(?INFLIGHT_TAB, {Pid, InstanceId, bootstrap, undefined}),
+    ets:insert(?INFLIGHT_TAB, {Pid, InstanceId, bootstrap, undefined, now_ms()}),
     telemetry:execute(
         [bondy_oplog, sync_scheduler, bootstrap, started],
         #{current => inflight_bootstrap_count()},
@@ -929,13 +949,13 @@ at_node_cap() ->
 %% In-flight count restricted to bootstrap sessions, for the narrower
 %% `max_inflight_bootstraps` sub-cap and `info/0` reporting.
 inflight_bootstrap_count() ->
-    select_inflight_count({'_', '_', bootstrap, '_'}).
+    select_inflight_count({'_', '_', bootstrap, '_', '_'}).
 
 %% @private
 %% Whether a live session is already running for this exact (instance,
 %% peer) pair — the per-peer dedup on the live fan-out.
 pair_inflight(InstanceId, Peer) ->
-    select_inflight_count({'_', InstanceId, live, Peer}) > 0.
+    select_inflight_count({'_', InstanceId, live, Peer, '_'}) > 0.
 
 %% @private
 %% Counts in-flight entries matching `Pattern` via a match spec (never
@@ -1137,7 +1157,7 @@ maybe_flag_rebootstrap(_InstanceId, _Peer, _Reason) ->
 %%   - `none`             — the normal live path.
 rebootstrap_state(InstanceId) ->
     _ = ensure_table(?REBOOTSTRAP_TAB),
-    case select_inflight_count({'_', InstanceId, bootstrap, '_'}) > 0 of
+    case select_inflight_count({'_', InstanceId, bootstrap, '_', '_'}) > 0 of
         true ->
             inflight;
         false ->
@@ -1313,7 +1333,7 @@ maybe_start_live(InstanceId, Peer, SessionOpts, Capped) ->
 track_live(Pid, InstanceId, Peer) ->
     _ = ensure_table(?INFLIGHT_TAB),
     _ = erlang:monitor(process, Pid),
-    ets:insert(?INFLIGHT_TAB, {Pid, InstanceId, live, Peer}),
+    ets:insert(?INFLIGHT_TAB, {Pid, InstanceId, live, Peer, now_ms()}),
     telemetry:execute(
         [bondy_oplog, sync_scheduler, live, started],
         #{current => inflight_count()},

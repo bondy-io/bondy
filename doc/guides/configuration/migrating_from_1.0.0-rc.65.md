@@ -141,9 +141,36 @@ defaults are safe to run with unchanged.
 | `load_regulation.router.flow_pool.capacity` | Capacity of the per-flow relay ordering pool. |
 | `registry.rib.check_interval`, `registry.rib.damping` | Registry routing-summary consistency sweep and route-flap damping. |
 
-Everything in `bondy_bridge_relay.schema`, `bondy_broker_bridge.schema`,
-`bondy_rpc_gateway.schema` and `oauth2.schema` — bridge relay, broker
-bridge, RPC Gateway, and OAuth2/OIDC configuration — is unchanged.
+Everything in `bondy_bridge_relay.schema`, `bondy_broker_bridge.schema`
+and `oauth2.schema` — bridge relay, broker bridge, and OAuth2/OIDC
+configuration — is unchanged. The RPC Gateway configuration moved; see
+step 7 below.
+
+### 7. Rename the RPC Gateway prefix (now HTTP Connector)
+
+The experimental WAMP→HTTP RPC Gateway application was renamed
+`bondy_rpc_gateway` → `bondy_http_connector`, to stop it being confused
+with the (unrelated, inbound) HTTP API Gateway. Every `rpc_gateway.*`
+`bondy.conf` key is now `http_connector.*` — only the prefix changes, every
+sub-key, value and its meaning are identical, e.g.:
+
+| Old key (≤ 1.0.0-rc.65) | New key |
+|---|---|
+| `rpc_gateway.services.$service.base_url` | `http_connector.services.$service.base_url` |
+| `rpc_gateway.services.$service.pool.*` | `http_connector.services.$service.pool.*` |
+| `rpc_gateway.services.$service.auth.*` | `http_connector.services.$service.auth.*` |
+| `rpc_gateway.services.$service.procedures.$proc.*` | `http_connector.services.$service.procedures.$proc.*` |
+
+If you don't have an `rpc_gateway.*` section in your `bondy.conf`, there is
+nothing to do.
+
+This release also adds a per-service liveness probe,
+`http_connector.services.$service.liveness.*` (enabled by default): a
+periodic health check of the upstream that raises an alarm
+(`{http_connector_service_down, ServiceName}`, visible via the existing
+active-alarms metric/dashboard panel) after `liveness.failure_threshold`
+consecutive failures and clears it on recovery. This is new, not a rename —
+the defaults are safe to run with unchanged.
 
 ## Result
 

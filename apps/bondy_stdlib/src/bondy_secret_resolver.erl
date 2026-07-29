@@ -6,7 +6,7 @@
 -module(bondy_secret_resolver).
 -moduledoc """
 A small, provider-pluggable facility for resolving secret material from an
-external source, shared across Bondy (RPC Gateway service secrets, realm
+external source, shared across Bondy (HTTP Connector service secrets, realm
 signing-key encryption, WAL body-encryption keys).
 
 A secret is named by a `ref()` map whose `provider` selects how it is fetched.

@@ -1,0 +1,27 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+{application, bondy_http_connector, [
+    {description,
+        "Egress connector that registers WAMP procedures backed by "
+        "upstream HTTP/REST services, handling auth token acquisition, "
+        "caching, and connection pooling per service."
+    },
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, {bondy_http_connector_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        erlcloud,
+        telemetry,
+        bondy_metrics,
+        bondy_stdlib
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+ ]}.

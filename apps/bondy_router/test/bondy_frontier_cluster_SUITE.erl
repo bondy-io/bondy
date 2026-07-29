@@ -545,11 +545,18 @@ await_instance_sigs(Node, Targets, Pred, Deadline) ->
 
 %% @private
 %% Per-target diagnosis captured when a barrier times out: is the instance
-%% process alive, and what does a bounded `root_hash` read actually return or
-%% raise? Distinguishes "deregistered" (`no_pid`) from "alive but starved"
-%% (`{read_failed, ...}` / timeout) from "genuinely empty root" (`root_undefined`)
-%% — turning an opaque `instance_sigs_unsettled` into an actionable reason. Runs
-%% ON the node (via erpc) so `is_process_alive/1` sees a local pid.
+%% process alive, what does a bounded `root_hash` read actually return or
+%% raise, and — the piece that distinguishes "never dispatched" from
+%% "dispatched but stuck" — is there a live/bootstrap sync session currently
+%% in flight for this instance, and for how long has it been running?
+%% `Read` distinguishes "deregistered" (`no_pid`) from "alive but starved"
+%% (`{read_failed, ...}` / timeout) from "genuinely empty root"
+%% (`root_undefined`); `Inflight` turns "roots never equalised" into either
+%% "no session is even trying" (`[]`) or "a session has been running for
+%% AgeMs without completing" (`[{Pid, Kind, Peer, AgeMs}]`) — the latter,
+%% with a large `AgeMs`, is the fingerprint of a stuck session rather than
+%% ordinary bulk-sync latency. Runs ON the node (via erpc) so
+%% `is_process_alive/1` sees a local pid.
 do_target_diag(InstIds) ->
     [
         begin
@@ -568,7 +575,13 @@ do_target_diag(InstIds) ->
                             C:R2 -> {read_failed, C, R2}
                         end
                 end,
-            {I, Pid, Alive, Read}
+            Inflight =
+                try bondy_oplog_sync_scheduler:inflight_for(I) of
+                    L when is_list(L) -> L
+                catch
+                    _:_ -> unavailable
+                end,
+            {I, Pid, Alive, Read, Inflight}
         end
      || I <- InstIds
     ].

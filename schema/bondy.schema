@@ -1295,7 +1295,7 @@ end}.
 %% =============================================================================
 
 %% @doc Path to a PEM file containing additional trusted CA certificates for
-%% outbound TLS connections (OIDC providers, RPC Gateway HTTP backends, etc.).
+%% outbound TLS connections (OIDC providers, HTTP Connector HTTP backends, etc.).
 %% These certificates are merged with the certifi Mozilla CA bundle and
 %% (when available) the OS trust store.
 %% If not set, Bondy will try to use the api_gateway.https.cacertfile value

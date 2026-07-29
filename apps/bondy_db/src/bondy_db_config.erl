@@ -10,7 +10,7 @@
 Per-database configuration for `bondy_db`'s two databases (`main` |
 `registry`). An implementation of the `app_config` behaviour, matching
 `bondy_config`, `bondy_mst_config`, `bondy_wamp_config` and
-`bondy_rpc_gateway_config` — every value is read once at boot (`init/0`,
+`bondy_http_connector_config` — every value is read once at boot (`init/0`,
 called from `bondy_db_sup`), cached in `persistent_term`, and never
 re-read from the raw environment afterwards, so a runtime override must go
 through `set/2`, not `application:set_env/3`.

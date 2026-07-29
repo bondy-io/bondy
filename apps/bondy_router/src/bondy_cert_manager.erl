@@ -11,7 +11,7 @@ Manages three concerns:
 
 1. **CA trust store** for outbound TLS connections — merges CA certificates from
    `certifi:cacerts()`, a user-configured PEM file (`tls.cacertfile`), and the
-   OS trust store. Provides `ssl_opts/0,1` consumed by OIDC, RPC Gateway, etc.
+   OS trust store. Provides `ssl_opts/0,1` consumed by OIDC, HTTP Connector, etc.
 
 2. **Server certificate management** — loads listener TLS certificates
    (cert + key) from PEM files, caches them in `persistent_term`, and provides

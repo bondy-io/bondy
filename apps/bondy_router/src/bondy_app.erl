@@ -112,7 +112,7 @@ start(_Type, Args) ->
                 %% Finally we allow clients to connect
                 ok ?= start_public_listeners(),
                 {ok, _} = application:ensure_all_started(
-                    bondy_rpc_gateway, permanent
+                    bondy_http_connector, permanent
                 ),
                 %% {ok, _} = application:ensure_all_started(
                 %%     bondy_broker_bridge, permanent

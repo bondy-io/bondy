@@ -194,7 +194,10 @@ push_failure(InstanceId, Reason) ->
         {'DOWN', Ref, process, FakePid, _} -> ok
     after 500 -> error(fake_pid_did_not_die)
     end,
-    ets:insert(?INFLIGHT_TAB, {FakePid, InstanceId, bootstrap, undefined}),
+    ets:insert(
+        ?INFLIGHT_TAB,
+        {FakePid, InstanceId, bootstrap, undefined, erlang:monotonic_time(millisecond)}
+    ),
     Sched ! {'DOWN', make_ref(), process, FakePid, Reason},
     _ = sys:get_state(Sched),
     ok.

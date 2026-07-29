@@ -101,7 +101,10 @@ fence_backer_bypasses_cap() ->
     %% capped here; a fence-backer must still dispatch (auth availability).
     Fake = spawn(fun() -> ok end),
     _ = monitor_until_dead(Fake),
-    ets:insert(?INFLIGHT_TAB, {Fake, <<"fake">>, live, p_fake}),
+    ets:insert(
+        ?INFLIGHT_TAB,
+        {Fake, <<"fake">>, live, p_fake, erlang:monotonic_time(millisecond)}
+    ),
 
     Inst = live_instance(true),
     ok = bondy_oplog_sync_scheduler:set_peer_source(
