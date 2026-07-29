@@ -322,7 +322,7 @@ damping() ->
 
 with_catalog(Fun) ->
     Tmp = make_tmpdir(),
-    application:set_env(bondy_router, oplog_core_shard_count, 1),
+    ok = bondy_db_config:set([databases, main, oplog, shard_count], 1),
     application:set_env(bondy_router, platform_data_dir, Tmp),
     {ok, Pid} = ?CAT:start_link(),
     Tab = ets:new(rib_members, [ordered_set, public]),
@@ -331,7 +331,7 @@ with_catalog(Fun) ->
     after
         ets:delete(Tab),
         _ = catch gen_server:stop(Pid, normal, 30000),
-        application:unset_env(bondy_router, oplog_core_shard_count),
+        ok = bondy_db_config:set([databases, main, oplog, shard_count], 16),
         application:unset_env(bondy_router, platform_data_dir),
         _ = file:del_dir_r(Tmp),
         ok

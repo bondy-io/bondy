@@ -13,7 +13,7 @@ input to lowercase use `string:casefold/1`.
 
 ### Storage
 
-Sources are stored in the bondy_db `security_sources` core table. The store is
+Sources are stored in the bondy_db `security_sources` main table. The store is
 realm-sharded; the compound `{Username, AMask, Authmethod}` key is encoded to a
 binary with `term_to_binary/1`. That encoding is not order-preserving and the
 match is on the `Username` (and optionally the `AMask`) — never the

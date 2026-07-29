@@ -95,42 +95,44 @@ its Cowboy dispatch; bridge relay holds the inter-cluster bridge configuration
 (read once at boot, filtered to the local node); retained messages hold the
 last event published with the `retain` option on each topic.
 
-## Two databases: `core` and `registry`
+## Two databases: `main` and `registry`
 
 The catalogue declares exactly two `bondy_db` databases, split by a single
 question — *must this survive a restart?*
 
-- **`core`** — **durable**. The system of record: realms, users, groups,
-  membership, grants, sources, tickets, tokens, the gateway specs, bridge
-  config, retained messages. Twelve tables, all on the durable substrate
-  (Leveled-backed).
-- **`registry`** — **ephemeral**. The two routing tables. It is in-memory
+- **`main`** — **durable**. The system of record: realms, users, groups,
+  membership, grants, sources, realm keys, tickets, tokens, the gateway
+  specs, bridge config, retained messages. Thirteen tables, all on the
+  durable substrate (Leveled-backed).
+- **`registry`** — **ephemeral**. The routing tables — registrations,
+  subscriptions, and their RIB summaries. It is in-memory
   end to end (ETS projection, in-memory write-ahead log), because persisting a
   registration would only resurrect a dead, unroutable session on restart. A
   rebooted node starts with an empty registry and re-learns live entries from
   its peers.
 
-The split is not cosmetic: it selects the entire storage stack. `core` pays for
+The split is not cosmetic: it selects the entire storage stack. `main` pays for
 durability (a disk write-ahead log, an LSM projection, crash recovery);
 `registry` pays for none of it and routes on RAM alone.
 
 ## The storage topology
 
-A table's placement on the substrate is decided by four declarations in its
-catalogue spec — which database, how it shards, how it folds, and whether it
-publishes change events — plus the secondary access paths it declares. The rest
-of this section takes them one at a time.
+A table's placement on the substrate is decided by a handful of declarations in
+its catalogue spec — which database, whether it is durable, how it folds, and
+whether it publishes change events — plus the secondary access paths it declares.
+Sharding is a property of the database, not of the individual table. The rest of
+this section takes these one at a time.
 
 ### The per-shard stack and the partition strategy
 
 Each database is a fixed set of **shards**, and every shard owns its own full
-storage stack (write-ahead log, MST, projection). `core` runs on the
+storage stack (write-ahead log, MST, projection). `main` runs on the
 **shared-shards** topology over Leveled with a deployment-configurable shard
-count (`db.core.shard_count`, default 16); `registry` runs on the **memory**
+count (`db.main.shard_count`, default 16); `registry` runs on the **memory**
 topology (ETS, in-memory WAL, the fused single-process writer) with its own
-shard count.
+shard count (`db.registry.shard_count`, default 16).
 
-Which shard a write lands on is the database's **partition strategy**. `core`
+Which shard a write lands on is the database's **partition strategy**. `main`
 uses the **aggregate** strategy: a cell's shard is chosen by hashing
 `(realm, aggregate-root-of-key)`. The realm component keeps a realm's data
 together with itself; the aggregate-root component (below) decides *which*
@@ -144,23 +146,24 @@ exists would silently misplace reads. The topology manifest records the frozen
 configuration and reconciles it against the running config on every boot (see
 *The topology manifest*).
 
-### Realm scoping: `shard_by`
+### Realm scoping
 
-`shard_by` declares whether a table is filed *under a realm* or in a *single
-global keyspace*.
+The `aggregate` strategy hashes `(realm, aggregate-root-of-key)`, so the *realm*
+component decides whether a table is filed under a realm or spread across a
+single global keyspace. That component comes from how each entity builds its
+key, not from a per-table switch.
 
-- **`shard_by => realm`** — the cell lives in a per-realm band. A realm's data
-  is isolated, and a realm-scoped query — "list this realm's users", "this
-  user's grants" — is a bounded, realm-local key range, not a scatter across the
-  whole table. This is the default, used by every per-realm table: users,
-  groups, membership, grants, sources, the gateway, bridges, retained messages,
-  and the (realm-scoped) routing tables.
-- **`shard_by => key`** — no realm band; the table is one global keyspace
-  addressed by key. Used by `bondy_realm` (the realm registry itself has no
-  enclosing realm — realms are spread across shards by their URI) and by
-  `bondy_ticket` / `bondy_oauth_token` (addressed by their opaque key, where
-  creation and point lookup are the only access patterns and enumeration is a
-  non-goal).
+- **Per-realm tables** file each cell in its realm's band. A realm's data is
+  isolated, and a realm-scoped query — "list this realm's users", "this user's
+  grants" — is a bounded, realm-local key range, not a scatter across the whole
+  table. This is every per-realm table: users, groups, membership, grants,
+  sources, the gateway, bridges, retained messages, and the (realm-scoped)
+  routing tables.
+- **Global tables** have no enclosing realm and are spread across shards by
+  their key. `bondy_realm` is the realm registry itself, keyed by realm URI;
+  `bondy_ticket` and `bondy_oauth_token` are addressed by their opaque key,
+  where creation and point lookup are the only access patterns and enumeration
+  is a non-goal.
 
 ### Co-location: `aggregate_root`
 
@@ -198,12 +201,14 @@ is what "merge" means for that table when two nodes have both written.
   that did not observe it. This is why two nodes that independently add the same
   user to different groups both succeed — the lost update an LWW `groups` list
   would suffer is structurally impossible when each membership is its own cell.
-- **`mv`** (a multi-value register, sibling-preserving) and **`aw`** (an
-  add-wins map) are defined fold classes available to the substrate but not
-  currently bound to a table. Grants and sources are *modelled* as
-  sibling-preserving — so a genuinely concurrent multi-node grant edit could be
-  surfaced rather than silently resolved — but run as `lww` today; the
-  distinction only matters under concurrent cross-node edits.
+- **`aw`** — an **add-wins map**, the fold for `bondy_realm_keys`, the global
+  registry of realm signing keys keyed by `kid`. Concurrent key additions on
+  different nodes all survive the merge.
+- **`mv`** (a multi-value register, sibling-preserving) is a defined fold class
+  available to the substrate but not currently bound to a table. Grants and
+  sources are *modelled* as sibling-preserving — so a genuinely concurrent
+  multi-node grant edit could be surfaced rather than silently resolved — but run
+  as `lww` today; the distinction only matters under concurrent cross-node edits.
 
 ### Change notification: `publish`
 
@@ -221,9 +226,9 @@ maintain the routing trie when a peer's registration replicates. A node's *own*
 writes run their side-effects inline at the call site, so reactors ignore the
 local tag and act only on the merge tag.
 
-Tables that publish: realms, users, membership, both grant tables, the gateway,
-and the two routing tables. Tables that do not (no consumer reacts to a remote
-change): groups, sources, tickets, tokens, bridges, retained messages.
+Tables that publish: realms, users, membership, both grant tables, sources, the
+gateway, and the routing tables. Tables that do not (no consumer reacts to a
+remote change): groups, tickets, tokens, bridges, retained messages.
 
 ### Secondary access paths
 
@@ -244,38 +249,40 @@ provide the reverse or cross-cutting lookups Bondy needs:
 
 ### The topology manifest
 
-A durable database's keying configuration — partition strategy, shard count,
-each table's `shard_by` and `aggregate_root` — decides where every cell lives on
-disk. Change it after data exists and reads silently miss. The manifest defends
+A durable database's keying configuration — partition strategy, shard count, and
+each table's `aggregate_root` — decides where every cell lives on disk. Change it after data exists and reads silently miss. The manifest defends
 against this: the first durable open **freezes** the configuration, and every
 later boot reconciles the running config against it, reporting a mismatch per
-the `db.core.on_topology_mismatch` policy (`warn` by default, `stop` to
+the `db.main.on_topology_mismatch` policy (`warn` by default, `stop` to
 refuse the boot). The frozen configuration also yields a **topology
 fingerprint** two peers exchange during anti-entropy, so a node that keys its
 data differently is never mistaken for a divergent replica of the same data.
 
 ## The catalogue
 
-The full inventory, grouped by domain. `DB` is `core` (durable) unless noted;
-`shard` is `shard_by`; `co-loc` is `aggregate_root` (blank = `identity`);
-`fold` is the CRDT; `pub` marks change-publishing tables.
+The full inventory, grouped by domain. `DB` is `main` (durable) unless noted;
+`scope` is `realm` (realm-banded) or `global`; `co-loc` is `aggregate_root`
+(blank = `identity`); `fold` is the CRDT; `pub` marks change-publishing tables.
 
-| Domain | Table | DB | shard | co-loc | fold | pub | Notes |
+| Domain | Table | DB | scope | co-loc | fold | pub | Notes |
 |---|---|---|---|---|---|---|---|
-| Realm | `bondy_realm` | core | key | — | lww | ✓ | global realm registry, keyed by URI |
-| Principals | `security_users` | core | realm | — | lww | ✓ | user record; membership is separate |
-| Principals | `security_groups` | core | realm | — | lww | | group record |
-| Principals | `security_group_members` | core | realm | second_col | **ew** | ✓ | membership relation; forward/reverse permutation index |
-| Authorization | `security_user_grants` | core | realm | leading_col | lww | ✓ | `{username, resource}`; `by_resource` index |
-| Authorization | `security_group_grants` | core | realm | leading_col | lww | ✓ | `{group, resource}`; `by_resource` index |
-| Authorization | `security_sources` | core | realm | leading_col | lww | | `{username, mask, method}` |
-| Auth artifacts | `bondy_ticket` | core | key | — | lww | | keyed by `{realm, authid, scope}` |
-| Auth artifacts | `bondy_oauth_token` | core | key | — | lww | | keyed by opaque token value |
-| Operational | `api_gateway` | core | realm | — | lww | ✓ | HTTP-API specs; dispatch reactor |
-| Operational | `bondy_bridge_relay` | core | realm | — | lww | | node-scoped; read once at boot |
-| Operational | `retained_messages` | core | realm | — | lww | | keyed by topic; range-scan matched |
+| Realm | `bondy_realm` | main | global | — | lww | ✓ | global realm registry, keyed by URI |
+| Realm | `bondy_realm_keys` | main | global | — | aw | | realm signing keys, keyed by `kid` |
+| Principals | `security_users` | main | realm | — | lww | ✓ | user record; membership is separate |
+| Principals | `security_groups` | main | realm | — | lww | | group record |
+| Principals | `security_group_members` | main | realm | second_col | **ew** | ✓ | membership relation; forward/reverse permutation index |
+| Authorization | `security_user_grants` | main | realm | leading_col | lww | ✓ | `{username, resource}`; `by_resource` index |
+| Authorization | `security_group_grants` | main | realm | leading_col | lww | ✓ | `{group, resource}`; `by_resource` index |
+| Authorization | `security_sources` | main | realm | leading_col | lww | ✓ | `{username, mask, method}`; merge-conflict alarm |
+| Auth artifacts | `bondy_ticket` | main | global | — | lww | | keyed by `{realm, authid, scope}` |
+| Auth artifacts | `bondy_oauth_token` | main | global | — | lww | | keyed by opaque token value |
+| Operational | `api_gateway` | main | realm | — | lww | ✓ | HTTP-API specs; dispatch reactor |
+| Operational | `bondy_bridge_relay` | main | realm | — | lww | | node-scoped; read once at boot |
+| Operational | `retained_messages` | main | realm | — | lww | | keyed by topic; range-scan matched |
 | Routing | `bondy_registration` | registry | realm | — | lww | ✓ | ephemeral; `by_session` index |
 | Routing | `bondy_subscription` | registry | realm | — | lww | ✓ | ephemeral; `by_session` index |
+| Routing | `bondy_registration_rib` | registry | realm | — | lww | ✓ | ephemeral; RIB routing summary |
+| Routing | `bondy_subscription_rib` | registry | realm | — | lww | ✓ | ephemeral; RIB routing summary |
 
 ## Pointers
 

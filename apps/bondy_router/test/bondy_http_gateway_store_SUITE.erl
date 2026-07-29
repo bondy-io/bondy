@@ -41,8 +41,9 @@ end_per_suite(Config) ->
 %% The catalogue provisions the api_gateway bondy_db table at boot (it is the
 %% migrated domain), so a reactor subscription and reads have a live table.
 catalogue_provisions_api_gateway_test(_) ->
+    Main = bondy_namespace_catalog:main_db_name(),
     ?assertMatch(
-        #{entity_type := api_gateway, db_name := core},
+        #{entity_type := api_gateway, db_name := Main},
         bondy_namespace_catalog:table(api_gateway)
     ).
 

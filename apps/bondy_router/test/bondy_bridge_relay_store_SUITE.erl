@@ -35,8 +35,9 @@ end_per_suite(Config) ->
 %% The catalogue provisions the bondy_bridge_relay bondy_db table at boot (it is
 %% a migrated domain), so the config store has a live table to read / write.
 catalogue_provisions_bridge_relay_test(_) ->
+    Main = bondy_namespace_catalog:main_db_name(),
     ?assertMatch(
-        #{entity_type := bondy_bridge_relay, db_name := core},
+        #{entity_type := bondy_bridge_relay, db_name := Main},
         bondy_namespace_catalog:table(bondy_bridge_relay)
     ).
 

@@ -20,7 +20,7 @@
 %% stamped by the module itself.
 configured() ->
     #{
-        db => core,
+        db => main,
         topology_module => bondy_db_topology_shared_shards,
         partition_strategy => aggregate,
         shard_count => 16,

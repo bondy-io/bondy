@@ -30,7 +30,7 @@ via the corresponding public API functions.
 ## API specifications
 
 API specs are JSON documents parsed by `bondy_http_gateway_api_spec_parser`.
-They are stored in the bondy_db `api_gateway` core table, keyed by spec id,
+They are stored in the bondy_db `api_gateway` main table, keyed by spec id,
 with the **source JSON** carried as a `term_to_binary/1` payload in an
 `lww_register` cell. When a spec
 is loaded:
@@ -91,7 +91,7 @@ Listeners are configured with two connection-count alarms:
 -include("bondy_uris.hrl").
 
 -define(DISPATCH_KEY(Name), {?MODULE, dispatch, Name}).
-%% API specs live in the bondy_db `api_gateway` core table. The store is a flat,
+%% API specs live in the bondy_db `api_gateway` main table. The store is a flat,
 %% id-keyed keyspace (a spec's realm is a field in the value, not part of the
 %% key), so a single
 %% fixed bucket is used. The spec map is stored directly in an `lww_register`

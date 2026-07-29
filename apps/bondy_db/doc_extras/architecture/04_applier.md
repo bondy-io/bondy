@@ -167,7 +167,7 @@ sequenceDiagram
     CA->>Cache: invalidate touched (Bucket, Key)s
 ```
 
-Four load-bearing details:
+Four details worth pinning down:
 
 - **Writes are batched, not per-event.** All new frames in the batch
   go to the projection in one `put_batch` (for leveled, one
@@ -185,7 +185,7 @@ Four load-bearing details:
 - **A peer's change is announced here.** When the batch being applied
   is a *remote* merge (a peer's write arriving via anti-entropy) and the
   table opted in with `publish => true`, the engine emits a
-  `bondy_oplog_core:publish_merge/4` event per touched cell — the remote
+  `bondy_oplog_core:publish_merge/5` event per touched cell — the remote
   half of the change-notification seam ([chapter 03](03_bondy_db.md#change-notification)).
   A node's *own* writes are announced separately by the applier's
   `publish_batch` (the local tag), because their side-effects already
@@ -200,7 +200,7 @@ Four load-bearing details:
   advance, and never leads the durable projection.
 
 The applier also keeps an in-memory `fold_state`
-(`apply_fold_batch/3`) for bare single-CRDT instances that have no
+(`apply_fold_batch/2`) for bare single-CRDT instances that have no
 projection at all — it folds the batch through the same
 `apply_op` step; the per-cell projection path is the common case.
 
@@ -324,7 +324,7 @@ Two paths, two checkpoints:
 
 ```mermaid
 flowchart LR
-    LOCAL["local append"] --> SIGN["instance:sign_event/2<br/>(at append time)"]
+    LOCAL["local append"] --> SIGN["validator sign_event/2<br/>(at append time)"]
     SIGN --> WAL["WAL"]
     WAL --> DRAIN["applier drain"]
     DRAIN --> REVER["applier:verify_batch/4<br/>(re-verify stored signature)"]
@@ -503,7 +503,7 @@ Implementation:
 - `bondy_oplog_latency.erl` — the per-instance sampler/emitter +
   `bondy_metrics` histogram type (`histogram/1`, `histogram_stats/1`).
 - `bondy_oplog_applier.erl` — gen_server; `drain_loop/1`,
-  `apply_batch/2`, `apply_fold_batch/3`, `maybe_commit/1`,
+  `apply_batch/2`, `apply_fold_batch/2`, `maybe_commit/1`,
   `enqueue_remote/2`, `forward_remote/2`, `verify_batch/4`,
   `start_pos_from_consumer_offset/1` (the durable resume cursor),
   `resume_position/2` (the fused/ephemeral resume cursor).
@@ -515,11 +515,13 @@ Implementation:
 - `bondy_oplog_cell_kernel.erl` — the CRDT seam the engine drives
   ([chapter 05](05_crdt_model.md)).
 - `bondy_oplog_instance.erl` — `install_local_batch` handler,
-  `evict_overlay_batch/2`, `sign_event/2`, `backpressure_admit/2`;
-  `fused_apply_batch/2` (the fused inline twin of this chapter).
+  `evict_overlay_batch/2`, `backpressure_admit/2`; `fused_apply_batch/2`
+  (the fused inline twin of this chapter). Signing at append time calls
+  the validator's `sign_event/2` callback (below).
 - `bondy_oplog_wal_reader.erl` — the WAL drain cursor.
-- `bondy_oplog_wal.erl` — `write_consumer_offset/2`,
-  `set_committed_segment/2`, `await_durable/3`.
+- `bondy_oplog_wal.erl` — `set_committed_segment/2`, `await_durable/3`.
+- `bondy_oplog_wal_state.erl` — `write_consumer_offset/2`, the durable
+  consumer offset.
 - `bondy_oplog_db_overlay.erl` — overlay key shape and per-row
   delete.
 - `bondy_oplog_validator.erl` (+ `_crypto` / `_trust` variants) —

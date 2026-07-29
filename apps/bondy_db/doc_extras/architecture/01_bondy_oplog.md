@@ -348,11 +348,11 @@ A few notes:
   via the responder / sync_session and are forwarded to the
   remote instance, which stages them in the overlay; the
   receiving applier installs them into the MST + projection.
-- **A future eager-push fast-path is intended.** The overlay's
-  `eager_pushed` origin tag and an `enqueue_remote` hook are
-  in place as the receive-side mechanism, but no sending-side
-  pusher exists today. Treat sync-session cadence as the floor on
-  cross-node visibility.
+- **A future eager-push fast-path is intended.** An `enqueue_remote`
+  hook is in place as the receive-side seam; the `eager_pushed` overlay
+  tag it would carry is reserved for that future receiver and is not
+  written yet. No sending-side pusher exists today, so treat
+  sync-session cadence as the floor on cross-node visibility.
 
 ## Recovery on boot
 

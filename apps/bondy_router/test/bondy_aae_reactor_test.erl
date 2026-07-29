@@ -15,7 +15,7 @@
 -define(USER, <<"alice">>).
 %% G-1 realm-folded security_users cell key: <<Realm, 0, Username>>.
 -define(USER_KEY, <<?REALM/binary, 0, ?USER/binary>>).
-%% bondy_realm global-band cell key on the folding core topology: <<0, Uri>>.
+%% bondy_realm global-band cell key on the folding main topology: <<0, Uri>>.
 -define(REALM_KEY, <<0, ?REALM/binary>>).
 %% Realm-folded grant cell key: <<Realm, 0, EncGrantKey>>, where the composite
 %% grant key (`bondy_rbac:encode_key/1`) carries its OWN 0x00 role/resource

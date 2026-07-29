@@ -179,10 +179,10 @@ incoming_root_restart(Dir) ->
     ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
     ok.
 
-%% Regression for the LIVE symptom: the core shards use SLASH-bearing instance
-%% ids (`core/13`). Under the sharded path layout the instance dir ends in TWO
-%% components (`.../core/13`), and a path helper that strips one component to find
-%% the "base" double-nests the id (`.../core/core/13`), so the persisted root is
+%% Regression for the LIVE symptom: the main shards use SLASH-bearing instance
+%% ids (`main/13`). Under the sharded path layout the instance dir ends in TWO
+%% components (`.../main/13`), and a path helper that strips one component to find
+%% the "base" double-nests the id (`.../main/main/13`), so the persisted root is
 %% read/written on a different path than the data — the tree never restores on
 %% reopen and the WAL replays in full every boot. This reproduces it with a
 %% slashed id; slash-free ids (every other test here) do not exercise it.
@@ -192,8 +192,8 @@ slash_instance_id_root_survives_restart_test_() ->
     end}.
 
 slash_id_restart(Dir) ->
-    %% A `core/13`-shaped id (DB name + shard), unique per run to avoid registry
-    %% collisions, with a slash like the real core shards.
+    %% A `main/13`-shaped id (DB name + shard), unique per run to avoid registry
+    %% collisions, with a slash like the real main shards.
     U = integer_to_binary(erlang:unique_integer([positive, monotonic])),
     InstId = <<"slashcore", U/binary, "/13">>,
     NS = binary_to_atom(<<"ns_slash_", U/binary>>, utf8),
@@ -393,7 +393,7 @@ open_pack_instance(InstanceId, NS, Dir) ->
 open_pack_instance(InstanceId, NS, Dir, Origin) ->
     open_pack_instance(InstanceId, NS, Dir, Origin, ?SEAL_EVERY).
 
-%% Mirrors a live core shard's steady state: a high seal threshold so recent
+%% Mirrors a live main shard's steady state: a high seal threshold so recent
 %% writes stay in the UNSEALED incoming pack at shutdown (the default is 10_000).
 open_pack_instance_noseal(InstanceId, NS, Dir, Origin) ->
     open_pack_instance(InstanceId, NS, Dir, Origin, 1_000_000).

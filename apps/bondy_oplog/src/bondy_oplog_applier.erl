@@ -320,7 +320,7 @@ instances are unaffected.
     %% Emits exactly ONE log when this instance's WAL replay begins and ONE
     %% when the first drain reaches end-of-log (boot catch-up complete) — a
     %% per-WAL boot progress marker, not a per-batch trace. `disabled` (the
-    %% default) is a no-op; only the durable `core` shards opt in (set by the
+    %% default) is a no-op; only the durable `main` shards opt in (set by the
     %% catalogue), so tests and ephemeral instances stay quiet.
     %%   disabled            — logging off.
     %%   armed               — opted in, replay not started.
@@ -385,7 +385,7 @@ instances are unaffected.
     drain_gated => boolean(),
     %% Emit a single boot log when this instance's WAL replay starts and a
     %% single log when the first drain reaches end-of-log. Default `false`.
-    %% Set by the catalogue for the durable `core` shards. See `boot_replay`.
+    %% Set by the catalogue for the durable `main` shards. See `boot_replay`.
     log_boot_replay => boolean()
 }.
 
@@ -3047,7 +3047,7 @@ reindex_one_cell(Adapter, Handle, Kernel, SecIdx, Id, Bucket, Key) ->
 %% directory, not the truncatable MST, so already-compacted cells are still
 %% reaped — and decoded with ITS OWN kernel. The founding-ctx version had
 %% both defects: on a shared shard whose founding table is tier_0 the whole
-%% pass no-oped (12 of the 13 core tables never reaped), and its
+%% pass no-oped (12 of the 13 main tables never reaped), and its
 %% `distinct_cell_keys(MST)` directory silently missed every compacted cell
 %% (BONDY_DB_RECLAMATION_PROOF.md §7.3). Members whose kernel is not a
 %% context-carrying tier_2 CRDT are skipped, byte-identical.

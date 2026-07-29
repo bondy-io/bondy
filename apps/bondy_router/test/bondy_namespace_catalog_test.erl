@@ -1,9 +1,9 @@
 %% =============================================================================
 %% Tests for `bondy_namespace_catalog` — the bondy_db DB/table declaration
-%% point and owner of the durable `core` database.
+%% point and owner of the durable `main` database.
 %%
 %% Pins: the table declarations (db split, aggregate_root routing, fold class),
-%% the core/registry DB specs, unconditional provisioning (every declared
+%% the main/registry DB specs, unconditional provisioning (every declared
 %% table opens + appears in bondy_db:info, fold→CRDT wiring), and teardown.
 %% =============================================================================
 
@@ -20,39 +20,39 @@
 declarations_test_() ->
     Tables = ?CAT:tables(),
     ByName = maps:from_list([{maps:get(name, S), S} || S <- Tables]),
-    Core = [S || S <- Tables, maps:get(db, S) =:= core],
+    Main = [S || S <- Tables, maps:get(db, S) =:= main],
     Registry = [S || S <- Tables, maps:get(db, S) =:= registry],
     [
         {"seventeen tables declared", ?_assertEqual(17, length(Tables))},
-        {"thirteen core, four registry", fun() ->
-            ?assertEqual(13, length(Core)),
+        {"thirteen main, four registry", fun() ->
+            ?assertEqual(13, length(Main)),
             ?assertEqual(4, length(Registry))
         end},
-        {"realm_keys is a durable core aw table", fun() ->
+        {"realm_keys is a durable main aw table", fun() ->
             %% Realm key material, split out of the realm identity cell so the
             %% realm's bondy_db identity/digest is Uri + config, not key bytes.
             %% Global registry like bondy_realm; aw-map of
             %% kid => key bundle so concurrent rotations merge without loss.
             Spec = maps:get(bondy_realm_keys, ByName),
-            ?assertEqual(core, maps:get(db, Spec)),
+            ?assertEqual(main, maps:get(db, Spec)),
             ?assertEqual(durable, maps:get(durability, Spec)),
             ?assertEqual(aw, maps:get(fold, Spec))
         end},
-        {"retained_messages is a durable core lww table", fun() ->
+        {"retained_messages is a durable main lww table", fun() ->
             %% Cut over to bondy_db (§11.4): always durable regardless of the
             %% inert `wamp.message_retention.storage_type` knob; storage-only
             %% lww, no secondary index (matched by key).
             Spec = maps:get(retained_messages, ByName),
-            ?assertEqual(core, maps:get(db, Spec)),
+            ?assertEqual(main, maps:get(db, Spec)),
             ?assertEqual(durable, maps:get(durability, Spec)),
             ?assertEqual(lww, maps:get(fold, Spec)),
             ?assertEqual([], maps:get(indexes, Spec, []))
         end},
-        {"group membership is a durable core ew fold (cell-per-fact)", fun() ->
+        {"group membership is a durable main ew fold (cell-per-fact)", fun() ->
             %% Authoritative cell-per-fact add-wins membership (ew_flag); the
             %% forward + reverse presence cells live here (design §3 / §11).
             Spec = maps:get(security_group_members, ByName),
-            ?assertEqual(core, maps:get(db, Spec)),
+            ?assertEqual(main, maps:get(db, Spec)),
             ?assertEqual(durable, maps:get(durability, Spec)),
             ?assertEqual(ew, maps:get(fold, Spec)),
             %% Facts co-locate with their leading entity (forward → user shard,
@@ -123,11 +123,11 @@ declarations_test_() ->
                 )
             )
         end},
-        {"core_db_spec: shared_shards, durable, default shards", fun() ->
-            Spec = ?CAT:core_db_spec(),
+        {"main_db_spec: shared_shards, durable, default shards", fun() ->
+            Spec = ?CAT:main_db_spec(),
             ?assertMatch(
                 #{
-                    name := core,
+                    name := main,
                     topology := bondy_db_topology_shared_shards,
                     durability := durable,
                     shard_count := 16
@@ -181,25 +181,25 @@ provisions_all() ->
     set_env(1, Tmp),
     {ok, Pid} = ?CAT:start_link(),
     try
-        %% Core DB + every declared core table provisioned and published —
+        %% Main DB + every declared main table provisioned and published —
         %% unconditionally, there is no per-table or per-domain gate.
         ?assert(?CAT:is_open()),
-        ?assertMatch(#{name := core}, ?CAT:core_db()),
+        ?assertMatch(#{name := main}, ?CAT:main_db()),
         ?assertMatch(
-            #{kind := db, name := core}, bondy_db:info(?CAT:core_db())
+            #{kind := db, name := main}, bondy_db:info(?CAT:main_db())
         ),
-        CoreNames = [
+        MainNames = [
             maps:get(name, S)
-         || S <- ?CAT:tables(), maps:get(db, S) =:= core
+         || S <- ?CAT:tables(), maps:get(db, S) =:= main
         ],
         lists:foreach(
             fun(Name) ->
                 ?assertMatch(
-                    #{entity_type := Name, db_name := core},
+                    #{entity_type := Name, db_name := main},
                     ?CAT:table(Name)
                 )
             end,
-            CoreNames
+            MainNames
         ),
         %% Registry tables (D-7) are provisioned in the ephemeral
         %% `registry` DB.
@@ -238,8 +238,8 @@ provisions_all() ->
         ),
         %% info/0 summary.
         Info = ?CAT:info(),
-        ?assertMatch(#{core := #{kind := db}}, Info),
-        %% info/0's tables map covers the core DB tables only.
+        ?assertMatch(#{main := #{kind := db}}, Info),
+        %% info/0's tables map covers the main DB tables only.
         ?assertEqual(13, map_size(maps:get(tables, Info)))
     after
         ok = stop_catalog(Pid),
@@ -248,7 +248,7 @@ provisions_all() ->
     end,
     %% Teardown cleared the published handles.
     ?assert(await(fun() -> ?CAT:is_open() =:= false end, 100)),
-    ?assertEqual(undefined, ?CAT:core_db()),
+    ?assertEqual(undefined, ?CAT:main_db()),
     ?assertEqual(undefined, ?CAT:table(bondy_realm)).
 
 %% Drives the ephemeral `registry` table exactly as `bondy_registry_store`
@@ -339,11 +339,11 @@ fold(ByName, Name) ->
     maps:get(fold, maps:get(Name, ByName)).
 
 set_env(Shards, Dir) ->
-    application:set_env(bondy_router, oplog_core_shard_count, Shards),
+    ok = bondy_db_config:set([databases, main, oplog, shard_count], Shards),
     application:set_env(bondy_router, platform_data_dir, Dir).
 
 reset_env() ->
-    application:unset_env(bondy_router, oplog_core_shard_count),
+    ok = bondy_db_config:set([databases, main, oplog, shard_count], 16),
     application:unset_env(bondy_router, platform_data_dir).
 
 stop_catalog(Pid) ->

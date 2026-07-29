@@ -146,7 +146,7 @@ live_value_survives(T) ->
 %% -----------------------------------------------------------------------------
 %%
 %% `shared_shards` + `shard_count => 1` puts BOTH tables on one applier AND one
-%% shared Bookie, with different CRDT kernels — the shape of every core shard
+%% shared Bookie, with different CRDT kernels — the shape of every main shard
 %% in production. The topology matters: on `memory` each table has its own ETS
 %% projection handle, so a founding-ctx sweep merely misses foreign cells
 %% (`not_found`); on `shared_shards` the handle is shared, the foreign frame IS

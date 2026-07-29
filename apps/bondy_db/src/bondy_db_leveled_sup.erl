@@ -55,7 +55,7 @@ restart was rejected (it fits dynamic ownership this design lacks).
 A crash-LOOP (e.g. a corrupted store that dies on every reopen) exhausts
 the supervisor's restart intensity — sized to tolerate a few slow leveled
 reopens, not a tight loop — and fells the supervisor. The owner
-(`bondy_namespace_catalog` for the core DB) links it and stops on its
+(`bondy_namespace_catalog` for the main DB) links it and stops on its
 EXIT, escalating the failure up the OTP tree instead of serving a
 silently dead shard.
 

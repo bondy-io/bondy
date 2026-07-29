@@ -1,12 +1,13 @@
 # Backup & restore — operator runbook
 
-This page is the **operator's runbook** for taking a backup of a Bondy MST
-data tree and restoring it. The architecture context for what each
-store contains lives in chapter 00 (in the bondy umbrella docs) (the layered
-storage model) and chapter 01 (in the bondy umbrella docs) (the WAL and
-recovery).
+This page is the **operator's runbook** for backing up and restoring an oplog
+instance's on-disk store — the WAL, the MST pack-store, and the compaction
+checkpoint that live together under one `storage_path`. For what each of those
+stores contains, see the storage-stack architecture chapters 00 (the layered
+storage model) and 01 (the WAL and recovery).
 
-The Erlang API for these operations is in `bondy_mst_admin`.
+The Erlang API for these operations is in `bondy_mst_admin`; it copies the tree
+generically, so it backs up whatever a shard owns under `storage_path`.
 
 ## What gets backed up
 

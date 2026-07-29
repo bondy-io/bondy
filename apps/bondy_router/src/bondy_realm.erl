@@ -37,7 +37,7 @@ Realm security is enabled by default.
 ## Storage
 
 Realms are persisted to disk and replicated across the cluster via the
-bondy_db `bondy_realm` core table. Unlike the per-realm tables, the realm table
+bondy_db `bondy_realm` main table. Unlike the per-realm tables, the realm table
 is a **global registry**:
 all realms share a single bondy_db band (the empty binary, like the API Gateway
 specs) and are keyed by their Uri, whose hash spreads them across

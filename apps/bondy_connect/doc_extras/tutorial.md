@@ -311,7 +311,7 @@ The connection maps your handler's return to a WAMP `YIELD` or `ERROR`:
 | `{error, Uri}` | `ERROR` |
 | `{error, Uri, Args}` | `ERROR` with args |
 | `{error, Uri, Args, KWArgs}` | `ERROR` with args + kwargs |
-| *(an exception)* | `ERROR` `bondy.error.internal_error` (handler crash is contained) |
+| *(an exception)* | `ERROR` `wamp.error.internal_error` (handler crash is contained) |
 
 ```erlang
 Divide = fun([_A, 0], _KWArgs, _Details) ->
@@ -634,7 +634,7 @@ quote_for(_Symbol) -> 42.
 | `{error, timeout}` | `call/5` | The call exceeded its `timeout` option. |
 | `{error, #{uri := <<"wamp.error.no_such_procedure">>}}` | `call` | Nothing registered for the URI. |
 | `{error, #{uri := <<"wamp.error.unavailable">>}}` | `call` | The callee's load regulator rejected the invocation. |
-| `{error, #{uri := <<"bondy.error.internal_error">>}}` | `call` | The callee handler crashed (contained). |
+| `{error, #{uri := <<"wamp.error.internal_error">>}}` | `call` | The callee handler crashed (contained). |
 | `{error, #{uri := Uri, ...}}` | `call` | Business error returned by the callee. |
 | `{error, {invalid_handler, _}}` | `register`/`subscribe` | The handler isn't a fun/3, `{M,F}`, or `{M,F,Extra}`. |
 | `{error, local_transport_unavailable}` | `connect` (`local`) | No router handler registered on this node. |
@@ -670,5 +670,7 @@ ok | {ok, PubId} = bondy_connect:publish(Conn, Topic, Args[, KWArgs[, Opts]]).
 ok          = bondy_connect:unsubscribe(Conn, SubId | Topic).
 ```
 
-That's the whole surface. For per-function detail see the `m:bondy_connect`
-module reference; for the why behind the design, [`DESIGN.md`](DESIGN.md).
+That covers the common surface. The one part left out here is progressive
+calls — `call_stream/5`, `send_input/4`, and `finish_input/4` — for streaming
+arguments into a call. For per-function detail see the `m:bondy_connect` module
+reference; for background, the app [`README.md`](../README.md).

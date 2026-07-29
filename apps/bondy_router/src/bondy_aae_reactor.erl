@@ -529,7 +529,7 @@ unfold_user_key(Key) ->
 
 %% @private
 %% bondy_realm is a global registry under the empty band `<<>>`, so on the
-%% folding (`shared_shards`) core topology its cell key is `<<0, Uri>>` (the
+%% folding (`shared_shards`) main topology its cell key is `<<0, Uri>>` (the
 %% empty band, a NUL separator, then the realm URI). Recover the URI.
 unfold_realm_key(Key) ->
     case binary:split(Key, <<0>>) of
@@ -540,7 +540,7 @@ unfold_realm_key(Key) ->
     end.
 
 %% @private
-%% Grant tables are realm-banded, so on the folding (`shared_shards`) core
+%% Grant tables are realm-banded, so on the folding (`shared_shards`) main
 %% topology a grant cell key is `<<RealmUri, 0, EncodedGrantKey/binary>>`. The
 %% realm URI is NUL-free, so the first separator recovers it; the trailing
 %% composite grant key (role + resource) is not needed, as invalidation is
@@ -555,7 +555,7 @@ unfold_grant_key(Key) ->
 
 %% @private
 %% security_group_members is realm-banded, so on the folding (`shared_shards`)
-%% core topology a membership cell key is `<<RealmUri, 0, EncodedFactKey>>`. The
+%% main topology a membership cell key is `<<RealmUri, 0, EncodedFactKey>>`. The
 %% realm URI is NUL-free, so the first separator recovers it; the trailing
 %% band-tagged fact key is not needed, as invalidation is realm-wide.
 unfold_member_key(Key) ->

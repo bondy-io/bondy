@@ -1,11 +1,10 @@
-# Bondy MST — Architecture
+# Bondy storage — Architecture
 
-This folder is the **authoritative architecture reference** for the
-`bondy_mst` substrate, written to be read: a conversational, "read it
-on the train" style, with one idea per mermaid diagram instead of one
-diagram per system. Where a chapter's narrative ends, it points at the
-source modules — module docs carry the implementation-level rigor
-(wire formats, option tables, invariants).
+This folder is the architecture reference for **Bondy's storage stack** —
+the three cooperating packages `bondy_db`, `bondy_oplog`, and `bondy_mst`.
+Each chapter explains one idea, with a mermaid diagram to anchor it. Where a
+chapter's narrative ends, it points at the source modules — module docs carry
+the implementation-level detail (wire formats, option tables, invariants).
 
 If you have read this far before reading any code, you are in the right
 place. Read the chapters in order — each one assumes you have read the
@@ -27,19 +26,22 @@ previous one.
 
 ## Style notes
 
-These are presented as a guided tour, in the spirit of the CMU SEI
-**Views and Beyond** method (a documented software architecture is a
-set of views, each suited to one audience). The difference is the
-register: blog post, not architecture handbook. Where you want
-implementation-level rigor, the chapter ends with a pointer to the
-relevant source modules, whose module docs are the contract of
-record.
+These are a guided tour, in the spirit of the CMU SEI **Views and
+Beyond** method (a documented software architecture is a set of views,
+each suited to one audience). The register is explanatory prose, not a
+specification: where you want the exact contract, the chapter ends with a
+pointer to the relevant source modules, whose module docs are the record.
 
 ## Conventions
 
 - **Diagrams** are mermaid. Render in any modern markdown viewer.
-- **`bondy_mst`** (lowercase) is the package / library name. **MST**
-  (uppercase) is the Merkle Search Tree data structure inside it.
-- **"Substrate"** means the published library API — what your
-  application sees. Bondy is the canonical consumer; this folder
-  describes the substrate, not Bondy.
+- **Storage stack** means the three packages together — `bondy_db`,
+  `bondy_oplog`, and `bondy_mst`.
+- **`bondy_mst`** (lowercase) is the Merkle Search Tree library — one
+  package in the stack. **MST** (uppercase) is the Merkle Search Tree
+  data structure inside it.
+- **"Substrate"** is a relative term: from a package's point of view it
+  means the layer or layers directly beneath it. From `bondy_db` the
+  substrate is `bondy_oplog` and `bondy_mst`; from `bondy_oplog` it is
+  `bondy_mst`. This folder describes the stack itself, not the
+  applications built on it.

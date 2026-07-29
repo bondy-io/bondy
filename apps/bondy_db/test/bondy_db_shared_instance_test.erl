@@ -3,7 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %%
-%% Proves the one-log-per-shard collapse on the production `core` topology
+%% Proves the one-log-per-shard collapse on the production `main` topology
 %% (`bondy_db_topology_shared_shards`, `instances_strategy => per_shard`): every
 %% table on a shard shares ONE `bondy_oplog` instance (one WAL + MST + applier),
 %% distinguished by the entity-type `Bucket` each event carries. Two tables on

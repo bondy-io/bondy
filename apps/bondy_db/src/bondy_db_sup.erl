@@ -16,8 +16,9 @@
 The `bondy_db` layer has no permanent processes: leveled bookie supervisors
 (`bondy_db_leveled_sup`, `simple_one_for_one`) and topology ETS owners
 (`bondy_db_topology_memory_owner`) are started on demand when a table is
-opened, linked to the opening process. This supervisor exists only so the
-`bondy_db` application has a root to return from `start/2`.
+opened, linked to the opening process. This supervisor exists so the
+`bondy_db` application has a root to return from `start/2`, and to
+initialise `bondy_db_config` before anything can read it.
 """).
 
 -export([start_link/0]).
@@ -38,6 +39,7 @@ start_link() ->
 %% =============================================================================
 
 init([]) ->
+    ok = bondy_db_config:init(),
     SupFlags = #{
         strategy => one_for_one,
         intensity => 5,

@@ -108,9 +108,9 @@ classDiagram
       +delete(Store, Hash) Store
       +copy(Store, Store2, Hash) Store
       +free(Store, Hash, Page) Store
-      +gc(Store, KeepRoots) Store
-      +list(Store) [Hash]
-      +missing_set(Store, Root) [Hash]
+      +gc(Store, KeepRoots) {Store, Metadata}
+      +list(Store) [Page]
+      +missing_set(Store, Root) set(Hash)
       +page_refs(Page) [Hash]
       +destroy(Store) ok
       +transaction(Store, Fun) Result
@@ -121,8 +121,9 @@ classDiagram
     bondy_mst_store <|-- bondy_mst_pack_store
 ```
 
-`list`, `missing_set`, and `gc` all walk the tree from a root via
-`page_refs/1`. **GC is mark-from-root**: keep only pages reachable
+`missing_set` and `gc` walk the tree from a root via `page_refs/1` (so
+does `list/2`, given a root); plain `list/1` enumerates every stored
+page. **GC is mark-from-root**: keep only pages reachable
 from the live root set, drop everything else. `free/3` is the
 soft-delete used during truncation — the backend records the hash as
 tombstoned and the next `gc/2` (pack-rewrite for `pack_store`)
@@ -268,17 +269,17 @@ For a hot read, the bloom and fanout are in OS page cache; cost is
 `incoming.pack` is the mutable write buffer — new pages append to it and
 a read merges it with the sealed packs. It cannot grow without bound, so
 once it passes `auto_seal_bytes` (the store's own default is `16_000_000`,
-16 MiB) the store **seals** it: rewrites it into an immutable `pack-NNNN`
+16 MB) the store **seals** it: rewrites it into an immutable `pack-NNNN`
 with its companion `.idx`, then starts a fresh empty `incoming.pack`.
 
 The seal is one datasync'd rewrite of the whole buffer, and its duration
 is a freeze of *write visibility* — read-after-write freshness lag — not
 of throughput (reads serve from the projection and caches, never the MST;
 see chapter 03 in the bondy umbrella docs). The threshold sizes that
-freeze: the 16 MiB default produced 600 ms-plus freezes, large enough to
+freeze: the 16 MB default produced 600 ms-plus freezes, large enough to
 push freshness lag toward the authentication fence's 1 s bound and cause
 spurious `temporarily_unavailable` refusals — which is why the `bondy_oplog`
-consumer lowers its own `auto_seal_bytes` to 2 MiB (through
+consumer lowers its own `auto_seal_bytes` to 2 MB (through
 `bondy_oplog_config:pack_auto_seal_bytes`), keeping each freeze to tens of ms.
 
 **Two seal modes** (the store's `seal_mode` option — default `sync`; the
@@ -377,8 +378,12 @@ shipped. The transport carries opaque request/response frames; the
 verb names above are illustrative (`bondy_oplog_transport:request/4`
 in code).
 
-The session is implemented in `bondy_oplog_sync_session.erl` and the
-peer side is `bondy_oplog_responder.erl`. The transport is pluggable.
+The library carries its own anti-entropy engine, `bondy_mst_exchange`,
+which orchestrates the compare-and-pull above — non-blocking merges,
+reciprocity, and bounded concurrency — over a pluggable transport. The
+exchange shown here is driven by the `bondy_oplog` consumer:
+`bondy_oplog_sync_session` runs the session and `bondy_oplog_responder`
+answers on the peer side.
 
 ## Where do MST pages come from?
 
@@ -393,7 +398,7 @@ process that:
 ```mermaid
 flowchart LR
     EV[Event] --> ENC[encode key/value]
-    ENC --> INS["mst:insert(K, V)"]
+    ENC --> INS["mst:put(K, V)"]
     INS --> PAGES[new + modified pages]
     PAGES --> STORE[(pack_store)]
     PAGES --> ROOT[new root hash]
@@ -489,5 +494,7 @@ current MST root".
   `bondy_mst_pack_tombstones.erl`, `bondy_mst_pack_recovery.erl`
   (crash recovery), `bondy_mst_pack_idx_rebuild.erl` (self-healing
   `.idx` rebuild).
-- Consumers: `bondy_oplog_sync_session.erl`,
-  `bondy_oplog_responder.erl`.
+- Anti-entropy: `bondy_mst_exchange.erl` — the library's own exchange
+  engine (compare-and-pull orchestration).
+- Consumers (in `bondy_oplog`, which drives the exchange):
+  `bondy_oplog_sync_session.erl`, `bondy_oplog_responder.erl`.

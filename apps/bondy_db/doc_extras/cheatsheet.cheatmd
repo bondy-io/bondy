@@ -1,7 +1,8 @@
 # Cheatsheet
 
-A one-page reference for the `bondy_mst` substrate. The architecture
-chapters (see the sidebar) are the narrative version.
+A one-page reference for Bondy's storage stack — `bondy_db`,
+`bondy_oplog`, and `bondy_mst`. The architecture chapters (see the
+sidebar) are the narrative version.
 
 ## Tables (bondy_db)
 {: .col-2}
@@ -36,7 +37,7 @@ chapters (see the sidebar) are the narrative version.
 ### Read / write
 
 ```erlang
-{ok, Value, Hlc} = bondy_db:read(T, Realm, Key),
+{ok, {Value, Hlc}} = bondy_db:read(T, Realm, Key),
 ok = bondy_db:apply(T, Realm, Key, Op),
 ok = bondy_db:counter_inc(Counters, Realm, Key, +1).
 
@@ -112,7 +113,7 @@ ok = bondy_oplog:await_apply(InstanceId, 5000).
 %% opt in per table: open_table(.., #{publish => true})
 {ok, Ref} = bondy_oplog_core:subscribe(NS, all),
 %%   {bondy_oplog_core_event,       NS, Key, Hlc, Op}  — local write
-%%   {bondy_oplog_core_merge_event, NS, Key, Hlc, Op}  — peer write (AE)
+%%   {bondy_oplog_core_merge_event, NS, Key, Hlc, Op, Old}  — peer write (AE)
 ok = bondy_oplog_core:unsubscribe(Ref).
 ```
 

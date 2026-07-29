@@ -3,8 +3,8 @@
 > Audience: anyone who wants the mental model before reading any code.
 > Time to read: ~10 min.
 
-You can think of `bondy_mst` as three cooperating libraries hiding
-behind a tidy facade. They have crisp jobs and crisper interfaces:
+Bondy's storage is three cooperating packages behind a small facade.
+Each has a distinct job and a narrow interface:
 
 - **`bondy_oplog`** is the **write side**. It appends events durably,
   ships them to peers, and recovers them after a crash.
@@ -197,10 +197,10 @@ flowchart TB
         PSTORE["pack_store · packfile"]
         STORES{{"ets_store · map_store · pack_store"}}
     end
-    subgraph BONDY_DB["bondy_db"]
-        FACADE["bondy_db"]
-        CORE["bondy_oplog_core"]
-        REG["db_core_registry"]
+    subgraph BONDY_DB["read side"]
+        FACADE["bondy_db (facade)"]
+        CORE["oplog_core"]
+        REG["oplog_core_registry"]
         OVERLAY["oplog_db_overlay"]
         CACHE["cache_adapter"]
         PROJ["projection_adapter<br/>leveled / ets"]
@@ -229,6 +229,12 @@ Most of the arrows here are obvious from chapters
 [03](03_bondy_db.md) / [04](04_applier.md); the ones worth
 flagging:
 
+- The **"read side" box groups modules by role, not by application.**
+  `bondy_db` is a thin facade; the read primitives it calls —
+  `bondy_oplog_core`, `bondy_oplog_core_registry`,
+  `bondy_oplog_db_overlay`, `bondy_oplog_cache_adapter`, and
+  `bondy_oplog_projection_adapter` — all live in the **`bondy_oplog`**
+  application. Look for them there, not under `bondy_db`.
 - The **applier is the only writer to the projection.** Reads share
   the same projection handle through `bondy_oplog_core_registry`.
 - The **overlay is shared** between the writer (oplog_instance) and

@@ -8,7 +8,7 @@
 When publishing an event a topic the Publisher can ask the Broker to
 retain the event being published as the most-recent event on this topic.
 
-Retained events are stored in `bondy_db` (the durable `core` DB), keyed by
+Retained events are stored in `bondy_db` (the durable `main` DB), keyed by
 topic within a realm and matched via key-ordered `bondy_db:range_all/5` prefix /
 wildcard scans.
 
@@ -22,7 +22,7 @@ moment.**
 -include("bondy_db_tables.hrl").
 
 %% The bondy_db table name (declared in `bondy_namespace_catalog:tables/0`,
-%% durable `core` DB). The realm is the bondy_db shard/realm argument, not part
+%% durable `main` DB). The realm is the bondy_db shard/realm argument, not part
 %% of the key.
 -define(TABLE, retained_messages).
 
@@ -357,7 +357,7 @@ subsumes(_, _) ->
     false.
 
 %% @private
-%% The bondy_db table handle for retained messages (durable `core` DB).
+%% The bondy_db table handle for retained messages (durable `main` DB).
 table() ->
     case bondy_namespace_catalog:table(?TABLE) of
         undefined -> error(retained_messages_not_provisioned);

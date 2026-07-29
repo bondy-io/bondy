@@ -4,7 +4,7 @@
 %% =============================================================================
 %%
 %% Realm-scoped secondary index reads on a `shared_shards` (G-1) table — the
-%% production `core` topology, where the realm is folded into the cell KEY
+%% production `main` topology, where the realm is folded into the cell KEY
 %% (not the bucket). The index entry key is therefore
 %% `<<enc(Term), 0, Realm, 0, Key>>`, so a term's entries span every realm
 %% and `index_get/5` must restrict its scan to the term's realm sub-band

@@ -223,26 +223,34 @@
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc The shard count for the bondy_db `core` durable database. Applied
-%% whenever the catalogue provisions the core DB.
+%% @doc The shard count for a bondy_db database. `main` is the durable
+%% database; `registry` is ephemeral. Applied whenever the catalogue
+%% provisions the named DB. `main` and `registry` are Bondy's only two
+%% databases — a fixed, closed set — so each gets its own explicit mapping
+%% rather than a `$name`-parameterised one.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "db.core.shard_count", "bondy_router.oplog_core_shard_count", [
+{mapping, "db.main.shard_count", "bondy_db.databases", [
+  {datatype, integer},
+  {default, 16}
+]}.
+
+{mapping, "db.registry.shard_count", "bondy_db.databases", [
   {datatype, integer},
   {default, 16}
 ]}.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Partition strategy for the bondy_db `core` durable database: how a
-%% (realm, key) write maps to one of `db.core.shard_count` shards. Sets BOTH
+%% @doc Partition strategy for the bondy_db `main` durable database: how a
+%% (realm, key) write maps to one of `db.main.shard_count` shards. Sets BOTH
 %% the write-atomicity grain (entities sharing a shard are written in one atomic
 %% batch / one causal log) and which reads are shard-local vs scatter-gather.
 %%   aggregate - shard = hash(realm, aggregate_root). A subject's record, grants
 %%               and memberships co-locate (atomic per-subject writes); subjects
 %%               spread across all shards, so a single realm still uses every
-%%               core. Realm-wide listings scatter-gather. (Recommended.)
-%%   realm     - shard = hash(realm-prefix, db.core.realm_prefix_depth). A
+%%               shard. Realm-wide listings scatter-gather. (Recommended.)
+%%   realm     - shard = hash(realm-prefix, db.main.realm_prefix_depth). A
 %%               realm's whole dataset is one shard (single-shard realm scans),
 %%               but a single realm collapses to one shard. Many-small-realm
 %%               fleets only.
@@ -250,39 +258,26 @@
 %%               cross-entity atomicity (the pre-bondy_db behaviour).
 %% TOPOLOGY-DEFINING: frozen in the on-disk topology manifest at first provision.
 %% Changing it on a populated node requires a re-key (export -> wipe data dir ->
-%% reimport); see `db.core.on_topology_mismatch`.
+%% reimport); see `db.main.on_topology_mismatch`. `registry` has no on-disk
+%% manifest (ephemeral), so it has no partition-strategy knob.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "db.core.partition_strategy",
- "bondy_router.oplog_core_partition_strategy", [
+{mapping, "db.main.partition_strategy", "bondy_db.databases", [
   {datatype, {enum, [aggregate, realm, entity]}},
   {default, aggregate}
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc Only used when `db.core.partition_strategy = realm`: the number of
+%% @doc Only used when `db.main.partition_strategy = realm`: the number of
 %% leading dot-separated realm-URI components that share a shard (the Spanner
 %% "directory" co-location pattern). 1 = per-realm; 2 co-locates `org.acme.sso`
-%% with `org.acme.app`. TOPOLOGY-DEFINING (frozen in the manifest).
+%% with `org.acme.app`. TOPOLOGY-DEFINING (frozen in the manifest). `main`-only;
+%% see `db.main.partition_strategy`.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "db.core.realm_prefix_depth",
- "bondy_router.oplog_core_realm_prefix_depth", [
+{mapping, "db.main.realm_prefix_depth", "bondy_db.databases", [
   {datatype, integer},
   {default, 1}
-]}.
-
-%% -----------------------------------------------------------------------------
-%% @doc Maximum number of shards a single cross-shard (scatter-gather) scan
-%% folds concurrently, bounding the parallel-snapshot fan-out of realm-wide
-%% listings under the `aggregate` / `entity` strategies. 0 = no cap (fan out to
-%% all `db.core.shard_count` shards). Runtime-tunable (not in the manifest).
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "db.core.scan_max_concurrency",
- "bondy_router.oplog_core_scan_max_concurrency", [
-  {datatype, integer},
-  {default, 0}
 ]}.
 
 %% -----------------------------------------------------------------------------
@@ -293,14 +288,51 @@
 %%   warn - log a loud warning naming the diverging keys and keep running on the
 %%          on-disk topology (the new config is NOT applied).
 %%   stop - refuse to boot (fail fast). Recommended for production.
-%% Runtime-tunable (not in the manifest).
+%% Runtime-tunable (not in the manifest). `main`-only; `registry` has no
+%% manifest and cannot mismatch.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "db.core.on_topology_mismatch",
- "bondy_router.oplog_core_on_topology_mismatch", [
+{mapping, "db.main.on_topology_mismatch", "bondy_db.databases", [
   {datatype, {enum, [warn, stop]}},
   {default, warn}
 ]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Aggregates the `db.main.*` / `db.registry.*` per-database mappings
+%% above into one `bondy_db` env key. Cuttlefish translation targets are
+%% static strings fixed at schema-load time, so both database names are
+%% read explicitly here rather than discovered — `main` and `registry` are
+%% Bondy's only two databases, a fixed set, not an open-ended
+%% operator-named collection. Shaped as
+%% `#{DbName => #{oplog => #{Option => Value}}}`; read via
+%% `bondy_db_config:oplog_*/1`.
+%% @end
+%% -----------------------------------------------------------------------------
+{translation, "bondy_db.databases", fun(Conf) ->
+    %% No fallback default here: `add_defaults/2` (cuttlefish_generator)
+    %% splices each mapping's own `{default, ...}` into `Conf` before any
+    %% translation runs, so every key below is always present by the time
+    %% this fun executes. `conf_get/2` (not `/3`) makes that invariant
+    %% load-bearing — a missing key fails config generation loudly instead
+    %% of silently falling back to a second, easily-drifting copy of a
+    %% default that already lives on the mapping above.
+    Get = fun(Key) -> cuttlefish:conf_get(Key, Conf) end,
+    #{
+        main => #{
+            oplog => #{
+                shard_count => Get("db.main.shard_count"),
+                partition_strategy => Get("db.main.partition_strategy"),
+                realm_prefix_depth => Get("db.main.realm_prefix_depth"),
+                on_topology_mismatch => Get("db.main.on_topology_mismatch")
+            }
+        },
+        registry => #{
+            oplog => #{
+                shard_count => Get("db.registry.shard_count")
+            }
+        }
+    }
+end}.
 
 %% -----------------------------------------------------------------------------
 %% @doc Byte threshold at which a durable shard's pack-store MST seals its
@@ -317,7 +349,7 @@
 %% Runtime-tunable (not in the manifest).
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "db.core.pack_auto_seal_bytes",
+{mapping, "db.pack_auto_seal_bytes",
  "bondy_oplog.pack_auto_seal_bytes", [
   {datatype, bytesize},
   {default, "2MB"}
@@ -339,7 +371,7 @@
 %% Runtime-tunable (not in the manifest).
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "db.core.pack_seal_mode",
+{mapping, "db.pack_seal_mode",
  "bondy_oplog.pack_seal_mode", [
   {datatype, {enum, [async, sync]}},
   {default, async}
@@ -347,15 +379,80 @@
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Fsync driver for the durable write-ahead log. `per_write` (default)
+%% fsyncs every append, bounding the writer to the storage device's fsync
+%% rate (~6k ops/s on typical NVMe) but guaranteeing each write is durable
+%% before it returns — required for security-class namespaces (grants,
+%% tickets, users). `batched` defers fsync to a size or time boundary
+%% (`db.wal.batched_fsync_bytes` / `db.wal.batched_fsync_interval`) and
+%% exposes durability via an explicit wait instead of the append call
+%% returning; it reaches roughly two orders of magnitude higher throughput
+%% at the cost of a bounded durability window. Global — affects every
+%% durable oplog instance node-wide, not a specific database; the
+%% ephemeral (`registry`) in-memory WAL never fsyncs and ignores this.
+%% Runtime-tunable (not in the manifest).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.wal.fsync_mode",
+ "bondy_oplog.wal_fsync_mode", [
+  {datatype, {enum, [per_write, batched]}},
+  {default, per_write}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Rotation threshold for the durable WAL's head segment. The writer
+%% rotates to a fresh segment once the next frame would push the head past
+%% this size; rotation fsyncs the sealed segment and advances the durable
+%% position. Global, like `db.wal.fsync_mode`. Runtime-tunable.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.wal.max_segment_bytes",
+ "bondy_oplog.wal_max_segment_bytes", [
+  {datatype, bytesize},
+  {default, "64MB"}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Batched-mode fsync time trigger: the writer fsyncs at most this long
+%% after the first un-fsynced append. Only consulted when
+%% `db.wal.fsync_mode = batched`. Global, like `db.wal.fsync_mode`.
+%% Runtime-tunable.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.wal.batched_fsync_interval",
+ "bondy_oplog.wal_batched_fsync_interval_ms", [
+  {datatype, {duration, ms}},
+  {default, "50ms"}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Batched-mode fsync size trigger: the writer fsyncs once accumulated
+%% un-fsynced bytes exceed this threshold. Only consulted when
+%% `db.wal.fsync_mode = batched`. Global, like `db.wal.fsync_mode`.
+%% Runtime-tunable.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.wal.batched_fsync_bytes",
+ "bondy_oplog.wal_batched_fsync_bytes", [
+  {datatype, bytesize},
+  {default, "1MB"}
+]}.
+
+
+%% -----------------------------------------------------------------------------
 %% @doc Interval at which each oplog instance checks its own heap and
-%% fullsweep-hibernates if it has grown past `db.core.gc_heap_delta` over its
+%% fullsweep-hibernates if it has grown past `db.gc_heap_delta` over its
 %% post-GC baseline. This reclaims the transient apply/AAE garbage a long-lived
 %% instance retains until the next major GC — most visibly during a solo import
 %% (no peers), where the AAE-driven hibernate never fires and the heap would
-%% otherwise climb unbounded. `0` disables the monitor. Runtime-tunable.
+%% otherwise climb unbounded. `0` disables the monitor. Runtime-tunable. Global —
+%% applies to every oplog instance node-wide, not a specific database.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "db.core.gc_interval",
+{mapping, "db.gc_interval",
  "bondy_oplog.instance_gc_interval_ms", [
   {datatype, {duration, ms}},
   {default, "2s"}
@@ -364,18 +461,124 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc Heap-growth threshold above an instance's post-GC baseline at which the
-%% periodic monitor (`db.core.gc_interval`) fullsweep-hibernates it. Keying on
+%% periodic monitor (`db.gc_interval`) fullsweep-hibernates it. Keying on
 %% growth over the live baseline — not absolute heap size — keeps an instance
 %% with a large live MST from being GC-thrashed: it fires once per ~this-many
 %% bytes of accumulated garbage, capping the transient per-instance peak at
 %% roughly `live + this`. Lower trades a touch more fullsweep work for a tighter
-%% memory ceiling. Runtime-tunable.
+%% memory ceiling. Runtime-tunable. Global — see `db.gc_interval`.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "db.core.gc_heap_delta",
+{mapping, "db.gc_heap_delta",
  "bondy_oplog.instance_gc_heap_delta_bytes", [
   {datatype, bytesize},
   {default, "16MB"}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Enables the periodic projection-cell reclamation scheduler. Global —
+%% governs every bondy_db database's oplog instances node-wide, not a
+%% specific database. Deletion (`bondy_db:delete/3`) always converges and is
+%% unaffected by this setting — a deleted value disappears immediately and
+%% everywhere either way. This only controls whether the underlying
+%% tombstone, once every cluster member has certified it causally stable, is
+%% physically reclaimed. When off, tombstones are retained indefinitely,
+%% exactly as if the feature did not exist. On by default.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.reclaim", "bondy_oplog.reclaim_enabled", [
+  {datatype, {flag, on, off}},
+  {default, on}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Interval between projection-cell reclamation passes. Deliberately
+%% much larger than the compaction cadence: reclamation is a space concern,
+%% not a liveness one, and each pass re-derives stability from peer state
+%% that only changes as anti-entropy rounds complete. `0` disables periodic
+%% passes (an operator can still trigger one explicitly). Only relevant when
+%% `db.reclaim` is on.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.reclaim.interval", "bondy_oplog.reclaim_interval_ms", [
+  {datatype, {duration, ms}},
+  {default, "1m"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Cells scanned per reclamation sweep batch. The sweep runs inside the
+%% applier — the sole writer of a shard's local projection — so this bounds
+%% how long a single batch can stall a concurrent write; a pass loops
+%% batches to completion, letting writes interleave between them. Only
+%% relevant when `db.reclaim` is on.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.reclaim.batch_cells", "bondy_oplog.reclaim_batch_cells", [
+  {datatype, integer},
+  {default, 500}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Cap on concurrently running reclamation/compaction trigger workers.
+%% Global, shared machinery: the reclamation scheduler (`db.reclaim`) is a
+%% second instance of the same scheduler that drives compaction, and both
+%% instances read this one cap — it is NOT the `db.gc_interval` /
+%% `db.gc_heap_delta` per-instance BEAM heap monitor, a separate subsystem
+%% that happens to share the "gc" name. Instances over the cap on a given
+%% tick are skipped that round and retried on the next.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.gc_max_concurrency", "bondy_oplog.gc_max_concurrency", [
+  {datatype, integer},
+  {default, 4}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Enables the origin-retirement pass. Global — reacts to Partisan
+%% membership changes node-wide, not a specific database: each node reacts
+%% to an observed membership removal — and reconciles once at boot, covering
+%% removals that happened while it was down — by forgetting departed peers
+%% from its peer state and reaping dead origins from cell state by
+%% complement. The pass is fail-closed: if any current member cannot be
+%% queried for the origins it claims, nothing is reaped and the pass retries
+%% on the next trigger. It never bans an origin. On by default.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.origin_retirement", "bondy_oplog.origin_retirement", [
+  {datatype, {flag, on, off}},
+  {default, on}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Interval between periodic origin-retirement passes, in addition to
+%% the membership-event trigger. The periodic pass covers origin-epoch
+%% turnover that produces no membership event — e.g. a node that loses its
+%% storage and rejoins under the same name mints a fresh origin without any
+%% peer joining or leaving, and only a periodic pass on the surviving nodes
+%% reaps the dead epoch. Only relevant when `db.origin_retirement` is on.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.origin_retirement.interval",
+ "bondy_oplog.origin_retirement_interval_ms", [
+  {datatype, {duration, ms}},
+  {default, "10m"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Recency window for a peer's last-seen state to count toward
+%% compaction's view of cluster liveness; a peer silent longer than this is
+%% excluded from compaction's stability read, so a permanently-departed peer
+%% eventually stops holding compaction back on its own. Governs the
+%% compaction scheduler ONLY — projection-cell reclamation (`db.reclaim`)
+%% uses a strict, membership-based reading with no recency filter, so a
+%% silent member holds reclamation down until retired by an explicit
+%% membership act (`db.origin_retirement`); no timeout changes that.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.compaction.peer_timeout", "bondy_oplog.peer_timeout_ms", [
+  {datatype, {duration, ms}},
+  {default, "30s"}
 ]}.
 
 

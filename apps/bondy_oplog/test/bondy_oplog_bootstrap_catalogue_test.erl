@@ -50,7 +50,7 @@ bootstrap_catalogue_test_() ->
 
 %% A LIVE sync round (`run/3`) adopts the peer's applied-frontier even for
 %% maxima the local replica can NEVER derive from the transferred events — the
-%% production core/12 & core/13 symptom. A shard the peer has fully compacted
+%% production main/12 & main/13 symptom. A shard the peer has fully compacted
 %% has EQUAL roots (nothing to page-sync) and a snapshot MST with no
 %% `cell_apply` keys, so neither the replay path nor a restart's
 %% `frontier_from_mst` can reconstruct those maxima; the ONLY path to a

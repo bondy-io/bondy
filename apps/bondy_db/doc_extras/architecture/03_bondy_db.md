@@ -69,9 +69,8 @@ flowchart LR
 ```
 
 The HLC is **always present**. Reads return `{Value, Hlc}`, period.
-Causality is exposed, not synthesized. This is the load-bearing
-choice that lets multi-cell reads detect skew without any cluster
-coordination.
+Causality is exposed, not synthesized. This choice is what lets
+multi-cell reads detect skew without any cluster coordination.
 
 ## Following a read
 
@@ -307,8 +306,8 @@ flowchart LR
     CHECK -->|some false| STALE["{stale, [NS, ...]}"]
 ```
 
-This is the load-bearing primitive for security consistency. The auth
-path verifies the token locally, fences, then reads:
+This is the primitive security consistency rests on. The auth path
+verifies the token locally, fences, then reads:
 
 ```mermaid
 sequenceDiagram
@@ -336,8 +335,7 @@ reason, `temporarily_unavailable` (an HTTP `503` or a WAMP abort) — the
 client retries after a short delay rather than being told its credential
 is wrong.
 
-Crucially, the predicate is **independent of the projection that might be
-stale**. Whether or not the projection has been updated, the `ae_atomics`
+The predicate is **independent of the projection that might be stale**. Whether or not the projection has been updated, the `ae_atomics`
 timestamp tells you when the shard last completed a full anti-entropy
 round with its peers — which is the thing a security decision actually
 needs to know.
@@ -385,14 +383,16 @@ subscription seam for exactly that:
 {ok, Ref} = bondy_oplog_core:subscribe(NS, all),
 %% ... your process now receives, per change to NS:
 %%   {bondy_oplog_core_event,       NS, Key, Hlc, Op}  — a local write
-%%   {bondy_oplog_core_merge_event, NS, Key, Hlc, Op}  — a peer's write, merged via AE
+%%   {bondy_oplog_core_merge_event, NS, Key, Hlc, Op, Old}  — a peer's write, merged via AE
 ```
 
-The two tags carry the **same** shape — `Op` is the raw table write op,
-`{set, Value}` for a write or `clear` for a delete (the explicit
-`{clear, Hlc}` form is also accepted); the `Hlc` travels as its own field
-in the message tuple, not inside `Op` — so a reactor can match one tag or
-both. The distinction is the whole point:
+The tags share their leading fields, so a reactor can match one or both.
+`Op` is the raw table write op — `{set, Value}` for a write or `clear` for
+a delete (the explicit `{clear, Hlc}` form is also accepted) — and `Hlc`
+travels as its own field, not inside `Op`. The merge tag carries one
+**extra** trailing field, `Old`: the cell's previous state, so a reactor
+can compute what the peer's write changed. The distinction is the whole
+point:
 
 - A **local** write already ran its side-effects inline at the call site
   (that is where the application code is). A reactor that cares only
@@ -538,14 +538,14 @@ is the table's own key.
 ### The topology manifest
 
 A durable DB's keying configuration — partition strategy, shard count,
-each table's `shard_by` / aggregate-root — determines *where on disk*
+each table's `aggregate_root` — determines *where on disk*
 every cell lives. Change it after data exists and reads silently miss.
 `bondy_db_manifest` defends against that: the first time a durable DB
 opens it **freezes** that configuration to an on-disk manifest, and every
 subsequent boot reconciles the running config against it. A mismatch is
-reported per the `db.core.on_topology_mismatch` policy (`warn` by
+reported per the `db.main.on_topology_mismatch` policy (`warn` by
 default, `stop` to refuse the boot). Ephemeral DBs (the registry — wiped
-on restart) keep no manifest. The `core` DB's partition strategy
+on restart) keep no manifest. The `main` DB's partition strategy
 (`partition_strategy`, default `aggregate`) is part of the frozen set:
 it is what decides which shard a `(realm, key)` write routes to.
 
@@ -563,14 +563,14 @@ flowchart LR
     APP[Application] --> FACADE[bondy_db]
     FACADE --> TOPO["topology<br/>route+bucket_for"]
     FACADE --> CORE[bondy_oplog_core]
-    CORE   --> REG[db_core_registry]
+    CORE   --> REG[bondy_oplog_core_registry]
     REG    --> SHARDS["one entry per<br/>(NS, Index, Shard)"]
 ```
 
 The registry entry per `(NS, Index, Shard)` carries:
 
 - `projection_adapter` + `projection_handle` — published by the
-  **shard owner** (typically `bondy_db:provision_shard/9`) at
+  **shard owner** (typically `bondy_db:provision_shard/11`) at
   open time, not by the applier itself.
 - `cache_adapter` + `cache_handle` — same.
 - `overlay` — the per-instance ETS overlay tid.
@@ -682,7 +682,7 @@ Implementation:
 - `bondy_oplog_core.erl` — substrate read API: `read/3`,
   `read_batch/2`, `ensure_fresh/2`, `range/4`, `write_through/5`; the
   change-notification facade `subscribe/2`, `publish/4`,
-  `publish_merge/4`.
+  `publish_merge/5`.
 - `bondy_oplog_core_registry.erl` — per-(NS, Index, Shard) handle
   store; `primary_shards_for/1` (the fence scope) + the `ae_atomics`
   stamping.

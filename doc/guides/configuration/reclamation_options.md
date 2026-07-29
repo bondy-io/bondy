@@ -1,32 +1,36 @@
 # Reclamation configuration reference
 
 The configuration surface for projection-cell reclamation and origin
-retirement. All options are `bondy_oplog` application-environment keys, read
-at node start. Reclamation and retirement are **on by default**; deletion
+retirement. Reclamation and retirement are **on by default**; deletion
 itself (`bondy_db:delete/3`) is always available and needs no configuration.
+Every option below has a `bondy.conf` key (`db.*`) as well as the
+underlying `bondy_oplog` application-environment key it maps to; either way,
+the value is read at node start — changing it requires a restart. These are
+global, node-wide settings — not scoped to a specific `bondy_db` database
+(`main` or `registry`).
 
 > **Concept:** [Understanding deletion and reclamation →](../database/deletion_and_reclamation.md)
 
 ## Enabling reclamation
 
-### `reclaim_enabled`
+### `db.reclaim` (`bondy_oplog.reclaim_enabled`)
 
-`boolean()`, default `true`.
+`on | off`, default `on`.
 
-Whether the reclamation scheduler ticks. When `false` the scheduler process
+Whether the reclamation scheduler ticks. When `off` the scheduler process
 runs idle: deletes still converge and tombstones are retained indefinitely,
-exactly as before the feature existed. Requires a node restart to change.
+exactly as before the feature existed.
 
-### `reclaim_interval_ms`
+### `db.reclaim.interval` (`bondy_oplog.reclaim_interval_ms`)
 
-`non_neg_integer()`, default `60000`.
+Duration, default `1m`.
 
-Milliseconds between reclamation passes. Deliberately much larger than the
+Interval between reclamation passes. Deliberately much larger than the
 compaction scheduler's cadence: reclamation is a space concern, not a
 liveness one, and each pass re-derives stability from peer state that only
 changes as anti-entropy rounds complete. `0` disables periodic passes.
 
-### `reclaim_batch_cells`
+### `db.reclaim.batch_cells` (`bondy_oplog.reclaim_batch_cells`)
 
 `pos_integer()`, default `500`.
 
@@ -37,9 +41,9 @@ completion; writes interleave between batches.
 
 ## Origin retirement
 
-### `origin_retirement`
+### `db.origin_retirement` (`bondy_oplog.origin_retirement`)
 
-`boolean()`, default `true`.
+`on | off`, default `on`.
 
 Whether the origin-retirement pass auto-reacts to Partisan membership
 changes. When enabled, each node reacts to an observed membership removal —
@@ -50,11 +54,11 @@ current member cannot be queried for the origins it claims, nothing is
 reaped and the pass retries on the next trigger. The pass never bans an
 origin.
 
-### `origin_retirement_interval_ms`
+### `db.origin_retirement.interval` (`bondy_oplog.origin_retirement_interval_ms`)
 
-`non_neg_integer()`, default `600000`.
+Duration, default `10m`.
 
-Milliseconds between periodic retirement passes, in addition to the
+Interval between periodic retirement passes, in addition to the
 membership-event trigger. The periodic pass covers origin-epoch turnover
 that produces no membership event — a node that loses its storage and
 rejoins under the same name mints fresh origins without any member joining
@@ -65,31 +69,30 @@ epoch.
 
 The reclamation scheduler is an instance of the same scheduler that drives
 compaction, registered as `bondy_oplog_reclaim_scheduler`. One option is
-shared; the compaction options are listed here only to state that they do
-**not** govern reclamation.
+shared; `gc_scheduler`/`gc_interval_ms` (the compaction scheduler's own
+enablement and cadence) are internal-only — they have no `bondy.conf` key —
+and are listed here only to state that they do **not** govern reclamation.
 
-### `gc_max_concurrency`
+### `db.gc_max_concurrency` (`bondy_oplog.gc_max_concurrency`)
 
 `pos_integer()`, default `4`.
 
-Cap on concurrently running trigger workers, per scheduler instance. Applies
-to both the compaction scheduler and the reclamation scheduler. Instances
-over the cap on a tick are skipped that round and retried on the next.
+Cap on concurrently running trigger workers. Shared machinery: this applies
+to both the compaction scheduler and the reclamation scheduler (they read
+the same cap), and is unrelated to `db.gc_interval` /
+`db.gc_heap_delta` (each instance's own BEAM heap monitor, a separate
+subsystem that happens to also use the word "gc"). Instances over the cap
+on a tick are skipped that round and retried on the next.
 
-### `gc_scheduler`, `gc_interval_ms`
+### `db.compaction.peer_timeout` (`bondy_oplog.peer_timeout_ms`)
 
-These govern the **compaction** scheduler only (defaults `true` and `1000`).
-Reclamation has its own enablement and cadence above; disabling compaction
-does not disable reclamation, and vice versa.
-
-### `peer_timeout_ms`
-
-`non_neg_integer()`, default `30000`.
+Duration, default `30s`.
 
 Listed to state a boundary: this recency filter applies to **compaction**'s
 reading of peer state only. Reclamation uses the strict, membership-based
 reading with no recency filter — a silent member holds reclamation down
-until retired by a membership act, and no timeout changes that.
+until retired by a membership act (`db.origin_retirement`), and no
+timeout changes that.
 
 ## Telemetry
 

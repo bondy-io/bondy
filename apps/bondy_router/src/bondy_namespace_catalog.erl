@@ -7,11 +7,11 @@
 -behaviour(gen_server).
 -moduledoc """
 The single declaration point for Bondy's `bondy_db` databases and tables, and
-the owner process for the durable `core` database.
+the owner process for the durable `main` database.
 
 Two databases are declared:
 
-- **`core`** — durable (`bondy_db_topology_shared_shards` over leveled),
+- **`main`** — durable (`bondy_db_topology_shared_shards` over leveled),
   holding the thirteen security / realm / realm-keys / gateway / token / bridge /
   retention tables.
 - **`registry`** — ephemeral (`bondy_db_topology_memory`, ETS), holding the
@@ -30,23 +30,23 @@ placement and convergence semantics, not merely metadata.
 ## Provisioning
 
 Every declared table is provisioned at boot, unconditionally — the full
-`core` set and the two `registry` tables. `init/1` opens both DBs with every
+`main` set and the two `registry` tables. `init/1` opens both DBs with every
 table their specs declare; there is no per-table or per-domain gate.
 
 ## Lifecycle
 
 This module is a `gen_server` (a child of `bondy_sup`). Because `bondy_db`
 keeps leveled supervisors on-demand and **owned by the `open/2` caller**, the
-catalogue process owns the `core` DB's `bondy_db_leveled_sup` for its lifetime:
+catalogue process owns the `main` DB's `bondy_db_leveled_sup` for its lifetime:
 
-- `init/1` — opens the durable `core` DB and the ephemeral `registry` DB with
+- `init/1` — opens the durable `main` DB and the ephemeral `registry` DB with
   their tables, and publishes the DB / table handles via `persistent_term` for
   lock-free access. The two DBs are opened independently; an open failure logs
   loudly and leaves that DB idle rather than bricking boot.
 - `terminate/2` — closes each open table, the DB, and the leveled sup.
 
-Accessors (`core_db/0`, `table/1`, `is_open/0`, `info/0`) read `persistent_term`
-and never call the process. Declarations (`tables/0`, `core_db_spec/0`,
+Accessors (`main_db/0`, `table/1`, `is_open/0`, `info/0`) read `persistent_term`
+and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
 `registry_db_spec/0`) are pure.
 """.
 
@@ -56,8 +56,6 @@ and never call the process. Declarations (`tables/0`, `core_db_spec/0`,
 
 -define(PT_DB(Name), {?MODULE, db, Name}).
 -define(PT_TABLE(Name), {?MODULE, table, Name}).
--define(DEFAULT_CORE_SHARD_COUNT, 16).
--define(DEFAULT_REGISTRY_SHARD_COUNT, 16).
 
 %% The native CRDTs that have no short fold alias in `bondy_oplog_cell_kernel`
 %% (`mv_register` for grants / sources, `ew_flag` for group membership). They are
@@ -72,12 +70,12 @@ and never call the process. Declarations (`tables/0`, `core_db_spec/0`,
     leveled_sup :: pid() | undefined,
     dir :: file:filename_all() | undefined,
     %% The ephemeral `registry` DB (memory topology — no leveled sup / dir),
-    %% provisioned alongside `core`.
+    %% provisioned alongside `main`.
     registry_db :: bondy_db:db() | undefined
 }).
 
 -type fold_class() :: lww | mv | aw | ew | presence.
--type db_name() :: core | registry.
+-type db_name() :: bondy_db_config:db_name().
 -type table_spec() :: #{
     name := atom(),
     db := db_name(),
@@ -94,15 +92,18 @@ and never call the process. Declarations (`tables/0`, `core_db_spec/0`,
 -export_type([fold_class/0]).
 
 %% API
--export([core_db/0]).
--export([core_db_spec/0]).
 -export([fold_opts/1]).
 -export([info/0]).
 -export([is_open/0]).
+-export([main_db/0]).
+-export([main_db_name/0]).
+-export([main_db_spec/0]).
 -export([registry_db/0]).
+-export([registry_db_name/0]).
 -export([registry_db_spec/0]).
 -export([start_link/0]).
 -export([table/1]).
+-export([table_names/1]).
 -export([tables/0]).
 
 %% GEN_SERVER CALLBACKS
@@ -130,7 +131,7 @@ Returns the declarative specs for all fifteen tables (both DBs), mirroring the
 
 tables() ->
     [
-        %% core — durable (leveled, shared_shards)
+        %% main — durable (leveled, shared_shards)
         %% bondy_realm — unlike the per-realm tables this is a GLOBAL registry:
         %% every realm shares one band (the empty binary) keyed by its Uri.
         %% Under the aggregate partition strategy the shard hash includes the
@@ -141,7 +142,7 @@ tables() ->
         %% that realm (the reactor is `bondy_aae_reactor`).
         #{
             name => ?BONDY_DB_REALM_TAB,
-            db => core,
+            db => main,
             durability => durable,
             fold => lww,
             publish => true
@@ -157,7 +158,7 @@ tables() ->
         %% merged keyset on demand.
         #{
             name => ?BONDY_DB_REALM_KEYS_TAB,
-            db => core,
+            db => main,
             durability => durable,
             fold => aw
         },
@@ -169,7 +170,7 @@ tables() ->
         %% `bondy.user.credentials_changed`).
         #{
             name => ?BONDY_DB_USER_TAB,
-            db => core,
+            db => main,
             durability => durable,
             fold => lww,
             publish => true,
@@ -179,7 +180,7 @@ tables() ->
         %% fire inline in bondy_rbac_group; on_merge is a no-op.
         #{
             name => ?BONDY_DB_GROUP_TAB,
-            db => core,
+            db => main,
             durability => durable,
             fold => lww
         },
@@ -199,7 +200,7 @@ tables() ->
         %% the write path also touches the user cell.
         #{
             name => ?BONDY_DB_GROUP_MEMBERS_TAB,
-            db => core,
+            db => main,
             durability => durable,
             %% Co-locate each fact with its leading ENTITY (the 2nd column of the
             %% band-tagged key): a forward `[?MEMBER_FWD, User, Group]` cell lands
@@ -230,7 +231,7 @@ tables() ->
         %% equality reverse lookup "grants on resource R" (see `grant_indexes/0`).
         #{
             name => ?BONDY_DB_GROUP_GRANT_TAB,
-            db => core,
+            db => main,
             durability => durable,
             %% aggregate root = the Rolename (group) leading the composite key,
             %% so a group's grants co-locate with the group record on one shard.
@@ -241,7 +242,7 @@ tables() ->
         },
         #{
             name => ?BONDY_DB_USER_GRANT_TAB,
-            db => core,
+            db => main,
             durability => durable,
             %% aggregate root = the Rolename (username) leading the composite key,
             %% so a user's grants co-locate with the user record on one shard +
@@ -263,7 +264,7 @@ tables() ->
         %% key's anchor-mask, and CIDR matching is containment, not equality).
         #{
             name => ?BONDY_DB_SOURCE_TAB,
-            db => core,
+            db => main,
             durability => durable,
             %% aggregate root = the Username leading the composite key, so a
             %% user's sources co-locate with the user record (auth-path locality).
@@ -279,7 +280,7 @@ tables() ->
         %% rebuilds on local + AE-replicated spec writes.
         #{
             name => api_gateway,
-            db => core,
+            db => main,
             durability => durable,
             fold => lww,
             publish => true
@@ -289,13 +290,13 @@ tables() ->
         %% revocation is inline; nothing subscribes to ticket/token changes).
         #{
             name => ?BONDY_DB_TICKET_TAB,
-            db => core,
+            db => main,
             durability => durable,
             fold => lww
         },
         #{
             name => ?BONDY_DB_OAUTH_TOKEN_TAB,
-            db => core,
+            db => main,
             durability => durable,
             fold => lww
         },
@@ -305,11 +306,11 @@ tables() ->
         %% needs no cluster-wide change notification.
         #{
             name => bondy_bridge_relay,
-            db => core,
+            db => main,
             durability => durable,
             fold => lww
         },
-        %% retained_messages — the WAMP retained-event store. A DURABLE core
+        %% retained_messages — the WAMP retained-event store. A DURABLE main
         %% table regardless of the legacy `wamp.message_retention.storage_type`
         %% knob (now inert): the operator decision is that retained messages
         %% always survive a restart. The feature is gated per-publish by the
@@ -320,7 +321,7 @@ tables() ->
         %% key-ordered `range_all/5` prefix / wildcard scans (no secondary index).
         #{
             name => retained_messages,
-            db => core,
+            db => main,
             durability => durable,
             fold => lww
         },
@@ -394,50 +395,30 @@ tables() ->
     ].
 
 -doc """
-The `core` DB declaration: durable shared-shards over leveled, with a
-deployment-configurable shard count (`db.core.shard_count`, default 16).
+The `main` DB declaration: durable shared-shards over leveled, with a
+deployment-configurable shard count (`db.main.shard_count`, default 16).
 """.
--spec core_db_spec() -> map().
+-spec main_db_spec() -> map().
 
-core_db_spec() ->
+main_db_spec() ->
     #{
-        name => core,
+        name => main,
         topology => bondy_db_topology_shared_shards,
         durability => durable,
-        shard_count => core_shard_count(),
-        partition_strategy => core_partition_strategy(),
-        realm_prefix_depth => core_realm_prefix_depth()
+        shard_count => bondy_db_config:oplog_shard_count(main),
+        partition_strategy => bondy_db_config:oplog_partition_strategy(main),
+        realm_prefix_depth => bondy_db_config:oplog_realm_prefix_depth(main)
     }.
 
 %% @private
-%% The `core` DB partition strategy (`db.core.partition_strategy`, default
-%% `aggregate`): how a `(realm, key)` write maps to a shard. TOPOLOGY-DEFINING —
-%% frozen in the topology manifest, re-key on change.
-core_partition_strategy() ->
-    application:get_env(bondy_router, oplog_core_partition_strategy, aggregate).
-
-%% @private
-%% For `partition_strategy = realm`: leading dotted realm-URI components that
-%% share a shard (`db.core.realm_prefix_depth`, default 1).
-core_realm_prefix_depth() ->
-    application:get_env(bondy_router, oplog_core_realm_prefix_depth, 1).
-
-%% @private
-%% Boot behaviour when the configured topology disagrees with the on-disk
-%% manifest (`db.core.on_topology_mismatch`, default `warn`). Runtime knob —
-%% NOT frozen in the manifest.
-core_on_topology_mismatch() ->
-    application:get_env(bondy_router, oplog_core_on_topology_mismatch, warn).
-
-%% @private
-%% Assemble the frozen keying configuration for the durable `core` DB: the
+%% Assemble the frozen keying configuration for the durable `main` DB: the
 %% subset of config that determines on-disk key placement and is therefore
 %% re-key-on-change. The catalogue supplies the deployment choices
-%% (partition_strategy / shard_count / realm_prefix_depth) and each core
+%% (partition_strategy / shard_count / realm_prefix_depth) and each main
 %% table's routing key (`aggregate_root`); the substrate invariants (hash
 %% function, key-encoding version) are stamped by `bondy_db_manifest`.
-core_topology_freeze() ->
-    Spec = core_db_spec(),
+main_topology_freeze() ->
+    Spec = main_db_spec(),
     Tables = maps:from_list([
         {
             maps:get(name, S),
@@ -445,10 +426,10 @@ core_topology_freeze() ->
                 aggregate_root => maps:get(aggregate_root, S, identity)
             }
         }
-     || #{db := core} = S <- tables()
+     || #{db := main} = S <- tables()
     ]),
     #{
-        db => core,
+        db => main,
         topology_module => maps:get(topology, Spec),
         partition_strategy => maps:get(partition_strategy, Spec),
         shard_count => maps:get(shard_count, Spec),
@@ -467,7 +448,7 @@ registry_db_spec() ->
         name => registry,
         topology => bondy_db_topology_memory,
         durability => ephemeral,
-        shard_count => registry_shard_count(),
+        shard_count => bondy_db_config:oplog_shard_count(registry),
         %% The four ephemeral knobs, applied per-table at open time.
         table_opts => #{
             projection_backend => ets,
@@ -523,11 +504,25 @@ fold_opts(presence) ->
     %% tables converge as `lww`); no mapping yet.
     error({not_yet_supported, presence}).
 
--doc "The published `core` DB handle, or `undefined` when not open.".
--spec core_db() -> bondy_db:db() | undefined.
+-doc """
+The durable database's name. Callers that need to filter or assert on
+`tables/0`'s `db` field should call this instead of spelling `main`
+literally — it is the single point that would change on a future rename.
+""".
+-spec main_db_name() -> db_name().
 
-core_db() ->
-    persistent_term:get(?PT_DB(core), undefined).
+main_db_name() -> main.
+
+-doc "The ephemeral database's name. See `main_db_name/0`.".
+-spec registry_db_name() -> db_name().
+
+registry_db_name() -> registry.
+
+-doc "The published `main` DB handle, or `undefined` when not open.".
+-spec main_db() -> bondy_db:db() | undefined.
+
+main_db() ->
+    persistent_term:get(?PT_DB(main), undefined).
 
 -doc "The published ephemeral `registry` DB handle, or `undefined`.".
 -spec registry_db() -> bondy_db:db() | undefined.
@@ -541,28 +536,34 @@ registry_db() ->
 table(Name) when is_atom(Name) ->
     persistent_term:get(?PT_TABLE(Name), undefined).
 
--doc "Whether the `core` DB has been provisioned and published.".
+-doc "The declared table names for `DbName`, in declaration order.".
+-spec table_names(DbName :: db_name()) -> [atom()].
+
+table_names(DbName) ->
+    [maps:get(name, S) || S <- tables(), maps:get(db, S) =:= DbName].
+
+-doc "Whether the `main` DB has been provisioned and published.".
 -spec is_open() -> boolean().
 
 is_open() ->
-    core_db() =/= undefined.
+    main_db() =/= undefined.
 
 -doc """
-A summary of the catalogue: the `core` DB info and each core table's
+A summary of the catalogue: the `main` DB info and each main table's
 `bondy_db:info/1` (or `not_open`).
 """.
 -spec info() -> map().
 
 info() ->
     #{
-        core =>
-            case core_db() of
+        main =>
+            case main_db() of
                 undefined -> not_open;
                 Db -> bondy_db:info(Db)
             end,
         tables => maps:from_list([
             {Name, table_info(Name)}
-         || #{name := Name, db := core} <- tables()
+         || #{name := Name, db := main} <- tables()
         ])
     }.
 
@@ -574,50 +575,50 @@ init([]) ->
     %% Trap exits so terminate/2 runs on supervised shutdown (to close the DBs)
     %% and so a leveled-sup crash surfaces as an EXIT message we can act on.
     process_flag(trap_exit, true),
-    %% Provision the durable `core` and the ephemeral `registry` DBs
+    %% Provision the durable `main` and the ephemeral `registry` DBs
     %% independently — an open failure in one leaves it idle without
     %% affecting the other.
-    State0 = open_core_into(#state{}),
+    State0 = open_main_into(#state{}),
     State = open_registry_into(State0),
     {ok, State}.
 
 %% @private
-open_core_into(State) ->
-    case specs_to_open() of
+open_main_into(State) ->
+    case main_specs_to_open() of
         [] ->
             %% Nothing to provision — reachable only if `tables/0` is
-            %% emptied of core specs.
+            %% emptied of main specs.
             ?LOG_NOTICE(#{
                 description =>
-                    "bondy_db namespace catalogue idle; no core tables to "
+                    "bondy_db namespace catalogue idle; no main tables to "
                     "provision"
             }),
             State;
         Specs ->
-            case do_open_core(Specs) of
+            case do_open_main(Specs) of
                 {ok, Db, Sup, Dir} ->
-                    %% Every core table is now open, so every shared per-shard
+                    %% Every main table is now open, so every shared per-shard
                     %% instance has its full set of cell-apply buckets
                     %% registered. Release the founding instances' WAL-drain
                     %% gates (set via `drain_gated => true` in
                     %% `maybe_ephemeral_opts/2`) so each shared WAL replays with
                     %% a complete routing directory — no non-founding table's
-                    %% cells are skipped. A no-op unless the core topology is
+                    %% cells are skipped. A no-op unless the main topology is
                     %% `per_shard`. See `bondy_db:start_draining/1`.
                     ok = bondy_db:start_draining(Db),
                     %% Now that the gates are open, run the secondary-index
                     %% cold-start that `open_table/3` deferred for the gated
                     %% tables: each barriers its (now ungated) primary drain and
                     %% trust-or-rebuilds from a fully-replayed primary.
-                    ok = cold_start_core_indexes(Specs),
+                    ok = cold_start_main_indexes(Specs),
                     State#state{db = Db, leveled_sup = Sup, dir = Dir};
                 {error, Reason} ->
                     %% Don't brick the node over a storage-open failure — log
-                    %% loudly and leave core idle (is_open/0 stays false).
+                    %% loudly and leave main idle (is_open/0 stays false).
                     ?LOG_ERROR(#{
                         description =>
-                            "Failed to provision bondy_db core tables; "
-                            "catalogue starting with core idle",
+                            "Failed to provision bondy_db main tables; "
+                            "catalogue starting with main idle",
                         reason => Reason
                     }),
                     State
@@ -625,12 +626,12 @@ open_core_into(State) ->
     end.
 
 %% @private
-%% Run the deferred secondary-index cold-start for every opened core table. Called
+%% Run the deferred secondary-index cold-start for every opened main table. Called
 %% AFTER `bondy_db:start_draining/1` has released the founding instances' WAL-drain
 %% gates, so each table's `bondy_db:cold_start_table_indexes/1` barriers a now-
 %% ungated, fully-replayed primary. A no-op for index-less tables and for tables
 %% whose handle is absent (a partial provisioning failure already logged).
-cold_start_core_indexes(Specs) ->
+cold_start_main_indexes(Specs) ->
     lists:foreach(
         fun(#{name := Name}) ->
             case table(Name) of
@@ -672,7 +673,7 @@ handle_cast(_Msg, State) ->
 handle_info({'EXIT', Sup, Reason}, #state{leveled_sup = Sup} = State) ->
     %% Our leveled sup died — stop so bondy_sup restarts us and re-opens.
     ?LOG_ERROR(#{
-        description => "bondy_db core leveled supervisor died",
+        description => "bondy_db main leveled supervisor died",
         reason => Reason
     }),
     {stop, {leveled_sup_died, Reason}, State#state{leveled_sup = undefined}};
@@ -680,7 +681,7 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, #state{db = Db, leveled_sup = Sup, registry_db = RegistryDb}) ->
-    _ = close_core(Db, Sup),
+    _ = close_main(Db, Sup),
     _ = close_registry(RegistryDb),
     ok.
 
@@ -689,9 +690,9 @@ terminate(_Reason, #state{db = Db, leveled_sup = Sup, registry_db = RegistryDb})
 %% =============================================================================
 
 %% @private
-%% The core table specs to provision at boot: every declared core table.
-specs_to_open() ->
-    [S || #{db := core} = S <- tables()].
+%% The main table specs to provision at boot: every declared main table.
+main_specs_to_open() ->
+    [S || #{db := main} = S <- tables()].
 
 %% @private
 %% The registry table specs to provision at boot: every declared registry
@@ -700,24 +701,24 @@ registry_specs_to_open() ->
     [S || #{db := registry} = S <- tables()].
 
 %% @private
-do_open_core(Specs) ->
-    Dir = core_dir(),
+do_open_main(Specs) ->
+    Dir = main_dir(),
     ok = filelib:ensure_path(Dir),
     %% Reconcile the configured keying topology against the on-disk manifest
     %% BEFORE opening anything. `Effective` is the topology the data is
     %% actually keyed under — the configured one at genesis, otherwise whatever
     %% the manifest froze — and the DB + tables are opened from it so a
     %% mismatched new config is detected (and, under `warn`, NOT applied).
-    Configured = core_topology_freeze(),
+    Configured = main_topology_freeze(),
     case
         bondy_db_manifest:reconcile(
-            Dir, Configured, core_on_topology_mismatch()
+            Dir, Configured, bondy_db_config:oplog_on_topology_mismatch(main)
         )
     of
         {ok, _Decision, Effective} ->
-            do_open_core(Specs, Dir, Effective);
+            do_open_main(Specs, Dir, Effective);
         {error, topology_mismatch} ->
-            %% Operator chose fail-fast (db.core.on_topology_mismatch = stop):
+            %% Operator chose fail-fast (db.main.on_topology_mismatch = stop):
             %% refuse to boot rather than mis-serve. reconcile/3 already logged
             %% the diverging keys; crashing init halts the node.
             error({bondy_db_topology_mismatch, Dir});
@@ -726,7 +727,7 @@ do_open_core(Specs) ->
     end.
 
 %% @private
-do_open_core(Specs, Dir, Effective) ->
+do_open_main(Specs, Dir, Effective) ->
     ShardCount = maps:get(shard_count, Effective),
     EffTables = maps:get(tables, Effective),
     case bondy_db_leveled_sup:start_link() of
@@ -740,22 +741,22 @@ do_open_core(Specs, Dir, Effective) ->
                 %% DB default fold; mv tables override via per-table crdt_module.
                 fold_module => lww_register
             },
-            case bondy_db:open(core, DbOpts) of
+            case bondy_db:open(main, DbOpts) of
                 {ok, Db} ->
-                    ok = put_db(core, Db),
+                    ok = put_db(main, Db),
                     %% Publish this node's keying-topology fingerprint (over the
                     %% EFFECTIVE on-disk topology) so anti-entropy peers can
                     %% verify they key data the same way before syncing per-shard
                     %% MST roots — mismatched topologies are refused, not
                     %% silently diverged.
                     ok = bondy_oplog:set_topology_fingerprint(
-                        core, bondy_db_manifest:fingerprint(Effective)
+                        main, bondy_db_manifest:fingerprint(Effective)
                     ),
                     case open_tables(Db, Specs, EffTables) of
                         ok ->
                             ?LOG_NOTICE(#{
                                 description =>
-                                    "bondy_db core tables provisioned",
+                                    "bondy_db main tables provisioned",
                                 count => length(Specs),
                                 tables => [maps:get(name, S) || S <- Specs],
                                 shard_count => ShardCount,
@@ -763,7 +764,7 @@ do_open_core(Specs, Dir, Effective) ->
                             }),
                             {ok, Db, Sup, Dir};
                         {error, _} = Err ->
-                            _ = close_core(Db, Sup),
+                            _ = close_main(Db, Sup),
                             Err
                     end;
                 {error, _} = Err ->
@@ -827,11 +828,11 @@ open_tables(Db, [#{name := Name} = Spec | Rest]) ->
     end.
 
 %% @private
-%% Core path: open each durable table from its EFFECTIVE routing keys — the
+%% Main path: open each durable table from its EFFECTIVE routing keys — the
 %% on-disk manifest's, which equal the configured ones unless a warn-mismatch
 %% pinned the old topology. `EffTables` maps each TableName to
 %% `#{aggregate_root => _}`; a table absent from it (should not happen for
-%% core) falls back to its declared spec values via `table_opts/2`.
+%% main) falls back to its declared spec values via `table_opts/2`.
 open_tables(_Db, [], _EffTables) ->
     ok;
 open_tables(Db, [#{name := Name} = Spec | Rest], EffTables) ->
@@ -845,15 +846,15 @@ open_tables(Db, [#{name := Name} = Spec | Rest], EffTables) ->
     end.
 
 %% @private
-%% Closes every open core table, the DB, and the leveled sup; clears the
+%% Closes every open main table, the DB, and the leveled sup; clears the
 %% published handles. Tolerant of partial state (any of Db / Sup undefined).
-close_core(Db, Sup) ->
+close_main(Db, Sup) ->
     _ = [
         begin
             _ = catch bondy_db:close_table(T),
             _ = persistent_term:erase(?PT_TABLE(Name))
         end
-     || #{name := Name, db := core} <- tables(),
+     || #{name := Name, db := main} <- tables(),
         (T = table(Name)) =/= undefined
     ],
     _ =
@@ -862,7 +863,7 @@ close_core(Db, Sup) ->
                 ok;
             _ ->
                 _ = catch bondy_db:close(Db),
-                persistent_term:erase(?PT_DB(core))
+                persistent_term:erase(?PT_DB(main))
         end,
     _ = stop_sup(Sup),
     ok.
@@ -870,7 +871,7 @@ close_core(Db, Sup) ->
 %% @private
 %% Closes every open registry table and the registry DB; clears the published
 %% handles. The memory topology owns no leveled sup / on-disk dir, so this is
-%% simpler than close_core/2. Tolerant of `undefined` (registry idle).
+%% simpler than close_main/2. Tolerant of `undefined` (registry idle).
 close_registry(undefined) ->
     ok;
 close_registry(Db) ->
@@ -933,21 +934,21 @@ table_opts(#{fold := Class} = Spec, Override) ->
 %% @private
 %% Registry (ephemeral, memory-topology) tables carry the in-RAM projection /
 %% WAL knobs at the DB-spec level (registry_db_spec/0); merge them under the
-%% fold + index opts (the key sets are disjoint). Core tables pass through.
+%% fold + index opts (the key sets are disjoint). Main tables pass through.
 maybe_ephemeral_opts(#{db := registry}, Opts) ->
     maps:merge(maps:get(table_opts, registry_db_spec()), Opts);
-maybe_ephemeral_opts(#{db := core, durability := durable}, Opts) ->
-    %% Make each durable core table's per-shard WAL + MST pack durable, rooted
+maybe_ephemeral_opts(#{db := main, durability := durable}, Opts) ->
+    %% Make each durable main table's per-shard WAL + MST pack durable, rooted
     %% under the data dir (collocated with the leveled projection) instead of
     %% the ephemeral `/tmp` fallback (which abandons fsynced frames on restart
     %% and keeps no MST pack on disk). Without this the DB-level
     %% `durability => durable` never reaches the oplog instances.
     %%
     %% The MST pack store (`storage_path`) and the WAL (`wal_dir`) live in their
-    %% own sibling subtrees alongside the leveled `core' dir — see
+    %% own sibling subtrees alongside the leveled `main' dir — see
     %% `bondy_db_dir/0`. An explicit `wal_dir` (rather than letting the WAL
     %% default to a `wal/' dir *under* the pack instance dir) keeps the WAL leaf
-    %% at `wal/<InstanceId>' (`wal/core/<ET>/<Shard>') instead of the doubly
+    %% at `wal/<InstanceId>' (`wal/main/<ET>/<Shard>') instead of the doubly
     %% nested `mst/.../<InstanceId>/wal/<InstanceId>'. The pack store keeps the
     %% default `sharded' path layout (`mst/<hash>/<hash>/<InstanceId>'); `flat'
     %% is unsafe here because the slash-bearing `InstanceId' makes the
@@ -961,21 +962,30 @@ maybe_ephemeral_opts(#{db := core, durability := durable}, Opts) ->
     %% node never has. Under multi-node AAE every node genesis-seeds and the lww
     %% merge reconciles their cells (proven by `bondy_aae_cluster_SUITE`).
     %% `drain_gated => true` founds each shared per-shard instance with its WAL
-    %% drain deferred. The `core` DB collapses every table onto N shard
+    %% drain deferred. The `main` DB collapses every table onto N shard
     %% instances (one WAL each); the first table opened on a shard founds the
     %% instance and the rest register their cell-apply buckets as they open. A
     %% founding instance that drained at init — before its siblings registered —
     %% would skip (and, since the MST install is unconditional, LOSE) every
     %% not-yet-registered table's WAL-tail cells on restart. `provision/1`
-    %% releases the gate via `bondy_db:start_draining/1` AFTER all core tables
+    %% releases the gate via `bondy_db:start_draining/1` AFTER all main tables
     %% are open. See `bondy_db:start_draining/1` and the applier `drain_gate`.
     Opts#{
         oplog_instance_opts => #{
             backend => bondy_mst_pack_store,
-            storage_path => core_mst_dir(),
-            wal_dir => core_wal_dir(),
+            storage_path => main_mst_dir(),
+            wal_dir => main_wal_dir(),
             seed => true,
-            %% `log_boot_replay` emits one NOTICE when each durable core shard
+            %% WAL fsync/rotation knobs (`db.wal.*`) — read here rather than
+            %% defaulting inside `bondy_oplog_wal` so an operator override
+            %% reaches the writer; the ephemeral `registry` DB never sets
+            %% these (its WAL is in-memory and never fsyncs).
+            fsync_mode => bondy_oplog_config:wal_fsync_mode(),
+            max_segment_bytes => bondy_oplog_config:wal_max_segment_bytes(),
+            batched_fsync_interval =>
+                bondy_oplog_config:wal_batched_fsync_interval_ms(),
+            batched_fsync_bytes => bondy_oplog_config:wal_batched_fsync_bytes(),
+            %% `log_boot_replay` emits one NOTICE when each durable main shard
             %% begins reading its WAL at boot and one when that replay reaches
             %% end-of-log — so a node's boot shows it reading each WAL.
             applier => #{drain_gated => true, log_boot_replay => true}
@@ -1029,43 +1039,31 @@ table_info(Name) ->
     end.
 
 %% @private
-core_shard_count() ->
-    application:get_env(
-        bondy_router, oplog_core_shard_count, ?DEFAULT_CORE_SHARD_COUNT
-    ).
-
-%% @private
-registry_shard_count() ->
-    application:get_env(
-        bondy_router, oplog_registry_shard_count, ?DEFAULT_REGISTRY_SHARD_COUNT
-    ).
-
-%% @private
 %% Root of the on-disk layout for all bondy_db data, configurable via the
-%% `platform_data_dir' schema knob. The durable `core' DB keeps its three
+%% `platform_data_dir' schema knob. The durable `main' DB keeps its three
 %% storage components in sibling subtrees under here:
 %%
-%%   <data>/bondy_db/core   leveled projection      (shards `core/0'..`core/N')
+%%   <data>/bondy_db/main   leveled projection      (shards `main/0'..`main/N')
 %%   <data>/bondy_db/mst    MST pack store          (`mst/<InstanceId>/...')
 %%   <data>/bondy_db/wal    write-ahead log         (`wal/<InstanceId>/...')
 %%
-%% with `InstanceId = core/<EntityType>/<Shard>'. `mst' and `wal' are siblings
-%% of `core' (not nested under it), and `path_layout => flat' keeps each leaf at
-%% `<base>/core/<ET>/<Shard>' rather than under opaque hash dirs.
+%% with `InstanceId = main/<EntityType>/<Shard>'. `mst' and `wal' are siblings
+%% of `main' (not nested under it), and `path_layout => flat' keeps each leaf at
+%% `<base>/main/<ET>/<Shard>' rather than under opaque hash dirs.
 bondy_db_dir() ->
     DataDir = application:get_env(bondy_router, platform_data_dir, "data"),
     filename:join([DataDir, "bondy_db"]).
 
 %% @private
-core_dir() ->
-    filename:join([bondy_db_dir(), "core"]).
+main_dir() ->
+    filename:join([bondy_db_dir(), "main"]).
 
 %% @private
-core_mst_dir() ->
+main_mst_dir() ->
     unicode:characters_to_binary(filename:join([bondy_db_dir(), "mst"])).
 
 %% @private
-core_wal_dir() ->
+main_wal_dir() ->
     unicode:characters_to_binary(filename:join([bondy_db_dir(), "wal"])).
 
 %% @private

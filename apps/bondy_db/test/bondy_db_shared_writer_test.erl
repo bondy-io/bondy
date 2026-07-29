@@ -3,7 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %%
-%% Proves the secondary-index-writer collapse on the production `core` topology
+%% Proves the secondary-index-writer collapse on the production `main` topology
 %% (`bondy_db_topology_shared_shards`, `instances_strategy => per_shard`): every
 %% index of every table on a secondary shard shares ONE
 %% `bondy_oplog_secondary_writer`, demuxing the dispatched ops back to each

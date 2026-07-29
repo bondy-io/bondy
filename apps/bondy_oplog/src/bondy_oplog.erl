@@ -458,7 +458,7 @@ projection(InstanceId) when is_binary(InstanceId) ->
 
 -doc """
 The `bondy_db` DB name an oplog instance belongs to, derived from its id
-(`<<"core/6">>` -> `core`). Returns `undefined` when the DB segment is not a
+(`<<"main/6">>` -> `main`). Returns `undefined` when the DB segment is not a
 known atom.
 """.
 -spec db_of(instance_id()) -> atom() | undefined.

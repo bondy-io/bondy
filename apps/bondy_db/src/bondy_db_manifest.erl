@@ -36,7 +36,7 @@ On boot the catalogue calls `reconcile/3` with the *configured* topology:
   mis-route every key and corrupt reads). Emit a loud warning naming the
   diverging keys plus the migration path (export → wipe data dir → reimport via
   `bondy_export`) and keep running on the **on-disk** topology; or, when the
-  operator sets `db.core.on_topology_mismatch = stop`, refuse to boot.
+  operator sets `db.main.on_topology_mismatch = stop`, refuse to boot.
 
 Only **keying-relevant** values are frozen. Runtime knobs (AAE, scan
 concurrency, the mismatch policy itself, cache, fsync mode) may change freely
@@ -433,7 +433,7 @@ log_mismatch(Dir, Divergences, Level) ->
             "under the manifest's topology and re-routing it would corrupt "
             "reads. To change the topology: export the data, wipe the data "
             "dir, reimport under the new config (see bondy_export). Set "
-            "db.core.on_topology_mismatch = stop to fail fast instead.",
+            "db.main.on_topology_mismatch = stop to fail fast instead.",
         path => path(Dir),
         divergences => [
             #{key => K, configured => C, on_disk => D}

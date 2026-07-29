@@ -76,7 +76,8 @@ classDiagram
       +hlc(state) hlc
       +encode_state(state) binary
       +decode_state(binary) state
-      +gc_threshold(state) hlc | undefined °
+      +removal_op() op °
+      +stabilize(stable_hlc, state) keep | discard °
       +value_equals_state() bool °
       +order_independent() bool °
       +context_of(state) context °tier_2
@@ -227,8 +228,10 @@ wrote it. That cost is bounded by cluster size, not op count — but
 entries of *retired* origins linger. `reap_origins/2` is the
 membership-driven GC: given operator-supplied retired origins
 (permanently gone, causally stable cluster-wide), it drops only the
-entries that carry no live value. tier_0 types don't export it (their
-per-origin entries *are* value).
+entries that carry no live value. Only the add-wins family exports it
+— `aw_set`, `aw_map`, `ew_flag`, `mv_register`. tier_0 types don't need
+it (their per-origin entries *are* value), and the remove-wins pair
+(`rw_set`, `dw_flag`) does not export it either.
 
 ## The non-negotiable properties
 
@@ -258,9 +261,10 @@ DVVs) are the standard mechanisms.
 Every CRDT answers one question consistently — *what is the maximum
 HLC ever interpreted into this state?* `hlc/1` is non-decreasing as
 operations are interpreted; the substrate stores it in the cell frame
-and reads return it as the cell's logical timestamp. `gc_threshold/1`
-(usually the same HLC) tells compaction which prefix is fully
-absorbed and safe to drop.
+and reads return it as the cell's logical timestamp. A separate
+optional hook, `stabilize/2`, lets a type tell compaction — at a
+cluster-stable HLC — whether a cell's state can be dropped or must be
+kept.
 
 ## The catalogue
 

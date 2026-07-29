@@ -99,22 +99,19 @@ has every key ≤ K**. The algorithm — `compute_frontier_for/2` in
 
 ```mermaid
 flowchart TB
-    L["LocalKeys = sort(keys(MST))"]
-    P["For each peer root R: PeerKeys_R = keys_set_at_root(MST, R)"]
-    LCP["Frontier = longest_common_prefix(LocalKeys, [PeerKeys_R, ...])"]
-    F["return Frontier · or undefined if no fresh peers"]
+    P["For each fresh peer root R:<br/>diff the local MST against R (bondy_mst:diff_to_list/2)<br/>to find the peer's lowest missing key — its 'first hole'"]
+    F["Frontier = the highest key below every peer's first hole<br/>· or undefined if no fresh peers"]
 
-    L --> LCP
-    P --> LCP
-    LCP --> F
+    P --> F
 ```
 
 A few subtle things:
 
-- **`keys_set_at_root(MST, R)`** walks the *local* MST as if its root
-  were R, recovering the set of keys present at that historical
-  state. Page content-addressing makes this cheap — the historical
-  root's pages are still present if they have not been GC'd.
+- **Each peer's "first hole"** is found by a structural diff of the
+  local MST against the peer's advertised root. Page content-addressing
+  makes the diff cheap — shared subtrees are compared by hash, not
+  walked — so the historical root's pages need not be materialised as a
+  key set.
 - **The frontier is the longest common *prefix*** because keys are
   HLC-ordered. Stability is monotonic in HLC: if a peer has key K,
   it transitively has every key < K.
@@ -185,8 +182,8 @@ that just confirm there is nothing new to compact.
 
 ## "Truncate" means **delete pages**, not tombstone events
 
-The MST truncation step is the load-bearing one. It is not a
-soft-delete: the instance calls `bondy_mst:truncate/2` with the
+The MST truncation step is the one that actually bounds the tree. It is
+not a soft-delete: the instance calls `bondy_mst:truncate/2` with the
 watermark, a **structural prefix-truncate** that removes every key
 `≤ Watermark` in one pass.
 
@@ -259,7 +256,7 @@ Two storage implementations ship; the default is **context-sensitive**
 | Backend | Durability | Use |
 |---|---|---|
 | `bondy_oplog_compaction_checkpoint_ets` | in-memory | tests, ephemeral instances |
-| `bondy_oplog_compaction_checkpoint_file` | tmp + datasync + rename + fsync-dir, at `<storage_path>/<shard>/<InstanceId>/checkpoint.etf` | production |
+| `bondy_oplog_compaction_checkpoint_file` | tmp + datasync + rename + fsync-dir, at `<storage_path>/<InstanceId>/checkpoint.etf` | production |
 
 The file backend treats a decode failure as `{error, {corrupted, _}}`
 and the instance **refuses to start** on a corrupted checkpoint —
@@ -505,12 +502,12 @@ sequenceDiagram
     Note over New,Peer: plain AE picks up the live tail
 ```
 
-`install_catalogue_batch` has two modes: **replace** (fresh replica —
-cells written as-is; uses the projection adapter's `head/3` fast path
-when exported) and **merge** (recovering replica with surviving local
-state — each incoming cell is merged through the CRDT). The
-finalize step performs the same monotonic watermark advance and
-`mark_live/1` ordering as the single-CRDT path.
+`install_catalogue_batch` writes cells in **replace** mode: each cell is
+written as-is, using the projection adapter's `head/3` fast path when
+exported. Bootstrap always streams into a fresh replica, so there is no
+surviving local state to merge against. The finalize step performs the
+same monotonic watermark advance and `mark_live/1` ordering as the
+single-CRDT path.
 
 **The frontier travels separately.** The streamed cells are
 `{Bucket, Key, Frame}` triples — HLC and folded value only. They do
@@ -701,8 +698,8 @@ retry pressure without sampling logs:
 | Event | When | Meta |
 |---|---|---|
 | `[bondy_oplog, sync_scheduler, dispatch_bootstrap]` | A session was spawned. | `instance_id`, `peer`, `mode` (`catalogue \| single_crdt`), `strategy` |
-| `[bondy_oplog, sync_scheduler, bootstrap_session, started]` | Session pid was added to the in-flight set. | `instance_id`, `pid` |
-| `[bondy_oplog, sync_scheduler, bootstrap_session, ended]` | Session pid exited (any reason). | `instance_id`, `pid`, `reason` |
+| `[bondy_oplog, sync_scheduler, bootstrap, started]` | Session pid was added to the in-flight set. | `instance_id`, `pid` |
+| `[bondy_oplog, sync_scheduler, bootstrap, ended]` | Session pid exited (any reason). | `instance_id`, `pid`, `reason` |
 | `[bondy_oplog, sync_scheduler, bootstrap_capped]` | Dispatch skipped because in-flight cap was hit. | `instance_id` |
 | `[bondy_oplog, sync_scheduler, bootstrap_backoff_deferred]` | Dispatch skipped because `now < NextRetryMs`. | `instance_id` |
 | `[bondy_oplog, sync_scheduler, bootstrap_retry_scheduled]` | A failure bumped the fail count + wrote a new retry time. | `instance_id`, `wait_ms`, `fail_count` |
@@ -978,7 +975,7 @@ Implementation:
 - `bondy_oplog_sync_session.erl:bootstrap_catalogue/3` — the
   catalogue (multi-cell) bootstrap: cursor-paginated cell stream
   (`get_catalogue_snapshot_init` / `..._next`),
-  `install_catalogue_batch` replace/merge modes, finalize +
+  `install_catalogue_batch` (replace mode), finalize +
   `mark_live/1` last.
 - `bondy_oplog_bootstrap_lifecycle.erl` — the `<instance_dir>/lifecycle.live`
   flag file + atomics mirror; `open/2`, `is_live/1`, `mark_live/1`.
@@ -990,8 +987,8 @@ Implementation:
       `round_robin` strategies. RR counter lives in the
       `bondy_oplog_sync_scheduler_rr` named ETS table.
     - `track_inflight/2` — monitors the spawned session pid and
-      records `{Pid, InstanceId}` in the
-      `bondy_oplog_sync_scheduler_inflight` named ETS table.
+      records `{Pid, InstanceId, bootstrap | live, Peer | undefined}`
+      in the `bondy_oplog_sync_scheduler_inflight` named ETS table.
     - `update_backoff/2` — DOWN-reason classifier; clears the
       entry on `normal`, bumps fail-count + writes a new
       `NextRetryMs` otherwise. State lives in the
@@ -1014,7 +1011,7 @@ Implementation:
 - `bondy_oplog_crdt.erl` — `interpret_cog/2` callback.
 - `bondy_mst.erl:truncate/2` (`truncate_at` / `truncate_scan` /
   `rebuild_truncated`) — the structural prefix-truncate; `delete/2`
-  + `merge_subtrees/3` for single-key structural deletion.
+  + `merge_subtrees/4` for single-key structural deletion.
 
 The dispatch-policy chain (auto-bootstrap routing, peer strategy,
 in-flight cap, retry backoff) is documented in the auto-bootstrap

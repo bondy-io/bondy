@@ -58,6 +58,12 @@ here.
 -export([pack_auto_seal_bytes/0]).
 -export([pack_seal_mode/0]).
 
+%% WAL (WRITE-AHEAD LOG)
+-export([wal_fsync_mode/0]).
+-export([wal_max_segment_bytes/0]).
+-export([wal_batched_fsync_interval_ms/0]).
+-export([wal_batched_fsync_bytes/0]).
+
 %% LIVE-SYNC THROTTLE
 -export([live_sync_adaptive/0]).
 -export([set_live_sync_adaptive/1]).
@@ -241,6 +247,66 @@ pack_seal_mode() ->
         sync -> sync;
         _ -> async
     end.
+
+%% =============================================================================
+%% API — WAL (WRITE-AHEAD LOG)
+%% =============================================================================
+
+-doc """
+Fsync driver for the durable WAL writer (default `per_write`).
+
+`per_write` fsyncs every `append/2`, bounding the writer to the storage
+device's fsync rate (~6k ops/s on typical NVMe) but guaranteeing each write
+is durable before it returns — required for security-class namespaces
+(grants, tickets, users) that rely on the "on disk before `append/2`
+returns" contract.
+
+`batched` defers fsync to a size or time boundary (`wal_batched_fsync_bytes/0`,
+`wal_batched_fsync_interval_ms/0`) and exposes durability via
+`bondy_oplog_wal:durable_position/1` / `await_durable/3` instead of the
+return of `append/2`. It reaches roughly two orders of magnitude higher
+throughput (~200k events/s under concurrent appenders) at the cost of a
+bounded durability window. Affects only the durable (disk) WAL backend;
+the ephemeral (`registry`) in-memory WAL never fsyncs.
+""".
+-spec wal_fsync_mode() -> per_write | batched.
+
+wal_fsync_mode() ->
+    case application:get_env(?APP, wal_fsync_mode, per_write) of
+        batched -> batched;
+        _ -> per_write
+    end.
+
+-doc """
+Rotation threshold, in bytes, for the durable WAL's head segment (default
+`67_108_864`, 64 MiB). The writer rotates to a fresh segment once the next
+frame would push the head past this size; rotation fsyncs the sealed
+segment and advances `durable_position/1`.
+""".
+-spec wal_max_segment_bytes() -> pos_integer().
+
+wal_max_segment_bytes() ->
+    application:get_env(?APP, wal_max_segment_bytes, 64 * 1024 * 1024).
+
+-doc """
+Batched-mode fsync time trigger in milliseconds (default `50`): the writer
+fsyncs at most this long after the first un-fsynced append. Only consulted
+when `wal_fsync_mode/0` is `batched`.
+""".
+-spec wal_batched_fsync_interval_ms() -> pos_integer().
+
+wal_batched_fsync_interval_ms() ->
+    application:get_env(?APP, wal_batched_fsync_interval_ms, 50).
+
+-doc """
+Batched-mode fsync size trigger in bytes (default `1_048_576`, 1 MiB): the
+writer fsyncs once accumulated un-fsynced bytes exceed this threshold. Only
+consulted when `wal_fsync_mode/0` is `batched`.
+""".
+-spec wal_batched_fsync_bytes() -> pos_integer().
+
+wal_batched_fsync_bytes() ->
+    application:get_env(?APP, wal_batched_fsync_bytes, 1024 * 1024).
 
 %% =============================================================================
 %% API — LIVE-SYNC THROTTLE

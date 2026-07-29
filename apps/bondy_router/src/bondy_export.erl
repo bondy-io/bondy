@@ -9,7 +9,7 @@ A `gen_server` that exports and imports the Bondy database, running the work
 asynchronously and writing to (or reading from) a `disk_log` file while
 tracking progress and emitting lifecycle events.
 
-This is a logical **export/import** of the durable `bondy_db` `core` tables
+This is a logical **export/import** of the durable `bondy_db` `main` tables
 (security, realms, gateway specs, tokens, tickets, bridges, retained
 messages) — not a byte-level backup. Each entry is dumped as a logical
 `{entry, Table, Band, Key, Value}` tuple (the fold-decoded domain term) and
@@ -18,7 +18,7 @@ Storage-level metadata (HLCs, CRDT lineage) is intentionally **not** preserved
 — an import is a set of fresh writes, which is the correct semantics for moving
 data between nodes / deployments.
 
-Enumeration is domain-agnostic: every core table is listed over the band set
+Enumeration is domain-agnostic: every main table is listed over the band set
 `[<<>> | RealmURIs]`. Per-realm tables (users, groups, grants, sources,
 tickets, tokens, retained messages) hold their entries under each realm's URI
 band; the global-band tables (realms, API gateway specs, bridges) hold theirs
@@ -367,7 +367,7 @@ mod_vsn() ->
 %% @private
 build_export(Log) ->
     Bands = [<<>> | realm_uris()],
-    Tables = core_table_names(),
+    Tables = main_table_names(),
     try
         Acc = lists:foldl(
             fun(Name, Acc0) -> export_table(Name, Bands, Log, Acc0) end,
@@ -384,7 +384,7 @@ build_export(Log) ->
     end.
 
 %% @private
-%% Exports one core table over every band, buffering entries and flushing in
+%% Exports one main table over every band, buffering entries and flushing in
 %% 500-entry batches (via `maybe_log/2`). Tables that are declared but not
 %% provisioned on this node (handle `undefined`) are skipped.
 export_table(Name, Bands, Log, Acc0) ->
@@ -417,13 +417,12 @@ export_band(Name, Table, Band, Log, Acc0) ->
     end.
 
 %% @private
-%% The durable `core` table names, in declaration order (realms first, so they
-%% are imported before per-realm data).
-core_table_names() ->
-    [
-        maps:get(name, S)
-     || S <- bondy_namespace_catalog:tables(), maps:get(db, S) =:= core
-    ].
+%% The durable database's table names, in declaration order (realms first,
+%% so they are imported before per-realm data). Delegates to the catalogue
+%% rather than filtering `tables()` by a literal db-name atom, so a future
+%% rename of the durable database touches one definition, not every caller.
+main_table_names() ->
+    bondy_namespace_catalog:table_names(bondy_namespace_catalog:main_db_name()).
 
 %% @private
 %% The URIs of all realms; drives per-realm table enumeration.

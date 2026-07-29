@@ -375,18 +375,18 @@ unquiesce(N1, N2) ->
 %% the same frontier + a binary root on the peer's snapshot. These are the
 %% meaningful compaction targets.
 %%
-%% CORE instances only, deliberately. The ephemeral REGISTRY instances can
+%% MAIN instances only, deliberately. The ephemeral REGISTRY instances can
 %% transiently qualify (both nodes hold internal registrations) but their
 %% cross-node MST contents are not required to equalise — entries are
 %% node-local and session-scoped (owner self-cleanup removes them without a
 %% cross-node contract) — so a registry bystander in the target set makes the
 %% baseline root assertions flake on state this suite does not test. Both
-%% tests here assert the DURABLE core DB's compaction/frontier semantics.
+%% tests here assert the DURABLE main DB's compaction/frontier semantics.
 converged_data_targets(Sigs1, Sigs2) ->
     [
         I
      || {I, {F1, R1}} <- maps:to_list(Sigs1),
-        binary:part(I, 0, min(5, byte_size(I))) =:= <<"core/">>,
+        bondy_oplog:db_of(I) =:= bondy_namespace_catalog:main_db_name(),
         map_size(F1) >= 1,
         is_binary(R1),
         case maps:get(I, Sigs2, undefined) of

@@ -21,8 +21,8 @@
 %% hand-called `bondy_oplog:sync/3'.
 
 -define(NODE_NAMES, [bondy1, bondy2, bondy3]).
-%% A per-realm durable core table (band = realm URI, exercises G-1 realm
-%% folding) and a global-band durable core table (band = <<>>).
+%% A per-realm durable main table (band = realm URI, exercises G-1 realm
+%% folding) and a global-band durable main table (band = <<>>).
 -define(USERS_TABLE, security_users).
 -define(BRIDGE_TABLE, bondy_bridge_relay).
 -define(REALM_TABLE, bondy_realm).
@@ -342,7 +342,7 @@ rib_write_mode_cluster(Config) ->
         TopicB = <<"com.example.ribwrite.pfx.beta">>,
 
         ok = erpc:call(W1, ?MODULE, do_create_open_realm, [Uri]),
-        %% The realm itself replicates via the durable core DB — wait for it
+        %% The realm itself replicates via the durable main DB — wait for it
         %% on W2 before opening a session there.
         ok = wait_realm(W2, Uri),
 
@@ -765,7 +765,7 @@ wait_probe_args(Node, Args) ->
     ).
 
 %% @private
-%% Polls until the realm has replicated to `Node' (rides the durable core
+%% Polls until the realm has replicated to `Node' (rides the durable main
 %% DB, a different AAE lane than the registry).
 wait_realm(Node, Uri) ->
     Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,

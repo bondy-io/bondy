@@ -1040,7 +1040,7 @@ controller_host() ->
 
 %% @private
 %% Per-node override of ?ENV: isolated data dirs (so leveled / the bondy_db
-%% `core' store don't collide or lock each other), a unique Partisan
+%% `main' store don't collide or lock each other), a unique Partisan
 %% listen port, all client listeners disabled (irrelevant to AAE and would
 %% clash across same-host nodes), and bondy_db AAE enabled with a fast tick.
 node_env(DataDir, PeerPort) ->

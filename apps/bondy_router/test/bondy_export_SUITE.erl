@@ -18,7 +18,7 @@ all() ->
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
-    %% A real realm so per-realm table enumeration includes it. Durable core
+    %% A real realm so per-realm table enumeration includes it. Durable main
     %% DB ⇒ may survive a prior run.
     _ =
         case bondy_realm:exists(?REALM) of

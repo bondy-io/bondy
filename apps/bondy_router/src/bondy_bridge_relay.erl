@@ -18,7 +18,7 @@ a node crash or manually stopped and re-started they will not be restarted.
 ## Storage
 
 Permanent bridge configurations are persisted in the bondy_db
-`bondy_bridge_relay` core table, keyed by bridge name, with the config map
+`bondy_bridge_relay` main table, keyed by bridge name, with the config map
 carried in an `lww_register` cell. The table is provisioned by
 `bondy_namespace_catalog`.
 Storage is node-local: `bondy_bridge_relay_manager` reads the configs once at
@@ -32,7 +32,7 @@ bondy_db anti-entropy, `db.aae`).
 
 -define(TYPE, bridge_relay).
 -define(VERSION, <<"1.0">>).
-%% Permanent bridge configs live in the bondy_db `bondy_bridge_relay` core
+%% Permanent bridge configs live in the bondy_db `bondy_bridge_relay` main
 %% table. The store is a flat, name-keyed keyspace, so a single fixed bucket is
 %% used. The bridge map
 %% is stored directly in an `lww_register` cell (the substrate serialises terms;

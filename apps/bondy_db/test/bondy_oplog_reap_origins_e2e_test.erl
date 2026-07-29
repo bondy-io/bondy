@@ -161,7 +161,7 @@ tier0_reap_noop() ->
 %% The founding member here is a tier_0 lww table; the mv table registers
 %% second on the SAME shard applier. Before the per-member fix,
 %% `kernel_reap_supported(FoundingKernel)` gated the entire pass to
-%% `supported => false` — on the production core shard that meant 12 of the
+%% `supported => false` — on the production main shard that meant 12 of the
 %% 13 tables were never reaped.
 mux_reap_reaches_non_founding_tables() ->
     {DbA, _Oa} = open_mux_db(reap_mux_a),

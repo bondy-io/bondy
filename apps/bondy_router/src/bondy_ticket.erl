@@ -149,7 +149,7 @@ WAMP permission required to call the procedures.
 % 2 mins
 -define(LEEWAY_SECS, 2 * 60).
 
-%% Tickets live in the bondy_db `bondy_ticket` core table, bucketed by the auth
+%% Tickets live in the bondy_db `bondy_ticket` main table, bucketed by the auth
 %% realm and keyed by the composed store key. The 3-tuple store key
 %% `{Authid, A, B}` is encoded to a binary with
 %% `term_to_binary/1`; it is NOT order-preserving, so `revoke_all/2` scans the

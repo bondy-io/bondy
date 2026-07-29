@@ -5,7 +5,7 @@
 
 %% Keyset (cursor) pagination over `bondy_db` via `bondy_relation`, on the
 %% `bondy_db_topology_shared_shards` topology — the production default for the
-%% `core` DB, and the one that folds the realm into the cell key (G-1). The
+%% `main` DB, and the one that folds the realm into the cell key (G-1). The
 %% relation's rows are spread across all shards by `phash2({Bucket, Key})`, so
 %% a page is assembled in one of two modes (see `bondy_relation`'s moduledoc):
 %%
