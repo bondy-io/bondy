@@ -24,7 +24,7 @@ carried in an `lww_register` cell. The table is provisioned by
 Storage is node-local: `bondy_bridge_relay_manager` reads the configs once at
 startup and runs only the bridges tagged with this node's `nodestring`, so the
 table needs no cluster-wide change notification (cross-node replication awaits
-bondy_db anti-entropy, `oplog.aae`).
+bondy_db anti-entropy, `db.aae`).
 """.
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").

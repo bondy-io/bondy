@@ -538,7 +538,7 @@ dirty_delete(#bondy_registry_store{} = Store, Type, EntryKey) ->
     %% across nodes) is gone: a dirty delete is now just a local delete. With
     %% AAE off there are no remote replicas to dirty-delete, so this is reached
     %% only by the (inert) node-down `prune` path; the presence-FSM / EVICT
-    %% replacement lands with oplog.aae (design D-7).
+    %% replacement lands with db.aae (design D-7).
     take(Store, Type, EntryKey).
 
 -doc "".

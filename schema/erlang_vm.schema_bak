@@ -1,3 +1,7 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
 
 
 %% @doc Starts the Erlang runtime system with SMP support

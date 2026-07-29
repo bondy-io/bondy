@@ -746,7 +746,7 @@ schedule_tick(#state{interval_ms = Ms} = State) ->
 default_dispatch(InstanceId, []) ->
     %% Empty peer list this round. `maybe_bump_ae_isolated/1` certifies a
     %% genuine single-node deployment unconditionally (no peer to lag), and
-    %% otherwise applies the `oplog.aae.fence.on_isolation` policy: `refuse`
+    %% otherwise applies the `db.aae.fence.on_isolation` policy: `refuse`
     %% leaves freshness to decay (the fence refuses); `proceed`/`quorum` may
     %% certify so the node keeps authenticating.
     bondy_oplog_sync_session:maybe_bump_ae_isolated(InstanceId);

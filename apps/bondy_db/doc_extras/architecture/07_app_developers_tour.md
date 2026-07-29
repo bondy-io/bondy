@@ -181,7 +181,7 @@ For app developers, the recommendation is short:
 - **`single_bookie` is for tests and single-node deployments.**
 
 In Bondy, **`shard_count` is a per-DB choice**, not per-table: the `core`
-DB sizes every table the same via `oplog.core.shard_count` (default 16).
+DB sizes every table the same via `db.core.shard_count` (default 16).
 The substrate itself accepts a per-table `shard_count` if a deployment
 wants to size a hot table independently. The sizing trade-off is real
 either way: each shard runs its own AE sessions, so cluster-wide AE
@@ -196,7 +196,7 @@ node-wide (`aae_max_concurrency`, `aae_max_pages_in_flight`), so more
 shards means more sessions taking turns under the cap, not more running at
 once — and the fair per-tick rotation keeps any one shard from starving
 ([chapter 06](06_compaction_and_bootstrap.md#keeping-anti-entropy-subordinate-to-routing)).
-The knobs themselves live on `bondy_oplog_config` and the `oplog.aae.*`
+The knobs themselves live on `bondy_oplog_config` and the `db.aae.*`
 schema keys.
 
 ## 4. The Bondy Router tour
@@ -597,7 +597,7 @@ When *not* to reach for it:
 
 Topology and shard count are **per-DB** choices, set once at
 `bondy_db:open/2`. As-built there are two DBs: the durable `core` DB
-(`shared_shards`, `oplog.core.shard_count` shards, default 16) and the
+(`shared_shards`, `db.core.shard_count` shards, default 16) and the
 ephemeral `registry` DB (`memory`). The column below is which DB each
 table belongs to; where the shipped CRDT differs from the table's data
 model, the **design target** column names what it graduates to once

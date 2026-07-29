@@ -10,7 +10,7 @@
 ## Storage
 Tokens are stored in the bondy_db `bondy_oauth_token` core table, bucketed by the authentication realm `RealmUri` (either the realm this user is connecting to or its associated SSO realm). The key is the sha256 hash of the user's username (`authid`); the value is the user's `bondy_oauth_token_set`, stored directly as a term in an `lww_register` cell (`clear` deletes). The catalogue (`bondy_namespace_catalog`) provisions the table.
 
-Tokens are sharded by key. Cross-node replication awaits bondy_db anti-entropy (`oplog.aae`); until then storage is node-local.
+Tokens are sharded by key. Cross-node replication awaits bondy_db anti-entropy (`db.aae`); until then storage is node-local.
 
 """.
 

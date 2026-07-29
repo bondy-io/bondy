@@ -382,7 +382,7 @@ aae_fence_single_node_available(Config) ->
     ?assertMatch({ok, _, _}, do_authenticate(RealmUri, JWT)).
 
 aae_fence_isolation_policy(Config) ->
-    %% The `oplog.aae.fence.on_isolation` policy governs a node that is part of a
+    %% The `db.aae.fence.on_isolation` policy governs a node that is part of a
     %% multi-node cluster but cannot reach a peer this round (so it is NOT solo).
     %% We simulate that on a single test node by mocking the Partisan membership
     %% to include an unreachable peer; `maybe_bump_ae_isolated/1` (the exact

@@ -1,3 +1,8 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
 %% @doc Specifies the primary log level, that is, log event that are equally or
 %% more severe than this level, are forwarded to the primary filters. Less
 %% severe log events are immediately discarded.

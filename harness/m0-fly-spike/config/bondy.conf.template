@@ -40,8 +40,8 @@ cluster.peer_discovery.config.nameservers.1 = fdaa::3
 cluster.channels.wamp_relay.parallelism     = 2
 
 ## --- anti-entropy: MUST be on (00 #3 landmine) -- 500ms sync tick -------------
-oplog.aae                                   = on
-oplog.aae.interval                          = 500ms
+db.aae                                   = on
+db.aae.interval                          = 500ms
 
 ## --- routing / ordering -------------------------------------------------------
 ## Flow lanes (commit 9bc267e2) enforce per-pair FIFO independent of forward.ack,

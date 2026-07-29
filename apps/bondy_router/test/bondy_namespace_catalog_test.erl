@@ -73,7 +73,7 @@ declarations_test_() ->
         end},
         {"grants + source cut as lww", fun() ->
             %% grants + source declared mv but cut as lww per the CRDT-fork
-            %% resolution (honouring mv is deferred to oplog.aae).
+            %% resolution (honouring mv is deferred to db.aae).
             ?assertEqual(lww, fold(ByName, security_group_grants)),
             ?assertEqual(lww, fold(ByName, security_user_grants)),
             ?assertEqual(lww, fold(ByName, security_sources))

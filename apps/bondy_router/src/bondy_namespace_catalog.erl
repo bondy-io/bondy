@@ -395,7 +395,7 @@ tables() ->
 
 -doc """
 The `core` DB declaration: durable shared-shards over leveled, with a
-deployment-configurable shard count (`oplog.core.shard_count`, default 16).
+deployment-configurable shard count (`db.core.shard_count`, default 16).
 """.
 -spec core_db_spec() -> map().
 
@@ -410,7 +410,7 @@ core_db_spec() ->
     }.
 
 %% @private
-%% The `core` DB partition strategy (`oplog.core.partition_strategy`, default
+%% The `core` DB partition strategy (`db.core.partition_strategy`, default
 %% `aggregate`): how a `(realm, key)` write maps to a shard. TOPOLOGY-DEFINING —
 %% frozen in the topology manifest, re-key on change.
 core_partition_strategy() ->
@@ -418,13 +418,13 @@ core_partition_strategy() ->
 
 %% @private
 %% For `partition_strategy = realm`: leading dotted realm-URI components that
-%% share a shard (`oplog.core.realm_prefix_depth`, default 1).
+%% share a shard (`db.core.realm_prefix_depth`, default 1).
 core_realm_prefix_depth() ->
     application:get_env(bondy_router, oplog_core_realm_prefix_depth, 1).
 
 %% @private
 %% Boot behaviour when the configured topology disagrees with the on-disk
-%% manifest (`oplog.core.on_topology_mismatch`, default `warn`). Runtime knob —
+%% manifest (`db.core.on_topology_mismatch`, default `warn`). Runtime knob —
 %% NOT frozen in the manifest.
 core_on_topology_mismatch() ->
     application:get_env(bondy_router, oplog_core_on_topology_mismatch, warn).
@@ -717,7 +717,7 @@ do_open_core(Specs) ->
         {ok, _Decision, Effective} ->
             do_open_core(Specs, Dir, Effective);
         {error, topology_mismatch} ->
-            %% Operator chose fail-fast (oplog.core.on_topology_mismatch = stop):
+            %% Operator chose fail-fast (db.core.on_topology_mismatch = stop):
             %% refuse to boot rather than mis-serve. reconcile/3 already logged
             %% the diverging keys; crashing init halts the node.
             error({bondy_db_topology_mismatch, Dir});

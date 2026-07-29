@@ -126,7 +126,7 @@ of this section takes them one at a time.
 Each database is a fixed set of **shards**, and every shard owns its own full
 storage stack (write-ahead log, MST, projection). `core` runs on the
 **shared-shards** topology over Leveled with a deployment-configurable shard
-count (`oplog.core.shard_count`, default 16); `registry` runs on the **memory**
+count (`db.core.shard_count`, default 16); `registry` runs on the **memory**
 topology (ETS, in-memory WAL, the fused single-process writer) with its own
 shard count.
 
@@ -249,7 +249,7 @@ each table's `shard_by` and `aggregate_root` — decides where every cell lives 
 disk. Change it after data exists and reads silently miss. The manifest defends
 against this: the first durable open **freezes** the configuration, and every
 later boot reconciles the running config against it, reporting a mismatch per
-the `oplog.core.on_topology_mismatch` policy (`warn` by default, `stop` to
+the `db.core.on_topology_mismatch` policy (`warn` by default, `stop` to
 refuse the boot). The frozen configuration also yields a **topology
 fingerprint** two peers exchange during anti-entropy, so a node that keys its
 data differently is never mistaken for a divergent replica of the same data.

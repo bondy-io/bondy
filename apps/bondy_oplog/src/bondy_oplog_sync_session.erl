@@ -901,7 +901,7 @@ Freshen this instance's AE targets for a node whose peer list is empty
 this round (no peer reachable). Certification follows
 `should_certify_freshness/1`: a genuine single-node deployment
 (`is_solo/0`) always certifies, since it has no peer to lag. Otherwise the
-`oplog.aae.fence.on_isolation` policy decides — `proceed` always bumps
+`db.aae.fence.on_isolation` policy decides — `proceed` always bumps
 (treat isolation as vacuously fresh), `refuse` never bumps (fail closed —
 the fence will refuse), `quorum` bumps only while connected to a majority.
 Called by the sync scheduler at its no-peer seam.
@@ -934,7 +934,7 @@ do_bump_ae_targets(Instance, Meta) ->
     end.
 
 %% @private
-%% The configured no-peer fence policy (`oplog.aae.fence.on_isolation`).
+%% The configured no-peer fence policy (`db.aae.fence.on_isolation`).
 isolation_policy() ->
     bondy_oplog_config:aae_fence_on_isolation().
 

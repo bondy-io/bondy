@@ -1483,7 +1483,7 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
 
             %% We synchronously delete the realm.
             %% This will be replicated and each node will handle the update
-            %% (via an AAE exchange, once oplog.aae lands) and close the realm.
+            %% (via an AAE exchange, once db.aae lands) and close the realm.
             ok = bondy_db:apply(table(), ?REALM_BAND, Uri, clear),
 
             %% We notify

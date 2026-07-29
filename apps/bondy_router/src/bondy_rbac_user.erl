@@ -1461,7 +1461,7 @@ do_get(RealmUri, Key) ->
 %% inline from the write / delete chokepoints (`store/3`, `remove/3`,
 %% `remove_all/2`). The REMOTE `on_merge` side-effect — closing local sessions
 %% when a peer's AAE merge shows a delete or credential change — is deferred to
-%% the `oplog.aae` phase, where it becomes a `bondy_db` publish/reactor seam.
+%% the `db.aae` phase, where it becomes a `bondy_db` publish/reactor seam.
 
 %% @private
 -spec do_on_update(uri(), username_int(), IsCreate :: boolean()) -> ok.

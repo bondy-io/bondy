@@ -1,30 +1,12 @@
 %% =============================================================================
-%%  bondy.schema - Bondy configuration schema for Cuttlefish
-%%
-%%  Copyright (c) 2016-2024 Leapsight. All rights reserved.
-%%
-%%  Licensed under the Apache License, Version 2.0 (the "License");
-%%  you may not use this file except in compliance with the License.
-%%  You may obtain a copy of the License at
-%%
-%%     http://www.apache.org/licenses/LICENSE-2.0
-%%
-%%  Unless required by applicable law or agreed to in writing, software
-%%  distributed under the License is distributed on an "AS IS" BASIS,
-%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-%%  See the License for the specific language governing permissions and
-%%  limitations under the License.
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
-
-
-
 
 
 %% =============================================================================
 %% GENERAL
 %% =============================================================================
-
-
 
 
 
@@ -40,10 +22,10 @@
 %% the scheduler has no peers and stays inert. A single-node deployment is
 %% unaffected either way — it has no peer to sync with, and the authentication
 %% freshness fence treats a lone node as vacuously fresh (see
-%% `oplog.aae.fence.on_isolation`).
+%% `db.aae.fence.on_isolation`).
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.aae", "bondy_oplog.aae_enabled", [
+{mapping, "db.aae", "bondy_oplog.aae_enabled", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
@@ -51,10 +33,10 @@
 %% -----------------------------------------------------------------------------
 %% @doc The interval between bondy_db sync scheduler ticks. Each tick the
 %% scheduler asks the peer source for peers and dispatches sync sessions. Only
-%% relevant when `oplog.aae` is on.
+%% relevant when `db.aae` is on.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.aae.interval", "bondy_oplog.sync_interval_ms", [
+{mapping, "db.aae.interval", "bondy_oplog.sync_interval_ms", [
   {datatype, {duration, ms}},
   {default, "500ms"}
 ]}.
@@ -65,15 +47,15 @@
 %% pull, yet a naive scheduler still dispatches a session against every peer
 %% every tick — the dominant steady-state cost of running AAE across many shards.
 %% When on (default), each shard syncs at the tick interval while its data is
-%% actively changing and backs off geometrically up to `oplog.aae.live_sync.max`
+%% actively changing and backs off geometrically up to `db.aae.live_sync.max`
 %% once it goes quiescent, resetting to the fast cadence the moment its data
 %% moves again. Shards that back the authentication freshness fence are exempt
 %% and always sync every tick, so this never affects auth availability. When
 %% off, every live shard syncs every peer every tick (the historical
-%% behaviour). Only relevant when `oplog.aae` is on.
+%% behaviour). Only relevant when `db.aae` is on.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.aae.live_sync", "bondy_oplog.live_sync_adaptive", [
+{mapping, "db.aae.live_sync", "bondy_oplog.live_sync_adaptive", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
@@ -86,10 +68,10 @@
 %% convergence SLA you need. The first poll that pulls anything resets the shard
 %% to the fast cadence, so recovery is quick once it starts. Shards backing the
 %% auth fence ignore this cap (they always sync every tick). Only relevant when
-%% `oplog.aae` and `oplog.aae.live_sync` are on.
+%% `db.aae` and `db.aae.live_sync` are on.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.aae.live_sync.max", "bondy_oplog.live_sync_max_ms", [
+{mapping, "db.aae.live_sync.max", "bondy_oplog.live_sync_max_ms", [
   {datatype, {duration, ms}},
   {default, "5s"}
 ]}.
@@ -98,15 +80,15 @@
 %% @doc Maximum number of AAE sync sessions allowed to run concurrently on this
 %% node. AAE is background work subordinate to routing — this cap keeps it from
 %% saturating the node. It governs SPEED and FAIRNESS, never the memory ceiling:
-%% the per-round page batch is `oplog.aae.max_pages_in_flight` divided by this
+%% the per-round page batch is `db.aae.max_pages_in_flight` divided by this
 %% value, so raising concurrency shrinks each session's batch and the node-wide
 %% page budget stays fixed. More concurrency means more peers/shards make
 %% progress at once (no shard starves behind a single serial sync), each running
 %% slower — NOT more RAM. `1` serialises AAE; `3` is a sane fairness default.
-%% Only relevant when `oplog.aae` is on.
+%% Only relevant when `db.aae` is on.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.aae.max_concurrency", "bondy_oplog.aae_max_concurrency", [
+{mapping, "db.aae.max_concurrency", "bondy_oplog.aae_max_concurrency", [
   {datatype, integer},
   {default, 3}
 ]}.
@@ -115,13 +97,13 @@
 %% @doc Node-wide budget, in MST pages, for AAE reconciliation in flight at any
 %% instant. This is the lever that bounds AAE's peak memory: a sync session
 %% pulls missing pages in bounded rounds of
-%% `this / oplog.aae.max_concurrency` pages, so total in-flight pages stay
+%% `this / db.aae.max_concurrency` pages, so total in-flight pages stay
 %% ≈ this budget regardless of dataset size or concurrency. Larger = faster
 %% sync, higher peak; smaller = gentler on RAM, slower. Only relevant when
-%% `oplog.aae` is on.
+%% `db.aae` is on.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.aae.max_pages_in_flight", "bondy_oplog.aae_max_pages_in_flight", [
+{mapping, "db.aae.max_pages_in_flight", "bondy_oplog.aae_max_pages_in_flight", [
   {datatype, integer},
   {default, 2048}
 ]}.
@@ -132,18 +114,18 @@
 %% even within the cap, a routing load spike transiently defers AAE so background
 %% reconciliation never steals scheduler time from the node's real job. When on,
 %% the scheduler samples a node-load signal each tick and, while the node is
-%% backlogged past `oplog.aae.load_run_queue_threshold`, skips the throttleable
+%% backlogged past `db.aae.load_run_queue_threshold`, skips the throttleable
 %% dispatches (bootstrap snapshot ships and non-fence live syncs) for that tick;
 %% in-flight sessions are never aborted and the deferred shards retry on the next
 %% quiet tick. Shards backing the authentication freshness fence are exempt and
 %% always sync, so this never affects auth availability. It cannot affect
 %% correctness, only convergence latency under load. Off by default — the cap and
 %% live throttle already keep AAE subordinate; enable it where routing latency is
-%% sensitive to AAE scheduler pressure under load. Only relevant when `oplog.aae`
+%% sensitive to AAE scheduler pressure under load. Only relevant when `db.aae`
 %% is on.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.aae.load_adaptive", "bondy_oplog.aae_load_adaptive", [
+{mapping, "db.aae.load_adaptive", "bondy_oplog.aae_load_adaptive", [
   {datatype, {flag, on, off}},
   {default, off}
 ]}.
@@ -151,16 +133,16 @@
 %% -----------------------------------------------------------------------------
 %% @doc Run-queue length per online scheduler — EWMA-smoothed across ticks — at
 %% or above which AAE yields its throttleable dispatches (see
-%% `oplog.aae.load_adaptive`). The signal is `erlang:statistics(run_queue)`
+%% `db.aae.load_adaptive`). The signal is `erlang:statistics(run_queue)`
 %% divided by the online scheduler count: the average number of ready processes
 %% queued per scheduler. A healthy node hovers near 0–1; a sustained 2+ means
 %% work is queuing faster than the schedulers drain it. Lower yields AAE sooner
 %% (more protective of routing latency, slower convergence under load); higher
-%% lets AAE work closer to saturation. Only consulted when both `oplog.aae` and
-%% `oplog.aae.load_adaptive` are on.
+%% lets AAE work closer to saturation. Only consulted when both `db.aae` and
+%% `db.aae.load_adaptive` are on.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.aae.load_run_queue_threshold",
+{mapping, "db.aae.load_run_queue_threshold",
  "bondy_oplog.aae_load_run_queue_threshold", [
   {datatype, float},
   {default, 2.0}
@@ -168,26 +150,26 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc The number of peers the bondy_db sync scheduler samples from the
-%% Partisan cluster membership each tick. Only relevant when `oplog.aae` is on.
+%% Partisan cluster membership each tick. Only relevant when `db.aae` is on.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.aae.fanout", "bondy_oplog.aae_fanout", [
+{mapping, "db.aae.fanout", "bondy_oplog.aae_fanout", [
   {datatype, integer},
   {default, 3}
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc The freshness bound for the authentication AE fence
-%% (STORAGE_ARCHITECTURE §9.2). A node refuses new authentication when its view
+%% @doc The freshness bound for the authentication AE fence.
+%% A node refuses new authentication when its view
 %% of the security tables (users / grants) has not been confirmed by a local
 %% commit or a successful AE round within this window — bounding how stale a
 %% credential/permission change a node may authenticate against. Lower = tighter
 %% security (a lagging node refuses sooner); higher = more availability under
-%% partition/lag. Only relevant when `oplog.aae` is on (the fence is otherwise a
+%% partition/lag. Only relevant when `db.aae` is on (the fence is otherwise a
 %% no-op — local writes are synchronous).
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.aae.fence.max_lag", "bondy_router.auth_max_lag", [
+{mapping, "db.aae.fence.max_lag", "bondy_router.auth_max_lag", [
   {datatype, {duration, ms}},
   {default, "1s"}
 ]}.
@@ -196,13 +178,18 @@
 %% @doc What the authentication AE fence does on a node in a multi-node cluster
 %% that currently cannot confirm freshness with any peer — partitioned into a
 %% minority, or cold-started before its first AE round completes. Such a node
-%% still lists its peers in its Partisan membership, so it knows it may be lagging
-%% a security change made elsewhere. A genuine single-node deployment (membership
-%% is just this node) is NOT governed by this policy: with no peer to lag, its
-%% view is vacuously fresh and it always authenticates — so flipping `oplog.aae`
-%% on does not lock out a lone node. Only relevant when `oplog.aae` is on.
-%%   refuse  - fail closed: refuse all new authentication until a peer round
-%%             confirms freshness. The secure default — a node that cannot confirm
+%% still lists its peers in its Partisan membership, so it knows it may be
+%% lagging a security change made elsewhere. A genuine single-node deployment
+%% (membership is just this node) is NOT governed by this policy: with no peer
+%% to lag, its view is vacuously fresh and it always authenticates — so flipping
+%% `db.aae` on does not lock out a lone node.
+%%
+%% Only relevant when `db.aae` is on.
+%%
+%% Options:
+%%  refuse  - fail closed: refuse all new authentication until a peer round
+%%             confirms freshness. The secure default — a node that cannot
+%%             confirm
 %%             freshness with any peer must not authenticate against a possibly-
 %%             stale security view. A node restarting into an established cluster
 %%             refuses only until its first sync round (typically sub-second).
@@ -216,7 +203,7 @@
 %%             for the majority side. Requires a Partisan cluster.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.aae.fence.on_isolation", "bondy_oplog.aae_fence_on_isolation", [
+{mapping, "db.aae.fence.on_isolation", "bondy_oplog.aae_fence_on_isolation", [
   {datatype, {enum, [refuse, proceed, quorum]}},
   {default, refuse}
 ]}.
@@ -230,7 +217,7 @@
 %% anti-entropy otherwise reports as converged. `0` disables the detector.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.drain.stall_alarm", "bondy_oplog.drain_stall_alarm_ms", [
+{mapping, "db.drain.stall_alarm", "bondy_oplog.drain_stall_alarm_ms", [
   {datatype, {duration, ms}},
   {default, "1m"}
 ]}.
@@ -240,7 +227,7 @@
 %% whenever the catalogue provisions the core DB.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.core.shard_count", "bondy_router.oplog_core_shard_count", [
+{mapping, "db.core.shard_count", "bondy_router.oplog_core_shard_count", [
   {datatype, integer},
   {default, 16}
 ]}.
@@ -248,14 +235,14 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc Partition strategy for the bondy_db `core` durable database: how a
-%% (realm, key) write maps to one of `oplog.core.shard_count` shards. Sets BOTH
+%% (realm, key) write maps to one of `db.core.shard_count` shards. Sets BOTH
 %% the write-atomicity grain (entities sharing a shard are written in one atomic
 %% batch / one causal log) and which reads are shard-local vs scatter-gather.
 %%   aggregate - shard = hash(realm, aggregate_root). A subject's record, grants
 %%               and memberships co-locate (atomic per-subject writes); subjects
 %%               spread across all shards, so a single realm still uses every
 %%               core. Realm-wide listings scatter-gather. (Recommended.)
-%%   realm     - shard = hash(realm-prefix, oplog.core.realm_prefix_depth). A
+%%   realm     - shard = hash(realm-prefix, db.core.realm_prefix_depth). A
 %%               realm's whole dataset is one shard (single-shard realm scans),
 %%               but a single realm collapses to one shard. Many-small-realm
 %%               fleets only.
@@ -263,23 +250,23 @@
 %%               cross-entity atomicity (the pre-bondy_db behaviour).
 %% TOPOLOGY-DEFINING: frozen in the on-disk topology manifest at first provision.
 %% Changing it on a populated node requires a re-key (export -> wipe data dir ->
-%% reimport); see `oplog.core.on_topology_mismatch`.
+%% reimport); see `db.core.on_topology_mismatch`.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.core.partition_strategy",
+{mapping, "db.core.partition_strategy",
  "bondy_router.oplog_core_partition_strategy", [
   {datatype, {enum, [aggregate, realm, entity]}},
   {default, aggregate}
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc Only used when `oplog.core.partition_strategy = realm`: the number of
+%% @doc Only used when `db.core.partition_strategy = realm`: the number of
 %% leading dot-separated realm-URI components that share a shard (the Spanner
 %% "directory" co-location pattern). 1 = per-realm; 2 co-locates `org.acme.sso`
 %% with `org.acme.app`. TOPOLOGY-DEFINING (frozen in the manifest).
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.core.realm_prefix_depth",
+{mapping, "db.core.realm_prefix_depth",
  "bondy_router.oplog_core_realm_prefix_depth", [
   {datatype, integer},
   {default, 1}
@@ -289,10 +276,10 @@
 %% @doc Maximum number of shards a single cross-shard (scatter-gather) scan
 %% folds concurrently, bounding the parallel-snapshot fan-out of realm-wide
 %% listings under the `aggregate` / `entity` strategies. 0 = no cap (fan out to
-%% all `oplog.core.shard_count` shards). Runtime-tunable (not in the manifest).
+%% all `db.core.shard_count` shards). Runtime-tunable (not in the manifest).
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.core.scan_max_concurrency",
+{mapping, "db.core.scan_max_concurrency",
  "bondy_router.oplog_core_scan_max_concurrency", [
   {datatype, integer},
   {default, 0}
@@ -309,7 +296,7 @@
 %% Runtime-tunable (not in the manifest).
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.core.on_topology_mismatch",
+{mapping, "db.core.on_topology_mismatch",
  "bondy_router.oplog_core_on_topology_mismatch", [
   {datatype, {enum, [warn, stop]}},
   {default, warn}
@@ -322,7 +309,7 @@
 %% is a freeze of local writes' visibility (read-after-write freshness lag),
 %% NOT of the write calls. The cost scales linearly with this threshold: the
 %% pack store's native 16MB default produces ~600ms+ freezes, large enough to
-%% push freshness lag toward `oplog.aae.fence.max_lag` (1s) and trigger spurious
+%% push freshness lag toward `db.aae.fence.max_lag` (1s) and trigger spurious
 %% auth refusals. 2MB keeps each freeze to ~tens of ms at no throughput or
 %% hot-read cost (reads serve from the projection + cache, never the MST). A
 %% smaller value seals more often into more sealed packs, adding only
@@ -330,7 +317,7 @@
 %% Runtime-tunable (not in the manifest).
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.core.pack_auto_seal_bytes",
+{mapping, "db.core.pack_auto_seal_bytes",
  "bondy_oplog.pack_auto_seal_bytes", [
   {datatype, bytesize},
   {default, "2MB"}
@@ -344,7 +331,7 @@
 %% the apply pipeline — so the seal is no longer a freeze of local writes'
 %% visibility (read-after-write freshness lag). Measured ~44% lower install
 %% p99 with the inline seal freezes (84-188ms locally, up to ~750ms under disk
-%% contention, close to `oplog.aae.fence.max_lag`) removed entirely. It does
+%% contention, close to `db.aae.fence.max_lag`) removed entirely. It does
 %% NOT change durable write throughput — the per-writer ceiling is bounded by
 %% disk fsync bandwidth, independent of where the seal runs. `sync` restores
 %% the historical inline seal (the store seals on `put` at the threshold).
@@ -352,7 +339,7 @@
 %% Runtime-tunable (not in the manifest).
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.core.pack_seal_mode",
+{mapping, "db.core.pack_seal_mode",
  "bondy_oplog.pack_seal_mode", [
   {datatype, {enum, [async, sync]}},
   {default, async}
@@ -361,14 +348,14 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc Interval at which each oplog instance checks its own heap and
-%% fullsweep-hibernates if it has grown past `oplog.core.gc_heap_delta` over its
+%% fullsweep-hibernates if it has grown past `db.core.gc_heap_delta` over its
 %% post-GC baseline. This reclaims the transient apply/AAE garbage a long-lived
 %% instance retains until the next major GC — most visibly during a solo import
 %% (no peers), where the AAE-driven hibernate never fires and the heap would
 %% otherwise climb unbounded. `0` disables the monitor. Runtime-tunable.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.core.gc_interval",
+{mapping, "db.core.gc_interval",
  "bondy_oplog.instance_gc_interval_ms", [
   {datatype, {duration, ms}},
   {default, "2s"}
@@ -377,7 +364,7 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc Heap-growth threshold above an instance's post-GC baseline at which the
-%% periodic monitor (`oplog.core.gc_interval`) fullsweep-hibernates it. Keying on
+%% periodic monitor (`db.core.gc_interval`) fullsweep-hibernates it. Keying on
 %% growth over the live baseline — not absolute heap size — keeps an instance
 %% with a large live MST from being GC-thrashed: it fires once per ~this-many
 %% bytes of accumulated garbage, capping the transient per-instance peak at
@@ -385,7 +372,7 @@
 %% memory ceiling. Runtime-tunable.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "oplog.core.gc_heap_delta",
+{mapping, "db.core.gc_heap_delta",
  "bondy_oplog.instance_gc_heap_delta_bytes", [
   {datatype, bytesize},
   {default, "16MB"}
@@ -4163,7 +4150,7 @@ end}.
   {datatype, {duration, ms}}
 ]}.
 
-%% Cowboy HTTP connection idle timeout for `/wamp/longpoll/*` endpoints. It
+%% Cowboy HTTP connection idle timeout for `/wamp/longpoll/\*` endpoints. It
 %% MUST be strictly greater than `wamp.longpoll.poll_timeout` so the server has
 %% time to reply before the connection is torn down for inactivity.
 {mapping, "wamp.longpoll.idle_timeout",

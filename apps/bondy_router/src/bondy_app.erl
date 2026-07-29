@@ -399,7 +399,7 @@ setup_wamp_subscriptions() ->
 
 %% @private
 %% Wires the bondy_oplog sync scheduler to the Partisan cluster when oplog
-%% anti-entropy is enabled (`oplog.aae`, off by default). Sets the env the
+%% anti-entropy is enabled (`db.aae`, off by default). Sets the env the
 %% scheduler reads at init: peers from live Partisan membership
 %% (`bondy_oplog_peer_source_partisan`) and sessions over the Partisan
 %% transport on the dedicated AE channel. A no-op when disabled — the

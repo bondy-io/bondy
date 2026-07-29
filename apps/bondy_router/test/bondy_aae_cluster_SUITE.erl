@@ -12,7 +12,7 @@
 
 -compile([nowarn_export_all, export_all]).
 
-%% A 3-node Partisan cluster with bondy_db anti-entropy (`oplog.aae') enabled.
+%% A 3-node Partisan cluster with bondy_db anti-entropy (`db.aae') enabled.
 %% Each node runs the full bondy_router stack with all client listeners
 %% disabled and an isolated data dir / Partisan port (see
 %% `bondy_ct:start_cluster/2'). These tests write through `bondy_db' on one

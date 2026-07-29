@@ -751,7 +751,7 @@ stop_bondy() ->
 %% @doc Starts `length(Names)' full `bondy_router' nodes as `peer' nodes on
 %% 127.0.0.1, each with an isolated data directory and a unique Partisan listen
 %% port, all client listeners disabled, and bondy_db anti-entropy
-%% (`oplog.aae') enabled; then joins them into a single Partisan cluster and
+%% (`db.aae') enabled; then joins them into a single Partisan cluster and
 %% waits for the membership to converge.
 %%
 %% `Names' is a list of short node-name atoms (e.g. `[bondy1, bondy2, bondy3]').
@@ -1138,7 +1138,7 @@ wait_for_members_loop(Nodes, Expected, Deadline) ->
 %% =============================================================================
 %% AAE FRESHNESS-FENCE TEST HELPERS
 %% =============================================================================
-%% Shared by the auth suites that exercise the `oplog.aae` freshness fence
+%% Shared by the auth suites that exercise the `db.aae` freshness fence
 %% (`bondy_auth_oauth2_SUITE`, `bondy_auth_password_SUITE`). They drive the
 %% per-shard AE freshness atomics and the no-peer certification seam directly,
 %% so a single-node suite can assert fence behaviour without a real cluster and
@@ -1164,7 +1164,7 @@ aae_reset_all_stale() ->
 -doc """
 Drive the scheduler's no-peer freshness path for every running instance — the
 exact function the sync scheduler invokes at its no-peer seam. Whether it
-certifies freshness depends on `oplog.aae.fence.on_isolation` and whether the
+certifies freshness depends on `db.aae.fence.on_isolation` and whether the
 node looks solo (see `aae_mock_nonsolo_membership/0`).
 """.
 -spec aae_bump_isolated_all() -> ok.

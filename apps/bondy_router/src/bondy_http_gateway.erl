@@ -52,7 +52,7 @@ peer via bondy_db's anti-entropy — to the table namespace. The server
 rebuilds this node's dispatch tables. Rebuilds are **debounced**
 (`?REBUILD_DEBOUNCE` ms) so a burst (boot config load, an AE sync) collapses
 into a single rebuild. Cross-node propagation requires bondy_db anti-entropy
-to be enabled (`oplog.aae`).
+to be enabled (`db.aae`).
 
 ## WAMP subscriptions
 

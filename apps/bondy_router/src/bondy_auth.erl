@@ -21,7 +21,7 @@ system and the user's password capabilities.
 -include("bondy_db_tables.hrl").
 
 %% Default AE-freshness bound for the §9.8 auth fence; overridable via the
-%% `bondy_router` `auth_max_lag` app env (cuttlefish `oplog.aae.fence.max_lag`).
+%% `bondy_router` `auth_max_lag` app env (cuttlefish `db.aae.fence.max_lag`).
 -define(AUTH_MAX_LAG, 1000).
 
 -type context() :: #{
@@ -493,10 +493,10 @@ authenticate(Method, Signature, DataIn, Ctxt) ->
 %% authenticate against a security view that may predate a credential or
 %% permission change made elsewhere.
 %%
-%% A no-op unless the AAE phase is enabled (`oplog.aae`): with AAE off, local
+%% A no-op unless the AAE phase is enabled (`db.aae`): with AAE off, local
 %% writes are synchronous and there is no cross-node staleness window. The
 %% per-shard freshness signal is produced AE-side (`bondy_oplog_sync_session`),
-%% honouring the `oplog.aae.fence.on_isolation` policy; this fence only reads it.
+%% honouring the `db.aae.fence.on_isolation` policy; this fence only reads it.
 -spec security_fence() -> ok | {error, temporarily_unavailable}.
 
 security_fence() ->

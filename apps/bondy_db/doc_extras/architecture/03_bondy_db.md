@@ -543,7 +543,7 @@ every cell lives. Change it after data exists and reads silently miss.
 `bondy_db_manifest` defends against that: the first time a durable DB
 opens it **freezes** that configuration to an on-disk manifest, and every
 subsequent boot reconciles the running config against it. A mismatch is
-reported per the `oplog.core.on_topology_mismatch` policy (`warn` by
+reported per the `db.core.on_topology_mismatch` policy (`warn` by
 default, `stop` to refuse the boot). Ephemeral DBs (the registry — wiped
 on restart) keep no manifest. The `core` DB's partition strategy
 (`partition_strategy`, default `aggregate`) is part of the frozen set:
