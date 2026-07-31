@@ -51,7 +51,8 @@ is fail-fast by default (configurable via `reconnect.retry_initial_connect`).
   whose result becomes a `YIELD` or `ERROR`; `INTERRUPT` kills the worker;
   when the caller requested progressive results the handler receives a
   `progress` fun in its details whose calls become progressive `YIELD`s.
-- **publisher** — `publish/5` (fire-and-forget, or acknowledged `PUBLISHED`).
+- **publisher** — `publish/5` (fire-and-forget) or `publish_ack/5`
+  (waits for the router's `PUBLISHED`).
 - **subscriber** — `subscribe/4`/`unsubscribe/2`; inbound `EVENT` is dispatched
   to a worker, **FIFO per subscription** by default (opt-in `unordered`).
 
@@ -120,6 +121,7 @@ authenticating and cleared on `established`. Progressive calls
 -export([subscribe/4]).
 -export([unsubscribe/2]).
 -export([publish/5]).
+-export([publish_ack/5]).
 -export([status/1]).
 
 -export([callback_mode/0]).
@@ -154,32 +156,32 @@ Issue a synchronous CALL and wait for the RESULT/ERROR.
 represent a stream of progressive results — use `call_async/5` for that.
 """.
 -spec call(pid(), uri(), list(), map(), map()) ->
-    {ok, map()} | {error, term()}.
+    {ok, bondy_connect:call_result()} | {error, bondy_connect:call_error()}.
 call(_, _, _, _, #{receive_progress := true}) ->
-    {error, {invalid_option, receive_progress}};
+    tag_error({error, {invalid_option, receive_progress}});
 call(Pid, Uri, Args, KWArgs, Opts) ->
     Timeout = maps:get(timeout, Opts, ?DEFAULT_CALL_TIMEOUT),
-    call_safe(
+    tag_error(call_safe(
         Pid, {call, Uri, Args, KWArgs, Opts}, Timeout + ?CALL_TIMEOUT_SLACK
-    ).
+    )).
 
 -doc """
 Issue an asynchronous CALL. Returns `{ok, Token}`; the RESULT/ERROR is later
 delivered to the calling process as `{bondy_connect, Token, Reply}` where
-`Reply` is `{ok, map()}` or `{error, term()}`.
+`Reply` is `{ok, bondy_connect:call_result()}` or
+`{error, bondy_connect:call_error()}`.
 
 With `receive_progress => true` any progressive results arrive first, each
-as `{bondy_connect, Token, {progress, map()}}`; the `{ok, map()}` (or
-`{error, term()}`) delivery remains the single terminal message. The
-per-call timeout bounds the whole call — progressive results do not extend
-it.
+as `{bondy_connect, Token, {progress, map()}}`; the terminal delivery
+remains the single `{ok, _}`/`{error, _}` message. The per-call timeout
+bounds the whole call — progressive results do not extend it.
 """.
 -spec call_async(pid(), uri(), list(), map(), map()) ->
-    {ok, reference()} | {error, term()}.
+    {ok, reference()} | {error, bondy_connect:call_error()}.
 call_async(Pid, Uri, Args, KWArgs, Opts) ->
-    call_safe(
+    tag_error(call_safe(
         Pid, {call_async, Uri, Args, KWArgs, Opts}, ?DEFAULT_ADMIN_TIMEOUT
-    ).
+    )).
 
 -doc """
 Begin a progressive call (caller argument streaming): send the first CALL with
@@ -187,11 +189,11 @@ Begin a progressive call (caller argument streaming): send the first CALL with
 one request id via `send_input/4` / `finish_input/4`.
 """.
 -spec call_stream(pid(), uri(), list(), map(), map()) ->
-    {ok, reference()} | {error, term()}.
+    {ok, reference()} | {error, bondy_connect:call_error()}.
 call_stream(Pid, Uri, Args, KWArgs, Opts) ->
-    call_safe(
+    tag_error(call_safe(
         Pid, {call_stream, Uri, Args, KWArgs, Opts}, ?DEFAULT_ADMIN_TIMEOUT
-    ).
+    )).
 
 -doc "Send a non-final argument chunk of a progressive call.".
 -spec send_input(pid(), reference(), list(), map()) -> ok | {error, term()}.
@@ -207,7 +209,7 @@ finish_input(Pid, Token, Args, KWArgs) ->
 Cancel an in-flight asynchronous call identified by its `Token` (returned by
 `call_async/5`). `Mode` is `skip` | `kill` | `killnowait` (WAMP call-cancelling
 modes). The original async caller still receives the terminating
-`{error, #{uri := <<"wamp.error.canceled">>}}` reply.
+`{error, #{kind := wamp, uri := <<"wamp.error.canceled">>, ...}}` reply.
 """.
 -spec cancel(pid(), reference(), skip | kill | killnowait) ->
     ok | {error, term()}.
@@ -216,30 +218,39 @@ cancel(Pid, Token, Mode) ->
 
 -doc "Register a procedure with a handler. Returns `{ok, RegistrationId}`.".
 -spec register(pid(), uri(), bondy_connect_handler_spec:handler(), map()) ->
-    {ok, pos_integer()} | {error, term()}.
+    {ok, pos_integer()} | {error, bondy_connect:call_error()}.
 register(Pid, Uri, Handler, Opts) ->
-    call_safe(Pid, {register, Uri, Handler, Opts}, ?DEFAULT_ADMIN_TIMEOUT).
+    tag_error(call_safe(
+        Pid, {register, Uri, Handler, Opts}, ?DEFAULT_ADMIN_TIMEOUT
+    )).
 
 -doc "Unregister a procedure by its registration id or URI.".
--spec unregister(pid(), pos_integer() | uri()) -> ok | {error, term()}.
+-spec unregister(pid(), pos_integer() | uri()) ->
+    ok | {error, bondy_connect:call_error()}.
 unregister(Pid, RegRef) ->
-    call_safe(Pid, {unregister, RegRef}, ?DEFAULT_ADMIN_TIMEOUT).
+    tag_error(call_safe(Pid, {unregister, RegRef}, ?DEFAULT_ADMIN_TIMEOUT)).
 
 -doc "Subscribe to a topic with a handler. Returns `{ok, SubscriptionId}`.".
 -spec subscribe(pid(), uri(), bondy_connect_handler_spec:handler(), map()) ->
-    {ok, pos_integer()} | {error, term()}.
+    {ok, pos_integer()} | {error, bondy_connect:call_error()}.
 subscribe(Pid, Topic, Handler, Opts) ->
-    call_safe(Pid, {subscribe, Topic, Handler, Opts}, ?DEFAULT_ADMIN_TIMEOUT).
+    tag_error(call_safe(
+        Pid, {subscribe, Topic, Handler, Opts}, ?DEFAULT_ADMIN_TIMEOUT
+    )).
 
 -doc "Unsubscribe from a topic by its subscription id or URI.".
--spec unsubscribe(pid(), pos_integer() | uri()) -> ok | {error, term()}.
+-spec unsubscribe(pid(), pos_integer() | uri()) ->
+    ok | {error, bondy_connect:call_error()}.
 unsubscribe(Pid, SubRef) ->
-    call_safe(Pid, {unsubscribe, SubRef}, ?DEFAULT_ADMIN_TIMEOUT).
+    tag_error(call_safe(Pid, {unsubscribe, SubRef}, ?DEFAULT_ADMIN_TIMEOUT)).
 
 -doc """
 Publish to a topic. With `Opts` `#{acknowledge => true}` it waits for the
 router's `PUBLISHED` and returns `{ok, PublicationId}`; otherwise it returns
-`ok` once the message is on the wire.
+`ok` once the message is on the wire. Shared low-level implementation for
+both `bondy_connect:publish/*` (acknowledge disallowed) and `publish_ack/5`
+(acknowledge forced) — the branch on `Opts.acknowledge` is unaffected by
+either caller.
 """.
 -spec publish(pid(), uri(), list(), map(), map()) ->
     ok | {ok, pos_integer()} | {error, term()}.
@@ -247,6 +258,15 @@ publish(Pid, Topic, Args, KWArgs, Opts) ->
     call_safe(
         Pid, {publish, Topic, Args, KWArgs, Opts}, ?DEFAULT_ADMIN_TIMEOUT
     ).
+
+-doc """
+Acknowledged publish — same wire behaviour as `publish/5` with
+`Opts#{acknowledge => true}`, discriminated error.
+""".
+-spec publish_ack(pid(), uri(), list(), map(), map()) ->
+    {ok, pos_integer()} | {error, bondy_connect:call_error()}.
+publish_ack(Pid, Topic, Args, KWArgs, Opts) ->
+    tag_error(publish(Pid, Topic, Args, KWArgs, Opts#{acknowledge => true})).
 
 -doc "The public status of the connection.".
 -spec status(pid()) ->
@@ -267,6 +287,16 @@ call_safe(Pid, Request, Timeout) ->
         exit:{noproc, _} -> {error, not_connected};
         exit:{Reason, _} -> {error, Reason}
     end.
+
+%% @private A map error is already `kind`-tagged by error_payload/1 (a router
+%% ERROR); a bare term is a client-side failure (call_safe/3's catch, a local
+%% precondition check, or a send_msg failure) that needs one. Applied at the
+%% ops where both classes are reachable — call/call_async/call_stream,
+%% register/unregister/subscribe/unsubscribe, publish_ack.
+tag_error({error, Reason}) when not is_map(Reason) ->
+    {error, #{kind => client, reason => Reason}};
+tag_error(Result) ->
+    Result.
 
 %% =============================================================================
 %% GEN_STATEM CALLBACKS
@@ -1156,7 +1186,7 @@ route_input_chunk(ReqId, Details, Args, KWArgs, Data) ->
                 {handler_input, undefined_to(Args, []),
                     undefined_to(KWArgs, #{}), IsFinal},
             ok;
-        error ->
+        {error, not_found} ->
             ok
     end.
 
@@ -1335,11 +1365,17 @@ restart_req_timer(ReqId, #{meta := Meta}) ->
         end,
     erlang:start_timer(After, self(), {req_timeout, ReqId}).
 
-%% @private A per-request timeout fired before its ack/result arrived.
+%% @private A per-request timeout fired before its ack/result arrived. Bypasses
+%% resolve_pending/3 (there is no router ERROR to interpret), so the reply is
+%% tagged here rather than relying on error_payload/1 — this is the only
+%% client-side error that reaches an async owner directly (call_async/5's own
+%% immediate `{ok, Token}`/`{error, _}` is tagged at its own boundary; this is
+%% the *delivered* terminal message for an async entry, or the sync reply for
+%% a sync one).
 handle_req_timeout(ReqId, TRef, #data{pending = Pending} = Data) ->
     case maps:find(ReqId, Pending) of
         {ok, #{timer := TRef, from := From} = Entry} ->
-            _ = dispatch_reply(From, {error, timeout}),
+            _ = dispatch_reply(From, tag_error({error, timeout})),
             Data#data{
                 pending = maps:remove(ReqId, Pending),
                 async_index = unindex_async(Entry, Data#data.async_index)
@@ -1370,12 +1406,18 @@ dispatch_reply({async, Pid, Token}, Reply) ->
 dispatch_reply(undefined, _Reply) ->
     ok.
 
-%% @private
+%% @private Fail every pending call/call_async/call_stream/register/
+%% subscribe/unregister/unsubscribe/publish_ack entry with `Reply` (a
+%% teardown-time bare client-side reason, e.g. `disconnected`) — tagged here
+%% for the same reason as handle_req_timeout/3: this bypasses
+%% resolve_pending/3, so there is no error_payload/1 to have already tagged
+%% it.
 reply_pending(Reply, #data{pending = Pending} = Data) ->
+    Tagged = tag_error(Reply),
     _ = [
         begin
             _ = cancel_timer(maps:get(timer, E, undefined)),
-            dispatch_reply(maps:get(from, E, undefined), Reply)
+            dispatch_reply(maps:get(from, E, undefined), Tagged)
         end
      || E <- maps:values(Pending)
     ],
@@ -1759,9 +1801,13 @@ result_payload(#result{details = Details, args = Args, kwargs = KWArgs}) ->
         details => undefined_to(Details, #{})
     }.
 
-%% @private
+%% @private A router-sent ERROR, shared by every request kind that awaits one
+%% (CALL, REGISTER, SUBSCRIBE, UNREGISTER, UNSUBSCRIBE, acknowledged PUBLISH)
+%% via resolve_pending/3 (route_app/2). `kind => wamp` discriminates this from
+%% a client-side `{error, Reason}` at the tag_error/1 boundary.
 error_payload(#error{error_uri = Uri, args = Args, kwargs = KWArgs}) ->
     #{
+        kind => wamp,
         uri => Uri,
         args => undefined_to(Args, []),
         kwargs => undefined_to(KWArgs, #{})

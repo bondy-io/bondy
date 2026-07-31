@@ -122,7 +122,7 @@ call_unknown_procedure_errors(_) ->
     {ok, Conn} = bondy_connect:connect(spec()),
     Result = bondy_connect:call(Conn, <<"com.example.no.such.proc.m1">>, []),
     ct:pal("unknown procedure -> ~p", [Result]),
-    ?assertMatch({error, #{uri := _}}, Result),
+    ?assertMatch({error, #{kind := wamp, uri := _}}, Result),
     ok = bondy_connect:disconnect(Conn).
 
 connect_unknown_realm_fails(_) ->

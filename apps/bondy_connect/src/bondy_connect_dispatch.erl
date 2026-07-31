@@ -253,18 +253,18 @@ has_invocation(ReqId, #dispatch{invocations = Inv}) ->
     is_map_key(ReqId, Inv).
 
 -doc """
-The pid of the worker servicing invocation `ReqId`, or `error` if none is in
-flight (never started, or already finished/interrupted). Used to deliver a
-progressive-input argument chunk to the live worker.
+The pid of the worker servicing invocation `ReqId`, or `{error, not_found}`
+if none is in flight (never started, or already finished/interrupted). Used
+to deliver a progressive-input argument chunk to the live worker.
 """.
--spec worker_pid(ReqId :: term(), t()) -> {ok, pid()} | error.
+-spec worker_pid(ReqId :: term(), t()) -> {ok, pid()} | {error, not_found}.
 
 worker_pid(ReqId, #dispatch{invocations = Inv}) ->
     case maps:find(ReqId, Inv) of
         {ok, {Pid, _MonRef}} ->
             {ok, Pid};
         error ->
-            error
+            {error, not_found}
     end.
 
 -doc """

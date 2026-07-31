@@ -36,6 +36,7 @@ all() ->
     [
         invocation_admit_spawn_yield,
         invocation_overloaded,
+        worker_pid_returns_pid_or_not_found,
         invocation_worker_start_fail_releases_load,
         invocation_worker_down_errors_and_releases,
         interrupt_kills_and_releases,
@@ -90,6 +91,30 @@ invocation_overloaded(_) ->
     ?assertEqual(1, bondy_connect_dispatch:in_flight(D2)),
     ?assertEqual(1, load_in_flight(D2)),
     invariant_check(D2).
+
+%% worker_pid/2 resolves the servicing worker's pid for an in-flight
+%% invocation, or {error, not_found} for one never admitted or already
+%% settled.
+worker_pid_returns_pid_or_not_found(_) ->
+    D0 = new(),
+    ?assertEqual(
+        {error, not_found}, bondy_connect_dispatch:worker_pid(10, D0)
+    ),
+
+    {D1, _} = settle(
+        bondy_connect_dispatch:admit_invocation(10, inv_job(10), D0)
+    ),
+    ?assertEqual({ok, self()}, bondy_connect_dispatch:worker_pid(10, D1)),
+    ?assertEqual(
+        {error, not_found}, bondy_connect_dispatch:worker_pid(11, D1)
+    ),
+
+    {D2, _} = settle(
+        bondy_connect_dispatch:handler_done(10, {yield, [], #{}}, D1)
+    ),
+    ?assertEqual(
+        {error, not_found}, bondy_connect_dispatch:worker_pid(10, D2)
+    ).
 
 %% Pitfall 1: admit charges the load token; a failed worker spawn must release it
 %% (and answer the router) or the in-flight cap leaks a slot forever.

@@ -26,6 +26,7 @@ all() ->
     [
         subscribe_and_receive,
         acknowledged_publish,
+        publish_with_acknowledge_rejected,
         ordered_events,
         unordered_events,
         subscriber_crash_preserves_fifo,
@@ -65,10 +66,23 @@ subscribe_and_receive(_) ->
 
 acknowledged_publish(_) ->
     Pub = connect(),
-    Result = bondy_connect:publish(
-        Pub, <<"com.example.ack">>, [<<"x">>], #{}, #{acknowledge => true}
+    Result = bondy_connect:publish_ack(
+        Pub, <<"com.example.ack">>, [<<"x">>], #{}
     ),
     ?assertMatch({ok, PubId} when is_integer(PubId), Result),
+    ok = bondy_connect:disconnect(Pub).
+
+%% `publish/5` rejects an explicit `acknowledge => true` in Opts rather than
+%% silently honouring it -- that ambiguity is exactly what `publish_ack/*`
+%% exists to remove.
+publish_with_acknowledge_rejected(_) ->
+    Pub = connect(),
+    ?assertEqual(
+        {error, badarg},
+        bondy_connect:publish(
+            Pub, <<"com.example.badarg">>, [], #{}, #{acknowledge => true}
+        )
+    ),
     ok = bondy_connect:disconnect(Pub).
 
 ordered_events(_) ->
@@ -85,8 +99,8 @@ ordered_events(_) ->
 
     Pub = connect(),
     _ = [
-        {ok, _} = bondy_connect:publish(
-            Pub, <<"com.example.ordered">>, [N], #{}, #{acknowledge => true}
+        {ok, _} = bondy_connect:publish_ack(
+            Pub, <<"com.example.ordered">>, [N], #{}
         )
      || N <- lists:seq(1, 5)
     ],
@@ -112,8 +126,8 @@ unordered_events(_) ->
     ),
 
     Pub = connect(),
-    {ok, _} = bondy_connect:publish(
-        Pub, <<"com.example.unordered">>, [<<"u">>], #{}, #{acknowledge => true}
+    {ok, _} = bondy_connect:publish_ack(
+        Pub, <<"com.example.unordered">>, [<<"u">>], #{}
     ),
     receive
         {uevent, Args} -> ?assertEqual([<<"u">>], Args)
@@ -146,8 +160,8 @@ subscriber_crash_preserves_fifo(_) ->
 
     Pub = connect(),
     _ = [
-        {ok, _} = bondy_connect:publish(
-            Pub, <<"com.example.crashfifo">>, [N], #{}, #{acknowledge => true}
+        {ok, _} = bondy_connect:publish_ack(
+            Pub, <<"com.example.crashfifo">>, [N], #{}
         )
      || N <- lists:seq(1, 5)
     ],
@@ -185,13 +199,11 @@ unsubscribe_stops_events(_) ->
     ok = bondy_connect:unsubscribe(Sub, SubId),
 
     Pub = connect(),
-    {ok, _} = bondy_connect:publish(
-        Pub, <<"com.example.unsub">>, [<<"x">>], #{}, #{acknowledge => true}
+    {ok, _} = bondy_connect:publish_ack(
+        Pub, <<"com.example.unsub">>, [<<"x">>], #{}
     ),
-    {ok, _} = bondy_connect:publish(
-        Pub, <<"com.example.unsub.ctrl">>, [<<"ok">>], #{}, #{
-            acknowledge => true
-        }
+    {ok, _} = bondy_connect:publish_ack(
+        Pub, <<"com.example.unsub.ctrl">>, [<<"ok">>], #{}
     ),
     receive
         {ctrl, _} -> ok

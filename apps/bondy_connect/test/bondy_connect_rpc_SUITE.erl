@@ -78,7 +78,9 @@ end_per_testcase(_, _Config) ->
 
 register_and_call(_) ->
     Callee = connect(),
-    Echo = fun(Args, KWArgs, _Details) -> {reply, Args, KWArgs} end,
+    Echo = fun(Args, KWArgs, _Details) ->
+        {ok, #{args => Args, kwargs => KWArgs}}
+    end,
     {ok, RegId} = bondy_connect:register(Callee, <<"com.example.echo">>, Echo),
     ?assert(is_integer(RegId)),
 
@@ -93,7 +95,7 @@ register_and_call(_) ->
 
 call_async_token_reply(_) ->
     Callee = connect(),
-    Echo = fun(Args, _KWArgs, _Details) -> {reply, Args} end,
+    Echo = fun(Args, _KWArgs, _Details) -> {ok, #{args => Args}} end,
     {ok, _} = bondy_connect:register(Callee, <<"com.example.async">>, Echo),
 
     Caller = connect(),
@@ -113,7 +115,7 @@ call_async_token_reply(_) ->
 
 unregister_stops_routing(_) ->
     Callee = connect(),
-    Echo = fun(Args, _, _) -> {reply, Args} end,
+    Echo = fun(Args, _, _) -> {ok, #{args => Args}} end,
     {ok, RegId} = bondy_connect:register(
         Callee, <<"com.example.transient">>, Echo
     ),
@@ -121,20 +123,26 @@ unregister_stops_routing(_) ->
 
     Caller = connect(),
     Result = bondy_connect:call(Caller, <<"com.example.transient">>, []),
-    ?assertMatch({error, #{uri := <<"wamp.error.no_such_procedure">>}}, Result),
+    ?assertMatch(
+        {error, #{kind := wamp, uri := <<"wamp.error.no_such_procedure">>}},
+        Result
+    ),
 
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
 
 handler_error_propagates(_) ->
     Callee = connect(),
-    Failing = fun(_, _, _) -> {error, <<"com.example.business_error">>} end,
+    Failing = fun(_, _, _) ->
+        {error, #{uri => <<"com.example.business_error">>}}
+    end,
     {ok, _} = bondy_connect:register(Callee, <<"com.example.err">>, Failing),
 
     Caller = connect(),
     Result = bondy_connect:call(Caller, <<"com.example.err">>, []),
     ?assertMatch(
-        {error, #{uri := <<"com.example.business_error">>}}, Result
+        {error, #{kind := wamp, uri := <<"com.example.business_error">>}},
+        Result
     ),
 
     ok = bondy_connect:disconnect(Caller),
@@ -148,13 +156,14 @@ handler_crash_isolation(_) ->
     Caller = connect(),
     Result = bondy_connect:call(Caller, <<"com.example.crash">>, []),
     ?assertMatch(
-        {error, #{uri := ?BONDY_CONNECT_INTERNAL_ERROR}}, Result
+        {error, #{kind := wamp, uri := ?BONDY_CONNECT_INTERNAL_ERROR}},
+        Result
     ),
 
     %% The crashing handler must NOT take the connection down — it can still
     %% serve a freshly-registered procedure.
     ?assertEqual(established, bondy_connect:status(Callee)),
-    Ok = fun(Args, _, _) -> {reply, Args} end,
+    Ok = fun(Args, _, _) -> {ok, #{args => Args}} end,
     {ok, _} = bondy_connect:register(Callee, <<"com.example.still_ok">>, Ok),
     {ok, R2} = bondy_connect:call(Caller, <<"com.example.still_ok">>, [
         <<"alive">>
@@ -168,7 +177,7 @@ per_call_timeout(_) ->
     Callee = connect(),
     Slow = fun(_, _, _) ->
         timer:sleep(2000),
-        {reply, []}
+        {ok, #{args => []}}
     end,
     {ok, _} = bondy_connect:register(Callee, <<"com.example.slow">>, Slow),
 
@@ -176,7 +185,7 @@ per_call_timeout(_) ->
     Result = bondy_connect:call(
         Caller, <<"com.example.slow">>, [], #{}, #{timeout => 300}
     ),
-    ?assertEqual({error, timeout}, Result),
+    ?assertEqual({error, #{kind => client, reason => timeout}}, Result),
 
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
@@ -196,7 +205,7 @@ load_rejection_under_burst(_) ->
     %% under the 30s default call timeout, so the admitted call still succeeds).
     Slow = fun(_, _, _) ->
         timer:sleep(1500),
-        {reply, [<<"done">>]}
+        {ok, #{args => [<<"done">>]}}
     end,
     {ok, _} = bondy_connect:register(Callee, Proc, Slow),
 
@@ -221,7 +230,11 @@ load_rejection_under_burst(_) ->
     ],
     Oks = [R || {ok, _} = R <- Replies],
     Unavail =
-        [R || {error, #{uri := <<"wamp.error.unavailable">>}} = R <- Replies],
+        [
+            R
+         || {error, #{kind := wamp, uri := <<"wamp.error.unavailable">>}} = R <-
+                Replies
+        ],
     ?assertEqual(1, length(Oks)),
     ?assertEqual(2, length(Unavail)),
 
@@ -238,7 +251,7 @@ progressive_end_to_end(_) ->
         Progress = maps:get(progress, Details),
         ok = Progress([1], #{}),
         ok = Progress([2], #{}),
-        {reply, [3]}
+        {ok, #{args => [3]}}
     end,
     {ok, _} = bondy_connect:register(
         Callee, <<"com.example.progressive">>, Handler
@@ -283,7 +296,7 @@ progressive_input_end_to_end(_) ->
     Callee = connect(),
     Handler = fun([First], _KWArgs, Details) ->
         Input = maps:get(input, Details),
-        {reply, [collect_input(Input, First)]}
+        {ok, #{args => [collect_input(Input, First)]}}
     end,
     {ok, _} = bondy_connect:register(
         Callee, <<"com.example.progressive.input">>, Handler
@@ -318,7 +331,7 @@ progressive_input_ordering(_) ->
     Callee = connect(),
     Handler = fun([First], _KWArgs, Details) ->
         Input = maps:get(input, Details),
-        {reply, [collect_input_list(Input, [First])]}
+        {ok, #{args => [collect_input_list(Input, [First])]}}
     end,
     {ok, _} = bondy_connect:register(
         Callee, <<"com.example.progressive.ordering">>, Handler
@@ -349,7 +362,7 @@ progressive_input_caller_unsupported(_) ->
     Callee = connect(),
     Handler = fun(_, _, _) ->
         TestPid ! handler_ran,
-        {reply, [<<"unexpected">>]}
+        {ok, #{args => [<<"unexpected">>]}}
     end,
     {ok, _} = bondy_connect:register(
         Callee, <<"com.example.progressive.input.caller_off">>, Handler
@@ -372,7 +385,7 @@ progressive_input_caller_unsupported(_) ->
     ),
 
     ?assertMatch(
-        {error, #{uri := <<"wamp.error.option_not_allowed">>}},
+        {error, #{kind := wamp, uri := <<"wamp.error.option_not_allowed">>}},
         next_reply(Token)
     ),
 
@@ -394,7 +407,7 @@ progressive_feature_disabled(_) ->
         TestPid !
             {details_flags, maps:is_key(receive_progress, Details),
                 maps:is_key(progress, Details)},
-        {reply, [<<"done">>]}
+        {ok, #{args => [<<"done">>]}}
     end,
     {ok, _} = bondy_connect:register(
         Callee, <<"com.example.progressive.off">>, Handler
@@ -422,7 +435,7 @@ progressive_feature_disabled(_) ->
 progressive_sync_call_rejected(_) ->
     Caller = connect(),
     ?assertEqual(
-        {error, {invalid_option, receive_progress}},
+        {error, #{kind => client, reason => {invalid_option, receive_progress}}},
         bondy_connect:call(Caller, <<"com.example.whatever">>, [], #{}, #{
             receive_progress => true
         })
@@ -490,7 +503,7 @@ progressive_timeout_resets_between_results(_) ->
             end
          || N <- lists:seq(1, 6)
         ],
-        {reply, [<<"final">>]}
+        {ok, #{args => [<<"final">>]}}
     end,
     {ok, _} = bondy_connect:register(
         Callee, <<"com.example.progressive.reset">>, Handler
@@ -521,7 +534,7 @@ progressive_inactivity_timeout(_) ->
         _ = Progress([1], #{}),
         _ = Progress([2], #{}),
         timer:sleep(60000),
-        {reply, [<<"never">>]}
+        {ok, #{args => [<<"never">>]}}
     end,
     {ok, _} = bondy_connect:register(
         Callee, <<"com.example.progressive.stall">>, Handler
@@ -537,7 +550,7 @@ progressive_inactivity_timeout(_) ->
 
     {NProgress, Terminal} = drain_replies(Token, 0, 10000),
     ?assertEqual(2, NProgress),
-    ?assertEqual({error, timeout}, Terminal),
+    ?assertEqual({error, #{kind => client, reason => timeout}}, Terminal),
 
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
@@ -574,7 +587,7 @@ progressive_deadline_caps_stream(_) ->
     Elapsed = erlang:monotonic_time(millisecond) - T0,
 
     ?assert(NProgress >= 3),
-    ?assertEqual({error, timeout}, Terminal),
+    ?assertEqual({error, #{kind => client, reason => timeout}}, Terminal),
     %% Terminated by the deadline, not by stream completion or the
     %% inactivity timeout (which never fires — chunks come every 100ms).
     ?assert(Elapsed >= 1000 andalso Elapsed < 5000),

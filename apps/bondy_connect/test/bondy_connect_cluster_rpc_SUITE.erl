@@ -134,7 +134,7 @@ progressive_across_cluster(Config) ->
     Handler = fun(_, _, Details) ->
         Progress = maps:get(progress, Details),
         _ = [ok = Progress([I], #{}) || I <- lists:seq(1, N)],
-        {reply, [<<"final">>]}
+        {ok, #{args => [<<"final">>]}}
     end,
     {ok, _} = bondy_connect:register(Callee, ?PROC, Handler),
 
@@ -193,7 +193,7 @@ progressive_across_cluster_feature_disabled(Config) ->
         TestPid !
             {details_flags, maps:is_key(receive_progress, Details),
                 maps:is_key(progress, Details)},
-        {reply, [<<"done">>]}
+        {ok, #{args => [<<"done">>]}}
     end,
     Proc = <<"com.example.cluster.progressive.off">>,
     {ok, _} = bondy_connect:register(Callee, Proc, Handler),
@@ -274,7 +274,9 @@ progressive_remote_cancel_interrupts_callee(Config) ->
     %% The caller gets the cancellation as the terminal reply (progress
     %% already in flight may arrive before it).
     {_, Terminal} = drain_progress(Token, 10000),
-    ?assertMatch({error, #{uri := <<"wamp.error.canceled">>}}, Terminal),
+    ?assertMatch(
+        {error, #{kind := wamp, uri := <<"wamp.error.canceled">>}}, Terminal
+    ),
 
     %% ...and the remote worker is killed.
     receive
@@ -354,7 +356,7 @@ progressive_input_across_cluster(Config) ->
     Callee = connect(?NODE2_WAMP_PORT),
     Handler = fun([First], _KWArgs, Details) ->
         Input = maps:get(input, Details),
-        {reply, [collect_input_list(Input, [First])]}
+        {ok, #{args => [collect_input_list(Input, [First])]}}
     end,
     Proc = <<"com.example.cluster.progressive.input">>,
     {ok, _} = bondy_connect:register(Callee, Proc, Handler),
@@ -402,7 +404,7 @@ progressive_input_across_cluster_callee_unsupported(Config) ->
     ),
     Handler = fun(_, _, _) ->
         TestPid ! handler_ran,
-        {reply, [<<"unexpected">>]}
+        {ok, #{args => [<<"unexpected">>]}}
     end,
     Proc = <<"com.example.cluster.progressive.input.unsupported">>,
     {ok, _} = bondy_connect:register(Callee, Proc, Handler),
@@ -420,7 +422,7 @@ progressive_input_across_cluster_callee_unsupported(Config) ->
     {ok, Token} = bondy_connect:call_stream(Caller, Proc, [1], #{}, #{}),
 
     ?assertMatch(
-        {error, #{uri := <<"wamp.error.option_not_allowed">>}},
+        {error, #{kind := wamp, uri := <<"wamp.error.option_not_allowed">>}},
         next_reply(Token)
     ),
 
@@ -475,7 +477,9 @@ progressive_input_remote_cancel_interrupts_callee(Config) ->
     ok = bondy_connect:cancel(Caller, Token, killnowait),
 
     {ok, Terminal} = drain_progress(Token, 10000),
-    ?assertMatch({error, #{uri := <<"wamp.error.canceled">>}}, Terminal),
+    ?assertMatch(
+        {error, #{kind := wamp, uri := <<"wamp.error.canceled">>}}, Terminal
+    ),
 
     receive
         {'DOWN', MRef, process, WorkerPid, _} -> ok

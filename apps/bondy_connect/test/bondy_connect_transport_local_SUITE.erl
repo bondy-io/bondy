@@ -88,7 +88,7 @@ local_cross_session_call(_) ->
     Caller = connect(),
     Proc = <<"com.example.res.local.cross">>,
     {ok, _} = bondy_connect:register(Callee, Proc, fun(Args, _, _) ->
-        {reply, [<<"from-callee">> | Args]}
+        {ok, #{args => [<<"from-callee">> | Args]}}
     end),
     {ok, R} = bondy_connect:call(Caller, Proc, [<<"x">>]),
     ?assertEqual([<<"from-callee">>, <<"x">>], maps:get(args, R)),
@@ -101,7 +101,7 @@ local_cross_session_call(_) ->
 
 %% @private
 echo_handler() ->
-    fun(Args, _, _) -> {reply, Args} end.
+    fun(Args, _, _) -> {ok, #{args => Args}} end.
 
 %% @private An event handler that forwards each event's args to `Pid`.
 event_handler(Pid) ->

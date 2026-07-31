@@ -103,7 +103,7 @@ cancel_kill_interrupts_callee(_) ->
     {ok, _} = bondy_connect:register(
         Callee, <<"com.example.cancel.kill">>, slow()
     ),
-    Ok = fun(Args, _, _) -> {reply, Args} end,
+    Ok = fun(Args, _, _) -> {ok, #{args => Args}} end,
     {ok, _} = bondy_connect:register(Callee, <<"com.example.cancel.ok">>, Ok),
 
     Caller = connect(),
@@ -179,14 +179,16 @@ cancel_unknown_token(_) ->
 slow() ->
     fun(_, _, _) ->
         timer:sleep(?SLOW_MS),
-        {reply, [<<"too_late">>]}
+        {ok, #{args => [<<"too_late">>]}}
     end.
 
 %% @private Assert the async caller received a terminating `canceled` error.
 assert_canceled(Token) ->
     receive
         {bondy_connect, Token, Reply} ->
-            ?assertMatch({error, #{uri := ?WAMP_CANCELLED}}, Reply)
+            ?assertMatch(
+                {error, #{kind := wamp, uri := ?WAMP_CANCELLED}}, Reply
+            )
     after ?RECV_MS ->
         ct:fail(no_cancel_reply)
     end.

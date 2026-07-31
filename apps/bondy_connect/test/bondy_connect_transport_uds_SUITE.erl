@@ -94,7 +94,7 @@ connect_missing_path_fails(_) ->
 
 %% @private
 echo_handler() ->
-    fun(Args, _, _) -> {reply, Args} end.
+    fun(Args, _, _) -> {ok, #{args => Args}} end.
 
 %% @private An event handler that forwards each event's args to `Pid`.
 event_handler(Pid) ->

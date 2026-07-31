@@ -21,8 +21,9 @@ M4 (Phase 6 — resilience) tests.
   keeping the *declared* entry, so a later reconnect replays it — a revocation
   is session-scoped and must not survive the reconnect (review B5).
 - **Fail-fast** (live): an in-flight async call is terminated with
-  `{error, disconnected}` when the link drops; and the initial connect to a dead
-  endpoint fails fast by default (no blocking on retries).
+  `{error, #{kind := client, reason := disconnected}}` when the link drops;
+  and the initial connect to a dead endpoint fails fast by default (no
+  blocking on retries).
 """.
 
 -include_lib("common_test/include/ct.hrl").
@@ -51,6 +52,8 @@ all() ->
         reconnect_replays_registration,
         malformed_frame_triggers_reconnect,
         revocation_keeps_declared_replays_on_reconnect,
+        register_duplicate_uri_errors,
+        unregister_unknown_ref_errors,
         in_flight_call_fails_on_drop,
         initial_connect_fails_fast,
         initial_connect_retries_when_enabled,
@@ -348,8 +351,10 @@ revocation_keeps_declared_replays_on_reconnect(_) ->
     ok = wait_until(
         fun() ->
             case bondy_connect:call(Caller, Proc, [<<"b">>]) of
-                {error, #{uri := ?WAMP_NO_SUCH_REGISTRATION}} -> true;
-                _ -> false
+                {error, #{kind := wamp, uri := ?WAMP_NO_SUCH_REGISTRATION}} ->
+                    true;
+                _ ->
+                    false
             end
         end,
         100,
@@ -380,6 +385,35 @@ revocation_keeps_declared_replays_on_reconnect(_) ->
     ok = bondy_connect:disconnect(Caller),
     ok = bondy_connect:disconnect(Callee).
 
+%% register/subscribe/unregister/unsubscribe share error_payload/1 with call*
+%% (T2, decision 1): a router-refused REGISTER is a `kind := wamp` call_error(),
+%% not a bare atom.
+register_duplicate_uri_errors(_) ->
+    Proc = <<"com.example.res.duplicate">>,
+    Callee1 = connect(#{}),
+    {ok, _} = bondy_connect:register(Callee1, Proc, echo_handler()),
+
+    Callee2 = connect(#{}),
+    Result = bondy_connect:register(Callee2, Proc, echo_handler()),
+    ?assertMatch(
+        {error, #{kind := wamp, uri := ?WAMP_PROCEDURE_ALREADY_EXISTS}},
+        Result
+    ),
+
+    ok = bondy_connect:disconnect(Callee1),
+    ok = bondy_connect:disconnect(Callee2).
+
+%% An unresolvable URI is rejected locally (no router round-trip) as a
+%% `kind := client` call_error() — the sibling of register's `kind := wamp`
+%% case above.
+unregister_unknown_ref_errors(_) ->
+    Callee = connect(#{}),
+    ?assertEqual(
+        {error, #{kind => client, reason => no_such_registration}},
+        bondy_connect:unregister(Callee, <<"com.example.res.never_registered">>)
+    ),
+    ok = bondy_connect:disconnect(Callee).
+
 %% An in-flight async call is terminated with {error, disconnected} (fail-fast)
 %% when the caller's link drops.
 in_flight_call_fails_on_drop(_) ->
@@ -393,7 +427,7 @@ in_flight_call_fails_on_drop(_) ->
     Handler = fun(_, _, _) ->
         Self ! invocation_started,
         timer:sleep(3000),
-        {reply, [<<"too_late">>]}
+        {ok, #{args => [<<"too_late">>]}}
     end,
     {ok, _} = bondy_connect:register(Callee, Proc, Handler),
 
@@ -409,7 +443,9 @@ in_flight_call_fails_on_drop(_) ->
 
     receive
         {bondy_connect, Token, Reply} ->
-            ?assertEqual({error, disconnected}, Reply)
+            ?assertEqual(
+                {error, #{kind => client, reason => disconnected}}, Reply
+            )
     after 5000 ->
         ct:fail(no_disconnected_reply)
     end,
@@ -506,10 +542,10 @@ reconnect_budget_exhaustion_gives_up(_) ->
 
 %% @private
 ok_handler() ->
-    fun(Args, _, _) -> {reply, Args} end.
+    fun(Args, _, _) -> {ok, #{args => Args}} end.
 
 echo_handler() ->
-    fun(Args, _, _) -> {reply, Args} end.
+    fun(Args, _, _) -> {ok, #{args => Args}} end.
 
 %% @private Establish a connection (with extra config merged in).
 connect(Extra) ->

@@ -112,26 +112,19 @@ pull_input() ->
 %% @private
 invoke_call(H, Args, KWArgs, Details) ->
     try bondy_connect_handler_spec:invoke(H, Args, KWArgs, Details) of
-        {reply, RArgs} when is_list(RArgs) ->
-            {yield, RArgs, undefined};
-        {reply, RArgs, RKWArgs} when is_list(RArgs), is_map(RKWArgs) ->
-            {yield, RArgs, RKWArgs};
-        ok ->
-            {yield, [], undefined};
-        noreply ->
-            {yield, [], undefined};
-        {error, Uri} when is_binary(Uri) ->
-            {error, Uri, undefined, undefined};
-        {error, Uri, EArgs} when is_binary(Uri) ->
-            {error, Uri, EArgs, undefined};
-        {error, Uri, EArgs, EKWArgs} when is_binary(Uri) ->
-            {error, Uri, EArgs, EKWArgs};
-        Other ->
-            ?LOG_WARNING(#{
-                description => "Callee handler returned an unexpected value.",
-                return => Other
-            }),
-            {error, ?BONDY_CONNECT_INTERNAL_ERROR, undefined, undefined}
+        Return ->
+            case bondy_connect_handler_spec:normalize_return(Return) of
+                invalid ->
+                    ?LOG_WARNING(#{
+                        description =>
+                            "Callee handler returned an unexpected value.",
+                        return => Return
+                    }),
+                    {error, ?BONDY_CONNECT_INTERNAL_ERROR, undefined,
+                        undefined};
+                Reply ->
+                    Reply
+            end
     catch
         Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
