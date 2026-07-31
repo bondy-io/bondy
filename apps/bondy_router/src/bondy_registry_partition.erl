@@ -260,8 +260,9 @@ remove(Partition, Entry) when is_pid(Partition) ->
 Removes a registration or subscription entry (`bondy_registry_entry:t()`) from
 the registry and its indices.
 
-The function first deletes the entry from PlumDB (this is serialised via a
-partition server), then deletes the indices.
+The function first deletes the indices, then deletes the entry from the
+node-local entry table — see `bondy_registry_store:remove/3` for why this
+order matters.
 
 Indices are deleted concurrently for entries with `exact` or `prefix` matching
 policies. However, for `wildcard` policy, the deletion will be serialized

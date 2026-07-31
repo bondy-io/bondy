@@ -5,7 +5,6 @@
 
 -module(bondy_registry_store).
 
--include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_db_tables.hrl").
@@ -428,8 +427,13 @@ remove(Store, Entry) ->
 Removes a registration or subscription entry (`bondy_registry_entry:t()`) from
 the registry and its indices.
 
-The function first deletes the entry from PlumDB (this is serialised via a
-partition server), then deletes the indices.
+The function first deletes the indices, then deletes the entry from the
+node-local entry table. This order matters: `project/2` resolves a lookup by
+walking the indices and looking up each index entry's backing record, so the
+indices must never reference an entry that is no longer in the entry table.
+Deleting the entry first would open exactly that window — briefly a live
+index entry with no backing record, logged by `project/2` as a registry
+inconsistency and silently dropped from the result.
 
 Indices are deleted concurrently for entries with `exact` or `prefix` matching
 policies. However, for `wildcard` policy, the deletion will be serialized
@@ -445,14 +449,13 @@ remove(#bondy_registry_store{} = Store, Entry, Opts) ->
     ok = validate_entry(Entry),
 
     maybe
-        ok ?=
-            delete(
-                Store,
-                bondy_registry_entry:type(Entry),
-                bondy_registry_entry:key(Entry),
-                Opts
-            ),
-        delete_indices(Store, Entry)
+        ok ?= delete_indices(Store, Entry),
+        delete(
+            Store,
+            bondy_registry_entry:type(Entry),
+            bondy_registry_entry:key(Entry),
+            Opts
+        )
     end.
 
 -doc "Removes an entry (and its indices) from the store returning it.".
@@ -466,7 +469,13 @@ take(Store, Entry) ->
         bondy_registry_entry:key(Entry)
     ).
 
--doc "Removes an entry (and its indices) from the store returning it.".
+-doc """
+Removes an entry (and its indices) from the store returning it.
+
+Indices are deleted before the entry table row (see `remove/3` for why this
+order matters: it keeps `project/2` from ever finding an index entry whose
+backing record is already gone).
+""".
 -spec take(Store :: t(), Type :: entry_type(), EntryKey :: entry_key()) ->
     {ok, Entry :: entry()} | {error, not_found}.
 
@@ -475,18 +484,17 @@ take(#bondy_registry_store{} = Store, Type, EntryKey) when ?IS_TYPE(Type) ->
     RealmUri = bondy_registry_entry:realm_uri(EntryKey),
     EntryId = bondy_registry_entry:id(EntryKey),
 
-    case
-        ets:take(
-            Store#bondy_registry_store.local_entry_tab,
-            {Type, RealmUri, EntryId}
-        )
-    of
-        [{_, Entry}] ->
-            ok = delete_local_session_idx(Store, Type, EntryKey),
+    case entry_read(Store, Type, RealmUri, EntryId) of
+        {ok, Entry} ->
             Result = delete_indices(Store, Entry),
+            ok = delete_local_session_idx(Store, Type, EntryKey),
+            true = ets:delete(
+                Store#bondy_registry_store.local_entry_tab,
+                {Type, RealmUri, EntryId}
+            ),
             resulto:then(Result, fun(_) -> {ok, Entry} end);
-        [] ->
-            {error, not_found}
+        {error, not_found} = Error ->
+            Error
     end.
 
 -doc """
@@ -2421,14 +2429,14 @@ project(Store, L) when is_list(L) ->
                     {ok, Entry} ->
                         {true, Entry};
                     {error, not_found} ->
-                        %% This is very rare, but we need to cater for it.
-                        ?LOG_WARNING(#{
-                            description =>
-                                "Inconsistency found in registry. "
-                                "An entry found in the indices "
-                                "could not be found on the main store.",
-                            reason => not_found,
-                            index_entry => IndexEntry
+                        %% Benign and expected under churn: the index is
+                        %% snapshotted ahead of resolving each entry, so a
+                        %% concurrent remove/take landing in that gap (e.g.
+                        %% the subscriber closed its session mid-publish)
+                        %% surfaces here as a miss. Not logged — at scale
+                        %% this is routine, not a fault — just counted.
+                        _ = bondy_metrics:counter(#{
+                            name => bondy_registry_projection_miss_total
                         }),
                         false
                 end;

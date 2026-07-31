@@ -5062,7 +5062,7 @@ end}.
 {mapping, "cluster.connection_high_watermark",
 "partisan.connection_high_watermark", [
   {default, infinity},
-  {datatype, [integer, {atom, infinity}]}
+  {datatype, [{atom, infinity}, integer]}
 ]}.
 
 {mapping, "cluster.channels.default.parallelism",
