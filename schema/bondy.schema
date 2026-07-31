@@ -5041,6 +5041,30 @@ end}.
   {datatype, bytesize}
 ]}.
 
+%% @doc Maximum number of inbound Partisan RPC requests (partisan_rpc /
+%% partisan_erpc / partisan_gen_server calls from a remote node) that may be
+%% executing concurrently on this node. Requests received past this cap fail
+%% immediately with `{badrpc, overloaded}` (or, for callers still using the
+%% legacy v5 RPC framing, `{badrpc, {'EXIT', overloaded}}`) instead of being
+%% queued or spawned unboundedly. Set to `infinity` to disable the cap.
+{mapping, "cluster.rpc_max_concurrency",
+"partisan.rpc_max_concurrency", [
+  {default, 10000},
+  {datatype, [integer, {atom, infinity}]}
+]}.
+
+%% @doc Maximum number of messages that may be queued to a single Partisan
+%% connection process before further sends to it are refused with
+%% `{error, overloaded}`. Dispatch to a connection is an unbounded mailbox by
+%% default (`infinity`, preserving the historical behaviour), so a sender
+%% faster than the peer's socket can otherwise grow that mailbox until the
+%% node runs out of memory. Lower this to fail fast instead.
+{mapping, "cluster.connection_high_watermark",
+"partisan.connection_high_watermark", [
+  {default, infinity},
+  {datatype, [integer, {atom, infinity}]}
+]}.
+
 {mapping, "cluster.channels.default.parallelism",
 "bondy_router.channels.undefined.parallelism", [
   {default, 1},
@@ -5336,6 +5360,15 @@ end}.
 "partisan.tls", [
   {default, "off"},
   {datatype, flag}
+]}.
+
+%% @doc Timeout for the server-side TLS handshake on an inbound peer
+%% connection. Bounds a stalled or deliberately slow handshake so it cannot
+%% pin an acceptor indefinitely (a slowloris-style vector on the peer plane).
+{mapping, "cluster.tls.handshake_timeout",
+"partisan.tls_handshake_timeout", [
+  {default, "5s"},
+  {datatype, {duration, ms}}
 ]}.
 
 %% @doc C-1 safety gate. The Partisan peer plane is plaintext + unauthenticated

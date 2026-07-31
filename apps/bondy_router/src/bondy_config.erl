@@ -113,6 +113,9 @@ An implementation of the `app_config` behaviour.
     %% - partisan.tls <- cluster.tls.enabled
     %% - partisan.tls_server_options.* <- cluster.tls.server.*
     %% - partisan.tls_client_options.* <- cluster.tls.client.*
+    %% - tls_handshake_timeout <- cluster.tls.handshake_timeout
+    %% - rpc_max_concurrency <- cluster.rpc_max_concurrency
+    %% - connection_high_watermark <- cluster.connection_high_watermark
     {partisan, [
         %% Overlay topology
         %% Required for peer_service_manager ==
