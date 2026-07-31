@@ -346,6 +346,17 @@ declare_rib_families() ->
             "Keys where the routing summaries disagree with the ground "
             "truth, as of the last periodic consistency sweep."
         >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_registry_projection_miss_total,
+        help => <<
+            "Index entries resolved by bondy_registry_store:project/2 whose "
+            "backing record was already gone from the local entry table. "
+            "Expected under concurrent subscribe/unsubscribe churn (the "
+            "subscriber left between the index snapshot and the resolve); "
+            "a sustained high rate relative to publish throughput may "
+            "warrant investigation, but any single occurrence is not a bug."
+        >>
     }).
 
 %% @private
