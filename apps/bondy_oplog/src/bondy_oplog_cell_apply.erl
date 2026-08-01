@@ -85,7 +85,7 @@ behaviour is byte-identical.
 -export([apply_cell_pairs/4]).
 -export([apply_cell_pairs_mux/4]).
 -export([build_source/2]).
--export([compute_one_cell/12]).
+-export([compute_one_cell/13]).
 -export([oldstate_cache_new/2]).
 -export([oldstate_cache_delete/3]).
 -export([oldstate_cache_put_entries/2]).
@@ -120,6 +120,7 @@ apply_cell_batch(_Ctx, _Id, []) ->
     ok;
 apply_cell_batch(Ctx, Id, Events) ->
     #{adapter := Adapter, handle := Handle, kernel := Kernel} = Ctx,
+    CrdtOpts = maps:get(crdt_opts, Ctx, #{}),
     CacheAdapter = maps:get(cache_adapter, Ctx, undefined),
     CacheHandle = maps:get(cache_handle, Ctx, undefined),
     HighWaterRef = maps:get(high_water_ref, Ctx, undefined),
@@ -153,6 +154,7 @@ apply_cell_batch(Ctx, Id, Events) ->
                             Adapter,
                             Handle,
                             Kernel,
+                            CrdtOpts,
                             WAcc,
                             Bucket,
                             Key,
@@ -261,6 +263,7 @@ compute_one_cell(
     Adapter,
     Handle,
     Kernel,
+    CrdtOpts,
     LocalWrites,
     Bucket,
     Key,
@@ -281,7 +284,14 @@ compute_one_cell(
             case maps:get({Bucket, Key}, LocalWrites, undefined) of
                 undefined ->
                     read_old_value(
-                        OldStateCache, Adapter, Handle, Kernel, Id, Bucket, Key
+                        OldStateCache,
+                        Adapter,
+                        Handle,
+                        Kernel,
+                        CrdtOpts,
+                        Id,
+                        Bucket,
+                        Key
                     );
                 LocalFrame ->
                     decode_old_frame(Kernel, LocalFrame)
@@ -340,7 +350,9 @@ compute_one_cell(
 %% A3 — resolve OldValue from the frame-cache (hit) or the projection
 %% (miss). Emits a `[bondy_oplog, applier, oldstate_cache]` hit/miss
 %% event only when the cache is enabled (zero overhead when off).
-read_old_value(OldStateCache, Adapter, Handle, Kernel, Id, Bucket, Key) ->
+read_old_value(
+    OldStateCache, Adapter, Handle, Kernel, CrdtOpts, Id, Bucket, Key
+) ->
     case oldstate_cache_get(OldStateCache, Bucket, Key) of
         {hit, Frame} ->
             emit_cache_result(OldStateCache, Id, hit),
@@ -350,7 +362,7 @@ read_old_value(OldStateCache, Adapter, Handle, Kernel, Id, Bucket, Key) ->
             case Adapter:get(Handle, Bucket, Key) of
                 not_found ->
                     {
-                        bondy_oplog_cell_kernel:init(Kernel),
+                        bondy_oplog_cell_kernel:init(Kernel, CrdtOpts),
                         undefined
                     };
                 {ok, OldFrame} ->
@@ -673,6 +685,7 @@ secondary_saturation_drop(NS, IName, SecShard, Entry, NumOps) ->
 %% it re-indexes from the converged projection (`reindex_from_projection/3`).
 apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
     #{adapter := Adapter, handle := Handle, kernel := Kernel} = Ctx,
+    CrdtOpts = maps:get(crdt_opts, Ctx, #{}),
     CacheAdapter = maps:get(cache_adapter, Ctx, undefined),
     CacheHandle = maps:get(cache_handle, Ctx, undefined),
     HighWaterRef = maps:get(high_water_ref, Ctx, undefined),
@@ -705,6 +718,7 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
                             Adapter,
                             Handle,
                             Kernel,
+                            CrdtOpts,
                             WAcc,
                             Bucket,
                             CellKey,

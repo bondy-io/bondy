@@ -302,10 +302,27 @@ refold_primary(Entry) ->
                 Pid when is_pid(Pid) ->
                     bondy_oplog_applier:rebuild_indexes_sync(Pid);
                 _ ->
-                    %% Applier restarting; its own cold-start replay will
-                    %% re-dispatch. The shard stays marked, so a later
-                    %% trigger retries.
-                    ok
+                    %% No applier — either a fused instance (which has none
+                    %% by design and runs the rebuild in-process instead)
+                    %% or a genuinely restarting subtree, whose own
+                    %% cold-start replay will re-dispatch: the shard stays
+                    %% marked either way, so a later trigger retries if
+                    %% this pass finds nowhere to run it.
+                    case bondy_oplog_registry:fused(InstanceId) of
+                        true ->
+                            case
+                                bondy_oplog_registry:instance_pid(InstanceId)
+                            of
+                                InstancePid when is_pid(InstancePid) ->
+                                    bondy_oplog_instance:rebuild_indexes_sync(
+                                        InstancePid
+                                    );
+                                _ ->
+                                    ok
+                            end;
+                        _ ->
+                            ok
+                    end
             end
     end.
 

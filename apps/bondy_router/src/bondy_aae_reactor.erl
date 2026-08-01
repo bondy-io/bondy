@@ -481,40 +481,21 @@ react_member(Key, _Op) ->
     bondy_session_manager:invalidate_rbac_all(RealmUri).
 
 %% @private
-%% Normalise the fold-event op a registry cell merge delivers. Registry writes use
-%% bondy_db's short forms (`{set, Value}` / `clear`); the explicit `{set, Hlc,
-%% Value}` / `{clear, Hlc}` forms are accepted too. Anything else is ignored — the
-%% reaction MUST be total so an unexpected op never crashes the reactor.
-registry_op({set, Value}) ->
-    {set, Value};
-registry_op({set, _Hlc, Value}) ->
-    {set, Value};
-registry_op(clear) ->
-    clear;
-registry_op({clear, _Hlc}) ->
-    clear;
-registry_op(_) ->
-    ignore.
-
-%% @private
-%% A peer's RIB summary cell arrived (or was removed) via anti-entropy:
-%% delegate to `bondy_registry_rib`, which maintains this node's stub store.
-%% The cell key is self-contained (realm included), so a `clear` needs no
-%% tombstone resolution. Total: unexpected ops are ignored.
-react_rib(Table, Key, Op) ->
+%% A peer's RIB summary cell changed via anti-entropy: delegate to
+%% `bondy_registry_rib:on_remote_merge/2`, which reads the cell's current
+%% converged value and maintains this node's stub store. Unlike the other
+%% `kind`s here, the RIB write path's per-field CRDT ops (`{apply, count,
+%% {inc, _}}`, a bare `{inc, _}`, ...) carry no whole-value `{set, _}`/
+%% `clear` shape to dispatch on — the op itself is therefore irrelevant and
+%% `on_remote_merge/2` re-reads the cell instead. Total: `on_remote_merge/2`
+%% is itself total.
+react_rib(Table, Key, _Op) ->
     Type =
         case Table of
             ?BONDY_DB_REGISTRATION_RIB_TAB -> registration;
             ?BONDY_DB_SUBSCRIPTION_RIB_TAB -> subscription
         end,
-    case registry_op(Op) of
-        {set, Summary} ->
-            bondy_registry_rib:on_remote_set(Type, Key, Summary);
-        clear ->
-            bondy_registry_rib:on_remote_clear(Type, Key);
-        ignore ->
-            ok
-    end.
+    bondy_registry_rib:on_remote_merge(Type, Key).
 
 %% @private
 %% security_users is realm-sharded, so its cell key is the G-1 realm-folded

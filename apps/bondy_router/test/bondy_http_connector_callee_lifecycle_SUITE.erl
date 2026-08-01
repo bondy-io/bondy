@@ -51,7 +51,9 @@ init_per_suite(Config) ->
 %% first real boot in this VM (`bondy_ct:start_bondy/0` is a no-op after
 %% that), so reclaim the name defensively before booting for real.
 maybe_reclaim_metrics_name() ->
-    IsBooted = lists:keymember(bondy_oplog, 1, application:which_applications()),
+    IsBooted = lists:keymember(
+        bondy_oplog, 1, application:which_applications()
+    ),
     case {IsBooted, whereis(bondy_metrics)} of
         {false, Pid} when is_pid(Pid) ->
             catch gen_server:stop(Pid),

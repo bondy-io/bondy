@@ -59,9 +59,11 @@ nested_value_replays_surviving_sub_ops_test() ->
     Entries0 = ?M:put_nested(#{}, <<"k">>, {<<"a">>, 1}, [], ?COUNTER, 1, {
         inc, 5
     }),
-    Entries1 = ?M:put_nested(Entries0, <<"k">>, {<<"b">>, 1}, [], ?COUNTER, 2, {
-        inc, 3
-    }),
+    Entries1 = ?M:put_nested(
+        Entries0, <<"k">>, {<<"b">>, 1}, [], ?COUNTER, 2, {
+            inc, 3
+        }
+    ),
     Cell = maps:get(<<"k">>, Entries1),
     ?assertEqual(8, ?M:nested_value(?COUNTER, Cell)).
 

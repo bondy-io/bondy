@@ -23,7 +23,7 @@ byte-identical CRDT twin). An unknown label has no twin and is an error.
 
 ## Why a kernel
 
-The applier's per-cell compute (`compute_one_cell/12`) reads the old cell,
+The applier's per-cell compute (`compute_one_cell/13`) reads the old cell,
 applies one operation, and encodes a new frame. Routing every step through
 this module keeps the projection seam in one place.
 
@@ -55,6 +55,7 @@ folds events through a state-based `apply_event`.
 -export([from_modules/2]).
 -export([default_crdt_for_fold/1]).
 -export([init/1]).
+-export([init/2]).
 -export([decode_state/2]).
 -export([encode_state/2]).
 -export([to_value/2]).
@@ -164,6 +165,22 @@ default_crdt_for_fold(_Other) ->
 
 init({crdt, Mod}) ->
     Mod:init().
+
+-doc """
+As `init/1`, but for a construction-configured CRDT (e.g.
+`bondy_oplog_crdt_struct`, which has no schema of its own): `Opts` is the
+table's configured `crdt_opts` (`#{}` when none). `Mod:init(Opts)` is
+called when `Mod` exports `init/1` (a config-aware CRDT); otherwise falls
+back to the plain `Mod:init()`, so this is a safe drop-in for every other
+CRDT type too — only a CRDT that actually declares `init/1` is affected.
+""".
+-spec init(t(), Opts :: map()) -> term().
+
+init({crdt, Mod}, Opts) ->
+    case erlang:function_exported(Mod, init, 1) of
+        true -> Mod:init(Opts);
+        false -> Mod:init()
+    end.
 
 -doc "Decode stored state bytes into the kernel's state.".
 -spec decode_state(t(), binary()) -> term().

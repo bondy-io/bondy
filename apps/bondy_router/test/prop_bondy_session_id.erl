@@ -79,8 +79,15 @@ invalid_session_id() ->
         %% Node-hash prefix present but Rest segment is the wrong length
         ?LET(
             {Hash, Len},
-            {range(1, 999999999), oneof([range(1, ?REST_LEN - 1), range(?REST_LEN + 1, 40)])},
-            <<(integer_to_binary(Hash))/binary, $., (list_to_binary(lists:duplicate(Len, $a)))/binary>>
+            {
+                range(1, 999999999),
+                oneof([range(1, ?REST_LEN - 1), range(?REST_LEN + 1, 40)])
+            },
+            <<
+                (integer_to_binary(Hash))/binary,
+                $.,
+                (list_to_binary(lists:duplicate(Len, $a)))/binary
+            >>
         ),
         %% Not binary
         "not_a_binary",
@@ -96,74 +103,87 @@ invalid_session_id() ->
 
 %% Property: new/0 produces `{NodeHash}.{27-char Rest}'
 prop_new_shape() ->
-    ?WITH_CFG(?FORALL(
-        _,
-        term(),
-        begin
-            SessionId = bondy_session_id:new(),
-            case binary:split(SessionId, <<$.>>) of
-                [NodeHash, Rest] ->
-                    NodeHash =/= <<>>
-                        andalso byte_size(Rest) =:= ?REST_LEN;
-                _ ->
-                    false
+    ?WITH_CFG(
+        ?FORALL(
+            _,
+            term(),
+            begin
+                SessionId = bondy_session_id:new(),
+                case binary:split(SessionId, <<$.>>) of
+                    [NodeHash, Rest] ->
+                        NodeHash =/= <<>> andalso
+                            byte_size(Rest) =:= ?REST_LEN;
+                    _ ->
+                        false
+                end
             end
-        end
-    )).
+        )
+    ).
 
 %% Property: new/0 produces valid session IDs
 prop_new_is_type() ->
-    ?WITH_CFG(?FORALL(
-        _,
-        term(),
-        bondy_session_id:is_type(bondy_session_id:new())
-    )).
+    ?WITH_CFG(
+        ?FORALL(
+            _,
+            term(),
+            bondy_session_id:is_type(bondy_session_id:new())
+        )
+    ).
 
 %% Property: the node-hash prefix of new/0 equals the local node hash
 prop_node_prefix_present() ->
-    ?WITH_CFG(?FORALL(
-        _,
-        term(),
-        begin
-            SessionId = bondy_session_id:new(),
-            bondy_session_id:node_hash(SessionId) =:= bondy_session_id:node_hash()
-        end
-    )).
+    ?WITH_CFG(
+        ?FORALL(
+            _,
+            term(),
+            begin
+                SessionId = bondy_session_id:new(),
+                bondy_session_id:node_hash(SessionId) =:=
+                    bondy_session_id:node_hash()
+            end
+        )
+    ).
 
 %% Property: new/1 with external ID produces valid session ID with that external ID
 prop_new_with_external_id_roundtrip() ->
-    ?WITH_CFG(?FORALL(
-        ExtId,
-        external_id(),
-        begin
-            SessionId = bondy_session_id:new(ExtId),
-            bondy_session_id:to_external(SessionId) =:= ExtId
-        end
-    )).
+    ?WITH_CFG(
+        ?FORALL(
+            ExtId,
+            external_id(),
+            begin
+                SessionId = bondy_session_id:new(ExtId),
+                bondy_session_id:to_external(SessionId) =:= ExtId
+            end
+        )
+    ).
 
 %% Property: to_external always returns a value in the valid range
 prop_new_with_external_id_in_range() ->
-    ?WITH_CFG(?FORALL(
-        ExtId,
-        external_id(),
-        begin
-            SessionId = bondy_session_id:new(ExtId),
-            ResultExtId = bondy_session_id:to_external(SessionId),
-            ResultExtId >= 1 andalso ResultExtId =< ?MAX_EXT_ID
-        end
-    )).
+    ?WITH_CFG(
+        ?FORALL(
+            ExtId,
+            external_id(),
+            begin
+                SessionId = bondy_session_id:new(ExtId),
+                ResultExtId = bondy_session_id:to_external(SessionId),
+                ResultExtId >= 1 andalso ResultExtId =< ?MAX_EXT_ID
+            end
+        )
+    ).
 
 %% Property: external ID is preserved through encode/decode (past the prefix)
 prop_external_id_preserved() ->
-    ?WITH_CFG(?FORALL(
-        ExtId,
-        external_id(),
-        begin
-            SessionId = bondy_session_id:new(ExtId),
-            ExtractedId = bondy_session_id:to_external(SessionId),
-            ExtractedId =:= ExtId
-        end
-    )).
+    ?WITH_CFG(
+        ?FORALL(
+            ExtId,
+            external_id(),
+            begin
+                SessionId = bondy_session_id:new(ExtId),
+                ExtractedId = bondy_session_id:to_external(SessionId),
+                ExtractedId =:= ExtId
+            end
+        )
+    ).
 
 %% =============================================================================
 %% Properties: Uniqueness
@@ -171,15 +191,17 @@ prop_external_id_preserved() ->
 
 %% Property: Multiple calls to new/0 produce unique session IDs
 prop_uniqueness() ->
-    ?WITH_CFG(?FORALL(
-        N,
-        range(2, 100),
-        begin
-            SessionIds = [bondy_session_id:new() || _ <- lists:seq(1, N)],
-            UniqueIds = lists:usort(SessionIds),
-            length(SessionIds) =:= length(UniqueIds)
-        end
-    )).
+    ?WITH_CFG(
+        ?FORALL(
+            N,
+            range(2, 100),
+            begin
+                SessionIds = [bondy_session_id:new() || _ <- lists:seq(1, N)],
+                UniqueIds = lists:usort(SessionIds),
+                length(SessionIds) =:= length(UniqueIds)
+            end
+        )
+    ).
 
 %% =============================================================================
 %% Properties: Type Checking
@@ -187,11 +209,13 @@ prop_uniqueness() ->
 
 %% Property: is_type accepts valid session IDs
 prop_is_type_accepts_valid() ->
-    ?WITH_CFG(?FORALL(
-        ExtId,
-        external_id(),
-        bondy_session_id:is_type(bondy_session_id:new(ExtId))
-    )).
+    ?WITH_CFG(
+        ?FORALL(
+            ExtId,
+            external_id(),
+            bondy_session_id:is_type(bondy_session_id:new(ExtId))
+        )
+    ).
 
 %% Property: is_type rejects invalid terms
 prop_is_type_rejects_invalid() ->
@@ -208,21 +232,23 @@ prop_is_type_rejects_invalid() ->
 %% Property: both the node-hash segment and the Rest segment are base62, split
 %% by exactly one `.'.
 prop_segments_charset() ->
-    ?WITH_CFG(?FORALL(
-        _,
-        term(),
-        begin
-            SessionId = bondy_session_id:new(),
-            case binary:split(SessionId, <<$.>>, [global]) of
-                [NodeHash, Rest] ->
-                    NodeHash =/= <<>>
-                        andalso is_valid_base62(NodeHash)
-                        andalso is_valid_base62(Rest);
-                _ ->
-                    false
+    ?WITH_CFG(
+        ?FORALL(
+            _,
+            term(),
+            begin
+                SessionId = bondy_session_id:new(),
+                case binary:split(SessionId, <<$.>>, [global]) of
+                    [NodeHash, Rest] ->
+                        NodeHash =/= <<>> andalso
+                            is_valid_base62(NodeHash) andalso
+                            is_valid_base62(Rest);
+                    _ ->
+                        false
+                end
             end
-        end
-    )).
+        )
+    ).
 
 %% Helper: Check if all characters are valid base62
 is_valid_base62(Bin) when is_binary(Bin) ->

@@ -133,39 +133,39 @@ and asks the topology to release its physical resources for the table.
 it).
 """).
 
--export([open/2]).
--export([close/1]).
--export([start_draining/1]).
--export([cold_start_table_indexes/1]).
--export([open_table/3]).
--export([close_table/1]).
--export([tick/1]).
 -export([apply/4]).
 -export([apply_batch/4]).
 -export([apply_many/1]).
--export([reconcile/4]).
--export([map_update/4]).
+-export([await_index/2]).
+-export([close/1]).
+-export([close_table/1]).
+-export([cold_start_table_indexes/1]).
 -export([counter_inc/4]).
--export([probe_write/1]).
 -export([delete/3]).
--export([read/3]).
--export([range/5]).
--export([range_all/5]).
--export([list/2]).
+-export([ensure_fresh/2]).
 -export([index_get/5]).
--export([index_range/6]).
+-export([index_lag/2]).
 -export([index_prefix/5]).
 -export([index_prefix_range/6]).
+-export([index_range/6]).
+-export([info/1]).
+-export([list/2]).
+-export([map_update/4]).
+-export([namespace/1]).
+-export([open/2]).
+-export([open_table/3]).
+-export([probe_write/1]).
+-export([publish_event/1]).
+-export([range/5]).
+-export([range_all/5]).
+-export([read/3]).
 -export([rebuild_index/2]).
 -export([rebuild_indexes/1]).
--export([index_lag/2]).
--export([await_index/2]).
--export([ensure_fresh/2]).
--export([info/1]).
--export([namespace/1]).
+-export([reconcile/4]).
 -export([shard_count/1]).
 -export([shard_for/3]).
--export([publish_event/1]).
+-export([start_draining/1]).
+-export([tick/1]).
 
 -export_type([db/0, table/0, realm/0, entry/0, row/0]).
 
@@ -496,6 +496,11 @@ open_table_provision(
             ExplicitCrdt ->
                 ExplicitCrdt
         end,
+    %% Optional per-table construction config for `CrdtModule`, for a CRDT
+    %% that needs more than an event to build its bottom state (e.g.
+    %% `bondy_oplog_crdt_struct`'s schema) — see
+    %% `bondy_oplog_cell_kernel:init/2`. `#{}` for every other CRDT.
+    CrdtOpts = maps:get(crdt_opts, Merged, #{}),
     %% Fail fast: a `tier_2` CRDT MUST be `order_independent` (its eager
     %% `apply_op` must equal the group `interpret_cog`, since the DVV join
     %% is commutative). Catches a mis-declared module at open, not at the
@@ -518,6 +523,7 @@ open_table_provision(
                     ShardCount,
                     FoldModule,
                     CrdtModule,
+                    CrdtOpts,
                     OplogOpts,
                     SecIndexes,
                     Topology,
@@ -580,6 +586,7 @@ open_table_provision(
                                 aggregate_root => AggregateRoot,
                                 fold_module => FoldModule,
                                 crdt_module => CrdtModule,
+                                crdt_opts => CrdtOpts,
                                 causal_tier => causal_tier_of(CrdtModule),
                                 projection_backend => Backend,
                                 fused => Fused,
@@ -1143,11 +1150,25 @@ append_and_await(InstanceId, Op, Meta) ->
 %% Read the cell's current causal context (`context_of/1`) in the
 %% applier's single-cell scope (so it reflects committed writes for
 %% read-your-writes). Returns `{ok, undefined}` when the CRDT does not
-%% carry a context.
+%% carry a context. A fused instance has no separate applier process —
+%% falls back to the instance's own equivalent handler
+%% (`bondy_oplog_instance:cell_context/3`) in that case.
 cell_context(InstanceId, Bucket, Key) ->
     case bondy_oplog_registry:applier_pid(InstanceId) of
         undefined ->
-            {error, {instance_unavailable, InstanceId}};
+            case bondy_oplog_registry:fused(InstanceId) of
+                true ->
+                    case bondy_oplog_registry:instance_pid(InstanceId) of
+                        undefined ->
+                            {error, {instance_unavailable, InstanceId}};
+                        InstancePid ->
+                            bondy_oplog_instance:cell_context(
+                                InstancePid, Bucket, Key
+                            )
+                    end;
+                false ->
+                    {error, {instance_unavailable, InstanceId}}
+            end;
         ApplierPid ->
             bondy_oplog_applier:cell_context(ApplierPid, Bucket, Key)
     end.
@@ -1210,18 +1231,44 @@ probe_dispatch(InstanceId, Mod, Op) ->
 %% go through the applier's `cell_apply_target` like the write path does.
 %% `undefined` when the instance has no projection target (not probeable).
 probe_module(InstanceId) ->
+    case cell_apply_target_for(InstanceId) of
+        {ok, {NS, Index, Shard}} ->
+            probe_module_from_entry(NS, Index, Shard);
+        undefined ->
+            undefined
+    end.
+
+%% @private
+%% `InstanceId`'s resolved `cell_apply_target`, from whichever process
+%% actually holds it: the applier, or — when there is none, a fused
+%% instance has no separate applier by design — the fused instance itself.
+cell_apply_target_for(InstanceId) ->
     case bondy_oplog_registry:applier_pid(InstanceId) of
         undefined ->
-            undefined;
-        ApplierPid ->
-            try bondy_oplog_applier:cell_apply_target(ApplierPid) of
-                {ok, {NS, Index, Shard}} ->
-                    probe_module_from_entry(NS, Index, Shard);
+            case bondy_oplog_registry:fused(InstanceId) of
+                true ->
+                    case bondy_oplog_registry:instance_pid(InstanceId) of
+                        undefined ->
+                            undefined;
+                        InstancePid ->
+                            safe_cell_apply_target(
+                                bondy_oplog_instance, InstancePid
+                            )
+                    end;
                 _ ->
                     undefined
-            catch
-                _:_ -> undefined
-            end
+            end;
+        ApplierPid ->
+            safe_cell_apply_target(bondy_oplog_applier, ApplierPid)
+    end.
+
+%% @private
+safe_cell_apply_target(Mod, Pid) ->
+    try Mod:cell_apply_target(Pid) of
+        {ok, _} = OK -> OK;
+        _ -> undefined
+    catch
+        _:_ -> undefined
     end.
 
 %% @private
@@ -1988,6 +2035,7 @@ info(
         shard_count => SC,
         fold_module => Fold,
         crdt_module => maps:get(crdt_module, Table, undefined),
+        crdt_opts => maps:get(crdt_opts, Table, #{}),
         causal_tier => maps:get(causal_tier, Table, tier_0),
         fused => maps:get(fused, Table, false),
         indexes => maps:map(
@@ -2166,6 +2214,7 @@ provision_shards(
     ShardCount,
     FoldModule,
     CrdtModule,
+    CrdtOpts,
     OplogOpts,
     SecIndexes,
     Topology,
@@ -2181,6 +2230,7 @@ provision_shards(
                 ShardCount,
                 FoldModule,
                 CrdtModule,
+                CrdtOpts,
                 OplogOpts,
                 SecIndexes,
                 Topology,
@@ -2201,6 +2251,7 @@ provision_shard(
     ShardCount,
     FoldModule,
     CrdtModule,
+    CrdtOpts,
     OplogOpts,
     SecIndexes,
     Topology,
@@ -2223,6 +2274,10 @@ provision_shard(
                         %% Optional native CRDT for the cell projection;
                         %% `undefined` keeps the legacy fold path.
                         crdt_module => CrdtModule,
+                        %% Optional per-table construction config for
+                        %% `CrdtModule` (`#{}` default) — see
+                        %% `bondy_oplog_cell_kernel:init/2`.
+                        crdt_opts => CrdtOpts,
                         %% The CRDT's declared causal tier (default tier_0).
                         %% tier_2 provisions the per-cell DVV context stamp.
                         causal_tier => causal_tier_of(CrdtModule),

@@ -196,7 +196,8 @@ push_failure(InstanceId, Reason) ->
     end,
     ets:insert(
         ?INFLIGHT_TAB,
-        {FakePid, InstanceId, bootstrap, undefined, erlang:monotonic_time(millisecond)}
+        {FakePid, InstanceId, bootstrap, undefined,
+            erlang:monotonic_time(millisecond)}
     ),
     Sched ! {'DOWN', make_ref(), process, FakePid, Reason},
     _ = sys:get_state(Sched),

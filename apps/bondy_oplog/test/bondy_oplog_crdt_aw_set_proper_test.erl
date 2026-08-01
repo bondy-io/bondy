@@ -22,6 +22,14 @@
 %% `bondy_oplog_crdt_nested_core`) is never generated. `apply` mints a
 %% dot exactly like `add` does, so `oracle/1` treats both as
 %% presence-contributing.
+%%
+%% `prop_nested_counter_oracle` (its own apply/sync-only generator, no
+%% add/rmv) independently sums every {inc,N} delta applied to a nested
+%% element and checks it against the converged value — semantic
+%% correctness, not just internal consistency. See the aw_map suite's
+%% moduledoc for why this distinction matters: it is what would have
+%% caught a real bug (`bondy_oplog_crdt_nested_core:put_nested/7`
+%% incorrectly pruning a writer's own prior nested sub-op).
 
 -module(bondy_oplog_crdt_aw_set_proper_test).
 
@@ -43,10 +51,23 @@
 -export([prop_idempotent_redelivery/0]).
 -export([prop_encode_state_roundtrip/0]).
 -export([prop_add_wins_oracle/0]).
+-export([prop_nested_counter_oracle/0]).
 
 %% =============================================================================
 %% Generators
 %% =============================================================================
+
+%% Focused generator for prop_nested_counter_oracle: apply/sync only, no
+%% add/rmv, so the independent sum oracle never needs to reason about
+%% element removal.
+counter_cmd_gen() ->
+    oneof([
+        {apply, oneof(?ORIGINS), oneof(?NESTED_ELEMS), oneof(?DELTAS)},
+        {sync, oneof(?ORIGINS), oneof(?ORIGINS)}
+    ]).
+
+counter_cmds_gen() ->
+    list(counter_cmd_gen()).
 
 cmd_gen() ->
     oneof([
@@ -123,6 +144,43 @@ prop_add_wins_oracle() ->
         {_PerOrigin, Log} = simulate(Cmds),
         State = ?MOD:interpret_cog(Log, ?MOD:init()),
         present_elems(?MOD:to_value(State)) =:= oracle(Log)
+    end).
+
+%% A nested `pn_counter` element's converged value must equal the sum of
+%% every {inc,N} delta ever applied to it, independent of how many
+%% origins contributed or how much sequential same-origin churn there
+%% was. See the aw_map suite's identical property for why this checks
+%% something the properties above do not.
+prop_nested_counter_oracle() ->
+    ?FORALL(Cmds, counter_cmds_gen(), begin
+        {_PerOrigin, Log} = simulate(Cmds),
+        State = ?MOD:interpret_cog(Log, ?MOD:init()),
+        Value = ?MOD:to_value(State),
+        lists:all(
+            fun(NestedElem) ->
+                Deltas = [
+                    N
+                 || Ev <- Log,
+                    {apply, E, _SubMod, {inc, N}} <-
+                        [bondy_oplog_crdt_commutative:op_of(Ev)],
+                    E =:= NestedElem
+                ],
+                %% `to_value/1` returns a plain list (never a map) when
+                %% nothing in the whole state is nested -- e.g. an empty
+                %% command sequence -- so a nested element is trivially
+                %% absent in that shape too.
+                case Deltas of
+                    [] ->
+                        not (is_map(Value) andalso
+                            maps:is_key(NestedElem, Value));
+                    _ ->
+                        is_map(Value) andalso
+                            maps:get(NestedElem, Value, undefined) =:=
+                                lists:sum(Deltas)
+                end
+            end,
+            ?NESTED_ELEMS
+        )
     end).
 
 %% `to_value/1` returns a plain list when no element is nested (the
@@ -253,7 +311,8 @@ properties_test_() ->
             prop_permutation_invariant(),
             prop_idempotent_redelivery(),
             prop_encode_state_roundtrip(),
-            prop_add_wins_oracle()
+            prop_add_wins_oracle(),
+            prop_nested_counter_oracle()
         ],
         lists:foreach(
             fun(Prop) -> ?assert(proper:quickcheck(Prop, Opts)) end,

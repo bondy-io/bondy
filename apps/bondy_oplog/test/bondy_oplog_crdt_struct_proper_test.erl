@@ -37,6 +37,7 @@
 -export([prop_permutation_invariant/0]).
 -export([prop_idempotent_redelivery/0]).
 -export([prop_encode_state_roundtrip/0]).
+-export([prop_counter_field_oracle/0]).
 
 %% =============================================================================
 %% Generators
@@ -107,6 +108,27 @@ prop_encode_state_roundtrip() ->
         {_PerOrigin, Log} = simulate(Cmds),
         State = group_interpret(Log, init()),
         ?MOD:decode_state(?MOD:encode_state(State)) =:= State
+    end).
+
+%% The `count` field's converged value must equal the sum of every
+%% {inc,N} delta ever applied to it, independent of how many origins
+%% contributed or how much sequential same-origin churn there was — a
+%% semantic-correctness check, not just internal consistency. This is
+%% what would have caught a real bug
+%% (`bondy_oplog_crdt_nested_core:put_nested/7` incorrectly pruning a
+%% writer's own prior nested sub-op, silently dropping sequential
+%% same-origin increments) that shipped past every property above.
+prop_counter_field_oracle() ->
+    ?FORALL(Cmds, cmds_gen(), begin
+        {_PerOrigin, Log} = simulate(Cmds),
+        State = group_interpret(Log, init()),
+        #{count := Count} = ?MOD:to_value(State),
+        Deltas = [
+            N
+         || Ev <- Log,
+            {apply, count, {inc, N}} <- [bondy_oplog_event:op(Ev)]
+        ],
+        Count =:= lists:sum(Deltas)
     end).
 
 %% =============================================================================
@@ -202,7 +224,8 @@ properties_test_() ->
             prop_full_sync_converges(),
             prop_permutation_invariant(),
             prop_idempotent_redelivery(),
-            prop_encode_state_roundtrip()
+            prop_encode_state_roundtrip(),
+            prop_counter_field_oracle()
         ],
         lists:foreach(
             fun(Prop) -> ?assert(proper:quickcheck(Prop, Opts)) end,

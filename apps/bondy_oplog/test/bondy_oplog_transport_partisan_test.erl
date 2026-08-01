@@ -217,8 +217,11 @@ wait_for_partisan_members_loop(NodeB, Deadline) ->
             ok;
         false ->
             case erlang:monotonic_time(millisecond) > Deadline of
-                true -> error({partisan_join_timeout, NodeB});
-                false -> timer:sleep(250), wait_for_partisan_members_loop(NodeB, Deadline)
+                true ->
+                    error({partisan_join_timeout, NodeB});
+                false ->
+                    timer:sleep(250),
+                    wait_for_partisan_members_loop(NodeB, Deadline)
             end
     end.
 

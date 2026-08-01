@@ -148,8 +148,9 @@ apply_op({Entries, CC, Hlc}, {put, K, V}, Key, Context0) when is_binary(K) ->
     Entries1 = bondy_oplog_crdt_rw_nested_core:put(Entries, K, Dot, Ctx, V),
     {Entries1, bondy_oplog_crdt_aw_core:cc_absorb(CC, Ctx, Dot),
         erlang:max(Hlc, key_hlc(Key))};
-apply_op({Entries, CC, Hlc}, {apply, K, SubMod, SubOp}, Key, Context0)
-        when is_binary(K) andalso is_atom(SubMod) ->
+apply_op({Entries, CC, Hlc}, {apply, K, SubMod, SubOp}, Key, Context0) when
+    is_binary(K) andalso is_atom(SubMod)
+->
     Dot = bondy_oplog_crdt_aw_core:dot_of(Key),
     Ctx = bondy_oplog_crdt_aw_core:normalise_context(Context0),
     Entries1 = bondy_oplog_crdt_rw_nested_core:put_nested(

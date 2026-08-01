@@ -682,7 +682,8 @@ slow_read_no_projection(Entry, Bucket, Key, Kernel) ->
         [] ->
             {undefined, projection};
         Events ->
-            InitState = bondy_oplog_cell_kernel:init(Kernel),
+            CrdtOpts = bondy_oplog_core_registry:entry_crdt_opts(Entry),
+            InitState = bondy_oplog_cell_kernel:init(Kernel, CrdtOpts),
             {NewState, NewHlc} =
                 bondy_oplog_cell_kernel:interpret_overlay(
                     Kernel, InitState, 0, Events
@@ -780,7 +781,8 @@ read_projection_state(Entry, Bucket, Key, Kernel) ->
     PH = bondy_oplog_core_registry:entry_projection_handle(Entry),
     case PA:get(PH, Bucket, Key) of
         not_found ->
-            bondy_oplog_cell_kernel:init(Kernel);
+            CrdtOpts = bondy_oplog_core_registry:entry_crdt_opts(Entry),
+            bondy_oplog_cell_kernel:init(Kernel, CrdtOpts);
         {ok, Frame} ->
             {_Hlc, StateBytes, _ValueBytes} =
                 bondy_oplog_cell_frame:decode_full(Frame),
@@ -794,7 +796,8 @@ read_projection_state_with_hlc(Entry, Bucket, Key, Kernel) ->
     PH = bondy_oplog_core_registry:entry_projection_handle(Entry),
     case PA:get(PH, Bucket, Key) of
         not_found ->
-            {bondy_oplog_cell_kernel:init(Kernel), 0, false};
+            CrdtOpts = bondy_oplog_core_registry:entry_crdt_opts(Entry),
+            {bondy_oplog_cell_kernel:init(Kernel, CrdtOpts), 0, false};
         {ok, Frame} ->
             {Hlc, StateBytes, _ValueBytes} =
                 bondy_oplog_cell_frame:decode_full(Frame),
@@ -967,6 +970,7 @@ do_range(Entry, Bucket, Low, High, Opts) ->
     IncludeOverlay = maps:get(include_overlay, Opts, true),
     Fence = maps:get(fence, Opts, infinity),
     Kernel = kernel_for(Entry),
+    CrdtOpts = bondy_oplog_core_registry:entry_crdt_opts(Entry),
     PA = bondy_oplog_core_registry:entry_projection_adapter(Entry),
     PH = bondy_oplog_core_registry:entry_projection_handle(Entry),
 
@@ -975,7 +979,7 @@ do_range(Entry, Bucket, Low, High, Opts) ->
             OverlayEntries = overlay_for_range(
                 Entry, Bucket, Low, High, Fence, IncludeOverlay
             ),
-            Merged = merge_range(Kernel, ProjEntries, OverlayEntries),
+            Merged = merge_range(Kernel, CrdtOpts, ProjEntries, OverlayEntries),
             {ok, lists:sublist(Merged, Limit)};
         {error, _} = Err ->
             Err
@@ -993,7 +997,7 @@ overlay_for_range(Entry, Bucket, Low, High, Fence, true) ->
             )
     end.
 
-merge_range(Kernel, ProjEntries, OverlayEntries) ->
+merge_range(Kernel, CrdtOpts, ProjEntries, OverlayEntries) ->
     Init = maps:from_list([{K, {F, []}} || {K, F} <- ProjEntries]),
     Grouped = lists:foldl(
         fun({K, E}, M) ->
@@ -1008,7 +1012,9 @@ merge_range(Kernel, ProjEntries, OverlayEntries) ->
     Cells = lists:keysort(1, maps:to_list(Grouped)),
     lists:filtermap(
         fun({K, {Frame, Events}}) ->
-            case emit_range_cell(Kernel, Frame, lists:reverse(Events)) of
+            case
+                emit_range_cell(Kernel, CrdtOpts, Frame, lists:reverse(Events))
+            of
                 undefined -> false;
                 {V, H} -> {true, {K, V, H}}
             end
@@ -1098,11 +1104,11 @@ merge_sorted_ranges(PerShardRows) ->
     Flat = lists:append(PerShardRows),
     lists:sort(fun({K1, _, _}, {K2, _, _}) -> K1 =< K2 end, Flat).
 
-emit_range_cell(Kernel, Frame, Events) ->
+emit_range_cell(Kernel, CrdtOpts, Frame, Events) ->
     {ProjState, ProjHlc} =
         case Frame of
             undefined ->
-                {bondy_oplog_cell_kernel:init(Kernel), 0};
+                {bondy_oplog_cell_kernel:init(Kernel, CrdtOpts), 0};
             Bin when is_binary(Bin) ->
                 {H, StateBytes, _ValueBytes} =
                     bondy_oplog_cell_frame:decode_full(Bin),
@@ -1141,9 +1147,11 @@ do_read_at_hlc(Entry, Bucket, Key, T) ->
                 ),
             case bondy_oplog_cell_kernel:to_value(Kernel, NewState) of
                 undefined ->
+                    CrdtOpts = bondy_oplog_core_registry:entry_crdt_opts(Entry),
                     {ok,
                         bondy_oplog_cell_kernel:to_value(
-                            Kernel, bondy_oplog_cell_kernel:init(Kernel)
+                            Kernel,
+                            bondy_oplog_cell_kernel:init(Kernel, CrdtOpts)
                         ),
                         0};
                 Value ->

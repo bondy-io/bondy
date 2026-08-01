@@ -103,22 +103,29 @@ declarations_test_() ->
                 )
             )
         end},
-        {"RIB tables are ephemeral lww, published, no indexes", fun() ->
-            %% The replicated routing summary cells: single-writer-per-key so
-            %% `lww` is exact; `publish => true` readies merge-side reactor
-            %% consumption; point-read by cell key only, so no secondary
-            %% index.
+        {"RIB tables are ephemeral CRDT cells, published, no indexes", fun() ->
+            %% The replicated routing summary cells: per-field CRDT deltas
+            %% (count/invoke/created_times), single-writer-per-key so no
+            %% cross-origin merge conflict; `publish => true` readies
+            %% merge-side reactor consumption; point-read by cell key only,
+            %% so no secondary index.
             ?assert(
                 lists:all(
-                    fun(S) ->
-                        maps:get(fold, S) =:= lww andalso
+                    fun({S, ExpectedFold}) ->
+                        maps:get(fold, S) =:= ExpectedFold andalso
                             maps:get(durability, S) =:= ephemeral andalso
                             maps:get(publish, S, false) =:= true andalso
                             [] =:= maps:get(indexes, S, [])
                     end,
                     [
-                        maps:get(bondy_registration_rib, ByName),
-                        maps:get(bondy_subscription_rib, ByName)
+                        {
+                            maps:get(bondy_registration_rib, ByName),
+                            rib_registration
+                        },
+                        {
+                            maps:get(bondy_subscription_rib, ByName),
+                            rib_subscription
+                        }
                     ]
                 )
             )
@@ -235,6 +242,20 @@ provisions_all() ->
         ?assertMatch(
             #{fold_module := lww_register},
             bondy_db:info(?CAT:table(security_sources))
+        ),
+        %% RIB tables register the generic CRDT toolkit modules directly (no
+        %% per-use-case wrapper) — registration_rib carries its schema as
+        %% crdt_opts (bondy_oplog_crdt_struct has none of its own).
+        ?assertMatch(
+            #{
+                crdt_module := bondy_oplog_crdt_struct,
+                crdt_opts := #{count := _, invoke := _, created_times := _}
+            },
+            bondy_db:info(?CAT:table(bondy_registration_rib))
+        ),
+        ?assertMatch(
+            #{crdt_module := bondy_oplog_crdt_pn_counter},
+            bondy_db:info(?CAT:table(bondy_subscription_rib))
         ),
         %% info/0 summary.
         Info = ?CAT:info(),

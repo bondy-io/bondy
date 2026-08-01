@@ -69,7 +69,9 @@ cross_node_get(Config) ->
 
     Result = erpc:call(N2, ?MODULE, do_session_get, [Uri, Guid]),
     ?assertMatch(
-        #result{args = [#{session := ExtId, authextra := #{session_guid := Guid}}]},
+        #result{
+            args = [#{session := ExtId, authextra := #{session_guid := Guid}}]
+        },
         Result
     ).
 

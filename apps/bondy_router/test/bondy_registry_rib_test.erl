@@ -3,11 +3,12 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Whitebox eunit for `bondy_registry_rib:recompute/5` — the serialised
-%% routing-summary derivation — driven with synthetic members rows against a
-%% provisioned catalogue (the ephemeral `registry` DB with the RIB tables).
-%% The hook-driven end-to-end path (register/unregister → cell) is covered
-%% in `bondy_registry_SUITE`.
+%% Whitebox eunit for `bondy_registry_rib`'s entry-add/remove write path — the
+%% per-field CRDT deltas `on_entry_added/3`/`on_entry_removed/3` apply
+%% directly from the caller, with no partition dispatch or recompute step.
+%% Driven with real `bondy_registry_entry:t()` records against a provisioned
+%% catalogue. The hook-driven end-to-end path (register/unregister → cell) is
+%% covered in `bondy_registry_SUITE`.
 -module(bondy_registry_rib_test).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -18,97 +19,143 @@
 -define(REALM, <<"com.example.rib">>).
 -define(URI, <<"com.example.rib.proc">>).
 
-recompute_test_() ->
-    {setup,
-        fun() ->
-            {ok, _} = application:ensure_all_started(bondy_db),
-            ok
-        end,
-        fun(_) -> ok end, [
-            {timeout, 60, {"registration summary lifecycle", fun regs/0}},
-            {timeout, 60, {"subscription summary lifecycle", fun subs/0}},
+%% One catalogue is booted for the whole suite (not one per test function):
+%% each fresh boot of the registry DB's (ephemeral, mem-backed, fused) oplog
+%% instance races its own cold-start drain scheduling, and churning through
+%% that repeatedly — once per test, as this suite used to — reliably
+%% surfaces it. A single shared boot is also the more faithful model: a real
+%% node provisions its registry DB once, not once per test case.
+write_path_test_() ->
+    {setup, fun setup_catalog/0, fun teardown_catalog/1, fun({_Pid, _Tmp, Tab}) ->
+        [
+            {timeout, 60,
+                {"registration summary lifecycle", fun() -> regs(Tab) end}},
+            {timeout, 60,
+                {"subscription summary lifecycle", fun() -> subs(Tab) end}},
             {timeout, 60, {"remote stub lifecycle", fun stubs/0}},
             {timeout, 60, {"subscriber node discovery", fun sub_nodes/0}},
-            {timeout, 60, {"update damping", fun damping/0}}
-        ]}.
+            {timeout, 60, {"reshape_summary/2", fun reshape_summary/0}}
+        ]
+    end}.
 
-regs() ->
-    with_catalog(fun(Tab) ->
-        Table = ?CAT:table(?BONDY_DB_REGISTRATION_RIB_TAB),
-        ?assertMatch(#{db_name := registry}, Table),
-        Key = cell_key(?EXACT_MATCH, ?URI),
+%% `bondy_db:read/3` on a RIB table returns the RAW `bondy_oplog_crdt_
+%% struct`/`bondy_oplog_crdt_pn_counter` projection — the generic CRDT
+%% toolkit modules are registered directly (no per-use-case wrapper), so
+%% `count`/`invoke` are already top-level (schema field names) but
+%% `created_times` is the raw two_p_set element list, not the derived
+%% `earliest`/`latest`. That derivation is `reshape_summary/2`'s job,
+%% exercised on its own in the `reshape_summary/0` test below —
+%% `regs/1`/`subs/1` here cover the write path via the raw shape.
+regs(Tab) ->
+    Table = ?CAT:table(?BONDY_DB_REGISTRATION_RIB_TAB),
+    ?assertMatch(#{db_name := registry}, Table),
+    Key = cell_key(?EXACT_MATCH, ?URI),
 
-        %% Two live local entries -> one cell, count 2, invoke carried,
-        %% earliest/latest = the ends of the Created order.
-        row(Tab, registration, ?EXACT_MATCH, 100, 1, ?INVOKE_ROUND_ROBIN),
-        row(Tab, registration, ?EXACT_MATCH, 200, 2, ?INVOKE_ROUND_ROBIN),
-        ok = recompute(Tab, registration),
-        ?assertMatch(
-            {ok, {
-                #{
-                    invoke := ?INVOKE_ROUND_ROBIN,
-                    count := 2,
-                    earliest := 100,
-                    latest := 200
-                },
-                _Hlc
-            }},
-            bondy_db:read(Table, ?REALM, Key)
-        ),
+    %% Two live local entries -> one cell, count 2, invoke carried,
+    %% created_times holds one element per live entry.
+    E1 = entry(registration, ?EXACT_MATCH, ?INVOKE_ROUND_ROBIN),
+    timer:sleep(2),
+    E2 = entry(registration, ?EXACT_MATCH, ?INVOKE_ROUND_ROBIN),
+    CK1 = bondy_registry_rib:created_key(
+        bondy_registry_entry:created(E1), bondy_registry_entry:id(E1)
+    ),
+    CK2 = bondy_registry_rib:created_key(
+        bondy_registry_entry:created(E2), bondy_registry_entry:id(E2)
+    ),
 
-        %% Removing the latest entry shrinks the summary exactly.
-        true = ets:delete(
-            Tab, {registration, ?REALM, ?EXACT_MATCH, ?URI, 200, 2}
-        ),
-        ok = recompute(Tab, registration),
-        ?assertMatch(
-            {ok, {#{count := 1, earliest := 100, latest := 100}, _}},
-            bondy_db:read(Table, ?REALM, Key)
-        ),
+    ok = bondy_registry_rib:on_entry_added(self(), Tab, E1),
+    ok = bondy_registry_rib:on_entry_added(self(), Tab, E2),
+    {ok, {#{invoke := Invoke0, count := Count0, created_times := Times0}, _}} =
+        bondy_db:read(Table, ?REALM, Key),
+    ?assertEqual(?INVOKE_ROUND_ROBIN, Invoke0),
+    ?assertEqual(2, Count0),
+    ?assertEqual(lists:sort([CK1, CK2]), lists:sort(Times0)),
 
-        %% Last member gone -> the cell is cleared (presence `dead`).
-        true = ets:delete(
-            Tab, {registration, ?REALM, ?EXACT_MATCH, ?URI, 100, 1}
-        ),
-        ok = recompute(Tab, registration),
-        ?assertEqual(
-            {error, not_found}, bondy_db:read(Table, ?REALM, Key)
-        ),
+    %% Removing the latest entry shrinks the summary exactly.
+    ok = bondy_registry_rib:on_entry_removed(self(), Tab, E2),
+    {ok, {#{count := Count1, created_times := Times1}, _}} =
+        bondy_db:read(Table, ?REALM, Key),
+    ?assertEqual(1, Count1),
+    ?assertEqual([CK1], Times1),
 
-        %% A different policy for the same URI is a different cell —
-        %% and prefix members do not leak into the exact summary.
-        row(Tab, registration, ?PREFIX_MATCH, 300, 3, ?INVOKE_SINGLE),
-        ok = recompute(Tab, registration, ?PREFIX_MATCH),
-        ?assertEqual({error, not_found}, bondy_db:read(Table, ?REALM, Key)),
-        ?assertMatch(
-            {ok, {#{invoke := ?INVOKE_SINGLE, count := 1}, _}},
-            bondy_db:read(Table, ?REALM, cell_key(?PREFIX_MATCH, ?URI))
-        )
-    end).
+    %% Last member gone -> no explicit clear, count settles to 0.
+    ok = bondy_registry_rib:on_entry_removed(self(), Tab, E1),
+    ?assertMatch(
+        {ok, {#{count := 0, created_times := []}, _}},
+        bondy_db:read(Table, ?REALM, Key)
+    ),
 
-subs() ->
-    with_catalog(fun(Tab) ->
-        Table = ?CAT:table(?BONDY_DB_SUBSCRIPTION_RIB_TAB),
-        Key = cell_key(?EXACT_MATCH, ?URI),
+    %% A different policy for the same URI is a different cell — and does
+    %% not resurrect the emptied exact-match one.
+    E3 = entry(registration, ?PREFIX_MATCH, ?INVOKE_SINGLE),
+    ok = bondy_registry_rib:on_entry_added(self(), Tab, E3),
+    ?assertMatch(
+        {ok, {#{count := 0}, _}}, bondy_db:read(Table, ?REALM, Key)
+    ),
+    ?assertMatch(
+        {ok, {#{invoke := ?INVOKE_SINGLE, count := 1}, _}},
+        bondy_db:read(Table, ?REALM, cell_key(?PREFIX_MATCH, ?URI))
+    ),
 
-        %% Subscription cells are reachability-only: `#{count}`.
-        row(Tab, subscription, ?EXACT_MATCH, 100, 1, undefined),
-        row(Tab, subscription, ?EXACT_MATCH, 200, 2, undefined),
-        ok = recompute(Tab, subscription),
-        ?assertMatch(
-            {ok, {#{count := 2} = V, _}} when map_size(V) == 1,
-            bondy_db:read(Table, ?REALM, Key)
-        ),
+    %% Leave the prefix cell empty too, so it does not leak into `subs/1`'s
+    %% shared members table.
+    ok = bondy_registry_rib:on_entry_removed(self(), Tab, E3).
 
-        true = ets:delete(
-            Tab, {subscription, ?REALM, ?EXACT_MATCH, ?URI, 100, 1}
-        ),
-        true = ets:delete(
-            Tab, {subscription, ?REALM, ?EXACT_MATCH, ?URI, 200, 2}
-        ),
-        ok = recompute(Tab, subscription),
-        ?assertEqual({error, not_found}, bondy_db:read(Table, ?REALM, Key))
-    end).
+subs(Tab) ->
+    Table = ?CAT:table(?BONDY_DB_SUBSCRIPTION_RIB_TAB),
+    Key = cell_key(?EXACT_MATCH, ?URI),
+
+    %% Subscription cells are reachability-only: a bare pn_counter, so the
+    %% raw read is a plain integer (`reshape_summary/2` wraps it as
+    %% `#{count => N}` for consumers — see the `reshape_summary/0` test).
+    E1 = entry(subscription, ?EXACT_MATCH, undefined),
+    E2 = entry(subscription, ?EXACT_MATCH, undefined),
+
+    ok = bondy_registry_rib:on_entry_added(self(), Tab, E1),
+    ok = bondy_registry_rib:on_entry_added(self(), Tab, E2),
+    ?assertMatch({ok, {2, _}}, bondy_db:read(Table, ?REALM, Key)),
+
+    ok = bondy_registry_rib:on_entry_removed(self(), Tab, E1),
+    ok = bondy_registry_rib:on_entry_removed(self(), Tab, E2),
+    ?assertMatch({ok, {0, _}}, bondy_db:read(Table, ?REALM, Key)).
+
+%% Unit-tests the read-path reshape in isolation: registration derives
+%% `earliest`/`latest` from the raw `created_times` set (min/max of the
+%% decoded `Created` component); subscription wraps the bare counter.
+reshape_summary() ->
+    CK1 = bondy_registry_rib:created_key(100, <<"a">>),
+    CK2 = bondy_registry_rib:created_key(200, <<"b">>),
+    CK3 = bondy_registry_rib:created_key(150, <<"c">>),
+    ?assertEqual(
+        #{
+            invoke => ?INVOKE_ROUND_ROBIN,
+            count => 3,
+            earliest => 100,
+            latest => 200
+        },
+        bondy_registry_rib:reshape_summary(registration, #{
+            count => 3,
+            invoke => ?INVOKE_ROUND_ROBIN,
+            created_times => [CK2, CK1, CK3]
+        })
+    ),
+    ?assertEqual(
+        #{
+            invoke => ?INVOKE_SINGLE,
+            count => 0,
+            earliest => undefined,
+            latest => undefined
+        },
+        bondy_registry_rib:reshape_summary(registration, #{
+            count => 0,
+            invoke => ?INVOKE_SINGLE,
+            created_times => []
+        })
+    ),
+    ?assertEqual(
+        #{count => 7},
+        bondy_registry_rib:reshape_summary(subscription, 7)
+    ).
 
 %% The remote-merge reactions maintain the stub store: `{set, Summary}`
 %% upserts, `clear` drops, self-origin and garbage are ignored (totality).
@@ -244,109 +291,58 @@ sub_nodes() ->
         registration, SKey(?EXACT_MATCH, <<"com.example.ribsub.proc">>, PeerB)
     ).
 
-%% Update damping: cell creation and selection-relevant changes (earliest)
-%% write through; count/latest-only changes on a live cell are suppressed
-%% within the window and written once it closes (here: by switching the
-%% window off, standing in for the trailing recompute the partition server
-%% runs in production).
-damping() ->
-    %% In production the damp table is claimed via bondy_table_manager (a
-    %% bondy_router process) on first use; here a bare named table
-    %% suffices — `ensure_damp_table` reuses any existing one.
-    ok = ensure_named_tab(bondy_registry_rib_damp, set),
-    with_catalog(fun(Tab) ->
-        Table = ?CAT:table(?BONDY_DB_REGISTRATION_RIB_TAB),
-        Key = cell_key(?EXACT_MATCH, ?URI),
-        ok = application:set_env(bondy_router, registry_rib_damping, 60000),
-        try
-            %% 0→1 (creation) is never damped.
-            row(Tab, registration, ?EXACT_MATCH, 100, 1, ?INVOKE_SINGLE),
-            ok = recompute(Tab, registration),
-            ?assertMatch(
-                {ok, {#{count := 1}, _}}, bondy_db:read(Table, ?REALM, Key)
-            ),
-
-            %% A count/latest-only change within the window is suppressed.
-            row(Tab, registration, ?EXACT_MATCH, 200, 2, ?INVOKE_SINGLE),
-            ok = recompute(Tab, registration),
-            ?assertMatch(
-                {ok, {#{count := 1, latest := 100}, _}},
-                bondy_db:read(Table, ?REALM, Key)
-            ),
-
-            %% An `earliest` change is selection-relevant — writes through.
-            true = ets:delete(
-                Tab, {registration, ?REALM, ?EXACT_MATCH, ?URI, 100, 1}
-            ),
-            ok = recompute(Tab, registration),
-            ?assertMatch(
-                {ok, {#{count := 1, earliest := 200}, _}},
-                bondy_db:read(Table, ?REALM, Key)
-            ),
-
-            %% Another count-only change: suppressed again...
-            row(Tab, registration, ?EXACT_MATCH, 300, 3, ?INVOKE_SINGLE),
-            ok = recompute(Tab, registration),
-            ?assertMatch(
-                {ok, {#{count := 1}, _}}, bondy_db:read(Table, ?REALM, Key)
-            ),
-
-            %% ...and lands once the window no longer applies.
-            ok = application:set_env(bondy_router, registry_rib_damping, 0),
-            ok = recompute(Tab, registration),
-            ?assertMatch(
-                {ok, {#{count := 2, latest := 300}, _}},
-                bondy_db:read(Table, ?REALM, Key)
-            ),
-
-            %% 1→0 (last member gone) is never damped.
-            application:set_env(bondy_router, registry_rib_damping, 60000),
-            true = ets:delete(
-                Tab, {registration, ?REALM, ?EXACT_MATCH, ?URI, 200, 2}
-            ),
-            true = ets:delete(
-                Tab, {registration, ?REALM, ?EXACT_MATCH, ?URI, 300, 3}
-            ),
-            ok = recompute(Tab, registration),
-            ?assertEqual(
-                {error, not_found}, bondy_db:read(Table, ?REALM, Key)
-            )
-        after
-            application:unset_env(bondy_router, registry_rib_damping)
-        end
-    end).
-
 %% =============================================================================
 %% Helpers
 %% =============================================================================
 
-with_catalog(Fun) ->
+setup_catalog() ->
+    {ok, _} = application:ensure_all_started(bondy_db),
     Tmp = make_tmpdir(),
     ok = bondy_db_config:set([databases, main, oplog, shard_count], 1),
     application:set_env(bondy_router, platform_data_dir, Tmp),
     {ok, Pid} = ?CAT:start_link(),
     Tab = ets:new(rib_members, [ordered_set, public]),
-    try
-        Fun(Tab)
-    after
-        ets:delete(Tab),
-        _ = catch gen_server:stop(Pid, normal, 30000),
-        ok = bondy_db_config:set([databases, main, oplog, shard_count], 16),
-        application:unset_env(bondy_router, platform_data_dir),
-        _ = file:del_dir_r(Tmp),
-        ok
+    timer:sleep(500),
+    {Pid, Tmp, Tab}.
+
+teardown_catalog({Pid, Tmp, Tab}) ->
+    ets:delete(Tab),
+    _ = catch gen_server:stop(Pid, normal, 30000),
+    ok = bondy_db_config:set([databases, main, oplog, shard_count], 16),
+    application:unset_env(bondy_router, platform_data_dir),
+    _ = file:del_dir_r(Tmp),
+    ok.
+
+%% The registry DB's oplog instance(s) start asynchronously after
+%% `?CAT:start_link/0` returns — a write issued immediately can race a
+%% not-yet-registered instance (`{error, {instance_unavailable, _}}`).
+%% Probed on `regs/1`'s own exact-match cell key, so it exercises the exact
+%% shard those writes will use, via the registration table (tier_2 — its
+%% write goes through `apply_with_context/4`'s extra applier-context
+%% round-trip, which registers slightly after the plain WAL/instance front
+%% the tier_0 subscription table would exercise) with a genuine, harmless
+%% op (`{apply, count, {inc, 0}}`).
+await_ready(Table, RealmUri) ->
+    Key = cell_key(?EXACT_MATCH, ?URI),
+    await_ready(Table, RealmUri, Key, 250).
+
+await_ready(_Table, _RealmUri, _Key, 0) ->
+    error(rib_test_db_not_ready);
+await_ready(Table, RealmUri, Key, N) ->
+    case bondy_db:apply(Table, RealmUri, Key, {apply, count, {inc, 0}}) of
+        ok ->
+            ok;
+        {error, {instance_unavailable, _}} ->
+            timer:sleep(20),
+            await_ready(Table, RealmUri, Key, N - 1)
     end.
 
-row(Tab, Type, Policy, Created, EntryId, Invoke) ->
-    true = ets:insert(
-        Tab, {{Type, ?REALM, Policy, ?URI, Created, EntryId}, Invoke}
-    ).
-
-recompute(Tab, Type) ->
-    recompute(Tab, Type, ?EXACT_MATCH).
-
-recompute(Tab, Type, Policy) ->
-    bondy_registry_rib:recompute(Tab, Type, ?REALM, Policy, ?URI).
+%% A synthetic local entry for `?REALM`/`?URI`. `Invoke` is ignored for
+%% subscriptions (the type carries no invocation policy).
+entry(Type, Policy, Invoke) ->
+    Ref = bondy_ref:new(internal),
+    Opts = #{match => Policy, invoke => Invoke},
+    bondy_registry_entry:new(Type, ?REALM, Ref, ?URI, Opts).
 
 cell_key(Policy, Uri) ->
     cell_key(Policy, Uri, bondy_config:nodestring()).

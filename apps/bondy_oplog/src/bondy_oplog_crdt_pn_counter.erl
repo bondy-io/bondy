@@ -53,6 +53,7 @@ switch with no data migration.
 -export([hlc/1]).
 -export([value_equals_state/0]).
 -export([order_independent/0]).
+-export([stabilize/2]).
 -export([encode_state/1]).
 -export([decode_state/1]).
 %% bondy_oplog_crdt_commutative
@@ -146,6 +147,23 @@ value_equals_state() ->
 
 order_independent() ->
     true.
+
+-doc """
+Causal stabilization: `discard` once the counter's value is its own
+algebraic zero (`sum(Pos) - sum(Neg) =:= 0`, the counter's bottom/identity
+value — not a policy choice, true for any consumer) and every constituent
+operation is strictly below the stability point. A non-zero value is data
+and is kept at any stability point.
+""".
+-spec stabilize(bondy_oplog_hlc:hlc(), state()) -> keep | discard.
+
+stabilize(StableHlc, #{hlc := Hlc} = State) when Hlc < StableHlc ->
+    case to_value(State) of
+        0 -> discard;
+        _ -> keep
+    end;
+stabilize(_StableHlc, _State) ->
+    keep.
 
 -spec encode_state(state()) -> binary().
 

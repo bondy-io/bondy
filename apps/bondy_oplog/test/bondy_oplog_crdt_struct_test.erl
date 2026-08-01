@@ -23,7 +23,9 @@ apply_op_on_unknown_field_raises_test() ->
     State = ?MOD:init(?SCHEMA),
     ?assertError(
         {badarg, {unknown_field, bogus}},
-        ?MOD:apply_op(State, {apply, bogus, {inc, 1}}, ev_key(1, <<"a">>, 1), [])
+        ?MOD:apply_op(
+            State, {apply, bogus, {inc, 1}}, ev_key(1, <<"a">>, 1), []
+        )
     ).
 
 never_written_field_projects_sub_mod_bottom_test() ->

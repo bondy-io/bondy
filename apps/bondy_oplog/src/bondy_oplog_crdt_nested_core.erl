@@ -49,8 +49,28 @@ flat `put/5` and `put_nested/7` on the same live key, or changing
 `SubMod` on a live key, is a caller error and raises `{badarg, _}`: a
 silent type mix would corrupt `nested_value/2`'s replay, which assumes
 every surviving entry at a key shares one `SubMod`.
+
+## `force_reap/2` — a stronger, opt-in alternative to `reap_origins/2`
+
+A CRDT module's own `reap_origins/2` (see `bondy_oplog_crdt.erl`) is
+deliberately conservative: it drops an origin's *causal-context*
+bookkeeping only once that origin has no surviving value anywhere,
+never the value itself — the right default for a general-purpose type,
+where a retired writer's surviving contribution may still be meaningful
+application data. `force_reap/2` is the opposite: it unconditionally
+drops every surviving entry (flat or nested) whose dot's origin is
+retired, discarding value data outright. This is only safe for a field
+whose own domain semantics make a retired origin's contributions
+unconditionally, permanently invalid — e.g. a set of live-session
+markers scoped to one node's process lifetime, where the origin
+retiring (that node's oplog identity rotating away, e.g. after a crash)
+*means* every entry it wrote is already gone in reality, not just in
+bookkeeping. Getting `RetiredOrigins` wrong here is a permanent data
+loss, not a bookkeeping-bloat nuisance — heed `reap_origins/2`'s own
+"operator's obligation" caution more strictly still.
 """).
 
+-export([force_reap/2]).
 -export([nested_value/2]).
 -export([put/5]).
 -export([put_nested/7]).
@@ -92,12 +112,12 @@ put(Entries, K, Dot, Ctx, V) ->
     Entries#{K => DS1#{Dot => V}}.
 
 -doc """
-Put a sub-operation `SubOp` (targeting sub-CRDT `SubMod`) at key `K`:
-drop every dot the writer's `Ctx` observed, then add the tagged
-sub-operation under the operation's own `Dot`. Raises `{badarg,
-{sub_mod_mismatch, K, Expected, Got}}` if `K` already holds sub-ops for
-a *different* `SubMod`, or `{badarg, {flat_key, K}}` if `K` currently
-holds a flat (non-nested) value.
+Adds a sub-operation `SubOp` (targeting sub-CRDT `SubMod`) at key `K`
+under the operation's own `Dot`, alongside every sub-op already there —
+deliberately not an observed-remove: see the note on `Ctx` below. Raises
+`{badarg, {sub_mod_mismatch, K, Expected, Got}}` if `K` already holds
+sub-ops for a *different* `SubMod`, or `{badarg, {flat_key, K}}` if `K`
+currently holds a flat (non-nested) value.
 """.
 -spec put_nested(
     Entries :: entries(),
@@ -109,11 +129,23 @@ holds a flat (non-nested) value.
     SubOp :: term()
 ) -> entries().
 
-put_nested(Entries, K, Dot, Ctx, SubMod, Hlc, SubOp) ->
+%% `Ctx` is accepted (matching `put/5`'s signature, so callers thread the
+%% same dot/context pair through either call uniformly) but deliberately
+%% unused: see below.
+put_nested(Entries, K, Dot, _Ctx, SubMod, Hlc, SubOp) ->
     DS0 = maps:get(K, Entries, #{}),
-    DS1 = bondy_oplog_crdt_aw_core:drop_observed(DS0, Ctx),
-    ok = check_sub_mod(DS1, K, SubMod),
-    Entries#{K => DS1#{Dot => {sub, SubMod, Hlc, SubOp}}}.
+    ok = check_sub_mod(DS0, K, SubMod),
+    %% Deliberately no drop_observed/2 here, unlike put/5. A flat value is
+    %% a register — a sequential same-origin write should supersede its
+    %% own prior value, which is exactly what drop_observed/2 achieves.
+    %% A nested sub-op is not a value to be superseded; it is one event in
+    %% a sequence every one of which must survive to be individually
+    %% folded through SubMod's own interpret_cog (an accumulator like
+    %% pn_counter, or a permanent-membership type like two_p_set, computes
+    %% the wrong result if any of its own ops go missing). Only an
+    %% explicit rmv/3 of the whole outer key may prune nested sub-op
+    %% dots — never an ordinary same-origin put_nested/7.
+    Entries#{K => DS0#{Dot => {sub, SubMod, Hlc, SubOp}}}.
 
 -doc """
 Observed-remove at key `K`: drop every dot the writer's `Ctx` observed
@@ -133,6 +165,23 @@ rmv(Entries, K, Ctx) ->
         0 -> maps:remove(K, Entries);
         _ -> Entries#{K => DS1}
     end.
+
+-doc """
+Unconditionally drops every dot (flat or nested value, uniformly) whose
+origin is in `RetiredOrigins` — see the moduledoc's *"`force_reap/2` — a
+stronger, opt-in alternative to `reap_origins/2`"* section for when this
+is (and is not) safe to use. Operates on a bare `dot_store()`, so it
+applies equally to one `aw_map`/`aw_set` key's dot-store or one
+`bondy_oplog_crdt_struct` field's.
+""".
+-spec force_reap(DotStore :: dot_store(), RetiredOrigins :: [term()]) ->
+    dot_store().
+
+force_reap(DotStore, RetiredOrigins) ->
+    maps:filter(
+        fun({Origin, _Seq}, _V) -> not lists:member(Origin, RetiredOrigins) end,
+        DotStore
+    ).
 
 -doc """
 The `SubMod` a dot-store's surviving entries were written with, or

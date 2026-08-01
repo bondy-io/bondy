@@ -58,9 +58,11 @@ put_nested_same_sub_mod_twice_is_fine_test() ->
     Entries0 = ?M:put_nested(#{}, <<"k">>, {<<"a">>, 1}, [], ?COUNTER, 1, {
         inc, 1
     }),
-    Entries1 = ?M:put_nested(Entries0, <<"k">>, {<<"b">>, 1}, [], ?COUNTER, 2, {
-        inc, 2
-    }),
+    Entries1 = ?M:put_nested(
+        Entries0, <<"k">>, {<<"b">>, 1}, [], ?COUNTER, 2, {
+            inc, 2
+        }
+    ),
     ?assertEqual(?COUNTER, ?M:sub_mod(maps:get(<<"k">>, Entries1))).
 
 %% =============================================================================
@@ -85,9 +87,11 @@ nested_value_replays_surviving_sub_ops_test() ->
     Entries0 = ?M:put_nested(#{}, <<"k">>, {<<"a">>, 1}, [], ?COUNTER, 1, {
         inc, 5
     }),
-    Entries1 = ?M:put_nested(Entries0, <<"k">>, {<<"b">>, 1}, [], ?COUNTER, 2, {
-        inc, 3
-    }),
+    Entries1 = ?M:put_nested(
+        Entries0, <<"k">>, {<<"b">>, 1}, [], ?COUNTER, 2, {
+            inc, 3
+        }
+    ),
     DS = maps:get(<<"k">>, Entries1),
     ?assertEqual(8, ?M:nested_value(?COUNTER, DS)).
 
@@ -99,9 +103,11 @@ rmv_prunes_only_observed_dots_test() ->
     Entries0 = ?M:put_nested(#{}, <<"k">>, {<<"a">>, 1}, [], ?COUNTER, 1, {
         inc, 5
     }),
-    Entries1 = ?M:put_nested(Entries0, <<"k">>, {<<"b">>, 1}, [], ?COUNTER, 2, {
-        inc, 3
-    }),
+    Entries1 = ?M:put_nested(
+        Entries0, <<"k">>, {<<"b">>, 1}, [], ?COUNTER, 2, {
+            inc, 3
+        }
+    ),
     %% Remove observing only a's dot -- b's concurrent apply survives.
     Entries2 = ?M:rmv(Entries1, <<"k">>, [{<<"a">>, 1}]),
     DS = maps:get(<<"k">>, Entries2),
@@ -122,5 +128,7 @@ rmv_on_absent_key_is_a_noop_test() ->
 put_prunes_writers_own_observed_dot_test() ->
     Entries0 = ?M:put(#{}, <<"k">>, {<<"a">>, 1}, [], <<"v1">>),
     %% A second write from the same origin, observing its own prior dot.
-    Entries1 = ?M:put(Entries0, <<"k">>, {<<"a">>, 2}, [{<<"a">>, 1}], <<"v2">>),
+    Entries1 = ?M:put(
+        Entries0, <<"k">>, {<<"a">>, 2}, [{<<"a">>, 1}], <<"v2">>
+    ),
     ?assertEqual(#{{<<"a">>, 2} => <<"v2">>}, maps:get(<<"k">>, Entries1)).

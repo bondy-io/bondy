@@ -37,7 +37,6 @@ groups() ->
             rib_retry_next_node,
             rib_retry_exhausted,
             rib_retry_requires_marker,
-            rib_damping_trailing_update,
             rib_metrics_surface
         ]},
         {pubsub, [sequence], [
@@ -475,14 +474,20 @@ registry_rib_dual_write(Config) ->
     ?assertMatch({ok, _}, bondy_dealer:register(Uri, Opts, RealmUri, Ref)),
     ?assertMatch({ok, _}, bondy_dealer:register(Uri, Opts, RealmUri, Ref)),
 
+    %% `bondy_db:read/3` returns the RAW `bondy_oplog_crdt_struct`
+    %% projection (registered directly, no per-use-case wrapper) —
+    %% `count`/`invoke` are top-level (schema field names) but
+    %% `created_times` is the raw two_p_set element list, not the derived
+    %% `earliest`/`latest` (that derivation is `bondy_registry_rib:
+    %% reshape_summary/2`'s job, unit-tested on its own).
     ?assert(
         await_cell(Table, RealmUri, Key, fun
             (
                 {ok, {
-                    #{invoke := I, count := 2, earliest := E, latest := L}, _
+                    #{invoke := I, count := 2, created_times := CT}, _
                 }}
             ) when
-                I == ?INVOKE_ROUND_ROBIN, E =< L
+                I == ?INVOKE_ROUND_ROBIN, length(CT) == 2
             ->
                 true;
             (_) ->
@@ -505,15 +510,18 @@ registry_rib_dual_write(Config) ->
         "Removing one of two registrations must leave count 1"
     ),
 
-    %% Removing the last registration clears the cell (presence `dead`).
+    %% Removing the last registration settles the cell to count=0 — no
+    %% explicit clear; a count=0 cell is "not routable" (see
+    %% `bondy_registry_rib`'s moduledoc "Concurrency model"), physically
+    %% reclaimed later via `stabilize/2` once causally stable.
     ok = bondy_registry:remove(E2),
 
     ?assert(
         await_cell(Table, RealmUri, Key, fun
-            ({error, not_found}) -> true;
+            ({ok, {#{count := 0}, _}}) -> true;
             (_) -> false
         end),
-        "Removing the last registration must clear the cell"
+        "Removing the last registration must settle the cell to count=0"
     ),
 
     %% Subscriptions: reachability-only cells (`#{count}`).
@@ -527,9 +535,13 @@ registry_rib_dual_write(Config) ->
         {RealmUri, ?EXACT_MATCH, SubUri, bondy_config:nodestring()}
     ),
 
+    %% Subscription is a bare `bondy_oplog_crdt_pn_counter`, registered
+    %% directly — its raw projection is a plain integer, not a map
+    %% (`bondy_registry_rib:reshape_summary/2` wraps it as `#{count => N}`
+    %% for consumers, unit-tested on its own).
     ?assert(
         await_cell(SubTable, RealmUri, SubKey, fun
-            ({ok, {#{count := 1}, _}}) -> true;
+            ({ok, {1, _}}) -> true;
             (_) -> false
         end),
         "A local subscription must produce a count-only cell"
@@ -541,10 +553,10 @@ registry_rib_dual_write(Config) ->
 
     ?assert(
         await_cell(SubTable, RealmUri, SubKey, fun
-            ({error, not_found}) -> true;
+            ({ok, {0, _}}) -> true;
             (_) -> false
         end),
-        "Removing the subscription must clear the cell"
+        "Removing the subscription must settle the cell to count=0"
     ),
 
     %% The consistency gate over the whole realm — including every entry the
@@ -625,9 +637,12 @@ rib_completion_no_local_fails_fast(Config) ->
 
 %% A merged RIB cell naming THIS node is an echo of our own writes; when it
 %% does not match local truth — e.g. peers merging back a pre-restart cell —
-%% the reaction re-derives the summary from the members table: a stale cell
-%% is cleared, a clobbered one re-asserted. This closes the resurrection
-%% hole for a rebooted node whose peers still hold its old summaries.
+%% self_heal corrects `count` via a corrective delta (`LocalCount -
+%% ReplicatedCount`): a stale cell with no local members settles to
+%% count=0 (no explicit clear — see `bondy_registry_rib`'s moduledoc), a
+%% clobbered one is brought back down to the true local count. This closes
+%% the resurrection hole for a rebooted node whose peers still hold its old
+%% summaries.
 rib_self_heal_stale_cell(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
     Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
@@ -635,19 +650,25 @@ rib_self_heal_stale_cell(Config) ->
     Key = term_to_binary(
         {RealmUri, ?EXACT_MATCH, Uri, bondy_config:nodestring()}
     ),
-    Stale = #{invoke => ?INVOKE_SINGLE, count => 1, earliest => 1, latest => 1},
 
-    %% Plant a stale self cell, as an AAE merge-back would, and simulate its
-    %% merge event reaching the reactor. There is no local registration for
-    %% the URI, so the self-heal recompute must clear it.
-    ok = bondy_db:apply(Table, RealmUri, Key, {set, Stale}),
-    ok = bondy_registry_rib:on_remote_set(registration, Key, Stale),
+    %% Plant a stale self cell via real per-field CRDT ops (the write shape
+    %% `bondy_registry_rib:apply_added/1` itself uses), as an AAE merge-back
+    %% would leave one, and simulate its merge event reaching the reactor.
+    %% There is no local registration for the URI, so self_heal's corrective
+    %% delta (0 - 1) must settle it to count=0.
+    CK1 = bondy_registry_rib:created_key(1, <<"stale-1">>),
+    ok = bondy_db:apply_batch(Table, RealmUri, Key, [
+        {apply, count, {inc, 1}},
+        {apply, invoke, {set, ?INVOKE_SINGLE}},
+        {apply, created_times, {add, CK1}}
+    ]),
+    ok = bondy_registry_rib:on_remote_set(registration, Key, #{}),
     ?assert(
         await_cell(Table, RealmUri, Key, fun
-            ({error, not_found}) -> true;
+            ({ok, {#{count := 0}, _}}) -> true;
             (_) -> false
         end),
-        "A stale self cell with no local members must be cleared"
+        "A stale self cell with no local members must settle to count=0"
     ),
 
     %% With a live local registration the same echo re-asserts the truth.
@@ -661,9 +682,9 @@ rib_self_heal_stale_cell(Config) ->
             (_) -> false
         end)
     ),
-    Bogus = Stale#{count => 7},
-    ok = bondy_db:apply(Table, RealmUri, Key, {set, Bogus}),
-    ok = bondy_registry_rib:on_remote_set(registration, Key, Bogus),
+    %% Clobber the replicated count to 7 with no matching local entries.
+    ok = bondy_db:apply_batch(Table, RealmUri, Key, [{apply, count, {inc, 6}}]),
+    ok = bondy_registry_rib:on_remote_set(registration, Key, #{}),
     ?assert(
         await_cell(Table, RealmUri, Key, fun
             ({ok, {#{count := 1}, _}}) -> true;
@@ -827,70 +848,6 @@ rib_retry_requires_marker(Config) ->
         error(no_response)
     end.
 
-%% RIB update damping end to end, through the partition server: with a
-%% window on, extra shared registrations (count-only changes) are
-%% suppressed, then the TRAILING recompute — deferred on the partition
-%% server — lands the final count once the window closes. Removal of the
-%% last registration (a reachability transition) clears immediately.
-rib_damping_trailing_update(Config) ->
-    RealmUri = key_value:get(realm_uri, Config),
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
-    Table = bondy_namespace_catalog:table(?BONDY_DB_REGISTRATION_RIB_TAB),
-    Key = term_to_binary(
-        {RealmUri, ?EXACT_MATCH, Uri, bondy_config:nodestring()}
-    ),
-    Opts = #{invoke => ?INVOKE_ROUND_ROBIN},
-    Ref = bondy_ref:new(internal),
-    ok = application:set_env(bondy_router, registry_rib_damping, 3000),
-    try
-        %% Creation (0→1) writes through.
-        ?assertMatch({ok, _}, bondy_dealer:register(Uri, Opts, RealmUri, Ref)),
-        ?assert(
-            await_cell(Table, RealmUri, Key, fun
-                ({ok, {#{count := 1}, _}}) -> true;
-                (_) -> false
-            end)
-        ),
-
-        %% Two more registrations: count-only changes, suppressed within
-        %% the window...
-        ?assertMatch({ok, _}, bondy_dealer:register(Uri, Opts, RealmUri, Ref)),
-        ?assertMatch({ok, _}, bondy_dealer:register(Uri, Opts, RealmUri, Ref)),
-        timer:sleep(200),
-        ?assertMatch(
-            {ok, {#{count := 1}, _}},
-            bondy_db:read(Table, RealmUri, Key),
-            "count-only changes within the window must be suppressed"
-        ),
-
-        %% ...until the trailing recompute lands the final value.
-        ?assert(
-            await_cell(
-                Table,
-                RealmUri,
-                Key,
-                fun
-                    ({ok, {#{count := 3}, _}}) -> true;
-                    (_) -> false
-                end,
-                800
-            ),
-            "the trailing update must land once the window closes"
-        )
-    after
-        application:unset_env(bondy_router, registry_rib_damping)
-    end,
-
-    %% Cleanup: removing the last registration clears immediately.
-    Entries = bondy_registry:find_matches(registration, RealmUri, Uri),
-    _ = [ok = bondy_registry:remove(E) || E <- Entries],
-    ?assert(
-        await_cell(Table, RealmUri, Key, fun
-            ({error, not_found}) -> true;
-            (_) -> false
-        end)
-    ).
-
 %% The RIB observability surface: every family moves at its capture site.
 %% Values are read as deltas — the suite's earlier cases already moved
 %% most of these counters.
@@ -984,31 +941,6 @@ rib_metrics_surface(Config) ->
         Miss0 + 1, V(bondy_rpc_rib_completions_total, #{outcome => miss})
     ),
 
-    %% Damping suppressions: two shared registrations — the second is a
-    %% count-only summary change, suppressed within the window.
-    Supp0 = V(bondy_registry_rib_damping_suppressions_total, #{}),
-    Uri2 = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
-    RRopts = #{invoke => ?INVOKE_ROUND_ROBIN},
-    %% A plain internal ref: a callback ref cannot share a registration.
-    RRref = bondy_ref:new(internal),
-    ok = application:set_env(bondy_router, registry_rib_damping, 3000),
-    try
-        {ok, _} = bondy_dealer:register(Uri2, RRopts, RealmUri, RRref),
-        {ok, _} = bondy_dealer:register(Uri2, RRopts, RealmUri, RRref),
-        ?assert(
-            await(
-                fun() ->
-                    V(bondy_registry_rib_damping_suppressions_total, #{}) >
-                        Supp0
-                end,
-                500
-            ),
-            "the count-only summary change must be suppressed and counted"
-        )
-    after
-        application:unset_env(bondy_router, registry_rib_damping)
-    end,
-
     %% The divergence sweep gauges the node-wide total. The raw read
     %% distinguishes "sweep ran, converged" (0) from "never gauged"
     %% (undefined).
@@ -1027,13 +959,8 @@ rib_metrics_surface(Config) ->
     ),
 
     %% Cleanup.
-    _ = [
-        begin
-            Entries = bondy_registry:find_matches(registration, RealmUri, U),
-            [ok = bondy_registry:remove(E) || E <- Entries]
-        end
-     || U <- [Uri, Uri2]
-    ],
+    Entries = bondy_registry:find_matches(registration, RealmUri, Uri),
+    _ = [ok = bondy_registry:remove(E) || E <- Entries],
     ok.
 
 %% @private

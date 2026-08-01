@@ -289,140 +289,38 @@ unfold_member_key_test() ->
 %% REGISTRY PRESENCE REACTIONS (§9.6)
 %% =============================================================================
 
-%% A peer's RIB summary cell merge maintains the stub store: both set forms
-%% upsert, both clear forms drop, self-origin cells and garbage ops/keys are
-%% ignored — the reaction is total.
-react_rib_stub_lifecycle_test() ->
-    %% Another test (or an app boot sharing this BEAM) may have created the
-    %% named stub table already; reuse it — this test's realm is unique.
-    _ =
-        case ets:whereis(bondy_registry_rib_stubs) of
-            undefined ->
-                ets:new(
-                    bondy_registry_rib_stubs,
-                    [ordered_set, named_table, public, {keypos, 1}]
-                );
-            Ref ->
-                Ref
-        end,
-    ok = meck:new(bondy_config, [passthrough]),
-    ok = meck:expect(bondy_config, nodestring, fun() -> <<"me@host">> end),
+%% `react_rib/3` is now a thin dispatcher: resolve `Type` from `Table` and
+%% delegate everything else — reading the cell's current converged value,
+%% self-vs-peer routing, and stub-store maintenance — to
+%% `bondy_registry_rib:on_remote_merge/2` (covered by
+%% `bondy_registry_rib_test.erl` and `bondy_aae_cluster_SUITE.erl`'s RIB
+%% cases). `Op` is irrelevant here — the per-field CRDT write path has no
+%% single op that represents "the current summary" the way the pre-migration
+%% whole-blob `lww_register` cell's `{set, V}` did, so `on_remote_merge/2`
+%% re-reads the cell instead — this test pins only the table→Type dispatch.
+react_rib_dispatches_by_table_test() ->
+    ok = meck:new(bondy_registry_rib, [passthrough]),
+    ok = meck:expect(bondy_registry_rib, on_remote_merge, fun(_, _) -> ok end),
     try
-        Proc = <<"com.example.rib_proc">>,
-        Peer = <<"peer@host">>,
-        Key = term_to_binary({?REALM, ?EXACT_MATCH, Proc, Peer}),
-        S1 = #{
-            invoke => ?INVOKE_ROUND_ROBIN,
-            count => 1,
-            earliest => 1,
-            latest => 1
-        },
-
-        %% Short-form set (the wire shape) upserts the stub.
+        Key = <<"some-key">>,
         ok = bondy_aae_reactor:react_rib(
-            ?BONDY_DB_REGISTRATION_RIB_TAB, Key, {set, S1}
+            ?BONDY_DB_REGISTRATION_RIB_TAB, Key, {set, #{}}
         ),
-        ?assertEqual(
-            [{Peer, S1}],
-            bondy_registry_rib:stub_nodes(
-                registration, ?REALM, ?EXACT_MATCH, Proc
-            )
-        ),
-
-        %% Long-form set replaces it.
-        S2 = S1#{count := 2},
-        ok = bondy_aae_reactor:react_rib(
-            ?BONDY_DB_REGISTRATION_RIB_TAB, Key, {set, 123, S2}
-        ),
-        ?assertEqual(
-            [{Peer, S2}],
-            bondy_registry_rib:stub_nodes(
-                registration, ?REALM, ?EXACT_MATCH, Proc
-            )
-        ),
-
-        %% The subscription table routes to the subscription view.
-        SubKey = term_to_binary({?REALM, ?EXACT_MATCH, Proc, Peer}),
-        ok = bondy_aae_reactor:react_rib(
-            ?BONDY_DB_SUBSCRIPTION_RIB_TAB, SubKey, {set, #{count => 1}}
-        ),
-        ?assertEqual(
-            [{Peer, #{count => 1}}],
-            bondy_registry_rib:stub_nodes(
-                subscription, ?REALM, ?EXACT_MATCH, Proc
-            )
-        ),
-
-        %% A cell naming this node is never stubbed.
-        SelfKey = term_to_binary(
-            {?REALM, ?EXACT_MATCH, <<"com.example.self">>, <<"me@host">>}
-        ),
-        ok = bondy_aae_reactor:react_rib(
-            ?BONDY_DB_REGISTRATION_RIB_TAB, SelfKey, {set, S1}
-        ),
-        ?assertEqual(
-            [],
-            bondy_registry_rib:stub_nodes(
-                registration, ?REALM, ?EXACT_MATCH, <<"com.example.self">>
-            )
-        ),
-
-        %% The realm-folded wire form <<Realm, 0, RawKey>> — what a merge
-        %% event actually delivers — decodes identically.
-        FoldedProc = <<"com.example.rib_folded">>,
-        Folded = <<
-            ?REALM/binary,
-            0,
-            (term_to_binary({?REALM, ?EXACT_MATCH, FoldedProc, Peer}))/binary
-        >>,
-        ok = bondy_aae_reactor:react_rib(
-            ?BONDY_DB_REGISTRATION_RIB_TAB, Folded, {set, S1}
-        ),
-        ?assertEqual(
-            [{Peer, S1}],
-            bondy_registry_rib:stub_nodes(
-                registration, ?REALM, ?EXACT_MATCH, FoldedProc
+        ?assert(
+            meck:called(
+                bondy_registry_rib, on_remote_merge, [registration, Key]
             )
         ),
         ok = bondy_aae_reactor:react_rib(
-            ?BONDY_DB_REGISTRATION_RIB_TAB, Folded, clear
+            ?BONDY_DB_SUBSCRIPTION_RIB_TAB, Key, clear
         ),
-        ?assertEqual(
-            [],
-            bondy_registry_rib:stub_nodes(
-                registration, ?REALM, ?EXACT_MATCH, FoldedProc
-            )
-        ),
-
-        %% Garbage op / key: ignored, no crash.
-        ok = bondy_aae_reactor:react_rib(
-            ?BONDY_DB_REGISTRATION_RIB_TAB, Key, {bogus, op}
-        ),
-        ok = bondy_aae_reactor:react_rib(
-            ?BONDY_DB_REGISTRATION_RIB_TAB, <<"not a term">>, {set, S1}
-        ),
-
-        %% Both clear forms drop the stub.
-        ok = bondy_aae_reactor:react_rib(
-            ?BONDY_DB_REGISTRATION_RIB_TAB, Key, {clear, 123}
-        ),
-        ?assertEqual(
-            [],
-            bondy_registry_rib:stub_nodes(
-                registration, ?REALM, ?EXACT_MATCH, Proc
-            )
-        ),
-        ok = bondy_aae_reactor:react_rib(
-            ?BONDY_DB_SUBSCRIPTION_RIB_TAB, SubKey, clear
-        ),
-        ?assertEqual(
-            [],
-            bondy_registry_rib:stub_nodes(
-                subscription, ?REALM, ?EXACT_MATCH, Proc
+        ?assert(
+            meck:called(
+                bondy_registry_rib, on_remote_merge, [subscription, Key]
             )
         )
     after
-        meck:unload(bondy_config)
+        meck:unload(bondy_registry_rib)
     end.
 
 %% =============================================================================

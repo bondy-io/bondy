@@ -89,9 +89,11 @@ For an event with dot `Dot = {Origin, Seq}` and stamped observed context
   (`Dot' <= Ctx`), then add `{Dot => V}`. Observed dots are the writer's
   own prior versions, so a sequential write dominates; a concurrent
   write's dot is not in `Ctx`, so it survives as a sibling.
-- `{apply, K, SubMod, SubOp}`: same drop-then-add as `{put, K, V}}`, but
-  the added dot carries a tagged sub-operation instead of a flat value
-  — see *Nested sub-CRDTs*.
+- `{apply, K, SubMod, SubOp}`: add `{Dot => {sub, SubMod, Hlc, SubOp}}` to
+  `K`'s dot-store *without* dropping any of the writer's own prior dots —
+  unlike `{put, K, V}`, no observed-remove pruning happens here. Every
+  sub-op is one event that must survive to be individually folded through
+  `SubMod`'s own `interpret_cog` — see *Nested sub-CRDTs*.
 - `{rmv, K}`: drop from `K`'s dot-store every dot the writer observed; add
   nothing. If the dot-store empties, the key is removed. A concurrent add
   the remover never observed survives — add-wins.
@@ -105,10 +107,19 @@ context derivation and the projection.
 
 A key's value can be another CRDT's converged state instead of an
 opaque term: `{apply, K, SubMod, SubOp}` accumulates `{sub, SubMod,
-Hlc, SubOp}` at the operation's dot exactly as `{put, K, V}}` accumulates
-`V` — same add-wins/observed-remove treatment, since
-`bondy_oplog_crdt_aw_core:drop_observed/2` only ever inspects the dot,
-never the value. `to_value/1` detects a nested key
+Hlc, SubOp}` at the operation's dot — but, unlike `{put, K, V}}`,
+**without** dropping any of the writer's own prior dots on `K` first.
+Each nested sub-op is one event in a sequence every one of which must
+survive to be individually folded through `SubMod`'s own
+`interpret_cog/2` — pruning "the writer's own observed dot" is only
+correct for a flat value being superseded (a register), never for an
+accumulator (`pn_counter`) or permanent-membership type (`two_p_set`)
+being folded, both of which would silently compute the wrong value if
+any of their own ops went missing. Only an explicit `{rmv, K}` prunes
+nested sub-op dots (`bondy_oplog_crdt_aw_core:drop_observed/2` there
+still never inspects the value, flat or nested, uniformly). A nested
+key's dot-store therefore grows with every write for the life of the
+key, unlike a flat key's. `to_value/1` detects a nested key
 (`bondy_oplog_crdt_nested_core:sub_mod/1`) and, instead of returning the
 raw sibling set, replays the surviving sub-ops through `SubMod`'s own
 `interpret_cog/2` (`bondy_oplog_crdt_nested_core:nested_value/2`) — no
@@ -309,8 +320,9 @@ apply_op({Entries, CC, Hlc}, {put, K, V}, Key, Context0) when is_binary(K) ->
     Entries1 = bondy_oplog_crdt_nested_core:put(Entries, K, Dot, Ctx, V),
     {Entries1, bondy_oplog_crdt_aw_core:cc_absorb(CC, Ctx, Dot),
         erlang:max(Hlc, key_hlc(Key))};
-apply_op({Entries, CC, Hlc}, {apply, K, SubMod, SubOp}, Key, Context0)
-        when is_binary(K) andalso is_atom(SubMod) ->
+apply_op({Entries, CC, Hlc}, {apply, K, SubMod, SubOp}, Key, Context0) when
+    is_binary(K) andalso is_atom(SubMod)
+->
     Dot = bondy_oplog_crdt_aw_core:dot_of(Key),
     Ctx = bondy_oplog_crdt_aw_core:normalise_context(Context0),
     Entries1 = bondy_oplog_crdt_nested_core:put_nested(

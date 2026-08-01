@@ -46,6 +46,7 @@ instance_test_() ->
         {timeout, 30, fun refresh_validator_rotates_applier_snapshot/0},
         {timeout, 30, fun refresh_validator_noop_when_callback_not_exported/0},
         {timeout, 30, fun refresh_validator_returns_error_when_no_applier/0},
+        {timeout, 30, fun refresh_validator_rotates_fused_instance_snapshot/0},
         {timeout, 30, fun refresh_validator_in_flight_keeps_old_snapshot/0},
         {timeout, 30, fun list_instances_reports_running/0},
         {timeout, 30, fun start_instance_idempotent/0}
@@ -445,6 +446,38 @@ refresh_validator_returns_error_when_no_applier() ->
         {error, applier_unavailable},
         bondy_oplog_instance:refresh_validator(Id)
     ).
+
+%% `refresh_validator_rotates_applier_snapshot/0`, on a FUSED instance
+%% (which has no separate applier by design — `refresh_validator/2`
+%% previously always returned `{error, applier_unavailable}` for it,
+%% permanently). Same rule-table trick, same rotation, only the
+%% synchronisation point differs: `sys:get_state/1` on the instance's own
+%% pid (there is no applier pid to query).
+refresh_validator_rotates_fused_instance_snapshot() ->
+    Id = mk_id(),
+    Tab = ets:new(refresh_rule_fused, [public, set]),
+    true = ets:insert(Tab, {allow_op, op_a}),
+    {ok, _} = bondy_oplog:start_instance(Id, #{
+        validator => bondy_oplog_test_refreshable_validator,
+        validator_opts => #{rule_table => Tab},
+        fused => true
+    }),
+    ?assertEqual(undefined, bondy_oplog_registry:applier_pid(Id)),
+    ?assertEqual(true, bondy_oplog_registry:fused(Id)),
+
+    ?assertEqual(ok, append_peer_event(Id, op_a, 1)),
+    ?assertEqual({error, refused}, append_peer_event(Id, op_b, 2)),
+
+    true = ets:insert(Tab, {allow_op, op_b}),
+    ok = bondy_oplog_instance:refresh_validator(Id, test_rotation),
+    InstancePid = bondy_oplog_registry:instance_pid(Id),
+    ?assert(is_pid(InstancePid)),
+    _ = sys:get_state(InstancePid),
+
+    ?assertEqual(ok, append_peer_event(Id, op_b, 3)),
+    ?assertEqual({error, refused}, append_peer_event(Id, op_a, 4)),
+    ok = bondy_oplog:stop_instance(Id),
+    true = ets:delete(Tab).
 
 %% An `enqueue_remote` worker that captured the OLD snapshot before
 %% the refresh cast was processed continues to verify against that

@@ -33,6 +33,17 @@
 %% is never generated. This exercises the same
 %% `bondy_oplog_crdt_nested_core` engine `bondy_oplog_crdt_aw_set` uses,
 %% so the properties below prove convergence for nested keys too.
+%%
+%% `prop_nested_counter_oracle` is a **separate**, focused property (its
+%% own apply-only generator, no put/rmv) that checks *semantic*
+%% correctness against an independent oracle, not just internal
+%% consistency: the other properties above only prove replicas agree
+%% with each other, which is satisfied even if every replica agrees on a
+%% *wrong* value. This distinction is not academic — it is exactly how a
+%% real bug (`bondy_oplog_crdt_nested_core:put_nested/7` incorrectly
+%% pruning a writer's own prior nested sub-op, silently dropping
+%% sequential same-origin `pn_counter` increments) shipped past every
+%% property above and was only caught by manual reproduction.
 
 -module(bondy_oplog_crdt_aw_map_proper_test).
 
@@ -53,6 +64,7 @@
 -export([prop_permutation_invariant/0]).
 -export([prop_idempotent_redelivery/0]).
 -export([prop_encode_state_roundtrip/0]).
+-export([prop_nested_counter_oracle/0]).
 
 %% =============================================================================
 %% Generators
@@ -68,6 +80,18 @@ cmd_gen() ->
 
 cmds_gen() ->
     list(cmd_gen()).
+
+%% Focused generator for prop_nested_counter_oracle: apply/sync only, no
+%% put/rmv, so the independent sum oracle never needs to reason about
+%% key removal.
+counter_cmd_gen() ->
+    oneof([
+        {apply, oneof(?ORIGINS), oneof(?NESTED_KEYS), oneof(?DELTAS)},
+        {sync, oneof(?ORIGINS), oneof(?ORIGINS)}
+    ]).
+
+counter_cmds_gen() ->
+    list(counter_cmd_gen()).
 
 %% =============================================================================
 %% Properties
@@ -131,6 +155,38 @@ prop_encode_state_roundtrip() ->
         {_PerOrigin, Log} = simulate(Cmds),
         State = ?MOD:interpret_cog(Log, ?MOD:init()),
         ?MOD:decode_state(?MOD:encode_state(State)) =:= State
+    end).
+
+%% A nested `pn_counter` field's converged value must equal the sum of
+%% every {inc,N} delta ever applied to it, independent of how many
+%% origins contributed or how much sequential same-origin churn there
+%% was. Deliberately its own generator (apply/sync only, no put/rmv) so
+%% key-removal interaction never complicates this independent-oracle
+%% check — that interaction is already covered by the properties above.
+prop_nested_counter_oracle() ->
+    ?FORALL(Cmds, counter_cmds_gen(), begin
+        {_PerOrigin, Log} = simulate(Cmds),
+        State = ?MOD:interpret_cog(Log, ?MOD:init()),
+        Value = ?MOD:to_value(State),
+        lists:all(
+            fun(NestedKey) ->
+                Deltas = [
+                    N
+                 || Ev <- Log,
+                    {apply, K, _SubMod, {inc, N}} <-
+                        [bondy_oplog_crdt_commutative:op_of(Ev)],
+                    K =:= NestedKey
+                ],
+                case Deltas of
+                    [] ->
+                        not maps:is_key(NestedKey, Value);
+                    _ ->
+                        maps:get(NestedKey, Value, undefined) =:=
+                            lists:sum(Deltas)
+                end
+            end,
+            ?NESTED_KEYS
+        )
     end).
 
 %% =============================================================================
@@ -227,7 +283,8 @@ properties_test_() ->
             prop_full_sync_converges(),
             prop_permutation_invariant(),
             prop_idempotent_redelivery(),
-            prop_encode_state_roundtrip()
+            prop_encode_state_roundtrip(),
+            prop_nested_counter_oracle()
         ],
         lists:foreach(
             fun(Prop) -> ?assert(proper:quickcheck(Prop, Opts)) end,

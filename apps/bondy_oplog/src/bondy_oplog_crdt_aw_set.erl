@@ -66,11 +66,18 @@ observed; concurrent adds/applies of `E` (un-observed dots) survive.
 
 An element's value can be another CRDT's converged state instead of its
 own identity: `{apply, E, SubMod, SubOp}` accumulates `{sub, SubMod, Hlc,
-SubOp}` at the operation's dot exactly as `{add, E}` accumulates `E` —
-same add-wins/observed-remove treatment, since
-`bondy_oplog_crdt_aw_core:drop_observed/2` only ever inspects the dot,
-never the value. `to_value/1` detects whether *any* element in the state
-is nested and switches its return shape accordingly — see `to_value/1`.
+SubOp}` at the operation's dot — but, unlike `{add, E}`, **without**
+dropping any of the writer's own prior dots on `E` first. Each nested
+sub-op is one event in a sequence every one of which must survive to be
+individually folded through `SubMod`'s own `interpret_cog/2` — pruning
+"the writer's own observed dot" would silently drop ops an accumulator
+(`pn_counter`) or permanent-membership type (`two_p_set`) needs to fold,
+computing the wrong value. Only an explicit `{rmv, E}` prunes nested
+sub-op dots (drops every dot of `E` the writer's context observed,
+flat or nested, uniformly — `bondy_oplog_crdt_aw_core:drop_observed/2`
+never inspects the value). `to_value/1` detects whether *any* element in
+the state is nested and switches its return shape accordingly — see
+`to_value/1`.
 
 `SubMod` MUST be `causal_tier() =:= tier_0` (`pn_counter`,
 `lww_register`, `max_register`, `min_register`, ...) — see
@@ -174,8 +181,9 @@ apply_op({Entries, CC, Hlc}, {add, E}, Key, Context0) when is_binary(E) ->
         bondy_oplog_crdt_aw_core:cc_absorb(CC, Ctx, Dot),
         erlang:max(Hlc, key_hlc(Key))
     };
-apply_op({Entries, CC, Hlc}, {apply, E, SubMod, SubOp}, Key, Context0)
-        when is_binary(E) andalso is_atom(SubMod) ->
+apply_op({Entries, CC, Hlc}, {apply, E, SubMod, SubOp}, Key, Context0) when
+    is_binary(E) andalso is_atom(SubMod)
+->
     Dot = bondy_oplog_crdt_aw_core:dot_of(Key),
     Ctx = bondy_oplog_crdt_aw_core:normalise_context(Context0),
     Entries1 = bondy_oplog_crdt_nested_core:put_nested(

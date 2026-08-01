@@ -418,14 +418,24 @@ useful to distinguish "never dispatched" from "dispatched but stuck"
 when diagnosing a convergence stall.
 """).
 -spec inflight_for(instance_id()) ->
-    [{pid(), bootstrap | live, peer_id() | undefined, AgeMs :: non_neg_integer()}].
+    [
+        {
+            pid(),
+            bootstrap | live,
+            peer_id() | undefined,
+            AgeMs :: non_neg_integer()
+        }
+    ].
 
 inflight_for(InstanceId) ->
     _ = ensure_table(?INFLIGHT_TAB),
     Now = now_ms(),
     Pattern = {'$1', InstanceId, '$2', '$3', '$4'},
     Rows = ets:select(?INFLIGHT_TAB, [{Pattern, [], [['$1', '$2', '$3', '$4']]}]),
-    [{Pid, Kind, Peer, Now - StartedAt} || [Pid, Kind, Peer, StartedAt] <- Rows].
+    [
+        {Pid, Kind, Peer, Now - StartedAt}
+     || [Pid, Kind, Peer, StartedAt] <- Rows
+    ].
 
 %% =============================================================================
 %% gen_server CALLBACKS
@@ -900,7 +910,9 @@ dispatch_bootstrap(InstanceId, Peer, Strategy) ->
 track_inflight(Pid, InstanceId) ->
     _ = ensure_table(?INFLIGHT_TAB),
     _ = erlang:monitor(process, Pid),
-    ets:insert(?INFLIGHT_TAB, {Pid, InstanceId, bootstrap, undefined, now_ms()}),
+    ets:insert(
+        ?INFLIGHT_TAB, {Pid, InstanceId, bootstrap, undefined, now_ms()}
+    ),
     telemetry:execute(
         [bondy_oplog, sync_scheduler, bootstrap, started],
         #{current => inflight_bootstrap_count()},

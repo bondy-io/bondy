@@ -65,6 +65,19 @@ and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
 -define(AW_CRDT, bondy_oplog_crdt_aw_map).
 -define(EW_CRDT, bondy_oplog_crdt_ew_flag).
 
+%% The registration RIB cell's `bondy_oplog_crdt_struct` schema, passed as
+%% `crdt_opts` (the struct has no schema of its own — see
+%% `bondy_oplog_crdt_struct`'s moduledoc). `count`'s `stabilize_zero => 0`
+%% and `created_times`'s `force_reap => true` are the RIB-specific policy:
+%% the local group's cell is reclaimable once it empties, and a departed
+%% node's `created_times` entries are unconditionally, permanently invalid
+%% (scoped to that node's process lifetime).
+-define(RIB_REGISTRATION_SCHEMA, #{
+    count => {bondy_oplog_crdt_pn_counter, #{stabilize_zero => 0}},
+    invoke => bondy_oplog_crdt_lww_register,
+    created_times => {bondy_oplog_crdt_two_p_set, #{force_reap => true}}
+}).
+
 -record(state, {
     db :: bondy_db:db() | undefined,
     leveled_sup :: pid() | undefined,
@@ -74,7 +87,8 @@ and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
     registry_db :: bondy_db:db() | undefined
 }).
 
--type fold_class() :: lww | mv | aw | ew | presence.
+-type fold_class() ::
+    lww | mv | aw | ew | presence | rib_registration | rib_subscription.
 -type db_name() :: bondy_db_config:db_name().
 -type table_spec() :: #{
     name := atom(),
@@ -371,25 +385,32 @@ tables() ->
         %% (Realm, MatchPolicy, Uri, Node) carrying `#{invoke, count,
         %% earliest, latest}` (registrations) or `#{count}` (subscriptions).
         %% Only the node named in the key ever writes the cell — single-writer
-        %% by construction, so `lww` is exact. `publish => true` wires the
-        %% merge-side hook: `bondy_aae_reactor` delegates merged peer cells to
-        %% `bondy_registry_rib`, which maintains the local stub view routing
-        %% consumes under RIB `read`/`write` mode. Under `write` mode these
-        %% cells are the ONLY replicated registry state — the full-entry
-        %% tables above hold nothing (entries stay in partition-local ETS).
-        %% Maintained by `bondy_registry_rib`.
+        %% by construction. `count`/`invoke`/`earliest`/`latest` are backed by
+        %% per-field CRDTs (`fold => rib_registration`/`rib_subscription`
+        %% resolve to `bondy_oplog_crdt_struct`, schema `?RIB_REGISTRATION_
+        %% SCHEMA`, and a bare `bondy_oplog_crdt_pn_counter` respectively —
+        %% registered directly, no per-use-case wrapper module) rather than
+        %% one opaque LWW blob, so `bondy_registry_rib`'s
+        %% entry-add/remove hooks write small, lock-free, targeted deltas
+        %% directly — no per-realm recompute/serialisation point. `publish =>
+        %% true` wires the merge-side hook: `bondy_aae_reactor` delegates
+        %% merged peer cells to `bondy_registry_rib`, which maintains the
+        %% local stub view routing consumes under RIB `read`/`write` mode.
+        %% Under `write` mode these cells are the ONLY replicated registry
+        %% state — the full-entry tables above hold nothing (entries stay in
+        %% partition-local ETS). Maintained by `bondy_registry_rib`.
         #{
             name => ?BONDY_DB_REGISTRATION_RIB_TAB,
             db => registry,
             durability => ephemeral,
-            fold => lww,
+            fold => rib_registration,
             publish => true
         },
         #{
             name => ?BONDY_DB_SUBSCRIPTION_RIB_TAB,
             db => registry,
             durability => ephemeral,
-            fold => lww,
+            fold => rib_subscription,
             publish => true
         }
     ].
@@ -482,12 +503,24 @@ native CRDT — the per-table "WAMP fold module" selection. These map what
 - `mv`  → `lww_register` carrier + the `mv_register` CRDT: reserved — no
   current table uses it (grants and sources are the intended consumers if
   their lww deferral is ever revisited).
+- `rib_registration` / `rib_subscription` → `lww_register` carrier +
+  `bondy_oplog_crdt_struct` (schema `?RIB_REGISTRATION_SCHEMA`, passed as
+  `crdt_opts` — the struct has no schema of its own) /
+  `bondy_oplog_crdt_pn_counter`, registered directly (no per-use-case
+  wrapper module): the registry RIB tables (see `tables/0`). The raw
+  projected value is NOT the external `#{invoke, count, earliest,
+  latest}` / `#{count}` summary shape read-side consumers expect —
+  `bondy_registry_rib:reshape_summary/2` derives it at every read call
+  site, immediately after the raw read/list. `bondy_registry_rib`'s write
+  path is lock-free per-field deltas, not a serialised recompute-from-
+  scratch whole-blob write.
 
-`mv_register` / `aw_map` / `ew_flag` have no short fold alias in
-`bondy_oplog_cell_kernel`, so they are passed as an explicit `crdt_module` (the
-`fold_module` stays `lww_register`, their byte-compatible carrier). `presence`
-has no current table — the registry tables converge as `lww` (see `tables/0`) —
-and has no mapping yet.
+`mv_register` / `aw_map` / `ew_flag` / the two RIB CRDTs have no short
+fold alias in `bondy_oplog_cell_kernel`, so they are passed as an
+explicit `crdt_module` (the `fold_module` stays `lww_register`, their
+byte-compatible carrier). `presence` has no current table — the registry
+tables converge as `rib_registration`/`rib_subscription` now (see
+`tables/0`) — and has no mapping yet.
 """.
 -spec fold_opts(fold_class()) -> map().
 
@@ -499,6 +532,14 @@ fold_opts(aw) ->
     #{fold_module => lww_register, crdt_module => ?AW_CRDT};
 fold_opts(ew) ->
     #{fold_module => lww_register, crdt_module => ?EW_CRDT};
+fold_opts(rib_registration) ->
+    #{
+        fold_module => lww_register,
+        crdt_module => bondy_oplog_crdt_struct,
+        crdt_opts => ?RIB_REGISTRATION_SCHEMA
+    };
+fold_opts(rib_subscription) ->
+    #{fold_module => lww_register, crdt_module => bondy_oplog_crdt_pn_counter};
 fold_opts(presence) ->
     %% Reserved presence-FSM fold — no current table uses it (the registry
     %% tables converge as `lww`); no mapping yet.

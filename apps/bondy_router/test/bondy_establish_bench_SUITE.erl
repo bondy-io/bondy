@@ -64,14 +64,22 @@ bench_session_open(Config) ->
     T0 = erlang:monotonic_time(nanosecond),
     _ = [do_open(RealmUri) || _ <- lists:seq(1, N)],
     T1 = erlang:monotonic_time(nanosecond),
-    report(open, "session open (full: store+counters+gproc+monitor+register_procedures)",
-           summarize(throughput, N, T1 - T0)),
+    report(
+        open,
+        "session open (full: store+counters+gproc+monitor+register_procedures)",
+        summarize(throughput, N, T1 - T0)
+    ),
     ok.
 
 bench_session_open_scaling(Config) ->
     RealmUri = ?config(realm_uri, Config),
-    Results = [{W, scale_run(W, ?OPEN_OPS, fun() -> do_open(RealmUri) end)} || W <- ?SCALES],
-    report_scaling(open_scaling, "session open throughput (N concurrent openers)", Results),
+    Results = [
+        {W, scale_run(W, ?OPEN_OPS, fun() -> do_open(RealmUri) end)}
+     || W <- ?SCALES
+    ],
+    report_scaling(
+        open_scaling, "session open throughput (N concurrent openers)", Results
+    ),
     ok.
 
 %% =============================================================================
@@ -84,14 +92,22 @@ bench_subscribe(Config) ->
     T0 = erlang:monotonic_time(nanosecond),
     _ = [do_subscribe(RealmUri) || _ <- lists:seq(1, N)],
     T1 = erlang:monotonic_time(nanosecond),
-    report(subscribe, "subscribe (registry add: dedup fold + ETS writes + RIB member + async apply)",
-           summarize(throughput, N, T1 - T0)),
+    report(
+        subscribe,
+        "subscribe (registry add: dedup fold + ETS writes + RIB member + async apply)",
+        summarize(throughput, N, T1 - T0)
+    ),
     ok.
 
 bench_subscribe_scaling(Config) ->
     RealmUri = ?config(realm_uri, Config),
-    Results = [{W, scale_run(W, ?SUB_OPS, fun() -> do_subscribe(RealmUri) end)} || W <- ?SCALES],
-    report_scaling(sub_scaling, "subscribe throughput (N concurrent subscribers)", Results),
+    Results = [
+        {W, scale_run(W, ?SUB_OPS, fun() -> do_subscribe(RealmUri) end)}
+     || W <- ?SCALES
+    ],
+    report_scaling(
+        sub_scaling, "subscribe throughput (N concurrent subscribers)", Results
+    ),
     ok.
 
 %% =============================================================================
@@ -104,8 +120,11 @@ bench_auth(Config) ->
     T0 = erlang:monotonic_time(nanosecond),
     _ = [do_auth(RealmUri) || _ <- lists:seq(1, N)],
     T1 = erlang:monotonic_time(nanosecond),
-    report(auth, "auth cycle (init -> challenge -> authenticate, anonymous)",
-           summarize(throughput, N, T1 - T0)),
+    report(
+        auth,
+        "auth cycle (init -> challenge -> authenticate, anonymous)",
+        summarize(throughput, N, T1 - T0)
+    ),
     ok.
 
 %% =============================================================================
@@ -141,9 +160,15 @@ do_open(RealmUri) ->
 %% the dedup fold stays O(1) and each call exercises the full registry+RIB write.
 do_subscribe(RealmUri) ->
     Ref = bondy_ref:new(internal, self(), bondy_session_id:new()),
-    Uri = <<"perf.topic.", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    Uri =
+        <<"perf.topic.",
+            (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
     %% add/5 returns {ok, Entry} at runtime (spec claims a 3-tuple) — accept both.
-    case bondy_registry:add(subscription, RealmUri, Uri, #{match => ?EXACT_MATCH}, Ref) of
+    case
+        bondy_registry:add(
+            subscription, RealmUri, Uri, #{match => ?EXACT_MATCH}, Ref
+        )
+    of
         {ok, _} -> ok;
         {ok, _, _} -> ok
     end.
@@ -152,9 +177,13 @@ do_subscribe(RealmUri) ->
 do_auth(RealmUri) ->
     Id = bondy_session_id:new(),
     SourceIP = {127, 0, 0, 1},
-    {ok, Ctxt0} = bondy_auth:init(Id, RealmUri, anonymous, [<<"anonymous">>], SourceIP),
+    {ok, Ctxt0} = bondy_auth:init(
+        Id, RealmUri, anonymous, [<<"anonymous">>], SourceIP
+    ),
     {ok, _, Ctxt1} = bondy_auth:challenge(?WAMP_ANON_AUTH, #{}, Ctxt0),
-    {ok, _, _} = bondy_auth:authenticate(?WAMP_ANON_AUTH, undefined, #{}, Ctxt1),
+    {ok, _, _} = bondy_auth:authenticate(
+        ?WAMP_ANON_AUTH, undefined, #{}, Ctxt1
+    ),
     ok.
 
 %% @private
@@ -186,7 +215,12 @@ scale_run(W, NTotal, Op) ->
         end)
      || _ <- lists:seq(1, W)
     ],
-    _ = [receive {done, P} -> ok end || P <- Pids],
+    _ = [
+        receive
+            {done, P} -> ok
+        end
+     || P <- Pids
+    ],
     T1 = erlang:monotonic_time(nanosecond),
     summarize(throughput, W * Per, T1 - T0).
 
@@ -204,7 +238,9 @@ profile(Label, Fun) ->
     eprof:log(File),
     eprof:analyze(total),
     eprof:stop(),
-    ct:pal("~n========== EPROF: ~s (~p ops) written to ~s ==========", [Label, ?EPROF_OPS, File]).
+    ct:pal("~n========== EPROF: ~s (~p ops) written to ~s ==========", [
+        Label, ?EPROF_OPS, File
+    ]).
 
 %% =============================================================================
 %% SUMMARIZATION / REPORTING
@@ -220,7 +256,9 @@ summarize(throughput, Ops, Nanos) ->
     }.
 
 %% @private
-report(Case, Desc, #{ops := Ops, wall_ms := Ms, ops_per_sec := Ops_s, avg_us := Avg}) ->
+report(Case, Desc, #{
+    ops := Ops, wall_ms := Ms, ops_per_sec := Ops_s, avg_us := Avg
+}) ->
     ct:pal(
         "~n=== Bench ~s: ~s ===~n  ops=~p  wall=~.1f ms  ops/s=~p  avg=~.2f us/op",
         [string:to_upper(atom_to_list(Case)), Desc, Ops, Ms, Ops_s, Avg]
@@ -229,8 +267,12 @@ report(Case, Desc, #{ops := Ops, wall_ms := Ms, ops_per_sec := Ops_s, avg_us := 
 %% @private
 report_scaling(Case, Desc, Results) ->
     Lines = [
-        io_lib:format("    W=~-3b ops/s=~-9b avg=~.2f us/op~n",
-            [W, maps:get(ops_per_sec, M), maps:get(avg_us, M)])
+        io_lib:format(
+            "    W=~-3b ops/s=~-9b avg=~.2f us/op~n",
+            [W, maps:get(ops_per_sec, M), maps:get(avg_us, M)]
+        )
      || {W, M} <- Results
     ],
-    ct:pal("~n=== Bench ~s: ~s ===~n~s", [string:to_upper(atom_to_list(Case)), Desc, Lines]).
+    ct:pal("~n=== Bench ~s: ~s ===~n~s", [
+        string:to_upper(atom_to_list(Case)), Desc, Lines
+    ]).

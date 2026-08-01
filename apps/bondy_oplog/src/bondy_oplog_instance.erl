@@ -380,6 +380,11 @@ without protocol changes.
     %% Fused-writer drain state, or `undefined` for every non-fused
     %% (durable + non-fused ephemeral) instance. See `#fused_drain{}`.
     fused_drain = undefined :: undefined | #fused_drain{},
+    %% tier_2 stamp-site context-regression guard (#27) — see
+    %% `bondy_oplog_ctx_guard`. Only ever populated for a fused instance
+    %% (a non-fused instance's applier holds its own copy); `undefined`
+    %% for every non-fused instance.
+    ctx_guard = bondy_oplog_ctx_guard:new() :: bondy_oplog_ctx_guard:guard(),
     %% Async pack-store seal driver. `drive_seal` is true only when the
     %% durable backend was opened with `seal_mode => async`; then the
     %% instance rolls the incoming pack at the commit barrier
@@ -509,6 +514,10 @@ without protocol changes.
 %% `bondy_oplog_validator:refresh/1` callback.
 -export([refresh_validator/1, refresh_validator/2]).
 -export([reap_origins/2]).
+-export([cell_context/3]).
+-export([sweep_stable_cells/3]).
+-export([cell_apply_target/1]).
+-export([rebuild_indexes_sync/1]).
 
 %% Page-level API (sync protocol)
 -export([get_pages/2]).
@@ -1052,6 +1061,32 @@ applier_pid_for(Pid) when is_pid(Pid) ->
         Id -> applier_pid_for(Id)
     end.
 
+%% @private
+%% Resolves the FUSED INSTANCE's own pid for `Target` (instance id or
+%% pid) — the counterpart to `applier_pid_for/1` for cell-admin ops that
+%% fall back to running in-process on a fused instance (which has no
+%% separate applier). `{error, applier_unavailable}` for a non-fused
+%% instance too, so callers can treat it exactly like the applier-missing
+%% case (there is genuinely nowhere else to run the op).
+fused_instance_pid_for(InstanceId) when is_binary(InstanceId) ->
+    case bondy_oplog_registry:fused(InstanceId) of
+        true ->
+            case bondy_oplog_registry:instance_pid(InstanceId) of
+                undefined -> {error, applier_unavailable};
+                Pid when is_pid(Pid) -> {ok, Pid}
+            end;
+        %% `false` for a genuinely non-fused instance; `undefined` for an
+        %% instance id the registry has never seen (no row to read `fused`
+        %% from) — both mean "nowhere to run this in-process".
+        _ ->
+            {error, applier_unavailable}
+    end;
+fused_instance_pid_for(Pid) when is_pid(Pid) ->
+    case lookup_instance_id(Pid) of
+        undefined -> {error, applier_unavailable};
+        Id -> fused_instance_pid_for(Id)
+    end.
+
 ?DOC("""
 Blocks until the per-instance applier has promoted every overlay row
 into the MST, or until `Timeout` ms have elapsed.
@@ -1391,7 +1426,15 @@ refresh_validator(Target, Reason) ->
         {ok, ApplierPid} ->
             bondy_oplog_applier:refresh_validator(ApplierPid, Reason);
         {error, _} = Err ->
-            Err
+            %% No separate applier — a fused instance has none by design.
+            %% Fall back to the instance's own equivalent handler.
+            case fused_instance_pid_for(Target) of
+                {ok, InstancePid} ->
+                    gen_server:cast(InstancePid, {refresh_validator, Reason}),
+                    ok;
+                {error, _} ->
+                    Err
+            end
     end.
 
 ?DOC("""
@@ -1429,8 +1472,77 @@ reap_origins(Target, RetiredOrigins) when is_list(RetiredOrigins) ->
         {ok, ApplierPid} ->
             bondy_oplog_applier:reap_origins_sync(ApplierPid, RetiredOrigins);
         {error, _} = Err ->
-            Err
+            %% No separate applier — a fused instance has none by design.
+            %% Fall back to the instance's own equivalent handler.
+            case fused_instance_pid_for(Target) of
+                {ok, InstancePid} ->
+                    gen_server:call(
+                        InstancePid, {reap_origins, RetiredOrigins}, infinity
+                    );
+                {error, _} ->
+                    Err
+            end
     end.
+
+-doc """
+The tier_2 stamp-site read of a cell's current causal context, for a
+**fused** instance (which has no separate applier process to hold
+`bondy_oplog_applier:cell_context/3`'s equivalent). `bondy_db:cell_context/3`
+calls this directly (via `InstancePid`) when
+`bondy_oplog_registry:applier_pid/1` is `undefined` and the instance is
+fused. `{error, no_cell_apply_target}` for an unbootstrapped or non-fused
+instance.
+""".
+-spec cell_context(InstancePid :: pid(), Bucket :: term(), Key :: term()) ->
+    {ok, term()} | {error, term()}.
+
+cell_context(InstancePid, Bucket, Key) when is_pid(InstancePid) ->
+    gen_server:call(InstancePid, {cell_context, Bucket, Key}, infinity).
+
+-doc """
+The causally-stable CRDT cell reclamation sweep, for a **fused** instance
+(which has no separate applier process to hold
+`bondy_oplog_applier:sweep_stable_cells/3`'s equivalent). `reclaim_stable_
+cells/1` calls this directly when the instance is fused. `{error,
+no_projection}` for an unbootstrapped or non-fused instance.
+""".
+-spec sweep_stable_cells(
+    InstancePid :: pid(), StableHlc :: integer(), Opts :: map()
+) ->
+    {ok, map(), done | {resume, term()}} | {error, term()}.
+
+sweep_stable_cells(InstancePid, StableHlc, Opts) when
+    is_pid(InstancePid), is_integer(StableHlc), is_map(Opts)
+->
+    gen_server:call(
+        InstancePid, {sweep_stable_cells, StableHlc, Opts}, infinity
+    ).
+
+-doc """
+The FUSED instance's resolved `cell_apply_target` shard key, for a fused
+instance (which has no separate applier process to hold
+`bondy_oplog_applier:cell_apply_target/1`'s equivalent). Mirrors that
+function exactly, including its founding-ctx-only scope (the FOUNDING
+table's shard key on a multiplexed shard, not every registered table's).
+`undefined` if no projection target was configured, or the instance is not
+fused.
+""".
+-spec cell_apply_target(InstancePid :: pid()) -> {ok, term()} | undefined.
+
+cell_apply_target(InstancePid) when is_pid(InstancePid) ->
+    gen_server:call(InstancePid, cell_apply_target, infinity).
+
+-doc """
+Full secondary-index rebuild on a **fused** instance (which has no
+separate applier process to hold
+`bondy_oplog_applier:rebuild_indexes_sync/1`'s equivalent). Synchronous —
+the rebuild barrier. A no-op when the instance has no `cell_apply_target`
+or is not fused.
+""".
+-spec rebuild_indexes_sync(InstancePid :: pid()) -> ok.
+
+rebuild_indexes_sync(InstancePid) when is_pid(InstancePid) ->
+    gen_server:call(InstancePid, rebuild_indexes, infinity).
 
 %% =============================================================================
 %% PAGE-LEVEL API (sync protocol)
@@ -3058,6 +3170,153 @@ do_handle_call({persist_frontier, AbsorbHlc}, From, State) when
         AbsorbHlc > 0 andalso
             bondy_oplog_hlc:update(State#state.hlc, AbsorbHlc),
     do_handle_call(persist_frontier, From, State);
+do_handle_call(
+    {cell_context, _Bucket, _Key},
+    _From,
+    #state{fused_drain = undefined} = State
+) ->
+    %% Not a fused instance (or not yet bootstrapped) — no per-cell
+    %% resolution source of its own; the caller (`bondy_db:cell_context/3`)
+    %% only reaches here when no applier was found either.
+    {reply, {error, no_cell_apply_target}, State};
+do_handle_call(
+    {cell_context, Bucket, Key},
+    _From,
+    #state{
+        instance_id = Id,
+        fused_drain = #fused_drain{
+            cell_apply_source = Source, cell_apply_ctx = Founding
+        },
+        ctx_guard = Guard
+    } = State
+) ->
+    %% Mirrors `bondy_oplog_applier`'s `{cell_context, Bucket, Key}` handler
+    %% exactly, reading via THIS instance's own in-process state (a fused
+    %% instance has no separate applier to delegate to). See that clause's
+    %% doc for the read/decode rationale and the single-applier-scope /
+    %% read-then-append race note — identical here, single-instance-scope.
+    case resolve_cell_ctx(Source, Bucket, Founding) of
+        undefined ->
+            {reply, {error, no_cell_apply_target}, State};
+        #{
+            adapter := Adapter,
+            handle := Handle,
+            kernel := Kernel,
+            crdt_module := CrdtMod
+        } = CellCtx ->
+            State0 =
+                case Adapter:get(Handle, Bucket, Key) of
+                    not_found ->
+                        bondy_oplog_cell_kernel:init(
+                            Kernel, maps:get(crdt_opts, CellCtx, #{})
+                        );
+                    {ok, Frame} ->
+                        {_PrevHlc, StateBytes, _ValueBytes} =
+                            bondy_oplog_cell_frame:decode_full(Frame),
+                        bondy_oplog_cell_kernel:decode_state(Kernel, StateBytes)
+                end,
+            Context =
+                case
+                    CrdtMod =/= undefined andalso
+                        erlang:function_exported(CrdtMod, context_of, 1)
+                of
+                    true -> CrdtMod:context_of(State0);
+                    false -> undefined
+                end,
+            {Reply, Guard1} = bondy_oplog_ctx_guard:stamp(
+                Id, Guard, Bucket, Key, Context
+            ),
+            {reply, Reply, State#state{ctx_guard = Guard1}}
+    end;
+do_handle_call(
+    {reap_origins, _Retired},
+    _From,
+    #state{fused_drain = undefined} = State
+) ->
+    {reply, {error, no_cell_apply_target}, State};
+do_handle_call(
+    {reap_origins, Retired},
+    _From,
+    #state{
+        instance_id = Id,
+        fused_drain = #fused_drain{cell_apply_source = Source},
+        ctx_guard = Guard
+    } = State
+) ->
+    %% Mirrors `bondy_oplog_applier`'s `{reap_origins, Retired}` handler —
+    %% delegates to the shared `bondy_oplog_cell_utils`, which this instance
+    %% runs in-process (no separate applier to delegate to).
+    {Reply, Guard1} = bondy_oplog_cell_utils:reap(Id, Guard, Source, Retired),
+    {reply, Reply, State#state{ctx_guard = Guard1}};
+do_handle_call(
+    {sweep_stable_cells, _StableHlc, _Opts},
+    _From,
+    #state{fused_drain = undefined} = State
+) ->
+    {reply, {error, no_projection}, State};
+do_handle_call(
+    {sweep_stable_cells, StableHlc, Opts},
+    _From,
+    #state{
+        instance_id = Id,
+        fused_drain = #fused_drain{
+            cell_apply_source = Source, cell_apply_ctx = Ctx
+        }
+    } = State
+) ->
+    %% Mirrors `bondy_oplog_applier`'s `{sweep_stable_cells, _, _}` handler —
+    %% delegates to the shared `bondy_oplog_cell_utils`, which this
+    %% instance runs in-process (no separate applier to delegate to).
+    {reply, bondy_oplog_cell_utils:sweep(Id, Ctx, Source, StableHlc, Opts),
+        State};
+do_handle_call(
+    cell_apply_target,
+    _From,
+    #state{fused_drain = undefined} = State
+) ->
+    {reply, undefined, State};
+do_handle_call(
+    cell_apply_target,
+    _From,
+    #state{fused_drain = #fused_drain{cell_apply_ctx = Ctx}} = State
+) ->
+    %% Mirrors `bondy_oplog_applier`'s `cell_apply_target` handler exactly
+    %% (same founding-ctx-only scope), reading via this instance's own
+    %% `#fused_drain{}` (a fused instance has no separate applier to
+    %% delegate to).
+    Reply =
+        case Ctx of
+            #{shard_key := ShardKey} -> {ok, ShardKey};
+            _ -> undefined
+        end,
+    {reply, Reply, State};
+do_handle_call(
+    rebuild_indexes,
+    _From,
+    #state{fused_drain = undefined} = State
+) ->
+    {reply, ok, State};
+do_handle_call(
+    rebuild_indexes,
+    _From,
+    #state{
+        instance_id = Id,
+        fused_drain = #fused_drain{cell_apply_ctx = Ctx}
+    } = State
+) when Ctx =/= undefined ->
+    %% Mirrors `bondy_oplog_applier`'s `rebuild_indexes` handler exactly
+    %% (same founding-ctx-only scope), delegating to the shared
+    %% `bondy_oplog_cell_utils` (a fused instance has no separate
+    %% applier to delegate to).
+    case bondy_oplog_cell_apply:sec_idx(Ctx) of
+        {_NS, []} ->
+            ok;
+        SecIdx ->
+            bondy_oplog_cell_utils:reindex(Id, Ctx, SecIdx)
+    end,
+    {reply, ok, State};
+do_handle_call(rebuild_indexes, _From, State) ->
+    {reply, ok, State};
 do_handle_call(_Req, _From, State) ->
     {reply, {error, badcall}, State}.
 
@@ -3139,6 +3398,20 @@ handle_cast({catch_up_done, _Token}, State) ->
     %% Stale/superseded `{catch_up_done, _}` (no matching pending
     %% compaction — already committed, aborted, or timed out). Ignore.
     {noreply, State};
+handle_cast(
+    {refresh_validator, Reason},
+    #state{
+        instance_id = Id,
+        validator_module = Mod,
+        validator_state = VS
+    } = State
+) ->
+    %% Mirrors `bondy_oplog_applier`'s `{refresh_validator, Reason}` cast —
+    %% delegates to the shared `bondy_oplog_validator_refresh`, which this
+    %% instance runs against its own validator fields (no separate applier
+    %% to delegate to).
+    NewVS = bondy_oplog_validator_refresh:refresh(Id, Reason, Mod, VS),
+    {noreply, State#state{validator_state = NewVS}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -5076,10 +5349,8 @@ instance handler: the instance must never block on the applier.
 reclaim_stable_cells(InstanceId) when is_binary(InstanceId) ->
     case stability_point(InstanceId) of
         {ok, StableHlc} ->
-            case bondy_oplog_registry:applier_pid(InstanceId) of
-                undefined ->
-                    reclamation_stalled(InstanceId, no_applier);
-                Pid when is_pid(Pid) ->
+            case applier_pid_for(InstanceId) of
+                {ok, Pid} ->
                     %% Bounded batches to completion: each applier call
                     %% scans at most `reclaim_batch_cells`, so concurrent
                     %% writes interleave between batches instead of
@@ -5088,6 +5359,7 @@ reclaim_stable_cells(InstanceId) when is_binary(InstanceId) ->
                     %% cells_swept]` event per batch, carrying the stats
                     %% and the derived `stable_hlc`.
                     reclaim_batches(
+                        fun bondy_oplog_applier:sweep_stable_cells/3,
                         Pid,
                         StableHlc,
                         bondy_oplog_config:reclaim_batch_cells(),
@@ -5098,24 +5370,47 @@ reclaim_stable_cells(InstanceId) when is_binary(InstanceId) ->
                             reduction_skipped => 0,
                             skipped => 0
                         }
-                    )
+                    );
+                {error, _} ->
+                    %% No separate applier — a fused instance has none by
+                    %% design. Fall back to the instance's own equivalent
+                    %% handler.
+                    case fused_instance_pid_for(InstanceId) of
+                        {ok, InstancePid} ->
+                            reclaim_batches(
+                                fun ?MODULE:sweep_stable_cells/3,
+                                InstancePid,
+                                StableHlc,
+                                bondy_oplog_config:reclaim_batch_cells(),
+                                undefined,
+                                #{
+                                    scanned => 0,
+                                    discarded => 0,
+                                    reduction_skipped => 0,
+                                    skipped => 0
+                                }
+                            );
+                        {error, _} ->
+                            reclamation_stalled(InstanceId, no_applier)
+                    end
             end;
         {error, Reason} ->
             reclamation_stalled(InstanceId, Reason)
     end.
 
 %% @private
-reclaim_batches(Pid, StableHlc, Max, Cursor, Acc) ->
-    case
-        bondy_oplog_applier:sweep_stable_cells(
-            Pid, StableHlc, #{max_cells => Max, cursor => Cursor}
-        )
-    of
+reclaim_batches(SweepFun, Pid, StableHlc, Max, Cursor, Acc) ->
+    case SweepFun(Pid, StableHlc, #{max_cells => Max, cursor => Cursor}) of
         {ok, Stats, done} ->
             {ok, merge_sweep_stats(Acc, Stats)};
         {ok, Stats, {resume, Next}} ->
             reclaim_batches(
-                Pid, StableHlc, Max, Next, merge_sweep_stats(Acc, Stats)
+                SweepFun,
+                Pid,
+                StableHlc,
+                Max,
+                Next,
+                merge_sweep_stats(Acc, Stats)
             );
         {error, _} = E ->
             E
@@ -6341,6 +6636,19 @@ target(InstanceId) when is_binary(InstanceId) ->
     end;
 target(Other) ->
     error({invalid_target, Other}).
+
+%% @private
+%% The ctx for a cell's bucket: its own registered table ctx when the bucket
+%% is in the multiplex directory, else the founding ctx (for unregistered
+%% buckets such as the reserved latency-probe bucket). `undefined` only when
+%% the instance is unbootstrapped. Mirrors
+%% `bondy_oplog_applier:resolve_cell_ctx/3` exactly (not exported there, so
+%% duplicated rather than cross-module-private-called).
+resolve_cell_ctx(Source, Bucket, Founding) ->
+    case bondy_oplog_mux:resolve(Source, Bucket) of
+        undefined -> Founding;
+        Ctx -> Ctx
+    end.
 
 %% @private
 %% Resolves and validates the `fold_module` / `fold_opts` instance

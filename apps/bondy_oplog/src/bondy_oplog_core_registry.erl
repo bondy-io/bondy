@@ -230,7 +230,15 @@ keeps reads parallel.
     %% (`index_entries_for_writer/1`), exactly as `instance_id` is for primaries.
     %% Appended last so existing `#entry`-index `ets:update_element` writes stay
     %% valid.
-    writer_key = undefined :: binary() | undefined
+    writer_key = undefined :: binary() | undefined,
+    %% Optional per-table construction config for a `crdt_module` that needs
+    %% more than an event to build its bottom state (e.g.
+    %% `bondy_oplog_crdt_struct`'s schema) — passed to
+    %% `bondy_oplog_cell_kernel:init/2` instead of the plain `init/1` at
+    %% cold-start. `#{}` (default) for every CRDT whose `init/0` needs
+    %% nothing. Appended last so existing `#entry`-index `ets:update_element`
+    %% writes stay valid.
+    crdt_opts = #{} :: map()
 }).
 
 -record(state, {
@@ -257,6 +265,10 @@ keeps reads parallel.
     %% Optional. Native operation-based CRDT module for the cell
     %% projection; when present it takes precedence over `fold_module`.
     crdt_module => module(),
+    %% Optional. Per-table construction config for `crdt_module`, passed to
+    %% `bondy_oplog_cell_kernel:init/2` at cold-start (see `#entry.crdt_opts`).
+    %% `#{}` (default) for every CRDT whose `init/0` needs nothing.
+    crdt_opts => map(),
     %% Optional. The `crdt_module`'s declared `causal_tier()`. Defaults
     %% to `tier_0` (scalar HLC). `tier_2` provisions the per-cell DVV
     %% causal-context stamp for this table's writes.
@@ -345,6 +357,7 @@ keeps reads parallel.
 -export([entry_writer_pid/1]).
 -export([entry_instance_id/1]).
 -export([entry_crdt_module/1]).
+-export([entry_crdt_opts/1]).
 -export([entry_causal_tier/1]).
 -export([entry_index_clear_scope/1]).
 -export([entry_primary_cell_scope/1]).
@@ -827,6 +840,14 @@ entry_writer_pid(#entry{writer_pid = V}) -> V.
 entry_instance_id(#entry{instance_id = V}) -> V.
 entry_crdt_module(#entry{crdt_module = V}) -> V.
 
+-doc """
+Per-table construction config for `crdt_module` (`#{}` default) — see
+`#entry.crdt_opts`.
+""".
+-spec entry_crdt_opts(shard_entry()) -> map().
+
+entry_crdt_opts(#entry{crdt_opts = V}) -> V.
+
 -doc "The shard's CRDT causal tier (`tier_0` default).".
 -spec entry_causal_tier(shard_entry()) -> bondy_oplog_crdt:tier().
 
@@ -1234,7 +1255,8 @@ handle_call({register, NS, Index, Shard, Owner, Config}, _From, State0) ->
         cell_apply_bucket = maps:get(cell_apply_bucket, Config, undefined),
         publish_ns = maps:get(publish_ns, Config, undefined),
         secondary_indexes = maps:get(secondary_indexes, Config, undefined),
-        writer_key = maps:get(writer_key, Config, undefined)
+        writer_key = maps:get(writer_key, Config, undefined),
+        crdt_opts = maps:get(crdt_opts, Config, #{})
     },
     true = ets:insert(?TABLE, Entry),
     State2 = State1#state{
