@@ -125,7 +125,9 @@ step equals the key-sorted `interpret_cog/2` fold.
 apply_op({Cell, CC, Hlc}, enable, Key, Context0) ->
     Dot = bondy_oplog_crdt_aw_core:dot_of(Key),
     Ctx = bondy_oplog_crdt_aw_core:normalise_context(Context0),
-    Cell1 = bondy_oplog_crdt_rw_core:add(Cell, Dot, Ctx),
+    %% The token has no value beyond its own presence -- the payload is
+    %% never inspected, only every rw_core cell's shape is uniform.
+    Cell1 = bondy_oplog_crdt_rw_core:add(Cell, Dot, Ctx, enabled),
     {Cell1, bondy_oplog_crdt_aw_core:cc_absorb(CC, Ctx, Dot),
         erlang:max(Hlc, key_hlc(Key))};
 apply_op({Cell, CC, Hlc}, disable, Key, Context0) ->

@@ -3,38 +3,33 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% PropEr properties for the Add-Wins Set (AWSet / observed-remove set),
-%% the tier_2 ship gate. Modelled on the aw_map suite: a command sequence
-%% over a few origins (`{add,O,E}`, `{rmv,O,E}`, `{sync,From,To}`) is
-%% simulated with realistic causal-delivery semantics (each origin keeps
-%% its own materialised state + delivered events; a mint stamps the
-%% origin's observed `context_of/1`; a sync delivers, in key order, exactly
-%% the events the source saw that the target had not).
+%% PropEr properties for `bondy_oplog_crdt_struct` — the fixed-schema
+%% record CRDT ("ImmutableCRDT"), the ship gate mirroring
+%% `bondy_oplog_crdt_aw_map_proper_test`/`bondy_oplog_crdt_aw_set_proper_test`.
 %%
-%% Beyond the standard convergence properties, `prop_add_wins_oracle`
-%% pins the defining semantics: an element is present iff some add of it
-%% survived every remove that observed it (concurrent add wins).
-%%
-%% The generator also mints `{apply, O, E, N}` — a nested `pn_counter`
-%% sub-op on an element drawn from a set disjoint from the plain-add
-%% elements, so a type-consistency `{badarg, _}` (mixing a plain add and
-%% a nested apply on the same element is a caller error, see
-%% `bondy_oplog_crdt_nested_core`) is never generated. `apply` mints a
-%% dot exactly like `add` does, so `oracle/1` treats both as
-%% presence-contributing.
+%% `bondy_oplog_crdt_struct` is a toolkit, not a `bondy_oplog_crdt`
+%% implementation in its own right (its `init/1` takes the schema, unlike
+%% the behaviour's arity-0 `init/0` — see its moduledoc), so there is no
+%% concrete module to drive through `bondy_oplog_crdt_commutative`
+%% directly. This suite plays that role itself: a fixed two-field test
+%% schema (`count` => `pn_counter`, `tag` => `lww_register`), and a local
+%% `group_interpret/2` that sorts by key and folds `apply_op/4` exactly as
+%% `bondy_oplog_crdt_commutative:interpret_cog/3` would for a concrete
+%% consumer module.
 
--module(bondy_oplog_crdt_aw_set_proper_test).
+-module(bondy_oplog_crdt_struct_proper_test).
 
 -include_lib("proper/include/proper.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
--define(MOD, bondy_oplog_crdt_aw_set).
--define(CORE, bondy_oplog_crdt_aw_core).
+-define(MOD, bondy_oplog_crdt_struct).
 -define(ORIGINS, [<<"a">>, <<"b">>, <<"c">>]).
--define(ELEMS, [<<"x">>, <<"y">>, <<"z">>]).
--define(NESTED_ELEMS, [<<"nx">>, <<"ny">>]).
 -define(DELTAS, [-2, -1, 1, 2]).
--define(SUB_MOD, bondy_oplog_crdt_pn_counter).
+-define(TAGS, [<<"x">>, <<"y">>, <<"z">>]).
+-define(SCHEMA, #{
+    count => bondy_oplog_crdt_pn_counter,
+    tag => bondy_oplog_crdt_lww_register
+}).
 -define(DEFAULT_NUMTESTS, 300).
 
 -export([prop_per_replica_eager_equals_group/0]).
@@ -42,7 +37,6 @@
 -export([prop_permutation_invariant/0]).
 -export([prop_idempotent_redelivery/0]).
 -export([prop_encode_state_roundtrip/0]).
--export([prop_add_wins_oracle/0]).
 
 %% =============================================================================
 %% Generators
@@ -50,9 +44,8 @@
 
 cmd_gen() ->
     oneof([
-        {add, oneof(?ORIGINS), oneof(?ELEMS)},
-        {apply, oneof(?ORIGINS), oneof(?NESTED_ELEMS), oneof(?DELTAS)},
-        {rmv, oneof(?ORIGINS), oneof(?ELEMS ++ ?NESTED_ELEMS)},
+        {apply, oneof(?ORIGINS), count, {inc, oneof(?DELTAS)}},
+        {apply, oneof(?ORIGINS), tag, {set, oneof(?TAGS)}},
         {sync, oneof(?ORIGINS), oneof(?ORIGINS)}
     ]).
 
@@ -68,7 +61,7 @@ prop_per_replica_eager_equals_group() ->
         {PerOrigin, _Log} = simulate(Cmds),
         lists:all(
             fun({_O, State, Delivered}) ->
-                State =:= ?MOD:interpret_cog(Delivered, ?MOD:init())
+                State =:= group_interpret(Delivered, init())
             end,
             PerOrigin
         )
@@ -77,12 +70,12 @@ prop_per_replica_eager_equals_group() ->
 prop_full_sync_converges() ->
     ?FORALL(Cmds, cmds_gen(), begin
         {PerOrigin, Log} = simulate(Cmds),
-        Target = ?MOD:interpret_cog(Log, ?MOD:init()),
+        Target = group_interpret(Log, init()),
         lists:all(
             fun({_O, State, Delivered}) ->
                 Remaining = [E || E <- Log, not lists:member(E, Delivered)],
                 Saturated = lists:foldl(
-                    fun(E, S) -> apply_event(S, E) end,
+                    fun(E, S) -> apply_event(E, S) end,
                     State,
                     sort_by_key(Remaining)
                 ),
@@ -95,93 +88,44 @@ prop_full_sync_converges() ->
 prop_permutation_invariant() ->
     ?FORALL(Cmds, cmds_gen(), begin
         {_PerOrigin, Log} = simulate(Cmds),
-        Ref = ?MOD:interpret_cog(Log, ?MOD:init()),
+        Ref = group_interpret(Log, init()),
         ?FORALL(Perm, shuffle_gen(Log), begin
-            ?MOD:interpret_cog(Perm, ?MOD:init()) =:= Ref
+            group_interpret(Perm, init()) =:= Ref
         end)
     end).
 
 prop_idempotent_redelivery() ->
     ?FORALL(Cmds, cmds_gen(), begin
         {_PerOrigin, Log} = simulate(Cmds),
-        Once = ?MOD:interpret_cog(Log, ?MOD:init()),
-        Twice = ?MOD:interpret_cog(Log ++ Log, ?MOD:init()),
+        Once = group_interpret(Log, init()),
+        Twice = group_interpret(Log ++ Log, init()),
         Once =:= Twice
     end).
 
 prop_encode_state_roundtrip() ->
     ?FORALL(Cmds, cmds_gen(), begin
         {_PerOrigin, Log} = simulate(Cmds),
-        State = ?MOD:interpret_cog(Log, ?MOD:init()),
+        State = group_interpret(Log, init()),
         ?MOD:decode_state(?MOD:encode_state(State)) =:= State
     end).
 
-%% Add-wins semantics oracle: an element is present iff at least one of its
-%% adds/applies has a dot that NO remove of that element observed.
-prop_add_wins_oracle() ->
-    ?FORALL(Cmds, cmds_gen(), begin
-        {_PerOrigin, Log} = simulate(Cmds),
-        State = ?MOD:interpret_cog(Log, ?MOD:init()),
-        present_elems(?MOD:to_value(State)) =:= oracle(Log)
-    end).
-
-%% `to_value/1` returns a plain list when no element is nested (the
-%% common case this property mostly exercises) or a map once at least one
-%% `apply` produced a nested element — normalise both to a sorted list of
-%% present elements for comparison against the oracle.
-present_elems(L) when is_list(L) -> lists:sort(L);
-present_elems(M) when is_map(M) -> lists:sort(maps:keys(M)).
-
 %% =============================================================================
-%% Add-wins oracle (independent of the CRDT implementation)
+%% Simulation (realistic causal delivery) — mirrors the aw_map/aw_set suites
 %% =============================================================================
 
-oracle(Log) ->
-    %% `apply` mints a dot for its element exactly like `add` does — both
-    %% are presence-contributing writes.
-    Adds = [
-        {?CORE:dot_of(bondy_oplog_event:key(Ev)), elem_of(Ev)}
-     || Ev <- Log, lists:member(tag_of(Ev), [add, apply])
-    ],
-    Rmvs = [
-        {elem_of(Ev), normctx(bondy_oplog_event:meta(Ev))}
-     || Ev <- Log, rmv =:= tag_of(Ev)
-    ],
-    Present = [
-        E
-     || {Dot, E} <- Adds,
-        not lists:any(
-            fun({E2, Ctx}) ->
-                E2 =:= E andalso ?CORE:dot_observed(Dot, Ctx)
-            end,
-            Rmvs
-        )
-    ],
-    lists:usort(Present).
-
-tag_of(Ev) -> element(1, bondy_oplog_crdt_commutative:op_of(Ev)).
-elem_of(Ev) -> element(2, bondy_oplog_crdt_commutative:op_of(Ev)).
-normctx(undefined) -> [];
-normctx(VV) -> VV.
-
-%% =============================================================================
-%% Simulation (realistic causal delivery) — mirrors the aw_map suite
-%% =============================================================================
+init() ->
+    ?MOD:init(?SCHEMA).
 
 simulate(Cmds) ->
-    Origins0 = maps:from_list([{O, {?MOD:init(), []}} || O <- ?ORIGINS]),
+    Origins0 = maps:from_list([{O, {init(), []}} || O <- ?ORIGINS]),
     World0 = #{origins => Origins0, hlc => 1, seqs => #{}, log => []},
     World = lists:foldl(fun step/2, World0, Cmds),
     #{origins := Origins, log := RevLog} = World,
     PerOrigin = [{O, S, D} || {O, {S, D}} <- maps:to_list(Origins)],
     {PerOrigin, lists:reverse(RevLog)}.
 
-step({add, O, E}, World) ->
-    mint(O, {add, E}, World);
-step({apply, O, E, N}, World) ->
-    mint(O, {apply, E, ?SUB_MOD, {inc, N}}, World);
-step({rmv, O, E}, World) ->
-    mint(O, {rmv, E}, World);
+step({apply, O, FieldKey, SubOp}, World) ->
+    mint(O, {apply, FieldKey, SubOp}, World);
 step({sync, From, To}, World) ->
     sync(From, To, World).
 
@@ -190,7 +134,7 @@ mint(O, Op, #{origins := Os, hlc := H, seqs := Seqs, log := Log} = W) ->
     Seq = maps:get(O, Seqs, 0) + 1,
     Ctx = ?MOD:context_of(S),
     E = mk_event(H, O, Seq, Op, Ctx),
-    S1 = apply_event(S, E),
+    S1 = apply_event(E, S),
     W#{
         origins := Os#{O => {S1, D ++ [E]}},
         hlc := H + 1,
@@ -203,7 +147,7 @@ sync(From, To, #{origins := Os} = W) ->
     {STo, DTo} = maps:get(To, Os),
     Missing = sort_by_key([E || E <- DFrom, not lists:member(E, DTo)]),
     {STo1, DTo1} = lists:foldl(
-        fun(E, {SAcc, DAcc}) -> {apply_event(SAcc, E), DAcc ++ [E]} end,
+        fun(E, {SAcc, DAcc}) -> {apply_event(E, SAcc), DAcc ++ [E]} end,
         {STo, DTo},
         Missing
     ),
@@ -217,13 +161,19 @@ mk_event(Hlc, Origin, Seq, Op, Context) ->
     Key = bondy_oplog_event:key(Hlc, Origin, Seq),
     bondy_oplog_event:new(Key, Op, Context).
 
-apply_event(State, Event) ->
+apply_event(Event, State) ->
     ?MOD:apply_op(
         State,
-        bondy_oplog_crdt_commutative:op_of(Event),
+        bondy_oplog_event:op(Event),
         bondy_oplog_event:key(Event),
         bondy_oplog_event:meta(Event)
     ).
+
+%% The canonical batch-fold path: sort by key, fold `apply_op/4` — what
+%% `bondy_oplog_crdt_commutative:interpret_cog/3` does for a concrete
+%% consumer module.
+group_interpret(Events, State) ->
+    lists:foldl(fun apply_event/2, State, sort_by_key(Events)).
 
 sort_by_key(Events) ->
     lists:sort(
@@ -252,8 +202,7 @@ properties_test_() ->
             prop_full_sync_converges(),
             prop_permutation_invariant(),
             prop_idempotent_redelivery(),
-            prop_encode_state_roundtrip(),
-            prop_add_wins_oracle()
+            prop_encode_state_roundtrip()
         ],
         lists:foreach(
             fun(Prop) -> ?assert(proper:quickcheck(Prop, Opts)) end,

@@ -134,7 +134,9 @@ apply_op({Elems, CC, Hlc}, {add, E}, Key, Context0) when is_binary(E) ->
     Dot = bondy_oplog_crdt_aw_core:dot_of(Key),
     Ctx = bondy_oplog_crdt_aw_core:normalise_context(Context0),
     Cell0 = maps:get(E, Elems, bondy_oplog_crdt_rw_core:new()),
-    Cell1 = bondy_oplog_crdt_rw_core:add(Cell0, Dot, Ctx),
+    %% The element is its own payload -- redundant with the outer key, but
+    %% keeps every rw_core cell shaped the same way regardless of consumer.
+    Cell1 = bondy_oplog_crdt_rw_core:add(Cell0, Dot, Ctx, E),
     Elems1 = put_cell(Elems, E, Cell1),
     {Elems1, bondy_oplog_crdt_aw_core:cc_absorb(CC, Ctx, Dot),
         erlang:max(Hlc, key_hlc(Key))};

@@ -36,24 +36,34 @@ the group `interpret_cog` fold (the tier_2 ship gate).
 ## A cell
 
 ```
-{Adds :: #{dot() => context()},   %% surviving adds: dot -> observed context
- R    :: bondy_dvvset:vector()}    %% the remove frontier (join of rmv dots)
+{Adds :: #{dot() => {context(), payload()}},   %% surviving adds
+ R    :: bondy_dvvset:vector()}                 %% remove frontier (join of rmv dots)
 ```
 
-`Adds` holds only currently-surviving adds (every stored add dominates
-`R`), so a cell is *present* iff `Adds` is non-empty.
+Each surviving add carries both the context it observed (needed to test
+survival against the remove frontier) and its payload — an opaque term
+for a presence-only consumer (`bondy_oplog_crdt_rw_set`,
+`bondy_oplog_crdt_dw_flag`, which store the element/token itself, never
+inspected again), or a flat value / nested sub-op tag for a value-carrying
+consumer (`bondy_oplog_crdt_rw_map`). `prune/2` only ever inspects the
+context half, never the payload — mirroring how
+`bondy_oplog_crdt_aw_core:drop_observed/2` is payload-agnostic on the
+add-wins side. `Adds` holds only currently-surviving adds (every stored
+add dominates `R`), so a cell is *present* iff `Adds` is non-empty.
 """).
 
--export([new/0]).
--export([add/3]).
--export([rmv/2]).
--export([present/1]).
+-export([add/4]).
+-export([adds/1]).
 -export([is_empty/1]).
+-export([new/0]).
+-export([present/1]).
+-export([rmv/2]).
 -export([vv_dominates/2]).
 
 -type dot() :: bondy_oplog_crdt_aw_core:dot().
 -type vv() :: bondy_dvvset:vector().
--type cell() :: {Adds :: #{dot() => vv()}, R :: vv()}.
+-type payload() :: term().
+-type cell() :: {Adds :: #{dot() => {vv(), payload()}}, R :: vv()}.
 
 -export_type([cell/0]).
 
@@ -68,15 +78,21 @@ new() ->
     {#{}, []}.
 
 -doc """
-Apply an add with dot `Dot` and observed context `Ctx`. The add is stored,
-then the cell is re-pruned against the current remove frontier — so an add
-concurrent with (or behind) an existing remove is dropped immediately
-(remove-wins).
+Apply an add with dot `Dot`, observed context `Ctx`, and `Payload`. The
+add is stored, then the cell is re-pruned against the current remove
+frontier — so an add concurrent with (or behind) an existing remove is
+dropped immediately (remove-wins).
 """.
--spec add(cell(), dot(), vv()) -> cell().
+-spec add(cell(), dot(), vv(), payload()) -> cell().
 
-add({Adds, R}, Dot, Ctx) ->
-    {prune(Adds#{Dot => Ctx}, R), R}.
+add({Adds, R}, Dot, Ctx, Payload) ->
+    {prune(Adds#{Dot => {Ctx, Payload}}, R), R}.
+
+-doc "The surviving adds' payloads, keyed by dot (context stripped).".
+-spec adds(cell()) -> #{dot() => payload()}.
+
+adds({Adds, _R}) ->
+    maps:map(fun(_Dot, {_Ctx, Payload}) -> Payload end, Adds).
 
 -doc """
 Apply a remove with dot `Dot`: extend the remove frontier `R` with `Dot`,
@@ -130,6 +146,7 @@ vv_dominates(C, R) ->
 %% =============================================================================
 
 %% @private
-%% Keep only the adds whose context dominates the remove frontier.
+%% Keep only the adds whose context dominates the remove frontier. The
+%% payload half of each entry is never inspected.
 prune(Adds, R) ->
-    maps:filter(fun(_Dot, C) -> vv_dominates(C, R) end, Adds).
+    maps:filter(fun(_Dot, {Ctx, _Payload}) -> vv_dominates(Ctx, R) end, Adds).

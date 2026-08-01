@@ -115,6 +115,26 @@ batch_same_field_last_wins_test() ->
     State = eager(?MOD:init(), E),
     ?assertEqual(#{<<"k">> => [<<"second">>]}, ?MOD:to_value(State)).
 
+%% A batch containing a nested `apply` alongside a flat `put` expands
+%% correctly -- distinct keys sharing one dot/context, routed through
+%% `bondy_oplog_crdt_nested_core` for each.
+batch_mixed_put_and_apply_test() ->
+    E = mk_event(
+        1,
+        <<"o">>,
+        1,
+        {batch, [
+            {put, <<"label">>, <<"v1">>},
+            {apply, <<"count">>, bondy_oplog_crdt_pn_counter, {inc, 4}}
+        ]},
+        []
+    ),
+    State = eager(?MOD:init(), E),
+    ?assertEqual(
+        #{<<"label">> => [<<"v1">>], <<"count">> => 4},
+        ?MOD:to_value(State)
+    ).
+
 %% The capability marker: the dot-store / grow-set types are batchable; the
 %% Seq/HLC-deduping counters and registers are not.
 is_batchable_test() ->

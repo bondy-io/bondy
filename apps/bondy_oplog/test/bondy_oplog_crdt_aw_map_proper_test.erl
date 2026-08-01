@@ -25,6 +25,14 @@
 %% the key-sorted order (a sync can interleave a peer's lower-HLC event
 %% after the replica's own higher-HLC event), so this genuinely exercises
 %% eager-vs-group rather than re-sorting an already-sorted log.
+%%
+%% The generator also mints `{apply, O, K, N}` — a nested `pn_counter`
+%% sub-op on a key drawn from a set disjoint from the flat-put keys, so a
+%% type-consistency `{badarg, _}` (mixing a flat put and a nested apply
+%% on the same key is a caller error, see `bondy_oplog_crdt_nested_core`)
+%% is never generated. This exercises the same
+%% `bondy_oplog_crdt_nested_core` engine `bondy_oplog_crdt_aw_set` uses,
+%% so the properties below prove convergence for nested keys too.
 
 -module(bondy_oplog_crdt_aw_map_proper_test).
 
@@ -34,7 +42,10 @@
 -define(MOD, bondy_oplog_crdt_aw_map).
 -define(ORIGINS, [<<"a">>, <<"b">>, <<"c">>]).
 -define(KEYS, [<<"k1">>, <<"k2">>]).
+-define(NESTED_KEYS, [<<"nk1">>, <<"nk2">>]).
 -define(VALUES, [<<"x">>, <<"y">>, <<"z">>]).
+-define(DELTAS, [-2, -1, 1, 2]).
+-define(SUB_MOD, bondy_oplog_crdt_pn_counter).
 -define(DEFAULT_NUMTESTS, 300).
 
 -export([prop_per_replica_eager_equals_group/0]).
@@ -50,7 +61,8 @@
 cmd_gen() ->
     oneof([
         {put, oneof(?ORIGINS), oneof(?KEYS), oneof(?VALUES)},
-        {rmv, oneof(?ORIGINS), oneof(?KEYS)},
+        {apply, oneof(?ORIGINS), oneof(?NESTED_KEYS), oneof(?DELTAS)},
+        {rmv, oneof(?ORIGINS), oneof(?KEYS ++ ?NESTED_KEYS)},
         {sync, oneof(?ORIGINS), oneof(?ORIGINS)}
     ]).
 
@@ -138,6 +150,8 @@ simulate(Cmds) ->
 
 step({put, O, K, V}, World) ->
     mint(O, {put, K, V}, World);
+step({apply, O, K, N}, World) ->
+    mint(O, {apply, K, ?SUB_MOD, {inc, N}}, World);
 step({rmv, O, K}, World) ->
     mint(O, {rmv, K}, World);
 step({sync, From, To}, World) ->

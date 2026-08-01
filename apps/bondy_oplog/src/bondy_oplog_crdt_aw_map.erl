@@ -71,12 +71,14 @@ dot() :: {origin(), counter()}          %% counter = the substrate Seq
 ## Operations
 
 ```
-{put, key(), value()}   %% assign value to key (mv on concurrent puts)
-{rmv, key()}            %% observed-remove the key
+{put, key(), value()}              %% assign value to key (mv on concurrent puts)
+{apply, key(), module(), term()}   %% apply a sub-op to a nested tier_0 sub-CRDT
+{rmv, key()}                       %% observed-remove the key
 ```
 
-`value()` is any term supplied by the application. (There is no
-`{apply, K, SubOp}` / per-key sub-CRDT — see *Deviations*.)
+`value()` is any term supplied by the application. `{apply, K, SubMod,
+SubOp}` lets `K`'s value be another CRDT's converged state instead of
+an opaque term — see *Nested sub-CRDTs*.
 
 ## Semantics — `apply_op/4` reads `OldState[K]`
 
@@ -87,9 +89,38 @@ For an event with dot `Dot = {Origin, Seq}` and stamped observed context
   (`Dot' <= Ctx`), then add `{Dot => V}`. Observed dots are the writer's
   own prior versions, so a sequential write dominates; a concurrent
   write's dot is not in `Ctx`, so it survives as a sibling.
+- `{apply, K, SubMod, SubOp}`: same drop-then-add as `{put, K, V}}`, but
+  the added dot carries a tagged sub-operation instead of a flat value
+  — see *Nested sub-CRDTs*.
 - `{rmv, K}`: drop from `K`'s dot-store every dot the writer observed; add
   nothing. If the dot-store empties, the key is removed. A concurrent add
   the remover never observed survives — add-wins.
+
+All three route through `bondy_oplog_crdt_nested_core`, which owns the
+drop-then-add/drop-then-maybe-remove bookkeeping generically (shared
+with `bondy_oplog_crdt_aw_set`); this module supplies only the dot/
+context derivation and the projection.
+
+## Nested sub-CRDTs
+
+A key's value can be another CRDT's converged state instead of an
+opaque term: `{apply, K, SubMod, SubOp}` accumulates `{sub, SubMod,
+Hlc, SubOp}` at the operation's dot exactly as `{put, K, V}}` accumulates
+`V` — same add-wins/observed-remove treatment, since
+`bondy_oplog_crdt_aw_core:drop_observed/2` only ever inspects the dot,
+never the value. `to_value/1` detects a nested key
+(`bondy_oplog_crdt_nested_core:sub_mod/1`) and, instead of returning the
+raw sibling set, replays the surviving sub-ops through `SubMod`'s own
+`interpret_cog/2` (`bondy_oplog_crdt_nested_core:nested_value/2`) — no
+callback beyond what every `bondy_oplog_crdt` module already exports.
+
+`SubMod` MUST be `causal_tier() =:= tier_0` (`pn_counter`,
+`lww_register`, `max_register`, `min_register`, ...): a tier_0 sub-op
+only needs its own HLC to linearize, which the parent's dot/event key
+already carries — no nested causal-context threading. A key's `SubMod`
+is fixed by its first `{apply, ...}` write; mixing `put`/`rmv` and
+`apply` on the same live key, or changing `SubMod` on a live key, raises
+`{badarg, _}` (`bondy_oplog_crdt_nested_core:put/5`,`:put_nested/7`).
 
 A dot `{O, S}` is *observed* by a context `Ctx` iff `Ctx[O] >= S`. Under
 causal (per-origin FIFO) delivery this compact test is exact: observing
@@ -138,15 +169,16 @@ bytes ⇒ equal MST page hash ⇒ convergent `root_hash`.
 
 ## Deviations
 
-1. **`value()` per dot, multi-value leaf** (not a per-key sub-CRDT).
-   The deprecated fold attaches a sub-fold (`lww_register`, `pn_counter`,
-   …) to each key and resolves the key to a *single* merged sub-value via
-   `merge_states/2`. This native map stores an opaque value per dot and
-   resolves a key to the *set* of concurrent siblings — the honest
-   tier_2, concurrency-detecting projection (the same shape as
-   `mv_register`). There is consequently no `{apply, K, SubOp}` op and no
-   sub-fold tag. Reconciling the cutover with the fold's single-value /
-   sub-CRDT projection is a follow-up concern.
+1. **`value()` per dot, multi-value leaf, for flat values** (not a
+   per-key sub-CRDT resolved via a state-based `merge_states/2`, as the
+   deprecated fold did by attaching a sub-fold — `lww_register`,
+   `pn_counter`, ... — to each key). This native map stores an opaque
+   value per dot and resolves a *flat* key to the set of concurrent
+   siblings — the honest tier_2, concurrency-detecting projection (the
+   same shape as `mv_register`). Nested keys (`{apply, K, SubMod,
+   SubOp}`) are the op-based analogue of the deprecated fold's per-key
+   sub-CRDT — see *Nested sub-CRDTs* — restricted to tier_0 `SubMod`s
+   (no recursive tier_2-in-tier_2 nesting).
 2. **One per-cell context VV**, not a DVVSet per key — the per-key
    dot-store carries presence; the shared context carries causality.
    `bondy_dvvset` is the conceptual basis, but its API operates on
@@ -216,7 +248,10 @@ peer add survives a remove (add-wins).
 -type entries() :: #{map_key() => dot_store()}.
 -type context() :: bondy_dvvset:vector().
 -type state() :: {entries(), context(), bondy_oplog_hlc:hlc()}.
--type op() :: {put, map_key(), map_value()} | {rmv, map_key()}.
+-type op() ::
+    {put, map_key(), map_value()}
+    | {apply, map_key(), module(), term()}
+    | {rmv, map_key()}.
 
 -export_type([state/0, op/0, map_key/0, map_value/0]).
 
@@ -242,7 +277,7 @@ init() ->
 interpret_cog(Events, State) ->
     bondy_oplog_crdt_commutative:interpret_cog(?MODULE, Events, State).
 
--spec query(value, state()) -> #{map_key() => [map_value()]}.
+-spec query(value, state()) -> #{map_key() => [map_value()] | term()}.
 
 query(value, State) ->
     to_value(State).
@@ -252,12 +287,14 @@ query(value, State) ->
 %% =============================================================================
 
 -doc """
-Apply one `{put, K, V}` or `{rmv, K}` with its observed causal `Context`
-(the stamped version vector in the event `meta`). Reads `K`'s current
-dot-store, drops the dots the writer observed (the pure observed-remove),
-and — for a put — adds the new dotted value. The surviving dot-set is a
-pure function of the event set, so this eager step equals the key-sorted
-`interpret_cog/2` fold.
+Apply one `{put, K, V}`, `{apply, K, SubMod, SubOp}`, or `{rmv, K}` with
+its observed causal `Context` (the stamped version vector in the event
+`meta`). Dispatches to `bondy_oplog_crdt_nested_core`, which owns the
+drop-then-add/drop-then-maybe-remove dot-store bookkeeping generically
+(shared with `bondy_oplog_crdt_aw_set`); this clause set only derives
+the dot/context and folds the cell-wide context and HLC. The surviving
+dot-set is a pure function of the event set, so this eager step equals
+the key-sorted `interpret_cog/2` fold.
 """.
 -spec apply_op(
     state(),
@@ -269,21 +306,22 @@ pure function of the event set, so this eager step equals the key-sorted
 apply_op({Entries, CC, Hlc}, {put, K, V}, Key, Context0) when is_binary(K) ->
     Dot = bondy_oplog_crdt_aw_core:dot_of(Key),
     Ctx = bondy_oplog_crdt_aw_core:normalise_context(Context0),
-    DS0 = maps:get(K, Entries, #{}),
-    DS1 = bondy_oplog_crdt_aw_core:drop_observed(DS0, Ctx),
-    Entries1 = Entries#{K => DS1#{Dot => V}},
+    Entries1 = bondy_oplog_crdt_nested_core:put(Entries, K, Dot, Ctx, V),
+    {Entries1, bondy_oplog_crdt_aw_core:cc_absorb(CC, Ctx, Dot),
+        erlang:max(Hlc, key_hlc(Key))};
+apply_op({Entries, CC, Hlc}, {apply, K, SubMod, SubOp}, Key, Context0)
+        when is_binary(K) andalso is_atom(SubMod) ->
+    Dot = bondy_oplog_crdt_aw_core:dot_of(Key),
+    Ctx = bondy_oplog_crdt_aw_core:normalise_context(Context0),
+    Entries1 = bondy_oplog_crdt_nested_core:put_nested(
+        Entries, K, Dot, Ctx, SubMod, key_hlc(Key), SubOp
+    ),
     {Entries1, bondy_oplog_crdt_aw_core:cc_absorb(CC, Ctx, Dot),
         erlang:max(Hlc, key_hlc(Key))};
 apply_op({Entries, CC, Hlc}, {rmv, K}, Key, Context0) when is_binary(K) ->
     Dot = bondy_oplog_crdt_aw_core:dot_of(Key),
     Ctx = bondy_oplog_crdt_aw_core:normalise_context(Context0),
-    DS0 = maps:get(K, Entries, #{}),
-    DS1 = bondy_oplog_crdt_aw_core:drop_observed(DS0, Ctx),
-    Entries1 =
-        case map_size(DS1) of
-            0 -> maps:remove(K, Entries);
-            _ -> Entries#{K => DS1}
-        end,
+    Entries1 = bondy_oplog_crdt_nested_core:rmv(Entries, K, Ctx),
     {Entries1, bondy_oplog_crdt_aw_core:cc_absorb(CC, Ctx, Dot),
         erlang:max(Hlc, key_hlc(Key))}.
 
@@ -293,16 +331,31 @@ apply_op({Entries, CC, Hlc}, {rmv, K}, Key, Context0) when is_binary(K) ->
 
 -doc """
 The map's value: live keys, each mapped to the sorted set of its
-concurrent sibling values. Removed keys are absent.
+concurrent sibling values, or — for a nested key
+(`bondy_oplog_crdt_nested_core:sub_mod/1`) — the sub-CRDT's own
+converged value (`bondy_oplog_crdt_nested_core:nested_value/2`). Removed
+keys are absent.
 """.
--spec to_value(state()) -> #{map_key() => [map_value()]}.
+-spec to_value(state()) -> #{map_key() => [map_value()] | term()}.
 
 to_value({Entries, _CC, _Hlc}) ->
     maps:fold(
         fun(K, DS, Acc) ->
             case map_size(DS) of
-                0 -> Acc;
-                _ -> Acc#{K => lists:usort(maps:values(DS))}
+                0 ->
+                    Acc;
+                _ ->
+                    case bondy_oplog_crdt_nested_core:sub_mod(DS) of
+                        undefined ->
+                            Acc#{K => lists:usort(maps:values(DS))};
+                        SubMod ->
+                            Acc#{
+                                K =>
+                                    bondy_oplog_crdt_nested_core:nested_value(
+                                        SubMod, DS
+                                    )
+                            }
+                    end
             end
         end,
         #{},
