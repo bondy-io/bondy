@@ -228,7 +228,9 @@ extract_vars_empty(_Config) ->
 extract_vars_single(_Config) ->
     ?assertEqual(
         [<<"id">>],
-        bondy_http_connector_callee_handler:extract_path_vars(<<"/items/{{id}}">>)
+        bondy_http_connector_callee_handler:extract_path_vars(
+            <<"/items/{{id}}">>
+        )
     ).
 
 extract_vars_multiple(_Config) ->

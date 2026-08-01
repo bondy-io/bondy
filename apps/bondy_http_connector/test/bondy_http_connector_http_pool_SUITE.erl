@@ -161,8 +161,11 @@ current_alarms() ->
 
 wait_until(Fun, Retries) when Retries > 0 ->
     case Fun() of
-        true -> ok;
-        false -> timer:sleep(50), wait_until(Fun, Retries - 1)
+        true ->
+            ok;
+        false ->
+            timer:sleep(50),
+            wait_until(Fun, Retries - 1)
     end;
 wait_until(Fun, 0) ->
     ?assert(Fun()).
@@ -175,33 +178,56 @@ pool_up_when_reachable(Config) ->
     ServiceName = ?config(service_name, Config),
     {Name, _Pid} = start_pool(
         ServiceName,
-        #{enabled => true, interval => 60_000, failure_threshold => 2, success_threshold => 1},
+        #{
+            enabled => true,
+            interval => 60_000,
+            failure_threshold => 2,
+            success_threshold => 1
+        },
         Config
     ),
-    wait_until(fun() -> bondy_http_connector_http_pool:status(Name) =:= up end, 40),
+    wait_until(
+        fun() -> bondy_http_connector_http_pool:status(Name) =:= up end, 40
+    ),
     ?assertEqual(1, pool_up_gauge(ServiceName)),
-    ?assertEqual([], [A || {Id, _} = A <- current_alarms(), Id =:= ?ALARM_ID(ServiceName)]).
+    ?assertEqual([], [
+        A
+     || {Id, _} = A <- current_alarms(), Id =:= ?ALARM_ID(ServiceName)
+    ]).
 
 pool_marked_down_after_failure_threshold_and_alarm_set(Config) ->
     ServiceName = ?config(service_name, Config),
     {Name, _Pid} = start_pool(
         ServiceName,
-        #{enabled => true, interval => 100, timeout => 500, failure_threshold => 2, success_threshold => 1},
+        #{
+            enabled => true,
+            interval => 100,
+            timeout => 500,
+            failure_threshold => 2,
+            success_threshold => 1
+        },
         Config
     ),
-    wait_until(fun() -> bondy_http_connector_http_pool:status(Name) =:= up end, 40),
+    wait_until(
+        fun() -> bondy_http_connector_http_pool:status(Name) =:= up end, 40
+    ),
 
     %% Simulate an outage: stop the mock listener so every probe (and the
     %% down-state retry) hits {error, econnrefused}.
     mock_auth_http_server:stop(),
 
-    wait_until(fun() -> bondy_http_connector_http_pool:status(Name) =:= down end, 60),
+    wait_until(
+        fun() -> bondy_http_connector_http_pool:status(Name) =:= down end, 60
+    ),
     ?assertEqual(0, pool_up_gauge(ServiceName)),
     ?assertMatch(
         [{_, #{service := ServiceName}}],
         [A || {Id, _} = A <- current_alarms(), Id =:= ?ALARM_ID(ServiceName)]
     ),
-    ?assertEqual({error, pool_down}, bondy_http_connector_http_pool:request(Name, get, <<"/">>, [], <<>>)),
+    ?assertEqual(
+        {error, pool_down},
+        bondy_http_connector_http_pool:request(Name, get, <<"/">>, [], <<>>)
+    ),
     %% failure_threshold=2 -- at least 2 failed up-state probes must have
     %% fired (and been recorded) before the down transition.
     ?assert(liveness_probes_total(ServiceName, error) >= 2).
@@ -211,15 +237,28 @@ pool_recovers_and_alarm_cleared_respecting_success_threshold(Config) ->
     Port = ?config(port, Config),
     {Name, _Pid} = start_pool(
         ServiceName,
-        #{enabled => true, interval => 100, timeout => 500, failure_threshold => 2, success_threshold => 2},
+        #{
+            enabled => true,
+            interval => 100,
+            timeout => 500,
+            failure_threshold => 2,
+            success_threshold => 2
+        },
         Config
     ),
-    wait_until(fun() -> bondy_http_connector_http_pool:status(Name) =:= up end, 40),
+    wait_until(
+        fun() -> bondy_http_connector_http_pool:status(Name) =:= up end, 40
+    ),
 
     mock_auth_http_server:stop(),
-    wait_until(fun() -> bondy_http_connector_http_pool:status(Name) =:= down end, 60),
+    wait_until(
+        fun() -> bondy_http_connector_http_pool:status(Name) =:= down end, 60
+    ),
     ?assertNotEqual(
-        [], [A || {Id, _} = A <- current_alarms(), Id =:= ?ALARM_ID(ServiceName)]
+        [], [
+            A
+         || {Id, _} = A <- current_alarms(), Id =:= ?ALARM_ID(ServiceName)
+        ]
     ),
 
     {ok, _} = mock_auth_http_server:start(#{port => Port}),
@@ -227,19 +266,29 @@ pool_recovers_and_alarm_cleared_respecting_success_threshold(Config) ->
     %% The pool itself recovers fail-open on the very first successful
     %% probe (down-state bondy_retry loop), well before the up-state
     %% cadence has run success_threshold=2 times.
-    wait_until(fun() -> bondy_http_connector_http_pool:status(Name) =:= up end, 60),
+    wait_until(
+        fun() -> bondy_http_connector_http_pool:status(Name) =:= up end, 60
+    ),
     ?assertEqual(1, pool_up_gauge(ServiceName)),
 
     %% ...but the alarm requires 2 consecutive successful up-state
     %% liveness probes (100ms interval) to clear, so it should still be
     %% active immediately after recovery.
     ?assertNotEqual(
-        [], [A || {Id, _} = A <- current_alarms(), Id =:= ?ALARM_ID(ServiceName)]
+        [], [
+            A
+         || {Id, _} = A <- current_alarms(), Id =:= ?ALARM_ID(ServiceName)
+        ]
     ),
 
     wait_until(
         fun() ->
-            [] =:= [A || {Id, _} = A <- current_alarms(), Id =:= ?ALARM_ID(ServiceName)]
+            [] =:=
+                [
+                    A
+                 || {Id, _} = A <- current_alarms(),
+                    Id =:= ?ALARM_ID(ServiceName)
+                ]
         end,
         60
     ).
@@ -250,10 +299,18 @@ pool_liveness_disabled_never_probes(Config) ->
         ServiceName,
         %% A short interval that WOULD have ticked several times over the
         %% test's runtime if the periodic probe were armed.
-        #{enabled => false, interval => 100, timeout => 500, failure_threshold => 2, success_threshold => 1},
+        #{
+            enabled => false,
+            interval => 100,
+            timeout => 500,
+            failure_threshold => 2,
+            success_threshold => 1
+        },
         Config
     ),
-    wait_until(fun() -> bondy_http_connector_http_pool:status(Name) =:= up end, 40),
+    wait_until(
+        fun() -> bondy_http_connector_http_pool:status(Name) =:= up end, 40
+    ),
 
     %% The one-shot startup health check always runs regardless of
     %% `liveness.enabled` (that's the pre-existing behaviour), but it
@@ -266,7 +323,10 @@ pool_liveness_disabled_never_probes(Config) ->
     ?assertEqual(1, pool_up_gauge(ServiceName)),
     ?assertEqual(0, liveness_probes_total(ServiceName, ok)),
     ?assertEqual(0, liveness_probes_total(ServiceName, error)),
-    ?assertEqual([], [A || {Id, _} = A <- current_alarms(), Id =:= ?ALARM_ID(ServiceName)]).
+    ?assertEqual([], [
+        A
+     || {Id, _} = A <- current_alarms(), Id =:= ?ALARM_ID(ServiceName)
+    ]).
 
 pool_liveness_probe_uses_get_method(Config) ->
     ServiceName = ?config(service_name, Config),
@@ -282,11 +342,16 @@ pool_liveness_probe_uses_get_method(Config) ->
         },
         Config
     ),
-    wait_until(fun() -> bondy_http_connector_http_pool:status(Name) =:= up end, 40),
+    wait_until(
+        fun() -> bondy_http_connector_http_pool:status(Name) =:= up end, 40
+    ),
 
     %% At least one periodic (GET-method) up-state probe must have fired
     %% and been recorded, both as the counter and the duration histogram.
     wait_until(fun() -> liveness_probes_total(ServiceName, ok) >= 1 end, 40),
     ?assert(liveness_probe_duration_count(ServiceName) >= 1),
     ?assertEqual(1, pool_up_gauge(ServiceName)),
-    ?assertEqual([], [A || {Id, _} = A <- current_alarms(), Id =:= ?ALARM_ID(ServiceName)]).
+    ?assertEqual([], [
+        A
+     || {Id, _} = A <- current_alarms(), Id =:= ?ALARM_ID(ServiceName)
+    ]).

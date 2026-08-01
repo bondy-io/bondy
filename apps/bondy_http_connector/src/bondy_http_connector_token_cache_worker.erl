@@ -187,14 +187,18 @@ handle_cast(_Msg, State) ->
 handle_info({refresh, ServiceName, AuthMod, AuthConf}, State) ->
     case get_new_token(ServiceName, AuthMod, AuthConf, State) of
         {ok, _} ->
-            ok = bondy_http_connector_telemetry:token_refresh(ServiceName, ok, preemptive),
+            ok = bondy_http_connector_telemetry:token_refresh(
+                ServiceName, ok, preemptive
+            ),
             ?LOG_DEBUG(#{
                 description => <<"Preemptive token refresh succeeded">>,
                 service => ServiceName
             }),
             {noreply, State};
         {error, Reason} ->
-            ok = bondy_http_connector_telemetry:token_refresh(ServiceName, error, preemptive),
+            ok = bondy_http_connector_telemetry:token_refresh(
+                ServiceName, error, preemptive
+            ),
             ?LOG_WARNING(#{
                 description => <<"Preemptive token refresh failed">>,
                 service => ServiceName,
@@ -250,7 +254,9 @@ get_new_token(ServiceName, AuthMod, AuthConf, State) ->
             {ok, _} -> ok;
             {error, _} -> error
         end,
-    ok = bondy_http_connector_telemetry:token_fetch(ServiceName, FetchOutcome, DurationMs),
+    ok = bondy_http_connector_telemetry:token_fetch(
+        ServiceName, FetchOutcome, DurationMs
+    ),
     Result.
 
 %% @private
@@ -308,7 +314,10 @@ cancel_pending_refresh(ServiceName, State) ->
 %% @private
 clear_token(ServiceName, State) ->
     Result = ets:lookup_element(
-        State#state.name, ServiceName, #http_connector_token.timer_ref, undefined
+        State#state.name,
+        ServiceName,
+        #http_connector_token.timer_ref,
+        undefined
     ),
     case Result of
         undefined ->

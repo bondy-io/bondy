@@ -31,7 +31,6 @@ get(RealmUri, Guid, _Details) when is_binary(Guid) ->
         {error, not_found} ->
             no_such_session_error()
     end;
-
 get(_RealmUri, _Guid, _Details) ->
     no_such_session_error().
 

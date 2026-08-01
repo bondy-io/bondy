@@ -205,7 +205,9 @@ terminate(_Reason, _State) ->
 %% @private
 init_pool() ->
     DefaultSize = max(erlang:system_info(schedulers_online), 8),
-    Size = bondy_http_connector_config:get([token_cache_pool, size], DefaultSize),
+    Size = bondy_http_connector_config:get(
+        [token_cache_pool, size], DefaultSize
+    ),
 
     ok = ensure_pool(?POOLNAME, Size),
 

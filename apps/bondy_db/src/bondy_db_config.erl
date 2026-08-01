@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_db_config).
 -behaviour(app_config).
 -moduledoc """
@@ -49,11 +48,9 @@ surface to configure them through, rather than reaching into the raw
 
 -compile({no_auto_import, [get/1]}).
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 -doc "Initialises bondy_db configuration.".
 -spec init() -> ok.
@@ -62,20 +59,17 @@ init() ->
     ok = app_config:init(?APP, #{callback_mod => ?MODULE}),
     ok.
 
-
 -doc "Gets a config value by key.".
 -spec get(Key :: list() | atom() | tuple()) -> term().
 
 get(Key) ->
     app_config:get(?APP, Key).
 
-
 -doc "Gets a config value by key, falling back to `Default` when unset.".
 -spec get(Key :: list() | atom() | tuple(), Default :: term()) -> term().
 
 get(Key, Default) ->
     app_config:get(?APP, Key, Default).
-
 
 -doc """
 Sets a config value at runtime. Test/operator override seam — updates both
@@ -87,13 +81,11 @@ the cached `persistent_term` value `get/1,2` reads and the underlying
 set(Key, Value) ->
     app_config:set(?APP, Key, Value).
 
-
 -doc "Shard count for `DbName` (default `16`).".
 -spec oplog_shard_count(DbName :: db_name()) -> pos_integer().
 
 oplog_shard_count(DbName) ->
     get([databases, DbName, oplog, shard_count], 16).
-
 
 -doc """
 Partition strategy for `DbName` (default `aggregate`). Only meaningful for
@@ -106,7 +98,6 @@ this key.
 oplog_partition_strategy(DbName) ->
     get([databases, DbName, oplog, partition_strategy], aggregate).
 
-
 -doc """
 Realm-prefix co-location depth for `DbName` (default `1`), used only when
 `oplog_partition_strategy/1` is `realm`. `main`-only; see
@@ -116,7 +107,6 @@ Realm-prefix co-location depth for `DbName` (default `1`), used only when
 
 oplog_realm_prefix_depth(DbName) ->
     get([databases, DbName, oplog, realm_prefix_depth], 1).
-
 
 -doc """
 Boot behaviour when `DbName`'s on-disk topology manifest disagrees with the
@@ -128,13 +118,11 @@ configured topology (default `warn`). `main`-only; see
 oplog_on_topology_mismatch(DbName) ->
     get([databases, DbName, oplog, on_topology_mismatch], warn).
 
-
 -spec will_set(Key :: key_value:key(), Value :: any()) ->
     ok | {ok, NewValue :: any()} | {error, Reason :: any()}.
 
 will_set(_, _) ->
     ok.
-
 
 -spec on_set(Key :: key_value:key(), Value :: any()) -> ok.
 

@@ -3,7 +3,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-
 -module(bondy_http_connector_telemetry).
 -moduledoc """
 Telemetry conventions for `bondy_http_connector` instrumentation.
@@ -68,7 +67,9 @@ Called once from `bondy_http_connector_app:start/2`.
 init() ->
     ok = declare_families(),
     case
-        telemetry:attach_many(?MODULE, ?EVENTS, fun ?MODULE:handle_event/4, undefined)
+        telemetry:attach_many(
+            ?MODULE, ?EVENTS, fun ?MODULE:handle_event/4, undefined
+        )
     of
         ok -> ok;
         {error, already_exists} -> ok
@@ -86,7 +87,11 @@ handler's return shape via `classify_status/1`. Total: never throws.
     Result :: tuple()
 ) -> ok.
 
-request(#http_connector_proc_conf{service_name = Service, uri = ProcUri}, StartTs, Result) ->
+request(
+    #http_connector_proc_conf{service_name = Service, uri = ProcUri},
+    StartTs,
+    Result
+) ->
     DurationMs = erlang:monotonic_time(millisecond) - StartTs,
     Outcome = classify_status(Result),
     execute(
@@ -99,7 +104,8 @@ request(#http_connector_proc_conf{service_name = Service, uri = ProcUri}, StartT
 Emits `[bondy, http_connector, retry]` for an upstream HTTP retry
 attempt. Total: never throws.
 """.
--spec retry(Service :: binary(), ProcUri :: binary(), Attempt :: pos_integer()) -> ok.
+-spec retry(Service :: binary(), ProcUri :: binary(), Attempt :: pos_integer()) ->
+    ok.
 
 retry(Service, ProcUri, Attempt) ->
     execute(
@@ -126,7 +132,9 @@ token_cache(Service, Result) ->
 Emits `[bondy, http_connector, token_fetch]` for a token acquisition
 HTTP call to the identity provider. Total: never throws.
 """.
--spec token_fetch(Service :: binary(), Outcome :: ok | error, DurationMs :: integer()) -> ok.
+-spec token_fetch(
+    Service :: binary(), Outcome :: ok | error, DurationMs :: integer()
+) -> ok.
 
 token_fetch(Service, Outcome, DurationMs) ->
     execute(
@@ -186,7 +194,9 @@ Emits `[bondy, http_connector, liveness_probe]` for a periodic
 liveness check against a service's upstream endpoint, regardless of
 whether it changed the pool's up/down state. Total: never throws.
 """.
--spec liveness_probe(Service :: binary(), Outcome :: ok | error, DurationMs :: integer()) -> ok.
+-spec liveness_probe(
+    Service :: binary(), Outcome :: ok | error, DurationMs :: integer()
+) -> ok.
 
 liveness_probe(Service, Outcome, DurationMs) ->
     execute(
@@ -205,7 +215,9 @@ handle_event([bondy, http_connector, request], #{duration := D}, Meta, _Config) 
     safe(fun() ->
         bondy_metrics:counter(#{
             name => bondy_http_connector_requests_total,
-            label => #{service => Service, procedure_uri => Uri, outcome => Outcome}
+            label => #{
+                service => Service, procedure_uri => Uri, outcome => Outcome
+            }
         })
     end),
     safe(fun() ->
@@ -231,7 +243,9 @@ handle_event([bondy, http_connector, token_cache], _Meas, Meta, _Config) ->
             label => #{service => Service, result => Result}
         })
     end);
-handle_event([bondy, http_connector, token_fetch], #{duration := D}, Meta, _Config) ->
+handle_event(
+    [bondy, http_connector, token_fetch], #{duration := D}, Meta, _Config
+) ->
     #{service := Service, outcome := Outcome} = Meta,
     safe(fun() ->
         bondy_metrics:counter(#{
@@ -286,7 +300,9 @@ handle_event([bondy, http_connector, pool_status], _Meas, Meta, _Config) ->
             value => Up
         })
     end);
-handle_event([bondy, http_connector, liveness_probe], #{duration := D}, Meta, _Config) ->
+handle_event(
+    [bondy, http_connector, liveness_probe], #{duration := D}, Meta, _Config
+) ->
     #{service := Service, outcome := Outcome} = Meta,
     safe(fun() ->
         bondy_metrics:counter(#{
@@ -326,7 +342,8 @@ declare_families() ->
     }),
     ok = bondy_metrics:declare(#{
         name => bondy_http_connector_token_cache_total,
-        help => ~"Total token cache lookups, by service and result (hit | miss)."
+        help =>
+            ~"Total token cache lookups, by service and result (hit | miss)."
     }),
     ok = bondy_metrics:declare(#{
         name => bondy_http_connector_token_fetch_total,
@@ -339,11 +356,13 @@ declare_families() ->
     }),
     ok = bondy_metrics:declare(#{
         name => bondy_http_connector_token_refresh_total,
-        help => ~"Total preemptive or reactive token refreshes, by service, outcome and trigger."
+        help =>
+            ~"Total preemptive or reactive token refreshes, by service, outcome and trigger."
     }),
     ok = bondy_metrics:declare(#{
         name => bondy_http_connector_secret_resolution_total,
-        help => ~"Total external secret resolution attempts, by service and outcome."
+        help =>
+            ~"Total external secret resolution attempts, by service and outcome."
     }),
     ok = bondy_metrics:declare(#{
         name => bondy_http_connector_service_ready,

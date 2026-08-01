@@ -364,7 +364,9 @@ try_start_pool(#state{name = Name} = State0) ->
 %% recover-on-first-success expectation; a higher threshold keeps the
 %% alarm active — deliberately decoupled from traffic — until the
 %% recovery looks stable, so a flapping upstream doesn't flap the page.
-mark_up(#state{name = Name, service_name = ServiceName, retry = Retry0} = State0) ->
+mark_up(
+    #state{name = Name, service_name = ServiceName, retry = Retry0} = State0
+) ->
     {_, Retry} = bondy_retry:succeed(Retry0),
     ?LOG_INFO(#{
         description => "Pool is up",
@@ -402,7 +404,9 @@ do_mark_down(#state{name = Name, service_name = ServiceName} = State0) ->
 %% {error, Reason}`. Shared by the startup/down-state health check
 %% (`try_start_pool/1`) and the periodic up-state liveness check
 %% (`do_liveness_check/1`) so the two can't drift apart.
-probe_endpoint(#state{name = Name, endpoint = Endpoint, liveness_opts = LOpts} = State) ->
+probe_endpoint(
+    #state{name = Name, endpoint = Endpoint, liveness_opts = LOpts} = State
+) ->
     Method = maps:get(method, LOpts, head),
     Timeout = maps:get(timeout, LOpts, 5_000),
     Url = liveness_url(Endpoint, LOpts),
@@ -466,16 +470,22 @@ do_liveness_check(#state{service_name = ServiceName} = State0) ->
     DurationMs = erlang:monotonic_time(millisecond) - StartTs,
     case Result of
         ok ->
-            ok = bondy_http_connector_telemetry:liveness_probe(ServiceName, ok, DurationMs),
+            ok = bondy_http_connector_telemetry:liveness_probe(
+                ServiceName, ok, DurationMs
+            ),
             handle_probe_success(State0);
         {error, Reason} ->
-            ok = bondy_http_connector_telemetry:liveness_probe(ServiceName, error, DurationMs),
+            ok = bondy_http_connector_telemetry:liveness_probe(
+                ServiceName, error, DurationMs
+            ),
             handle_probe_failure(State0, Reason)
     end.
 
 %% @private
 handle_probe_success(#state{consec_successes = Successes} = State0) ->
-    State1 = State0#state{consec_failures = 0, consec_successes = Successes + 1},
+    State1 = State0#state{
+        consec_failures = 0, consec_successes = Successes + 1
+    },
     ok = maybe_clear_alarm(State1),
     arm_liveness_timer(State1).
 
@@ -544,12 +554,18 @@ set_service_down_alarm(#state{
 %% set is a harmless no-op, so calling this on every post-recovery
 %% probe until the threshold is reached is safe.
 maybe_clear_alarm(#state{
-    service_name = ServiceName, consec_successes = Successes, liveness_opts = LOpts
+    service_name = ServiceName,
+    consec_successes = Successes,
+    liveness_opts = LOpts
 }) ->
     SuccessThreshold = maps:get(success_threshold, LOpts, 1),
     case Successes >= SuccessThreshold of
-        true -> alarm_handler:clear_alarm({http_connector_service_down, ServiceName});
-        false -> ok
+        true ->
+            alarm_handler:clear_alarm(
+                {http_connector_service_down, ServiceName}
+            );
+        false ->
+            ok
     end.
 
 %% @private

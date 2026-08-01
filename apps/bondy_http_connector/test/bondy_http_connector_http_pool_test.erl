@@ -21,28 +21,42 @@
 
 liveness_url_test_() ->
     [
-        {"default path probes the bare endpoint", ?_assertEqual(
-            ~"https://api.example.com",
-            ?M:liveness_url(~"https://api.example.com", #{})
-        )},
-        {"default path with trailing slash endpoint is unchanged", ?_assertEqual(
-            ~"https://api.example.com/",
-            ?M:liveness_url(~"https://api.example.com/", #{})
-        )},
-        {"configured path with leading slash appends cleanly", ?_assertEqual(
-            ~"https://api.example.com/healthz",
-            ?M:liveness_url(~"https://api.example.com", #{path => ~"/healthz"})
-        )},
-        {"configured path without leading slash gets one added", ?_assertEqual(
-            ~"https://api.example.com/healthz",
-            ?M:liveness_url(~"https://api.example.com", #{path => ~"healthz"})
-        )},
-        {"trailing slash on endpoint is stripped before appending path", ?_assertEqual(
-            ~"https://api.example.com/healthz",
-            ?M:liveness_url(~"https://api.example.com/", #{path => ~"/healthz"})
-        )},
-        {"nested configured path is appended verbatim", ?_assertEqual(
-            ~"https://api.example.com/api/v1/health",
-            ?M:liveness_url(~"https://api.example.com", #{path => ~"/api/v1/health"})
-        )}
+        {"default path probes the bare endpoint",
+            ?_assertEqual(
+                ~"https://api.example.com",
+                ?M:liveness_url(~"https://api.example.com", #{})
+            )},
+        {"default path with trailing slash endpoint is unchanged",
+            ?_assertEqual(
+                ~"https://api.example.com/",
+                ?M:liveness_url(~"https://api.example.com/", #{})
+            )},
+        {"configured path with leading slash appends cleanly",
+            ?_assertEqual(
+                ~"https://api.example.com/healthz",
+                ?M:liveness_url(~"https://api.example.com", #{
+                    path => ~"/healthz"
+                })
+            )},
+        {"configured path without leading slash gets one added",
+            ?_assertEqual(
+                ~"https://api.example.com/healthz",
+                ?M:liveness_url(~"https://api.example.com", #{
+                    path => ~"healthz"
+                })
+            )},
+        {"trailing slash on endpoint is stripped before appending path",
+            ?_assertEqual(
+                ~"https://api.example.com/healthz",
+                ?M:liveness_url(~"https://api.example.com/", #{
+                    path => ~"/healthz"
+                })
+            )},
+        {"nested configured path is appended verbatim",
+            ?_assertEqual(
+                ~"https://api.example.com/api/v1/health",
+                ?M:liveness_url(~"https://api.example.com", #{
+                    path => ~"/api/v1/health"
+                })
+            )}
     ].

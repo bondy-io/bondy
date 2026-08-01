@@ -161,9 +161,11 @@ call(_, _, _, _, #{receive_progress := true}) ->
     tag_error({error, {invalid_option, receive_progress}});
 call(Pid, Uri, Args, KWArgs, Opts) ->
     Timeout = maps:get(timeout, Opts, ?DEFAULT_CALL_TIMEOUT),
-    tag_error(call_safe(
-        Pid, {call, Uri, Args, KWArgs, Opts}, Timeout + ?CALL_TIMEOUT_SLACK
-    )).
+    tag_error(
+        call_safe(
+            Pid, {call, Uri, Args, KWArgs, Opts}, Timeout + ?CALL_TIMEOUT_SLACK
+        )
+    ).
 
 -doc """
 Issue an asynchronous CALL. Returns `{ok, Token}`; the RESULT/ERROR is later
@@ -179,9 +181,11 @@ bounds the whole call — progressive results do not extend it.
 -spec call_async(pid(), uri(), list(), map(), map()) ->
     {ok, reference()} | {error, bondy_connect:call_error()}.
 call_async(Pid, Uri, Args, KWArgs, Opts) ->
-    tag_error(call_safe(
-        Pid, {call_async, Uri, Args, KWArgs, Opts}, ?DEFAULT_ADMIN_TIMEOUT
-    )).
+    tag_error(
+        call_safe(
+            Pid, {call_async, Uri, Args, KWArgs, Opts}, ?DEFAULT_ADMIN_TIMEOUT
+        )
+    ).
 
 -doc """
 Begin a progressive call (caller argument streaming): send the first CALL with
@@ -191,9 +195,11 @@ one request id via `send_input/4` / `finish_input/4`.
 -spec call_stream(pid(), uri(), list(), map(), map()) ->
     {ok, reference()} | {error, bondy_connect:call_error()}.
 call_stream(Pid, Uri, Args, KWArgs, Opts) ->
-    tag_error(call_safe(
-        Pid, {call_stream, Uri, Args, KWArgs, Opts}, ?DEFAULT_ADMIN_TIMEOUT
-    )).
+    tag_error(
+        call_safe(
+            Pid, {call_stream, Uri, Args, KWArgs, Opts}, ?DEFAULT_ADMIN_TIMEOUT
+        )
+    ).
 
 -doc "Send a non-final argument chunk of a progressive call.".
 -spec send_input(pid(), reference(), list(), map()) -> ok | {error, term()}.
@@ -220,9 +226,11 @@ cancel(Pid, Token, Mode) ->
 -spec register(pid(), uri(), bondy_connect_handler_spec:handler(), map()) ->
     {ok, pos_integer()} | {error, bondy_connect:call_error()}.
 register(Pid, Uri, Handler, Opts) ->
-    tag_error(call_safe(
-        Pid, {register, Uri, Handler, Opts}, ?DEFAULT_ADMIN_TIMEOUT
-    )).
+    tag_error(
+        call_safe(
+            Pid, {register, Uri, Handler, Opts}, ?DEFAULT_ADMIN_TIMEOUT
+        )
+    ).
 
 -doc "Unregister a procedure by its registration id or URI.".
 -spec unregister(pid(), pos_integer() | uri()) ->
@@ -234,9 +242,11 @@ unregister(Pid, RegRef) ->
 -spec subscribe(pid(), uri(), bondy_connect_handler_spec:handler(), map()) ->
     {ok, pos_integer()} | {error, bondy_connect:call_error()}.
 subscribe(Pid, Topic, Handler, Opts) ->
-    tag_error(call_safe(
-        Pid, {subscribe, Topic, Handler, Opts}, ?DEFAULT_ADMIN_TIMEOUT
-    )).
+    tag_error(
+        call_safe(
+            Pid, {subscribe, Topic, Handler, Opts}, ?DEFAULT_ADMIN_TIMEOUT
+        )
+    ).
 
 -doc "Unsubscribe from a topic by its subscription id or URI.".
 -spec unsubscribe(pid(), pos_integer() | uri()) ->

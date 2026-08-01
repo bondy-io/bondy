@@ -154,8 +154,11 @@ existing_part(Id) ->
 %% @private A valid 27-char base62 "existing" id (no node-hash prefix), built
 %% deterministically so tests need neither bondy_config nor randomness.
 mk_existing(Ext) ->
-    <<Id160:?LEN/integer>> = <<Ext:?EXT_LEN/integer, 0:(?LEN - ?EXT_LEN)/integer>>,
-    iolist_to_binary(string:pad(base62:encode(Id160), ?ENCODED_LEN, leading, $0)).
+    <<Id160:?LEN/integer>> =
+        <<Ext:?EXT_LEN/integer, 0:(?LEN - ?EXT_LEN)/integer>>,
+    iolist_to_binary(
+        string:pad(base62:encode(Id160), ?ENCODED_LEN, leading, $0)
+    ).
 
 composite_parse_test() ->
     Existing = mk_existing(123456789),

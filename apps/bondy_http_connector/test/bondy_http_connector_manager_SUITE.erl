@@ -126,8 +126,11 @@ end_per_testcase(_TC, _Config) ->
 
 wait_until(Fun, Retries) when Retries > 0 ->
     case Fun() of
-        true -> ok;
-        false -> timer:sleep(50), wait_until(Fun, Retries - 1)
+        true ->
+            ok;
+        false ->
+            timer:sleep(50),
+            wait_until(Fun, Retries - 1)
     end;
 wait_until(Fun, 0) ->
     ?assert(Fun()).
@@ -137,11 +140,15 @@ stop_all_pools() ->
         undefined ->
             ok;
         _ ->
-            Children = supervisor:which_children(bondy_http_connector_http_pool_sup),
+            Children = supervisor:which_children(
+                bondy_http_connector_http_pool_sup
+            ),
             lists:foreach(
                 fun
-                    ({_, Pid, _, _}) when is_pid(Pid) -> catch gen_server:stop(Pid);
-                    (_) -> ok
+                    ({_, Pid, _, _}) when is_pid(Pid) ->
+                        catch gen_server:stop(Pid);
+                    (_) ->
+                        ok
                 end,
                 Children
             )
@@ -210,7 +217,8 @@ no_services_configured_is_idle(_Config) ->
 
     ?assertEqual([], bondy_http_connector_manager:services()),
     ?assertEqual(
-        {ok, #{}}, bondy_http_connector_manager:service_readiness(<<"anything">>)
+        {ok, #{}},
+        bondy_http_connector_manager:service_readiness(<<"anything">>)
     ).
 
 service_without_secrets_starts_pool_and_is_ready(Config) ->
@@ -227,7 +235,9 @@ service_without_secrets_starts_pool_and_is_ready(Config) ->
     ),
 
     PoolName = pool_name(ServiceName),
-    wait_until(fun() -> bondy_http_connector_http_pool:status(PoolName) =:= up end, 40).
+    wait_until(
+        fun() -> bondy_http_connector_http_pool:status(PoolName) =:= up end, 40
+    ).
 
 service_with_secrets_resolves_and_becomes_ready(Config) ->
     BaseUrl = ?config(base_url, Config),
@@ -258,7 +268,9 @@ service_with_secrets_resolves_and_becomes_ready(Config) ->
     ?assertEqual(1, service_ready_gauge(ServiceName)),
 
     PoolName = pool_name(ServiceName),
-    wait_until(fun() -> bondy_http_connector_http_pool:status(PoolName) =:= up end, 40).
+    wait_until(
+        fun() -> bondy_http_connector_http_pool:status(PoolName) =:= up end, 40
+    ).
 
 service_with_bad_secrets_stays_not_ready(Config) ->
     BaseUrl = ?config(base_url, Config),
@@ -280,7 +292,8 @@ service_with_bad_secrets_stays_not_ready(Config) ->
     %% service_with_secrets_resolves_and_becomes_ready/1.
     _ = bondy_http_connector_manager:services(),
     ?assertEqual(
-        {error, not_ready}, bondy_http_connector_manager:service_readiness(ServiceName)
+        {error, not_ready},
+        bondy_http_connector_manager:service_readiness(ServiceName)
     ),
     ?assertEqual(1, secret_resolution_total(ServiceName, error)),
     ?assertEqual(0, service_ready_gauge(ServiceName)),
@@ -288,7 +301,9 @@ service_with_bad_secrets_stays_not_ready(Config) ->
     %% A secrets failure doesn't block the rest of the pipeline -- the
     %% pool for this service still starts.
     PoolName = pool_name(ServiceName),
-    wait_until(fun() -> bondy_http_connector_http_pool:status(PoolName) =:= up end, 40).
+    wait_until(
+        fun() -> bondy_http_connector_http_pool:status(PoolName) =:= up end, 40
+    ).
 
 multiple_services_are_independent(Config) ->
     BaseUrl = ?config(base_url, Config),
@@ -315,10 +330,14 @@ multiple_services_are_independent(Config) ->
     ),
 
     wait_until(
-        fun() -> bondy_http_connector_http_pool:status(pool_name(PlainName)) =:= up end,
+        fun() ->
+            bondy_http_connector_http_pool:status(pool_name(PlainName)) =:= up
+        end,
         40
     ),
     wait_until(
-        fun() -> bondy_http_connector_http_pool:status(pool_name(SecureName)) =:= up end,
+        fun() ->
+            bondy_http_connector_http_pool:status(pool_name(SecureName)) =:= up
+        end,
         40
     ).

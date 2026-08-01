@@ -100,7 +100,9 @@ init_per_testcase(TC, Config) ->
     {ok, PoolPid} = bondy_http_connector_http_pool:start_link(
         PoolName, BaseUrl, #{service_name => ServiceName}
     ),
-    wait_until(fun() -> bondy_http_connector_http_pool:status(PoolName) =:= up end, 40),
+    wait_until(
+        fun() -> bondy_http_connector_http_pool:status(PoolName) =:= up end, 40
+    ),
 
     [
         {service_name, ServiceName},
@@ -144,8 +146,11 @@ collect_attempts(Ref, N, Timeout) ->
 
 wait_until(Fun, Retries) when Retries > 0 ->
     case Fun() of
-        true -> ok;
-        false -> timer:sleep(50), wait_until(Fun, Retries - 1)
+        true ->
+            ok;
+        false ->
+            timer:sleep(50),
+            wait_until(Fun, Retries - 1)
     end;
 wait_until(Fun, 0) ->
     ?assert(Fun()).
@@ -205,12 +210,16 @@ successful_get_request_emits_ok_metrics(Config) ->
     ProcUri = ServiceName,
     ProcConf = base_proc_conf(Config, ProcUri),
 
-    Result1 = bondy_http_connector_callee_handler:handle_wamp_call(ProcConf, #{}, #{}),
+    Result1 = bondy_http_connector_callee_handler:handle_wamp_call(
+        ProcConf, #{}, #{}
+    ),
     ?assertMatch({ok, #{}, [], #{<<"status">> := 200}}, Result1),
 
     %% Second call for the same service/procedure: the token is now cached
     %% (a hit), the request itself is independent per-call.
-    Result2 = bondy_http_connector_callee_handler:handle_wamp_call(ProcConf, #{}, #{}),
+    Result2 = bondy_http_connector_callee_handler:handle_wamp_call(
+        ProcConf, #{}, #{}
+    ),
     ?assertMatch({ok, #{}, [], #{<<"status">> := 200}}, Result2),
 
     ?assertEqual(2, requests_total(ServiceName, ProcUri, ok)),
@@ -226,9 +235,12 @@ client_error_response_classified_correctly(Config) ->
     ),
     ProcConf = base_proc_conf(Config, ProcUri),
 
-    Result = bondy_http_connector_callee_handler:handle_wamp_call(ProcConf, #{}, #{}),
+    Result = bondy_http_connector_callee_handler:handle_wamp_call(
+        ProcConf, #{}, #{}
+    ),
     ?assertMatch(
-        {error, ~"wamp.error.not_found", #{}, [], #{<<"status">> := 404}}, Result
+        {error, ~"wamp.error.not_found", #{}, [], #{<<"status">> := 404}},
+        Result
     ),
     ?assertEqual(1, requests_total(ServiceName, ProcUri, client_error)).
 
@@ -247,9 +259,12 @@ retries_exhausted_emits_retries_total_and_bad_gateway(Config) ->
         base_url = <<"http://localhost:1">>
     },
 
-    Result = bondy_http_connector_callee_handler:handle_wamp_call(ProcConf, #{}, #{}),
+    Result = bondy_http_connector_callee_handler:handle_wamp_call(
+        ProcConf, #{}, #{}
+    ),
     ?assertMatch(
-        {error, ~"bondy.error.bad_gateway", #{}, [], #{<<"status">> := 502}}, Result
+        {error, ~"bondy.error.bad_gateway", #{}, [], #{<<"status">> := 502}},
+        Result
     ),
     %% retries = ?DEFAULT_RETRIES(3): 3 retry attempts fire (the 4th and
     %% final attempt, at RetriesLeft=0, gives up without another retry
@@ -281,9 +296,12 @@ retry_attempt_numbers_are_correct_for_non_default_retries(Config) ->
         []
     ),
     try
-        Result = bondy_http_connector_callee_handler:handle_wamp_call(ProcConf, #{}, #{}),
+        Result = bondy_http_connector_callee_handler:handle_wamp_call(
+            ProcConf, #{}, #{}
+        ),
         ?assertMatch(
-            {error, ~"bondy.error.bad_gateway", #{}, [], #{<<"status">> := 502}}, Result
+            {error, ~"bondy.error.bad_gateway", #{}, [], #{<<"status">> := 502}},
+            Result
         ),
         ?assertEqual([1, 2], collect_attempts(Ref, 2, 2000))
     after

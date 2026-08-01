@@ -270,7 +270,9 @@ resolve_service_secret(
     case Result of
         {ok, ResolvedVars} ->
             ets:insert(?READINESS_TAB, {Name, {ready, ResolvedVars}}),
-            ok = bondy_http_connector_telemetry:secret_resolution(Name, ok, startup),
+            ok = bondy_http_connector_telemetry:secret_resolution(
+                Name, ok, startup
+            ),
             ?LOG_INFO(#{
                 description => <<"Secrets resolved for service at startup">>,
                 service => Name
@@ -278,7 +280,9 @@ resolve_service_secret(
             {ok, CleanedService};
         {error, Reason} ->
             ets:insert(?READINESS_TAB, {Name, not_ready}),
-            ok = bondy_http_connector_telemetry:secret_resolution(Name, error, startup),
+            ok = bondy_http_connector_telemetry:secret_resolution(
+                Name, error, startup
+            ),
             ?LOG_WARNING(#{
                 description =>
                     ~"Secret resolution failed at startup, will retry in background",

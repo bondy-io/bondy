@@ -421,7 +421,16 @@ acquire_token(ServiceName, AuthMod, AuthConf) ->
 %% ===================================================================
 
 request_with_retry(
-    ServiceName, ProcUri, Method, Url, Headers, Body, MaxRetries, RetriesLeft, Timeout, Pool
+    ServiceName,
+    ProcUri,
+    Method,
+    Url,
+    Headers,
+    Body,
+    MaxRetries,
+    RetriesLeft,
+    Timeout,
+    Pool
 ) ->
     Overrides = [
         {connect_timeout, Timeout},
@@ -447,7 +456,9 @@ request_with_retry(
                 attempt => Attempt,
                 backoff_ms => BackoffMs
             }),
-            ok = bondy_http_connector_telemetry:retry(ServiceName, ProcUri, Attempt),
+            ok = bondy_http_connector_telemetry:retry(
+                ServiceName, ProcUri, Attempt
+            ),
             receive
             after BackoffMs -> ok
             end,
