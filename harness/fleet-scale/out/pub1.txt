@@ -1,0 +1,128 @@
+Connecting to fdaa:3:2957:a7b:493:a120:4b93:2...
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: /scripts/fleet_smoke.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 225000 max VUs, 3m40s max duration (incl. graceful stop):
+              * fleet: Up to 225000 looping VUs for 3m10s over 3 stages (gracefulRampDown: 30s, gracefulStop: 30s)
+
+
+Init    [   3% ] 007283/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [   6% ] 014480/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [   9% ] 020778/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  13% ] 029077/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  16% ] 036144/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  20% ] 044510/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  22% ] 048985/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  26% ] 057466/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  30% ] 067727/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  32% ] 072920/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  34% ] 077447/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  36% ] 081795/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  42% ] 095195/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  46% ] 103883/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  49% ] 110582/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  51% ] 115081/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  53% ] 119676/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  55% ] 124301/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  57% ] 128520/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  60% ] 135165/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  66% ] 148446/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  70% ] 157197/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  73% ] 164127/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  76% ] 170127/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  78% ] 174798/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  78% ] 174798/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  78% ] 174888/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  78% ] 174888/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  78% ] 174888/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  78% ] 174888/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  78% ] 174903/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  78% ] 174903/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  78% ] 174903/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  78% ] 174903/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  78% ] 174903/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  78% ] 174903/225000 VUs initialized
+fleet   [   0% ]
+
+Init    [  78% ] 174903/225000 VUs initialized
+fleet   [   0% ]
+Error: ssh shell: Process exited with status 4294967295

@@ -1,0 +1,22 @@
+# =============================================================================
+# k6 load-generator app for the fleet-scale test (co-located with
+# bondy-fleet-1 in lhr). Idle machines; run-fleet-lg.sh execs `k6 run` in each
+# over fly ssh so the load originates inside Fly's lhr datacenter.
+#
+# Deploy from the REPO ROOT:
+#   fly deploy --config harness/fleet-scale/lg-fly.toml \
+#              --dockerfile harness/k6-lg/Dockerfile --remote-only
+# =============================================================================
+
+app            = "bondy-fleet-lg"
+primary_region = "lhr"
+
+# No [http_service]: this app never receives inbound traffic, it only makes
+# outbound WS connections to the fleet cluster.
+
+# performance-16x: sized for k6's own per-VU memory (JS VU context + WS
+# buffers), which is the actual constraint at hundreds of thousands of VUs,
+# NOT Bondy's own footprint.
+[[vm]]
+  size   = "performance-16x"
+  memory = "32gb"
