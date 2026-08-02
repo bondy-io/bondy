@@ -47,7 +47,8 @@ groups() ->
             sub_add_local_wildcard_1,
             sub_add_local_wildcard_,
             sub_del_local_exact_1,
-            sub_del_local_exact_2
+            sub_del_local_exact_2,
+            sub_session_death_cleans_registry
         ]}
     ].
 
@@ -359,6 +360,39 @@ sub_del_local_exact_1(Config) ->
 
 sub_del_local_exact_2(Config) ->
     Config.
+
+%% The subscription-side counterpart of
+%% `bondy_http_connector_callee_lifecycle_SUITE:callee_death_cleans_registry/1`
+%% (registration side). A subscriber's session dying (a killed connection
+%% process) must trigger the SAME `bondy_session_manager` DOWN handler ->
+%% `bondy_router:flush/2` -> `bondy_broker:flush/2` -> registry `remove_all`
+%% chain that the registration side already proves — orphaned subscriptions
+%% left behind after every client of a load test disconnects is exactly the
+%% shape of the memory growth observed under a real subscribe-heavy load
+%% (Fly fleet-scale run, 2026-08-01/02): zero active connections, but the
+%% fused registry projection never shrank back down.
+sub_session_death_cleans_registry(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+
+    Pid = start_subscriber(RealmUri, Uri, #{match => ?EXACT_MATCH}),
+
+    {Matches, _} = bondy_registry:find_matches(subscription, RealmUri, Uri),
+    ?assertMatch([_ | _], Matches, "The subscriber must have a live entry"),
+
+    ok = kill_and_wait(Pid),
+
+    ?assert(
+        await(
+            fun() ->
+                {M, _} =
+                    bondy_registry:find_matches(subscription, RealmUri, Uri),
+                M =:= []
+            end,
+            500
+        ),
+        "subscription was not cleaned after session death"
+    ).
 
 register_invoke_single(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
@@ -1023,6 +1057,51 @@ await(Pred, N) ->
         false ->
             timer:sleep(10),
             await(Pred, N - 1)
+    end.
+
+%% @private
+%% Opens a real, `bondy_session_manager`-monitored session in a dedicated
+%% process (so killing it is a genuine process-monitor DOWN, exercising the
+%% same cleanup trigger a real WAMP connection dying would), subscribes to
+%% `Uri` through it, then blocks until killed by the caller.
+start_subscriber(RealmUri, Uri, Opts) ->
+    Parent = self(),
+    Pid = spawn(fun() ->
+        SessionId = bondy_session_id:new(),
+        SessionOpts = #{
+            type => internal,
+            roles => #{subscriber => #{}},
+            agent => <<"bondy_registry_SUITE">>,
+            is_anonymous => true
+        },
+        {ok, Session} = bondy_session_manager:open(
+            SessionId, RealmUri, SessionOpts
+        ),
+        Ctxt = bondy_context:new(
+            {{127, 0, 0, 1}, 0}, {ws, text, json}, #{session => Session}
+        ),
+        Ref = bondy_context:ref(Ctxt),
+        {ok, {_Entry, true}} =
+            bondy_registry:add(subscription, RealmUri, Uri, Opts, Ref),
+        Parent ! {self(), ready},
+        receive
+            stop -> ok
+        end
+    end),
+    receive
+        {Pid, ready} -> Pid
+    after 5000 ->
+        ct:fail({timeout_waiting_for_subscriber_ready, Pid})
+    end.
+
+%% @private
+kill_and_wait(Pid) ->
+    MonRef = monitor(process, Pid),
+    exit(Pid, kill),
+    receive
+        {'DOWN', MonRef, process, _, _} -> ok
+    after 5000 ->
+        ct:fail({timeout_waiting_for_exit, Pid})
     end.
 
 %% @private

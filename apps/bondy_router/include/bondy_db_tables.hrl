@@ -31,16 +31,8 @@
 -define(BONDY_DB_REGISTRY_ACTOR, '$bondy_registry').
 
 %% REGISTRY
--define(BONDY_DB_REGISTRATION_TAB, bondy_registration).
--define(BONDY_DB_SUBSCRIPTION_TAB, bondy_subscription).
 %% The RIB (Routing Information Base) summary tables — the replicated
 %% routing cells: one cell per (Realm, MatchPolicy, Uri, Node), written
 %% only by Node. Maintained by bondy_registry_rib.
 -define(BONDY_DB_REGISTRATION_RIB_TAB, bondy_registration_rib).
 -define(BONDY_DB_SUBSCRIPTION_RIB_TAB, bondy_subscription_rib).
--define(BONDY_DB_REGISTRATION_PREFIX(RealmUri),
-    {?BONDY_DB_REGISTRATION_TAB, RealmUri}
-).
--define(BONDY_DB_SUBSCRIPTION_PREFIX(RealmUri),
-    {?BONDY_DB_SUBSCRIPTION_TAB, RealmUri}
-).

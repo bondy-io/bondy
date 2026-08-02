@@ -5111,7 +5111,8 @@ do_compact_sync(#state{} = State0, PeerRoots) ->
         State#state.compaction_checkpoint_state,
         State#state.cached_checkpoint,
         State#state.crdt_module,
-        HasProjection
+        HasProjection,
+        State#state.fused
     ),
     case Result of
         {ok, {catalogue_compacted, Frontier}} when
@@ -5137,10 +5138,11 @@ run_compaction(
     CkptState,
     CachedCheckpoint,
     CrdtMod,
-    HasProjection
+    HasProjection,
+    Fused
 ) ->
     try
-        case compute_frontier_for(MST, PeerRoots) of
+        case effective_frontier(MST, PeerRoots, Fused, HasProjection) of
             undefined ->
                 maybe_watermark_catchup(MST, Watermark0, HasProjection);
             Frontier when
@@ -5446,17 +5448,32 @@ reclamation_stalled(InstanceId, Reason) ->
     {error, Reason}.
 
 %% @private
+%% The single point of truth for classifying a `reclamation_members/0`
+%% result into `solo | {clustered, Members} | error`. Both GC mechanisms
+%% that license a solo shortcut — `reclamation_stability_point/1` (CRDT-cell
+%% reclamation) and `effective_frontier/3` (MST/WAL compaction) — consume
+%% this, so there is exactly one place that decides what counts as solo.
+%% `reclamation_members/0`'s own contract (never conflate `[]` with `error`)
+%% is preserved verbatim: `error` in ⇒ `error` out, never `solo`.
+-spec membership_class({ok, [node()]} | error) ->
+    solo | {clustered, [node()]} | error.
+
+membership_class({ok, []}) -> solo;
+membership_class({ok, [_ | _] = Members}) -> {clustered, Members};
+membership_class(error) -> error.
+
+%% @private
 %% See `stability_point/1`. Membership is read FIRST: the solo carve-out
 %% needs only the clock, and an instance with no MST yet must still answer.
 reclamation_stability_point(State) ->
-    case reclamation_members() of
+    case membership_class(reclamation_members()) of
         error ->
             {error, membership_unavailable};
-        {ok, []} ->
+        solo ->
             %% Solo: a fresh tick strictly exceeds every event this node
             %% holds — see `stability_point/1`.
             {ok, bondy_oplog_hlc:now(State#state.hlc)};
-        {ok, Members} ->
+        {clustered, Members} ->
             case local_mst_empty(State) of
                 true ->
                     %% Clustered but this replica's tree is empty (fully
@@ -5545,6 +5562,55 @@ compute_frontier_for(MST, PeerRoots) ->
                         [] -> undefined
                     end
             end
+    end.
+
+%% @private
+%% The compaction frontier, with a solo carve-out for ephemeral+fused
+%% CATALOGUE instances — the mux-collapsed `registry` DB shape
+%% (`bondy_namespace_catalog:registry_db_spec/0`). Mirrors
+%% `reclamation_members/0`'s solo carve-out (see `stability_point/1`),
+%% classified through the same `membership_class/1` both mechanisms share.
+%%
+%% `compute_frontier_for/2` requires at least one PEER ROOT, supplied by
+%% `bondy_oplog_compaction:compact/1` from THIS instance's own sync history
+%% — NOT live cluster membership. On a genuinely solo node (no Partisan
+%% peer, ever) that history can never be populated, so a durable-shaped
+%% compaction stalls forever: `compute_frontier_for(_MST, []) -> undefined.`
+%% has no carve-out.
+%%
+%% Gated on `Fused ANDALSO HasProjection`, not `Fused` alone.
+%% `bondy_db:assert_fused_requires_ephemeral/2` makes `fused` an
+%% ephemeral-only property by construction, so a durable instance is never
+%% eligible regardless of membership — but `fused` alone does not imply a
+%% projection exists (a bare fused CRDT instance with no `cell_apply_target`
+%% is constructible below `bondy_db`, in `bondy_oplog_instance` tests). The
+%% safety argument — "a peer with a stale or rootless view falls back to a
+%% full catalogue bootstrap rather than an incremental MST diff, so
+%% truncating early costs a peer a bootstrap, never data" — is about the
+%% CATALOGUE bootstrap path specifically (`bondy_oplog_compaction:compact/1`'s
+%% "the truncated prefix" comment; `06_compaction_and_bootstrap.md`'s
+%% "Catalogue-mode bootstrap"). It has not been extended to the bare-CRDT
+%% checkpoint path, so this stays scoped to what was actually analysed: the
+%% real registry-DB shape (`fused => true, projection_backend => ets`) is
+%% always both. When the peer-confirmed path finds nothing to work with AND
+%% live membership is genuinely solo (never `error` — see
+%% `reclamation_members/0`, which must not conflate "solo" with "can't
+%% tell"), take the whole local tree as the frontier, exactly like the
+%% peer-confirmed "no hole" case already does.
+effective_frontier(MST, PeerRoots, Fused, HasProjection) ->
+    case compute_frontier_for(MST, PeerRoots) of
+        undefined when Fused andalso HasProjection ->
+            case membership_class(reclamation_members()) of
+                solo ->
+                    case bondy_mst:last(MST) of
+                        {K, _V} -> K;
+                        undefined -> undefined
+                    end;
+                _ ->
+                    undefined
+            end;
+        Frontier ->
+            Frontier
     end.
 
 %% @private

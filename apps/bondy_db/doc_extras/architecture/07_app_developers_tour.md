@@ -242,54 +242,54 @@ means the per-table calls below need only their `crdt_module`.)
 > table does this, the tour names both the shipped CRDT and the design
 > target, and why the gap is safe.
 
-### 4.1 Registrations and subscriptions
+### 4.1 Registration and subscription RIB summaries
 
-These carry the routing entries in the **ephemeral `registry` DB**, opened
-on the in-RAM `memory` topology with the fused, mem-WAL stack. The DB also
-holds their `_rib` routing-summary companions (`bondy_registration_rib`,
-`bondy_subscription_rib`):
+A WAMP registration or subscription entry (`#entry{}`) never enters
+`bondy_db` at all — it lives in `bondy_registry_store`'s partition-local
+ETS (one table per node) and backs the in-memory match tries
+(`bondy_registry_ptrie`). What `bondy_db` holds is the **RIB** (Routing
+Information Base): one summary cell per `(Realm, MatchPolicy, Uri,
+Node)`, replicated so a node can route to a peer's callee/subscriber
+without that peer re-announcing on every call. The cells live in the
+**ephemeral `registry` DB**, opened on the in-RAM `memory` topology with
+the fused, mem-WAL stack:
 
 ```erlang
 {ok, Registry} = bondy_db:open(registry, #{
     topology    => bondy_db_topology_memory,
     fold_module => lww_register
 }).
-{ok, Regs} = bondy_db:open_table(Registry, bondy_registration, #{
-    crdt_module => bondy_oplog_crdt_lww_register,
-    indexes     => [#{name => by_session, extract => [session_id]}]
+{ok, RegsRib} = bondy_db:open_table(Registry, bondy_registration_rib, #{
+    crdt_module => bondy_oplog_crdt_struct,
+    crdt_opts   => ?RIB_REGISTRATION_SCHEMA
 }).
-{ok, Subs} = bondy_db:open_table(Registry, bondy_subscription, #{
-    crdt_module => bondy_oplog_crdt_lww_register,
-    indexes     => [#{name => by_session, extract => [session_id]}]
+{ok, SubsRib} = bondy_db:open_table(Registry, bondy_subscription_rib, #{
+    crdt_module => bondy_oplog_crdt_pn_counter
 }).
 ```
 
-A WAMP registration or subscription is bound to a session: when the
-session's transport closes, the entry is gone. Persisting it would only
-resurrect dead, unroutable entries on restart, so the table is
-**ephemeral** — RAM projection, in-memory WAL, no disk anywhere
-([chapter 03](03_bondy_db.md#projection-backend-durable-vs-ephemeral)).
-After a restart the node starts empty and re-converges live entries from
-peers.
+Only the node named in a cell's key ever writes it — single-writer by
+construction — so `count`/`invoke`/`earliest`/`latest` (registrations) or
+a bare `count` (subscriptions) are backed by per-field CRDTs rather than
+one opaque LWW blob: `bondy_registry_rib`'s add/remove hooks write small,
+lock-free, targeted deltas directly, with no per-realm
+recompute-from-scratch write. Both tables are **ephemeral** — RAM
+projection, in-memory WAL, no disk anywhere
+([chapter 03](03_bondy_db.md#projection-backend-durable-vs-ephemeral))
+— and both are `publish => true`: a cell merged in from a peer via
+anti-entropy drives `bondy_aae_reactor` to hand it to
+`bondy_registry_rib`, which maintains the local stub view routing reads
+from ([chapter 03](03_bondy_db.md#change-notification)). Neither table
+declares a secondary index — a cell is looked up directly by its
+`(Realm, MatchPolicy, Uri, Node)` key.
 
-Both tables are `publish => true`: a registration that arrives from a
-peer via anti-entropy drives this node's reactor to add it to the
-routing trie (and a `clear` to remove it), so a node learns it can route
-to a peer's callee without that peer re-announcing
-([chapter 03](03_bondy_db.md#change-notification)).
-
-The cell is keyed by a random, realm-unique `entry_id` and holds a thin
-record; present (a `set`) or withdrawn (a `clear`), highest-HLC wins, so
-`lww_register` fits. The `by_session` secondary index is what makes
-session teardown cheap: closing a session must remove *all* of its
-entries, and the index turns that from a realm-wide scan into a bounded
-reverse lookup. (The hot routing path is the in-memory trie, not this
-table; the table is the trie's replicated, restart-rebuilt backing.) A
-**presence FSM** — masking a peer's entries while that peer is
-unreachable rather than reading them as live — is the design target for
-this table once anti-entropy is exchanging cross-node entries; today,
-with replication of the registry off, every entry is locally owned and a
-set/clear register is enough.
+Routing itself never touches `bondy_db`: the hot path walks the local
+`bondy_registry_ptrie`/`bondy_registry_store` tries, maintained
+independently on every node from its own local entries. The RIB is a
+permanent, write-only cross-node directory — it tells a node a peer
+*can* route a URI, never carries the entry's own routing detail; a
+node's own registrations/subscriptions are always served from its own
+local store, never read back through `bondy_db`.
 
 ### 4.2 Realm
 
@@ -607,8 +607,8 @@ concurrent multi-writer is enabled.
 
 | Table | CRDT (ships) | Design target | DB | Notes |
 |---|---|---|---|---|
-| `bondy_registration` | `lww_register` | presence FSM | registry (ephemeral) | `by_session` index; structurally-unique keys |
-| `bondy_subscription` | `lww_register` | presence FSM | registry (ephemeral) | `by_session` index |
+| `bondy_registration_rib` | `bondy_oplog_crdt_struct` | — | registry (ephemeral) | RIB summary cell; single-writer by key; no secondary index |
+| `bondy_subscription_rib` | `bondy_oplog_crdt_pn_counter` | — | registry (ephemeral) | RIB summary cell; single-writer by key; no secondary index |
 | `bondy_realm` | `lww_register` | — | main | global registry; `publish` |
 | `bondy_realm_keys` | `aw_map` | — | main | realm signing/encryption key material, split out of the realm cell so key bytes never enter the realm's convergence identity; global registry, `kid => key bundle` |
 | `security_users` | `lww_register` | — | main | `publish`; no secondary index (membership is its own relation) |

@@ -279,8 +279,6 @@ The full inventory, grouped by domain. `DB` is `main` (durable) unless noted;
 | Operational | `api_gateway` | main | realm | — | lww | ✓ | HTTP-API specs; dispatch reactor |
 | Operational | `bondy_bridge_relay` | main | realm | — | lww | | node-scoped; read once at boot |
 | Operational | `retained_messages` | main | realm | — | lww | | keyed by topic; range-scan matched |
-| Routing | `bondy_registration` | registry | realm | — | lww | ✓ | ephemeral; `by_session` index |
-| Routing | `bondy_subscription` | registry | realm | — | lww | ✓ | ephemeral; `by_session` index |
 | Routing | `bondy_registration_rib` | registry | realm | — | lww | ✓ | ephemeral; RIB routing summary |
 | Routing | `bondy_subscription_rib` | registry | realm | — | lww | ✓ | ephemeral; RIB routing summary |
 

@@ -1,4 +1,6 @@
-Connecting to fdaa:3:2957:a7b:4a2:1d06:541c:2...
+[33mWARN[0m The running flyctl agent (v0.4.74) is older than the current flyctl (v0.4.77).
+[33mWARN[0m The out-of-date agent will be shut down along with existing wireguard connections. The new agent will start automatically as needed.
+Connecting to fdaa:3:2957:a7b:493:a120:4b93:2...
 
          /\      Grafana   /‾‾/  
     /\  /  \     |\  __   /  /   
@@ -15,102 +17,87 @@ Connecting to fdaa:3:2957:a7b:4a2:1d06:541c:2...
               * fleet: Up to 225000 looping VUs for 3m10s over 3 stages (gracefulRampDown: 30s, gracefulStop: 30s)
 
 
-Init    [   3% ] 007738/225000 VUs initialized
+Init    [   3% ] 007183/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [   6% ] 014407/225000 VUs initialized
+Init    [   6% ] 013276/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  10% ] 022289/225000 VUs initialized
+Init    [   9% ] 020418/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  14% ] 031625/225000 VUs initialized
+Init    [  13% ] 028997/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  16% ] 036392/225000 VUs initialized
+Init    [  15% ] 033590/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  21% ] 047162/225000 VUs initialized
+Init    [  20% ] 044019/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  24% ] 052922/225000 VUs initialized
+Init    [  22% ] 049020/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  26% ] 057989/225000 VUs initialized
+Init    [  24% ] 053445/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  31% ] 069296/225000 VUs initialized
+Init    [  29% ] 065257/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  34% ] 077262/225000 VUs initialized
+Init    [  32% ] 072279/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  37% ] 082532/225000 VUs initialized
+Init    [  35% ] 077866/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  39% ] 087228/225000 VUs initialized
+Init    [  36% ] 081063/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  41% ] 091892/225000 VUs initialized
+Init    [  38% ] 085113/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  45% ] 102033/225000 VUs initialized
+Init    [  44% ] 098338/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  50% ] 113389/225000 VUs initialized
+Init    [  47% ] 106745/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  53% ] 120276/225000 VUs initialized
+Init    [  50% ] 113090/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  56% ] 126412/225000 VUs initialized
+Init    [  52% ] 117793/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  58% ] 130786/225000 VUs initialized
+Init    [  54% ] 122257/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  60% ] 133890/225000 VUs initialized
+Init    [  56% ] 126409/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  61% ] 136794/225000 VUs initialized
+Init    [  58% ] 130536/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  62% ] 139459/225000 VUs initialized
+Init    [  60% ] 134774/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  63% ] 142058/225000 VUs initialized
+Init    [  64% ] 145107/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  64% ] 144901/225000 VUs initialized
+Init    [  70% ] 157792/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  65% ] 147356/225000 VUs initialized
+Init    [  73% ] 164216/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  67% ] 151319/225000 VUs initialized
+Init    [  76% ] 169913/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  70% ] 158174/225000 VUs initialized
+Init    [  78% ] 175348/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  75% ] 168153/225000 VUs initialized
+Init    [  79% ] 177154/225000 VUs initialized
 fleet   [   0% ]
 
-Init    [  77% ] 173942/225000 VUs initialized
-fleet   [   0% ]
-
-Init    [  80% ] 179007/225000 VUs initialized
-fleet   [   0% ]
-
-Init    [  81% ] 182905/225000 VUs initialized
-fleet   [   0% ]
-
-Init    [  81% ] 182953/225000 VUs initialized
-fleet   [   0% ]
-
-Init    [  81% ] 182953/225000 VUs initialized
-fleet   [   0% ]
-
-Init    [  81% ] 182955/225000 VUs initialized
+Init    [  79% ] 177154/225000 VUs initialized
 fleet   [   0% ]
 Error: ssh shell: Process exited with status 4294967295

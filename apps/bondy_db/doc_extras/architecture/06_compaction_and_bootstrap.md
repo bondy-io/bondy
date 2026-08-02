@@ -118,6 +118,82 @@ A few subtle things:
 - **No coordination is required.** Two replicas that have observed
   the same set of peers compute the same frontier independently.
 
+### The ephemeral + fused solo carve-out
+
+`compute_frontier_for/2` above is silent when `PeerRoots = []` — it
+returns `undefined`, deferring forever. `PeerRoots` comes from
+`bondy_oplog_compaction:compact/1`, which reads THIS instance's own
+sync history (`bondy_oplog_peer_state:get_instance_peer_states/1`), not
+live cluster membership. On a genuinely solo node — no Partisan peer,
+ever — that history can never be populated, so a durable-shaped
+compaction on the registry's ephemeral, fused (mux-collapsed) shards
+stalled forever: the MST page store (raw `cell_apply` event history)
+grew unbounded. This was a real production incident — a single-node
+`bondy` under subscribe-heavy load ran its RAM out via this exact
+stall, reproduced on Fly and locally.
+
+`effective_frontier/4` in `bondy_oplog_instance.erl` closes the gap
+with a carve-out, gated on **`Fused ANDALSO HasProjection`** — not
+`Fused` alone:
+
+```mermaid
+flowchart TB
+    CF["compute_frontier_for(MST, PeerRoots)"]
+    UD{"undefined?"}
+    GATE{"Fused ∧ HasProjection?"}
+    SOLO{"membership_class(reclamation_members()) =:= solo?"}
+    LOCAL["frontier = local MST's own max key<br/>(bondy_mst:last/1) — same shape as the<br/>peer-confirmed 'no hole' case"]
+    DEFER["defer — {ok, no_change}"]
+
+    CF --> UD
+    UD -->|no| Frontier[use the peer-confirmed frontier]
+    UD -->|yes| GATE
+    GATE -->|no| DEFER
+    GATE -->|yes| SOLO
+    SOLO -->|yes| LOCAL
+    SOLO -->|no — clustered or can't tell| DEFER
+```
+
+Why each half of the gate is load-bearing:
+
+- **`Fused`** — `bondy_db:assert_fused_requires_ephemeral/2` makes
+  `fused` an ephemeral-only property by construction (rejected at
+  `open_table` for a durable/leveled backend), so the carve-out can
+  never fire for durable data regardless of membership. There is
+  nothing an ephemeral store protects by waiting: it starts empty on
+  every restart, and a peer with a stale or rootless view already
+  falls back to a full catalogue bootstrap rather than an incremental
+  MST diff (see [Catalogue-mode bootstrap](#catalogue-mode-bootstrap-multi-cell-snapshot))
+  — so truncating early costs a peer a bootstrap, never data.
+- **`HasProjection`** — the bootstrap-fallback safety argument above is
+  specifically about the *catalogue* path, where the projection is the
+  thing a bootstrap streams wholesale. It has not been extended to the
+  bare-CRDT checkpoint path (`false when CrdtMod =/= undefined` in
+  `run_compaction/10`), so the gate stays narrower than `Fused` alone
+  would allow — scoped to exactly what was analysed: the real registry
+  DB shape (`bondy_namespace_catalog:registry_db_spec/0`) is always
+  both `fused => true` and `projection_backend => ets`.
+- **Solo, not "can't tell."** The membership check reuses
+  `reclamation_members/0` — the same primitive causal-stability
+  reclamation's own solo carve-out already relies on (see
+  `reclamation_members/0` and `stability_point/1`'s docstrings in
+  `bondy_oplog_instance.erl` — reclamation is a separate GC mechanism,
+  projection-cell garbage collection rather than MST/WAL truncation,
+  and is not otherwise covered by this chapter) — through a shared
+  classifier, `membership_class/1`, so there is exactly one place in
+  the module that decides what counts as solo. `{ok, []}` (genuinely
+  no peer) ⇒ `solo`; `error` (membership service unreachable) and
+  `{ok, [_|_]}` (real peers, just none confirmed yet) both fall through
+  to `defer`. Conflating "solo" with "can't tell" would license the
+  shortcut on a node that merely lost sight of its own cluster — see
+  `reclamation_members/0`'s own docstring for the full argument.
+
+Once the carve-out fires, the derived frontier is the local MST's own
+maximum key — identical in shape to what the peer-confirmed path
+already does for a fully-agreeing peer (the "no hole" branch above) —
+so it flows through the same catalogue truncation path as every other
+frontier, with no special-cased commit logic.
+
 ## The compaction cycle
 
 `bondy_oplog_gc_scheduler` ticks every `gc_interval_ms` (default 1s)
@@ -896,6 +972,7 @@ snapshot.
 | Cluster cold-start fires N parallel snapshot transfers and saturates the peer pool. | `max_inflight_bootstraps` cap (default `4`) gates concurrent sessions. Over-cap dispatches are deferred to the next tick as in-flight sessions drain. |
 | A replica with an unreachable peer-pool retries every 500 ms forever. | Per-instance exponential backoff (`500 ms → 30 s` ceiling, optional ±50 % jitter) drops the steady-state retry rate to ~1/30 Hz after a few failures. |
 | Multiple replicas hammer the same first peer. | `bootstrap_peer_strategy` (`first` \| `random` \| `round_robin`) — switch to `round_robin` or `random` to spread load. |
+| A genuinely solo, peerless node's ephemeral+fused (registry) shard never advances the frontier — `compute_frontier_for(_MST, []) -> undefined` has no carve-out on its own — so the MST page store grows unbounded under sustained write load; a real incident that ran a single-node `bondy` out of RAM. | The [ephemeral + fused solo carve-out](#the-ephemeral-fused-solo-carve-out) (`effective_frontier/4`) derives the frontier from the local MST's own max key once live membership is confirmed genuinely solo, gated on `Fused ANDALSO HasProjection` so durable and bare-CRDT instances are unaffected. |
 
 ## Tests that pin this down
 
@@ -904,6 +981,13 @@ because everything else relies on it. The relevant suites:
 
 - `test/bondy_oplog_compaction_test.erl` — frontier computation,
   watermark advance, idempotency, no-change cases, MST shrinkage.
+- `test/bondy_oplog_compaction_fused_test.erl` — the [ephemeral + fused
+  solo carve-out](#the-ephemeral-fused-solo-carve-out): a peerless fused
+  instance converges (the regression test for the RAM-leak incident), the
+  peer-confirmed path still works on fused, the real registry mux shape
+  (two tables, heterogeneous CRDT kernels, one shared MST) compacts
+  together, a fused instance with no projection wiring is NOT given the
+  shortcut, and the solo path is idempotent on a second no-op cycle.
 - `test/bondy_oplog_gc_scheduler_test.erl` — tick cadence, semaphore
   cap, set_interval/set_trigger races, per-instance isolation.
 - `test/bondy_oplog_bootstrap_test.erl` — snapshot transfer,
@@ -953,7 +1037,12 @@ Implementation:
   per-instance worker.
 - `bondy_oplog_instance.erl`:
     - `compute_frontier_for/2` — frontier as longest common prefix.
-    - `do_compact_sync/2` + `run_compaction/9` — the cycle, run
+    - `effective_frontier/4` — wraps `compute_frontier_for/2` with the
+      [ephemeral+fused solo carve-out](#the-ephemeral-fused-solo-carve-out).
+    - `membership_class/1` — the single classifier both the solo
+      carve-out and causal-stability reclamation use to decide
+      `solo | {clustered, Members} | error` from `reclamation_members/0`.
+    - `do_compact_sync/2` + `run_compaction/10` — the cycle, run
       synchronously in the instance gen_server.
     - `commit_compaction/3` — atomic truncate + watermark + HLC bump.
     - `truncate_below_or_equal/2` — drops keys ≤ watermark.

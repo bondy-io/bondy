@@ -23,10 +23,10 @@ declarations_test_() ->
     Main = [S || S <- Tables, maps:get(db, S) =:= main],
     Registry = [S || S <- Tables, maps:get(db, S) =:= registry],
     [
-        {"seventeen tables declared", ?_assertEqual(17, length(Tables))},
-        {"thirteen main, four registry", fun() ->
+        {"fifteen tables declared", ?_assertEqual(15, length(Tables))},
+        {"thirteen main, two registry", fun() ->
             ?assertEqual(13, length(Main)),
-            ?assertEqual(4, length(Registry))
+            ?assertEqual(2, length(Registry))
         end},
         {"realm_keys is a durable main aw table", fun() ->
             %% Realm key material, split out of the realm identity cell so the
@@ -77,31 +77,6 @@ declarations_test_() ->
             ?assertEqual(lww, fold(ByName, security_group_grants)),
             ?assertEqual(lww, fold(ByName, security_user_grants)),
             ?assertEqual(lww, fold(ByName, security_sources))
-        end},
-        {"registry tables are ephemeral lww, published, by_session", fun() ->
-            %% Cut over to bondy_db (D-7): `lww` IS the presence state machine
-            %% (keys unique by SessionId — set=live, clear=dead);
-            %% `publish => true` wires the merge-side reactor that
-            %% maintains the routing trie from peers' registrations (§9.6), with
-            %% the `by_session` reverse index for session-close cleanup.
-            ?assert(
-                lists:all(
-                    fun(S) ->
-                        maps:get(fold, S) =:= lww andalso
-                            maps:get(durability, S) =:= ephemeral andalso
-                            maps:get(publish, S, false) =:= true andalso
-                            [by_session] =:=
-                                [
-                                    bondy_oplog_index_spec:name(I)
-                                 || I <- maps:get(indexes, S, [])
-                                ]
-                    end,
-                    [
-                        maps:get(bondy_registration, ByName),
-                        maps:get(bondy_subscription, ByName)
-                    ]
-                )
-            )
         end},
         {"RIB tables are ephemeral CRDT cells, published, no indexes", fun() ->
             %% The replicated routing summary cells: per-field CRDT deltas
@@ -177,10 +152,7 @@ lifecycle_test_() ->
         end,
         fun(_) -> ok end, [
             {timeout, 60,
-                {"provisions every declared table", fun provisions_all/0}},
-            {timeout, 60,
-                {"registry by_session index works end-to-end",
-                    fun registry_index/0}}
+                {"provisions every declared table", fun provisions_all/0}}
         ]}.
 
 provisions_all() ->
@@ -208,17 +180,8 @@ provisions_all() ->
             end,
             MainNames
         ),
-        %% Registry tables (D-7) are provisioned in the ephemeral
+        %% The RIB summary tables (D-7) are provisioned in the ephemeral
         %% `registry` DB.
-        ?assertMatch(
-            #{entity_type := bondy_registration, db_name := registry},
-            ?CAT:table(bondy_registration)
-        ),
-        ?assertMatch(
-            #{entity_type := bondy_subscription, db_name := registry},
-            ?CAT:table(bondy_subscription)
-        ),
-        %% The RIB summary tables ride the same ephemeral registry DB.
         ?assertMatch(
             #{entity_type := bondy_registration_rib, db_name := registry},
             ?CAT:table(bondy_registration_rib)
@@ -271,86 +234,6 @@ provisions_all() ->
     ?assert(await(fun() -> ?CAT:is_open() =:= false end, 100)),
     ?assertEqual(undefined, ?CAT:main_db()),
     ?assertEqual(undefined, ?CAT:table(bondy_realm)).
-
-%% Drives the ephemeral `registry` table exactly as `bondy_registry_store`
-%% does — `entry_id` primary key, the `#{session_id, entry}` cell value, the
-%% `by_session` reverse index — asserting the storage swap's load-bearing
-%% behaviour end-to-end through the provisioned catalogue.
-registry_index() ->
-    Tmp = make_tmpdir(),
-    set_env(1, Tmp),
-    {ok, Pid} = ?CAT:start_link(),
-    try
-        Table = ?CAT:table(bondy_registration),
-        ?assertMatch(#{db_name := registry}, Table),
-        Realm = <<"com.example">>,
-        S1 = <<"session-1">>,
-        S2 = <<"session-2">>,
-
-        %% Two entries for S1, one for S2, one session-less (undefined).
-        ok = put_entry(Table, Realm, 1, S1),
-        ok = put_entry(Table, Realm, 2, S1),
-        ok = put_entry(Table, Realm, 3, S2),
-        ok = put_entry(Table, Realm, 4, undefined),
-        ok = bondy_db:await_index(Table, by_session),
-
-        %% by_session resolves each session's primary keys (the entry_ids).
-        ?assertEqual([1, 2], session_ids(Table, Realm, S1)),
-        ?assertEqual([3], session_ids(Table, Realm, S2)),
-        %% A session-less (undefined) entry is stored but NOT indexed (the index
-        %% skips an undefined term), so it appears under no session — the store
-        %% resolves such entries via a realm scan, never `index_get`.
-        ?assertMatch(
-            {ok, {#{session_id := undefined}, _}},
-            bondy_db:read(Table, Realm, dbkey(4))
-        ),
-        ?assertNot(lists:member(4, session_ids(Table, Realm, S1))),
-        ?assertNot(lists:member(4, session_ids(Table, Realm, S2))),
-
-        %% Point read returns the wrapped cell value verbatim.
-        ?assertMatch(
-            {ok, {#{session_id := S1, entry := {fake, 1}}, _Hlc}},
-            bondy_db:read(Table, Realm, dbkey(1))
-        ),
-
-        %% Clearing an entry drops it from the primary AND every index order.
-        ok = bondy_db:apply(Table, Realm, dbkey(1), clear),
-        ok = bondy_db:await_index(Table, by_session),
-        ?assertEqual({error, not_found}, bondy_db:read(Table, Realm, dbkey(1))),
-        ?assertEqual([2], session_ids(Table, Realm, S1)),
-
-        %% Realm isolation: the memory topology buckets by realm, so the same
-        %% entry_id in another realm is an independent cell, and the by_session
-        %% index restricts to the queried realm.
-        Realm2 = <<"com.other">>,
-        ok = put_entry(Table, Realm2, 2, S2),
-        ok = bondy_db:await_index(Table, by_session),
-        ?assertMatch(
-            {ok, {#{entry := {fake, 2}}, _}},
-            bondy_db:read(Table, Realm, dbkey(2))
-        ),
-        ?assertEqual([2], session_ids(Table, Realm2, S2)),
-        ?assertEqual([], session_ids(Table, Realm2, S1))
-    after
-        ok = stop_catalog(Pid),
-        reset_env(),
-        rmrf(Tmp)
-    end.
-
-%% @private
-put_entry(Table, Realm, EntryId, SessionId) ->
-    Value = #{session_id => SessionId, entry => {fake, EntryId}},
-    bondy_db:apply(Table, Realm, dbkey(EntryId), {set, Value}).
-
-%% @private
-dbkey(EntryId) ->
-    term_to_binary(EntryId).
-
-%% @private
-%% The entry_ids (decoded primary keys) a session indexes to, sorted.
-session_ids(Table, Realm, SessionId) ->
-    {ok, Hits} = bondy_db:index_get(Table, Realm, by_session, SessionId, #{}),
-    lists:sort([binary_to_term(PKey) || {PKey, _Cols} <- Hits]).
 
 %% =============================================================================
 %% Helpers

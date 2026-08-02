@@ -632,13 +632,6 @@ format_error(Reason, [{_M, _F, _As, Info} | _]) ->
 %% =============================================================================
 
 init([]) ->
-    %% The owner self-cleanup invariant (§9.6.1): periodically DELETE this node's
-    %% own entries whose session is no longer live — the C2/C3 discriminator that
-    %% lets a rebooted node shed the stale registrations a peer would otherwise
-    %% RESUME. First sweep runs shortly after boot, once AAE has had a chance to
-    %% pull this node's pre-restart entries back.
-    _ = erlang:send_after(self_clean_boot_ms(), self(), self_clean),
-
     %% Periodic RIB consistency sweep: compares the replicated routing
     %% summaries against the ground truth per realm
     %% (`bondy_registry_rib:check/1`) and logs any divergence — the
@@ -669,26 +662,6 @@ handle_cast(Event, State) ->
     }),
     {noreply, State}.
 
-handle_info(self_clean = Event, State) ->
-    %% Owner self-cleanup invariant (§9.6.1). Defensive: a sweep walks the realm
-    %% list and the registry projection, none of which may take the registry
-    %% server down — on any error we simply retry at the steady cadence.
-    ?LOG_DEBUG(#{event => Event}),
-    Cleaned =
-        try
-            self_clean()
-        catch
-            Class:Reason:Stacktrace ->
-                ?LOG_WARNING(#{
-                    description => "Registry owner self-cleanup sweep failed",
-                    class => Class,
-                    reason => Reason,
-                    stacktrace => Stacktrace
-                }),
-                0
-        end,
-    _ = erlang:send_after(self_clean_next_ms(Cleaned), self(), self_clean),
-    {noreply, State};
 handle_info(rib_check = Event, State) ->
     %% Periodic RIB consistency sweep. Defensive: the check scans the
     %% registry projections realm by realm and must never take the registry
@@ -1167,7 +1140,7 @@ init_indices(State) ->
 
 %% @private
 rebuild_indices(Type, Now, Node) ->
-    case bondy_namespace_catalog:table(registry_table_name(Type)) of
+    case bondy_namespace_catalog:table(?BONDY_DB_REGISTRATION_RIB_TAB) of
         undefined ->
             %% Registry not provisioned (e.g. the catalogue is idle) — nothing
             %% to rebuild.
@@ -1222,10 +1195,6 @@ maybe_restore_index(Partition, Entry, Now, Node) ->
             _ = bondy_registry_partition:add_indices(Partition, Entry),
             ok
     end.
-
-%% @private
-registry_table_name(registration) -> ?BONDY_DB_REGISTRATION_TAB;
-registry_table_name(subscription) -> ?BONDY_DB_SUBSCRIPTION_TAB.
 
 %% @private
 maybe_fun(undefined, _) ->
@@ -1289,75 +1258,6 @@ do_remove_all({[{_EntryKey, Entry} | T], Cont}, SessionId, Fun, Opts, Acc) ->
     end.
 
 %% @private
-%% Owner self-cleanup invariant (§9.6.1): DELETE this node's own registry entries
-%% whose session is no longer live. On a clean reboot the ephemeral projection
-%% starts empty and AAE pulls this node's pre-restart entries back; none has a
-%% live session, so they are cleared — which is what stops a peer from RESUMEing
-%% dead registrations. A `clear` replicates, so peers drop them via the merge
-%% reactor. Returns the number of entries cleaned (drives the sweep cadence).
-self_clean() ->
-    lists:foldl(
-        fun(Realm, Acc) ->
-            RealmUri = bondy_realm:uri(Realm),
-            Acc +
-                self_clean_table(
-                    ?BONDY_DB_REGISTRATION_TAB, registration, RealmUri
-                ) +
-                self_clean_table(
-                    ?BONDY_DB_SUBSCRIPTION_TAB, subscription, RealmUri
-                )
-        end,
-        0,
-        bondy_realm:list()
-    ).
-
-%% @private
-self_clean_table(TabName, Type, RealmUri) ->
-    case bondy_namespace_catalog:table(TabName) of
-        undefined ->
-            0;
-        Table ->
-            case bondy_db:list(Table, RealmUri) of
-                {ok, Rows} ->
-                    lists:foldl(
-                        fun(Row, Acc) ->
-                            Acc + maybe_self_clean(Type, RealmUri, Row)
-                        end,
-                        0,
-                        Rows
-                    );
-                {error, _} ->
-                    0
-            end
-    end.
-
-%% @private
-maybe_self_clean(Type, RealmUri, {_Key, #{entry := Entry}, _Hlc}) ->
-    case bondy_registry_entry:is_local(Entry) andalso is_stale_session(Entry) of
-        true ->
-            Partition = pick_partition(RealmUri),
-            _ = bondy_registry_partition:remove(Partition, Entry),
-            _ = maybe_flush_callee_promises(Type, Entry),
-            1;
-        false ->
-            0
-    end;
-maybe_self_clean(_Type, _RealmUri, _Row) ->
-    0.
-
-%% @private
-%% A session-bound entry whose session is gone is stale. An entry with no session
-%% (a callback / internal handler) is tied to node lifecycle, not a session, so it
-%% is left for clean shutdown to remove.
-is_stale_session(Entry) ->
-    case bondy_registry_entry:session_id(Entry) of
-        undefined ->
-            false;
-        SessionId ->
-            bondy_session:lookup(SessionId) =:= {error, not_found}
-    end.
-
-%% @private
 %% Runs the RIB consistency check for every realm, logs each divergent one
 %% (realm, divergence count and a bounded sample) and gauges the node-wide
 %% total.
@@ -1418,38 +1318,6 @@ rib_check_interval_ms() ->
     application:get_env(
         bondy_router, registry_rib_check_interval, timer:minutes(5)
     ).
-
-%% @private
-%% Delay from boot to the first owner self-cleanup sweep, giving AAE time to pull
-%% this node's pre-restart entries back.
-self_clean_boot_ms() ->
-    application:get_env(
-        bondy_router, registry_presence_self_clean_boot, timer:seconds(5)
-    ).
-
-%% @private
-%% Cadence of the owner self-cleanup sweep: while a sweep is still shedding stale
-%% entries (a node that just rebooted is converging) keep it tight; once a sweep
-%% finds nothing, fall back to the steady safety-net interval (default 5 min).
-self_clean_next_ms(Cleaned) when Cleaned > 0 ->
-    timer:seconds(5);
-self_clean_next_ms(_) ->
-    application:get_env(
-        bondy_router, registry_presence_self_clean_interval, timer:minutes(5)
-    ).
-
-%% @private
--doc """
-Fast-fails in-flight callers whose callee was on the pruned
-node's registration, so they don't wait for the call timeout.
-Subscriptions have no promise table to reap.
-""".
-maybe_flush_callee_promises(registration, Entry) ->
-    RealmUri = bondy_registry_entry:realm_uri(Entry),
-    Ref = bondy_registry_entry:ref(Entry),
-    bondy_dealer:flush_callee_promises(RealmUri, Ref);
-maybe_flush_callee_promises(_, _) ->
-    ok.
 
 sort(_, ?EOT) ->
     ?EOT;

@@ -361,10 +361,9 @@ rib_write_mode_cluster(Config) ->
         ok = wait_rib_sub_node(W2, Uri, TopicA, W1),
         ok = wait_rib_sub_node(W2, Uri, TopicB, W1),
 
-        %% ...while the full-entry tables hold NOTHING anywhere — the whole
-        %% point of write mode: entries live in the owner's local ETS only.
-        ?assertEqual([], erpc:call(W1, ?MODULE, do_list_entry_rows, [Uri])),
-        ?assertEqual([], erpc:call(W2, ?MODULE, do_list_entry_rows, [Uri])),
+        %% Write mode: entries live in the owner's local ETS only — there is no
+        %% full-entry bondy_db table left to hold anything anywhere, so the
+        %% property is now structurally true rather than empirically observed.
 
         %% Cross-node CALL on summaries alone.
         ?assertMatch(
@@ -1026,19 +1025,6 @@ do_probe_drain() ->
     after 5000 ->
         error(probe_drain_timeout)
     end.
-
-%% @private
-%% Every row the replicated full-entry registry tables hold for the realm on
-%% THIS node — the write-mode proof asserts this stays empty.
-do_list_entry_rows(RealmUri) ->
-    lists:append([
-        begin
-            Table = table_handle(Name),
-            {ok, Rows} = bondy_db:list(Table, RealmUri),
-            Rows
-        end
-     || Name <- [bondy_registration, bondy_subscription]
-    ]).
 
 %% @private
 do_has_realm(Uri) ->

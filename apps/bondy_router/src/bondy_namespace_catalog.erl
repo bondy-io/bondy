@@ -15,7 +15,10 @@ Two databases are declared:
   holding the thirteen security / realm / realm-keys / gateway / token / bridge /
   retention tables.
 - **`registry`** — ephemeral (`bondy_db_topology_memory`, ETS), holding the
-  two routing tables (registrations / subscriptions).
+  RIB (Routing Information Base) summary tables — the replicated routing
+  cells for registrations / subscriptions. Full `#entry{}` records never
+  enter `bondy_db` at all; they live in `bondy_registry_store`'s local ETS
+  (see `bondy_registry_rib.erl`'s moduledoc).
 
 The table names mirror the `bondy_db_tables.hrl` prefixes, plus
 `security_group_members` (group membership is its own cell-per-fact relation —
@@ -340,65 +343,26 @@ tables() ->
             fold => lww
         },
 
-        %% registry — ephemeral (ETS projection, mem WAL, memory topology — NO
-        %% durable or disk-backed storage). Cut as `lww`, and that IS the registry
-        %% presence state machine: keys carry the globally-unique `SessionId`, so
-        %% no two writers ever target the same key — a `set` is `live`, a `clear`
-        %% is `dead`, HLC-ordered, and a re-CREATE uses a fresh SessionId (a
-        %% different key), so there is no resurrection to resolve and no dedicated
-        %% presence fold is needed. `publish => true` wires the merge-side hook so
-        %% `bondy_aae_reactor` maintains this node's routing trie from peers'
-        %% replicated registrations (the AAE merge lands in this projection; the
-        %% trie is a separate materialised view). Node-level liveness
-        %% (SUSPEND/RESUME) is local Partisan-driven trie masking in
-        %% `bondy_registry`, not replicated data; only owner DELETE / self-clean
-        %% and the rendezvous-hashed EVICT are replicated `clear`s. The key is the
-        %% random realm-unique `entry_id`; the `by_session` index
-        %% (registry_indexes/0) serves session-close cleanup (`remove_all`) as a
-        %% bounded reverse lookup instead of a realm scan.
-        %%
-        %% Under RIB `write` mode (`registry.rib`) these two tables stay
-        %% provisioned but hold nothing: the registry store keeps full entries
-        %% in partition-local ETS (they never enter replication) and the RIB
-        %% summary tables below carry the replicated routing state. They remain
-        %% declared as the rollback net — flipping the mode back re-populates
-        %% them as sessions re-register — and as the landing zone for peers
-        %% that still replicate full entries in a mode-mixed cluster.
-        #{
-            name => ?BONDY_DB_REGISTRATION_TAB,
-            db => registry,
-            durability => ephemeral,
-            fold => lww,
-            publish => true,
-            indexes => registry_indexes()
-        },
-        #{
-            name => ?BONDY_DB_SUBSCRIPTION_TAB,
-            db => registry,
-            durability => ephemeral,
-            fold => lww,
-            publish => true,
-            indexes => registry_indexes()
-        },
-
-        %% registry RIB — the replicated routing summary cells: one cell per
-        %% (Realm, MatchPolicy, Uri, Node) carrying `#{invoke, count,
-        %% earliest, latest}` (registrations) or `#{count}` (subscriptions).
-        %% Only the node named in the key ever writes the cell — single-writer
-        %% by construction. `count`/`invoke`/`earliest`/`latest` are backed by
-        %% per-field CRDTs (`fold => rib_registration`/`rib_subscription`
-        %% resolve to `bondy_oplog_crdt_struct`, schema `?RIB_REGISTRATION_
-        %% SCHEMA`, and a bare `bondy_oplog_crdt_pn_counter` respectively —
-        %% registered directly, no per-use-case wrapper module) rather than
-        %% one opaque LWW blob, so `bondy_registry_rib`'s
-        %% entry-add/remove hooks write small, lock-free, targeted deltas
-        %% directly — no per-realm recompute/serialisation point. `publish =>
-        %% true` wires the merge-side hook: `bondy_aae_reactor` delegates
-        %% merged peer cells to `bondy_registry_rib`, which maintains the
-        %% local stub view routing consumes under RIB `read`/`write` mode.
-        %% Under `write` mode these cells are the ONLY replicated registry
-        %% state — the full-entry tables above hold nothing (entries stay in
-        %% partition-local ETS). Maintained by `bondy_registry_rib`.
+        %% registry RIB — ephemeral (ETS projection, mem WAL, memory topology —
+        %% NO durable or disk-backed storage), the replicated routing summary
+        %% cells: one cell per (Realm, MatchPolicy, Uri, Node) carrying
+        %% `#{invoke, count, earliest, latest}` (registrations) or `#{count}`
+        %% (subscriptions). Only the node named in the key ever writes the
+        %% cell — single-writer by construction. `count`/`invoke`/`earliest`/
+        %% `latest` are backed by per-field CRDTs (`fold =>
+        %% rib_registration`/`rib_subscription` resolve to
+        %% `bondy_oplog_crdt_struct`, schema `?RIB_REGISTRATION_SCHEMA`, and a
+        %% bare `bondy_oplog_crdt_pn_counter` respectively — registered
+        %% directly, no per-use-case wrapper module) rather than one opaque
+        %% LWW blob, so `bondy_registry_rib`'s entry-add/remove hooks write
+        %% small, lock-free, targeted deltas directly — no per-realm
+        %% recompute/serialisation point. `publish => true` wires the
+        %% merge-side hook: `bondy_aae_reactor` delegates merged peer cells to
+        %% `bondy_registry_rib`, which maintains the local stub view routing
+        %% consumes. These cells are the ONLY replicated registry state — full
+        %% `#entry{}` records never enter `bondy_db`; they live in
+        %% `bondy_registry_store`'s partition-local ETS. Maintained by
+        %% `bondy_registry_rib`.
         #{
             name => ?BONDY_DB_REGISTRATION_RIB_TAB,
             db => registry,
@@ -1058,19 +1022,6 @@ user_indexes() ->
 %% distinct.
 grant_indexes() ->
     [#{name => by_resource, extract => [resource], normalize => canonical}].
-
-%% @private
-%% The registry's reverse access path for session-close cleanup: "which entries
-%% belong to session S". The registry cell value is the thin fact map
-%% `#{session_id => SId, entry => Entry}` (the `#entry{}` record preserved
-%% verbatim under `entry`, with `session_id` denormalised to the top level
-%% precisely so this pointer-only index can extract it). `bondy_registry`'s
-%% `remove_all/_` resolves a session's entries through `bondy_db:index_get/5`
-%% (bounded) instead of a realm scan + filter. A session-less entry (callback /
-%% internal registration, `session_id => undefined`) yields no index entry —
-%% correct, since session-close never targets it.
-registry_indexes() ->
-    [#{name => by_session, extract => [session_id]}].
 
 %% @private
 table_info(Name) ->
