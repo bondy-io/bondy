@@ -8,9 +8,10 @@
 %% publication order — across topics — and calls from one caller session
 %% reach a callee session in call order — across procedures. Each sequence
 %% is submitted through `bondy_router:forward/2' from a single process, as
-%% a client transport would, so the cases exercise the ordered flow pool
-%% on the publishing node, the per-flow relay partition key on the wire
-%% and the keyed flow dispatch on the receiving node.
+%% a client transport would, so the cases exercise the synchronous
+%% in-process routing on the publishing node, the per-flow relay
+%% partition key on the wire and the keyed flow dispatch on the
+%% receiving node.
 -module(bondy_router_ordering_SUITE).
 
 -include_lib("common_test/include/ct.hrl").
@@ -49,7 +50,7 @@ end_per_suite(Config) ->
 %% =============================================================================
 
 %% Publisher and subscriber on the SAME node: two publications by one
-%% session must not race across flow pool workers.
+%% session must not race (the submitting process serialises them).
 same_node_publish_order(Config) ->
     [N1, _N2] = nodes_of(Config),
     Uri = <<"com.bondy.ordering_local">>,

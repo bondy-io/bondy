@@ -155,7 +155,11 @@ setup() ->
             [bondy, socket, error],
             [bondy, socket, ping_rtt],
             [bondy, session, opened],
-            [bondy, session, closed]
+            [bondy, session, closed],
+            [bondy, wamp, hello],
+            [bondy, session_manager, open],
+            [bondy, session_manager, cleanup],
+            [bondy, router, flow]
         ],
         fun ?MODULE:handle_net_event/4,
         undefined
@@ -514,6 +518,59 @@ declare_net_session_families() ->
             "A histogram of round-trip times of router-initiated "
             "transport-level pings, by protocol and transport."
         >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_wamp_hello_duration_microseconds,
+        help => <<
+            "A histogram of the in-process time spent handling a WAMP HELLO "
+            "on the connection process: realm lookup, auth context build and "
+            "(when no challenge is required) the full session open up to the "
+            "encoded WELCOME."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_session_manager_open_queue_microseconds,
+        help => <<
+            "A histogram of the time a session open request waited in a "
+            "session manager pool worker's mailbox before being served. High "
+            "values mean opens are queued behind other worker work (e.g. "
+            "crashed-session cleanup)."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_session_manager_open_service_microseconds,
+        help => <<
+            "A histogram of the time a session manager pool worker spent "
+            "serving a session open (store, monitor, procedure registration)."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_session_manager_cleanup_microseconds,
+        help => <<
+            "A histogram of the time a session manager pool worker spent on "
+            "session teardown, by kind (down | close | error). This work "
+            "shares the worker mailbox with session opens."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_router_flow_queue_microseconds,
+        help => <<
+            "A histogram of the time a task waited in a router flow pool "
+            "worker's mailbox before executing, by family (router = "
+            "submitted by a local connection process, relay = dispatched by "
+            "the relay ingress). Ordered flows cannot convert queue depth "
+            "into throughput, so sustained growth here is delivery latency "
+            "every event behind it will pay."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_router_flow_service_microseconds,
+        help => <<
+            "A histogram of the execution time of a router flow pool task "
+            "(e.g. a PUBLISH: authorize, match and fan out), by family "
+            "(router | relay). Pool throughput is bounded by pool size "
+            "divided by this duration."
+        >>
     }).
 
 %% @private
@@ -606,6 +663,79 @@ handle_net_event([bondy, session, Action], Meas, Meta, _Config) ->
                     value => maps:get(duration, Meas, 0)
                 })
         end
+    catch
+        _:_ ->
+            ok
+    end;
+handle_net_event([bondy, wamp, hello], Meas, _Meta, _Config) ->
+    try
+        bondy_metrics:histogram(#{
+            name => bondy_wamp_hello_duration_microseconds,
+            label => #{node => node_name()},
+            value => maps:get(duration, Meas, 0)
+        }),
+        ok
+    catch
+        _:_ ->
+            ok
+    end;
+handle_net_event([bondy, session_manager, open], Meas, _Meta, _Config) ->
+    try
+        Labels = #{node => node_name()},
+        ok = bondy_metrics:histogram(#{
+            name => bondy_session_manager_open_queue_microseconds,
+            label => Labels,
+            value => maps:get(queue, Meas, 0)
+        }),
+        ok = bondy_metrics:histogram(#{
+            name => bondy_session_manager_open_service_microseconds,
+            label => Labels,
+            value => maps:get(service, Meas, 0)
+        })
+    catch
+        _:_ ->
+            ok
+    end;
+handle_net_event([bondy, router, flow], Meas, Meta, _Config) ->
+    try
+        Labels = #{
+            node => node_name(),
+            family => maps:get(family, Meta, undefined)
+        },
+        %% The queue measurement is absent for tasks delivered straight
+        %% into the worker mailbox by a remote peer (no local dispatch
+        %% timestamp); recording a zero would fake a perfect queue.
+        ok =
+            case Meas of
+                #{queue := Queue} ->
+                    bondy_metrics:histogram(#{
+                        name => bondy_router_flow_queue_microseconds,
+                        label => Labels,
+                        value => Queue
+                    });
+                _ ->
+                    ok
+            end,
+        ok = bondy_metrics:histogram(#{
+            name => bondy_router_flow_service_microseconds,
+            label => Labels,
+            value => maps:get(service, Meas, 0)
+        })
+    catch
+        _:_ ->
+            ok
+    end;
+handle_net_event([bondy, session_manager, cleanup], Meas, Meta, _Config) ->
+    try
+        bondy_metrics:histogram(#{
+            name => bondy_session_manager_cleanup_microseconds,
+            label => #{
+                node => node_name(),
+                kind => maps:get(kind, Meta, undefined)
+            },
+            value => maps:get(duration, Meas, 0)
+        }),
+        ok
     catch
         _:_ ->
             ok

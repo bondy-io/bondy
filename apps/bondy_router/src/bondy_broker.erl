@@ -19,13 +19,13 @@ identical.
 
 In other words, WAMP guarantees ordering of events between any given
 *pair* of *Publisher* & *Subscriber*. The implementation preserves this
-by serialising each publisher's publications on one flow pool worker
-(`bondy_router_worker:cast/2`) and, for subscribers on other nodes, by
-pinning the publisher's relayed publications to one relay channel
-connection on egress and to one flow pool worker on the receiving node
-(see `bondy_relay:routing_opts/2`), so a publisher's events reach every
-subscriber in publication order — across topics — while distinct
-publishers run concurrently.
+by handling each publisher's publications synchronously in its own
+connection process (which serialises them in submission order) and,
+for subscribers on other nodes, by pinning the publisher's relayed
+publications to one relay channel connection on egress and to one flow
+pool worker on the receiving node (see `bondy_relay:routing_opts/2`),
+so a publisher's events reach every subscriber in publication order —
+across topics — while distinct publishers run concurrently.
 
 Further, if *Subscriber A* subscribes to *Topic 1*, the "SUBSCRIBED"
 message will be sent by the *Broker* to *Subscriber A* before any
@@ -373,7 +373,10 @@ forward(M, Ctxt) ->
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply)
     end.
 
--doc "Handles a message sent by a peer node through the `bondy_relay`.".
+-doc """
+Handles a message relayed by a peer node (executed on the flow pool
+worker owning the message's flow key — see `bondy_relay`).
+""".
 -spec forward(
     M :: wamp_publish(),
     To :: optional(bondy_ref:t()),

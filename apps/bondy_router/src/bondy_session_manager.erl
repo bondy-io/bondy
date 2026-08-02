@@ -114,7 +114,8 @@ open(Session) ->
     do_for_worker(
         fun(ServerRef) ->
             try
-                gen_server:call(ServerRef, {open, Session}, 15000)
+                EnqueuedAt = erlang:monotonic_time(microsecond),
+                gen_server:call(ServerRef, {open, Session, EnqueuedAt}, 15000)
             catch
                 exit:{timeout, _} ->
                     {error, timeout}
@@ -144,7 +145,8 @@ open(Id, RealmOrUri, Opts) ->
         fun(ServerRef) ->
             try
                 Session = bondy_session:new(Id, RealmOrUri, Opts),
-                gen_server:call(ServerRef, {open, Session}, 15000)
+                EnqueuedAt = erlang:monotonic_time(microsecond),
+                gen_server:call(ServerRef, {open, Session, EnqueuedAt}, 15000)
             catch
                 exit:{timeout, _} ->
                     {error, timeout}
@@ -251,7 +253,12 @@ init([PoolName, WorkerName]) ->
     true = gproc_pool:connect_worker(PoolName, WorkerName),
     {ok, #state{name = WorkerName}}.
 
-handle_call({open, Session0}, _From, State0) ->
+handle_call({open, Session0, EnqueuedAt}, _From, State0) ->
+    %% Mailbox wait vs service time; the split tells whether slow opens
+    %% are queued behind other worker work or slow to serve.
+    ServiceStart = erlang:monotonic_time(microsecond),
+    QueueUs = ServiceStart - EnqueuedAt,
+
     %% We store the session
     {ok, Session} = bondy_session:store(Session0),
 
@@ -281,6 +288,9 @@ handle_call({open, Session0}, _From, State0) ->
         %% Schedule OIDC token refresh if this is an oidcrp session
         ok = maybe_schedule_oidc_refresh(Session),
 
+        ServiceUs = erlang:monotonic_time(microsecond) - ServiceStart,
+        ok = bondy_telemetry:session_manager_open(QueueUs, ServiceUs),
+
         {reply, {ok, Session}, State}
     catch
         Class:Reason:Stacktrace ->
@@ -292,7 +302,9 @@ handle_call({open, Session0}, _From, State0) ->
                 stacktrace => Stacktrace
             }),
             erlang:demonitor(Ref),
-            ok = cleanup(Session),
+            ok = timed_cleanup(error, Session),
+            ErrServiceUs = erlang:monotonic_time(microsecond) - ServiceStart,
+            ok = bondy_telemetry:session_manager_open(QueueUs, ErrServiceUs),
             {reply, {error, Reason}, State0}
     end;
 handle_call(Event, From, State) ->
@@ -304,7 +316,10 @@ handle_call(Event, From, State) ->
     {reply, {error, {unsupported_call, Event}}, State}.
 
 handle_cast({close, Session, ReasonUri}, State0) ->
+    T0 = erlang:monotonic_time(microsecond),
     State = do_close(State0, Session, ReasonUri),
+    DurationUs = erlang:monotonic_time(microsecond) - T0,
+    ok = bondy_telemetry:session_manager_cleanup(close, DurationUs),
     {noreply, State};
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
@@ -330,7 +345,7 @@ handle_info({'DOWN', Ref, _, _, _}, State0) ->
                             protocol_session_id => ProtocolId,
                             session_id => Id
                         }),
-                        cleanup(Session);
+                        timed_cleanup(down, Session);
                     {error, not_found} ->
                         ok
                 end,
@@ -413,6 +428,13 @@ register_node_session_get(RealmUri) ->
             %% restart; the existing wildcard is exactly what we wanted.
             ok
     end.
+
+%% @private
+timed_cleanup(Kind, Session) ->
+    T0 = erlang:monotonic_time(microsecond),
+    ok = cleanup(Session),
+    DurationUs = erlang:monotonic_time(microsecond) - T0,
+    ok = bondy_telemetry:session_manager_cleanup(Kind, DurationUs).
 
 %% @private
 cleanup(Session) ->

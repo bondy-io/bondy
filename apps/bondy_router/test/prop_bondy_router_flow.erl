@@ -13,9 +13,9 @@
 %%
 %%   egress partition_key (bondy_relay:routing_opts/2)
 %%     -> one channel connection per flow (FIFO wire)
-%%     -> relay mailbox (FIFO)
-%%     -> flow pool worker keyed by the pair
-%%          (bondy_router_worker:cast/2, FIFO per worker)
+%%     -> flow pool worker keyed by the pair, resolved by the receiving
+%%          connection process (bondy_router_worker:whereis_name/1,
+%%          FIFO per worker; no relay process in between)
 %%
 %% `prop_pipeline_preserves_flow_order/0' models the multi-queue stages and
 %% checks that, for EVERY interleaving of the independent queues, each
@@ -41,7 +41,9 @@
     prop_pipeline_preserves_flow_order/0,
     prop_pipeline_delivers_exactly_once/0,
     prop_partition_key_is_per_flow/0,
-    prop_flow_pool_fifo/0
+    prop_flow_pool_fifo/0,
+    prop_via_resolution_is_keyed/0,
+    prop_via_flow_fifo/0
 ]).
 
 %% =============================================================================
@@ -168,6 +170,73 @@ prop_flow_pool_fifo() ->
                     lists:sort([{F, S} || {F, S, _} <- Submissions]),
 
             PerFlowOrdered andalso ExactlyOnce
+        end
+    ).
+
+%% Relay ingress resolves the egress partition key to a flow pool worker
+%% via `bondy_router_worker:whereis_name/1' (the `{via, _, _}' target a
+%% peer addresses). The resolution must be deterministic per key and
+%% return the live worker owning `phash2(Key, Size)'; each successful
+%% resolution claims a usage slot, which we release here since no
+%% message is delivered.
+prop_via_resolution_is_keyed() ->
+    ?FORALL(
+        {From, To},
+        {from_ref(), to_ref()},
+        begin
+            ok = ensure_flow_pool(),
+            #{partition_key := Key} = bondy_relay:routing_opts(From, To),
+            Pid1 = bondy_router_worker:whereis_name(Key),
+            Pid2 = bondy_router_worker:whereis_name(Key),
+            ok = release_slots(Key, 2),
+
+            is_pid(Pid1) andalso
+                Pid1 =:= Pid2 andalso
+                Pid1 =:= expected_worker_pid(Key)
+        end
+    ).
+
+%% Per-flow FIFO, exactly-once and usage accounting through the REAL via
+%% delivery path: resolve the key with `whereis_name/1' (claiming the
+%% usage slot exactly as partisan's deliver does) and send straight into
+%% the worker mailbox. The worker's execution releases the slot, so
+%% after the run every slot must be back to zero.
+prop_via_flow_fifo() ->
+    ?FORALL(
+        {Flows, Sched},
+        {flows(), schedule()},
+        begin
+            ok = ensure_flow_pool(),
+            Tag = make_ref(),
+            Self = self(),
+            Submissions = interleave(flow_queues(Flows), Sched),
+            Total = length(Submissions),
+
+            ok = lists:foreach(
+                fun({Flow, Seq, _Topic}) ->
+                    Job = fun() -> Self ! {Tag, Flow, Seq} end,
+                    Pid = bondy_router_worker:whereis_name(Flow),
+                    true = is_pid(Pid),
+                    Pid ! {'$gen_cast', Job},
+                    ok
+                end,
+                Submissions
+            ),
+
+            Delivered = gather(Tag, Total, []),
+
+            PerFlowOrdered = lists:all(
+                fun({Flow, _}) ->
+                    Seqs = [S || {F, S} <- Delivered, F =:= Flow],
+                    Seqs =:= lists:sort(Seqs)
+                end,
+                Flows
+            ),
+            ExactlyOnce =
+                lists:sort(Delivered) =:=
+                    lists:sort([{F, S} || {F, S, _} <- Submissions]),
+
+            PerFlowOrdered andalso ExactlyOnce andalso slots_drained()
         end
     ).
 
@@ -299,6 +368,50 @@ ensure_flow_pool() ->
             end;
         _ ->
             ok
+    end.
+
+%% The worker pid `whereis_name/1' must resolve `Key' to, derived
+%% independently from the stamped geometry.
+expected_worker_pid(Key) ->
+    Opts = bondy_config:get(router_flow_pool),
+    Size = key_value:get(size, Opts),
+    Index = erlang:phash2(Key, Size) + 1,
+    gproc:where(bondy_gproc:local_name({bondy_router_worker, flow, Index})).
+
+%% Releases `N' usage slots claimed by resolutions whose message was
+%% never sent (the worker only releases slots for messages it executes).
+release_slots(Key, N) ->
+    Opts = bondy_config:get(router_flow_pool),
+    Size = key_value:get(size, Opts),
+    Counters = key_value:get(counters, Opts),
+    Index = erlang:phash2(Key, Size) + 1,
+    ok = atomics:sub(Counters, Index, N).
+
+%% After every delivered message has executed, all usage slots must be
+%% zero: `whereis_name/1' claimed one per delivery and the worker
+%% released one per execution. Polls briefly — the gather/3 ack proves
+%% the Job ran, but the worker's `after' clause (which releases the
+%% slot) runs a moment later.
+slots_drained() ->
+    Opts = bondy_config:get(router_flow_pool),
+    Size = key_value:get(size, Opts),
+    Counters = key_value:get(counters, Opts),
+    slots_drained(Counters, Size, 50).
+
+slots_drained(Counters, Size, Retries) ->
+    case
+        lists:all(
+            fun(I) -> atomics:get(Counters, I) =:= 0 end,
+            lists:seq(1, Size)
+        )
+    of
+        true ->
+            true;
+        false when Retries > 0 ->
+            timer:sleep(10),
+            slots_drained(Counters, Size, Retries - 1);
+        false ->
+            false
     end.
 
 gather(_Tag, 0, Acc) ->

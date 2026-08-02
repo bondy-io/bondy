@@ -19,6 +19,17 @@
 //     in a burst right after WELCOME, then just holds, measuring delivery
 //     latency across all of them.
 //
+// Failure discipline: a failed WS handshake or a session that never reaches
+// WELCOME within WELCOME_TIMEOUT_MS ends the iteration with a jittered
+// RETRY_BACKOFF_MS sleep, so a struggling server sees a bounded retry rate
+// instead of a self-sustaining reconnect storm.
+//
+// Accounting discipline: success/failure rates are recorded INSIDE the socket
+// callbacks (WELCOME / close). Long-lived successful sessions are usually
+// still connected when the test ends, so k6 interrupts those iterations and
+// any code after ws.connect() never runs for them — recording there
+// undercounts every success.
+//
 // Distributed LGs: pass a distinct VU_OFFSET per LG process so per-VU vehicle
 // ids / group ids stay globally unique across the fleet.
 //
@@ -27,7 +38,7 @@
 // =============================================================================
 
 import ws from 'k6/ws';
-import { check } from 'k6';
+import { check, sleep } from 'k6';
 import { Trend, Counter, Rate } from 'k6/metrics';
 import * as wamp from './lib/wamp.js';
 
@@ -42,6 +53,9 @@ const SESSION_MS = parseInt(__ENV.SESSION_MS || '120000');
 const VEHICLE_POOL = parseInt(__ENV.VEHICLE_POOL || '500000');
 const GROUP_SIZE = parseInt(__ENV.GROUP_SIZE || '5');
 const SUBS_PER_USER = parseInt(__ENV.SUBS_PER_USER || '2000');
+const WELCOME_TIMEOUT_MS = parseInt(__ENV.WELCOME_TIMEOUT_MS || '30000');
+const RETRY_BACKOFF_MS = parseInt(__ENV.RETRY_BACKOFF_MS || '2000');
+const RETRY_BACKOFF_MAX_MS = parseInt(__ENV.RETRY_BACKOFF_MAX_MS || '60000');
 
 const deliveryLatency = new Trend('wamp_delivery_latency_ms', true);
 const welcomeLatency = new Trend('wamp_welcome_latency_ms', true);
@@ -49,7 +63,10 @@ const subscribeLatency = new Trend('wamp_subscribe_latency_ms', true);
 const subscribeBurstLatency = new Trend('wamp_subscribe_burst_ms', true);
 const eventsReceived = new Counter('wamp_events_received');
 const publishesSent = new Counter('wamp_publishes_sent');
-const wampErrors = new Counter('wamp_errors');
+const wampErrors = new Counter('wamp_errors'); // aggregate of the three below
+const wampAborts = new Counter('wamp_aborts');
+const wampProtoErrors = new Counter('wamp_proto_errors'); // WAMP ERROR messages
+const wampParseErrors = new Counter('wamp_parse_errors');
 const wsConnectErrors = new Counter('wamp_ws_connect_errors');
 const sessionOk = new Rate('wamp_session_ok');
 const subscribedOk = new Rate('wamp_all_subscribed_ok');
@@ -97,6 +114,43 @@ function groupVehicleIds(groupId, count, poolSize) {
   return Array.from(ids);
 }
 
+// Exponential per-VU backoff between failed attempts, jittered to avoid
+// retry synchronisation. VU-module state persists across iterations, so
+// consecutive failures decay this VU's retry rate toward RETRY_BACKOFF_MAX_MS
+// — the aggregate attempt rate converges to what the server can absorb
+// instead of a fixed-rate reconnect storm. Reset on any successful WELCOME.
+let consecutiveFailures = 0;
+
+function backoff() {
+  const base = Math.min(
+    RETRY_BACKOFF_MS * Math.pow(2, consecutiveFailures),
+    RETRY_BACKOFF_MAX_MS
+  );
+  consecutiveFailures++;
+  sleep((base * (0.5 + Math.random())) / 1000);
+}
+
+// Log a small sample of ABORT frames verbatim so the reason URI + details
+// show up in the k6 output without spamming it (tags on counters are not
+// rendered in the text summary).
+function sampleAbort(data) {
+  if (Math.random() < 0.002) console.error('ABORT sample: ' + data);
+}
+
+// Classify an incoming frame; returns the parsed message or null after
+// recording the failure. Empty frames (close/keepalive noise surfaced by the
+// ws layer) are ignored silently — counting them made wamp_errors read
+// one-per-session regardless of health.
+function parseFrame(data) {
+  if (!data || data.length === 0) return null;
+  const msg = wamp.parse(data);
+  if (!msg) {
+    wampParseErrors.add(1);
+    wampErrors.add(1, { reason: 'parse' });
+  }
+  return msg;
+}
+
 function runPublisher() {
   const vehicleId = VU_OFFSET + __VU;
   const topic = `${TOPIC_BASE}.${vehicleId}`;
@@ -111,12 +165,14 @@ function runPublisher() {
     });
 
     socket.on('message', (data) => {
-      const msg = wamp.parse(data);
-      if (!msg) { wampErrors.add(1, { reason: 'parse' }); return; }
+      const msg = parseFrame(data);
+      if (!msg) return;
       const type = msg[0];
 
       if (type === wamp.T.WELCOME) {
         welcomed = true;
+        consecutiveFailures = 0;
+        sessionOk.add(true);
         welcomeLatency.add(Date.now() - helloTs);
         socket.setInterval(() => {
           const ts = Date.now();
@@ -131,20 +187,39 @@ function runPublisher() {
         eventsReceived.add(1);
 
       } else if (type === wamp.T.ABORT) {
+        wampAborts.add(1);
         wampErrors.add(1, { reason: 'abort:' + (msg[2] || '?') });
+        sampleAbort(data);
         socket.close();
 
       } else if (type === wamp.T.ERROR) {
+        wampProtoErrors.add(1);
         wampErrors.add(1, { reason: 'wamp_error' });
       }
     });
 
+    socket.on('close', () => {
+      if (!welcomed) sessionOk.add(false);
+    });
+
     socket.on('error', () => { wsConnectErrors.add(1); });
+
+    // A session that cannot reach WELCOME is torn down (and retried after
+    // backoff) instead of holding the socket until SESSION_MS.
+    socket.setTimeout(() => {
+      if (!welcomed) socket.close();
+    }, WELCOME_TIMEOUT_MS);
+
     socket.setTimeout(() => { socket.send(wamp.goodbye()); socket.close(); }, SESSION_MS);
   });
 
-  sessionOk.add(welcomed);
-  check(res, { 'ws handshake 101': (r) => r && r.status === 101 });
+  const upgraded = check(res, { 'ws handshake 101': (r) => r && r.status === 101 });
+  if (!upgraded) {
+    sessionOk.add(false);
+    backoff();
+  } else if (!welcomed) {
+    backoff();
+  }
 }
 
 function runSubscriber() {
@@ -166,12 +241,14 @@ function runSubscriber() {
     });
 
     socket.on('message', (data) => {
-      const msg = wamp.parse(data);
-      if (!msg) { wampErrors.add(1, { reason: 'parse' }); return; }
+      const msg = parseFrame(data);
+      if (!msg) return;
       const type = msg[0];
 
       if (type === wamp.T.WELCOME) {
         welcomed = true;
+        consecutiveFailures = 0;
+        sessionOk.add(true);
         welcomeLatency.add(Date.now() - helloTs);
         burstStartTs = Date.now();
         for (const vehicleId of vehicleIds) {
@@ -191,6 +268,7 @@ function runSubscriber() {
         subscribedCount++;
         if (subscribedCount === vehicleIds.length) {
           subscribeBurstLatency.add(Date.now() - burstStartTs);
+          subscribedOk.add(true);
         }
 
       } else if (type === wamp.T.EVENT) {
@@ -200,21 +278,41 @@ function runSubscriber() {
         eventsReceived.add(1);
 
       } else if (type === wamp.T.ABORT) {
+        wampAborts.add(1);
         wampErrors.add(1, { reason: 'abort:' + (msg[2] || '?') });
+        sampleAbort(data);
         socket.close();
 
       } else if (type === wamp.T.ERROR) {
+        wampProtoErrors.add(1);
         wampErrors.add(1, { reason: 'wamp_error' });
       }
     });
 
+    socket.on('close', () => {
+      if (!welcomed) {
+        sessionOk.add(false);
+      } else if (subscribedCount !== vehicleIds.length) {
+        subscribedOk.add(false);
+      }
+    });
+
     socket.on('error', () => { wsConnectErrors.add(1); });
+
+    socket.setTimeout(() => {
+      if (!welcomed) socket.close();
+    }, WELCOME_TIMEOUT_MS);
+
     socket.setTimeout(() => { socket.send(wamp.goodbye()); socket.close(); }, SESSION_MS);
   });
 
-  sessionOk.add(welcomed);
-  subscribedOk.add(subscribedCount === vehicleIds.length);
-  check(res, { 'ws handshake 101': (r) => r && r.status === 101 });
+  const upgraded = check(res, { 'ws handshake 101': (r) => r && r.status === 101 });
+  if (!upgraded) {
+    sessionOk.add(false);
+    backoff();
+  } else if (!welcomed) {
+    backoff();
+  }
 }
 
 export default function () {

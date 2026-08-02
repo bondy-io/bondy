@@ -252,7 +252,7 @@ by handling CALL synchronously in the caller's transport process (Erlang
 guarantees signal order between a pair of processes) and, when the callee
 is on another node, by pinning the caller/callee pair to one relay
 channel connection on egress and to one flow pool worker on ingress (see
-`bondy_relay:routing_opts/2` and `bondy_router_worker:cast/2`), so the
+`bondy_relay:routing_opts/2` and `bondy_router_worker:cast/3`), so the
 pair's messages form a single FIFO pipeline end to end.
 
 There are no guarantees on the order of call results and errors in

@@ -4094,8 +4094,14 @@ fused_collect_frames(mem, Iter, Max) ->
     fused_mem_collect_frames(Iter, Max, [], 0, undefined).
 
 %% @private
+%% The badarg catch covers the shutdown race: the mem-WAL ETS queue is
+%% owned by the WAL process, which the supervisor may stop before this
+%% instance while a drain message is still queued — routine now that
+%% async writers (`bondy_db:apply_async/4`) can leave undrained work at
+%% teardown. A vanished queue reads as end-of-log; the instance is about
+%% to terminate anyway.
 fused_mem_collect_frames(Iter0, Max, AccRev, N, LastPos) ->
-    case bondy_oplog_wal_mem_reader:next(Iter0) of
+    try bondy_oplog_wal_mem_reader:next(Iter0) of
         {ok, Batch, _Hlcs, NextPos, NewIter} ->
             N1 = N + length(Batch),
             AccRev1 = [Batch | AccRev],
@@ -4112,6 +4118,11 @@ fused_mem_collect_frames(Iter0, Max, AccRev, N, LastPos) ->
             {frames, lists:append(lists:reverse(AccRev)), LastPos, Iter0, eol};
         {error, Reason} ->
             {error, Reason}
+    catch
+        error:badarg when AccRev == [] ->
+            {empty, Iter0};
+        error:badarg ->
+            {frames, lists:append(lists:reverse(AccRev)), LastPos, Iter0, eol}
     end.
 
 %% @private

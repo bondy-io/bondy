@@ -429,21 +429,26 @@ handle_inbound_messages(
         throttled ->
             stop({rate_limited, handshake}, St0);
         ok ->
+            T0 = erlang:monotonic_time(microsecond),
             Ctxt0 = St0#wamp_state.context,
             Ctxt1 = bondy_context:set_realm_uri(Ctxt0, Uri),
             St1 = update_context(Ctxt1, St0),
             St = set_next_state(establishing, St1),
 
             %% Lookup or create realm
-            case bondy_realm:get(Uri) of
-                {ok, Realm} ->
-                    ok = logger:update_process_metadata(#{realm => Uri}),
-                    maybe_open_session(
-                        maybe_auth_challenge(M#hello.details, Realm, St)
-                    );
-                {error, not_found} ->
-                    stop({authentication_failed, {no_such_realm, Uri}}, St)
-            end
+            Result =
+                case bondy_realm:get(Uri) of
+                    {ok, Realm} ->
+                        ok = logger:update_process_metadata(#{realm => Uri}),
+                        maybe_open_session(
+                            maybe_auth_challenge(M#hello.details, Realm, St)
+                        );
+                    {error, not_found} ->
+                        stop({authentication_failed, {no_such_realm, Uri}}, St)
+                end,
+            DurationUs = erlang:monotonic_time(microsecond) - T0,
+            ok = bondy_telemetry:wamp_hello(DurationUs),
+            Result
     end;
 handle_inbound_messages([#hello{} = M | _], #wamp_state{} = St, _) ->
     %% Client does not have a session but we already received a HELLO message
@@ -999,6 +1004,18 @@ abort_message({authentication_failed, invalid_authmethod}) ->
         message => <<"Unsupported authentication method.">>
     },
     bondy_wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
+abort_message({authentication_failed, temporarily_unavailable}) ->
+    %% The AE auth fence refused because this node cannot currently confirm
+    %% its security view is fresh. This is an availability condition, not a
+    %% credential failure — a retryable URI stops clients (and their humans)
+    %% from treating it as a bad password.
+    Details = #{
+        message => <<
+            "Authentication is temporarily unavailable on this node. "
+            "Please retry."
+        >>
+    },
+    bondy_wamp_message:abort(Details, ?WAMP_UNAVAILABLE);
 abort_message({authentication_failed, {no_such_realm, Realm}}) ->
     Details = #{
         message => <<"Realm '", Realm/binary, "' does not exist.">>

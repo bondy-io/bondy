@@ -22,7 +22,17 @@ system and the user's password capabilities.
 
 %% Default AE-freshness bound for the §9.8 auth fence; overridable via the
 %% `bondy_router` `auth_max_lag` app env (cuttlefish `db.aae.fence.max_lag`).
--define(AUTH_MAX_LAG, 1000).
+%% The freshness signal is produced by background AE rounds whose wall-clock
+%% completion degrades whenever the node's run queues are deep (a busy node
+%% schedules the sync processes late), so a bound of ~1s makes authentication
+%% availability hostage to transient CPU pressure: under a session-open burst
+%% the fence mass-refuses with no actual security staleness in play (fleet
+%% measurement: worst security-shard lag reached ~30s at ~29k sessions on
+%% saturated 8-vCPU nodes). 60s gives 2x headroom over that while still
+%% bounding the cross-node staleness window a node may authenticate against;
+%% precise revocation handling rides the per-user token_version fence and the
+%% merge-reactor RBAC invalidation, not this coarse bound.
+-define(AUTH_MAX_LAG, 60000).
 
 -type context() :: #{
     realm_uri := uri(),

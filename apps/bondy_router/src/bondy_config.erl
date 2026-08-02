@@ -388,7 +388,13 @@ setup_mods() ->
 setup_partisan_channels() ->
     DefaultChannels = #{
         ?BONDY_DB_DATA_CHANNEL => #{parallelism => 2, compression => false},
-        ?WAMP_RELAY_CHANNEL => #{parallelism => 2, compression => false},
+        %% The wamp_relay channel carries the WAMP data plane. Each
+        %% connection is one ordered pipe (flows are pinned by
+        %% partition_key) with its own sender and receiver process on
+        %% each side, so parallelism is the relay's ingress/egress
+        %% process parallelism — size it for data-plane throughput, not
+        %% like the control-plane channels.
+        ?WAMP_RELAY_CHANNEL => #{parallelism => 8, compression => false},
         ?BONDY_AAE_CHANNEL => #{parallelism => 2, compression => false}
     },
     Channels =

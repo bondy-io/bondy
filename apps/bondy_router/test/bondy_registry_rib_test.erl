@@ -46,6 +46,12 @@ write_path_test_() ->
 %% `earliest`/`latest`. That derivation is `reshape_summary/2`'s job,
 %% exercised on its own in the `reshape_summary/0` test below —
 %% `regs/1`/`subs/1` here cover the write path via the raw shape.
+%% The RIB hooks write async (`bondy_db:apply_async/4` — no
+%% read-your-writes barrier), so tests reading the cell right after a
+%% hook must flush the shard first.
+flush(Table, Key) ->
+    ok = bondy_db:await(Table, ?REALM, Key).
+
 regs(Tab) ->
     Table = ?CAT:table(?BONDY_DB_REGISTRATION_RIB_TAB),
     ?assertMatch(#{db_name := registry}, Table),
@@ -65,6 +71,7 @@ regs(Tab) ->
 
     ok = bondy_registry_rib:on_entry_added(self(), Tab, E1),
     ok = bondy_registry_rib:on_entry_added(self(), Tab, E2),
+    ok = flush(Table, Key),
     {ok, {#{invoke := Invoke0, count := Count0, created_times := Times0}, _}} =
         bondy_db:read(Table, ?REALM, Key),
     ?assertEqual(?INVOKE_ROUND_ROBIN, Invoke0),
@@ -73,6 +80,7 @@ regs(Tab) ->
 
     %% Removing the latest entry shrinks the summary exactly.
     ok = bondy_registry_rib:on_entry_removed(self(), Tab, E2),
+    ok = flush(Table, Key),
     {ok, {#{count := Count1, created_times := Times1}, _}} =
         bondy_db:read(Table, ?REALM, Key),
     ?assertEqual(1, Count1),
@@ -80,6 +88,7 @@ regs(Tab) ->
 
     %% Last member gone -> no explicit clear, count settles to 0.
     ok = bondy_registry_rib:on_entry_removed(self(), Tab, E1),
+    ok = flush(Table, Key),
     ?assertMatch(
         {ok, {#{count := 0, created_times := []}, _}},
         bondy_db:read(Table, ?REALM, Key)
@@ -89,6 +98,7 @@ regs(Tab) ->
     %% not resurrect the emptied exact-match one.
     E3 = entry(registration, ?PREFIX_MATCH, ?INVOKE_SINGLE),
     ok = bondy_registry_rib:on_entry_added(self(), Tab, E3),
+    ok = flush(Table, cell_key(?PREFIX_MATCH, ?URI)),
     ?assertMatch(
         {ok, {#{count := 0}, _}}, bondy_db:read(Table, ?REALM, Key)
     ),
@@ -113,10 +123,12 @@ subs(Tab) ->
 
     ok = bondy_registry_rib:on_entry_added(self(), Tab, E1),
     ok = bondy_registry_rib:on_entry_added(self(), Tab, E2),
+    ok = flush(Table, Key),
     ?assertMatch({ok, {2, _}}, bondy_db:read(Table, ?REALM, Key)),
 
     ok = bondy_registry_rib:on_entry_removed(self(), Tab, E1),
     ok = bondy_registry_rib:on_entry_removed(self(), Tab, E2),
+    ok = flush(Table, Key),
     ?assertMatch({ok, {0, _}}, bondy_db:read(Table, ?REALM, Key)).
 
 %% Unit-tests the read-path reshape in isolation: registration derives

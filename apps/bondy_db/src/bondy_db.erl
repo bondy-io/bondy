@@ -134,8 +134,11 @@ it).
 """).
 
 -export([apply/4]).
+-export([apply_async/4]).
 -export([apply_batch/4]).
+-export([apply_batch_async/4]).
 -export([apply_many/1]).
+-export([await/3]).
 -export([await_index/2]).
 -export([close/1]).
 -export([close_table/1]).
@@ -930,10 +933,10 @@ apply(
     %% writes are sampled; telemetry never alters the result.
     case bondy_oplog_latency:enabled() of
         false ->
-            do_apply(Table, InstanceId, Bucket, SKey, Event);
+            do_apply(Table, InstanceId, Bucket, SKey, Event, await);
         true ->
             T0 = erlang:monotonic_time(microsecond),
-            Result = do_apply(Table, InstanceId, Bucket, SKey, Event),
+            Result = do_apply(Table, InstanceId, Bucket, SKey, Event, await),
             case Result of
                 ok ->
                     bondy_oplog_latency:record(
@@ -944,6 +947,64 @@ apply(
             end,
             Result
     end.
+
+-doc """
+As `apply/4` but WITHOUT the read-your-writes barrier: returns as soon
+as the WAL append is durable, without blocking on the applier/drain
+committing the projection write. Under a deep drain backlog `apply/4`'s
+`await_apply` barrier makes the caller pay the whole backlog's latency;
+this variant costs the caller only the (lock-free, for stateless
+validators) append itself.
+
+Use it for fire-and-forget deltas whose consumers are eventually
+consistent by design — e.g. the registry RIB summary cells, whose local
+routing truth lives elsewhere (the trie/members table, updated
+synchronously) and whose replicated view propagates via AE regardless.
+Do NOT use it when the caller — or anything the caller unblocks — reads
+the cell right after writing: the projection write lands asynchronously
+and a `read/3` may see the previous value. A tier_2 table still pays
+the origin context-stamp round-trip (`cell_context/3`, a call into the
+possibly-busy instance); only the commit barrier is skipped.
+
+No write→readable latency sample is recorded — the metric measures
+exactly the barrier this variant does not have.
+""".
+-spec apply_async(
+    Table :: table(),
+    Realm :: realm(),
+    Key :: binary(),
+    Event :: term()
+) -> ok | {error, term()}.
+
+apply_async(
+    #{
+        db_topology := Topology,
+        table_state := TableState,
+        entity_type := EntityType
+    } = Table,
+    Realm,
+    Key,
+    Event
+) when
+    is_binary(Realm), is_binary(Key)
+->
+    Bucket = Topology:bucket_for(EntityType, Realm, TableState),
+    SKey = cell_key(Topology, Realm, Key),
+    InstanceId = instance_for_shard(Table, shard_for(Table, Realm, Key)),
+    do_apply(Table, InstanceId, Bucket, SKey, Event, none).
+
+-doc """
+The read-your-writes barrier `apply_async/4` skips, on demand: blocks
+until `(Realm, Key)`'s shard has committed every projection write
+appended before this call, so a subsequent `read/3` observes them. The
+companion for the rare caller (tests, admin operations) that mixes
+`apply_async/4` with an immediate read.
+""".
+-spec await(Table :: table(), Realm :: realm(), Key :: binary()) ->
+    ok | {error, term()}.
+
+await(Table, Realm, Key) when is_binary(Realm), is_binary(Key) ->
+    await(instance_for_shard(Table, shard_for(Table, Realm, Key))).
 
 -doc """
 Idempotent set: ensure `(Realm, Key)` in `Table` holds `Value`, emitting a
@@ -1104,16 +1165,17 @@ await_instances([InstanceId | Rest]) ->
     end.
 
 %% @private
-do_apply(Table, InstanceId, Bucket, Key, Event) ->
+do_apply(Table, InstanceId, Bucket, Key, Event, Barrier) ->
     case maps:get(causal_tier, Table, tier_0) of
         tier_2 ->
-            apply_with_context(InstanceId, Bucket, Key, Event);
+            apply_with_context(InstanceId, Bucket, Key, Event, Barrier);
         _ ->
             %% tier_0 / tier_1 write path: the op carries whatever
             %% causality the type needs in-band, so the write is a
             %% straight WAL append with no server-side round-trip.
-            append_and_await(
-                InstanceId, {cell_apply, Bucket, Key, Event}, undefined
+            append_with_barrier(
+                InstanceId, {cell_apply, Bucket, Key, Event}, undefined,
+                Barrier
             )
     end.
 
@@ -1126,13 +1188,13 @@ do_apply(Table, InstanceId, Bucket, Key, Event) ->
 %% already-stamped via `append_remote` and are never re-stamped.
 %% Read-your-writes holds because `await/1` commits each write's
 %% projection before the next write reads context.
-apply_with_context(InstanceId, Bucket, Key, Event) ->
+apply_with_context(InstanceId, Bucket, Key, Event, Barrier) ->
     try cell_context(InstanceId, Bucket, Key) of
         {error, _} = Err ->
             Err;
         {ok, Context} ->
             Op = {cell_apply, Bucket, Key, Event},
-            append_and_await(InstanceId, Op, Context)
+            append_with_barrier(InstanceId, Op, Context, Barrier)
     catch
         exit:{noproc, _} ->
             {error, {instance_unavailable, InstanceId}};
@@ -1141,10 +1203,15 @@ apply_with_context(InstanceId, Bucket, Key, Event) ->
     end.
 
 %% @private
-append_and_await(InstanceId, Op, Meta) ->
+%% `Barrier = await` blocks on the applier/drain committing the write's
+%% projection (read-your-writes; `apply/4`); `none` returns at WAL
+%% durability (`apply_async/4`).
+append_with_barrier(InstanceId, Op, Meta, Barrier) ->
     try bondy_oplog:append(InstanceId, Op, Meta) of
         {error, _} = Err ->
             Err;
+        _EventKey when Barrier =:= none ->
+            ok;
         _EventKey ->
             await(InstanceId)
     catch
@@ -1221,12 +1288,15 @@ probe_write(InstanceId) when is_binary(InstanceId) ->
 probe_dispatch(InstanceId, Mod, Op) ->
     case Mod:causal_tier() of
         tier_2 ->
-            apply_with_context(InstanceId, ?PROBE_BUCKET, ?PROBE_KEY, Op);
+            apply_with_context(
+                InstanceId, ?PROBE_BUCKET, ?PROBE_KEY, Op, await
+            );
         _ ->
-            append_and_await(
+            append_with_barrier(
                 InstanceId,
                 {cell_apply, ?PROBE_BUCKET, ?PROBE_KEY, Op},
-                undefined
+                undefined,
+                await
             )
     end.
 
@@ -1413,6 +1483,32 @@ apply_batch(Table, Realm, Key, Ops) when
     case assert_batchable(Table) of
         ok ->
             ?MODULE:apply(Table, Realm, Key, {batch, Ops});
+        {error, _} = Err ->
+            Err
+    end.
+
+-doc """
+As `apply_batch/4` but through `apply_async/4`: one packed batch event,
+no read-your-writes barrier. Same contract and caveats as
+`apply_async/4`.
+""".
+-spec apply_batch_async(
+    Table :: table(),
+    Realm :: realm(),
+    Key :: binary(),
+    Ops :: [term()]
+) -> ok | {error, term()}.
+
+apply_batch_async(_Table, Realm, Key, []) when
+    is_binary(Realm), is_binary(Key)
+->
+    ok;
+apply_batch_async(Table, Realm, Key, Ops) when
+    is_binary(Realm), is_binary(Key), is_list(Ops)
+->
+    case assert_batchable(Table) of
+        ok ->
+            apply_async(Table, Realm, Key, {batch, Ops});
         {error, _} = Err ->
             Err
     end.

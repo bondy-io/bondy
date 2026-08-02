@@ -96,7 +96,7 @@ done
 say "waiting for all LGs to finish (ramp=$RAMP hold=$HOLD, so allow $((${RAMP%s} + ${HOLD%s} + 30))s+)..."
 for p in "${pids[@]}"; do wait "$p" || true; done
 
-line()  { grep -E "^ *$2" "$1" | sed 's/^ *//' | head -1; }
+line()  { { grep -E "^ *$2" "$1" || true; } | sed 's/^ *//' | head -1; }
 
 echo; echo "==================== SUBSCRIBER ===================="
 line "$OUT/sub.txt" 'wamp_delivery_latency_ms\.'
@@ -106,7 +106,11 @@ line "$OUT/sub.txt" 'wamp_subscribe_burst_ms\.'
 line "$OUT/sub.txt" 'wamp_all_subscribed_ok'
 line "$OUT/sub.txt" 'wamp_session_ok'
 line "$OUT/sub.txt" 'wamp_errors'
+line "$OUT/sub.txt" 'wamp_aborts'
+line "$OUT/sub.txt" 'wamp_proto_errors'
+line "$OUT/sub.txt" 'wamp_parse_errors'
 line "$OUT/sub.txt" 'wamp_ws_connect_errors'
+{ grep -E '✓ ws handshake 101|✗ ws handshake 101|↳' "$OUT/sub.txt" || true; } | sed 's/^ *//' | head -2
 
 echo; echo "==================== PUBLISHERS ===================="
 for i in "${!pub_machines[@]}"; do
@@ -114,7 +118,11 @@ for i in "${!pub_machines[@]}"; do
   echo "--- PUB$i ---"
   line "$f" 'wamp_session_ok'
   line "$f" 'wamp_publishes_sent'
+  line "$f" 'wamp_welcome_latency_ms\.'
+  line "$f" 'wamp_errors'
+  line "$f" 'wamp_aborts'
   line "$f" 'wamp_ws_connect_errors'
+  { grep -E '✓ ws handshake 101|✗ ws handshake 101|↳' "$f" || true; } | sed 's/^ *//' | head -2
 done
 
 echo; echo "raw per-LG output: $OUT/*.txt"

@@ -35,7 +35,7 @@ cluster.peer_discovery.config.query         = ${FLY_APP_NAME}.internal
 ## BONDY_ERL_NODENAME=bondy@<ip>), so it MUST be `bondy`, not the app name.
 cluster.peer_discovery.config.node_basename = bondy
 cluster.peer_discovery.config.nameservers.1 = fdaa::3
-cluster.channels.wamp_relay.parallelism     = 2
+cluster.channels.wamp_relay.parallelism     = 8
 
 ## --- anti-entropy: MUST be on -- 500ms sync tick ------------------------------
 db.aae                                   = on

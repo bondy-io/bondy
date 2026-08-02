@@ -781,7 +781,7 @@ handle_in({forward, _, #publish{} = M, _Opts}, SessionId, State) ->
     %% publisher stay in arrival order (per-key FIFO on the flow pool).
     %% On overload we shed: delivery is at-most-once and executing inline
     %% would overtake the publications already queued for this session.
-    case bondy_router_worker:cast({Ref, undefined}, Job) of
+    case bondy_router_worker:cast({Ref, undefined}, bridge_relay, Job) of
         ok ->
             ok;
         {error, overload} ->
@@ -808,7 +808,7 @@ handle_in({forward, To, Msg, Opts}, SessionId, State) ->
     %% already queued for the same flow.
     Key = {maps:get(from, Opts, undefined), To},
 
-    case bondy_router_worker:cast(Key, Fwd) of
+    case bondy_router_worker:cast(Key, bridge_relay, Fwd) of
         ok ->
             ok;
         {error, overload} ->

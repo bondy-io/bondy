@@ -167,11 +167,20 @@
 %% security (a lagging node refuses sooner); higher = more availability under
 %% partition/lag. Only relevant when `db.aae` is on (the fence is otherwise a
 %% no-op — local writes are synchronous).
+%%
+%% Do not set this near the AE tick period: the confirming AE rounds are
+%% background work whose wall-clock completion stretches whenever the node is
+%% busy, so a ~1s bound mass-refuses authentication under a session-open burst
+%% with no actual staleness in play — under fleet load the worst
+%% security-shard lag was measured reaching ~30s with zero staleness. The 60s
+%% default still bounds the cross-node staleness window; precise
+%% credential-revocation handling is provided independently by the per-user
+%% token_version fence and the AE merge-reactor RBAC invalidation.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "db.aae.fence.max_lag", "bondy_router.auth_max_lag", [
   {datatype, {duration, ms}},
-  {default, "1s"}
+  {default, "60s"}
 ]}.
 
 %% -----------------------------------------------------------------------------
@@ -382,8 +391,8 @@ end}.
 %% is a freeze of local writes' visibility (read-after-write freshness lag),
 %% NOT of the write calls. The cost scales linearly with this threshold: the
 %% pack store's native 16MB default produces ~600ms+ freezes, large enough to
-%% push freshness lag toward `db.aae.fence.max_lag` (1s) and trigger spurious
-%% auth refusals. 2MB keeps each freeze to ~tens of ms at no throughput or
+%% push freshness lag toward a tightly-set `db.aae.fence.max_lag` and trigger
+%% spurious auth refusals. 2MB keeps each freeze to ~tens of ms at no throughput or
 %% hot-read cost (reads serve from the projection + cache, never the MST). A
 %% smaller value seals more often into more sealed packs, adding only
 %% AAE/compaction/cold-boot work (GC-bounded), never read-path work.

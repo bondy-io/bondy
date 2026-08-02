@@ -14,13 +14,20 @@ Two pools coexist because they offer different ordering guarantees:
   of supervised `m:gen_server` workers or a transient pool that spawns a new
   worker per task. Tasks run concurrently with no ordering relationship, so
   this pool is only suitable for work where relative order does not matter.
-* The flow pool (`cast/2`) is a fixed set of supervised `m:gen_server`
-  workers (see `m:bondy_router_flow_sup`) where the worker is chosen by
-  hashing the caller-provided key. All tasks sharing a key execute on the
-  same worker in submission order, giving per-key FIFO execution while
-  keeping tasks with different keys concurrent. It is used to preserve the
-  WAMP per-source ordering guarantees (events between a publisher and a
-  subscriber, invocations between a caller and a callee).
+* The flow pool (`cast/2,3`, `whereis_name/1`) is a fixed set of
+  supervised `m:gen_server` workers (see `m:bondy_router_flow_sup`)
+  where the worker is chosen by hashing the caller-provided key. All
+  tasks sharing a key execute on the same worker in submission order,
+  giving per-key FIFO execution while keeping tasks with different keys
+  concurrent. It preserves the WAMP pairwise ordering guarantees for
+  messages arriving from other nodes: cluster peers address relayed
+  messages to `{via, ?MODULE, PartitionKey}` so the receiving
+  connection process resolves the flow key straight to the owning
+  worker (`whereis_name/1`), and bridge-relay ingress dispatches by the
+  same kind of key via `cast/3`. The wire delivers each flow in order
+  and the keyed worker carries that order through local delivery.
+  (Messages submitted by locally connected clients need no pool — the
+  client's own connection process serialises them.)
 """.
 -behaviour(gen_server).
 
@@ -45,6 +52,8 @@ Two pools coexist because they offer different ordering guarantees:
 -export([start_link/1]).
 -export([cast/1]).
 -export([cast/2]).
+-export([cast/3]).
+-export([whereis_name/1]).
 -export([report_shed/1]).
 
 %% GEN_SERVER CALLBACKS
@@ -119,6 +128,18 @@ slot per worker — no `process_info/2` on the hot path.
 -spec cast(Key :: any(), Fun :: fun(() -> any())) -> ok | {error, overload}.
 
 cast(Key, Fun) when is_function(Fun, 0) ->
+    cast(Key, router, Fun).
+
+-doc """
+Same as `cast/2` but tags the task with `Family` (`relay` for relay
+ingress, `bridge_relay` for bridge-relay ingress, `router` — the
+`cast/2` default — for everything else), used to label the
+`[bondy, router, flow]` telemetry event emitted when the task executes.
+""".
+-spec cast(Key :: any(), Family :: atom(), Fun :: fun(() -> any())) ->
+    ok | {error, overload}.
+
+cast(Key, Family, Fun) when is_function(Fun, 0) ->
     case bondy_config:get(router_flow_pool, undefined) of
         undefined ->
             %% The pool has not started yet.
@@ -143,7 +164,62 @@ cast(Key, Fun) when is_function(Fun, 0) ->
                             ok = atomics:sub(Counters, Index, 1),
                             {error, overload};
                         Pid ->
-                            gen_server:cast(Pid, Fun)
+                            gen_server:cast(Pid, timed(Family, Fun))
+                    end
+            end
+    end.
+
+-doc """
+Resolves a flow key to the flow pool worker owning it — the `{via,
+?MODULE, Key}` resolution partisan performs on relay ingress.
+
+A cluster peer relaying a WAMP message addresses it to
+`{via, bondy_router_worker, PartitionKey}` (see `bondy_relay:forward/3`),
+where the partition key is the sender's `phash2({From, To})` flow hash —
+the same key that pinned the flow to one channel connection on the wire.
+The receiving connection process calls this function to resolve the key
+against the LOCAL pool geometry and delivers the message straight into
+the worker's mailbox: the pool size never crosses the wire, and a flow
+arriving in wire order lands on one worker in that order with no
+intermediate process.
+
+This function is also the relay-ingress overload gate: it claims the
+worker's usage slot (released by the worker after executing the
+message). Over the per-worker limit — or while the worker is restarting
+— it records the shed and returns `undefined`, which makes partisan's
+delivery drop the message (at-most-once, gaps permissible; executing it
+anywhere else would overtake the flow's queued messages). As with
+`cast/3`, a message sent to a worker that dies before executing it
+leaks its slot claim until the worker's restart resets the slot.
+""".
+-spec whereis_name(Key :: any()) -> pid() | undefined.
+
+whereis_name(Key) ->
+    case bondy_config:get(router_flow_pool, undefined) of
+        undefined ->
+            %% The pool has not started yet.
+            undefined;
+        Opts ->
+            Size = key_value:get(size, Opts),
+            Limit = key_value:get(worker_limit, Opts),
+            Counters = key_value:get(counters, Opts),
+            Index = erlang:phash2(Key, Size) + 1,
+
+            case atomics:add_get(Counters, Index, 1) > Limit of
+                true ->
+                    ok = atomics:sub(Counters, Index, 1),
+                    ok = report_shed(relay),
+                    undefined;
+                false ->
+                    Name = bondy_gproc:local_name(?FLOW_WORKER_NAME(Index)),
+
+                    case gproc:where(Name) of
+                        undefined ->
+                            ok = atomics:sub(Counters, Index, 1),
+                            ok = report_shed(relay),
+                            undefined;
+                        Pid ->
+                            Pid
                     end
             end
     end.
@@ -263,6 +339,33 @@ handle_cast(Fun, State) when is_function(Fun, 0) ->
         bondy:unset_process_metadata(),
         ok = release_usage(State)
     end;
+handle_cast({forward, To, Msg, FwdOpts} = M, State) ->
+    %% A WAMP message relayed by a cluster peer, delivered straight into
+    %% this worker's mailbox by the receiving connection process (the
+    %% `{via, ?MODULE, Key}' resolution — see `whereis_name/1'). The
+    %% usage slot was claimed at resolution; released below.
+    Started = erlang:monotonic_time(microsecond),
+
+    try
+        Opts = FwdOpts#{relayed_by => relay_ref()},
+        _ = bondy_router:forward(Msg, To, Opts),
+        {noreply, State}
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error while forwarding peer message",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace,
+                message => M
+            }),
+            {noreply, State}
+    after
+        ok = bondy_telemetry:router_flow(
+            relay, erlang:monotonic_time(microsecond) - Started
+        ),
+        ok = release_usage(State)
+    end;
 handle_cast(Event, State) ->
     ?LOG_DEBUG(#{
         reason => unsupported_event,
@@ -293,6 +396,45 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% The node-static ref stamped as `relayed_by' on messages arriving from
+%% cluster peers. Only its type (relay, NOT bridge_relay) and node are
+%% ever read (see `bondy_broker:forward/3'); nothing sends to it, so a
+%% name target is sufficient.
+relay_ref() ->
+    Key = {?MODULE, relay_ref},
+
+    case persistent_term:get(Key, undefined) of
+        undefined ->
+            Ref = bondy_ref:new(relay, ~"bondy_relay"),
+            ok = persistent_term:put(Key, Ref),
+            Ref;
+        Ref ->
+            Ref
+    end.
+
+%% @private
+%% Wraps a flow task so its execution emits `[bondy, router, flow]` with
+%% the mailbox wait (cast to execution) and service time. Emitted in an
+%% `after` clause so failing tasks are measured too (handle_cast logs
+%% them).
+timed(Family, Fun) ->
+    EnqueuedAt = erlang:monotonic_time(microsecond),
+
+    fun() ->
+        Started = erlang:monotonic_time(microsecond),
+
+        try
+            Fun()
+        after
+            ok = bondy_telemetry:router_flow(
+                Family,
+                Started - EnqueuedAt,
+                erlang:monotonic_time(microsecond) - Started
+            )
+        end
+    end.
 
 %% @private
 %% Flow workers return their usage-counter slot after each executed task;

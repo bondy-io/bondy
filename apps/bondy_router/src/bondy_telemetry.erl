@@ -37,7 +37,12 @@ Also provides trace-identifier generation.
 -export([session_opened/1]).
 -export([session_closed/3]).
 -export([registry_event/3]).
+-export([router_flow/2]).
+-export([router_flow/3]).
 -export([rpc_latency/3]).
+-export([wamp_hello/1]).
+-export([session_manager_open/2]).
+-export([session_manager_cleanup/2]).
 -export([ping_rtt/3]).
 -export([realm_event/2]).
 -export([user_event/3]).
@@ -180,6 +185,97 @@ session_closed(Session, DurationSecs, Reason) ->
         _:_ ->
             ok
     end.
+
+-doc """
+Emits `[bondy, wamp, hello]` with the in-process time (µs) spent
+handling a HELLO message on the connection process: realm lookup, auth
+context build and — when no challenge is needed — the full session open
+up to the encoded WELCOME. Together with `[bondy, session_manager,
+open]` this decomposes client-observed session-establishment latency
+into connection-process time vs session-manager queue/service time.
+Total: never throws.
+""".
+-spec wamp_hello(DurationUs :: integer()) -> ok.
+
+wamp_hello(DurationUs) ->
+    execute([bondy, wamp, hello], #{duration => max(0, DurationUs)}, #{}).
+
+-doc """
+Emits `[bondy, session_manager, open]` for a session open served by a
+`bondy_session_manager` pool worker. `QueueUs` is the time the request
+waited in the worker's mailbox (enqueue at the caller to dequeue at the
+worker); `ServiceUs` is the time the worker spent serving it. A high
+queue/service ratio means opens are stuck behind other worker work
+(e.g. crashed-session cleanup), not that opening is slow. Total: never
+throws.
+""".
+-spec session_manager_open(QueueUs :: integer(), ServiceUs :: integer()) -> ok.
+
+session_manager_open(QueueUs, ServiceUs) ->
+    execute(
+        [bondy, session_manager, open],
+        #{queue => max(0, QueueUs), service => max(0, ServiceUs)},
+        #{}
+    ).
+
+-doc """
+Emits `[bondy, session_manager, cleanup]` with the time (µs) a
+`bondy_session_manager` pool worker spent on session teardown work.
+`Kind` is `down` (connection process died, full router flush), `close`
+(explicit close request) or `error` (rollback of a failed open). This
+work shares the worker mailbox with session opens, so its duration is
+open-latency the next queued open will pay. Total: never throws.
+""".
+-spec session_manager_cleanup(
+    Kind :: down | close | error, DurationUs :: integer()
+) -> ok.
+
+session_manager_cleanup(Kind, DurationUs) ->
+    execute(
+        [bondy, session_manager, cleanup],
+        #{duration => max(0, DurationUs)},
+        #{kind => Kind}
+    ).
+
+-doc """
+Emits `[bondy, router, flow]` for a task executed by a router flow pool
+worker (`bondy_router_worker:cast/2,3`). `QueueUs` is the time the task
+waited in the worker's mailbox (cast at the dispatcher to execution at
+the worker); `ServiceUs` is the execution time. `Family` is `relay` for
+tasks dispatched by the relay ingress for messages arriving from
+cluster peers, `bridge_relay` for bridge-relay ingress, and `router`
+(the `cast/2` default) for anything else. Because ordered flows cannot
+convert queue depth into throughput, sustained queue growth here is
+delivery latency every event behind it will pay — and once a worker's
+share of the pool capacity is full, further tasks are shed (see
+`bondy_wamp_dropped_total`). Total: never throws.
+""".
+-spec router_flow(
+    Family :: atom(), QueueUs :: integer(), ServiceUs :: integer()
+) -> ok.
+
+router_flow(Family, QueueUs, ServiceUs) ->
+    execute(
+        [bondy, router, flow],
+        #{queue => max(0, QueueUs), service => max(0, ServiceUs)},
+        #{family => Family}
+    ).
+
+-doc """
+As `router_flow/3` but with the service time only — for tasks delivered
+straight into the worker's mailbox by a remote peer's relayed message
+(the `{via, bondy_router_worker, Key}` resolution), where no local
+dispatch timestamp exists: the mailbox wait would span two nodes'
+monotonic clocks, which are not comparable. Total: never throws.
+""".
+-spec router_flow(Family :: atom(), ServiceUs :: integer()) -> ok.
+
+router_flow(Family, ServiceUs) ->
+    execute(
+        [bondy, router, flow],
+        #{service => max(0, ServiceUs)},
+        #{family => Family}
+    ).
 
 -doc """
 Emits `[bondy, registry, event]` for a registration/subscription

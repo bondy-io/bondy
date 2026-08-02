@@ -219,13 +219,21 @@ apply_added(Entry) ->
                         invoke, Entry, ?INVOKE_SINGLE
                     ),
                     CK = created_key(Created, EntryId),
-                    bondy_db:apply_batch(Table, RealmUri, Key, [
+                    %% Async (no read-your-writes barrier): nothing reads
+                    %% the cell on the entry-add path — local routing
+                    %% truth is the trie/members table, written above,
+                    %% and the replicated summary view is eventually
+                    %% consistent via AE by design. The synchronous
+                    %% barrier made every REGISTER/SUBSCRIBE pay the
+                    %% registry drain's whole backlog under load (the
+                    %% fleet-scale subscribe-latency collapse).
+                    bondy_db:apply_batch_async(Table, RealmUri, Key, [
                         {apply, count, {inc, 1}},
                         {apply, invoke, {set, Invoke}},
                         {apply, created_times, {add, CK}}
                     ]);
                 subscription ->
-                    bondy_db:apply(Table, RealmUri, Key, {inc, 1})
+                    bondy_db:apply_async(Table, RealmUri, Key, {inc, 1})
             end,
         log_rib_error(Result, add, Type, RealmUri, Policy, Uri)
     catch
@@ -261,12 +269,13 @@ apply_removed(Entry) ->
                     Created = bondy_registry_entry:created(Entry),
                     EntryId = bondy_registry_entry:id(Entry),
                     CK = created_key(Created, EntryId),
-                    bondy_db:apply_batch(Table, RealmUri, Key, [
+                    %% Async — same rationale as `apply_added/1`.
+                    bondy_db:apply_batch_async(Table, RealmUri, Key, [
                         {apply, count, {inc, -1}},
                         {apply, created_times, {rmv, CK}}
                     ]);
                 subscription ->
-                    bondy_db:apply(Table, RealmUri, Key, {inc, -1})
+                    bondy_db:apply_async(Table, RealmUri, Key, {inc, -1})
             end,
         log_rib_error(Result, remove, Type, RealmUri, Policy, Uri)
     catch

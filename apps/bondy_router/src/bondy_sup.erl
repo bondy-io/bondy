@@ -50,9 +50,12 @@ init([]) ->
         ?EVENT_MANAGER(bondy_event_manager, permanent, 5000),
         ?EVENT_MANAGER(bondy_wamp_event_manager, permanent, 5000),
         ?SUPERVISOR(bondy_jobs_sup, [], permanent, infinity),
-        %% Router flow pool: keyed FIFO workers used to preserve WAMP
-        %% per-source ordering (see bondy_router_worker:cast/2). Must be up
-        %% before bondy_relay so relayed traffic can be dispatched.
+        %% Router flow pool: keyed FIFO workers used on relay and
+        %% bridge-relay ingress to preserve WAMP pairwise ordering. Relay
+        %% ingress resolves the flow key straight to a worker
+        %% (bondy_router_worker:whereis_name/1); bridge relay dispatches
+        %% via bondy_router_worker:cast/3. Must be up before Partisan
+        %% accepts peer connections so relayed traffic can be delivered.
         ?SUPERVISOR(bondy_router_flow_sup, [], permanent, infinity),
         ?SUPERVISOR(bondy_registry_sup, [], permanent, infinity),
         %% OIDC support
@@ -65,9 +68,6 @@ init([]) ->
         ?SUPERVISOR(bondy_http_transport_session_sup, [], permanent, infinity),
         ?SUPERVISOR(bondy_subscribers_sup, [], permanent, infinity),
         ?WORKER(bondy_retained_message_manager, [], permanent, 5000),
-        %% TODO bondy_relay to be replaced by a pool of relays each
-        %% corresponding to a Partisan channel connections
-        ?WORKER(bondy_relay, [], permanent, 5000),
         ?WORKER(bondy_export, [], permanent, 5000),
         ?WORKER(bondy_http_gateway, [], permanent, 5000),
         %% Node-local reactor for bondy_db remote-merge (AAE) changes; depends
