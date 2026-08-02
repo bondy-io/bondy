@@ -162,7 +162,12 @@ table's lifecycle tied to a supervisor child.
     %% thereafter); `false` for every durable instance and for
     %% ephemeral instances that have not opted in. Defaults to `false`
     %% for any row created by a caller that omits it.
-    fused = false :: boolean()
+    fused = false :: boolean(),
+    %% Retention-bounded MST history flag (`mst_retention` instance opt
+    %% present). Set at `init` (immutable thereafter), read by the sync
+    %% scheduler (join-time catalogue bootstrap seeding) and the sync
+    %% session (frontier-gap detection gates peer-frontier adoption).
+    mst_retention = false :: boolean()
 }).
 
 -record(state, {}).
@@ -197,7 +202,8 @@ table's lifecycle tied to a supervisor child.
     overlay_tab => ets:tid() | undefined,
     fast_path => undefined | fast_path(),
     ae_targets => [{atom(), atom(), non_neg_integer()}],
-    fused => boolean()
+    fused => boolean(),
+    mst_retention => boolean()
 }.
 
 -export_type([entry/0]).
@@ -233,6 +239,7 @@ table's lifecycle tied to a supervisor child.
 -export([ae_targets/1]).
 -export([frontier/1]).
 -export([fused/1]).
+-export([mst_retention/1]).
 -export([install_in_flight/1]).
 -export([max_install_in_flight/1]).
 -export([lifecycle/1]).
@@ -526,6 +533,20 @@ fused(InstanceId) ->
     field(InstanceId, #entry.fused).
 
 ?DOC("""
+Returns whether the instance is retention-bounded (`mst_retention`
+instance opt). `true` only for fused ephemeral catalogue instances whose
+MST history is truncated by local policy — the signal that peers of this
+instance ALSO truncate (uniform policy), so a sync session must not adopt
+a peer frontier it has not materially caught up to, and a fresh instance
+needs a join-time catalogue bootstrap (page-sync alone covers only the
+retention window).
+""").
+-spec mst_retention(instance_id()) -> boolean() | undefined.
+
+mst_retention(InstanceId) ->
+    field(InstanceId, #entry.mst_retention).
+
+?DOC("""
 Returns `{OverlayTab, MST}` for an instance in **one** ETS lookup,
 or `undefined` when the row is absent. Used by the hot lock-free
 read paths (`get/2`, `fold_range/5`, `first_key/1`,
@@ -800,7 +821,8 @@ to_record(#{instance_id := Id} = M) ->
         overlay_tab = maps:get(overlay_tab, M, undefined),
         fast_path = maps:get(fast_path, M, undefined),
         ae_targets = maps:get(ae_targets, M, []),
-        fused = maps:get(fused, M, false)
+        fused = maps:get(fused, M, false),
+        mst_retention = maps:get(mst_retention, M, false)
     }.
 
 %% @private
@@ -821,7 +843,8 @@ to_map(#entry{
     overlay_tab = OverlayTab,
     fast_path = FastPath,
     ae_targets = AeTargets,
-    fused = Fused
+    fused = Fused,
+    mst_retention = MstRetention
 }) ->
     #{
         instance_id => Id,
@@ -840,5 +863,6 @@ to_map(#entry{
         overlay_tab => OverlayTab,
         fast_path => FastPath,
         ae_targets => AeTargets,
-        fused => Fused
+        fused => Fused,
+        mst_retention => MstRetention
     }.

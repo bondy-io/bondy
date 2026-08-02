@@ -35,7 +35,8 @@ gc_scheduler_test_() ->
         fun trigger_for_single_instance/0,
         fun no_trigger_when_unset/0,
         fun trigger_error_does_not_crash/0,
-        fun named_second_scheduler_is_independent/0
+        fun named_second_scheduler_is_independent/0,
+        fun capped_ticks_rotate_across_all_instances/0
     ]}.
 
 trigger_invokes_callback() ->
@@ -191,6 +192,50 @@ named_second_scheduler_is_independent() ->
         gen_server:stop(Pid),
         bondy_oplog:stop_instance(Inst),
         bondy_oplog_gc_scheduler:set_trigger(undefined)
+    end.
+
+%% With more instances than max_concurrency and triggers that complete
+%% within a tick interval, successive ticks must rotate the cap across
+%% ALL instances — least-recently-fired first — instead of re-firing
+%% the head of the instance list every round and starving the rest.
+%% (Regression: registry shards were never compacted on clustered nodes
+%% because 16 idle main/* shards ahead of them in list order soaked up
+%% the whole cap on every tick.)
+capped_ticks_rotate_across_all_instances() ->
+    Self = self(),
+    Ref = make_ref(),
+    Name = gc_sched_test_fair,
+    Cap = 2,
+    {ok, Pid} = bondy_oplog_gc_scheduler:start_link(#{
+        name => Name,
+        interval_ms => 0,
+        max_concurrency => Cap,
+        trigger => fun(I) -> Self ! {Ref, I} end
+    }),
+    Instances = [mk_inst() || _ <- lists:seq(1, 6)],
+    [{ok, _} = bondy_oplog:start_instance(I) || I <- Instances],
+    try
+        %% Each trigger is one tick; the sleep lets the (instant)
+        %% workers exit so every tick starts with zero in flight —
+        %% exactly the condition that starved instances beyond the cap.
+        %% A few spare ticks tolerate unrelated instances sharing the
+        %% global registry; the property is coverage of ALL instances,
+        %% which the unfixed head-of-list order can never reach.
+        Ticks = (length(Instances) div Cap) + 4,
+        Fired = lists:flatmap(
+            fun(_) ->
+                bondy_oplog_gc_scheduler:trigger(Name),
+                Batch = collect(Ref, Cap, 1000),
+                timer:sleep(50),
+                Batch
+            end,
+            lists:seq(1, Ticks)
+        ),
+        Mine = [I || I <- Fired, lists:member(I, Instances)],
+        ?assertEqual(lists:sort(Instances), lists:usort(Mine))
+    after
+        gen_server:stop(Pid),
+        [bondy_oplog:stop_instance(I) || I <- Instances]
     end.
 
 %% Helpers

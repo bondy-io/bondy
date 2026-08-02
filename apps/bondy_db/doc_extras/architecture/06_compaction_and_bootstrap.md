@@ -15,8 +15,11 @@ single compacted state snapshot. At full convergence the live MST is
 The mechanism in this codebase is the COG (Concurrent Operation
 Group) idea — `bondy_oplog_compaction` orchestrates;
 `bondy_oplog_instance` runs the cycle; `bondy_oplog_gc_scheduler`
-fires it on a timer; `bondy_mst:truncate/2` does the physical
-deletion; `bondy_oplog_sync_session` (`bootstrap/3` /
+fires it on a timer; the physical deletion is a TWO-step handoff —
+`bondy_mst:truncate/2` unlinks the stable prefix (rewriting only the
+O(log N) left spine) and `bondy_mst:gc/1` then sweeps the unlinked
+subtrees' pages out of the store (`truncate_below_or_equal/3`; ETS
+backend); `bondy_oplog_sync_session` (`bootstrap/3` /
 `bootstrap_catalogue/3`) carries the snapshot to new replicas.
 
 ## The intuition: the MST is not a log, it's a *window*
@@ -118,88 +121,136 @@ A few subtle things:
 - **No coordination is required.** Two replicas that have observed
   the same set of peers compute the same frontier independently.
 
-### The ephemeral + fused solo carve-out
+### Retention-bounded truncation for ephemeral catalogue instances
 
-`compute_frontier_for/2` above is silent when `PeerRoots = []` — it
-returns `undefined`, deferring forever. `PeerRoots` comes from
-`bondy_oplog_compaction:compact/1`, which reads THIS instance's own
-sync history (`bondy_oplog_peer_state:get_instance_peer_states/1`), not
-live cluster membership. On a genuinely solo node — no Partisan peer,
-ever — that history can never be populated, so a durable-shaped
-compaction on the registry's ephemeral, fused (mux-collapsed) shards
-stalled forever: the MST page store (raw `cell_apply` event history)
-grew unbounded. This was a real production incident — a single-node
-`bondy` under subscribe-heavy load ran its RAM out via this exact
-stall, reproduced on Fly and locally.
+**An opt-in overload backstop, OFF by default.** Peer-confirmed
+compaction is the primary history bound for ephemeral catalogue
+instances exactly as for durable ones — it trails the write rate by
+roughly one sync round plus one GC tick, so a loaded shard's live
+history is bounded by propagation, not by app lifetime.
 
-`effective_frontier/4` in `bondy_oplog_instance.erl` closes the gap
-with a carve-out, gated on **`Fused ANDALSO HasProjection`** — not
-`Fused` alone:
+The incident that motivated this section deserves its honest history: a
+fleet-scale subscribe-heavy load test drove every node of a 5-node
+cluster to 90-98% RAM in minutes, and an A/B experiment appeared to
+prove the growth was a capacity fact of stability-driven compaction
+itself. That conclusion was CONFOUNDED: `bondy_oplog_gc_scheduler` had a
+head-of-line starvation defect (each tick walked `list_instances()` from
+the head and the first `max_concurrency` fast-completing instances —
+the idle `main/*` shards — monopolised every round), so compaction had
+never run at all for `registry/*` shards on any clustered node in any of
+those experiments. With the scheduler firing fairly
+(least-recently-fired first), the peer-confirmed frontier advances
+normally under load and drains history fully once writes stop.
+
+What retention exists for is the residual risk the confirmed frontier
+cannot cover: a live-but-lagging peer (or one partitioned longer than
+`peer_timeout_ms` filters for) pins the frontier, and on the memory
+topology pinned history is RAM. Enabling the policy trades the
+soundness invariant peer confirmation provides — *never truncate what a
+live peer still lacks* — for a hard local bound; the recovery paths
+below exist to pay that trade's cost. Instance opt `mst_retention =>
+#{max_age_ms, max_events}` (registry knobs `db.registry.retention.*`,
+both default `0` = disabled):
 
 ```mermaid
 flowchart TB
     CF["compute_frontier_for(MST, PeerRoots)"]
-    UD{"undefined?"}
-    GATE{"Fused ∧ HasProjection?"}
-    SOLO{"membership_class(reclamation_members()) =:= solo?"}
-    LOCAL["frontier = local MST's own max key<br/>(bondy_mst:last/1) — same shape as the<br/>peer-confirmed 'no hole' case"]
-    DEFER["defer — {ok, no_change}"]
+    UD{"frontier past the watermark?"}
+    RET{"mst_retention configured ∧ Fused ∧ HasProjection<br/>∧ (size > max_events ∨ oldest > max_age_ms)?"}
+    RFRONT["frontier = whole applied tree (size breach)<br/>or newest key older than the age cutoff"]
+    CATCH["maybe_watermark_catchup — else {ok, no_change}"]
 
     CF --> UD
-    UD -->|no| Frontier[use the peer-confirmed frontier]
-    UD -->|yes| GATE
-    GATE -->|no| DEFER
-    GATE -->|yes| SOLO
-    SOLO -->|yes| LOCAL
-    SOLO -->|no — clustered or can't tell| DEFER
+    UD -->|yes| Frontier[peer-confirmed truncation — preferred, unchanged]
+    UD -->|no| RET
+    RET -->|yes| RFRONT
+    RET -->|no| CATCH
 ```
 
-Why each half of the gate is load-bearing:
+Key properties:
 
-- **`Fused`** — `bondy_db:assert_fused_requires_ephemeral/2` makes
-  `fused` an ephemeral-only property by construction (rejected at
-  `open_table` for a durable/leveled backend), so the carve-out can
-  never fire for durable data regardless of membership. There is
-  nothing an ephemeral store protects by waiting: it starts empty on
-  every restart, and a peer with a stale or rootless view already
-  falls back to a full catalogue bootstrap rather than an incremental
-  MST diff (see [Catalogue-mode bootstrap](#catalogue-mode-bootstrap-multi-cell-snapshot))
-  — so truncating early costs a peer a bootstrap, never data.
-- **`HasProjection`** — the bootstrap-fallback safety argument above is
-  specifically about the *catalogue* path, where the projection is the
-  thing a bootstrap streams wholesale. It has not been extended to the
-  bare-CRDT checkpoint path (`false when CrdtMod =/= undefined` in
-  `run_compaction/10`), so the gate stays narrower than `Fused` alone
-  would allow — scoped to exactly what was analysed: the real registry
-  DB shape (`bondy_namespace_catalog:registry_db_spec/0`) is always
-  both `fused => true` and `projection_backend => ets`.
-- **Solo, not "can't tell."** The membership check reuses
-  `reclamation_members/0` — the same primitive causal-stability
-  reclamation's own solo carve-out already relies on (see
-  `reclamation_members/0` and `stability_point/1`'s docstrings in
-  `bondy_oplog_instance.erl` — reclamation is a separate GC mechanism,
-  projection-cell garbage collection rather than MST/WAL truncation,
-  and is not otherwise covered by this chapter) — through a shared
-  classifier, `membership_class/1`, so there is exactly one place in
-  the module that decides what counts as solo. `{ok, []}` (genuinely
-  no peer) ⇒ `solo`; `error` (membership service unreachable) and
-  `{ok, [_|_]}` (real peers, just none confirmed yet) both fall through
-  to `defer`. Conflating "solo" with "can't tell" would license the
-  shortcut on a node that merely lost sight of its own cluster — see
-  `reclamation_members/0`'s own docstring for the full argument.
+- **Peer-confirmed first.** A confirmed frontier is strictly better —
+  every peer already holds that prefix, so truncating it costs nobody a
+  bootstrap. Retention fires only when the confirmed path yields
+  nothing (`retention_or_catchup/5` → `retention_frontier/3` in
+  `bondy_oplog_instance.erl`).
+- **Sound because ephemeral + projection-backed.** A restart wipes the
+  instance anyway (no durability to protect) and the projection
+  materializes all applied state, so truncation loses nothing locally.
+  Enforced twice: `mst_retention` requires `fused`
+  (`validate_retention/2`; `fused ⇒ ephemeral` per
+  `bondy_db:assert_fused_requires_ephemeral/2`) and never fires without
+  a projection (`retention_ctx/2`). Durable instances are untouched.
+- **Uniform policy, not per-node heroics.** Every node bounds these
+  instances by the same policy, so no peer's frontier computation is
+  held hostage by another node's retained history. Solo nodes need no
+  special case — retention truncates regardless of membership (the
+  earlier interim solo-membership carve-out was subsumed and removed).
 
-Once the carve-out fires, the derived frontier is the local MST's own
-maximum key — identical in shape to what the peer-confirmed path
-already does for a fully-agreeing peer (the "no hole" branch above) —
-so it flows through the same catalogue truncation path as every other
-frontier, with no special-cased commit logic.
+What a peer that missed truncated history does:
+
+- **Failed page pull** — the pages are gone. The session's FIRST move
+  is not to give up: a miss usually just means the peer truncated (and
+  page-GC'd) mid-round, so the session re-requests the peer's current
+  root and continues against that — its live pages are always servable
+  (`chase_refreshed_root/7`, budget-bounded). Only when the peer has
+  not moved AND the peer's applied-frontier VV is strictly ahead of
+  ours does the session die with `{peer_pages_unavailable, _}` and the
+  scheduler flag a catalogue re-bootstrap (dedup + backoff,
+  `?REBOOTSTRAP_TAB`); a miss with NO frontier deficit ends the round
+  benign — the unpullable pages covered only events this replica
+  already applied. Treating every miss as terminal caused a
+  re-bootstrap storm on every truncation round, each one a needless
+  clobber-and-rederive cycle.
+- **Silent deficit** — the peer truncated events this node NEVER
+  received, so no page pull fails; instead, after every complete round
+  a retention instance compares the peer's pre-round applied-frontier
+  VV against its own post-replay VV. Strictly behind on any origin ⇒
+  the session fails with `{frontier_gap, Origins}` and the scheduler
+  flags the same re-bootstrap. Crucially this check also **gates
+  frontier adoption**: the "adopt the peer's frontier after a
+  successful round" oracle-repair is only sound when peer compaction
+  implies all-peer confirmation — retention breaks that implication,
+  and adopting across a gap would report CONVERGED over silently
+  missing data. This is ALSO the organic join-time trigger: a fresh
+  replica's first sync against a truncating cluster lands here and
+  bootstraps; a fresh cluster with nothing yet truncated syncs clean
+  with no wasted bootstrap.
+- **Catalogue bootstrap works on fused instances** (it must — it is the
+  only complete recovery source once history truncates): the snapshot
+  producer resolves the projection target through the fused instance
+  itself when there is no applier (`bondy_oplog_catalogue_snapshot:
+  resolve_cell_apply_target/1`), and the installer runs in the fused
+  gen_server over its own mux cell-apply source
+  (`bondy_oplog_applier:install_catalogue_cells/3`, shared body).
+- **Live re-bootstraps re-derive the projection afterwards** — on fused
+  instances via `bondy_oplog_instance:rederive_projection/1` (the
+  fused counterpart of the applier's `rederive_projection_sync/1`,
+  routed by `bondy_oplog_sync_session`). The `replace`-mode install is
+  skip-if-older by HLC, which can clobber a per-Origin-accumulating
+  cell: the peer's higher-HLC copy may omit ops the peer had not
+  applied when its snapshot was cut, and the loss is invisible to the
+  convergence oracle (the local applied-frontier VV still covers the
+  clobbered ops). The rederive re-applies every retained MST event —
+  already-held ops are rejected by the kernel's causal metadata,
+  missing ops integrate. **This remedy is complete only for ops still
+  inside the retained window**: under peer-confirmed compaction that is
+  guaranteed (anything truncated is in everyone's cells already), which
+  is exactly why retention — which truncates past confirmation — is an
+  opt-in trade rather than a default.
 
 ## The compaction cycle
 
 `bondy_oplog_gc_scheduler` ticks every `gc_interval_ms` (default 1s)
-and spawns one short-lived worker per instance. The worker just **issues
-the compaction call**; the instance gen_server runs the whole five-step
-cycle **synchronously**:
+and spawns one short-lived worker per instance, firing the
+**least-recently-fired instances first** — the `gc_max_concurrency` cap
+(default 4) admits only that many workers per round, and a stable
+head-of-list order would permanently starve every instance beyond the
+cap whenever the head's triggers complete within one interval (the
+defect that kept `registry/*` shards uncompacted behind 16 idle
+`main/*` shards and caused the fleet-scale OOM). The worker just
+**issues the compaction call**; the instance gen_server runs the whole
+five-step cycle **synchronously**:
 
 ```mermaid
 sequenceDiagram
@@ -927,15 +978,31 @@ events it already folded into its snapshot. The mechanism is in
 MST1 = bondy_mst:merge(MST0, MST0, PeerRoot),
 MST2 = case State#state.watermark of
            undefined -> MST1;
-           W         -> truncate_below_or_equal(MST1, W)
+           W         -> truncate_below_or_equal(MST1, W, State#state.backend)
        end,
 ```
 
-The peer's pages are merged in, then `truncate_below_or_equal/2`
+The peer's pages are merged in, then `truncate_below_or_equal/3`
 re-runs against the local watermark, dropping any keys X has already
 compacted away. The local-append side uses the same idea via
 `below_or_equal_watermark/2` — appended or peer-supplied events whose
 key is ≤ the local watermark are rejected at the door.
+
+`truncate_below_or_equal/3` is also where dropped pages are PHYSICALLY
+reclaimed: `bondy_mst:truncate/2` frees only the O(log N) spine pages
+it rewrites and leaves the dropped subtrees merely unreachable in the
+page store, so on the ephemeral (ETS) backend the helper follows every
+truncation with the mark-and-sweep `bondy_mst:gc/1` (current root
+protected). Nothing else ever ran that collector — shards whose event
+count read 0 still pinned their entire history as orphaned pages
+(~5 GB/node at fleet scale), the residual RAM plateau after the
+scheduler-starvation fix. Two consequences are deliberate: the pack
+(durable) backend is excluded (its list-mode GC is a sealed-pack
+rewrite with its own lifecycle — a disk-space follow-up, not a RAM
+problem), and a compaction-cycle diff against a peer root whose pages
+were just swept defers conservatively instead of raising
+(`peer_first_hole/2` certifies nothing for that peer until its root
+refreshes on the next sync round).
 
 ```mermaid
 flowchart LR
@@ -972,7 +1039,8 @@ snapshot.
 | Cluster cold-start fires N parallel snapshot transfers and saturates the peer pool. | `max_inflight_bootstraps` cap (default `4`) gates concurrent sessions. Over-cap dispatches are deferred to the next tick as in-flight sessions drain. |
 | A replica with an unreachable peer-pool retries every 500 ms forever. | Per-instance exponential backoff (`500 ms → 30 s` ceiling, optional ±50 % jitter) drops the steady-state retry rate to ~1/30 Hz after a few failures. |
 | Multiple replicas hammer the same first peer. | `bootstrap_peer_strategy` (`first` \| `random` \| `round_robin`) — switch to `round_robin` or `random` to spread load. |
-| A genuinely solo, peerless node's ephemeral+fused (registry) shard never advances the frontier — `compute_frontier_for(_MST, []) -> undefined` has no carve-out on its own — so the MST page store grows unbounded under sustained write load; a real incident that ran a single-node `bondy` out of RAM. | The [ephemeral + fused solo carve-out](#the-ephemeral-fused-solo-carve-out) (`effective_frontier/4`) derives the frontier from the local MST's own max key once live membership is confirmed genuinely solo, gated on `Fused ANDALSO HasProjection` so durable and bare-CRDT instances are unaffected. |
+| `registry/*` shards' MSTs retained every event — pure RAM, unbounded; the fleet-scale OOM. Root cause was NOT a stalling frontier: the gc scheduler's head-of-list tick order let the first `gc_max_concurrency` fast-completing instances (idle `main/*` shards) monopolise every round, so compaction never ran for `registry/*` at all on clustered nodes. | Least-recently-fired tick ordering in `bondy_oplog_gc_scheduler` (see [the compaction cycle](#the-compaction-cycle)); peer-confirmed compaction then bounds ephemeral history by propagation, same as durable. For genuine overload where a lagging live peer pins the frontier, [retention](#retention-bounded-truncation-for-ephemeral-catalogue-instances) (`mst_retention`, opt-in, off by default) is the backstop; laggards then recover via the `peer_pages_unavailable` / `frontier_gap` → catalogue re-bootstrap + rederive path. |
+| Shards whose event count read 0 still pinned their entire history as orphaned ETS pages (~5 GB/node): `bondy_mst:truncate/2` frees only the O(log N) spine pages it rewrites and nothing ever ran the store's collector over the unlinked subtrees. | `truncate_below_or_equal/3` follows every truncation with the mark-and-sweep `bondy_mst:gc/1` on the ETS backend; `peer_first_hole/2` defers (never raises) when a compaction diff meets a peer root whose pages were swept. Pack (durable) reclamation is a tracked follow-up. |
 
 ## Tests that pin this down
 
@@ -981,13 +1049,24 @@ because everything else relies on it. The relevant suites:
 
 - `test/bondy_oplog_compaction_test.erl` — frontier computation,
   watermark advance, idempotency, no-change cases, MST shrinkage.
-- `test/bondy_oplog_compaction_fused_test.erl` — the [ephemeral + fused
-  solo carve-out](#the-ephemeral-fused-solo-carve-out): a peerless fused
-  instance converges (the regression test for the RAM-leak incident), the
-  peer-confirmed path still works on fused, the real registry mux shape
-  (two tables, heterogeneous CRDT kernels, one shared MST) compacts
-  together, a fused instance with no projection wiring is NOT given the
-  shortcut, and the solo path is idempotent on a second no-op cycle.
+- `test/bondy_oplog_compaction_fused_test.erl` — [retention-bounded
+  truncation](#retention-bounded-truncation-for-ephemeral-catalogue-instances):
+  size- and age-breach truncation, no-policy defers forever, retention
+  requires `fused`, never fires without a projection, the
+  truncate-vs-drain race loses no data, idempotence, the peer-confirmed
+  and mux paths unchanged, the fused-to-fused catalogue-bootstrap
+  roundtrip, the frontier-gap detect → non-adopt → bootstrap-remedy
+  sequence end to end, the install-clobber → rederive-heal →
+  idempotent-rederive sequence, and PHYSICAL page reclamation on
+  truncation (asserted at the ETS level — the blind spot every
+  event-count assertion missed).
+- `apps/bondy_router/test/bondy_oplog_compaction_cluster_SUITE.erl` —
+  the cluster regression-lock AT DEFAULTS: 3 real nodes, sustained
+  writes, every `registry/*` shard under the propagation ceiling
+  throughout, drained to quiescent post-settle (catches any future
+  scheduler-starvation shape), instance-owned ETS bytes back to a
+  live-tree footprint (catches any future page leak), zero RIB
+  divergence on every node.
 - `test/bondy_oplog_gc_scheduler_test.erl` — tick cadence, semaphore
   cap, set_interval/set_trigger races, per-instance isolation.
 - `test/bondy_oplog_bootstrap_test.erl` — snapshot transfer,
@@ -1037,15 +1116,19 @@ Implementation:
   per-instance worker.
 - `bondy_oplog_instance.erl`:
     - `compute_frontier_for/2` — frontier as longest common prefix.
-    - `effective_frontier/4` — wraps `compute_frontier_for/2` with the
-      [ephemeral+fused solo carve-out](#the-ephemeral-fused-solo-carve-out).
-    - `membership_class/1` — the single classifier both the solo
-      carve-out and causal-stability reclamation use to decide
-      `solo | {clustered, Members} | error` from `reclamation_members/0`.
+    - `retention_or_catchup/5` + `retention_frontier/3` +
+      `retention_ctx/2` + `validate_retention/2` — [retention-bounded
+      truncation](#retention-bounded-truncation-for-ephemeral-catalogue-instances)
+      for `mst_retention` instances.
+    - `membership_class/1` — classifies `reclamation_members/0` into
+      `solo | {clustered, Members} | error` for causal-stability
+      reclamation's solo shortcut.
     - `do_compact_sync/2` + `run_compaction/10` — the cycle, run
       synchronously in the instance gen_server.
     - `commit_compaction/3` — atomic truncate + watermark + HLC bump.
-    - `truncate_below_or_equal/2` — drops keys ≤ watermark.
+    - `truncate_below_or_equal/3` — drops keys ≤ watermark, then
+      (ETS backend) sweeps the dropped subtrees' pages via
+      `bondy_mst:gc/1` — truncate only unlinks them.
     - `do_load_snapshot/3` + `apply_loaded_snapshot/3` — bootstrap
       install with monotonicity guard.
     - `do_handle_call({integrate_peer_root, _}, _, _)` — merge +

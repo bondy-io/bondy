@@ -377,6 +377,22 @@ without protocol changes.
     %% behaviour yet — the durable two-process pipeline is unaffected.
     %% The `fused ⇒ ephemeral` invariant is enforced at `open_table`.
     fused = false :: boolean(),
+    %% MST retention policy for ephemeral catalogue (fused) instances
+    %% (opt `mst_retention` — distinct from the WAL's segment-retention
+    %% `retention` proplist): `#{max_age_ms => A, max_events => N}` (`0`
+    %% disables a knob) or `undefined` (stability-driven compaction only —
+    %% every durable instance). When set, `run_compaction` falls back to a LOCAL
+    %% retention frontier whenever the peer-confirmed frontier yields
+    %% nothing: the MST is bounded by policy, not by all-peer stability.
+    %% Sound only for an ephemeral projection-backed instance — the
+    %% projection holds all applied state and a peer that misses
+    %% truncated history recovers via catalogue bootstrap (the
+    %% `peer_pages_unavailable` / `frontier_gap` → rebootstrap path in
+    %% `bondy_oplog_sync_scheduler`). Requires `fused` (⇒ ephemeral, per
+    %% `bondy_db:assert_fused_requires_ephemeral/2`); enforced at
+    %% `init/1` via `validate_retention/2`.
+    retention :: #{max_age_ms := non_neg_integer(),
+                   max_events := non_neg_integer()} | undefined,
     %% Fused-writer drain state, or `undefined` for every non-fused
     %% (durable + non-fused ephemeral) instance. See `#fused_drain{}`.
     fused_drain = undefined :: undefined | #fused_drain{},
@@ -536,6 +552,7 @@ without protocol changes.
 -export([mark_live/1]).
 -export([lifecycle_state/1]).
 -export([install_catalogue_batch/2]).
+-export([rederive_projection/1]).
 -export([finalize_catalogue_bootstrap/3]).
 -export([finalize_catalogue_bootstrap/4]).
 -export([finalize_catalogue_bootstrap/5]).
@@ -1835,13 +1852,22 @@ install_catalogue_batch(InstanceId, {replace, Cells}) when
     %% reach the applier (which would function_clause).
     case bondy_oplog_registry:fused(InstanceId) of
         true ->
-            %% A fused instance has no applier to install into. Catalogue-
-            %% snapshot bootstrap targets durable instances; a fused
-            %% (ephemeral) instance defaults to lifecycle `live` and
-            %% converges via AE page-sync (`integrate_peer_root` →
-            %% inline replay), so it is never routed here in practice.
-            %% Surface an explicit, non-misleading error if it ever is.
-            {error, fused_bootstrap_unsupported};
+            %% A fused instance has no applier to install into: the install
+            %% runs in the instance gen_server itself, through the same
+            %% shared body (`bondy_oplog_applier:install_catalogue_cells/3`)
+            %% over this instance's own `#fused_drain{}` cell-apply source.
+            %% Load-bearing for retention-bounded (`mst_retention`)
+            %% instances: their truncated history makes catalogue bootstrap
+            %% the ONLY complete recovery path for a joining or lagging
+            %% peer — page-sync alone covers just the retention window.
+            case ?MODULE:whereis(InstanceId) of
+                undefined ->
+                    {error, instance_not_running};
+                Pid ->
+                    gen_server:call(
+                        Pid, {install_catalogue_batch, Cells}, infinity
+                    )
+            end;
         _ ->
             case bondy_oplog_registry:applier_pid(InstanceId) of
                 undefined ->
@@ -1858,6 +1884,26 @@ install_catalogue_batch(Pid, ModeAndCells) when is_pid(Pid) ->
             install_catalogue_batch(InstanceId, ModeAndCells);
         not_found ->
             {error, instance_not_found}
+    end.
+
+-doc """
+The fused counterpart of
+`bondy_oplog_applier:rederive_projection_sync/1`: re-applies every
+retained MST event through the instance's own cell-apply source,
+restoring cells that a `replace`-mode catalogue install clobbered on a
+live re-bootstrap. Idempotent — re-delivered ops a cell already holds
+are rejected by the kernel's causal metadata. Fused instances only; an
+applier-backed instance takes the applier path in
+`bondy_oplog_sync_session`.
+""".
+-spec rederive_projection(instance_id()) -> ok | {error, any()}.
+
+rederive_projection(InstanceId) when is_binary(InstanceId) ->
+    case ?MODULE:whereis(InstanceId) of
+        undefined ->
+            {error, instance_not_running};
+        Pid ->
+            gen_server:call(Pid, rederive_projection, infinity)
     end.
 
 ?DOC("""
@@ -2335,6 +2381,13 @@ init({InstanceId, Opts}) ->
         %% where the projection backend is authoritatively known;
         %% the instance only records and republishes the flag.
         fused = maps:get(fused, Opts, false),
+        %% NOTE the opt is `mst_retention`, NOT `retention` — the latter
+        %% is the WAL's segment-retention proplist, forwarded verbatim to
+        %% `bondy_oplog_wal` (see `bondy_oplog_wal_manifest:new/3`).
+        retention = validate_retention(
+            maps:get(mst_retention, Opts, undefined),
+            maps:get(fused, Opts, false)
+        ),
         %% Drive the asynchronous seal iff the backend ADVERTISES the
         %% `async_seal` capability and was opened in `seal_mode => async`.
         %% Gating on the capability (not a hardcoded backend module) keeps the
@@ -3028,7 +3081,7 @@ do_handle_call(
     MST2 =
         case State#state.watermark of
             undefined -> MST1;
-            W -> truncate_below_or_equal(MST1, W)
+            W -> truncate_below_or_equal(MST1, W, State#state.backend)
         end,
     %% HLC update: events received via merge may carry HLCs higher than
     %% our local clock. Advance the HLC to dominate the merged tree's
@@ -3269,6 +3322,69 @@ do_handle_call(
     %% instance runs in-process (no separate applier to delegate to).
     {reply, bondy_oplog_cell_utils:sweep(Id, Ctx, Source, StableHlc, Opts),
         State};
+do_handle_call(
+    rederive_projection,
+    _From,
+    #state{fused_drain = undefined} = State
+) ->
+    {reply, {error, no_cell_apply_target}, State};
+do_handle_call(
+    rederive_projection,
+    _From,
+    #state{
+        instance_id = Id,
+        mst = MST,
+        fused_drain = #fused_drain{cell_apply_source = Source}
+    } = State
+) ->
+    %% Mirrors `bondy_oplog_applier`'s `rederive_projection` handler — the
+    %% full re-apply of every retained MST event, restoring a cell that a
+    %% `replace`-mode catalogue install clobbered on a live re-bootstrap
+    %% (the peer's higher-HLC cell can omit ops the peer had not applied
+    %% when its snapshot was cut). Re-delivering an op a cell already
+    %% holds is idempotent (the kernel's per-origin causal metadata
+    %% rejects it); a missing op integrates — the op-based replacement
+    %% for CvRDT `merge_states`, same as the applier path. Runs in the
+    %% gen_server, serialized with the fused drain, and the MST fold is
+    %% already in-process (no separate applier to delegate to).
+    Pairs =
+        case MST of
+            undefined -> [];
+            _ -> bondy_mst:to_list(MST)
+        end,
+    Count = bondy_oplog_cell_apply:apply_cell_pairs_mux(
+        Source, Id, Pairs, bondy_oplog_registry:origin(Id)
+    ),
+    telemetry:execute(
+        [bondy_oplog, instance, rederive_projection],
+        #{cells_applied => Count, pairs => length(Pairs)},
+        #{instance_id => Id}
+    ),
+    {reply, ok, State};
+do_handle_call(
+    {install_catalogue_batch, _Cells},
+    _From,
+    #state{fused_drain = undefined} = State
+) ->
+    %% Not a fused instance (or not yet initialized) — the id-level API
+    %% only routes here for fused instances, so this is a raced/misplaced
+    %% call.
+    {reply, {error, no_cell_apply_target}, State};
+do_handle_call(
+    {install_catalogue_batch, Cells},
+    _From,
+    #state{
+        instance_id = Id,
+        fused_drain = #fused_drain{cell_apply_source = Source}
+    } = State
+) ->
+    %% Mirrors `bondy_oplog_applier`'s `{install_catalogue_batch, _}`
+    %% handler — delegates to the shared applier-state-free body over THIS
+    %% instance's own cell-apply source (a fused instance has no separate
+    %% applier to delegate to). Runs in the gen_server, serialized with
+    %% the fused drain, so an install never interleaves with an apply.
+    Reply = bondy_oplog_applier:install_catalogue_cells(Id, Source, Cells),
+    {reply, Reply, State};
 do_handle_call(
     cell_apply_target,
     _From,
@@ -5068,7 +5184,25 @@ advance_watermark(Cur, _New) -> Cur.
 %% The result is byte-identical to the equivalent delete sequence (the
 %% MST is history-independent), so the root hash that peers sync against
 %% is unchanged.
-truncate_below_or_equal(MST, Watermark) ->
+%%
+%% Truncation only UNLINKS the dropped subtrees — `bondy_mst:truncate/2`
+%% frees the O(log N) spine pages it rewrites, but the dropped subtrees'
+%% interior pages are merely left unreachable, awaiting the store's
+%% garbage collector. Nothing else ever runs that collector, so on the
+%% ephemeral (ETS) backend every truncation leaked its whole dropped
+%% prefix into the page table: registry shards whose event count read 0
+%% still pinned hundreds of MB of orphaned pages (the residual RAM
+%% plateau after the fleet OOM's scheduler fix). The mark-and-sweep
+%% `bondy_mst:gc/1` (current root protected) reclaims them here, at the
+%% only moments bulk garbage is created. Steady-state cost is small: the
+%% post-truncate live tree is the mark set and the swept table holds
+%% little beyond it once GC runs every cycle. NOT run for the pack
+%% (durable) backend, where list-mode GC is a sealed-pack rewrite with
+%% its own lifecycle — durable pack reclamation is a separate concern
+%% (disk, not RAM).
+truncate_below_or_equal(MST, Watermark, ets) ->
+    bondy_mst:gc(bondy_mst:truncate(MST, Watermark));
+truncate_below_or_equal(MST, Watermark, _Backend) ->
     bondy_mst:truncate(MST, Watermark).
 
 %% @private
@@ -5112,7 +5246,7 @@ do_compact_sync(#state{} = State0, PeerRoots) ->
         State#state.cached_checkpoint,
         State#state.crdt_module,
         HasProjection,
-        State#state.fused
+        retention_ctx(State, HasProjection)
     ),
     case Result of
         {ok, {catalogue_compacted, Frontier}} when
@@ -5139,17 +5273,21 @@ run_compaction(
     CachedCheckpoint,
     CrdtMod,
     HasProjection,
-    Fused
+    Retention
 ) ->
     try
-        case effective_frontier(MST, PeerRoots, Fused, HasProjection) of
+        case compute_frontier_for(MST, PeerRoots) of
             undefined ->
-                maybe_watermark_catchup(MST, Watermark0, HasProjection);
+                retention_or_catchup(
+                    InstanceId, MST, Watermark0, HasProjection, Retention
+                );
             Frontier when
                 Watermark0 =/= undefined,
                 Frontier =< Watermark0
             ->
-                maybe_watermark_catchup(MST, Watermark0, HasProjection);
+                retention_or_catchup(
+                    InstanceId, MST, Watermark0, HasProjection, Retention
+                );
             Frontier ->
                 %% Path is chosen by whether a PROJECTION materialises the
                 %% state — NOT by whether `crdt_module` is set. A
@@ -5449,12 +5587,14 @@ reclamation_stalled(InstanceId, Reason) ->
 
 %% @private
 %% The single point of truth for classifying a `reclamation_members/0`
-%% result into `solo | {clustered, Members} | error`. Both GC mechanisms
-%% that license a solo shortcut — `reclamation_stability_point/1` (CRDT-cell
-%% reclamation) and `effective_frontier/3` (MST/WAL compaction) — consume
-%% this, so there is exactly one place that decides what counts as solo.
-%% `reclamation_members/0`'s own contract (never conflate `[]` with `error`)
-%% is preserved verbatim: `error` in ⇒ `error` out, never `solo`.
+%% result into `solo | {clustered, Members} | error`, consumed by
+%% `reclamation_stability_point/1` (CRDT-cell reclamation's solo
+%% shortcut). MST/WAL compaction no longer needs a solo shortcut: the
+%% retention policy (`retention_frontier/3`) bounds ephemeral catalogue
+%% instances by local policy regardless of membership, which covers solo
+%% trivially. `reclamation_members/0`'s own contract (never conflate `[]`
+%% with `error`) is preserved verbatim: `error` in ⇒ `error` out, never
+%% `solo`.
 -spec membership_class({ok, [node()]} | error) ->
     solo | {clustered, [node()]} | error.
 
@@ -5565,53 +5705,147 @@ compute_frontier_for(MST, PeerRoots) ->
     end.
 
 %% @private
-%% The compaction frontier, with a solo carve-out for ephemeral+fused
-%% CATALOGUE instances — the mux-collapsed `registry` DB shape
-%% (`bondy_namespace_catalog:registry_db_spec/0`). Mirrors
-%% `reclamation_members/0`'s solo carve-out (see `stability_point/1`),
-%% classified through the same `membership_class/1` both mechanisms share.
+%% Validates the `retention` instance opt. Retention-bounded truncation is
+%% sound only for an ephemeral projection-backed instance — the projection
+%% materializes all applied state, so truncating the MST loses nothing
+%% locally, and a peer that misses truncated history recovers via
+%% catalogue bootstrap. `fused ⇒ ephemeral` is enforced upstream
+%% (`bondy_db:assert_fused_requires_ephemeral/2`), so requiring `fused`
+%% here transitively requires ephemeral without this module needing the
+%% projection backend.
+validate_retention(undefined, _Fused) ->
+    undefined;
+validate_retention(#{} = Policy, true) ->
+    MaxAge = maps:get(max_age_ms, Policy, 0),
+    MaxEvents = maps:get(max_events, Policy, 0),
+    (is_integer(MaxAge) andalso MaxAge >= 0 andalso
+        is_integer(MaxEvents) andalso MaxEvents >= 0) orelse
+        error({badarg, {retention, Policy}}),
+    case {MaxAge, MaxEvents} of
+        {0, 0} -> undefined;
+        _ -> #{max_age_ms => MaxAge, max_events => MaxEvents}
+    end;
+validate_retention(Policy, false) ->
+    error({badarg, {mst_retention_requires_fused, Policy}}).
+
+%% @private
+%% The per-cycle retention context handed to `run_compaction/10`, or
+%% `undefined` when retention does not apply this cycle. Snapshots
+%% `live_size` and the wall clock at call time so the compaction body
+%% stays free of clock/state reads. Wall time, NOT `bondy_oplog_hlc:peek/1`:
+%% the HLC atomic only advances when events are generated, so on a quiet
+%% instance `peek` is frozen at the last write and nothing would ever age
+%% out. Event-key HLC physicals are epoch-ms (the same clock domain), so
+%% wall-ms compares directly; an HLC that ran ahead of the wall (peer
+%% absorption) only makes events look newer — the safe direction. Only a
+%% fused instance WITH a projection is eligible: `fused` alone does not
+%% imply a projection exists (a bare fused CRDT instance with no
+%% `cell_apply_target` is constructible below `bondy_db`), and without one
+%% the projection-holds-the-state safety argument does not hold.
+retention_ctx(
+    #state{retention = #{} = Policy, fused = true} = State, true
+) ->
+    Policy#{
+        live_size => State#state.live_size,
+        now_ms => erlang:system_time(millisecond)
+    };
+retention_ctx(#state{}, _HasProjection) ->
+    undefined.
+
+%% @private
+%% The no-peer-confirmed-frontier fallback chain: retention first (when
+%% configured and triggered), then the watermark catch-up. Both are
+%% reached exclusively when the peer-confirmed path yielded nothing past
+%% the watermark — a confirmed frontier is always preferred (every peer
+%% already holds that prefix, so truncating it costs nobody a bootstrap).
+retention_or_catchup(InstanceId, MST, Watermark0, HasProjection, Retention) ->
+    case retention_frontier(MST, Watermark0, Retention) of
+        undefined ->
+            maybe_watermark_catchup(MST, Watermark0, HasProjection);
+        {Kind, Frontier} ->
+            telemetry:execute(
+                [bondy_oplog, compaction, retention],
+                #{count => 1},
+                #{instance_id => InstanceId, kind => Kind}
+            ),
+            {ok, {catalogue_compacted, Frontier}}
+    end.
+
+%% @private
+%% The LOCAL retention frontier for an ephemeral catalogue instance, or
+%% `undefined` when the policy is absent or not yet breached.
 %%
-%% `compute_frontier_for/2` requires at least one PEER ROOT, supplied by
-%% `bondy_oplog_compaction:compact/1` from THIS instance's own sync history
-%% — NOT live cluster membership. On a genuinely solo node (no Partisan
-%% peer, ever) that history can never be populated, so a durable-shaped
-%% compaction stalls forever: `compute_frontier_for(_MST, []) -> undefined.`
-%% has no carve-out.
+%% - `max_events` breach (checked first — one integer compare): frontier =
+%%   the MST's own max key, i.e. truncate the whole applied tree. Peers
+%%   within one AE round are unaffected (they hold their own copies);
+%%   laggards take the rebootstrap path.
+%% - `max_age_ms` breach: frontier = the largest REAL key strictly below
+%%   the age cutoff. Event keys are `#bondy_oplog_event_key{hlc, origin,
+%%   seq}` records ordered by HLC first, so a synthetic bound
+%%   `key(CutoffHlc, <<>>, 0)` sorts at-or-before every real key with
+%%   HLC >= cutoff, and `bondy_mst:last_n(MST, Bound, 1)` returns exactly
+%%   the newest key older than the cutoff (the same bound technique
+%%   `compute_frontier_for/2` uses for the first hole).
 %%
-%% Gated on `Fused ANDALSO HasProjection`, not `Fused` alone.
-%% `bondy_db:assert_fused_requires_ephemeral/2` makes `fused` an
-%% ephemeral-only property by construction, so a durable instance is never
-%% eligible regardless of membership — but `fused` alone does not imply a
-%% projection exists (a bare fused CRDT instance with no `cell_apply_target`
-%% is constructible below `bondy_db`, in `bondy_oplog_instance` tests). The
-%% safety argument — "a peer with a stale or rootless view falls back to a
-%% full catalogue bootstrap rather than an incremental MST diff, so
-%% truncating early costs a peer a bootstrap, never data" — is about the
-%% CATALOGUE bootstrap path specifically (`bondy_oplog_compaction:compact/1`'s
-%% "the truncated prefix" comment; `06_compaction_and_bootstrap.md`'s
-%% "Catalogue-mode bootstrap"). It has not been extended to the bare-CRDT
-%% checkpoint path, so this stays scoped to what was actually analysed: the
-%% real registry-DB shape (`fused => true, projection_backend => ets`) is
-%% always both. When the peer-confirmed path finds nothing to work with AND
-%% live membership is genuinely solo (never `error` — see
-%% `reclamation_members/0`, which must not conflate "solo" with "can't
-%% tell"), take the whole local tree as the frontier, exactly like the
-%% peer-confirmed "no hole" case already does.
-effective_frontier(MST, PeerRoots, Fused, HasProjection) ->
-    case compute_frontier_for(MST, PeerRoots) of
-        undefined when Fused andalso HasProjection ->
-            case membership_class(reclamation_members()) of
-                solo ->
-                    case bondy_mst:last(MST) of
-                        {K, _V} -> K;
-                        undefined -> undefined
+%% Every returned frontier is a REAL key from the tree (the commit path
+%% calls `bondy_oplog_event:key_hlc/1` on it) and strictly above
+%% `Watermark0` (at-or-below means the tree holds only already-compacted
+%% keys — that is `maybe_watermark_catchup/3`'s case, not ours).
+retention_frontier(_MST, _Watermark0, undefined) ->
+    undefined;
+retention_frontier(MST, Watermark0, #{} = Ctx) ->
+    #{
+        max_age_ms := MaxAge,
+        max_events := MaxEvents,
+        live_size := LiveSize,
+        now_ms := NowMs
+    } = Ctx,
+    SizeBreached = MaxEvents > 0 andalso LiveSize > MaxEvents,
+    case SizeBreached of
+        true ->
+            case bondy_mst:last(MST) of
+                {K, _V} -> above_watermark(size, K, Watermark0);
+                undefined -> undefined
+            end;
+        false ->
+            retention_age_frontier(MST, Watermark0, MaxAge, NowMs)
+    end.
+
+%% @private
+retention_age_frontier(_MST, _Watermark0, 0, _NowMs) ->
+    undefined;
+retention_age_frontier(MST, Watermark0, MaxAge, NowMs) ->
+    CutoffPhys = NowMs - MaxAge,
+    case CutoffPhys > 0 andalso bondy_mst:first(MST) of
+        {OldestKey, _V} ->
+            {OldestPhys, _} = bondy_oplog_hlc:decode(
+                bondy_oplog_event:key_hlc(OldestKey)
+            ),
+            case OldestPhys < CutoffPhys of
+                true ->
+                    Bound = bondy_oplog_event:key(
+                        bondy_oplog_hlc:encode(CutoffPhys, 0), <<>>, 0
+                    ),
+                    case bondy_mst:last_n(MST, Bound, 1) of
+                        [{K, _}] -> above_watermark(age, K, Watermark0);
+                        [] -> undefined
                     end;
-                _ ->
+                false ->
                     undefined
             end;
-        Frontier ->
-            Frontier
+        _ ->
+            %% Empty tree, or the cutoff predates the epoch (a clock that
+            %% has barely started) — nothing to age out.
+            undefined
     end.
+
+%% @private
+above_watermark(_Kind, K, Watermark) when
+    Watermark =/= undefined, K =< Watermark
+->
+    undefined;
+above_watermark(Kind, K, _Watermark) ->
+    {Kind, K}.
 
 %% @private
 %% Smallest local key absent-or-different in some peer root, or `no_hole`
@@ -5640,7 +5874,22 @@ min_hole(_H, Acc) -> Acc.
 %% skipping present-and-equal false-positives. `no_hole` when local is a
 %% subset of the peer (diff empty or all false-positives).
 peer_first_hole(MST, R) ->
-    first_genuine_hole(MST, R, bondy_mst:diff_to_list(MST, R)).
+    try
+        first_genuine_hole(MST, R, bondy_mst:diff_to_list(MST, R))
+    catch
+        _:_ ->
+            %% The recorded peer root references pages this store has
+            %% already reclaimed (post-truncation page GC on the
+            %% ephemeral backend). We cannot certify what that peer
+            %% holds, so certify nothing: a hole at the first local key
+            %% defers compaction for this peer until its root refreshes
+            %% on the next sync round (seconds). Never raises out of the
+            %% synchronous compaction handler.
+            case bondy_mst:first(MST) of
+                {K, _V} -> K;
+                undefined -> no_hole
+            end
+    end.
 
 %% @private
 first_genuine_hole(_MST, _R, []) ->
@@ -5741,7 +5990,9 @@ commit_compaction(
     Started,
     {ok, {compacted, Frontier, NewCheckpoint, EventCount}}
 ) ->
-    MST1 = truncate_below_or_equal(State#state.mst, Frontier),
+    MST1 = truncate_below_or_equal(
+        State#state.mst, Frontier, State#state.backend
+    ),
     %% Persist the truncated root so the durable MST root tracks the
     %% checkpoint (which `do_compact_sync/2` already wrote). For this
     %% bare-CRDT path the checkpoint carries the full materialised state, so
@@ -5864,7 +6115,9 @@ finalize_catalogue_compaction(State0, Started, Frontier) ->
     %% the applier and therefore the async path.
     State = drive_secondary_indexes(State0),
     {MST1, TruncateUs} = tc(fun() ->
-        truncate_below_or_equal(State#state.mst, Frontier)
+        truncate_below_or_equal(
+            State#state.mst, Frontier, State#state.backend
+        )
     end),
     %% Persist the truncated MST root BEFORE advancing the durable
     %% checkpoint. The reboot resume position is
@@ -6228,7 +6481,9 @@ apply_loaded_snapshot(State, NewWatermark, Snapshot) ->
         State#state.compaction_checkpoint_state, NewWatermark, Snapshot
     ),
     %% Drop any live events that the new checkpoint already covers.
-    MST1 = truncate_below_or_equal(State#state.mst, NewWatermark),
+    MST1 = truncate_below_or_equal(
+        State#state.mst, NewWatermark, State#state.backend
+    ),
     LiveSize1 = compute_live_size(MST1),
     %% Advance HLC to keep future local appends above the watermark.
     _ = bondy_oplog_hlc:update(
@@ -6450,7 +6705,8 @@ publish(#state{} = State) ->
         fold_module => State#state.fold_module,
         fold_opts => State#state.fold_opts,
         live_size => State#state.live_size,
-        fused => State#state.fused
+        fused => State#state.fused,
+        mst_retention => State#state.retention =/= undefined
     }).
 
 %% @private

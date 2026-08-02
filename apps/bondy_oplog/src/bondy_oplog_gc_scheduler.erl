@@ -62,7 +62,13 @@ smuggling per-instance time checks into a shared trigger.
     %% InstanceId → last wall-clock ms a stall was LOGGED for it. The
     %% rate limit for the stalled-reclamation warning (telemetry is never
     %% rate-limited; only the log line is).
-    last_stall_log = #{} :: #{instance_id() => integer()}
+    last_stall_log = #{} :: #{instance_id() => integer()},
+    %% InstanceId → monotonic ms it was last fired. Ticks fire the
+    %% least-recently-fired instances first; without this ordering, a
+    %% tick always walks list_instances() from the head and — with fast
+    %% triggers — the first max_concurrency instances monopolise every
+    %% round while the rest are never compacted.
+    last_fired = #{} :: #{instance_id() => integer()}
 }).
 
 %% A stalled instance is re-reported in the log at most this often. The
@@ -300,10 +306,28 @@ terminate(_Reason, _State) ->
 run_tick(#state{enabled = false} = State) ->
     State;
 run_tick(#state{} = State0) ->
-    Instances = safe_list_instances(),
+    Instances0 = safe_list_instances(),
+    %% Least-recently-fired first: the cap admits only max_concurrency
+    %% workers per round, so a stable head-of-list order would starve
+    %% every instance beyond the cap forever whenever the head's
+    %% triggers complete within one interval. Sorting by last-fired
+    %% time round-robins the cap across all instances. The map is
+    %% pruned to the live instance set so departed instances don't
+    %% accumulate.
+    LastFired = maps:with(Instances0, State0#state.last_fired),
+    %% Never-fired sorts first. erlang:monotonic_time/1 can be
+    %% negative, so the never-fired default must undercut any real
+    %% timestamp — not 0.
+    Never = -(1 bsl 63),
+    Instances = lists:sort(
+        fun(A, B) ->
+            maps:get(A, LastFired, Never) =< maps:get(B, LastFired, Never)
+        end,
+        Instances0
+    ),
     State = lists:foldl(
         fun(I, S) -> fire_async(I, S) end,
-        State0,
+        State0#state{last_fired = LastFired},
         Instances
     ),
     telemetry:execute(
@@ -361,7 +385,12 @@ fire_async(InstanceId, #state{in_flight = InFlight} = State) ->
             {Pid, _Ref} = spawn_monitor(fun() ->
                 run_trigger(Name, InstanceId, Trigger)
             end),
-            State#state{in_flight = InFlight#{Pid => InstanceId}}
+            LastFired = State#state.last_fired,
+            Now = erlang:monotonic_time(millisecond),
+            State#state{
+                in_flight = InFlight#{Pid => InstanceId},
+                last_fired = LastFired#{InstanceId => Now}
+            }
     end.
 
 %% @private

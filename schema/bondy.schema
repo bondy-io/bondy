@@ -240,6 +240,43 @@
   {default, 16}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc OVERLOAD BACKSTOP (off by default): retention window, in milliseconds,
+%% for the ephemeral `registry` database's per-shard op-log history (the MST
+%% event history backing anti-entropy). The primary history bound is
+%% peer-confirmed compaction — the same mechanism durable databases use — which
+%% truncates only what every fresh peer already holds and so never strands a
+%% lagging peer. Enabling retention truncates history older than this window
+%% locally REGARDLESS of peer confirmation: a peer lagging past the window must
+%% then recover via catalogue re-bootstrap, and summary cells it re-installs can
+%% only be fully reconciled from history still inside the window. Enable only
+%% when sustained overload demonstrably outruns peer-confirmed compaction.
+%% `0` (default) disables the age bound. `registry`-only: durable databases are
+%% never retention-bounded.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.registry.retention.max_age_ms", "bondy_db.databases", [
+  {datatype, integer},
+  {default, 0}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc OVERLOAD BACKSTOP (off by default): event-count bound, per shard, for
+%% the ephemeral `registry` database's op-log history. When a shard's live
+%% history exceeds this many events the whole applied history is truncated at
+%% the next GC tick (default 1s), independent of
+%% `db.registry.retention.max_age_ms` — keeps a write burst from outrunning the
+%% age window. Same trade as the age knob: truncation past peer confirmation
+%% forces lagging peers through catalogue re-bootstrap. `0` (default) disables
+%% the size bound; both knobs `0` = retention fully disabled (peer-confirmed
+%% compaction alone bounds history).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.registry.retention.max_events", "bondy_db.databases", [
+  {datatype, integer},
+  {default, 0}
+]}.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc Partition strategy for the bondy_db `main` durable database: how a
@@ -328,7 +365,11 @@
         },
         registry => #{
             oplog => #{
-                shard_count => Get("db.registry.shard_count")
+                shard_count => Get("db.registry.shard_count"),
+                retention => #{
+                    max_age_ms => Get("db.registry.retention.max_age_ms"),
+                    max_events => Get("db.registry.retention.max_events")
+                }
             }
         }
     }

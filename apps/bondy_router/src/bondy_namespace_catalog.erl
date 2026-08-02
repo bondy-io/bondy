@@ -434,13 +434,21 @@ registry_db_spec() ->
         topology => bondy_db_topology_memory,
         durability => ephemeral,
         shard_count => bondy_db_config:oplog_shard_count(registry),
-        %% The four ephemeral knobs, applied per-table at open time.
+        %% The ephemeral knobs, applied per-table at open time.
         table_opts => #{
             projection_backend => ets,
             oplog_instance_opts => #{
                 backend => ets,
                 wal_backend => mem,
-                durability => ephemeral
+                durability => ephemeral,
+                %% Retention-bounded MST history (`db.registry.retention.*`,
+                %% defaults 30s / 50K events per shard). The registry's
+                %% event history is pure RAM (memory topology) and the
+                %% all-peer-confirmed compaction frontier cannot keep pace
+                %% under sustained subscribe/register load, so each shard
+                %% bounds its own history locally; a peer that misses
+                %% truncated history recovers via catalogue bootstrap.
+                mst_retention => bondy_db_config:oplog_mst_retention(registry)
             },
             fused => true
         }

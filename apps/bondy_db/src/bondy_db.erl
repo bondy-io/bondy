@@ -473,6 +473,14 @@ open_table_provision(
     %% for behaviour yet (the durable pipeline is untouched).
     Fused = maps:get(fused, Merged, false),
     ok = assert_fused_requires_ephemeral(Fused, Backend),
+    %% Retention-bounded MST history (`mst_retention` under
+    %% `oplog_instance_opts`) is fused-only — and fused is ephemeral-only
+    %% (asserted above) — so a durable table can never be retention-bounded.
+    %% The instance re-validates at start; asserting here too makes the
+    %% failure a crisp open_table error rather than a child-start crash.
+    ok = assert_mst_retention_requires_fused(
+        maps:get(mst_retention, OplogOpts0, undefined), Fused
+    ),
     OplogOpts1 = OplogOpts0#{fused => Fused},
     %% Opt-in change-notification (`publish => true`): wire every shard's
     %% applier to publish each verified apply (local OR AE-replicated) to the
@@ -2407,6 +2415,20 @@ assert_fused_requires_ephemeral(true, ets) ->
     ok;
 assert_fused_requires_ephemeral(true, Backend) ->
     error({fused_requires_ephemeral, Backend}).
+
+%% @private
+%% Retention-bounded MST history is sound only where the projection holds
+%% all applied state and a restart wipes everything anyway — the fused
+%% (⇒ ephemeral) shape. A durable table's history is protected by
+%% peer-confirmed compaction and must never be bounded by local policy.
+-spec assert_mst_retention_requires_fused(map() | undefined, boolean()) -> ok.
+
+assert_mst_retention_requires_fused(undefined, _Fused) ->
+    ok;
+assert_mst_retention_requires_fused(#{}, true) ->
+    ok;
+assert_mst_retention_requires_fused(Policy, false) ->
+    error({mst_retention_requires_fused, Policy}).
 
 %% @private
 %% Provision the per-shard read cache. A topology that wants its

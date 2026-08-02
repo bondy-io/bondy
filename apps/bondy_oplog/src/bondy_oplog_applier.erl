@@ -419,6 +419,7 @@ instances are unaffected.
 -export([sweep_stable_cells/2]).
 -export([sweep_stable_cells/3]).
 -export([install_catalogue_batch/2]).
+-export([install_catalogue_cells/3]).
 -export([cell_context/3]).
 %% State-free drain leaves reused verbatim by the ephemeral fused-writer
 %% mode in `bondy_oplog_instance` (fused-writer rollout, Steps 3-4). Exposed
@@ -1008,6 +1009,24 @@ install_catalogue_batch(ApplierPid, {replace, Cells}) when
     gen_server:call(
         ApplierPid, {install_catalogue_batch, Cells}, infinity
     ).
+
+-doc """
+The catalogue-batch install body, shared with the FUSED instance (which
+has no separate applier process and runs the install in its own
+gen_server, passing its `#fused_drain{}` `cell_apply_source` as `Source`).
+Applier-state-free by construction: everything the install needs rides in
+`Source`'s per-table ctxs. Same semantics as the applier's own
+`{install_catalogue_batch, _}` handler — replace-mode, bucket-demuxed,
+per-cell HLC-guarded via the projection adapter's `head/3` fast path.
+""".
+-spec install_catalogue_cells(
+    InstanceId :: instance_id(),
+    Source :: term(),
+    Cells :: [bondy_oplog_transport:cell()]
+) -> {ok, map()}.
+
+install_catalogue_cells(InstanceId, Source, Cells) when is_list(Cells) ->
+    do_install_catalogue_batch(InstanceId, Source, Cells).
 
 %% =============================================================================
 %% gen_server CALLBACKS

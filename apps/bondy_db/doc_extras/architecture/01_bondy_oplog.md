@@ -472,7 +472,10 @@ Two properties make it safe to run always-on:
 
 The defining property of `bondy_oplog` is that the event log does not
 grow without bound. Once peers confirm they have an event, the
-`bondy_oplog_gc_scheduler` (1 s default tick) calls
+`bondy_oplog_gc_scheduler` (1 s default tick, firing the
+least-recently-fired instances first so its `gc_max_concurrency` cap
+round-robins across ALL instances rather than starving everything
+behind the fastest few) calls
 `bondy_oplog_compaction:compact/1` for each instance, which:
 
 1. computes a **stability frontier** from per-peer root hashes
@@ -492,7 +495,9 @@ grow without bound. Once peers confirm they have an event, the
 3. atomically truncates the MST via `bondy_mst:truncate/2` — a
    **structural prefix-truncate** that walks only the left spine,
    rewrites O(log N) pages, and leaves a root byte-identical to the
-   equivalent per-key deletes — and advances the watermark.
+   equivalent per-key deletes — then (ETS backend) sweeps the
+   now-unreachable dropped subtrees' pages via `bondy_mst:gc/1`
+   (truncate only unlinks them), and advances the watermark.
 
 ```mermaid
 flowchart LR
@@ -503,12 +508,13 @@ flowchart LR
     INTERP["CrdtMod:interpret_cog<br/>(bare single-CRDT only)"]
     CKPT[compaction_checkpoint:put]
     TRUNC["bondy_mst:truncate/2<br/>(structural O(log N) prefix drop)"]
+    GC["bondy_mst:gc/1<br/>(sweep unlinked pages · ETS backend)"]
     WM[watermark advance]
 
     PEERS --> FRONT --> MODE
     MODE -->|yes| FAST --> TRUNC
     MODE -->|no| INTERP --> CKPT --> TRUNC
-    TRUNC --> WM
+    TRUNC --> GC --> WM
 ```
 
 At full quiescence the live MST is empty; new replicas bootstrap from

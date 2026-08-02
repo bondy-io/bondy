@@ -117,7 +117,13 @@ other_failures_do_not_flag() ->
 %% =============================================================================
 
 request(_Peer, _Instance, get_frontier, _Opts) ->
-    {ok, #{}};
+    %% A VV strictly ahead of the (empty) local instance's. Load-bearing
+    %% for `unavailable_flags_and_rebootstraps/0`: `peer_pages_unavailable`
+    %% is terminal (→ rebootstrap) only under a GENUINE applied-frontier
+    %% deficit — with no deficit the session ends benign (the unpullable
+    %% pages cover only already-applied events; see
+    %% `bondy_oplog_sync_session:chase_refreshed_root/7`).
+    {ok, #{<<"rb_test_peer_origin">> => 1}};
 request(_Peer, _Instance, get_root, _Opts) ->
     case mode() of
         unavailable ->

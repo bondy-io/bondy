@@ -1154,6 +1154,33 @@ maybe_flag_rebootstrap(
         peer => Peer
     }),
     ok;
+maybe_flag_rebootstrap(
+    InstanceId, Peer, {sync_failed, {frontier_gap, Origins}}
+) ->
+    %% A retention-bounded instance completed a full round yet is still
+    %% behind the peer's applied frontier: the missing events were
+    %% retention-truncated at the peer and can never arrive by page-sync.
+    %% Same remedy as `peer_pages_unavailable` — a catalogue re-bootstrap
+    %% supplies both the data (projection stream) and the frontier
+    %% (finalize adoption). This is ALSO the organic join-time trigger: a
+    %% fresh replica's first sync against a truncating cluster lands here.
+    _ = ensure_table(?REBOOTSTRAP_TAB),
+    ets:insert(?REBOOTSTRAP_TAB, {InstanceId, Peer}),
+    telemetry:execute(
+        [bondy_oplog, sync_scheduler, rebootstrap_scheduled],
+        #{count => 1},
+        #{instance_id => InstanceId, peer => Peer, reason => frontier_gap}
+    ),
+    ?LOG_INFO(#{
+        description =>
+            "Peer's applied frontier is ahead of ours after a complete "
+            "sync round (its retention policy truncated history we never "
+            "received); scheduling a catalogue re-bootstrap.",
+        instance => InstanceId,
+        peer => Peer,
+        origins_behind => Origins
+    }),
+    ok;
 maybe_flag_rebootstrap(_InstanceId, _Peer, _Reason) ->
     ok.
 

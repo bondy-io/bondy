@@ -42,6 +42,7 @@ surface to configure them through, rather than reaching into the raw
 -export([oplog_shard_count/1]).
 -export([oplog_partition_strategy/1]).
 -export([oplog_realm_prefix_depth/1]).
+-export([oplog_mst_retention/1]).
 -export([oplog_on_topology_mismatch/1]).
 -export([will_set/2]).
 -export([on_set/2]).
@@ -117,6 +118,33 @@ configured topology (default `warn`). `main`-only; see
 
 oplog_on_topology_mismatch(DbName) ->
     get([databases, DbName, oplog, on_topology_mismatch], warn).
+
+-doc """
+MST-history retention policy for `DbName`'s per-shard op-log instances
+(`db.<name>.retention.max_age_ms` / `.max_events`), or `undefined` when
+both knobs are `0` — the DEFAULT: peer-confirmed compaction is the
+primary history bound for ephemeral instances exactly as for durable
+ones, and it never truncates an event a live peer still needs, which is
+what keeps a live re-bootstrap's `replace`-mode install + rederive a
+complete remedy. Retention is an explicit opt-in OVERLOAD BACKSTOP
+(`registry`-only, fused-only): it truncates by local age/size when the
+confirmed frontier yields nothing, at the cost of that soundness
+invariant — a peer lagging past the window must recover via catalogue
+re-bootstrap, and cells clobbered outside the retained window cannot be
+restored by rederive. Durable databases are never retention-bounded.
+""".
+-spec oplog_mst_retention(DbName :: db_name()) ->
+    #{max_age_ms := non_neg_integer(), max_events := non_neg_integer()}
+    | undefined.
+
+oplog_mst_retention(DbName) ->
+    Policy = get([databases, DbName, oplog, retention], #{}),
+    MaxAge = maps:get(max_age_ms, Policy, 0),
+    MaxEvents = maps:get(max_events, Policy, 0),
+    case {MaxAge, MaxEvents} of
+        {0, 0} -> undefined;
+        _ -> #{max_age_ms => MaxAge, max_events => MaxEvents}
+    end.
 
 -spec will_set(Key :: key_value:key(), Value :: any()) ->
     ok | {ok, NewValue :: any()} | {error, Reason :: any()}.

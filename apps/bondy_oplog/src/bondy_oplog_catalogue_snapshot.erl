@@ -179,18 +179,13 @@ next(InstanceId, Cursor) when
 
 %% @private
 init_catalogue(InstanceId, Bucket) ->
-    case bondy_oplog_registry:applier_pid(InstanceId) of
+    case resolve_cell_apply_target(InstanceId) of
         undefined ->
+            %% Not running, or a catalogue instance with no projection
+            %% wiring — nothing to snapshot.
             {ok, no_snapshot};
-        ApplierPid ->
-            case bondy_oplog_applier:cell_apply_target(ApplierPid) of
-                undefined ->
-                    %% Catalogue instance with no projection wiring —
-                    %% nothing to snapshot.
-                    {ok, no_snapshot};
-                {ok, {NS, Index, Shard}} ->
-                    init_with_target(InstanceId, NS, Index, Shard, Bucket)
-            end
+        {ok, {NS, Index, Shard}} ->
+            init_with_target(InstanceId, NS, Index, Shard, Bucket)
     end.
 
 %% @private
@@ -200,16 +195,40 @@ init_catalogue(InstanceId, Bucket) ->
 %% streams all of its tables; a single-table instance with no per-table bucket
 %% falls back to the legacy single-bucket walk.
 init_catalogue_multi(InstanceId) ->
-    case bondy_oplog_registry:applier_pid(InstanceId) of
+    case resolve_cell_apply_target(InstanceId) of
         undefined ->
             {ok, no_snapshot};
+        {ok, {NS, Index, Shard}} ->
+            Targets = build_targets(InstanceId, NS),
+            init_with_targets(InstanceId, NS, Index, Shard, Targets)
+    end.
+
+%% @private
+%% The instance's founding projection target, resolved through whichever
+%% process owns it: the applier for a non-fused instance, the fused
+%% instance's own gen_server otherwise (`bondy_oplog_instance:
+%% cell_apply_target/1` — a fused instance has no applier pid, which
+%% previously made every fused instance answer `no_snapshot` and left
+%% retention-bounded registry shards with no bootstrap producer at all).
+resolve_cell_apply_target(InstanceId) ->
+    case bondy_oplog_registry:applier_pid(InstanceId) of
+        undefined ->
+            case
+                bondy_oplog_registry:fused(InstanceId) andalso
+                    bondy_oplog_instance:whereis(InstanceId)
+            of
+                Pid when is_pid(Pid) ->
+                    case bondy_oplog_instance:cell_apply_target(Pid) of
+                        {ok, {_, _, _}} = Ok -> Ok;
+                        _ -> undefined
+                    end;
+                _ ->
+                    undefined
+            end;
         ApplierPid ->
             case bondy_oplog_applier:cell_apply_target(ApplierPid) of
-                undefined ->
-                    {ok, no_snapshot};
-                {ok, {NS, Index, Shard}} ->
-                    Targets = build_targets(InstanceId, NS),
-                    init_with_targets(InstanceId, NS, Index, Shard, Targets)
+                {ok, {_, _, _}} = Ok -> Ok;
+                _ -> undefined
             end
     end.
 
