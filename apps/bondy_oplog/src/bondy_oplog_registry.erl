@@ -145,6 +145,18 @@ table's lifecycle tied to a supervisor child.
     %% tolerates by treating it as "no cap" until visible).
     install_in_flight :: atomics:atomics_ref() | undefined,
     max_install_in_flight :: pos_integer() | undefined,
+    %% Remote-delivery generation (slot 1): bumped by the instance at the
+    %% END of every `integrate_peer_root` handler — the point at which
+    %% peer-merged events count as locally DELIVERED. The applier caches
+    %% this ref and compares it against the generation it last replayed
+    %% to, so its prepare fence (`{cell_context, _, _}`) detects "events
+    %% delivered but not yet folded into my projection" with a single
+    %% atomic read — see the I1 invariant note at that handler. Published
+    %% once at instance init; `undefined` between the entry's creation
+    %% and the instance's `init/1` finishing (nothing can have been
+    %% integrated before then, so the applier safely treats it as
+    %% generation 0).
+    remote_gen :: atomics:atomics_ref() | undefined,
     %% Per-instance bootstrap lifecycle handle
     %% (`bondy_oplog_bootstrap_lifecycle`). Created at instance init —
     %% see `bondy_oplog_bootstrap_lifecycle:open/2` — and published
@@ -241,6 +253,7 @@ table's lifecycle tied to a supervisor child.
 -export([fused/1]).
 -export([mst_retention/1]).
 -export([install_in_flight/1]).
+-export([remote_gen/1]).
 -export([max_install_in_flight/1]).
 -export([lifecycle/1]).
 -export([instance_id_by_sup_pid/1]).
@@ -261,6 +274,7 @@ table's lifecycle tied to a supervisor child.
 -export([merge_frontier/2]).
 -export([set_install_in_flight/3]).
 -export([set_lifecycle/2]).
+-export([set_remote_gen/2]).
 
 %% gen_server callbacks
 -export([init/1]).
@@ -459,6 +473,17 @@ the ref; both processes update it via `atomics:add_get/3` and
 
 install_in_flight(InstanceId) ->
     field(InstanceId, #entry.install_in_flight).
+
+?DOC("""
+Returns the remote-delivery generation counter ref for `InstanceId`, or
+`undefined` when the entry has not yet been published (nothing can have
+been integrated before the instance's `init/1`, so callers treat the
+absence as generation 0). See the `remote_gen` field note.
+""").
+-spec remote_gen(instance_id()) -> atomics:atomics_ref() | undefined.
+
+remote_gen(InstanceId) ->
+    field(InstanceId, #entry.remote_gen).
 
 ?DOC("""
 Returns the configured cap on the applier's in-flight
@@ -742,6 +767,18 @@ gate the WAL drain.
 
 set_lifecycle(InstanceId, Handle) when is_binary(InstanceId) ->
     _ = update_field(InstanceId, #entry.lifecycle, Handle),
+    ok.
+
+?DOC("""
+Publishes the per-instance remote-delivery generation counter (see the
+`remote_gen` field note). Set once by the instance's `init/1`; bumped by
+the instance's `integrate_peer_root` handler; read by the applier's
+prepare fence.
+""").
+-spec set_remote_gen(instance_id(), atomics:atomics_ref()) -> ok.
+
+set_remote_gen(InstanceId, Ref) when is_binary(InstanceId) ->
+    _ = update_field(InstanceId, #entry.remote_gen, Ref),
     ok.
 
 %% =============================================================================

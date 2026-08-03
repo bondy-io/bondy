@@ -101,6 +101,15 @@ as the sole convergence kernel.
   confirmed all-peer frontier — see
   `bondy_oplog_peer_state:confirmed_peer_states/2`.
 
+  The license this contract extends is exactly as strong as invariants
+  I1 (prepare-after-deliver, enforced by the applier's prepare fence —
+  `bondy_oplog_applier:ensure_remote_caught_up/1`, where the full
+  theorem is stated) and I2 (containment stability, what the confirmed
+  frontier proves). Together they guarantee every event generated after
+  the frontier's certification carries a context dominating every dot
+  at or below it — which is what makes a `discard` (and any future
+  `{keep, Reduced}` reduction) invisible to all late arrivals.
+
 - `value_equals_state() -> boolean()` declares that `to_value/1` is the
   identity (the projection value *is* the state) — a storage optimisation
   for value-carrying CRDTs (e.g. g-sets). Default `false`.

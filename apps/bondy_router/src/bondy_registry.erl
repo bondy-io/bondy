@@ -183,7 +183,7 @@ According to the WAMP specification, in the case of a subscription that was
 already added before by the same _Subscriber_, the _Broker_ should not fail
 and answer with a `SUBSCRIBED` message, containing the existing
 `Subscription|id`. So in this case this function returns
-`{ok, entry(), boolean()}`.
+`{ok, {entry(), boolean()}}`.
 
 In case of a registration, as a default, only a single Callee may
 register a procedure for an URI. However, when shared registrations are
@@ -209,7 +209,7 @@ return an error tuple.
     Opts :: map(),
     Ref :: bondy_ref:t()
 ) ->
-    {ok, Entry :: entry(), IsFirstEntry :: boolean()}
+    {ok, {Entry :: entry(), IsFirstEntry :: boolean()}}
     | {error, {already_exists, entry()} | any()}.
 
 add(Type, RealmUri, Uri, Opts, Ref) ->

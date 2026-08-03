@@ -416,7 +416,7 @@ handle_inbound_messages(
     >>,
     stop({protocol_violation, Reason}, Acc, St);
 handle_inbound_messages(
-    [#hello{realm_uri = Uri} = M | _],
+    [#hello{} = M | _],
     #wamp_state{state_name = closed} = St0,
     _
 ) ->
@@ -424,31 +424,21 @@ handle_inbound_messages(
     %% This will return either reply with
     %% wamp_welcome() | wamp_challenge() | wamp_abort()
     ok = notify(M, St0),
-    %% AV-1: throttle the pre-auth handshake per source IP (no-op unless enabled).
-    case throttle(handshake, St0) of
-        throttled ->
-            stop({rate_limited, handshake}, St0);
-        ok ->
-            T0 = erlang:monotonic_time(microsecond),
-            Ctxt0 = St0#wamp_state.context,
-            Ctxt1 = bondy_context:set_realm_uri(Ctxt0, Uri),
-            St1 = update_context(Ctxt1, St0),
-            St = set_next_state(establishing, St1),
-
-            %% Lookup or create realm
-            Result =
-                case bondy_realm:get(Uri) of
-                    {ok, Realm} ->
-                        ok = logger:update_process_metadata(#{realm => Uri}),
-                        maybe_open_session(
-                            maybe_auth_challenge(M#hello.details, Realm, St)
-                        );
-                    {error, not_found} ->
-                        stop({authentication_failed, {no_such_realm, Uri}}, St)
-                end,
-            DurationUs = erlang:monotonic_time(microsecond) - T0,
-            ok = bondy_telemetry:wamp_hello(DurationUs),
-            Result
+    %% Load admission gate first (one atomics read): when the node's run
+    %% queues are deep, a session open the node accepts will spend
+    %% seconds of wall clock in scheduling delay and likely time out on
+    %% the client after holding a socket, session state and auth work
+    %% the whole while. Refusing HERE costs a parse and an encoded
+    %% ABORT, and the reason URI is retryable (wamp.error.unavailable)
+    %% so well-behaved clients back off and try again — admitted
+    %% sessions keep their establishment latency instead of sharing the
+    %% overload with everyone.
+    case admit_hello() of
+        false ->
+            ok = bondy_prometheus:report_dropped(admission, hello),
+            stop(overload, St0);
+        true ->
+            handle_hello(M, St0)
     end;
 handle_inbound_messages([#hello{} = M | _], #wamp_state{} = St, _) ->
     %% Client does not have a session but we already received a HELLO message
@@ -854,8 +844,53 @@ auth_challenge(Method, St0) ->
     end.
 
 %% =============================================================================
-%% PRIVATE: RATE LIMITING (AV-1)
+%% PRIVATE: ADMISSION & RATE LIMITING (AV-1)
 %% =============================================================================
+
+%% @private
+%% The load admission gate for new sessions: refuses when the node is in
+%% the busy state (deep run queues — see `bondy_regulator_load`) and the
+%% gate is enabled (`load_regulation.hello.enabled`, default on). Both
+%% reads are lock-free; fails open.
+admit_hello() ->
+    case bondy_config:get([load_regulation, hello, enabled], true) of
+        true ->
+            not bondy_regulator_load:busy();
+        false ->
+            true
+    end.
+
+%% @private
+%% The admitted-HELLO path: per-source-IP handshake throttle, then realm
+%% lookup and the auth challenge / session open.
+handle_hello(#hello{realm_uri = Uri} = M, St0) ->
+    %% AV-1: throttle the pre-auth handshake per source IP (no-op unless
+    %% enabled).
+    case throttle(handshake, St0) of
+        throttled ->
+            stop({rate_limited, handshake}, St0);
+        ok ->
+            T0 = erlang:monotonic_time(microsecond),
+            Ctxt0 = St0#wamp_state.context,
+            Ctxt1 = bondy_context:set_realm_uri(Ctxt0, Uri),
+            St1 = update_context(Ctxt1, St0),
+            St = set_next_state(establishing, St1),
+
+            %% Lookup or create realm
+            Result =
+                case bondy_realm:get(Uri) of
+                    {ok, Realm} ->
+                        ok = logger:update_process_metadata(#{realm => Uri}),
+                        maybe_open_session(
+                            maybe_auth_challenge(M#hello.details, Realm, St)
+                        );
+                    {error, not_found} ->
+                        stop({authentication_failed, {no_such_realm, Uri}}, St)
+                end,
+            DurationUs = erlang:monotonic_time(microsecond) - T0,
+            ok = bondy_telemetry:wamp_hello(DurationUs),
+            Result
+    end.
 
 %% @private
 %% Per-source-IP inbound throttle for the handshake / auth classes. Delegates to
@@ -963,6 +998,19 @@ abort_message(connections_not_allowed) ->
             <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure taken by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>
     },
     bondy_wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
+abort_message(overload) ->
+    %% The load admission gate refused this session: the node's run
+    %% queues are too deep to establish a session within a useful time.
+    %% An availability condition, not a client error — the retryable URI
+    %% tells clients to back off and try again (possibly reaching
+    %% another node through their load balancer).
+    Details = #{
+        message => <<
+            "The router is overloaded and cannot accept new sessions "
+            "at the moment. Please retry."
+        >>
+    },
+    bondy_wamp_message:abort(Details, ?WAMP_UNAVAILABLE);
 abort_message({rate_limited, _Class}) ->
     %% AV-1: inbound throttle tripped. A pre-auth signal, so the reason is not a
     %% user-enumeration oracle; keep it generic and non-specific about the limit.

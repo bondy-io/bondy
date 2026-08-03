@@ -26,6 +26,16 @@ init([]) ->
         period => 10
     },
     ChildSpecs = [
+        %% Node load monitor (run-queue sampler behind busy/0). No
+        %% dependency relationship with the rate limiting pair below.
+        #{
+            id => bondy_regulator_load,
+            start => {bondy_regulator_load, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [bondy_regulator_load]
+        },
         #{
             id => bondy_regulator_rate_limit,
             start => {bondy_regulator_rate_limit, start_link, []},

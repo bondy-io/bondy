@@ -17,7 +17,8 @@
 all() ->
     [
         mg_comparator,
-        composite_comparator
+        composite_comparator,
+        key_pattern_sessionless
     ].
 
 init_per_suite(Config) ->
@@ -145,4 +146,28 @@ composite_comparator(_) ->
          || E <- lists:sort(Fun, Entries)
         ]
     ),
+    ok.
+
+%% A ref without a session id (internal subscribers/callbacks) stores its
+%% entries under `session_id = undefined', so `undefined' must be a valid
+%% exact-match value for key_pattern/3 — it used to crash the guard.
+key_pattern_sessionless(_) ->
+    RealmUri = <<"com.example.test.registry_entry">>,
+    Ref = bondy_ref:new(internal, self()),
+    ?assertEqual(undefined, bondy_ref:session_id(Ref)),
+
+    Entry = bondy_registry_entry:new(
+        subscription, RealmUri, Ref, <<"com.example.topic">>, #{}
+    ),
+    Key = bondy_registry_entry:key(Entry),
+    ?assertEqual(undefined, bondy_registry_entry:session_id(Key)),
+
+    Pattern = bondy_registry_entry:key_pattern(RealmUri, undefined, '_'),
+    ?assertEqual(undefined, bondy_registry_entry:session_id(Pattern)),
+    ?assertEqual(RealmUri, bondy_registry_entry:realm_uri(Pattern)),
+
+    %% Wildcard and exact-binary forms still accepted.
+    _ = bondy_registry_entry:key_pattern(RealmUri, '_', '_'),
+    SessionId = bondy_session_id:new(),
+    _ = bondy_registry_entry:key_pattern(RealmUri, SessionId, '_'),
     ok.

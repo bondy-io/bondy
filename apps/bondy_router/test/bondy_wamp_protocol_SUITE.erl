@@ -21,7 +21,9 @@ all() ->
         handle_inbound,
         throttle_disabled_by_default,
         throttle_when_enabled,
-        throttle_message_class
+        throttle_message_class,
+        hello_admission_when_busy,
+        hello_admission_disabled
     ].
 
 init_per_suite(Config) ->
@@ -269,6 +271,62 @@ throttle_when_enabled(_Config) ->
         ?assertEqual(ok, bondy_wamp_protocol:throttle(handshake, State))
     after
         ok = bondy_config:set([security, rate_limit], undefined)
+    end.
+
+%% A busy node refuses a new HELLO with a retryable
+%% wamp.error.unavailable ABORT before doing any realm or auth work.
+hello_admission_when_busy(_Config) ->
+    Ref = persistent_term:get({bondy_regulator_load, status}),
+    %% Suspend the sampler so the forced busy state cannot be reverted
+    %% by a tick mid-test (the test node is idle).
+    ok = sys:suspend(bondy_regulator_load),
+    ok = atomics:put(Ref, 1, 1),
+    try
+        ?assert(bondy_regulator_load:busy()),
+
+        {ok, St} = bondy_wamp_protocol:init(
+            {raw, binary, erl}, {{10, 8, 8, 8}, 5000}, #{}
+        ),
+        Hello = bondy_wamp_message:hello(
+            <<"com.example.test.wamp_protocol">>,
+            #{roles => #{caller => #{}}}
+        ),
+        Data = bondy_wamp_encoding:encode(Hello, erl),
+
+        ?assertMatch(
+            {stop, ?WAMP_UNAVAILABLE, [_Abort], _},
+            bondy_wamp_protocol:handle_inbound(Data, St)
+        )
+    after
+        ok = atomics:put(Ref, 1, 0),
+        ok = sys:resume(bondy_regulator_load)
+    end.
+
+%% With the gate disabled a busy node still processes the HELLO (here it
+%% fails later on the unknown realm — proving it got past admission).
+hello_admission_disabled(_Config) ->
+    Ref = persistent_term:get({bondy_regulator_load, status}),
+    ok = sys:suspend(bondy_regulator_load),
+    ok = atomics:put(Ref, 1, 1),
+    ok = bondy_config:set([load_regulation, hello, enabled], false),
+    try
+        {ok, St} = bondy_wamp_protocol:init(
+            {raw, binary, erl}, {{10, 8, 8, 9}, 5000}, #{}
+        ),
+        Hello = bondy_wamp_message:hello(
+            <<"com.example.test.wamp_protocol.does_not_exist">>,
+            #{roles => #{caller => #{}}}
+        ),
+        Data = bondy_wamp_encoding:encode(Hello, erl),
+
+        Result = bondy_wamp_protocol:handle_inbound(Data, St),
+        ?assertMatch({stop, _, _, _}, Result),
+        {stop, Uri, _, _} = Result,
+        ?assertNotEqual(?WAMP_UNAVAILABLE, Uri)
+    after
+        ok = bondy_config:set([load_regulation, hello, enabled], true),
+        ok = atomics:put(Ref, 1, 0),
+        ok = sys:resume(bondy_regulator_load)
     end.
 
 throttle_message_class(_Config) ->

@@ -306,6 +306,11 @@ without protocol changes.
     %% below that.
     install_in_flight :: atomics:atomics_ref() | undefined,
     max_install_in_flight :: pos_integer(),
+    %% Remote-delivery generation shared with the applier's prepare
+    %% fence (I1). Bumped at the END of every `integrate_peer_root`
+    %% handler (the local delivery point of peer-merged events);
+    %% published via `bondy_oplog_registry:set_remote_gen/2` at init.
+    remote_gen_ref :: atomics:atomics_ref() | undefined,
     %% A4 — instance-side install coalescing. The
     %% `install_local_batch` cast handler drains up to this many *queued*
     %% install casts (including the one being handled) and merges their
@@ -2371,6 +2376,7 @@ init({InstanceId, Opts}) ->
         max_local_installed_seq = MaxLocalInstalledSeq,
         install_in_flight = atomics:new(1, [{signed, false}]),
         max_install_in_flight = maps:get(max_install_in_flight, Opts, 64),
+        remote_gen_ref = atomics:new(1, [{signed, false}]),
         install_coalesce_max = validate_coalesce_max(
             maps:get(install_coalesce_max, Opts, 16)
         ),
@@ -2439,6 +2445,14 @@ init({InstanceId, Opts}) ->
         InstanceId,
         State#state.install_in_flight,
         State#state.max_install_in_flight
+    ),
+    %% Publish the remote-delivery generation counter backing the
+    %% applier's prepare fence (I1) — see the `integrate_peer_root`
+    %% handler for the bump site and the applier's `{cell_context, _, _}`
+    %% handler for the invariant it enforces. The instance owns the
+    %% atomic; the applier shares the ref.
+    ok = bondy_oplog_registry:set_remote_gen(
+        InstanceId, State#state.remote_gen_ref
     ),
     %% Publish the bootstrap lifecycle handle. The applier reads this
     %% in its own `init/1` and gates the WAL drain on it. The handle is
@@ -3146,6 +3160,27 @@ do_handle_call(
                 %% applier's `cell_apply_ctx` is `undefined` and the cast
                 %% falls through). Mark the remote events pending so the
                 %% next catalogue compaction folds them before truncating.
+                %%
+                %% I1 (prepare-after-deliver) — the DELIVERY POINT. Bump
+                %% the shared remote-delivery generation strictly AFTER
+                %% the MST root advance above (program order within this
+                %% handler): the applier's prepare fence
+                %% (`{cell_context, _, _}`) compares this generation
+                %% against the one it last replayed to, so a context read
+                %% ordered after this handler's completion either finds
+                %% the generation advanced (and replays before serving)
+                %% or the cast below already folded the events. A context
+                %% read that races AHEAD of this bump is, by definition,
+                %% prepared before these events were delivered — I1 holds
+                %% vacuously for it. This handler is the ONLY path by
+                %% which remote-origin events enter a non-fused
+                %% instance's MST (catalogue bootstrap installs cells
+                %% pre-live, before any context is served; the compaction
+                %% catch-up re-folds events already counted here), so
+                %% this single bump site is exhaustive.
+                _ =
+                    State1#state.remote_gen_ref =/= undefined andalso
+                        atomics:add(State1#state.remote_gen_ref, 1, 1),
                 case
                     bondy_oplog_registry:applier_pid(
                         State1#state.instance_id
@@ -3245,7 +3280,12 @@ do_handle_call(
 ) ->
     %% Mirrors `bondy_oplog_applier`'s `{cell_context, Bucket, Key}` handler
     %% exactly, reading via THIS instance's own in-process state (a fused
-    %% instance has no separate applier to delegate to). See that clause's
+    %% instance has no separate applier to delegate to). I1
+    %% (prepare-after-deliver — see `bondy_oplog_applier:
+    %% ensure_remote_caught_up/1` for the invariant and theorem) holds
+    %% here WITHOUT a fence: `integrate_peer_root` folds peer events
+    %% into the projection inline in this same process, so any context
+    %% read serialised after it necessarily sees them. See that clause's
     %% doc for the read/decode rationale and the single-applier-scope /
     %% read-then-append race note — identical here, single-instance-scope.
     case resolve_cell_ctx(Source, Bucket, Founding) of

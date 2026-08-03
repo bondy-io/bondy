@@ -1636,15 +1636,17 @@ find_invocations(CallId, Fun, Ctxt) when is_function(Fun, 2) ->
         '_'
     ),
 
-    case bondy_rpc_promise:find(Key) of
-        {ok, Promise} ->
-            {ok, Ctxt1} = Fun(Promise, Ctxt),
-            %% We iterate until there are no more pending invocation for the
-            %% call_request_id == CallId
-            find_invocations(CallId, Fun, Ctxt1);
-        error ->
-            {ok, Ctxt}
-    end.
+    %% `Fun` READS the promises without consuming them (kill-mode CANCEL
+    %% leaves the promise for the callee's INTERRUPT ERROR to settle), so
+    %% the matches MUST be collected in one pass: a find-apply-refind
+    %% loop keeps returning the same promise and never terminates —
+    %% observed as an unbounded INTERRUPT flood at the callee, racing the
+    %% very ERROR that would have ended it.
+    lists:foldl(
+        fun(Promise, {ok, Ctxt1}) -> Fun(Promise, Ctxt1) end,
+        {ok, Ctxt},
+        bondy_rpc_promise:find_all(Key)
+    ).
 
 %% @private
 no_matching_promise(M) ->

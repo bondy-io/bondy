@@ -90,6 +90,7 @@ back to the origin `wamp_call()` and Caller
 -export([expiry/1]).
 -export([count_by_procedure/0]).
 -export([find/1]).
+-export([find_all/1]).
 -export([flush/2]).
 -export([flush/3]).
 -export([get/2]).
@@ -559,6 +560,22 @@ Reads the active promise that matches the key pattern.
 
 find(#bondy_rpc_promise_key{} = Key) ->
     do_find(Key, active).
+
+-doc """
+Reads ALL active promises matching the key pattern, in one pass.
+
+Use this — never repeated `find/1` calls — when iterating promises that
+the iteration does not consume: `find/1` on the same pattern returns the
+same promise again, so a read-only loop over it never terminates (the
+kill-mode CANCEL did exactly that, machine-gunning INTERRUPTs at the
+callee until the callee's ERROR settled the promise).
+""".
+-spec find_all(key()) -> [t()].
+
+find_all(#bondy_rpc_promise_key{} = Key) ->
+    Tab = ?TAB(Key#bondy_rpc_promise_key.realm_uri),
+    MS = match_spec(Key, active),
+    ets:select(Tab, MS).
 
 -doc """
 Slides the promise's expiry forward to `now + timeout`, capped by the

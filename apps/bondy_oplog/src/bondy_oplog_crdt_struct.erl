@@ -36,7 +36,8 @@ wrapper module is needed just to supply a schema.
     crdt_opts => #{
         count => {bondy_oplog_crdt_pn_counter, #{stabilize_zero => 0}},
         invoke => bondy_oplog_crdt_lww_register,
-        created_times => {bondy_oplog_crdt_two_p_set, #{force_reap => true}}
+        earliest => bondy_oplog_crdt_min_register,
+        latest => bondy_oplog_crdt_max_register
     }
 }
 ```

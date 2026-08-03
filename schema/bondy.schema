@@ -1430,6 +1430,62 @@ end}.
 ]}.
 
 %% -----------------------------------------------------------------------------
+%% @doc Enables the session admission gate: while the node is in the busy
+%% state (see the load_regulation.load_monitor.* settings) new HELLO
+%% requests are refused immediately with a retryable
+%% `wamp.error.unavailable` ABORT instead of being accepted into a session
+%% open that deep run queues would stretch past the client's timeout while
+%% holding a socket and session state. Sessions already established, and
+%% handshakes already past HELLO, are unaffected.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "load_regulation.hello.enabled",
+"bondy_router.load_regulation.hello.enabled", [
+  {default, on},
+  {datatype, flag}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The node enters the busy state when the sampled total run queue
+%% length reaches this factor times the number of online schedulers. The
+%% run queue is the number of runnable processes waiting for a scheduler,
+%% so a factor of N means roughly N processes ahead of any newly runnable
+%% one on every scheduler — a direct measure of scheduling delay.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "load_regulation.load_monitor.run_queue_high_watermark",
+"bondy_regulator.load_monitor_high_watermark", [
+  {default, 8},
+  {validators, ["pos_integer"]},
+  {datatype, integer}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The node returns to the normal state when the sampled total run
+%% queue length falls to this factor times the number of online
+%% schedulers. Must be below the high watermark; the gap is the
+%% hysteresis that prevents the state from flapping at the boundary.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "load_regulation.load_monitor.run_queue_low_watermark",
+"bondy_regulator.load_monitor_low_watermark", [
+  {default, 4},
+  {datatype, integer}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How often the load monitor samples the runtime's run queue
+%% length. The sample is cheap; the interval bounds how quickly the busy
+%% state reacts to a load change.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "load_regulation.load_monitor.sample_interval",
+"bondy_regulator.load_monitor_sample_interval_ms", [
+  {default, "100ms"},
+  {datatype, {duration, ms}}
+]}.
+
+%% -----------------------------------------------------------------------------
 %% @doc The capacity of the session manager process pool, i.e. the maximum
 %% number of active erlang processes handling session events (default = 32).
 %% @end

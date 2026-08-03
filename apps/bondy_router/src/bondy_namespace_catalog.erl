@@ -71,14 +71,18 @@ and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
 %% The registration RIB cell's `bondy_oplog_crdt_struct` schema, passed as
 %% `crdt_opts` (the struct has no schema of its own — see
 %% `bondy_oplog_crdt_struct`'s moduledoc). `count`'s `stabilize_zero => 0`
-%% and `created_times`'s `force_reap => true` are the RIB-specific policy:
-%% the local group's cell is reclaimable once it empties, and a departed
-%% node's `created_times` entries are unconditionally, permanently invalid
-%% (scoped to that node's process lifetime).
+%% is the RIB-specific policy: the local group's cell is reclaimable once
+%% it empties. `earliest`/`latest` are monotone ratchets over the group's
+%% entry-creation times — a scalar per field regardless of how many
+%% entries ever existed (the former `created_times` two_p_set grew one
+%% element per add and one tombstone per remove, forever), at the
+%% documented cost that removals never shrink them: they are lifetime
+%% watermarks of the group, which WAMP dealer semantics permit.
 -define(RIB_REGISTRATION_SCHEMA, #{
     count => {bondy_oplog_crdt_pn_counter, #{stabilize_zero => 0}},
     invoke => bondy_oplog_crdt_lww_register,
-    created_times => {bondy_oplog_crdt_two_p_set, #{force_reap => true}}
+    earliest => bondy_oplog_crdt_min_register,
+    latest => bondy_oplog_crdt_max_register
 }).
 
 -record(state, {

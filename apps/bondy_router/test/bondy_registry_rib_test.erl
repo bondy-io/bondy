@@ -41,11 +41,12 @@ write_path_test_() ->
 %% `bondy_db:read/3` on a RIB table returns the RAW `bondy_oplog_crdt_
 %% struct`/`bondy_oplog_crdt_pn_counter` projection — the generic CRDT
 %% toolkit modules are registered directly (no per-use-case wrapper), so
-%% `count`/`invoke` are already top-level (schema field names) but
-%% `created_times` is the raw two_p_set element list, not the derived
-%% `earliest`/`latest`. That derivation is `reshape_summary/2`'s job,
-%% exercised on its own in the `reshape_summary/0` test below —
-%% `regs/1`/`subs/1` here cover the write path via the raw shape.
+%% schema fields are already top-level: `count`, `invoke` and the
+%% `earliest`/`latest` min/max ratchet registers over the group's
+%% entry-creation times (removals never shrink them — they are lifetime
+%% watermarks, which is what bounds the cell to a scalar per field).
+%% `reshape_summary/2` only normalises shape for consumers, exercised on
+%% its own in the `reshape_summary/0` test below.
 %% The RIB hooks write async (`bondy_db:apply_async/4` — no
 %% read-your-writes barrier), so tests reading the cell right after a
 %% hook must flush the shard first.
@@ -58,39 +59,48 @@ regs(Tab) ->
     Key = cell_key(?EXACT_MATCH, ?URI),
 
     %% Two live local entries -> one cell, count 2, invoke carried,
-    %% created_times holds one element per live entry.
+    %% earliest/latest ratcheted to the min/max creation times.
     E1 = entry(registration, ?EXACT_MATCH, ?INVOKE_ROUND_ROBIN),
     timer:sleep(2),
     E2 = entry(registration, ?EXACT_MATCH, ?INVOKE_ROUND_ROBIN),
-    CK1 = bondy_registry_rib:created_key(
-        bondy_registry_entry:created(E1), bondy_registry_entry:id(E1)
-    ),
-    CK2 = bondy_registry_rib:created_key(
-        bondy_registry_entry:created(E2), bondy_registry_entry:id(E2)
-    ),
+    Created1 = bondy_registry_entry:created(E1),
+    Created2 = bondy_registry_entry:created(E2),
 
     ok = bondy_registry_rib:on_entry_added(self(), Tab, E1),
     ok = bondy_registry_rib:on_entry_added(self(), Tab, E2),
     ok = flush(Table, Key),
-    {ok, {#{invoke := Invoke0, count := Count0, created_times := Times0}, _}} =
+    {ok, {
+        #{
+            invoke := Invoke0,
+            count := Count0,
+            earliest := Earliest0,
+            latest := Latest0
+        },
+        _
+    }} =
         bondy_db:read(Table, ?REALM, Key),
     ?assertEqual(?INVOKE_ROUND_ROBIN, Invoke0),
     ?assertEqual(2, Count0),
-    ?assertEqual(lists:sort([CK1, CK2]), lists:sort(Times0)),
+    ?assertEqual(min(Created1, Created2), Earliest0),
+    ?assertEqual(max(Created1, Created2), Latest0),
 
-    %% Removing the latest entry shrinks the summary exactly.
+    %% Removing an entry shrinks the count but NOT the ratchets — they
+    %% are lifetime watermarks by design (the former two_p_set shrank
+    %% here, at the cost of one tombstone per removal, forever).
     ok = bondy_registry_rib:on_entry_removed(self(), Tab, E2),
     ok = flush(Table, Key),
-    {ok, {#{count := Count1, created_times := Times1}, _}} =
+    {ok, {#{count := Count1, earliest := Earliest1, latest := Latest1}, _}} =
         bondy_db:read(Table, ?REALM, Key),
     ?assertEqual(1, Count1),
-    ?assertEqual([CK1], Times1),
+    ?assertEqual(Earliest0, Earliest1),
+    ?assertEqual(Latest0, Latest1),
 
-    %% Last member gone -> no explicit clear, count settles to 0.
+    %% Last member gone -> no explicit clear, count settles to 0 while
+    %% the watermarks remain.
     ok = bondy_registry_rib:on_entry_removed(self(), Tab, E1),
     ok = flush(Table, Key),
     ?assertMatch(
-        {ok, {#{count := 0, created_times := []}, _}},
+        {ok, {#{count := 0, earliest := Earliest0, latest := Latest0}, _}},
         bondy_db:read(Table, ?REALM, Key)
     ),
 
@@ -131,13 +141,10 @@ subs(Tab) ->
     ok = flush(Table, Key),
     ?assertMatch({ok, {0, _}}, bondy_db:read(Table, ?REALM, Key)).
 
-%% Unit-tests the read-path reshape in isolation: registration derives
-%% `earliest`/`latest` from the raw `created_times` set (min/max of the
-%% decoded `Created` component); subscription wraps the bare counter.
+%% Unit-tests the read-path reshape in isolation: registration passes
+%% the ratchet registers through (normalising never-written fields to
+%% `undefined`); subscription wraps the bare counter.
 reshape_summary() ->
-    CK1 = bondy_registry_rib:created_key(100, <<"a">>),
-    CK2 = bondy_registry_rib:created_key(200, <<"b">>),
-    CK3 = bondy_registry_rib:created_key(150, <<"c">>),
     ?assertEqual(
         #{
             invoke => ?INVOKE_ROUND_ROBIN,
@@ -148,9 +155,12 @@ reshape_summary() ->
         bondy_registry_rib:reshape_summary(registration, #{
             count => 3,
             invoke => ?INVOKE_ROUND_ROBIN,
-            created_times => [CK2, CK1, CK3]
+            earliest => 100,
+            latest => 200
         })
     ),
+    %% A cell whose ratchets were never written (or a raw value where an
+    %% unwritten register is omitted) reshapes to `undefined` watermarks.
     ?assertEqual(
         #{
             invoke => ?INVOKE_SINGLE,
@@ -160,8 +170,7 @@ reshape_summary() ->
         },
         bondy_registry_rib:reshape_summary(registration, #{
             count => 0,
-            invoke => ?INVOKE_SINGLE,
-            created_times => []
+            invoke => ?INVOKE_SINGLE
         })
     ),
     ?assertEqual(

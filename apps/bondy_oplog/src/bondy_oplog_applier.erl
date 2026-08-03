@@ -284,6 +284,14 @@ instances are unaffected.
     %% watermark from `commit_now/1` regresses convergence (Jepsen
     %% OR-set: 27/226 lost adds).
     last_replayed_root = undefined :: undefined | bondy_mst:hash(),
+    %% The prepare fence's shared remote-delivery generation ref
+    %% (`bondy_oplog_registry:remote_gen/1`), resolved lazily on first
+    %% use (`undefined` until the instance's `init/1` has published it —
+    %% before which nothing can have been integrated), and the
+    %% generation this applier's projection is known to be caught up to.
+    %% See `ensure_remote_caught_up/1` (I1).
+    remote_gen_ref = undefined :: undefined | atomics:atomics_ref(),
+    replayed_remote_gen = 0 :: non_neg_integer(),
     %% Bootstrap lifecycle handle (`bondy_oplog_bootstrap_lifecycle`).
     %% Cached once at `init/1` from the registry; the gate check in
     %% `drain_loop/1` is then a single `atomics:get/2`. `undefined`
@@ -1595,8 +1603,19 @@ handle_call({reap_origins, Retired}, _From, State) ->
 handle_call(
     {cell_context, Bucket, Key},
     _From,
-    #state{cell_apply_source = Source, cell_apply_ctx = Founding} = State
+    #state{} = StateIn
 ) ->
+    %% I1 (prepare-after-deliver): this read is a tier_2 op's PREPARE —
+    %% it must not be served from a projection lagging events already
+    %% delivered to this replica, or the minted context under-
+    %% approximates its causal past (lost causality — the fatal
+    %% direction). Local events are covered by construction (the WAL
+    %% drain writes the projection before the MST install); remote
+    %% events need this fence. Steady-state cost: one atomic read. See
+    %% `ensure_remote_caught_up/1` for the invariant, the theorem it
+    %% underwrites, and the mechanism.
+    #state{cell_apply_source = Source, cell_apply_ctx = Founding} =
+        State = ensure_remote_caught_up(StateIn),
     %% Resolve the ctx for THIS cell's bucket from the multiplex directory —
     %% NOT the founding `cell_apply_ctx`. On a collapsed (one-log-per-shard)
     %% instance many tables share one applier, each with its own CRDT, so the
@@ -2550,9 +2569,108 @@ signal_catch_up_done(#state{instance_pid = InstancePid}, Token) ->
     end,
     ok.
 
-do_replay_cell_events(#state{cell_apply_ctx = undefined} = State) ->
-    State;
-do_replay_cell_events(
+do_replay_cell_events(State0) ->
+    {_, State} = do_replay_cell_events_r(State0),
+    State.
+
+%% @private
+%% THE PREPARE FENCE — the enforcement point of invariant I1, on which
+%% the soundness of the whole causal-stabilization story rests. Stated
+%% for the record (this is the normative statement; every reclamation
+%% feature is answerable to it):
+%%
+%%   I1 (prepare-after-deliver). Every operation on a cell `c` is
+%%   prepared against a state that reflects the effect of every event
+%%   on `c` DELIVERED at this replica before the prepare. "Delivered"
+%%   means: locally originated and WAL-drained (the drain writes the
+%%   projection BEFORE the MST install, so local events satisfy I1 by
+%%   construction), or peer-merged by `integrate_peer_root` (whose
+%%   handler completion is the remote delivery point).
+%%
+%%   I2 (containment stability). The reclamation frontier `StableHlc`
+%%   (`bondy_oplog_instance:stability_point/1`) certifies, by per-key
+%%   containment proofs against every confirmed peer root, that every
+%%   replica holds every event with HLC =< `StableHlc`.
+%%
+%%   Theorem (causal stability without causal broadcast). Given I1 and
+%%   I2, any event generated anywhere after `StableHlc` was certified
+%%   carries a causal context dominating every dot with HLC =<
+%%   `StableHlc` on its cell. Hence any state transformation derived
+%%   solely from events at or below the frontier — a `stabilize/2`
+%%   `discard`, a `{keep, Reduced}` metadata reduction, an
+%%   order-independent accumulator fold — is invisible to every event
+%%   that can still arrive. Proof sketch: by I2 the generating replica
+%%   held (and by I1 had applied, before preparing) every such event
+%%   for the cell; the prepared context is `context_of/1` over that
+%%   state, which contains their dots. This recovers TCSB-grade causal
+%%   stability (Baquero, Almeida & Shoker, arXiv:1710.04469 §7.2) in an
+%%   anti-entropy architecture with no causal broadcast layer.
+%%
+%% Without this fence I1 fails on applier-backed instances for REMOTE
+%% events: `integrate_peer_root` advances the MST and casts
+%% `replay_cell_events`, but that cast and a client's `cell_context`
+%% call come from different senders, so the context read can be served
+%% from a projection lagging the replica's own delivered set — minting
+%% an op whose context under-approximates its causal past (the fatal
+%% direction: lost causality; contrast the read-and-stamp
+%% non-atomicity noted at the `{cell_context, _, _}` handler, which
+%% errs only toward FALSE concurrency — extra siblings the CRDT
+%% resolves — and is therefore acceptable).
+%%
+%% Mechanism: one shared atomics generation, bumped by the instance at
+%% each `integrate_peer_root` completion (the delivery point; see the
+%% bump-site note there for why that site is exhaustive). A context
+%% read compares it against the generation this projection last
+%% replayed to: equal in the steady state (one atomic read, no
+%% instance round-trip), and on a gap it runs the same idempotent
+%% `replay_pairs`-anchored catch-up the cast handler runs, advancing
+%% the recorded generation ONLY on success — a failed catch-up must
+%% keep the fence armed. The generation is sampled BEFORE the replay:
+%% a bump landing mid-replay may or may not be covered by the root the
+%% replay read, so it must re-arm the fence (conservative, never
+%% unsound).
+ensure_remote_caught_up(State0) ->
+    State = resolve_remote_gen_ref(State0),
+    case State#state.remote_gen_ref of
+        undefined ->
+            %% Not yet published by the instance's `init/1` — before
+            %% which no `integrate_peer_root` can have run, so there is
+            %% nothing to catch up to.
+            State;
+        Ref ->
+            Gen = atomics:get(Ref, 1),
+            case Gen > State#state.replayed_remote_gen of
+                true ->
+                    case do_replay_cell_events_r(State) of
+                        {ok, State1} ->
+                            State1#state{replayed_remote_gen = Gen};
+                        {{error, _}, State1} ->
+                            State1
+                    end;
+                false ->
+                    State
+            end
+    end.
+
+%% @private
+resolve_remote_gen_ref(#state{remote_gen_ref = undefined} = State) ->
+    State#state{
+        remote_gen_ref = bondy_oplog_registry:remote_gen(
+            State#state.instance_id
+        )
+    };
+resolve_remote_gen_ref(State) ->
+    State.
+
+%% @private
+%% As `do_replay_cell_events/1` but reporting whether the projection is
+%% now provably caught up (`{ok, _}`) or the replay could not run
+%% (`{error, _}` — instance unavailable). The prepare fence needs the
+%% distinction: it must only advance its recorded generation on `ok`,
+%% or a failed replay would silently unfence subsequent context reads.
+do_replay_cell_events_r(#state{cell_apply_ctx = undefined} = State) ->
+    {ok, State};
+do_replay_cell_events_r(
     #state{
         cell_apply_source = Source,
         instance_id = Id,
@@ -2576,7 +2694,7 @@ do_replay_cell_events(
                     incremental => LastRoot =/= undefined
                 }
             ),
-            State;
+            {ok, State};
         {ok, {CurrentRoot, Pairs}} ->
             Count = bondy_oplog_cell_apply:apply_cell_pairs_mux(
                 Source, Id, Pairs, bondy_oplog_registry:origin(Id)
@@ -2596,12 +2714,12 @@ do_replay_cell_events(
                     incremental => LastRoot =/= undefined
                 }
             ),
-            State#state{last_replayed_root = CurrentRoot}
+            {ok, State#state{last_replayed_root = CurrentRoot}}
     catch
-        exit:_ ->
+        exit:Reason ->
             %% Instance unavailable (e.g. mid-restart) — leave the replay root
             %% unchanged; the next replay trigger retries.
-            State
+            {{error, Reason}, State}
     end.
 
 %% @private

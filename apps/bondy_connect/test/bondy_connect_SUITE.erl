@@ -19,6 +19,10 @@ all() ->
 %% The skeleton must boot (with its library deps) and shut down cleanly,
 %% without any dependency on the bondy router.
 app_starts_and_stops(_) ->
+    %% The case asserts cold-start behaviour; earlier suites sharing the
+    %% CT node may have left the app running, which would make
+    %% ensure_all_started report nothing started.
+    _ = application:stop(bondy_connect),
     {ok, Started} = application:ensure_all_started(bondy_connect),
     ?assert(lists:member(bondy_connect, Started)),
     ?assert(is_pid(whereis(bondy_connect_sup))),

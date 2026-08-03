@@ -41,3 +41,4 @@ apps/bondy_cbor/bench/output/*
 /.vscode/settings.json
 /.env
 /etc
+/harness/fleet-scale/out

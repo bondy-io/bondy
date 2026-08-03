@@ -46,14 +46,16 @@ each cell this node owns back to reality.
 
 The registry write path runs in the **caller's** process (the partition
 pid only locates the store slice) — the same is true of RIB maintenance.
-`count`, `invoke`, and the `earliest`/`latest`-deriving `created_times`
-set are per-field CRDTs (registration: `bondy_oplog_crdt_struct`,
-registered directly with its schema as `crdt_opts` — see
-`bondy_namespace_catalog`'s `?RIB_REGISTRATION_SCHEMA`; subscription:
-a bare `bondy_oplog_crdt_pn_counter`), not one opaque summary blob, so
-an entry add/remove writes a small, targeted,
-**lock-free** delta directly from the caller — `{inc, 1}` /`{inc, -1}`
-on `count`, `{add, _}`/`{rmv, _}` on `created_times` — with no
+`count`, `invoke`, `earliest` and `latest` are per-field CRDTs
+(registration: `bondy_oplog_crdt_struct`, registered directly with its
+schema as `crdt_opts` — see `bondy_namespace_catalog`'s
+`?RIB_REGISTRATION_SCHEMA`; subscription: a bare
+`bondy_oplog_crdt_pn_counter`), not one opaque summary blob, so an
+entry add/remove writes a small, targeted, **lock-free** delta directly
+from the caller — `{inc, 1}` /`{inc, -1}` on `count`, `{set, Created}`
+on the `earliest`/`latest` min/max ratchets (adds only: removals never
+shrink the lifetime watermarks, which is what keeps the cell a scalar
+per field) — with no
 read-modify-write, no per-realm dispatch, and no serialisation point:
 concurrent writers to the same cell simply converge, the same way the
 entry/ptrie writes they accompany already do. The atomic row op on the
@@ -103,7 +105,6 @@ they reach this node via AAE merge.
 
 %% API
 -export([check/1]).
--export([created_key/2]).
 -export([ensure_stubs_table/0]).
 -export([match_stubs/2]).
 -export([match_summaries/3]).
@@ -118,8 +119,8 @@ they reach this node via AAE merge.
 
 -ifdef(TEST).
 %% Exposes the read-path reshape helper for a direct unit test of its
-%% derivation logic (`created_times` -> `earliest`/`latest`), decoupled
-%% from constructing real CRDT state via the full write path.
+%% shaping logic, decoupled from constructing real CRDT state via the
+%% full write path.
 -export([reshape_summary/2]).
 -endif.
 
@@ -180,23 +181,14 @@ on_entry_removed(_Partition, Tab, Entry) ->
     end.
 
 -doc """
-Encodes a `(Created, EntryId)` pair as a `created_times` set element. Pairs,
-not bare timestamps, to avoid collisions when two entries share a
-`Created` tick.
-""".
--spec created_key(Created :: integer(), EntryId :: term()) -> binary().
-
-created_key(Created, EntryId) when is_integer(Created) ->
-    term_to_binary({Created, EntryId}).
-
--doc """
 Applies the CRDT delta for a newly-added local entry directly from the
-caller's process: `count` `{inc, 1}`, `invoke` `{set, Invoke}` and a
-`created_times` `{add, _}` for a registration; a bare counter `{inc, 1}`
-for a subscription (its table has no `invoke`/`created_times` fields —
-it is a bare `bondy_oplog_crdt_pn_counter`, not a struct). MUST be
-total: any failure is logged, never raised — a RIB write failing must
-not fail the entry add/remove it accompanies.
+caller's process: `count` `{inc, 1}`, `invoke` `{set, Invoke}` and the
+`earliest`/`latest` ratchets `{set, Created}` for a registration; a bare
+counter `{inc, 1}` for a subscription (its table has no
+`invoke`/`earliest`/`latest` fields — it is a bare
+`bondy_oplog_crdt_pn_counter`, not a struct). MUST be total: any
+failure is logged, never raised — a RIB write failing must not fail the
+entry add/remove it accompanies.
 """.
 -spec apply_added(Entry :: entry()) -> ok.
 
@@ -214,11 +206,9 @@ apply_added(Entry) ->
             case Type of
                 registration ->
                     Created = bondy_registry_entry:created(Entry),
-                    EntryId = bondy_registry_entry:id(Entry),
                     Invoke = bondy_registry_entry:get_option(
                         invoke, Entry, ?INVOKE_SINGLE
                     ),
-                    CK = created_key(Created, EntryId),
                     %% Async (no read-your-writes barrier): nothing reads
                     %% the cell on the entry-add path — local routing
                     %% truth is the trie/members table, written above,
@@ -230,7 +220,8 @@ apply_added(Entry) ->
                     bondy_db:apply_batch_async(Table, RealmUri, Key, [
                         {apply, count, {inc, 1}},
                         {apply, invoke, {set, Invoke}},
-                        {apply, created_times, {add, CK}}
+                        {apply, earliest, {set, Created}},
+                        {apply, latest, {set, Created}}
                     ]);
                 subscription ->
                     bondy_db:apply_async(Table, RealmUri, Key, {inc, 1})
@@ -245,11 +236,14 @@ apply_added(Entry) ->
 
 -doc """
 Applies the CRDT delta for a removed local entry — the causal dual of
-`apply_added/1`: `count` `{inc, -1}` and a `created_times` `{rmv, _}` for
-a registration (`invoke` is untouched — a stable per-group value, it
-self-corrects on the group's next add if it ever changes); a bare
-counter `{inc, -1}` for a subscription. MUST be total, same contract as
-`apply_added/1`.
+`apply_added/1`: `count` `{inc, -1}` for a registration (`invoke` is
+untouched — a stable per-group value, it self-corrects on the group's
+next add if it ever changes; `earliest`/`latest` are untouched by
+design — they are monotone ratchets recording the group's lifetime
+creation-time watermarks, so removals never shrink them, which is what
+bounds the cell to a scalar per field instead of one element plus one
+tombstone per entry ever added); a bare counter `{inc, -1}` for a
+subscription. MUST be total, same contract as `apply_added/1`.
 """.
 -spec apply_removed(Entry :: entry()) -> ok.
 
@@ -266,14 +260,10 @@ apply_removed(Entry) ->
         Result =
             case Type of
                 registration ->
-                    Created = bondy_registry_entry:created(Entry),
-                    EntryId = bondy_registry_entry:id(Entry),
-                    CK = created_key(Created, EntryId),
                     %% Async — same rationale as `apply_added/1`.
-                    bondy_db:apply_batch_async(Table, RealmUri, Key, [
-                        {apply, count, {inc, -1}},
-                        {apply, created_times, {rmv, CK}}
-                    ]);
+                    bondy_db:apply_async(
+                        Table, RealmUri, Key, {apply, count, {inc, -1}}
+                    );
                 subscription ->
                     bondy_db:apply_async(Table, RealmUri, Key, {inc, -1})
             end,
@@ -402,12 +392,12 @@ which alone represents "the current summary" — unlike the pre-migration
 whole-blob `lww_register` cell, where the merge op directly carried the
 new value. Reads the cell's CURRENT converged value instead, reshapes it
 (`reshape_summary/2` — the generic CRDT modules' raw `to_value/1` is not
-the summary shape read-side consumers expect: registration's raw struct
-value still carries the un-derived `created_times` set instead of
-`earliest`/`latest`; subscription's raw `pn_counter` value is a bare
+quite the summary shape read-side consumers expect: registration's raw
+struct value may omit never-written `earliest`/`latest` fields;
+subscription's raw `pn_counter` value is a bare
 integer, not a map), and dispatches exactly as `on_remote_set/3` already
 does (`count = 0` there is already equivalent to a clear, so this needs
-no separate clear case — the new write path never emits an explicit
+no separate clear case — the write path never emits an explicit
 clear op either, see the moduledoc's "Concurrency model"). A cell that
 does not exist (never written, or fully
 reclaimed by `stabilize/2`) is a no-op: there is nothing for the stub
@@ -759,23 +749,11 @@ stub_delete(StubKey) ->
 %% replicates back out regardless of how many origins contributed to the
 %% stale value historically.
 %%
-%% `created_times`'s stale pre-restart entries are NOT handled here —
-%% they are handled automatically, elsewhere: this DB's origin identity
-%% rotates fresh on every restart (no `storage_path` to persist it to —
-%% ephemeral RIB tables), so the old origin becomes unclaimed the moment
-%% this node re-advertises under its new one, and
-%% `bondy_oplog_origin_retirement`'s reap-by-complement already reaps
-%% exactly this case generically (its own moduledoc calls out "ephemeral
-%% VM boots" as a case it already covers) — calling
-%% `bondy_oplog_crdt_struct:reap_origins/2` on the registration table's
-%% cell, which force-reaps `created_times` for retired origins (its
-%% schema declares `force_reap => true` for that field — see
-%% `bondy_namespace_catalog`'s `?RIB_REGISTRATION_SCHEMA`). That runs on
-%% its own schedule (reacting to Partisan membership events),
-%% independently of this function, so there is a bounded window where
-%% `count` is already correct but `earliest`/`latest` may still be
-%% tainted by a not-yet-reaped stale entry — self-resolving, not a
-%% permanent inconsistency.
+%% `earliest`/`latest` need no restart handling at all: they are
+%% monotone ratchet registers over the group's lifetime creation times
+%% (per-value, not per-origin state), so pre-restart values simply
+%% remain as valid watermarks of the group's history — exactly the
+%% ratchet semantics the removals path already relies on.
 %%
 %% MUST be total — called from the AAE merge reactor.
 self_heal(Type, RealmUri, Policy, Uri) ->
@@ -1002,27 +980,27 @@ safe_metric(Type, Spec) ->
 %% every consumer expects. Both RIB tables register the generic CRDT
 %% toolkit modules directly (no per-use-case wrapper — see
 %% `bondy_namespace_catalog`'s `?RIB_REGISTRATION_SCHEMA`), so their raw
-%% projected value is not yet in the shape read-side consumers want:
-%% registration's raw `bondy_oplog_crdt_struct` value already has `count`
-%% and `invoke` as top-level keys (they are schema field names) but
-%% carries the raw `created_times` two_p_set elements instead of the
-%% derived `earliest`/`latest`; subscription's raw `bondy_oplog_crdt_
+%% projected value is not quite the shape read-side consumers want:
+%% registration's raw `bondy_oplog_crdt_struct` value already has the
+%% schema fields as top-level keys but may omit never-written
+%% `earliest`/`latest` registers (normalised to `undefined` here);
+%% subscription's raw `bondy_oplog_crdt_
 %% pn_counter` value is a bare integer, not a map at all. Called
 %% immediately after every raw read/list, before any `#{count := _}`-
 %% shaped pattern match.
 -spec reshape_summary(entry_type(), term()) -> map().
 
-reshape_summary(
-    registration,
-    #{count := Count, invoke := Invoke, created_times := TimesBin}
-) ->
-    Createds = [element(1, binary_to_term(T)) || T <- TimesBin],
-    {Earliest, Latest} =
-        case Createds of
-            [] -> {undefined, undefined};
-            _ -> {lists:min(Createds), lists:max(Createds)}
-        end,
-    #{invoke => Invoke, count => Count, earliest => Earliest, latest => Latest};
+reshape_summary(registration, #{count := Count, invoke := Invoke} = Value) ->
+    %% `earliest`/`latest` are schema fields (min/max ratchet registers)
+    %% so they are already scalars in the raw value; an unwritten
+    %% register projects as `undefined`, which is also the summary's
+    %% "never had an entry" shape — no derivation left to do.
+    #{
+        invoke => Invoke,
+        count => Count,
+        earliest => maps:get(earliest, Value, undefined),
+        latest => maps:get(latest, Value, undefined)
+    };
 reshape_summary(subscription, Count) when is_integer(Count) ->
     #{count => Count}.
 

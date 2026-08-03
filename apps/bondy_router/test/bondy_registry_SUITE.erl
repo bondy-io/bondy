@@ -510,18 +510,23 @@ registry_rib_dual_write(Config) ->
 
     %% `bondy_db:read/3` returns the RAW `bondy_oplog_crdt_struct`
     %% projection (registered directly, no per-use-case wrapper) —
-    %% `count`/`invoke` are top-level (schema field names) but
-    %% `created_times` is the raw two_p_set element list, not the derived
-    %% `earliest`/`latest` (that derivation is `bondy_registry_rib:
-    %% reshape_summary/2`'s job, unit-tested on its own).
+    %% schema fields are top-level, with `earliest`/`latest` as the
+    %% min/max ratchet registers over the group's creation times.
     ?assert(
         await_cell(Table, RealmUri, Key, fun
             (
                 {ok, {
-                    #{invoke := I, count := 2, created_times := CT}, _
+                    #{
+                        invoke := I,
+                        count := 2,
+                        earliest := E,
+                        latest := L
+                    },
+                    _
                 }}
             ) when
-                I == ?INVOKE_ROUND_ROBIN, length(CT) == 2
+                I == ?INVOKE_ROUND_ROBIN, is_integer(E), is_integer(L),
+                E =< L
             ->
                 true;
             (_) ->
@@ -690,11 +695,11 @@ rib_self_heal_stale_cell(Config) ->
     %% would leave one, and simulate its merge event reaching the reactor.
     %% There is no local registration for the URI, so self_heal's corrective
     %% delta (0 - 1) must settle it to count=0.
-    CK1 = bondy_registry_rib:created_key(1, <<"stale-1">>),
     ok = bondy_db:apply_batch(Table, RealmUri, Key, [
         {apply, count, {inc, 1}},
         {apply, invoke, {set, ?INVOKE_SINGLE}},
-        {apply, created_times, {add, CK1}}
+        {apply, earliest, {set, 1}},
+        {apply, latest, {set, 1}}
     ]),
     ok = bondy_registry_rib:on_remote_set(registration, Key, #{}),
     ?assert(

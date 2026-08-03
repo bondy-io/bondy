@@ -255,13 +255,18 @@ pattern(Type, RealmUri, RegUri, Options, Extra) ->
 
 -spec key_pattern(
     RealmUri :: uri(),
-    SessionId :: wildcard(bondy_session_id:t()),
+    SessionId :: wildcard(optional(bondy_session_id:t())),
     EntryId :: wildcard(id())
 ) -> key().
 
 key_pattern(RealmUri, SessionId, EntryId) when
     is_binary(RealmUri) andalso
-        (is_binary(SessionId) orelse SessionId == '_') andalso
+        %% `undefined' is a legitimate exact-match value, NOT a wildcard:
+        %% entries owned by session-less refs (internal callback
+        %% subscribers) are stored with `session_id = undefined' (see
+        %% `new/6'), so a pattern must be able to select exactly those.
+        (is_binary(SessionId) orelse SessionId == undefined orelse
+            SessionId == '_') andalso
         (is_integer(EntryId) orelse EntryId == '_')
 ->
     #entry_key{

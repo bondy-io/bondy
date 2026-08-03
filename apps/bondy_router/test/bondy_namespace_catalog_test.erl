@@ -80,7 +80,7 @@ declarations_test_() ->
         end},
         {"RIB tables are ephemeral CRDT cells, published, no indexes", fun() ->
             %% The replicated routing summary cells: per-field CRDT deltas
-            %% (count/invoke/created_times), single-writer-per-key so no
+            %% (count/invoke/earliest/latest), single-writer-per-key so no
             %% cross-origin merge conflict; `publish => true` readies
             %% merge-side reactor consumption; point-read by cell key only,
             %% so no secondary index.
@@ -212,7 +212,9 @@ provisions_all() ->
         ?assertMatch(
             #{
                 crdt_module := bondy_oplog_crdt_struct,
-                crdt_opts := #{count := _, invoke := _, created_times := _}
+                crdt_opts := #{
+                    count := _, invoke := _, earliest := _, latest := _
+                }
             },
             bondy_db:info(?CAT:table(bondy_registration_rib))
         ),
