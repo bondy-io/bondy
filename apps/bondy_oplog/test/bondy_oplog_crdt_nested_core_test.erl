@@ -193,13 +193,32 @@ stabilize_fold_flat_store_unchanged_test() ->
     ?assertEqual(unchanged, ?M:stabilize_fold(DS, 100)).
 
 stabilize_fold_non_opted_sub_mod_unchanged_test() ->
-    %% g_counter exports no state_to_op/1 — it has not opted into folding.
+    %% two_p_set exports no state_to_op/1 (no single op can rebuild a
+    %% state holding both adds and permanent removals) — not opted in.
+    TPS = bondy_oplog_crdt_two_p_set,
+    DS = #{
+        {<<"a">>, 1} => {sub, TPS, 10, {add, <<"x">>}},
+        {<<"a">>, 2} => {sub, TPS, 20, {add, <<"y">>}}
+    },
+    ?assertEqual(unchanged, ?M:stabilize_fold(DS, 100)).
+
+stabilize_fold_g_counter_run_test() ->
     GC = bondy_oplog_crdt_g_counter,
     DS = #{
         {<<"a">>, 1} => {sub, GC, 10, {inc, 1}},
-        {<<"a">>, 2} => {sub, GC, 20, {inc, 2}}
+        {<<"a">>, 2} => {sub, GC, 20, {inc, 2}},
+        {<<"b">>, 1} => {sub, GC, 15, {inc, 5}}
     },
-    ?assertEqual(unchanged, ?M:stabilize_fold(DS, 100)).
+    {folded, DS1} = ?M:stabilize_fold(DS, 100),
+    %% Origin a's run collapses to its total; b's single entry stays.
+    ?assertEqual(
+        #{
+            {<<"a">>, 2} => {sub, GC, 20, {inc, 3}},
+            {<<"b">>, 1} => {sub, GC, 15, {inc, 5}}
+        },
+        DS1
+    ),
+    ?assertEqual(8, ?M:nested_value(GC, DS1)).
 
 stabilize_fold_lww_keeps_the_winners_own_hlc_test() ->
     LWW = bondy_oplog_crdt_lww_register,

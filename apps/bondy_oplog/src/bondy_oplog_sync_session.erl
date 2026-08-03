@@ -142,21 +142,35 @@ run(Instance, Peer, Opts, Iterations) when is_binary(Instance) ->
             {ok, LocalRoot, PR} -> {{ok, LocalRoot}, PR};
             {error, _} = Error -> {Error, undefined}
         end,
-    %% Retention-bounded (`mst_retention`) instances gate the adoption below
-    %% behind a frontier-GAP check. The adoption's "can never over-claim"
-    %% argument holds only under all-peer-confirmed compaction, where a
-    %% peer having compacted an event IMPLIES this node already held it.
-    %% A retention-truncating peer compacts WITHOUT our confirmation: if
-    %% its pre-round frontier is still strictly ahead of ours after a
-    %% complete round, the missing events were truncated at the peer and
-    %% can never arrive by page-sync — adopting would flip the convergence
-    %% oracle to CONVERGED over silently missing data. Fail the session
-    %% with `{frontier_gap, Origins}` instead; the sync scheduler flags a
-    %% catalogue rebootstrap, whose install + finalize supply BOTH the data
-    %% and the frontier. Non-retention (durable) instances keep the
-    %% unconditional adoption unchanged.
-    Result = maybe_frontier_gap(Result0, Instance, PeerFrontier),
-    ok = maybe_adopt_peer_frontier(Result, Instance, PeerFrontier),
+    %% The adoption below is gated behind a frontier-GAP check. The
+    %% adoption's "can never over-claim" argument holds only when a peer
+    %% having compacted an event IMPLIES this node already held it — and
+    %% BOTH compaction flavours can break that implication by design:
+    %% `mst_retention` truncates by local policy with no confirmation at
+    %% all, and the durable peer-confirmed frontier is RECENCY-FILTERED
+    %% (`bondy_oplog_peer_state:get_instance_peer_states/1`) — a replica
+    %% silent past `peer_timeout_ms` is dropped so compaction can
+    %% proceed without it. In either case, if the peer's pre-round
+    %% frontier is still strictly ahead of ours after a complete round,
+    %% the missing events were compacted away at the peer and can never
+    %% arrive by page-sync — adopting would flip the convergence oracle
+    %% to CONVERGED over silently missing data. Fail the session with
+    %% `{frontier_gap, Origins}` instead; the sync scheduler flags a
+    %% catalogue rebootstrap, whose install + finalize supply BOTH the
+    %% data and the frontier. This check IS the recovery half of the
+    %% recency filter's liveness trade — without it a stale-peer rejoin
+    %% silently loses whatever was truncated past it (found by
+    %% `bondy_oplog_compaction_cluster_SUITE`'s stale-peer rejoin case,
+    %% which previously timed out here with zero rebootstraps flagged).
+    %% Both the gap check and the adoption require a COMPLETE round
+    %% (`PeerRoot =/= skip`): a benign-incomplete round (budget/byte caps,
+    %% mid-session root refresh) has not pulled everything the peer's
+    %% pre-round frontier covers, so a deficit there is expected lag (not
+    %% a gap — flagging it rebootstraps healthy instances on every capped
+    %% round under load), and adopting there would over-claim maxima the
+    %% round never delivered.
+    Result = maybe_frontier_gap(Result0, Instance, PeerFrontier, PeerRoot),
+    ok = maybe_adopt_peer_frontier(Result, Instance, PeerFrontier, PeerRoot),
     maybe_record(Result, Instance, Peer, Record, PeerRoot),
     ok = maybe_confirm_root(
         Result, Instance, Peer, Transport, TransportOpts, Record, PeerRoot
@@ -966,7 +980,12 @@ maybe_checkpoint_root(Root, Instance, Peer) when
 %% comparison with no ETS write and no `fsync`. The persist makes an adopted
 %% maximum durable so an isolated restart (peer then unreachable) keeps the
 %% converged oracle rather than re-diverging until the peer returns.
-maybe_adopt_peer_frontier({ok, _}, Instance, PeerFrontier) when
+maybe_adopt_peer_frontier({ok, _}, _Instance, _PeerFrontier, skip) ->
+    %% Benign incomplete round: the pre-round frontier's maxima were not
+    %% necessarily delivered, so adopting would over-claim. The next
+    %% complete round adopts.
+    ok;
+maybe_adopt_peer_frontier({ok, _}, Instance, PeerFrontier, _PeerRoot) when
     is_map(PeerFrontier), map_size(PeerFrontier) > 0
 ->
     Local = bondy_oplog_registry:frontier(Instance),
@@ -987,34 +1006,68 @@ maybe_adopt_peer_frontier({ok, _}, Instance, PeerFrontier) when
         false ->
             ok
     end;
-maybe_adopt_peer_frontier(_Result, _Instance, _PeerFrontier) ->
+maybe_adopt_peer_frontier(_Result, _Instance, _PeerFrontier, _PeerRoot) ->
     ok.
 
 %% @private
-%% Frontier-GAP check for retention-bounded instances (see the call site in
-%% `run/4` for the full rationale). Only fires on a SUCCESSFUL round of a
-%% `mst_retention` instance: retention ⇒ fused ⇒ the pull's events were
-%% replayed inline within the round (`integrate_peer_root` → inline
-%% replay), so the local frontier read here is post-replay — a strict
-%% deficit against the peer's PRE-round frontier means the missing events
-%% no longer exist in the peer's live window. Origins list is bounded to
-%% keep the exit reason log-safe.
-maybe_frontier_gap({ok, _} = Result, Instance, PeerFrontier) when
+%% Frontier-GAP check (see the call site in `run/4` for the full
+%% rationale). Fires on a SUCCESSFUL round when the peer's PRE-round
+%% applied frontier is still strictly ahead of ours after the round: the
+%% missing events were compacted away at the peer — whether by
+%% `mst_retention` policy or by the durable recency-filtered frontier
+%% advancing past this then-silent replica — and can never arrive by
+%% page-sync, so the only convergence path is a catalogue rebootstrap.
+%%
+%% On an applier-backed instance the pulled events reach the projection
+%% (and the applied-frontier VV its max-merge advances) ASYNCHRONOUSLY —
+%% the `integrate_peer_root` handler casts `replay_cell_events` to the
+%% APPLIER — so a first-pass deficit may be nothing but replay lag:
+%% settle the whole local pipeline and re-check before declaring a gap.
+%% The settle is two barriers: the instance's overlay drain
+%% (`await_apply/1` — local WAL-appended events projected + installed)
+%% and the APPLIER barrier (`bondy_oplog_applier:barrier/1` — served
+%% after the integrate-time replay cast already in its queue, and
+%% running the I1 fence so even a LOST cast is replayed). On a fused
+%% instance there is no applier and replay was inline at integrate, so
+%% only the overlay drain applies. With the peer's answer
+%% installed-consistent (the responder's barrier) and the round complete,
+%% a residual deficit after this settle is deterministic evidence the
+%% missing events were compacted away at the peer. Origins list is
+%% bounded to keep the exit reason log-safe.
+maybe_frontier_gap({ok, _} = Result, _Instance, _PeerFrontier, skip) ->
+    %% Benign incomplete round: a deficit here is expected transfer lag,
+    %% not evidence of compacted-away history. The next complete round
+    %% judges.
+    Result;
+maybe_frontier_gap({ok, _} = Result, Instance, PeerFrontier, _PeerRoot) when
     is_map(PeerFrontier), map_size(PeerFrontier) > 0
 ->
-    case bondy_oplog_registry:mst_retention(Instance) of
-        true ->
-            case frontier_deficit(Instance, PeerFrontier) of
-                [] ->
-                    Result;
-                Origins ->
-                    {error, {frontier_gap, Origins}}
-            end;
+    case frontier_deficit(Instance, PeerFrontier) of
+        [] ->
+            Result;
         _ ->
-            Result
+            ok = settle_local(Instance),
+            case frontier_deficit(Instance, PeerFrontier) of
+                [] -> Result;
+                Origins -> {error, {frontier_gap, Origins}}
+            end
     end;
-maybe_frontier_gap(Result, _Instance, _PeerFrontier) ->
+maybe_frontier_gap(Result, _Instance, _PeerFrontier, _PeerRoot) ->
     Result.
+
+%% @private
+%% Settle the local apply pipeline: overlay drained (local events
+%% projected + installed) and, when the instance is applier-backed, the
+%% applier caught up (queued replay casts served + the I1 fence run).
+settle_local(Instance) ->
+    _ = catch bondy_oplog_instance:await_apply(Instance),
+    case bondy_oplog_registry:applier_pid(Instance) of
+        Pid when is_pid(Pid) ->
+            _ = catch bondy_oplog_applier:barrier(Pid),
+            ok;
+        _ ->
+            ok
+    end.
 
 %% @private
 %% Origins (bounded to 5, log-safe) for which the peer's applied-frontier

@@ -304,6 +304,25 @@ retries.
 -define(LIVE_BACKOFF_TAB, bondy_oplog_sync_scheduler_live_backoff).
 -define(LOAD_TAB, bondy_oplog_sync_scheduler_load).
 -define(REBOOTSTRAP_TAB, bondy_oplog_sync_scheduler_rebootstrap).
+-define(GAP_STRIKE_TAB, bondy_oplog_sync_scheduler_gap_strikes).
+%% A `frontier_gap` only schedules a rebootstrap on the SECOND consecutive
+%% strike for the same (instance, peer) within this window; a successful
+%% round clears the count. The gap verdict's deterministic core — the
+%% peer's installed-consistency barrier on `get_frontier`, the
+%% complete-round gate, and the initiator's local settle — eliminates the
+%% SYSTEMATIC false positives (install lag, replay lag, capped rounds).
+%% This debounce absorbs a residual RARE transient observed only on fused
+%% catalogue instances under sustained write load with live catalogue
+%% compaction (a handful of single-shot gaps per minute across shards,
+%% self-healing by the next round; mechanism not yet pinned — needs
+%% `origins_behind` forensics from peer logs). Single-shot flagging there
+%% is not value-neutral: each live fused rebootstrap is a replace-mode
+%% install racing the churn, and one gap-triggered bootstrap seeds
+%% adopted-frontier claims its neighbours then gap against — a cascade. A
+%% REAL gap (compacted-past-me history) cannot heal by syncing and
+%% strikes again on the very next round, so detection is delayed by one
+%% round, never lost.
+-define(GAP_STRIKE_WINDOW_MS, 120_000).
 %% EWMA smoothing factor for the node-load signal: the weight given to the
 %% newest per-tick sample. 0.3 keeps ~3 ticks of history, enough hysteresis
 %% that a single-tick burst does not flip the yield while still reacting
@@ -449,6 +468,7 @@ init(Opts) ->
     _ = ensure_table(?LIVE_BACKOFF_TAB),
     _ = ensure_table(?LOAD_TAB),
     _ = ensure_table(?REBOOTSTRAP_TAB),
+    _ = ensure_table(?GAP_STRIKE_TAB),
     Dispatch =
         case maps:find(dispatch, Opts) of
             {ok, V} ->
@@ -1157,29 +1177,102 @@ maybe_flag_rebootstrap(
 maybe_flag_rebootstrap(
     InstanceId, Peer, {sync_failed, {frontier_gap, Origins}}
 ) ->
-    %% A retention-bounded instance completed a full round yet is still
-    %% behind the peer's applied frontier: the missing events were
-    %% retention-truncated at the peer and can never arrive by page-sync.
+    %% The instance completed a full round yet is still behind the peer's
+    %% applied frontier: the missing events were compacted away at the
+    %% peer — by `mst_retention` policy, or by the durable
+    %% recency-filtered frontier advancing past this replica while it was
+    %% silent past `peer_timeout_ms` — and can never arrive by page-sync.
     %% Same remedy as `peer_pages_unavailable` — a catalogue re-bootstrap
     %% supplies both the data (projection stream) and the frontier
-    %% (finalize adoption). This is ALSO the organic join-time trigger: a
-    %% fresh replica's first sync against a truncating cluster lands here.
-    _ = ensure_table(?REBOOTSTRAP_TAB),
-    ets:insert(?REBOOTSTRAP_TAB, {InstanceId, Peer}),
-    telemetry:execute(
-        [bondy_oplog, sync_scheduler, rebootstrap_scheduled],
-        #{count => 1},
-        #{instance_id => InstanceId, peer => Peer, reason => frontier_gap}
-    ),
-    ?LOG_INFO(#{
-        description =>
-            "Peer's applied frontier is ahead of ours after a complete "
-            "sync round (its retention policy truncated history we never "
-            "received); scheduling a catalogue re-bootstrap.",
-        instance => InstanceId,
-        peer => Peer,
-        origins_behind => Origins
-    }),
+    %% (finalize adoption). This is ALSO the organic join-time trigger (a
+    %% fresh replica's first sync against a truncating cluster lands
+    %% here) and the stale-peer rejoin path (the recovery half of the
+    %% recency filter's liveness trade).
+    %%
+    %% TWO-STRIKE debounce — see `?GAP_STRIKE_WINDOW_MS` for the full
+    %% rationale (deterministic core + residual rare transient on fused
+    %% catalogue instances under churn). (If per-origin frontier
+    %% RETIREMENT is ever introduced — VVs never shrink today — retired
+    %% origins must also be excluded from the deficit, or every reap
+    %% becomes a permanent false gap.)
+    _ = ensure_table(?GAP_STRIKE_TAB),
+    Now = erlang:monotonic_time(millisecond),
+    Key = {InstanceId, Peer},
+    Repeat =
+        case ets:lookup(?GAP_STRIKE_TAB, Key) of
+            [{Key, T0}] when Now - T0 =< ?GAP_STRIKE_WINDOW_MS -> true;
+            _ -> false
+        end,
+    case Repeat of
+        false ->
+            true = ets:insert(?GAP_STRIKE_TAB, {Key, Now}),
+            ok;
+        true ->
+            true = ets:delete(?GAP_STRIKE_TAB, Key),
+            %% The REMEDY is scoped to where it is safe. A live catalogue
+            %% re-bootstrap of an applier-backed (durable) instance is a
+            %% proven-safe recovery (install + rederive; the stale-peer
+            %% rejoin CT case), and a retention-bounded fused instance
+            %% depends on it by design (its peers truncate without
+            %% confirmation as a matter of policy). A fused instance
+            %% WITHOUT retention is different: its live re-bootstrap is a
+            %% replace-mode install racing the fused churn, and with the
+            %% MST catalogue-compacted the post-install rederive cannot
+            %% restore a clobbered cell's compacted local ops — a single
+            %% gap-triggered re-bootstrap under load measurably corrupts
+            %% RIB accumulator cells. For those, the frontier-gap session
+            %% error already prevents the false adoption (the oracle
+            %% stays honestly DIVERGED); surface the standing gap to the
+            %% operator instead of auto-triggering the unsafe remedy,
+            %% until a churn-safe fused re-bootstrap exists.
+            Fused = catch bondy_oplog_registry:fused(InstanceId),
+            Retention = catch bondy_oplog_registry:mst_retention(InstanceId),
+            case Fused =:= true andalso Retention =/= true of
+                true ->
+                    ?LOG_WARNING(#{
+                        description =>
+                            "Peer's applied frontier is ahead of ours "
+                            "after complete sync rounds (it compacted "
+                            "history we never received). This fused "
+                            "instance has no churn-safe re-bootstrap; "
+                            "the gap persists until the instance is "
+                            "restarted or re-bootstrapped explicitly.",
+                        instance => InstanceId,
+                        peer => Peer,
+                        origins_behind => Origins
+                    }),
+                    ok;
+                false ->
+                    _ = ensure_table(?REBOOTSTRAP_TAB),
+                    ets:insert(?REBOOTSTRAP_TAB, {InstanceId, Peer}),
+                    telemetry:execute(
+                        [bondy_oplog, sync_scheduler, rebootstrap_scheduled],
+                        #{count => 1},
+                        #{
+                            instance_id => InstanceId,
+                            peer => Peer,
+                            reason => frontier_gap
+                        }
+                    ),
+                    ?LOG_INFO(#{
+                        description =>
+                            "Peer's applied frontier is ahead of ours "
+                            "after a complete sync round, twice in a row "
+                            "(it compacted history we never received); "
+                            "scheduling a catalogue re-bootstrap.",
+                        instance => InstanceId,
+                        peer => Peer,
+                        origins_behind => Origins
+                    }),
+                    ok
+            end
+    end;
+maybe_flag_rebootstrap(InstanceId, Peer, normal) ->
+    %% A successful round proves there is no standing gap against this
+    %% peer — clear any single strike so an unrelated transient later
+    %% starts a fresh count.
+    _ = ensure_table(?GAP_STRIKE_TAB),
+    _ = ets:delete(?GAP_STRIKE_TAB, {InstanceId, Peer}),
     ok;
 maybe_flag_rebootstrap(_InstanceId, _Peer, _Reason) ->
     ok.

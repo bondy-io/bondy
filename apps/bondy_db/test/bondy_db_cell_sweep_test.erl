@@ -186,9 +186,28 @@ struct_fold_test_() ->
         [
             {"sweep folds a struct cell's stable sub-op runs, "
              "value-preserving and idempotent",
-                {timeout, 60, fun() -> struct_fold_reduces_stable_runs(T) end}}
+                {timeout, 60, fun() -> struct_fold_reduces_stable_runs(T) end}},
+            {"duplicate same-field sub-ops in one batch are rejected",
+                fun() -> struct_duplicate_batch_rejected(T) end}
         ]
     end}.
+
+%% A batch is ONE dot and a field's sub-ops accumulate BY dot — the batch
+%% write API rejects a same-field duplicate outright (struct's 3-tuple
+%% `{apply, FieldKey, SubOp}` form; the collections' 4-tuple form is
+%% covered in `bondy_db_aw_map_batch_e2e_test`).
+struct_duplicate_batch_rejected(T) ->
+    Dup = [{apply, count, {inc, 1}}, {apply, count, {inc, 2}}],
+    ?assertEqual(
+        {error, {duplicate_batch_subop, [count]}},
+        bondy_db:apply_batch(T, ?REALM, <<"dup">>, Dup)
+    ),
+    ?assertEqual(
+        {error, {duplicate_batch_subop, [count]}},
+        bondy_db:apply_batch_async(T, ?REALM, <<"dup">>, Dup)
+    ),
+    %% Nothing was written on either path.
+    ?assertEqual({error, not_found}, bondy_db:read(T, ?REALM, <<"dup">>)).
 
 struct_fold_reduces_stable_runs(T) ->
     K = <<"proc.echo">>,
@@ -243,6 +262,126 @@ struct_fold_reduces_stable_runs(T) ->
     ?assert(maps:get(rewritten, Stats3) >= 1),
     {ok, {Value3, _}} = bondy_db:read(T, ?REALM, K),
     ?assertEqual(Value2, Value3).
+
+%% -----------------------------------------------------------------------------
+%% Overlay fence on the {keep, Reduced} rewrite
+%% -----------------------------------------------------------------------------
+%%
+%% The reduction rides the same overlay fence as `discard`: while ANY
+%% event is pending in the shard's overlay for a cell, the sweep must
+%% leave that cell alone (`skipped`), because a pending event's stamped
+%% context may be one the reduction's license did not account for.
+%%
+%% No production owner currently arms the fence — `bondy_db` registers
+%% every shard with `overlay => disabled` (read-your-writes comes from
+%% `apply/4`'s await, not overlay-merge), so the branch is defensive
+%% scaffolding for prospective `bondy_oplog_core` owners that DO pass an
+%% overlay tid. To exercise the real resolution path
+%% (`shard_key` -> registry lookup -> `entry_overlay` -> `events_for`)
+%% the test needs the shared_shards topology (whose ctx carries a
+%% `shard_key`; the memory topology's does not) and a passthrough meck
+%% of `bondy_oplog_core_registry:entry_overlay/1` returning a prepared
+%% overlay table — the registered entry itself is `disabled`, which the
+%% test asserts first to document that production reality. The "blocked"
+%% assertion doubles as a check that the pending row's Bucket/CellKey
+%% convention matches the fence's real read — a mismatch would let the
+%% rewrite through and fail it.
+
+fence_setup() ->
+    process_flag(trap_exit, true),
+    {ok, _} = application:ensure_all_started(bondy_db),
+    bondy_oplog_sync_scheduler:set_dispatch(undefined),
+    bondy_oplog_gc_scheduler:set_trigger(undefined),
+    Dir = mux_tempdir(),
+    {ok, Sup} = bondy_db_leveled_sup:start_link(),
+    {ok, Db} = bondy_db:open(sweep_fence_db, #{
+        topology => bondy_db_topology_shared_shards,
+        topology_opts => #{sup => Sup, dir => Dir},
+        shard_count => 1,
+        fold_module => lww_register,
+        crdt_module => bondy_oplog_crdt_struct,
+        crdt_opts => #{count => bondy_oplog_crdt_pn_counter}
+    }),
+    {ok, T} = bondy_db:open_table(Db, fenced, #{}),
+    {Db, T, Sup, Dir}.
+
+fence_cleanup({Db, _T, Sup, Dir}) ->
+    _ = catch bondy_db:close(Db),
+    _ = [
+        catch bondy_oplog:stop_instance(I)
+     || I <- bondy_oplog:list_instances()
+    ],
+    case is_process_alive(Sup) of
+        true -> bondy_db_leveled_sup:stop(Sup);
+        false -> ok
+    end,
+    mux_rmrf(Dir),
+    ok.
+
+overlay_fence_test_() ->
+    {setup, fun fence_setup/0, fun fence_cleanup/1, fun({_Db, T, _, _}) ->
+        [
+            {"a pending overlay event blocks the {keep, Reduced} rewrite",
+                {timeout, 60, fun() -> overlay_fence_blocks_reduction(T) end}}
+        ]
+    end}.
+
+overlay_fence_blocks_reduction(T) ->
+    K = <<"blocked">>,
+    %% Two separate applies — a batch is ONE dot, and two sub-ops on the
+    %% same field under one dot would collapse in the dot-store (the
+    %% batch API rejects that shape outright). The fold needs a run of
+    %% two distinct dots.
+    ok = bondy_db:apply(T, ?REALM, K, {apply, count, {inc, 1}}),
+    ok = bondy_db:apply(T, ?REALM, K, {apply, count, {inc, 2}}),
+    ?assertMatch({ok, {#{count := 3}, _}}, bondy_db:read(T, ?REALM, K)),
+
+    InstanceId = instance_of(T),
+    ok = bondy_oplog_instance:await_apply(InstanceId),
+    Pid = bondy_oplog_registry:applier_pid(InstanceId),
+    ?assert(is_pid(Pid)),
+    {ok, {NS, Index, Shard}} = bondy_oplog_applier:cell_apply_target(Pid),
+    {ok, Entry} = bondy_oplog_core_registry:lookup(NS, Index, Shard),
+    %% Production reality: the facade registers no overlay. The fence is
+    %% open by default, hence the meck below to arm it.
+    ?assertEqual(
+        disabled, bondy_oplog_core_registry:entry_overlay(Entry)
+    ),
+
+    %% A prepared overlay holding one synthetic pending event for the
+    %% cell — value-inert ({inc, 0}) in case anything overlay-merges it.
+    Overlay = bondy_oplog_db_overlay:new(),
+    Bucket = atom_to_binary(fenced, utf8),
+    CellKey = <<?REALM/binary, 0, K/binary>>,
+    Hlc = far_future(T) + 1000,
+    EventKey = bondy_oplog_event:key(Hlc, <<"synthetic">>, 1),
+    Ev = bondy_oplog_event:new(EventKey, {apply, count, {inc, 0}}, undefined),
+    ok = bondy_oplog_db_overlay:insert(Overlay, Bucket, CellKey, Ev),
+
+    ok = meck:new(bondy_oplog_core_registry, [passthrough]),
+    ok = meck:expect(bondy_oplog_core_registry, entry_overlay, fun(_) ->
+        Overlay
+    end),
+    try
+        %% Blocked: the count field's stable run is foldable, but the
+        %% fence must hold the cell back while an event is pending.
+        {ok, Stats1} = bondy_oplog_applier:sweep_stable_cells(
+            Pid, far_future(T)
+        ),
+        ?assertEqual(0, maps:get(rewritten, Stats1)),
+        ?assert(maps:get(skipped, Stats1) >= 1),
+
+        %% Unblocked: the pending event drains (here: the synthetic row
+        %% is removed) and the very next pass performs the rewrite.
+        true = ets:delete(Overlay, {{Bucket, CellKey}, Hlc, EventKey}),
+        {ok, Stats2} = bondy_oplog_applier:sweep_stable_cells(
+            Pid, far_future(T)
+        ),
+        ?assert(maps:get(rewritten, Stats2) >= 1)
+    after
+        meck:unload(bondy_oplog_core_registry)
+    end,
+    ?assertMatch({ok, {#{count := 3}, _}}, bondy_db:read(T, ?REALM, K)).
 
 %% -----------------------------------------------------------------------------
 %% Kernel fidelity on a multiplexed applier (A6)

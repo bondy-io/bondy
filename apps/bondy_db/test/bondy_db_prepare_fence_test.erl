@@ -66,18 +66,31 @@ remote_delivery_fences_cell_context() ->
 
     %% Swallow the integrate handler's replay trigger — simulating the
     %% cast in flight (or lost; it is best-effort by contract) at the
-    %% moment a client prepares an op. Only the public cast-send wrapper
-    %% is stubbed; the fence's own catch-up runs through the applier's
-    %% internal replay path and is unaffected.
+    %% moment a client prepares an op. The sync session's frontier-gap
+    %% settle barrier (`bondy_oplog_applier:barrier/1`) would heal this
+    %% exact window before the session returns, so it is swallowed too —
+    %% the fence under test here is the one at the PREPARE
+    %% (`cell_context`), and it must hold with no other healer running.
+    %% Only the public wrappers are stubbed; the fence's own catch-up
+    %% runs through the applier's internal replay path and is unaffected.
     ok = meck:new(bondy_oplog_applier, [passthrough]),
     ok = meck:expect(bondy_oplog_applier, replay_cell_events, fun(_) ->
+        ok
+    end),
+    ok = meck:expect(bondy_oplog_applier, barrier, fun(_) ->
         ok
     end),
     try
         %% A pulls B's event: it is now DELIVERED at A (in A's MST, the
         %% remote-delivery generation bumped) but NOT in A's projection
-        %% (the replay cast was swallowed).
-        {ok, _} = bondy_oplog:sync(InstA, InstB),
+        %% (the replay cast was swallowed). With the whole local settle
+        %% stubbed out, the session's frontier-gap check correctly judges
+        %% A's projection behind B's installed-consistent frontier — the
+        %% session reports the gap, and the pages are integrated
+        %% regardless (the gap verdict follows the completed pull).
+        ?assertMatch(
+            {error, {frontier_gap, _}}, bondy_oplog:sync(InstA, InstB)
+        ),
         ?assertMatch({error, not_found}, bondy_db:read(TA, ?R, ?K)),
 
         %% I1: the PREPARE must reflect every delivered event. The

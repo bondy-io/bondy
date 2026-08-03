@@ -423,6 +423,7 @@ instances are unaffected.
 -export([rebuild_indexes_sync/1]).
 -export([await_drain/1]).
 -export([reap_origins_sync/2]).
+-export([barrier/1]).
 -export([cell_apply_target/1]).
 -export([sweep_stable_cells/2]).
 -export([sweep_stable_cells/3]).
@@ -811,6 +812,23 @@ projection's cells from.
 """.
 cell_apply_target(ApplierPid) when is_pid(ApplierPid) ->
     gen_server:call(ApplierPid, cell_apply_target, infinity).
+
+-doc """
+A synchronous settle barrier: returns once the applier has served every
+message enqueued before this call — in particular the
+`replay_cell_events` cast an `integrate_peer_root` issued earlier — AND
+has caught its projection up to the instance's remote-delivery
+generation (the I1 fence, `ensure_remote_caught_up/1`), which also
+covers a lost best-effort replay cast. After this returns, the
+projection (and the applied-frontier VV its replay advances) reflects
+every remote event delivered to the instance before the call. Used by
+the sync session's frontier-gap check to rule out replay lag before
+declaring a deficit genuine.
+""".
+-spec barrier(pid()) -> ok.
+
+barrier(ApplierPid) when is_pid(ApplierPid) ->
+    gen_server:call(ApplierPid, barrier, infinity).
 
 -doc """
 Reclaims projection cells that are no longer semantically meaningful once
@@ -1489,6 +1507,13 @@ handle_call(
     %% is still in flight (a different sender, unordered against this
     %% call) — before any cell is discarded or reduced. See the theorem
     %% at `ensure_remote_caught_up/1`. Steady-state cost: one atomic read.
+    %%
+    %% A FAILED catch-up does not abort the sweep (same policy as the
+    %% `cell_context` fence): the fence stays armed for the next call,
+    %% and proceeding is promptness-not-soundness — a delivered event the
+    %% sweep missed replays later onto whatever the sweep left (a reduced
+    %% frame absorbs it as a new entry; a discarded cell is re-created by
+    %% the replay), so both directions converge.
     #state{
         cell_apply_ctx = Ctx,
         cell_apply_source = Source,
@@ -1496,6 +1521,11 @@ handle_call(
     } = State = ensure_remote_caught_up(StateIn),
     {reply, bondy_oplog_cell_utils:sweep(Id, Ctx, Source, StableHlc, Opts),
         State};
+handle_call(barrier, _From, StateIn) ->
+    %% Queue-ordering alone settles every earlier cast; the I1 fence on
+    %% top also covers a LOST best-effort replay cast (gen gap → replay
+    %% now). One atomic read when nothing is pending.
+    {reply, ok, ensure_remote_caught_up(StateIn)};
 handle_call(
     cell_apply_target,
     _From,

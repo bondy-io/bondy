@@ -42,23 +42,30 @@ bootstrap_catalogue_test_() ->
         fun finalize_adopts_peer_frontier/0,
         fun bootstrap_seeds_local_frontier/0,
         fun bootstrap_absorbs_installed_hlcs/0,
-        fun live_sync_adopts_peer_frontier/0,
+        fun live_sync_refuses_phantom_frontier_bootstrap_adopts/0,
         fun no_snapshot_falls_through_to_sync/0,
         fun single_crdt_local_refuses_bootstrap_catalogue/0,
         fun live_replica_recovers_lossless_via_anti_entropy/0
     ]}.
 
-%% A LIVE sync round (`run/3`) adopts the peer's applied-frontier even for
-%% maxima the local replica can NEVER derive from the transferred events — the
-%% production main/12 & main/13 symptom. A shard the peer has fully compacted
-%% has EQUAL roots (nothing to page-sync) and a snapshot MST with no
-%% `cell_apply` keys, so neither the replay path nor a restart's
-%% `frontier_from_mst` can reconstruct those maxima; the ONLY path to a
-%% converged oracle is adopting the peer's frontier on the live sync. Modelled
-%% by injecting a phantom origin into the peer's frontier that no transferred
-%% event carries: a converged round must still adopt it. Before the fix the
-%% local frontier omits it and the oracle stays DIVERGED-with-identical-data.
-live_sync_adopts_peer_frontier() ->
+%% THE CONTRACT (post stale-peer-rejoin audit): a LIVE round adopts the
+%% peer's applied-frontier ONLY for maxima the local replica can WITNESS —
+%% i.e. when, after the round and the local settle, its own frontier
+%% already covers everything the peer's claims (no deficit). A maximum no
+%% transferred event carries — a compacted-prefix maximum, modelled here
+%% by a phantom origin injected into the peer's frontier — is precisely
+%% what a live round cannot witness, and unconditionally adopting it was
+%% the stale-peer rejoin data-loss mechanism: a replica the
+%% recency-filtered frontier had excluded would return, "successfully"
+%% sync against the truncated trees, adopt a frontier covering data it
+%% never received, and the convergence oracle would report CONVERGED over
+%% a silent permanent loss. The live round now refuses with
+%% `{error, {frontier_gap, Origins}}`; the sync scheduler routes that to
+%% a catalogue BOOTSTRAP, whose install + finalize supply BOTH the data
+%% and the frontier (phantom maxima included) — the witnessed adoption
+%% path. Asserted here by driving the bootstrap directly and observing a
+%% clean live round afterwards.
+live_sync_refuses_phantom_frontier_bootstrap_adopts() ->
     {Peer, _, _, _} = setup_instance(),
     {Local, _, _, _} = setup_instance(),
     %% A real shared event so the round genuinely converges (equal roots).
@@ -69,43 +76,46 @@ live_sync_adopts_peer_frontier() ->
     Phantom = <<"peer-compacted-origin">>,
     ok = bondy_oplog_registry:merge_frontier(Peer, #{Phantom => 777}),
 
+    %% 1. The live round refuses the unwitnessable claim, naming the
+    %% origin, and adopts nothing. (Bounded retry through transient
+    %% `{ok, _}` rounds whose inline `get_frontier` degraded to `#{}`
+    %% under load — those skip both the check and the adoption.)
+    ok = gap_within(Local, Peer, Phantom, 100),
     ?assertEqual(
         undefined,
         maps:get(Phantom, bondy_oplog_instance:frontier(Local), undefined)
     ),
 
-    %% THE FIX (production behaviour): a converged round adopts the peer's
-    %% frontier, including the phantom maximum no transferred event carries.
-    %%
-    %% We assert this against the CONVERGED STEADY STATE rather than a single
-    %% `run/1`. `run/4` captures the peer frontier BEFORE the round via
-    %% `request_peer_frontier/4`, whose inline `get_frontier` request has a
-    %% `catch` that degrades to `#{}` on ANY error — including a transient
-    %% gen_server-call timeout under heavy test-VM load. When that happens the
-    %% round still returns `{ok, _}` but skips the adoption (empty peer frontier),
-    %% exactly as it would in production — where the scheduler simply adopts on
-    %% the next AE tick. Mirror that by running rounds until the phantom is
-    %% adopted (bounded). This cannot mask a real "never adopts" regression: a
-    %% frontier that is genuinely never adopted still exhausts the budget and
-    %% fails loudly below.
-    ok = adopt_phantom_within(Local, Peer, Phantom, 777, 100),
+    %% 2. The bootstrap path adopts: install + finalize carry both the
+    %% cells and the frontier, phantom included.
+    ?assertMatch(
+        {ok, _},
+        bondy_oplog_sync_session:bootstrap_catalogue(
+            Local, Peer, #{transport_opts => #{}}
+        )
+    ),
+    ?assertEqual(
+        777,
+        maps:get(Phantom, bondy_oplog_instance:frontier(Local), undefined)
+    ),
+
+    %% 3. With every claim witnessed, the next live round is clean.
+    ?assertMatch({ok, _}, bondy_oplog_sync_session:run(Local, Peer, #{})),
 
     teardown(Peer),
     teardown(Local).
 
 %% @private
-adopt_phantom_within(_Local, _Peer, Phantom, Expected, 0) ->
-    error({frontier_not_adopted, Phantom, Expected});
-adopt_phantom_within(Local, Peer, Phantom, Expected, N) ->
-    %% Tolerate a transient `{error, _}` round (e.g. a load-induced
-    %% budget/timeout) the same way the scheduler does — retry.
-    _ = bondy_oplog_sync_session:run(Local, Peer, #{}),
-    case maps:get(Phantom, bondy_oplog_instance:frontier(Local), undefined) of
-        Expected ->
+gap_within(_Local, _Peer, Phantom, 0) ->
+    error({frontier_gap_never_reported, Phantom});
+gap_within(Local, Peer, Phantom, N) ->
+    case bondy_oplog_sync_session:run(Local, Peer, #{}) of
+        {error, {frontier_gap, Origins}} ->
+            ?assert(lists:member(Phantom, Origins)),
             ok;
         _ ->
             timer:sleep(20),
-            adopt_phantom_within(Local, Peer, Phantom, Expected, N - 1)
+            gap_within(Local, Peer, Phantom, N - 1)
     end.
 
 %% A3 — the catalogue install writes peer cells carrying remote HLCs straight

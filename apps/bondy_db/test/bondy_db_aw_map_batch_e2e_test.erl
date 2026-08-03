@@ -42,6 +42,8 @@ aw_map_batch_e2e_test_() ->
             {"empty batch is a no-op", fun empty_batch_noop/0},
             {"unknown map_update key is rejected", fun unknown_map_edit_key/0},
             {"counter table refuses apply_batch", fun counter_not_batchable/0},
+            {"duplicate same-key nested sub-ops in one batch are rejected",
+                fun duplicate_nested_subop_rejected/0},
             {"a batch event converges with concurrent single ops",
                 {timeout, 30, fun batch_converges_with_single/0}}
         ]
@@ -139,6 +141,48 @@ counter_not_batchable() ->
     ?assertMatch(
         {error, {not_batchable, bondy_oplog_crdt_pn_counter}},
         bondy_db:apply_batch(T, <<"r">>, <<"c">>, [{inc, 1}, {inc, 2}])
+    ),
+    ok = bondy_db:close(Db).
+
+%% A batch is ONE dot and nested sub-ops accumulate BY dot, so two
+%% sub-ops on the same key under one packed identity would silently
+%% collapse to the last — both batch entry points reject the batch
+%% before the WAL append instead.
+duplicate_nested_subop_rejected() ->
+    {Db, _O} = open_db(awmapb_dup),
+    {ok, T} = bondy_db:open_table(Db, items, #{}),
+    PN = bondy_oplog_crdt_pn_counter,
+    Dup = [
+        {apply, <<"hits">>, PN, {inc, 1}},
+        {apply, <<"hits">>, PN, {inc, 2}}
+    ],
+    ?assertEqual(
+        {error, {duplicate_batch_subop, [<<"hits">>]}},
+        bondy_db:apply_batch(T, <<"r">>, <<"c">>, Dup)
+    ),
+    ?assertEqual(
+        {error, {duplicate_batch_subop, [<<"hits">>]}},
+        bondy_db:apply_batch_async(T, <<"r">>, <<"c">>, Dup)
+    ),
+    %% Nothing was written — the cell does not exist.
+    ?assertEqual({error, not_found}, bondy_db:read(T, <<"r">>, <<"c">>)),
+
+    %% Distinct keys (and flat forms mixed in) remain batchable: one
+    %% sub-op per key is exactly the intended shape.
+    ok = bondy_db:apply_batch(T, <<"r">>, <<"c">>, [
+        {apply, <<"hits">>, PN, {inc, 3}},
+        {apply, <<"misses">>, PN, {inc, 1}},
+        {put, <<"name">>, <<"alice">>}
+    ]),
+    ?assertEqual(
+        {ok,
+            #{
+                <<"hits">> => 3,
+                <<"misses">> => 1,
+                <<"name">> => [<<"alice">>]
+            },
+            read_hlc},
+        normalise(bondy_db:read(T, <<"r">>, <<"c">>))
     ),
     ok = bondy_db:close(Db).
 

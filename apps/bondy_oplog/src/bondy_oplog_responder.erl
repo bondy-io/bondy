@@ -171,14 +171,35 @@ dispatch(InstanceId, get_frontier) when is_binary(InstanceId) ->
             %% `#{Origin => max Seq}`. Equal frontiers across nodes ⇒ the same
             %% op-set has been applied ⇒ converged (causal delivery makes a
             %% per-origin max Seq identify the applied prefix), and it is
-            %% compaction-invariant. Lock-free registry read; like `get_root` we
-            %% do NOT await the applier drain (eventually consistent). The
-            %% topology fingerprint lets the initiator compare frontiers only when
-            %% both nodes key data the same way.
-            {ok, bondy_oplog_instance:frontier(InstanceId),
-                bondy_oplog:topology_fingerprint(
-                    bondy_oplog:db_of(InstanceId)
-                )}
+            %% compaction-invariant.
+            %%
+            %% INSTALLED-CONSISTENCY BARRIER (unlike `get_root`, which stays
+            %% lock-free): the answered frontier is the initiator's evidence
+            %% base for the frontier-GAP check — "everything this frontier
+            %% counts is either in the tree my round completes against, or
+            %% was compacted from it". Local events advance the applied VV
+            %% at their projection write, which the drain performs BEFORE
+            %% their MST install, so a lock-free read can count events the
+            %% current tree cannot yet ship — turning ordinary install lag
+            %% into false `frontier_gap` verdicts (observed as spurious
+            %% rebootstraps under sustained load). Draining the overlay
+            %% first (`await_apply/1` blocks until the install handlers
+            %% empty it) restores the invariant: post-drain, applied ≡
+            %% installed-ever, and the session fetches the frontier BEFORE
+            %% the root, so the round's tree is same-or-newer than this
+            %% answer. On drain timeout answer an error — the initiator's
+            %% `request_peer_frontier` degrades to `#{}`, which skips both
+            %% the adoption and the gap check for that round (conservative
+            %% in the safe direction).
+            case bondy_oplog_instance:await_apply(InstanceId) of
+                ok ->
+                    {ok, bondy_oplog_instance:frontier(InstanceId),
+                        bondy_oplog:topology_fingerprint(
+                            bondy_oplog:db_of(InstanceId)
+                        )};
+                {error, timeout} ->
+                    {error, {frontier_unavailable, InstanceId}}
+            end
     end;
 dispatch(InstanceId, {confirm_root, Peer, Root}) when
     is_binary(InstanceId), is_binary(Root)

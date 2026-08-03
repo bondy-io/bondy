@@ -74,7 +74,8 @@
 
 all() ->
     [
-        sustained_writes_registry_history_stays_bounded
+        sustained_writes_registry_history_stays_bounded,
+        silent_peer_truncated_past_recovers_on_rejoin
     ].
 
 suite() ->
@@ -226,6 +227,433 @@ await_rib_convergence(Nodes, Deadline) ->
             timer:sleep(5000),
             await_rib_convergence(Nodes, Deadline)
     end.
+
+%% =============================================================================
+%% STALE-PEER REJOIN AUDIT (durable path)
+%% =============================================================================
+%%
+%% The recency-filtered stability frontier
+%% (`bondy_oplog_peer_state:get_instance_peer_states/1,2`) drops a peer
+%% silent past `peer_timeout_ms` so a dead node cannot stall MST
+%% compaction forever — the documented liveness trade: truncating past
+%% what the silent peer never received costs it a bulk resync via the
+%% bootstrap path, not correctness. This case is the never-before-run
+%% demonstration that the resync half of that trade actually holds, END
+%% TO END, on the durable (`main/*`, `security_users`) path — including
+%% the hardest part: the silent peer holds UNIQUE writes of its own that
+%% no live node ever received, and those must survive its own recovery
+%% AND propagate back out (they exist only in its own MST; the healthy
+%% nodes' advanced watermarks would drop them at the integrate door, so
+%% the S1 frontier-gap detection is what must carry them home).
+%%
+%% Fully deterministic: sync-scheduler dispatch is disabled on all nodes
+%% and every AE session is driven by hand (`bondy_oplog:sync/2`),
+%% scheduler GC is frozen and compaction invoked explicitly
+%% (`bondy_oplog:compact/1`); only the REJOIN runs through the restored
+%% production scheduler, because the recovery chain under test
+%% (session exit -> rebootstrap flag -> catalogue bootstrap dispatch)
+%% lives in the scheduler's exit handling.
+
+-define(STALE_BANDS, 4).
+-define(STALE_CONVERGE_MS, 120000).
+
+silent_peer_truncated_past_recovers_on_rejoin(Config) ->
+    [_N1, _N2, _N3] = Nodes = nodes_of(Config),
+
+    %% Manual control: no scheduler dispatch, no scheduler-driven GC.
+    _ = [
+        ok = erpc:call(N, bondy_oplog_sync_scheduler, set_dispatch, [undefined])
+     || N <- Nodes
+    ],
+    _ = [ok = bondy_ct:freeze_gc(N) || N <- Nodes],
+    _ = [ok = erpc:call(N, ?MODULE, do_start_dispatch_collector, []) || N <- Nodes],
+
+    try
+        do_stale_rejoin(Nodes)
+    after
+        %% Leave the cluster schedulable for any case added after this one.
+        _ = [
+            catch erpc:call(N, ?MODULE, do_restore_sync_defaults, [])
+         || N <- Nodes
+        ]
+    end.
+
+do_stale_rejoin([N1, N2, N3] = Nodes) ->
+    Bands = [stale_band(B) || B <- lists:seq(1, ?STALE_BANDS)],
+
+    %% ---------------------------------------------------------------------
+    %% 1. SEED on all three nodes; converge via manual full-mesh pulls.
+    %% ---------------------------------------------------------------------
+    Seed = [
+        {Band, stale_key(Tag), stale_val(Band, Tag)}
+     || Band <- Bands, Tag <- [<<"s1">>, <<"s2">>, <<"s3">>]
+    ],
+    SeedWriters = lists:zip([N1, N2, N3], [<<"s1">>, <<"s2">>, <<"s3">>]),
+    _ = [
+        ok = erpc:call(W, ?MODULE, do_stale_apply, [Band, K, V])
+     || {W, Tag} <- SeedWriters,
+        {Band, K, V} <- Seed,
+        binary:match(K, Tag) =/= nomatch
+    ],
+    ok = stale_converge_all(Nodes, Seed),
+
+    %% ---------------------------------------------------------------------
+    %% 2. SILENCE. N3 stops syncing entirely (its dispatch is already off and
+    %%    it is simply excluded from the manual rounds) and writes UNIQUE
+    %%    keys no other node will ever pull while it is silent.
+    %% ---------------------------------------------------------------------
+    Unique = [
+        {Band, stale_key(<<"unique">>), stale_val(Band, <<"unique">>)}
+     || Band <- Bands
+    ],
+    _ = [
+        ok = erpc:call(N3, ?MODULE, do_stale_apply, [Band, K, V])
+     || {Band, K, V} <- Unique
+    ],
+
+    %% ---------------------------------------------------------------------
+    %% 3. The live pair keeps working: post-silence writes + mutual sync
+    %%    rounds, so N1/N2 confirm each other's FULL history.
+    %% ---------------------------------------------------------------------
+    Post = [
+        {Band, stale_key(<<"post">>), stale_val(Band, <<"post">>)}
+     || Band <- Bands
+    ],
+    _ = [
+        ok = erpc:call(N1, ?MODULE, do_stale_apply, [Band, K, V])
+     || {Band, K, V} <- Post
+    ],
+    ok = stale_converge_all([N1, N2], Post),
+
+    %% Sanity on the partition: the silent peer lacks the post-silence
+    %% writes, the live pair lacks the unique ones.
+    [{PB, PK, _} | _] = Post,
+    [{UB, UK, _} | _] = Unique,
+    ?assertEqual({error, not_found}, stale_read(N3, PB, PK)),
+    ?assertEqual({error, not_found}, stale_read(N1, UB, UK)),
+
+    %% ---------------------------------------------------------------------
+    %% 4. STALE-OUT: with a lowered `peer_timeout_ms`, N3's last-confirmed
+    %%    entries age out of the recency filter on the live pair, while one
+    %%    fresh mutual round keeps N1<->N2 inside it.
+    %% ---------------------------------------------------------------------
+    _ = [
+        ok = erpc:call(
+            N, application, set_env, [bondy_oplog, peer_timeout_ms, 1500]
+        )
+     || N <- [N1, N2]
+    ],
+    timer:sleep(2000),
+
+    %% ---------------------------------------------------------------------
+    %% 5. TRUNCATE: explicit compaction on both live nodes. The frontier is
+    %%    now computed over the fresh pair alone, so it advances past
+    %%    everything N3 never confirmed — a truncation that MUST move the
+    %%    compaction watermark (scheduler GC is frozen; nothing else could
+    %%    have) on both nodes, or the recency filter is not doing its
+    %%    liveness job. Two mechanics learned the hard way:
+    %%      - sync and compact are fused PER INSTANCE on the peer side:
+    %%        with the recency window at 1.5s, a node-wide sync round
+    %%        followed by a node-wide compact round leaves the live
+    %%        peer's entry stale again before the later instances compact;
+    %%      - `bondy_oplog:compact/1` may start an ASYNC projection
+    %%        catch-up ({ok, compaction_pending}) whose eventual
+    %%        truncation replies to nobody — so the observable is the
+    %%        WATERMARK advancing, with the compact polled until pending
+    %%        resolves, never the drop count of one synchronous call.
+    %% ---------------------------------------------------------------------
+    W1Before = erpc:call(N1, ?MODULE, do_stale_watermarks_main, []),
+    W2Before = erpc:call(N2, ?MODULE, do_stale_watermarks_main, []),
+    Compact1 = erpc:call(N1, ?MODULE, do_stale_sync_and_compact_main, [N2]),
+    Compact2 = erpc:call(N2, ?MODULE, do_stale_sync_and_compact_main, [N1]),
+    W1After = erpc:call(N1, ?MODULE, do_stale_watermarks_main, []),
+    W2After = erpc:call(N2, ?MODULE, do_stale_watermarks_main, []),
+    Advanced1 = watermarks_advanced(W1Before, W1After),
+    Advanced2 = watermarks_advanced(W2Before, W2After),
+    ct:pal(
+        "stale-rejoin: compaction watermarks advanced on ~p instance(s) "
+        "on ~p and ~p instance(s) on ~p~n"
+        "compact results on ~p:~n~p~n"
+        "compact results on ~p:~n~p",
+        [
+            length(Advanced1), N1, length(Advanced2), N2,
+            N1, Compact1, N2, Compact2
+        ]
+    ),
+    ?assert(length(Advanced1) >= 1),
+    ?assert(length(Advanced2) >= 1),
+
+    %% ---------------------------------------------------------------------
+    %% 6. REJOIN through the PRODUCTION scheduler: restore N3's dispatch and
+    %%    tick it. Its live pulls hit truncated pages on the live nodes
+    %%    ({peer_pages_unavailable, _}), the scheduler flags rebootstrap,
+    %%    and a catalogue bootstrap carries it forward. Converged when N3
+    %%    reads every seed AND post-silence key.
+    %% ---------------------------------------------------------------------
+    ok = erpc:call(N3, ?MODULE, do_restore_sync_defaults, []),
+    ok = stale_wait(
+        fun() ->
+            _ = catch erpc:call(N3, bondy_oplog_sync_scheduler, trigger, []),
+            lists:all(
+                fun({Band, K, V}) ->
+                    stale_read(N3, Band, K) =:= {ok_val, V}
+                end,
+                Seed ++ Post
+            )
+        end,
+        {stale_rejoin_bootstrap_timeout, N3},
+        fun() ->
+            Missing = [
+                {Band, K, stale_read(N3, Band, K)}
+             || {Band, K, V} <- Seed ++ Post,
+                stale_read(N3, Band, K) =/= {ok_val, V}
+            ],
+            ct:pal(
+                "stale-rejoin TIMEOUT diagnostics on ~p:~n"
+                "missing keys:~n~p~n"
+                "collector events:~n~p~n"
+                "scheduler info:~n~p",
+                [
+                    N3,
+                    Missing,
+                    catch erpc:call(
+                        N3, ?MODULE, do_drain_dispatch_collector, []
+                    ),
+                    catch erpc:call(N3, bondy_oplog_sync_scheduler, info, [])
+                ]
+            )
+        end
+    ),
+
+    %% The recovery MUST have gone through the truncated-page rebootstrap
+    %% chain — otherwise this case silently degraded into plain AE and
+    %% proved nothing about truncation.
+    N3Events = erpc:call(N3, ?MODULE, do_drain_dispatch_collector, []),
+    Rebootstraps = [
+        maps:with([instance_id, reason], Meta)
+     || {E, _, Meta} <- N3Events,
+        lists:suffix([rebootstrap_scheduled], E)
+    ],
+    BootstrapStarts = length([
+        E
+     || {E, _, _} <- N3Events, lists:suffix([bootstrap, started], E)
+    ]),
+    ct:pal(
+        "stale-rejoin: ~p rebootstraps flagged on ~p (~p bootstrap starts):~n~p",
+        [length(Rebootstraps), N3, BootstrapStarts, lists:sublist(Rebootstraps, 8)]
+    ),
+    ?assert(length(Rebootstraps) >= 1),
+    ?assert(BootstrapStarts >= 1),
+
+    %% ---------------------------------------------------------------------
+    %% 7. THE AUDIT'S CRUX: N3's unique silence-era writes must first have
+    %%    SURVIVED its own recovery (the catalogue install must not have
+    %%    clobbered what only N3 ever held)...
+    %% ---------------------------------------------------------------------
+    _ = [
+        ?assertEqual(
+            {ok_val, V},
+            stale_read(N3, Band, K),
+            lists:flatten(
+                io_lib:format(
+                    "unique key ~p/~p lost on the rejoining node itself "
+                    "after catalogue bootstrap",
+                    [Band, K]
+                )
+            )
+        )
+     || {Band, K, V} <- Unique
+    ],
+
+    %% ...and then propagate back OUT to the live pair. Their watermarks
+    %% have advanced past the unique events' HLC range, so plain integrate
+    %% drops them at the door — the frontier-gap detection must flag the
+    %% gap and carry them via rebootstrap. Restore the production
+    %% schedulers (and the default peer timeout) on the live pair and let
+    %% the machinery run.
+    _ = [
+        ok = erpc:call(N, ?MODULE, do_restore_sync_defaults, [])
+     || N <- [N1, N2]
+    ],
+    ok = stale_wait(
+        fun() ->
+            _ = [
+                catch erpc:call(N, bondy_oplog_sync_scheduler, trigger, [])
+             || N <- Nodes
+            ],
+            lists:all(
+                fun({Band, K, V}) ->
+                    stale_read(N1, Band, K) =:= {ok_val, V} andalso
+                        stale_read(N2, Band, K) =:= {ok_val, V}
+                end,
+                Unique
+            )
+        end,
+        {stale_unique_writes_never_returned, [N1, N2]}
+    ),
+
+    %% ---------------------------------------------------------------------
+    %% 8. Full agreement everywhere on every key this case ever wrote.
+    %% ---------------------------------------------------------------------
+    _ = [
+        ?assertEqual({ok_val, V}, stale_read(N, Band, K), {N, Band, K})
+     || N <- Nodes, {Band, K, V} <- Seed ++ Post ++ Unique
+    ],
+    ok.
+
+%% @private
+stale_band(B) ->
+    <<"com.bondy.stale.", (integer_to_binary(B))/binary>>.
+
+%% @private
+stale_key(Tag) ->
+    <<"sk_", Tag/binary>>.
+
+%% @private
+stale_val(Band, Tag) ->
+    #{band_uri => Band, tag => Tag, marker => <<"stale_rejoin">>}.
+
+%% @private
+%% Reads normalised to compare on the value alone (HLC differs by node).
+stale_read(Node, Band, Key) ->
+    case erpc:call(Node, ?MODULE, do_stale_read, [Band, Key]) of
+        {ok, {V, _Hlc}} -> {ok_val, V};
+        Other -> Other
+    end.
+
+%% @private
+%% Manual full-mesh convergence: every listed node pulls every `main/*`
+%% instance from every other listed node, repeatedly, until all given
+%% {Band, Key, Val} triples read back on all of them.
+stale_converge_all(Nodes, Triples) ->
+    stale_wait(
+        fun() ->
+            _ = [
+                catch erpc:call(X, ?MODULE, do_stale_sync_main_from, [Y])
+             || X <- Nodes, Y <- Nodes, X =/= Y
+            ],
+            lists:all(
+                fun({Band, K, V}) ->
+                    lists:all(
+                        fun(N) -> stale_read(N, Band, K) =:= {ok_val, V} end,
+                        Nodes
+                    )
+                end,
+                Triples
+            )
+        end,
+        {stale_converge_timeout, Nodes}
+    ).
+
+%% @private
+stale_wait(Fun, ErrorTag) ->
+    stale_wait(Fun, ErrorTag, fun() -> ok end).
+
+%% @private
+stale_wait(Fun, ErrorTag, DiagFun) ->
+    stale_wait(
+        Fun,
+        ErrorTag,
+        DiagFun,
+        erlang:monotonic_time(millisecond) + ?STALE_CONVERGE_MS
+    ).
+
+%% @private
+stale_wait(Fun, ErrorTag, DiagFun, Deadline) ->
+    case Fun() of
+        true ->
+            ok;
+        false ->
+            case erlang:monotonic_time(millisecond) =< Deadline of
+                true ->
+                    ok;
+                false ->
+                    _ = catch DiagFun(),
+                    error(ErrorTag)
+            end,
+            timer:sleep(400),
+            stale_wait(Fun, ErrorTag, DiagFun, Deadline)
+    end.
+
+%% @private
+%% Instances whose compaction watermark moved between two
+%% `do_stale_watermarks_main/0` snapshots.
+watermarks_advanced(Before, After) ->
+    B = maps:from_list(Before),
+    [I || {I, W} <- After, W =/= maps:get(I, B, undefined)].
+
+%% =============================================================================
+%% STALE-PEER REJOIN — PEER-SIDE HELPERS (run on cluster nodes via erpc)
+%% =============================================================================
+
+%% @private
+do_stale_apply(Band, Key, Val) ->
+    bondy_db:apply(table_handle(security_users), Band, Key, {set, Val}).
+
+%% @private
+do_stale_read(Band, Key) ->
+    bondy_db:read(table_handle(security_users), Band, Key).
+
+%% @private
+%% One manual pull of every durable `main/*` instance from `Peer` — the
+%% hand-driven replacement for a scheduler live-sync round. Threads the
+%% node's configured `sync_session_opts` (the Partisan transport +
+%% channel `bondy_app` wired for the scheduler) — without them
+%% `bondy_oplog:sync/2` defaults to the inline transport, which treats a
+%% node-atom peer as a (nonexistent) local instance id.
+do_stale_sync_main_from(Peer) ->
+    Opts = application:get_env(bondy_oplog, sync_session_opts, #{}),
+    [
+        {I, catch bondy_oplog:sync(I, Peer, Opts)}
+     || I <- bondy_oplog:list_instances(),
+        binary:match(I, <<"main/">>) =/= nomatch
+    ].
+
+%% @private
+%% Per `main/*` instance: one manual pull from `Peer` immediately followed
+%% by one explicit compaction cycle — fused so the peer-state entry the
+%% frontier reads is milliseconds old even under a lowered
+%% `peer_timeout_ms` (see the step-5 note in the test).
+do_stale_sync_and_compact_main(Peer) ->
+    Opts = application:get_env(bondy_oplog, sync_session_opts, #{}),
+    [
+        begin
+            _ = catch bondy_oplog:sync(I, Peer, Opts),
+            {I, stale_compact_resolved(I, catch bondy_oplog:compact(I), 25)}
+        end
+     || I <- bondy_oplog:list_instances(),
+        binary:match(I, <<"main/">>) =/= nomatch
+    ].
+
+%% @private
+%% `compact/1` may start an async projection catch-up and reply
+%% `{ok, compaction_pending}`; poll until the cycle resolves (the
+%% truncation itself is observed via the watermark, not this reply).
+stale_compact_resolved(_I, Result, 0) ->
+    Result;
+stale_compact_resolved(I, {ok, compaction_pending}, N) ->
+    timer:sleep(200),
+    stale_compact_resolved(I, catch bondy_oplog:compact(I), N - 1);
+stale_compact_resolved(_I, Result, _N) ->
+    Result.
+
+%% @private
+%% Every `main/*` instance's current compaction watermark.
+do_stale_watermarks_main() ->
+    [
+        {I, catch bondy_oplog:current_watermark(I)}
+     || I <- bondy_oplog:list_instances(),
+        binary:match(I, <<"main/">>) =/= nomatch
+    ].
+
+%% @private
+%% Restores the production sync scheduler dispatch and the default peer
+%% recency window on THIS node.
+do_restore_sync_defaults() ->
+    ok = application:set_env(bondy_oplog, peer_timeout_ms, 30_000),
+    ok = bondy_oplog_sync_scheduler:set_dispatch(
+        fun bondy_oplog_sync_scheduler:default_dispatch/2
+    ).
 
 %% =============================================================================
 %% SCENARIO DRIVER

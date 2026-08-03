@@ -370,6 +370,16 @@ value_equals_state() ->
 order_independent() ->
     true.
 
+-doc """
+Batchable — with the standing constraint for nested sub-ops
+(`bondy_db:apply_batch/4`'s doc): a batch is ONE dot, and a field's
+sub-ops accumulate by dot, so a batch may carry at most one `{apply,
+FieldKey, _}` per field — two sub-ops on the same field under one dot
+would silently collapse to the last, which is why the batch write API
+rejects such a batch (`{error, {duplicate_batch_subop, _}}`).
+One-op-per-field batches (the registration RIB's shape) are exactly
+what this enables.
+""".
 -spec batchable() -> boolean().
 
 batchable() ->

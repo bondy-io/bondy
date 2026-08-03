@@ -418,6 +418,16 @@ reap_report(Supported, Scanned, OriginsReaped) ->
 %% judged stale would replay and resurrect a value. `Ctx`'s `shard_key`
 %% resolves the shard's overlay table exactly as the applier's own
 %% founding ctx does — the fence is instance-wide, not per-registered-table.
+%%
+%% Representation divergence: a `{keep, Reduced}` rewrite (like a reap)
+%% makes the projection FRAME a local representation — two replicas that
+%% reduce at different stability points hold different (semantically
+%% equal) state bytes for the same cell. This is sound only while frames
+%% never feed hash-compared state: AAE ships EVENTS (MST pages), the
+%% convergence oracle is the applied-frontier VV, and catalogue bootstrap
+%% replaces frames wholesale. Anything that ever starts hashing or
+%% diffing projection frames across replicas must first re-derive them
+%% canonically (e.g. re-fold from events).
 
 -doc """
 One bounded sweep pass over `Source`'s member tables' cells, judging

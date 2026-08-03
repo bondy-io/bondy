@@ -69,6 +69,7 @@ so a table can switch from the fold to this module with no data migration.
 -export([hlc/1]).
 -export([value_equals_state/0]).
 -export([order_independent/0]).
+-export([state_to_op/1]).
 -export([encode_state/1]).
 -export([decode_state/1]).
 %% bondy_oplog_crdt_commutative
@@ -158,6 +159,19 @@ value_equals_state() ->
 
 order_independent() ->
     true.
+
+-doc """
+The single operation that rebuilds an equivalent counter from bottom: the
+total. Used by causal-stabilization folding
+(`bondy_oplog_crdt_nested_core:stabilize_fold/2`) to collapse an origin's
+stable `{inc, _}` run into one op — `sum` over non-negative deltas is
+associative and commutative, so the total is exact regardless of how the
+run interleaved with other origins' operations.
+""".
+-spec state_to_op(state()) -> op().
+
+state_to_op(State) ->
+    {inc, to_value(State)}.
 
 -spec encode_state(state()) -> binary().
 

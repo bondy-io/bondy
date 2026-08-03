@@ -1458,12 +1458,23 @@ map `[{put, Field, Value}, {rmv, Field}, ...]`. An empty list is a no-op
 
 Only CRDTs whose operations are identified per sub-key/value — the
 dot-store and grow-set types (add-wins / remove-wins maps and sets, 2P-set,
-G-set, the flags) — may be batched; they declare the `batchable` callback
-of `bondy_oplog_crdt_commutative`. Counters and scalar registers
-dedup / resolve by the event sequence or HLC, so packing several of their
-ops under one identity would silently collapse them: `apply_batch/4`
-refuses such a table with `{error, {not_batchable, Module}}`. Merge those
-client-side and use `apply/4` / `counter_inc/4`.
+G-set, the flags, the struct) — may be batched; they declare the
+`batchable` callback of `bondy_oplog_crdt_commutative`. Counters and
+scalar registers dedup / resolve by the event sequence or HLC, so packing
+several of their ops under one identity would silently collapse them:
+`apply_batch/4` refuses such a table with `{error, {not_batchable,
+Module}}`. Merge those client-side and use `apply/4` / `counter_inc/4`.
+
+The same collapse applies WITHIN a batchable type's **nested sub-ops**:
+a nested `{apply, FieldOrKey, ...}` accumulates in the target's dot-store
+*by dot*, and a batch is one dot — so a batch may carry at most ONE
+sub-op per field/key (the registration-RIB shape: one batch touching four
+*different* fields). A second sub-op on the same field/key in the same
+batch would silently replace the first in the dot-store, so both batch
+entry points reject such a batch with `{error, {duplicate_batch_subop,
+Targets}}` before the WAL append (the async path included). Merge
+same-field sub-ops client-side, or issue separate `apply/4` calls
+(distinct dots).
 
 Returns `ok` once the WAL append is durable and the applier has committed
 the projection write (read-your-writes holds), or `{error, _}`.
@@ -1480,7 +1491,7 @@ apply_batch(_Table, Realm, Key, []) when is_binary(Realm), is_binary(Key) ->
 apply_batch(Table, Realm, Key, Ops) when
     is_binary(Realm), is_binary(Key), is_list(Ops)
 ->
-    case assert_batchable(Table) of
+    case assert_batch(Table, Ops) of
         ok ->
             ?MODULE:apply(Table, Realm, Key, {batch, Ops});
         {error, _} = Err ->
@@ -1506,7 +1517,7 @@ apply_batch_async(_Table, Realm, Key, []) when
 apply_batch_async(Table, Realm, Key, Ops) when
     is_binary(Realm), is_binary(Key), is_list(Ops)
 ->
-    case assert_batchable(Table) of
+    case assert_batch(Table, Ops) of
         ok ->
             apply_async(Table, Realm, Key, {batch, Ops});
         {error, _} = Err ->
@@ -2246,6 +2257,39 @@ assert_batchable(#{crdt_module := Mod}) when Mod =/= undefined ->
     end;
 assert_batchable(_Table) ->
     {error, {not_batchable, undefined}}.
+
+%% @private
+%% Both batch preconditions, checked at the write API — before the WAL
+%% append, so the sync AND async paths fail loudly: the table's CRDT must
+%% be batchable, and the batch must carry at most one nested sub-op per
+%% target (`assert_batch_ops/1`).
+assert_batch(Table, Ops) ->
+    case assert_batchable(Table) of
+        ok -> assert_batch_ops(Ops);
+        {error, _} = Err -> Err
+    end.
+
+%% @private
+%% A batch is ONE dot, and a nested sub-op accumulates in its target's
+%% dot-store BY dot (`bondy_oplog_crdt_nested_core:put_nested/7`) — so a
+%% second sub-op on the same field/key under one packed identity would
+%% silently replace the first, losing its contribution. The nested-op
+%% shapes are the convention shared by every nested-capable type: the
+%% struct's `{apply, FieldKey, SubOp}` and the collections'
+%% `{apply, Key, SubMod, SubOp}`. Flat forms (`put`/`rmv`/`add`) are
+%% exempt: sharing one dot is exactly their documented atomic,
+%% mutually-concurrent batch semantics.
+assert_batch_ops(Ops) ->
+    Targets = [T || Op <- Ops, T <- batch_subop_targets(Op)],
+    case Targets -- lists:usort(Targets) of
+        [] -> ok;
+        Dups -> {error, {duplicate_batch_subop, lists:usort(Dups)}}
+    end.
+
+%% @private
+batch_subop_targets({apply, Target, _SubOp}) -> [Target];
+batch_subop_targets({apply, Target, _SubMod, _SubOp}) -> [Target];
+batch_subop_targets(_Op) -> [].
 
 %% @private
 %% Translate a declarative `#{put => #{F => V}, rmv => [F]}` map edit into
