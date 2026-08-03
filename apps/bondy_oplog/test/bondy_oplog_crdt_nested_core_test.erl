@@ -132,3 +132,96 @@ put_prunes_writers_own_observed_dot_test() ->
         Entries0, <<"k">>, {<<"a">>, 2}, [{<<"a">>, 1}], <<"v2">>
     ),
     ?assertEqual(#{{<<"a">>, 2} => <<"v2">>}, maps:get(<<"k">>, Entries1)).
+
+%% =============================================================================
+%% stabilize_fold/2 — causal-stabilization compaction of one PO-Log
+%% =============================================================================
+%%
+%% The license boundary (only dot-stores never partially dropped by an
+%% observed context; per-origin only) is the CALLER's obligation — these
+%% tests pin the mechanics: per-origin grouping, the stability cut, the
+%% representative dot, value preservation, and the opt-in gate.
+
+stabilize_fold_collapses_per_origin_runs_test() ->
+    DS = #{
+        {<<"a">>, 1} => {sub, ?COUNTER, 10, {inc, 1}},
+        {<<"a">>, 2} => {sub, ?COUNTER, 20, {inc, 2}},
+        {<<"a">>, 3} => {sub, ?COUNTER, 30, {inc, 3}},
+        {<<"b">>, 1} => {sub, ?COUNTER, 15, {inc, 10}},
+        {<<"b">>, 2} => {sub, ?COUNTER, 25, {inc, -4}}
+    },
+    Before = ?M:nested_value(?COUNTER, DS),
+    {folded, DS1} = ?M:stabilize_fold(DS, 100),
+    %% One synthetic entry per origin, at each run's max dot and max HLC.
+    ?assertEqual(
+        #{
+            {<<"a">>, 3} => {sub, ?COUNTER, 30, {inc, 6}},
+            {<<"b">>, 2} => {sub, ?COUNTER, 25, {inc, 6}}
+        },
+        DS1
+    ),
+    ?assertEqual(Before, ?M:nested_value(?COUNTER, DS1)).
+
+stabilize_fold_respects_the_stability_cut_test() ->
+    DS = #{
+        {<<"a">>, 1} => {sub, ?COUNTER, 10, {inc, 1}},
+        {<<"a">>, 2} => {sub, ?COUNTER, 20, {inc, 2}},
+        {<<"a">>, 3} => {sub, ?COUNTER, 30, {inc, 3}}
+    },
+    %% Only the entries strictly below the cut fold; the live tail stays.
+    {folded, DS1} = ?M:stabilize_fold(DS, 25),
+    ?assertEqual(
+        #{
+            {<<"a">>, 2} => {sub, ?COUNTER, 20, {inc, 3}},
+            {<<"a">>, 3} => {sub, ?COUNTER, 30, {inc, 3}}
+        },
+        DS1
+    ),
+    ?assertEqual(6, ?M:nested_value(?COUNTER, DS1)).
+
+stabilize_fold_single_entry_runs_unchanged_test() ->
+    DS = #{
+        {<<"a">>, 1} => {sub, ?COUNTER, 10, {inc, 1}},
+        {<<"b">>, 1} => {sub, ?COUNTER, 20, {inc, 2}}
+    },
+    %% Nothing to compress — a run of one is already minimal.
+    ?assertEqual(unchanged, ?M:stabilize_fold(DS, 100)).
+
+stabilize_fold_flat_store_unchanged_test() ->
+    Entries = ?M:put(#{}, <<"k">>, {<<"a">>, 1}, [], <<"v">>),
+    DS = maps:get(<<"k">>, Entries),
+    ?assertEqual(unchanged, ?M:stabilize_fold(DS, 100)).
+
+stabilize_fold_non_opted_sub_mod_unchanged_test() ->
+    %% g_counter exports no state_to_op/1 — it has not opted into folding.
+    GC = bondy_oplog_crdt_g_counter,
+    DS = #{
+        {<<"a">>, 1} => {sub, GC, 10, {inc, 1}},
+        {<<"a">>, 2} => {sub, GC, 20, {inc, 2}}
+    },
+    ?assertEqual(unchanged, ?M:stabilize_fold(DS, 100)).
+
+stabilize_fold_lww_keeps_the_winners_own_hlc_test() ->
+    LWW = bondy_oplog_crdt_lww_register,
+    %% An explicit-HLC set that wins over a later-delivered lower-HLC one.
+    DS = #{
+        {<<"a">>, 1} => {sub, LWW, 10, {set, 50, <<"winner">>}},
+        {<<"a">>, 2} => {sub, LWW, 20, {set, 15, <<"loser">>}}
+    },
+    ?assertEqual(<<"winner">>, ?M:nested_value(LWW, DS)),
+    {folded, DS1} = ?M:stabilize_fold(DS, 100),
+    %% The synthetic op carries the WINNER's write HLC in explicit form —
+    %% re-stamping from the representative dot would flip the outcome.
+    ?assertEqual(
+        #{{<<"a">>, 2} => {sub, LWW, 20, {set, 50, <<"winner">>}}},
+        DS1
+    ),
+    ?assertEqual(<<"winner">>, ?M:nested_value(LWW, DS1)).
+
+stabilize_fold_is_idempotent_at_a_cut_test() ->
+    DS0 = #{
+        {<<"a">>, 1} => {sub, ?COUNTER, 10, {inc, 1}},
+        {<<"a">>, 2} => {sub, ?COUNTER, 20, {inc, 2}}
+    },
+    {folded, DS1} = ?M:stabilize_fold(DS0, 100),
+    ?assertEqual(unchanged, ?M:stabilize_fold(DS1, 100)).

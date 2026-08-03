@@ -87,6 +87,7 @@ undefined    -> <<0>>
 -export([hlc/1]).
 -export([removal_op/0]).
 -export([stabilize/2]).
+-export([state_to_op/1]).
 -export([value_equals_state/0]).
 -export([order_independent/0]).
 -export([encode_state/1]).
@@ -229,6 +230,25 @@ stabilize(StableHlc, {cleared, H}) when H < StableHlc ->
     discard;
 stabilize(_StableHlc, _State) ->
     keep.
+
+-doc """
+The single operation that rebuilds an equivalent register from bottom, in
+the **explicit-HLC** form so the winner's own write HLC travels with the
+op rather than being re-stamped from a synthetic event key. Used by
+causal-stabilization folding
+(`bondy_oplog_crdt_nested_core:stabilize_fold/2`): LWW resolution is a
+deterministic maximum over `(HLC, tie-break)`, so replacing a stable run
+with its winner is exact against any operations folded later. `undefined`
+(bottom, nothing ever written) has no representing op.
+""".
+-spec state_to_op(state()) -> op() | undefined.
+
+state_to_op(undefined) ->
+    undefined;
+state_to_op({set, V, H}) ->
+    {set, H, V};
+state_to_op({cleared, H}) ->
+    {clear, H}.
 
 -spec value_equals_state() -> boolean().
 

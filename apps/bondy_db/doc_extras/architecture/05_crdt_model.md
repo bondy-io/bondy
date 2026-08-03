@@ -77,9 +77,10 @@ classDiagram
       +encode_state(state) binary
       +decode_state(binary) state
       +removal_op() op °
-      +stabilize(stable_hlc, state) keep | discard °
+      +stabilize(stable_hlc, state) keep | {keep, state} | discard °
       +value_equals_state() bool °
       +order_independent() bool °
+      +state_to_op(state) op °
       +context_of(state) context °tier_2
       +reap_origins(state, retired) {state, reaped} °tier_2
     }
@@ -262,9 +263,14 @@ Every CRDT answers one question consistently — *what is the maximum
 HLC ever interpreted into this state?* `hlc/1` is non-decreasing as
 operations are interpreted; the substrate stores it in the cell frame
 and reads return it as the cell's logical timestamp. A separate
-optional hook, `stabilize/2`, lets a type tell compaction — at a
-cluster-stable HLC — whether a cell's state can be dropped or must be
-kept.
+optional hook, `stabilize/2`, lets a type tell the reclamation sweep —
+at a cluster-stable HLC — whether a cell's state can be dropped
+(`discard`), kept as-is (`keep`), or kept in a reduced representation
+(`{keep, Reduced}`, a value-preserving rewrite; e.g. the struct folds
+each field's causally-stable per-origin sub-op runs into synthetic ops
+via `bondy_oplog_crdt_nested_core:stabilize_fold/2` and the tier_0
+accumulators' `state_to_op/1`, bounding a nested PO-Log at
+`O(origins)` per field).
 
 ## The catalogue
 

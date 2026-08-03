@@ -101,9 +101,16 @@ own `interpret_cog` (an accumulator like `pn_counter`, or a
 permanent-membership type like `two_p_set`, computes the wrong value if
 any of its own ops go missing — pruning "the writer's own observed
 dot" is only correct for a value being superseded, never for an op being
-accumulated). A field's dot-store therefore grows with every write for
-the life of the cell, bounded only by whatever causal-stabilization
-compaction is layered on top in the future — not by this module.
+accumulated). A field's dot-store therefore grows with every write —
+until causal stabilization bounds it: `stabilize/2` folds every field's
+causally-stable per-origin sub-op runs into synthetic ops
+(`bondy_oplog_crdt_nested_core:stabilize_fold/2`), collapsing each
+field to `O(origins)` entries. The struct is precisely the shape that
+makes this fold sound at the substrate's HLC stability frontier: with no
+`put`/`rmv`, no operation ever partially drops a field's dot-store by
+observed context — see the license-boundary discussion in
+`bondy_oplog_crdt_nested_core`'s moduledoc (the same fold is NOT safe
+for `aw_map`/`aw_set` keys, whose `{rmv, _}` selects dots by context).
 
 Every schema value MUST be `causal_tier() =:= tier_0`
 (`pn_counter`, `lww_register`, `max_register`, `min_register`, ...) —
@@ -284,37 +291,51 @@ reap_origins({Schema, Fields0, CC, Hlc}, Retired) ->
     end.
 
 -doc """
-Causal stabilization: `discard` once every schema field declaring a
-`stabilize_zero` policy value currently holds that value and every
-constituent operation is strictly below the stability point. A schema
-declaring no `stabilize_zero` field never discards (opt-in only).
-""".
--spec stabilize(bondy_oplog_hlc:hlc(), state()) -> keep | discard.
+Causal stabilization, two reductions in order of strength:
 
-stabilize(StableHlc, {Schema, _Fields, _CC, Hlc} = State) when
-    Hlc < StableHlc
-->
-    ZeroChecks = [
-        {FieldKey, Zero}
-     || {FieldKey, Entry} <- maps:to_list(Schema),
-        {ok, Zero} <- [maps:find(stabilize_zero, field_policy(Entry))]
-    ],
-    case ZeroChecks of
-        [] ->
-            keep;
-        _ ->
-            Value = to_value(State),
-            AllZero = lists:all(
-                fun({FieldKey, Zero}) -> maps:get(FieldKey, Value) =:= Zero end,
-                ZeroChecks
+1. `discard` once every schema field declaring a `stabilize_zero` policy
+   value currently holds that value and every constituent operation is
+   strictly below the stability point. A schema declaring no
+   `stabilize_zero` field never discards (opt-in only).
+2. Otherwise `{keep, Reduced}` when any field's causally-stable
+   per-origin sub-op runs could be folded into synthetic ops
+   (`bondy_oplog_crdt_nested_core:stabilize_fold/2`) — the compaction
+   that bounds a field's PO-Log at `O(origins)`. Value-preserving
+   (the fold is each sub-CRDT's own convergence kernel) and
+   context-preserving (`CC` untouched). Sound at the HLC frontier
+   because no struct operation partially drops a field's dot-store by
+   observed context — see the moduledoc and `stabilize_fold/2`'s
+   license boundary.
+
+`keep` when neither applies.
+""".
+-spec stabilize(bondy_oplog_hlc:hlc(), state()) ->
+    keep | {keep, state()} | discard.
+
+stabilize(StableHlc, {Schema, Fields, CC, Hlc} = State) ->
+    case zero_discard(StableHlc, State) of
+        discard ->
+            discard;
+        keep ->
+            {Fields1, Folded} = maps:fold(
+                fun(FieldKey, DS, {Acc, Changed}) ->
+                    case
+                        bondy_oplog_crdt_nested_core:stabilize_fold(
+                            DS, StableHlc
+                        )
+                    of
+                        unchanged -> {Acc, Changed};
+                        {folded, DS1} -> {Acc#{FieldKey => DS1}, true}
+                    end
+                end,
+                {Fields, false},
+                Fields
             ),
-            case AllZero of
-                true -> discard;
+            case Folded of
+                true -> {keep, {Schema, Fields1, CC, Hlc}};
                 false -> keep
             end
-    end;
-stabilize(_StableHlc, _State) ->
-    keep.
+    end.
 
 -doc """
 Unconditionally drops `FieldKey`'s dot-store entries whose origin is in
@@ -376,6 +397,35 @@ decode_state(<<?ENC_V1, Bin/binary>>) ->
 %% @private
 key_hlc(Key) ->
     bondy_oplog_event:key_hlc(Key).
+
+%% @private
+%% The whole-cell `stabilize_zero` discard check (`stabilize/2`'s first
+%% reduction), gated on the cell's head HLC being strictly below the
+%% stability point.
+zero_discard(StableHlc, {Schema, _Fields, _CC, Hlc} = State) when
+    Hlc < StableHlc
+->
+    ZeroChecks = [
+        {FieldKey, Zero}
+     || {FieldKey, Entry} <- maps:to_list(Schema),
+        {ok, Zero} <- [maps:find(stabilize_zero, field_policy(Entry))]
+    ],
+    case ZeroChecks of
+        [] ->
+            keep;
+        _ ->
+            Value = to_value(State),
+            AllZero = lists:all(
+                fun({FieldKey, Zero}) -> maps:get(FieldKey, Value) =:= Zero end,
+                ZeroChecks
+            ),
+            case AllZero of
+                true -> discard;
+                false -> keep
+            end
+    end;
+zero_discard(_StableHlc, _State) ->
+    keep.
 
 %% @private
 %% Normalizes a schema entry to its sub-CRDT module, ignoring any policy.

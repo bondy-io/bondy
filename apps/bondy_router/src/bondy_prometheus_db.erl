@@ -669,7 +669,7 @@ do_handle_event([bondy_oplog, applier, cells_swept], Meas, Meta) ->
                     )
             end
         end,
-        [scanned, discarded, reduction_skipped, skipped]
+        [scanned, discarded, rewritten, skipped]
     );
 do_handle_event([bondy_oplog, applier, origins_reaped], Meas, Meta) ->
     counter(

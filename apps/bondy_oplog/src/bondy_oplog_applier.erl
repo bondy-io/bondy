@@ -821,10 +821,11 @@ of each. `discard` removes the cell physically — via `Adapter:delete/3`, which
 on the leveled backend emits real `remove` ObjectSpecs that LSM compaction can
 reclaim, unlike a tombstone written as an ordinary value.
 
-`{keep, State}` — metadata reduction — is **not implemented**: it is counted as
-`reduction_skipped` and the cell is left unchanged. That forgoes a space saving
-but cannot lose data, unlike getting `discard` wrong. Implementing it needs the
-out-of-band cell rewrite `reap_origins` already performs.
+`{keep, State}` — causal-stabilization reduction (e.g. a struct field's stable
+per-origin sub-op runs folded into synthetic ops) — is persisted as a
+value-preserving frame rewrite (same Hlc, same value column, smaller state
+bytes; the same out-of-band rewrite `reap_origins` performs) and counted as
+`rewritten`. It rides the same overlay fence as `discard`.
 
 Runs **inside the applier process**, deliberately. The applier is the only
 writer to the projection, so a sweep executed here is serialised against
@@ -847,7 +848,7 @@ staleness.
     {ok, #{
         scanned := non_neg_integer(),
         discarded := non_neg_integer(),
-        reduction_skipped := non_neg_integer(),
+        rewritten := non_neg_integer(),
         skipped := non_neg_integer()
     }}
     | {error, term()}.
@@ -890,7 +891,7 @@ need no new invariant.
         #{
             scanned := non_neg_integer(),
             discarded := non_neg_integer(),
-            reduction_skipped := non_neg_integer(),
+            rewritten := non_neg_integer(),
             skipped := non_neg_integer()
         },
         done | {resume, Cursor :: term()}}
@@ -1479,12 +1480,20 @@ handle_call(
 handle_call(
     {sweep_stable_cells, StableHlc, Opts},
     _From,
+    #state{} = StateIn
+) ->
+    %% I1 (prepare-after-deliver) applies to the sweep as it does to the
+    %% tier_2 PREPARE: the sweep judges "the state at StableHlc", so the
+    %% projection must reflect every event delivered to this replica —
+    %% including remote events integrated into the MST whose replay cast
+    %% is still in flight (a different sender, unordered against this
+    %% call) — before any cell is discarded or reduced. See the theorem
+    %% at `ensure_remote_caught_up/1`. Steady-state cost: one atomic read.
     #state{
         cell_apply_ctx = Ctx,
         cell_apply_source = Source,
         instance_id = Id
-    } = State
-) ->
+    } = State = ensure_remote_caught_up(StateIn),
     {reply, bondy_oplog_cell_utils:sweep(Id, Ctx, Source, StableHlc, Opts),
         State};
 handle_call(

@@ -142,6 +142,109 @@ live_value_survives(T) ->
     ?assertMatch({ok, {<<"alive">>, _}}, bondy_db:read(T, ?REALM, K)).
 
 %% -----------------------------------------------------------------------------
+%% Causal-stabilization folding ({keep, Reduced} → value-preserving rewrite)
+%% -----------------------------------------------------------------------------
+%%
+%% A struct cell's fields are nested PO-Logs — one dot-store entry per
+%% sub-op, forever — until the sweep folds each origin's causally-stable
+%% run into a synthetic op (`bondy_oplog_crdt_struct:stabilize/2` →
+%% `{keep, Reduced}`) and persists it as a value-preserving frame rewrite,
+%% counted as `rewritten`. This drives the whole path end-to-end through
+%% `bondy_db`: real stamped tier_2 events, the applier's sweep handler
+%% (behind the I1 remote-generation fence), the overlay fence, and the
+%% adapter write-back — on the registration-RIB schema, the production
+%% shape this bounds.
+
+struct_fold_setup() ->
+    {ok, _} = application:ensure_all_started(bondy_db),
+    %% Deterministic timing — no AE/GC scheduler racing the sweep.
+    bondy_oplog_sync_scheduler:set_dispatch(undefined),
+    bondy_oplog_gc_scheduler:set_trigger(undefined),
+    {ok, Db} = bondy_db:open(sweep_fold_db, #{
+        topology => bondy_db_topology_memory,
+        shard_count => 1,
+        fold_module => lww_register,
+        crdt_module => bondy_oplog_crdt_struct,
+        crdt_opts => #{
+            count => {bondy_oplog_crdt_pn_counter, #{stabilize_zero => 0}},
+            invoke => bondy_oplog_crdt_lww_register,
+            earliest => bondy_oplog_crdt_min_register,
+            latest => bondy_oplog_crdt_max_register
+        }
+    }),
+    {ok, T} = bondy_db:open_table(Db, ribs, #{}),
+    {Db, T}.
+
+struct_fold_cleanup({Db, T}) ->
+    catch bondy_db:close_table(T),
+    catch bondy_db:close(Db),
+    [bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
+    ok.
+
+struct_fold_test_() ->
+    {setup, fun struct_fold_setup/0, fun struct_fold_cleanup/1, fun({_Db, T}) ->
+        [
+            {"sweep folds a struct cell's stable sub-op runs, "
+             "value-preserving and idempotent",
+                {timeout, 60, fun() -> struct_fold_reduces_stable_runs(T) end}}
+        ]
+    end}.
+
+struct_fold_reduces_stable_runs(T) ->
+    K = <<"proc.echo">>,
+    %% Registration-RIB-shaped churn: adds each writing all four fields,
+    %% then some removals — every op is one more PO-Log entry until folded.
+    [
+        ok = bondy_db:apply_batch(T, ?REALM, K, [
+            {apply, count, {inc, 1}},
+            {apply, invoke, {set, <<"single">>}},
+            {apply, earliest, {set, N}},
+            {apply, latest, {set, N}}
+        ])
+     || N <- lists:seq(1, 8)
+    ],
+    [
+        ok = bondy_db:apply(T, ?REALM, K, {apply, count, {inc, -1}})
+     || _ <- lists:seq(1, 3)
+    ],
+    {ok, {Value0, _}} = bondy_db:read(T, ?REALM, K),
+    ?assertMatch(
+        #{
+            count := 5,
+            invoke := <<"single">>,
+            earliest := 1,
+            latest := 8
+        },
+        Value0
+    ),
+
+    %% First sweep: the stable runs fold and the reduced frame is written.
+    {ok, Stats1} = sweep(T, far_future(T)),
+    ?assert(maps:get(rewritten, Stats1) >= 1),
+    ?assertEqual(0, maps:get(discarded, Stats1)),
+    {ok, {Value1, _}} = bondy_db:read(T, ?REALM, K),
+    ?assertEqual(Value0, Value1),
+
+    %% Second sweep at the same point: every run is already a single
+    %% synthetic op — nothing left to rewrite.
+    {ok, Stats2} = sweep(T, far_future(T)),
+    ?assertEqual(0, maps:get(rewritten, Stats2)),
+
+    %% The folded cell keeps absorbing writes — the next apply folds onto
+    %% the REDUCED state (the write-through of the rewritten frame), and a
+    %% later sweep folds the new tail in turn.
+    ok = bondy_db:apply_batch(T, ?REALM, K, [
+        {apply, count, {inc, 1}},
+        {apply, latest, {set, 9}}
+    ]),
+    {ok, {Value2, _}} = bondy_db:read(T, ?REALM, K),
+    ?assertMatch(#{count := 6, latest := 9}, Value2),
+    {ok, Stats3} = sweep(T, far_future(T)),
+    ?assert(maps:get(rewritten, Stats3) >= 1),
+    {ok, {Value3, _}} = bondy_db:read(T, ?REALM, K),
+    ?assertEqual(Value2, Value3).
+
+%% -----------------------------------------------------------------------------
 %% Kernel fidelity on a multiplexed applier (A6)
 %% -----------------------------------------------------------------------------
 %%
@@ -301,7 +404,7 @@ sweep_batched(T, StableHlc, Max) ->
     Pid = bondy_oplog_registry:applier_pid(InstanceId),
     ?assert(is_pid(Pid)),
     Zero = #{
-        scanned => 0, discarded => 0, reduction_skipped => 0, skipped => 0
+        scanned => 0, discarded => 0, rewritten => 0, skipped => 0
     },
     sweep_batched_loop(Pid, StableHlc, Max, undefined, Zero, 0).
 

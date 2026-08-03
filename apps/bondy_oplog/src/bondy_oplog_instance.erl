@@ -3359,7 +3359,12 @@ do_handle_call(
 ) ->
     %% Mirrors `bondy_oplog_applier`'s `{sweep_stable_cells, _, _}` handler —
     %% delegates to the shared `bondy_oplog_cell_utils`, which this
-    %% instance runs in-process (no separate applier to delegate to).
+    %% instance runs in-process (no separate applier to delegate to). No
+    %% remote-generation fence is needed here, unlike the applier's
+    %% handler: a fused instance folds remote events into the projection
+    %% INLINE at `integrate_peer_root`, in this same process, so this
+    %% call is serialized after every delivery it must observe (I1 holds
+    %% by construction — see `bondy_oplog_applier:ensure_remote_caught_up/1`).
     {reply, bondy_oplog_cell_utils:sweep(Id, Ctx, Source, StableHlc, Opts),
         State};
 do_handle_call(
@@ -5558,7 +5563,7 @@ reclaim_stable_cells(InstanceId) when is_binary(InstanceId) ->
                         #{
                             scanned => 0,
                             discarded => 0,
-                            reduction_skipped => 0,
+                            rewritten => 0,
                             skipped => 0
                         }
                     );
@@ -5577,7 +5582,7 @@ reclaim_stable_cells(InstanceId) when is_binary(InstanceId) ->
                                 #{
                                     scanned => 0,
                                     discarded => 0,
-                                    reduction_skipped => 0,
+                                    rewritten => 0,
                                     skipped => 0
                                 }
                             );

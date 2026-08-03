@@ -38,6 +38,7 @@
 -export([prop_idempotent_redelivery/0]).
 -export([prop_encode_state_roundtrip/0]).
 -export([prop_counter_field_oracle/0]).
+-export([prop_stabilize_fold_transparent/0]).
 
 %% =============================================================================
 %% Generators
@@ -129,6 +130,42 @@ prop_counter_field_oracle() ->
             {apply, count, {inc, N}} <- [bondy_oplog_event:op(Ev)]
         ],
         Count =:= lists:sum(Deltas)
+    end).
+
+%% Causal-stabilization folding (`stabilize/2` -> `{keep, Reduced}`,
+%% via `bondy_oplog_crdt_nested_core:stabilize_fold/2`) is transparent:
+%% at ANY stability cut, on any replica, the folded state (a) projects
+%% the same value, (b) round-trips the frame encoding, and (c) after
+%% delivering every event the replica had not yet seen, converges to the
+%% same value as the never-folded full fold. This is the R2 soundness
+%% claim for the struct shape (no put/rmv, so no context ever partially
+%% drops a field's dot-store — see the license boundary in
+%% `bondy_oplog_crdt_nested_core`'s moduledoc).
+prop_stabilize_fold_transparent() ->
+    ?FORALL({Cmds, Cut}, {cmds_gen(), choose(0, 60)}, begin
+        {PerOrigin, Log} = simulate(Cmds),
+        Target = ?MOD:to_value(group_interpret(Log, init())),
+        lists:all(
+            fun({_O, State, Delivered}) ->
+                case ?MOD:stabilize(Cut, State) of
+                    keep ->
+                        true;
+                    {keep, Folded} ->
+                        Remaining = sort_by_key([
+                            E
+                         || E <- Log, not lists:member(E, Delivered)
+                        ]),
+                        Saturated = lists:foldl(
+                            fun apply_event/2, Folded, Remaining
+                        ),
+                        ?MOD:to_value(Folded) =:= ?MOD:to_value(State) andalso
+                            ?MOD:decode_state(?MOD:encode_state(Folded)) =:=
+                                Folded andalso
+                            ?MOD:to_value(Saturated) =:= Target
+                end
+            end,
+            PerOrigin
+        )
     end).
 
 %% =============================================================================
@@ -225,7 +262,8 @@ properties_test_() ->
             prop_permutation_invariant(),
             prop_idempotent_redelivery(),
             prop_encode_state_roundtrip(),
-            prop_counter_field_oracle()
+            prop_counter_field_oracle(),
+            prop_stabilize_fold_transparent()
         ],
         lists:foreach(
             fun(Prop) -> ?assert(proper:quickcheck(Prop, Opts)) end,

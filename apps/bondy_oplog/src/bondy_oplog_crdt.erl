@@ -90,9 +90,14 @@ as the sole convergence kernel.
   matters: it exists only to reject a concurrent write with a lower HLC,
   so once that is impossible it is pure overhead.
 
-  `{keep, State'}` is the weaker form — retain the cell but drop metadata
-  that only served to order it against operations that can no longer
-  arrive.
+  `{keep, State'}` is the weaker form — retain the cell but reduce its
+  representation, dropping or compressing metadata that only served to
+  order it against operations that can no longer arrive. The sweep
+  persists the reduced state with a value-preserving frame rewrite
+  (`bondy_oplog_cell_utils`'s STABILIZE section): `to_value(State')`
+  MUST equal `to_value(State)`, and the reduction MUST NOT shrink
+  `context_of/1` (a legitimately-shrinking context is `reap_origins/2`'s
+  job, which co-evicts the stamp-site guard — the sweep does not).
 
   This is causal *stabilization* in the sense of Baquero, Almeida and
   Shoker (arXiv:1710.04469 §7.2): a data-type-specific reduction licensed
@@ -105,10 +110,15 @@ as the sole convergence kernel.
   I1 (prepare-after-deliver, enforced by the applier's prepare fence —
   `bondy_oplog_applier:ensure_remote_caught_up/1`, where the full
   theorem is stated) and I2 (containment stability, what the confirmed
-  frontier proves). Together they guarantee every event generated after
-  the frontier's certification carries a context dominating every dot
-  at or below it — which is what makes a `discard` (and any future
-  `{keep, Reduced}` reduction) invisible to all late arrivals.
+  frontier proves). Together they guarantee no event at or below the
+  frontier will ever be delivered again — which is what makes a
+  `discard`, whose observable effect is governed purely by HLC
+  comparison, invisible to all late arrivals. A `{keep, State'}`
+  reduction that changes how a *causal context* would select parts of
+  the state (folding an observed-remove dot-store) needs a strictly
+  stronger license than this HLC frontier — see
+  `bondy_oplog_crdt_nested_core:stabilize_fold/2` for the boundary and
+  the counterexample.
 
 - `value_equals_state() -> boolean()` declares that `to_value/1` is the
   identity (the projection value *is* the state) — a storage optimisation
@@ -122,6 +132,18 @@ as the sole convergence kernel.
   (the only correct path for non-commutative CRDTs, e.g. an observed-remove
   map or a bounded counter). It is a property of the CRDT *module*,
   validated by test — never an arrival-order heuristic. Default `false`.
+
+- `state_to_op(State) -> Op | undefined` — **tier_0 accumulators.** The
+  single operation that rebuilds an equivalent state from bottom:
+  applying `Op` to `init/0` must converge (same `to_value/1`, same
+  ordering behaviour against later ops) with `State`. This is what lets
+  causal-stabilization folding
+  (`bondy_oplog_crdt_nested_core:stabilize_fold/2`) collapse an
+  origin's causally-stable run of sub-ops inside a nested PO-Log into
+  one synthetic op. Only meaningful alongside
+  `order_independent() =:= true` (the fold displaces the run's
+  contributions to a single position in the replay order). `undefined`
+  when no single op can represent `State` (typically bottom).
 
 - `context_of(State) -> term()` — **tier_2 only.** Returns the cell's
   current causal context (a version vector, e.g. `bondy_dvvset:join/1`).
@@ -194,6 +216,8 @@ silently diverge.
 
 -callback order_independent() -> boolean().
 
+-callback state_to_op(State :: term()) -> Op :: term() | undefined.
+
 -callback context_of(State :: term()) -> Context :: term().
 
 -callback reap_origins(
@@ -206,6 +230,7 @@ silently diverge.
     stabilize/2,
     value_equals_state/0,
     order_independent/0,
+    state_to_op/1,
     context_of/1,
     reap_origins/2
 ]).

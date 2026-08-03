@@ -48,6 +48,7 @@ fold, so a table can switch with no data migration.
 -export([hlc/1]).
 -export([value_equals_state/0]).
 -export([order_independent/0]).
+-export([state_to_op/1]).
 -export([encode_state/1]).
 -export([decode_state/1]).
 %% bondy_oplog_crdt_commutative
@@ -120,6 +121,20 @@ value_equals_state() ->
 
 order_independent() ->
     true.
+
+-doc """
+The single operation that rebuilds an equivalent register from bottom: a
+`{set, _}` of the running maximum. Used by causal-stabilization folding
+(`bondy_oplog_crdt_nested_core:stabilize_fold/2`) — `max` is associative,
+commutative and idempotent, so the collapse is exact. `undefined` (bottom,
+nothing ever written) has no representing op.
+""".
+-spec state_to_op(state()) -> op() | undefined.
+
+state_to_op(undefined) ->
+    undefined;
+state_to_op({V, _H}) ->
+    {set, V}.
 
 -spec encode_state(state()) -> binary().
 

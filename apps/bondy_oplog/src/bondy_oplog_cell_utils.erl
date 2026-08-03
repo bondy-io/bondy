@@ -319,7 +319,7 @@ reap_one_cell(Adapter, Handle, Kernel, Id, {Bucket, Key}, Retired) ->
                     StateBytes2 = bondy_oplog_cell_kernel:encode_state(
                         Kernel, NewState
                     ),
-                    {reaped_frame(Hlc, StateBytes2, ValueBytes), Ids};
+                    {value_preserving_frame(Hlc, StateBytes2, ValueBytes), Ids};
                 _ ->
                     %% `{_NewState, []}` (no matching entry) or
                     %% `not_supported` (defensive — already gated above).
@@ -329,12 +329,15 @@ reap_one_cell(Adapter, Handle, Kernel, Id, {Bucket, Key}, Retired) ->
     ).
 
 %% @private
-%% Re-encode a reaped cell frame, preserving the value column exactly (the
-%% reap is value-preserving). `undefined` value bytes ⇒ a `value_equals_
-%% state` frame (no value column); otherwise the original value column.
-reaped_frame(Hlc, StateBytes, undefined) ->
+%% Re-encode a cell frame around new (smaller) state bytes, preserving the
+%% Hlc and the value column exactly — the shape shared by the dead-origin
+%% reap and the stabilization sweep's `{keep, Reduced}` rewrite, both of
+%% which are value-preserving by contract. `undefined` value bytes ⇒ a
+%% `value_equals_state` frame (no value column); otherwise the original
+%% value column.
+value_preserving_frame(Hlc, StateBytes, undefined) ->
     bondy_oplog_cell_frame:encode(Hlc, StateBytes, undefined, true);
-reaped_frame(Hlc, StateBytes, ValueBytes) when is_binary(ValueBytes) ->
+value_preserving_frame(Hlc, StateBytes, ValueBytes) when is_binary(ValueBytes) ->
     bondy_oplog_cell_frame:encode(Hlc, StateBytes, ValueBytes, false).
 
 %% @private
@@ -402,9 +405,10 @@ reap_report(Supported, Scanned, OriginsReaped) ->
 %% that could ever compare against it is causally stable (below
 %% `StableHlc`): `keep`, `discard` (the cell is dead — e.g. a disabled
 %% flag, an emptied group — and physically removed), or `{keep, Reduced}`
-%% (metadata reduction, not yet implemented — see `apply_stabilize/7`'s
-%% note). Folds that declare no `stabilize/2` are left untouched
-%% (`not_supported`).
+%% (causal-stabilization reduction, e.g. a struct field's per-origin
+%% sub-op runs folded into synthetic ops — persisted as a
+%% value-preserving frame rewrite, see `apply_stabilize/10`). Folds that
+%% declare no `stabilize/2` are left untouched (`not_supported`).
 %%
 %% Overlay fence: a cell can only be *deleted* from the projection once
 %% its overlay (the WAL-appended, not-yet-installed events pending
@@ -422,7 +426,7 @@ call's work, returning `{ok, Stats, {resume, Cursor}}` when the budget
 runs out with cells still pending — pass `Cursor` back as `Opts#{cursor =>
 Cursor}` on the next call to continue; `{ok, Stats, done}` once every
 member's cells have been swept. `Stats` is
-`#{scanned, discarded, reduction_skipped, skipped}`.
+`#{scanned, discarded, rewritten, skipped}`.
 """.
 -spec sweep(
     InstanceId :: term(),
@@ -456,7 +460,7 @@ sweep(InstanceId, Ctx, Source, StableHlc, Opts) ->
         #{
             scanned => 0,
             discarded => 0,
-            reduction_skipped => 0,
+            rewritten => 0,
             skipped => 0
         },
         undefined
@@ -464,7 +468,7 @@ sweep(InstanceId, Ctx, Source, StableHlc, Opts) ->
     telemetry:execute(
         [bondy_oplog, applier, cells_swept],
         maps:with(
-            [scanned, discarded, reduction_skipped, skipped], Acc
+            [scanned, discarded, rewritten, skipped], Acc
         ),
         #{instance_id => InstanceId, stable_hlc => StableHlc}
     ),
@@ -584,14 +588,17 @@ sweep_one_cell(
         "projection value; it is left in place and retried on a later pass.",
         Acc,
         bump(skipped, Acc),
-        fun(_Hlc, State, _ValueBytes) ->
+        fun(Hlc, State, ValueBytes) ->
             apply_stabilize(
                 MCtx,
                 Overlay,
+                Id,
                 Bucket,
                 Key,
                 StableHlc,
+                Hlc,
                 State,
+                ValueBytes,
                 Acc
             )
         end
@@ -601,10 +608,13 @@ sweep_one_cell(
 apply_stabilize(
     #{adapter := Adapter, handle := Handle, kernel := Kernel} = MCtx,
     Overlay,
+    Id,
     Bucket,
     Key,
     StableHlc,
+    Hlc,
     State,
+    ValueBytes,
     Acc
 ) ->
     case bondy_oplog_cell_kernel:stabilize(Kernel, StableHlc, State) of
@@ -638,28 +648,81 @@ apply_stabilize(
                     %% later pass, once the applier has drained.
                     bump(skipped, Acc)
             end;
-        {keep, _Reduced} ->
-            %% NOT IMPLEMENTED — and counted honestly as such.
+        {keep, Reduced} ->
+            %% Causal-stabilization reduction (arXiv:1710.04469 §7.2.1): the
+            %% cell's value survives; its state sheds representation that only
+            %% served to order it against operations that can no longer
+            %% arrive (e.g. a struct field's stable per-origin sub-op runs
+            %% folded into synthetic ops). A value-preserving frame rewrite —
+            %% same Hlc, same value column, smaller state bytes — exactly as
+            %% the dead-origin reap performs, behind the SAME overlay fence
+            %% as `discard`: a WAL-pended event for this cell may be one the
+            %% reduction's license did not account for (its stamped context
+            %% may select among the very dots being folded), so the cell is
+            %% left for a later pass until the applier has drained it.
             %%
-            %% This is metadata reduction (arXiv:1710.04469 §7.2.1): once a
-            %% timestamp is causally stable nothing will be compared against it
-            %% again, so it can be dropped from the stored state. The value
-            %% stays; only ordering metadata goes. Worth real space for types
-            %% whose metadata dwarfs their payload.
-            %%
-            %% Persisting it means an out-of-band cell rewrite — encode the
-            %% reduced state, rebuild the frame, put it. `reap/4` above
-            %% already does exactly that and is the template to follow.
-            %%
-            %% Until then the cell is left as-is, which forgoes a saving but
-            %% cannot lose data. Do NOT count it as `rewritten`: nothing was
-            %% written, and a counter that says otherwise would hide the gap
-            %% from whoever adds the first fold that returns this.
-            bump(reduction_skipped, Acc);
+            %% Unlike the reap, no `bondy_oplog_ctx_guard` co-eviction: the
+            %% `stabilize/2` contract forbids the reduction from shrinking
+            %% the cell's causal context, so the stamp-site guard never sees
+            %% a regression.
+            case overlay_clear(Overlay, Bucket, Key) of
+                true ->
+                    write_reduced_cell(
+                        MCtx, Id, Bucket, Key, Hlc, Reduced, ValueBytes, Acc
+                    );
+                false ->
+                    bump(skipped, Acc)
+            end;
         not_supported ->
             %% Fold declares no stabilization: nothing is reclaimable for it.
             %% MUST NOT be read as "reclaimable".
             Acc
+    end.
+
+%% @private
+%% Persist one reduced cell frame, mirroring `finish_reap_member/4`'s
+%% write path for a single cell: put, invalidate the point-read cache,
+%% write-through the A3 OldValue cache so the next apply folds onto the
+%% reduced state instead of resurrecting the unreduced one from cache. A
+%% failed write leaves the cell as-is (`skipped`) — the unreduced state is
+%% still correct, only larger — and a later pass retries.
+write_reduced_cell(
+    #{adapter := Adapter, handle := Handle, kernel := Kernel} = MCtx,
+    Id,
+    Bucket,
+    Key,
+    Hlc,
+    Reduced,
+    ValueBytes,
+    Acc
+) ->
+    StateBytes = bondy_oplog_cell_kernel:encode_state(Kernel, Reduced),
+    Frame = value_preserving_frame(Hlc, StateBytes, ValueBytes),
+    case Adapter:put_batch(Handle, [{Bucket, Key, Frame}]) of
+        ok ->
+            bondy_oplog_cell_apply:invalidate_cache(
+                maps:get(cache_adapter, MCtx, undefined),
+                maps:get(cache_handle, MCtx, undefined),
+                Bucket,
+                Key
+            ),
+            bondy_oplog_cell_apply:oldstate_cache_put_entries(
+                maps:get(oldstate_cache, MCtx, undefined),
+                [{Bucket, Key, Frame}]
+            ),
+            bump(rewritten, Acc);
+        {error, Reason} ->
+            ?LOG_WARNING(#{
+                description =>
+                    "bondy_oplog_cell_utils stabilization sweep could not "
+                    "persist a reduced cell frame; the cell is left "
+                    "unreduced and retried on a later pass.",
+                instance_id => Id,
+                bucket => Bucket,
+                cell_key => Key,
+                reason => Reason
+            }),
+            bump(skipped, Acc)
     end.
 
 %% @private

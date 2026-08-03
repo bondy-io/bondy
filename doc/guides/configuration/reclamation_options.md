@@ -101,9 +101,12 @@ is part of the contract. Events, with their measurement and metadata keys:
 
 ### `[bondy_oplog, applier, cells_swept]`
 
-Emitted per sweep batch. Measurements: `scanned`, `discarded`,
-`reduction_skipped`, `skipped`. Metadata: `instance_id`, `stable_hlc` — the
-stability point the batch ran at.
+Emitted per sweep batch. Measurements: `scanned`, `discarded` (cells
+physically reclaimed), `rewritten` (cells whose state was reduced by a
+value-preserving causal-stabilization rewrite, e.g. a struct field's
+stable per-origin sub-op runs folded into synthetic ops), `skipped`.
+Metadata: `instance_id`, `stable_hlc` — the stability point the batch
+ran at.
 
 ### `[bondy_oplog, reclamation, stalled]`
 
