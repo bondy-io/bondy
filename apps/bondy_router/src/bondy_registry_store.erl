@@ -49,8 +49,14 @@ Indeces for matching bondy_registry_entry(s).
     %% Main store: {Type, Realm, EntryId} -> entry(). ordered_set so
     %% realm-scoped maintenance scans are bounded prefix selects.
     local_entry_tab :: ets:tab(),
-    %% Session index (bag): {Type, Realm, SessionId} -> EntryId. Serves
-    %% session-close cleanup (`remove_all`) without a realm scan.
+    %% Session index (ordered_set, key-only rows):
+    %% {Type, Realm, SessionId, Uri, MatchPolicy, EntryId}. The
+    %% (Type, Realm, SessionId) prefix serves session-close cleanup
+    %% (`remove_all`) as a bounded range select; the fully-bound
+    %% (…, Uri, MatchPolicy) prefix answers the idempotent-SUBSCRIBE
+    %% duplicate check in O(log n) — the previous bag shape forced a
+    %% full scan (and entry materialisation) of the session's entries
+    %% on EVERY subscribe, quadratic over a session's subscribe burst.
     local_session_idx_tab :: ets:tab()
 }).
 
@@ -184,6 +190,7 @@ Indeces for matching bondy_registry_entry(s).
 -export([find/2]).
 -export([find/3]).
 -export([find/4]).
+-export([find_session_entry/6]).
 -export([list_local/5]).
 -export([fold/4]).
 -export([fold/5]).
@@ -288,7 +295,7 @@ new(PartitionIndex) ->
     ),
     {ok, L2} = bondy_table_manager:add_or_claim(
         gen_name(local_session_idx_tab, PartitionIndex),
-        [bag | key_value:put(keypos, 1, Opts)]
+        [ordered_set | key_value:put(keypos, 1, Opts)]
     ),
     #bondy_registry_store{
         partition = self(),
@@ -450,12 +457,7 @@ remove(#bondy_registry_store{} = Store, Entry, Opts) ->
 
     maybe
         ok ?= delete_indices(Store, Entry),
-        delete(
-            Store,
-            bondy_registry_entry:type(Entry),
-            bondy_registry_entry:key(Entry),
-            Opts
-        )
+        delete(Store, Entry, Opts)
     end.
 
 -doc "Removes an entry (and its indices) from the store returning it.".
@@ -487,7 +489,7 @@ take(#bondy_registry_store{} = Store, Type, EntryKey) when ?IS_TYPE(Type) ->
     case entry_read(Store, Type, RealmUri, EntryId) of
         {ok, Entry} ->
             Result = delete_indices(Store, Entry),
-            ok = delete_local_session_idx(Store, Type, EntryKey),
+            ok = delete_local_session_idx(Store, Entry),
             true = ets:delete(
                 Store#bondy_registry_store.local_entry_tab,
                 {Type, RealmUri, EntryId}
@@ -657,6 +659,36 @@ find(Store, Type, Pattern, Opts0) when ?IS_TYPE(Type) ->
     end.
 
 -doc """
+The session's entry for `(Uri, MatchPolicy)`, when one exists — the
+idempotent-SUBSCRIBE duplicate check. A bounded prefix select on the
+session index (fully bound but for the entry id), so its cost is
+independent of how many entries the session holds — the previous
+implementation folded over ALL of the session's entries (materialising
+each one) on every subscribe, which is quadratic over a session's
+subscribe burst.
+""".
+-spec find_session_entry(
+    Store :: t(),
+    Type :: entry_type(),
+    RealmUri :: uri(),
+    SessionId :: bondy_session_id:t(),
+    Uri :: uri(),
+    MatchPolicy :: binary()
+) -> {ok, entry()} | {error, not_found}.
+
+find_session_entry(Store, Type, RealmUri, SessionId, Uri, MatchPolicy) when
+    ?IS_TYPE(Type)
+->
+    MS = [{{{Type, RealmUri, SessionId, Uri, MatchPolicy, '$1'}}, [], ['$1']}],
+    Tab = Store#bondy_registry_store.local_session_idx_tab,
+    case ets:select(Tab, MS, 1) of
+        {[EntryId], _Cont} ->
+            entry_read(Store, Type, RealmUri, EntryId);
+        _ ->
+            {error, not_found}
+    end.
+
+-doc """
 A keyset page of node-local entries of `Type` in `RealmUri`, in ascending
 `EntryId` order: up to `Limit` entries whose id is strictly greater than
 `AfterId` (all of them when `AfterId` is `undefined`, i.e. the first page).
@@ -747,17 +779,18 @@ session_matches(Session, Entry) ->
 
 %% @private
 %% All `{EntryKey, Entry}` pairs for a `(RealmUri, SessionId)` via the
-%% session index. Session-close cleanup (`remove_all`) MUST see every entry
-%% the session created — including one made microseconds before disconnect —
-%% or the entry leaks; the idempotent-SUBSCRIBE check relies on the same
-%% freshness. The index is maintained synchronously on the write path.
+%% session index — a bounded prefix select on the ordered_set. Session-close
+%% cleanup (`remove_all`) MUST see every entry the session created —
+%% including one made microseconds before disconnect — or the entry leaks;
+%% the idempotent-SUBSCRIBE check relies on the same freshness. The index is
+%% maintained synchronously on the write path.
 session_pairs(#bondy_registry_store{} = Store, Type, RealmUri, Session) ->
-    Hits = ets:lookup(
-        Store#bondy_registry_store.local_session_idx_tab,
-        {Type, RealmUri, Session}
+    MS = [{{{Type, RealmUri, Session, '_', '_', '$1'}}, [], ['$1']}],
+    EntryIds = ets:select(
+        Store#bondy_registry_store.local_session_idx_tab, MS
     ),
     lists:filtermap(
-        fun({_, EntryId}) ->
+        fun(EntryId) ->
             case entry_read(Store, Type, RealmUri, EntryId) of
                 {ok, Entry} ->
                     {true, {bondy_registry_entry:key(Entry), Entry}};
@@ -765,7 +798,7 @@ session_pairs(#bondy_registry_store{} = Store, Type, RealmUri, Session) ->
                     false
             end
         end,
-        Hits
+        EntryIds
     ).
 
 -doc "".
@@ -940,9 +973,9 @@ ets_has_row(Tab, Pattern) ->
 -doc """
 Finds entries matching `Type`, `RealmUri` and `Uri`.
 
-This call executes concurrently for entries with `exact` or `prefix` matching
-policies. However, for `wildcard` policy, the call will be serialized
-through a gen_server.
+This call executes concurrently in the caller's process for ALL matching
+policies — `exact` via ETS reads, `prefix` and `wildcard` by traversing
+immutable ptrie snapshots (lock-free, QSBR-reclaimed).
 """.
 -spec match(
     Store :: t(),
@@ -1134,7 +1167,9 @@ match_wildcard(#continuation{}) ->
 -doc """
 Finds entries matching `Type`, `RealmUri` and `Uri` and the `wildcard` policy.
 
-This call is serialised through a partition server.
+Executes in the caller's process: the ptrie is an immutable snapshot
+traversed lock-free (QSBR-reclaimed), so nothing routes through a
+partition server.
 """.
 -spec match_wildcard(t(), entry_type(), uri(), uri(), map()) -> match_result().
 
@@ -1154,9 +1189,9 @@ Returns a list of all entries, where their key subsumes `Uri`.
 i.e. this function treats the stored entries as patterns that are used to match
 `Uri`.
 
-This call executes concurrently for entries with `exact` or `prefix` matching
-policies. However, for `wildcard` policy, the call will be serialized
-through a gen_server.
+This call executes concurrently in the caller's process for ALL matching
+policies — `exact` via ETS reads, `prefix` and `wildcard` by traversing
+immutable ptrie snapshots (lock-free, QSBR-reclaimed).
 """.
 -spec find_matches(
     Store :: t(),
@@ -1286,7 +1321,9 @@ find_wildcard_matches(#continuation{}) ->
 -doc """
 Finds entries matching `Type`, `RealmUri` and `Uri` and the `wildcard` policy.
 
-This call is serialised through the ART server.
+Executes in the caller's process: the ptrie is an immutable snapshot
+traversed lock-free (QSBR-reclaimed), so nothing routes through a
+partition server.
 """.
 -spec find_wildcard_matches(t(), entry_type(), uri(), uri(), map()) ->
     match_result().
@@ -1380,44 +1417,57 @@ store(#bondy_registry_store{} = Store, Entry) ->
         SessionId ->
             true = ets:insert(
                 Store#bondy_registry_store.local_session_idx_tab,
-                {{Type, RealmUri, SessionId}, EntryId}
+                {session_idx_key(Entry, Type, RealmUri, SessionId, EntryId)}
             ),
             ok
     end.
 
 %% @private
--spec delete(
-    Store :: t(),
-    Type :: entry_type(),
-    EntryKey :: entry_key(),
-    Opts :: map()
-) -> ok | {error, any()}.
+%% The session-index row key for an entry. Key-only rows in an
+%% ordered_set: the (Type, Realm, SessionId) prefix is the session's
+%% contiguous range; Uri and MatchPolicy ride in the key so the
+%% idempotent-SUBSCRIBE duplicate check is a bounded prefix select
+%% instead of a scan over the session's entries.
+session_idx_key(Entry, Type, RealmUri, SessionId, EntryId) ->
+    {
+        Type,
+        RealmUri,
+        SessionId,
+        bondy_registry_entry:uri(Entry),
+        bondy_registry_entry:match_policy(Entry),
+        EntryId
+    }.
 
-delete(#bondy_registry_store{} = Store, Type, EntryKey, _Opts) when
-    ?IS_TYPE(Type)
-->
-    RealmUri = bondy_registry_entry:realm_uri(EntryKey),
-    EntryId = bondy_registry_entry:id(EntryKey),
+%% @private
+-spec delete(Store :: t(), Entry :: entry(), Opts :: map()) ->
+    ok | {error, any()}.
+
+delete(#bondy_registry_store{} = Store, Entry, _Opts) ->
+    Type = bondy_registry_entry:type(Entry),
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    EntryId = bondy_registry_entry:id(Entry),
     true = ets:delete(
         Store#bondy_registry_store.local_entry_tab,
         {Type, RealmUri, EntryId}
     ),
-    delete_local_session_idx(Store, Type, EntryKey).
+    delete_local_session_idx(Store, Entry).
 
 %% @private
-%% Drop the local session-index row for an entry key. `delete_object` needs
-%% the exact row, so a key without a session id (callback / internal) is a
-%% no-op — no row was written for it.
-delete_local_session_idx(Store, Type, EntryKey) ->
-    case bondy_registry_entry:session_id(EntryKey) of
+%% Drop the local session-index row for an entry — an exact-key delete on
+%% the ordered_set (the full row key is derivable from the entry). An entry
+%% without a session id (callback / internal) is a no-op — no row was
+%% written for it.
+delete_local_session_idx(Store, Entry) ->
+    case bondy_registry_entry:session_id(Entry) of
         undefined ->
             ok;
         SessionId ->
-            RealmUri = bondy_registry_entry:realm_uri(EntryKey),
-            EntryId = bondy_registry_entry:id(EntryKey),
-            true = ets:delete_object(
+            Type = bondy_registry_entry:type(Entry),
+            RealmUri = bondy_registry_entry:realm_uri(Entry),
+            EntryId = bondy_registry_entry:id(Entry),
+            true = ets:delete(
                 Store#bondy_registry_store.local_session_idx_tab,
-                {{Type, RealmUri, SessionId}, EntryId}
+                session_idx_key(Entry, Type, RealmUri, SessionId, EntryId)
             ),
             ok
     end.

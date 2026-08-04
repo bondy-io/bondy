@@ -218,7 +218,11 @@ new(Name) when is_atom(Name) ->
             public,
             {keypos, 1},
             {read_concurrency, true},
-            {write_concurrency, true}
+            {write_concurrency, true},
+            %% Every ptrie READ inserts+deletes an epoch pin (with_epoch/2),
+            %% so the size counter is written from every concurrent reader —
+            %% decentralize it (not the default for `set` tables).
+            {decentralized_counters, true}
         ]
     ),
     %% Single-slot monotonic counter. `add_get` on slot 1 is our epoch bump.

@@ -48,7 +48,10 @@ groups() ->
             sub_add_local_wildcard_,
             sub_del_local_exact_1,
             sub_del_local_exact_2,
-            sub_session_death_cleans_registry
+            sub_session_death_cleans_registry,
+            sub_same_uri_multiple_policies,
+            sub_sessionless_refs,
+            partition_pick_recovers_after_crash
         ]}
     ].
 
@@ -393,6 +396,113 @@ sub_session_death_cleans_registry(Config) ->
         ),
         "subscription was not cleaned after session death"
     ).
+
+%% A killed partition must not leave pick/1 serving its dead pid: once
+%% the supervisor restarts the partition and its init reconnects the
+%% pool worker, pick must return the restarted partition's live pid.
+partition_pick_recovers_after_crash(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+
+    Pid0 = bondy_registry_partition:pick(RealmUri),
+    ?assert(is_pid(Pid0) andalso is_process_alive(Pid0)),
+
+    true = exit(Pid0, kill),
+
+    ?assert(
+        await(
+            fun() ->
+                case bondy_registry_partition:pick(RealmUri) of
+                    Pid when is_pid(Pid), Pid =/= Pid0 ->
+                        is_process_alive(Pid);
+                    _ ->
+                        %% restart window: the pool may briefly have no
+                        %% connected worker for this slot
+                        false
+                end
+            end,
+            500
+        ),
+        "pick/1 must serve the restarted partition's live pid"
+    ).
+
+%% It is valid for one session to subscribe to the same URI under two
+%% match policies — the duplicate check is keyed on (session, uri, POLICY),
+%% so the second policy must create its own entry, not hit already_exists.
+sub_same_uri_multiple_policies(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Ctxt = key_value:get(context, Config),
+    Ref = bondy_context:ref(Ctxt),
+    Type = subscription,
+    Uri = <<"com.multi.policy">>,
+
+    {ok, {E1, _}} = bondy_registry:add(
+        Type, RealmUri, Uri, #{match => ?EXACT_MATCH}, Ref
+    ),
+    {ok, {E2, _}} = bondy_registry:add(
+        Type, RealmUri, Uri, #{match => ?PREFIX_MATCH}, Ref
+    ),
+
+    ?assertNotEqual(
+        bondy_registry_entry:id(E1),
+        bondy_registry_entry:id(E2),
+        "Each match policy must get its own entry"
+    ),
+
+    ?assertMatch(
+        {error, {already_exists, _}},
+        bondy_registry:add(Type, RealmUri, Uri, #{match => ?EXACT_MATCH}, Ref),
+        "Re-subscribing under an already-held policy is idempotent"
+    ),
+    ?assertMatch(
+        {error, {already_exists, _}},
+        bondy_registry:add(Type, RealmUri, Uri, #{match => ?PREFIX_MATCH}, Ref),
+        "Re-subscribing under an already-held policy is idempotent"
+    ).
+
+%% Session-less (internal) subscribers: the SAME process reference
+%% re-subscribing to a topic is idempotent (already_exists with its own
+%% entry), while a DIFFERENT process subscribing to the same topic gets its
+%% own entry — each internal subscriber needs its own delivery.
+sub_sessionless_refs(Config) ->
+    RealmUri = key_value:get(realm_uri, Config),
+    Type = subscription,
+    Uri = <<"com.sessionless.topic">>,
+    Opts = #{match => ?EXACT_MATCH},
+
+    PidA = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    PidB = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    RefA = bondy_ref:new(internal, PidA),
+    RefB = bondy_ref:new(internal, PidB),
+
+    {ok, {EntryA, _}} = bondy_registry:add(Type, RealmUri, Uri, Opts, RefA),
+
+    ?assertMatch(
+        {error, {already_exists, EntryA}},
+        bondy_registry:add(Type, RealmUri, Uri, Opts, RefA),
+        "Same internal ref re-subscribing is idempotent"
+    ),
+
+    {ok, {EntryB, _}} = bondy_registry:add(Type, RealmUri, Uri, Opts, RefB),
+
+    ?assertNotEqual(
+        bondy_registry_entry:id(EntryA),
+        bondy_registry_entry:id(EntryB),
+        "A different internal process gets its own subscription"
+    ),
+
+    ok = bondy_registry:remove(EntryA),
+    ok = bondy_registry:remove(EntryB),
+    PidA ! stop,
+    PidB ! stop,
+    ok.
 
 register_invoke_single(Config) ->
     RealmUri = key_value:get(realm_uri, Config),

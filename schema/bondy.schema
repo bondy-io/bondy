@@ -1384,9 +1384,8 @@ end}.
 
 %% -----------------------------------------------------------------------------
 %% @doc The size of the router process pool.
-%% The actual size will be the maximum between the configured value and
-%% the result of evaluating `erlang:system_info(schedulers)` which returns the
-%% number of CPU Cores visible by Erlang.
+%% The configured value is used verbatim; sizing it at or above
+%% `erlang:system_info(schedulers)` is recommended.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.size",

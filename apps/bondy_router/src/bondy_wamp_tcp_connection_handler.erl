@@ -124,10 +124,12 @@ init({Ref, Transport, _Opts0}) ->
         source_ip = SourceIP
     },
 
+    %% Listener-level socket opts (nodelay, buffers, keepalive) are
+    %% inherited from the listen socket, so only the per-connection
+    %% receive settings are applied here.
     SocketOpts = [
         {active, active_n(State)},
         {packet, 0}
-        | bondy_config:get([Ref, socket_opts], [])
     ],
 
     %% If Transport == ssl, upgrades a gen_tcp, or equivalent, socket to an SSL

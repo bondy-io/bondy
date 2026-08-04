@@ -743,62 +743,77 @@ maybe_add(registration, RealmUri, Uri, Opts, Ref, Partition) ->
             maybe_add_registration(RealmUri, Uri, Opts, Ref, Partition)
     end;
 maybe_add(subscription = Type, RealmUri, Uri, Opts, Ref, Partition) ->
-    SessionId = bondy_ref:session_id(Ref),
     MP = maps:get(match, Opts, ?EXACT_MATCH),
 
+    case bondy_ref:session_id(Ref) of
+        undefined ->
+            maybe_add_sessionless_subscription(
+                RealmUri, Uri, MP, Opts, Ref, Partition
+            );
+        SessionId ->
+            %% The idempotent-SUBSCRIBE check: a session already holding a
+            %% subscription for `(Uri, MP)` gets the existing entry back
+            %% (the broker answers SUBSCRIBED with the existing id). It is
+            %% valid for a subscriber to subscribe to both {foo, exact}
+            %% and {foo, prefix}. A bounded session-index probe — its
+            %% cost must not depend on how many subscriptions the session
+            %% already holds, or a session's subscribe burst turns
+            %% quadratic (this runs in the caller's process per
+            %% SUBSCRIBE).
+            case
+                bondy_registry_partition:find_session_entry(
+                    Partition, Type, RealmUri, SessionId, Uri, MP
+                )
+            of
+                {ok, Entry} ->
+                    {error, {already_exists, Entry}};
+                {error, not_found} ->
+                    RegId = subscription_id(RealmUri, Opts),
+                    Entry = bondy_registry_entry:new(
+                        Type, RegId, RealmUri, Ref, Uri, Opts
+                    ),
+                    bondy_registry_partition:add(Partition, Entry)
+            end
+    end.
+
+%% @private
+%% A session-less (internal / callback) subscriber has no session-index
+%% rows, so the duplicate check scans the realm's session-less entries —
+%% a rare path (internal subscribers only), preserved as a fold: the same
+%% process reference re-subscribing to `(Uri, MP)` is idempotent; a
+%% DIFFERENT process subscribing to the same topic gets its own entry.
+maybe_add_sessionless_subscription(RealmUri, Uri, MP, Opts, Ref, Partition) ->
+    Type = subscription,
+
     Fun = fun({_, E} = KV, Acc) ->
-        %% It is valid for a subscriber to subscribe to both
-        %% {foo, exact} and {foo, prefix}.
         Matches =
             Uri == bondy_registry_entry:uri(E) andalso
-                MP == bondy_registry_entry:match_policy(E),
+                MP == bondy_registry_entry:match_policy(E) andalso
+                Ref == bondy_registry_entry:ref(E),
 
         case Matches of
             false ->
                 %% We continue
                 Acc;
-            true when SessionId == undefined ->
-                NewAcc = [KV | Acc],
-
-                %% Internal process subscribing w/o session, we check it is not
-                %% the same process reference
-                Ref =/= bondy_registry_entry:ref(E) orelse
-                    throw({break, NewAcc}),
-                NewAcc;
             true ->
                 throw({break, [KV | Acc]})
         end
     end,
 
-    Acc = [],
-    KeyPattern = bondy_registry_entry:key_pattern(RealmUri, SessionId, '_'),
-    FoldOpts = [
-        {match, KeyPattern},
-        {remove_tombstones, true},
-        %% TODO maybe use FWW and check node (ActorID)?
-        {resolver, lww}
-    ],
+    KeyPattern = bondy_registry_entry:key_pattern(RealmUri, undefined, '_'),
+    FoldOpts = [{match, KeyPattern}],
     FoldResult = bondy_registry_partition:fold(
-        Partition, Type, RealmUri, Fun, Acc, FoldOpts
+        Partition, Type, RealmUri, Fun, [], FoldOpts
     ),
 
     case FoldResult of
         [] ->
-            %% No matching subscriptions for this SessionId exists
             RegId = subscription_id(RealmUri, Opts),
             Entry = bondy_registry_entry:new(
                 Type, RegId, RealmUri, Ref, Uri, Opts
             ),
             bondy_registry_partition:add(Partition, Entry);
-        [{_EntryKey, Entry}] ->
-            %% In case of receiving a "SUBSCRIBE" message from the same
-            %% _Subscriber_ and to already added topic, _Broker_ should
-            %% answer with "SUBSCRIBED" message, containing the existing
-            %% "Subscription|id".
-            %% {ok, Entry} = bondy_registry_partition:lookup(
-            %%     Partition, Type, EntryKey
-            %% ),
-
+        [{_EntryKey, Entry} | _] ->
             {error, {already_exists, Entry}}
     end.
 

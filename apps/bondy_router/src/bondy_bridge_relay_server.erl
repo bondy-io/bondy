@@ -225,11 +225,13 @@ connecting(enter, connecting, State0) ->
 connecting(internal, connection_setup, State) ->
     Transport = State#state.transport,
     Socket = State#state.socket,
+    %% Listener-level socket opts (nodelay, buffers, keepalive) are
+    %% inherited from the listen socket, so only the per-connection
+    %% receive settings are applied here.
     SocketOpts = [
         binary,
         {packet, 4},
         {active, once}
-        | bondy_config:get([State#state.ranch_ref, socket_opts], [])
     ],
 
     %% If Transport == ssl, upgrades a gen_tcp, or equivalent socket to an SSL

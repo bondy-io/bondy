@@ -75,6 +75,7 @@
 -export([find/1]).
 -export([find/3]).
 -export([find/4]).
+-export([find_session_entry/6]).
 -export([list_local/5]).
 -export([fold/4]).
 -export([fold/5]).
@@ -423,6 +424,26 @@ and URI use the `match_` functions instead.
 
 find(Partition, Type, Pattern, Opts) when ?IS_TYPE(Type) ->
     bondy_registry_store:find(store(Partition), Type, Pattern, Opts).
+
+-doc """
+The session's entry for `(Uri, MatchPolicy)`, when one exists — the
+idempotent-SUBSCRIBE duplicate check, answered by a bounded session-index
+select whose cost is independent of how many entries the session holds
+(see `bondy_registry_store:find_session_entry/6`).
+""".
+-spec find_session_entry(
+    Partition :: pid(),
+    Type :: entry_type(),
+    RealmUri :: uri(),
+    SessionId :: bondy_session_id:t(),
+    Uri :: uri(),
+    MatchPolicy :: binary()
+) -> {ok, entry()} | {error, not_found}.
+
+find_session_entry(Partition, Type, RealmUri, SessionId, Uri, MatchPolicy) ->
+    bondy_registry_store:find_session_entry(
+        store(Partition), Type, RealmUri, SessionId, Uri, MatchPolicy
+    ).
 
 -doc """
 A keyset page of node-local entries of `Type` in `RealmUri` — see
