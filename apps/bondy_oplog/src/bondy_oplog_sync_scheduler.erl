@@ -328,10 +328,11 @@ retries.
 %% peer-confirmed frontier needs the lagging replica's roots to
 %% contain it; observed live in the compaction cluster suite, ~63ms
 %% window). That transient heals on the next round and must NOT
-%% trigger the remedy, because the remedy is not free: a live fused
-%% re-bootstrap is a replace-mode install racing churn. A standing gap
-%% cannot heal by syncing and strikes again on the very next round, so
-%% detection is delayed by one round, never lost.
+%% trigger the remedy, because the remedy is not free: a catalogue
+%% re-bootstrap streams the peer's whole projection and re-derives the
+%% local one. A standing gap cannot heal by syncing and strikes again
+%% on the very next round, so detection is delayed by one round, never
+%% lost.
 -define(GAP_STRIKE_WINDOW_MS, 120_000).
 %% EWMA smoothing factor for the node-load signal: the weight given to the
 %% newest per-tick sample. 0.3 keeps ~3 ticks of history, enough hysteresis
@@ -1219,63 +1220,51 @@ maybe_flag_rebootstrap(
             ok;
         true ->
             true = ets:delete(?GAP_STRIKE_TAB, Key),
-            %% The REMEDY is scoped to where it is safe. A live catalogue
-            %% re-bootstrap of an applier-backed (durable) instance is a
-            %% proven-safe recovery (install + rederive; the stale-peer
-            %% rejoin CT case), and a retention-bounded fused instance
-            %% depends on it by design (its peers truncate without
-            %% confirmation as a matter of policy). A fused instance
-            %% WITHOUT retention is different: its live re-bootstrap is a
-            %% replace-mode install racing the fused churn, and with the
-            %% MST catalogue-compacted the post-install rederive cannot
-            %% restore a clobbered cell's compacted local ops — a single
-            %% gap-triggered re-bootstrap under load measurably corrupts
-            %% RIB accumulator cells. For those, the frontier-gap session
-            %% error already prevents the false adoption (the oracle
-            %% stays honestly DIVERGED); surface the standing gap to the
-            %% operator instead of auto-triggering the unsafe remedy,
-            %% until a churn-safe fused re-bootstrap exists.
-            Fused = catch bondy_oplog_registry:fused(InstanceId),
-            Retention = catch bondy_oplog_registry:mst_retention(InstanceId),
-            case Fused =:= true andalso Retention =/= true of
-                true ->
-                    ?LOG_WARNING(#{
-                        description =>
-                            "Peer's applied frontier is ahead of ours "
-                            "after complete sync rounds (it compacted "
-                            "history we never received). This fused "
-                            "instance has no churn-safe re-bootstrap; "
-                            "the gap persists until the instance is "
-                            "restarted or re-bootstrapped explicitly.",
-                        instance => InstanceId,
-                        peer => Peer,
-                        origins_behind => Origins
-                    }),
-                    ok;
-                false ->
-                    _ = ensure_table(?REBOOTSTRAP_TAB),
-                    ets:insert(?REBOOTSTRAP_TAB, {InstanceId, Peer}),
-                    telemetry:execute(
-                        [bondy_oplog, sync_scheduler, rebootstrap_scheduled],
-                        #{count => 1},
-                        #{
-                            instance_id => InstanceId,
-                            peer => Peer,
-                            reason => frontier_gap
-                        }
-                    ),
-                    ?LOG_INFO(#{
-                        description =>
-                            "Peer's applied frontier is ahead of ours "
-                            "after a complete sync round, twice in a row "
-                            "(it compacted history we never received); "
-                            "scheduling a catalogue re-bootstrap.",
-                        instance => InstanceId,
-                        peer => Peer,
-                        origins_behind => Origins
-                    }),
-                    ok
-            end
+            %% The remedy applies UNIFORMLY — applier-backed durable,
+            %% retention-fused, and fused-at-defaults alike. The old
+            %% fused-without-retention carve-out (standing-gap WARNING
+            %% instead of the remedy) guarded against a corruption class
+            %% that predated the watermark door: with never-applied
+            %% events silently discarded at integrate, a peer snapshot
+            %% could genuinely lack ops this replica had folded and then
+            %% compacted, and the post-install rederive could not restore
+            %% them. Post-door that argument closed: a live fused
+            %% re-bootstrap is sound because (a) the install runs in the
+            %% instance gen_server itself — atomic w.r.t. the fused
+            %% drain, no mid-install interleaving; (b) every op the
+            %% replace-mode install can clobber is either peer-confirmed
+            %% (a fused peer folds at integrate BEFORE its root is
+            %% confirmable, so the op is IN the snapshot) or still
+            %% retained in the local MST (peer-confirmed compaction
+            %% cannot have truncated it), where the post-bootstrap
+            %% rederive (`bondy_oplog_instance:rederive_projection/1`)
+            %% restores it; and (c) `finalize_catalogue_bootstrap` does
+            %% not truncate the MST, so unshared local-origin events
+            %% survive for peers to pull. Under `mst_retention` the
+            %% retained-window limit on (b) is the documented residual
+            %% trade of that policy.
+            _ = ensure_table(?REBOOTSTRAP_TAB),
+            ets:insert(?REBOOTSTRAP_TAB, {InstanceId, Peer}),
+            telemetry:execute(
+                [bondy_oplog, sync_scheduler, rebootstrap_scheduled],
+                #{count => 1},
+                #{
+                    instance_id => InstanceId,
+                    peer => Peer,
+                    reason => frontier_gap
+                }
+            ),
+            ?LOG_INFO(#{
+                description =>
+                    "Peer's applied frontier is ahead of ours "
+                    "after a complete sync round, twice in a row "
+                    "(it compacted history we never received); "
+                    "scheduling a catalogue re-bootstrap.",
+                instance => InstanceId,
+                peer => Peer,
+                origins_behind => Origins
+            }),
+            ok
     end;
 maybe_flag_rebootstrap(InstanceId, Peer, normal) ->
     %% A successful round proves there is no standing gap against this

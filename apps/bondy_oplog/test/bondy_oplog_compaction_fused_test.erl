@@ -68,6 +68,7 @@ compaction_fused_test_() ->
         {timeout, 30, fun live_append_remote_reaches_projection_applier/0},
         {timeout, 30, fun frontier_gap_detected_after_peer_truncation/0},
         {timeout, 30, fun rederive_restores_cell_clobbered_by_live_bootstrap/0},
+        {timeout, 30, fun live_bootstrap_with_churn_between_batches_converges/0},
         {timeout, 30, fun truncation_reclaims_store_pages/0}
     ]}.
 
@@ -864,6 +865,75 @@ rederive_restores_cell_clobbered_by_live_bootstrap() ->
     %% kernel rejects ops the cell already holds.
     ok = bondy_oplog_instance:rederive_projection(B),
     ?assertMatch({2, _}, bondy_oplog_core:read(BNs, primary, K)),
+
+    teardown(A),
+    teardown(B).
+
+%% The CHURN variant of the clobber/rederive lock: local ops keep landing
+%% BETWEEN install batches of a live re-bootstrap (the install runs in the
+%% instance gen_server, so batches are atomic, but the gaps between them
+%% are live). A churn op folded after batch 1 and clobbered by batch 2
+%% must still survive the full bootstrap sequence (install → finalize →
+%% rederive), converging to peer + pre-bootstrap + mid-install
+%% contributions.
+live_bootstrap_with_churn_between_batches_converges() ->
+    A = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
+    B = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
+    BNs = ns_of(B),
+    K = <<"k_churn">>,
+
+    %% B's own contribution first; A's LATER higher-HLC inc on the same
+    %% key (never saw B's) plus a second key so the snapshot splits into
+    %% two batches.
+    _ = bondy_oplog:append(B, {cell_apply, ?B, K, {inc, 1}}),
+    ok = bondy_oplog_instance:await_apply(B),
+    _ = bondy_oplog:append(A, {cell_apply, ?B, K, {inc, 1}}),
+    _ = bondy_oplog:append(A, {cell_apply, ?B, <<"k_other">>, {inc, 1}}),
+    ok = bondy_oplog_instance:await_apply(A),
+
+    {ok, {_W, Cursor}} = bondy_oplog_catalogue_snapshot:init(A),
+    Cells = pull_snapshot(A, Cursor, []),
+    ?assertEqual(2, length(Cells)),
+    {KCells, OtherCells} = lists:partition(
+        fun({_Bucket, CellKey, _Frame}) -> CellKey =:= K end, Cells
+    ),
+
+    %% Batch 1 (without K), then the mid-install churn op on K, then
+    %% batch 2 — whose copy of K clobbers BOTH of B's incs.
+    {ok, _} = bondy_oplog_instance:install_catalogue_batch(
+        B, {replace, OtherCells}
+    ),
+    _ = bondy_oplog:append(B, {cell_apply, ?B, K, {inc, 1}}),
+    ok = bondy_oplog_instance:await_apply(B),
+    {ok, _} = bondy_oplog_instance:install_catalogue_batch(
+        B, {replace, KCells}
+    ),
+    %% The churn inc gave B's cell a HIGHER HLC than A's snapshot copy,
+    %% so skip-if-older SKIPPED it: B keeps its own two incs but is now
+    %% missing A's contribution — the mirror image of the clobber. (Had
+    %% A's copy been newer, it would have installed and clobbered B's
+    %% incs instead; the sequence below converges either way.)
+    ?assertMatch({2, _}, bondy_oplog_core:read(BNs, primary, K)),
+
+    %% The production sequence, exactly as `finish_bootstrap` runs it for
+    %% a live instance: finalize (frontier adoption — no MST truncation),
+    %% a full AE round against the peer (supplies whatever the install
+    %% skipped or the snapshot lacked), then the rederive (restores
+    %% whatever the install clobbered).
+    ok = bondy_oplog_instance:finalize_catalogue_bootstrap(
+        B, 0, bondy_oplog_registry:frontier(A), true
+    ),
+    ?assertMatch(
+        {ok, _},
+        bondy_oplog_sync_session:run(B, A, #{record_in_peer_state => false})
+    ),
+    ok = bondy_oplog_instance:rederive_projection(B),
+    ?assertMatch({3, _}, bondy_oplog_core:read(BNs, primary, K)),
+    ?assertMatch({1, _}, bondy_oplog_core:read(BNs, primary, <<"k_other">>)),
+
+    %% Idempotent under a second full re-apply.
+    ok = bondy_oplog_instance:rederive_projection(B),
+    ?assertMatch({3, _}, bondy_oplog_core:read(BNs, primary, K)),
 
     teardown(A),
     teardown(B).

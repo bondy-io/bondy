@@ -9,7 +9,7 @@
   ],
   "timezone": "",
   "schemaVersion": 39,
-  "version": 8,
+  "version": 9,
   "refresh": "10s",
   "time": {
     "from": "now-1h",
@@ -514,12 +514,12 @@
     {
       "id": 25,
       "type": "stat",
-      "title": "Frontier-gap verdicts (15m)",
+      "title": "Standing frontier gaps",
       "datasource": {
         "type": "prometheus",
         "uid": "bondy-prometheus"
       },
-      "description": "Peer strictly ahead after a completed sync round. One is a benign transient; repeats/growth = standing gap. Click through for the node \u00d7 peer matrix.",
+      "description": "Gap verdicts in the last 15m WHILE the cluster is currently diverged \u2014 a standing gap that has not healed. A verdict that already healed (re-bootstrap completed, frontiers converged) reads 0 here; the recent-event history lives on the Cluster Sync / AAE dashboard. Non-zero = the system is telling you it could not self-heal \u2014 drill in.",
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -538,12 +538,8 @@
                 "value": null
               },
               {
-                "color": "yellow",
-                "value": 1
-              },
-              {
                 "color": "red",
-                "value": 3
+                "value": 1
               }
             ]
           },
@@ -576,7 +572,7 @@
             "type": "prometheus",
             "uid": "bondy-prometheus"
           },
-          "expr": "sum(increase(bondy_oplog_frontier_gap_verdicts_total[15m])) or vector(0)",
+          "expr": "sum(increase(bondy_oplog_frontier_gap_verdicts_total[15m])) and on() (count(count by (instance_id)(count_values by (instance_id)(\"h\", bondy_oplog_instance_frontier_hash) > 0) > 1) > 0) or vector(0)",
           "refId": "A"
         }
       ]
@@ -584,12 +580,12 @@
     {
       "id": 26,
       "type": "stat",
-      "title": "Re-bootstraps (15m)",
+      "title": "Re-bootstraps failing (15m)",
       "datasource": {
         "type": "prometheus",
         "uid": "bondy-prometheus"
       },
-      "description": "Snapshot re-bootstraps scheduled. Non-zero deserves a look.",
+      "description": "Catalogue (re-)bootstrap sessions that FAILED in the last 15m. Scheduled re-bootstraps that completed ok are the system healing itself (e.g. a stale rejoin) and stay green here \u2014 see Cluster Sync / AAE for the full scheduled/ok/error history.",
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -642,7 +638,7 @@
             "type": "prometheus",
             "uid": "bondy-prometheus"
           },
-          "expr": "sum(increase(bondy_oplog_rebootstraps_scheduled_total[15m])) or vector(0)",
+          "expr": "sum(increase(bondy_oplog_bootstrap_sessions_total{outcome=\"error\"}[15m])) or vector(0)",
           "refId": "A"
         }
       ]
@@ -650,12 +646,12 @@
     {
       "id": 27,
       "type": "stat",
-      "title": "Sync errors (15m)",
+      "title": "Sync error rate (5m)",
       "datasource": {
         "type": "prometheus",
         "uid": "bondy-prometheus"
       },
-      "description": "Failed AE sessions across the cluster.",
+      "description": "Current AE sync failure rate. Decays to green within ~5m of the last error \u2014 persistent amber/red means sessions are failing NOW.",
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -664,8 +660,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
-          "decimals": 0,
+          "unit": "ops",
+          "decimals": 2,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -675,11 +671,11 @@
               },
               {
                 "color": "yellow",
-                "value": 10
+                "value": 0.1
               },
               {
                 "color": "red",
-                "value": 100
+                "value": 1
               }
             ]
           },
@@ -712,7 +708,7 @@
             "type": "prometheus",
             "uid": "bondy-prometheus"
           },
-          "expr": "sum(increase(bondy_oplog_sync_sessions_total{outcome=\"error\"}[15m])) or vector(0)",
+          "expr": "sum(rate(bondy_oplog_sync_sessions_total{outcome=\"error\"}[5m])) or vector(0)",
           "refId": "A"
         }
       ]

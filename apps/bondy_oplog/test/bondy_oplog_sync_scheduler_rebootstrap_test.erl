@@ -60,7 +60,8 @@ cleanup(_) ->
 rebootstrap_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {timeout, 30, fun unavailable_flags_and_rebootstraps/0},
-        {timeout, 30, fun other_failures_do_not_flag/0}
+        {timeout, 30, fun other_failures_do_not_flag/0},
+        {timeout, 30, fun gap_two_strikes_rebootstraps_fused/0}
     ]}.
 
 %% A live instance whose pull dies on `peer_pages_unavailable` is flagged
@@ -78,6 +79,40 @@ unavailable_flags_and_rebootstraps() ->
 
         %% The flag is consumed by a bootstrap dispatch, not another live
         %% sync.
+        bondy_oplog_sync_scheduler:trigger(),
+        Meta = await([bondy_oplog, sync_scheduler, dispatch_bootstrap], Inst),
+        ?assertMatch(#{peer := ?PEER, mode := catalogue}, Meta)
+    end),
+    bondy_oplog:stop_instance(Inst).
+
+%% A FUSED instance (no retention) whose complete rounds keep ending with
+%% a frontier-gap verdict — the peer's applied frontier is ahead and its
+%% tree cannot supply the missing events — must reach the catalogue
+%% re-bootstrap remedy on the SECOND consecutive strike, exactly like an
+%% applier-backed instance. The `gap` transport mode plays a peer that
+%% compacted everything away: an empty tree (`get_root` → undefined ⇒ a
+%% complete zero-pull round) with an applied VV strictly ahead.
+gap_two_strikes_rebootstraps_fused() ->
+    set_mode(gap),
+    Inst = mk_fused_inst(),
+    ?assertEqual(true, bondy_oplog_registry:fused(Inst)),
+    ?assertNotEqual(true, bondy_oplog_registry:mst_retention(Inst)),
+    with_telemetry(fun() ->
+        %% Strike 1: the session ends `{error, {frontier_gap, _}}`; the
+        %% debounce records it, nothing is scheduled yet.
+        bondy_oplog_sync_scheduler:trigger(),
+        _ = await([bondy_oplog, sync_scheduler, live, ended], Inst),
+        %% Root activity so the live throttle dispatches again
+        %% immediately instead of waiting out the poll window.
+        _ = bondy_oplog:append(Inst, {op, two_strikes}),
+        ok = bondy_oplog_instance:await_apply(Inst),
+        %% Strike 2: same pair, same verdict → the remedy.
+        bondy_oplog_sync_scheduler:trigger(),
+        #{instance_id := Inst, peer := ?PEER, reason := frontier_gap} =
+            await(
+                [bondy_oplog, sync_scheduler, rebootstrap_scheduled], Inst
+            ),
+        %% The flag is consumed by a bootstrap dispatch.
         bondy_oplog_sync_scheduler:trigger(),
         Meta = await([bondy_oplog, sync_scheduler, dispatch_bootstrap], Inst),
         ?assertMatch(#{peer := ?PEER, mode := catalogue}, Meta)
@@ -129,6 +164,12 @@ request(_Peer, _Instance, get_root, _Opts) ->
         unavailable ->
             [{root, Root}] = ets:lookup(?MODE_TAB, root),
             {ok, Root};
+        gap ->
+            %% A peer that compacted EVERYTHING away: genuinely empty
+            %% tree (a complete zero-pull round) while its applied VV
+            %% (`get_frontier` above) is strictly ahead — the standing
+            %% frontier-gap shape.
+            {ok, undefined};
         error ->
             {error, econnrefused}
     end;
@@ -161,6 +202,17 @@ mk_inst() ->
         "rb_", integer_to_binary(erlang:unique_integer([positive]))
     ]),
     {ok, _} = bondy_oplog:start_instance(Id, #{}),
+    Id.
+
+%% A bare FUSED instance (no `mst_retention`) — the class the frontier-gap
+%% remedy used to exclude.
+mk_fused_inst() ->
+    Id = iolist_to_binary([
+        "rbf_", integer_to_binary(erlang:unique_integer([positive]))
+    ]),
+    {ok, _} = bondy_oplog:start_instance(Id, #{
+        fused => true, wal_backend => mem, durability => ephemeral
+    }),
     Id.
 
 %% Attaches the telemetry forwarder in the TEST process (a fixture-level
