@@ -60,11 +60,18 @@ do_request(PeerInstance, get_root) ->
     _ = bondy_oplog_instance:await_apply(PeerInstance),
     {ok, bondy_oplog_instance:root_hash(PeerInstance)};
 do_request(PeerInstance, get_frontier) ->
-    %% Drain the peer's applier so the returned frontier reflects every
-    %% WAL-fsynced event (mirrors `get_root` above). In-VM transport ⇒ no
-    %% fingerprint leg (the responder's Partisan path carries it).
+    %% Snapshot the applied VV FIRST, then drain, then answer the
+    %% SNAPSHOT — the responder's installed-consistency order (see
+    %% `bondy_oplog_responder`'s `get_frontier` clause): every event the
+    %% snapshot counts is in the overlay before the drain starts, so it
+    %% is installed by the time we answer and the round's later root
+    %% read is same-or-newer. Draining first and reading after can
+    %% count an event applied mid-call that the served tree cannot yet
+    %% ship. In-VM transport ⇒ no fingerprint leg (the responder's
+    %% Partisan path carries it).
+    Frontier = bondy_oplog_instance:frontier(PeerInstance),
     _ = bondy_oplog_instance:await_apply(PeerInstance),
-    {ok, bondy_oplog_instance:frontier(PeerInstance)};
+    {ok, Frontier};
 do_request(PeerInstance, {confirm_root, _, _} = Request) ->
     bondy_oplog_responder:dispatch(PeerInstance, Request);
 do_request(PeerInstance, get_origins) ->

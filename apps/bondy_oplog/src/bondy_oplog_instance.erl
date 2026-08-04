@@ -58,6 +58,22 @@
 -define(FUSED_GAP_RETRY_MS, 1).
 -define(FUSED_MAX_GAP_RETRIES, 2000).
 
+%% Cap on the watermark door's fast-path region scan
+%% (`entries_at_or_below/2`): the at-or-below-watermark region is
+%% normally empty or a handful of just-merged events, so the capped
+%% `bondy_mst:last_n/3` walk covers it in O(candidates); an
+%% exactly-capped result falls back to the total full-tree filter.
+-define(DOOR_SCAN_CAP, 1024).
+
+%% TTL for peer-root pins (`pin_peer_root/2`). A sync session pins the
+%% root it is pulling so the ETS page GC (`truncate_below_or_equal/4`)
+%% does not sweep pulled-but-not-yet-merged pages out from under it; a
+%% session that dies without its pin being consumed by
+%% `integrate_peer_root` leaves the pin to expire here. Generous vs the
+%% session's own timeouts — the cost of a stale pin is only a few
+%% retained pages for this long.
+-define(PEER_ROOT_PIN_TTL_MS, 120_000).
+
 %% Async pack-store seal: how many times the instance re-runs a failed seal
 %% job before giving up and stopping so the supervisor restart + reopen
 %% recovery re-seals the frozen incoming pack from scratch. A persistent
@@ -350,6 +366,12 @@ without protocol changes.
     %% compaction, before any low-load warmup window (the freeze that broke
     %% multi-shard batched-fsync runs). See `resolve_has_projection/1`.
     has_projection = false :: boolean(),
+    %% Peer roots pinned by in-flight sync sessions (root → pinned-at,
+    %% monotonic ms). The ETS page GC keeps everything reachable from
+    %% these roots so a multi-round pull's earlier pages survive the
+    %% concurrent compaction cycles that run while later rounds are
+    %% still fetching. See `pin_peer_root/2` / `?PEER_ROOT_PIN_TTL_MS`.
+    pinned_peer_roots = #{} :: #{binary() => integer()},
     %% Monotonic counter bumped every time a peer-merged event enters the
     %% MST (`integrate_peer_root`). Captured at the start of an async
     %% compaction catch-up and re-checked at the truncate so a peer event
@@ -545,6 +567,7 @@ without protocol changes.
 -export([merge_pages/2]).
 -export([missing_set/2]).
 -export([integrate_peer_root/2]).
+-export([pin_peer_root/2]).
 
 %% GC / compaction API
 -export([current_watermark/1]).
@@ -982,6 +1005,16 @@ applier process, which then forwards the verified event to the
 instance for origin-ban / backpressure / watermark filtering and the
 MST install. The applier is therefore the sole verify+dispatch origin
 for both locally appended and peer-received events.
+
+An accepted fresh event is DELIVERED, not merely installed: on a
+fused instance the projection reflects it when this call returns; on
+an applier-backed instance the applier replay is cast and the I1
+prepare fence bumped, so a projection read behind the applier barrier
+observes it — no AE round required. The watermark filter drops an
+at-or-below-watermark event only when the applied VV witnesses it as
+already folded here (or the instance has no projection); a
+never-applied event below the watermark is accepted and delivered
+like any other (the live-event watermark door).
 
 **Pass an `instance_id()` (binary)** for hot-path callers. The binary
 form resolves origin and applier pid via lock-free registry reads
@@ -1627,12 +1660,22 @@ missing_set(Target, Root) when is_binary(Root) ->
 Integrates a peer's tree (identified by `PeerRoot`) into the local
 MST. Pre-condition: every page reachable from `PeerRoot` must already
 be present in the local store (caller's responsibility — typically
-ensured by `missing_set/2` returning `[]` after page loading).
+ensured by `missing_set/2` returning `[]` after page loading). The
+handler RE-VERIFIES that pre-condition atomically with the merge (both
+run in this gen_server, serialized with the compaction cycles whose
+page GC can sweep pulled-but-unmerged pages) and answers
+`{error, {peer_pages_missing, N}}` instead of merging partially — a
+missing subtree would otherwise be silently treated as empty by
+`bondy_mst:merge/3`, losing every event under it while the session
+records the round as complete (observed live: ~100-270 silent partial
+merges per sustained-load suite run before this guard). The caller
+re-pulls and retries.
 
 After this call, all events that were in the peer's tree are visible
 to local queries, and the local root is the merged root of both trees.
 """).
--spec integrate_peer_root(instance_id() | pid(), bondy_mst:hash()) -> ok.
+-spec integrate_peer_root(instance_id() | pid(), bondy_mst:hash()) ->
+    ok | {error, {peer_pages_missing, non_neg_integer()}}.
 
 integrate_peer_root(Target, PeerRoot) when is_binary(PeerRoot) ->
     gen_server:call(
@@ -1640,6 +1683,22 @@ integrate_peer_root(Target, PeerRoot) when is_binary(PeerRoot) ->
         {integrate_peer_root, PeerRoot},
         infinity
     ).
+
+?DOC("""
+Pins `Root` (a peer root an in-flight sync session is pulling pages
+for) against this instance's ETS page GC. Pulled pages are unreachable
+from the LOCAL current root until `integrate_peer_root/2` merges them,
+so without a pin every concurrent compaction cycle's mark-and-sweep
+collects them — a multi-round pull would lose its earlier rounds'
+pages while later rounds are still fetching. The pin is consumed by a
+successful `integrate_peer_root/2` of the same root and expires after
+`?PEER_ROOT_PIN_TTL_MS` otherwise (a crashed session must not retain
+pages forever).
+""").
+-spec pin_peer_root(instance_id() | pid(), bondy_mst:hash()) -> ok.
+
+pin_peer_root(Target, Root) when is_binary(Root) ->
+    gen_server:call(target(Target), {pin_peer_root, Root}).
 
 %% =============================================================================
 %% GC / COMPACTION API
@@ -2986,10 +3045,12 @@ do_handle_call({truncate_prefix, Watermark}, _From, #state{mst = MST0} = State) 
     %% bookkeeping.
     %%
     %% Also advances `state.watermark` so the receive-side filter in
-    %% `do_append_remote/2` rejects peer events with HLC ≤ Watermark.
-    %% Without this, peers that have not yet seen the truncate would
-    %% keep re-shipping the events we just dropped, defeating the
-    %% purpose of the call. No snapshot is written at the new
+    %% `do_append_remote/2` rejects re-shipped peer events with
+    %% HLC ≤ Watermark (already applied here — the live door only
+    %% accepts at-or-below-watermark events the applied VV does NOT
+    %% witness). Without this, peers that have not yet seen the
+    %% truncate would keep re-shipping the events we just dropped,
+    %% defeating the purpose of the call. No snapshot is written at the new
     %% watermark — operator-driven truncate is documented as lossy for
     %% bootstrap consumers (see `bondy_oplog:truncate_prefix/2`). The
     %% watermark advance is monotone: a Watermark lower than the
@@ -3087,113 +3148,35 @@ do_handle_call({missing_set, Root}, _From, #state{mst = MST} = State) ->
 do_handle_call(
     {integrate_peer_root, PeerRoot},
     _From,
-    #state{mst = MST0} = State
+    #state{mst = MST0} = State000
 ) ->
-    MST1 = bondy_mst:merge(MST0, MST0, PeerRoot),
-    %% Watermark filter: if our compaction has advanced past some of
-    %% the events in PeerRoot's tree, re-truncate to drop them.
-    MST2 =
-        case State#state.watermark of
-            undefined -> MST1;
-            W -> truncate_below_or_equal(MST1, W, State#state.backend)
-        end,
-    %% HLC update: events received via merge may carry HLCs higher than
-    %% our local clock. Advance the HLC to dominate the merged tree's
-    %% max key so subsequent local appends sort after every received
-    %% event — and stay above any future watermark.
-    case bondy_mst:last(MST2) of
-        undefined ->
-            ok;
-        {LastKey, _V} ->
-            _ = bondy_oplog_hlc:update(
-                State#state.hlc, bondy_oplog_event:key_hlc(LastKey)
-            )
-    end,
-    %% Re-seed `max_local_installed_seq` from the merged tree. A sync
-    %% can echo our own local events back to us (peer pulled them
-    %% from us earlier, then we pull our originated pages back in via
-    %% `pull_until_complete` → `integrate_peer_root`). When the
-    %% applier later dispatches those same WAL entries to
-    %% `install_local_batch`, the `is_fast_install` predicate uses
-    %% this watermark to decide between the fast install (blindly
-    %% bumps `live_size`) and the slow safe install (checks the MST
-    %% first). Without this refresh, the fast path double-bumps
-    %% `live_size` for the echoed event — visible to `size/1` as an
-    %% off-by-N overcount.
-    MaxLocalSeq =
-        case max_local_seq(MST2, State#state.origin) of
-            undefined -> State#state.max_local_installed_seq;
-            S -> erlang:max(S, State#state.max_local_installed_seq)
-        end,
-    State1 = State#state{
-        mst = MST2,
-        live_size = compute_live_size(MST2),
-        max_local_installed_seq = MaxLocalSeq,
-        %% Bump the generation so an async catch-up already in flight (or
-        %% one that captured this state) detects the new event at its
-        %% truncate guard and defers rather than truncating it un-folded.
-        %% (Non-fused only matters; harmless when fused.)
-        remote_gen = State#state.remote_gen + 1
-    },
-    %% Sync produced new events in the local MST; the cell_apply projection
-    %% must re-fold so peer-authored events become visible to
-    %% `bondy_db:read/3`.
-    State2 =
-        case State1#state.fused of
-            true ->
-                %% Fused (no applier): fold the peer-merged events into the
-                %% projection INLINE, in this process (Step 4). The
-                %% projection is current on return, so there is nothing for
-                %% a later compaction to catch up — `remote_events_pending`
-                %% stays false. The async catch-up
-                %% (`begin_async_catch_up/3`) exists only to break the
-                %% cross-process instance↔applier deadlock, which a single
-                %% process does not have. Reads see the merged values as
-                %% soon as this handler returns (the merged MST2 is
-                %% auto-published by `maybe_publish/2`).
-                fused_replay_cell_events(State1);
-            false ->
-                %% Durable / non-fused: ask the applier to re-fold the
-                %% projection (a best-effort cast; the next sync tick
-                %% re-arms it if the applier was busy). No-op when the
-                %% instance was started without a `cell_apply_target` (the
-                %% applier's `cell_apply_ctx` is `undefined` and the cast
-                %% falls through). Mark the remote events pending so the
-                %% next catalogue compaction folds them before truncating.
-                %%
-                %% I1 (prepare-after-deliver) — the DELIVERY POINT. Bump
-                %% the shared remote-delivery generation strictly AFTER
-                %% the MST root advance above (program order within this
-                %% handler): the applier's prepare fence
-                %% (`{cell_context, _, _}`) compares this generation
-                %% against the one it last replayed to, so a context read
-                %% ordered after this handler's completion either finds
-                %% the generation advanced (and replays before serving)
-                %% or the cast below already folded the events. A context
-                %% read that races AHEAD of this bump is, by definition,
-                %% prepared before these events were delivered — I1 holds
-                %% vacuously for it. This handler is the ONLY path by
-                %% which remote-origin events enter a non-fused
-                %% instance's MST (catalogue bootstrap installs cells
-                %% pre-live, before any context is served; the compaction
-                %% catch-up re-folds events already counted here), so
-                %% this single bump site is exhaustive.
-                _ =
-                    State1#state.remote_gen_ref =/= undefined andalso
-                        atomics:add(State1#state.remote_gen_ref, 1, 1),
-                case
-                    bondy_oplog_registry:applier_pid(
-                        State1#state.instance_id
-                    )
-                of
-                    undefined ->
-                        ok;
-                    ApplierPid when is_pid(ApplierPid) ->
-                        bondy_oplog_applier:replay_cell_events(ApplierPid)
-                end,
-                State1#state{remote_events_pending = true}
-        end,
-    {reply, ok, State2};
+    %% ATOMIC pre-condition re-check: the session verified
+    %% `missing_set == []` one call earlier, but this instance's own
+    %% compaction (its ETS page GC sweeps everything unreachable from
+    %% the CURRENT root — which pulled-but-unmerged peer pages are) can
+    %% interleave between that check and this handler. Re-checking HERE
+    %% is race-free — the GC only runs in this process — and a missing
+    %% page must fail the call: `bondy_mst:merge/3` silently treats an
+    %% unresolvable subtree as empty, which loses every event under it
+    %% while the session records the round as complete.
+    MissingSet = bondy_mst:missing_set(MST0, PeerRoot),
+    case missing_set_empty(MissingSet) of
+        true ->
+            do_integrate_peer_root(PeerRoot, State000);
+        false ->
+            {reply,
+                {error,
+                    {peer_pages_missing,
+                        length(missing_set_to_list(MissingSet))}},
+                State000}
+    end;
+do_handle_call({pin_peer_root, Root}, _From, State) when is_binary(Root) ->
+    Now = erlang:monotonic_time(millisecond),
+    Pins = maps:filter(
+        fun(_, T) -> Now - T =< ?PEER_ROOT_PIN_TTL_MS end,
+        State#state.pinned_peer_roots
+    ),
+    {reply, ok, State#state{pinned_peer_roots = Pins#{Root => Now}}};
 do_handle_call(current_watermark, _From, State) ->
     {reply, State#state.watermark, State};
 do_handle_call(crdt_module, _From, State) ->
@@ -4225,6 +4208,311 @@ fused_replay_cell_events(
     end.
 
 %% @private
+%% The `integrate_peer_root` body, entered only after the handler's
+%% atomic missing-set pre-check. Merges the peer root, runs the
+%% watermark door, replays (fused) or schedules the applier replay
+%% (non-fused), consumes the session's peer-root pin, and returns the
+%% gen_server reply tuple.
+do_integrate_peer_root(PeerRoot, #state{mst = MST0} = State00) ->
+    {HasProjection, State} = resolve_has_projection(State00),
+    MST1 = bondy_mst:merge(MST0, MST0, PeerRoot),
+    %% Watermark filter — THE WATERMARK DOOR: if our compaction has
+    %% advanced past some of the events in PeerRoot's tree, re-truncate
+    %% to drop them. The door's premise — "at or below the watermark ⇒
+    %% already folded here" — is FALSE for a peer event this replica
+    %% never saw: the peer-confirmed frontier and in-flight events race
+    %% by design under concurrent writes, so a just-minted peer event
+    %% can arrive after the watermark passed its key. Discarding it
+    %% unapplied is silent, permanent, per-replica data loss — the
+    %% completed round's `confirm_root` (a page-holding claim) lets the
+    %% origin compact the event away, and the applied VV max-merges
+    %% past the hole on the next same-origin apply (the VV is a max,
+    %% not a prefix witness), so no oracle ever flags it. Proven live
+    %% at defaults by the compaction cluster suite's forensics.
+    %% `watermark_door/3` therefore NEVER truncates a never-applied
+    %% event: fused instances fold it into the projection inline first;
+    %% applier-backed instances hold it below the watermark for the
+    %% applier's replay (this function sets `remote_events_pending`
+    %% below, and every later truncation site is behind the async
+    %% catch-up gate).
+    MST2 = watermark_door(HasProjection, State, MST1),
+    %% HLC update: events received via merge may carry HLCs higher than
+    %% our local clock. Advance the HLC to dominate the merged tree's
+    %% max key so subsequent local appends sort after every received
+    %% event — and stay above any future watermark.
+    case bondy_mst:last(MST2) of
+        undefined ->
+            ok;
+        {LastKey, _V} ->
+            _ = bondy_oplog_hlc:update(
+                State#state.hlc, bondy_oplog_event:key_hlc(LastKey)
+            )
+    end,
+    %% Re-seed `max_local_installed_seq` from the merged tree. A sync
+    %% can echo our own local events back to us (peer pulled them
+    %% from us earlier, then we pull our originated pages back in via
+    %% `pull_until_complete` → `integrate_peer_root`). When the
+    %% applier later dispatches those same WAL entries to
+    %% `install_local_batch`, the `is_fast_install` predicate uses
+    %% this watermark to decide between the fast install (blindly
+    %% bumps `live_size`) and the slow safe install (checks the MST
+    %% first). Without this refresh, the fast path double-bumps
+    %% `live_size` for the echoed event — visible to `size/1` as an
+    %% off-by-N overcount.
+    MaxLocalSeq =
+        case max_local_seq(MST2, State#state.origin) of
+            undefined -> State#state.max_local_installed_seq;
+            S -> erlang:max(S, State#state.max_local_installed_seq)
+        end,
+    State1 = State#state{
+        mst = MST2,
+        live_size = compute_live_size(MST2),
+        max_local_installed_seq = MaxLocalSeq,
+        %% The session's pin on this root is consumed by the successful
+        %% merge — the pages are now reachable from OUR root, so the GC
+        %% protects them without it.
+        pinned_peer_roots = maps:remove(
+            PeerRoot, State#state.pinned_peer_roots
+        )
+    },
+    %% Sync produced new events in the local MST; the cell_apply projection
+    %% must re-fold so peer-authored events become visible to
+    %% `bondy_db:read/3`.
+    {reply, ok, deliver_remote(State1)}.
+
+%% @private
+%% The remote DELIVERY POINT, shared by `do_integrate_peer_root/2`
+%% (page sync) and `append_remote_install/3` (live single events) —
+%% the only two paths by which remote-origin events enter an
+%% instance's MST post-live (catalogue bootstrap installs cells
+%% pre-live, before any context is served; the compaction catch-up
+%% re-folds events already counted here). Called strictly AFTER the
+%% MST root advance (program order within the calling handler).
+%%
+%% Always bumps `remote_gen` so an async catch-up already in flight
+%% (or one that captured the pre-delivery state) detects the new
+%% events at its truncate guard and defers rather than truncating
+%% them un-folded. Then:
+%%
+%% - Fused (no applier): fold the new events into the projection
+%%   INLINE, in this process. The projection is current on return, so
+%%   there is nothing for a later compaction to catch up —
+%%   `remote_events_pending` stays false. The async catch-up
+%%   (`begin_async_catch_up/3`) exists only to break the
+%%   cross-process instance↔applier deadlock, which a single process
+%%   does not have. Reads see the values as soon as the calling
+%%   handler returns (the advanced MST is auto-published by
+%%   `maybe_publish/2`).
+%% - Durable / non-fused: ask the applier to re-fold the projection
+%%   (a best-effort cast; the next sync tick re-arms it if the
+%%   applier was busy). No-op when the instance was started without a
+%%   `cell_apply_target` (the applier's `cell_apply_ctx` is
+%%   `undefined` and the cast falls through). Mark the remote events
+%%   pending so the next catalogue compaction folds them before
+%%   truncating.
+%%
+%%   I1 (prepare-after-deliver): the shared remote-delivery
+%%   generation bump makes this the fence's delivery point — the
+%%   applier's prepare fence (`{cell_context, _, _}`) compares this
+%%   generation against the one it last replayed to, so a context
+%%   read ordered after the calling handler's completion either finds
+%%   the generation advanced (and replays before serving) or the cast
+%%   below already folded the events. A context read that races AHEAD
+%%   of this bump is, by definition, prepared before these events
+%%   were delivered — I1 holds vacuously for it. Both MST entry paths
+%%   route here, so this single bump site is exhaustive.
+deliver_remote(#state{} = State0) ->
+    State = State0#state{remote_gen = State0#state.remote_gen + 1},
+    case State#state.fused of
+        true ->
+            fused_replay_cell_events(State);
+        false ->
+            _ =
+                State#state.remote_gen_ref =/= undefined andalso
+                    atomics:add(State#state.remote_gen_ref, 1, 1),
+            case
+                bondy_oplog_registry:applier_pid(State#state.instance_id)
+            of
+                undefined ->
+                    ok;
+                ApplierPid when is_pid(ApplierPid) ->
+                    bondy_oplog_applier:replay_cell_events(ApplierPid)
+            end,
+            State#state{remote_events_pending = true}
+    end.
+
+%% @private
+%% THE WATERMARK DOOR (see `do_integrate_peer_root/2` for the full
+%% rationale). Truncates the merged tree at or below the watermark
+%% WITHOUT ever dropping a never-applied event:
+%%
+%% - No watermark, or no never-applied events at or below it → plain
+%%   truncate (the pre-existing behaviour; already-applied events at or
+%%   below the watermark are compacted history re-introduced by the
+%%   merge, and dropping them is the door's whole point).
+%% - Fused with a projection → fold the never-applied events into the
+%%   projection inline (`apply_cell_pairs_mux`, exactly the primitive
+%%   `fused_replay_cell_events/1` uses — same process, same sources),
+%%   re-check against the now-advanced VV, then truncate. Fold-before-
+%%   drop: the event's op survives in the projection, the VV witnesses
+%%   it honestly, and the MST stays bounded.
+%% - Applier-backed (the applier is the projection's single writer, so
+%%   this process must not fold cells) or fold failed → HOLD: truncate
+%%   only the prefix strictly below the smallest never-applied key. The
+%%   held events stay in the tree for the applier's replay (the
+%%   integrate handler sets `remote_events_pending`, and every later
+%%   truncation site — compaction commit and watermark catch-up — is
+%%   behind the async catch-up gate, which folds before truncating).
+%%   The next door pass re-evaluates the held prefix against the VV and
+%%   truncates once applied.
+%%
+%% Instances WITHOUT a projection have no applied-VV witness (their
+%% checkpoint fold at compaction defines "applied"), so the door keeps
+%% its legacy full truncate there — the production `bondy_db` tables
+%% are all projection-backed.
+watermark_door(_HasProjection, #state{watermark = undefined}, MST) ->
+    MST;
+watermark_door(false, #state{watermark = W, backend = Backend} = State, MST) ->
+    truncate_below_or_equal(MST, W, Backend, pinned_roots(State));
+watermark_door(
+    true,
+    #state{instance_id = Id, watermark = W, backend = Backend} = State,
+    MST
+) ->
+    Pinned = pinned_roots(State),
+    case never_applied_at_or_below(Id, MST, W) of
+        [] ->
+            truncate_below_or_equal(MST, W, Backend, Pinned);
+        Doored ->
+            ok = door_fold(State, Doored),
+            case never_applied_at_or_below(Id, MST, W) of
+                [] ->
+                    ok = door_report(Id, folded, Doored),
+                    truncate_below_or_equal(MST, W, Backend, Pinned);
+                Held ->
+                    ok = door_report(Id, held, Held),
+                    MinHeld = lists:min([K || {K, _} <- Held]),
+                    case bondy_mst:last_n(MST, MinHeld, 1) of
+                        [{K, _V}] ->
+                            truncate_below_or_equal(MST, K, Backend, Pinned);
+                        [] ->
+                            MST
+                    end
+            end
+    end.
+
+%% @private
+%% `{Key, Value}` entries at or below `W` whose `{Origin, Seq}` exceeds
+%% the local applied VV — events the door must not drop. The region at
+%% or below the watermark is normally EMPTY (the watermark is this
+%% instance's own truncation point), so the scan visits only what the
+%% merge just re-introduced plus any held prefix: O(candidates), not
+%% O(tree).
+never_applied_at_or_below(Id, MST, W) ->
+    VV = applied_vv(Id),
+    [
+        {K, V}
+     || {K, V} <- entries_at_or_below(MST, W),
+        bondy_oplog_event:key_seq(K) >
+            maps:get(bondy_oplog_event:key_origin(K), VV, 0)
+    ].
+
+%% @private
+%% The applied-frontier version vector — the witness both watermark
+%% doors (`watermark_door/3` and `append_remote_below_watermark/3`)
+%% judge "never applied here" against. `#{}` when the registry has no
+%% frontier yet (nothing applied).
+applied_vv(Id) ->
+    case bondy_oplog_registry:frontier(Id) of
+        M when is_map(M) -> M;
+        _ -> #{}
+    end.
+
+%% @private
+%% The tree's `{Key, Value}` entries with `Key =< W`. Fast path: walk
+%% down from the key's successor with `bondy_mst:last_n/3` ("last N
+%% strictly below the bound"), capped; an exactly-capped result means
+%% the region may be larger than the cap, so fall back to the total
+%% full-tree filter.
+entries_at_or_below(MST, W) ->
+    case bondy_oplog_event:is_key(W) of
+        true ->
+            Bound = bondy_oplog_event:key(
+                bondy_oplog_event:key_hlc(W),
+                bondy_oplog_event:key_origin(W),
+                bondy_oplog_event:key_seq(W) + 1
+            ),
+            case bondy_mst:last_n(MST, Bound, ?DOOR_SCAN_CAP) of
+                Entries when length(Entries) < ?DOOR_SCAN_CAP ->
+                    Entries;
+                _ ->
+                    full_scan_at_or_below(MST, W)
+            end;
+        false ->
+            full_scan_at_or_below(MST, W)
+    end.
+
+%% @private
+full_scan_at_or_below(MST, W) ->
+    bondy_mst:fold(
+        MST,
+        fun
+            ({K, V}, Acc) when K =< W -> [{K, V} | Acc];
+            (_, Acc) -> Acc
+        end,
+        []
+    ).
+
+%% @private
+%% Fold never-applied doored pairs into the projection — fused
+%% instances only (the fused instance owns its cell-apply sources; an
+%% applier-backed instance must leave the fold to the applier, its
+%% projection's single writer). Best-effort: the caller re-checks the
+%% VV afterwards, so a partial or failed fold degrades to the HOLD
+%% path, never to a drop.
+door_fold(
+    #state{
+        instance_id = Id,
+        origin = Origin,
+        fused = true,
+        fused_drain = #fused_drain{cell_apply_ctx = Ctx, cell_apply_source = S}
+    },
+    Pairs
+) when Ctx =/= undefined ->
+    _ = catch bondy_oplog_cell_apply:apply_cell_pairs_mux(S, Id, Pairs, Origin),
+    ok;
+door_fold(#state{}, _Pairs) ->
+    ok.
+
+%% @private
+door_report(Id, Action, Pairs) ->
+    Sample = [
+        #{
+            origin => bondy_oplog_event:key_origin(K),
+            seq => bondy_oplog_event:key_seq(K),
+            hlc => bondy_oplog_event:key_hlc(K)
+        }
+     || {K, _} <- lists:sublist(Pairs, 10)
+    ],
+    telemetry:execute(
+        [bondy_oplog, instance, integrate_doored],
+        #{count => length(Pairs)},
+        #{instance_id => Id, action => Action, doored => Sample}
+    ),
+    ?LOG_INFO(#{
+        description =>
+            "Watermark door: integrate merged never-applied peer "
+            "events at or below the local watermark; folded them into "
+            "the projection (fused) or held them for the applier's "
+            "replay instead of discarding them",
+        instance_id => Id,
+        action => Action,
+        count => length(Pairs),
+        doored => Sample
+    }),
+    ok.
+
+%% @private
 %% Bumps the AE-freshness atomic for every shard in the fused drain's
 %% `ae_targets` with a shared `monotonic_time(millisecond)` so a batch of
 %% shards observes the same "now". Mirrors
@@ -4900,22 +5188,82 @@ invalidate_wal_pid(#state{wal_pid_monitor = Ref} = State) ->
 %% here, so this function trusts the input and runs the remaining
 %% accept/reject logic:
 %%
-%% - Idempotent below-watermark filter (compaction may have advanced
-%%   past this key already).
-%% - `bondy_mst:get` three-way:
-%%   - `undefined`: fresh insert.
-%%   - bit-identical existing value: idempotent re-receive, no-op.
+%% - At-or-below-watermark door (`append_remote_below_watermark/3`) —
+%%   the live-event twin of `watermark_door/3`. An at-or-below-
+%%   watermark key is usually compacted history we already folded
+%%   (idempotent drop), but it may also be a NEVER-applied event whose
+%%   key the locally-advancing watermark passed while it was in
+%%   flight. Those are accepted — installed and delivered like any
+%%   other remote event — instead of dropped; the applied VV is the
+%%   witness, exactly as at the integrate door.
+%% - `bondy_mst:get` three-way (`append_remote_install/3`):
+%%   - `undefined`: fresh insert + remote delivery
+%%     (`deliver_remote/1` — fold inline when fused, fence + replay
+%%     cast when applier-backed).
+%%   - bit-identical existing value: idempotent re-receive, no-op (a
+%%     prior insert already delivered it).
 %%   - different existing value: equivocation; record proof in the
 %%     quarantine table, leave the MST unchanged, return
 %%     `{error, equivocation_detected}`. Keeping the gen_server alive
 %%     on bad input avoids a crash-loop on poisoned peer traffic.
-do_append_remote(#state{mst = MST0} = State, Event) ->
+do_append_remote(#state{} = State, Event) ->
     Key = bondy_oplog_event:key(Event),
     _ = bondy_oplog_hlc:update(
         State#state.hlc, bondy_oplog_event:key_hlc(Key)
     ),
     case below_or_equal_watermark(Key, State#state.watermark) of
         true ->
+            append_remote_below_watermark(State, Key, Event);
+        false ->
+            append_remote_install(State, Key, Event)
+    end.
+
+%% @private
+%% THE LIVE-EVENT WATERMARK DOOR (see `watermark_door/3` for the page-
+%% sync twin and the full rationale). "At or below the watermark ⇒
+%% already folded here" is FALSE for a peer event this replica never
+%% saw, so the filter must not drop on key order alone:
+%%
+%% - Projection-backed instance + the applied VV does NOT witness the
+%%   event (`Seq > VV[Origin]`) → never applied here: install and
+%%   deliver it like any above-watermark event. The MST briefly holds
+%%   an at-or-below-watermark key; that is safe on both projection
+%%   classes — fused folds it inline in `deliver_remote/1` before this
+%%   handler returns (so a later compaction truncates it as applied
+%%   history), and an applier-backed instance's truncation sites are
+%%   all behind the async catch-up gate, which folds before
+%%   truncating (`deliver_remote/1` sets `remote_events_pending` and
+%%   bumps `remote_gen`, so an in-flight catch-up defers too).
+%% - Applied, or no projection (no VV witness — `resolve_has_projection/1`)
+%%   → the legacy idempotent drop.
+append_remote_below_watermark(State0, Key, Event) ->
+    {HasProjection, State} = resolve_has_projection(State0),
+    VV = applied_vv(State#state.instance_id),
+    NeverApplied =
+        bondy_oplog_event:key_seq(Key) >
+            maps:get(bondy_oplog_event:key_origin(Key), VV, 0),
+    case HasProjection andalso NeverApplied of
+        true ->
+            telemetry:execute(
+                [bondy_oplog, instance, append_remote, doored],
+                #{count => 1},
+                #{
+                    instance_id => State#state.instance_id,
+                    origin => bondy_oplog_event:key_origin(Key),
+                    seq => bondy_oplog_event:key_seq(Key)
+                }
+            ),
+            ?LOG_INFO(#{
+                description =>
+                    "Live-event watermark door: accepted a never-applied "
+                    "remote event at or below the local watermark instead "
+                    "of discarding it",
+                instance_id => State#state.instance_id,
+                origin => bondy_oplog_event:key_origin(Key),
+                seq => bondy_oplog_event:key_seq(Key)
+            }),
+            append_remote_install(State, Key, Event);
+        false ->
             telemetry:execute(
                 [bondy_oplog, instance, append_remote, filtered],
                 #{count => 1},
@@ -4924,25 +5272,31 @@ do_append_remote(#state{mst = MST0} = State, Event) ->
                     reason => below_watermark
                 }
             ),
-            {ok, State};
-        false ->
-            NewValue = value_from_event(Event),
-            case bondy_mst:get(MST0, Key) of
-                undefined ->
-                    {ok,
-                        install_event(
-                            State, Key, NewValue, append_remote, true
-                        )};
-                NewValue ->
-                    %% Idempotent re-receive (bit-identical).
-                    {ok,
-                        install_event(
-                            State, Key, NewValue, append_remote, false
-                        )};
-                ExistingValue ->
-                    record_equivocation(State, Key, ExistingValue, Event),
-                    {error, equivocation_detected}
-            end
+            {ok, State}
+    end.
+
+%% @private
+%% The `bondy_mst:get` three-way accept path shared by the normal
+%% (above-watermark) install and the live-event watermark door. A
+%% fresh insert is a remote DELIVERY — `deliver_remote/1` folds it
+%% into the projection (fused) or fences + casts the applier replay,
+%% so a projection read ordered after this handler's reply observes
+%% the event. The idempotent re-receive skips delivery: the insert
+%% that first put the value in the MST already delivered it.
+append_remote_install(#state{mst = MST0} = State, Key, Event) ->
+    NewValue = value_from_event(Event),
+    case bondy_mst:get(MST0, Key) of
+        undefined ->
+            State1 = install_event(
+                State, Key, NewValue, append_remote, true
+            ),
+            {ok, deliver_remote(State1)};
+        NewValue ->
+            %% Idempotent re-receive (bit-identical).
+            {ok, install_event(State, Key, NewValue, append_remote, false)};
+        ExistingValue ->
+            record_equivocation(State, Key, ExistingValue, Event),
+            {error, equivocation_detected}
     end.
 
 %% @private
@@ -5256,10 +5610,27 @@ advance_watermark(Cur, _New) -> Cur.
 %% (durable) backend, where list-mode GC is a sealed-pack rewrite with
 %% its own lifecycle — durable pack reclamation is a separate concern
 %% (disk, not RAM).
-truncate_below_or_equal(MST, Watermark, ets) ->
-    bondy_mst:gc(bondy_mst:truncate(MST, Watermark));
-truncate_below_or_equal(MST, Watermark, _Backend) ->
+truncate_below_or_equal(MST, Watermark, ets, KeepRoots) ->
+    %% `KeepRoots` (the session-pinned peer roots, see `pin_peer_root/2`)
+    %% protects pulled-but-not-yet-merged sync pages from the sweep —
+    %% they are unreachable from OUR current root until
+    %% `integrate_peer_root/2` merges them, and without the pin every
+    %% compaction cycle during a multi-round pull collected the earlier
+    %% rounds' pages (observed as silent partial merges — see
+    %% `do_integrate_peer_root/2`). `bondy_mst:gc/2` adds the current
+    %% root itself.
+    bondy_mst:gc(bondy_mst:truncate(MST, Watermark), KeepRoots);
+truncate_below_or_equal(MST, Watermark, _Backend, _KeepRoots) ->
     bondy_mst:truncate(MST, Watermark).
+
+%% @private
+%% The live (non-expired) session-pinned peer roots — the extra
+%% KeepRoots for `truncate_below_or_equal/4`'s page GC.
+pinned_roots(#state{pinned_peer_roots = Pins}) when map_size(Pins) =:= 0 ->
+    [];
+pinned_roots(#state{pinned_peer_roots = Pins}) ->
+    Now = erlang:monotonic_time(millisecond),
+    [R || R := T <- Pins, Now - T =< ?PEER_ROOT_PIN_TTL_MS].
 
 %% @private
 %% Runs a full compaction cycle synchronously, in the instance
@@ -6047,7 +6418,7 @@ commit_compaction(
     {ok, {compacted, Frontier, NewCheckpoint, EventCount}}
 ) ->
     MST1 = truncate_below_or_equal(
-        State#state.mst, Frontier, State#state.backend
+        State#state.mst, Frontier, State#state.backend, pinned_roots(State)
     ),
     %% Persist the truncated root so the durable MST root tracks the
     %% checkpoint (which `do_compact_sync/2` already wrote). For this
@@ -6172,7 +6543,8 @@ finalize_catalogue_compaction(State0, Started, Frontier) ->
     State = drive_secondary_indexes(State0),
     {MST1, TruncateUs} = tc(fun() ->
         truncate_below_or_equal(
-            State#state.mst, Frontier, State#state.backend
+            State#state.mst, Frontier, State#state.backend,
+            pinned_roots(State)
         )
     end),
     %% Persist the truncated MST root BEFORE advancing the durable
@@ -6538,7 +6910,8 @@ apply_loaded_snapshot(State, NewWatermark, Snapshot) ->
     ),
     %% Drop any live events that the new checkpoint already covers.
     MST1 = truncate_below_or_equal(
-        State#state.mst, NewWatermark, State#state.backend
+        State#state.mst, NewWatermark, State#state.backend,
+        pinned_roots(State)
     ),
     LiveSize1 = compute_live_size(MST1),
     %% Advance HLC to keep future local appends above the watermark.

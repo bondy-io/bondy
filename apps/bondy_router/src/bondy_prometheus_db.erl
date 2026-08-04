@@ -239,6 +239,7 @@ events() ->
         [bondy_oplog, instance, append_remote, ok],
         [bondy_oplog, instance, append_remote, banned],
         [bondy_oplog, instance, append_remote, filtered],
+        [bondy_oplog, instance, append_remote, doored],
         [bondy_oplog, instance, append_remote, equivocation],
         [bondy_oplog, instance, overlay, backpressure_drop],
         [bondy_oplog, instance, write_latency],

@@ -152,15 +152,44 @@ dispatch(InstanceId, get_root) when is_binary(InstanceId) ->
             %% verify both nodes key data the same way before pulling pages.
             %%
             %% `aae_root/1` (not `root_hash/1`) applies the integrity guard:
-            %% if our root is dangling (a page it references is missing) it
-            %% advertises `undefined` instead, so the peer pulls nothing
-            %% unservable from us (avoiding `peer_returned_empty_pages`) and we
-            %% heal our own root via our pull / replay rather than poisoning a
-            %% healthy peer. Local logic keeps using the real `root_hash/1`.
-            {ok, bondy_oplog_instance:aae_root(InstanceId),
-                bondy_oplog:topology_fingerprint(
-                    bondy_oplog:db_of(InstanceId)
-                )}
+            %% if our root is dangling (a page it references is missing —
+            %% transiently normal under the truncate+page-GC churn) it
+            %% answers `undefined`, so the peer pulls nothing unservable
+            %% from us and we heal via our own pull / replay.
+            %%
+            %% A guard-tripped `undefined` MUST NOT be advertised as the
+            %% root, because the initiator rightly treats an `undefined`
+            %% peer root as "peer's tree is genuinely empty" — a COMPLETE
+            %% round with nothing to pull, which the frontier-gap check
+            %% then judges against our honest applied frontier. During a
+            %% dangling window that manufactured a false standing-gap
+            %% verdict on every such round (zero-pull "complete" rounds
+            %% 1-3 fresh events behind, observed live in the compaction
+            %% cluster suite). Distinguish the two: a live root that the
+            %% guard refuses is answered as an ERROR — the session fails
+            %% benignly and retries next round — while a genuinely empty
+            %% tree (`root_hash/1` = `undefined`: fully compacted or never
+            %% written) keeps the `undefined` answer that the joiner /
+            %% fully-compacted-shard convergence path depends on. The two
+            %% reads race harmlessly: a tree that empties in between
+            %% answers an error once and empty on the retry.
+            case bondy_oplog_instance:aae_root(InstanceId) of
+                undefined ->
+                    case bondy_oplog_instance:root_hash(InstanceId) of
+                        undefined ->
+                            {ok, undefined,
+                                bondy_oplog:topology_fingerprint(
+                                    bondy_oplog:db_of(InstanceId)
+                                )};
+                        _Live ->
+                            {error, {root_unservable, InstanceId}}
+                    end;
+                Root ->
+                    {ok, Root,
+                        bondy_oplog:topology_fingerprint(
+                            bondy_oplog:db_of(InstanceId)
+                        )}
+            end
     end;
 dispatch(InstanceId, get_frontier) when is_binary(InstanceId) ->
     case bondy_oplog_instance:whereis(InstanceId) of
@@ -182,18 +211,30 @@ dispatch(InstanceId, get_frontier) when is_binary(InstanceId) ->
             %% their MST install, so a lock-free read can count events the
             %% current tree cannot yet ship — turning ordinary install lag
             %% into false `frontier_gap` verdicts (observed as spurious
-            %% rebootstraps under sustained load). Draining the overlay
-            %% first (`await_apply/1` blocks until the install handlers
-            %% empty it) restores the invariant: post-drain, applied ≡
-            %% installed-ever, and the session fetches the frontier BEFORE
-            %% the root, so the round's tree is same-or-newer than this
-            %% answer. On drain timeout answer an error — the initiator's
+            %% rebootstraps under sustained load).
+            %%
+            %% The ORDER here is load-bearing: snapshot the VV FIRST, then
+            %% drain, then answer the SNAPSHOT. Every event the snapshot
+            %% counts had its projection write done at snapshot time, and a
+            %% projection write only happens while the pipeline processes
+            %% an already-appended overlay entry — so the event is in the
+            %% overlay before the drain starts and is installed by the time
+            %% we answer; the session fetches the frontier BEFORE the root,
+            %% so the round's tree is same-or-newer still. Draining first
+            %% and reading after leaves a window in which events applied
+            %% mid-call are counted but not yet installed when the round
+            %% grabs its root — under sustained writes that answered
+            %% off-by-one as a standing gap on nearly every round
+            %% (forensics: 43 gaps/25s across the cluster, ~85% the peer's
+            %% own newest event, deficit almost always exactly 1). On drain
+            %% timeout answer an error — the initiator's
             %% `request_peer_frontier` degrades to `#{}`, which skips both
             %% the adoption and the gap check for that round (conservative
             %% in the safe direction).
+            Frontier = bondy_oplog_instance:frontier(InstanceId),
             case bondy_oplog_instance:await_apply(InstanceId) of
                 ok ->
-                    {ok, bondy_oplog_instance:frontier(InstanceId),
+                    {ok, Frontier,
                         bondy_oplog:topology_fingerprint(
                             bondy_oplog:db_of(InstanceId)
                         )};

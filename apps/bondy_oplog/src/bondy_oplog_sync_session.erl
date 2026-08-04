@@ -169,7 +169,7 @@ run(Instance, Peer, Opts, Iterations) when is_binary(Instance) ->
     %% a gap — flagging it rebootstraps healthy instances on every capped
     %% round under load), and adopting there would over-claim maxima the
     %% round never delivered.
-    Result = maybe_frontier_gap(Result0, Instance, PeerFrontier, PeerRoot),
+    Result = maybe_frontier_gap(Result0, Instance, Peer, PeerFrontier, PeerRoot),
     ok = maybe_adopt_peer_frontier(Result, Instance, PeerFrontier, PeerRoot),
     maybe_record(Result, Instance, Peer, Record, PeerRoot),
     ok = maybe_confirm_root(
@@ -733,6 +733,18 @@ pull_until_complete(
     PeerRoot,
     Budget0
 ) ->
+    %% Pin the root we are about to pull so the instance's page GC does
+    %% not sweep pulled-but-not-yet-merged pages between our rounds —
+    %% during a multi-round pull the earlier rounds' pages are
+    %% unreachable from the LOCAL root until the final integrate, and
+    %% every concurrent compaction cycle used to collect them (the
+    %% merge then silently treated the missing subtrees as empty). The
+    %% pin is consumed by a successful integrate and TTL-expires if
+    %% this session dies. First entry only; chase re-pins its refreshed
+    %% root.
+    _ =
+        Budget0 =:= undefined andalso
+            (catch bondy_oplog_instance:pin_peer_root(Instance, PeerRoot)),
     case bondy_oplog_instance:missing_set(Instance, PeerRoot) of
         [] ->
             %% Every page reachable from PeerRoot is now in our store.
@@ -742,10 +754,29 @@ pull_until_complete(
             %% root this session demonstrably completed against — the ONLY
             %% root `maybe_record/5` may checkpoint (a mid-session root
             %% refresh means the session-start root was never fully held).
-            ok = bondy_oplog_instance:integrate_peer_root(
-                Instance, PeerRoot
-            ),
-            {ok, bondy_oplog_instance:root_hash(Instance), PeerRoot};
+            %% The integrate re-checks the missing set ATOMICALLY with
+            %% the merge (its instance serializes with the page GC) and
+            %% refuses a partial merge — on `peer_pages_missing` the
+            %% pages were swept between our check and the call, so loop
+            %% back and re-pull them (budget-bounded).
+            case bondy_oplog_instance:integrate_peer_root(Instance, PeerRoot) of
+                ok ->
+                    {ok, bondy_oplog_instance:root_hash(Instance), PeerRoot};
+                {error, {peer_pages_missing, _}} ->
+                    NextBudget =
+                        case Budget0 of
+                            undefined -> 4;
+                            _ -> Budget0 - 1
+                        end,
+                    pull_until_complete(
+                        Instance,
+                        Peer,
+                        Transport,
+                        TransportOpts,
+                        PeerRoot,
+                        NextBudget
+                    )
+            end;
         Missing ->
             PerRound = bondy_oplog_config:aae_pages_per_round(),
             %% On the first round (`Budget0 == undefined`) size the round
@@ -823,13 +854,22 @@ pull_until_complete(
 chase_refreshed_root(
     Instance, Peer, Transport, TransportOpts, OldRoot, Budget, Batch
 ) ->
+    %% A failed root re-request (transport error, or the peer's
+    %% dangling-root guard answering `{error, {root_unservable, _}}`
+    %% mid-GC) ends the round as a plain session error — retried on the
+    %% next tick. Falling back to the old root here would read as "root
+    %% unmoved" below and, with a fresh-events deficit, manufacture a
+    %% false `peer_pages_unavailable` verdict (an immediate rebootstrap
+    %% flag) out of a transient serving hiccup.
     NewRoot =
         case Transport:request(Peer, Instance, get_root, TransportOpts) of
             {ok, R, _Fp} -> R;
             {ok, R} -> R;
-            {error, _} -> OldRoot
+            {error, _} = RootErr -> RootErr
         end,
     case NewRoot of
+        {error, _} = E ->
+            E;
         OldRoot ->
             PeerFrontier = request_peer_frontier(
                 Instance, Peer, Transport, TransportOpts
@@ -851,6 +891,9 @@ chase_refreshed_root(
             %% (recency only).
             {ok, bondy_oplog_instance:root_hash(Instance), undefined};
         _ ->
+            %% Chasing a refreshed root: pin it like the session-start
+            %% root (the stale pin expires by TTL).
+            _ = (catch bondy_oplog_instance:pin_peer_root(Instance, NewRoot)),
             pull_until_complete(
                 Instance,
                 Peer,
@@ -1032,28 +1075,123 @@ maybe_adopt_peer_frontier(_Result, _Instance, _PeerFrontier, _PeerRoot) ->
 %% only the overlay drain applies. With the peer's answer
 %% installed-consistent (the responder's barrier) and the round complete,
 %% a residual deficit after this settle is deterministic evidence the
-%% missing events were compacted away at the peer. Origins list is
-%% bounded to keep the exit reason log-safe.
-maybe_frontier_gap({ok, _} = Result, _Instance, _PeerFrontier, skip) ->
+%% missing events were compacted away at the peer. The exit reason's
+%% origins list is bounded to keep it log-safe; the full per-origin
+%% deficit (peer vs local sequence) goes out on the
+%% `[bondy_oplog, sync_session, frontier_gap]` telemetry event and the
+%% log line here, so a standing gap is diagnosable from either.
+maybe_frontier_gap({ok, _} = Result, _Instance, _Peer, _PeerFrontier, skip) ->
     %% Benign incomplete round: a deficit here is expected transfer lag,
     %% not evidence of compacted-away history. The next complete round
     %% judges.
     Result;
-maybe_frontier_gap({ok, _} = Result, Instance, PeerFrontier, _PeerRoot) when
+maybe_frontier_gap({ok, _} = Result, Instance, Peer, PeerFrontier, PeerRoot) when
     is_map(PeerFrontier), map_size(PeerFrontier) > 0
 ->
     case frontier_deficit(Instance, PeerFrontier) of
-        [] ->
+        Deficit0 when map_size(Deficit0) =:= 0 ->
             Result;
-        _ ->
+        Deficit0 ->
             ok = settle_local(Instance),
             case frontier_deficit(Instance, PeerFrontier) of
-                [] -> Result;
-                Origins -> {error, {frontier_gap, Origins}}
+                Deficit when map_size(Deficit) =:= 0 ->
+                    ?LOG_DEBUG(#{
+                        description =>
+                            "Frontier deficit settled by the local "
+                            "apply-pipeline barriers (replay lag, not "
+                            "a gap)",
+                        instance => Instance,
+                        peer => Peer,
+                        deficit => Deficit0
+                    }),
+                    Result;
+                Deficit ->
+                    Presence = deficit_presence(Instance, Deficit),
+                    LocalRoot =
+                        catch bondy_oplog_instance:root_hash(Instance),
+                    telemetry:execute(
+                        [bondy_oplog, sync_session, frontier_gap],
+                        #{count => 1, origins => map_size(Deficit)},
+                        #{
+                            instance_id => Instance,
+                            peer => Peer,
+                            deficit => Deficit,
+                            present_locally => Presence,
+                            completed_peer_root => PeerRoot,
+                            local_root => LocalRoot
+                        }
+                    ),
+                    ?LOG_INFO(#{
+                        description =>
+                            "Frontier gap: peer's applied frontier is "
+                            "still ahead after a complete round and a "
+                            "local settle (per-origin peer vs local "
+                            "sequences in `deficit`; `present_locally` "
+                            "discriminates apply-side lag from a "
+                            "peer-side over-claim)",
+                        instance => Instance,
+                        peer => Peer,
+                        deficit => Deficit,
+                        present_locally => Presence
+                    }),
+                    Origins = lists:sublist(maps:keys(Deficit), 5),
+                    {error, {frontier_gap, Origins}}
             end
     end;
-maybe_frontier_gap(Result, _Instance, _PeerFrontier, _PeerRoot) ->
+maybe_frontier_gap(Result, _Instance, _Peer, _PeerFrontier, _PeerRoot) ->
     Result.
+
+%% @private
+%% Forensic probe on a residual deficit: is each behind `{Origin, Seq}`
+%% event present in the LOCAL log (MST + overlay — `fold_range/5`
+%% captures both in one instance callback)? `true` ⇒ the round delivered
+%% the event and the deficit is local apply-side lag the settle barriers
+%% did not cover; `false` ⇒ the peer's answered frontier counted an
+%% event its served tree never shipped (peer-side over-claim). Bounded:
+%% probes at most 10 missing seqs per behind origin. Diagnostic only —
+%% total, `#{}` on any failure.
+deficit_presence(Instance, Deficit) ->
+    try
+        First = bondy_oplog_instance:first_key(Instance),
+        Last = bondy_oplog_instance:latest_key(Instance),
+        case First =:= undefined orelse Last =:= undefined of
+            true ->
+                #{};
+            false ->
+                Want = maps:fold(
+                    fun(Origin, #{peer := S, local := L}, Acc) ->
+                        Lo = max(L + 1, S - 9),
+                        lists:foldl(
+                            fun(Seq, Acc1) -> Acc1#{{Origin, Seq} => false} end,
+                            Acc,
+                            lists:seq(Lo, S)
+                        )
+                    end,
+                    #{},
+                    Deficit
+                ),
+                bondy_oplog_instance:fold_range(
+                    Instance,
+                    First,
+                    Last,
+                    fun(E, Acc) ->
+                        K = bondy_oplog_event:key(E),
+                        OS = {
+                            bondy_oplog_event:key_origin(K),
+                            bondy_oplog_event:key_seq(K)
+                        },
+                        case maps:is_key(OS, Acc) of
+                            true -> Acc#{OS => true};
+                            false -> Acc
+                        end
+                    end,
+                    Want
+                )
+        end
+    catch
+        _:_ ->
+            #{}
+    end.
 
 %% @private
 %% Settle the local apply pipeline: overlay drained (local events
@@ -1070,21 +1208,29 @@ settle_local(Instance) ->
     end.
 
 %% @private
-%% Origins (bounded to 5, log-safe) for which the peer's applied-frontier
-%% VV is strictly ahead of the local one — the convergence oracle's
-%% definition of "this replica is missing something". `[]` = no deficit.
+%% Per-origin deficit map (`Origin => #{peer => Seq, local => Cur}`) for
+%% which the peer's applied-frontier VV is strictly ahead of the local
+%% one — the convergence oracle's definition of "this replica is missing
+%% something". Empty map = no deficit. Origins are node-scoped so the
+%% map is bounded by cluster size.
 frontier_deficit(Instance, PeerFrontier) ->
-    Local = bondy_oplog_registry:frontier(Instance),
-    Behind = maps:filter(
-        fun(Origin, Seq) ->
-            case Local of
-                #{Origin := Cur} -> Seq > Cur;
-                _ -> Seq > 0
+    Local =
+        case bondy_oplog_registry:frontier(Instance) of
+            M when is_map(M) -> M;
+            _ -> #{}
+        end,
+    maps:fold(
+        fun(Origin, Seq, Acc) ->
+            case maps:get(Origin, Local, 0) of
+                Cur when Seq > Cur ->
+                    Acc#{Origin => #{peer => Seq, local => Cur}};
+                _ ->
+                    Acc
             end
         end,
+        #{},
         PeerFrontier
-    ),
-    lists:sublist(maps:keys(Behind), 5).
+    ).
 
 %% @private
 %% Substrate read-side freshness wiring. After a successful AE round,

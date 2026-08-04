@@ -311,17 +311,27 @@ retries.
 %% peer's installed-consistency barrier on `get_frontier`, the
 %% complete-round gate, and the initiator's local settle — eliminates the
 %% SYSTEMATIC false positives (install lag, replay lag, capped rounds).
-%% This debounce absorbs a residual RARE transient observed only on fused
-%% catalogue instances under sustained write load with live catalogue
-%% compaction (a handful of single-shot gaps per minute across shards,
-%% self-healing by the next round; mechanism not yet pinned — needs
-%% `origins_behind` forensics from peer logs). Single-shot flagging there
-%% is not value-neutral: each live fused rebootstrap is a replace-mode
-%% install racing the churn, and one gap-triggered bootstrap seeds
-%% adopted-frontier claims its neighbours then gap against — a cascade. A
-%% REAL gap (compacted-past-me history) cannot heal by syncing and
-%% strikes again on the very next round, so detection is delayed by one
-%% round, never lost.
+%% The short-lived gaps this debounce used to ride out under sustained
+%% write load were the observable window of the WATERMARK DOOR —
+%% `integrate_peer_root` discarding a just-pulled never-applied peer
+%% event at or below the local watermark — which is now CLOSED
+%% (`watermark_door/3` in `bondy_oplog_instance`: fused instances fold
+%% such events into the projection before truncating; applier-backed
+%% instances hold them for the applier's replay). With the door closed
+%% a gap verdict is deterministic evidence of compacted-past-me
+%% history — but not yet of a STANDING gap: the door itself mints a
+%% legitimate single-strike transient. When a peer door-FOLDS an
+%% in-flight event, its applied VV advances past what its truncated
+%% MST can serve, and a third replica whose complete round lands in
+%% that window records a deficit it can only cover via the ORIGIN one
+%% round later (the origin cannot compact the event away — the
+%% peer-confirmed frontier needs the lagging replica's roots to
+%% contain it; observed live in the compaction cluster suite, ~63ms
+%% window). That transient heals on the next round and must NOT
+%% trigger the remedy, because the remedy is not free: a live fused
+%% re-bootstrap is a replace-mode install racing churn. A standing gap
+%% cannot heal by syncing and strikes again on the very next round, so
+%% detection is delayed by one round, never lost.
 -define(GAP_STRIKE_WINDOW_MS, 120_000).
 %% EWMA smoothing factor for the node-load signal: the weight given to the
 %% newest per-tick sample. 0.3 keeps ~3 ticks of history, enough hysteresis

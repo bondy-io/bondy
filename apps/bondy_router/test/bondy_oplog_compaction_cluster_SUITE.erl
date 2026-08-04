@@ -113,6 +113,84 @@ sustained_writes_registry_history_stays_bounded(Config) ->
     Result = run_scenario(Config, defaults_peer_confirmed),
     log_scenario_result(defaults_peer_confirmed, Result),
 
+    %% Frontier-gap forensics: every session-level gap detection with
+    %% its full per-origin deficit, plus every watermark-door event and
+    %% the sync-outcome timeline for the pairs that gapped.
+    Forensics = [
+        {N, erpc:call(N, ?MODULE, do_gap_forensics, [])}
+     || N <- Nodes
+    ],
+    ct:pal("frontier-gap forensics per node:~n~p", [Forensics]),
+
+    %% With the watermark door closed (never-applied peer events are
+    %% folded or held at integrate, never discarded), no event is ever
+    %% LOST — but a single transient frontier-gap verdict per pair is
+    %% legitimate under sustained load: when a peer door-FOLDS an
+    %% in-flight event, its applied VV advances past what its truncated
+    %% MST can serve, and a third replica's complete round landing in
+    %% that window sees a deficit it can only cover via the ORIGIN one
+    %% round later (the origin cannot compact the event away — the
+    %% peer-confirmed frontier needs the lagging replica's roots to
+    %% contain it). The scheduler's ?GAP_STRIKE debounce absorbs
+    %% exactly this. So the assertion is the system guarantee, not
+    %% zero telemetry:
+    %%   (1) no pair gaps twice (two strikes = the rebootstrap
+    %%       threshold = a STANDING gap — the silent-data-loss class
+    %%       this suite's forensics proved), and
+    %%   (2) every recorded deficit has HEALED by now (the node's
+    %%       current applied VV covers the peer sequence the verdict
+    %%       recorded).
+    GapEvents = [
+        {N, G}
+     || {N, #{gaps := Gs}} <- Forensics, G <- Gs
+    ],
+    GapEvents =/= [] andalso
+        ct:pal(
+            "transient frontier-gap verdicts (allowed if single-strike "
+            "and healed):~n~p",
+            [GapEvents]
+        ),
+    RepeatedStrikes =
+        maps:filter(
+            fun(_Pair, Count) -> Count >= 2 end,
+            lists:foldl(
+                fun({N, #{instance := I, peer := P}}, Acc) ->
+                    maps:update_with(
+                        {N, I, P}, fun(C) -> C + 1 end, 1, Acc
+                    )
+                end,
+                #{},
+                GapEvents
+            )
+        ),
+    ?assertEqual(
+        #{},
+        RepeatedStrikes,
+        "a (node, instance, peer) pair produced two or more "
+        "frontier-gap verdicts — the rebootstrap threshold: a STANDING "
+        "gap, not a door-fold transient (see forensics dump)"
+    ),
+    Unhealed = [
+        {N, I, Origin, #{local_now => LocalNow, peer_at_verdict => PeerSeq}}
+     || {N, #{instance := I, deficit := Deficit}} <- GapEvents,
+        {Origin, #{peer := PeerSeq}} <- maps:to_list(Deficit),
+        LocalNow <- [
+            maps:get(
+                Origin,
+                erpc:call(N, bondy_oplog_registry, frontier, [I]),
+                0
+            )
+        ],
+        LocalNow < PeerSeq
+    ],
+    ?assertEqual(
+        [],
+        Unhealed,
+        "a frontier-gap verdict's deficit never healed: the event is "
+        "still missing at end of run — data loss, not a door-fold "
+        "transient (see forensics dump)"
+    ),
+
     #{samples := Samples} = Result,
     RegistrySamples = [
         S
@@ -1154,6 +1232,14 @@ dispatch_collector_init(Parent) ->
             [bondy_oplog, sync_scheduler, dispatch_bootstrap],
             [bondy_oplog, sync_scheduler, bootstrap, started],
             [bondy_oplog, compaction, retention],
+            %% Frontier-gap forensics: the session-level event carries
+            %% the full per-origin deficit (peer vs local sequence), and
+            %% the per-round sync outcomes give the self-heal timeline
+            %% for any instance/peer pair that gapped.
+            [bondy_oplog, sync_session, frontier_gap],
+            [bondy_oplog, instance, integrate_doored],
+            [bondy_oplog, sync, ok],
+            [bondy_oplog, sync, error],
             %% Cell reclamation on the origin is the suspected accomplice:
             %% under retention the local-MST diff cannot see a laggard's
             %% holes below the truncation bound, so the stability point
@@ -1174,7 +1260,11 @@ dispatch_collector_loop(Acc) ->
             From ! {oplog_dispatch_collector_events, lists:reverse(Acc)},
             dispatch_collector_loop(Acc);
         {telemetry_event, Event, Measurements, Metadata} ->
-            dispatch_collector_loop([{Event, Measurements, Metadata} | Acc]);
+            %% Receipt stamp so post-hoc analysis can order gap events
+            %% against the sync-outcome timeline (self-heal latency).
+            Stamped = Metadata#{collected_at_ms =>
+                erlang:system_time(millisecond)},
+            dispatch_collector_loop([{Event, Measurements, Stamped} | Acc]);
         _Other ->
             dispatch_collector_loop(Acc)
     end.
@@ -1186,6 +1276,56 @@ do_drain_dispatch_collector() ->
     after 5000 ->
         error(dispatch_collector_drain_timeout)
     end.
+
+%% Runs ON a cluster node (erpc). Extracts every frontier-gap detection
+%% this node's sync sessions reported (full per-origin deficit) plus the
+%% sync-outcome timeline for exactly the {instance, peer} pairs that
+%% gapped — enough to read off, per occurrence: which origins were
+%% behind, by how much, against which peer, and how long until the next
+%% successful round against the same peer (the self-heal latency).
+do_gap_forensics() ->
+    Events = do_drain_dispatch_collector(),
+    Gaps = [
+        #{
+            ts => maps:get(collected_at_ms, Meta, undefined),
+            instance => maps:get(instance_id, Meta, undefined),
+            peer => maps:get(peer, Meta, undefined),
+            deficit => maps:get(deficit, Meta, undefined),
+            present_locally => maps:get(present_locally, Meta, undefined),
+            completed_peer_root =>
+                maps:get(completed_peer_root, Meta, undefined),
+            local_root => maps:get(local_root, Meta, undefined)
+        }
+     || {[bondy_oplog, sync_session, frontier_gap], _M, Meta} <- Events
+    ],
+    Doored = [
+        #{
+            ts => maps:get(collected_at_ms, Meta, undefined),
+            instance => maps:get(instance_id, Meta, undefined),
+            action => maps:get(action, Meta, undefined),
+            count => maps:get(count, M, undefined),
+            doored => maps:get(doored, Meta, undefined)
+        }
+     || {[bondy_oplog, instance, integrate_doored], M, Meta} <- Events
+    ],
+    GapPairs = lists:usort([
+        {maps:get(instance, G), maps:get(peer, G)} || G <- Gaps
+    ]),
+    Timeline = lists:sort([
+        {
+            maps:get(collected_at_ms, Meta, undefined),
+            Outcome,
+            maps:get(instance_id, Meta, undefined),
+            maps:get(peer, Meta, undefined)
+        }
+     || {[bondy_oplog, sync, Outcome], _M, Meta} <- Events,
+        lists:member(
+            {maps:get(instance_id, Meta, undefined),
+                maps:get(peer, Meta, undefined)},
+            GapPairs
+        )
+    ]),
+    #{gaps => Gaps, doored => Doored, timeline => Timeline}.
 
 %% =============================================================================
 %% MISC HELPERS

@@ -976,17 +976,38 @@ events it already folded into its snapshot. The mechanism is in
 ```erlang
 %% bondy_oplog_instance.erl — do_handle_call({integrate_peer_root, _})
 MST1 = bondy_mst:merge(MST0, MST0, PeerRoot),
-MST2 = case State#state.watermark of
-           undefined -> MST1;
-           W         -> truncate_below_or_equal(MST1, W, State#state.backend)
-       end,
+MST2 = watermark_door(HasProjection, State, MST1),
 ```
 
-The peer's pages are merged in, then `truncate_below_or_equal/3`
-re-runs against the local watermark, dropping any keys X has already
-compacted away. The local-append side uses the same idea via
-`below_or_equal_watermark/2` — appended or peer-supplied events whose
-key is ≤ the local watermark are rejected at the door.
+The peer's pages are merged in, then the **watermark door**
+(`watermark_door/3`) re-truncates against the local watermark,
+dropping keys X has already compacted away — but it NEVER drops a
+never-applied event. The naive re-truncate's premise ("≤ watermark ⇒
+already folded here") is false for a peer event this replica never
+saw: under concurrent writes the peer-confirmed frontier and in-flight
+events race by design, so a just-minted peer event can arrive after
+the watermark passed its key. Discarding it unapplied is silent,
+permanent, per-replica data loss — the completed round's
+`confirm_root` (a page-holding claim) lets the origin compact the
+event away, and the applied VV max-merges past the hole on the next
+same-origin apply, so no oracle ever flags it (this was observed live
+at defaults, on both `registry/*` and `main/*` shards). The door
+therefore checks every at-or-below-watermark key against the applied
+VV: a fused instance folds never-applied events into the projection
+inline before truncating; an applier-backed instance holds them below
+the watermark for the applier's replay (every later truncation site is
+behind the async catch-up gate, which folds before truncating). The
+live single-event receive path (`append_remote/2` →
+`do_append_remote/2`) runs the same judgement — the **live-event
+watermark door** (`append_remote_below_watermark/3`): an
+at-or-below-watermark event the applied VV does not witness is
+accepted (installed and delivered) instead of dropped; only
+VV-witnessed re-ships and no-projection instances keep the plain
+filter. Both MST entry paths then converge on one remote DELIVERY
+POINT (`deliver_remote/1`): fused instances fold inline before the
+handler returns; applier-backed instances bump the I1 fence and cast
+the applier replay, so a live-pushed event reaches the projection
+without waiting for the next AE round.
 
 `truncate_below_or_equal/3` is also where dropped pages are PHYSICALLY
 reclaimed: `bondy_mst:truncate/2` frees only the O(log N) spine pages
@@ -1032,7 +1053,9 @@ snapshot.
 | Silent peer pins the watermark forever. | `peer_timeout_ms` filters stale peer entries (default 30s); the frontier ignores them. |
 | Replica truncates a prefix the application still cares about. | `interpret_cog` must consume the prefix into the snapshot first. The compaction cycle is `frontier → events → interpret_cog → snapshot → truncate` — the snapshot is durable *before* the MST mutation. |
 | Two compactions race. | One-at-a-time guard in `bondy_oplog_instance`: a second `compact` request while one is in flight replies `{ok, no_change}`. |
-| Peer ships events the local replica has already truncated. | Integrate path drops events with `key ≤ watermark`. |
+| Peer ships events the local replica has already truncated. | The watermark door (`watermark_door/3` on page sync; `append_remote_below_watermark/3` on the live single-event path) drops re-shipped `key ≤ watermark` events **only when the applied VV proves they were folded here**; a never-applied event at or below the watermark (in-flight write racing the frontier) is folded inline (fused) or held for the applier's replay — dropping it unapplied was the silent per-replica data-loss class found by the compaction cluster suite's forensics. |
+| A dangling root (transient truncate + page-GC race) is advertised over AAE and read as "peer's tree is empty", so the initiator runs a zero-pull "complete" round a few fresh events behind the peer's honest frontier — a false standing-gap verdict per round. | The responder's `get_root` distinguishes the two `undefined`s: the aae-root guard's refusal answers `{error, {root_unservable, _}}` (session fails benignly, retries next tick) while only a genuinely empty tree (`root_hash/1 = undefined`) answers `undefined` — the joiner / fully-compacted-shard path keeps its semantics. `chase_refreshed_root` propagates a failed root re-request instead of reading it as "root unmoved". |
+| The local page GC sweeps pages a sync session pulled but has not yet merged (they are unreachable from the LOCAL root until `integrate_peer_root/2`), and `bondy_mst:merge/3` silently treats the missing subtrees as empty — a completed, `confirm_root`-checkpointed round that silently lost events. | Sessions pin the root they pull (`bondy_oplog_instance:pin_peer_root/2`; consumed by a successful integrate, TTL-expired otherwise) and `truncate_below_or_equal/4` passes the pins to `bondy_mst:gc/2` as KeepRoots; independently, `integrate_peer_root/2` re-checks `missing_set` **atomically with the merge** (same process as the GC) and answers a retryable `{error, {peer_pages_missing, _}}` instead of merging partially. |
 | Bootstrap snapshot is older than local. | `load_snapshot/3` refuses with `watermark_not_advancing` and falls through to plain AE. |
 | `interpret_cog/2` is non-deterministic. | Convergence breaks silently. The behaviour documentation flags this as the invariant; PropEr suites for each CRDT verify it (`bondy_mst_crdt_SUITE.erl`). |
 | Fresh persistent replica never flips to `live` because nobody calls `bootstrap/3`. | The default scheduler dispatch is lifecycle-aware: `pre_bootstrap` instances are auto-bootstrapped from the first available peer on the next tick. |
@@ -1057,16 +1080,41 @@ because everything else relies on it. The relevant suites:
   and mux paths unchanged, the fused-to-fused catalogue-bootstrap
   roundtrip, the frontier-gap detect → non-adopt → bootstrap-remedy
   sequence end to end, the install-clobber → rederive-heal →
-  idempotent-rederive sequence, and PHYSICAL page reclamation on
+  idempotent-rederive sequence, PHYSICAL page reclamation on
   truncation (asserted at the ETS level — the blind spot every
-  event-count assertion missed).
+  event-count assertion missed), and the WATERMARK-DOOR locks:
+  `watermark_door_folds_unapplied_peer_event_fused` /
+  `watermark_door_holds_unapplied_peer_event_applier` (a peer event
+  arriving below an already-advanced local watermark must reach the
+  projection and the applied VV — fold-inline on fused, hold-for-replay
+  on applier-backed — instead of being silently discarded), plus the
+  LIVE-EVENT door and delivery-point locks:
+  `live_door_accepts_unapplied_remote_event_fused` /
+  `live_door_accepts_unapplied_remote_event_applier` (the same
+  guarantee for a single event pushed via `append_remote/2`),
+  `live_filter_drops_already_applied_remote_event` (the idempotent
+  half stays a drop), and
+  `live_append_remote_reaches_projection_fused` / `_applier` (a
+  live-pushed event reaches the projection without waiting for the
+  next AE round).
 - `apps/bondy_router/test/bondy_oplog_compaction_cluster_SUITE.erl` —
   the cluster regression-lock AT DEFAULTS: 3 real nodes, sustained
   writes, every `registry/*` shard under the propagation ceiling
   throughout, drained to quiescent post-settle (catches any future
   scheduler-starvation shape), instance-owned ETS bytes back to a
   live-tree footprint (catches any future page leak), zero RIB
-  divergence on every node.
+  divergence on every node, and the frontier-gap SYSTEM guarantee
+  across the whole load window: no (node, instance, peer) pair gaps
+  twice (two strikes = the rebootstrap threshold = a standing gap) and
+  every recorded deficit has healed by end of run. A SINGLE transient
+  verdict per pair is legitimate: a peer's door-FOLD advances its
+  applied VV past what its truncated MST can serve, and a third
+  replica's complete round landing in that window (observed: ~63ms)
+  records a deficit the origin covers one round later — the
+  scheduler's two-strike debounce absorbs exactly this. This is the
+  end-to-end lock on the watermark door, the dangling-root fake-empty
+  answer, and the GC-vs-in-flight-pull races — the per-node forensics
+  dump prints the full per-origin evidence on failure.
 - `test/bondy_oplog_gc_scheduler_test.erl` — tick cadence, semaphore
   cap, set_interval/set_trigger races, per-instance isolation.
 - `test/bondy_oplog_bootstrap_test.erl` — snapshot transfer,

@@ -59,6 +59,13 @@ compaction_fused_test_() ->
         {timeout, 30, fun self_root_confirms_ephemeral_fused_compacts/0},
         {timeout, 30, fun mux_shard_both_tables_compact_together/0},
         {timeout, 30, fun fused_catalogue_bootstrap_roundtrip/0},
+        {timeout, 30, fun watermark_door_folds_unapplied_peer_event_fused/0},
+        {timeout, 30, fun watermark_door_holds_unapplied_peer_event_applier/0},
+        {timeout, 30, fun live_door_accepts_unapplied_remote_event_fused/0},
+        {timeout, 30, fun live_door_accepts_unapplied_remote_event_applier/0},
+        {timeout, 30, fun live_filter_drops_already_applied_remote_event/0},
+        {timeout, 30, fun live_append_remote_reaches_projection_fused/0},
+        {timeout, 30, fun live_append_remote_reaches_projection_applier/0},
         {timeout, 30, fun frontier_gap_detected_after_peer_truncation/0},
         {timeout, 30, fun rederive_restores_cell_clobbered_by_live_bootstrap/0},
         {timeout, 30, fun truncation_reclaims_store_pages/0}
@@ -467,6 +474,294 @@ fused_catalogue_bootstrap_roundtrip() ->
 %% which retention bypasses — adopting would flip the convergence oracle
 %% to CONVERGED over silently missing data). The catalogue bootstrap is
 %% then the remedy: after install + finalize the same sync round passes.
+%% THE WATERMARK DOOR — data-loss reproducer and fix lock (fused).
+%% A peer event whose key sorts at or below this replica's watermark can
+%% arrive AFTER the watermark advanced: the peer-confirmed frontier and
+%% in-flight events race by design under concurrent writes.
+%% `integrate_peer_root` used to discard such an event UNAPPLIED at its
+%% watermark re-truncate — the op never reached this replica's
+%% projection, the completed round's `confirm_root` (a PAGE-holding
+%% claim) then let the origin compact the event away, and the applied
+%% VV max-merged past the hole on the next same-origin apply, masking
+%% the loss from every oracle. The door must FOLD a never-applied event
+%% into the projection (advancing the VV) before dropping it.
+watermark_door_folds_unapplied_peer_event_fused() ->
+    A = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
+    B = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
+    BNs = ns_of(B),
+
+    %% A mints the in-flight event FIRST — the lowest HLC in this test.
+    _ = bondy_oplog:append(A, {cell_apply, ?B, <<"doored">>, {inc, 5}}),
+    ok = bondy_oplog_instance:await_apply(A),
+
+    %% B writes AFTER (higher HLCs) and self-root-confirm compacts, so
+    %% B's watermark lands ABOVE A's in-flight event which B has never
+    %% seen.
+    _ = bondy_oplog:append(B, {cell_apply, ?B, <<"own">>, {inc, 1}}),
+    _ = bondy_oplog:append(B, {cell_apply, ?B, <<"own">>, {inc, 1}}),
+    ok = bondy_oplog_instance:await_apply(B),
+    ?assertMatch(
+        {ok, {compacted, _, _}},
+        bondy_oplog_instance:compact(B, [bondy_oplog_instance:root_hash(B)])
+    ),
+    ?assertNotEqual(undefined, bondy_oplog:current_watermark(B)),
+
+    %% B pulls A. The round completes and A's event sorts at or below
+    %% B's watermark: the door folds it inline (fused), so the round
+    %% ends with no frontier deficit.
+    ?assertMatch(
+        {ok, _},
+        bondy_oplog_sync_session:run(B, A, #{record_in_peer_state => false})
+    ),
+    %% The op's effect reached B's projection...
+    ?assertNotEqual(
+        undefined, bondy_oplog_core:read(BNs, primary, <<"doored">>)
+    ),
+    %% ...the applied VV witnesses it honestly (no max-merge lie)...
+    AOrigin = bondy_oplog_instance:origin(A),
+    ?assertEqual(1, maps:get(AOrigin, bondy_oplog_registry:frontier(B), 0)),
+    %% ...and the fused door still truncated it from the MST after the
+    %% fold (fold-before-drop, not keep-forever).
+    ?assertEqual(0, bondy_oplog:size(B)),
+
+    teardown(A),
+    teardown(B).
+
+%% As above, for an APPLIER-backed (non-fused) instance. The instance
+%% process cannot fold cells itself (the applier is the projection's
+%% single writer), so the door HOLDS the never-applied event below the
+%% watermark — truncating only the prefix strictly below it — and the
+%% applier's normal replay applies it; the next compaction cycle then
+%% truncates the (now applied) held prefix via the async catch-up gate.
+watermark_door_holds_unapplied_peer_event_applier() ->
+    A = start_applier_instance(),
+    B = start_applier_instance(),
+    BNs = ns_of(B),
+
+    _ = bondy_oplog:append(A, {cell_apply, ?B, <<"doored">>, {inc, 5}}),
+    ok = bondy_oplog_instance:await_apply(A),
+
+    _ = bondy_oplog:append(B, {cell_apply, ?B, <<"own">>, {inc, 1}}),
+    _ = bondy_oplog:append(B, {cell_apply, ?B, <<"own">>, {inc, 1}}),
+    ok = bondy_oplog_instance:await_apply(B),
+    ?assertMatch(
+        {ok, {compacted, _, _}},
+        bondy_oplog_instance:compact(B, [bondy_oplog_instance:root_hash(B)])
+    ),
+    ?assertNotEqual(undefined, bondy_oplog:current_watermark(B)),
+
+    %% B pulls A: the door holds A's event; the session's settle
+    %% (instance drain + applier barrier) covers the replay, so the
+    %% round ends deficit-free.
+    ?assertMatch(
+        {ok, _},
+        bondy_oplog_sync_session:run(B, A, #{record_in_peer_state => false})
+    ),
+    ?assertNotEqual(
+        undefined, bondy_oplog_core:read(BNs, primary, <<"doored">>)
+    ),
+    AOrigin = bondy_oplog_instance:origin(A),
+    ?assertEqual(1, maps:get(AOrigin, bondy_oplog_registry:frontier(B), 0)),
+    %% The held event is still in the MST (below the watermark) — the
+    %% hold is what kept it alive for the applier's replay.
+    ?assert(bondy_oplog:size(B) >= 1),
+
+    %% Next compaction cycle folds-then-truncates the held prefix.
+    ?assertMatch(
+        {ok, {compacted, _, _}},
+        bondy_oplog_instance:compact(B, [bondy_oplog_instance:root_hash(B)])
+    ),
+    ?assertEqual(0, bondy_oplog:size(B)),
+    ?assertNotEqual(
+        undefined, bondy_oplog_core:read(BNs, primary, <<"doored">>)
+    ),
+
+    teardown(A),
+    teardown(B).
+
+%% THE LIVE-EVENT WATERMARK DOOR, fused: a never-applied peer event
+%% pushed via `append_remote/2` whose key sorts at or below the local
+%% watermark must be accepted — folded into the projection inline —
+%% not silently dropped on key order (the page-sync door's premise
+%% "at or below the watermark ⇒ already folded" is just as false for
+%% a live single event).
+live_door_accepts_unapplied_remote_event_fused() ->
+    A = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
+    B = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
+    BNs = ns_of(B),
+
+    %% A mints the in-flight event FIRST — the lowest HLC in this test.
+    KA = bondy_oplog:append(A, {cell_apply, ?B, <<"doored">>, {inc, 5}}),
+    ok = bondy_oplog_instance:await_apply(A),
+    {ok, EventA} = bondy_oplog:get(A, KA),
+
+    %% B writes AFTER (higher HLCs) and self-root-confirm compacts, so
+    %% B's watermark lands ABOVE A's in-flight event.
+    _ = bondy_oplog:append(B, {cell_apply, ?B, <<"own">>, {inc, 1}}),
+    _ = bondy_oplog:append(B, {cell_apply, ?B, <<"own">>, {inc, 1}}),
+    ok = bondy_oplog_instance:await_apply(B),
+    ?assertMatch(
+        {ok, {compacted, _, _}},
+        bondy_oplog_instance:compact(B, [bondy_oplog_instance:root_hash(B)])
+    ),
+    ?assertNotEqual(undefined, bondy_oplog:current_watermark(B)),
+
+    %% Live push of the at-or-below-watermark event. Fused delivery is
+    %% inline: the op's effect is visible as soon as the call returns.
+    ?assertEqual(ok, bondy_oplog:append_remote(B, EventA)),
+    ?assertNotEqual(
+        undefined, bondy_oplog_core:read(BNs, primary, <<"doored">>)
+    ),
+    %% The applied VV witnesses it honestly.
+    AOrigin = bondy_oplog_instance:origin(A),
+    ?assertEqual(1, maps:get(AOrigin, bondy_oplog_registry:frontier(B), 0)),
+    %% The event was installed (not dropped); the next compaction
+    %% truncates it as applied history with the projection intact.
+    ?assert(bondy_oplog:size(B) >= 1),
+    ?assertMatch(
+        {ok, {compacted, _, _}},
+        bondy_oplog_instance:compact(B, [bondy_oplog_instance:root_hash(B)])
+    ),
+    ?assertEqual(0, bondy_oplog:size(B)),
+    ?assertNotEqual(
+        undefined, bondy_oplog_core:read(BNs, primary, <<"doored">>)
+    ),
+
+    teardown(A),
+    teardown(B).
+
+%% As above, for an APPLIER-backed instance: the accept installs the
+%% event below the watermark (a hold) and the delivery point fences +
+%% casts the applier replay; the async catch-up gate keeps every later
+%% truncation from eating it un-folded.
+live_door_accepts_unapplied_remote_event_applier() ->
+    A = start_applier_instance(),
+    B = start_applier_instance(),
+    BNs = ns_of(B),
+
+    KA = bondy_oplog:append(A, {cell_apply, ?B, <<"doored">>, {inc, 5}}),
+    ok = bondy_oplog_instance:await_apply(A),
+    {ok, EventA} = bondy_oplog:get(A, KA),
+
+    _ = bondy_oplog:append(B, {cell_apply, ?B, <<"own">>, {inc, 1}}),
+    _ = bondy_oplog:append(B, {cell_apply, ?B, <<"own">>, {inc, 1}}),
+    ok = bondy_oplog_instance:await_apply(B),
+    ?assertMatch(
+        {ok, {compacted, _, _}},
+        bondy_oplog_instance:compact(B, [bondy_oplog_instance:root_hash(B)])
+    ),
+    ?assertNotEqual(undefined, bondy_oplog:current_watermark(B)),
+
+    ?assertEqual(ok, bondy_oplog:append_remote(B, EventA)),
+    %% Applier delivery is async — settle on the applier barrier (it
+    %% runs the I1 fence, so even a lost replay cast is covered).
+    ok = bondy_oplog_applier:barrier(
+        bondy_oplog_registry:applier_pid(B)
+    ),
+    ?assertNotEqual(
+        undefined, bondy_oplog_core:read(BNs, primary, <<"doored">>)
+    ),
+    AOrigin = bondy_oplog_instance:origin(A),
+    ?assertEqual(1, maps:get(AOrigin, bondy_oplog_registry:frontier(B), 0)),
+    ?assert(bondy_oplog:size(B) >= 1),
+
+    %% Next compaction cycle folds-then-truncates the held prefix.
+    ?assertMatch(
+        {ok, {compacted, _, _}},
+        bondy_oplog_instance:compact(B, [bondy_oplog_instance:root_hash(B)])
+    ),
+    ?assertEqual(0, bondy_oplog:size(B)),
+    ?assertNotEqual(
+        undefined, bondy_oplog_core:read(BNs, primary, <<"doored">>)
+    ),
+
+    teardown(A),
+    teardown(B).
+
+%% The idempotent half of the live door: an ALREADY-applied event
+%% re-pushed after compaction truncated it must still be dropped —
+%% no MST reinstall, no double-apply.
+live_filter_drops_already_applied_remote_event() ->
+    A = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
+    B = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
+    BNs = ns_of(B),
+
+    KA = bondy_oplog:append(A, {cell_apply, ?B, <<"applied">>, {inc, 5}}),
+    ok = bondy_oplog_instance:await_apply(A),
+    {ok, EventA} = bondy_oplog:get(A, KA),
+
+    %% B applies it the normal way (page sync), then compacts past it.
+    ?assertMatch(
+        {ok, _},
+        bondy_oplog_sync_session:run(B, A, #{record_in_peer_state => false})
+    ),
+    ?assertNotEqual(
+        undefined, bondy_oplog_core:read(BNs, primary, <<"applied">>)
+    ),
+    _ = bondy_oplog:append(B, {cell_apply, ?B, <<"own">>, {inc, 1}}),
+    ok = bondy_oplog_instance:await_apply(B),
+    ?assertMatch(
+        {ok, {compacted, _, _}},
+        bondy_oplog_instance:compact(B, [bondy_oplog_instance:root_hash(B)])
+    ),
+    ?assertEqual(0, bondy_oplog:size(B)),
+
+    %% The re-push is witnessed by the applied VV → filtered.
+    ?assertEqual(ok, bondy_oplog:append_remote(B, EventA)),
+    ?assertEqual(0, bondy_oplog:size(B)),
+    AOrigin = bondy_oplog_instance:origin(A),
+    ?assertEqual(1, maps:get(AOrigin, bondy_oplog_registry:frontier(B), 0)),
+
+    teardown(A),
+    teardown(B).
+
+%% Above-watermark live push, fused: `append_remote/2` is a remote
+%% DELIVERY, not just an MST install — the projection reflects the op
+%% as soon as the call returns, without waiting for the next AE round.
+live_append_remote_reaches_projection_fused() ->
+    A = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
+    B = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
+    BNs = ns_of(B),
+
+    KA = bondy_oplog:append(A, {cell_apply, ?B, <<"live">>, {inc, 3}}),
+    ok = bondy_oplog_instance:await_apply(A),
+    {ok, EventA} = bondy_oplog:get(A, KA),
+
+    ?assertEqual(ok, bondy_oplog:append_remote(B, EventA)),
+    ?assertNotEqual(
+        undefined, bondy_oplog_core:read(BNs, primary, <<"live">>)
+    ),
+    AOrigin = bondy_oplog_instance:origin(A),
+    ?assertEqual(1, maps:get(AOrigin, bondy_oplog_registry:frontier(B), 0)),
+
+    teardown(A),
+    teardown(B).
+
+%% As above for an applier-backed instance: the delivery point casts
+%% the replay and bumps the I1 fence, so the applier barrier suffices
+%% — no AE round needed.
+live_append_remote_reaches_projection_applier() ->
+    A = start_applier_instance(),
+    B = start_applier_instance(),
+    BNs = ns_of(B),
+
+    KA = bondy_oplog:append(A, {cell_apply, ?B, <<"live">>, {inc, 3}}),
+    ok = bondy_oplog_instance:await_apply(A),
+    {ok, EventA} = bondy_oplog:get(A, KA),
+
+    ?assertEqual(ok, bondy_oplog:append_remote(B, EventA)),
+    ok = bondy_oplog_applier:barrier(
+        bondy_oplog_registry:applier_pid(B)
+    ),
+    ?assertNotEqual(
+        undefined, bondy_oplog_core:read(BNs, primary, <<"live">>)
+    ),
+    AOrigin = bondy_oplog_instance:origin(A),
+    ?assertEqual(1, maps:get(AOrigin, bondy_oplog_registry:frontier(B), 0)),
+
+    teardown(A),
+    teardown(B).
+
 frontier_gap_detected_after_peer_truncation() ->
     Retention = #{max_age_ms => 0, max_events => 1},
     A = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, Retention),
@@ -664,6 +959,19 @@ start_fused_instance(CrdtModule, CrdtOpts, Retention) ->
             #{} -> Opts0#{mst_retention => Retention}
         end,
     {ok, _} = bondy_oplog:start_instance(Id, Opts),
+    Id.
+
+start_applier_instance() ->
+    Id = mk_id(),
+    NS = ns_of(Id),
+    _ = register_shard(NS, primary, 0, bondy_oplog_crdt_pn_counter, #{}),
+    {ok, _} = bondy_oplog:start_instance(Id, #{
+        fold_module => lww_register,
+        origin => bondy_oplog_origin:new(),
+        applier => #{
+            cell_apply_target => {NS, primary, 0}
+        }
+    }),
     Id.
 
 register_shard(NS, Index, Shard, CrdtModule, CrdtOpts) ->
