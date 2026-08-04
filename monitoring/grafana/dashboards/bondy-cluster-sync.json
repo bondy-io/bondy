@@ -9,7 +9,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -800,12 +800,12 @@
     {
       "id": 210,
       "type": "timeseries",
-      "title": "Gap verdicts & re-bootstraps (5m rate)",
+      "title": "Gap verdicts, re-bootstraps & MST rebuilds (5m rate)",
       "datasource": {
         "type": "prometheus",
         "uid": "bondy-prometheus"
       },
-      "description": "The trend the stats summarize: verdicts should be rare spikes that return to zero. A staircase = a standing gap re-striking every round.",
+      "description": "The trend the stats summarize: verdicts should be rare spikes that return to zero. A staircase = a standing gap re-striking every round. MST rebuilds = the unservable-own-root self-heal fired \u2014 the shard recovered, but investigate why root pages went missing.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -857,6 +857,15 @@
           "refId": "B",
           "expr": "sum by (node)(increase(bondy_oplog_rebootstraps_scheduled_total[5m]))",
           "legendFormat": "rebootstraps {{node}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "refId": "C",
+          "legendFormat": "mst rebuilds {{node}}",
+          "expr": "sum by (node) (increase(bondy_oplog_mst_rebuilt_total[5m]))"
         }
       ]
     },

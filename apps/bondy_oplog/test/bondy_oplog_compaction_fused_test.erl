@@ -69,6 +69,8 @@ compaction_fused_test_() ->
         {timeout, 30, fun frontier_gap_detected_after_peer_truncation/0},
         {timeout, 30, fun rederive_restores_cell_clobbered_by_live_bootstrap/0},
         {timeout, 30, fun live_bootstrap_with_churn_between_batches_converges/0},
+        {timeout, 30, fun unservable_own_root_self_heals_when_peers_dominate/0},
+        {timeout, 30, fun unservable_own_root_holds_until_peers_dominate/0},
         {timeout, 30, fun truncation_reclaims_store_pages/0}
     ]}.
 
@@ -937,6 +939,135 @@ live_bootstrap_with_churn_between_batches_converges() ->
 
     teardown(A),
     teardown(B).
+
+%% THE s16 SELF-HEAL LOCK (broken-node half). A fused instance whose own
+%% root loses pages can never serve a complete page round again, so
+%% nothing on the shard ever earns a truncation license — an AE blackout
+%% plus an unbounded MST. Once the unservable streak passes the
+%% threshold AND every recency-live peer's recorded frontier dominates
+%% ours, the compaction tick must REBUILD: drop the tree, advance the
+%% watermark, keep the projection and the applied frontier.
+unservable_own_root_self_heals_when_peers_dominate() ->
+    ok = application:set_env(bondy_oplog, unservable_self_heal_after_ms, 50),
+    Id = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
+    Ns = ns_of(Id),
+    try
+        _ = [
+            bondy_oplog:append(
+                Id,
+                {cell_apply, ?B, <<"sh_", (integer_to_binary(N))/binary>>,
+                    {inc, 1}}
+            )
+         || N <- lists:seq(1, 300)
+        ],
+        ok = bondy_oplog_instance:await_apply(Id),
+        SizeBefore = bondy_oplog:size(Id),
+        ?assert(SizeBefore > 100),
+
+        %% Fault: delete a page the current root references — the
+        %% dangling-own-root state observed live on Fly s16.
+        ok = drop_root_referenced_page(Id),
+        %% The advertise guard sees it on the next `aae_root` ask (this
+        %% is also what starts the unservable streak clock).
+        ?assertEqual(undefined, bondy_oplog_instance:aae_root(Id)),
+
+        %% A recency-live peer whose recorded frontier EQUALS ours
+        %% dominates it — our surplus is fully covered elsewhere.
+        ok = bondy_oplog_peer_state:record_sync_complete(
+            {peer, sh_dominating}, Id, crypto:strong_rand_bytes(32),
+            bondy_oplog_registry:frontier(Id),
+            os:system_time(millisecond)
+        ),
+        timer:sleep(80),
+
+        ?assertMatch({ok, _}, bondy_oplog_instance:compact(Id, [])),
+        %% Rebuilt: tree empty, projection intact, frontier kept, and
+        %% the advertise guard is happy again (empty = servable).
+        ?assertEqual(0, bondy_oplog:size(Id)),
+        ?assertNotEqual(
+            undefined, bondy_oplog_core:read(Ns, primary, <<"sh_1">>)
+        ),
+        ?assert(map_size(bondy_oplog_registry:frontier(Id)) > 0),
+        ?assertNotEqual(undefined, bondy_oplog:current_watermark(Id)),
+
+        %% And the shard is alive again: new writes install and compact.
+        _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"sh_new">>, {inc, 1}}),
+        ok = bondy_oplog_instance:await_apply(Id),
+        ?assertNotEqual(
+            undefined, bondy_oplog_core:read(Ns, primary, <<"sh_new">>)
+        )
+    after
+        application:unset_env(bondy_oplog, unservable_self_heal_after_ms),
+        teardown(Id)
+    end.
+
+%% The domination gate: with a live peer whose recorded frontier does
+%% NOT cover ours (or is unknown), the rebuild must hold — the surplus
+%% must drain to the peers first (their unservable-behind catalogue
+%% bootstraps), only then may the tree be dropped.
+unservable_own_root_holds_until_peers_dominate() ->
+    ok = application:set_env(bondy_oplog, unservable_self_heal_after_ms, 50),
+    Id = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
+    try
+        _ = [
+            bondy_oplog:append(
+                Id,
+                {cell_apply, ?B, <<"hb_", (integer_to_binary(N))/binary>>,
+                    {inc, 1}}
+            )
+         || N <- lists:seq(1, 300)
+        ],
+        ok = bondy_oplog_instance:await_apply(Id),
+        SizeBefore = bondy_oplog:size(Id),
+        ?assert(SizeBefore > 100),
+        ok = drop_root_referenced_page(Id),
+        ?assertEqual(undefined, bondy_oplog_instance:aae_root(Id)),
+
+        %% A live peer with a BEHIND frontier (empty VV): not dominated.
+        ok = bondy_oplog_peer_state:record_sync_complete(
+            {peer, hb_behind}, Id, crypto:strong_rand_bytes(32),
+            #{<<"someone">> => 1},
+            os:system_time(millisecond)
+        ),
+        timer:sleep(80),
+        ?assertMatch({ok, _}, bondy_oplog_instance:compact(Id, [])),
+        %% Held: the unservable tree is still there.
+        ?assertEqual(SizeBefore, bondy_oplog:size(Id)),
+
+        %% The peer catches up (its recorded frontier now covers ours —
+        %% e.g. after its catalogue bootstrap from our projection) → the
+        %% next tick rebuilds.
+        ok = bondy_oplog_peer_state:record_sync_complete(
+            {peer, hb_behind}, Id, crypto:strong_rand_bytes(32),
+            bondy_oplog_registry:frontier(Id),
+            os:system_time(millisecond)
+        ),
+        timer:sleep(20),
+        ?assertMatch({ok, _}, bondy_oplog_instance:compact(Id, [])),
+        ?assertEqual(0, bondy_oplog:size(Id))
+    after
+        application:unset_env(bondy_oplog, unservable_self_heal_after_ms),
+        teardown(Id)
+    end.
+
+%% Deletes one page referenced by the instance's CURRENT MST root,
+%% straight out of the (public) ETS page store — the fault observed
+%% live on Fly s16 (2 pages absent from an own root). The page table is
+%% the instance-owned ETS table holding the store's `<<"$root">>` row.
+drop_root_referenced_page(Id) ->
+    Pid = bondy_oplog_instance:whereis(Id),
+    [Tab] = [
+        T
+     || T <- ets:all(),
+        ets:info(T, owner) =:= Pid,
+        ets:info(T, type) =:= set,
+        (catch ets:lookup(T, <<"$root">>)) =/= []
+    ],
+    [{<<"$root">>, RootHash}] = ets:lookup(Tab, <<"$root">>),
+    [{RootHash, RootPage, _}] = ets:lookup(Tab, RootHash),
+    [Ref | _] = bondy_mst_page:refs(RootPage),
+    true = ets:delete(Tab, Ref),
+    ok.
 
 %% Truncation must PHYSICALLY reclaim the dropped history's pages, not
 %% just unlink them: `bondy_mst:truncate/2` frees only the spine pages it

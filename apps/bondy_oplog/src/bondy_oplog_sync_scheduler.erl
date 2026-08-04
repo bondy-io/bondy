@@ -334,6 +334,13 @@ retries.
 %% on the very next round, so detection is delayed by one round, never
 %% lost.
 -define(GAP_STRIKE_WINDOW_MS, 120_000).
+%% Consecutive `root_unservable_behind` strikes (same window as above)
+%% before the permanent-unservable escalation fires. Higher than the gap
+%% path's two because transient unservability is an EXPECTED benign state
+%% (the responder guard's original truncate/GC race window) and rounds
+%% against an unservable peer are cheap refusals — three in a row inside
+%% the window separates the permanent form cleanly.
+-define(UNSERVABLE_STRIKES, 3).
 %% EWMA smoothing factor for the node-load signal: the weight given to the
 %% newest per-tick sample. 0.3 keeps ~3 ticks of history, enough hysteresis
 %% that a single-tick burst does not flip the yield while still reacting
@@ -1266,12 +1273,67 @@ maybe_flag_rebootstrap(
             }),
             ok
     end;
+maybe_flag_rebootstrap(
+    InstanceId, Peer, {sync_failed, {root_unservable_behind, Origins}}
+) ->
+    %% The peer's responder refuses to serve its root (dangling pages)
+    %% AND its applied frontier is strictly ahead of ours — the session
+    %% established both (see `maybe_unservable_behind/3`). Transient
+    %% unservability (the truncate/GC race the responder guard was built
+    %% for) clears within a round, so require ?UNSERVABLE_STRIKES
+    %% CONSECUTIVE strikes inside the gap-strike window before treating
+    %% it as the permanent form (own-root pages lost — Fly s16) and
+    %% escalating to the same catalogue re-bootstrap the frontier-gap
+    %% path uses: the peer's snapshot producer reads its PROJECTION,
+    %% which stays complete and servable when its MST is not. Without
+    %% this clause the pair deadlocks: every round errors, no round
+    %% completes, the gap verdict never fires, and the peer's surplus
+    %% stays unreachable forever.
+    _ = ensure_table(?GAP_STRIKE_TAB),
+    Now = erlang:monotonic_time(millisecond),
+    Key = {unservable, InstanceId, Peer},
+    Count =
+        case ets:lookup(?GAP_STRIKE_TAB, Key) of
+            [{Key, N, T0}] when Now - T0 =< ?GAP_STRIKE_WINDOW_MS -> N + 1;
+            _ -> 1
+        end,
+    case Count >= ?UNSERVABLE_STRIKES of
+        false ->
+            true = ets:insert(?GAP_STRIKE_TAB, {Key, Count, Now}),
+            ok;
+        true ->
+            true = ets:delete(?GAP_STRIKE_TAB, Key),
+            _ = ensure_table(?REBOOTSTRAP_TAB),
+            ets:insert(?REBOOTSTRAP_TAB, {InstanceId, Peer}),
+            telemetry:execute(
+                [bondy_oplog, sync_scheduler, rebootstrap_scheduled],
+                #{count => 1},
+                #{
+                    instance_id => InstanceId,
+                    peer => Peer,
+                    reason => root_unservable
+                }
+            ),
+            ?LOG_WARNING(#{
+                description =>
+                    "Peer cannot serve its MST root (dangling pages) "
+                    "while its applied frontier is ahead of ours, "
+                    "persistently; scheduling a catalogue re-bootstrap "
+                    "to recover its surplus from its projection.",
+                instance => InstanceId,
+                peer => Peer,
+                origins_behind => Origins
+            }),
+            ok
+    end;
 maybe_flag_rebootstrap(InstanceId, Peer, normal) ->
     %% A successful round proves there is no standing gap against this
     %% peer — clear any single strike so an unrelated transient later
-    %% starts a fresh count.
+    %% starts a fresh count. Same for unservable strikes: a round that
+    %% completed means the peer's root served fine.
     _ = ensure_table(?GAP_STRIKE_TAB),
     _ = ets:delete(?GAP_STRIKE_TAB, {InstanceId, Peer}),
+    _ = ets:delete(?GAP_STRIKE_TAB, {unservable, InstanceId, Peer}),
     ok;
 maybe_flag_rebootstrap(_InstanceId, _Peer, _Reason) ->
     ok.

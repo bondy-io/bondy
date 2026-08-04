@@ -74,6 +74,14 @@
 %% retained pages for this long.
 -define(PEER_ROOT_PIN_TTL_MS, 120_000).
 
+%% How long the instance's own aae-root must verify UNSERVABLE
+%% (continuously) before the compaction path self-heals by rebuilding
+%% the MST (`maybe_self_heal_unservable/2`). Far above any transient
+%% truncate/GC race window (those clear within a round) and long enough
+%% for the peer-side unservable-behind escalation to drain our surplus
+%% first — see the domination gate.
+-define(SELF_HEAL_UNSERVABLE_AFTER_MS, 60_000).
+
 %% Async pack-store seal: how many times the instance re-runs a failed seal
 %% job before giving up and stopping so the supervisor restart + reopen
 %% recovery re-seals the frozen incoming pack from scratch. A persistent
@@ -223,6 +231,13 @@ without protocol changes.
     %% memoised per root hash so it re-walks (and re-logs) only when the
     %% root changes, never every sync round.
     aae_root_check :: undefined | {binary(), boolean()},
+    %% Monotonic ms of the FIRST unservable aae-root verdict of the
+    %% current unservable streak; reset the moment any root verifies
+    %% servable. Persist across root changes: a tree whose missing
+    %% pages sit in a shared subtree stays unservable through every new
+    %% root, and the self-heal threshold must measure the streak, not
+    %% the root. See `maybe_self_heal_unservable/2`.
+    unservable_since = undefined :: undefined | integer(),
     backend :: backend(),
     validator_module :: module(),
     validator_state :: term(),
@@ -2972,7 +2987,7 @@ do_handle_call(aae_root, _From, #state{mst = MST} = State) ->
     case bondy_mst:root(MST) of
         undefined ->
             %% Empty is trivially servable (nothing to serve).
-            {reply, undefined, State};
+            {reply, undefined, State#state{unservable_since = undefined}};
         Root ->
             case State#state.aae_root_check of
                 {Root, true} ->
@@ -2991,12 +3006,27 @@ do_handle_call(aae_root, _From, #state{mst = MST} = State) ->
                             description =>
                                 "Refusing to advertise a dangling MST root "
                                 "over anti-entropy; advertising empty so peers "
-                                "do not pull unservable pages. Will heal via "
-                                "our own pull / WAL replay.",
+                                "do not pull unservable pages. Transient "
+                                "(truncate/GC race) heals next round; a "
+                                "PERSISTENT streak triggers the compaction-"
+                                "path self-heal (mst_rebuilt).",
                             instance_id => State#state.instance_id,
                             root => Root
                         }),
-                    State1 = State#state{aae_root_check = {Root, Servable}},
+                    Since =
+                        case Servable of
+                            true ->
+                                undefined;
+                            false when State#state.unservable_since =/=
+                                    undefined ->
+                                State#state.unservable_since;
+                            false ->
+                                erlang:monotonic_time(millisecond)
+                        end,
+                    State1 = State#state{
+                        aae_root_check = {Root, Servable},
+                        unservable_since = Since
+                    },
                     Reply =
                         case Servable of
                             true -> Root;
@@ -4418,6 +4448,130 @@ never_applied_at_or_below(Id, MST, W) ->
     ].
 
 %% @private
+%% THE UNSERVABLE-OWN-ROOT SELF-HEAL (the broken-node half of the
+%% dangling-root recovery; the peer half is the sync scheduler's
+%% `root_unservable_behind` escalation). A fused instance whose own
+%% root has lost pages (found live on Fly s16: 2 pages absent from the
+%% ephemeral ETS store) can never serve a complete page round again, so
+%% NOTHING on the shard ever earns a peer-confirmed truncation license:
+%% the MST grows forever and the shard is an AE blackout even for new
+%% writes. The events are already lost as replication currency (the
+%% tree cannot serve them) — but the PROJECTION is intact, the applied
+%% VV witnesses everything, and catalogue bootstrap serves both. So the
+%% honest recovery is to REBUILD: drop the unservable tree, advance the
+%% watermark past the dropped range, keep projection + frontier, and
+%% let AE resume on the fresh (servable) tree.
+%%
+%% Gates, in order:
+%% - fused + projection only (the s16 class; a durable instance heals
+%%   its store via reboot/WAL replay);
+%% - the unservable streak must exceed ?SELF_HEAL_UNSERVABLE_AFTER_MS
+%%   (transient truncate/GC-race unservability clears within a round);
+%% - re-verified against the CURRENT root right here (the streak
+%%   timestamp alone could be stale);
+%% - every recency-live peer's recorded frontier (peer_state, captured
+%%   by our own successful rounds) must DOMINATE our applied VV — i.e.
+%%   our surplus has already drained to the peers (normally via their
+%%   unservable-behind catalogue bootstraps), so dropping our events
+%%   strands nobody. Vacuous with no live peers: solo, there is no one
+%%   to serve; and a later-returning peer recovers via the frontier-gap
+%%   → catalogue-bootstrap chain against our intact projection.
+maybe_self_heal_unservable(
+    #state{
+        fused = true,
+        unservable_since = Since,
+        mst = MST,
+        instance_id = Id,
+        backend = Backend
+    } = State,
+    true
+) when Since =/= undefined ->
+    Now = erlang:monotonic_time(millisecond),
+    Root = bondy_mst:root(MST),
+    StillUnservable =
+        Root =/= undefined andalso
+            not missing_set_empty(bondy_mst:missing_set(MST, Root)),
+    Threshold = application:get_env(
+        bondy_oplog, unservable_self_heal_after_ms,
+        ?SELF_HEAL_UNSERVABLE_AFTER_MS
+    ),
+    case
+        Now - Since > Threshold andalso
+            StillUnservable andalso live_peers_dominate(Id)
+    of
+        false ->
+            case StillUnservable of
+                true -> State;
+                false -> State#state{unservable_since = undefined}
+            end;
+        true ->
+            {LastKey, _} = bondy_mst:last(MST),
+            Dropped = State#state.live_size,
+            MST1 = truncate_below_or_equal(
+                MST, LastKey, Backend, pinned_roots(State)
+            ),
+            _ = bondy_oplog_hlc:update(
+                State#state.hlc, bondy_oplog_event:key_hlc(LastKey)
+            ),
+            telemetry:execute(
+                [bondy_oplog, instance, mst_rebuilt],
+                #{count => 1, dropped => Dropped},
+                #{instance_id => Id, reason => unservable_root}
+            ),
+            ?LOG_NOTICE(#{
+                description =>
+                    "Rebuilt an unservable MST (own root with lost "
+                    "pages): dropped the tree, advanced the watermark "
+                    "past it and kept the projection + applied "
+                    "frontier. Every recency-live peer's frontier "
+                    "dominates ours, so no peer is stranded; AE "
+                    "resumes on the fresh tree.",
+                instance_id => Id,
+                dropped_events => Dropped,
+                unservable_for_ms => Now - Since
+            }),
+            State#state{
+                mst = MST1,
+                watermark = advance_watermark(State#state.watermark, LastKey),
+                live_size = compute_live_size(MST1),
+                remote_gen = State#state.remote_gen + 1,
+                aae_root_check = undefined,
+                unservable_since = undefined,
+                fused_drain = fused_reanchor_cursor(
+                    State#state.fused_drain, bondy_mst:root(MST1)
+                )
+            }
+    end;
+maybe_self_heal_unservable(State, _HasProjection) ->
+    State.
+
+%% @private
+%% True when every recency-live peer we have completed a round against
+%% has a recorded applied frontier that covers ours per-origin. A peer
+%% with NO recorded frontier (never supplied one) blocks the heal —
+%% unknown is not coverage.
+live_peers_dominate(Id) ->
+    OurVV = applied_vv(Id),
+    lists:all(
+        fun
+            (#{frontier := F}) when is_map(F) -> dominates(F, OurVV);
+            (_) -> false
+        end,
+        bondy_oplog_peer_state:get_instance_peer_states(Id)
+    ).
+
+%% @private
+dominates(PeerVV, OurVV) ->
+    maps:fold(
+        fun
+            (_Origin, _Seq, false) -> false;
+            (Origin, Seq, true) -> maps:get(Origin, PeerVV, 0) >= Seq
+        end,
+        true,
+        OurVV
+    ).
+
+%% @private
 %% The applied-frontier version vector — the witness both watermark
 %% doors (`watermark_door/3` and `append_remote_below_watermark/3`)
 %% judge "never applied here" against. `#{}` when the registry has no
@@ -5662,7 +5816,11 @@ do_compact_sync(#state{} = State0, PeerRoots) ->
     %% Resolve (and memoise) projection-presence BEFORE the compaction body
     %% so the body makes no per-cycle `gen_server:call` to the applier (the
     %% instance↔applier deadlock — see the `has_projection` state field).
-    {HasProjection, State} = resolve_has_projection(State0),
+    {HasProjection, StateR} = resolve_has_projection(State0),
+    %% Unservable-own-root self-heal runs on the compaction tick — the
+    %% one periodic in-process hook — BEFORE the frontier computation
+    %% (a rebuilt tree simply compacts as `no_change`).
+    State = maybe_self_heal_unservable(StateR, HasProjection),
     Result = run_compaction(
         State#state.instance_id,
         State#state.mst,

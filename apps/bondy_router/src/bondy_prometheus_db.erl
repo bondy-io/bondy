@@ -251,6 +251,7 @@ events() ->
         [bondy_oplog, sync_session, frontier_gap],
         [bondy_oplog, sync_scheduler, rebootstrap_scheduled],
         [bondy_oplog, instance, integrate_doored],
+        [bondy_oplog, instance, mst_rebuilt],
         [bondy_oplog, sync, catalogue_bootstrap, ok],
         [bondy_oplog, sync, catalogue_bootstrap, error],
         [bondy_oplog, sync, catalogue_bootstrap, complete],
@@ -399,6 +400,13 @@ declare_metrics() ->
             "Catalogue re-bootstraps scheduled (peer reclaimed pages this "
             "replica needs, or a frontier gap struck twice).", [
             instance_id, peer
+        ]},
+        {bondy_oplog_mst_rebuilt_total,
+            "Unservable-own-root self-heals: the instance dropped an MST "
+            "whose own root lost pages (after the domination gate proved "
+            "no peer is stranded) and resumed AE on a fresh tree. Any "
+            "occurrence deserves a look at WHY pages went missing.", [
+            instance_id, reason
         ]},
         {bondy_oplog_doored_events_total,
             "Never-applied peer events at or below the local watermark "
@@ -829,6 +837,12 @@ do_handle_event(
     counter(
         bondy_oplog_rebootstraps_scheduled_total,
         [instance_id(Meta), maps:get(peer, Meta, undefined)],
+        1
+    );
+do_handle_event([bondy_oplog, instance, mst_rebuilt], _Meas, Meta) ->
+    counter(
+        bondy_oplog_mst_rebuilt_total,
+        [instance_id(Meta), maps:get(reason, Meta, undefined)],
         1
     );
 do_handle_event([bondy_oplog, instance, integrate_doored], Meas, Meta) ->

@@ -169,9 +169,10 @@ run(Instance, Peer, Opts, Iterations) when is_binary(Instance) ->
     %% a gap — flagging it rebootstraps healthy instances on every capped
     %% round under load), and adopting there would over-claim maxima the
     %% round never delivered.
-    Result = maybe_frontier_gap(Result0, Instance, Peer, PeerFrontier, PeerRoot),
+    Result1 = maybe_unservable_behind(Result0, Instance, PeerFrontier),
+    Result = maybe_frontier_gap(Result1, Instance, Peer, PeerFrontier, PeerRoot),
     ok = maybe_adopt_peer_frontier(Result, Instance, PeerFrontier, PeerRoot),
-    maybe_record(Result, Instance, Peer, Record, PeerRoot),
+    maybe_record(Result, Instance, Peer, Record, PeerRoot, PeerFrontier),
     ok = maybe_confirm_root(
         Result, Instance, Peer, Transport, TransportOpts, Record, PeerRoot
     ),
@@ -442,6 +443,20 @@ finish_bootstrap(Instance, Peer, Opts, WasLive) ->
                 false -> ok
             end,
             Ok;
+        {error, {root_unservable, _}} ->
+            %% The catalogue install + finalize already supplied the data
+            %% and the frontier; this trailing AE round only covers events
+            %% past the new watermark, which an UNSERVABLE peer cannot
+            %% serve by definition — it is exactly the peer this bootstrap
+            %% was escalated against. Failing the whole bootstrap here
+            %% would discard a successful recovery (and re-strike
+            %% forever); complete it, run the live-rederive, and leave the
+            %% residual tail to the peer's own self-heal.
+            case WasLive of
+                true -> ok = rederive_projection(Instance);
+                false -> ok
+            end,
+            {ok, bootstrapped_unservable_tail};
         {error, _} = E ->
             E
     end.
@@ -932,12 +947,12 @@ initial_round_budget(MissingCount, PerRound) ->
 %% The peer-state record also always lands: with an empty peer tree it
 %% advances recency only (no root to confirm — see
 %% `bondy_oplog_peer_state:record_sync_complete/3`).
-maybe_record({ok, _LocalRoot}, _Instance, _Peer, _Record, skip) ->
+maybe_record({ok, _LocalRoot}, _Instance, _Peer, _Record, skip, _Frontier) ->
     %% Benign incomplete round (`chase_refreshed_root/7`): the peer's
     %% advertised root was never fully held, so checkpointing it — or even
     %% bumping recency against it — would overstate this session.
     ok;
-maybe_record({ok, _LocalRoot}, Instance, Peer, true, PeerRoot) ->
+maybe_record({ok, _LocalRoot}, Instance, Peer, true, PeerRoot, Frontier) ->
     %% Checkpoint the PEER's root, not ours.
     %%
     %% `peer_state` feeds `compute_frontier_for/2`, whose contract is "the
@@ -954,9 +969,9 @@ maybe_record({ok, _LocalRoot}, Instance, Peer, true, PeerRoot) ->
     %% re-reading the peer's current one) is deliberately conservative: the peer
     %% may have advanced since, which only delays the frontier, never
     %% over-claims it.
-    ok = maybe_checkpoint_root(PeerRoot, Instance, Peer),
+    ok = maybe_checkpoint_root(PeerRoot, Instance, Peer, Frontier),
     ok = bump_ae_on_sync(Instance, Peer);
-maybe_record(_, _, _, _, _) ->
+maybe_record(_, _, _, _, _, _) ->
     ok.
 
 %% @private
@@ -1009,10 +1024,23 @@ maybe_confirm_root(_, _, _, _, _, _, _) ->
 %% fully-compacted quiescent shard) advances the peer's sync recency
 %% without confirming a root, so the last-sync age stays truthful on
 %% converged idle shards instead of climbing forever.
-maybe_checkpoint_root(Root, Instance, Peer) when
+maybe_checkpoint_root(Root, Instance, Peer, Frontier0) when
     is_binary(Root) orelse Root =:= undefined
 ->
-    bondy_oplog_peer_state:record_sync_complete(Peer, Instance, Root).
+    %% The recorded frontier feeds the unservable-own-root self-heal's
+    %% domination gate. `request_peer_frontier/4` degrades to `#{}` on a
+    %% transport error, which is indistinguishable from a genuinely empty
+    %% frontier — record UNKNOWN (`undefined`, preserving any previous
+    %% observation) rather than an empty claim; the cost is only a
+    %% delayed rebuild, never a wrong one.
+    Frontier =
+        case Frontier0 of
+            F when is_map(F), map_size(F) > 0 -> F;
+            _ -> undefined
+        end,
+    bondy_oplog_peer_state:record_sync_complete(
+        Peer, Instance, Root, Frontier, os:system_time(millisecond)
+    ).
 
 %% @private
 %% Adopt the peer's applied-frontier after a CONVERGED round (`{ok, _}`).
@@ -1080,6 +1108,41 @@ maybe_adopt_peer_frontier(_Result, _Instance, _PeerFrontier, _PeerRoot) ->
 %% deficit (peer vs local sequence) goes out on the
 %% `[bondy_oplog, sync_session, frontier_gap]` telemetry event and the
 %% log line here, so a standing gap is diagnosable from either.
+%% @private
+%% THE UNSERVABLE-BEHIND ESCALATION EVIDENCE. A peer whose responder
+%% answers `{error, {root_unservable, _}}` is refusing to serve a
+%% dangling root — designed as a benign transient (a truncate/GC race
+%% window, healed by the next tick). But a peer whose OWN root pages are
+%% permanently lost stays unservable forever, and because every round
+%% ERRORS (never completes), the frontier-gap verdict can never fire —
+%% the recovery deadlock found live on Fly run s16: no page round can
+%% ever deliver what the peer holds, yet no re-bootstrap is ever
+%% scheduled. This helper turns the error into escalation EVIDENCE when
+%% and only when the peer actually has something we lack: the peer's
+%% pre-round applied frontier (captured before `get_root`) strictly
+%% ahead of ours after the local settle. The scheduler debounces
+%% consecutive `root_unservable_behind` strikes into a catalogue
+%% re-bootstrap — the snapshot producer reads the peer's PROJECTION,
+%% which is complete and servable even when its MST is not. A plain
+%% `root_unservable` with no deficit stays benign, which is also the
+%% loop protection: once a re-bootstrap (or the peer's own self-heal)
+%% has levelled the frontiers, later unservable rounds stop escalating.
+maybe_unservable_behind(
+    {error, {root_unservable, _}} = E, Instance, PeerFrontier
+) when is_map(PeerFrontier), map_size(PeerFrontier) > 0 ->
+    Deficit0 = frontier_deficit(Instance, PeerFrontier),
+    map_size(Deficit0) =:= 0 orelse settle_local(Instance),
+    case frontier_deficit(Instance, PeerFrontier) of
+        Deficit when map_size(Deficit) =:= 0 ->
+            E;
+        Deficit ->
+            {error,
+                {root_unservable_behind,
+                    lists:sublist(maps:keys(Deficit), 5)}}
+    end;
+maybe_unservable_behind(Result, _Instance, _PeerFrontier) ->
+    Result.
+
 maybe_frontier_gap({ok, _} = Result, _Instance, _Peer, _PeerFrontier, skip) ->
     %% Benign incomplete round: a deficit here is expected transfer lag,
     %% not evidence of compacted-away history. The next complete round

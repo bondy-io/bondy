@@ -191,6 +191,24 @@ sustained_writes_registry_history_stays_bounded(Config) ->
         "transient (see forensics dump)"
     ),
 
+    %% The s16 page-loss TRIPWIRE: no node may end the run with an
+    %% instance whose own root cannot be fully served (missing pages).
+    %% The unservable-root recovery machinery would eventually heal it,
+    %% but page loss itself is the primary bug — catch it in the act
+    %% with the diagnose evidence (missing/absent counts + sample ids).
+    Unservable = [
+        {N, U}
+     || N <- Nodes,
+        U <- erpc:call(N, ?MODULE, do_unservable_roots, [])
+    ],
+    ?assertEqual(
+        [],
+        Unservable,
+        "an instance ended the run with an unservable OWN root "
+        "(missing pages) — the s16 page-loss bug reproduced; the "
+        "diagnose_root maps above carry the evidence"
+    ),
+
     #{samples := Samples} = Result,
     RegistrySamples = [
         S
@@ -1006,6 +1024,17 @@ do_recovery_diagnostics() ->
 %% The concatenated RIB divergence list over every test realm on THIS node
 %% (`bondy_registry_rib:check/1` compares the replicated summary cells
 %% against the local members ground truth). `[]` = consistent.
+%% Every instance whose CURRENT root cannot be fully served on THIS
+%% node — the s16 page-loss tripwire. `[]` = all roots servable.
+do_unservable_roots() ->
+    [
+        {I, D}
+     || I <- bondy_oplog:list_instances(),
+        D <- [catch bondy_oplog_instance:diagnose_root(I)],
+        is_map(D),
+        maps:get(servable, D, true) =:= false
+    ].
+
 do_rib_divergences() ->
     lists:append([
         bondy_registry_rib:check(

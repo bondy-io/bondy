@@ -75,6 +75,12 @@ process can read it without round-tripping the gen_server.
     %% there is no root to confirm — and only a confirmed (binary) root
     %% counts for stability.
     root_hash :: binary() | undefined,
+    %% The peer's applied-frontier version vector as observed at the start
+    %% of the last completed round (`get_frontier`). `undefined` until a
+    %% round supplies one. Consumed by the unservable-own-root self-heal
+    %% (`bondy_oplog_instance`): a rebuild is licensed only when every
+    %% recency-live peer's recorded frontier dominates the local one.
+    frontier :: #{binary() => non_neg_integer()} | undefined,
     %% ms since UNIX epoch
     last_sync :: integer(),
     %% ms since UNIX epoch
@@ -89,6 +95,7 @@ process can read it without round-tripping the gen_server.
     peer := peer_id(),
     instance := instance_id(),
     root_hash := binary() | undefined,
+    frontier := #{binary() => non_neg_integer()} | undefined,
     last_sync := integer(),
     last_seen := integer()
 }.
@@ -103,6 +110,7 @@ process can read it without round-tripping the gen_server.
 %% Writes
 -export([record_sync_complete/3]).
 -export([record_sync_complete/4]).
+-export([record_sync_complete/5]).
 -export([touch_peer/1]).
 -export([forget_peer/1]).
 -export([forget_instance/1]).
@@ -182,9 +190,20 @@ record_sync_complete(Peer, Instance, RootHash) ->
 ) -> ok.
 
 record_sync_complete(Peer, Instance, RootHash, Now) ->
+    record_sync_complete(Peer, Instance, RootHash, undefined, Now).
+
+-spec record_sync_complete(
+    peer_id(),
+    instance_id(),
+    binary() | undefined,
+    #{binary() => non_neg_integer()} | undefined,
+    integer()
+) -> ok.
+
+record_sync_complete(Peer, Instance, RootHash, Frontier, Now) ->
     gen_server:cast(
         ?MODULE,
-        {record_sync_complete, Peer, Instance, RootHash, Now}
+        {record_sync_complete, Peer, Instance, RootHash, Frontier, Now}
     ).
 
 ?DOC("""
@@ -267,7 +286,7 @@ get_known_peers(Instance, Since) ->
 ?DOC("""
 Returns the full per-peer record set for `Instance`, excluding stale
 peers. Each entry is a map with `peer`, `instance`, `root_hash`,
-`last_sync`, `last_seen`.
+`frontier`, `last_sync`, `last_seen`.
 """).
 -spec get_instance_peer_states(instance_id()) -> [peer_state_entry()].
 
@@ -337,6 +356,7 @@ get_instance_peer_states(Instance, Since) ->
             #peer_instance_state{
                 peer_instance = {'$1', '$2'},
                 root_hash = '$3',
+                frontier = '$6',
                 last_sync = '$4',
                 last_seen = '$5'
             },
@@ -344,7 +364,7 @@ get_instance_peer_states(Instance, Since) ->
                 {'=:=', '$2', {const, Instance}},
                 {'>=', '$5', {const, Since}}
             ],
-            [{{'$1', '$3', '$4', '$5'}}]
+            [{{'$1', '$3', '$6', '$4', '$5'}}]
         }
     ],
     [
@@ -352,10 +372,11 @@ get_instance_peer_states(Instance, Since) ->
             peer => P,
             instance => Instance,
             root_hash => H,
+            frontier => F,
             last_sync => LS,
             last_seen => LSeen
         }
-     || {P, H, LS, LSeen} <- ets:select(?TABLE, MatchSpec)
+     || {P, H, F, LS, LSeen} <- ets:select(?TABLE, MatchSpec)
     ].
 
 ?DOC("""
@@ -438,26 +459,40 @@ handle_call(sync, _From, State) ->
 handle_call(_Req, _From, State) ->
     {reply, {error, badcall}, State}.
 
-handle_cast({record_sync_complete, Peer, Instance, Hash, Now}, State) ->
+handle_cast(
+    {record_sync_complete, Peer, Instance, Hash, Frontier0, Now}, State
+) ->
     Key = {Peer, Instance},
     %% A rootless completion (peer tree empty) refreshes recency but must
     %% not ERASE a previously confirmed root: the peer checkpointed that
     %% root's content before compacting, so keeping it is conservative —
     %% the stability frontier stays where it was rather than regressing to
-    %% unconfirmed.
+    %% unconfirmed. Same preservation for the recorded frontier: an
+    %% unknown-frontier completion must not erase a previously observed
+    %% one (regressing it could falsely license the unservable-root
+    %% self-heal against stale knowledge — preserving is conservative
+    %% the other way: it can only DELAY the rebuild).
+    Prev =
+        case ets:lookup(?TABLE, Key) of
+            [#peer_instance_state{} = P] -> P;
+            [] -> undefined
+        end,
     Root =
-        case Hash of
-            undefined ->
-                case ets:lookup(?TABLE, Key) of
-                    [#peer_instance_state{root_hash = Prev}] -> Prev;
-                    [] -> undefined
-                end;
-            _ ->
-                Hash
+        case {Hash, Prev} of
+            {undefined, #peer_instance_state{root_hash = PR}} -> PR;
+            {undefined, undefined} -> undefined;
+            _ -> Hash
+        end,
+    Frontier =
+        case {Frontier0, Prev} of
+            {undefined, #peer_instance_state{frontier = PF}} -> PF;
+            {undefined, undefined} -> undefined;
+            _ -> Frontier0
         end,
     Entry = #peer_instance_state{
         peer_instance = Key,
         root_hash = Root,
+        frontier = Frontier,
         last_sync = Now,
         last_seen = Now
     },

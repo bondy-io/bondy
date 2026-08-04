@@ -61,7 +61,9 @@ rebootstrap_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {timeout, 30, fun unavailable_flags_and_rebootstraps/0},
         {timeout, 30, fun other_failures_do_not_flag/0},
-        {timeout, 30, fun gap_two_strikes_rebootstraps_fused/0}
+        {timeout, 30, fun gap_two_strikes_rebootstraps_fused/0},
+        {timeout, 30, fun unservable_behind_three_strikes_rebootstraps/0},
+        {timeout, 30, fun unservable_without_deficit_never_escalates/0}
     ]}.
 
 %% A live instance whose pull dies on `peer_pages_unavailable` is flagged
@@ -119,6 +121,61 @@ gap_two_strikes_rebootstraps_fused() ->
     end),
     bondy_oplog:stop_instance(Inst).
 
+%% THE s16 DEADLOCK LOCK. A peer whose root is persistently unservable
+%% (own pages lost) while its applied frontier is AHEAD must reach the
+%% catalogue re-bootstrap after three consecutive strikes — every round
+%% errors, so without this escalation no complete round ever runs the
+%% frontier-gap check and the pair deadlocks forever.
+unservable_behind_three_strikes_rebootstraps() ->
+    set_mode(unservable_behind),
+    Inst = mk_inst(),
+    with_telemetry(fun() ->
+        Strike = fun() ->
+            _ = bondy_oplog:append(Inst, {op, erlang:unique_integer()}),
+            ok = bondy_oplog_instance:await_apply(Inst),
+            bondy_oplog_sync_scheduler:trigger(),
+            _ = await([bondy_oplog, sync_scheduler, live, ended], Inst)
+        end,
+        Strike(),
+        Strike(),
+        Strike(),
+        %% The third strike scheduled it during its own DOWN handling.
+        #{instance_id := Inst, peer := ?PEER, reason := root_unservable} =
+            await(
+                [bondy_oplog, sync_scheduler, rebootstrap_scheduled], Inst
+            ),
+        bondy_oplog_sync_scheduler:trigger(),
+        Meta = await([bondy_oplog, sync_scheduler, dispatch_bootstrap], Inst),
+        ?assertMatch(#{peer := ?PEER, mode := catalogue}, Meta)
+    end),
+    bondy_oplog:stop_instance(Inst).
+
+%% The loop protection: an unservable peer whose frontier is NOT ahead
+%% (nothing to recover from it) must never escalate, no matter how many
+%% rounds fail — the plain `root_unservable` error stays benign.
+unservable_without_deficit_never_escalates() ->
+    set_mode(unservable_no_deficit),
+    Inst = mk_inst(),
+    with_telemetry(fun() ->
+        lists:foreach(
+            fun(_) ->
+                _ = bondy_oplog:append(Inst, {op, erlang:unique_integer()}),
+                ok = bondy_oplog_instance:await_apply(Inst),
+                bondy_oplog_sync_scheduler:trigger(),
+                _ = await([bondy_oplog, sync_scheduler, live, ended], Inst)
+            end,
+            lists:seq(1, 4)
+        ),
+        receive
+            {telemetry, [bondy_oplog, sync_scheduler, rebootstrap_scheduled],
+                _, #{instance_id := Inst}} ->
+                error(unexpected_unservable_escalation)
+        after 500 ->
+            ok
+        end
+    end),
+    bondy_oplog:stop_instance(Inst).
+
 %% An ordinary transient live failure (transport refuses `get_root`) leaves
 %% no re-bootstrap state: the session ends, nothing schedules a bootstrap.
 other_failures_do_not_flag() ->
@@ -157,8 +214,13 @@ request(_Peer, _Instance, get_frontier, _Opts) ->
     %% is terminal (→ rebootstrap) only under a GENUINE applied-frontier
     %% deficit — with no deficit the session ends benign (the unpullable
     %% pages cover only already-applied events; see
-    %% `bondy_oplog_sync_session:chase_refreshed_root/7`).
-    {ok, #{<<"rb_test_peer_origin">> => 1}};
+    %% `bondy_oplog_sync_session:chase_refreshed_root/7`). Same gate for
+    %% the unservable escalation: `unservable_no_deficit` answers an
+    %% empty VV so `maybe_unservable_behind/3` finds nothing to recover.
+    case mode() of
+        unservable_no_deficit -> {ok, #{}};
+        _ -> {ok, #{<<"rb_test_peer_origin">> => 1}}
+    end;
 request(_Peer, _Instance, get_root, _Opts) ->
     case mode() of
         unavailable ->
@@ -170,6 +232,10 @@ request(_Peer, _Instance, get_root, _Opts) ->
             %% (`get_frontier` above) is strictly ahead — the standing
             %% frontier-gap shape.
             {ok, undefined};
+        M when M == unservable_behind orelse M == unservable_no_deficit ->
+            %% The dangling-own-root peer (Fly s16): its responder
+            %% refuses to serve the root, every round errors here.
+            {error, {root_unservable, <<"rb_unservable_instance">>}};
         error ->
             {error, econnrefused}
     end;
