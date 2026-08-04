@@ -100,6 +100,15 @@ ENV HOME "/bondy"
 # `apt-get upgrade` ensures base-image packages pick up Debian security updates
 # (glibc, systemd, libcap2, nghttp2, ...) rather than staying frozen at the
 # versions cached in the base layer.
+#
+# The four VOLUME paths (etc, data, log, tmp) MUST exist in the image and be
+# owned by `bondy` BEFORE the VOLUME instruction below. Docker creates a missing
+# mountpoint as root:root 0755 at container-create time, and this image runs as
+# the unprivileged `bondy` user — so an image without them boots into
+# `filelib:ensure_path/1` failing on `/bondy/data/bondy_db/main` (surfaced by
+# `bondy_namespace_catalog` as `{badmatch,{error,enoent}}`; ensure_path/1 reports
+# the underlying EACCES as `enoent`). When the mountpoint DOES exist, Docker
+# seeds the anonymous volume from it and carries its ownership over.
 RUN apt-get update && \
     apt-get -y upgrade && \
     apt-get -y install --no-install-recommends \
@@ -108,8 +117,8 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 -r bondy \
     && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "bondy" bondy \
-    && mkdir -p /bondy/etc \
-    && chown bondy:bondy /bondy/etc
+    && mkdir -p /bondy/etc /bondy/data /bondy/log /bondy/tmp \
+    && chown bondy:bondy /bondy/etc /bondy/data /bondy/log /bondy/tmp
 
 WORKDIR /bondy
 

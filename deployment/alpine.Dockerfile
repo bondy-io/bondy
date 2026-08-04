@@ -80,9 +80,17 @@ ENV HOME "/bondy"
 # We install the following required packages:
 # - openssl: required by Erlang crypto application
 # We setup the bondy group and user and the /bondy dir
-# We also create the /bondy/etc dir to avoid an issue when deploying in K8s
-# where the permissions are not assigned to the directory and Bondy will not
-# have permission to write.
+#
+# The four VOLUME paths (etc, data, log, tmp) MUST exist in the image and be
+# owned by `bondy` BEFORE the VOLUME instruction below. Docker creates a missing
+# mountpoint as root:root 0755 at container-create time, and this image runs as
+# the unprivileged `bondy` user — so an image without them boots into
+# `filelib:ensure_path/1` failing on `/bondy/data/bondy_db/main` (surfaced by
+# `bondy_namespace_catalog` as `{badmatch,{error,enoent}}`; ensure_path/1 reports
+# the underlying EACCES as `enoent`). When the mountpoint DOES exist, Docker
+# seeds the anonymous volume from it and carries its ownership over. Creating
+# /bondy/etc also avoids a K8s deployment issue where the directory is otherwise
+# not writable by Bondy.
 RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
     ln -s /var/cache/apk /etc/apk/cache \
     && apk add --no-cache \
@@ -95,8 +103,8 @@ RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
         --ingroup bondy \
         --home /bondy \
         --shell /bin/bash bondy \
-    && mkdir -p /bondy/etc \
-    && chown bondy:bondy /bondy/etc
+    && mkdir -p /bondy/etc /bondy/data /bondy/log /bondy/tmp \
+    && chown bondy:bondy /bondy/etc /bondy/data /bondy/log /bondy/tmp
 
 WORKDIR /bondy
 USER bondy:bondy
