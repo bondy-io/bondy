@@ -1540,16 +1540,20 @@ end}.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc The number of registry partitions, i.e. the maximum
-%% number of active erlang processes handling registry trie serialised
-%% operations (default = 32).
-%% Check with the documentation which operations are concurrent and which are
-%% serialised to understand the impact.
-%% Notice that all registrations and subcritions for a realm are stored in the
-%% same (single) partition and partition assignment is based on hashing the
-%% realm uri across the number of partitions. So increasing the number of
-%% partitions will only  affect use cases in which you have a decent amount of
-%% realms.
+%% @doc The number of registry store partitions (default = 32; the
+%% runtime lowers an unset value to min(16, schedulers)).
+%% A partition owns one registry store (the entry tables plus the
+%% exact/prefix/wildcard routing indexes) and a gen_server that
+%% supervises its index janitors. All registrations and subscriptions
+%% for a realm are PLACED in the same (single) partition — assignment
+%% hashes the realm URI across the partition count — so increasing the
+%% count only spreads load when there is a decent number of realms.
+%% Placement is not a concurrency bottleneck for a single busy realm,
+%% however: every hot-path operation (add, remove, lookup, match) runs
+%% lock-free in the calling process regardless of partition — exact
+%% indexes via ETS, pattern indexes via a persistent trie with
+%% compare-and-swap publication (contention is observable as
+%% bondy_registry_ptrie_cas_retries_total).
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "registry.partitions",

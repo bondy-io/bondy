@@ -9,7 +9,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 5,
+  "version": 6,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -3654,6 +3654,85 @@
           "refId": "A",
           "expr": "sum by (reason, family) (rate(bondy_wamp_dropped_total{reason=~\"admission|shed\"}[$__rate_interval]))",
           "legendFormat": "{{reason}} {{family}}"
+        }
+      ]
+    },
+    {
+      "id": 153,
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "title": "Registry pattern-index CAS contention",
+      "description": "Ptrie write rounds lost to a concurrent writer (retried) and writes that exhausted the retry budget (an incident). All pattern writes of a realm CAS on one root per (type, policy) \u2014 a sustained retry rate here is the trigger for pattern-broadcast sharding (_design/REGISTRY_PARTITION_GRAIN.md). Zero when uncontended.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 158
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*exhausted.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "refId": "A",
+          "legendFormat": "retries {{node}}",
+          "expr": "sum by (node) (rate(bondy_registry_ptrie_cas_retries_total{node=~\"$node\"}[$__rate_interval]))"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "refId": "B",
+          "legendFormat": "exhausted {{node}}",
+          "expr": "sum by (node) (rate(bondy_registry_ptrie_cas_exhausted_total{node=~\"$node\"}[$__rate_interval]))"
         }
       ]
     }

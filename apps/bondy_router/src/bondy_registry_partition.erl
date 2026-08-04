@@ -229,9 +229,11 @@ add(Partition, Entry) when is_pid(Partition) ->
 -doc """
 The function inserts the indices for an entry.
 
-Indices are inserted concurrently for entries with `exact` or `prefix` matching
-policies. However, for `wildcard` policy, the insertion will be serialized
-through a trie server.
+Indices are inserted concurrently for ALL matching policies, in the
+caller's process: `exact` via ETS, `prefix`/`wildcard` via the persistent
+ptrie's path-copy + root CAS (concurrent writers retry on CAS loss — see
+`bondy_registry_ptrie`; retry pressure is observable as
+`bondy_registry_ptrie_cas_retries_total`).
 
 > #### {.warning}
 > This function is used when we received an entry via AAE sync exchange. You
@@ -264,9 +266,9 @@ The function first deletes the indices, then deletes the entry from the
 node-local entry table — see `bondy_registry_store:remove/3` for why this
 order matters.
 
-Indices are deleted concurrently for entries with `exact` or `prefix` matching
-policies. However, for `wildcard` policy, the deletion will be serialized
-through a trie server.
+Indices are deleted concurrently for ALL matching policies, in the
+caller's process: `exact` via ETS, `prefix`/`wildcard` via the persistent
+ptrie's path-copy + root CAS (concurrent writers retry on CAS loss).
 
 > #### {.info}
 > This is an interim design that will be replaced by a more concurrent one in
@@ -505,9 +507,10 @@ match(Cont) ->
 -doc """
 Finds entries matching `Type`, `RealmUri` and `Uri`.
 
-This call executes concurrently for entries with `exact` or `prefix` matching
-policies. However, for `wildcard` policy, the call will be serialized
-through a gen_server.
+This call executes concurrently in the caller's process for ALL matching
+policies — `exact` via ETS reads, `prefix`/`wildcard` by traversing an
+immutable ptrie snapshot (lock-free, QSBR-reclaimed); nothing routes
+through the partition gen_server.
 """.
 -spec match(
     Partition :: pid(),
@@ -535,9 +538,10 @@ find_matches(Cont) ->
 -doc """
 Finds entries matching `Type`, `RealmUri` and `Uri`.
 
-This call executes concurrently for entries with `exact` or `prefix` matching
-policies. However, for `wildcard` policy, the call will be serialized
-through a gen_server.
+This call executes concurrently in the caller's process for ALL matching
+policies — `exact` via ETS reads, `prefix`/`wildcard` by traversing an
+immutable ptrie snapshot (lock-free, QSBR-reclaimed); nothing routes
+through the partition gen_server.
 """.
 -spec find_matches(
     Partition :: pid(),

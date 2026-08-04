@@ -159,7 +159,9 @@ setup() ->
             [bondy, wamp, hello],
             [bondy, session_manager, open],
             [bondy, session_manager, cleanup],
-            [bondy, router, flow]
+            [bondy, router, flow],
+            [bondy, registry, ptrie, cas_retry],
+            [bondy, registry, ptrie, cas_exhausted]
         ],
         fun ?MODULE:handle_net_event/4,
         undefined
@@ -571,12 +573,49 @@ declare_net_session_families() ->
             "(router | relay). Pool throughput is bounded by pool size "
             "divided by this duration."
         >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_registry_ptrie_cas_retries_total,
+        help => <<
+            "Registry pattern-index (ptrie) write rounds lost to a "
+            "concurrent writer's root CAS and retried. All pattern writes "
+            "of a realm contend on one root per (type, policy), so a "
+            "sustained rate here is the trigger for pattern-broadcast "
+            "sharding (see _design/REGISTRY_PARTITION_GRAIN.md). Zero on "
+            "the uncontended fast path."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_registry_ptrie_cas_exhausted_total,
+        help => <<
+            "Registry pattern-index (ptrie) writes that exhausted their "
+            "CAS retry budget and failed. A safety valve against "
+            "pathological livelock — any non-zero value is an incident."
+        >>
     }).
 
 %% @private
 %% Telemetry sink for the socket and session events emitted by
 %% `bondy_telemetry`. Same discipline as `handle_wamp_message/4`:
 %% wait-free `bondy_metrics` writes only, total.
+handle_net_event([bondy, registry, ptrie, Outcome], Meas, _Meta, _Config) when
+    Outcome == cas_retry orelse Outcome == cas_exhausted
+->
+    try
+        Name =
+            case Outcome of
+                cas_retry -> bondy_registry_ptrie_cas_retries_total;
+                cas_exhausted -> bondy_registry_ptrie_cas_exhausted_total
+            end,
+        ok = bondy_metrics:counter(#{
+            name => Name,
+            label => #{node => node_name()},
+            delta => maps:get(count, Meas, 1)
+        })
+    catch
+        _:_ ->
+            ok
+    end;
 handle_net_event([bondy, socket, ping_rtt], Meas, Meta, _Config) ->
     try
         bondy_metrics:histogram(#{

@@ -700,13 +700,27 @@ with_epoch(#handle{epoch_tab = ET, current_epoch = CE}, Fun) ->
 %%
 %% `Walk` is a fun/1 that takes the in-memory root #pnode{} and returns
 %% {NewRootId, RetiredIds, FreshIds} — see walk_insert / walk_remove.
+%%
+%% Contention telemetry: every lost round emits `cas_retry` and budget
+%% exhaustion emits `cas_exhausted` — nothing is emitted on the
+%% uncontended fast path. These counters are the evidence hook for the
+%% registry partition-grain decision (`_design/REGISTRY_PARTITION_GRAIN.md`):
+%% all pattern writes of a realm CAS on one root per (type, policy), so
+%% sustained retry pressure is the one signal that would justify
+%% pattern-broadcast sharding. Watch them on the Router/WAMP dashboard.
 do_write(_H, _Walk, 0) ->
+    telemetry:execute(
+        [bondy, registry, ptrie, cas_exhausted], #{count => 1}, #{}
+    ),
     {error, cas_exhausted};
 do_write(#handle{} = H, Walk, N) ->
     {OldRootId, V} = read_root(H),
     case ets:lookup(H#handle.node_tab, OldRootId) of
         [] ->
             %% The root row we saw was concurrently retired out from under us.
+            telemetry:execute(
+                [bondy, registry, ptrie, cas_retry], #{count => 1}, #{}
+            ),
             do_write(H, Walk, N - 1);
         [OldRoot] ->
             {NewRootId, Retired, Fresh} = Walk(OldRoot),
@@ -751,6 +765,9 @@ publish(
             ok;
         0 ->
             discard_fresh(H, Fresh),
+            telemetry:execute(
+                [bondy, registry, ptrie, cas_retry], #{count => 1}, #{}
+            ),
             erlang:yield(),
             do_write(H, Walk, N - 1)
     end.
