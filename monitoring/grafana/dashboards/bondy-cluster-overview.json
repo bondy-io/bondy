@@ -9,7 +9,7 @@
   ],
   "timezone": "",
   "schemaVersion": 39,
-  "version": 7,
+  "version": 8,
   "refresh": "10s",
   "time": {
     "from": "now-1h",
@@ -43,6 +43,17 @@
     ]
   },
   "links": [
+    {
+      "title": "Cluster Sync / AAE",
+      "url": "/d/bondy-cluster-sync",
+      "type": "link",
+      "icon": "external link",
+      "targetBlank": false,
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "asDropdown": false
+    },
     {
       "title": "Node detail \u2014 db / oplog / MST",
       "type": "link",
@@ -488,6 +499,361 @@
       ]
     },
     {
+      "id": 24,
+      "type": "row",
+      "title": "AE / sync health",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "panels": []
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "Frontier-gap verdicts (15m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Peer strictly ahead after a completed sync round. One is a benign transient; repeats/growth = standing gap. Click through for the node \u00d7 peer matrix.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          },
+          "links": [
+            {
+              "title": "Cluster Sync / AAE \u2014 drill down",
+              "url": "/d/bondy-cluster-sync?${__url_time_range}"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(increase(bondy_oplog_frontier_gap_verdicts_total[15m])) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "Re-bootstraps (15m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Snapshot re-bootstraps scheduled. Non-zero deserves a look.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "links": [
+            {
+              "title": "Cluster Sync / AAE \u2014 drill down",
+              "url": "/d/bondy-cluster-sync?${__url_time_range}"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(increase(bondy_oplog_rebootstraps_scheduled_total[15m])) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "type": "stat",
+      "title": "Sync errors (15m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Failed AE sessions across the cluster.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          },
+          "links": [
+            {
+              "title": "Cluster Sync / AAE \u2014 drill down",
+              "url": "/d/bondy-cluster-sync?${__url_time_range}"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(increase(bondy_oplog_sync_sessions_total{outcome=\"error\"}[15m])) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "stat",
+      "title": "Doored events (15m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Watermark-door accepts (fold/hold). Normal under load \u2014 the honest alternative to silent loss.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50000
+              }
+            ]
+          },
+          "links": [
+            {
+              "title": "Cluster Sync / AAE \u2014 drill down",
+              "url": "/d/bondy-cluster-sync?${__url_time_range}"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(increase(bondy_oplog_doored_events_total[15m])) or vector(0)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "type": "stat",
+      "title": "Stalest pair sync age",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Oldest last-completed-sync for any (instance, peer).",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 30
+              },
+              {
+                "color": "red",
+                "value": 120
+              }
+            ]
+          },
+          "links": [
+            {
+              "title": "Cluster Sync / AAE \u2014 drill down",
+              "url": "/d/bondy-cluster-sync?${__url_time_range}"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "max(bondy_oplog_peer_last_sync_age_seconds)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "id": 8,
       "type": "row",
       "title": "Nodes & connectivity",
@@ -496,7 +862,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 5
+        "y": 10
       },
       "panels": []
     },
@@ -513,7 +879,7 @@
         "h": 6,
         "w": 6,
         "x": 0,
-        "y": 6
+        "y": 11
       },
       "fieldConfig": {
         "defaults": {
@@ -591,7 +957,7 @@
         "h": 6,
         "w": 6,
         "x": 6,
-        "y": 6
+        "y": 11
       },
       "fieldConfig": {
         "defaults": {
@@ -657,7 +1023,7 @@
         "h": 6,
         "w": 6,
         "x": 12,
-        "y": 6
+        "y": 11
       },
       "fieldConfig": {
         "defaults": {
@@ -726,7 +1092,7 @@
         "h": 6,
         "w": 6,
         "x": 18,
-        "y": 6
+        "y": 11
       },
       "fieldConfig": {
         "defaults": {
@@ -811,7 +1177,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 12
+        "y": 17
       },
       "panels": []
     },
@@ -828,7 +1194,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 13
+        "y": 18
       },
       "fieldConfig": {
         "defaults": {
@@ -897,7 +1263,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 13
+        "y": 18
       },
       "fieldConfig": {
         "defaults": {
@@ -986,7 +1352,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 13
+        "y": 18
       },
       "fieldConfig": {
         "defaults": {
@@ -1055,7 +1421,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 20
+        "y": 25
       },
       "fieldConfig": {
         "defaults": {
@@ -1124,7 +1490,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 20
+        "y": 25
       },
       "fieldConfig": {
         "defaults": {
@@ -1213,7 +1579,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 20
+        "y": 25
       },
       "fieldConfig": {
         "defaults": {
@@ -1297,7 +1663,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 27
+        "y": 32
       },
       "title": "Inter-node links \u2014 Partisan (RTT, backpressure, churn)",
       "panels": []
@@ -1315,7 +1681,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 28
+        "y": 33
       },
       "fieldConfig": {
         "defaults": {
@@ -1376,7 +1742,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 28
+        "y": 33
       },
       "fieldConfig": {
         "defaults": {
@@ -1437,7 +1803,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 28
+        "y": 33
       },
       "fieldConfig": {
         "defaults": {

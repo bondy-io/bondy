@@ -10,7 +10,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 9,
+  "version": 11,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -47,100 +47,6 @@
             "$__all"
           ]
         }
-      },
-      {
-        "name": "nodeA",
-        "label": "nodeA",
-        "type": "query",
-        "datasource": {
-          "type": "prometheus",
-          "uid": "bondy-prometheus"
-        },
-        "query": {
-          "query": "label_values(up{job=\"bondy\"}, node)",
-          "refId": "var-nodeA"
-        },
-        "refresh": 2,
-        "multi": true,
-        "includeAll": true,
-        "allValue": ".*",
-        "sort": 1,
-        "hide": 2,
-        "current": {
-          "selected": true,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
-        }
-      },
-      {
-        "name": "nodeB",
-        "label": "nodeB",
-        "type": "query",
-        "datasource": {
-          "type": "prometheus",
-          "uid": "bondy-prometheus"
-        },
-        "query": {
-          "query": "label_values(up{job=\"bondy\"}, node)",
-          "refId": "var-nodeB"
-        },
-        "refresh": 2,
-        "multi": true,
-        "includeAll": true,
-        "allValue": ".*",
-        "sort": 1,
-        "hide": 2,
-        "current": {
-          "selected": true,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
-        }
-      },
-      {
-        "name": "pairA",
-        "label": "pairA",
-        "type": "query",
-        "datasource": {
-          "type": "prometheus",
-          "uid": "bondy-prometheus"
-        },
-        "query": {
-          "query": "label_values(up{job=\"bondy\"}, node)",
-          "refId": "var-pairA"
-        },
-        "refresh": 2,
-        "multi": false,
-        "includeAll": false,
-        "sort": 1,
-        "hide": 0,
-        "current": {}
-      },
-      {
-        "name": "pairB",
-        "label": "pairB",
-        "type": "query",
-        "datasource": {
-          "type": "prometheus",
-          "uid": "bondy-prometheus"
-        },
-        "query": {
-          "query": "label_values(up{job=\"bondy\"}, node)",
-          "refId": "var-pairB"
-        },
-        "refresh": 2,
-        "multi": false,
-        "includeAll": false,
-        "sort": 1,
-        "hide": 0,
-        "current": {}
       }
     ]
   },
@@ -161,1974 +67,6 @@
   },
   "panels": [
     {
-      "id": 1,
-      "type": "row",
-      "title": "Cluster \u2014 Partisan (observer_cli [C] pane)",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 0
-      },
-      "panels": []
-    },
-    {
-      "id": 2,
-      "type": "stat",
-      "title": "Scrape up",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 0,
-        "y": 1
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "up{job=\"bondy\",node=~\"$node\"}",
-          "legendFormat": "{{node}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "1": {
-                  "text": "UP",
-                  "color": "green",
-                  "index": 0
-                },
-                "0": {
-                  "text": "DOWN",
-                  "color": "red",
-                  "index": 1
-                }
-              }
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "text",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "textMode": "auto"
-      },
-      "description": "Prometheus can reach the node's Admin API /metrics endpoint."
-    },
-    {
-      "id": 3,
-      "type": "stat",
-      "title": "Membership view size",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 6,
-        "y": 1
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "bondy_cluster_members{node=~\"$node\"}",
-          "legendFormat": "{{node}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "text",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "textMode": "auto"
-      },
-      "description": "partisan_peer_service:members() as seen by each node."
-    },
-    {
-      "id": 4,
-      "type": "stat",
-      "title": "Cluster health",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 5,
-        "x": 10,
-        "y": 1
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "min(bondy_cluster_all_members_connected{node=~\"$node\"})",
-          "legendFormat": "",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "1": {
-                  "text": "ALL CONNECTED",
-                  "color": "green",
-                  "index": 0
-                },
-                "0": {
-                  "text": "PARTITIONED",
-                  "color": "red",
-                  "index": 1
-                }
-              }
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "text",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "textMode": "auto"
-      },
-      "description": "1 only when every node reaches every member of its view."
-    },
-    {
-      "id": 5,
-      "type": "stat",
-      "title": "Node ready",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 5,
-        "x": 15,
-        "y": 1
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "bondy_node_ready{node=~\"$node\"}",
-          "legendFormat": "{{node}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "1": {
-                  "text": "READY",
-                  "color": "green",
-                  "index": 0
-                },
-                "0": {
-                  "text": "NOT READY",
-                  "color": "red",
-                  "index": 1
-                }
-              }
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "text",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "textMode": "auto"
-      },
-      "description": "Same flag the /ready probe serves."
-    },
-    {
-      "id": 6,
-      "type": "stat",
-      "title": "Active alarms",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 20,
-        "y": 1
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum(bondy_alarms{node=~\"$node\"}) or vector(0)",
-          "legendFormat": "",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "textMode": "auto"
-      },
-      "description": "OTP alarms (e.g. system_memory_high_watermark), all nodes."
-    },
-    {
-      "id": 7,
-      "type": "table",
-      "title": "Connectivity matrix (observer \u00d7 peer)",
-      "description": "Each cell: can the row's node reach the column's peer? Green = connected.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 5
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "bondy_cluster_peer_connected{node=~\"$node\"}",
-          "format": "table",
-          "instant": true,
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true,
-              "__name__": true,
-              "job": true,
-              "instance": true,
-              "member": true,
-              "self": true
-            }
-          }
-        },
-        {
-          "id": "groupingToMatrix",
-          "options": {
-            "columnField": "peer",
-            "rowField": "node",
-            "valueField": "Value"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "1": {
-                  "text": "\u2713",
-                  "color": "green",
-                  "index": 0
-                },
-                "0": {
-                  "text": "\u2717",
-                  "color": "red",
-                  "index": 1
-                }
-              }
-            }
-          ],
-          "custom": {
-            "align": "center",
-            "cellOptions": {
-              "type": "color-background"
-            }
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "node\\peer"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "auto"
-                }
-              },
-              {
-                "id": "mappings",
-                "value": []
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "showHeader": true
-      }
-    },
-    {
-      "id": 8,
-      "type": "state-timeline",
-      "title": "Peer connectivity history",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 5
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "bondy_cluster_peer_connected{node=~\"$node\"}",
-          "legendFormat": "{{node}} \u2192 {{peer}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "maxDataPoints": 300,
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "1": {
-                  "text": "up",
-                  "index": 0
-                },
-                "0": {
-                  "text": "down",
-                  "index": 1
-                }
-              }
-            }
-          ],
-          "custom": {
-            "lineWidth": 0,
-            "fillOpacity": 70,
-            "spanNulls": false
-          },
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "mergeValues": true,
-        "showValue": "never",
-        "rowHeight": 0.85,
-        "alignValue": "center",
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "description": "Per (observer, peer) link state over time; red bands are partitions or restarts."
-    },
-    {
-      "id": 9,
-      "type": "row",
-      "title": "Sync / AAE \u2014 frontier convergence (observer_cli [Y] pane)",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 13
-      },
-      "panels": []
-    },
-    {
-      "id": 10,
-      "type": "stat",
-      "title": "AAE",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 0,
-        "y": 14
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "min(bondy_oplog_aae_enabled{node=~\"$node\"})",
-          "legendFormat": "",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "1": {
-                  "text": "ON",
-                  "color": "green",
-                  "index": 0
-                },
-                "0": {
-                  "text": "OFF",
-                  "color": "yellow",
-                  "index": 1
-                }
-              }
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "text",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "textMode": "auto"
-      }
-    },
-    {
-      "id": 11,
-      "type": "stat",
-      "title": "Instances converged",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 5,
-        "x": 4,
-        "y": 14
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "count(count by (instance_id) (count_values by (instance_id) (\"fh\", bondy_oplog_instance_frontier_hash{node=~\"$node\"})) == 1) or vector(0)",
-          "legendFormat": "",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "textMode": "auto"
-      },
-      "description": "Instances whose applied-frontier hash is identical on every selected node (includes solo instances)."
-    },
-    {
-      "id": 12,
-      "type": "stat",
-      "title": "Instances DIVERGED",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 5,
-        "x": 9,
-        "y": 14
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "count(count by (instance_id) (count_values by (instance_id) (\"fh\", bondy_oplog_instance_frontier_hash{node=~\"$node\"})) > 1) or vector(0)",
-          "legendFormat": "",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "textMode": "auto"
-      },
-      "description": "Instances reporting different applied-frontier hashes across nodes. Transient during writes; persistent divergence means AAE is not converging."
-    },
-    {
-      "id": 13,
-      "type": "stat",
-      "title": "Instances not live",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 5,
-        "x": 14,
-        "y": 14
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum(bondy_oplog_instances{node=~\"$node\",lifecycle!=\"live\"}) or vector(0)",
-          "legendFormat": "",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "textMode": "auto"
-      }
-    },
-    {
-      "id": 14,
-      "type": "stat",
-      "title": "Syncs in flight",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 5,
-        "x": 19,
-        "y": 14
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum(bondy_oplog_sync_scheduler_inflight{node=~\"$node\",kind=\"total\"})",
-          "legendFormat": "",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "text",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "textMode": "auto"
-      }
-    },
-    {
-      "id": 15,
-      "type": "timeseries",
-      "title": "Diverged instances over time",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 18
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "count(count by (instance_id) (count_values by (instance_id) (\"fh\", bondy_oplog_instance_frontier_hash{node=~\"$node\"})) > 1) or vector(0)",
-          "legendFormat": "diverged",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "short",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 16,
-      "type": "timeseries",
-      "title": "Sync sessions",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 18
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (outcome) (rate(bondy_oplog_sync_sessions_total{node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "{{outcome}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "ops",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 17,
-      "type": "timeseries",
-      "title": "AAE lww merge conflicts",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 18
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (table) (rate(bondy_aae_merge_conflicts_total{node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "{{table}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "ops",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "description": "Remote AAE merges that replaced a DIFFERENT local value of an authorization cell (lww). Investigate any sustained activity: a concurrent edit lost."
-    },
-    {
-      "id": 18,
-      "type": "heatmap",
-      "title": "Sync session duration",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 26
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (le) (rate(bondy_oplog_sync_duration_microseconds_bucket{node=~\"$node\",outcome=\"ok\"}[$__rate_interval]))",
-          "format": "heatmap",
-          "legendFormat": "{{le}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "calculate": false,
-        "cellGap": 1,
-        "color": {
-          "mode": "scheme",
-          "scheme": "Spectral",
-          "steps": 48,
-          "reverse": true
-        },
-        "yAxis": {
-          "unit": "\u00b5s",
-          "decimals": 0
-        },
-        "rowsFrame": {
-          "layout": "auto"
-        },
-        "tooltip": {
-          "mode": "single",
-          "showColorScale": true
-        },
-        "legend": {
-          "show": true
-        },
-        "exemplars": {
-          "color": "rgba(255,0,255,0.7)"
-        }
-      },
-      "description": "Distribution of AAE sync session durations."
-    },
-    {
-      "id": 19,
-      "type": "timeseries",
-      "title": "Sync session duration (quantiles)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 26
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(bondy_oplog_sync_duration_microseconds_bucket{node=~\"$node\",outcome=\"ok\"}[$__rate_interval])))",
-          "legendFormat": "p50",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        },
-        {
-          "refId": "B",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(bondy_oplog_sync_duration_microseconds_bucket{node=~\"$node\",outcome=\"ok\"}[$__rate_interval])))",
-          "legendFormat": "p95",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        },
-        {
-          "refId": "C",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(bondy_oplog_sync_duration_microseconds_bucket{node=~\"$node\",outcome=\"ok\"}[$__rate_interval])))",
-          "legendFormat": "p99",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "\u00b5s",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 20,
-      "type": "timeseries",
-      "title": "Bootstrap activity",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 26
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (outcome) (rate(bondy_oplog_bootstrap_sessions_total{node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "sessions {{outcome}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        },
-        {
-          "refId": "B",
-          "expr": "sum by (result) (rate(bondy_oplog_bootstrap_cells_total{node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "cells {{result}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "ops",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 21,
-      "type": "timeseries",
-      "title": "Peer root-checkpoint age (stalest pair vs typical)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 34
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "max by (node) (bondy_oplog_peer_last_sync_age_seconds{node=~\"$node\"})",
-          "legendFormat": "stalest {{node}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        },
-        {
-          "refId": "B",
-          "expr": "quantile by (node) (0.5, bondy_oplog_peer_last_sync_age_seconds{node=~\"$node\"})",
-          "legendFormat": "median {{node}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "s",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "description": "Age of the last CONFIRMED peer-root checkpoint per (shard, peer) pair \u2014 the reclamation-stability signal, NOT sync cadence. A quiet shard whose peer has fully compacted advertises no MST root, so its checkpoint is deliberately frozen even though sync sessions keep running (see the Sync sessions panel for cadence). Worry only if the MEDIAN grows while writes are flowing."
-    },
-    {
-      "id": 22,
-      "type": "timeseries",
-      "title": "Substrate AE freshness lag (max per namespace)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 34
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "max by (namespace) (bondy_oplog_core_ae_lag_milliseconds{node=~\"$node\"})",
-          "legendFormat": "{{namespace}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "ms",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 23,
-      "type": "timeseries",
-      "title": "Sync scheduler activity",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 34
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (event) (rate(bondy_oplog_sync_scheduler_events_total{node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "{{event}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "ops",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 24,
-      "type": "timeseries",
-      "title": "Instances by lifecycle",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 42
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (lifecycle) (bondy_oplog_instances{node=~\"$node\"})",
-          "legendFormat": "{{lifecycle}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "short",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 25,
-      "type": "row",
-      "title": "Frontier sync matrix \u2014 $nodeA \u21e2 (diverged shard count per peer)",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 50
-      },
-      "panels": [],
-      "repeat": "nodeA"
-    },
-    {
-      "id": 26,
-      "type": "stat",
-      "title": "\u21e2 $nodeB",
-      "description": "Number of shards whose applied-frontier hash differs between $nodeA and $nodeB. Click to inspect the pair.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 3,
-        "x": 0,
-        "y": 51
-      },
-      "repeat": "nodeB",
-      "repeatDirection": "h",
-      "maxPerRow": 8,
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "count(max by (instance_id) (bondy_oplog_instance_frontier_hash{node=\"$nodeA\"}) != max by (instance_id) (bondy_oplog_instance_frontier_hash{node=\"$nodeB\"})) or vector(0)",
-          "legendFormat": "",
-          "instant": true,
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          },
-          "links": [
-            {
-              "title": "Inspect pair ${nodeA} vs ${nodeB}",
-              "url": "/d/bondy-db-oplog-mst?var-pairA=${nodeA}&var-pairB=${nodeB}&${__url_time_range}"
-            }
-          ]
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "textMode": "value"
-      }
-    },
-    {
-      "id": 27,
-      "type": "row",
-      "title": "Pair inspector \u2014 $pairA vs $pairB",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 54
-      },
-      "panels": []
-    },
-    {
-      "id": 28,
-      "type": "stat",
-      "title": "Diverged shards ($pairA vs $pairB)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 0,
-        "y": 55
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "count(max by (instance_id) (bondy_oplog_instance_frontier_hash{node=\"$pairA\"}) != max by (instance_id) (bondy_oplog_instance_frontier_hash{node=\"$pairB\"})) or vector(0)",
-          "legendFormat": "",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "textMode": "auto"
-      }
-    },
-    {
-      "id": 29,
-      "type": "stat",
-      "title": "Last sync age ($pairA \u2192 $pairB)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 6,
-        "y": 55
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "max(bondy_oplog_peer_last_sync_age_seconds{node=\"$pairA\",peer=\"$pairB\"})",
-          "legendFormat": "",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "text",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "textMode": "auto"
-      },
-      "description": "Oldest last-completed-sync across $pairA's instances against $pairB."
-    },
-    {
-      "id": 30,
-      "type": "timeseries",
-      "title": "Diverged shards between pair over time",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 12,
-        "x": 12,
-        "y": 55
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "count(max by (instance_id) (bondy_oplog_instance_frontier_hash{node=\"$pairA\"}) != max by (instance_id) (bondy_oplog_instance_frontier_hash{node=\"$pairB\"})) or vector(0)",
-          "legendFormat": "diverged",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "short",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 31,
-      "type": "table",
-      "title": "Diverged shards: frontier seq delta ($pairA vs $pairB)",
-      "description": "Shards whose frontiers differ between the pair, with the absolute applied-sequence gap (how far apart).",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 8,
-        "x": 0,
-        "y": 60
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "abs(max by (instance_id) (bondy_oplog_instance_frontier_seq_total{node=\"$pairA\"}) - max by (instance_id) (bondy_oplog_instance_frontier_seq_total{node=\"$pairB\"})) and on (instance_id) (max by (instance_id) (bondy_oplog_instance_frontier_hash{node=\"$pairA\"}) != max by (instance_id) (bondy_oplog_instance_frontier_hash{node=\"$pairB\"}))",
-          "format": "table",
-          "instant": true,
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true
-            },
-            "renameByName": {
-              "instance_id": "Shard / instance",
-              "Value": "Seq delta"
-            }
-          }
-        },
-        {
-          "id": "sortBy",
-          "options": {
-            "sort": [
-              {
-                "field": "Seq delta",
-                "desc": true
-              }
-            ]
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "filterable": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "showHeader": true
-      }
-    },
-    {
-      "id": 32,
-      "type": "bargauge",
-      "title": "Largest frontier gaps (top 15)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 8,
-        "x": 8,
-        "y": 60
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "topk(15, abs(max by (instance_id) (bondy_oplog_instance_frontier_seq_total{node=\"$pairA\"}) - max by (instance_id) (bondy_oplog_instance_frontier_seq_total{node=\"$pairB\"})) and on (instance_id) (max by (instance_id) (bondy_oplog_instance_frontier_hash{node=\"$pairA\"}) != max by (instance_id) (bondy_oplog_instance_frontier_hash{node=\"$pairB\"})))",
-          "legendFormat": "{{instance_id}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "instant": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": {
-            "mode": "continuous-BlPu"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "blue",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "orientation": "horizontal",
-        "displayMode": "gradient",
-        "valueMode": "color",
-        "showUnfilled": true,
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        }
-      },
-      "description": "Applied-sequence gap per diverged shard between the pair."
-    },
-    {
-      "id": 33,
-      "type": "timeseries",
-      "title": "Sync sessions between pair",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 8,
-        "x": 16,
-        "y": 60
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum by (outcome) (rate(bondy_oplog_sync_sessions_total{node=\"$pairA\",peer=\"$pairB\"}[$__rate_interval]))",
-          "legendFormat": "$pairA\u2192$pairB {{outcome}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        },
-        {
-          "refId": "B",
-          "expr": "sum by (outcome) (rate(bondy_oplog_sync_sessions_total{node=\"$pairB\",peer=\"$pairA\"}[$__rate_interval]))",
-          "legendFormat": "$pairB\u2192$pairA {{outcome}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "ops",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
       "id": 34,
       "type": "row",
       "title": "Write path \u2014 instances & WAL",
@@ -2137,7 +75,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 69
+        "y": 0
       },
       "panels": []
     },
@@ -2153,7 +91,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 70
+        "y": 1
       },
       "targets": [
         {
@@ -2234,7 +172,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 70
+        "y": 1
       },
       "targets": [
         {
@@ -2297,7 +235,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 70
+        "y": 1
       },
       "targets": [
         {
@@ -2396,7 +334,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 78
+        "y": 9
       },
       "targets": [
         {
@@ -2476,7 +414,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 78
+        "y": 9
       },
       "targets": [
         {
@@ -2536,7 +474,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 78
+        "y": 9
       },
       "targets": [
         {
@@ -2595,7 +533,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 86
+        "y": 17
       },
       "targets": [
         {
@@ -2657,7 +595,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 86
+        "y": 17
       },
       "targets": [
         {
@@ -2719,7 +657,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 86
+        "y": 17
       },
       "targets": [
         {
@@ -2779,7 +717,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 94
+        "y": 25
       },
       "targets": [
         {
@@ -2841,7 +779,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 94
+        "y": 25
       },
       "targets": [
         {
@@ -2921,7 +859,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 94
+        "y": 25
       },
       "targets": [
         {
@@ -3001,7 +939,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 102
+        "y": 33
       },
       "targets": [
         {
@@ -3060,7 +998,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 102
+        "y": 33
       },
       "targets": [
         {
@@ -3123,7 +1061,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 102
+        "y": 33
       },
       "targets": [
         {
@@ -3182,7 +1120,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 110
+        "y": 41
       },
       "panels": []
     },
@@ -3198,7 +1136,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 111
+        "y": 42
       },
       "targets": [
         {
@@ -3258,7 +1196,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 111
+        "y": 42
       },
       "targets": [
         {
@@ -3320,7 +1258,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 111
+        "y": 42
       },
       "targets": [
         {
@@ -3382,7 +1320,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 119
+        "y": 50
       },
       "targets": [
         {
@@ -3453,7 +1391,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 119
+        "y": 50
       },
       "targets": [
         {
@@ -3533,7 +1471,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 119
+        "y": 50
       },
       "targets": [
         {
@@ -3610,7 +1548,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 127
+        "y": 58
       },
       "panels": []
     },
@@ -3626,7 +1564,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 128
+        "y": 59
       },
       "targets": [
         {
@@ -3688,7 +1626,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 128
+        "y": 59
       },
       "targets": [
         {
@@ -3750,7 +1688,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 128
+        "y": 59
       },
       "targets": [
         {
@@ -3813,7 +1751,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 136
+        "y": 67
       },
       "targets": [
         {
@@ -3884,7 +1822,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 136
+        "y": 67
       },
       "targets": [
         {
@@ -3946,7 +1884,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 136
+        "y": 67
       },
       "targets": [
         {
@@ -4015,7 +1953,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 144
+        "y": 75
       },
       "panels": []
     },
@@ -4031,7 +1969,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 145
+        "y": 76
       },
       "targets": [
         {
@@ -4094,7 +2032,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 145
+        "y": 76
       },
       "targets": [
         {
@@ -4174,7 +2112,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 145
+        "y": 76
       },
       "targets": [
         {
@@ -4234,7 +2172,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 153
+        "y": 84
       },
       "targets": [
         {
@@ -4305,7 +2243,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 153
+        "y": 84
       },
       "targets": [
         {
@@ -4376,7 +2314,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 153
+        "y": 84
       },
       "targets": [
         {
@@ -4439,7 +2377,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 161
+        "y": 92
       },
       "targets": [
         {
@@ -4499,7 +2437,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 169
+        "y": 100
       },
       "panels": []
     },
@@ -4515,7 +2453,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 170
+        "y": 101
       },
       "targets": [
         {
@@ -4586,7 +2524,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 170
+        "y": 101
       },
       "targets": [
         {
@@ -4646,7 +2584,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 170
+        "y": 101
       },
       "targets": [
         {
@@ -4708,7 +2646,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 178
+        "y": 109
       },
       "targets": [
         {
@@ -4770,7 +2708,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 178
+        "y": 109
       },
       "targets": [
         {
@@ -4833,7 +2771,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 178
+        "y": 109
       },
       "targets": [
         {
@@ -4895,7 +2833,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 186
+        "y": 117
       },
       "targets": [
         {
@@ -4966,7 +2904,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 186
+        "y": 117
       },
       "targets": [
         {
@@ -5028,7 +2966,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 186
+        "y": 117
       },
       "targets": [
         {
@@ -5126,7 +3064,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 194
+        "y": 125
       },
       "panels": []
     },
@@ -5142,7 +3080,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 195
+        "y": 126
       },
       "targets": [
         {
@@ -5204,7 +3142,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 195
+        "y": 126
       },
       "targets": [
         {
@@ -5264,7 +3202,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 195
+        "y": 126
       },
       "targets": [
         {
@@ -5322,690 +3260,20 @@
           "sort": "desc"
         }
       }
-    },
-    {
-      "id": 150,
-      "type": "row",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 203
-      },
-      "title": "AAE Sync \u2014 Oversized items (values too large to replicate over Partisan)",
-      "panels": []
-    },
-    {
-      "id": 151,
-      "type": "timeseries",
-      "title": "Oversized AAE sync items skipped \u2014 rate",
-      "description": "Rate of AAE sync items (MST pages or catalogue cells) skipped because a single item's serialized size exceeds the sync response ceiling (Partisan max_message_size \u00d7 headroom). Non-zero means stored values are too large to replicate \u2014 raise cluster.max_message_size. Alert (the operator alarm): sum(increase(bondy_oplog_sync_oversized_item_total[15m])) > 0 \u2014 it self-clears once skipping stops.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 204
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "short",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "sum by (kind) (rate(bondy_oplog_sync_oversized_item_total{node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "{{kind}}"
-        }
-      ]
-    },
-    {
-      "id": 152,
-      "type": "timeseries",
-      "title": "Largest skipped AAE sync item",
-      "description": "Largest AAE sync item skipped (over the visible range, by kind) because it exceeds the frame cap. Indicates how high cluster.max_message_size must be raised. A first-class SASL alarm (bondy_oplog_sync_oversized_items) also fires while skipping is ongoing \u2014 see the cluster overview's Active alarms.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 204
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "bytes",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "max by (kind) (max_over_time(bondy_oplog_sync_oversized_item_last_bytes{node=~\"$node\"}[$__range]))",
-          "legendFormat": "{{kind}}"
-        }
-      ]
-    },
-    {
-      "id": 153,
-      "type": "row",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 212
-      },
-      "title": "Cluster \u2014 inter-node links (Partisan telemetry)",
-      "panels": []
-    },
-    {
-      "id": 154,
-      "type": "timeseries",
-      "title": "Inter-node RTT (quantiles)",
-      "description": "Partisan heartbeat round-trip across all peers/channels.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 213
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ms",
-          "min": 0,
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(bondy_cluster_peer_rtt_milliseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
-          "legendFormat": "p50"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "histogram_quantile(0.9, sum by (le) (rate(bondy_cluster_peer_rtt_milliseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
-          "legendFormat": "p90"
-        },
-        {
-          "refId": "C",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(bondy_cluster_peer_rtt_milliseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
-          "legendFormat": "p99"
-        }
-      ]
-    },
-    {
-      "id": 155,
-      "type": "heatmap",
-      "title": "Inter-node RTT (heatmap)",
-      "description": "RTT distribution over time.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 213
-      },
-      "options": {
-        "calculate": false,
-        "cellGap": 1,
-        "color": {
-          "scheme": "Spectral",
-          "mode": "scheme"
-        },
-        "yAxis": {
-          "unit": "ms"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "sum by (le) (rate(bondy_cluster_peer_rtt_milliseconds_bucket{node=~\"$node\"}[$__rate_interval]))",
-          "format": "heatmap",
-          "legendFormat": "{{le}}"
-        }
-      ]
-    },
-    {
-      "id": 156,
-      "type": "timeseries",
-      "title": "Send backpressure \u2014 pending bytes (by peer, side)",
-      "description": "Bytes queued to send but not flushed. Sustained > 0 = link can't keep up.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 213
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "bytes",
-          "min": 0,
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "max by (peer, side) (bondy_cluster_peer_send_pending_bytes{node=~\"$node\"})",
-          "legendFormat": "{{peer}} {{side}}"
-        }
-      ]
-    },
-    {
-      "id": 157,
-      "type": "timeseries",
-      "title": "Connection churn (up / down by reason)",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 221
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "cps",
-          "min": 0,
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "sum(rate(bondy_cluster_connection_up_total{node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "up"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "sum by (reason) (rate(bondy_cluster_connection_down_total{node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "down: {{reason}}"
-        }
-      ]
-    },
-    {
-      "id": 158,
-      "type": "timeseries",
-      "title": "Channel connections vs target (under-provisioned)",
-      "description": "size < target means a channel is running under its configured parallelism.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 221
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "sum by (channel) (bondy_cluster_channel_connections{node=~\"$node\"})",
-          "legendFormat": "size {{channel}}"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "sum by (channel) (bondy_cluster_channel_connections_target{node=~\"$node\"})",
-          "legendFormat": "target {{channel}}"
-        }
-      ]
-    },
-    {
-      "id": 159,
-      "type": "timeseries",
-      "title": "Membership: size + change rate",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 221
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "max(bondy_cluster_membership_size{node=~\"$node\"})",
-          "legendFormat": "members"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "sum by (direction) (rate(bondy_cluster_membership_changes_total{node=~\"$node\"}[$__rate_interval]))",
-          "legendFormat": "{{direction}}/s"
-        }
-      ]
-    },
-    {
-      "id": 160,
-      "type": "timeseries",
-      "title": "Connect & TLS-handshake latency (p99, by result)",
-      "description": "A spike in handshake result=error is the slowloris signal.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 0,
-        "y": 229
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ms",
-          "min": 0,
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le, result) (rate(bondy_cluster_connect_latency_milliseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
-          "legendFormat": "connect {{result}}"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le, result) (rate(bondy_cluster_tls_handshake_milliseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
-          "legendFormat": "handshake {{result}}"
-        }
-      ]
-    },
-    {
-      "id": 161,
-      "type": "timeseries",
-      "title": "Connect / handshake failure rate",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 12,
-        "y": 229
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "cps",
-          "min": 0,
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "sum(rate(bondy_cluster_connect_latency_milliseconds_count{node=~\"$node\",result=\"error\"}[$__rate_interval]))",
-          "legendFormat": "connect errors"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          },
-          "expr": "sum(rate(bondy_cluster_tls_handshake_milliseconds_count{node=~\"$node\",result=\"error\"}[$__rate_interval]))",
-          "legendFormat": "handshake errors"
-        }
-      ]
     }
   ],
   "links": [
+    {
+      "title": "Cluster Sync / AAE",
+      "url": "/d/bondy-cluster-sync",
+      "type": "link",
+      "icon": "external link",
+      "targetBlank": false,
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "asDropdown": false
+    },
     {
       "title": "Cluster Overview",
       "type": "link",

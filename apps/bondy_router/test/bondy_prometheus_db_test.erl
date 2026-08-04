@@ -24,6 +24,7 @@ bridge_test_() ->
         fun wal_events_are_counted/0,
         fun applier_stage_events_are_counted/0,
         fun sync_events_are_counted/0,
+        fun ae_health_events_are_counted/0,
         fun scheduler_events_are_counted/0,
         fun mst_events_are_counted/0,
         fun core_refresh_sets_gauges/0,
@@ -155,6 +156,53 @@ sync_events_are_counted() ->
         bondy_oplog_sync_duration_microseconds, [ok]
     ),
     ?assertEqual(1, lists:sum(BucketCounts)).
+
+ae_health_events_are_counted() ->
+    Peer = 'peer@127.0.0.1',
+    ok = telemetry:execute(
+        [bondy_oplog, sync_session, frontier_gap],
+        #{count => 1, origins => 1},
+        #{instance_id => ?ID, peer => Peer, deficit => #{}}
+    ),
+    ?assertEqual(
+        1,
+        prometheus_counter:value(
+            bondy_oplog_frontier_gap_verdicts_total, [?ID, Peer]
+        )
+    ),
+    ok = telemetry:execute(
+        [bondy_oplog, sync_scheduler, rebootstrap_scheduled],
+        #{count => 1},
+        #{instance_id => ?ID, peer => Peer, reason => frontier_gap}
+    ),
+    ?assertEqual(
+        1,
+        prometheus_counter:value(
+            bondy_oplog_rebootstraps_scheduled_total, [?ID, Peer]
+        )
+    ),
+    ok = telemetry:execute(
+        [bondy_oplog, instance, integrate_doored],
+        #{count => 3},
+        #{instance_id => ?ID, action => folded, doored => []}
+    ),
+    ok = telemetry:execute(
+        [bondy_oplog, instance, integrate_doored],
+        #{count => 1},
+        #{instance_id => ?ID, action => held, doored => []}
+    ),
+    ?assertEqual(
+        3,
+        prometheus_counter:value(
+            bondy_oplog_doored_events_total, [?ID, folded]
+        )
+    ),
+    ?assertEqual(
+        1,
+        prometheus_counter:value(
+            bondy_oplog_doored_events_total, [?ID, held]
+        )
+    ).
 
 scheduler_events_are_counted() ->
     ok = telemetry:execute(

@@ -9,7 +9,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 3,
+  "version": 5,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -85,6 +85,17 @@
       "targetBlank": false,
       "keepTime": true,
       "includeVars": true
+    },
+    {
+      "title": "Cluster Sync / AAE",
+      "url": "/d/bondy-cluster-sync",
+      "type": "link",
+      "icon": "external link",
+      "targetBlank": false,
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "asDropdown": false
     }
   ],
   "annotations": {
@@ -3389,6 +3400,262 @@
         "textMode": "auto"
       },
       "description": "Node-wide total of routing-summary divergences at the last sweep. Green means the RIB agrees with the ground truth everywhere."
+    },
+    {
+      "id": 148,
+      "type": "row",
+      "title": "Delivery pipeline \u2014 flow pool & HELLO admission",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 141
+      },
+      "panels": []
+    },
+    {
+      "id": 149,
+      "type": "timeseries",
+      "title": "Flow queue wait (p95/p99 by family)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Time a task waited in a flow pool worker mailbox before executing. Ordered flows cannot convert queue depth into throughput \u2014 sustained growth here IS delivery latency for every event behind it.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 142
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "\u00b5s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, family) (rate(bondy_router_flow_queue_microseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{family}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "refId": "B",
+          "expr": "histogram_quantile(0.99, sum by (le, family) (rate(bondy_router_flow_queue_microseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "p99 {{family}}"
+        }
+      ]
+    },
+    {
+      "id": 150,
+      "type": "timeseries",
+      "title": "Flow task service time (p95 by family)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "Execution time of a flow pool task (relay ingress / bridge relay). Pool throughput is bounded by pool size / this duration; a p95 far above p50 under load is scheduler starvation, not slow work.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 142
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "\u00b5s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, family) (rate(bondy_router_flow_service_microseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{family}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "refId": "B",
+          "expr": "histogram_quantile(0.50, sum by (le, family) (rate(bondy_router_flow_service_microseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{family}}"
+        }
+      ]
+    },
+    {
+      "id": 151,
+      "type": "timeseries",
+      "title": "HELLO handling duration (p50/p95)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "In-process time handling a WAMP HELLO on the connection process (realm lookup, auth context, session open up to the encoded WELCOME). Compare against client-observed welcome latency: a large difference is queueing before the HELLO is even picked up.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 150
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "\u00b5s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(bondy_wamp_hello_duration_microseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "p95"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "refId": "B",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(bondy_wamp_hello_duration_microseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "p50"
+        }
+      ]
+    },
+    {
+      "id": 152,
+      "type": "timeseries",
+      "title": "Admission refusals & sheds (rate)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "description": "admission/hello = the load regulator refusing HELLOs cheaply while busy (retryable ABORT \u2014 protects the data plane). shed/* = flow pool overload discarding work at-most-once. Sheds should be ZERO in steady state; admission refusals are the designed relief valve.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 150
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "refId": "A",
+          "expr": "sum by (reason, family) (rate(bondy_wamp_dropped_total{reason=~\"admission|shed\"}[$__rate_interval]))",
+          "legendFormat": "{{reason}} {{family}}"
+        }
+      ]
     }
   ]
 }

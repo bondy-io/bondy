@@ -248,6 +248,9 @@ events() ->
         %% Sync / AAE
         [bondy_oplog, sync, ok],
         [bondy_oplog, sync, error],
+        [bondy_oplog, sync_session, frontier_gap],
+        [bondy_oplog, sync_scheduler, rebootstrap_scheduled],
+        [bondy_oplog, instance, integrate_doored],
         [bondy_oplog, sync, catalogue_bootstrap, ok],
         [bondy_oplog, sync, catalogue_bootstrap, error],
         [bondy_oplog, sync, catalogue_bootstrap, complete],
@@ -385,6 +388,23 @@ declare_metrics() ->
         {bondy_oplog_sync_sessions_total, "AAE sync sessions.", [
             instance_id, peer, outcome
         ]},
+        {bondy_oplog_frontier_gap_verdicts_total,
+            "Frontier-gap verdicts: a completed sync round left the peer's "
+            "applied frontier strictly ahead of ours after settle. A single "
+            "verdict per (instance, peer) is a benign door-fold transient "
+            "(heals next round); repeats trip the rebootstrap remedy.", [
+            instance_id, peer
+        ]},
+        {bondy_oplog_rebootstraps_scheduled_total,
+            "Catalogue re-bootstraps scheduled (peer reclaimed pages this "
+            "replica needs, or a frontier gap struck twice).", [
+            instance_id, peer
+        ]},
+        {bondy_oplog_doored_events_total,
+            "Never-applied peer events at or below the local watermark "
+            "accepted by the watermark door instead of discarded: folded "
+            "into the projection inline (fused) or held for the applier's "
+            "replay.", [instance_id, action]},
         {bondy_oplog_bootstrap_sessions_total, "Catalogue bootstrap sessions.",
             [instance_id, peer, outcome]},
         {bondy_oplog_bootstrap_cells_total,
@@ -796,6 +816,26 @@ do_handle_event([bondy_oplog, sync, catalogue_bootstrap, Outcome], Meas, Meta) -
         bondy_oplog_bootstrap_duration_microseconds,
         [Outcome],
         native_to_us(num(duration, Meas))
+    );
+do_handle_event([bondy_oplog, sync_session, frontier_gap], _Meas, Meta) ->
+    counter(
+        bondy_oplog_frontier_gap_verdicts_total,
+        [instance_id(Meta), maps:get(peer, Meta, undefined)],
+        1
+    );
+do_handle_event(
+    [bondy_oplog, sync_scheduler, rebootstrap_scheduled], _Meas, Meta
+) ->
+    counter(
+        bondy_oplog_rebootstraps_scheduled_total,
+        [instance_id(Meta), maps:get(peer, Meta, undefined)],
+        1
+    );
+do_handle_event([bondy_oplog, instance, integrate_doored], Meas, Meta) ->
+    counter(
+        bondy_oplog_doored_events_total,
+        [instance_id(Meta), maps:get(action, Meta, undefined)],
+        max(1, num(count, Meas))
     );
 do_handle_event([bondy_oplog, scheduler, sync, tick], _Meas, _Meta) ->
     counter(bondy_oplog_sync_scheduler_events_total, [tick], 1);

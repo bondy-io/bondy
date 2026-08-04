@@ -9,7 +9,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "10s",
   "time": {
     "from": "now-30m",
@@ -76,6 +76,17 @@
       "targetBlank": false,
       "keepTime": true,
       "includeVars": true
+    },
+    {
+      "title": "Cluster Sync / AAE",
+      "url": "/d/bondy-cluster-sync",
+      "type": "link",
+      "icon": "external link",
+      "targetBlank": false,
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "asDropdown": false
     }
   ],
   "annotations": {

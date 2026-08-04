@@ -19,8 +19,35 @@ docker compose up -d
 open http://localhost:3000    # anonymous admin, no login
 ```
 
-The provisioned dashboard is **Bondy — bondy_db / oplog / MST** in the
-*Bondy* folder. Prometheus itself is at <http://localhost:9090>.
+The dashboards are provisioned into the *Bondy* folder as a hub +
+drill-down hierarchy (every dashboard links to the others; time range
+and node selection carry across):
+
+- **Bondy — Cluster Overview** (`bondy-cluster-overview`) — the landing
+  page. Threshold-colored stats answer "is anything wrong?" at a
+  glance: cluster state, **AE / sync health** (frontier-gap verdicts,
+  re-bootstraps, sync errors, watermark-door volume, stalest pair),
+  per-node vitals, inter-node link health. Anything non-green carries a
+  data link to the dashboard that explains it.
+- **Bondy — Cluster Sync / AAE** (`bondy-cluster-sync`) — the whole
+  cluster's replication state on one screen: an **N×N node × peer
+  matrix** (last-completed-sync age; a red row = that node cannot pull,
+  a red column = nobody can pull from that peer) plus a gap-verdict
+  matrix, trend panels, frontier convergence, the pair inspector
+  (`pairA`/`pairB`), and Partisan link health.
+- **Bondy — bondy_db / oplog / MST** (`bondy-db-oplog-mst`) — per-node
+  storage detail: write path, applier, core substrate, leveled, MST &
+  page store, secondary indexes.
+- **Bondy — Router / WAMP**, **Bondy — Runtime / BEAM**, **Bondy —
+  HTTP Connector** — per-node domain detail.
+- **Bondy — Cluster Graph** (`bondy-cluster-graph`) — live topology
+  node graph (needs a running node; served from `/cluster/topology`).
+
+The intended debugging flow is topsight-first: start at the Overview,
+let a red/amber stat lead you to Cluster Sync / AAE, find the offending
+(node, peer) cell in the matrix, set `pairA`/`pairB` for the pair
+inspector, then jump to the node-detail dashboards for the mechanism.
+Prometheus itself is at <http://localhost:9090>.
 
 ## How it works
 
