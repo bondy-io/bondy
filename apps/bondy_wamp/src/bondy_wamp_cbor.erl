@@ -73,7 +73,7 @@ encode(Term, Opts) ->
 Encodes a list of elements (WAMP message) together with a tail obtained
 previously using `decode_head/2`.
 """.
--spec encode_with_tail(Elements :: [term()], Tail :: binary()) -> binary().
+-spec encode_with_tail(Elements :: [term()], Tail :: binary()) -> iodata().
 
 encode_with_tail(Elements, TailBin) when
     is_list(Elements), is_binary(TailBin)
@@ -83,6 +83,10 @@ encode_with_tail(Elements, TailBin) when
     %% 2. Encode the array header with proper count
     %% 3. Encode the new elements
     %% 4. Append the tail elements (already encoded)
+    %%
+    %% Returned as iodata: flattening would copy the (potentially large)
+    %% tail payload once per subscriber, and every consumer accepts
+    %% iodata.
 
     TailCount = count_cbor_elements(TailBin),
     TotalCount = length(Elements) + TailCount,
@@ -91,9 +95,9 @@ encode_with_tail(Elements, TailBin) when
     HeaderBin = encode_array_header(TotalCount),
 
     %% Encode each new element
-    EncodedElements = [iolist_to_binary(bondy_cbor:encode(E)) || E <- Elements],
+    EncodedElements = [bondy_cbor:encode(E) || E <- Elements],
 
-    iolist_to_binary([HeaderBin | EncodedElements] ++ [TailBin]).
+    [HeaderBin, EncodedElements, TailBin].
 
 -spec decode(binary()) -> term() | no_return().
 

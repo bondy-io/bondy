@@ -302,18 +302,20 @@ test_encode_with_tail(_) ->
     %% Get tail from decode_head, encode new elements with it
     CBOR = bondy_wamp_cbor:encode([1, 2, 3, 4, 5]),
     {_, Tail1} = bondy_wamp_cbor:decode_head(CBOR, 2),
-    Result1 = bondy_wamp_cbor:encode_with_tail([10, 20], Tail1),
+    Result1 = iolist_to_binary(bondy_wamp_cbor:encode_with_tail([10, 20], Tail1)),
     ?assertEqual([10, 20, 3, 4, 5], bondy_wamp_cbor:decode(Result1)),
 
     %% Empty tail
-    Result2 = bondy_wamp_cbor:encode_with_tail([1, 2, 3], <<>>),
+    Result2 = iolist_to_binary(bondy_wamp_cbor:encode_with_tail([1, 2, 3], <<>>)),
     ?assertEqual([1, 2, 3], bondy_wamp_cbor:decode(Result2)),
 
     %% Complex elements with tail
     CBOR3 = bondy_wamp_cbor:encode([1, 2, 3]),
     {_, Tail3} = bondy_wamp_cbor:decode_head(CBOR3, 1),
-    Result3 = bondy_wamp_cbor:encode_with_tail(
-        [#{<<"key">> => <<"value">>}], Tail3
+    Result3 = iolist_to_binary(
+        bondy_wamp_cbor:encode_with_tail(
+            [#{<<"key">> => <<"value">>}], Tail3
+        )
     ),
     ?assertEqual(
         [#{<<"key">> => <<"value">>}, 2, 3], bondy_wamp_cbor:decode(Result3)
@@ -322,7 +324,7 @@ test_encode_with_tail(_) ->
     %% Single element with tail
     CBOR4 = bondy_wamp_cbor:encode([10, 20, 30, 40]),
     {_, Tail4} = bondy_wamp_cbor:decode_head(CBOR4, 2),
-    Result4 = bondy_wamp_cbor:encode_with_tail([1], Tail4),
+    Result4 = iolist_to_binary(bondy_wamp_cbor:encode_with_tail([1], Tail4)),
     ?assertEqual([1, 30, 40], bondy_wamp_cbor:decode(Result4)).
 
 test_validate_opts(_) ->
@@ -397,7 +399,7 @@ test_roundtrip(_) ->
     {Head2, Tail2} = bondy_wamp_cbor:decode_head(
         bondy_wamp_cbor:encode([10, 20, 30, 40]), 2
     ),
-    Encoded2 = bondy_wamp_cbor:encode_with_tail(Head2, Tail2),
+    Encoded2 = iolist_to_binary(bondy_wamp_cbor:encode_with_tail(Head2, Tail2)),
     ?assertEqual([10, 20, 30, 40], bondy_wamp_cbor:decode(Encoded2)),
 
     %% Large integers

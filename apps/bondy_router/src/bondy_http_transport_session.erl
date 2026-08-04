@@ -716,8 +716,6 @@ schedule_inactivity_check(#state{transport_ttl = TTL}) ->
     ok.
 
 %% @private
-forward_or_buffer(Bin, State) when is_binary(Bin) ->
-    forward_or_buffer([Bin], State);
 forward_or_buffer(Bins, #state{sse_pid = SsePid} = State) when
     is_pid(SsePid)
 ->

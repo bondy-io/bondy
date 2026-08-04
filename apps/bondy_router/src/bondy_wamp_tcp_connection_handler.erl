@@ -76,6 +76,13 @@ init({Ref, Transport, _Opts0}) ->
         transport => Transport
     }),
 
+    %% Connection processes are the highest fan-in mailboxes on a pub/sub
+    %% workload (one EVENT per subscription per publication).
+    _ = erlang:process_flag(
+        message_queue_data,
+        bondy_config:get([wamp_connection, message_queue_data], off_heap)
+    ),
+
     %% We to make this call before ranch:handshake/2
     ProxyProtocol = bondy_tcp_proxy_protocol:init(Ref, 15_000),
 
@@ -422,25 +429,25 @@ handle_inbound(<<0:5, 0:3, Len:24, Msg:Len/binary, Rest/binary>>, State0) ->
             handle_inbound(Rest, State0#state{protocol_state = PSt});
         {reply, L, PSt} ->
             State = State0#state{protocol_state = PSt},
-            ok = send(L, State),
+            ok = send_messages(L, State),
             handle_inbound(Rest, State);
         {stop, PSt} ->
             State = State0#state{protocol_state = PSt},
             {stop, normal, State};
         {stop, L, PSt} ->
             State = State0#state{protocol_state = PSt},
-            ok = send(L, State),
+            ok = send_messages(L, State),
             {stop, normal, State};
         {stop, normal, L, PSt} ->
             State = State0#state{protocol_state = PSt},
-            ok = send(L, State),
+            ok = send_messages(L, State),
             {stop, normal, State};
         {stop, Reason, L, PSt} ->
             State = State0#state{
                 protocol_state = PSt,
                 shutdown_reason = Reason
             },
-            ok = send(L, State),
+            ok = send_messages(L, State),
             {stop, shutdown, State}
     end;
 handle_inbound(<<0:5, 1:3, Len:24, Payload:Len/binary, Rest/binary>>, State) ->
@@ -501,7 +508,7 @@ handle_outbound(M, State0) ->
             {noreply, State, ?TIMEOUT(State)};
         {ok, Bin, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
-            case send(Bin, State) of
+            case send_message(Bin, State) of
                 ok ->
                     {noreply, State, ?TIMEOUT(State)};
                 {error, Reason} ->
@@ -512,7 +519,7 @@ handle_outbound(M, State0) ->
             {stop, normal, disable_ping(State)};
         {stop, Bin, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
-            case send(Bin, State) of
+            case send_message(Bin, State) of
                 ok ->
                     {stop, normal, disable_ping(State)};
                 {error, Reason} ->
@@ -523,7 +530,7 @@ handle_outbound(M, State0) ->
             State = State0#state{protocol_state = ProtoState},
             erlang:send_after(Time, self(), {stop, normal}),
 
-            case send(Bin, State) of
+            case send_message(Bin, State) of
                 ok ->
                     {noreply, disable_ping(State)};
                 {error, Reason} ->
@@ -596,17 +603,31 @@ do_terminate(State) ->
     bondy_wamp_protocol:terminate(State#state.protocol_state).
 
 %% @private
--spec send(binary() | list(), state()) -> ok | {error, any()}.
+%% All messages travel in a single Transport:send call (one writev)
+%% instead of one syscall per message.
+-spec send_messages([iodata()], state()) -> ok | {error, any()}.
 
-send(L, St) when is_list(L) ->
-    lists:foreach(fun(Bin) -> send(Bin, St) end, L);
-send(Bin, St) ->
-    send_frame(?RAW_FRAME(Bin), St).
+send_messages([Msg], St) ->
+    send_message(Msg, St);
+send_messages(L, St) when is_list(L) ->
+    send_frame([frame(Msg) || Msg <- L], St).
 
 %% @private
--spec send_frame(binary(), state()) -> ok | {error, any()}.
+-spec send_message(iodata(), state()) -> ok | {error, any()}.
 
-send_frame(Frame, St) when is_binary(Frame) ->
+send_message(Msg, St) ->
+    send_frame(frame(Msg), St).
+
+%% @private
+%% iodata-preserving equivalent of ?RAW_FRAME (which requires a flat
+%% binary): the encoded message is never copied, only length-prefixed.
+frame(Msg) ->
+    [?RAW_MSG_PREFIX, <<(erlang:iolist_size(Msg)):24>>, Msg].
+
+%% @private
+-spec send_frame(iodata(), state()) -> ok | {error, any()}.
+
+send_frame(Frame, St) ->
     (St#state.transport):send(St#state.socket, Frame).
 
 %% @private

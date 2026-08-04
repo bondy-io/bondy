@@ -131,8 +131,9 @@ init(Req0, Opts) ->
     end.
 
 info({sync_reply, Bin}, Req, State) ->
+    %% Bin may be iodata; cow_sse scans `data` for newlines, so flatten.
     ok = cowboy_req:stream_events(
-        #{event => <<"wamp">>, data => Bin},
+        #{event => <<"wamp">>, data => iolist_to_binary(Bin)},
         nofin,
         Req
     ),
@@ -173,7 +174,7 @@ info({stop_stream, FinalBins}, Req, State) ->
     lists:foreach(
         fun(Bin) ->
             ok = cowboy_req:stream_events(
-                #{event => <<"wamp">>, data => Bin},
+                #{event => <<"wamp">>, data => iolist_to_binary(Bin)},
                 nofin,
                 Req
             )
@@ -240,7 +241,9 @@ send_wamp_events([], _Req, _State) ->
 send_wamp_events(Messages, Req, #state{encoding = Encoding}) ->
     Events = lists:map(
         fun(Msg) ->
-            Bin = bondy_wamp_encoding:encode(Msg, Encoding),
+            %% cow_sse scans `data` for newlines, so flatten here (SSE is
+            %% not a hot path).
+            Bin = iolist_to_binary(bondy_wamp_encoding:encode(Msg, Encoding)),
             #{event => <<"wamp">>, data => Bin}
         end,
         Messages

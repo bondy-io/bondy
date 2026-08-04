@@ -501,7 +501,7 @@ relay_message(RealmUri, Node, To, Msg, Opts) ->
 do_send(To, M, #{realm_uri := RealmUri} = Opts) ->
     Pid = bondy_ref:pid(To),
 
-    case bondy_ref:is_self(To) of
+    case Pid =:= self() of
         true ->
             Pid ! request(Pid, RealmUri, M),
             ok;
@@ -526,17 +526,19 @@ do_send(To, M, #{realm_uri := RealmUri} = Opts) ->
 maybe_enqueue(undefined, _, _) ->
     false;
 maybe_enqueue(SessionId, M, _Opts) ->
-    case bondy_session:lookup(SessionId) of
-        {ok, Session} ->
-            case bondy_session:transport_id(Session) of
-                undefined ->
-                    false;
-                TransportId ->
-                    ok = bondy_transport_queue:enqueue(TransportId, M, #{}),
-                    bondy_http_transport_session:notify_enqueue(TransportId),
-                    true
-            end;
-        {error, not_found} ->
+    %% transport_id/1 on a session id reads the single field via
+    %% ets:lookup_element, avoiding a full #session{} copy per delivery.
+    try bondy_session:transport_id(SessionId) of
+        undefined ->
+            false;
+        TransportId ->
+            ok = bondy_transport_queue:enqueue(TransportId, M, #{}),
+            bondy_http_transport_session:notify_enqueue(TransportId),
+            true
+    catch
+        error:badarg ->
+            %% Session already gone; the plain send below is a no-op on a
+            %% dead pid, matching the previous not_found behaviour.
             false
     end.
 

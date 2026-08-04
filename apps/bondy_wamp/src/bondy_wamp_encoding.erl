@@ -78,7 +78,11 @@ decode({http_sse, text, json}, Data, Opts) ->
 decode({http_longpoll, text, json}, Data, Opts) ->
     decode_text(Data, json, Opts, []).
 
--spec encode(wamp_message() | list(), encoding()) -> binary() | no_return().
+%% The result is iodata, NOT necessarily a flat binary: the
+%% partial-passthrough path returns `[Head, Tail]` so the payload bytes
+%% are never copied. Callers that truly need a binary must flatten with
+%% `iolist_to_binary/1`; sockets and Cowboy frames take iodata directly.
+-spec encode(wamp_message() | list(), encoding()) -> iodata() | no_return().
 
 encode(Message0, Enc) when is_tuple(Message0) ->
     case bondy_wamp_message:partial(Message0) of
@@ -115,7 +119,7 @@ encode(Message, Format) when is_list(Message) ->
     error({unsupported_encoding, Format}).
 
 -spec encode(wamp_message() | list(), encoding(), Opts :: list()) ->
-    binary() | no_return().
+    iodata() | no_return().
 
 encode(Message, Encoding, Opts) when is_tuple(Message) ->
     encode(pack(Message), Encoding, Opts);

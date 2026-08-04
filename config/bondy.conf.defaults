@@ -474,6 +474,7 @@ wamp.websocket.deflate.mem_level = 8
 wamp.websocket.deflate.server_context_takeover = takeover
 wamp.websocket.deflate.server_max_window_bits = 11
 wamp.websocket.deflate.strategy = default
+wamp.websocket.hibernate = idle
 wamp.websocket.idle_timeout = 8h
 wamp.websocket.max_frame_size = 4MB
 wamp.websocket.ping.enabled = on

@@ -71,9 +71,12 @@ encode(Term, Opts) ->
 Encodes a list of elements (WAMP message) together with a tail obtained
 previously using `decode_partial/1`.
 """.
--spec encode_with_tail(Elements :: [term()], Tail :: binary()) -> binary().
+-spec encode_with_tail(Elements :: [term()], Tail :: binary()) -> iodata().
 
-%% Encode new elements and concatenate with the preserved tail
+%% Encode new elements and concatenate with the preserved tail.
+%% Returns iodata: flattening would copy the (potentially large) tail
+%% payload once per subscriber, and every consumer (gen_tcp/ssl sends,
+%% Cowboy frames) accepts iodata.
 encode_with_tail(Elements, TailBin) when
     is_list(Elements), is_binary(TailBin)
 ->
@@ -83,19 +86,17 @@ encode_with_tail(Elements, TailBin) when
     IOList1 = lists:droplast(IOList0),
 
     %% Concatenate, ensuring proper comma placement
-    IOList =
-        case TailBin of
-            <<",", _/binary>> ->
-                %% Tail already has comma
-                [IOList1, TailBin];
-            <<"]", _/binary>> ->
-                %% Tail is just the closing bracket
-                [IOList1, TailBin];
-            _ ->
-                %% Need to add comma
-                [IOList1, ",", TailBin]
-        end,
-    iolist_to_binary(IOList).
+    case TailBin of
+        <<",", _/binary>> ->
+            %% Tail already has comma
+            [IOList1, TailBin];
+        <<"]", _/binary>> ->
+            %% Tail is just the closing bracket
+            [IOList1, TailBin];
+        _ ->
+            %% Need to add comma
+            [IOList1, ",", TailBin]
+    end.
 
 -spec decode(binary()) -> term() | no_return().
 

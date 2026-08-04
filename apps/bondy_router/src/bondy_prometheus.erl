@@ -261,8 +261,10 @@ declare_message_families() ->
     }),
     ok = bondy_metrics:declare(#{
         name => bondy_wamp_message_bytes,
-        help =>
-            <<"A histogram of the size of the wamp messages received by a bondy node">>
+        help => <<
+            "A histogram of the wire size (encoded frame bytes) of the "
+            "wamp messages sent and received by a bondy node"
+        >>
     }),
     lists:foreach(
         fun(Type) ->
@@ -990,11 +992,20 @@ handle_wamp_message(_EventName, Measurements, Meta, _Config) ->
         ok = bondy_metrics:counter(#{
             name => bondy_wamp_messages_total, label => Labels
         }),
-        ok = bondy_metrics:histogram(#{
-            name => bondy_wamp_message_bytes,
-            label => Labels,
-            value => maps:get(size, Measurements, 0)
-        }),
+        %% `size` (wire bytes) is only measured at transport boundaries;
+        %% internal emitters omit it rather than skew the histogram with
+        %% zeros.
+        ok =
+            case Measurements of
+                #{size := Size} ->
+                    bondy_metrics:histogram(#{
+                        name => bondy_wamp_message_bytes,
+                        label => Labels,
+                        value => Size
+                    });
+                _ ->
+                    ok
+            end,
         case message_type_family(maps:get(type, Meta, undefined)) of
             undefined ->
                 ok;

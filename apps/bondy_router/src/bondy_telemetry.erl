@@ -31,6 +31,7 @@ Also provides trace-identifier generation.
 
 -export([trace_id/0]).
 -export([wamp_message/2]).
+-export([wamp_message/3]).
 -export([socket_open/2]).
 -export([socket_closed/3]).
 -export([socket_error/2]).
@@ -62,7 +63,8 @@ trace_id() ->
 
 -doc """
 Emits the `[bondy, wamp, message]` telemetry event for a routed WAMP
-message.
+message whose wire size is unknown (internal callers that never touch a
+transport). Counter families only — no size measurement is emitted.
 
 Extracts the scalar metadata the metric sinks need (message type,
 subprotocol triple, realm type and — for the URI-labelled families —
@@ -72,37 +74,23 @@ boundary. Total: never throws.
 -spec wamp_message(M :: tuple(), Ctxt :: bondy_context:t()) -> ok.
 
 wamp_message(M, Ctxt) ->
-    try
-        Size = erts_debug:flat_size(M) * 8,
-        %% Internal contexts (e.g. gateway/internal callers) may carry no
-        %% subprotocol (bondy_context:subprotocol/1 is partial).
-        {Transport, FrameType, Encoding} =
-            try bondy_context:subprotocol(Ctxt) of
-                {_, _, _} = Subprotocol -> Subprotocol;
-                _ -> {undefined, undefined, undefined}
-            catch
-                _:_ -> {undefined, undefined, undefined}
-            end,
-        Meta0 = #{
-            type => element(1, M),
-            realm_type => realm_type(Ctxt),
-            protocol => wamp,
-            transport => Transport,
-            frame_type => FrameType,
-            encoding => Encoding
-        },
-        Meta = add_uri(M, Meta0),
-        telemetry:execute([bondy, wamp, message], #{size => Size}, Meta)
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_DEBUG(#{
-                description => "Failed to emit wamp message telemetry",
-                class => Class,
-                reason => Reason,
-                stacktrace => Stacktrace
-            }),
-            ok
-    end.
+    do_wamp_message(M, #{}, Ctxt).
+
+-doc """
+Emits the `[bondy, wamp, message]` telemetry event for a WAMP message
+crossing a transport boundary. `WireSize` is the byte size of the
+encoded frame — callers pass it from the encode/decode site, so the
+size metric costs a `byte_size`/`iolist_size` instead of a term
+traversal. Total: never throws.
+""".
+-spec wamp_message(
+    M :: tuple(),
+    WireSize :: non_neg_integer(),
+    Ctxt :: bondy_context:t()
+) -> ok.
+
+wamp_message(M, WireSize, Ctxt) ->
+    do_wamp_message(M, #{size => WireSize}, Ctxt).
 
 -doc """
 Emits `[bondy, socket, open]` for an accepted transport connection.
@@ -374,6 +362,39 @@ ping_rtt(Protocol, Transport, DurationMs) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+do_wamp_message(M, Measurements, Ctxt) ->
+    try
+        %% Internal contexts (e.g. gateway/internal callers) may carry no
+        %% subprotocol (bondy_context:subprotocol/1 is partial).
+        {Transport, FrameType, Encoding} =
+            try bondy_context:subprotocol(Ctxt) of
+                {_, _, _} = Subprotocol -> Subprotocol;
+                _ -> {undefined, undefined, undefined}
+            catch
+                _:_ -> {undefined, undefined, undefined}
+            end,
+        Meta0 = #{
+            type => element(1, M),
+            realm_type => realm_type(Ctxt),
+            protocol => wamp,
+            transport => Transport,
+            frame_type => FrameType,
+            encoding => Encoding
+        },
+        Meta = add_uri(M, Meta0),
+        telemetry:execute([bondy, wamp, message], Measurements, Meta)
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_DEBUG(#{
+                description => "Failed to emit wamp message telemetry",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            ok
+    end.
 
 %% @private
 %% Total wrapper: an emitter must never affect the caller (WAL

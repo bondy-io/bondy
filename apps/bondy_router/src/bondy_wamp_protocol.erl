@@ -219,16 +219,20 @@ when required.
 """.
 -spec handle_inbound(binary(), state()) ->
     {noreply, state()}
-    | {reply, [binary()], state()}
+    | {reply, [iodata()], state()}
     | {stop, state()}
-    | {stop, [binary()], state()}
-    | {stop, Reason :: any(), [binary()], state()}.
+    | {stop, [iodata()], state()}
+    | {stop, Reason :: any(), [iodata()], state()}.
 
 handle_inbound(Data, St) ->
     try bondy_wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
-        {Messages, <<>>} ->
+        {[], <<>>} ->
+            {noreply, St};
+        {[M | _] = Messages, <<>>} ->
             %% At the moment messages contain only one message as we do not yet
-            %% support batched encoding
+            %% support batched encoding. Notifying here (single site, with the
+            %% frame's wire size) covers every inbound message uniformly.
+            ok = notify(M, byte_size(Data), St),
             handle_inbound_messages(Messages, St)
     catch
         _:{unsupported_encoding, _} = Reason ->
@@ -270,29 +274,29 @@ handle_inbound(Data, St) ->
     end.
 
 -spec handle_outbound(bondy_wamp_message:message(), state()) ->
-    {ok, binary(), state()}
+    {ok, iodata(), state()}
     | {error, any(), state()}
     | {stop, state()}
-    | {stop, binary(), state()}
-    | {stop, binary(), state(), After :: non_neg_integer()}.
+    | {stop, iodata(), state()}
+    | {stop, iodata(), state(), After :: non_neg_integer()}.
 
 handle_outbound(#result{} = M, St0) ->
     Ctxt0 = St0#wamp_state.context,
-    ok = notify(M, St0),
     St1 = update_context(bondy_context:reset(Ctxt0), St0),
     Bin = bondy_wamp_encoding:encode(M, encoding(St1)),
+    ok = notify(M, erlang:iolist_size(Bin), St1),
     {ok, Bin, St1};
 handle_outbound(#error{request_type = ?CALL} = M, St0) ->
     Ctxt0 = St0#wamp_state.context,
-    ok = notify(M, St0),
     St1 = update_context(bondy_context:reset(Ctxt0), St0),
     Bin = bondy_wamp_encoding:encode(M, encoding(St1)),
+    ok = notify(M, erlang:iolist_size(Bin), St1),
     {ok, Bin, St1};
 handle_outbound(#goodbye{} = M, St0) ->
     %% Bondy is shutting_down this session, we will stop when we
     %% get the client's goodbye response
-    ok = notify(M, St0),
     Bin = bondy_wamp_encoding:encode(M, encoding(St0)),
+    ok = notify(M, erlang:iolist_size(Bin), St0),
     St1 = St0#wamp_state{
         state_name = shutting_down,
         goodbye_reason = M#goodbye.reason_uri
@@ -304,8 +308,8 @@ handle_outbound(#goodbye{} = M, St0) ->
 handle_outbound(M, St) ->
     case bondy_wamp_message:is_message(M) of
         true ->
-            ok = notify(M, St),
             Bin = bondy_wamp_encoding:encode(M, encoding(St)),
+            ok = notify(M, erlang:iolist_size(Bin), St),
             {ok, Bin, St};
         false ->
             %% This SHOULD not happen, we drop the message
@@ -323,10 +327,10 @@ handle_outbound(M, St) ->
 
 -spec handle_inbound_messages([raw_wamp_message()], state()) ->
     {noreply, state()}
-    | {reply, [binary()], state()}
+    | {reply, [iodata()], state()}
     | {stop, state()}
-    | {stop, [binary()], state()}
-    | {stop, Reason :: any(), [binary()], state()}.
+    | {stop, [iodata()], state()}
+    | {stop, Reason :: any(), [iodata()], state()}.
 
 handle_inbound_messages(Messages, St) ->
     try
@@ -355,9 +359,9 @@ when required.
 ) ->
     {noreply, state()}
     | {stop, state()}
-    | {stop, [binary()], state()}
-    | {stop, Reason :: any(), [binary()], state()}
-    | {reply, [binary()], state()}.
+    | {stop, [iodata()], state()}
+    | {stop, Reason :: any(), [iodata()], state()}
+    | {reply, [iodata()], state()}.
 
 handle_inbound_messages(
     [#abort{} = M | _], #wamp_state{state_name = established} = St0, []
@@ -367,7 +371,6 @@ handle_inbound_messages(
         reason => M#abort.reason_uri,
         details => M#abort.details
     }),
-    ok = notify(M, St0),
     St1 = St0#wamp_state{state_name = closed},
 
     {stop, St1};
@@ -386,20 +389,19 @@ handle_inbound_messages(
         goodbye_reason = M#goodbye.reason_uri
     },
 
-    ok = notify(Reply, St1),
+    ok = notify(Reply, erlang:iolist_size(Bin), St1),
 
     {stop, normal, lists:reverse([Bin | Acc]), St1};
 handle_inbound_messages(
-    [#goodbye{} = M | _], #wamp_state{state_name = shutting_down} = St0, Acc
+    [#goodbye{} | _], #wamp_state{state_name = shutting_down} = St0, Acc
 ) ->
     %% Client is replying to our goodbye, we ignore any subsequent messages
     %% We reply all previous messages and close
-    ok = notify(M, St0),
     St1 = St0#wamp_state{state_name = closed},
 
     {stop, shutdown, lists:reverse(Acc), St1};
 handle_inbound_messages(
-    [#hello{} = M | _], #wamp_state{context = #{session := _}} = St, Acc
+    [#hello{} | _], #wamp_state{context = #{session := _}} = St, Acc
 ) ->
     %% Client already has a session!
     %% RFC:
@@ -408,7 +410,6 @@ handle_inbound_messages(
     %% happens.
     %% We reply all previous messages plus an abort message and close
     %% state_name might be 'close' already
-    ok = notify(M, St),
     Reason = <<
         "Duplicate Session Initialization. "
         "You've attempted to send a HELLO message when you already "
@@ -423,7 +424,6 @@ handle_inbound_messages(
     %% Client is requesting a session
     %% This will return either reply with
     %% wamp_welcome() | wamp_challenge() | wamp_abort()
-    ok = notify(M, St0),
     %% Load admission gate first (one atomics read): when the node's run
     %% queues are deep, a session open the node accepts will spend
     %% seconds of wall clock in scheduling delay and likely time out on
@@ -440,19 +440,17 @@ handle_inbound_messages(
         true ->
             handle_hello(M, St0)
     end;
-handle_inbound_messages([#hello{} = M | _], #wamp_state{} = St, _) ->
+handle_inbound_messages([#hello{} | _], #wamp_state{} = St, _) ->
     %% Client does not have a session but we already received a HELLO message
     %% once, otherwise we would be in the 'close' state and match the previous
     %% clause
-    ok = notify(M, St),
     Reason = <<"You've sent a HELLO message more than once.">>,
     stop({protocol_violation, Reason}, St);
 handle_inbound_messages(
-    [#authenticate{} = M | _],
+    [#authenticate{} | _],
     #wamp_state{state_name = established, context = #{session := _}} = St,
     _
 ) ->
-    ok = notify(M, St),
     %% Client already has a session so is already authenticated.
     Reason = <<"You've sent an AUTHENTICATE message more than once.">>,
     stop({protocol_violation, Reason}, St);
@@ -460,8 +458,6 @@ handle_inbound_messages(
     [#authenticate{} = M | _], #wamp_state{state_name = challenging} = St0, _
 ) ->
     %% Client is responding to a challenge
-    ok = notify(M, St0),
-
     %% AV-1: throttle credential-verification attempts per source IP so a
     %% credential-stuffing / brute-force flood is rate-limited (no-op unless
     %% enabled). Applied before the (expensive) verification.
@@ -485,12 +481,11 @@ handle_inbound_messages(
             end
     end;
 handle_inbound_messages(
-    [#authenticate{} = M | _], #wamp_state{state_name = Name} = St, _
+    [#authenticate{} | _], #wamp_state{state_name = Name} = St, _
 ) when
     Name =/= challenging
 ->
     %% Client has not been sent a challenge
-    ok = notify(M, St),
     Reason = <<"You need to establish a session first.">>,
     stop({protocol_violation, Reason}, St);
 handle_inbound_messages(
@@ -545,13 +540,13 @@ handle_inbound_messages(_, St, _) ->
 %% @private
 maybe_open_session({send_challenge, AuthMethod, Challenge, St0}) ->
     M = bondy_wamp_message:challenge(AuthMethod, Challenge),
-    ok = notify(M, St0),
     Bin = bondy_wamp_encoding:encode(M, encoding(St0)),
+    ok = notify(M, erlang:iolist_size(Bin), St0),
     St1 = St0#wamp_state{
         state_name = challenging,
         authmethod = AuthMethod
     },
-    {reply, Bin, St1};
+    {reply, [Bin], St1};
 maybe_open_session({ok, AuthExtra, St}) ->
     %% No need for a challenge, anonymous|trust or security disabled
     open_session(AuthExtra, St);
@@ -559,9 +554,11 @@ maybe_open_session({error, Reason, St}) ->
     stop(Reason, St).
 
 %% @private
+%% Replies are ALWAYS proper lists of encoded messages: a bare iodata
+%% message would be indistinguishable from a message list downstream.
 -spec open_session(map(), state()) ->
-    {reply, binary(), state()}
-    | {stop, binary(), state()}.
+    {reply, [iodata()], state()}
+    | {stop, iodata(), state()}.
 
 open_session(Extra, St0) when is_map(Extra) ->
     try
@@ -634,8 +631,8 @@ open_session(Extra, St0) when is_map(Extra) ->
                 roles => bondy_router:roles()
             }
         ),
-        ok = notify(Welcome, St1),
         Bin = bondy_wamp_encoding:encode(Welcome, encoding(St1)),
+        ok = notify(Welcome, erlang:iolist_size(Bin), St1),
 
         %% We define the process metadata and which keys are exposed as logger
         %% metadata.
@@ -655,7 +652,7 @@ open_session(Extra, St0) when is_map(Extra) ->
 
         %% AV-1: resolve the per-session message-throttle bucket ONCE, now that
         %% the session is open (or `undefined` if message throttling is off).
-        {reply, Bin, St1#wamp_state{
+        {reply, [Bin], St1#wamp_state{
             state_name = established,
             msg_limiter = bondy_rate_limit:new_session_limiter()
         }}
@@ -952,8 +949,8 @@ stop(Reason, St) ->
 
 %% @private
 stop(#abort{reason_uri = Uri} = M, Acc, St0) ->
-    ok = notify(M, St0),
     Bin = bondy_wamp_encoding:encode(M, encoding(St0)),
+    ok = notify(M, erlang:iolist_size(Bin), St0),
 
     %% We reply all previous messages plus an abort message and close
     St1 = St0#wamp_state{state_name = closed},
@@ -1235,5 +1232,5 @@ update_process_metadata(#wamp_state{} = State) ->
         peername => bondy_context:peername(Ctxt)
     }).
 
-notify(M, State) ->
-    bondy_telemetry:wamp_message(M, State#wamp_state.context).
+notify(M, WireSize, State) ->
+    bondy_telemetry:wamp_message(M, WireSize, State#wamp_state.context).

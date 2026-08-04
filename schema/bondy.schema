@@ -4270,6 +4270,33 @@ end}.
 % }.
 
 
+%% @doc Where WAMP connection processes (Websocket and raw TCP/TLS) keep
+%% their mailbox: off_heap avoids scanning a deep mailbox on every GC (the
+%% fan-out delivery path can queue one EVENT per subscription), at a small
+%% constant cost per received message. on_heap is the BEAM default.
+{mapping, "wamp.connection.message_queue_data",
+"bondy_router.wamp_connection.message_queue_data", [
+  {default, off_heap},
+  {datatype, {enum, [off_heap, on_heap]}},
+  hidden
+]}.
+
+
+%% @doc Controls when a Websocket connection process hibernates (a
+%% hibernation forces a full-sweep garbage collection and shrinks the
+%% process heap).
+%% * idle (default) hibernates only on control events (pings, timeouts),
+%%   so a connection under sustained message traffic never pays a GC per
+%%   message while quiet connections still shrink.
+%% * always hibernates after every message (lowest memory, highest CPU).
+%% * never disables hibernation.
+{mapping, "wamp.websocket.hibernate",
+"bondy_router.wamp_websocket.hibernate", [
+  {default, idle},
+  {datatype, {enum, [never, idle, always]}}
+]}.
+
+
 %% Defines if Websocket compression (permessage-deflate extension) is enabled
 %% or not. If enabled it will be negotiated with supporting clients.
 {mapping, "wamp.websocket.compression_enabled",

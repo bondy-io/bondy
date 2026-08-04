@@ -76,7 +76,7 @@ encoding(#codec{encoding = Enc}) -> Enc.
         {message_too_large, Size :: non_neg_integer(), Max :: pos_integer()}}.
 
 encode(Msg, #codec{encoding = Enc, send_max_len = Max}) ->
-    Payload = bondy_wamp_encoding:encode(Msg, Enc),
+    Payload = iolist_to_binary(bondy_wamp_encoding:encode(Msg, Enc)),
     Size = byte_size(Payload),
     case Size =< Max of
         true ->

@@ -53,6 +53,7 @@ WebSocket subprotocol registry.
     %% Monotonic seconds at websocket_init, for the socket duration
     %% observation on terminate (also the "socket_open was emitted" guard).
     start_time :: optional(integer()),
+    hibernate = idle :: never | idle | always,
     protocol_state :: optional(bondy_wamp_protocol:state())
 }).
 
@@ -189,6 +190,13 @@ websocket_init(#state{protocol_state = undefined} = State) ->
     },
     {[Frame], State};
 websocket_init(#state{protocol_state = PSt} = State) ->
+    %% Connection processes are the highest fan-in mailboxes on a pub/sub
+    %% workload (one EVENT per subscription per publication).
+    _ = erlang:process_flag(
+        message_queue_data,
+        bondy_config:get([wamp_connection, message_queue_data], off_heap)
+    ),
+
     ok = logger:update_process_metadata(#{
         transport => websockets,
         protocol => wamp,
@@ -201,7 +209,7 @@ websocket_init(#state{protocol_state = PSt} = State) ->
     ok = bondy_telemetry:socket_open(wamp, ws),
     State1 = State#state{start_time = erlang:monotonic_time(second)},
 
-    {[], reset_ping(State1), hibernate}.
+    maybe_hibernate([], reset_ping(State1), control).
 
 -doc """
 Called for every frame received from the client.
@@ -218,32 +226,32 @@ websocket_handle(Data, #state{protocol_state = undefined} = State) ->
     {[close], State};
 websocket_handle(ping, State) ->
     %% Cowboy already replies to pings for us, we return nothing
-    {[], reset_ping(State)};
+    maybe_hibernate([], reset_ping(State), control);
 websocket_handle({ping, _}, State) ->
     %% Cowboy already replies to pings for us, we return nothing
-    {[], reset_ping(State), hibernate};
+    maybe_hibernate([], reset_ping(State), control);
 websocket_handle(pong, State) ->
     %% https://datatracker.ietf.org/doc/html/rfc6455#page-37
     %% A Pong frame MAY be sent unsolicited.  This serves as a unidirectional
     %% heartbeat. A response to an unsolicited Pong frame is not expected.
-    {[], reset_ping(State), hibernate};
+    maybe_hibernate([], reset_ping(State), control);
 websocket_handle({pong, Data}, #state{ping_payload = Data} = State0) ->
     %% We've got an answer to a Bondy-initiated ping.
     State = observe_ping_rtt(State0),
-    {[], reset_ping(State), hibernate};
+    maybe_hibernate([], reset_ping(State), control);
 websocket_handle({T, Data}, #state{frame_type = T} = State0) ->
     ProtoState0 = State0#state.protocol_state,
 
     case bondy_wamp_protocol:handle_inbound(Data, ProtoState0) of
         {noreply, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
-            {[], reset_ping(State), hibernate};
+            maybe_hibernate([], reset_ping(State), data);
         {reply, L, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
-            {data_frames(T, L), reset_ping(State), hibernate};
+            maybe_hibernate(data_frames(T, L), reset_ping(State), data);
         {stop, ProtoState} ->
             State = State0#state{protocol_state = ProtoState},
-            {[close], disable_ping(State), hibernate};
+            {[close], disable_ping(State)};
         {stop, L, ProtoState} ->
             self() ! {stop, normal},
             State = State0#state{protocol_state = ProtoState},
@@ -261,7 +269,7 @@ websocket_handle(Data, State) ->
         description => "Received unsupported message",
         data => Data
     }),
-    {[], State, hibernate}.
+    maybe_hibernate([], State, control).
 
 -doc """
 Called for every Erlang message received.
@@ -299,7 +307,7 @@ websocket_info({timeout, Ref, Msg}, State) ->
         message => Msg,
         ref => Ref
     }),
-    {[], State, hibernate};
+    maybe_hibernate([], State, control);
 websocket_info({stop, Reason}, State) ->
     ?LOG_INFO(#{
         description => "Connection closing",
@@ -311,7 +319,7 @@ websocket_info(Msg, State) ->
         description => "Received unknown message",
         message => Msg
     }),
-    {[], State, hibernate}.
+    maybe_hibernate([], State, control).
 
 -doc """
 Termination.
@@ -408,7 +416,11 @@ terminate(Other, _Req, State) ->
 handle_outbound(T, M, State) ->
     case bondy_wamp_protocol:handle_outbound(M, State#state.protocol_state) of
         {ok, Bin, PSt} ->
-            {data_frames(T, Bin), State#state{protocol_state = PSt}, hibernate};
+            %% Bin is ONE message as iodata — do not pass it to
+            %% data_frames/2, which maps over a list of messages.
+            maybe_hibernate(
+                [{T, Bin}], State#state{protocol_state = PSt}, data
+            );
         {stop, PSt} ->
             {[close], State#state{protocol_state = PSt}};
         {stop, Bin, PSt} ->
@@ -453,10 +465,14 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State0) ->
             %% This works only on HTTP1, we will change this for a stratgy
             %% based on {active, boolean()} and bondy_regulator.
             Opts1 = maps:put(active_n, 1, Opts0),
-            {PingOpts, Opts} = maps:take(ping, Opts1),
+            {PingOpts, Opts2} = maps:take(ping, Opts1),
+            %% Ours, not Cowboy's: see maybe_hibernate/3.
+            Hibernate = maps:get(hibernate, Opts2, idle),
+            Opts = maps:remove(hibernate, Opts2),
 
             State1 = State0#state{
                 frame_type = FrameType,
+                hibernate = Hibernate,
                 protocol_state = CBState
             },
 
@@ -532,6 +548,21 @@ do_terminate(State, IsError) ->
     bondy_wamp_protocol:terminate(State#state.protocol_state).
 
 %% @private
+%% A hibernate return forces a full-sweep GC + heap shrink, so data-path
+%% callbacks (inbound frames, outbound router messages) only pay it under
+%% the `always` strategy; control-path callbacks (pings, timeouts, init)
+%% also hibernate under `idle`, shrinking quiet connections without a GC
+%% per routed message.
+maybe_hibernate(Cmds, #state{hibernate = always} = State, _) ->
+    {Cmds, State, hibernate};
+maybe_hibernate(Cmds, #state{hibernate = never} = State, _) ->
+    {Cmds, State};
+maybe_hibernate(Cmds, State, data) ->
+    {Cmds, State};
+maybe_hibernate(Cmds, State, control) ->
+    {Cmds, State, hibernate}.
+
+%% @private
 -doc """
 From `cow_ws:frame()`.
 
@@ -541,11 +572,12 @@ From `cow_ws:frame()`.
 	| {close, close_code(), iodata()}
 	| {fragment, fin | nofin, text | binary | continuation, iodata()}.
 ```
+
+`L` must be a proper list of encoded messages (each one iodata, one
+frame each) — a bare iodata message would be misread as several.
 """.
 data_frames(Type, L) when is_list(L) ->
-    [{Type, E} || E <- L];
-data_frames(Type, E) ->
-    [{Type, E}].
+    [{Type, E} || E <- L].
 
 %% =============================================================================
 %% PRIVATE: PING TIMEOUT

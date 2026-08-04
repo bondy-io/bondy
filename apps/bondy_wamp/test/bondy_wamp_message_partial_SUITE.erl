@@ -29,7 +29,7 @@ end_per_suite(_) ->
 
 %% Helper to create a partial message via encode/decode
 create_partial(Message) ->
-    Bin = bondy_wamp_encoding:encode(Message, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(Message, json)),
     {[PartialMsg], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     PartialMsg.
 
@@ -44,7 +44,7 @@ partial_call_simple_test(_) ->
     M0 = bondy_wamp_message:call(1, #{}, <<"proc">>, [1, 2, 3], #{
         <<"key">> => <<"value">>
     }),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     %% Decode with partial (default behavior)
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
@@ -54,54 +54,54 @@ partial_call_simple_test(_) ->
     ?assertMatch({json, _}, bondy_wamp_message:partial(M1)),
 
     %% Re-encode should match original
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 partial_call_with_lists_test(_) ->
     M0 = bondy_wamp_message:call(1, #{}, <<"proc">>, [1, 2, [3, 4]], #{
         <<"items">> => [<<"a">>, <<"b">>]
     }),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     ?assert(bondy_wamp_message:is_partial(M1)),
 
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 partial_result_simple_test(_) ->
     M0 = bondy_wamp_message:result(1, #{}, [42, 43], #{<<"status">> => <<"ok">>}),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     ?assert(bondy_wamp_message:is_partial(M1)),
     ?assertEqual(undefined, M1#result.args),
     ?assertEqual(undefined, M1#result.kwargs),
 
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 partial_result_with_nested_lists_test(_) ->
     Args = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]],
     M0 = bondy_wamp_message:result(1, #{}, Args, #{<<"nested">> => [[1], [2]]}),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     ?assert(bondy_wamp_message:is_partial(M1)),
 
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 partial_yield_simple_test(_) ->
     M0 = bondy_wamp_message:yield(1, #{}, [1, 2, 3], #{<<"done">> => true}),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     ?assert(bondy_wamp_message:is_partial(M1)),
     ?assertEqual(undefined, M1#yield.args),
     ?assertEqual(undefined, M1#yield.kwargs),
 
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 partial_yield_with_objects_list_test(_) ->
@@ -110,90 +110,90 @@ partial_yield_with_objects_list_test(_) ->
         #{<<"id">> => 2, <<"name">> => <<"Bob">>}
     ],
     M0 = bondy_wamp_message:yield(1, #{}, Args, #{<<"count">> => 2}),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     ?assert(bondy_wamp_message:is_partial(M1)),
 
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 partial_error_simple_test(_) ->
     M0 = bondy_wamp_message:error(
         ?CALL, 1, #{}, <<"error.uri">>, [<<"error">>], #{<<"code">> => 500}
     ),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     ?assert(bondy_wamp_message:is_partial(M1)),
     ?assertEqual(undefined, M1#error.args),
     ?assertEqual(undefined, M1#error.kwargs),
 
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 partial_error_with_lists_test(_) ->
     Args = [<<"Error">>, [<<"detail1">>, <<"detail2">>]],
     KWArgs = #{<<"trace">> => [<<"line1">>, <<"line2">>]},
     M0 = bondy_wamp_message:error(?CALL, 1, #{}, <<"error.uri">>, Args, KWArgs),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     ?assert(bondy_wamp_message:is_partial(M1)),
 
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 partial_invocation_simple_test(_) ->
     M0 = bondy_wamp_message:invocation(1, 2, #{}, [100, 200], #{
         <<"timeout">> => 5000
     }),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     ?assert(bondy_wamp_message:is_partial(M1)),
     ?assertEqual(undefined, M1#invocation.args),
     ?assertEqual(undefined, M1#invocation.kwargs),
 
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 partial_invocation_with_complex_data_test(_) ->
     Args = [[[[[1, 2]]]]],
     KWArgs = #{<<"deep">> => #{<<"nested">> => #{<<"list">> => [[[3, 4]]]}}},
     M0 = bondy_wamp_message:invocation(1, 2, #{}, Args, KWArgs),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     ?assert(bondy_wamp_message:is_partial(M1)),
 
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 partial_publish_simple_test(_) ->
     M0 = bondy_wamp_message:publish(1, #{}, <<"topic">>, [<<"message">>], #{
         <<"retain">> => true
     }),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     ?assert(bondy_wamp_message:is_partial(M1)),
     ?assertEqual(undefined, M1#publish.args),
     ?assertEqual(undefined, M1#publish.kwargs),
 
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 partial_publish_with_unicode_test(_) ->
     Args = [<<"Hello 世界"/utf8>>, <<"Привет мир"/utf8>>, <<"مرحبا"/utf8>>],
     KWArgs = #{<<"langs">> => [<<"中文"/utf8>>, <<"日本語"/utf8>>]},
     M0 = bondy_wamp_message:publish(1, #{}, <<"topic">>, Args, KWArgs),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     ?assert(bondy_wamp_message:is_partial(M1)),
 
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 %% =============================================================================
@@ -203,24 +203,24 @@ partial_publish_with_unicode_test(_) ->
 partial_with_empty_lists_test(_) ->
     Args = [[], [[]], [[], []]],
     M0 = bondy_wamp_message:call(1, #{}, <<"proc">>, Args, #{<<"empty">> => []}),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     ?assert(bondy_wamp_message:is_partial(M1)),
 
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 partial_with_null_values_test(_) ->
     Args = [undefined, 1, undefined, undefined, 2, undefined, 3],
     KWArgs = #{<<"sparse">> => [undefined, undefined, <<"value">>, undefined]},
     M0 = bondy_wamp_message:result(1, #{}, Args, KWArgs),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     ?assert(bondy_wamp_message:is_partial(M1)),
 
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 partial_with_mixed_types_test(_) ->
@@ -229,12 +229,12 @@ partial_with_mixed_types_test(_) ->
     ],
     KWArgs = #{<<"mixed">> => [#{}, []]},
     M0 = bondy_wamp_message:yield(1, #{}, Args, KWArgs),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     ?assert(bondy_wamp_message:is_partial(M1)),
 
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 partial_with_large_list_test(_) ->
@@ -242,12 +242,12 @@ partial_with_large_list_test(_) ->
     M0 = bondy_wamp_message:call(1, #{}, <<"proc">>, LargeList, #{
         <<"count">> => 100
     }),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     ?assert(bondy_wamp_message:is_partial(M1)),
 
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 partial_with_special_json_values_test(_) ->
@@ -257,12 +257,12 @@ partial_with_special_json_values_test(_) ->
         <<"numbers">> => [0, -1, 1.5e-10]
     },
     M0 = bondy_wamp_message:error(?CALL, 1, #{}, <<"error.uri">>, Args, KWArgs),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin),
     ?assert(bondy_wamp_message:is_partial(M1)),
 
-    ReEncoded = bondy_wamp_encoding:encode(M1, json),
+    ReEncoded = iolist_to_binary(bondy_wamp_encoding:encode(M1, json)),
     ?assertEqual(Bin, ReEncoded).
 
 %% =============================================================================
@@ -310,7 +310,7 @@ no_partial_call_test(_) ->
     M0 = bondy_wamp_message:call(1, #{}, <<"proc">>, [1, 2, 3], #{
         <<"key">> => <<"value">>
     }),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     %% Decode with partial_decode disabled
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin, #{
@@ -324,7 +324,7 @@ no_partial_with_lists_test(_) ->
     Args = [[[1, 2], [3, 4]]],
     KWArgs = #{<<"items">> => [1, 2, 3], <<"tags">> => [<<"a">>, <<"b">>]},
     M0 = bondy_wamp_message:result(1, #{}, Args, KWArgs),
-    Bin = bondy_wamp_encoding:encode(M0, json),
+    Bin = iolist_to_binary(bondy_wamp_encoding:encode(M0, json)),
 
     {[M1], <<>>} = bondy_wamp_encoding:decode({ws, text, json}, Bin, #{
         partial_decode => false

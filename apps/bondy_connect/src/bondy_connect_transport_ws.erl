@@ -150,7 +150,7 @@ send(
     Enc =/= undefined
 ->
     #state{conn_pid = ConnPid, stream_ref = StreamRef} = St,
-    Payload = bondy_wamp_encoding:encode(Msg, Enc),
+    Payload = iolist_to_binary(bondy_wamp_encoding:encode(Msg, Enc)),
     Size = byte_size(Payload),
     case Size =< Max of
         true ->
