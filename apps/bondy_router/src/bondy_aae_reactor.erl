@@ -548,7 +548,6 @@ unfold_member_key(Key) ->
     end.
 
 -ifdef(TEST).
-%% @private
 %% TEST-only: build a `#sub{}` for exercising `apply_reaction/4` dispatch without
 %% a running subscription (`ns`/`ref` are unused on the reaction path).
 make_sub(Kind, Label, Table) ->

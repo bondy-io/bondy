@@ -50,7 +50,7 @@ unexport LDFLAGS
 unexport LDLIBS
 
 
-.PHONY: genvars compile check test xref eunit dialyzer release release-tar spellcheck spellfix conf
+.PHONY: genvars compile check test xref eunit dialyzer release release-tar spellcheck spellfix conf docs clean-docs
 
 conf:
 	@_build/default/bin/cuttlefish effective -s schema/ 2>/dev/null > config/bondy.conf.defaults
@@ -66,29 +66,31 @@ compile:
 	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} compile
 
+# ex_doc writes one doc/ tree per app under apps/. Two things it does not
+# provide are added here for every generated tree: `doc/js/docs_config.js`
+# (the script every generated page loads -- it renders the mermaid diagrams
+# embedded in the moduledocs) and the shared images the README and guides
+# reference. Looping over the generated trees keeps this correct as apps are
+# added or renamed.
 docs: xref
 	${REBAR} ex_doc
-	cp -r doc/js/* apps/bondy/doc/
-	cp -r doc/js/* apps/bondy_broker_bridge/doc/
-	mkdir -p apps/bondy/doc/assets/
-	mkdir -p apps/bondy_broker_bridge/doc/assets/
-	cp -r doc/assets/* apps/bondy/doc/assets/
-	cp -r doc/assets/* apps/bondy_broker_bridge/doc/assets/
-	mkdir -p apps/bondy_stdlib/doc/assets/
-	cp -r doc/assets/* apps/bondy/doc/assets/
-	cp -r doc/assets/* apps/bondy_stdlib/doc/assets/
+	@for d in apps/*/doc; do \
+		[ -d "$$d" ] || continue; \
+		cp -r doc/js/* "$$d/"; \
+		mkdir -p "$$d/assets"; \
+		cp -r doc/assets/* "$$d/assets/"; \
+	done
+	@echo "Generated docs for: $$(ls -d apps/*/doc | cut -d/ -f2 | tr '\n' ' ')"
 
 clean: node1-clean node2-clean node3-clean
 	${REBAR} clean
 
 
 clean-docs:
-	rm -rf apps/bondy/doc/*
-	rm -f apps/bondy/doc/.build
-	rm -rf apps/bondy_broker_bridge/doc/*
-	rm -f apps/bondy_broker_bridge/doc/.build
-	rm -rf apps/bondy_stdlib/doc/*
-	rm -f apps/bondy_stdlib/doc/.build
+	@for d in apps/*/doc; do \
+		[ -d "$$d" ] || continue; \
+		rm -rf "$$d"; \
+	done
 
 test: xref eunit
 	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
@@ -97,10 +99,6 @@ test: xref eunit
 eunit:
 	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} eunit
-
-xref:
-	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
-	${REBAR} xref skip_deps=true
 
 check: kill test xref dialyzer eqwalizer spellcheck
 
@@ -125,10 +123,6 @@ spellfix:
 cover: xref
 	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} as test ct ${CT_SUITE_ARGS}, cover
-
-dialyzer: compile
-	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
-	${REBAR} dialyzer
 
 release:
 	rm -rf _build/${REBAR3_PROFILE}

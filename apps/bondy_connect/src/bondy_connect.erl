@@ -36,11 +36,13 @@ connection.
 -opaque conn() :: {bondy_connect, pid() | atom()}.
 -type handler() :: bondy_connect_handler_spec:handler().
 -type call_result() :: #{args := list(), kwargs := map(), details := map()}.
-%% The named, structured client-side failures reachable from `call/*`,
-%% `register/*`, `unregister/2`, `subscribe/*`, `unsubscribe/2` and
-%% `publish_ack/*` — a local precondition check, a per-request timeout, a
-%% connection drop, or a `gen_statem:call/3` exit (`term()` covers the last
-%% case, plus any raw transport `send/2` failure, both open-ended by nature).
+-doc """
+The named, structured client-side failures reachable from `call/*`,
+`register/*`, `unregister/2`, `subscribe/*`, `unsubscribe/2` and
+`publish_ack/*` — a local precondition check, a per-request timeout, a
+connection drop, or a `gen_statem:call/3` exit (`term()` covers the last
+case, plus any raw transport `send/2` failure, both open-ended by nature).
+""".
 -type call_client_reason() ::
     timeout
     | not_connected

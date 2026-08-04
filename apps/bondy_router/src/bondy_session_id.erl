@@ -151,7 +151,7 @@ existing_part(Id) ->
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
-%% @private A valid 27-char base62 "existing" id (no node-hash prefix), built
+%% A valid 27-char base62 "existing" id (no node-hash prefix), built
 %% deterministically so tests need neither bondy_config nor randomness.
 mk_existing(Ext) ->
     <<Id160:?LEN/integer>> =

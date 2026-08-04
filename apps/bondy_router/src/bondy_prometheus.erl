@@ -1076,7 +1076,6 @@ message_type_family(yield) ->
 message_type_family(_) ->
     undefined.
 
+%% @private
 node_name() ->
     bondy_config:node().
-
-%% @private

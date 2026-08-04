@@ -118,8 +118,10 @@ need a separate persistence layer.
     value => integer()
 }.
 -type declaration() :: #{name := name(), help := binary(), _ => _}.
-%% Everything except `name`, keyed by name in `declared/0`. Open map so
-%% future metadata (e.g. `unit`) is a non-breaking addition.
+-doc """
+Everything except `name`, keyed by name in `declared/0`. Open map so
+future metadata (e.g. `unit`) is a non-breaking addition.
+""".
 -type descriptor() :: #{help := binary(), _ => _}.
 -type entry() :: #{type := type(), ref := counters:counters_ref()}.
 -type histogram() :: #{

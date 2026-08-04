@@ -1081,34 +1081,6 @@ maybe_adopt_peer_frontier(_Result, _Instance, _PeerFrontier, _PeerRoot) ->
     ok.
 
 %% @private
-%% Frontier-GAP check (see the call site in `run/4` for the full
-%% rationale). Fires on a SUCCESSFUL round when the peer's PRE-round
-%% applied frontier is still strictly ahead of ours after the round: the
-%% missing events were compacted away at the peer — whether by
-%% `mst_retention` policy or by the durable recency-filtered frontier
-%% advancing past this then-silent replica — and can never arrive by
-%% page-sync, so the only convergence path is a catalogue rebootstrap.
-%%
-%% On an applier-backed instance the pulled events reach the projection
-%% (and the applied-frontier VV its max-merge advances) ASYNCHRONOUSLY —
-%% the `integrate_peer_root` handler casts `replay_cell_events` to the
-%% APPLIER — so a first-pass deficit may be nothing but replay lag:
-%% settle the whole local pipeline and re-check before declaring a gap.
-%% The settle is two barriers: the instance's overlay drain
-%% (`await_apply/1` — local WAL-appended events projected + installed)
-%% and the APPLIER barrier (`bondy_oplog_applier:barrier/1` — served
-%% after the integrate-time replay cast already in its queue, and
-%% running the I1 fence so even a LOST cast is replayed). On a fused
-%% instance there is no applier and replay was inline at integrate, so
-%% only the overlay drain applies. With the peer's answer
-%% installed-consistent (the responder's barrier) and the round complete,
-%% a residual deficit after this settle is deterministic evidence the
-%% missing events were compacted away at the peer. The exit reason's
-%% origins list is bounded to keep it log-safe; the full per-origin
-%% deficit (peer vs local sequence) goes out on the
-%% `[bondy_oplog, sync_session, frontier_gap]` telemetry event and the
-%% log line here, so a standing gap is diagnosable from either.
-%% @private
 %% THE UNSERVABLE-BEHIND ESCALATION EVIDENCE. A peer whose responder
 %% answers `{error, {root_unservable, _}}` is refusing to serve a
 %% dangling root — designed as a benign transient (a truncate/GC race
@@ -1143,6 +1115,34 @@ maybe_unservable_behind(
 maybe_unservable_behind(Result, _Instance, _PeerFrontier) ->
     Result.
 
+%% @private
+%% Frontier-GAP check (see the call site in `run/4` for the full
+%% rationale). Fires on a SUCCESSFUL round when the peer's PRE-round
+%% applied frontier is still strictly ahead of ours after the round: the
+%% missing events were compacted away at the peer — whether by
+%% `mst_retention` policy or by the durable recency-filtered frontier
+%% advancing past this then-silent replica — and can never arrive by
+%% page-sync, so the only convergence path is a catalogue rebootstrap.
+%%
+%% On an applier-backed instance the pulled events reach the projection
+%% (and the applied-frontier VV its max-merge advances) ASYNCHRONOUSLY —
+%% the `integrate_peer_root` handler casts `replay_cell_events` to the
+%% APPLIER — so a first-pass deficit may be nothing but replay lag:
+%% settle the whole local pipeline and re-check before declaring a gap.
+%% The settle is two barriers: the instance's overlay drain
+%% (`await_apply/1` — local WAL-appended events projected + installed)
+%% and the APPLIER barrier (`bondy_oplog_applier:barrier/1` — served
+%% after the integrate-time replay cast already in its queue, and
+%% running the I1 fence so even a LOST cast is replayed). On a fused
+%% instance there is no applier and replay was inline at integrate, so
+%% only the overlay drain applies. With the peer's answer
+%% installed-consistent (the responder's barrier) and the round complete,
+%% a residual deficit after this settle is deterministic evidence the
+%% missing events were compacted away at the peer. The exit reason's
+%% origins list is bounded to keep it log-safe; the full per-origin
+%% deficit (peer vs local sequence) goes out on the
+%% `[bondy_oplog, sync_session, frontier_gap]` telemetry event and the
+%% log line here, so a standing gap is diagnosable from either.
 maybe_frontier_gap({ok, _} = Result, _Instance, _Peer, _PeerFrontier, skip) ->
     %% Benign incomplete round: a deficit here is expected transfer lag,
     %% not evidence of compacted-away history. The next complete round

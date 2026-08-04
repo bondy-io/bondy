@@ -2618,14 +2618,6 @@ on_delete(Entry) ->
     bondy_meta_events:maybe_publish(deleted, Entry).
 
 %% @private
--doc """
-Replies to the caller of an in-flight invocation promise with a
-`wamp.error.no_eligible_callee` ERROR. Used by `flush/2` when the callee
-session dies, so callers fast-fail instead of waiting for the call
-timeout. The reply is routed back through any relays stored in the
-promise's `via` queue.
-""".
-%% @private
 %% Hierarchical (RIB `read` mode) selection: the caller picks a NODE — self,
 %% or a peer advertising the procedure in the stub view — and the winning
 %% node completes the selection among its own live local registrations.
@@ -3163,6 +3155,11 @@ cancel_remote_callee(Promise) ->
     end.
 
 %% @private
+%% Replies to the caller of an in-flight invocation promise with a
+%% `wamp.error.no_eligible_callee` ERROR. Used by `flush/2` when the callee
+%% session dies, so callers fast-fail instead of waiting for the call
+%% timeout. The reply is routed back through any relays stored in the
+%% promise's `via` queue.
 send_no_eligible_callee(Promise) ->
     RealmUri = bondy_rpc_promise:realm_uri(Promise),
     Caller = bondy_rpc_promise:caller(Promise),
