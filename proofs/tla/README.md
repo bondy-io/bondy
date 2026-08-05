@@ -173,7 +173,9 @@ Increment 1 — landed, zero behaviour change:
   (never silently passes) when the scenario is not reached. It is
   **red by design** until increment 2 lands.
 
-Increment 2 — BUILT, flag-gated (`prefix_hold`, default **off**), CT-validated:
+Increment 2 — BUILT, CT-validated, Fly-validated, and now the **shipped
+default** (`db.aae.prefix_hold = on`; the knob remains as an emergency
+opt-out):
 
 - `apply_cell_pairs_mux/5` partitions each replay batch per remote origin
   into the contiguous-foldable prefix and a HELD remainder, excluded from
@@ -221,15 +223,42 @@ one watchpoint is the local-inversion `prefix_hole` rate (219 in ~8 min at
 peak load) — measurement noise today, but any future consumer of `prefix_hole`
 as an alert must exclude own-origin firings first.
 
-CT `truncated_prefix_is_held_and_repaired_by_rebootstrap` (flag ON,
+CT `truncated_prefix_is_held_and_repaired_by_rebootstrap` (enforcement on,
 same scenario): **0 holes folded, 20 writer-origin holds** (e.g. `main/1`
-held `[16,17]` — the exact gap the defaults run folds through), then with
+held `[16,17]` — the exact gap the unenforced run folds through), then with
 the schedulers restored the persisting frontier deficit drives the
 frontier-gap → rebootstrap chain to **full convergence of all 52 keys**
 (seed + early + late; the truncated EARLY values arrive via the catalogue
 bootstrap's projection cells), with zero holes through the repair included.
-The defaults case remains red-by-design, proving the bug whenever the flag
-is off.
+
+With enforcement now the default, the sibling case
+`truncated_prefix_below_peer_max_is_not_silently_adopted` forces the flag
+OFF and **passes on detection**: it locks the detector's ability to see the
+misfold (which is what gives the enforced case's "zero holes" assertion its
+meaning) and documents the hazard the default closes. Its only remaining
+hard failure is silent adoption.
+
+### The model verifies the fix
+
+`AaeCausalClosure.tla` gained a `PrefixHold` constant: integration applies
+the per-origin CONTIGUOUS CLOSURE of local-applied ∪ peer-tree instead of
+the raw union (the tree still merges fully — the hold is at the
+applied/projection level, as implemented). Results:
+
+| Configuration | Result |
+| --- | --- |
+| baseline (hold off, ungated compaction) | violates in 6 steps — unchanged, the regression pin |
+| gated compaction (hold off) | exhaustive clean, 12.9M states — unchanged |
+| **`AaeCausalClosure_Hold.cfg`** (hold ON, ungated compaction — the shipped default) | **exhaustive clean at pairwise scope** (2 replicas; 30,938 states) |
+
+One model-fidelity lesson en route: the first hold run produced a spurious
+`NoOverClaim` violation because the model's `Rebootstrap` discarded the
+replica's OWN minted events — in reality they survive in the local WAL and
+are re-delivered after any clobber. `Rebootstrap` now retains own-origin
+events (commented in the spec). After that fidelity fix the 3-replica hold
+state space exploded past practical bounds, so the hold configuration is
+exhaustive at the pairwise protocol scope (sync, hold, and frontier logic
+are all pairwise).
 
 ### Second iteration — loops until the maxima meet
 
