@@ -36,8 +36,11 @@ flowchart TD
    is no window where a durable write is invisible. If the WAL rejects the
    append, the overlay row is unstaged and the reserved sequence range is
    returned to the counter when still topmost; a range overtaken by a
-   concurrent reservation is counted (`bondy_oplog_seqs_burned_total`)
-   because it becomes a permanent, sync-unfillable gap.
+   concurrent reservation cannot be returned, so it is counted
+   (`bondy_oplog_seqs_burned_total`) and backfilled with signed no-op
+   `seq_fill` events (`bondy_oplog_seqs_filled_total`) that occupy the
+   seqs — replicating and advancing frontiers like any event, folding to
+   nothing — so the gap never becomes sync-unfillable.
 3. **Acknowledge.** The caller's write is complete at durable append —
    before the fold. Durability policy (`db.fsync`) governs what "durable"
    costs.

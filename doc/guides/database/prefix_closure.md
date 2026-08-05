@@ -89,12 +89,17 @@ replica holds — a *burned* seq, minted for a write whose write-ahead append
 failed after a concurrent reservation landed on top. The mint path returns a
 rejected batch's sequence range to the counter whenever it is still the
 topmost reservation, so burns require a lost race against a concurrent
-writer during a storage failure; the residual rate is counted, and a
-validation run at full load measured zero.
+writer during a storage failure; a validation run at full load measured
+zero. When one does occur, the origin repairs it itself: it backfills each
+burned seq with a signed **`seq_fill`** event — a no-op that occupies the
+sequence number, replicates like any operation, and advances every replica's
+frontier past the gap while folding to nothing. Peers never see the burn; a
+backfill that itself fails (after retries against the same backpressure that
+caused the burn) leaves the gap to the rebootstrap chain above.
 
 ## Observing it
 
-Three counters, all labelled by instance:
+Four counters, all labelled by instance:
 
 - `bondy_oplog_events_held_total` — operations a replay held. A burst on a
   replica rejoining after truncation is the mechanism working; a sustained
@@ -105,8 +110,11 @@ Three counters, all labelled by instance:
   concurrent local commit reordering should register; exclude those before
   alerting. Any remote-origin count is a fold path the hold does not cover
   and warrants investigation.
-- `bondy_oplog_seqs_burned_total` — permanently unfillable sequence numbers
-  minted locally. Under the hold, each converts a future silent gap into a
+- `bondy_oplog_seqs_burned_total` — sequence numbers a rejected append could
+  not return to the counter. Each is immediately backfilled.
+- `bondy_oplog_seqs_filled_total` — burned seqs whose `seq_fill` backfill
+  landed durably. Healthy operation keeps this equal to the burn counter; a
+  persistent shortfall is a permanent gap that will convert into a
   rebootstrap on peers.
 
 The `frontier-gap verdicts` and `re-bootstraps scheduled` counters complete

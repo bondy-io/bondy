@@ -16,7 +16,7 @@ value*.
 | # | Invariant | Where enforced | How checked |
 | --- | --- | --- | --- |
 | 1 | **Clock monotonicity.** Each instance's HLC is strictly monotone and, after receiving any timestamp, exceeds it forever after — so local events always sort after everything already received. | The HLC's two CAS steps, including the logical-overflow clamp | Mechanized proof (Isabelle/HOL) |
-| 2 | **Sequence density.** An origin's minted sequence numbers are contiguous: ranges are reserved atomically and returned on WAL rejection when still topmost; unreturnable ranges are counted, not hidden. | The minting core and its rollback | Property tests; burn counter validated at zero under record load |
+| 2 | **Sequence density.** An origin's minted sequence numbers are contiguous: ranges are reserved atomically and returned on WAL rejection when still topmost; an unreturnable range is counted and backfilled with signed no-op `seq_fill` events that occupy the seqs everywhere while folding to nothing. | The minting core, its rollback, and the backfill | Property tests; burn counter validated at zero under record load; backfill covered end to end (local install and cross-replica sync) |
 | 3 | **Deterministic interpretation.** Every event folds through one materialisation path via its table's CRDT module; the same event set yields the same projection on every replica. | `cell_apply` as the single fold | The behaviour's stated determinism contract; property tests per CRDT (permutation, idempotent redelivery, oracle equivalence) |
 | 4 | **Per-origin prefix closure.** No replica materialises an origin's later event while an earlier one is missing; the applied frontier counts only contiguous prefixes. This is the hypothesis under which the observed-remove test (`Ctx[O] ≥ S`) is exact. | The prefix hold at the fold, on every path with re-presentation; instrumented on the paths without | Exactness: mechanized proof. The hypothesis itself: model-checked (TLA+ — violated unenforced, exhaustively clean with the hold), cluster-tested in both polarities, field-validated with fault injection |
 | 5 | **Whole-round confirmation.** A sync round records nothing unless it completed against the peer's whole tree; every cluster-wide license reads only confirmations. | The sync session's single checkpoint site | Cluster tests (stale-peer rejoin; truncation chase) |
@@ -54,8 +54,10 @@ frontier it cannot back — rather than approximating.
 - The prefix hold does not cover folds with no re-presentation path (the
   compaction catch-up, one-shot re-derivations); these are instrumented
   (`bondy_oplog_prefix_holes_total`) rather than enforced.
-- A burned sequence range converts a future silent gap into a rebootstrap
-  on peers — noise traded for correctness, measured at zero in validation.
+- A burned sequence range is backfilled by the origin with no-op events;
+  only a backfill that itself fails after retries leaves a gap, which then
+  converts into a rebootstrap on peers — noise traded for correctness.
+  Burns measured at zero in validation.
 - Model-checking of the hold is exhaustive at pairwise scope; the
   three-replica space is beyond practical bounds. The protocol is
   pairwise, and the cluster tests run three nodes.

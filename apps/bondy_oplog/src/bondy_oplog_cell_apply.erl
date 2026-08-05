@@ -850,10 +850,15 @@ batch_frontier(Pairs) ->
     frontier_of(origin_seqs(Pairs, fun pair_cell_key/1)).
 
 %% @private
-%% Per-origin seq lists (unsorted) over a batch's `cell_apply` events —
-%% the shared core of `batch_frontier/1`/`batch_frontier_events/1` and
-%% `detect_prefix_holes/2`. `KeyF` extracts the event key from one batch
-%% element, or `undefined` for non-cell_apply elements.
+%% Per-origin seq lists (unsorted) over a batch's seq-bearing events —
+%% the shared core of `batch_frontier/1`/`batch_frontier_events/1`,
+%% `detect_prefix_holes/2` and `partition_contiguous/3`. `KeyF` extracts
+%% the event key from one batch element, or `undefined` for elements
+%% that carry no per-origin seq claim. `cell_apply` events count, and so
+%% do `seq_fill` backfills (the no-op occupants of a burned seq range,
+%% see `release_seq_range` in `bondy_oplog_instance`): a fill's whole
+%% purpose is to be PRESENT — to advance the frontier and complete
+%% contiguous runs — while every fold skips it.
 origin_seqs(Items, KeyF) ->
     lists:foldl(
         fun(Item, Acc) ->
@@ -875,6 +880,8 @@ origin_seqs(Items, KeyF) ->
 %% @private
 pair_cell_key({MstKey, {{cell_apply, _B, _K, _F}, _Meta, _Prev, _Sig}}) ->
     MstKey;
+pair_cell_key({MstKey, {seq_fill, _Meta, _Prev, _Sig}}) ->
+    MstKey;
 pair_cell_key(_) ->
     undefined.
 
@@ -882,6 +889,7 @@ pair_cell_key(_) ->
 event_cell_key(Event) ->
     case bondy_oplog_event:op(Event) of
         {cell_apply, _B, _K, _F} -> bondy_oplog_event:key(Event);
+        seq_fill -> bondy_oplog_event:key(Event);
         _ -> undefined
     end.
 
@@ -908,10 +916,12 @@ frontier_of(OriginSeqs) ->
 %%
 %% A firing is a fact about fold-time contiguity, not always data loss:
 %% a concurrent local fast-path append that commits to the WAL out of
-%% seq order, or a seq burned by a failed WAL append (see
-%% `release_seq_range` in `bondy_oplog_instance`), also present as
-%% gaps. The point of the telemetry is to measure exactly that mix in
-%% the field before any enforcement is attempted.
+%% seq order also presents as a (transient, own-origin) gap. A seq
+%% burned by a failed WAL append (see `release_seq_range` in
+%% `bondy_oplog_instance`) presents the same way until its `seq_fill`
+%% backfill lands — the fill counts as a present seq here, closing the
+%% gap. The point of the telemetry is to measure exactly that mix in
+%% the field.
 detect_prefix_holes(_Id, OriginSeqs) when map_size(OriginSeqs) =:= 0 ->
     ok;
 detect_prefix_holes(Id, OriginSeqs) ->
@@ -1057,8 +1067,10 @@ apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin, Opts) ->
 %% count it must hold. Per remote origin, foldable seqs are everything at
 %% or below the applied frontier (idempotent re-folds) plus the
 %% contiguous run rising from it; the rest of that origin's seqs — and
-%% every pair carrying them — are held. Non-cell_apply pairs and
-%% local-origin pairs always fold.
+%% every pair carrying them — are held. Pairs with no per-origin seq
+%% claim (see `origin_seqs/2`) and local-origin pairs always fold; a
+%% `seq_fill` pair is seq-bearing like any other, so it both completes
+%% runs and can itself be held behind an unfilled earlier gap.
 partition_contiguous(Id, Pairs, LocalOrigin) ->
     VV = bondy_oplog_registry:frontier(Id),
     OriginSeqs = maps:remove(

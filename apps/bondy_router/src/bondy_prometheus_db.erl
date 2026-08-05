@@ -256,6 +256,7 @@ events() ->
         [bondy_oplog, applier, prefix_hole],
         [bondy_oplog, applier, events_held],
         [bondy_oplog, instance, seq_burned],
+        [bondy_oplog, instance, seq_filled],
         [bondy_oplog, sync, catalogue_bootstrap, ok],
         [bondy_oplog, sync, catalogue_bootstrap, error],
         [bondy_oplog, sync, catalogue_bootstrap, complete],
@@ -434,12 +435,23 @@ declare_metrics() ->
             "cluster is a stuck gap (check seq burns and the rebootstrap "
             "chain).", [instance_id]},
         {bondy_oplog_seqs_burned_total,
-            "Per-origin sequence numbers permanently lost to a rejected WAL "
-            "batch whose seq range was overtaken by a concurrent "
-            "reservation before it could be returned "
-            "(release_seq_range/3). Each burned seq is a gap no replica "
-            "will ever fill by sync: under db.aae.prefix_hold it converts "
-            "into a catalogue rebootstrap on peers.", [instance_id]},
+            "Per-origin sequence numbers a rejected WAL batch could not "
+            "return to the counter (its range was overtaken by a concurrent "
+            "reservation, release_seq_range/3). The origin immediately "
+            "backfills each burned seq with a signed no-op seq_fill event "
+            "(seqs_filled_total) so the gap closes everywhere; a burn "
+            "WITHOUT a matching fill is a permanent gap that converts into "
+            "a catalogue rebootstrap on peers under db.aae.prefix_hold.", [
+            instance_id
+        ]},
+        {bondy_oplog_seqs_filled_total,
+            "Burned sequence numbers successfully backfilled with no-op "
+            "seq_fill events (durably appended at the origin; they "
+            "replicate and advance every replica's applied frontier past "
+            "the burned gap while folding to nothing). Healthy operation "
+            "keeps this equal to seqs_burned_total; a persistent "
+            "shortfall means a backfill gave up after retries and peers "
+            "will repair by rebootstrap.", [instance_id]},
         {bondy_oplog_bootstrap_sessions_total, "Catalogue bootstrap sessions.",
             [instance_id, peer, outcome]},
         {bondy_oplog_bootstrap_cells_total,
@@ -893,6 +905,12 @@ do_handle_event([bondy_oplog, applier, events_held], Meas, Meta) ->
 do_handle_event([bondy_oplog, instance, seq_burned], Meas, Meta) ->
     counter(
         bondy_oplog_seqs_burned_total,
+        [instance_id(Meta)],
+        max(1, num(count, Meas))
+    );
+do_handle_event([bondy_oplog, instance, seq_filled], Meas, Meta) ->
+    counter(
+        bondy_oplog_seqs_filled_total,
         [instance_id(Meta)],
         max(1, num(count, Meas))
     );

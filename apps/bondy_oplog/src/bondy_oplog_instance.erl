@@ -58,6 +58,12 @@
 -define(FUSED_GAP_RETRY_MS, 1).
 -define(FUSED_MAX_GAP_RETRIES, 2000).
 
+%% Retry budget for the burned-seq backfill (`fill_burned_seqs/4`): the
+%% WAL rejection that caused the burn is usually transient backpressure,
+%% so the fill retries with exponential backoff (100ms doubling, 5s cap)
+%% before giving up and leaving the gap to the peers' rebootstrap repair.
+-define(SEQ_FILL_MAX_RETRIES, 10).
+
 %% Cap on the watermark door's fast-path region scan
 %% (`entries_at_or_below/2`): the at-or-below-watermark region is
 %% normally empty or a handful of just-merged events, so the capped
@@ -897,6 +903,15 @@ do_build_events(HLC, SeqRef, Origin, Mod, VS0, Items) ->
     N = length(Items),
     EndSeq = atomics:add_get(SeqRef, 1, N),
     StartSeq = EndSeq - N + 1,
+    do_build_events_at(HLC, StartSeq, Origin, Mod, VS0, Items).
+
+%% @private
+%% The minting fold behind `do_build_events/6` (which reserves its seq
+%% range) and `build_fill_events/3` (which re-mints over an
+%% already-burned range): one HLC tick per item, keys assigned
+%% `StartSeq + i`, each event signed through the validator with the
+%% state threaded forward.
+do_build_events_at(HLC, StartSeq, Origin, Mod, VS0, Items) ->
     {EventsRev, KeysRev, _, VS} = lists:foldl(
         fun({Op, Meta}, {EvAcc, KAcc, Seq, VSAcc0}) ->
             Hlc = bondy_oplog_hlc:now(HLC),
@@ -916,12 +931,13 @@ do_build_events(HLC, SeqRef, Origin, Mod, VS0, Items) ->
 %% is still the TOPMOST reservation (counter =:= End): the range was
 %% reserved in one `atomics:add_get/3`, so no foreign seq can sit
 %% inside it, and the CAS fails whenever a concurrent minter has
-%% reserved on top — in which case the range is permanently burned
-%% (a hole no replica will ever hold) and is counted via telemetry so
-%% the field rate of residual burns is measurable. Burn direction is
-%% benign for correctness today; it matters to the cell-apply
-%% contiguity detector and to any future per-origin contiguity gate,
-%% which must treat burned seqs as expected gaps.
+%% reserved on top — in which case the range cannot be returned. A
+%% burned range would otherwise be a hole no replica can ever fill by
+%% sync (the prefix hold would park every peer on it until a
+%% rebootstrap), so the burn is counted via telemetry and the instance
+%% is asked to BACKFILL it with signed `seq_fill` no-op events
+%% (`fill_burned_seqs/4`): they occupy the burned seqs, fold to
+%% nothing, and advance every replica's applied frontier past the gap.
 release_seq_range(_SeqRef, _InstanceId, []) ->
     ok;
 release_seq_range(SeqRef, InstanceId, [First | _] = Keys) ->
@@ -936,7 +952,22 @@ release_seq_range(SeqRef, InstanceId, [First | _] = Keys) ->
                 #{count => End - Start + 1},
                 #{instance_id => InstanceId}
             ),
-            ok
+            request_seq_fill(InstanceId, Start, End)
+    end.
+
+%% @private
+%% Asks the instance gen_server to backfill a burned seq range. Runs on
+%% whichever process detected the burn (a fast-path caller or the
+%% instance itself); the cast serialises the fill through the instance,
+%% which owns the HLC and validator state needed to mint. A missing
+%% registry row (subtree restarting) drops the request — the burn stays
+%% counted and the gap falls back to the peers' rebootstrap repair.
+request_seq_fill(InstanceId, Start, End) ->
+    case bondy_oplog_registry:instance_pid(InstanceId) of
+        undefined ->
+            ok;
+        Pid ->
+            gen_server:cast(Pid, {fill_burned_seqs, Start, End, 0})
     end.
 
 %% @private
@@ -3634,6 +3665,10 @@ handle_cast(
     %% to delegate to).
     NewVS = bondy_oplog_validator_refresh:refresh(Id, Reason, Mod, VS),
     {noreply, State#state{validator_state = NewVS}};
+handle_cast({fill_burned_seqs, Start, End, Attempt}, State) ->
+    %% Requested by `release_seq_range/3` when a rejected batch's seq
+    %% range was overtaken and could not be returned to the counter.
+    {noreply, fill_burned_seqs(State, Start, End, Attempt)};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -3703,6 +3738,10 @@ handle_info({compaction_catch_up_timeout, _Token}, State) ->
     %% Stale watchdog — the catch-up already committed, aborted, or was
     %% superseded. Ignore.
     {noreply, State};
+handle_info({fill_burned_seqs, Start, End, Attempt}, State) ->
+    %% Backoff retry scheduled by `fill_burned_seqs/4` after a WAL
+    %% rejection of the fill batch itself.
+    {noreply, fill_burned_seqs(State, Start, End, Attempt)};
 handle_info(
     {seal_done, PackId, ok},
     #state{seal = #seal{ref = Ref, pack_id = PackId}} = State
@@ -4975,6 +5014,69 @@ build_events(State0, Items) ->
     {Events, Keys, VS} = do_build_events(
         State0#state.hlc,
         State0#state.seq,
+        State0#state.origin,
+        State0#state.validator_module,
+        State0#state.validator_state,
+        Items
+    ),
+    {Events, Keys, State0#state{validator_state = VS}}.
+
+%% @private
+%% Backfills a burned seq range `[Start, End]` with signed `seq_fill`
+%% no-op events: fresh HLC ticks (HLCs are never recycled), the burned
+%% seqs themselves (their only occupants — the rejected batch that
+%% reserved them never became durable), signed through the validator
+%% like any event. The fills ride the normal WAL → applier → MST path,
+%% so they replicate and advance the applied frontier on every replica
+%% (`bondy_oplog_cell_apply` counts `seq_fill` in `origin_seqs/2` and
+%% skips it in every fold), closing the gap the peers' prefix hold
+%% would otherwise park on until a rebootstrap. No overlay row is
+%% staged — a fill has no readable value.
+%%
+%% A rejected fill append retries with exponential backoff (the
+%% rejection is usually the same transient backpressure that caused
+%% the burn); after `?SEQ_FILL_MAX_RETRIES` the gap is left to the
+%% rebootstrap repair chain, already counted by `seq_burned`.
+fill_burned_seqs(State0, Start, End, Attempt) ->
+    Items = [{seq_fill, undefined} || _ <- lists:seq(Start, End)],
+    {Events, _Keys, State} = build_fill_events(State0, Start, Items),
+    case fast_wal_append_batch(State#state.instance_id, Events) of
+        ok ->
+            telemetry:execute(
+                [bondy_oplog, instance, seq_filled],
+                #{count => End - Start + 1},
+                #{instance_id => State#state.instance_id}
+            ),
+            State;
+        {error, _Reason} when Attempt < ?SEQ_FILL_MAX_RETRIES ->
+            _ = erlang:send_after(
+                min(100 bsl Attempt, 5000),
+                self(),
+                {fill_burned_seqs, Start, End, Attempt + 1}
+            ),
+            State;
+        {error, Reason} ->
+            ?LOG_WARNING(#{
+                description =>
+                    "Burned-seq backfill gave up after retries; the "
+                    "range stays a permanent per-origin gap — peers "
+                    "hold at it and repair via catalogue rebootstrap.",
+                instance_id => State#state.instance_id,
+                seq_range => {Start, End},
+                reason => Reason
+            }),
+            State
+    end.
+
+%% @private
+%% Mints signed `seq_fill` events over an explicit seq range — no
+%% reservation, the range was already reserved (and then burned) by the
+%% rejected batch. Thin state wrapper over `do_build_events_at/6`,
+%% exactly as `build_events/2` wraps `do_build_events/6`.
+build_fill_events(State0, StartSeq, Items) ->
+    {Events, Keys, VS} = do_build_events_at(
+        State0#state.hlc,
+        StartSeq,
         State0#state.origin,
         State0#state.validator_module,
         State0#state.validator_state,
