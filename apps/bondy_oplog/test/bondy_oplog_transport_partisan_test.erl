@@ -37,6 +37,21 @@ cleanup(_) ->
         bondy_oplog:stop_instance(I)
      || I <- bondy_oplog:list_instances()
     ],
+    leave_all_peers().
+
+%% `peer:stop/1` kills the peer BEAM but the LOCAL Partisan membership
+%% set retains the dead node, leaking it into every later test module in
+%% the same run (`bondy_oplog_sync_scheduler_test:
+%% partisan_source_excludes_self/0` pins a pristine single-node
+%% membership). Sweep every non-self member out on the way down.
+leave_all_peers() ->
+    Manager = partisan_peer_service:manager(),
+    Self = partisan:node(),
+    {ok, Members} = Manager:members_for_orchestration(),
+    _ = [
+        catch partisan_peer_service:leave(Spec)
+     || #{name := Name} = Spec <- Members, Name =/= Self
+    ],
     ok.
 
 partisan_transport_test_() ->

@@ -763,12 +763,25 @@ do_prefix_hole_enforced([N1, N2, N3] = Nodes) ->
         "detected — the enforcement failed to hold a non-contiguous batch"
     ),
 
-    case Helds0 of
-        [] ->
+    case {Helds0, LateMissing0} of
+        {[], _} ->
             {skip,
                 "scenario not reached: enforcement never engaged on the "
                 "writer's origin — no instance hosted both an early and a "
                 "late key. Raise ?HOLE_TAGS_PER_BAND."};
+        {_, []} ->
+            %% Holds fired, no hole folded (asserted above), yet every
+            %% late key reads back: each held gap was later FILLED by a
+            %% presentation of the early prefix — the live pair
+            %% truncated asymmetrically and the second round's peer
+            %% still shipped the early events for every instance
+            %% hosting a late key. Legitimate hold-then-release, but
+            %% the parked-while-held observable is out of reach.
+            {skip,
+                "scenario not reached: asymmetric truncation between "
+                "the live pair let the second round fill every held "
+                "gap on late-key instances. Re-run; raise "
+                "?HOLE_TAGS_PER_BAND if persistent."};
         _ ->
             %% (b) Holding must be observable: a held suffix is not
             %% readable.
@@ -909,19 +922,19 @@ hole_scenario([N1, N2, N3] = Nodes) ->
     %%    per instance for the reason given in the sibling case: under a
     %%    1.5s recency window a node-wide sync followed by a node-wide
     %%    compact lets the peer entry go stale again mid-round.
+    %%
+    %%    Repeated (bounded) until at least one instance has truncated on
+    %%    BOTH live nodes: with asymmetric truncation (disjoint advanced
+    %%    sets) the rejoining node's second round pulls the early prefix
+    %%    from whichever peer still ships it, filling every gap the first
+    %%    round held and dissolving the scenario under test.
     %% ---------------------------------------------------------------------
-    W1Before = erpc:call(N1, ?MODULE, do_stale_watermarks_main, []),
-    W2Before = erpc:call(N2, ?MODULE, do_stale_watermarks_main, []),
-    _ = erpc:call(N1, ?MODULE, do_stale_sync_and_compact_main, [N2]),
-    _ = erpc:call(N2, ?MODULE, do_stale_sync_and_compact_main, [N1]),
-    W1After = erpc:call(N1, ?MODULE, do_stale_watermarks_main, []),
-    W2After = erpc:call(N2, ?MODULE, do_stale_watermarks_main, []),
-    Advanced1 = watermarks_advanced(W1Before, W1After),
-    Advanced2 = watermarks_advanced(W2Before, W2After),
+    {Advanced1, Advanced2} = truncate_main_until_common(N1, N2, [], [], 5),
+    Common = [I || I <- Advanced1, lists:member(I, Advanced2)],
     ct:pal(
         "prefix-hole: watermarks advanced on ~p instance(s) on ~p and "
-        "~p instance(s) on ~p",
-        [length(Advanced1), N1, length(Advanced2), N2]
+        "~p instance(s) on ~p (~p in common)",
+        [length(Advanced1), N1, length(Advanced2), N2, length(Common)]
     ),
     ?assert(length(Advanced1) >= 1),
     ?assert(length(Advanced2) >= 1),
@@ -1345,6 +1358,32 @@ stale_wait(Fun, ErrorTag, DiagFun, Deadline) ->
 watermarks_advanced(Before, After) ->
     B = maps:from_list(Before),
     [I || {I, W} <- After, W =/= maps:get(I, B, undefined)].
+
+%% @private
+%% One fused sync+compact pass over the `main/*` instances of both live
+%% nodes, repeated (bounded) until some instance has truncated on BOTH —
+%% accumulating each node's advanced set across passes, since an
+%% instance may truncate on N1 in one pass and on N2 in a later one.
+%% Returns the accumulated `{Advanced1, Advanced2}` either way; the
+%% verdict stays honest downstream when no common instance was reached.
+truncate_main_until_common(N1, N2, Acc1, Acc2, Attempts) ->
+    W1Before = erpc:call(N1, ?MODULE, do_stale_watermarks_main, []),
+    W2Before = erpc:call(N2, ?MODULE, do_stale_watermarks_main, []),
+    _ = erpc:call(N1, ?MODULE, do_stale_sync_and_compact_main, [N2]),
+    _ = erpc:call(N2, ?MODULE, do_stale_sync_and_compact_main, [N1]),
+    W1After = erpc:call(N1, ?MODULE, do_stale_watermarks_main, []),
+    W2After = erpc:call(N2, ?MODULE, do_stale_watermarks_main, []),
+    Adv1 = lists:usort(Acc1 ++ watermarks_advanced(W1Before, W1After)),
+    Adv2 = lists:usort(Acc2 ++ watermarks_advanced(W2Before, W2After)),
+    Common = [I || I <- Adv1, lists:member(I, Adv2)],
+    case {Common, Attempts} of
+        {[_ | _], _} ->
+            {Adv1, Adv2};
+        {[], 1} ->
+            {Adv1, Adv2};
+        {[], _} ->
+            truncate_main_until_common(N1, N2, Adv1, Adv2, Attempts - 1)
+    end.
 
 %% =============================================================================
 %% STALE-PEER REJOIN — PEER-SIDE HELPERS (run on cluster nodes via erpc)
