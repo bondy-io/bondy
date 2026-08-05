@@ -1127,12 +1127,20 @@ Status legend: `[ ]` open · `[~]` in progress · `[x]` done.
       retry; `cell_apply` counts `seq_fill` in origin_seqs (frontier/hold/
       detector) & every fold skips it. New metric seqs_filled_total +
       Grafana stat/series; docs updated. EUnit incl. cross-sync hold test.
-- [ ] Found-not-fixed: partisan_source_excludes_self eunit isolation flake.
-- [ ] Found-not-fixed: `truncated_prefix_is_held_and_repaired_by_rebootstrap`
-      flaked once in a full-suite run 2026-08-05 (assertion (b): late keys
-      all readable while holds recorded — gap likely filled between hold and
-      probe; zero seq_fill/seq_burned activity in the run, so NOT a backfill
-      interaction). Passed on isolated re-run and in all prior runs.
+- [x] FIXED partisan_source_excludes_self isolation flake 2026-08-05:
+      `bondy_oplog_transport_partisan_test` peers joined local Partisan
+      membership but `peer:stop/1` left the dead nodes in the set; cleanup
+      now sweeps non-self members via `partisan_peer_service:leave/1`
+      (specs from manager `members_for_orchestration/0`). Full oplog dir
+      1187/0 — first fully green run.
+- [x] FIXED `truncated_prefix_is_held_and_repaired_by_rebootstrap` flake
+      2026-08-05: root cause = ASYMMETRIC truncation (step 4 asserted only
+      >=1 instance advanced per node; disjoint sets let the second rejoin
+      round fill every held gap on late-key instances -> assertion (b)
+      failed despite correct holding). Fix: `truncate_main_until_common/5`
+      loops fused sync+compact until a common truncated instance exists
+      (13/13 common in validation), plus an honest skip branch when holds
+      all legitimately released. Both prefix CT cases green.
 - [ ] NOTE: a leftover `make node1`-style daemon makes bondy CT suites fail
       init_per_suite with eaddrinuse (and may perturb eunit under load —
       one unreproducible 10-failure bondy_db run). Stop local nodes before
