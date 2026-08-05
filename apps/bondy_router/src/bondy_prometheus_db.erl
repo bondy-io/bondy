@@ -252,6 +252,10 @@ events() ->
         [bondy_oplog, sync_scheduler, rebootstrap_scheduled],
         [bondy_oplog, instance, integrate_doored],
         [bondy_oplog, instance, mst_rebuilt],
+        %% Per-origin prefix closure (db.aae.prefix_hold)
+        [bondy_oplog, applier, prefix_hole],
+        [bondy_oplog, applier, events_held],
+        [bondy_oplog, instance, seq_burned],
         [bondy_oplog, sync, catalogue_bootstrap, ok],
         [bondy_oplog, sync, catalogue_bootstrap, error],
         [bondy_oplog, sync, catalogue_bootstrap, complete],
@@ -413,6 +417,29 @@ declare_metrics() ->
             "accepted by the watermark door instead of discarded: folded "
             "into the projection inline (fused) or held for the applier's "
             "replay.", [instance_id, action]},
+        {bondy_oplog_prefix_holes_total,
+            "Per-origin contiguity gaps that MATERIALISED into a projection "
+            "fold (an origin's later seq applied while earlier seqs are "
+            "absent). With db.aae.prefix_hold on (default) this should only "
+            "count own-origin transients from concurrent local WAL commit "
+            "reordering; any sustained rate, or any rate at all on a "
+            "rejoining node, deserves a look. Exclude own-origin firings "
+            "before alerting.", [instance_id]},
+        {bondy_oplog_events_held_total,
+            "Remote-origin events a replay excluded from the fold to "
+            "preserve per-origin prefix closure (db.aae.prefix_hold). Held "
+            "events re-present each replay until the gap fills or a "
+            "catalogue rebootstrap repairs it - a burst during a stale-peer "
+            "rejoin is the mechanism working; a sustained rate on a healthy "
+            "cluster is a stuck gap (check seq burns and the rebootstrap "
+            "chain).", [instance_id]},
+        {bondy_oplog_seqs_burned_total,
+            "Per-origin sequence numbers permanently lost to a rejected WAL "
+            "batch whose seq range was overtaken by a concurrent "
+            "reservation before it could be returned "
+            "(release_seq_range/3). Each burned seq is a gap no replica "
+            "will ever fill by sync: under db.aae.prefix_hold it converts "
+            "into a catalogue rebootstrap on peers.", [instance_id]},
         {bondy_oplog_bootstrap_sessions_total, "Catalogue bootstrap sessions.",
             [instance_id, peer, outcome]},
         {bondy_oplog_bootstrap_cells_total,
@@ -849,6 +876,24 @@ do_handle_event([bondy_oplog, instance, integrate_doored], Meas, Meta) ->
     counter(
         bondy_oplog_doored_events_total,
         [instance_id(Meta), maps:get(action, Meta, undefined)],
+        max(1, num(count, Meas))
+    );
+do_handle_event([bondy_oplog, applier, prefix_hole], Meas, Meta) ->
+    counter(
+        bondy_oplog_prefix_holes_total,
+        [instance_id(Meta)],
+        max(1, num(missing, Meas))
+    );
+do_handle_event([bondy_oplog, applier, events_held], Meas, Meta) ->
+    counter(
+        bondy_oplog_events_held_total,
+        [instance_id(Meta)],
+        max(1, num(count, Meas))
+    );
+do_handle_event([bondy_oplog, instance, seq_burned], Meas, Meta) ->
+    counter(
+        bondy_oplog_seqs_burned_total,
+        [instance_id(Meta)],
         max(1, num(count, Meas))
     );
 do_handle_event([bondy_oplog, scheduler, sync, tick], _Meas, _Meta) ->

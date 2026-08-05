@@ -2574,10 +2574,16 @@ do_apply_replayed_pairs(
 do_apply_replayed_pairs(
     #state{cell_apply_source = Source, instance_id = Id} = State, Pairs, NewRoot
 ) ->
-    _ = bondy_oplog_cell_apply:apply_cell_pairs_mux(
-        Source, Id, Pairs, bondy_oplog_registry:origin(Id)
+    {_Count, Held} = bondy_oplog_cell_apply:apply_cell_pairs_mux(
+        Source, Id, Pairs, bondy_oplog_registry:origin(Id),
+        #{hold => true}
     ),
-    State#state{last_replayed_root = NewRoot}.
+    %% Prefix-closure hold: keep the cursor when events were held so the
+    %% next replay re-presents them (see `do_replay_cell_events_r/1`).
+    case Held of
+        0 -> State#state{last_replayed_root = NewRoot};
+        _ -> State
+    end.
 
 %% @private
 %% Write half of the async compaction catch-up (`catch_up_apply/3`).
@@ -2590,6 +2596,11 @@ do_catch_up_apply(#state{cell_apply_ctx = undefined} = State, _Pairs) ->
 do_catch_up_apply(
     #state{cell_apply_source = Source, instance_id = Id} = State, Pairs
 ) ->
+    %% Deliberately the non-holding mux: these pairs are about to be
+    %% TRUNCATED out of the MST, and the instance re-anchors the cursor
+    %% on the truncated root — a held event here would never be
+    %% re-presented, turning the hold into a silent drop. The contiguity
+    %% detector still measures any gap that folds through.
     _ = bondy_oplog_cell_apply:apply_cell_pairs_mux(
         Source, Id, Pairs, bondy_oplog_registry:origin(Id)
     ),
@@ -2735,13 +2746,15 @@ do_replay_cell_events_r(
             ),
             {ok, State};
         {ok, {CurrentRoot, Pairs}} ->
-            Count = bondy_oplog_cell_apply:apply_cell_pairs_mux(
-                Source, Id, Pairs, bondy_oplog_registry:origin(Id)
+            {Count, Held} = bondy_oplog_cell_apply:apply_cell_pairs_mux(
+                Source, Id, Pairs, bondy_oplog_registry:origin(Id),
+                #{hold => true}
             ),
             ?LOG_DEBUG(#{
                 description => "replay_cell_events done",
                 instance_id => Id,
                 cells_applied => Count,
+                events_held => Held,
                 incremental => LastRoot =/= undefined
             }),
             telemetry:execute(
@@ -2753,7 +2766,14 @@ do_replay_cell_events_r(
                     incremental => LastRoot =/= undefined
                 }
             ),
-            {ok, State#state{last_replayed_root = CurrentRoot}}
+            %% Prefix-closure hold: a diff with held events must keep the
+            %% replay cursor — re-diffing from the old root re-presents
+            %% them (idempotent re-fold) until the gap fills or a
+            %% rebootstrap re-anchors the cursor.
+            case Held of
+                0 -> {ok, State#state{last_replayed_root = CurrentRoot}};
+                _ -> {ok, State}
+            end
     catch
         exit:Reason ->
             %% Instance unavailable (e.g. mid-restart) — leave the replay root

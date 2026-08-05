@@ -48,8 +48,12 @@ CONSTANTS
     Replicas,          \* set of replica ids, also used as origin ids
     MaxSeq,            \* how many events each origin may mint
     GapCheckEnabled,   \* TRUE models maybe_frontier_gap/5; FALSE is the differential
-    GatedCompaction    \* TRUE = truncate only what every replica applied
+    GatedCompaction,   \* TRUE = truncate only what every replica applied
                        \* FALSE = mst_retention / recency-filtered frontier
+    PrefixHold         \* TRUE models db.aae.prefix_hold (the increment-2 fix):
+                       \* a sync applies only the per-origin CONTIGUOUS closure
+                       \* of local-applied + peer-tree; the held remainder stays
+                       \* in the (fully merged) tree and out of the frontier
 
 Origins == Replicas
 
@@ -58,6 +62,14 @@ Event == [org : Origins, seq : 1..MaxSeq]
 Ev(o, s) == [org |-> o, seq |-> s]
 
 Max2(a, b) == IF a > b THEN a ELSE b
+
+\* The per-origin contiguous-from-1 closure of an event set: keep an event
+\* iff every earlier seq of its origin is also in the set. This is what the
+\* prefix-hold fold materialises (bondy_oplog_cell_apply:partition_contiguous
+\* keeps seqs at-or-below the applied VV plus the contiguous run above it;
+\* over applied \cup tree that composes to exactly this closure, because
+\* applied is inductively prefix-closed under the hold).
+ContigClosure(S) == {e \in S : \A i \in 1..e.seq : Ev(e.org, i) \in S}
 
 \* Highest seq of origin o present in S (0 if none). NOT a claim that
 \* everything below it is present -- that is exactly what we are checking.
@@ -136,7 +148,8 @@ SyncComplete(r, p) ==
     /\ ~gapFlag[r]
     /\ booted[r]
     /\ booted[p]
-    /\ LET newApplied == applied[r] \cup tree[p]
+    /\ LET union      == applied[r] \cup tree[p]
+           newApplied == IF PrefixHold THEN ContigClosure(union) ELSE union
            base == [o \in Origins |-> Max2(claim[r][o], MaxSeqOf(newApplied, o))]
            gap  == \E o \in Origins : claim[p][o] > base[o]
        IN /\ applied' = [applied EXCEPT ![r] = newApplied]
@@ -168,9 +181,20 @@ Compact(r) ==
 Rebootstrap(r) ==
     /\ gapFlag[r]
     /\ \E p \in Replicas \ {r} :
-         /\ applied' = [applied EXCEPT ![r] = applied[p]]
-         /\ tree'    = [tree    EXCEPT ![r] = tree[p]]
-         /\ claim'   = [claim   EXCEPT ![r] = claim[p]]
+         \* The catalogue install supplies the peer's data and frontier;
+         \* the replica's OWN events survive in its local WAL and are
+         \* re-delivered by the drain/rederive after any clobber, so the
+         \* model must retain them — dropping them manufactured a spurious
+         \* own-origin non-contiguity (a later Mint atop a forgotten own
+         \* prefix) that no real replica exhibits.
+         /\ applied' = [applied EXCEPT
+                          ![r] = applied[p] \cup {e \in applied[r] : e.org = r}]
+         /\ tree'    = [tree    EXCEPT
+                          ![r] = tree[p] \cup {e \in tree[r] : e.org = r}]
+         /\ claim'   = [claim   EXCEPT
+                          ![r] = [o \in Origins |->
+                                    IF o = r THEN Max2(claim[p][o], claim[r][o])
+                                    ELSE claim[p][o]]]
     /\ gapFlag' = [gapFlag EXCEPT ![r] = FALSE]
     /\ UNCHANGED <<minted, booted>>
 

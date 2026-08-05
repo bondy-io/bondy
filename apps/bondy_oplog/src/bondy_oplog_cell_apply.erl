@@ -84,6 +84,7 @@ behaviour is byte-identical.
 -export([apply_cell_batch_mux/3]).
 -export([apply_cell_pairs/4]).
 -export([apply_cell_pairs_mux/4]).
+-export([apply_cell_pairs_mux/5]).
 -export([build_source/2]).
 -export([compute_one_cell/13]).
 -export([oldstate_cache_new/2]).
@@ -837,24 +838,7 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
 %% As `batch_frontier/1`, for the local/append path (`apply_cell_batch/3`), whose
 %% input is a list of `bondy_oplog_event:t()` rather than `{MstKey, _}` pairs.
 batch_frontier_events(Events) ->
-    lists:foldl(
-        fun(Event, Acc) ->
-            case bondy_oplog_event:op(Event) of
-                {cell_apply, _B, _K, _F} ->
-                    Key = bondy_oplog_event:key(Event),
-                    Origin = bondy_oplog_event:key_origin(Key),
-                    Seq = bondy_oplog_event:key_seq(Key),
-                    case Acc of
-                        #{Origin := Cur} when Cur >= Seq -> Acc;
-                        _ -> Acc#{Origin => Seq}
-                    end;
-                _ ->
-                    Acc
-            end
-        end,
-        #{},
-        Events
-    ).
+    frontier_of(origin_seqs(Events, fun event_cell_key/1)).
 
 %% @private
 %% Per-origin max-Seq over the cell_apply events in a replay batch — the
@@ -863,21 +847,123 @@ batch_frontier_events(Events) ->
 %% older than the cell's current state, so that origin's frontier is already at a
 %% higher seq, making the unconditional `max` correct.
 batch_frontier(Pairs) ->
+    frontier_of(origin_seqs(Pairs, fun pair_cell_key/1)).
+
+%% @private
+%% Per-origin seq lists (unsorted) over a batch's `cell_apply` events —
+%% the shared core of `batch_frontier/1`/`batch_frontier_events/1` and
+%% `detect_prefix_holes/2`. `KeyF` extracts the event key from one batch
+%% element, or `undefined` for non-cell_apply elements.
+origin_seqs(Items, KeyF) ->
     lists:foldl(
-        fun
-            ({MstKey, {{cell_apply, _B, _K, _F}, _Meta, _Prev, _Sig}}, Acc) ->
-                Origin = bondy_oplog_event:key_origin(MstKey),
-                Seq = bondy_oplog_event:key_seq(MstKey),
-                case Acc of
-                    #{Origin := Cur} when Cur >= Seq -> Acc;
-                    _ -> Acc#{Origin => Seq}
-                end;
-            (_, Acc) ->
-                Acc
+        fun(Item, Acc) ->
+            case KeyF(Item) of
+                undefined ->
+                    Acc;
+                Key ->
+                    Origin = bondy_oplog_event:key_origin(Key),
+                    Seq = bondy_oplog_event:key_seq(Key),
+                    maps:update_with(
+                        Origin, fun(Seqs) -> [Seq | Seqs] end, [Seq], Acc
+                    )
+            end
         end,
         #{},
-        Pairs
+        Items
     ).
+
+%% @private
+pair_cell_key({MstKey, {{cell_apply, _B, _K, _F}, _Meta, _Prev, _Sig}}) ->
+    MstKey;
+pair_cell_key(_) ->
+    undefined.
+
+%% @private
+event_cell_key(Event) ->
+    case bondy_oplog_event:op(Event) of
+        {cell_apply, _B, _K, _F} -> bondy_oplog_event:key(Event);
+        _ -> undefined
+    end.
+
+%% @private
+frontier_of(OriginSeqs) ->
+    maps:map(fun(_Origin, Seqs) -> lists:max(Seqs) end, OriginSeqs).
+
+%% @private
+%% CONTIGUITY DETECTOR — telemetry only, never changes behaviour.
+%%
+%% The applied-frontier VV is a per-origin max, not a prefix witness
+%% (see the watermark-door note in `bondy_oplog_instance`), and the
+%% compact observed-remove test `Ctx[O] >= S`
+%% (`bondy_oplog_crdt_aw_core:dot_observed/2`) is exact only when each
+%% origin's events reach a projection in per-origin contiguous order.
+%% Nothing enforces that today: a page-sync merge can fold an origin's
+%% later seq while an earlier one is absent (truncated at every live
+%% peer before this replica ever pulled it), silently max-merging the
+%% frontier past the hole. This detector makes that moment observable:
+%% called at the mux front-ends — the whole batch, BEFORE any per-group
+%% frontier merge, so a bucket split cannot fake a gap — it compares
+%% the batch's per-origin seqs against the pre-batch frontier and
+%% reports every gap.
+%%
+%% A firing is a fact about fold-time contiguity, not always data loss:
+%% a concurrent local fast-path append that commits to the WAL out of
+%% seq order, or a seq burned by a failed WAL append (see
+%% `release_seq_range` in `bondy_oplog_instance`), also present as
+%% gaps. The point of the telemetry is to measure exactly that mix in
+%% the field before any enforcement is attempted.
+detect_prefix_holes(_Id, OriginSeqs) when map_size(OriginSeqs) =:= 0 ->
+    ok;
+detect_prefix_holes(Id, OriginSeqs) ->
+    VV = bondy_oplog_registry:frontier(Id),
+    maps:foreach(
+        fun(Origin, Seqs) ->
+            Cur = maps:get(Origin, VV, 0),
+            News = lists:usort([S || S <- Seqs, S > Cur]),
+            case seq_gaps(Cur, News) of
+                [] ->
+                    ok;
+                Gaps ->
+                    Missing = lists:sum([To - From + 1 || {From, To} <- Gaps]),
+                    telemetry:execute(
+                        [bondy_oplog, applier, prefix_hole],
+                        #{count => 1, missing => Missing},
+                        #{
+                            instance_id => Id,
+                            origin => Origin,
+                            applied_seq => Cur,
+                            gaps => Gaps
+                        }
+                    ),
+                    ?LOG_WARNING(#{
+                        description =>
+                            "Per-origin contiguity gap at the cell-apply "
+                            "fold: this batch materialises an origin's "
+                            "later seq while earlier seq(s) are neither "
+                            "applied here nor in the batch. If the gap is "
+                            "history truncated at every live peer this is "
+                            "a prefix hole the applied frontier will "
+                            "silently max-merge past.",
+                        instance_id => Id,
+                        origin => Origin,
+                        applied_seq => Cur,
+                        gaps => Gaps,
+                        missing => Missing
+                    })
+            end
+        end,
+        OriginSeqs
+    ).
+
+%% @private
+%% Gaps in a sorted seq list relative to `Prev` (exclusive): each
+%% `{From, To}` is a maximal run of absent seqs.
+seq_gaps(_Prev, []) ->
+    [];
+seq_gaps(Prev, [S | Rest]) when S =:= Prev + 1 ->
+    seq_gaps(S, Rest);
+seq_gaps(Prev, [S | Rest]) ->
+    [{Prev + 1, S - 1} | seq_gaps(S, Rest)].
 
 %% @private
 %% Per-bucket multiplexing front-ends for `apply_cell_batch/3` and
@@ -898,6 +984,7 @@ batch_frontier(Pairs) ->
 apply_cell_batch_mux({single, undefined}, _Id, _Events) ->
     ok;
 apply_cell_batch_mux(Source, Id, Events) ->
+    ok = detect_prefix_holes(Id, origin_seqs(Events, fun event_cell_key/1)),
     lists:foreach(
         fun({Bucket, Group}) ->
             case bondy_oplog_mux:resolve(Source, Bucket) of
@@ -914,10 +1001,43 @@ apply_cell_batch_mux(Source, Id, Events) ->
 %% @private
 %% As `apply_cell_batch_mux/3`, for the replay/merge path; returns the total
 %% number of cells applied across all bucket groups.
-apply_cell_pairs_mux({single, undefined}, _Id, _Pairs, _LocalOrigin) ->
-    0;
 apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin) ->
-    lists:foldl(
+    {Count, _Held} =
+        apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin, #{hold => false}),
+    Count.
+
+%% @private
+%% As `apply_cell_pairs_mux/4`, with per-origin prefix-closure
+%% enforcement: when `hold => true` AND `bondy_oplog_config:prefix_hold/0`
+%% is enabled, a remote origin's events beyond its first contiguity gap
+%% are HELD — excluded from the fold and therefore from the
+%% applied-frontier merge (`batch_frontier/1` sees only folded pairs).
+%% Returns `{CellsApplied, HeldCount}`; a caller passing `hold => true`
+%% MUST NOT advance its replay cursor past this diff when `HeldCount > 0`
+%% — the unadvanced cursor is what re-presents the held events on the
+%% next replay (idempotent re-fold), until the gap fills or a catalogue
+%% rebootstrap re-anchors the cursor. Callers with no re-presentation
+%% path (the compaction catch-up, whose input is about to be truncated
+%% out of the MST, and `rederive_projection`, a one-shot full fold) MUST
+%% keep using `apply_cell_pairs_mux/4`: for them a hold is a silent drop.
+%%
+%% Local-origin events are never held: they are delivered in seq order
+%% by the local WAL drain, and holding a replica's own echoes could only
+%% park them behind a burned seq of its own counter.
+apply_cell_pairs_mux({single, undefined}, _Id, _Pairs, _LocalOrigin, _Opts) ->
+    {0, 0};
+apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin, Opts) ->
+    {Foldable, Held} =
+        case maps:get(hold, Opts, false) andalso bondy_oplog_config:prefix_hold() of
+            true -> partition_contiguous(Id, Pairs, LocalOrigin);
+            false -> {Pairs, 0}
+        end,
+    %% Detect on what will actually FOLD, after any hold: `prefix_hole`
+    %% means a contiguity gap MATERIALISED into the projection, while a
+    %% gap that was presented but held is `events_held`. With holding
+    %% off `Foldable =:= Pairs`, so this is the unenforced measurement.
+    ok = detect_prefix_holes(Id, origin_seqs(Foldable, fun pair_cell_key/1)),
+    Count = lists:foldl(
         fun({Bucket, Group}, Acc) ->
             case bondy_oplog_mux:resolve(Source, Bucket) of
                 undefined ->
@@ -928,8 +1048,78 @@ apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin) ->
             end
         end,
         0,
-        bondy_oplog_mux:group_by(Pairs, fun pair_bucket/1)
-    ).
+        bondy_oplog_mux:group_by(Foldable, fun pair_bucket/1)
+    ),
+    {Count, Held}.
+
+%% @private
+%% Splits a replay batch into the pairs the fold may materialise and the
+%% count it must hold. Per remote origin, foldable seqs are everything at
+%% or below the applied frontier (idempotent re-folds) plus the
+%% contiguous run rising from it; the rest of that origin's seqs — and
+%% every pair carrying them — are held. Non-cell_apply pairs and
+%% local-origin pairs always fold.
+partition_contiguous(Id, Pairs, LocalOrigin) ->
+    VV = bondy_oplog_registry:frontier(Id),
+    OriginSeqs = maps:remove(
+        LocalOrigin, origin_seqs(Pairs, fun pair_cell_key/1)
+    ),
+    HeldSeqs = maps:filtermap(
+        fun(Origin, Seqs) ->
+            Cur = maps:get(Origin, VV, 0),
+            News = lists:usort([S || S <- Seqs, S > Cur]),
+            Run = contiguous_run(Cur, News),
+            case News -- Run of
+                [] -> false;
+                Rest -> {true, Rest}
+            end
+        end,
+        OriginSeqs
+    ),
+    case map_size(HeldSeqs) of
+        0 ->
+            {Pairs, 0};
+        _ ->
+            {Foldable, Held} = lists:partition(
+                fun(Pair) ->
+                    case pair_cell_key(Pair) of
+                        undefined ->
+                            true;
+                        Key ->
+                            Origin = bondy_oplog_event:key_origin(Key),
+                            Seq = bondy_oplog_event:key_seq(Key),
+                            not lists:member(
+                                Seq, maps:get(Origin, HeldSeqs, [])
+                            )
+                    end
+                end,
+                Pairs
+            ),
+            telemetry:execute(
+                [bondy_oplog, applier, events_held],
+                #{count => length(Held)},
+                #{instance_id => Id, held => HeldSeqs}
+            ),
+            ?LOG_INFO(#{
+                description =>
+                    "Prefix-closure hold: this replay batch carries "
+                    "remote-origin events beyond a per-origin contiguity "
+                    "gap; they are excluded from the fold and the "
+                    "applied-frontier merge, and the caller keeps its "
+                    "replay cursor so they re-present until the gap "
+                    "fills or a rebootstrap repairs it.",
+                instance_id => Id,
+                held => HeldSeqs
+            }),
+            {Foldable, length(Held)}
+    end.
+
+%% @private
+%% The longest prefix of sorted `Seqs` contiguous with `Prev`.
+contiguous_run(Prev, [S | Rest]) when S =:= Prev + 1 ->
+    [S | contiguous_run(S, Rest)];
+contiguous_run(_Prev, _Seqs) ->
+    [].
 
 -doc """
 Build the initial `ctx_source()` for the cell-apply mux. A `cell_apply_bucket`

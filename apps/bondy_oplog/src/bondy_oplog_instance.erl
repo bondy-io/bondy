@@ -758,9 +758,10 @@ do_append_fast(InstanceId, FastPath, Op, Meta) ->
                         {error, _} = Err ->
                             %% WAL rejected the batch — drop the
                             %% staged row so no phantom write is
-                            %% observable.
-                            ets:delete(Tab, Key),
-                            overlay_counters_sub(Ctrs, 1),
+                            %% observable, and return the seq so the
+                            %% origin's sequence stays gap-free.
+                            ok = unstage_overlay_rows(Tab, Ctrs, [Event]),
+                            ok = release_seq_range(SeqRef, InstanceId, [Key]),
                             Err
                     end
             end;
@@ -779,9 +780,15 @@ and bumps the overlay-counters atomics once.
 The WAL's `append_batch/2` is all-or-nothing: either every event
 becomes durable or the entire batch is rejected. The fast path
 inherits that semantic — on `{error, _}` no overlay row is written
-and the caller can retry. HLCs and Seqs that were minted for a
-rejected batch are not recycled; gaps in those sequences are
-benign (the keys are global identifiers, not array indices).
+and the caller can retry. The rejected batch's seq range is returned
+to the counter when it is still the topmost reservation
+(`release_seq_range/3`), keeping each origin's sequence gap-free —
+per-origin contiguity is what makes a max-Seq frontier readable as
+an applied prefix and what the cell-apply contiguity detector
+(`bondy_oplog_cell_apply`) measures. A range overtaken by a
+concurrent reservation cannot be returned and is counted by the
+`[bondy_oplog, instance, seq_burned]` telemetry event. HLCs are
+never recycled.
 
 Returns the assigned `event_key()` list in input order, or
 `{error, backpressure | working_set_full | wal_unavailable | _}`.
@@ -828,7 +835,9 @@ do_append_many_fast(InstanceId, FastPath, Items) ->
         fast_admit(InstanceId, Ctrs, MaxEvents, MaxBytes, MaxWorkingSet, Delta)
     of
         ok ->
-            {Events, Keys} = build_events_fast(
+            %% Stateless validator by fast-path contract: discard the
+            %% returned validator state.
+            {Events, Keys, _} = do_build_events(
                 HLC, SeqRef, Origin, ValidatorMod, ValidatorState, Items
             ),
             %% Resolve the overlay tid up-front; the rare `undefined`
@@ -852,17 +861,11 @@ do_append_many_fast(InstanceId, FastPath, Items) ->
                             ),
                             Keys;
                         {error, _} = Err ->
-                            %% Roll back the staged rows.
-                            lists:foreach(
-                                fun(E) ->
-                                    ets:delete(
-                                        Tab,
-                                        bondy_oplog_event:key(E)
-                                    )
-                                end,
-                                Events
-                            ),
-                            overlay_counters_sub(Ctrs, length(Events)),
+                            %% Roll back the staged rows and return the
+                            %% seq range so the origin's sequence stays
+                            %% gap-free.
+                            ok = unstage_overlay_rows(Tab, Ctrs, Events),
+                            ok = release_seq_range(SeqRef, InstanceId, Keys),
                             Err
                     end
             end;
@@ -871,7 +874,9 @@ do_append_many_fast(InstanceId, FastPath, Items) ->
     end.
 
 %% @private
-%% Mints `{Event, Key}` pairs for every item.
+%% Mints signed events for every item — the single minting core behind
+%% both the lock-free caller-side paths and the gen_server's
+%% `build_events/2`.
 %%
 %% - One HLC tick per item: the WAL's `do_append_batch/2` rejects
 %%   a batch whose HLCs are not strictly increasing (so receivers
@@ -880,27 +885,59 @@ do_append_many_fast(InstanceId, FastPath, Items) ->
 %%   guarantees strict monotonicity at the per-replica level.
 %% - **One** `atomics:add_get/3` to reserve a contiguous seq range,
 %%   then assign each event `Start+i`. N - 1 fewer atomic
-%%   read-modify-writes on the shared seq atomics per batch.
+%%   read-modify-writes on the shared seq atomics per batch — and,
+%%   as importantly, no concurrent minter can land INSIDE the batch's
+%%   range, which is what makes `release_seq_range/3` safe to call
+%%   when the WAL rejects the batch.
 %%
-%% The validator state is immutable (stateless validators by
-%% contract), so we pass the same `ValState` for every call and
-%% discard the returned state.
-build_events_fast(HLC, SeqRef, Origin, Mod, ValState, Items) ->
+%% Threads the validator state and returns it; stateless validators
+%% (the fast-path eligibility contract) return it unchanged and the
+%% fast paths discard it.
+do_build_events(HLC, SeqRef, Origin, Mod, VS0, Items) ->
     N = length(Items),
     EndSeq = atomics:add_get(SeqRef, 1, N),
     StartSeq = EndSeq - N + 1,
-    {EventsRev, KeysRev, _} = lists:foldl(
-        fun({Op, Meta}, {EvAcc, KAcc, Seq}) ->
+    {EventsRev, KeysRev, _, VS} = lists:foldl(
+        fun({Op, Meta}, {EvAcc, KAcc, Seq, VSAcc0}) ->
             Hlc = bondy_oplog_hlc:now(HLC),
             Key = bondy_oplog_event:key(Hlc, Origin, Seq),
             Event0 = bondy_oplog_event:new(Key, Op, Meta),
-            {Event, _} = Mod:sign_event(Event0, ValState),
-            {[Event | EvAcc], [Key | KAcc], Seq + 1}
+            {Event, VSAcc} = Mod:sign_event(Event0, VSAcc0),
+            {[Event | EvAcc], [Key | KAcc], Seq + 1, VSAcc}
         end,
-        {[], [], StartSeq},
+        {[], [], StartSeq, VS0},
         Items
     ),
-    {lists:reverse(EventsRev), lists:reverse(KeysRev)}.
+    {lists:reverse(EventsRev), lists:reverse(KeysRev), VS}.
+
+%% @private
+%% Returns a rejected batch's seq range `[Start, End]` to the counter,
+%% keeping the origin's sequence gap-free. Safe exactly when the range
+%% is still the TOPMOST reservation (counter =:= End): the range was
+%% reserved in one `atomics:add_get/3`, so no foreign seq can sit
+%% inside it, and the CAS fails whenever a concurrent minter has
+%% reserved on top — in which case the range is permanently burned
+%% (a hole no replica will ever hold) and is counted via telemetry so
+%% the field rate of residual burns is measurable. Burn direction is
+%% benign for correctness today; it matters to the cell-apply
+%% contiguity detector and to any future per-origin contiguity gate,
+%% which must treat burned seqs as expected gaps.
+release_seq_range(_SeqRef, _InstanceId, []) ->
+    ok;
+release_seq_range(SeqRef, InstanceId, [First | _] = Keys) ->
+    Start = bondy_oplog_event:key_seq(First),
+    End = bondy_oplog_event:key_seq(lists:last(Keys)),
+    case atomics:compare_exchange(SeqRef, 1, End, Start - 1) of
+        ok ->
+            ok;
+        _Overtaken ->
+            telemetry:execute(
+                [bondy_oplog, instance, seq_burned],
+                #{count => End - Start + 1},
+                #{instance_id => InstanceId}
+            ),
+            ok
+    end.
 
 %% @private
 %% Lock-free analogue of `admit/2` for the fast path. The atomics
@@ -986,15 +1023,23 @@ fast_wal_append_batch_disk(InstanceId, Events) ->
         undefined ->
             {error, wal_unavailable};
         WalPid ->
-            try bondy_oplog_wal:append_batch(WalPid, Events) of
-                {ok, _Entries} -> ok;
-                {error, _} = Err -> Err
-            catch
-                exit:{noproc, _} -> {error, wal_unavailable};
-                exit:noproc -> {error, wal_unavailable};
-                exit:{normal, _} -> {error, wal_unavailable};
-                exit:{shutdown, _} -> {error, wal_unavailable}
-            end
+            wal_append_batch(WalPid, Events)
+    end.
+
+%% @private
+%% One disk-WAL batch append with the writer-death exits normalised to
+%% `{error, wal_unavailable}` — shared by the caller-side fast path
+%% (registry-resolved pid) and the gen_server's `do_append_local/3`
+%% (cached, monitored pid).
+wal_append_batch(WalPid, Events) ->
+    try bondy_oplog_wal:append_batch(WalPid, Events) of
+        {ok, _Entries} -> ok;
+        {error, _} = Err -> Err
+    catch
+        exit:{noproc, _} -> {error, wal_unavailable};
+        exit:noproc -> {error, wal_unavailable};
+        exit:{normal, _} -> {error, wal_unavailable};
+        exit:{shutdown, _} -> {error, wal_unavailable}
     end.
 
 ?DOC("""
@@ -3410,6 +3455,9 @@ do_handle_call(
             undefined -> [];
             _ -> bondy_mst:to_list(MST)
         end,
+    %% Deliberately the non-holding mux: this is a one-shot full fold
+    %% with no replay cursor to re-present a held event — a hold here
+    %% would leave the projection missing it with nothing to retry.
     Count = bondy_oplog_cell_apply:apply_cell_pairs_mux(
         Source, Id, Pairs, bondy_oplog_registry:origin(Id)
     ),
@@ -4225,16 +4273,26 @@ fused_replay_cell_events(
             State;
         _ ->
             Pairs = bondy_oplog_applier:diff_pairs(MST, LastRoot, Id),
-            _ = bondy_oplog_cell_apply:apply_cell_pairs_mux(
-                FD#fused_drain.cell_apply_source, Id, Pairs, Origin
+            {_Count, Held} = bondy_oplog_cell_apply:apply_cell_pairs_mux(
+                FD#fused_drain.cell_apply_source, Id, Pairs, Origin,
+                #{hold => true}
             ),
             %% Reads of a peer-authored value just became answerable — bump
             %% the AE-freshness shards so a secondary-index read does not
             %% refuse as stale.
             ok = fused_bump_ae_targets(FD#fused_drain.ae_targets),
-            State#state{
-                fused_drain = FD#fused_drain{last_replayed_root = CurrentRoot}
-            }
+            %% Prefix-closure hold: keep the cursor when events were held
+            %% so the next replay re-presents them (idempotent re-fold);
+            %% see `bondy_oplog_cell_apply:apply_cell_pairs_mux/5`.
+            case Held of
+                0 ->
+                    State#state{
+                        fused_drain =
+                            FD#fused_drain{last_replayed_root = CurrentRoot}
+                    };
+                _ ->
+                    State
+            end
     end.
 
 %% @private
@@ -4633,7 +4691,13 @@ door_fold(
     },
     Pairs
 ) when Ctx =/= undefined ->
-    _ = catch bondy_oplog_cell_apply:apply_cell_pairs_mux(S, Id, Pairs, Origin),
+    %% The holding mux is safe here: a pair the hold excludes stays
+    %% never-applied below the watermark, so the caller's VV re-check
+    %% keeps it doored — exactly this function's stated degrade path —
+    %% and the fused replay re-presents it once the gap fills.
+    _ = catch bondy_oplog_cell_apply:apply_cell_pairs_mux(
+        S, Id, Pairs, Origin, #{hold => true}
+    ),
     ok;
 door_fold(#state{}, _Pairs) ->
     ok.
@@ -4807,8 +4871,8 @@ do_append_local(#state{} = State0, WalPid, Items) ->
     %% inflates `size/1`. Staging first guarantees the row is
     %% visible the moment the WAL entry is.
     State2 = stage_to_overlay(State1, Events),
-    try bondy_oplog_wal:append_batch(WalPid, Events) of
-        {ok, _Entries} ->
+    case wal_append_batch(WalPid, Events) of
+        ok ->
             telemetry:execute(
                 [bondy_oplog, instance, append],
                 #{count => length(Events)},
@@ -4816,33 +4880,30 @@ do_append_local(#state{} = State0, WalPid, Items) ->
             ),
             {ok, Keys, State2};
         {error, _} = E ->
-            %% WAL rejected the batch — roll back the overlay rows
-            %% so they cannot be served as a phantom write.
+            %% WAL rejected the batch — roll back the overlay rows so
+            %% they cannot be served as a phantom write, and return
+            %% the seq range so the origin's sequence stays gap-free.
             ok = unstage_overlay(State2, Events),
+            ok = release_seq_range(
+                State2#state.seq, State2#state.instance_id, Keys
+            ),
             E
-    catch
-        exit:{noproc, _} ->
-            ok = unstage_overlay(State2, Events),
-            {error, wal_unavailable};
-        exit:noproc ->
-            ok = unstage_overlay(State2, Events),
-            {error, wal_unavailable};
-        exit:{normal, _} ->
-            ok = unstage_overlay(State2, Events),
-            {error, wal_unavailable};
-        exit:{shutdown, _} ->
-            ok = unstage_overlay(State2, Events),
-            {error, wal_unavailable}
     end.
 
 %% @private
 %% Undo the effect of `stage_to_overlay/2` for a batch whose WAL
-%% append did not succeed. Deletes every overlay row by key and
-%% decrements the shared counters by the same amount they were
-%% bumped — keeping the counters and the table in lockstep.
+%% append did not succeed.
 unstage_overlay(#state{overlay = undefined}, _Events) ->
     ok;
 unstage_overlay(#state{overlay = Tab, overlay_counters = Ctrs}, Events) ->
+    unstage_overlay_rows(Tab, Ctrs, Events).
+
+%% @private
+%% Deletes every staged overlay row by key and decrements the shared
+%% counters by the same amount they were bumped — keeping the counters
+%% and the table in lockstep. Shared by the gen_server rollback above
+%% and the caller-side fast paths.
+unstage_overlay_rows(Tab, Ctrs, Events) ->
     lists:foreach(
         fun(E) -> ets:delete(Tab, bondy_oplog_event:key(E)) end,
         Events
@@ -4906,24 +4967,20 @@ overlay_row(Event, Origin) ->
 %% @private
 %% Allocates a fresh `{HLC, Origin, Seq}` for each item, signs the
 %% event via the configured validator, and threads the validator state
-%% forward. Returns `{Events, Keys, NewState}`.
+%% forward. Returns `{Events, Keys, NewState}`. Thin state wrapper over
+%% `do_build_events/6` — the same minting core (and the same
+%% single-range seq reservation, which is what makes the WAL-failure
+%% rollback in `do_append_local/3` safe) as the fast paths.
 build_events(State0, Items) ->
-    {EventsRev, KeysRev, State1} = lists:foldl(
-        fun({Op, Meta}, {EvAcc, KAcc, S0}) ->
-            HLC = bondy_oplog_hlc:now(S0#state.hlc),
-            Seq = atomics:add_get(S0#state.seq, 1, 1),
-            Key = bondy_oplog_event:key(HLC, S0#state.origin, Seq),
-            Event0 = bondy_oplog_event:new(Key, Op, Meta),
-            {Signed, VS1} =
-                (S0#state.validator_module):sign_event(
-                    Event0, S0#state.validator_state
-                ),
-            {[Signed | EvAcc], [Key | KAcc], S0#state{validator_state = VS1}}
-        end,
-        {[], [], State0},
+    {Events, Keys, VS} = do_build_events(
+        State0#state.hlc,
+        State0#state.seq,
+        State0#state.origin,
+        State0#state.validator_module,
+        State0#state.validator_state,
         Items
     ),
-    {lists:reverse(EventsRev), lists:reverse(KeysRev), State1}.
+    {Events, Keys, State0#state{validator_state = VS}}.
 
 %% @private
 %% Sole MST-install path for local-origin events. Driven by the

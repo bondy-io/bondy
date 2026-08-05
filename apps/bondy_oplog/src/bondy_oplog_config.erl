@@ -87,6 +87,7 @@ here.
 
 %% AAE / SYNC SESSION
 -export([aae_fence_on_isolation/0]).
+-export([prefix_hold/0]).
 -export([sync_session_opts/0]).
 -export([aae_max_concurrency/0]).
 -export([set_aae_max_concurrency/1]).
@@ -438,6 +439,37 @@ The AE-fence policy when this node is an isolated, non-solo minority
 
 aae_fence_on_isolation() ->
     application:get_env(?APP, aae_fence_on_isolation, refuse).
+
+-doc """
+Whether the cell-apply replay paths enforce per-origin prefix closure
+(default `true`).
+
+When enabled, a replay/merge fold materialises a remote origin's events
+only up to the first per-origin contiguity gap; the non-contiguous
+remainder is HELD — excluded from the fold and from the applied-frontier
+merge — and the caller's replay cursor is not advanced past the diff, so
+the held events are re-presented on the next replay (idempotent re-fold)
+until the gap fills or a catalogue rebootstrap re-anchors the cursor and
+supplies both the data and the frontier. This closes the window in which
+the compact observed-remove test (`bondy_oplog_crdt_aw_core:dot_observed/2`)
+misjudges a skipped dot as observed, and keeps `merge_frontier/2` from
+max-merging the applied frontier past a hole — which in turn makes the
+sync session's frontier-gap detection deterministic rather than
+incidental. See `bondy_oplog_cell_apply` and `proofs/tla/README.md`.
+
+Enforced by default (CT-proven data-loss window when off; Fly-validated
+at record load with fault injection — s24). The knob is an emergency
+opt-out only: with enforcement off, a replica that integrates a peer's
+truncated history past a gap silently violates the convergence
+preconditions of every observed-remove (add-wins) table. The one cost of
+enforcement is that a permanently-missing seq (a burned range that
+`release_seq_range/3` could not return) converts into a catalogue
+rebootstrap instead of a silent gap.
+""".
+-spec prefix_hold() -> boolean().
+
+prefix_hold() ->
+    application:get_env(?APP, prefix_hold, true).
 
 -doc "Extra options threaded into each sync session (default `#{}`).".
 -spec sync_session_opts() -> map().

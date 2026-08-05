@@ -42,3 +42,5 @@ apps/bondy_cbor/bench/output/*
 /.env
 /etc
 /harness/fleet-scale/out
+/proofs/tla/states
+/harness/fleet-scale/report.py
