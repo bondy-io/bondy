@@ -1,0 +1,17 @@
+(*
+  SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+  SPDX-License-Identifier: Apache-2.0
+*)
+
+session Bondy_Stabilization = HOL +
+  description "
+    Soundness of causal-stabilization reductions in bondy_db: what a scalar
+    HLC containment frontier does and does not license.
+  "
+  options [document = false]
+  theories
+    Oplog_Model
+    Stabilization
+    Aw_Counterexample
+    Hlc
+    Dot_Exactness
