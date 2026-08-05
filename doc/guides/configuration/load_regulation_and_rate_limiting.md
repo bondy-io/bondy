@@ -33,7 +33,7 @@ Start with ingress. Each transport gets its own lane because the gates genuinely
 differ per lane — and the dashed boxes are worth noting early, since they mark
 where nothing regulates anything today.
 
-![Bondy ingress and admission per transport: five lanes — HTTP/HTTPS, WAMP WebSocket, WAMP TCP/TLS, Partisan and Bondy Bridge Relay — each running from client through listener and acceptor pool, connection admission, connection process, session admission and per-session limits.](assets/load_regulation_ingress.svg)
+[![Bondy ingress and admission per transport: five lanes — HTTP/HTTPS, WAMP WebSocket, WAMP TCP/TLS, Partisan and Bondy Bridge Relay — each running from client through listener and acceptor pool, connection admission, connection process, session admission and per-session limits.](assets/load_regulation_ingress.svg)](assets/load_regulation_ingress.svg)
 
 ## Two questions, two mechanisms
 
@@ -189,7 +189,7 @@ differ in what feeds them, what bounds them, and — the part worth knowing befo
 an incident — what each does when it fills. Only the flow pool loses messages
 outright.
 
-![Bondy pools and worker queues: router pool, flow pool, session manager pool, job manager pool and FIFO queues, registry partitions, transport queue and anti-entropy reactor pool, each showing what feeds it, its configuration keys, and its overflow behaviour.](assets/load_regulation_pools.svg)
+[![Bondy pools and worker queues: router pool, flow pool, session manager pool, job manager pool and FIFO queues, registry partitions, transport queue and anti-entropy reactor pool, each showing what feeds it, its configuration keys, and its overflow behaviour.](assets/load_regulation_pools.svg)](assets/load_regulation_pools.svg)
 
 ## Keeping background work subordinate
 
@@ -248,7 +248,7 @@ of it is engaging. It also makes explicit something easy to miss — the node
 monitor and anti-entropy sample the run queue **separately**, in different
 shapes, and neither feeds the other.
 
-![Bondy load regulators and their signals: the node load monitor and its watermarks, a comparison of the two independent run-queue signals, the fail-open principle, the four anti-entropy regulators, outbound and callee-side admission, and the metrics to watch.](assets/load_regulation_signals.svg)
+[![Bondy load regulators and their signals: the node load monitor and its watermarks, a comparison of the two independent run-queue signals, the fail-open principle, the four anti-entropy regulators, outbound and callee-side admission, and the metrics to watch.](assets/load_regulation_signals.svg)](assets/load_regulation_signals.svg)
 
 ## Rate limiting inbound traffic
 
