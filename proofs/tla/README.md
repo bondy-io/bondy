@@ -250,15 +250,23 @@ applied/projection level, as implemented). Results:
 | baseline (hold off, ungated compaction) | violates in 6 steps — unchanged, the regression pin |
 | gated compaction (hold off) | exhaustive clean, 12.9M states — unchanged |
 | **`AaeCausalClosure_Hold.cfg`** (hold ON, ungated compaction — the shipped default) | **exhaustive clean at pairwise scope** (2 replicas; 30,938 states) |
+| `AaeCausalClosure_Hold3.cfg` (same, 3 replicas) | clean; full exhaustion impractical — bounded-exhaustive clean to depth 18 (25.2M distinct states; the unenforced baseline violates at depth 6), plus 800,000 random traces to depth 40 (mean 29), 321M states checked, no violation (seed −3719027508674266878) |
 
 One model-fidelity lesson en route: the first hold run produced a spurious
 `NoOverClaim` violation because the model's `Rebootstrap` discarded the
 replica's OWN minted events — in reality they survive in the local WAL and
 are re-delivered after any clobber. `Rebootstrap` now retains own-origin
 events (commented in the spec). After that fidelity fix the 3-replica hold
-state space exploded past practical bounds, so the hold configuration is
-exhaustive at the pairwise protocol scope (sync, hold, and frontier logic
-are all pairwise).
+state space exploded past practical bounds for full exhaustion, so the hold
+configuration is exhaustive at the pairwise protocol scope (sync, hold, and
+frontier logic are all pairwise). The 3-replica run
+(`AaeCausalClosure_Hold3.cfg`) covers the triangular interleavings two ways,
+both clean: breadth-first to depth 18 before being stopped for machine
+resources (25.2M distinct states — three times the depth at which the
+unenforced baseline violates), and simulation mode
+(`-simulate num=200000 -depth 40`, which TLC multiplies per worker: 800k
+traces, 321M states checked) with all three invariants checked at every
+state.
 
 ### Second iteration — loops until the maxima meet
 
