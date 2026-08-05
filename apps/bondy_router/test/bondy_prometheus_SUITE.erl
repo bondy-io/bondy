@@ -173,7 +173,9 @@ wamp_message_metrics_via_telemetry(_) ->
     M = bondy_wamp_message:call(1, #{}, Proc, [], #{}),
     Ctxt = bondy_context:local_context(<<"com.leapsight.bondy">>),
 
-    ok = bondy_telemetry:wamp_message(M, Ctxt),
+    %% Wire size is caller-provided (from the encode/decode site); the
+    %% sized form is the one that feeds the bytes histogram.
+    ok = bondy_telemetry:wamp_message(M, 128, Ctxt),
 
     %% The sink is inline and wait-free, so the counters are visible
     %% immediately — no polling needed.
