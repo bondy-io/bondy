@@ -20,6 +20,61 @@
 
 -define(N, 300).
 
+%% The abort's evidence must survive the log. A field occurrence is rare and
+%% its log line ages out of the platform's buffer long before anyone looks
+%% (Fly s25: the missing hashes were lost exactly this way), so the report is
+%% retained in-node and recoverable later via `gc_aborts/0`. The
+%% classification is the payload that matters: it names WHICH layer lost the
+%% page, which a bare hash list does not.
+gc_abort_retains_classified_report_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    ok = bondy_mst:forget_gc_aborts(),
+    T0 = new_tree(),
+    T = lists:foldl(
+        fun(K, Acc) -> bondy_mst:put(Acc, K, K) end, T0, lists:seq(1, ?N)
+    ),
+    Tab = page_tab(bondy_mst:root(T)),
+    {Hash, Row} = drop_root_referenced_page(Tab),
+
+    try
+        _ = bondy_mst:gc(T, []),
+
+        [Report | _] = bondy_mst:gc_aborts(),
+        #{
+            name := <<"gc_guard">>,
+            root := Root,
+            missing_count := 1,
+            immediate := Immediate,
+            delayed := Delayed,
+            classification := Classification
+        } = Report,
+
+        ?assertEqual(bondy_mst:root(T), Root),
+        %% A genuinely deleted row is `absent` at both probes, and the
+        %% verdict must be `deleted` — the store-layer signal.
+        ?assertEqual([{Hash, absent}], Immediate),
+        ?assertEqual([{Hash, absent}], Delayed),
+        ?assertEqual(deleted, Classification),
+
+        %% A page that is merely TOMBSTONED reads back as such, so the same
+        %% tripwire distinguishes "freed but readable" from "gone" — the
+        %% distinction that separates a consumer/read-path fault from a
+        %% store-layer one.
+        true = ets:insert(Tab, Row),
+        ok = bondy_mst:forget_gc_aborts(),
+        Store = bondy_mst:store(T),
+        ?assertEqual(live, bondy_mst_store:page_state(Store, Hash)),
+        [{_, Page, _}] = ets:lookup(Tab, Hash),
+        _ = bondy_mst_store:free(Store, Hash, Page),
+        ?assertMatch({tombstoned, _}, bondy_mst_store:page_state(Store, Hash)),
+
+        %% Ring is newest-first and bounded.
+        ?assertEqual([], bondy_mst:gc_aborts())
+    after
+        catch bondy_mst:forget_gc_aborts(),
+        catch bondy_mst:destroy(T)
+    end.
+
 gc_aborts_on_unservable_root_test() ->
     {ok, _} = application:ensure_all_started(telemetry),
     T0 = new_tree(),

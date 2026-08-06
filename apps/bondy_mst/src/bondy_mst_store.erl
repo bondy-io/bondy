@@ -74,6 +74,7 @@ and implement different synchronization or caching mechanisms.
 -export([list/2]).
 -export([missing_set/2]).
 -export([name/1]).
+-export([page_state/2]).
 -export([open/3]).
 -export([page_refs/2]).
 -export([put/2]).
@@ -164,6 +165,19 @@ that surfaces far from its cause, as an unservable root.
 -callback name(backend()) -> binary() | undefined.
 
 -optional_callbacks([name/1]).
+
+%% Forensic state of a single page hash: `live`, `{tombstoned, FreedAt}`
+%% (freed but still readable), or `absent` (the row is gone).
+%%
+%% Optional. Implemented by backends that can distinguish the three, so a
+%% diagnosing caller can tell WHICH layer lost a page: `absent` under a live
+%% root means something deleted a still-referenced page (store layer), whereas
+%% `live`/`tombstoned` means the page was readable all along and the miss came
+%% from the walk (consumer / read path).
+-callback page_state(backend(), hash()) ->
+    live | {tombstoned, integer()} | absent.
+
+-optional_callbacks([page_state/2]).
 
 -callback maybe_roll_for_seal(backend()) ->
     {rolled, Job :: term(), backend()}
@@ -425,6 +439,18 @@ at this layer attributable to a shard.
 name(#?MODULE{mod = Mod, state = State}) ->
     bondy_mst_utils:apply_lazy(
         Mod, name, 1, [State], fun() -> undefined end
+    ).
+
+?DOC("""
+See the `page_state/2` callback. Returns `unknown` when the backend does not
+implement it.
+""").
+-spec page_state(Store :: t(), Hash :: hash()) ->
+    live | {tombstoned, integer()} | absent | unknown.
+
+page_state(#?MODULE{mod = Mod, state = State}, Hash) ->
+    bondy_mst_utils:apply_lazy(
+        Mod, page_state, 2, [State, Hash], fun() -> unknown end
     ).
 
 -spec capabilities(Store :: t()) -> map().

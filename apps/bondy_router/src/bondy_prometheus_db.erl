@@ -417,11 +417,13 @@ declare_metrics() ->
         {bondy_mst_gc_aborted_total,
             "MST page GCs aborted because the current root was unservable "
             "(missing pages) at sweep time. The abort prevents the sweep "
-            "from amplifying the hole into subtree loss; the paired error "
-            "log names the missing page hashes. Any occurrence is the "
-            "own-root page-loss tripwire firing: capture the log and "
-            "investigate.", [
-            instance_id, reason
+            "from amplifying the hole into subtree loss. The label says "
+            "which layer lost the page: deleted (a page a live root needs "
+            "is gone - store layer), tombstoned (freed but readable - "
+            "consumer/read path), transient (readable on re-probe, nothing "
+            "lost). Per-hash evidence is retained in-node: call "
+            "bondy_oplog_instance:gc_aborts/0,1 - it outlives the log.", [
+            instance_id, classification
         ]},
         {bondy_oplog_doored_events_total,
             "Never-applied peer events at or below the local watermark "
@@ -897,9 +899,14 @@ do_handle_event([bondy_oplog, instance, mst_rebuilt], _Meas, Meta) ->
 do_handle_event([bondy_mst, gc, aborted], _Meas, Meta) ->
     %% Emitted below the oplog layer, so the instance id arrives as the
     %% store's `name` (bondy_oplog opens every tree with name = instance id).
+    %% `classification` says which layer lost the page — the reason to page
+    %% someone. Full per-hash evidence: bondy_oplog_instance:gc_aborts/0,1.
     counter(
         bondy_mst_gc_aborted_total,
-        [maps:get(name, Meta, undefined), maps:get(reason, Meta, undefined)],
+        [
+            maps:get(name, Meta, undefined),
+            maps:get(classification, Meta, maps:get(reason, Meta, undefined))
+        ],
         1
     );
 do_handle_event([bondy_oplog, instance, integrate_doored], Meas, Meta) ->

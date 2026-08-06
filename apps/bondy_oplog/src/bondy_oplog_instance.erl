@@ -556,6 +556,8 @@ without protocol changes.
 -export([root_hash/1]).
 -export([aae_root/1]).
 -export([diagnose_root/1]).
+-export([gc_aborts/0]).
+-export([gc_aborts/1]).
 -export([frontier/1]).
 -export([fold_range/5]).
 -export([range/3]).
@@ -1403,6 +1405,39 @@ read-only.
 
 diagnose_root(Target) ->
     gen_server:call(target(Target), diagnose_root).
+
+-doc """
+Retained MST garbage-collection abort reports for this node, newest first —
+optionally filtered to one instance.
+
+The GC abort is the own-root page-loss tripwire (see `bondy_mst:gc/2`): when
+the current root is unservable the sweep refuses to run, because the mark walk
+skips missing pages and would amplify a small hole into subtree loss. Each
+abort retains the missing page hashes AND their state re-probed after a short
+delay, classified as `deleted` (a page a live root references is gone — a
+store-layer fault), `tombstoned` (present but freed, so the walk's miss came
+from elsewhere), or `transient` (readable on re-probe, nothing lost).
+
+Reports live in the node, not only in the log, so an occurrence stays
+diagnosable long after the platform's log buffer has rolled — which is exactly
+what cost us the evidence on Fly s25. Query after any
+`bondy_mst_gc_aborted_total` increment:
+
+```erlang
+bondy_oplog_instance:gc_aborts().
+bondy_oplog_instance:gc_aborts(<<"registry/4">>).
+```
+""".
+-spec gc_aborts() -> [map()].
+
+gc_aborts() ->
+    bondy_mst:gc_aborts().
+
+-spec gc_aborts(instance_id()) -> [map()].
+
+gc_aborts(InstanceId) when is_binary(InstanceId) ->
+    %% The store's name IS the instance id for every tree this module opens.
+    [R || #{name := N} = R <- bondy_mst:gc_aborts(), N =:= InstanceId].
 
 -doc """
 The instance's applied-frontier version vector `#{Origin => max Seq}` — the

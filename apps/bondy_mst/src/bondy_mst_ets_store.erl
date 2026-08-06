@@ -86,6 +86,7 @@ Read-concurrent, MST backend using `ets`.
 -export([name/1]).
 -export([open/2]).
 -export([page_refs/1]).
+-export([page_state/2]).
 -export([put/2]).
 -export([set_root/2]).
 
@@ -189,6 +190,29 @@ get(#?MODULE{tab = Tab}, Hash) ->
 
 has(#?MODULE{tab = Tab}, Hash) ->
     ets:member(Tab, Hash).
+
+-spec page_state(T :: t(), Hash :: binary()) ->
+    live | {tombstoned, integer()} | absent.
+
+page_state(#?MODULE{tab = Tab}, Hash) ->
+    %% Forensic accessor: distinguishes the three states a "missing" page can
+    %% actually be in, which is what tells a diagnosing operator WHICH layer
+    %% is at fault.
+    %%
+    %% - `absent`      — the row is gone. Something DELETED a page a live root
+    %%                   references: a store-layer fault (or a consumer that
+    %%                   collected without establishing liveness).
+    %% - `{tombstoned, FreedAt}` — the row is intact but `free/3` marked it.
+    %%                   The page is readable, so a walk that called it
+    %%                   missing did NOT get that from this store: an
+    %%                   oplog-layer/read-path fault.
+    %% - `live`        — present and unmarked: the miss was transient
+    %%                   (observed before the insert became visible).
+    case ets:lookup(Tab, Hash) of
+        [] -> absent;
+        [{_, _, undefined}] -> live;
+        [{_, _, FreedAt}] -> {tombstoned, FreedAt}
+    end.
 
 -spec put(T :: t(), Page :: page()) -> {Hash :: binary(), T :: t()}.
 

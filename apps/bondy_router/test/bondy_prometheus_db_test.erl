@@ -262,13 +262,12 @@ mst_events_are_counted() ->
     ok = telemetry:execute(
         [bondy_mst, gc, aborted],
         #{count => 1, missing_count => 2},
-        #{reason => unservable_root, name => ?ID}
+        #{reason => unservable_root, name => ?ID, classification => deleted}
     ),
+    %% The label carries the CLASSIFICATION (which layer lost the page), not
+    %% the bare reason — that is what makes the counter actionable.
     ?assertEqual(
-        1,
-        prometheus_counter:value(
-            bondy_mst_gc_aborted_total, [?ID, unservable_root]
-        )
+        1, prometheus_counter:value(bondy_mst_gc_aborted_total, [?ID, deleted])
     ).
 
 core_refresh_sets_gauges() ->

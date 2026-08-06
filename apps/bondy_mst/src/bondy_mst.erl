@@ -107,6 +107,16 @@ hash.
 %% seal (run_seal_job/1) without holding the tree.
 -opaque seal_job() :: {module(), term()}.
 
+%% Retained GC-abort reports (see `gc_aborts/0`). Kept small: any occurrence
+%% is a defect, so a handful of reports is plenty of evidence, and the ring
+%% must never become a memory sink on a node that is already misbehaving.
+-define(GC_ABORTS_KEY, {?MODULE, gc_aborts}).
+-define(GC_ABORTS_MAX, 20).
+-define(GC_ABORT_MAX_HASHES, 32).
+%% Long enough for a not-yet-visible insert to land, short enough not to hold
+%% up the collector meaningfully — this runs only on the abort path.
+-define(GC_ABORT_REPROBE_MS, 50).
+
 -export_type([t/0]).
 -export_type([opt/0]).
 -export_type([opts/0]).
@@ -140,7 +150,9 @@ hash.
 -export([fold_pages/4]).
 -export([foreach/2]).
 -export([foreach/3]).
+-export([forget_gc_aborts/0]).
 -export([gc/1]).
+-export([gc_aborts/0]).
 -export([gc/2]).
 -export([get/2]).
 -export([get/3]).
@@ -931,20 +943,29 @@ gc(#?MODULE{store = Store0} = T, Arg0) when
                         %% `bondy_oplog` opens, which is what makes the event
                         %% attributable to a shard on a dashboard.
                         Name = bondy_mst_store:name(Store0),
+                        Report = abort_report(Store0, Name, T, Missing),
+                        ok = record_gc_abort(Report),
                         ?LOG_ERROR(#{
                             description =>
                                 "MST garbage collection aborted: the current "
                                 "root is unservable (missing pages). Sweeping "
                                 "would amplify the loss; keeping garbage for "
-                                "this cycle.",
+                                "this cycle. Full report retained in-node: "
+                                "bondy_mst:gc_aborts().",
                             name => Name,
                             missing_count => length(Missing),
+                            classification => maps:get(classification, Report),
                             missing => Missing
                         }),
                         telemetry:execute(
                             [bondy_mst, gc, aborted],
                             #{count => 1, missing_count => length(Missing)},
-                            #{reason => unservable_root, name => Name}
+                            #{
+                                reason => unservable_root,
+                                name => Name,
+                                classification =>
+                                    maps:get(classification, Report)
+                            }
                         ),
                         {T, #{freed_count => 0, freed_bytes => 0}}
                 end
@@ -952,6 +973,96 @@ gc(#?MODULE{store = Store0} = T, Arg0) when
             bondy_mst_store:transaction(Store0, Fun)
         end
     ).
+
+?DOC("""
+The most recent GC-abort reports retained by this node, newest first.
+
+The abort is the own-root page-loss tripwire; this is the evidence it
+captures. A field occurrence is rare and its log line ages out of a
+platform's log buffer long before anyone looks (exactly what happened on Fly
+s25), so the report is ALSO kept in-node and can be recovered at any later
+time with `bondy_mst:gc_aborts()` — no log shipper, no retention window.
+
+Each report carries the store `name` (the instance id, for the trees
+`bondy_oplog` opens), the `root`, every missing page hash with its
+per-hash state at abort time and again after a short delay, and the
+`classification` those states imply:
+
+- `deleted`      — at least one hash is `absent` from the store. A page a
+                   live root references was DELETED: a store-layer fault, or
+                   a consumer that collected without establishing liveness.
+- `tombstoned`   — the pages are present but `free/3`-marked, so a walk that
+                   called them missing did not learn that from the store: a
+                   consumer / read-path fault.
+- `transient`    — the pages were readable on re-probe: the miss was a
+                   visibility artifact and nothing was lost.
+- `mixed`        — more than one of the above across the missing set.
+
+That distinction is the whole point: it says WHICH layer to investigate,
+which a hash list alone does not.
+""").
+-spec gc_aborts() -> [map()].
+
+gc_aborts() ->
+    persistent_term:get(?GC_ABORTS_KEY, []).
+
+?DOC("""
+Discards the retained GC-abort reports (see `gc_aborts/0`).
+""").
+-spec forget_gc_aborts() -> ok.
+
+forget_gc_aborts() ->
+    persistent_term:erase(?GC_ABORTS_KEY),
+    ok.
+
+%% @private
+%% Builds the forensic report. Probes each missing hash immediately and again
+%% after a short delay, so a page that merely had not become visible yet is
+%% distinguished from one that is really gone. Bounded: only the first
+%% `?GC_ABORT_MAX_HASHES` hashes are probed and retained, so a pathological
+%% miss set cannot blow up the node's heap or stall the collector.
+abort_report(Store, Name, T, Missing) ->
+    Probed = lists:sublist(Missing, ?GC_ABORT_MAX_HASHES),
+    Immediate = [{H, bondy_mst_store:page_state(Store, H)} || H <- Probed],
+    ok = timer:sleep(?GC_ABORT_REPROBE_MS),
+    Delayed = [{H, bondy_mst_store:page_state(Store, H)} || H <- Probed],
+    #{
+        name => Name,
+        root => root(T),
+        at => erlang:system_time(millisecond),
+        monotonic => erlang:monotonic_time(millisecond),
+        missing_count => length(Missing),
+        probed => length(Probed),
+        immediate => Immediate,
+        delayed => Delayed,
+        classification => classify_states([S || {_, S} <- Delayed])
+    }.
+
+%% @private
+classify_states(States) ->
+    Kinds = lists:usort([kind(S) || S <- States]),
+    case Kinds of
+        [K] -> K;
+        [] -> transient;
+        _ -> mixed
+    end.
+
+%% @private
+kind(absent) -> deleted;
+kind({tombstoned, _}) -> tombstoned;
+kind(live) -> transient;
+kind(unknown) -> unknown.
+
+%% @private
+%% Newest-first ring in `persistent_term`. Aborts are rare (any occurrence is
+%% a defect), so the write cost of persistent_term is irrelevant here, and it
+%% buys survival across every process death short of a VM restart — which is
+%% precisely what an ETS table owned by a crashing instance would not.
+record_gc_abort(Report) ->
+    Old = persistent_term:get(?GC_ABORTS_KEY, []),
+    New = lists:sublist([Report | Old], ?GC_ABORTS_MAX),
+    persistent_term:put(?GC_ABORTS_KEY, New),
+    ok.
 
 %% @private
 %% `{true, MissingHashes}` when the current root's subtree has pages absent
