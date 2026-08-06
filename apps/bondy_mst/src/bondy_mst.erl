@@ -873,18 +873,70 @@ gc(#?MODULE{store = Store0} = T, Arg0) when
                         false ->
                             Arg0
                     end,
-                {Store, Meta} = bondy_mst_store:gc(Store0, Arg),
-                ?LOG_DEBUG(#{
-                    description => "Garbage collection completed",
-                    name => maps:get(name, Meta, <<"unknown">>),
-                    freed_count => maps:get(freed_count, Meta, 0),
-                    freed_bytes => maps:get(freed_bytes, Meta, 0)
-                }),
-                {T#?MODULE{store = Store}, Meta}
+                case is_list(Arg) andalso unservable_current_root(T) of
+                    false ->
+                        {Store, Meta} = bondy_mst_store:gc(Store0, Arg),
+                        ?LOG_DEBUG(#{
+                            description => "Garbage collection completed",
+                            name => maps:get(name, Meta, <<"unknown">>),
+                            freed_count => maps:get(freed_count, Meta, 0),
+                            freed_bytes => maps:get(freed_bytes, Meta, 0)
+                        }),
+                        {T#?MODULE{store = Store}, Meta};
+                    {true, Missing} ->
+                        %% ABORT, do not sweep. The list-mode collector marks
+                        %% by walking the keep-roots THROUGH PRESENT PAGES
+                        %% (`fold_pages/4` skips a missing page silently), so
+                        %% a hole under the current root would under-mark its
+                        %% whole subtree below the hole and the sweep would
+                        %% then delete live, reachable pages — amplifying a
+                        %% small anomaly into large, permanent data loss. A
+                        %% hole in the CURRENT root is always a defect
+                        %% upstream (pinned peer roots, by contrast, are
+                        %% legitimately partial mid-pull); surface it loudly
+                        %% and keep the garbage for a cycle instead of making
+                        %% the damage worse.
+                        ?LOG_ERROR(#{
+                            description =>
+                                "MST garbage collection aborted: the current "
+                                "root is unservable (missing pages). Sweeping "
+                                "would amplify the loss; keeping garbage for "
+                                "this cycle.",
+                            missing_count => length(Missing),
+                            missing => Missing
+                        }),
+                        telemetry:execute(
+                            [bondy_mst, gc, aborted],
+                            #{count => 1, missing_count => length(Missing)},
+                            #{reason => unservable_root}
+                        ),
+                        {T, #{freed_count => 0, freed_bytes => 0}}
+                end
             end,
             bondy_mst_store:transaction(Store0, Fun)
         end
     ).
+
+%% @private
+%% `{true, MissingHashes}` when the current root's subtree has pages absent
+%% from the store — the precondition under which a list-mode sweep is unsafe.
+unservable_current_root(T) ->
+    case root(T) of
+        undefined ->
+            false;
+        Root ->
+            case missing_set(T, Root) of
+                L when is_list(L), L =/= [] ->
+                    {true, L};
+                L when is_list(L) ->
+                    false;
+                Set ->
+                    case sets:is_empty(Set) of
+                        true -> false;
+                        false -> {true, sets:to_list(Set)}
+                    end
+            end
+    end.
 
 format_error(Reason, [{_M, _F, _As, Info} | _]) when is_list(Info) ->
     ErrorInfo = proplists:get_value(error_info, Info, #{}),
