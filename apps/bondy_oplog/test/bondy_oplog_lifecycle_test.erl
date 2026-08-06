@@ -20,11 +20,35 @@ lifecycle_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         fun start_stop/0,
         fun stop_unknown/0,
+        fun stop_survives_missing_registry_row/0,
         fun crash_isolated_between_instances/0,
         fun discover_flat/0,
         fun discover_sharded/0,
         fun path_layouts_round_trip/0
     ]}.
+
+%% Regression: an instance whose registry row is gone while its subtree
+%% still runs (a consumer teardown that failed mid-close) must remain
+%% STOPPABLE. `list_instances/0` enumerates supervisor children while
+%% `stop_instance/1` used to resolve only via the registry row — the
+%% asymmetry made such an instance visible to every scheduler yet
+%% unkillable, so it polluted every later test module's clean slate for
+%% the VM's lifetime (the `my_db/0` zombie).
+stop_survives_missing_registry_row() ->
+    Id = mk_id(),
+    {ok, _} = bondy_oplog:start_instance(Id),
+    ?assert(lists:member(Id, bondy_oplog:list_instances())),
+
+    %% Mint the zombie: drop the row, keep the subtree.
+    ok = bondy_oplog_registry:unregister(Id),
+    ?assertEqual(undefined, bondy_oplog_registry:sup_pid(Id)),
+    ?assert(lists:member(Id, bondy_oplog:list_instances())),
+
+    %% The fallback resolves through the same enumeration
+    %% `list_instances/0` uses, so what is visible is killable.
+    ?assertEqual(ok, bondy_oplog:stop_instance(Id)),
+    ?assertNot(lists:member(Id, bondy_oplog:list_instances())),
+    ?assertEqual({error, not_found}, bondy_oplog:stop_instance(Id)).
 
 start_stop() ->
     Id = mk_id(),

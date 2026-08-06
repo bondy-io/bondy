@@ -152,7 +152,7 @@ apply_op({merge_peer, Keys}, {T0, Model0, Roots, ok}) ->
         %% The pull: adopt EVERY peer page into our store (a completed
         %% multi-round pull), then the guarded integrate.
         T1 = adopt_pages(T0, PeerT, PeerRoot, 1.0),
-        case missing(T1, PeerRoot) of
+        case bondy_mst:missing_set(T1, PeerRoot) of
             [] ->
                 T = bondy_mst:merge(T1, T1, PeerRoot),
                 Model = lists:foldl(
@@ -175,7 +175,7 @@ apply_op({partial_pull, Keys, Fraction}, {T0, Model0, Roots, ok}) ->
     {PeerT, PeerRoot} = peer_tree(Keys),
     try
         T1 = adopt_pages(T0, PeerT, PeerRoot, Fraction),
-        case missing(T1, PeerRoot) of
+        case bondy_mst:missing_set(T1, PeerRoot) of
             [] ->
                 %% Complete after all (small tree / fraction ~ 1.0): merging
                 %% is then legal, mirroring production.
@@ -233,7 +233,7 @@ check(T, Model, Roots, OpTag) ->
 
 %% @private
 check_root(T, Root, Model, Roots, OpTag) ->
-    case missing(T, Root) of
+    case bondy_mst:missing_set(T, Root) of
         [] ->
             Expected = orddict:to_list(Model),
             case lists:sort(bondy_mst:to_list(T)) of
@@ -248,13 +248,6 @@ check_root(T, Root, Model, Roots, OpTag) ->
                 {failed, {own_root_unservable, OpTag, Missing}}}
     end.
 
-%% `bondy_mst:missing_set/2`'s spec says `[hash()]` but the ETS store hands
-%% back a `sets:set()`; normalise so the property reads either.
-missing(T, Root) ->
-    case bondy_mst:missing_set(T, Root) of
-        L when is_list(L) -> L;
-        S -> sets:to_list(S)
-    end.
 
 %% Builds the peer's tree in its OWN store, as a real peer would hold it.
 peer_tree(Keys) ->

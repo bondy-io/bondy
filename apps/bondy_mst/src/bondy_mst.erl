@@ -834,7 +834,13 @@ from the store.
 -spec missing_set(t(), Root :: binary()) -> [hash()].
 
 missing_set(#?MODULE{store = Store}, Root) ->
-    bondy_mst_store:missing_set(Store, Root).
+    %% Backends build the set as a `sets:set()` internally; this wrapper is
+    %% the single normalisation point to the spec'd list, so no caller needs
+    %% shape-dispatching.
+    case bondy_mst_store:missing_set(Store, Root) of
+        L when is_list(L) -> L;
+        Set -> sets:to_list(Set)
+    end.
 
 ?DOC("""
 Dumps the structure of the MST for debugging purposes.
@@ -932,15 +938,8 @@ unservable_current_root(T) ->
             false;
         Root ->
             case missing_set(T, Root) of
-                L when is_list(L), L =/= [] ->
-                    {true, L};
-                L when is_list(L) ->
-                    false;
-                Set ->
-                    case sets:is_empty(Set) of
-                        true -> false;
-                        false -> {true, sets:to_list(Set)}
-                    end
+                [] -> false;
+                Missing -> {true, Missing}
             end
     end.
 

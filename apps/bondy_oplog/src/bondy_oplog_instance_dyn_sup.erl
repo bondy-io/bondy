@@ -64,7 +64,21 @@ start_instance(InstanceId, Opts) when
 stop_instance(InstanceId) when is_binary(InstanceId) ->
     case bondy_oplog_registry:sup_pid(InstanceId) of
         undefined ->
-            {error, not_found};
+            %% No registry row — but the SUBTREE may still be running. A
+            %% consumer teardown that failed mid-close can drop the row while
+            %% the supervisor child survives, and `list_instances/0`
+            %% enumerates CHILDREN, not rows — so without this fallback such
+            %% an instance is visible to every scheduler yet unkillable
+            %% (`{error, not_found}` forever), and it pollutes the whole VM's
+            %% lifetime: observed as a `my_db/0` zombie receiving gc/sync
+            %% dispatches across every later eunit module in a run. Resolve
+            %% by the same route `list_instances/0` sees it.
+            case find_child_by_instance_id(InstanceId) of
+                undefined ->
+                    {error, not_found};
+                SupPid ->
+                    supervisor:terminate_child(?SERVER, SupPid)
+            end;
         SupPid ->
             case supervisor:terminate_child(?SERVER, SupPid) of
                 ok ->
@@ -121,6 +135,38 @@ init([]) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% Locates a running per-instance subtree by asking each child's instance
+%% gen_server for its id — the same enumeration `bondy_oplog:list_instances/0`
+%% performs, so anything that function can see, `stop_instance/1` can kill.
+%% O(children); only reached on the registry-row-missing path, which is a
+%% teardown anomaly, not steady state.
+find_child_by_instance_id(InstanceId) ->
+    Children = supervisor:which_children(?SERVER),
+    Found = [
+        SupPid
+     || {_Id, SupPid, supervisor, _} <- Children,
+        is_pid(SupPid),
+        InstancePid <- [bondy_oplog_instance_sup:instance_pid(SupPid)],
+        is_pid(InstancePid),
+        instance_id_of(InstancePid) =:= InstanceId
+    ],
+    case Found of
+        [SupPid | _] -> SupPid;
+        [] -> undefined
+    end.
+
+%% @private
+%% Total: a child that dies mid-scan reads as a non-match rather than
+%% raising out of a cleanup path.
+instance_id_of(InstancePid) ->
+    try bondy_oplog_instance:info(InstancePid) of
+        #{instance_id := Id} -> Id;
+        _ -> undefined
+    catch
+        _:_ -> undefined
+    end.
 
 %% @private
 do_start(InstanceId, Opts) ->

@@ -233,7 +233,7 @@ is_stale(Tree, PeerRoot) ->
         true ->
             false;
         false ->
-            not sets:is_empty(bondy_mst:missing_set(Tree, PeerRoot))
+            [] =/= bondy_mst:missing_set(Tree, PeerRoot)
     end.
 
 -doc "Returns `true` if `Term` is an exchange protocol message.".
@@ -408,7 +408,11 @@ merge(#?MODULE{} = State, Tree, Peer) ->
     PeerRoot = maps:get(Peer, State#?MODULE.merge_buffer),
     true = PeerRoot =/= undefined,
 
-    MissingSet = bondy_mst:missing_set(Tree, PeerRoot),
+    %% `missing_set/2` answers a list; the exchange tracks outstanding
+    %% requests as a `sets:set()` in its state, so convert at the boundary.
+    MissingSet = sets:from_list(
+        bondy_mst:missing_set(Tree, PeerRoot), [{version, 2}]
+    ),
 
     case sets:is_empty(MissingSet) of
         true ->
@@ -445,7 +449,7 @@ do_merge(#?MODULE{} = State0, Tree0, Peer, PeerRoot) ->
     NewRoot = bondy_mst:root(Tree),
 
     %% Post-condition: the merged tree must be complete.
-    true = sets:is_empty(bondy_mst:missing_set(Tree, NewRoot)),
+    [] = bondy_mst:missing_set(Tree, NewRoot),
 
     %% Drop this merge, plus any other now subsumed by the new root.
     Merges = maps:filter(

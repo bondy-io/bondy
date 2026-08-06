@@ -64,7 +64,7 @@ gc_aborts_on_unservable_root_test() ->
         %% and leaves it fully servable.
         true = ets:insert(Tab, Row),
         T2 = bondy_mst:gc(T1, []),
-        ?assertEqual([], missing(T2, bondy_mst:root(T2))),
+        ?assertEqual([], bondy_mst:missing_set(T2, bondy_mst:root(T2))),
         ?assertEqual(?N, length(bondy_mst:to_list(T2))),
 
         %% And no second abort was emitted.
@@ -117,9 +117,3 @@ drop_root_referenced_page(Tab) ->
     [Row] = ets:lookup(Tab, Ref),
     true = ets:delete(Tab, Ref),
     {Ref, Row}.
-
-missing(T, Root) ->
-    case bondy_mst:missing_set(T, Root) of
-        L when is_list(L) -> L;
-        S -> sets:to_list(S)
-    end.

@@ -2771,15 +2771,6 @@ maybe_hibernate_after(_Req, Result) ->
     Result.
 
 %% @private
-%% `bondy_mst:missing_set/2` returns `[]`/`[hash()]` on some backends and a
-%% `sets:set()` on others; this answers "is it empty?" for both shapes.
-missing_set_empty(M) when is_list(M) -> M =:= [];
-missing_set_empty(M) -> sets:size(M) =:= 0.
-
-%% @private
-missing_set_to_list(M) when is_list(M) -> M;
-missing_set_to_list(M) -> sets:to_list(M).
-
 %% @private
 %% Splits a list of "missing" page hashes into {PresentButMasked, Absent}.
 %% A page is `present_but_masked` when its content is physically on disk yet
@@ -3119,11 +3110,7 @@ do_handle_call(aae_root, _From, #state{mst = MST} = State) ->
                     {reply, undefined, State};
                 _ ->
                     %% Root changed (or first check): re-evaluate once.
-                    %% `missing_set/2` returns a list on some backends and a
-                    %% `sets:set()` on others — normalise the emptiness test.
-                    Servable = missing_set_empty(
-                        bondy_mst:missing_set(MST, Root)
-                    ),
+                    Servable = [] =:= bondy_mst:missing_set(MST, Root),
                     Servable orelse
                         ?LOG_WARNING(#{
                             description =>
@@ -3164,7 +3151,7 @@ do_handle_call(diagnose_root, _From, #state{mst = MST} = State) ->
             undefined ->
                 #{root => undefined, servable => true};
             Root ->
-                Missing = missing_set_to_list(bondy_mst:missing_set(MST, Root)),
+                Missing = bondy_mst:missing_set(MST, Root),
                 {Present, Absent} = classify_missing_pages(MST, Missing),
                 #{
                     root => Root,
@@ -3291,13 +3278,7 @@ do_handle_call({merge_pages, Pages}, _From, #state{mst = MST0} = State) ->
     ),
     {reply, ok, State#state{mst = MST}};
 do_handle_call({missing_set, Root}, _From, #state{mst = MST} = State) ->
-    Set = bondy_mst:missing_set(MST, Root),
-    Reply =
-        case is_list(Set) of
-            true -> Set;
-            false -> sets:to_list(Set)
-        end,
-    {reply, Reply, State};
+    {reply, bondy_mst:missing_set(MST, Root), State};
 do_handle_call(
     {integrate_peer_root, PeerRoot},
     _From,
@@ -3312,15 +3293,12 @@ do_handle_call(
     %% page must fail the call: `bondy_mst:merge/3` silently treats an
     %% unresolvable subtree as empty, which loses every event under it
     %% while the session records the round as complete.
-    MissingSet = bondy_mst:missing_set(MST0, PeerRoot),
-    case missing_set_empty(MissingSet) of
-        true ->
+    case bondy_mst:missing_set(MST0, PeerRoot) of
+        [] ->
             do_integrate_peer_root(PeerRoot, State000);
-        false ->
+        Missing ->
             {reply,
-                {error,
-                    {peer_pages_missing,
-                        length(missing_set_to_list(MissingSet))}},
+                {error, {peer_pages_missing, length(Missing)}},
                 State000}
     end;
 do_handle_call({pin_peer_root, Root}, _From, State) when is_binary(Root) ->
@@ -4634,7 +4612,7 @@ maybe_self_heal_unservable(
     Root = bondy_mst:root(MST),
     StillUnservable =
         Root =/= undefined andalso
-            not missing_set_empty(bondy_mst:missing_set(MST, Root)),
+            [] =/= bondy_mst:missing_set(MST, Root),
     Threshold = application:get_env(
         bondy_oplog, unservable_self_heal_after_ms,
         ?SELF_HEAL_UNSERVABLE_AFTER_MS

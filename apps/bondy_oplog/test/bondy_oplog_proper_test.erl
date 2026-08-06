@@ -57,10 +57,13 @@ crdt_cmd() ->
 %% MST root hash. This is Strong Eventual Consistency in its purest
 %% form: same events ⇒ same MST.
 prop_convergence() ->
-    ?FORALL(
-        Cmds,
-        list(cmd()),
-        run_convergence(Cmds, fun convergence_invariant/2)
+    ?SETUP(
+        fun app_env_setup/0,
+        ?FORALL(
+            Cmds,
+            list(cmd()),
+            run_convergence(Cmds, fun convergence_invariant/2)
+        )
     ).
 
 %% Same as prop_convergence/0 but with a counter CRDT bound to each
@@ -69,20 +72,26 @@ prop_convergence() ->
 %% catches both protocol-level divergence and CRDT-interpretation
 %% divergence.
 prop_convergence_with_counter_crdt() ->
-    ?FORALL(
-        Cmds,
-        list(crdt_cmd()),
-        run_counter_convergence(Cmds)
+    ?SETUP(
+        fun app_env_setup/0,
+        ?FORALL(
+            Cmds,
+            list(crdt_cmd()),
+            run_counter_convergence(Cmds)
+        )
     ).
 
 %% After A bootstraps from B (which has compacted), A's snapshot
 %% watermark equals B's, and a subsequent convergence round leaves both
 %% at the same root.
 prop_bootstrap_then_converge() ->
-    ?FORALL(
-        NEvents,
-        integer(1, 30),
-        run_bootstrap(NEvents)
+    ?SETUP(
+        fun app_env_setup/0,
+        ?FORALL(
+            NEvents,
+            integer(1, 30),
+            run_bootstrap(NEvents)
+        )
     ).
 
 %% =============================================================================
@@ -192,6 +201,25 @@ setup() ->
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
     bondy_oplog_gc_scheduler:set_trigger(undefined),
     ok.
+
+%% @private
+%% `?SETUP` hook run by PropEr itself before each property, so a STANDALONE
+%% invocation (`rebar3 as test proper --module=...` / `-p`) gets the app
+%% environment the eunit fixture otherwise provides. Under the eunit path the
+%% fixture has already started everything and this is an idempotent no-op.
+%% Returns the property's teardown fun (PropEr calls it after the run):
+%% instances are left to the eunit fixture's `cleanup/1` when present, and
+%% stopped here otherwise — stopping is idempotent, so doing it in both
+%% places is safe.
+app_env_setup() ->
+    ok = setup(),
+    fun() ->
+        _ = [
+            bondy_oplog:stop_instance(I)
+         || I <- bondy_oplog:list_instances()
+        ],
+        ok
+    end.
 
 cleanup(_) ->
     [
