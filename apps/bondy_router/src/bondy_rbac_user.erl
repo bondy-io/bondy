@@ -268,6 +268,7 @@ end#{
 -export([list/2]).
 -export([list_members/3]).
 -export([lookup/2]).
+-export([lookup/3]).
 -export([meta/1]).
 -export([new/1]).
 -export([new/2]).
@@ -701,6 +702,49 @@ lookup(RealmUri, Username0) ->
             end
     end.
 
+-doc """
+Looks up a user in `RealmUri`, resolving SSO aliases through `SSORealmUri`.
+
+Behaves like `lookup/2` when the name is a username of `RealmUri`. Otherwise,
+and provided `SSORealmUri` is not `undefined`, the SSO realm is consulted to
+map an alias onto a username — which must then still exist in `RealmUri`. An
+SSO realm can name a user, but it cannot by itself grant access to a realm the
+user is not a member of.
+
+The user returned is the merge of the local and SSO records (see `resolve/2`),
+and every record consulted must be enabled.
+
+This is the single definition of "which user is this name, in this realm",
+shared by the WAMP session path (`bondy_auth`) and by credential verification
+outside a handshake (`bondy_http_verify_handler`), so that the two cannot drift
+apart on who they consider a valid principal.
+""".
+-spec lookup(
+    RealmUri :: uri(),
+    SSORealmUri :: optional(uri()),
+    UsernameOrAlias :: username_int()
+) ->
+    {ok, t()} | {error, not_found | user_disabled}.
+
+lookup(RealmUri, SSORealmUri, UsernameOrAlias) ->
+    case lookup(RealmUri, UsernameOrAlias) of
+        {ok, User} ->
+            case is_enabled(User) of
+                true ->
+                    %% Merge in the SSO record (if any) so the caller gets the
+                    %% credentials, which live on the SSO user.
+                    {ok, resolve(User)};
+                false ->
+                    {error, user_disabled}
+            end;
+
+        {error, not_found} when SSORealmUri == undefined ->
+            {error, not_found};
+
+        {error, not_found} ->
+            resolve_alias(RealmUri, SSORealmUri, UsernameOrAlias)
+    end.
+
 -spec exists(RealmUri :: uri(), Username :: username_int()) -> boolean().
 
 exists(RealmUri, Username0) ->
@@ -1090,6 +1134,29 @@ normalise_username(Term) when is_binary(Term) ->
     string:casefold(Term);
 normalise_username(_) ->
     error(badarg).
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+%% The SSO realm is consulted with no SSO realm of its own, so this bottoms out
+%% after one hop even when a realm is configured as its own SSO realm.
+resolve_alias(RealmUri, SSORealmUri, Alias) ->
+    case lookup(SSORealmUri, undefined, Alias) of
+        {ok, SSOUser} ->
+            case lookup(RealmUri, undefined, username(SSOUser)) of
+                {ok, User} ->
+                    %% Both records are already in hand, so merge them directly
+                    %% rather than making `resolve/1` re-read the SSO user.
+                    {ok, resolve(User, SSOUser)};
+                {error, _} = Error ->
+                    Error
+            end;
+
+        {error, _} = Error ->
+            Error
+    end.
 
 %% =============================================================================
 %% PRIVATE: STORAGE

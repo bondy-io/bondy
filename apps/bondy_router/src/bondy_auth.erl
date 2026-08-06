@@ -726,28 +726,17 @@ get_user(_, _, undefined) ->
 get_user(RealmUri, SSORealmUri, UsernameOrAlias0) ->
     UsernameOrAlias = casefold(UsernameOrAlias0),
 
-    case bondy_rbac_user:lookup(RealmUri, UsernameOrAlias) of
-        {error, not_found} when SSORealmUri =:= undefined ->
-            throw({no_such_user, UsernameOrAlias});
-        {error, not_found} ->
-            %% We try to find the user on the SSORealm
-            SSOUser = get_user(SSORealmUri, undefined, UsernameOrAlias),
-            %% Now that we have the username, we try to find in the requested
-            %% realm
-            Username = bondy_rbac_user:username(SSOUser),
-            User = get_user(RealmUri, undefined, Username),
-            %% Finally we resolve the user using both (this is more efficient
-            %% than calling bondy_rbac_user:resolve/1 as we already fetched the
-            %% SSOUser).
-            bondy_rbac_user:resolve(User, SSOUser);
+    %% Resolution lives in bondy_rbac_user so that credential verification
+    %% outside a handshake (`bondy_http_verify_handler`) decides who is a valid
+    %% principal exactly the way this path does. Only the error convention
+    %% differs: callers here expect a throw.
+    case bondy_rbac_user:lookup(RealmUri, SSORealmUri, UsernameOrAlias) of
         {ok, User} ->
-            bondy_rbac_user:is_enabled(User) orelse throw(user_disabled),
-            %% We call resolve so that we merge the local user to the SSO user
-            %% (if any), so that we get the credentials (password and
-            %% authorized_keys).
-            %% If for whatever reason the local user had values for the
-            %% credentials, they will be overridden by those from the SSO.
-            bondy_rbac_user:resolve(User)
+            User;
+        {error, user_disabled} ->
+            throw(user_disabled);
+        {error, not_found} ->
+            throw({no_such_user, UsernameOrAlias})
     end.
 
 %% @private

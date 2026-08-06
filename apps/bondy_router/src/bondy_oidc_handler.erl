@@ -537,7 +537,7 @@ do_handle_logout(Req0, #{realm_uri := DefaultRealmUri} = State) ->
     %% Find the realm-prefixed ticket cookie and try to revoke it.
     %% The realm may not exist on this node (e.g. after reconfiguration),
     %% so we catch errors to ensure cookies are always cleared.
-    TicketCookieName = ticket_cookie_name(RealmUri),
+    TicketCookieName = bondy_http_utils:ticket_cookie_name(RealmUri),
     OidcClaims =
         case lists:keyfind(TicketCookieName, 1, Cookies) of
             {_, JWT} ->
@@ -799,14 +799,6 @@ build_oidc_tokens_map(IdTokenJWT, AccessToken, RefreshToken) ->
     end.
 
 %% @private
-ticket_cookie_name(RealmUri) ->
-    <<?TICKET_COOKIE_PREFIX/binary, RealmUri/binary>>.
-
-%% @private
-csrf_cookie_name(RealmUri) ->
-    <<?CSRF_COOKIE_PREFIX/binary, RealmUri/binary>>.
-
-%% @private
 set_ticket_cookie(
     Req,
     RealmUri,
@@ -820,7 +812,7 @@ set_ticket_cookie(
     Opts = cookie_opts(
         BasePath, MaxAgeSecs, IsSecure, true, CookieDomain, CookieSameSite
     ),
-    cowboy_req:set_resp_cookie(ticket_cookie_name(RealmUri), JWT, Req, Opts).
+    cowboy_req:set_resp_cookie(bondy_http_utils:ticket_cookie_name(RealmUri), JWT, Req, Opts).
 
 %% @private
 clear_ticket_cookie(
@@ -834,7 +826,7 @@ clear_ticket_cookie(
     Opts = cookie_opts(
         BasePath, 0, IsSecure, true, CookieDomain, CookieSameSite
     ),
-    cowboy_req:set_resp_cookie(ticket_cookie_name(RealmUri), <<>>, Req, Opts).
+    cowboy_req:set_resp_cookie(bondy_http_utils:ticket_cookie_name(RealmUri), <<>>, Req, Opts).
 
 %% @private
 set_csrf_cookie(
@@ -851,7 +843,7 @@ set_csrf_cookie(
         BasePath, MaxAgeSecs, IsSecure, false, CookieDomain, CookieSameSite
     ),
     cowboy_req:set_resp_cookie(
-        csrf_cookie_name(RealmUri), CsrfToken, Req, Opts
+        bondy_http_utils:csrf_cookie_name(RealmUri), CsrfToken, Req, Opts
     ).
 
 %% @private
@@ -867,7 +859,7 @@ clear_csrf_cookie(
         BasePath, 0, IsSecure, false, CookieDomain, CookieSameSite
     ),
     cowboy_req:set_resp_cookie(
-        csrf_cookie_name(RealmUri), <<>>, Req, Opts
+        bondy_http_utils:csrf_cookie_name(RealmUri), <<>>, Req, Opts
     ).
 
 %% @private

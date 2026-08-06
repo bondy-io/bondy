@@ -404,6 +404,11 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
         allow_null => false,
         datatype => binary
     },
+    <<"verify_path">> => #{
+        alias => verify_path,
+        required => false,
+        datatype => binary
+    },
     <<"description">> => #{
         alias => description,
         required => false,
@@ -444,6 +449,11 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
     },
     <<"revoke_token_path">> => #{
         alias => revoke_token_path,
+        required => false,
+        datatype => binary
+    },
+    <<"verify_path">> => #{
+        alias => verify_path,
         required => false,
         datatype => binary
     },
@@ -1292,8 +1302,22 @@ parse_version(V0, Ctxt0) ->
         end
     end,
     V5 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], V4),
+
+    %% The security scheme endpoints (`/oauth/token`, `/oidc/login`, `verify`)
+    %% belong to the API version, not to any individual path, so
+    %% `dispatch_table_version/3` needs the version's resolved `security` and
+    %% `schemes`. We cannot read them back off `V5`: `eval_vars/2` narrows a
+    %% spec's own `defaults` to the keys that level declared, so a version that
+    %% inherits `security` from the API level has no copy of it. The
+    %% accumulated context does have the merged and evaluated value.
+    Defaults = maps:get(?DEFAULTS_KEY, Ctxt3, #{}),
+    V6 = V5#{
+        <<"security">> => maps:get(<<"security">>, Defaults, #{}),
+        <<"schemes">> => maps:get(<<"schemes">>, Defaults, ?DEFAULT_SCHEMES)
+    },
+
     maps:update(
-        <<"paths">>, maps:map(Fun, maps:get(<<"paths">>, V5)), V5
+        <<"paths">>, maps:map(Fun, maps:get(<<"paths">>, V6)), V6
     ).
 
 %% @private
@@ -1605,9 +1629,30 @@ dispatch_table_version(Host, Realm, {_Name, Version}) ->
         <<"is_deprecated">> := Deprecated,
         <<"paths">> := Paths
     } = Version,
+
+    %% The security scheme endpoints are a property of the version, so they are
+    %% emitted here rather than being left to `dispatch_table_path/6`. Without
+    %% this a version declaring no paths at all — which is exactly what an API
+    %% that exists only to expose `/oidc/login` and the verify endpoint looks
+    %% like, see `examples/config/oidc_api_spec.json` — would mount nothing.
+    %%
+    %% `dispatch_table_path/6` still emits them too, for the case where an
+    %% individual path overrides `security` with a scheme the version does not
+    %% declare. Identical rules collapse in `build_dispatch_table/3`, which
+    %% loads them into a `leap_relation` (a set).
+    Sec = maps:get(<<"security">>, Version, #{}),
+    Schemes = maps:get(<<"schemes">>, Version, ?DEFAULT_SCHEMES),
+    SecurityRules = [
+        security_scheme_rules(S, Host, BasePath, Realm, Sec)
+     || S <- Schemes
+    ],
+
     [
-        dispatch_table_path(Host, BasePath, Deprecated, Realm, P, Version)
-     || P <- maps:to_list(Paths)
+        SecurityRules
+        | [
+            dispatch_table_path(Host, BasePath, Deprecated, Realm, P, Version)
+         || P <- maps:to_list(Paths)
+        ]
     ].
 
 -spec dispatch_table_path(
@@ -1665,6 +1710,7 @@ security_scheme_rules(
 ) ->
     Token = get_token_path(Sec),
     Revoke = get_revoke_path(Sec),
+    Verify = get_verify_path(Sec, <<"/oauth/verify">>),
 
     St = #{
         realm_uri => Realm,
@@ -1678,15 +1724,20 @@ security_scheme_rules(
         %% Revoke is secured
         {S, Host, Realm, <<BasePath/binary, Revoke/binary>>, Mod, St},
         %% Json Web Key Set path, in which we publish the public
-        {S, Host, Realm, <<BasePath/binary, "/oauth/jwks">>, Mod, St}
+        {S, Host, Realm, <<BasePath/binary, "/oauth/jwks">>, Mod, St},
+        %% Credential verification, e.g. for an NGINX `auth_request`
+        {S, Host, Realm, <<BasePath/binary, Verify/binary>>,
+            bondy_http_verify_handler, verify_state(Realm)}
     ];
 security_scheme_rules(
     S,
     Host,
     BasePath,
     Realm,
-    #{<<"type">> := <<"oidc">>, <<"provider">> := Provider}
+    #{<<"type">> := <<"oidc">>, <<"provider">> := Provider} = Sec
 ) ->
+    Verify = get_verify_path(Sec, <<"/oidc/verify">>),
+
     St = #{
         realm_uri => Realm,
         provider => Provider,
@@ -1703,7 +1754,10 @@ security_scheme_rules(
             St#{action => callback}},
         {S, Host, Realm, <<BasePath/binary, "/oidc/logout">>, Mod, St#{
             action => logout
-        }}
+        }},
+        %% Credential verification, e.g. for an NGINX `auth_request`
+        {S, Host, Realm, <<BasePath/binary, Verify/binary>>,
+            bondy_http_verify_handler, verify_state(Realm)}
     ];
 security_scheme_rules(_, _, _, _, _) ->
     %% TODO for other types
@@ -1720,6 +1774,25 @@ get_revoke_path(#{<<"revoke_token">> := Token}) ->
     validate_rel_path(Token);
 get_revoke_path(_) ->
     <<"/oauth/revoke">>.
+
+%% @private
+%% The defaults are deliberately two-segment, like `/oauth/token` and
+%% `/oidc/login`. Routes are matched in ascending path order (they reach Cowboy
+%% through a `leap_relation`, which is ordered) and Cowboy takes the first
+%% match, so a one-segment `/verify` would be shadowed by any API path declaring
+%% a single-segment binding such as `/:id`.
+get_verify_path(#{<<"verify_path">> := Path}, _Default) ->
+    validate_rel_path(Path);
+get_verify_path(_, Default) ->
+    Default.
+
+%% @private
+%% Kept free of per-path and per-provider data on purpose: identical rules are
+%% collapsed by the `leap_relation` in `build_dispatch_table/3`, so any field
+%% that varies between paths would multiply this route instead of deduplicating
+%% it.
+verify_state(Realm) ->
+    #{realm_uri => Realm}.
 
 %% @private
 validate_rel_path(<<$/, _Rest/binary>> = Val) ->

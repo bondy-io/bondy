@@ -14,6 +14,9 @@ verifying a JWT bearer token presented by the client against the realm.
 
 -type state() :: map().
 
+%% API
+-export([cp_security_check/2]).
+
 %% BONDY_AUTH CALLBACKS
 -export([init/1]).
 -export([requirements/0]).
@@ -86,7 +89,7 @@ authenticate(JWT, _, Ctxt, State) ->
     end.
 
 %% =============================================================================
-%% PRIVATE
+%% API
 %% =============================================================================
 
 -doc """
@@ -99,8 +102,14 @@ Active only in the AAE phase (`bondy_oplog` `aae_enabled`). With anti-entropy
 off there is no cross-node staleness window, so the check is a deliberate no-op
 — a credential change closes sessions inline and tokens carry the synchronous
 local `token_version`.
+
+Exported so that credential verification outside a WAMP handshake — see
+`bondy_http_verify_handler` — applies the same gate, rather than accepting a
+token that this node would refuse on the session path.
 """.
-%% @private
+-spec cp_security_check(Claims :: map(), UserId :: binary()) ->
+    ok | {error, oauth2_invalid_grant}.
+
 cp_security_check(Claims, UserId) ->
     case aae_enabled() of
         false ->
@@ -108,6 +117,10 @@ cp_security_check(Claims, UserId) ->
         true ->
             check_token_version(Claims, UserId)
     end.
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
 
 %% @private
 %% Steps 3-4: the JWT's issue-time `tv` (the user cell's HLC at issue) must

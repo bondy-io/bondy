@@ -168,3 +168,16 @@
 
 -define(TICKET_COOKIE_PREFIX, <<"bondy_ticket_">>).
 -define(CSRF_COOKIE_PREFIX, <<"bondy_csrf_">>).
+
+%% Request header carrying a Bondy ticket explicitly, for callers that hold the
+%% ticket rather than relying on the cookie. See `bondy_http_verify_handler`.
+-define(TICKET_HEADER, <<"x-bondy-ticket">>).
+
+%% Identity of a verified credential, echoed as response headers so that a
+%% reverse proxy can propagate it upstream, e.g. via NGINX `auth_request_set`.
+-define(AUTHID_HEADER, <<"x-bondy-authid">>).
+-define(AUTHMETHOD_HEADER, <<"x-bondy-authmethod">>).
+-define(AUTHREALM_HEADER, <<"x-bondy-authrealm">>).
+-define(AUTHROLES_HEADER, <<"x-bondy-authroles">>).
+-define(EXPIRES_AT_HEADER, <<"x-bondy-expires-at">>).
+-define(REALM_HEADER, <<"x-bondy-realm">>).

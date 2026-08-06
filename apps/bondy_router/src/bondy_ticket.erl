@@ -303,13 +303,14 @@ issue(Session, Opts0) ->
             {error, Reason}
     end.
 
--spec verify(Ticket :: binary()) -> {ok, t()} | {error, expired | invalid}.
+-spec verify(Ticket :: binary()) ->
+    {ok, t()} | {error, expired | invalid | no_match}.
 
 verify(Ticket) ->
     verify(Ticket, #{}).
 
 -spec verify(Ticket :: binary(), Opts :: verify_opts()) ->
-    {ok, t()} | {error, expired | invalid}.
+    {ok, t()} | {error, expired | invalid | no_match}.
 
 verify(Ticket, Opts) ->
     try
@@ -374,7 +375,29 @@ verify(Ticket, Opts) ->
         error:{badarg, _} ->
             {error, invalid};
         throw:Reason ->
-            {error, Reason}
+            {error, Reason};
+        error:{not_found, _} ->
+            %% bondy_realm:fetch/1 raised because `authrealm` names a realm
+            %% that does not exist. That claim is still unverified input at
+            %% this point, so this is an invalid ticket, not a server fault.
+            {error, invalid};
+        Class:Reason:Stacktrace ->
+            %% Everything above the signature check runs on attacker-controlled
+            %% input: `jose_jwt:peek/1` raises `case_clause` or
+            %% `function_clause` on some malformed JWTs, and
+            %% `bondy_auth_scope:normalize/1` is only defined for maps, so a
+            %% ticket carrying a non-map `scope` raises too. Report those as an
+            %% invalid ticket rather than letting them crash the caller.
+            %% Logged at warning, not error: a flood of malformed tickets is an
+            %% untrusted peer, not a fault in this node. The ticket itself is
+            %% never logged.
+            ?LOG_WARNING(#{
+                description => "Error while verifying ticket",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            {error, invalid}
     end.
 
 -spec lookup(

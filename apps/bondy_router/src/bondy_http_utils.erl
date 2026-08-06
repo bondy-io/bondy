@@ -26,6 +26,16 @@ handler and one supplying the API Gateway spec defaults - and they disagreed on
 -export([parse_authorization/1]).
 -export([is_public_ip/1]).
 
+%% COOKIES
+-export([csrf_cookie_name/1]).
+-export([find_ticket_cookie/1]).
+-export([find_ticket_cookie/2]).
+-export([safe_bearer_token/1]).
+-export([safe_parse_cookies/1]).
+-export([ticket_cookie_name/1]).
+-export([ticket_cookie_realm/1]).
+-export([validate_csrf/1]).
+
 %% ERROR STATUS MAPPING
 -export([default_status_codes/0]).
 -export([http_status/1]).
@@ -122,6 +132,153 @@ parse_authorization(Req) ->
             end;
         Other ->
             Other
+    end.
+
+-doc """
+Returns the name of the cookie holding the Bondy ticket issued for `RealmUri`.
+
+The ticket cookie value is a signed Bondy ticket (a JWT), not a session
+identifier. See `bondy_oidc_handler`, which sets it at the end of the OIDC
+authorization code flow.
+""".
+-spec ticket_cookie_name(RealmUri :: binary()) -> binary().
+
+ticket_cookie_name(RealmUri) when is_binary(RealmUri) ->
+    <<?TICKET_COOKIE_PREFIX/binary, RealmUri/binary>>.
+
+-doc """
+Returns the name of the CSRF cookie issued for `RealmUri`.
+""".
+-spec csrf_cookie_name(RealmUri :: binary()) -> binary().
+
+csrf_cookie_name(RealmUri) when is_binary(RealmUri) ->
+    <<?CSRF_COOKIE_PREFIX/binary, RealmUri/binary>>.
+
+-doc """
+Returns the first cookie whose name carries the Bondy ticket prefix.
+
+Use this when the realm is not known up front. When it is, prefer
+`find_ticket_cookie/2`, which pins the exact cookie before falling back to
+this scan.
+""".
+-spec find_ticket_cookie(Cookies :: [{binary(), binary()}]) ->
+    {value, {Name :: binary(), Value :: binary()}} | false.
+
+find_ticket_cookie(Cookies) ->
+    PrefixLen = byte_size(?TICKET_COOKIE_PREFIX),
+    lists:search(
+        fun({Name, _}) ->
+            byte_size(Name) > PrefixLen andalso
+                binary:part(Name, 0, PrefixLen) =:= ?TICKET_COOKIE_PREFIX
+        end,
+        Cookies
+    ).
+
+-doc """
+Returns the ticket cookie for `RealmUri`, or any Bondy ticket cookie.
+
+The exact name is tried first. The fallback matters when the ticket was issued
+by an SSO realm, in which case the cookie is named after the issuing realm
+rather than the realm being accessed; the caller is still responsible for
+checking that the issuer is trusted by the target realm, via
+`bondy_realm:is_trusted_issuer/2`.
+""".
+-spec find_ticket_cookie(
+    RealmUri :: binary(), Cookies :: [{binary(), binary()}]
+) ->
+    {value, {Name :: binary(), Value :: binary()}} | false.
+
+find_ticket_cookie(RealmUri, Cookies) when is_binary(RealmUri) ->
+    case lists:keyfind(ticket_cookie_name(RealmUri), 1, Cookies) of
+        false ->
+            find_ticket_cookie(Cookies);
+        Entry ->
+            {value, Entry}
+    end.
+
+-doc """
+Returns the realm a ticket cookie was issued for, given the cookie's name.
+
+The inverse of `ticket_cookie_name/1`.
+""".
+-spec ticket_cookie_realm(Name :: binary()) -> binary().
+
+ticket_cookie_realm(Name) when is_binary(Name) ->
+    PrefixLen = byte_size(?TICKET_COOKIE_PREFIX),
+    binary:part(Name, PrefixLen, byte_size(Name) - PrefixLen).
+
+-doc """
+Validates the double-submit CSRF token of a cookie-authenticated request.
+
+Returns `ok` when the request carries no Bondy ticket cookie, since a request
+that does not rely on ambient cookie authority has nothing to protect. When a
+ticket cookie is present, the `x-csrf-token` header must match the value of the
+matching CSRF cookie. See `bondy_oidc_handler`, which issues the pair.
+""".
+-spec validate_csrf(Req :: cowboy_req:req()) -> ok | {error, forbidden}.
+
+validate_csrf(Req) ->
+    Cookies = safe_parse_cookies(Req),
+
+    case find_ticket_cookie(Cookies) of
+        false ->
+            %% No ticket cookie — non-OIDC flow, skip CSRF
+            ok;
+
+        {value, {Name, _}} ->
+            CsrfName = csrf_cookie_name(ticket_cookie_realm(Name)),
+            CsrfHeader = cowboy_req:header(<<"x-csrf-token">>, Req, undefined),
+            CsrfCookie =
+                case lists:keyfind(CsrfName, 1, Cookies) of
+                    {_, V} -> V;
+                    false -> undefined
+                end,
+
+            case
+                is_binary(CsrfHeader) andalso is_binary(CsrfCookie) andalso
+                    CsrfHeader =:= CsrfCookie
+            of
+                true -> ok;
+                false -> {error, forbidden}
+            end
+    end.
+
+-doc """
+Parses the request cookies, returning `[]` when the header is malformed.
+
+`cowboy_req:parse_cookies/1` raises on input as trivial as `Cookie: =x`, and
+`cowboy_req:parse_header/4` does not guard the parser. On an endpoint reachable
+before authentication that turns any unauthenticated request into a 500 plus a
+crash report, so callers there must use this instead.
+""".
+-spec safe_parse_cookies(Req :: cowboy_req:req()) -> [{binary(), binary()}].
+
+safe_parse_cookies(Req) ->
+    try
+        cowboy_req:parse_cookies(Req)
+    catch
+        _:_ ->
+            []
+    end.
+
+-doc """
+Returns the bearer token of the `Authorization` header, or `undefined`.
+
+`undefined` covers an absent header, a malformed one, and any scheme other than
+`Bearer`. As with `safe_parse_cookies/1`, the underlying parser raises on
+malformed input, e.g. a bare `Authorization: Bearer`.
+""".
+-spec safe_bearer_token(Req :: cowboy_req:req()) -> binary() | undefined.
+
+safe_bearer_token(Req) ->
+    try cowboy_req:parse_header(<<"authorization">>, Req) of
+        {bearer, Token} when is_binary(Token), Token =/= <<>> ->
+            Token;
+        _ ->
+            undefined
+    catch
+        _:_ ->
+            undefined
     end.
 
 -doc """

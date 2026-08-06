@@ -122,7 +122,7 @@ handle_open(Req0, State) ->
 
 %% @private
 do_handle_open(Req0, State) ->
-    case validate_csrf(Req0) of
+    case bondy_http_utils:validate_csrf(Req0) of
         {error, forbidden} ->
             Req1 = reply_error(
                 ?HTTP_FORBIDDEN, <<"csrf_validation_failed">>, Req0
@@ -250,7 +250,7 @@ handle_send(Req0, State) ->
 
 %% @private
 do_handle_send(Req0, State) ->
-    case validate_csrf(Req0) of
+    case bondy_http_utils:validate_csrf(Req0) of
         {error, forbidden} ->
             Req1 = reply_error(
                 ?HTTP_FORBIDDEN, <<"csrf_validation_failed">>, Req0
@@ -380,7 +380,7 @@ handle_close(Req0, State) ->
 
 %% @private
 do_handle_close(Req0, State) ->
-    case validate_csrf(Req0) of
+    case bondy_http_utils:validate_csrf(Req0) of
         {error, forbidden} ->
             Req1 = reply_error(
                 ?HTTP_FORBIDDEN, <<"csrf_validation_failed">>, Req0
@@ -437,7 +437,7 @@ to_longpoll_subprotocol(?WAMP2_JSON) ->
 %% @private
 maybe_set_auth_ticket(Pid, Req) ->
     Cookies = cowboy_req:parse_cookies(Req),
-    case find_ticket_cookie(Cookies) of
+    case bondy_http_utils:find_ticket_cookie(Cookies) of
         {value, {_, Ticket}} when Ticket =/= <<>> ->
             case bondy_ticket:verify(Ticket) of
                 {ok, Claims} ->
@@ -455,37 +455,6 @@ maybe_set_auth_ticket(Pid, Req) ->
     end.
 
 %% @private
-validate_csrf(Req) ->
-    Cookies = cowboy_req:parse_cookies(Req),
-    case find_ticket_cookie(Cookies) of
-        false ->
-            %% No ticket cookie — non-OIDC flow, skip CSRF
-            ok;
-        {value, {Name, _}} ->
-            %% Extract realm suffix and look up the matching CSRF cookie
-            PrefixLen = byte_size(?TICKET_COOKIE_PREFIX),
-            RealmUri = binary:part(
-                Name, PrefixLen, byte_size(Name) - PrefixLen
-            ),
-            CsrfName = <<?CSRF_COOKIE_PREFIX/binary, RealmUri/binary>>,
-            CsrfHeader = cowboy_req:header(
-                <<"x-csrf-token">>, Req, undefined
-            ),
-            CsrfCookie =
-                case lists:keyfind(CsrfName, 1, Cookies) of
-                    {_, V} -> V;
-                    false -> undefined
-                end,
-            case
-                is_binary(CsrfHeader) andalso is_binary(CsrfCookie) andalso
-                    CsrfHeader =:= CsrfCookie
-            of
-                true -> ok;
-                false -> {error, forbidden}
-            end
-    end.
-
-%% @private
 validate_auth_ticket(Pid, Req) ->
     case bondy_http_transport_session:auth_claims(Pid) of
         undefined ->
@@ -493,7 +462,7 @@ validate_auth_ticket(Pid, Req) ->
             ok;
         #{authrealm := Authrealm} = StoredClaims ->
             Cookies = cowboy_req:parse_cookies(Req),
-            CookieName = <<?TICKET_COOKIE_PREFIX/binary, Authrealm/binary>>,
+            CookieName = bondy_http_utils:ticket_cookie_name(Authrealm),
             case lists:keyfind(CookieName, 1, Cookies) of
                 false ->
                     {error, unauthorized};
@@ -518,18 +487,6 @@ validate_auth_ticket(Pid, Req) ->
                     end
             end
     end.
-
-%% @private
-%% Scans cookies for the first one matching the bondy_ticket_ prefix.
-find_ticket_cookie(Cookies) ->
-    lists:search(
-        fun({Name, _}) ->
-            PrefixLen = byte_size(?TICKET_COOKIE_PREFIX),
-            byte_size(Name) > PrefixLen andalso
-                binary:part(Name, 0, PrefixLen) =:= ?TICKET_COOKIE_PREFIX
-        end,
-        Cookies
-    ).
 
 %% @private
 reply_error(StatusCode, ErrorBin, Req) ->

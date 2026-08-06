@@ -202,7 +202,7 @@ validate_sse_auth(SessionPid, Req) ->
             ok;
         #{authrealm := Authrealm} = StoredClaims ->
             Cookies = cowboy_req:parse_cookies(Req),
-            CookieName = <<?TICKET_COOKIE_PREFIX/binary, Authrealm/binary>>,
+            CookieName = bondy_http_utils:ticket_cookie_name(Authrealm),
             case lists:keyfind(CookieName, 1, Cookies) of
                 false ->
                     {error, unauthorized};
