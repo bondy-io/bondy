@@ -162,18 +162,19 @@ truncate_first_last_test() ->
     ?assertEqual({50, 50}, bondy_mst:last(T1)).
 
 %% -----------------------------------------------------------------------------
-%% Persistent store: the actual compaction backend. A prior root must remain
-%% readable after truncate (compaction reads peer/prior roots via diff_to_list),
-%% because `free/3` only soft-marks pages for later GC in persistent mode.
+%% ETS store: the actual compaction backend. A prior root must remain readable
+%% after truncate (compaction reads peer/prior roots via diff_to_list), because
+%% `free/3` only tombstones — pages are reclaimed by `gc/2`, which establishes
+%% liveness first. This is the property that makes the structure persistent.
 %% -----------------------------------------------------------------------------
 
-truncate_persistent_keeps_prior_root_readable_test() ->
+truncate_keeps_prior_root_readable_test() ->
     Name = list_to_binary(
         "trunc_persist_" ++ integer_to_list(erlang:phash2(self()))
     ),
     T0 = bondy_mst:new(#{
         store => bondy_mst_ets_store,
-        store_opts => #{name => Name, persistent => true},
+        store_opts => #{name => Name},
         merger => fun(_K, _V1, V2) -> V2 end
     }),
     T = lists:foldl(

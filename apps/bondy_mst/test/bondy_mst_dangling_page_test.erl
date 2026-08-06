@@ -139,7 +139,7 @@ put_with_dangling_root_does_not_crash() ->
 make_tree(Name) ->
     bondy_mst:new(#{
         store => bondy_mst_ets_store,
-        store_opts => #{name => Name, persistent => true},
+        store_opts => #{name => Name},
         hash_algorithm => sha256,
         merger => fun(_K, _V1, V2) -> V2 end
     }).

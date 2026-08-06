@@ -859,7 +859,31 @@ gc(#?MODULE{} = T) ->
     gc(T, []).
 
 ?DOC("""
+Reclaims pages, either by reachability (a list of keep-roots) or by epoch (an
+integer).
 
+## Precondition — the caller must establish liveness
+
+`gc/2` MUST be serialized with the tree's writers, OR be given a keep-root
+list / epoch that already covers every root any writer may publish. This is
+not a `concurrent_writes` matter: that capability governs `put`/`get`, and
+`bondy_mst_ets_store` declares it `true`. Collection is different, because
+BOTH modes require knowing what is live:
+
+- reachability: marks from `KeepRoots` (plus the current root). A writer that
+  publishes a NEW root after the mark has its root page swept — the mark
+  never saw it. There is no ordering that fixes this: with unsynchronized
+  writers the live-root set is not knowable.
+- epoch: prunes pages tombstoned at or before `Epoch`, which is only sound if
+  no root older than `Epoch` is still in use.
+
+`bondy_oplog` satisfies the precondition by construction: compaction is a
+`gen_server:call` into the instance, and every tree mutation runs in that same
+process, so the root marked from IS the only live root.
+
+Reachability mode additionally refuses to sweep when the current root is
+already unservable — see the abort below; a hole would otherwise be amplified
+into subtree loss, because the mark walk skips missing pages silently.
 """).
 -spec gc(t(), KeepRoots :: [hash()] | Epoch :: integer()) -> t().
 

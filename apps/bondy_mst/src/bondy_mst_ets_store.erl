@@ -48,15 +48,25 @@ Read-concurrent, MST backend using `ets`.
 -type t() :: #?MODULE{}.
 -type opt() ::
     {name, binary()}
-    | {persistent, boolean()}.
+    | {gc_mode, gc_mode()}.
 -type opts() :: [opt()] | opts_map().
 -type opts_map() :: #{
     name := binary(),
-    persistent => boolean()
+    gc_mode => gc_mode()
 }.
+-type gc_mode() :: epoch | reachability.
+%% How `gc/2` reclaims tombstoned pages. `epoch` (the default) prunes every
+%% page freed at or before a caller-supplied epoch — cheap, and exact when the
+%% caller knows no root older than that epoch is still in use. `reachability`
+%% marks from the supplied keep-roots and sweeps everything else — needed when
+%% the caller cannot bound root age, at the cost of a full walk per collection.
+%%
+%% This is a COLLECTION-STRATEGY choice only. It does not affect `free/3`,
+%% which always tombstones (see there).
 -type page() :: bondy_mst_page:t().
 
 -export_type([t/0]).
+-export_type([gc_mode/0]).
 -export_type([page/0]).
 
 %% API
@@ -90,7 +100,7 @@ open(Algo, Opts) when is_atom(Algo), is_list(Opts) ->
 open(Algo, Opts0) when is_atom(Algo), is_map(Opts0) ->
     DefaultOpts = #{
         name => undefined,
-        persistent => true
+        gc_mode => epoch
     },
 
     Opts = maps:merge(DefaultOpts, Opts0),
@@ -100,9 +110,9 @@ open(Algo, Opts0) when is_atom(Algo), is_map(Opts0) ->
             (name, V) ->
                 is_binary(V) orelse
                     error({badarg, [{name, V}]});
-            (persistent, V) ->
-                is_boolean(V) orelse
-                    error({badarg, [{persistent, V}]})
+            (gc_mode, V) ->
+                (V == epoch orelse V == reachability) orelse
+                    error({badarg, [{gc_mode, V}]})
         end,
         Opts
     ),
@@ -124,10 +134,11 @@ open(Algo, Opts0) when is_atom(Algo), is_map(Opts0) ->
 
 -spec capabilities(t()) -> map().
 
-capabilities(#?MODULE{} = T) ->
+capabilities(#?MODULE{}) ->
     #{
         transactions => false,
-        read_concurrency => maps:get(persistent, T#?MODULE.opts),
+        %% The table is created with `read_concurrency: true`.
+        read_concurrency => true,
         %% Pages live in a shared ETS table; any process holding the
         %% store handle can write concurrently.
         concurrent_writes => true,
@@ -217,28 +228,40 @@ list(#?MODULE{tab = Tab}) ->
 
 -spec free(T :: t(), Hash :: binary(), Page :: page()) -> T :: t().
 
-free(#?MODULE{tab = Tab, opts = #{persistent := true}} = T, Hash, _Page0) ->
-    %% Mark the page free by stamping only the FreedAt column in place;
-    %% gc/2 (prune_freed) actually deletes it. `update_element` writes a
-    %% single tuple slot rather than re-copying the whole page into the
-    %% table (as a full re-insert would), so the cost is independent of
-    %% page size. A concurrent reader still sees the intact page.
+free(#?MODULE{tab = Tab} = T, Hash, _Page0) ->
+    %% TOMBSTONE ONLY — never a hard delete, and not configurable.
+    %%
+    %% `free/3` is called by every path-copying operation on the pages of the
+    %% spine it rewrote (`put`, `split_page`, `truncate_at`, `delete`). Under
+    %% structural sharing that hash may STILL be referenced: by an older root
+    %% the caller retains (the whole point of a persistent structure — e.g.
+    %% `bondy_mst:diff_to_list/2` against a previously captured root), by a
+    %% peer root pinned mid-pull, or by a merge accumulator. Deleting it
+    %% outright therefore breaks live trees — a root referencing a page that
+    %% is no longer there.
+    %%
+    %% This backend cannot opt out of that: its `capabilities/1` declares
+    %% `concurrent_writes => true` (pages live in a shared, public ETS table
+    %% any holder may write), so another process may be mid-operation on this
+    %% very hash at any instant. Hard deletion is only ever sound for a
+    %% backend that declares `concurrent_writes => false` AND whose consumer
+    %% retains no old roots — see the `free/3` note on `bondy_mst_store`.
+    %% Reclamation happens in `gc/2` instead, where liveness is established.
+    %%
+    %% `update_element` writes a single tuple slot rather than re-copying the
+    %% whole page, so the cost is independent of page size, and a concurrent
+    %% reader still sees the intact page.
     _ = ets:update_element(Tab, Hash, {?FREED_AT_POS, erlang:monotonic_time()}),
-    T;
-free(#?MODULE{tab = Tab, opts = #{persistent := false}} = T, Hash, _Page) ->
-    %% We immediately delete
-    true = ets:delete(Tab, Hash),
     T.
 
 -spec gc(T :: t(), KeepRoots :: [list()] | epoch()) ->
     {T :: t(), Metadata :: map()}.
 
-gc(#?MODULE{opts = #{persistent := true}} = T, Epoch) when is_integer(Epoch) ->
-    %% When the tree is marked as persistent we have several roots sharing
-    %% subtrees. During destructive operations we mark freed pages with an
-    %% epoch (freed_at) so that we can prune them here
+gc(#?MODULE{} = T, Epoch) when is_integer(Epoch) ->
+    %% Epoch mode: pages tombstoned at or before `Epoch` are unreachable from
+    %% any root the caller still admits, so prune them.
     prune_freed(T, Epoch);
-gc(#?MODULE{opts = #{persistent := _}} = T, KeepRoots) when
+gc(#?MODULE{} = T, KeepRoots) when
     is_list(KeepRoots)
 ->
     %% The algorithmm found in the paper, which is suboptimal to say the least
@@ -331,18 +354,32 @@ estimate_bloomfi_capacity(#?MODULE{} = T) ->
     ets:info(T#?MODULE.tab, size).
 
 %% @private
-prune_unreachable(#?MODULE{opts = #{persistent := _}} = T, KeepRoots) ->
+prune_unreachable(#?MODULE{} = T, KeepRoots) ->
+    Tab = T#?MODULE.tab,
+
+    %% CANDIDATE SET FIRST, then mark. The order is load-bearing.
+    %%
+    %% The sweep may only delete pages that were already present when the mark
+    %% walk observed the keep-roots. Taking the candidate set AFTER marking
+    %% (the previous order) let a page inserted in between be swept: it was
+    %% absent during the mark, so it is not in the filter, yet present for the
+    %% select — deleted on arrival. Its writer then publishes a root that
+    %% references it, and the tree has an unservable root: the s16/s25 fault,
+    %% reproducible in seconds with a concurrent writer
+    %% (`bondy_mst_ets_concurrent_stress_test`).
+    %%
+    %% Snapshotting first inverts the race harmlessly: a page inserted after
+    %% the snapshot is simply not a candidate, so it survives this cycle and
+    %% is collected by the next one if it really is garbage. Deleting late is
+    %% a bounded memory cost; deleting early is data loss.
+    MS = [{{'$1', '_', '_'}, [{'=/=', '$1', ?ROOT_KEY}], ['$1']}],
+    All = ets:select(Tab, MS),
+
     %% We build a bloomfilter containing all the hashes of pages emanating from
     %% roots in KeepRoots
     BF = bloom_filter(T, KeepRoots),
 
-    Tab = T#?MODULE.tab,
     W0 = ets:info(Tab, memory),
-
-    %% We iterate over all the tree hashes and remove any hash not in the bloom
-    %% filter.
-    MS = [{{'$1', '_', '_'}, [{'=/=', '$1', ?ROOT_KEY}], ['$1']}],
-    All = ets:select(Tab, MS),
 
     Num = lists:foldl(
         fun(Hash, Acc) ->

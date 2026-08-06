@@ -113,6 +113,34 @@ and implement different synchronization or caching mechanisms.
 
 -callback copy(backend(), OtherStore :: t(), Hash :: hash()) -> backend().
 
+?DOC("""
+Releases the caller's claim on a page hash.
+
+Called by every path-copying operation on the pages of the spine it just
+rewrote. **A page hash reaching `free/3` is NOT necessarily garbage**: under
+structural sharing it may still be referenced by an older root the consumer
+retains (the defining property of a persistent structure — see
+`bondy_mst:diff_to_list/2` against a previously captured root), by a peer
+root pinned mid-pull, or by an in-flight merge accumulator.
+
+An implementation may therefore delete the page immediately ONLY IF BOTH
+hold:
+
+1. it declares `concurrent_writes => false` in `capabilities/1` — otherwise
+   another process may be mid-operation on that very hash; and
+2. its consumer retains no root other than the current one — otherwise the
+   deletion breaks a live tree.
+
+When either is in doubt, TOMBSTONE and let `gc/2` establish liveness. That is
+what `bondy_mst_ets_store` does (it cannot satisfy (1) — its pages live in a
+shared public table), and what `bondy_mst_pack_store` does via its free set.
+`bondy_mst_map_store` deletes outright, which is sound only because the store
+IS its owning gen_server's state (satisfying (1)) and it is used where no old
+root is retained.
+
+Getting this wrong produces a root that references an absent page — a fault
+that surfaces far from its cause, as an unservable root.
+""").
 -callback free(backend(), hash(), page()) -> backend().
 
 -callback gc(backend(), KeepRoots :: [hash()] | Epoch :: epoch()) ->

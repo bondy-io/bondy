@@ -17,8 +17,8 @@
 %%      oracle over `fold/2`).
 %%   2. Read-only: diffing leaves both input trees byte-for-byte intact on the
 %%      mutable backends, where the old `free`-based descent corrupted them —
-%%      immediately on a non-persistent ETS store (free == `ets:delete`), and
-%%      after a `gc(Epoch)` on a persistent one (free marks `freed_at`, which
+%%      at the next collection on an ETS store (free tombstones `freed_at`),
+%%      observable after a `gc(Epoch)` (which
 %%      `prune_freed` then reclaims regardless of reachability).
 %% =============================================================================
 
@@ -37,10 +37,10 @@ map_tree(Name) ->
         merger => fun(_K, _V1, V2) -> V2 end
     }).
 
-ets_tree(Name, Persistent) ->
+ets_tree(Name, GcMode) ->
     bondy_mst:new(#{
         store => bondy_mst_ets_store,
-        store_opts => #{name => list_to_binary(Name), persistent => Persistent},
+        store_opts => #{name => list_to_binary(Name), gc_mode => GcMode},
         merger => fun(_K, _V1, V2) -> V2 end
     }).
 
@@ -155,13 +155,16 @@ diff_unknown_root_is_full_list_test() ->
 %% 2. Read-only: the mutable backends are left intact by a diff
 %% -----------------------------------------------------------------------------
 
-%% Non-persistent ETS: `free` is an immediate `ets:delete`, so the old
-%% split-based descent destroyed live pages *during* the diff. Two-tree form
-%% splits both stores; assert both trees survive, the result is correct, and a
-%% repeat diff is identical (the old code would crash on the second pass).
-diff_readonly_ets_non_persistent_test() ->
-    A = build(ets_tree("np_A", false), kvs(lists:seq(1, 200), 0)),
-    B = build(ets_tree("np_B", false), kvs(lists:seq(100, 350), 7)),
+%% ETS: the old split-based descent `free`d pages *during* the diff. `free`
+%% now always tombstones (it once hard-deleted here, which is why this
+%% regression was written), so the damage would surface at the next
+%% collection rather than instantly — the assertions below hold either way.
+%% Two-tree form splits both stores; assert both trees survive, the result is
+%% correct, and a repeat diff is identical (the old code crashed on the
+%% second pass).
+diff_readonly_ets_two_tree_test() ->
+    A = build(ets_tree("np_A", reachability), kvs(lists:seq(1, 200), 0)),
+    B = build(ets_tree("np_B", reachability), kvs(lists:seq(100, 350), 7)),
     AList = to_kv(A),
     BList = to_kv(B),
 
@@ -179,12 +182,12 @@ diff_readonly_ets_non_persistent_test() ->
     ?assertEqual(D1, D2),
     ?assertEqual(D1, bondy_mst:diff_to_list(B, A)).
 
-%% Persistent ETS + root form: `free` marks `freed_at`; a `gc(Epoch)` then
+%% Epoch-collected ETS + root form: `free` marks `freed_at`; a `gc(Epoch)` then
 %% reclaims every freed-marked page regardless of reachability. If the diff
 %% had `free`d any page reachable from the current root, the post-GC tree would
 %% lose entries. Assert the current tree survives a full epoch GC after a diff.
-diff_readonly_ets_persistent_gc_test() ->
-    A = build(ets_tree("p_A", true), kvs(lists:seq(1, 200), 0)),
+diff_readonly_ets_epoch_gc_test() ->
+    A = build(ets_tree("p_A", epoch), kvs(lists:seq(1, 200), 0)),
     RA = bondy_mst:root(A),
     B0 = build(A, kvs(lists:seq(201, 320), 0)),
     B = build(B0, kvs(lists:seq(1, 10), 1)),
@@ -206,7 +209,7 @@ diff_readonly_ets_persistent_gc_test() ->
 %% correct — guards against an asymmetry between the Store1 / Store2 paths.
 diff_readonly_mixed_backend_test() ->
     A = build(map_tree("mixed_A"), kvs(lists:seq(1, 120), 0)),
-    B = build(ets_tree("mix_B", false), kvs(lists:seq(60, 240), 3)),
+    B = build(ets_tree("mix_B", reachability), kvs(lists:seq(60, 240), 3)),
     AList = to_kv(A),
     BList = to_kv(B),
     assert_valid_diff(AList, BList, bondy_mst:diff_to_list(A, B)),

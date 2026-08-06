@@ -11,7 +11,7 @@
 %%
 %% Construction: all peer roots must be reachable in the local MST's store (as
 %% they are in production after anti-entropy sync). We build one lineage on a
-%% single *persistent* ETS store — where `free` marks `freed_at` but keeps the
+%% single ETS store — where `free` tombstones (`freed_at`) but keeps the
 %% page — so every intermediate root stays readable. Peer roots are built
 %% first (capturing each root hash as the table advances), then the local tree
 %% is built last from the final peer, so the live handle's root is the local
@@ -23,13 +23,13 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %% -----------------------------------------------------------------------------
-%% Lineage construction (single persistent ETS store, all roots reachable)
+%% Lineage construction (single ETS store, all roots reachable)
 %% -----------------------------------------------------------------------------
 
 ets_tree(Name) ->
     bondy_mst:new(#{
         store => bondy_mst_ets_store,
-        store_opts => #{name => list_to_binary(Name), persistent => true},
+        store_opts => #{name => list_to_binary(Name)},
         merger => fun(_K, _V1, V2) -> V2 end
     }).
 

@@ -61,14 +61,14 @@ init_per_group(set_with_ets_store, Config) ->
     {ok, _} = application:ensure_all_started(bondy_mst),
     Opts = #{
         store => bondy_mst_ets_store,
-        persistent => false
+        gc_mode => reachability
     },
     [{grove_opts, Opts}] ++ Config;
 init_per_group(set_with_ets_persistent_store, Config) ->
     {ok, _} = application:ensure_all_started(bondy_mst),
     Opts = #{
         store => bondy_mst_ets_store,
-        persistent => true
+        gc_mode => epoch
     },
     [{grove_opts, Opts}] ++ Config;
 init_per_group(set_with_leveled_store, Config) ->
