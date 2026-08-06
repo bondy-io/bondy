@@ -1770,7 +1770,7 @@ get_token_path(_) ->
     <<"/oauth/token">>.
 
 %% @private
-get_revoke_path(#{<<"revoke_token">> := Token}) ->
+get_revoke_path(#{<<"revoke_token_path">> := Token}) ->
     validate_rel_path(Token);
 get_revoke_path(_) ->
     <<"/oauth/revoke">>.

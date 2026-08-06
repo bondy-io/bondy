@@ -571,6 +571,7 @@ without protocol changes.
 %% once at its `init/1` so it can re-verify signatures (S1) in its own
 %% process before dispatching events to the instance.
 -export([get_validator/1]).
+-export([cell_directory/1]).
 -export([replay_pairs/2]).
 
 %% Operator-facing trigger that asks the applier to refresh its
@@ -751,24 +752,34 @@ do_append_fast(InstanceId, FastPath, Op, Meta) ->
                     %% the applier reads from the WAL the instant it
                     %% becomes durable, and an in-flight overlay insert
                     %% races with `evict_overlay_batch/2`.
-                    true = ets:insert(Tab, [overlay_row(Event, local)]),
-                    overlay_counters_add(Ctrs, [Event]),
-                    case fast_wal_append_batch(InstanceId, [Event]) of
+                    case
+                        stage_overlay_rows(Tab, [overlay_row(Event, local)])
+                    of
+                        stale ->
+                            append(InstanceId, Op, Meta);
                         ok ->
-                            telemetry:execute(
-                                [bondy_oplog, instance, append],
-                                #{count => 1},
-                                #{instance_id => InstanceId}
-                            ),
-                            Key;
-                        {error, _} = Err ->
-                            %% WAL rejected the batch — drop the
-                            %% staged row so no phantom write is
-                            %% observable, and return the seq so the
-                            %% origin's sequence stays gap-free.
-                            ok = unstage_overlay_rows(Tab, Ctrs, [Event]),
-                            ok = release_seq_range(SeqRef, InstanceId, [Key]),
-                            Err
+                            overlay_counters_add(Ctrs, [Event]),
+                            case fast_wal_append_batch(InstanceId, [Event]) of
+                                ok ->
+                                    telemetry:execute(
+                                        [bondy_oplog, instance, append],
+                                        #{count => 1},
+                                        #{instance_id => InstanceId}
+                                    ),
+                                    Key;
+                                {error, _} = Err ->
+                                    %% WAL rejected the batch — drop the
+                                    %% staged row so no phantom write is
+                                    %% observable, and return the seq so the
+                                    %% origin's sequence stays gap-free.
+                                    ok = unstage_overlay_rows(
+                                        Tab, Ctrs, [Event]
+                                    ),
+                                    ok = release_seq_range(
+                                        SeqRef, InstanceId, [Key]
+                                    ),
+                                    Err
+                            end
                     end
             end;
         {error, _} = Err ->
@@ -856,23 +867,31 @@ do_append_many_fast(InstanceId, FastPath, Items) ->
                     %% Stage overlay rows BEFORE the WAL append (see
                     %% the matching comment on `do_append_local/3`).
                     Rows = [overlay_row(E, local) || E <- Events],
-                    true = ets:insert(Tab, Rows),
-                    overlay_counters_add(Ctrs, Events),
-                    case fast_wal_append_batch(InstanceId, Events) of
+                    case stage_overlay_rows(Tab, Rows) of
+                        stale ->
+                            append_many(InstanceId, Items);
                         ok ->
-                            telemetry:execute(
-                                [bondy_oplog, instance, append],
-                                #{count => Delta},
-                                #{instance_id => InstanceId}
-                            ),
-                            Keys;
-                        {error, _} = Err ->
-                            %% Roll back the staged rows and return the
-                            %% seq range so the origin's sequence stays
-                            %% gap-free.
-                            ok = unstage_overlay_rows(Tab, Ctrs, Events),
-                            ok = release_seq_range(SeqRef, InstanceId, Keys),
-                            Err
+                            overlay_counters_add(Ctrs, Events),
+                            case fast_wal_append_batch(InstanceId, Events) of
+                                ok ->
+                                    telemetry:execute(
+                                        [bondy_oplog, instance, append],
+                                        #{count => Delta},
+                                        #{instance_id => InstanceId}
+                                    ),
+                                    Keys;
+                                {error, _} = Err ->
+                                    %% Roll back the staged rows and return the
+                                    %% seq range so the origin's sequence stays
+                                    %% gap-free.
+                                    ok = unstage_overlay_rows(
+                                        Tab, Ctrs, Events
+                                    ),
+                                    ok = release_seq_range(
+                                        SeqRef, InstanceId, Keys
+                                    ),
+                                    Err
+                            end
                     end
             end;
         {error, _} = Err ->
@@ -1534,6 +1553,24 @@ Returns `{ok, no_change}` when the MST root has not moved since `LastRoot`, or
 
 replay_pairs(Pid, LastRoot) when is_pid(Pid) ->
     gen_server:call(Pid, {replay_pairs, LastRoot}, infinity).
+
+?DOC("""
+Returns the distinct `{Bucket, Key}` cell keys named by this instance's MST.
+
+The fallback cell directory for a projection adapter that cannot enumerate
+its own keyspace, folded HERE because this process owns the MST store: a
+sealed pack is read through a raw file descriptor bound to whichever process
+opened it, so a caller that folds it itself gets
+`not_on_controlling_process`. Same delegation as `replay_pairs/2`, and for
+the same reason.
+
+Callers go through `bondy_oplog_cell_utils:mst_cell_directory/1`, which
+folds in place when it is already running in this process.
+""").
+-spec cell_directory(pid()) -> {ok, [{term(), term()}]}.
+
+cell_directory(Pid) when is_pid(Pid) ->
+    gen_server:call(Pid, cell_directory, infinity).
 
 ?DOC("""
 Asks the per-instance applier to refresh its validator snapshot by
@@ -2764,6 +2801,7 @@ classify_missing_pages(MST, Hashes) ->
 heap_heavy_aae({get_pages, _}) -> true;
 heap_heavy_aae({missing_set, _}) -> true;
 heap_heavy_aae({replay_pairs, _}) -> true;
+heap_heavy_aae(cell_directory) -> true;
 heap_heavy_aae({merge_pages, _}) -> true;
 heap_heavy_aae({integrate_peer_root, _}) -> true;
 heap_heavy_aae(root_hash) -> true;
@@ -2902,6 +2940,15 @@ do_handle_call({unregister_table, Bucket}, _From, State) ->
     ),
     FD = FD0#fused_drain{cell_apply_source = Source},
     {reply, ok, State#state{fused_drain = FD}};
+do_handle_call(
+    cell_directory, _From, #state{mst = undefined} = State
+) ->
+    {reply, {ok, []}, State};
+do_handle_call(
+    cell_directory, _From, #state{mst = MST} = State
+) ->
+    %% Fold runs in THIS (the MST-owning) process; see `cell_directory/1`.
+    {reply, {ok, bondy_oplog_cell_utils:distinct_cell_keys(MST)}, State};
 do_handle_call(
     {replay_pairs, _LastRoot}, _From, #state{mst = undefined} = State
 ) ->
@@ -4936,6 +4983,35 @@ unstage_overlay(#state{overlay = undefined}, _Events) ->
     ok;
 unstage_overlay(#state{overlay = Tab, overlay_counters = Ctrs}, Events) ->
     unstage_overlay_rows(Tab, Ctrs, Events).
+
+%% @private
+%% Stages overlay rows on a registry-published tid, reporting `stale` when
+%% that tid no longer names a live table.
+%%
+%% `bondy_oplog_registry:overlay_tab/1` can hand back a dead tid, not just
+%% `undefined`: the overlay table dies with its instance gen_server (it has no
+%% heir) and the registry row keeps the old value until the next instance
+%% `init/1` republishes a fresh one. A caller-side append landing in that
+%% window would otherwise crash with `badarg` instead of routing through the
+%% gen_server the way the `undefined` case already does.
+%%
+%% Staleness has to be discovered by attempting the write — probing with
+%% `ets:info/2` first would only move the race, since the owner can die
+%% between the probe and the insert. This is safe to retry because staging is
+%% the first side effect of an append: on a dead table nothing was written,
+%% no counters have moved, and no WAL frame exists yet.
+%%
+%% Only `badarg` is caught. A `badmatch` on the insert result would mean a
+%% live table refused the write, which is an invariant violation and must stay
+%% loud.
+stage_overlay_rows(Tab, Rows) ->
+    try
+        true = ets:insert(Tab, Rows),
+        ok
+    catch
+        error:badarg ->
+            stale
+    end.
 
 %% @private
 %% Deletes every staged overlay row by key and decrements the shared

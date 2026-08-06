@@ -27,6 +27,122 @@ cold_replay_of_sealed_packs_runs_off_applier_test_() ->
         {timeout, 60, fun() -> run(Dir) end}
     end}.
 
+%% Regression, same bug class as above but on the RECLAMATION seam. The GC
+%% sweep enumerates cells through `bondy_oplog_cell_utils:mst_cell_directory/1`
+%% whenever the projection adapter cannot enumerate its own keyspace, and that
+%% fold used to run in whichever process swept — the applier, for the ordinary
+%% (non-fused) path. On a durable instance with sealed packs that means reading
+%% the instance's raw fds from the applier: `not_on_controlling_process`, which
+%% killed the applier and took the whole instance subtree down with it via
+%% one_for_all. Left latent when the cold-replay seam above was fixed; this
+%% pins the delegation so it cannot regress.
+sweep_cell_directory_of_sealed_packs_runs_off_owner_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(Dir) ->
+        {timeout, 60, fun() -> run_cell_directory(Dir) end}
+    end}.
+
+%% The complement of the delegation test above: delegation is gated on the
+%% store's `process_bound_reads` capability, so a MEMORY-backed instance must
+%% fold in the caller — never through the instance gen_server, which is the
+%% append serialisation point. Routing every ephemeral sweep through it would
+%% stall appends for the duration of a full-tree fold, taxing the path that
+%% was never broken. Proved by suspending the instance: a delegated fold
+%% would block on its mailbox; a local one completes regardless.
+ephemeral_cell_directory_folds_in_caller_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Dir) ->
+        {timeout, 60, fun() -> run_ephemeral_cell_directory() end}
+    end}.
+
+run_ephemeral_cell_directory() ->
+    InstId = mk_id(),
+    NS = ns_of(InstId),
+    {C, P} = register_shard(NS),
+    {ok, _} = bondy_oplog:start_instance(InstId, #{
+        origin => bondy_oplog_origin:new(),
+        fold_module => lww_register,
+        durability => ephemeral,
+        seed => true,
+        applier => #{cell_apply_target => {NS, primary, 0}}
+    }),
+    append_batch(InstId, 1, 50),
+    _ = bondy_oplog_instance:await_apply(InstId),
+
+    MST = bondy_oplog_registry:mst(InstId),
+    ?assertEqual(
+        false,
+        maps:get(process_bound_reads, bondy_mst:capabilities(MST), false),
+        "ephemeral store must not advertise process-bound reads"
+    ),
+
+    InstP = bondy_oplog_registry:instance_pid(InstId),
+    ok = sys:suspend(InstP),
+    try
+        Keys = bondy_oplog_cell_utils:mst_cell_directory(InstId),
+        ?assertEqual(50, length(Keys))
+    after
+        ok = sys:resume(InstP)
+    end,
+    ok = bondy_oplog:stop_instance(InstId),
+    close_shard(C, P),
+    ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
+    ok.
+
+run_cell_directory(Dir) ->
+    InstId = mk_id(),
+    NS = ns_of(InstId),
+    {C, P} = register_shard(NS),
+    {ok, _} = open_pack_instance(InstId, NS, Dir),
+    append_batch(InstId, 1, ?BATCH),
+    _ = bondy_oplog_instance:await_apply(InstId),
+
+    %% Without a sealed pack there are no process-bound fds and the bug cannot
+    %% show, so the premise is asserted rather than assumed.
+    ok = await_sealed_packs(Dir, 1, 15_000),
+
+    InstP = bondy_oplog_registry:instance_pid(InstId),
+    ?assert(is_pid(InstP)),
+    ?assert(InstP =/= self()),
+
+    %% Called from a process that does NOT own the fds — the position the
+    %% applier is in. This raised `not_on_controlling_process` before the fix.
+    Keys = bondy_oplog_cell_utils:mst_cell_directory(InstId),
+    ?assertEqual(?BATCH, length(Keys)),
+    ?assertEqual(lists:usort(Keys), Keys),
+    ?assert(lists:member({?B, key(1, 1)}, Keys)),
+
+    %% Delegation must be transparent: the same answer the owner computes.
+    {ok, Owned} = bondy_oplog_instance:cell_directory(InstP),
+    ?assertEqual(Owned, Keys),
+
+    %% ...and folding IN the owner must stay a direct fold, not a call into
+    %% itself, which would deadlock the fused sweep path.
+    InOwner = run_in(InstP, fun() ->
+        bondy_oplog_cell_utils:mst_cell_directory(InstId)
+    end),
+    ?assertEqual(Keys, InOwner),
+
+    ok = bondy_oplog:stop_instance(InstId),
+    close_shard(C, P),
+    ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
+    ok.
+
+%% @private
+%% Evaluates `Fun` inside `Pid` via the instance's own `sys` debug hook, so the
+%% assertion above genuinely runs in the fd-owning process.
+run_in(Pid, Fun) ->
+    Self = self(),
+    Ref = make_ref(),
+    %% `replace_state/2` returns the (unchanged) state, not `ok`.
+    _ = sys:replace_state(Pid, fun(S) ->
+        Self ! {Ref, catch Fun()},
+        S
+    end),
+    receive
+        {Ref, {'EXIT', Reason}} -> error({run_in_failed, Reason});
+        {Ref, Result} -> Result
+    after 30_000 -> error(run_in_timeout)
+    end.
+
 %% Regression: a durable (pack-store) instance's MST must SURVIVE a stop. The
 %% instance `terminate/2` once called `bondy_mst:destroy/1`, whose pack-store
 %% impl `file:del_dir_r`s the whole directory — so every clean shutdown wiped the
@@ -58,7 +174,7 @@ survives_restart(Dir) ->
     Root0 = bondy_mst:root(MST0),
     ?assert(Root0 =/= undefined),
     {LastKey0, _} = bondy_mst:last(MST0),
-    ?assert(length(sealed_packs(Dir)) >= 1),
+    ok = await_sealed_packs(Dir, 1, 15_000),
 
     %% Stop: `terminate/2` must CLOSE (preserve), not DESTROY (delete).
     ok = bondy_oplog:stop_instance(InstId),
@@ -265,7 +381,7 @@ root_persisted_midrun(Dir) ->
     append_batch(InstId, 1, 100),
     _ = bondy_oplog_instance:await_apply(InstId),
     _ = bondy_oplog:projection(InstId),
-    ?assert(length(sealed_packs(Dir)) >= 1),
+    ok = await_sealed_packs(Dir, 1, 15_000),
 
     InstDir = bondy_oplog_path:instance_dir(
         InstId, unicode:characters_to_binary(Dir), #{}
@@ -324,7 +440,7 @@ run(Dir) ->
     {ok, _} = open_pack_instance(InstId, NS, Dir),
     append_batch(InstId, 1, ?BATCH),
     _ = bondy_oplog_instance:await_apply(InstId),
-    ?assert(length(sealed_packs(Dir)) >= 1),
+    ok = await_sealed_packs(Dir, 1, 15_000),
     ?assertEqual(?BATCH, bondy_oplog:size(InstId)),
 
     InstP = bondy_oplog_registry:instance_pid(InstId),
@@ -429,6 +545,26 @@ sealed_packs(Dir) ->
     filelib:fold_files(
         Dir, "pack-.*\\.pack$", true, fun(F, Acc) -> [F | Acc] end, []
     ).
+
+%% Awaits the premise that at least `Min` sealed packs exist on disk.
+%%
+%% Sealing is asynchronous and OFF the apply path: `await_apply/1` returns
+%% when events are applied, while the seal job runs for hundreds of ms in a
+%% monitored worker and only `complete_seal/2` commits the pack file. So
+%% "append `N` with `auto_seal_records` `M` ⇒ a sealed pack exists" is only
+%% *eventually* true, and asserting it instantaneously is a race that loses
+%% under whole-suite load. The bounded wait keeps the premise honest: if
+%% seals never complete, this still fails — loudly, after the deadline.
+await_sealed_packs(Dir, Min, DeadlineMs) when DeadlineMs > 0 ->
+    case length(sealed_packs(Dir)) >= Min of
+        true ->
+            ok;
+        false ->
+            timer:sleep(50),
+            await_sealed_packs(Dir, Min, DeadlineMs - 50)
+    end;
+await_sealed_packs(Dir, Min, _) ->
+    error({sealed_packs_premise_not_met, Min, length(sealed_packs(Dir))}).
 
 del_tree(Dir) ->
     case filelib:is_dir(Dir) of

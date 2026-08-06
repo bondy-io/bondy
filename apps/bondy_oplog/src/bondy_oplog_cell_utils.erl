@@ -119,13 +119,85 @@ The MST `cell_apply` cell directory — the fallback for an adapter that
 cannot enumerate its keyspace (the ephemeral ETS adapter) or an instance
 with no `cell_keys_scope()`. Truncatable (see `primary_cell_directory/4`),
 so only sound where cells are never compacted past what a peer re-ships.
+
+Where the fold runs is decided by the store's `process_bound_reads`
+capability: a backend whose pages are read through a process-bound resource
+(the pack store's raw sealed-pack fds) is folded by its owning instance —
+see `bondy_oplog_instance:cell_directory/1` — while a memory backend is
+folded right here, in the caller.
 """.
 -spec mst_cell_directory(InstanceId :: term()) -> [{term(), term()}].
 
 mst_cell_directory(Id) ->
     case bondy_oplog_registry:mst(Id) of
-        undefined -> [];
-        MST -> distinct_cell_keys(MST)
+        undefined ->
+            [];
+        MST ->
+            %% A sealed pack is read through a raw file descriptor bound to
+            %% the instance gen_server that opened it; folding such a store
+            %% from any other process raises `not_on_controlling_process` —
+            %% which crashed the applier, and with it the whole instance
+            %% subtree, the first time a durable pack-backed instance without
+            %% an enumerable adapter reached a GC sweep. The store declares
+            %% the constraint (`process_bound_reads`), so the dispatch is on
+            %% the declared property, not on the backend's identity or on a
+            %% caught exception.
+            %%
+            %% Memory backends fold here, in the caller: their pages are
+            %% process-independent, and `sweep/5` runs in the applier on the
+            %% ordinary path — routing those folds through the instance would
+            %% serialise every sweep against the append path for no benefit.
+            case process_bound_reads(MST) of
+                true ->
+                    owner_cell_directory(Id, MST);
+                false ->
+                    distinct_cell_keys(MST)
+            end
+    end.
+
+%% @private
+process_bound_reads(MST) ->
+    maps:get(process_bound_reads, bondy_mst:capabilities(MST), false).
+
+%% @private
+%% The fold must run in the instance process. `sweep/5` executes in the
+%% applier for the ordinary path but in the instance itself for the fused
+%% one, so the owner is tested for rather than assumed — delegating
+%% unconditionally would have the instance call itself and deadlock.
+owner_cell_directory(Id, MST) ->
+    case bondy_oplog_registry:instance_pid(Id) of
+        Pid when is_pid(Pid), Pid =/= self() ->
+            delegated_cell_directory(Pid);
+        Pid when Pid =:= self() ->
+            distinct_cell_keys(MST);
+        undefined ->
+            %% No owner, process-bound store: there is no process that can
+            %% fold this tree safely (the fds died with the instance), so the
+            %% only sound answer is the empty one. The subtree is mid-restart;
+            %% the next sweep finds the republished instance.
+            []
+    end.
+
+%% @private
+delegated_cell_directory(Pid) ->
+    try
+        {ok, Keys} = bondy_oplog_instance:cell_directory(Pid),
+        Keys
+    catch
+        exit:{noproc, _} ->
+            %% The subtree is going down; same answer as the `undefined`
+            %% owner branch above.
+            [];
+        exit:{normal, _} ->
+            [];
+        exit:{shutdown, _} ->
+            [];
+        exit:{{shutdown, _}, _} ->
+            []
+        %% Anything else — `killed`, or the instance's own fold raising —
+        %% propagates DELIBERATELY. Under one_for_all the subtree is being
+        %% torn down in those cases anyway, and absorbing them here would
+        %% only disguise a real fault as an empty directory.
     end.
 
 -doc """

@@ -7,6 +7,13 @@
 
 setup() ->
     {ok, _} = application:ensure_all_started(bondy_db),
+    %% Instances are node-global and several of these tests assert on the
+    %% whole set — `no_dispatch_when_no_instances` needs it empty. Each test
+    %% stops what it started, but a test that fails or times out never reaches
+    %% those lines, so under whole-suite load one casualty used to cascade
+    %% into every later test in this module. Starting from a clean slate makes
+    %% each test independent of its predecessors' fate.
+    _ = [bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
     %% Reset state before each test:
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
     bondy_oplog_sync_scheduler:set_peer_source(
@@ -33,8 +40,10 @@ cleanup(_) ->
     ],
     ok.
 
+%% `foreach`, not `setup`: setup/cleanup run around EVERY test, so a failing
+%% test cannot leave instances behind for the next one.
 sync_scheduler_test_() ->
-    {setup, fun setup/0, fun cleanup/1, [
+    {foreach, fun setup/0, fun cleanup/1, [
         fun trigger_invokes_dispatch/0,
         fun dispatch_per_running_instance/0,
         fun no_dispatch_when_no_instances/0,

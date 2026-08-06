@@ -26,6 +26,11 @@
 
 setup() ->
     {ok, _} = application:ensure_all_started(bondy_db),
+    %% Clean slate: a test that fails or times out never reaches its own
+    %% `stop_instance`, and a leaked instance receives dispatches meant for
+    %% the next test's assertions. Same discipline as the other scheduler
+    %% test modules.
+    _ = [bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
     ok = bondy_oplog_sync_scheduler:set_interval_ms(0),
     ok = bondy_oplog_sync_scheduler:set_dispatch(
         fun bondy_oplog_sync_scheduler:default_dispatch/2
@@ -53,14 +58,24 @@ cleanup(_) ->
     [bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
     ok.
 
+%% `foreach`, not `setup`: setup/cleanup bracket EVERY test, so a timed-out
+%% test cannot leak its instance into the next one.
+%%
+%% The outer eunit timeout must DOMINATE the inner per-dispatch guard in
+%% `capture_chosen_peers/2` (30s), or the guard is unreachable: eunit's kill
+%% fires first, cancels the remaining fixture tests, and skips the test's own
+%% cleanup — the old `{timeout, 10}` did exactly that under whole-suite load,
+%% where `random_strategy_distributes`'s 60 dispatch round-trips exceed 10s.
+%% Letting the inner guard fire instead yields a legible `no_dispatch` error
+%% pointing at the stalled dispatch rather than a bare fixture cancellation.
 peer_strategy_test_() ->
-    {setup, fun setup/0, fun cleanup/1, [
-        {timeout, 10, fun first_strategy_picks_head/0},
-        {timeout, 10, fun random_strategy_distributes/0},
-        {timeout, 10, fun round_robin_strategy_advances/0},
-        {timeout, 10, fun unknown_strategy_falls_back_to_first/0},
-        {timeout, 10, fun set_strategy_takes_effect_next_tick/0},
-        {timeout, 10, fun info_reports_strategy/0}
+    {foreach, fun setup/0, fun cleanup/1, [
+        {timeout, 120, fun first_strategy_picks_head/0},
+        {timeout, 120, fun random_strategy_distributes/0},
+        {timeout, 120, fun round_robin_strategy_advances/0},
+        {timeout, 120, fun unknown_strategy_falls_back_to_first/0},
+        {timeout, 120, fun set_strategy_takes_effect_next_tick/0},
+        {timeout, 120, fun info_reports_strategy/0}
     ]}.
 
 first_strategy_picks_head() ->
@@ -151,11 +166,20 @@ info_reports_strategy() ->
 
 pre_bootstrap_instance() ->
     Id = mk_id(),
+    %% The OS pid segment makes the path unique PER BEAM RUN:
+    %% `erlang:unique_integer/1` restarts across runs, so without it a fresh
+    %% run re-draws ids used by earlier runs and inherits their directories —
+    %% including WALs torn by a killed test, which the instance (correctly)
+    %% refuses to open (`{head_segment, _, truncated_header}`). Same trick as
+    %% the library's default storage path. The explicit delete covers a
+    %% same-pid collision after an OS pid wrap.
     Dir = filename:join([
         "/tmp",
         "bondy_mst_peer_strategy_test",
+        os:getpid(),
         binary_to_list(Id)
     ]),
+    _ = file:del_dir_r(Dir),
     ok = filelib:ensure_path(Dir),
     {ok, _} = bondy_oplog:start_instance(Id, #{
         storage_path => list_to_binary(Dir)
@@ -186,22 +210,29 @@ capture_chosen_peers(InstanceId, N) ->
         []
     ),
     try
-        Peers = [
-            begin
-                bondy_oplog_sync_scheduler:trigger(),
-                receive
-                    {Ref, P} -> P
-                    %% Generous timeout: under full-suite load the scheduler's
-                    %% dispatch can lag well past a couple of seconds; a tight bound
-                    %% produced an intermittent `no_dispatch` flake.
-                after 30000 -> error(no_dispatch)
-                end
-            end
-         || _ <- lists:seq(1, N)
-        ],
-        Peers
+        [await_dispatch(Ref, 30_000) || _ <- lists:seq(1, N)]
     after
         telemetry:detach(HandlerId)
+    end.
+
+%% Triggers until one dispatch for the instance is observed, then returns the
+%% chosen peer.
+%%
+%% Trigger-to-dispatch is deliberately NOT 1:1 in the scheduler: a trigger
+%% that lands while the instance's previous (failed) bootstrap session is
+%% still in flight — its exit `DOWN` not yet processed — dispatches nothing
+%% for that instance. Waiting a long time for a swallowed trigger can never
+%% succeed, so this re-triggers on a short cadence instead. Sound for every
+%% strategy under test because the assertions are per OBSERVED dispatch: the
+%% round-robin cursor advances only when a dispatch happens, `first` is
+%% constant, and the distribution test just needs `N` uniform samples.
+await_dispatch(_Ref, Remaining) when Remaining =< 0 ->
+    error(no_dispatch);
+await_dispatch(Ref, Remaining) ->
+    bondy_oplog_sync_scheduler:trigger(),
+    receive
+        {Ref, P} -> P
+    after 500 -> await_dispatch(Ref, Remaining - 500)
     end.
 
 mk_id() ->

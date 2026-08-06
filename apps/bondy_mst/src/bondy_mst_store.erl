@@ -17,7 +17,15 @@ and implement different synchronization or caching mechanisms.
 
 -define(DEFAULT_CAPABILITIES, #{
     read_concurrency => false,
-    transactions => false
+    transactions => false,
+    %% `true` when the backend reads pages through a resource bound to the
+    %% process that opened the store (e.g. the pack store's raw sealed-pack
+    %% fds), in which case any fold MUST run in the owning process. Defaults
+    %% to `false` — process-independent terms — which is what every memory
+    %% backend serves; a backend that IS process-bound but fails to declare
+    %% it fails loudly (`not_on_controlling_process`) rather than silently,
+    %% the same way it would have before this capability existed.
+    process_bound_reads => false
 }).
 
 -record(?MODULE, {

@@ -135,7 +135,10 @@ capabilities(#?MODULE{} = T) ->
         async_seal => false,
         %% Volatile: the ETS table does not survive an instance/node restart,
         %% so a WAL consumer must replay from the log to rebuild it.
-        durable => false
+        durable => false,
+        %% Pages live in ETS: any process holding the handle can read them,
+        %% so a fold may run wherever the caller pleases.
+        process_bound_reads => false
     }.
 
 -spec close(t()) -> ok.

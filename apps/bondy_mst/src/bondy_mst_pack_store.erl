@@ -360,7 +360,14 @@ capabilities(#?MODULE{}) ->
         async_seal => true,
         %% Durable: the pack tree survives an instance/node restart, so a WAL
         %% consumer resumes from its committed offset rather than replaying.
-        durable => true
+        durable => true,
+        %% Sealed packs are read through raw file descriptors bound to the
+        %% process that opened them (see the moduledoc). A consumer that may
+        %% fold the tree from another process reads this capability to decide
+        %% whether the fold must be delegated to the owner; folding elsewhere
+        %% raises `not_on_controlling_process`. Memory backends advertise
+        %% `false` — their pages are process-independent terms.
+        process_bound_reads => true
     }.
 
 -spec get_root(t()) -> binary() | undefined.

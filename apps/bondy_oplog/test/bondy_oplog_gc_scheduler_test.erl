@@ -8,6 +8,11 @@
 
 setup() ->
     {ok, _} = application:ensure_all_started(bondy_db),
+    %% Instances are node-global and the scheduler fires for every one of
+    %% them, so an instance leaked by a test that failed or timed out shows up
+    %% as a spurious trigger in a later test. Each test stops what it starts,
+    %% but only if it reaches the end of its body — hence the clean slate.
+    _ = [bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
     bondy_oplog_gc_scheduler:set_trigger(undefined),
     %% Disable periodic ticks for the duration of the suite — these
     %% tests assert on explicit `trigger/0` and `trigger_for/1` calls
@@ -28,8 +33,10 @@ cleanup(_) ->
     ],
     ok.
 
+%% `foreach`, not `setup`: setup/cleanup run around EVERY test, so a failing
+%% test cannot leave instances behind for the next one.
 gc_scheduler_test_() ->
-    {setup, fun setup/0, fun cleanup/1, [
+    {foreach, fun setup/0, fun cleanup/1, [
         fun trigger_invokes_callback/0,
         fun trigger_per_running_instance/0,
         fun trigger_for_single_instance/0,
@@ -162,7 +169,7 @@ named_second_scheduler_is_independent() ->
         after 1000 -> error(no_named_trigger)
         end,
         receive
-            {RefD, _} -> error(default_fired_by_named_tick)
+            {RefD, Inst} -> error(default_fired_by_named_tick)
         after 100 -> ok
         end,
 
@@ -172,8 +179,12 @@ named_second_scheduler_is_independent() ->
             {RefD, Inst} -> ok
         after 1000 -> error(no_default_trigger)
         end,
+        %% Match on `Inst`, not `_`: the assertion is that the default tick did
+        %% not fire the NAMED trigger for the instance under test. A wildcard
+        %% also matches a leftover message for some other instance, which is a
+        %% different (and untrue) claim.
         receive
-            {RefN, _} -> error(named_fired_by_default_tick)
+            {RefN, Inst} -> error(named_fired_by_default_tick)
         after 100 -> ok
         end,
 

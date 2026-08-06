@@ -26,6 +26,12 @@
 
 setup() ->
     {ok, _} = application:ensure_all_started(bondy_db),
+    %% `aae_max_concurrency` is a NODE-WIDE cap and the scheduler applies it
+    %% across every registered instance, while `run_one_tick_and_count/1`
+    %% only counts outcomes for the instances the test created. An instance
+    %% leaked by a test that failed or timed out therefore consumes one of the
+    %% slots the assertions are counting, and `started` comes back short.
+    _ = [bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
     ok = bondy_oplog_sync_scheduler:set_interval_ms(0),
     ok = bondy_oplog_sync_scheduler:set_dispatch(
         fun bondy_oplog_sync_scheduler:default_dispatch/2
@@ -50,8 +56,10 @@ cleanup(Prev) ->
     end,
     ok.
 
+%% `foreach`, not `setup`: setup/cleanup run around EVERY test, so a failing
+%% test cannot leave instances behind to eat the next one's concurrency slots.
 aae_concurrency_test_() ->
-    {setup, fun setup/0, fun cleanup/1, [
+    {foreach, fun setup/0, fun cleanup/1, [
         {"rotate is a fair round-robin", fun rotate_round_robin/0},
         {timeout, 15,
             {"node-wide cap bounds live sessions",

@@ -87,7 +87,10 @@ capabilities(#?MODULE{}) ->
         async_seal => false,
         %% Volatile: the in-process map dies with the gen_server, so a WAL
         %% consumer must replay from the log to rebuild it.
-        durable => false
+        durable => false,
+        %% The map is a plain term: any process holding a handle reads its
+        %% own (possibly stale) copy, never a process-bound resource.
+        process_bound_reads => false
     }.
 
 -spec close(t()) -> ok.
