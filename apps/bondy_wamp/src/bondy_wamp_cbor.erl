@@ -127,16 +127,14 @@ decode_head(Bin, NumElements) when
             decode_n_elements_indefinite(Rest, NumElements, []);
         error ->
             error(
-                bondy_stdlib_error:new(#{
-                    type => badarg,
+                bondy_error:new(badarg, #{
                     details => #{1 => Bin, 2 => NumElements}
                 })
             )
     end;
 decode_head(Bin, NumElements) ->
     error(
-        bondy_stdlib_error:new(#{
-            type => badarg,
+        bondy_error:new(badarg, #{
             details => #{1 => Bin, 2 => NumElements}
         })
     ).
@@ -369,8 +367,7 @@ decode_n_elements(Bin, N, ArrayLen, Acc) when N > 0, ArrayLen > 0 ->
             decode_n_elements(Rest, N - 1, ArrayLen - 1, [Element | Acc]);
         error ->
             error(
-                bondy_stdlib_error:new(#{
-                    type => badarg,
+                bondy_error:new(badarg, #{
                     details => #{reason => cbor_decode_error}
                 })
             )
@@ -406,8 +403,7 @@ decode_n_elements_indefinite(Bin, N, Acc) when N > 0 ->
             decode_n_elements_indefinite(Rest, N - 1, [Element | Acc]);
         error ->
             error(
-                bondy_stdlib_error:new(#{
-                    type => badarg,
+                bondy_error:new(badarg, #{
                     details => #{reason => cbor_decode_error}
                 })
             )

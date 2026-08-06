@@ -13,6 +13,7 @@
     stdlib,
     crypto,
     public_key,
+    bondy_stdlib,
     bondy_cbor,
     msgpack,
     bert,

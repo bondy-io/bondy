@@ -125,8 +125,7 @@ decode_head(<<"[", Rest/binary>>, NumElements) when
     end;
 decode_head(Term, NumElements) ->
     error(
-        bondy_stdlib_error:new(#{
-            type => badarg,
+        bondy_error:new(badarg, #{
             details => #{1 => Term, 2 => NumElements}
         })
     ).

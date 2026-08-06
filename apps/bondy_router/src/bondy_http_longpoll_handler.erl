@@ -113,7 +113,10 @@ handle_open(Req0, State) ->
         <<"POST">> ->
             do_handle_open(Req0, State);
         _ ->
-            Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, #{}, <<>>, Req0),
+            %% The status is kept at 400 for compatibility; what changes is
+            %% that the response now says what went wrong instead of being an
+            %% empty body.
+            Req1 = reply_error(?HTTP_BAD_REQUEST, ~"method_not_allowed", Req0),
             {ok, Req1, State}
     end.
 
@@ -238,7 +241,10 @@ handle_send(Req0, State) ->
         <<"POST">> ->
             do_handle_send(Req0, State);
         _ ->
-            Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, #{}, <<>>, Req0),
+            %% The status is kept at 400 for compatibility; what changes is
+            %% that the response now says what went wrong instead of being an
+            %% empty body.
+            Req1 = reply_error(?HTTP_BAD_REQUEST, ~"method_not_allowed", Req0),
             {ok, Req1, State}
     end.
 
@@ -308,7 +314,10 @@ handle_receive(Req0, State) ->
         <<"POST">> ->
             do_handle_receive(Req0, State);
         _ ->
-            Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, #{}, <<>>, Req0),
+            %% The status is kept at 400 for compatibility; what changes is
+            %% that the response now says what went wrong instead of being an
+            %% empty body.
+            Req1 = reply_error(?HTTP_BAD_REQUEST, ~"method_not_allowed", Req0),
             {ok, Req1, State}
     end.
 
@@ -362,7 +371,10 @@ handle_close(Req0, State) ->
         <<"POST">> ->
             do_handle_close(Req0, State);
         _ ->
-            Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, #{}, <<>>, Req0),
+            %% The status is kept at 400 for compatibility; what changes is
+            %% that the response now says what went wrong instead of being an
+            %% empty body.
+            Req1 = reply_error(?HTTP_BAD_REQUEST, ~"method_not_allowed", Req0),
             {ok, Req1, State}
     end.
 
@@ -521,7 +533,12 @@ find_ticket_cookie(Cookies) ->
 
 %% @private
 reply_error(StatusCode, ErrorBin, Req) ->
-    ReplyBody = json:encode(#{<<"error">> => ErrorBin}),
+    %% `error' is retained for existing clients; the standard error payload is
+    %% added alongside it.
+    Body = maps:put(
+        ~"error", ErrorBin, bondy_error:to_map(bondy_error:from_term(ErrorBin))
+    ),
+    ReplyBody = json:encode(Body),
     cowboy_req:reply(
         StatusCode,
         #{<<"content-type">> => <<"application/json">>},

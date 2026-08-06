@@ -614,18 +614,17 @@ scope(Session, #{client_ticket := Ticket} = Opts, Uri) when
 
             bondy_auth_scope:new(Uri, ClientId, Id);
         {error, _Reason} ->
-            %% TODO implement new Error standard
-            error(#{
-                code => invalid_value,
-                description => <<
-                    "The value for 'client_ticket' is not valid."
-                >>,
-                key => client_ticket,
-                message => <<
-                    "The value for 'client_ticket' is not either not a ticket,"
-                    " it has an invalid signature or it is expired."
-                >>
-            })
+            error(
+                bondy_error:new(invalid_value, #{
+                    description =>
+                        ~"The value for 'client_ticket' is not valid.",
+                    message => <<
+                        "The value for 'client_ticket' is not either not a "
+                        "ticket, it has an invalid signature or it is expired."
+                    >>,
+                    details => #{key => client_ticket}
+                })
+            )
     end;
 scope(Session, Opts, Uri) ->
     Authid = bondy_session:authid(Session),

@@ -63,12 +63,13 @@ defined in this module (`?API_HOST`, `?API_VERSION`, `?API_PATH`,
 `?REQ_SPEC`, etc.). Invalid specs raise errors with descriptive
 messages.
 
-## WAMP error → HTTP status code mapping
+## Error URI → HTTP status code mapping
 
 The spec supports a `status_codes` map at the host and version levels
-that maps WAMP error URIs to HTTP status codes. A set of default
-mappings is always present (e.g. `wamp.error.not_found` → 404,
-`wamp.error.not_authorized` → 403).
+that maps error URIs to HTTP status codes. It is merged over the
+defaults from `bondy_http_utils:default_status_codes/0`, which are
+derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
+`wamp.error.not_authorized` → 403). Operator-supplied entries win.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -101,36 +102,6 @@ mappings is always present (e.g. `wamp.error.not_found` → 404,
     <<"post">>,
     <<"put">>
 ]).
-
--define(DEFAULT_STATUS_CODES, #{
-    ?BONDY_ERROR_ALREADY_EXISTS => ?HTTP_BAD_REQUEST,
-    ?BONDY_ERROR_NOT_FOUND => ?HTTP_NOT_FOUND,
-    ?BONDY_ERROR_BAD_GATEWAY => ?HTTP_SERVICE_UNAVAILABLE,
-    ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR => ?HTTP_INTERNAL_SERVER_ERROR,
-    ?BONDY_ERROR_TIMEOUT => ?HTTP_GATEWAY_TIMEOUT,
-    %% REVIEW
-    ?WAMP_AUTHORIZATION_FAILED => ?HTTP_INTERNAL_SERVER_ERROR,
-    ?WAMP_CANCELLED => ?HTTP_BAD_REQUEST,
-    ?WAMP_CLOSE_REALM => ?HTTP_INTERNAL_SERVER_ERROR,
-    ?WAMP_DISCLOSE_ME_NOT_ALLOWED => ?HTTP_BAD_REQUEST,
-    ?WAMP_GOODBYE_AND_OUT => ?HTTP_INTERNAL_SERVER_ERROR,
-    ?WAMP_INVALID_ARGUMENT => ?HTTP_BAD_REQUEST,
-    ?WAMP_INVALID_URI => ?HTTP_BAD_REQUEST,
-    ?WAMP_NET_FAILURE => ?HTTP_BAD_GATEWAY,
-    %% REVIEW
-    ?WAMP_NOT_AUTHORIZED => ?HTTP_FORBIDDEN,
-    ?WAMP_NO_ELIGIBLE_CALLE => ?HTTP_BAD_GATEWAY,
-    ?WAMP_NO_SUCH_PROCEDURE => ?HTTP_NOT_IMPLEMENTED,
-    ?WAMP_NO_SUCH_REALM => ?HTTP_BAD_GATEWAY,
-    ?WAMP_NO_SUCH_REGISTRATION => ?HTTP_BAD_GATEWAY,
-    ?WAMP_NO_SUCH_ROLE => ?HTTP_BAD_REQUEST,
-    ?WAMP_NO_SUCH_SESSION => ?HTTP_INTERNAL_SERVER_ERROR,
-    ?WAMP_NO_SUCH_SUBSCRIPTION => ?HTTP_BAD_GATEWAY,
-    ?WAMP_OPTION_DISALLOWED_DISCLOSE_ME => ?HTTP_BAD_REQUEST,
-    ?WAMP_OPTION_NOT_ALLOWED => ?HTTP_BAD_REQUEST,
-    ?WAMP_PROCEDURE_ALREADY_EXISTS => ?HTTP_BAD_REQUEST,
-    ?WAMP_SYSTEM_SHUTDOWN => ?HTTP_INTERNAL_SERVER_ERROR
-}).
 
 -define(MOPS_PROXY_FUN_TYPE, tuple).
 
@@ -1279,7 +1250,11 @@ parse_host(Host0, Ctxt0) ->
     Ctxt1 = Ctxt0#{
         ?VARS_KEY => Vars,
         ?DEFAULTS_KEY => Defs,
-        ?STATUS_CODES_KEY => maps:merge(Codes, ?DEFAULT_STATUS_CODES)
+        %% Operator-supplied codes override the defaults, matching both
+        %% the documented behaviour and the version-level merge below.
+        ?STATUS_CODES_KEY => maps:merge(
+            bondy_http_utils:default_status_codes(), Codes
+        )
     },
 
     %% parse all versions

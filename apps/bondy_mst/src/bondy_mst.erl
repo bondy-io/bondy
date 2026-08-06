@@ -886,13 +886,16 @@ gc(#?MODULE{store = Store0} = T, Arg0) when
         end
     ).
 
-format_error(Reason, [{_M, _F, _As, Info} | _]) ->
+format_error(Reason, [{_M, _F, _As, Info} | _]) when is_list(Info) ->
     ErrorInfo = proplists:get_value(error_info, Info, #{}),
-    ErrorMap = maps:get(cause, ErrorInfo),
-    ErrorMap#{
-        %% general => "optional general information",
+    %% `cause' is optional: reading it without a default crashed the formatter
+    %% whenever a raise supplied error_info without one.
+    Cause = maps:get(cause, ErrorInfo, #{}),
+    Cause#{
         reason => io_lib:format("~p: ~p", [?MODULE, Reason])
-    }.
+    };
+format_error(Reason, _) ->
+    #{reason => io_lib:format("~p: ~p", [?MODULE, Reason])}.
 
 %% =============================================================================
 %% PRIVATE

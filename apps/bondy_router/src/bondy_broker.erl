@@ -353,23 +353,17 @@ forward(M, Ctxt) ->
             Reply = not_found_error(M, Ctxt),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
         Class:Reason:Stacktrace ->
-            TraceId = bondy_utils:uuid(),
-            ?LOG_ERROR(#{
+            %% The log entry and the reply are projections of one error value.
+            %% The log used to omit the trace_id altogether, so the identifier
+            %% the caller was given could not be found again.
+            Error = bondy_error:internal(Class, Reason, Stacktrace),
+            ?LOG_ERROR((bondy_error:to_log_map(Error))#{
                 description =>
                     ~"Error while evaluating inbound message. Returning ERROR",
-                reason => Reason,
-                class => Class,
-                stacktrace => Stacktrace,
                 data => M
             }),
 
-            Reply = bondy_wamp_message:error_from(
-                M,
-                #{},
-                ?BONDY_ERROR_INTERNAL,
-                [~"Internal system error"],
-                #{trace_id => TraceId}
-            ),
+            Reply = bondy_wamp_error:to_wamp(Error, M),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply)
     end.
 
@@ -539,11 +533,12 @@ do_forward(#subscribe{} = M, Ctxt) ->
             Id = bondy_registry_entry:id(Entry),
             bondy:send(RealmUri, Ref, bondy_wamp_message:subscribed(ReqId, Id));
         {error, timeout} ->
-            Error = bondy_wamp_message:error_from(
-                M,
-                #{},
-                ?WAMP_ERROR_TIMEOUT,
-                [~"Request timed out waiting for subcription response."]
+            Error = bondy_wamp_error:to_wamp(
+                bondy_error:new(timeout, #{
+                    message =>
+                        ~"Request timed out waiting for subcription response."
+                }),
+                M
             ),
             bondy:send(RealmUri, Ref, Error)
     end;
@@ -605,26 +600,21 @@ not_found_error(M, _Ctxt) ->
                 #{}
         end,
 
-    bondy_wamp_message:error(
+    bondy_wamp_error:to_wamp(
+        bondy_error:new(no_such_subscription, #{
+            message => Msg,
+            description => ~"The unsubscribe request failed.",
+            details => #{subscription_id => M#unsubscribe.subscription_id}
+        }),
         ?UNSUBSCRIBE,
         M#unsubscribe.request_id,
-        ErrorDetails,
-        ?WAMP_NO_SUCH_SUBSCRIPTION,
-        [Msg],
-        #{
-            message => Msg,
-            description => <<"The unsubscribe request failed.">>
-        }
+        ErrorDetails
     ).
 
 %% @private
 not_authorized_error(M, Reason) ->
-    bondy_wamp_message:error_from(
-        M,
-        #{},
-        ?WAMP_NOT_AUTHORIZED,
-        [Reason],
-        #{message => Reason}
+    bondy_wamp_error:to_wamp(
+        bondy_error:new(not_authorized, #{message => Reason}), M
     ).
 
 %% @private

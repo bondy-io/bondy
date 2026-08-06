@@ -573,32 +573,28 @@ http_to_wamp(Status, RespBody) ->
         <<"status">> => Status, <<"body">> => DecodedBody
     }}.
 
-status_to_error_uri(400) ->
-    <<"wamp.error.invalid_argument">>;
-status_to_error_uri(422) ->
-    <<"wamp.error.invalid_argument">>;
-status_to_error_uri(401) ->
-    <<"wamp.error.not_authorized">>;
-status_to_error_uri(403) ->
-    <<"wamp.error.not_authorized">>;
-status_to_error_uri(404) ->
-    <<"wamp.error.not_found">>;
-status_to_error_uri(408) ->
-    <<"wamp.error.timeout">>;
-status_to_error_uri(504) ->
-    <<"wamp.error.timeout">>;
-status_to_error_uri(429) ->
-    <<"bondy.error.too_many_requests">>;
-status_to_error_uri(502) ->
-    <<"bondy.error.bad_gateway">>;
-status_to_error_uri(503) ->
-    <<"bondy.error.bad_gateway">>;
-status_to_error_uri(S) when S >= 400, S < 500 ->
-    <<"bondy.error.invalid_argument">>;
-status_to_error_uri(S) when S >= 500 ->
-    <<"bondy.error.bad_gateway">>;
-status_to_error_uri(_) ->
-    <<"bondy.error.bad_gateway">>.
+%% @private
+%% Resolved through the catalogue rather than written out, so that an upstream
+%% status maps onto a URI Bondy actually defines. Two of the literals this
+%% replaced - `wamp.error.not_found' and `bondy.error.invalid_argument' - were
+%% neither WAMP nor Bondy URIs.
+status_to_error_uri(Status) ->
+    bondy_error:uri(status_to_error_type(Status)).
+
+%% @private
+status_to_error_type(400) -> invalid_argument;
+status_to_error_type(422) -> invalid_argument;
+status_to_error_type(401) -> not_authorized;
+status_to_error_type(403) -> not_authorized;
+status_to_error_type(404) -> not_found;
+status_to_error_type(408) -> timeout;
+status_to_error_type(504) -> timeout;
+status_to_error_type(429) -> too_many_requests;
+status_to_error_type(502) -> bad_gateway;
+status_to_error_type(503) -> bad_gateway;
+status_to_error_type(S) when S >= 400, S < 500 -> invalid_argument;
+status_to_error_type(S) when S >= 500 -> bad_gateway;
+status_to_error_type(_) -> bad_gateway.
 
 %% ===================================================================
 %% Helpers

@@ -588,12 +588,8 @@ forward(M, Ctxt) ->
         do_forward(M, Ctxt)
     catch
         _:{not_authorized, Reason} ->
-            Reply = bondy_wamp_message:error_from(
-                M,
-                #{},
-                ?WAMP_NOT_AUTHORIZED,
-                [Reason],
-                #{message => Reason}
+            Reply = bondy_wamp_error:to_wamp(
+                bondy_error:new(not_authorized, #{message => Reason}), M
             ),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
         throw:not_found ->
@@ -608,24 +604,17 @@ forward(M, Ctxt) ->
             Reply = progressive_calls_error(M, violation),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
         Class:Reason:Stacktrace ->
-            TraceId = bondy_utils:uuid(),
-            ?LOG_ERROR(#{
+            %% The log entry and the reply are projections of one error value,
+            %% so the trace_id the caller receives is the one an operator finds
+            %% in the log, next to the reason the caller must not be shown.
+            Error = bondy_error:internal(Class, Reason, Stacktrace),
+            ?LOG_ERROR((bondy_error:to_log_map(Error))#{
                 description =>
                     ~"Error while evaluating inbound message. Returning ERROR",
-                reason => Reason,
-                class => Class,
-                stacktrace => Stacktrace,
-                data => M,
-                trace_id => TraceId
+                data => M
             }),
 
-            Reply = bondy_wamp_message:error_from(
-                M,
-                #{},
-                ?BONDY_ERROR_INTERNAL,
-                [~"Internal system error"],
-                #{trace_id => TraceId}
-            ),
+            Reply = bondy_wamp_error:to_wamp(Error, M),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply)
     end.
 
@@ -1214,12 +1203,14 @@ apply_dynamic_callback(#call{} = Msg, Callee) ->
     wamp_result() | wamp_error().
 
 apply_dynamic_callback(#call{options = #{ppt_scheme := _}} = Msg, _, _) ->
-    bondy_wamp_message:error(
+    bondy_wamp_error:to_wamp(
+        bondy_error:new(invalid_argument, #{
+            message =>
+                ~"Payload Passthru Mode is not supported on Bondy Meta API."
+        }),
         ?CALL,
         Msg#call.request_id,
-        Msg#call.options,
-        ?WAMP_INVALID_ARGUMENT,
-        [~"Payload Passthru Mode is not supported on Bondy Meta API."]
+        Msg#call.options
     );
 apply_dynamic_callback(#call{} = Msg0, Callee, CBArgs) ->
     Msg = bondy_wamp_message:decode_partial(Msg0),
@@ -1327,17 +1318,7 @@ handle_cancel_remote(M, Ctxt, Mode, CallKey, Promise) ->
                 ok;
             _ ->
                 _ = bondy_rpc_promise:take(CallKey),
-                Error = bondy_wamp_message:error(
-                    ?CALL,
-                    CallId,
-                    #{},
-                    ?WAMP_CANCELLED,
-                    [<<"call_cancelled">>],
-                    #{
-                        description =>
-                            <<"The call was cancelled by the user.">>
-                    }
-                ),
+                Error = cancelled_error(CallId),
                 bondy:send(RealmUri, Caller, Error, #{})
         end,
 
@@ -1403,16 +1384,7 @@ handle_cancel_local(#cancel{} = M, Ctxt0, killnowait) ->
         InvocationId = bondy_rpc_promise:invocation_id(Promise),
         Callee = bondy_rpc_promise:callee(Promise),
 
-        Error = bondy_wamp_message:error(
-            ?CALL,
-            CallId,
-            #{},
-            ?WAMP_CANCELLED,
-            [<<"call_cancelled">>],
-            #{
-                description => <<"The call was cancelled by the user.">>
-            }
-        ),
+        Error = cancelled_error(CallId),
 
         %% We know the caller is local
         ok = bondy:send(RealmUri, Caller, Error, #{}),
@@ -1447,16 +1419,7 @@ handle_cancel_local(#cancel{} = M, Ctxt0, skip) ->
 
         %% The cancellation acknowledgement is an ERROR for the CALL (the
         %% CANCEL message type has no ERROR counterpart in the spec).
-        Error = bondy_wamp_message:error(
-            ?CALL,
-            CallId,
-            #{},
-            ?WAMP_CANCELLED,
-            [<<"call_cancelled">>],
-            #{
-                description => <<"The call was cancelled by the user.">>
-            }
-        ),
+        Error = cancelled_error(CallId),
 
         RealmUri = bondy_context:realm_uri(Ctxt1),
         ok = bondy:send(RealmUri, Caller, Error, #{}),
@@ -1926,13 +1889,15 @@ progressive_calls_error(#call{} = Msg, {unsupported, Role}) ->
         atom_to_binary(Role, utf8),
         " does not support the progressive_calls feature."
     ]),
-    bondy_wamp_message:error_from(
-        Msg, #{}, ?WAMP_OPTION_NOT_ALLOWED, [Reason], #{message => Reason}
+    bondy_wamp_error:to_wamp(
+        bondy_error:new(option_not_allowed, #{message => Reason}), Msg
     );
 progressive_calls_error(#call{} = Msg, violation) ->
-    Reason = <<"A request id of an in-flight call was reused.">>,
-    bondy_wamp_message:error_from(
-        Msg, #{}, ?WAMP_PROTOCOL_VIOLATION, [Reason], #{message => Reason}
+    bondy_wamp_error:to_wamp(
+        bondy_error:new(protocol_violation, #{
+            message => ~"A request id of an in-flight call was reused."
+        }),
+        Msg
     ).
 
 %% @private
@@ -2220,27 +2185,26 @@ handle_call_matched(Msg, ProcUri, Fun, Opts, Ctxt, CallId, RealmUri) ->
 
             ok = reply_error(Error, Ctxt);
         {error, ErrorMap} when is_map(ErrorMap) ->
-            %% bondy_rpc_load_balancer opts validation error
-            ErrorMsg = <<
-                "The request failed due to invalid option parameters."
-            >>,
-
+            %% bondy_rpc_load_balancer opts validation error. It is carried as
+            %% a cause so the caller gets both the general condition and the
+            %% specific option that was wrong.
             ErrorOpts = maps:with(?WAMP_PPT_ATTRS, Msg#call.options),
 
-            Error = bondy_wamp_message:error(
+            Error = bondy_wamp_error:to_wamp(
+                bondy_error:wrap(
+                    bondy_error:new(invalid_argument, #{
+                        message =>
+                            ~"The request failed due to invalid option parameters.",
+                        description => <<
+                            "A required options parameter was missing in the "
+                            "request or while present they were malformed."
+                        >>
+                    }),
+                    ErrorMap
+                ),
                 ?CALL,
                 CallId,
-                ErrorOpts,
-                ?WAMP_INVALID_ARGUMENT,
-                [ErrorMsg],
-                #{
-                    message => ErrorMsg,
-                    details => ErrorMap,
-                    description => <<
-                        "A required options parameter was missing in the "
-                        "request or while present they were malformed."
-                    >>
-                }
+                ErrorOpts
             ),
             ok = reply_error(Error, Ctxt)
     end.
@@ -3058,19 +3022,15 @@ reg_match_opts() ->
 %% retried, preserving at-most-once invocation.
 reply_no_eligible_callee(#call{} = Msg, #{from := Caller} = Opts) ->
     RealmUri = ?GET_REALM_URI(Opts),
-    Reason = <<"There are no eligible callees for the procedure.">>,
-    Error0 = bondy_wamp_message:error_from(
-        Msg,
-        #{},
-        ?WAMP_NO_ELIGIBLE_CALLE,
-        [Reason],
-        #{
-            message => Reason,
+    Error0 = bondy_wamp_error:to_wamp(
+        bondy_error:new(no_eligible_callee, #{
+            message => ~"There are no eligible callees for the procedure.",
             description => <<
                 "The node this call was routed to no longer has a live "
                 "registration for the procedure."
             >>
-        }
+        }),
+        Msg
     ),
     %% The marker is stamped on the record AFTER construction, deliberately
     %% bypassing the details validation: it must never be part of the
@@ -3167,18 +3127,17 @@ send_no_eligible_callee(Promise) ->
     CallId = bondy_rpc_promise:call_id(Promise),
     Via = bondy_rpc_promise:via(Promise),
 
-    Msg = <<"There are no eligible callees for the procedure.">>,
-    Description = <<
-        "The callee handling this call became unavailable "
-        "while the call was in flight."
-    >>,
-    Error = bondy_wamp_message:error(
+    Error = bondy_wamp_error:to_wamp(
+        bondy_error:new(no_eligible_callee, #{
+            message => ~"There are no eligible callees for the procedure.",
+            description => <<
+                "The callee handling this call became unavailable "
+                "while the call was in flight."
+            >>
+        }),
         ?CALL,
         CallId,
-        #{},
-        ?WAMP_NO_ELIGIBLE_CALLE,
-        [Msg],
-        #{message => Msg, description => Description}
+        #{}
     ),
 
     SendOpts0 = #{from => Callee, via => Via},
@@ -3220,29 +3179,42 @@ send_no_eligible_callee(Promise) ->
 %%     ).
 
 %% @private
+%% `call_cancelled' is kept as Args[0]: it is a token clients match on, not
+%% prose.
+cancelled_error(CallId) ->
+    bondy_wamp_error:to_wamp(
+        bondy_error:new(canceled, #{
+            message => ~"call_cancelled",
+            description => ~"The call was cancelled by the user."
+        }),
+        ?CALL,
+        CallId,
+        #{}
+    ).
+
+%% @private
 badarity_error(CallId, Type) ->
-    Msg = <<
-        "The call was made passing the wrong number of positional arguments."
-    >>,
-    bondy_wamp_message:error(
+    bondy_wamp_error:to_wamp(
+        bondy_error:new(invalid_argument, #{
+            message => <<
+                "The call was made passing the wrong number of positional "
+                "arguments."
+            >>
+        }),
         Type,
         CallId,
-        #{},
-        ?WAMP_INVALID_ARGUMENT,
-        [Msg]
+        #{}
     ).
 
 %% @private
 badarg_error(CallId, Type) ->
-    Msg = <<
-        "The call was made passing invalid arguments."
-    >>,
-    bondy_wamp_message:error(
+    bondy_wamp_error:to_wamp(
+        bondy_error:new(invalid_argument, #{
+            message => ~"The call was made passing invalid arguments."
+        }),
         Type,
         CallId,
-        #{},
-        ?WAMP_INVALID_ARGUMENT,
-        [Msg]
+        #{}
     ).
 
 %% @private
@@ -3255,16 +3227,15 @@ not_found_error(M, _Ctxt) ->
             $'
         ]
     ),
-    bondy_wamp_message:error(
+    bondy_wamp_error:to_wamp(
+        bondy_error:new(no_such_registration, #{
+            message => Msg,
+            description => ~"The unregister request failed.",
+            details => #{registration_id => M#unregister.registration_id}
+        }),
         ?UNREGISTER,
         M#unregister.request_id,
-        #{},
-        ?WAMP_NO_SUCH_REGISTRATION,
-        [Msg],
-        #{
-            message => Msg,
-            description => <<"The unregister request failed.">>
-        }
+        #{}
     ).
 
 %% @private

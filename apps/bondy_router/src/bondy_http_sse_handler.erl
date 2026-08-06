@@ -412,7 +412,12 @@ find_ticket_cookie(Cookies) ->
 
 %% @private
 reply_error(StatusCode, ErrorBin, Req) ->
-    ReplyBody = json:encode(#{<<"error">> => ErrorBin}),
+    %% `error' is retained for existing clients; the standard error payload is
+    %% added alongside it.
+    Body = maps:put(
+        ~"error", ErrorBin, bondy_error:to_map(bondy_error:from_term(ErrorBin))
+    ),
+    ReplyBody = json:encode(Body),
     cowboy_req:reply(
         StatusCode,
         #{<<"content-type">> => <<"application/json">>},

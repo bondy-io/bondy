@@ -87,24 +87,20 @@ maybe_error(Val, M) ->
     bondy_wamp_message:result(bondy_wamp_message:request_id(M), #{}, [Val]).
 
 error({not_authorized, Reason}, M) ->
-    Map = bondy_error_utils:map(Reason),
+    Map = bondy_error:to_map(bondy_error:from_term(Reason)),
 
+    %% This clause has always put the error map in Args rather than a message,
+    %% unlike every other error reply. The shape is kept so existing clients
+    %% keep reading Args[0], and the standard payload is added in KWArgs.
     bondy_wamp_message:error_from(
         M,
         #{},
         ?WAMP_NOT_AUTHORIZED,
-        [Map]
+        [Map],
+        Map
     );
 error(Reason, #call{} = M) ->
-    #{<<"code">> := Code} = Map = bondy_error_utils:map(Reason),
-    Mssg = maps:get(<<"message">>, Map, <<>>),
-    bondy_wamp_message:error_from(
-        M,
-        #{},
-        bondy_error_utils:code_to_uri(Code),
-        [Mssg],
-        Map
-    ).
+    bondy_wamp_error:to_wamp(Reason, M).
 
 deprecated_procedure_error(#call{procedure_uri = Uri} = M) ->
     do_deprecated_procedure_error(M, Uri);
@@ -120,35 +116,16 @@ no_such_procedure_error(#invocation{details = #{procedure := Uri}} = M) ->
     no_such_procedure_error(Uri, ?CALL, M#invocation.request_id).
 
 no_such_procedure_error(ProcUri, MType, ReqId) ->
-    Mssg = <<
-        "There are no registered procedures matching the uri",
-        $\s,
-        $',
-        ProcUri/binary,
-        $',
-        $.
-    >>,
-    bondy_wamp_message:error(
-        MType,
-        ReqId,
-        #{},
-        ?WAMP_NO_SUCH_PROCEDURE,
-        [Mssg],
-        #{
-            message => Mssg,
-            description =>
-                <<"Either no registration exists for the requested procedure or the match policy used did not match any registered procedures.">>
-        }
-    ).
+    Error = bondy_error:new(no_such_procedure, #{
+        details => #{procedure_uri => ProcUri}
+    }),
+    bondy_wamp_error:to_wamp(Error, MType, ReqId, #{}).
 
 no_such_registration_error(RegId) when is_integer(RegId) ->
-    bondy_wamp_message:error(
-        ?UNREGISTER,
-        RegId,
-        #{},
-        ?WAMP_NO_SUCH_REGISTRATION,
-        [<<"No registration exists for the supplied RegistrationId">>]
-    ).
+    Error = bondy_error:new(no_such_registration, #{
+        details => #{registration_id => RegId}
+    }),
+    bondy_wamp_error:to_wamp(Error, ?UNREGISTER, RegId, #{}).
 
 %% =============================================================================
 %% PRIVATE
@@ -172,31 +149,19 @@ session's Realm or any other in case the session's realm is the root realm.
 ) -> Args :: list() | no_return().
 
 do_validate_call_args(Msg, _, Min, _, Len, _) when Len + 1 < Min ->
-    E = bondy_wamp_message:error(
-        ?CALL,
-        bondy_wamp_message:request_id(Msg),
-        #{},
-        ?WAMP_INVALID_ARGUMENT,
-        [<<"Invalid number of positional arguments.">>],
-        #{
-            description =>
-                <<"The procedure requires at least ",
-                    (integer_to_binary(Min))/binary, " positional arguments.">>
-        }
+    E = arity_error(
+        Msg,
+        <<"The procedure requires at least ", (integer_to_binary(Min))/binary,
+            " positional arguments.">>,
+        #{minimum_arity => Min}
     ),
     error(E);
 do_validate_call_args(Msg, _, _, Max, Len, _) when Len > Max ->
-    E = bondy_wamp_message:error(
-        ?CALL,
-        bondy_wamp_message:request_id(Msg),
-        #{},
-        ?WAMP_INVALID_ARGUMENT,
-        [<<"Invalid number of positional arguments.">>],
-        #{
-            description =>
-                <<"The procedure accepts at most ",
-                    (integer_to_binary(Max))/binary, " positional arguments.">>
-        }
+    E = arity_error(
+        Msg,
+        <<"The procedure accepts at most ", (integer_to_binary(Max))/binary,
+            " positional arguments.">>,
+        #{maximum_arity => Max}
     ),
     error(E);
 do_validate_call_args(Msg, Ctxt, Min, _, Len, AdminOnly) when Len == 0 ->
@@ -251,8 +216,7 @@ unauthorized(#unsubscribe{} = M, Ctxt) ->
 unauthorized(#register{} = M, Ctxt) ->
     unauthorized(?REGISTER, M#register.request_id, Ctxt);
 unauthorized(#unregister{} = M, Ctxt) ->
-    unauthorized(?REGISTER, M#unregister.request_id),
-    Ctxt;
+    unauthorized(?UNREGISTER, M#unregister.request_id, Ctxt);
 unauthorized(#call{} = M, Ctxt) ->
     unauthorized(?CALL, M#call.request_id, Ctxt);
 unauthorized(#invocation{} = M, Ctxt) ->
@@ -263,7 +227,7 @@ unauthorized(#cancel{} = M, Ctxt) ->
 %% @private
 unauthorized(Type, ReqId, Ctxt) ->
     Uri = bondy_context:realm_uri(Ctxt),
-    Mssg = <<
+    Message = <<
         "You have no authorisation to perform this operation on this realm."
     >>,
     Description = <<
@@ -285,13 +249,25 @@ unauthorized(Type, ReqId, Ctxt) ->
         $),
         $.
     >>,
-    bondy_wamp_message:error(
-        Type,
-        ReqId,
-        #{},
-        ?WAMP_NOT_AUTHORIZED,
-        [Mssg],
-        #{description => Description}
+    Error = bondy_error:new(not_authorized, #{
+        message => Message,
+        description => Description,
+        details => #{
+            realm_uri => Uri,
+            master_realm_uri => ?MASTER_REALM_URI
+        }
+    }),
+    bondy_wamp_error:to_wamp(Error, Type, ReqId, #{}).
+
+%% @private
+arity_error(Msg, Description, Details) ->
+    Error = bondy_error:new(invalid_argument, #{
+        message => ~"Invalid number of positional arguments.",
+        description => Description,
+        details => Details
+    }),
+    bondy_wamp_error:to_wamp(
+        Error, ?CALL, bondy_wamp_message:request_id(Msg), #{}
     ).
 
 %% @private
@@ -307,13 +283,7 @@ to_list(undefined) -> [];
 to_list(L) when is_list(L) -> L.
 
 do_deprecated_procedure_error(M, Uri) ->
-    Reason = <<"The procedure '", Uri/binary, "' has been deprecated.">>,
-    bondy_wamp_message:error_from(
-        M,
-        #{},
-        ~"bondy.error.deprecated_procedure",
-        [Reason],
-        #{
-            message => Reason
-        }
-    ).
+    Error = bondy_error:new(deprecated_procedure, #{
+        details => #{procedure_uri => Uri}
+    }),
+    bondy_wamp_error:to_wamp(Error, M).

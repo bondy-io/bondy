@@ -983,11 +983,11 @@ derive_strategy(Uri, [H | T]) ->
             derive_strategy(Uri, T)
     end;
 derive_strategy(_, []) ->
-    error(bondy_error_utils:map({missing_required_value, <<"match">>})).
+    error(bondy_error:new(missing_required_value, #{details => #{key => ~"match"}})).
 
 %% @private
 inconsistency_error(Keys) ->
-    error(bondy_error_utils:map({inconsistency_error, Keys})).
+    error(bondy_error:from_term({inconsistency_error, Keys})).
 
 %% @private
 -doc "Grant permissions to one or more roles(".

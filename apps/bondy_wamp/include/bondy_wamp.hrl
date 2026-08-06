@@ -1572,14 +1572,12 @@ end).
 
 -define(WAMP_UNAVAILABLE, <<"wamp.error.unavailable">>).
 -define(WAMP_NO_AVAILABLE_CALLEE, <<"wamp.error.no_available_callee">>).
--define(WAMP_FEATURE_NOT_SUPPORTED, <<"wamp.error.no_available_callee">>).
+-define(WAMP_FEATURE_NOT_SUPPORTED, <<"wamp.error.feature_not_supported">>).
 -define(WAMP_AUTHENTICATION_FAILED, <<"wamp.error.authentication_failed">>).
 -define(WAMP_AUTHORIZATION_FAILED, <<"wamp.error.authorization_failed">>).
 -define(WAMP_CANCELLED, <<"wamp.error.canceled">>).
 -define(WAMP_COUNT_CALLEES, <<"wamp.registration.count_callees">>).
 -define(WAMP_DISCLOSE_ME_NOT_ALLOWED, <<"wamp.error.disclose_me.not_allowed">>).
--define(WAMP_ERROR_INVALID_URI, <<"wamp.error.invalid_uri">>).
--define(WAMP_ERROR_NO_SUCH_SESSION, <<"wamp.error.no_such_session">>).
 -define(WAMP_GOODBYE_AND_OUT, <<"wamp.close.goodbye_and_out">>).
 -define(WAMP_INVALID_ARGUMENT, <<"wamp.error.invalid_argument">>).
 -define(WAMP_INVALID_PAYLOAD, <<"wamp.error.invalid_payload">>).

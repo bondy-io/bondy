@@ -558,9 +558,8 @@ jwks(Req0, St) ->
             Req1 = prepare_request(KeySet, #{}, Req0),
             {true, Req1, St};
         {error, not_found} ->
-            ErrorMap = maps:without(
-                [<<"status_code">>],
-                bondy_error_utils:map({no_such_realm, RealmUri})
+            ErrorMap = bondy_error:to_map(
+                bondy_error:from_term({no_such_realm, RealmUri})
             ),
             Req1 = cowboy_req:reply(
                 ?HTTP_NOT_FOUND,
@@ -591,25 +590,25 @@ reply(no_common_name, Req) ->
     reply(oauth2_invalid_client, Req);
 reply(common_name_mismatch, Req) ->
     reply(oauth2_invalid_client, Req);
-reply(oauth2_invalid_client = Error, Req) ->
+reply(oauth2_invalid_client = Reason, Req) ->
     Headers = #{<<"www-authenticate">> => <<"Basic">>},
-    ErrorMap = maps:without([<<"status_code">>], bondy_error_utils:map(Error)),
+    Error = bondy_error:from_term(Reason),
     cowboy_req:reply(
-        ?HTTP_UNAUTHORIZED, prepare_request(ErrorMap, Headers, Req)
+        ?HTTP_UNAUTHORIZED,
+        prepare_request(bondy_error:to_map(Error), Headers, Req)
     );
-reply(unsupported_token_type = Error, Req) ->
-    {Code, Map} = maps:take(<<"status_code">>, bondy_error_utils:map(Error)),
-    cowboy_req:reply(Code, prepare_request(Map, #{}, Req));
-reply(Error, Req) ->
-    Map0 = bondy_error_utils:map(Error),
-    {Code, Map1} =
-        case maps:take(<<"status_code">>, Map0) of
-            error ->
-                {?HTTP_BAD_REQUEST, Map0};
-            Res ->
-                Res
+reply(Reason, Req) ->
+    Error = bondy_error:from_term(Reason),
+    %% An OAuth2 request that carries no more specific status is a bad request,
+    %% unlike the API Gateway, which defaults to a server error.
+    Status =
+        case bondy_http_utils:http_status(Error) of
+            ?HTTP_INTERNAL_SERVER_ERROR -> ?HTTP_BAD_REQUEST;
+            Other -> Other
         end,
-    cowboy_req:reply(Code, prepare_request(Map1, #{}, Req)).
+    cowboy_req:reply(
+        Status, prepare_request(bondy_error:to_map(Error), #{}, Req)
+    ).
 
 %% @private
 -spec prepare_request(term(), map(), cowboy_req:req()) -> cowboy_req:req().

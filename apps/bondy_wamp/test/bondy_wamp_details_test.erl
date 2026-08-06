@@ -33,8 +33,10 @@ caller_pairing() ->
     ?assertMatch(#{roles := _}, bondy_wamp_details:new(hello, Paired)),
 
     Unpaired = hello(caller, #{progressive_calls => true}),
+    %% `type' is the stable handle for an error's identity; `code' is a binary
+    %% kept for wire compatibility.
     ?assertError(
-        #{code := invalid_feature_request},
+        #{type := invalid_feature_request},
         bondy_wamp_details:new(hello, Unpaired)
     ).
 
@@ -43,8 +45,10 @@ callee_pairing() ->
     ?assertMatch(#{roles := _}, bondy_wamp_details:new(hello, Paired)),
 
     Unpaired = hello(callee, #{progressive_calls => true}),
+    %% `type' is the stable handle for an error's identity; `code' is a binary
+    %% kept for wire compatibility.
     ?assertError(
-        #{code := invalid_feature_request},
+        #{type := invalid_feature_request},
         bondy_wamp_details:new(hello, Unpaired)
     ).
 

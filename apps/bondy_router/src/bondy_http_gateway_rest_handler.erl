@@ -59,12 +59,13 @@ MOPS expressions:
 - `security` — populated after OAuth2 authentication (realm_uri,
   session, authid, groups, etc.)
 
-## WAMP error → HTTP status code
+## Error URI → HTTP status code
 
-WAMP error URIs are mapped to HTTP status codes. The spec's
-`status_codes` map can override the defaults. Built-in mappings
-include `wamp.error.not_found` → 404, `wamp.error.not_authorized` →
-401, `wamp.error.invalid_argument` → 400, etc.
+The status is derived from the error's URI by
+`bondy_http_utils:http_status/1`, which is the single source for that
+mapping; an API spec's `status_codes` map overrides it. Examples:
+`bondy.error.not_found` → 404, `wamp.error.not_authorized` → 403,
+`wamp.error.invalid_argument` → 400.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -237,17 +238,13 @@ is_authorized(Req0, St0) ->
         end
     catch
         throw:proxy_protocol_error ->
-            Body = bondy_error_utils:map({
-                proxy_protocol_error,
-                <<"Operation forbidden">>,
-                <<"The source IP Address couldn't be determined.">>
-            }),
+            Body = bondy_error:to_map(bondy_error:new(proxy_protocol_error)),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(?HTTP_FORBIDDEN, json, Response, Req0),
             {stop, Req1, St0};
         error:{no_such_realm, _} = Reason ->
             {StatusCode, Body} = take_status_code(
-                bondy_error_utils:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR
+                bondy_error:to_map(bondy_error:from_term(Reason)), ?HTTP_INTERNAL_SERVER_ERROR
             ),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, json, Response, Req0),
@@ -263,7 +260,7 @@ is_authorized(Req0, St0) ->
                 St0
             ),
             {StatusCode, Body} = take_status_code(
-                bondy_error_utils:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR
+                bondy_error:to_map(bondy_error:from_term(Reason)), ?HTTP_INTERNAL_SERVER_ERROR
             ),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, json, Response, Req0),
@@ -487,7 +484,7 @@ authenticate(Token, Ctxt0, Req0, St0) ->
             %% TODO update context
             {true, Req0, St1};
         {error, {no_such_realm, _} = Reason} ->
-            {_, ErrorMap} = take_status_code(bondy_error_utils:map(Reason)),
+            {_, ErrorMap} = take_status_code(bondy_error:to_map(bondy_error:from_term(Reason))),
             Response = #{
                 <<"body">> => ErrorMap,
                 <<"headers">> => eval_headers(Req0, St0)
@@ -536,7 +533,7 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
     catch
         throw:Reason ->
             {StatusCode, Body} = take_status_code(
-                bondy_error_utils:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR
+                bondy_error:to_map(bondy_error:from_term(Reason)), ?HTTP_INTERNAL_SERVER_ERROR
             ),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
@@ -552,7 +549,7 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 St0
             ),
             {StatusCode, Body} = take_status_code(
-                bondy_error_utils:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR
+                bondy_error:to_map(bondy_error:from_term(Reason)), ?HTTP_INTERNAL_SERVER_ERROR
             ),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
@@ -588,7 +585,7 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
     catch
         throw:Reason ->
             {StatusCode1, Body} = take_status_code(
-                bondy_error_utils:map(Reason), ?HTTP_BAD_REQUEST
+                bondy_error:to_map(bondy_error:from_term(Reason)), ?HTTP_BAD_REQUEST
             ),
             ErrResp = #{<<"body">> => Body, <<"headers">> => #{}},
             Req = reply(StatusCode1, error_encoding(Enc), ErrResp, Req0),
@@ -604,7 +601,7 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 St0
             ),
             {StatusCode1, Body} = take_status_code(
-                bondy_error_utils:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR
+                bondy_error:to_map(bondy_error:from_term(Reason)), ?HTTP_INTERNAL_SERVER_ERROR
             ),
             ErrResp = #{<<"body">> => Body, <<"headers">> => #{}},
             Req = reply(StatusCode1, error_encoding(Enc), ErrResp, Req0),
@@ -632,17 +629,20 @@ take_status_code(#{<<"body">> := Body0} = Map, Default) ->
 take_status_code(ErrorBody, Default) ->
     case maps:take(<<"status_code">>, ErrorBody) of
         error ->
-            StatusCode =
-                case maps:find(<<"code">>, ErrorBody) of
-                    {ok, Val} ->
-                        uri_to_status_code(Val);
-                    _ ->
-                        Default
-                end,
-            {StatusCode, ErrorBody};
+            {status_code_of(ErrorBody, Default), ErrorBody};
         Res ->
             Res
     end.
+
+%% @private
+%% `uri' is an error's normative identity and is preferred; `code' is consulted
+%% only for bodies built by an API specification, which carry no `uri'.
+status_code_of(#{<<"uri">> := Uri}, _) when is_binary(Uri) ->
+    bondy_http_utils:http_status(Uri);
+status_code_of(#{<<"code">> := Code}, _) when is_binary(Code); is_atom(Code) ->
+    bondy_http_utils:http_status(Code);
+status_code_of(_, Default) ->
+    Default.
 
 -doc """
 Creates a context object based on the passed Request
@@ -682,9 +682,7 @@ init_context(Req) ->
     Id = bondy_telemetry:trace_id(),
 
     M = #{
-        %% Msgpack does not support 128-bit integers,
-        %% so for the time being we encode it as binary string
-        <<"id">> => integer_to_binary(Id),
+        <<"id">> => Id,
         <<"method">> => method(Req),
         <<"scheme">> => cowboy_req:scheme(Req),
         <<"peer">> => Peer,
@@ -858,15 +856,16 @@ perform_action(
             {ok, RespBody} = hackney:body(ClientRef),
             from_http_response(StatusCode, RespHeaders, RespBody, RSpec, St0);
         {error, Reason} ->
-            Error = #{
-                <<"code">> => ?BONDY_ERROR_BAD_GATEWAY,
-                <<"message">> =>
+            %% Reason is a raw hackney term: it has no JSON representation and
+            %% must be rendered before it can reach a client.
+            Error = bondy_error:new(bad_gateway, #{
+                message =>
                     <<"Error while connecting with upstream URL '", Url/binary,
                         "'.">>,
-                %% TODO convert to string
-                <<"description">> => Reason
-            },
-            throw(Error)
+                details => #{url => Url},
+                metadata => #{reason => Reason}
+            }),
+            throw(bondy_error:to_map(Error))
     end;
 perform_action(
     Method,
@@ -922,7 +921,9 @@ perform_action(
             St2 = maps:update(api_context, ApiCtxt1, St1),
             {ok, Response, St2};
         {error, WampError0} ->
-            StatusCode0 = uri_to_status_code(maps:get(error_uri, WampError0)),
+            StatusCode0 = bondy_http_utils:http_status(
+                maps:get(error_uri, WampError0)
+            ),
             WampError1 = bondy_utils:to_binary_keys(WampError0),
             Error = maps:put(<<"status_code">>, StatusCode0, WampError1),
             ApiCtxt1 = update_context({error, Error}, ApiCtxt0),
@@ -982,7 +983,9 @@ perform_action(
             St2 = maps:update(api_context, ApiCtxt1, St1),
             {ok, Response, St2};
         {error, WampError0} ->
-            StatusCode0 = uri_to_status_code(maps:get(error_uri, WampError0)),
+            StatusCode0 = bondy_http_utils:http_status(
+                maps:get(error_uri, WampError0)
+            ),
             WampError1 = bondy_utils:to_binary_keys(WampError0),
             Error = maps:put(<<"status_code">>, StatusCode0, WampError1),
             ApiCtxt1 = update_context({error, Error}, ApiCtxt0),
@@ -1088,7 +1091,7 @@ from_http_response(StatusCode0, RespHeaders, RespBody, Spec, St0) ->
     {ok, StatusCode1, Response1, St1}.
 
 reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
-    {_, Body} = take_status_code(bondy_error_utils:map(Error)),
+    {_, Body} = take_status_code(bondy_error:to_map(bondy_error:from_term(Error))),
     Code = maps:get(<<"code">>, Body, <<>>),
     Msg = maps:get(<<"message">>, Body, <<>>),
     Desc = maps:get(<<"description">>, Body, <<>>),
@@ -1210,58 +1213,6 @@ error_encoding(undefined) -> json;
 error_encoding(_Other) -> json.
 
 %% @private
-uri_to_status_code(timeout) ->
-    ?HTTP_GATEWAY_TIMEOUT;
-uri_to_status_code(?BONDY_ERROR_BAD_GATEWAY) ->
-    ?HTTP_SERVICE_UNAVAILABLE;
-uri_to_status_code(?BONDY_ERROR_TIMEOUT) ->
-    ?HTTP_GATEWAY_TIMEOUT;
-uri_to_status_code(?WAMP_AUTHORIZATION_FAILED) ->
-    %% REVIEW
-    ?HTTP_FORBIDDEN;
-uri_to_status_code(?WAMP_CANCELLED) ->
-    ?HTTP_BAD_REQUEST;
-uri_to_status_code(?WAMP_CLOSE_REALM) ->
-    ?HTTP_INTERNAL_SERVER_ERROR;
-uri_to_status_code(?WAMP_DISCLOSE_ME_NOT_ALLOWED) ->
-    ?HTTP_BAD_REQUEST;
-uri_to_status_code(?WAMP_GOODBYE_AND_OUT) ->
-    ?HTTP_INTERNAL_SERVER_ERROR;
-uri_to_status_code(?WAMP_INVALID_ARGUMENT) ->
-    ?HTTP_BAD_REQUEST;
-uri_to_status_code(?WAMP_INVALID_URI) ->
-    ?HTTP_BAD_REQUEST;
-uri_to_status_code(?WAMP_NET_FAILURE) ->
-    ?HTTP_BAD_GATEWAY;
-uri_to_status_code(?WAMP_NOT_AUTHORIZED) ->
-    %% REVIEW
-    ?HTTP_UNAUTHORIZED;
-uri_to_status_code(?WAMP_NO_ELIGIBLE_CALLE) ->
-    ?HTTP_BAD_GATEWAY;
-uri_to_status_code(?WAMP_NO_SUCH_PROCEDURE) ->
-    ?HTTP_NOT_IMPLEMENTED;
-uri_to_status_code(?WAMP_NO_SUCH_REALM) ->
-    ?HTTP_BAD_GATEWAY;
-uri_to_status_code(?WAMP_NO_SUCH_REGISTRATION) ->
-    ?HTTP_BAD_GATEWAY;
-uri_to_status_code(?WAMP_NO_SUCH_ROLE) ->
-    ?HTTP_BAD_REQUEST;
-uri_to_status_code(?WAMP_NO_SUCH_SESSION) ->
-    ?HTTP_INTERNAL_SERVER_ERROR;
-uri_to_status_code(?WAMP_NO_SUCH_SUBSCRIPTION) ->
-    ?HTTP_BAD_GATEWAY;
-uri_to_status_code(?WAMP_OPTION_DISALLOWED_DISCLOSE_ME) ->
-    ?HTTP_BAD_REQUEST;
-uri_to_status_code(?WAMP_OPTION_NOT_ALLOWED) ->
-    ?HTTP_BAD_REQUEST;
-uri_to_status_code(?WAMP_PROCEDURE_ALREADY_EXISTS) ->
-    ?HTTP_BAD_REQUEST;
-uri_to_status_code(?WAMP_SYSTEM_SHUTDOWN) ->
-    ?HTTP_INTERNAL_SERVER_ERROR;
-uri_to_status_code(_) ->
-    ?HTTP_INTERNAL_SERVER_ERROR.
-
-%% @private
 eval_headers(Req, #{api_spec := Spec, api_context := Ctxt}) ->
     Expr = maps_utils:get_path(
         [<<"response">>, <<"on_error">>, <<"headers">>],
@@ -1286,18 +1237,21 @@ mops_eval(Expr, Ctxt, Opts) ->
         mops:eval(Expr, Ctxt, Opts)
     catch
         error:{invalid_expression, [Expr, Term]} ->
-            throw(#{
-                <<"code">> => ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR,
-                <<"message">> => iolist_to_binary([
-                    <<"There was an error evaluating the MOPS expression '">>,
-                    Expr,
-                    "' with value '",
-                    io_lib:format("~p", [Term]),
-                    "'"
-                ]),
-                <<"description">> =>
-                    <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
-            });
+            throw(
+                bondy_error:to_map(
+                    bondy_error:new(invalid_expression, #{
+                        message => iolist_to_binary([
+                            <<"There was an error evaluating the MOPS ">>,
+                            <<"expression '">>,
+                            Expr,
+                            "' with value '",
+                            io_lib:format("~p", [Term]),
+                            "'"
+                        ]),
+                        details => #{expression => Expr}
+                    })
+                )
+            );
         error:{badkey, Key} ->
             throw(#{
                 <<"code">> => ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR,

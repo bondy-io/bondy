@@ -959,80 +959,74 @@ stop(Reason, Acc, St) ->
     stop(abort_message(Reason), Acc, St).
 
 %% @private
+%% Each clause picks the error type whose catalogued URI is the one this abort
+%% has always used, so the reason URI on the wire is unchanged. Routing through
+%% bondy_error is what adds the standard keys - notably `nature', which lets a
+%% client tell a retryable refusal (overload, fence) from a permanent one.
 abort_message(internal_error) ->
-    Details = #{
-        message => <<"Internal system error, contact your administrator.">>
-    },
-    bondy_wamp_message:abort(Details, ?BONDY_ERROR_INTERNAL);
+    abort(
+        internal_error,
+        <<"Internal system error, contact your administrator.">>
+    );
 abort_message(decoding_error) ->
-    Details = #{
-        message => <<"An error occurred while deserealising a message.">>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_PROTOCOL_VIOLATION);
+    abort(
+        protocol_violation,
+        <<"An error occurred while deserealising a message.">>
+    );
 abort_message({invalid_message, _M}) ->
-    Details = #{
-        message => <<"An invalid message was received.">>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_PROTOCOL_VIOLATION);
+    abort(protocol_violation, <<"An invalid message was received.">>);
 abort_message({no_authmethod, []}) ->
-    Details = #{
-        message =>
-            <<"No authentication method requested. At least one authentication method is required.">>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_NOT_AUTH_METHOD);
+    abort(
+        not_auth_method,
+        <<"No authentication method requested. At least one authentication method is required.">>
+    );
 abort_message({no_authmethod, ReqMethods}) ->
-    Details = #{
-        message =>
-            <<"The requested authentication methods are not available for this user on this realm.">>,
-        description =>
-            <<"The requested methods are either not enabled for the authenticating user or realm or they are restricted to a specific network address range that doesn't match the client's. Check the realm configuration including the user (its roles) and the assigned sources.">>,
-        requested_methods => ReqMethods
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_NOT_AUTH_METHOD);
+    abort(
+        not_auth_method,
+        <<"The requested authentication methods are not available for this user on this realm.">>,
+        <<"The requested methods are either not enabled for the authenticating user or realm or they are restricted to a specific network address range that doesn't match the client's. Check the realm configuration including the user (its roles) and the assigned sources.">>,
+        #{requested_methods => ReqMethods}
+    );
 abort_message(connections_not_allowed) ->
-    Details = #{
-        message =>
-            <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure taken by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
+    abort(
+        authentication_failed,
+        <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure taken by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>
+    );
 abort_message(overload) ->
     %% The load admission gate refused this session: the node's run
     %% queues are too deep to establish a session within a useful time.
     %% An availability condition, not a client error — the retryable URI
     %% tells clients to back off and try again (possibly reaching
     %% another node through their load balancer).
-    Details = #{
-        message => <<
+    abort(
+        service_unavailable,
+        <<
             "The router is overloaded and cannot accept new sessions "
             "at the moment. Please retry."
         >>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_UNAVAILABLE);
+    );
 abort_message({rate_limited, _Class}) ->
     %% AV-1: inbound throttle tripped. A pre-auth signal, so the reason is not a
     %% user-enumeration oracle; keep it generic and non-specific about the limit.
-    Details = #{
-        message =>
-            <<"Too many requests. Please slow down and retry later.">>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_UNAVAILABLE);
+    abort(
+        service_unavailable,
+        <<"Too many requests. Please slow down and retry later.">>
+    );
 abort_message(no_such_realm) ->
-    Details = #{
-        message => <<"Realm does not exist.">>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_NO_SUCH_REALM);
+    abort(no_such_realm, <<"Realm does not exist.">>);
 abort_message({no_such_realm, Realm}) ->
-    Details = #{
-        message => <<"Realm '", Realm/binary, "' does not exist.">>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_NO_SUCH_REALM);
+    abort(
+        no_such_realm,
+        <<"Realm '", Realm/binary, "' does not exist.">>,
+        <<>>,
+        #{realm_uri => Realm}
+    );
 abort_message({no_such_groups, Groups}) when is_list(Groups) ->
     Joined = lists:join(<<", ">>, Groups),
     Msg = iolist_to_binary(
         [<<"The following groups do not exist: ">>, Joined]
     ),
-    Details = #{message => Msg},
-    bondy_wamp_message:abort(Details, ?WAMP_NO_SUCH_ROLE);
+    abort(no_such_role, Msg, <<>>, #{groups => Groups});
 abort_message({no_such_user, Username}) ->
     ?LOG_INFO(#{
         description =>
@@ -1043,29 +1037,28 @@ abort_message({no_such_user, Username}) ->
     }),
     generic_authentication_failed();
 abort_message({protocol_violation, Reason}) when is_binary(Reason) ->
-    bondy_wamp_message:abort(#{message => Reason}, ?WAMP_PROTOCOL_VIOLATION);
+    abort(protocol_violation, Reason);
 abort_message({authentication_failed, invalid_authmethod}) ->
-    Details = #{
-        message => <<"Unsupported authentication method.">>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
+    abort(authentication_failed, <<"Unsupported authentication method.">>);
 abort_message({authentication_failed, temporarily_unavailable}) ->
     %% The AE auth fence refused because this node cannot currently confirm
     %% its security view is fresh. This is an availability condition, not a
     %% credential failure — a retryable URI stops clients (and their humans)
     %% from treating it as a bad password.
-    Details = #{
-        message => <<
+    abort(
+        service_unavailable,
+        <<
             "Authentication is temporarily unavailable on this node. "
             "Please retry."
         >>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_UNAVAILABLE);
+    );
 abort_message({authentication_failed, {no_such_realm, Realm}}) ->
-    Details = #{
-        message => <<"Realm '", Realm/binary, "' does not exist.">>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_NO_SUCH_REALM);
+    abort(
+        no_such_realm,
+        <<"Realm '", Realm/binary, "' does not exist.">>,
+        <<>>,
+        #{realm_uri => Realm}
+    );
 abort_message({authentication_failed, {no_such_groups, Groups}}) when
     is_list(Groups)
 ->
@@ -1075,8 +1068,7 @@ abort_message({authentication_failed, {no_such_groups, Groups}}) when
         <<"do not exist: ">>,
         Joined
     ]),
-    Details = #{message => Msg},
-    bondy_wamp_message:abort(Details, ?WAMP_NO_SUCH_ROLE);
+    abort(no_such_role, Msg, <<>>, #{groups => Groups});
 abort_message({authentication_failed, {no_such_user, Username}}) ->
     ?LOG_INFO(#{
         description =>
@@ -1095,89 +1087,109 @@ abort_message({authentication_failed, user_disabled}) ->
     }),
     generic_authentication_failed();
 abort_message({authentication_failed, invalid_scheme}) ->
-    Details = #{
-        message => <<"Unsupported authentication scheme.">>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
+    abort(authentication_failed, <<"Unsupported authentication scheme.">>);
 abort_message({authentication_failed, missing_signature}) ->
     generic_authentication_failed();
 abort_message({authentication_failed, oauth2_invalid_grant}) ->
-    Details = #{
-        message => <<
+    abort(
+        authentication_failed,
+        <<
             "The access token provided is expired, revoked, malformed,"
             " or invalid either because it does not match the Realm used in the"
             " request, or because it was issued to another peer."
         >>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
+    );
 abort_message({authentication_failed, _}) ->
     %% Wrong password, bad signature, or any other unspecified auth failure.
     %% Kept byte-identical to the unknown/disabled-user responses above so the
     %% client cannot distinguish them (no user-enumeration oracle).
     generic_authentication_failed();
 abort_message({unsupported_encoding, Encoding}) ->
-    Details = #{
-        message => <<
+    abort(
+        protocol_violation,
+        <<
             "Unsupported message encoding '",
             (atom_to_binary(Encoding))/binary,
             "'."
         >>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_PROTOCOL_VIOLATION);
+    );
 abort_message({validation_failed, Details, _ReqInfo}) ->
     bondy_wamp_message:abort(Details, ?WAMP_PROTOCOL_VIOLATION);
 abort_message({invalid_options, missing_client_role}) ->
-    Details = #{
-        message => <<
+    abort(
+        protocol_violation,
+        <<
             "No client roles provided. Please provide at least one client role."
         >>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_PROTOCOL_VIOLATION);
+    );
 abort_message({missing_param, Param}) ->
-    Details = #{
-        message => <<
-            "Missing value for required parameter '", Param/binary, "'."
-        >>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_PROTOCOL_VIOLATION);
+    abort(
+        protocol_violation,
+        <<"Missing value for required parameter '", Param/binary, "'.">>,
+        <<>>,
+        #{parameter => Param}
+    );
 abort_message({unsupported_authmethod, Method}) ->
-    Details = #{
-        message => <<
+    abort(
+        not_auth_method,
+        <<
             "Router could not use the '",
             Method/binary,
             "' authmethod requested."
             " Either the method is not supported by the Router or it is not"
             " allowed by the Realm."
-        >>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_NOT_AUTH_METHOD);
+        >>,
+        <<>>,
+        #{authmethod => Method}
+    );
 abort_message({invalid_authmethod, Method}) ->
-    Details = #{
-        message => <<
+    abort(
+        not_auth_method,
+        <<
             "Router could not use the authmethod requested ('",
             Method/binary,
             "')."
-        >>
-    },
-    bondy_wamp_message:abort(Details, ?WAMP_NOT_AUTH_METHOD);
+        >>,
+        <<>>,
+        #{authmethod => Method}
+    );
 abort_message({Code, Term}) when is_atom(Term) ->
-    abort_message({Code, ?CHARS2BIN(atom_to_list(Term))}).
+    abort_message({Code, ?CHARS2BIN(atom_to_list(Term))});
+abort_message(Reason) ->
+    %% stop/2 is reached from every protocol path, so an unmatched reason must
+    %% still close the connection with a valid ABORT rather than crash the
+    %% handler. The reason itself stays in the log, not on the wire.
+    ?LOG_ERROR(#{
+        description => "Unhandled abort reason; aborting with a generic error.",
+        reason => Reason
+    }),
+    abort(
+        internal_error,
+        <<"Internal system error, contact your administrator.">>
+    ).
+
+%% @private
+abort(Type, Message) ->
+    abort(Type, Message, <<>>, #{}).
+
+%% @private
+abort(Type, Message, Description, Details) ->
+    bondy_wamp_error:to_abort(
+        bondy_error:new(Type, #{
+            message => Message,
+            description => Description,
+            details => Details
+        })
+    ).
 
 %% @private
 %% A single, client-indistinguishable ABORT for every pre-authentication
 %% credential/identity failure — unknown user, disabled user, bad or missing
 %% signature, wrong password. Distinct reason URIs or messages here would be a
 %% user-enumeration oracle (CWE-204); the specific reason is logged server-side
-%% by the callers.
+%% by the callers. Every caller must receive a byte-identical message.
 generic_authentication_failed() ->
-    bondy_wamp_message:abort(
-        #{message => <<"Authentication failed.">>},
-        ?WAMP_AUTHENTICATION_FAILED
-    ).
-
-%% @private
-% abort_message(Details, Uri) when is_map(Details), is_binary(Uri) ->
-%     bondy_wamp_message:abort(Details, Uri).
+    abort(authentication_failed, <<"Authentication failed.">>).
 
 -spec subprotocol(binary()) ->
     bondy_wamp_protocol:subprotocol() | {error, invalid_subprotocol}.

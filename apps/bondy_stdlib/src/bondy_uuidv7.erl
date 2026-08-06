@@ -17,9 +17,10 @@ parsing.
 -define(VARIANT, 16#2).
 
 -type uuid_binary() :: <<_:128>>.
--type uuid_string() :: string().
+%% `hex' renders as an iolist, `urlsafe' and `compact_hex' as binaries.
+-type uuid_string() :: unicode:chardata().
 -type timestamp() :: non_neg_integer().
--type format_opts() :: #{mode => urlsafe | hex}.
+-type format_opts() :: #{mode => urlsafe | hex | compact_hex}.
 
 -export_type([uuid_binary/0]).
 -export_type([uuid_string/0]).
@@ -93,7 +94,14 @@ is_valid(_) ->
 format(Bin) ->
     format(Bin, #{mode => urlsafe}).
 
--doc "Format UUID binary as standard string representation.".
+-doc """
+Formats a UUID binary.
+
+- `hex` (the default) is the canonical dashed 8-4-4-4-12 form.
+- `urlsafe` is unpadded url-safe base64, 22 characters.
+- `compact_hex` is 32 lowercase hex characters with no separators - a valid
+  W3C Trace Context `trace-id`.
+""".
 -spec format(uuid_binary(), format_opts()) -> uuid_string().
 
 format(<<A:32, B:16, C:16, D:16, E:48>> = Bin, Opts) when is_map(Opts) ->
@@ -104,7 +112,14 @@ format(<<A:32, B:16, C:16, D:16, E:48>> = Bin, Opts) when is_map(Opts) ->
                 [A, B, C, D, E]
             );
         urlsafe ->
-            base64:encode(Bin, #{mode => urlsafe, padding => false})
+            base64:encode(Bin, #{mode => urlsafe, padding => false});
+        compact_hex ->
+            %% 32 lowercase hex characters, no separators: the rendering the
+            %% W3C Trace Context specification requires of a `trace-id', which
+            %% OpenTelemetry propagates. A UUIDv7 is 16 bytes, exactly a
+            %% trace-id's width, and its version bits guarantee it is never the
+            %% all-zero value the specification forbids.
+            binary:encode_hex(Bin, lowercase)
     end.
 
 -doc "Parse UUID string into binary format.".

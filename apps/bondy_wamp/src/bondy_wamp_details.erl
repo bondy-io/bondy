@@ -65,27 +65,31 @@ validate(hello, Details0, Extensions) ->
     Roles = maps:get(roles, Details),
 
     maps:size(Roles) > 0 orelse
-        error(#{
-            code => missing_required_value,
-            message => <<"No WAMP peer roles defined.">>,
-            description => <<
-                "At least one WAMP peer role is required in the "
-                "HELLO.Details.roles dictionary"
-            >>
-        }),
+        error(
+            bondy_error:new(missing_required_value, #{
+                message => ~"No WAMP peer roles defined.",
+                description => <<
+                    "At least one WAMP peer role is required in the "
+                    "HELLO.Details.roles dictionary"
+                >>,
+                details => #{key => ~"roles"}
+            })
+        ),
 
     case key_value:get([caller, progressive_call_results], Details, false) of
         true ->
             key_value:get([caller, call_canceling], Details, false) orelse
-                error(#{
-                    code => invalid_feature_request,
-                    message => <<"Invalid feature requested for Caller role">>,
-                    description => <<
-                        "The feature progressive_call_results was requested "
-                        "but the feature call_canceling was not, both need to be "
-                        "requested for progressive_call_results to be enabled."
-                    >>
-                });
+                error(
+                    bondy_error:new(invalid_feature_request, #{
+                        message => ~"Invalid feature requested for Caller role",
+                        description => <<
+                            "The feature progressive_call_results was requested "
+                            "but the feature call_canceling was not, both need to be "
+                            "requested for progressive_call_results to be enabled."
+                        >>,
+                        details => #{role => ~"caller"}
+                    })
+                );
         false ->
             ok
     end,
@@ -93,15 +97,17 @@ validate(hello, Details0, Extensions) ->
     case key_value:get([callee, progressive_call_results], Details, false) of
         true ->
             key_value:get([callee, call_canceling], Details, false) orelse
-                error(#{
-                    code => invalid_feature_request,
-                    message => <<"Invalid feature requested for Callee role">>,
-                    description => <<
-                        "The feature progressive_call_results was requested "
-                        "but the feature call_canceling was not, both need to be "
-                        "requested for progressive_call_results to be enabled."
-                    >>
-                });
+                error(
+                    bondy_error:new(invalid_feature_request, #{
+                        message => ~"Invalid feature requested for Callee role",
+                        description => <<
+                            "The feature progressive_call_results was requested "
+                            "but the feature call_canceling was not, both need to be "
+                            "requested for progressive_call_results to be enabled."
+                        >>,
+                        details => #{role => ~"callee"}
+                    })
+                );
         false ->
             ok
     end,
@@ -159,20 +165,22 @@ require_call_canceling(Role, Feature, Roles) ->
     case key_value:get([Role, features, Feature], Roles, false) of
         true ->
             key_value:get([Role, features, call_canceling], Roles, false) orelse
-                error(#{
-                    code => invalid_feature_request,
-                    message => <<"Invalid feature requested">>,
-                    description => iolist_to_binary([
-                        "The feature ",
-                        atom_to_binary(Feature, utf8),
-                        " was requested for the ",
-                        atom_to_binary(Role, utf8),
-                        " role but call_canceling was not; both are required "
-                        "for ",
-                        atom_to_binary(Feature, utf8),
-                        "."
-                    ])
-                }),
+                error(
+                    bondy_error:new(invalid_feature_request, #{
+                        message => ~"Invalid feature requested",
+                        description => iolist_to_binary([
+                            "The feature ",
+                            atom_to_binary(Feature, utf8),
+                            " was requested for the ",
+                            atom_to_binary(Role, utf8),
+                            " role but call_canceling was not; both are "
+                            "required for ",
+                            atom_to_binary(Feature, utf8),
+                            "."
+                        ]),
+                        details => #{role => Role, feature => Feature}
+                    })
+                ),
             ok;
         false ->
             ok

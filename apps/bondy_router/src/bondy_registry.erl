@@ -619,13 +619,8 @@ find_matches(Type, RealmUri, Uri, Opts) ->
             ?EOT
     end.
 
-format_error(Reason, [{_M, _F, _As, Info} | _]) ->
-    ErrorInfo = proplists:get_value(error_info, Info, #{}),
-    ErrorMap = maps:get(cause, ErrorInfo),
-    ErrorMap#{
-        %% general => "optional general information",
-        reason => io_lib:format("~p: ~p", [?MODULE, Reason])
-    }.
+format_error(Reason, StackTrace) ->
+    bondy_error:format_error(Reason, StackTrace).
 
 %% =============================================================================
 %% GEN_SERVER CALLBACKS

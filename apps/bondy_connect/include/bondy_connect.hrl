@@ -19,7 +19,10 @@
 
 %% Error URI returned to the caller when a local callee handler crashes or
 %% returns an unexpected value. Kept local so `bondy_connect' has no dependency
-%% on the `bondy' application.
--define(BONDY_CONNECT_INTERNAL_ERROR, <<"wamp.error.internal_error">>).
+%% on the `bondy' application; the value is the catalogued
+%% `bondy_error:uri(internal_error)'. It was previously
+%% `wamp.error.internal_error', which the WAMP specification does not define -
+%% the `wamp.' namespace is reserved for the specification.
+-define(BONDY_CONNECT_INTERNAL_ERROR, <<"bondy.error.internal_error">>).
 
 -endif.

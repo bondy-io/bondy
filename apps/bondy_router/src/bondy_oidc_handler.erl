@@ -953,7 +953,12 @@ maybe_idp_logout_url(RealmUri, Claims, RedirectUri) ->
 
 %% @private
 reply_json_error(StatusCode, ErrorBin, Req) ->
-    ReplyBody = json:encode(#{<<"error">> => ErrorBin}),
+    %% `error' carries the RFC 6749 code and is retained; the standard error
+    %% payload is added alongside it.
+    Body = maps:put(
+        ~"error", ErrorBin, bondy_error:to_map(bondy_error:from_term(ErrorBin))
+    ),
+    ReplyBody = json:encode(Body),
     cowboy_req:reply(
         StatusCode,
         #{<<"content-type">> => <<"application/json">>},

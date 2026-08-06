@@ -52,8 +52,26 @@ case, plus any raw transport `send/2` failure, both open-ended by nature).
     | {invalid_option, receive_progress}
     | {invalid_handler, term()}
     | term().
+-doc """
+A failed operation.
+
+`kind => wamp` is an ERROR sent by the router. It is a `bondy_error:t()` - so
+it also carries `message`, `nature`, `details` and the rest - extended with the
+raw `args` and `kwargs` of the WAMP message. Prefer `uri` to identify it and
+`nature` to decide whether retrying can help.
+
+`kind => client` is a local failure, and carries the Erlang term as `reason`.
+""".
 -type call_error() ::
-    #{kind := wamp, uri := binary(), args := list(), kwargs := map()}
+    #{
+        kind := wamp,
+        uri := binary(),
+        args := list(),
+        kwargs := map(),
+        message := binary(),
+        nature := bondy_error:nature(),
+        _ => _
+    }
     | #{kind := client, reason := call_client_reason()}.
 
 -export_type([conn/0]).

@@ -42,7 +42,7 @@ Examples:
 join([], _) ->
     ~"";
 join([Item], _) ->
-    iolist_to_binary(quote(Item));
+    iolist_to_binary(quote(to_iodata(Item)));
 join(Items, Conjunction) when is_list(Items), is_binary(Conjunction) ->
     Quoted = [quote(to_iodata(I)) || I <- Items],
     join(Quoted, Conjunction, []).
@@ -52,6 +52,10 @@ join(Items, Conjunction) when is_list(Items), is_binary(Conjunction) ->
 %% =============================================================================
 
 %% @private
+%% With exactly two items there is no preceding item to separate from, so the
+%% conjunction stands alone: `'a' and 'b'`, not `, 'a' and 'b'`.
+join([H, T], Conjunction, []) ->
+    iolist_to_binary([H, $\s, Conjunction, $\s, T]);
 join([H, T], Conjunction, Acc) ->
     iolist_to_binary(
         lists:reverse([T, $\s, Conjunction, $\s, H, $\s, $, | Acc])
@@ -62,7 +66,7 @@ join([H | T], Conjunction, Acc) ->
     join(T, Conjunction, [H, $\s, $, | Acc]).
 
 %% @private
-%% Converts any term to bianry and wraps in single quotes
+%% Converts any term to binary and wraps it in single quotes
 quote(Term) ->
     [$', Term, $'].
 

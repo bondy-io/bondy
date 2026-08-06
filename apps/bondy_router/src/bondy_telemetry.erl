@@ -53,13 +53,16 @@ Also provides trace-identifier generation.
 %% =============================================================================
 
 -doc """
-Generates a 128 bit random integer to use as a trace id.
+Generates a W3C Trace Context `trace-id`: 32 lowercase hex characters.
+
+Shares its representation with the `trace_id` carried by `bondy_error:t()`, so
+a request identifier and an error correlation identifier are the same kind of
+value and can be propagated to an OpenTelemetry collector unchanged.
 """.
--spec trace_id() -> integer().
+-spec trace_id() -> binary().
 
 trace_id() ->
-    %% 2 shifted left by 127 == 2 ^ 128
-    rand:uniform(2 bsl 127 - 1).
+    bondy_uuidv7:format(bondy_uuidv7:new(), #{mode => compact_hex}).
 
 -doc """
 Emits the `[bondy, wamp, message]` telemetry event for a routed WAMP

@@ -100,18 +100,22 @@ new(token_bucket = Algo, Key, Opts) when is_map(Opts) ->
         error(
             badarg,
             [Algo, Key, Opts],
-            {error_info, #{
-                cause => #{3 => "capacity should be a positive number"}
-            }}
+            [
+                {error_info, #{
+                    cause => #{3 => "rate should be a positive number"}
+                }}
+            ]
         ),
 
     is_integer(Capacity) andalso Capacity > 0 orelse
         error(
             badarg,
             [Algo, Key, Opts],
-            {error_info, #{
-                cause => #{3 => "capacity should be a positive integer"}
-            }}
+            [
+                {error_info, #{
+                    cause => #{3 => "capacity should be a positive integer"}
+                }}
+            ]
         ),
 
     T = #?MODULE{
@@ -130,7 +134,7 @@ new(Algo, Key, Opts) ->
     error(
         badarg,
         [Algo, Key, Opts],
-        {error_info, #{cause => #{1 => "algorithm not supported"}}}
+        [{error_info, #{cause => #{1 => "algorithm not supported"}}}]
     ).
 
 -doc """

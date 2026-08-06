@@ -303,6 +303,10 @@ call_safe(Pid, Request, Timeout) ->
 %% precondition check, or a send_msg failure) that needs one. Applied at the
 %% ops where both classes are reachable — call/call_async/call_stream,
 %% register/unregister/subscribe/unsubscribe, publish_ack.
+%%
+%% Deliberately NOT enriched the way error_payload/1 is: this payload is
+%% matched exactly by callers (`{error, #{kind => client, reason => timeout}}`),
+%% so extra keys would break them, and the caller already holds the reason term.
 tag_error({error, Reason}) when not is_map(Reason) ->
     {error, #{kind => client, reason => Reason}};
 tag_error(Result) ->
@@ -1815,10 +1819,15 @@ result_payload(#result{details = Details, args = Args, kwargs = KWArgs}) ->
 %% (CALL, REGISTER, SUBSCRIBE, UNREGISTER, UNSUBSCRIBE, acknowledged PUBLISH)
 %% via resolve_pending/3 (route_app/2). `kind => wamp` discriminates this from
 %% a client-side `{error, Reason}` at the tag_error/1 boundary.
-error_payload(#error{error_uri = Uri, args = Args, kwargs = KWArgs}) ->
-    #{
+%%
+%% The payload is a `bondy_error:t()` carrying the router's error, with `kind`,
+%% `args` and `kwargs` retained so existing matches keep working. `message` and
+%% `nature` are the useful additions: a caller can tell a retryable refusal from
+%% a permanent one without parsing the URI.
+error_payload(#error{args = Args, kwargs = KWArgs} = M) ->
+    Error = bondy_wamp_error:from_wamp(M),
+    Error#{
         kind => wamp,
-        uri => Uri,
         args => undefined_to(Args, []),
         kwargs => undefined_to(KWArgs, #{})
     }.
