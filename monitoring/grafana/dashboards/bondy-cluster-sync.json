@@ -866,6 +866,15 @@
           "refId": "C",
           "legendFormat": "mst rebuilds {{node}}",
           "expr": "sum by (node) (increase(bondy_oplog_mst_rebuilt_total[5m]))"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "refId": "D",
+          "expr": "sum by (node) (increase(bondy_mst_gc_aborted_total[5m]))",
+          "legendFormat": "gc aborts (page-loss tripwire) {{node}}"
         }
       ]
     },

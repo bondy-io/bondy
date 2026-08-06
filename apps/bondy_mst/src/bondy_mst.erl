@@ -896,19 +896,25 @@ gc(#?MODULE{store = Store0} = T, Arg0) when
                         %% legitimately partial mid-pull); surface it loudly
                         %% and keep the garbage for a cycle instead of making
                         %% the damage worse.
+                        %%
+                        %% The store name is the instance id for the trees
+                        %% `bondy_oplog` opens, which is what makes the event
+                        %% attributable to a shard on a dashboard.
+                        Name = bondy_mst_store:name(Store0),
                         ?LOG_ERROR(#{
                             description =>
                                 "MST garbage collection aborted: the current "
                                 "root is unservable (missing pages). Sweeping "
                                 "would amplify the loss; keeping garbage for "
                                 "this cycle.",
+                            name => Name,
                             missing_count => length(Missing),
                             missing => Missing
                         }),
                         telemetry:execute(
                             [bondy_mst, gc, aborted],
                             #{count => 1, missing_count => length(Missing)},
-                            #{reason => unservable_root}
+                            #{reason => unservable_root, name => Name}
                         ),
                         {T, #{freed_count => 0, freed_bytes => 0}}
                 end

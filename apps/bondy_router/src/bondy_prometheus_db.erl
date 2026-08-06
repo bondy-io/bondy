@@ -252,6 +252,7 @@ events() ->
         [bondy_oplog, sync_scheduler, rebootstrap_scheduled],
         [bondy_oplog, instance, integrate_doored],
         [bondy_oplog, instance, mst_rebuilt],
+        [bondy_mst, gc, aborted],
         %% Per-origin prefix closure (db.aae.prefix_hold)
         [bondy_oplog, applier, prefix_hole],
         [bondy_oplog, applier, events_held],
@@ -411,6 +412,15 @@ declare_metrics() ->
             "whose own root lost pages (after the domination gate proved "
             "no peer is stranded) and resumed AE on a fresh tree. Any "
             "occurrence deserves a look at WHY pages went missing.", [
+            instance_id, reason
+        ]},
+        {bondy_mst_gc_aborted_total,
+            "MST page GCs aborted because the current root was unservable "
+            "(missing pages) at sweep time. The abort prevents the sweep "
+            "from amplifying the hole into subtree loss; the paired error "
+            "log names the missing page hashes. Any occurrence is the "
+            "own-root page-loss tripwire firing: capture the log and "
+            "investigate.", [
             instance_id, reason
         ]},
         {bondy_oplog_doored_events_total,
@@ -882,6 +892,14 @@ do_handle_event([bondy_oplog, instance, mst_rebuilt], _Meas, Meta) ->
     counter(
         bondy_oplog_mst_rebuilt_total,
         [instance_id(Meta), maps:get(reason, Meta, undefined)],
+        1
+    );
+do_handle_event([bondy_mst, gc, aborted], _Meas, Meta) ->
+    %% Emitted below the oplog layer, so the instance id arrives as the
+    %% store's `name` (bondy_oplog opens every tree with name = instance id).
+    counter(
+        bondy_mst_gc_aborted_total,
+        [maps:get(name, Meta, undefined), maps:get(reason, Meta, undefined)],
         1
     );
 do_handle_event([bondy_oplog, instance, integrate_doored], Meas, Meta) ->

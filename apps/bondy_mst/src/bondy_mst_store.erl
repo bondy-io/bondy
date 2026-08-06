@@ -73,6 +73,7 @@ and implement different synchronization or caching mechanisms.
 -export([list/1]).
 -export([list/2]).
 -export([missing_set/2]).
+-export([name/1]).
 -export([open/3]).
 -export([page_refs/2]).
 -export([put/2]).
@@ -131,6 +132,10 @@ and implement different synchronization or caching mechanisms.
 -callback capabilities(backend()) -> map().
 
 -optional_callbacks([capabilities/1]).
+
+-callback name(backend()) -> binary() | undefined.
+
+-optional_callbacks([name/1]).
 
 -callback maybe_roll_for_seal(backend()) ->
     {rolled, Job :: term(), backend()}
@@ -380,6 +385,19 @@ transaction(#?MODULE{transactions = true, mod = Mod, state = State}, Fun) ->
     Mod:transaction(State, Fun);
 transaction(#?MODULE{transactions = false}, Fun) ->
     Fun().
+
+?DOC("""
+The backend's configured name, or `undefined` when the backend has none
+(or does not implement the optional callback). For the trees `bondy_oplog`
+opens, the name is the instance id — which is what makes telemetry emitted
+at this layer attributable to a shard.
+""").
+-spec name(Store :: t()) -> binary() | undefined.
+
+name(#?MODULE{mod = Mod, state = State}) ->
+    bondy_mst_utils:apply_lazy(
+        Mod, name, 1, [State], fun() -> undefined end
+    ).
 
 -spec capabilities(Store :: t()) -> map().
 

@@ -1855,6 +1855,71 @@
           "legendFormat": "down: {{reason}}"
         }
       ]
+    },
+    {
+      "id": 30,
+      "type": "stat",
+      "title": "Sync errors w/o remedy (30m)",
+      "description": "AAE sync sessions erroring while every remedy and tripwire counter (gap verdicts, re-bootstraps, MST rebuilds, GC aborts) stayed at zero over the window. A transient blip here is benign (a peer restart errors a round with nothing to remedy); a PERSISTENT value is the s16 own-root blackout signature - errors that no machinery is acting on. Drill into Cluster Sync and check the erroring pair's instance.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bondy-prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          },
+          "expr": "sum(increase(bondy_oplog_sync_sessions_total{outcome=\"error\"}[30m])) and on() (((sum(increase(bondy_oplog_frontier_gap_verdicts_total[30m])) or vector(0)) + (sum(increase(bondy_oplog_rebootstraps_scheduled_total[30m])) or vector(0)) + (sum(increase(bondy_oplog_mst_rebuilt_total[30m])) or vector(0)) + (sum(increase(bondy_mst_gc_aborted_total[30m])) or vector(0))) == 0) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 25
+              }
+            ]
+          },
+          "links": [
+            {
+              "title": "Cluster Sync / AAE - drill down",
+              "url": "/d/bondy-cluster-sync?${__url_time_range}"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
     }
   ]
 }

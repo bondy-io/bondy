@@ -45,9 +45,13 @@ gc_aborts_on_unservable_root_test() ->
     try
         T1 = bondy_mst:gc(T, []),
 
-        %% The guard fired...
+        %% The guard fired, attributed to the store's name (the instance id
+        %% in production — what makes the dashboard counter actionable).
         receive
-            {Ref, #{missing_count := 1}, #{reason := unservable_root}} -> ok
+            {Ref, #{missing_count := 1}, #{
+                reason := unservable_root, name := <<"gc_guard">>
+            }} ->
+                ok
         after 1000 ->
             error(gc_abort_event_not_emitted)
         end,

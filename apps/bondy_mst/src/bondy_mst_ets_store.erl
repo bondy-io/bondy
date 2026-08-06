@@ -73,6 +73,7 @@ Read-concurrent, MST backend using `ets`.
 -export([has/2]).
 -export([list/1]).
 -export([missing_set/2]).
+-export([name/1]).
 -export([open/2]).
 -export([page_refs/1]).
 -export([put/2]).
@@ -151,6 +152,11 @@ close(#?MODULE{}) ->
 flush(#?MODULE{} = T) ->
     %% In-memory backend: nothing is staged for durability.
     {ok, T}.
+
+-spec name(T :: t()) -> binary() | undefined.
+
+name(#?MODULE{name = Val}) ->
+    Val.
 
 -spec get_root(T :: t()) -> Root :: hash() | undefined.
 

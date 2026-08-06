@@ -255,6 +255,20 @@ mst_events_are_counted() ->
         prometheus_counter:value(
             bondy_mst_seal_bytes_total, [?ID, <<"incoming">>]
         )
+    ),
+    %% The own-root page-loss tripwire. Emitted below the oplog layer, so
+    %% the instance id travels as the STORE NAME (`name`), not
+    %% `instance_id` — the bridge must read the right key.
+    ok = telemetry:execute(
+        [bondy_mst, gc, aborted],
+        #{count => 1, missing_count => 2},
+        #{reason => unservable_root, name => ?ID}
+    ),
+    ?assertEqual(
+        1,
+        prometheus_counter:value(
+            bondy_mst_gc_aborted_total, [?ID, unservable_root]
+        )
     ).
 
 core_refresh_sets_gauges() ->
