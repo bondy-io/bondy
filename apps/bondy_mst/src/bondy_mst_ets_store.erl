@@ -46,27 +46,19 @@ Read-concurrent, MST backend using `ets`.
 }).
 
 -type t() :: #?MODULE{}.
--type opt() ::
-    {name, binary()}
-    | {gc_mode, gc_mode()}.
+-type opt() :: {name, binary()}.
 -type opts() :: [opt()] | opts_map().
--type opts_map() :: #{
-    name := binary(),
-    gc_mode => gc_mode()
-}.
--type gc_mode() :: epoch | reachability.
-%% How `gc/2` reclaims tombstoned pages. `epoch` (the default) prunes every
-%% page freed at or before a caller-supplied epoch — cheap, and exact when the
-%% caller knows no root older than that epoch is still in use. `reachability`
-%% marks from the supplied keep-roots and sweeps everything else — needed when
-%% the caller cannot bound root age, at the cost of a full walk per collection.
-%%
-%% This is a COLLECTION-STRATEGY choice only. It does not affect `free/3`,
-%% which always tombstones (see there).
+-type opts_map() :: #{name := binary()}.
 -type page() :: bondy_mst_page:t().
 
+%% NOTE: the collection strategy is NOT a store-open option. `gc/2` selects it
+%% from the shape of its argument — an integer is an epoch (prune every page
+%% tombstoned at or before it), a list is a keep-root set (mark from those
+%% roots and sweep the rest). The caller is the only party that knows which is
+%% sound for its root lifetime, and it must decide per call, so an option here
+%% would be a second, weaker way to say the same thing.
+
 -export_type([t/0]).
--export_type([gc_mode/0]).
 -export_type([page/0]).
 
 %% API
@@ -99,21 +91,13 @@ Read-concurrent, MST backend using `ets`.
 open(Algo, Opts) when is_atom(Algo), is_list(Opts) ->
     open(Algo, maps:from_list(Opts));
 open(Algo, Opts0) when is_atom(Algo), is_map(Opts0) ->
-    DefaultOpts = #{
-        name => undefined,
-        gc_mode => epoch
-    },
+    DefaultOpts = #{name => undefined},
 
     Opts = maps:merge(DefaultOpts, Opts0),
 
     ok = maps:foreach(
-        fun
-            (name, V) ->
-                is_binary(V) orelse
-                    error({badarg, [{name, V}]});
-            (gc_mode, V) ->
-                (V == epoch orelse V == reachability) orelse
-                    error({badarg, [{gc_mode, V}]})
+        fun(name, V) ->
+            is_binary(V) orelse error({badarg, [{name, V}]})
         end,
         Opts
     ),
@@ -405,21 +389,27 @@ prune_unreachable(#?MODULE{} = T, KeepRoots) ->
 
     W0 = ets:info(Tab, memory),
 
-    Num = lists:foldl(
-        fun(Hash, Acc) ->
+    %% Retaining the swept hashes is a DIAGNOSIS instrument, not steady state:
+    %% it is what lets a consumer answer "were the pages my root is missing
+    %% ones this collector reclaimed?" — the question that separates a
+    %% collector defect from a consumer deriving a new root off a stale base.
+    Trace = application:get_env(bondy_mst, verify_gc, false) =/= false,
+
+    {Num, Swept} = lists:foldl(
+        fun(Hash, {N, Acc}) ->
             case bloomfi:member(Hash, BF) of
                 true ->
                     %% This could be a false positive, which means we will not
                     %% free the page when we should, but we will eventually in
                     %% future executions
-                    Acc;
+                    {N, Acc};
                 false ->
                     %% Definitely not in the set so we free
                     true = ets:delete(Tab, Hash),
-                    Acc + 1
+                    {N + 1, case Trace of true -> [Hash | Acc]; false -> Acc end}
             end
         end,
-        0,
+        {0, []},
         All
     ),
 
@@ -427,7 +417,12 @@ prune_unreachable(#?MODULE{} = T, KeepRoots) ->
     %% `ets:info(_, memory)` reports words; convert the freed delta to
     %% bytes (was `memory:words/1`, no longer exported by the dep).
     Bytes = (W0 - W1) * erlang:system_info(wordsize),
-    Meta = #{name => T#?MODULE.name, freed_count => Num, freed_bytes => Bytes},
+    Meta = #{
+        name => T#?MODULE.name,
+        freed_count => Num,
+        freed_bytes => Bytes,
+        swept => Swept
+    },
     {T, Meta}.
 
 %% @private

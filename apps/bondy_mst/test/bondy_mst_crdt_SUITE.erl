@@ -12,7 +12,6 @@ all() ->
     [
         {group, set_with_local_store, []},
         {group, set_with_ets_store, []},
-        {group, set_with_ets_persistent_store, []},
         {group, set_of_awsets_with_local_store, []},
         {group, set_of_awsets_with_ets_store, []}
         %% ,
@@ -42,7 +41,6 @@ groups() ->
     [
         {set_with_local_store, [], set_test_cases()},
         {set_with_ets_store, [], set_test_cases()},
-        {set_with_ets_persistent_store, [], set_test_cases()},
         %% {set_with_rocksdb_store, [], set_test_cases()},
         {set_with_leveled_store, [], set_test_cases()},
         {set_of_awsets_with_local_store, [], set_of_awsets_test_cases()},
@@ -60,15 +58,7 @@ init_per_group(set_with_local_store, Config) ->
 init_per_group(set_with_ets_store, Config) ->
     {ok, _} = application:ensure_all_started(bondy_mst),
     Opts = #{
-        store => bondy_mst_ets_store,
-        gc_mode => reachability
-    },
-    [{grove_opts, Opts}] ++ Config;
-init_per_group(set_with_ets_persistent_store, Config) ->
-    {ok, _} = application:ensure_all_started(bondy_mst),
-    Opts = #{
-        store => bondy_mst_ets_store,
-        gc_mode => epoch
+        store => bondy_mst_ets_store
     },
     [{grove_opts, Opts}] ++ Config;
 init_per_group(set_with_leveled_store, Config) ->

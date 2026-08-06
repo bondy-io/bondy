@@ -37,10 +37,12 @@ map_tree(Name) ->
         merger => fun(_K, _V1, V2) -> V2 end
     }).
 
-ets_tree(Name, GcMode) ->
+%% The collection strategy is chosen per `bondy_mst:gc/2` CALL (integer epoch
+%% vs keep-root list), not at open time, so the store takes no mode here.
+ets_tree(Name) ->
     bondy_mst:new(#{
         store => bondy_mst_ets_store,
-        store_opts => #{name => list_to_binary(Name), gc_mode => GcMode},
+        store_opts => #{name => list_to_binary(Name)},
         merger => fun(_K, _V1, V2) -> V2 end
     }).
 
@@ -163,8 +165,8 @@ diff_unknown_root_is_full_list_test() ->
 %% correct, and a repeat diff is identical (the old code crashed on the
 %% second pass).
 diff_readonly_ets_two_tree_test() ->
-    A = build(ets_tree("np_A", reachability), kvs(lists:seq(1, 200), 0)),
-    B = build(ets_tree("np_B", reachability), kvs(lists:seq(100, 350), 7)),
+    A = build(ets_tree("np_A"), kvs(lists:seq(1, 200), 0)),
+    B = build(ets_tree("np_B"), kvs(lists:seq(100, 350), 7)),
     AList = to_kv(A),
     BList = to_kv(B),
 
@@ -187,7 +189,7 @@ diff_readonly_ets_two_tree_test() ->
 %% had `free`d any page reachable from the current root, the post-GC tree would
 %% lose entries. Assert the current tree survives a full epoch GC after a diff.
 diff_readonly_ets_epoch_gc_test() ->
-    A = build(ets_tree("p_A", epoch), kvs(lists:seq(1, 200), 0)),
+    A = build(ets_tree("p_A"), kvs(lists:seq(1, 200), 0)),
     RA = bondy_mst:root(A),
     B0 = build(A, kvs(lists:seq(201, 320), 0)),
     B = build(B0, kvs(lists:seq(1, 10), 1)),
@@ -209,7 +211,7 @@ diff_readonly_ets_epoch_gc_test() ->
 %% correct — guards against an asymmetry between the Store1 / Store2 paths.
 diff_readonly_mixed_backend_test() ->
     A = build(map_tree("mixed_A"), kvs(lists:seq(1, 120), 0)),
-    B = build(ets_tree("mix_B", reachability), kvs(lists:seq(60, 240), 3)),
+    B = build(ets_tree("mix_B"), kvs(lists:seq(60, 240), 3)),
     AList = to_kv(A),
     BList = to_kv(B),
     assert_valid_diff(AList, BList, bondy_mst:diff_to_list(A, B)),

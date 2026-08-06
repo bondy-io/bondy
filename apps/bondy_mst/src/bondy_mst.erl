@@ -116,6 +116,7 @@ hash.
 %% Long enough for a not-yet-visible insert to land, short enough not to hold
 %% up the collector meaningfully — this runs only on the abort path.
 -define(GC_ABORT_REPROBE_MS, 50).
+-define(SWEPT_TAB, bondy_mst_recent_swept).
 
 -export_type([t/0]).
 -export_type([opt/0]).
@@ -153,6 +154,8 @@ hash.
 -export([forget_gc_aborts/0]).
 -export([gc/1]).
 -export([gc_aborts/0]).
+-export([recent_swept/0]).
+-export([forget_swept/0]).
 -export([gc/2]).
 -export([get/2]).
 -export([get/3]).
@@ -717,7 +720,7 @@ put_batch(#?MODULE{} = T, Items) when is_list(Items) ->
         hash_algorithm => T#?MODULE.hash_algorithm
     }),
     B = bulk_build(B0, Items),
-    merge(T, B).
+    do_merge(T, B, root(B), put_batch).
 
 ?DOC("""
 Structurally deletes a key from the MST.
@@ -815,16 +818,24 @@ Merges two MSTs into a single tree.
 -spec merge(T1 :: t(), T2 :: t()) -> NewT1 :: t().
 
 merge(#?MODULE{} = T1, #?MODULE{} = T2) ->
-    merge(T1, T2, root(T2)).
+    do_merge(T1, T2, root(T2), merge).
 
 ?DOC("""
 Merges two MSTs into a single tree.
 """).
 -spec merge(T1 :: t(), T2 :: t(), Root :: hash() | undefined) -> NewT1 :: t().
 
-merge(#?MODULE{store = Store0} = T1, #?MODULE{} = T2, Root) when
+merge(#?MODULE{} = T1, #?MODULE{} = T2, Root) when
     is_binary(Root) orelse Root == undefined
 ->
+    do_merge(T1, T2, Root, merge).
+
+%% @private
+%% `Op` names the CALLER for the publication post-condition below — a merge
+%% that publishes a root referencing uncopied donor pages is fatal only when
+%% the donor store is then discarded (`put_batch/2`), so the two call sites
+%% must be distinguishable in the evidence.
+do_merge(#?MODULE{store = Store0} = T1, #?MODULE{} = T2, Root, Op) ->
     telemetry:span(
         [bondy_mst, merge],
         #{},
@@ -835,6 +846,7 @@ merge(#?MODULE{store = Store0} = T1, #?MODULE{} = T2, Root) when
                 T1#?MODULE{store = Store}
             end,
             Result = bondy_mst_store:transaction(Store0, Fun),
+            ok = verify_published_root(Result, Op),
             {Result, #{}}
         end
     ).
@@ -918,13 +930,16 @@ gc(#?MODULE{store = Store0} = T, Arg0) when
                 case is_list(Arg) andalso unservable_current_root(T) of
                     false ->
                         {Store, Meta} = bondy_mst_store:gc(Store0, Arg),
+                        T1 = T#?MODULE{store = Store},
+                        ok = record_swept(Meta),
+                        ok = verify_post_sweep(T1, Store),
                         ?LOG_DEBUG(#{
                             description => "Garbage collection completed",
                             name => maps:get(name, Meta, <<"unknown">>),
                             freed_count => maps:get(freed_count, Meta, 0),
                             freed_bytes => maps:get(freed_bytes, Meta, 0)
                         }),
-                        {T#?MODULE{store = Store}, Meta};
+                        {T1, Meta};
                     {true, Missing} ->
                         %% ABORT, do not sweep. The list-mode collector marks
                         %% by walking the keep-roots THROUGH PRESENT PAGES
@@ -1014,6 +1029,158 @@ Discards the retained GC-abort reports (see `gc_aborts/0`).
 forget_gc_aborts() ->
     persistent_term:erase(?GC_ABORTS_KEY),
     ok.
+
+?DOC("""
+The page hashes most recently reclaimed by this node's collectors, newest
+first, when `bondy_mst.verify_gc` is enabled (otherwise empty).
+
+Diagnosis instrument. If a root is missing pages, intersecting its missing set
+with this answers the question that names the faulting party: pages that ARE
+here were reclaimed by a collector whose mark set did not include them, which
+means whoever published that root derived it from a base the collector had
+already moved past. Pages that are NOT here were never collected, so they were
+never stored.
+""").
+-spec recent_swept() -> [hash()].
+
+recent_swept() ->
+    case ets:whereis(?SWEPT_TAB) of
+        undefined -> [];
+        Tab -> [H || {H} <- ets:tab2list(Tab)]
+    end.
+
+%% @private
+%% Deliberately ETS and NOT `persistent_term`, unlike the abort ring next to
+%% it. An abort is rare, so a `persistent_term:put` per abort costs nothing; a
+%% SWEEP happens on every collection (~50/s on a busy shard), and each
+%% `persistent_term:put` of a large term forces a global scan of every process
+%% heap. Recording there slowed the collector enough to change the timing of
+%% the very race this instrument exists to observe — the measurement suppressed
+%% the phenomenon.
+record_swept(#{swept := [_ | _] = Swept}) ->
+    _ = ets:insert(swept_tab(), [{H} || H <- Swept]),
+    ok;
+record_swept(_) ->
+    ok.
+
+?DOC("""
+Discards the recorded sweep window (see `recent_swept/0`).
+
+The window is UNBOUNDED while `verify_gc` is on, because a bounded one is
+worse than useless here: any eviction policy cheap enough to run per sweep
+also empties the window most of the time, and an empty window answers "these
+pages were never collected" for pages that were — the exact false negative
+this instrument exists to rule out. The consumer owns the lifetime and must
+clear it per observation window.
+""").
+-spec forget_swept() -> ok.
+
+forget_swept() ->
+    case ets:whereis(?SWEPT_TAB) of
+        undefined -> ok;
+        Tab -> true = ets:delete_all_objects(Tab), ok
+    end.
+
+%% @private
+swept_tab() ->
+    case ets:whereis(?SWEPT_TAB) of
+        undefined ->
+            try
+                ets:new(?SWEPT_TAB, [named_table, public, set, {keypos, 1}])
+            catch
+                error:badarg -> ?SWEPT_TAB
+            end;
+        Tab ->
+            Tab
+    end.
+
+%% @private
+%% Publication post-condition, gated on the same `verify_gc` diagnosis mode as
+%% `verify_post_sweep/2`.
+%%
+%% An operation must never install a root whose pages are not all in the
+%% RECEIVER's store. `merge/3` is the one that can: MST merge prunes any
+%% subtree whose hash both sides share, which is sound only if the receiver
+%% really holds it — and `put_batch/2` merges from a volatile map-backed store
+%% that is discarded immediately afterwards, so anything wrongly pruned is
+%% gone for good. That failure looks exactly like the s16 signature: a
+%% brand-new root referencing pages that were never stored here.
+verify_published_root(#?MODULE{store = Store} = T, Op) ->
+    case application:get_env(bondy_mst, verify_gc, false) of
+        false ->
+            ok;
+        _ ->
+            case unservable_current_root(T) of
+                false ->
+                    ok;
+                {true, Missing} ->
+                    Name = bondy_mst_store:name(Store),
+                    Report = (abort_report(Store, Name, T, Missing))#{
+                        reason => {published_unservable_root, Op}
+                    },
+                    ok = record_gc_abort(Report),
+                    ?LOG_ERROR(#{
+                        description =>
+                            "MST published an unservable root: the operation "
+                            "installed a root referencing pages that are not "
+                            "in this store. Full report retained in-node: "
+                            "bondy_mst:gc_aborts().",
+                        name => Name,
+                        op => Op,
+                        missing_count => length(Missing),
+                        classification => maps:get(classification, Report)
+                    }),
+                    ok
+            end
+    end.
+
+%% @private
+%% Post-sweep self-check on the collector.
+%%
+%% Reachability-mode `gc/2` is only entered when the current root is servable
+%% (the abort above establishes that), and the sweep only ever deletes pages
+%% the mark walk did not reach. Those two facts together mean the collector
+%% MUST leave the current root servable. If it does not, the sweep itself
+%% deleted a live, reachable page — which is a defect in this module, not in a
+%% consumer, and the distinction is otherwise almost impossible to make after
+%% the fact because a concurrent writer can re-create a content-identical page
+%% and heal the hole before anyone looks.
+%%
+%% Costs a second full walk of the tree, so it is opt-in via
+%% `bondy_mst.verify_gc` (default `false`) and belongs in test and
+%% field-diagnosis runs, not in the steady state. The report lands in the same
+%% in-node ring as the aborts (`gc_aborts/0`) and is tagged `swept_live` to
+%% distinguish "the collector refused because it found damage" from "the
+%% collector CAUSED damage".
+verify_post_sweep(T, Store) ->
+    case application:get_env(bondy_mst, verify_gc, false) of
+        false ->
+            ok;
+        _ ->
+            case unservable_current_root(T) of
+                false ->
+                    ok;
+                {true, Missing} ->
+                    Name = bondy_mst_store:name(Store),
+                    Report = (abort_report(Store, Name, T, Missing))#{
+                        reason => swept_live
+                    },
+                    ok = record_gc_abort(Report),
+                    ?LOG_ERROR(#{
+                        description =>
+                            "MST garbage collection SWEPT A LIVE PAGE: the "
+                            "current root was servable on entry and is "
+                            "unservable on exit, so the sweep deleted a page "
+                            "reachable from it. Full report retained in-node: "
+                            "bondy_mst:gc_aborts().",
+                        name => Name,
+                        missing_count => length(Missing),
+                        classification => maps:get(classification, Report),
+                        missing => Missing
+                    }),
+                    ok
+            end
+    end.
 
 %% @private
 %% Builds the forensic report. Probes each missing hash immediately and again
@@ -1705,6 +1872,57 @@ get_page(T, Store, Hash) ->
     end.
 
 %% @private
+%% Materialises the subtree rooted at `Hash` in the RECEIVER's store, so that
+%% a reference `merge_aux/5` keeps is always resolvable there afterwards.
+%%
+%% `bondy_mst_store:copy/3` cannot serve this: it resolves every page from the
+%% DONOR alone. But `merge_aux_rec/7` calls `split/4` on donor subtrees, and
+%% `split_page/5` writes the rewritten spine pages it produces into the
+%% RECEIVER's store while their children still live only in the donor. For
+%% exactly those hashes `copy/3` looked in the donor, found nothing, and
+%% returned the store untouched — so merge published a root referencing
+%% children that were never copied. With `merge/3` that is survivable (the
+%% donor IS the receiver, so the reference still resolves), which is why the
+%% peer-integrate path never showed it; with `put_batch/2` the donor is a
+%% volatile map store that is discarded on return, making the loss permanent.
+%% That is the own-root page loss observed on Fly s16/s25.
+%%
+%% Hence the two rules here: resolve each page receiver-first then donor (the
+%% same fallback `get_page/3` uses), and ALWAYS walk a page's refs — presence
+%% in the receiver does not imply its subtree is closed under the receiver,
+%% precisely because `split/4` can put a page there ahead of its children.
+copy_subtree(_B, Store, undefined) ->
+    Store;
+copy_subtree(B, Store0, Hash) ->
+    case bondy_mst_store:get(Store0, Hash) of
+        undefined ->
+            case bondy_mst_store:get(B#?MODULE.store, Hash) of
+                undefined ->
+                    %% Resolvable in neither store: a genuinely dangling
+                    %% reference, which the callers' guards report.
+                    Store0;
+                Page ->
+                    %% Children first: the store must never hold a page whose
+                    %% subtree is not already there, or a crash between the two
+                    %% inserts leaves exactly the hole this function exists to
+                    %% prevent.
+                    Store1 = copy_refs(B, Store0, Page),
+                    {_Hash, Store} = bondy_mst_store:put(Store1, Page),
+                    Store
+            end;
+        Page ->
+            copy_refs(B, Store0, Page)
+    end.
+
+%% @private
+copy_refs(B, Store, Page) ->
+    lists:foldl(
+        fun(Ref, Acc) -> copy_subtree(B, Acc, Ref) end,
+        Store,
+        bondy_mst_page:refs(Page)
+    ).
+
+%% @private
 -spec merge_aux(
     A :: t(),
     B :: t(),
@@ -1719,7 +1937,7 @@ merge_aux(_, _, Store0, Root, Root) ->
 merge_aux(_, _, Store0, ARoot, undefined) ->
     {ARoot, Store0};
 merge_aux(_, B, Store0, undefined, BRoot) ->
-    Store = bondy_mst_store:copy(Store0, B#?MODULE.store, BRoot),
+    Store = copy_subtree(B, Store0, BRoot),
     {BRoot, Store};
 merge_aux(A, B, Store0, ARoot, BRoot) ->
     APage = bondy_mst_store:get(Store0, ARoot),
@@ -1749,7 +1967,7 @@ merge_aux(A, B, Store0, ARoot, BRoot) ->
                 ARoot,
                 BRoot
             ),
-            Store = bondy_mst_store:copy(Store0, B#?MODULE.store, BRoot),
+            Store = copy_subtree(B, Store0, BRoot),
             {BRoot, Store};
         {_, undefined} ->
             %% B's root hash doesn't resolve. Keep A as-is.

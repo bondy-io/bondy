@@ -135,11 +135,12 @@ dangling_root_not_advertised(Dir) ->
         %% ...but AAE refuses to advertise it.
         ?assertEqual(undefined, bondy_oplog_instance:aae_root(InstId)),
         %% diagnose_root classifies the missing child as genuinely absent
-        %% (never written), not present_but_masked.
+        %% (never written) rather than tombstoned — i.e. it names the store,
+        %% not the read path, as the layer that lost it.
         D = bondy_oplog_instance:diagnose_root(InstId),
         ?assertEqual(false, maps:get(servable, D)),
         ?assert(maps:get(absent, D) >= 1),
-        ?assertEqual(0, maps:get(present_but_masked, D))
+        ?assertEqual(0, maps:get(tombstoned, D))
     after
         ok = bondy_oplog:stop_instance(InstId),
         ok = bondy_oplog_core_registry:unregister(NS, primary, 0),

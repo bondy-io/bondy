@@ -1394,12 +1394,19 @@ aae_root(Target) ->
 -doc """
 Diagnostic for a (possibly dangling) root.
 
-Returns a map describing the current root and, for the pages reported as
-missing by `missing_set/2`, classifies each as either physically present
-but `free_set`-masked (`present_but_masked` — data is on disk, a read-side
-masking bug) or genuinely absent (`absent` — never written, an
-integrate/merge gap). Intended for operators diagnosing a dangling shard;
-read-only.
+Returns a map describing the current root and, for the pages reported missing
+by `missing_set/2`, a count per class — because the class is what names the
+faulting layer:
+
+- `tombstoned` — still readable in the store, so the walk's miss did not come
+  from the store: a read-path/masking fault.
+- `absent` — deleted outright while a live root references them: a store-layer
+  fault.
+- `live` — present and unmarked: a transient miss, observed before a
+  concurrent insert became visible.
+- `unknown` — the backend implements no `page_state/2` and cannot classify.
+
+Intended for operators diagnosing a dangling shard; read-only.
 """.
 -spec diagnose_root(instance_id() | pid()) -> map().
 
@@ -2806,21 +2813,62 @@ maybe_hibernate_after(_Req, Result) ->
     Result.
 
 %% @private
-%% @private
-%% Splits a list of "missing" page hashes into {PresentButMasked, Absent}.
-%% A page is `present_but_masked` when its content is physically on disk yet
-%% `free_set`-masked (so `get`/`missing_set` report it missing) — a read-side
-%% masking defect. `absent` means the bytes were never written. Pack-store
-%% only; other backends physically remove on free, so all "missing" are absent.
+%% Buckets "missing" page hashes by their ACTUAL state in the store, which is
+%% what names the layer at fault:
+%%
+%%   - `tombstoned` — the row is intact but `free/3` marked it. The bytes are
+%%     still readable, so a walk that called the page missing did not learn
+%%     that from the store: a read-path/masking fault.
+%%   - `absent`     — the row is gone. Something DELETED a page a live root
+%%     references: a store-layer fault.
+%%   - `live`       — present and unmarked; the miss was transient, observed
+%%     before a concurrent insert became visible.
+%%   - `unknown`    — the backend cannot say.
+%%
+%% Backends implementing the optional `page_state/2` callback answer directly.
+%% The pack store does not yet, so it keeps the `is_present/2` probe: on-disk
+%% bytes behind a `free_set` mask carry the same read-side meaning as a
+%% tombstone and are bucketed with it.
+%%
+%% Do NOT reintroduce a store-type test here that defaults every other backend
+%% to `absent`. That was the previous shape, and because the ephemeral ETS
+%% store `free/3` tombstones rather than deleting, it reported every missing
+%% page on a `registry/*` shard as `absent` — making the field that is supposed
+%% to identify the faulting layer a restatement of `missing`.
 classify_missing_pages(MST, Hashes) ->
-    case bondy_mst:store(MST) of
-        {bondy_mst_store, bondy_mst_pack_store, Backend, _} ->
-            lists:partition(
-                fun(H) -> bondy_mst_pack_store:is_present(Backend, H) end,
-                Hashes
-            );
-        _ ->
-            {[], Hashes}
+    Store = bondy_mst:store(MST),
+    Fallback = probe_fallback(Store),
+    lists:foldl(
+        fun(H, Acc) ->
+            Class = classify_page(Store, Fallback, H),
+            maps:update_with(Class, fun(L) -> [H | L] end, [H], Acc)
+        end,
+        #{},
+        Hashes
+    ).
+
+%% @private
+classify_page(Store, Fallback, Hash) ->
+    case bondy_mst_store:page_state(Store, Hash) of
+        live -> live;
+        {tombstoned, _FreedAt} -> tombstoned;
+        absent -> absent;
+        unknown -> probe_page(Fallback, Hash)
+    end.
+
+%% @private
+probe_fallback({bondy_mst_store, bondy_mst_pack_store, Backend, _}) ->
+    {bondy_mst_pack_store, Backend};
+probe_fallback(_) ->
+    undefined.
+
+%% @private
+probe_page(undefined, _Hash) ->
+    unknown;
+probe_page({Mod, Backend}, Hash) ->
+    case Mod:is_present(Backend, Hash) of
+        true -> tombstoned;
+        false -> absent
     end.
 
 %% @private
@@ -3187,17 +3235,24 @@ do_handle_call(diagnose_root, _From, #state{mst = MST} = State) ->
                 #{root => undefined, servable => true};
             Root ->
                 Missing = bondy_mst:missing_set(MST, Root),
-                {Present, Absent} = classify_missing_pages(MST, Missing),
+                Classified = classify_missing_pages(MST, Missing),
+                Get = fun(K) -> maps:get(K, Classified, []) end,
                 #{
                     root => Root,
                     servable => Missing =:= [],
                     missing => length(Missing),
-                    %% bytes on disk but free_set-masked (read-side bug)
-                    present_but_masked => length(Present),
-                    sample_masked => lists:sublist(Present, 3),
-                    %% never written (integrate/merge referenced an un-pulled page)
-                    absent => length(Absent),
-                    sample_absent => lists:sublist(Absent, 3)
+                    %% readable in the store, yet the walk called them
+                    %% missing — a read-side/masking fault
+                    tombstoned => length(Get(tombstoned)),
+                    sample_tombstoned => lists:sublist(Get(tombstoned), 3),
+                    %% deleted while a live root still references them —
+                    %% a store-layer fault
+                    absent => length(Get(absent)),
+                    sample_absent => lists:sublist(Get(absent), 3),
+                    %% present and unmarked: a transient miss
+                    live => length(Get(live)),
+                    %% the backend cannot classify (no `page_state/2`)
+                    unknown => length(Get(unknown))
                 }
         end,
     {reply, Reply, State};
