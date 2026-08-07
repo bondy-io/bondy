@@ -37,6 +37,10 @@ distributed query. This module runs that query:
   `not_found` from `unavailable`. A "here is a page" answer is understood as
   best-effort; a "the entry does not exist" answer must not lie.
 
+- **`page_members/4`** — the same walk with a different projection: each value
+  is the `{node, session_id}` of a callee/subscriber rather than the entry
+  itself. Backs `bondy.registration.callee.list`.
+
 - **`count/3`** — answered from RIB summaries alone (local matches plus the sum
   of the per-node summary `count`s), with no fan-out.
 
@@ -96,6 +100,7 @@ from its own local registry. The node-local leg reads full entries
 -export([get/3]).
 -export([list/3]).
 -export([list_members/3]).
+-export([page_members/4]).
 -export([match/4]).
 -export([max_page_size/0]).
 -export([max_results/0]).
@@ -132,7 +137,7 @@ external entry maps (`bondy_registry_entry:to_external/2`, `wamp_meta`), or
     {ok, bondy_pagination:result_set()} | {error, stale | malformed}.
 
 list(Type, RealmUri, Opts) ->
-    do_page(Type, RealmUri, ?ALL, Opts).
+    do_page(Type, RealmUri, ?ALL, entry, Opts).
 
 -doc """
 As `list/3`, but restricted to the entries whose registered/subscribed URI
@@ -148,7 +153,7 @@ operation). Same page shape and cursor discipline as `list/3`.
     {ok, bondy_pagination:result_set()} | {error, stale | malformed}.
 
 match(Type, RealmUri, Uri, Opts) when is_binary(Uri) ->
-    do_page(Type, RealmUri, Uri, Opts).
+    do_page(Type, RealmUri, Uri, entry, Opts).
 
 -doc """
 The cluster-wide number of entries of `Type` matching `Uri` in `RealmUri`,
@@ -216,6 +221,50 @@ list_members(Type, RealmUri, Id) ->
     with_resolved_uri(Type, RealmUri, Id, fun(Uri) ->
         {ok, gather_members(Type, RealmUri, Uri)}
     end).
+
+-doc """
+As `list_members/3`, but addressed by URI rather than by entry id, and pairing
+each session id with the node that holds it — `{Nodestring, SessionId}`.
+
+`Uri` is either a procedure/topic URI (members whose entry matches it) or the
+atom `all` (every member in the realm).
+
+Same cursor discipline, node walk and `page_opts()` as `list/3` and `match/4` —
+this is the same keyset walk with a different projection, not a second
+mechanism. `Query` is a procedure/topic URI (members whose entry matches it) or
+the atom `all` (every member in the realm).
+
+Values are `#{node => Nodestring, session_id => Id}`. The node is the point:
+`list_members/3` returns a bare union of session ids because its caller (the
+spec-frozen WAMP `list_callees`) takes ids alone, whereas
+`bondy.registration.callee.list` reports where each callee lives. Under
+write-only RIB the ids are not replicated — only summary counts are — so each
+owner is asked for its own.
+
+Two consequences of paging an ENTRY-keyed walk, both deliberate:
+
+- **A page may hold fewer than `limit` values.** Entries with no session (a
+  callback or internal registration) have no callee to report and are dropped
+  from the projection. They still consume their place in the walk, so the
+  cursor stays correct; only the page is shorter.
+- **Dedup is per page, not global.** A session holding several matching
+  registrations appears once per page it lands in, and can recur across pages.
+  Deduplicating globally would need a session-keyed cursor, which the
+  registry's id-ordered enumeration cannot provide. For a de-duplicated set
+  scoped to ONE registration, use `list_members/3`.
+""".
+-spec page_members(
+    Type :: entry_type(),
+    RealmUri :: uri(),
+    Query :: uri() | all,
+    Opts :: page_opts()
+) ->
+    {ok, bondy_pagination:result_set()} | {error, stale | malformed}.
+
+page_members(Type, RealmUri, all, Opts) ->
+    do_page(Type, RealmUri, ?ALL, callee, Opts);
+page_members(Type, RealmUri, Uri, Opts) when is_binary(Uri) ->
+    do_page(Type, RealmUri, Uri, callee, Opts).
 
 -doc "Default page size for the `bondy.*` paginated procedures.".
 -spec default_page_size() -> pos_integer().
@@ -303,11 +352,23 @@ runs in the calling request process); only this peer receiver is a process,
 because with disterl off a cross-node request must reach a REGISTERED name.
 """.
 handle_call({page, Type, RealmUri, Query, AfterId, Need}, From, State) ->
+    %% The pre-projection message, still sent by every `list`/`match` walk and
+    %% by peers running an older release.
     _ = spawn(fun() ->
         partisan_gen_server:reply(
             From,
             peer_reply(fun() ->
-                local_page(Type, RealmUri, Query, AfterId, Need)
+                local_page(Type, RealmUri, Query, entry, AfterId, Need)
+            end)
+        )
+    end),
+    {noreply, State};
+handle_call({page, Type, RealmUri, Query, Kind, AfterId, Need}, From, State) ->
+    _ = spawn(fun() ->
+        partisan_gen_server:reply(
+            From,
+            peer_reply(fun() ->
+                local_page(Type, RealmUri, Query, Kind, AfterId, Need)
             end)
         )
     end),
@@ -367,24 +428,29 @@ code_change(_OldVsn, State, _Extra) ->
 %% The `cursor := _` clause MUST come first: a map pattern matches on a subset
 %% of keys, so `#{limit := Limit}` also matches a map that carries `cursor`. If
 %% it came first it would re-match its own defaulted output and loop forever.
-do_page(Type, RealmUri, Query, #{limit := Limit, cursor := Cursor}) when
+do_page(Type, RealmUri, Query, Kind, #{limit := Limit, cursor := Cursor}) when
     is_integer(Limit) andalso Limit > 0
 ->
-    Fingerprint = fingerprint(Type, RealmUri, Query),
+    %% `Kind` is part of the fingerprint so a cursor minted by
+    %% `bondy.registration.callee.list` can never be resumed by
+    %% `bondy.registration.list` for the same realm and query: the walks agree
+    %% but the projections do not, and the caller would silently get the other
+    %% procedure's values.
+    Fingerprint = fingerprint(Type, RealmUri, Query, Kind),
     case resume(Fingerprint, Type, RealmUri, Query, Cursor) of
         {ok, Nodes, AfterId} ->
             %% Over-fetch one past the page so `has_more` needs no count.
             Tagged = collect(
-                Type, RealmUri, Query, Nodes, AfterId, Limit + 1, []
+                Type, RealmUri, Query, Kind, Nodes, AfterId, Limit + 1, []
             ),
-            {ok, finalize(Fingerprint, Nodes, Tagged, Limit)};
+            {ok, finalize(Fingerprint, Kind, Nodes, Tagged, Limit)};
         {error, _} = Error ->
             Error
     end;
-do_page(Type, RealmUri, Query, #{limit := Limit} = Opts) when
+do_page(Type, RealmUri, Query, Kind, #{limit := Limit} = Opts) when
     is_integer(Limit) andalso Limit > 0
 ->
-    do_page(Type, RealmUri, Query, Opts#{cursor => undefined}).
+    do_page(Type, RealmUri, Query, Kind, Opts#{cursor => undefined}).
 
 %% @private
 %% First page: freeze the node set. Resume: decode the cursor and read back the
@@ -407,12 +473,14 @@ resume(Fingerprint, _Type, _RealmUri, _Query, Bin) when is_binary(Bin) ->
 %% the nodes run out. A node returning fewer than asked is exhausted, so the
 %% walk advances to the next node from its start. Result is newest-first while
 %% building (reversed on return) so it ends in node-then-id order.
-collect(_Type, _RealmUri, _Query, _Nodes, _AfterId, Need, Acc) when Need =< 0 ->
+collect(_Type, _RealmUri, _Query, _Kind, _Nodes, _AfterId, Need, Acc) when
+    Need =< 0
+->
     lists:reverse(Acc);
-collect(_Type, _RealmUri, _Query, [], _AfterId, _Need, Acc) ->
+collect(_Type, _RealmUri, _Query, _Kind, [], _AfterId, _Need, Acc) ->
     lists:reverse(Acc);
-collect(Type, RealmUri, Query, [Node | Rest], AfterId, Need, Acc) ->
-    Items = node_page(Type, RealmUri, Query, Node, AfterId, Need),
+collect(Type, RealmUri, Query, Kind, [Node | Rest], AfterId, Need, Acc) ->
+    Items = node_page(Type, RealmUri, Query, Kind, Node, AfterId, Need),
     Acc1 = lists:foldl(fun(Item, A) -> [{Node, Item} | A] end, Acc, Items),
     case length(Items) < Need of
         true ->
@@ -420,6 +488,7 @@ collect(Type, RealmUri, Query, [Node | Rest], AfterId, Need, Acc) ->
                 Type,
                 RealmUri,
                 Query,
+                Kind,
                 Rest,
                 undefined,
                 Need - length(Items),
@@ -430,20 +499,29 @@ collect(Type, RealmUri, Query, [Node | Rest], AfterId, Need, Acc) ->
     end.
 
 %% @private
-node_page(Type, RealmUri, Query, Node, AfterId, Need) ->
+node_page(Type, RealmUri, Query, Kind, Node, AfterId, Need) ->
     case Node =:= partisan:node() of
         true ->
-            local_page(Type, RealmUri, Query, AfterId, Need);
+            local_page(Type, RealmUri, Query, Kind, AfterId, Need);
         false ->
-            remote_page(Type, RealmUri, Query, Node, AfterId, Need)
+            remote_page(Type, RealmUri, Query, Kind, Node, AfterId, Need)
     end.
 
 %% @private
 %% Best-effort: an unreachable or erroring peer contributes an empty page rather
 %% than failing the whole query.
-remote_page(Type, RealmUri, Query, Node, AfterId, Need) ->
+%%
+%% `entry` keeps the original 6-element message so a peer running an older
+%% release still answers the pre-existing `list`/`match` procedures; only the
+%% new `callee` projection uses the wider tag, and only it degrades (to an
+%% empty contribution) against a peer that does not know it.
+remote_page(Type, RealmUri, Query, Kind, Node, AfterId, Need) ->
     Target = {?MODULE, Node},
-    Msg = {page, Type, RealmUri, Query, AfterId, Need},
+    Msg =
+        case Kind of
+            entry -> {page, Type, RealmUri, Query, AfterId, Need};
+            _ -> {page, Type, RealmUri, Query, Kind, AfterId, Need}
+        end,
     try partisan_gen_server:call(Target, Msg, [{timeout, ?NODE_TIMEOUT}]) of
         {ok, Items} when is_list(Items) ->
             Items;
@@ -459,10 +537,10 @@ remote_page(Type, RealmUri, Query, Node, AfterId, Need) ->
 %% `EntryId`, up to `Need`, strictly past `AfterId`. `list` (Query = `?ALL`) is a
 %% bounded ordered-ETS keyset select; `match` materialises the (small) local
 %% matched set and slices it by id.
-local_page(Type, RealmUri, ?ALL, AfterId, Need) ->
+local_page(Type, RealmUri, ?ALL, Kind, AfterId, Need) ->
     Entries = bondy_registry:list_local(Type, RealmUri, AfterId, Need),
-    [external_pair(E) || E <- Entries];
-local_page(Type, RealmUri, Uri, AfterId, Need) when is_binary(Uri) ->
+    [external_pair(E, Kind) || E <- Entries];
+local_page(Type, RealmUri, Uri, Kind, AfterId, Need) when is_binary(Uri) ->
     %% `match` has no id-ordered index, so the local matched set is materialised
     %% and sliced per page — O(local matches) per page. That cardinality is the
     %% registrations/subscriptions for ONE uri (bounded by the invocation
@@ -484,14 +562,28 @@ local_page(Type, RealmUri, Uri, AfterId, Need) when is_binary(Uri) ->
         end,
         Seeked
     ),
-    [external_pair(E) || E <- lists:sublist(Sorted, Need)].
+    [external_pair(E, Kind) || E <- lists:sublist(Sorted, Need)].
 
 %% @private
-external_pair(Entry) ->
+%% The `callee` projection carries the session id only; the NODE is added by
+%% `values/2` from the walk's own tag, which is where it is known. Sessionless
+%% entries (callback / internal registrations) project to `undefined` rather
+%% than being filtered here: dropping them would shorten this leg, and `collect`
+%% reads a short leg as "node exhausted" and would skip the rest of its entries.
+external_pair(Entry, entry) ->
     {
         bondy_registry_entry:id(Entry),
         bondy_registry_entry:to_external(Entry, wamp_meta)
-    }.
+    };
+external_pair(Entry, callee) ->
+    Member =
+        case bondy_registry_entry:session_id(Entry) of
+            SessionId when is_binary(SessionId) ->
+                bondy_session_id:to_external(SessionId);
+            _ ->
+                undefined
+        end,
+    {bondy_registry_entry:id(Entry), Member}.
 
 %% @private
 %% This node's local matched entries for `Uri` as a plain entry list. Reads only
@@ -679,19 +771,31 @@ remote_get(Type, RealmUri, Id, Node) ->
 %% @private
 %% Take the page and, when more remain, mint the resume cursor from the last
 %% in-page item: its node (and the frozen node suffix from there) plus its id.
-finalize(_Fingerprint, _Nodes, Tagged, Limit) when length(Tagged) =< Limit ->
-    bondy_pagination:result(values(Tagged), undefined);
-finalize(Fingerprint, Nodes, Tagged, Limit) ->
+finalize(_Fingerprint, Kind, _Nodes, Tagged, Limit) when
+    length(Tagged) =< Limit
+->
+    bondy_pagination:result(values(Kind, Tagged), undefined);
+finalize(Fingerprint, Kind, Nodes, Tagged, Limit) ->
     Page = lists:sublist(Tagged, Limit),
     {ResumeNode, {ResumeId, _External}} = lists:nth(Limit, Tagged),
     Remaining = lists:dropwhile(fun(N) -> N =/= ResumeNode end, Nodes),
     Payload = #{nodes => Remaining, after_id => ResumeId},
     Next = bondy_pagination:new_cursor(Fingerprint, Payload),
-    bondy_pagination:result(values(Page), Next).
+    bondy_pagination:result(values(Kind, Page), Next).
 
 %% @private
-values(Tagged) ->
-    [External || {_Node, {_Id, External}} <- Tagged].
+%% The `callee` projection is where the walk's node tag is finally used, and
+%% where sessionless entries are dropped — so a page can be shorter than
+%% `limit` while `has_more` stays true. `usort` deduplicates a session holding
+%% several matching registrations WITHIN the page; across pages it can recur
+%% (see `page_members/4`).
+values(entry, Tagged) ->
+    [External || {_Node, {_Id, External}} <- Tagged];
+values(callee, Tagged) ->
+    lists:usort([
+        #{node => atom_to_binary(Node, utf8), session_id => SessionId}
+     || {Node, {_Id, SessionId}} <- Tagged, SessionId =/= undefined
+    ]).
 
 %% @private
 %% The node set for a list/match walk: the local node plus ONLY the nodes the
@@ -736,8 +840,8 @@ rib_nodes(Nodestrings) ->
     ).
 
 %% @private
-fingerprint(Type, RealmUri, Query) ->
+fingerprint(Type, RealmUri, Query, Kind) ->
     Full = crypto:hash(
-        sha256, term_to_binary({?SCHEMA_VSN, Type, RealmUri, Query})
+        sha256, term_to_binary({?SCHEMA_VSN, Type, RealmUri, Query, Kind})
     ),
     binary:part(Full, 0, ?FP_BYTES).

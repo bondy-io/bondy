@@ -31,7 +31,10 @@ suite() ->
 all() ->
     [
         cluster_list_paginates_all_nodes,
-        cluster_get_by_id_across_nodes
+        cluster_get_by_id_across_nodes,
+        cluster_member_pages_span_nodes,
+        cluster_member_pages_by_uri,
+        cluster_member_cursor_is_not_interchangeable
     ].
 
 init_per_suite(Config) ->
@@ -91,6 +94,61 @@ cluster_get_by_id_across_nodes(Config) ->
         erpc:call(Coordinator, ?MODULE, do_get, [?REALM, 999999999999999])
     ).
 
+%% `page_members/4` pairs each member session with the node holding it, and that
+%% node is the whole point — it is what `bondy.registration.callee.list`
+%% reports. The realm-wide form must span the cluster: it used to read
+%% `bondy_registry:match/3`, which under write-only RIB returns the
+%% coordinator's OWN entries only, so the peer's callees were silently missing
+%% and the answer shrank as the cluster grew.
+%%
+%% The page size is deliberately smaller than one node's share, so the walk
+%% must cross a page boundary AND a node boundary to see both.
+cluster_member_pages_span_nodes(Config) ->
+    Coordinator = ?config(coordinator, Config),
+    Peer = peer_node(Config),
+
+    Nodestrings = wait_until_member_nodes(Coordinator, all, 2),
+
+    ?assertEqual(
+        lists:usort([nodestring(Coordinator), nodestring(Peer)]),
+        Nodestrings
+    ).
+
+%% The by-URI form must also reach the peer AND stay scoped to the URI asked
+%% for: this procedure is registered on the peer only, so exactly one member
+%% comes back and it names the peer.
+cluster_member_pages_by_uri(Config) ->
+    Coordinator = ?config(coordinator, Config),
+    PeerNS = nodestring(peer_node(Config)),
+    [Uri | _] = uris(<<"n2">>),
+
+    _ = wait_until_member_nodes(Coordinator, Uri, 1),
+
+    Members = drain_members(Coordinator, Uri, 7, undefined, []),
+
+    ?assertMatch([#{node := PeerNS, session_id := _}], Members).
+
+%% A cursor minted by the callee walk must not be resumable by the entry walk
+%% over the same realm: the two agree on the walk but not on the projection, so
+%% a shared cursor would hand back the other procedure's values. The
+%% fingerprint binds the projection, so this is rejected as stale.
+cluster_member_cursor_is_not_interchangeable(Config) ->
+    Coordinator = ?config(coordinator, Config),
+    _ = wait_until_member_nodes(Coordinator, all, 2),
+
+    {ok, #{next := Next, has_more := true}} = erpc:call(
+        Coordinator, ?MODULE, do_page_members, [?REALM, all, #{limit => 1}]
+    ),
+
+    Cursor = bondy_pagination:encode_cursor(Next),
+
+    ?assertEqual(
+        {error, stale},
+        erpc:call(Coordinator, ?MODULE, do_list, [
+            ?REALM, #{limit => 1, cursor => Cursor}
+        ])
+    ).
+
 %% =============================================================================
 %% PEER-SIDE HELPERS (run on the cluster nodes via erpc)
 %% =============================================================================
@@ -135,6 +193,10 @@ do_list(RealmUri, Opts) ->
 %% Resolve a get-by-id from THIS (coordinator) node across the cluster.
 do_get(RealmUri, Id) ->
     bondy_registry_meta:get(registration, RealmUri, Id).
+
+%% Page {node, session_id} members from THIS (coordinator) node cluster-wide.
+do_page_members(RealmUri, Query, Opts) ->
+    bondy_registry_meta:page_members(registration, RealmUri, Query, Opts).
 
 %% =============================================================================
 %% HELPERS
@@ -184,6 +246,74 @@ drain(Coordinator, Limit, Cursor, Acc) ->
                 bondy_pagination:encode_cursor(Next),
                 Acc1
             )
+    end.
+
+%% @private
+peer_node(Config) ->
+    Coordinator = ?config(coordinator, Config),
+    [Peer] = [
+        Node
+     || {_, Node, _} <- ?config(nodes, Config), Node =/= Coordinator
+    ],
+    Peer.
+
+%% @private
+nodestring(Node) ->
+    atom_to_binary(Node, utf8).
+
+%% @private
+%% Drains the FULL member walk, threading the wire cursor exactly as a client
+%% would. Page size is deliberately smaller than one node's share so the drain
+%% crosses page boundaries as well as the node boundary.
+drain_members(Coordinator, Query, Limit, Cursor, Acc) ->
+    Opts =
+        case Cursor of
+            undefined -> #{limit => Limit};
+            _ -> #{limit => Limit, cursor => Cursor}
+        end,
+    {ok, #{values := Values, next := Next, has_more := HasMore}} =
+        erpc:call(Coordinator, ?MODULE, do_page_members, [?REALM, Query, Opts]),
+    Acc1 = Acc ++ Values,
+
+    case HasMore of
+        false ->
+            ?assertEqual(undefined, Next),
+            Acc1;
+        true ->
+            drain_members(
+                Coordinator,
+                Query,
+                Limit,
+                bondy_pagination:encode_cursor(Next),
+                Acc1
+            )
+    end.
+
+%% @private
+%% Polls the full member drain until it reports at least `N' distinct nodes,
+%% then returns them sorted. The realm-wide node set is derived from RIB stubs,
+%% so the peer's contribution appears only once its stubs converge — the same
+%% reason `cluster_list_paginates_all_nodes' polls rather than asserting once.
+wait_until_member_nodes(Coordinator, Query, N) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    wait_until_member_nodes(Coordinator, Query, N, Deadline).
+
+wait_until_member_nodes(Coordinator, Query, N, Deadline) ->
+    Members = drain_members(Coordinator, Query, 7, undefined, []),
+    Nodestrings = lists:usort([maps:get(node, M) || M <- Members]),
+
+    case length(Nodestrings) >= N of
+        true ->
+            Nodestrings;
+        false ->
+            case erlang:monotonic_time(millisecond) > Deadline of
+                true ->
+                    %% Return what we have; the caller's assertion reports it.
+                    Nodestrings;
+                false ->
+                    timer:sleep(200),
+                    wait_until_member_nodes(Coordinator, Query, N, Deadline)
+            end
     end.
 
 %% @private

@@ -306,9 +306,6 @@ another register request second might be permissible immediately.
 -type eot() :: bondy_registry_store:eot().
 
 %% API
--export([callees/1]).
--export([callees/2]).
--export([callees/3]).
 -export([features/0]).
 -export([flush/2]).
 -export([flush_callee_promises/2]).
@@ -518,68 +515,6 @@ unregister(RegId, Ctxt) ->
                 Error ->
                     Error
             end
-    end.
-
--spec callees(RealmUri :: uri()) -> [map()] | no_return().
-
-callees(RealmUri) ->
-    %% TODO paginate and groupBy sessionID, so that we call
-    %% bondy_session_id:to_external only once per session.
-    case bondy_registry:match(registration, RealmUri, '_') of
-        [] ->
-            [];
-        List ->
-            Set = lists:foldl(
-                fun(E, Acc) ->
-                    Ref = bondy_registry_entry:ref(E),
-                    SessionId = bondy_registry_entry:session_id(E),
-                    ExtId = bondy_session_id:to_external(SessionId),
-                    M = #{
-                        node => bondy_ref:nodestring(Ref),
-                        session_id => ExtId
-                    },
-                    sets:add_element(M, Acc)
-                end,
-                sets:new(),
-                List
-            ),
-            sets:to_list(Set)
-    end.
-
--spec callees(RealmUri :: uri(), ProcedureUri :: uri()) ->
-    [map()] | no_return().
-
-callees(RealmUri, ProcedureUri) ->
-    callees(RealmUri, ProcedureUri, #{}).
-
--spec callees(RealmUri :: uri(), ProcedureUri :: uri(), Opts :: map()) ->
-    [map()] | no_return().
-
-callees(RealmUri, ProcedureUri, Opts0) ->
-    %% TODO ask the registry to offer callees/3
-
-    %% We do not support limits yet
-    Opts = maps:without([limit], Opts0),
-
-    case bondy_registry:match(registration, RealmUri, ProcedureUri, Opts) of
-        [] ->
-            [];
-        List ->
-            Set = lists:foldl(
-                fun(E, Acc) ->
-                    Ref = bondy_registry_entry:ref(E),
-                    SessionId = bondy_registry_entry:session_id(E),
-                    ExtId = bondy_session_id:to_external(SessionId),
-                    M = #{
-                        node => bondy_ref:nodestring(Ref),
-                        session_id => ExtId
-                    },
-                    sets:add_element(M, Acc)
-                end,
-                sets:new(),
-                List
-            ),
-            sets:to_list(Set)
     end.
 
 -doc """
