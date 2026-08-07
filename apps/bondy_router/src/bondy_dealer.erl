@@ -320,6 +320,13 @@ another register request second might be permissible immediately.
 -export([unregister/1]).
 -export([unregister/2]).
 
+-ifdef(TEST).
+%% The node-stage liveness policy, with the environment probe injected so the
+%% never-empty and self-always invariants are testable without a cluster.
+-export([prefer_reachable/2]).
+-export([is_reachable/1]).
+-endif.
+
 -compile({no_auto_import, [register/2]}).
 
 %% =============================================================================
@@ -2688,8 +2695,10 @@ try_rib_groups(
         end,
     LBOpts = lb_opts(Invoke, Opts),
 
+    Units = prefer_reachable(SelfUnits ++ Stubs, fun is_reachable/1),
+
     Result = bondy_rpc_load_balancer:select_node(
-        SelfUnits ++ Stubs,
+        Units,
         LBOpts#{realm_uri => RealmUri, uri => ProcUri}
     ),
 
@@ -2705,6 +2714,63 @@ try_rib_groups(
             {forward_node, Nodestring};
         {error, noproc} ->
             try_rib_groups(Rest, RealmUri, ProcUri, Opts)
+    end.
+
+%% @private
+%% Liveness at SELECTION time. A node's RIB cells outlive the node — only the
+%% node named in the key may write them, so nobody can clear a dead peer's
+%% registrations — and the node stage would otherwise keep handing calls to a
+%% corpse, which answers nothing and times the CALL out instead of failing
+%% over to a live sibling.
+%%
+%% Reachability is a PREFERENCE, not an exclusion: if it would empty the
+%% candidate set the original set is returned unchanged. That keeps the
+%% transformation monotone — it can only replace a candidate that cannot
+%% answer with one that might, never turn a routable call into an error — so
+%% the `no_such_procedure` semantics of an exhausted group are untouched.
+%%
+%% Note this is a hint, not a guarantee: the peer may die between the probe
+%% and the send. The bounded pre-invocation retry (`rib_exclude`) remains the
+%% mechanism that makes routing failures recoverable; this only stops the
+%% obviously-doomed candidate from consuming a retry.
+prefer_reachable([_] = Units, _) ->
+    %% Nothing to prefer over, so skip the probe entirely — this is the
+    %% common shape on the CALL hot path.
+    Units;
+prefer_reachable(Units, IsReachable) ->
+    case lists:filter(fun({N, _}) -> IsReachable(N) end, Units) of
+        [] -> Units;
+        Reachable -> Reachable
+    end.
+
+%% @private
+%% One lock-free ETS read per remote candidate (`partisan_peer_connections`
+%% is a plain public table; `count/1` is a `lookup_element`).
+is_reachable(self) ->
+    true;
+is_reachable(Nodestring) when is_binary(Nodestring) ->
+    %% A connected peer's name is already an atom in Partisan's tables, so a
+    %% nodestring with no existing atom has never been connected here.
+    %% Resolving with `binary_to_existing_atom/2` also denies replicated RIB
+    %% data any way to grow the atom table.
+    try binary_to_existing_atom(Nodestring, utf8) of
+        Node ->
+            is_connected(Node)
+    catch
+        error:badarg ->
+            false
+    end.
+
+%% @private
+%% Fail OPEN when Partisan cannot answer (not started, table gone): "unknown"
+%% must never remove a candidate, or a probe failure would look exactly like
+%% a cluster-wide outage.
+is_connected(Node) ->
+    try
+        partisan_peer_connections:is_connected(Node)
+    catch
+        _:_ ->
+            true
     end.
 
 %% @private
