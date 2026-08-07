@@ -3216,132 +3216,6 @@
       "description": "Summary updates coalesced by the damping window (count/latest-only changes). Zero when registry.rib.damping is off."
     },
     {
-      "id": 145,
-      "type": "timeseries",
-      "title": "Suspended peers (per node)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 133
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "bondy_registry_presence_suspended_nodes{node=~\"$node\"}",
-          "legendFormat": "{{node}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "short",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "description": "Peer nodes currently SUSPENDed (down, within the EVICT grace period) as seen by each node; their registry entries are masked out of routing."
-    },
-    {
-      "id": 146,
-      "type": "timeseries",
-      "title": "Mask/unmask latency p95",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "bondy-prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 133
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le, op) (rate(bondy_registry_presence_mask_duration_ms_bucket{node=~\"$node\"}[$__rate_interval])))",
-          "legendFormat": "{{op}} p95",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "bondy-prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "ms",
-          "min": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "gradientMode": "none",
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "description": "Time to mask (SUSPEND) or unmask (RESUME) a peer's registry entries on a presence transition."
-    },
-    {
       "id": 147,
       "type": "stat",
       "title": "RIB divergences (now)",
@@ -3733,6 +3607,165 @@
           "refId": "B",
           "legendFormat": "exhausted {{node}}",
           "expr": "sum by (node) (rate(bondy_registry_ptrie_cas_exhausted_total{node=~\"$node\"}[$__rate_interval]))"
+        }
+      ]
+    },
+    {
+      "id": 154,
+      "type": "timeseries",
+      "title": "PUBLISH match p95 (registry lookup)",
+      "description": "Time a PUBLISH spent finding matching subscriptions. Grows with subscription count and pattern breadth, NOT with fanout. A tail here is a registry problem.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 166
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "\u00b5s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, node) (rate(bondy_broker_publish_match_microseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "{{node}}"
+        }
+      ]
+    },
+    {
+      "id": 155,
+      "type": "timeseries",
+      "title": "PUBLISH fanout p95 (delivery + relay egress)",
+      "description": "Time a PUBLISH spent delivering: a send per local subscriber plus one relayed PUBLISH per peer node holding one. A tail here is delivery cost, not lookup.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 166
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "\u00b5s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, node) (rate(bondy_broker_publish_fanout_microseconds_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "{{node}}"
+        }
+      ]
+    },
+    {
+      "id": 156,
+      "type": "timeseries",
+      "title": "Relay-ingress mailbox depth p95",
+      "description": "Flow-pool worker mailbox depth at dequeue, RELAY INGRESS only \u2014 these tasks arrive from a peer with no dispatch timestamp, so the queue-wait histogram records nothing for them. A flow is FIFO on its worker, so depth x service estimates the wait behind it. Sustained growth = cross-node delivery latency.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 166
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, node) (rate(bondy_router_flow_queue_depth_bucket{node=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "{{node}}"
         }
       ]
     }

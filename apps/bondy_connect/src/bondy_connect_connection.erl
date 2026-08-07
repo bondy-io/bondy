@@ -614,15 +614,33 @@ established(EventType, Event, Data) ->
 %% GEN_STATEM (terminate / status)
 %% =============================================================================
 
-terminate(_Reason, StateName, Data) ->
+terminate(Reason, StateName, Data) ->
     _ = disable_net_monitor(Data#data.net_monitor),
     _ = maybe_goodbye(StateName, Data),
     _ = close_transport(Data),
+    %% In-flight REQUESTS get the flat `disconnected` — for a caller mid-CALL
+    %% the only fact that matters is that the link went away, and that error is
+    %% part of the public API.
     _ = reply_pending({error, disconnected}, Data),
-    _ = reply_waiters({error, disconnected}, Data),
+    %% A `connect/1` WAITER is different: it is asking why it could not
+    %% establish, and `disconnected` answers nothing. Replying it here used to
+    %% discard the real reason, so a wrong realm, a failed credential, an
+    %% exhausted retry budget and a router refusal were indistinguishable to
+    %% the caller — and to anyone debugging one.
+    _ = reply_waiters({error, connect_error(Reason)}, Data),
     %% Free the rate-limiter's ETS row (no-op when no `rate` is configured).
     _ = bondy_connect_dispatch:delete(Data#data.dispatch),
     ok.
+
+%% @private Unwrap a gen_statem termination reason into the error a caller
+%% blocked in `connect/1` should see. `stop_fail/2` already replies waiters with
+%% the specific reason before stopping, so reaching here means we stopped by
+%% another route (a permanent ABORT, a protocol violation, a supervisor
+%% shutdown); `shutdown` wrappers carry no information, so peel them.
+connect_error({shutdown, Reason}) -> connect_error(Reason);
+connect_error(normal) -> disconnected;
+connect_error(shutdown) -> disconnected;
+connect_error(Reason) -> Reason.
 
 format_status(Status) ->
     maps:map(fun redact/2, Status).

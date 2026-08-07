@@ -25,8 +25,7 @@ init(Req0, State) ->
     {ok, Req2, State}.
 
 ready(<<"GET">>, Req) ->
-    Status = status_code(bondy_config:get(status, undefined)),
-    cowboy_req:reply(Status, Req);
+    cowboy_req:reply(status_code(), Req);
 ready(_, Req) ->
     cowboy_req:reply(?HTTP_METHOD_NOT_ALLOWED, Req).
 
@@ -34,5 +33,23 @@ ready(_, Req) ->
 %% PRIVATE
 %% =============================================================================
 
-status_code(ready) -> ?HTTP_NO_CONTENT;
-status_code(_) -> ?HTTP_SERVICE_UNAVAILABLE.
+%% @private
+%% Boot reaching its end is necessary but NOT sufficient. `bondy_app:start/2`
+%% sets the status unconditionally once the listeners are up, and the
+%% catalogue deliberately survives a failure to open the durable `main` DB
+%% (see `bondy_namespace_catalog:open_main_into/1`) — so without the second
+%% check a node that will raise `*_not_provisioned` on every durable operation
+%% answers 204 and a load balancer sends it traffic it cannot serve.
+%%
+%% Only `failed` is disqualifying: `idle` means there was nothing to
+%% provision, which is a legitimate configuration.
+status_code() ->
+    case bondy_config:get(status, undefined) of
+        ready ->
+            case bondy_namespace_catalog:main_status() of
+                failed -> ?HTTP_SERVICE_UNAVAILABLE;
+                _ -> ?HTTP_NO_CONTENT
+            end;
+        _ ->
+            ?HTTP_SERVICE_UNAVAILABLE
+    end.

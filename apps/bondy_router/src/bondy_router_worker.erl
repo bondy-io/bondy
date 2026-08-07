@@ -345,6 +345,12 @@ handle_cast({forward, To, Msg, FwdOpts} = M, State) ->
     %% `{via, ?MODULE, Key}' resolution — see `whereis_name/1'). The
     %% usage slot was claimed at resolution; released below.
     Started = erlang:monotonic_time(microsecond),
+    %% Mailbox depth at DEQUEUE. This is the only local observation of relay
+    %% ingress backlog: these tasks arrive with no dispatch timestamp, so the
+    %% queue-wait histogram records nothing for them (see
+    %% `bondy_telemetry:router_flow_ingress/3`). Reading own message_queue_len
+    %% takes no lock.
+    {message_queue_len, Depth} = erlang:process_info(self(), message_queue_len),
 
     try
         Opts = FwdOpts#{relayed_by => relay_ref()},
@@ -361,8 +367,8 @@ handle_cast({forward, To, Msg, FwdOpts} = M, State) ->
             }),
             {noreply, State}
     after
-        ok = bondy_telemetry:router_flow(
-            relay, erlang:monotonic_time(microsecond) - Started
+        ok = bondy_telemetry:router_flow_ingress(
+            relay, erlang:monotonic_time(microsecond) - Started, Depth
         ),
         ok = release_usage(State)
     end;

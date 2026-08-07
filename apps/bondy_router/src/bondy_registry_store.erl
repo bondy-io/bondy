@@ -1534,10 +1534,16 @@ store_indices(#bondy_registry_store{} = Store, Entry) ->
 
 -doc """
 Removes an entry's in-memory match indices (trie / ETS bags) ONLY — it does not
-touch the per-node remote index nor the bondy_db projection. Used by the
-presence-FSM masking path (`bondy_registry_partition:mask/2`) to make a remote
-entry unselectable for routing while retaining it, and by `remove/3` / `take/3`
-as the index half of a full delete.
+touch the per-node remote index nor the bondy_db projection. Used by
+`remove/3` / `take/3` as the index half of a full delete.
+
+This used to cite a presence-FSM masking path (`bondy_registry_partition:mask/2`)
+as a second caller. That function has never existed and will not: the FSM it
+belonged to was designed for a registry in which full `#entry{}` records
+replicated and a peer could clear another node's entries under LWW. Neither
+holds — entries are partition-local ETS and the replicated RIB cells are
+single-writer per node — so there is no destructive replicated clear for
+masking to make unnecessary.
 """.
 -spec delete_indices(Store :: t(), Entry :: entry()) -> ok | {error, any()}.
 

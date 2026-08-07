@@ -714,7 +714,7 @@ quote_for(_Symbol) -> 42.
 | `{error, local_transport_unavailable}` | `connect` (`local`) | No router handler registered on this node. |
 | `{error, {welcome_without_challenge, _}}` | `connect` | A credentialed method was welcomed unchallenged (downgrade refused). |
 | `{shutdown, {reconnect_failed, _}}` | (exit) | The reconnect budget was exhausted; `status/1` → `down`. |
-| `{shutdown, {abort, Uri, Details}}` | (exit) | The router refused the handshake with a **permanent** ABORT. Transient ones never surface here — they are retried; see below. |
+| `{error, {abort, Uri, Details}}` | `connect` | The router refused the handshake with a **permanent** ABORT. Transient ones never surface here — they are retried; see below. |
 
 ### Router ABORTs
 
@@ -723,8 +723,14 @@ An `ABORT` ends a handshake. Whether that is fatal is decided by
 
 | `nature` | Handled by `bondy_connect` as | Examples |
 |---|---|---|
-| `transient` | Retried with backoff, including on the first connect | `wamp.error.unavailable` — HELLO load gate (router shedding), AE security fence |
-| `permanent` | Fails fast, exits `{shutdown, {abort, _, _}}` | `wamp.error.no_such_realm`, `wamp.error.authentication_failed`, `wamp.error.protocol_violation` |
+| `transient` | Retried on the `reconnect` backoff ladder (jittered), including on the first connect | `wamp.error.unavailable` — HELLO load gate (router shedding), AE security fence |
+| `permanent` | Fails fast; `connect/1` returns `{error, {abort, Uri, Details}}` | `wamp.error.no_such_realm`, `wamp.error.authentication_failed`, `wamp.error.protocol_violation` |
+
+`connect/1` reports the reason it failed rather than a generic disconnect, so a
+wrong realm, a rejected credential and an exhausted retry budget are
+distinguishable. In-flight calls interrupted by a link drop still fail with
+`{error, disconnected}` — for a caller mid-CALL, that the link went away is the
+only fact that matters.
 
 You do not need to implement this yourself when using `bondy_connect`. You **do**
 need to implement it in a client written against the raw protocol — see

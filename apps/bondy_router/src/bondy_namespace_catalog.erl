@@ -57,6 +57,7 @@ and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
 
 -include("bondy_db_tables.hrl").
 
+-define(PT_MAIN_FAILED, {?MODULE, main_failed}).
 -define(PT_DB(Name), {?MODULE, db, Name}).
 -define(PT_TABLE(Name), {?MODULE, table, Name}).
 
@@ -116,6 +117,7 @@ and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
 -export([fold_opts/1]).
 -export([info/0]).
 -export([is_open/0]).
+-export([main_status/0]).
 -export([main_db/0]).
 -export([main_db_name/0]).
 -export([main_db_spec/0]).
@@ -566,6 +568,28 @@ is_open() ->
     main_db() =/= undefined.
 
 -doc """
+Whether the durable `main` DB is usable, distinguishing the two ways it can be
+absent.
+
+`idle` means there was nothing to provision — a legitimate configuration, and
+NOT a fault. `failed` means opening it raised: every durable table will reject
+use, so the node must not report itself ready. Keeping these apart is the whole
+point; `is_open/0` returns `false` for both and so cannot drive a health probe.
+""".
+-spec main_status() -> open | idle | failed.
+
+main_status() ->
+    case persistent_term:get(?PT_MAIN_FAILED, undefined) of
+        undefined ->
+            case main_db() of
+                undefined -> idle;
+                _ -> open
+            end;
+        _Reason ->
+            failed
+    end.
+
+-doc """
 A summary of the catalogue: the `main` DB info and each main table's
 `bondy_db:info/1` (or `not_open`).
 """.
@@ -630,17 +654,39 @@ open_main_into(State) ->
                     ok = cold_start_main_indexes(Specs),
                     State#state{db = Db, leveled_sup = Sup, dir = Dir};
                 {error, Reason} ->
-                    %% Don't brick the node over a storage-open failure — log
-                    %% loudly and leave main idle (is_open/0 stays false).
+                    %% Don't brick the node over a storage-open failure — the
+                    %% process keeps running so an operator can inspect it and
+                    %% the ephemeral registry still works. But the node MUST
+                    %% NOT present itself as healthy: every durable table will
+                    %% raise `*_not_provisioned` on use, so a readiness probe
+                    %% that passes here just routes traffic at a node that can
+                    %% serve none of it. Record the failure, raise an alarm,
+                    %% and let `main_status/0` fail readiness.
                     ?LOG_ERROR(#{
                         description =>
                             "Failed to provision bondy_db main tables; "
-                            "catalogue starting with main idle",
+                            "catalogue starting with main idle. The node will "
+                            "report NOT READY until this is resolved.",
                         reason => Reason
                     }),
+                    ok = set_main_failed(Reason),
                     State
             end
     end.
+
+%% @private
+%% Published through `persistent_term` (read on every readiness probe, written
+%% once) and mirrored as an alarm so it surfaces wherever alarms already go.
+set_main_failed(Reason) ->
+    _ = persistent_term:put(?PT_MAIN_FAILED, Reason),
+    _ = catch bondy_alarm_handler:set_alarm({
+        bondy_db_main_unavailable,
+        <<
+            "The durable `main` database could not be opened. Durable "
+            "operations will fail and this node reports NOT READY."
+        >>
+    }),
+    ok.
 
 %% @private
 %% Run the deferred secondary-index cold-start for every opened main table. Called

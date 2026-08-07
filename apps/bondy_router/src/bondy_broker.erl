@@ -635,9 +635,11 @@ do_publish(#publish{} = M, Ctxt) ->
 
     %% We find matching subscriptions
     MatchOpts = make_match_opts(SessionId, Opts),
+    T0 = erlang:monotonic_time(microsecond),
     Subscriptions = match_subscriptions_for_publish(
         TopicUri, RealmUri, MatchOpts
     ),
+    MatchUs = erlang:monotonic_time(microsecond) - T0,
 
     %% We generate a new publication id
     PubId = bondy_message_id:global(),
@@ -673,7 +675,15 @@ do_publish(#publish{} = M, Ctxt) ->
             ok = forward_using_bridge_relay(M, FwdOpts, Relay)
     end,
 
+    T1 = erlang:monotonic_time(microsecond),
     ok = do_publish(RealmUri, Subscriptions, MakeEvent, Fwd, local),
+    FanoutUs = erlang:monotonic_time(microsecond) - T1,
+
+    %% Stage split for the delivery-latency tail. This runs inline in the
+    %% publisher's connection process, so it is on the hot path: two clock
+    %% reads and one telemetry emit, the same cost the flow pool already pays
+    %% per task.
+    ok = bondy_telemetry:broker_publish(MatchUs, FanoutUs),
 
     {ok, PubId}.
 

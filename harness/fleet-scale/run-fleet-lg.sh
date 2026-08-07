@@ -32,6 +32,15 @@ SUBS_PER_USER="${SUBS_PER_USER:-2000}"
 VEHICLE_POOL="${VEHICLE_POOL:-500000}"
 PUB_INTERVAL_MS="${PUB_INTERVAL_MS:-1000}"
 RAMP="${RAMP:-120s}"; HOLD="${HOLD:-60s}"; SESSION_MS="${SESSION_MS:-240000}"
+# Subscriber-side overrides. Delivery latency measured while publishers are
+# still ramping is a RAMP measurement, and the aggregate trend k6 prints cannot
+# separate the two — which is how a ramp spike gets reported as a steady-state
+# tail. Holding the subscriber back until the publishers are up means every
+# delivery sample it takes is steady state. Defaults to the publisher values so
+# existing invocations are unchanged.
+SUB_DELAY_SECS="${SUB_DELAY_SECS:-0}"
+SUB_RAMP="${SUB_RAMP:-$RAMP}"; SUB_HOLD="${SUB_HOLD:-$HOLD}"
+SUB_SESSION_MS="${SUB_SESSION_MS:-$SESSION_MS}"
 ULIMIT_N="${ULIMIT_N:-1048576}"
 OUT="$HERE/out"; mkdir -p "$OUT"; rm -f "$OUT"/*.txt
 
@@ -105,10 +114,11 @@ say "$n LGs: 1 subscriber ($SUB_VUS_TOTAL VUs) + $n_pub publisher(s) (${pub_vus_
 pids=()
 
 # Subscriber LG.
-echo "   SUB  $sub_machine  VUS=$SUB_VUS_TOTAL GROUP_SIZE=$GROUP_SIZE SUBS_PER_USER=$SUBS_PER_USER"
-fly ssh console --app "$APP" --machine "$sub_machine" -C \
-  "sh -c 'ulimit -n $ULIMIT_N 2>/dev/null; k6 run -e ROLE=subscriber -e WS_URL=$WS_URL -e REALM=$REALM -e VUS=$SUB_VUS_TOTAL -e VU_OFFSET=0 -e GROUP_SIZE=$GROUP_SIZE -e SUBS_PER_USER=$SUBS_PER_USER -e VEHICLE_POOL=$VEHICLE_POOL -e RAMP=$RAMP -e HOLD=$HOLD -e SESSION_MS=$SESSION_MS /scripts/fleet_smoke.js'" \
-  > "$OUT/sub.txt" 2>&1 &
+echo "   SUB  $sub_machine  VUS=$SUB_VUS_TOTAL GROUP_SIZE=$GROUP_SIZE SUBS_PER_USER=$SUBS_PER_USER delay=${SUB_DELAY_SECS}s ramp=$SUB_RAMP hold=$SUB_HOLD"
+( sleep "$SUB_DELAY_SECS"
+  fly ssh console --app "$APP" --machine "$sub_machine" -C \
+    "sh -c 'ulimit -n $ULIMIT_N 2>/dev/null; k6 run -e ROLE=subscriber -e WS_URL=$WS_URL -e REALM=$REALM -e VUS=$SUB_VUS_TOTAL -e VU_OFFSET=0 -e GROUP_SIZE=$GROUP_SIZE -e SUBS_PER_USER=$SUBS_PER_USER -e VEHICLE_POOL=$VEHICLE_POOL -e RAMP=$SUB_RAMP -e HOLD=$SUB_HOLD -e SESSION_MS=$SUB_SESSION_MS /scripts/fleet_smoke.js'" \
+) > "$OUT/sub.txt" 2>&1 &
 pids+=("$!")
 
 # Publisher LGs, each a disjoint VU_OFFSET slice of the vehicle pool.

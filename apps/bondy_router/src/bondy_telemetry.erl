@@ -40,7 +40,9 @@ Also provides trace-identifier generation.
 -export([registry_event/3]).
 -export([router_flow/2]).
 -export([router_flow/3]).
+-export([router_flow_ingress/3]).
 -export([rpc_latency/3]).
+-export([broker_publish/2]).
 -export([wamp_hello/1]).
 -export([session_manager_open/2]).
 -export([session_manager_cleanup/2]).
@@ -192,6 +194,29 @@ wamp_hello(DurationUs) ->
     execute([bondy, wamp, hello], #{duration => max(0, DurationUs)}, #{}).
 
 -doc """
+Emits `[bondy, broker, publish]` for one PUBLISH handled inline in the
+publisher's connection process.
+
+Splits the publish into the two stages that can independently dominate it:
+`MatchUs` is the registry/trie lookup of matching subscriptions, `FanoutUs` is
+delivering to every local subscriber plus one relayed PUBLISH per peer node
+holding one. Without this split a slow publish is unattributable — a wide
+fanout and an expensive match look identical from outside, and both look
+identical to a downstream relay-ingress backlog (which
+`bondy_router_flow_queue_microseconds` already covers).
+
+Total: never throws.
+""".
+-spec broker_publish(MatchUs :: integer(), FanoutUs :: integer()) -> ok.
+
+broker_publish(MatchUs, FanoutUs) ->
+    execute(
+        [bondy, broker, publish],
+        #{match => max(0, MatchUs), fanout => max(0, FanoutUs)},
+        #{}
+    ).
+
+-doc """
 Emits `[bondy, session_manager, open]` for a session open served by a
 `bondy_session_manager` pool worker. `QueueUs` is the time the request
 waited in the worker's mailbox (enqueue at the caller to dequeue at the
@@ -253,11 +278,37 @@ router_flow(Family, QueueUs, ServiceUs) ->
     ).
 
 -doc """
-As `router_flow/3` but with the service time only — for tasks delivered
-straight into the worker's mailbox by a remote peer's relayed message
-(the `{via, bondy_router_worker, Key}` resolution), where no local
-dispatch timestamp exists: the mailbox wait would span two nodes'
-monotonic clocks, which are not comparable. Total: never throws.
+As `router_flow/3` but reporting mailbox DEPTH instead of wait — for tasks
+delivered straight into the worker's mailbox by a remote peer's relayed
+message (the `{via, bondy_router_worker, Key}` resolution).
+
+There is no local dispatch timestamp for these, and there cannot usefully be
+one: a stamp applied at the sending node would span two nodes' monotonic
+clocks (not comparable) and would fold network transit into what is supposed
+to be a queueing measurement. Carrying a per-message timestamp to make the
+wait exact would also cost an allocation on the hottest cross-node path.
+
+Depth is the local, allocation-free substitute, and it answers the question
+the wait was wanted for — is relay ingress backing up? Because a flow is FIFO
+on its worker, `depth x service` estimates the wait every message behind this
+one will pay. Relay ingress is the flow pool's ONLY data-plane role, so
+without this the pool is unobservable exactly where it matters.
+
+Total: never throws.
+""".
+-spec router_flow_ingress(
+    Family :: atom(), ServiceUs :: integer(), Depth :: non_neg_integer()
+) -> ok.
+
+router_flow_ingress(Family, ServiceUs, Depth) ->
+    execute(
+        [bondy, router, flow],
+        #{service => max(0, ServiceUs), depth => max(0, Depth)},
+        #{family => Family}
+    ).
+
+-doc """
+As `router_flow/3` but with the service time only. Total: never throws.
 """.
 -spec router_flow(Family :: atom(), ServiceUs :: integer()) -> ok.
 

@@ -160,6 +160,7 @@ setup() ->
             [bondy, session_manager, open],
             [bondy, session_manager, cleanup],
             [bondy, router, flow],
+            [bondy, broker, publish],
             [bondy, registry, ptrie, cas_retry],
             [bondy, registry, ptrie, cas_exhausted]
         ],
@@ -577,6 +578,41 @@ declare_net_session_families() ->
         >>
     }),
     ok = bondy_metrics:declare(#{
+        name => bondy_router_flow_queue_depth,
+        help => <<
+            "A histogram of a router flow pool worker's mailbox depth at the "
+            "moment it dequeued a task, recorded for RELAY INGRESS only. "
+            "Those tasks are delivered straight into the mailbox by a peer "
+            "and carry no local dispatch timestamp, so "
+            "bondy_router_flow_queue_microseconds records nothing for them — "
+            "which left the pool's only data-plane role unobservable. A flow "
+            "is FIFO on its worker, so depth x service estimates the wait "
+            "every message behind this one pays. Sustained growth here is "
+            "cross-node delivery latency."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_broker_publish_match_microseconds,
+        help => <<
+            "A histogram of the time a PUBLISH spent finding matching "
+            "subscriptions in the registry, measured inline in the "
+            "publisher's connection process. Grows with subscription count "
+            "and pattern breadth, not with fanout."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_broker_publish_fanout_microseconds,
+        help => <<
+            "A histogram of the time a PUBLISH spent delivering: a send per "
+            "local subscriber plus one relayed PUBLISH per peer node holding "
+            "one. Together with the match histogram this splits publish cost "
+            "into lookup vs delivery; a delivery tail that is NOT visible in "
+            "either is downstream (relay ingress queueing — see "
+            "bondy_router_flow_queue_microseconds — or the subscriber's own "
+            "connection process)."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
         name => bondy_registry_ptrie_cas_retries_total,
         help => <<
             "Registry pattern-index (ptrie) write rounds lost to a "
@@ -761,6 +797,38 @@ handle_net_event([bondy, router, flow], Meas, Meta, _Config) ->
             name => bondy_router_flow_service_microseconds,
             label => Labels,
             value => maps:get(service, Meas, 0)
+        }),
+        %% Depth is present only for relay ingress, where no queue wait can be
+        %% measured (the task arrives from a peer with no local dispatch
+        %% timestamp). It is the substitute backlog signal for the flow pool's
+        %% only data-plane role.
+        ok =
+            case Meas of
+                #{depth := Depth} ->
+                    bondy_metrics:histogram(#{
+                        name => bondy_router_flow_queue_depth,
+                        label => Labels,
+                        value => Depth
+                    });
+                _ ->
+                    ok
+            end
+    catch
+        _:_ ->
+            ok
+    end;
+handle_net_event([bondy, broker, publish], Meas, _Meta, _Config) ->
+    try
+        Labels = #{node => node_name()},
+        ok = bondy_metrics:histogram(#{
+            name => bondy_broker_publish_match_microseconds,
+            label => Labels,
+            value => maps:get(match, Meas, 0)
+        }),
+        ok = bondy_metrics:histogram(#{
+            name => bondy_broker_publish_fanout_microseconds,
+            label => Labels,
+            value => maps:get(fanout, Meas, 0)
         })
     catch
         _:_ ->

@@ -59,6 +59,7 @@ all() ->
         transient_abort_retries_until_admitted,
         transient_abort_retry_backs_off,
         permanent_abort_still_fails_fast,
+        connect_error_reports_the_router_reason,
         initial_connect_retries_when_enabled,
         reconnect_budget_exhaustion_gives_up
     ].
@@ -592,6 +593,22 @@ permanent_abort_still_fails_fast(_) ->
     end),
     ?assertMatch({error, _}, Result),
     ?assert(Elapsed < 5000000).
+
+%% `connect/1` must say WHY it failed. `terminate/3` used to reply every waiter
+%% a flat `{error, disconnected}`, so a wrong realm, a bad credential and a
+%% router refusal were indistinguishable — to the caller and to anyone
+%% debugging one.
+connect_error_reports_the_router_reason(_) ->
+    Result = bondy_connect:connect(#{
+        transport => tcp,
+        endpoint => {?HOST, ?PORT},
+        realm => <<"com.example.no.such.realm.at.all">>,
+        auth => #{method => ?WAMP_ANON_AUTH},
+        serializers => [json]
+    }),
+    ?assertMatch(
+        {error, {abort, <<"wamp.error.no_such_realm">>, _}}, Result
+    ).
 
 %% @private Force the router's HELLO admission gate open or closed.
 force_hello_gate(State) ->
