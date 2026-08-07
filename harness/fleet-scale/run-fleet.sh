@@ -43,6 +43,20 @@ if [ "${M0_SKIP_DEPLOY:-0}" != "1" ]; then
   fly scale count "$NODES" --app "$APP" --region "$REGION" --yes
 fi
 
+# `fly deploy` updates a STOPPED machine in place and leaves it stopped, and
+# `fly scale count` only reconciles how many exist -- neither starts anything.
+# So redeploying an app whose machines were stopped (any app idle long enough
+# to be suspended) leaves a cluster that is fully deployed and entirely down:
+# the health loop below then burns its whole budget watching started=0. Start
+# them explicitly; already-running machines are unaffected.
+say "starting any stopped machines"
+for M in $(fly machines list --app "$APP" --json \
+            | jq -r '.[]|select(.state!="started")|.id'); do
+  echo "  starting $M"
+  fly machine start "$M" --app "$APP" >/dev/null 2>&1 || \
+    echo "  !! could not start $M"
+done
+
 say "waiting for $NODES healthy machines"
 for i in $(seq 1 60); do
   started=$(fly machines list --app "$APP" --json | jq '[.[]|select(.state=="started")]|length')

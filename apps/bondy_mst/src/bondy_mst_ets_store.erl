@@ -393,7 +393,11 @@ prune_unreachable(#?MODULE{} = T, KeepRoots) ->
     %% it is what lets a consumer answer "were the pages my root is missing
     %% ones this collector reclaimed?" — the question that separates a
     %% collector defect from a consumer deriving a new root off a stale base.
-    Trace = application:get_env(bondy_mst, verify_gc, false) =/= false,
+    %% Separate switch from the `verify_gc` post-conditions on purpose: those
+    %% are cheap enough to leave on for a whole test suite, whereas this
+    %% window is UNBOUNDED (see `bondy_mst:forget_swept/0`) and would grow all
+    %% run. Opt in only when attributing specific missing pages.
+    Trace = application:get_env(bondy_mst, trace_swept, false) =/= false,
 
     {Num, Swept} = lists:foldl(
         fun(Hash, {N, Acc}) ->

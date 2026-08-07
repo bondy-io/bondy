@@ -191,6 +191,7 @@ volume.
 -export([get_root/1]).
 -export([has/2]).
 -export([is_present/2]).
+-export([page_state/2]).
 -export([is_tombstoned/2]).
 -export([list/1]).
 -export([missing_set/2]).
@@ -434,6 +435,35 @@ Diagnostic: is the hash currently tombstoned in the `free_set`?
 
 is_tombstoned(#?MODULE{free_set = FreeSet}, Hash) when is_binary(Hash) ->
     sets:is_element(Hash, FreeSet).
+
+-doc """
+Which of the three states a "missing" page is actually in — the accessor that
+lets `bondy_oplog_instance:diagnose_root/1` name the layer that lost a page on
+a DURABLE shard rather than reporting `unknown`.
+
+- `absent` — nothing on disk for this hash. Something deleted a page a live
+  root references: a store-layer fault.
+- `{tombstoned, undefined}` — the bytes ARE on disk but the `free_set` masks
+  them from `get/2`, so a walk that called the page missing did not learn that
+  from the disk: a consumer / read-path fault. The epoch slot is `undefined`
+  because this backend tombstones by set membership and keeps no per-hash
+  free time (contrast `bondy_mst_ets_store`, whose `FreedAt` column carries a
+  monotonic timestamp).
+- `live` — present and unmasked; the miss was transient.
+""".
+-spec page_state(t(), binary()) ->
+    live | {tombstoned, undefined} | absent.
+
+page_state(#?MODULE{} = T, Hash) when is_binary(Hash) ->
+    case is_present(T, Hash) of
+        false ->
+            absent;
+        true ->
+            case is_tombstoned(T, Hash) of
+                true -> {tombstoned, undefined};
+                false -> live
+            end
+    end.
 
 -spec put(t(), page()) -> {binary(), t()}.
 

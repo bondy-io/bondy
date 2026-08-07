@@ -172,3 +172,16 @@ drop_root_referenced_page(Tab) ->
     [Row] = ets:lookup(Tab, Ref),
     true = ets:delete(Tab, Ref),
     {Ref, Row}.
+
+%% The publication/collection post-conditions (`verify_published_root/2`,
+%% `verify_post_sweep/2`) are the ONLY thing in the tree that catches a merge
+%% publishing a root whose pages were never copied into the receiver's store —
+%% the Fly s16/s25 page loss — because that fault has never been reproduced by
+%% any targeted test. They therefore ride along on every test run, armed by
+%% `{d, BONDY_MST_VERIFY}` in this app's test profile.
+%%
+%% If that define is ever dropped the checks compile out silently and the whole
+%% suite goes on reporting green while verifying nothing, so assert the net is
+%% actually up.
+post_conditions_are_armed_in_test_builds_test() ->
+    ?assert(bondy_mst:verify_default()).

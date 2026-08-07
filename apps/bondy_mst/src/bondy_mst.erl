@@ -118,6 +118,17 @@ hash.
 -define(GC_ABORT_REPROBE_MS, 50).
 -define(SWEPT_TAB, bondy_mst_recent_swept).
 
+%% Default for the `verify_gc` post-conditions (`verify_published_root/2`,
+%% `verify_post_sweep/2`). ON in test builds, OFF in production — each check
+%% costs a full `missing_set/2` walk, which is right for a suite and wrong for
+%% a hot path. `application:set_env(bondy_mst, verify_gc, _)` overrides either
+%% way, which is how a field node is armed for diagnosis.
+-ifdef(BONDY_MST_VERIFY).
+-define(VERIFY_DEFAULT, true).
+-else.
+-define(VERIFY_DEFAULT, false).
+-endif.
+
 -export_type([t/0]).
 -export_type([opt/0]).
 -export_type([opts/0]).
@@ -155,6 +166,7 @@ hash.
 -export([gc/1]).
 -export([gc_aborts/0]).
 -export([recent_swept/0]).
+-export([verify_default/0]).
 -export([forget_swept/0]).
 -export([gc/2]).
 -export([get/2]).
@@ -1032,7 +1044,7 @@ forget_gc_aborts() ->
 
 ?DOC("""
 The page hashes most recently reclaimed by this node's collectors, newest
-first, when `bondy_mst.verify_gc` is enabled (otherwise empty).
+first, when `bondy_mst.trace_swept` is enabled (otherwise empty).
 
 Diagnosis instrument. If a root is missing pages, intersecting its missing set
 with this answers the question that names the faulting party: pages that ARE
@@ -1040,6 +1052,18 @@ here were reclaimed by a collector whose mark set did not include them, which
 means whoever published that root derived it from a base the collector had
 already moved past. Pages that are NOT here were never collected, so they were
 never stored.
+""").
+-spec verify_default() -> boolean().
+
+verify_default() ->
+    %% Observable so a test can assert the safety net is actually armed. A
+    %% post-condition that silently compiled itself out would be worse than
+    %% none: the suite would report green while checking nothing.
+    ?VERIFY_DEFAULT.
+
+?DOC("""
+The page hashes most recently reclaimed by this node's collectors, newest
+first, when `bondy_mst.trace_swept` is enabled (otherwise empty).
 """).
 -spec recent_swept() -> [hash()].
 
@@ -1066,7 +1090,7 @@ record_swept(_) ->
 ?DOC("""
 Discards the recorded sweep window (see `recent_swept/0`).
 
-The window is UNBOUNDED while `verify_gc` is on, because a bounded one is
+The window is UNBOUNDED while `trace_swept` is on, because a bounded one is
 worse than useless here: any eviction policy cheap enough to run per sweep
 also empties the window most of the time, and an empty window answers "these
 pages were never collected" for pages that were — the exact false negative
@@ -1106,7 +1130,7 @@ swept_tab() ->
 %% gone for good. That failure looks exactly like the s16 signature: a
 %% brand-new root referencing pages that were never stored here.
 verify_published_root(#?MODULE{store = Store} = T, Op) ->
-    case application:get_env(bondy_mst, verify_gc, false) of
+    case application:get_env(bondy_mst, verify_gc, ?VERIFY_DEFAULT) of
         false ->
             ok;
         _ ->
@@ -1153,7 +1177,7 @@ verify_published_root(#?MODULE{store = Store} = T, Op) ->
 %% distinguish "the collector refused because it found damage" from "the
 %% collector CAUSED damage".
 verify_post_sweep(T, Store) ->
-    case application:get_env(bondy_mst, verify_gc, false) of
+    case application:get_env(bondy_mst, verify_gc, ?VERIFY_DEFAULT) of
         false ->
             ok;
         _ ->
@@ -1732,9 +1756,31 @@ log_dangling_root(Tag, A, B, Store0, ARoot, BRoot) ->
         a_store_has_b => bondy_mst_store:has(A#?MODULE.store, BRoot)
     }).
 
-split(_, Store, undefined, _) ->
+%% Splitting a subtree of the tree that OWNS `Store` — a path-copy rewrite, so
+%% the page being replaced is freed (`owned`).
+split(T, Store, Hash, Key) ->
+    split(T, Store, Hash, Key, owned).
+
+%% `Owner` says whose page `Hash` is relative to the store being written:
+%%
+%%   `owned`   — `T`'s pages live in this store and we are path-copying it, so
+%%               the page we replace must be freed. Every insert/delete/truncate
+%%               caller is this case.
+%%   `foreign` — we are decomposing a page of the OTHER tree (`merge_aux_rec/7`
+%%               splitting the donor `B` while writing into the receiver's
+%%               store). Freeing there would tombstone `Hash` in a store that
+%%               either never held it or — because pages are content-addressed
+%%               — holds it as a LIVE page of the receiver's own tree. On
+%%               `bondy_mst_ets_store` that is currently masked by reachability
+%%               GC re-marking it; on `bondy_mst_pack_store` the pack rewrite
+%%               keeps `reachable INTERSECT non-tombstoned`, so a reachable
+%%               page carrying a stray tombstone would be dropped outright.
+%%               Skipping the free instead leaves a temporary page for the next
+%%               collection: deleting late is a bounded memory cost, deleting
+%%               early is data loss.
+split(_, Store, undefined, _, _) ->
     {undefined, undefined, Store};
-split(T, Store0, Hash, Key) ->
+split(T, Store0, Hash, Key, Owner) ->
     Page = get_page(T, Store0, Hash),
     case Page of
         undefined ->
@@ -1747,40 +1793,48 @@ split(T, Store0, Hash, Key) ->
             log_dangling_page("split: page missing", T, Store0, Hash, Key),
             {undefined, undefined, Store0};
         _ ->
-            split_page(T, Store0, Hash, Key, Page)
+            split_page(T, Store0, Hash, Key, Page, Owner)
     end.
 
 %% @private
-split_page(T, Store0, Hash, Key, Page) ->
+split_page(T, Store0, Hash, Key, Page, Owner) ->
     Level = bondy_mst_page:level(Page),
     Low = bondy_mst_page:low(Page),
     [{K0, _, _} | _] = List0 = bondy_mst_page:list(Page),
 
-    Store1 = bondy_mst_store:free(Store0, Hash, Page),
+    Store1 =
+        case Owner of
+            owned -> bondy_mst_store:free(Store0, Hash, Page);
+            foreign -> Store0
+        end,
 
     case compare(T, Key, K0) of
         lt ->
-            {LowLow, LowHi, Store2} = split(T, Store1, Low, Key),
+            {LowLow, LowHi, Store2} = split(T, Store1, Low, Key, Owner),
             NewPage = bondy_mst_page:new(Level, LowHi, List0),
             {NewPageHash, Store} = bondy_mst_store:put(Store2, NewPage),
             {LowLow, NewPageHash, Store};
         gt ->
-            {List, P2, Store2} = split_aux(T, Store1, Key, Level, List0),
+            {List, P2, Store2} =
+                split_aux(T, Store1, Key, Level, List0, Owner),
             NewPage = bondy_mst_page:new(Level, Low, List),
             {NewPageHash, Store} = bondy_mst_store:put(Store2, NewPage),
             {NewPageHash, P2, Store}
     end.
 
 %% @private
-split_aux(T, Store0, Key, _, [{K1, V1, R1}]) ->
+%% `Owner` threads through unchanged: a foreign split must stay foreign all the
+%% way down, or the deeper levels of a donor subtree would still be freed in
+%% the receiver's store.
+split_aux(T, Store0, Key, _, [{K1, V1, R1}], Owner) ->
     case compare(T, K1, Key) of
         eq ->
             error(inconsistency);
         _ ->
-            {R1L, R1H, Store} = split(T, Store0, R1, Key),
+            {R1L, R1H, Store} = split(T, Store0, R1, Key, Owner),
             {[{K1, V1, R1L}], R1H, Store}
     end;
-split_aux(T, Store0, Key, Level, [First, Second | Rest0]) ->
+split_aux(T, Store0, Key, Level, [First, Second | Rest0], Owner) ->
     {K1, V1, R1} = First,
     {K2, _, _} = Second,
 
@@ -1788,13 +1842,13 @@ split_aux(T, Store0, Key, Level, [First, Second | Rest0]) ->
         eq ->
             error(inconsistency);
         lt ->
-            {R1L, R1H, Store1} = split(T, Store0, R1, Key),
+            {R1L, R1H, Store1} = split(T, Store0, R1, Key, Owner),
             NewPage = bondy_mst_page:new(Level, R1H, [Second | Rest0]),
             {NewPageHash, Store} = bondy_mst_store:put(Store1, NewPage),
             {[{K1, V1, R1L}], NewPageHash, Store};
         gt ->
             {Rest, Hi, Store} = split_aux(
-                T, Store0, Key, Level, [Second | Rest0]
+                T, Store0, Key, Level, [Second | Rest0], Owner
             ),
             {[First | Rest], Hi, Store}
     end.
@@ -2028,7 +2082,7 @@ merge_aux_rec(A, B, Store0, ALow, [], BLow, [{K, V, R} | BRest]) ->
     {NewR, NewRest, Store} = merge_aux_rec(A, B, Store2, ALowH, [], R, BRest),
     {NewLow, [{K, V, NewR} | NewRest], Store};
 merge_aux_rec(A, B, Store0, ALow, [{K, V, R} | ARest], BLow, []) ->
-    {BLowL, BLowH, Store1} = split(B, Store0, BLow, K),
+    {BLowL, BLowH, Store1} = split(B, Store0, BLow, K, foreign),
     {NewLow, Store2} = merge_aux(A, B, Store1, ALow, BLowL),
     {NewR, NewRest, Store} = merge_aux_rec(A, B, Store2, R, ARest, BLowH, []),
     {NewLow, [{K, V, NewR} | NewRest], Store};
@@ -2043,7 +2097,7 @@ merge_aux_rec(
 ) ->
     case compare(A, AKey, BKey) of
         lt ->
-            {BLowL, BLowH, Store1} = split(B, Store0, BLow, AKey),
+            {BLowL, BLowH, Store1} = split(B, Store0, BLow, AKey, foreign),
             {NewLow, Store2} = merge_aux(A, B, Store1, ALow, BLowL),
             {NewR, NewRest, Store} = merge_aux_rec(
                 A, B, Store2, ARoot, ARest, BLowH, BEntries

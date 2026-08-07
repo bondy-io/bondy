@@ -212,6 +212,7 @@ run_scenario(Cfg) ->
     %% a concurrent writer can re-create a content-identical page and heal the
     %% hole before the next observation.
     ok = application:set_env(bondy_mst, verify_gc, true),
+    ok = application:set_env(bondy_mst, trace_swept, true),
     ok = bondy_mst:forget_gc_aborts(),
     ok = bondy_mst:forget_swept(),
     %% The schedulers drive their own compaction/sync on live instances; this

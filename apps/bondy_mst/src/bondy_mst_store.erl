@@ -174,8 +174,12 @@ that surfaces far from its cause, as an unservable root.
 %% root means something deleted a still-referenced page (store layer), whereas
 %% `live`/`tombstoned` means the page was readable all along and the miss came
 %% from the walk (consumer / read path).
+%% The epoch in `{tombstoned, _}` is whatever the backend can supply: a
+%% monotonic free time where one is recorded per hash (`bondy_mst_ets_store`),
+%% `undefined` where tombstoning is set membership with no per-hash time
+%% (`bondy_mst_pack_store`). Callers classify on the TAG, never the payload.
 -callback page_state(backend(), hash()) ->
-    live | {tombstoned, integer()} | absent.
+    live | {tombstoned, integer() | undefined} | absent.
 
 -optional_callbacks([page_state/2]).
 

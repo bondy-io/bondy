@@ -2825,22 +2825,22 @@ maybe_hibernate_after(_Req, Result) ->
 %%     before a concurrent insert became visible.
 %%   - `unknown`    — the backend cannot say.
 %%
-%% Backends implementing the optional `page_state/2` callback answer directly.
-%% The pack store does not yet, so it keeps the `is_present/2` probe: on-disk
-%% bytes behind a `free_set` mask carry the same read-side meaning as a
-%% tombstone and are bucketed with it.
+%% Every backend answers through the optional `page_state/2` callback; the two
+%% that back production shards (`bondy_mst_ets_store`, `bondy_mst_pack_store`)
+%% both implement it, and anything that does not is reported honestly as
+%% `unknown` rather than guessed at.
 %%
-%% Do NOT reintroduce a store-type test here that defaults every other backend
-%% to `absent`. That was the previous shape, and because the ephemeral ETS
-%% store `free/3` tombstones rather than deleting, it reported every missing
-%% page on a `registry/*` shard as `absent` — making the field that is supposed
-%% to identify the faulting layer a restatement of `missing`.
+%% Do NOT reintroduce a store-type test here that defaults some backend to
+%% `absent`. That was the original shape — a pack-store-only probe with an
+%% `{[], Hashes}` fallthrough — and because the ephemeral ETS store `free/3`
+%% tombstones rather than deleting, it reported every missing page on a
+%% `registry/*` shard as `absent`, making the field that is supposed to
+%% identify the faulting layer a mere restatement of `missing`.
 classify_missing_pages(MST, Hashes) ->
     Store = bondy_mst:store(MST),
-    Fallback = probe_fallback(Store),
     lists:foldl(
         fun(H, Acc) ->
-            Class = classify_page(Store, Fallback, H),
+            Class = classify_page(Store, H),
             maps:update_with(Class, fun(L) -> [H | L] end, [H], Acc)
         end,
         #{},
@@ -2848,27 +2848,14 @@ classify_missing_pages(MST, Hashes) ->
     ).
 
 %% @private
-classify_page(Store, Fallback, Hash) ->
+%% Classify on the TAG only: the epoch a backend carries in `{tombstoned, _}`
+%% is a monotonic time on ETS and `undefined` on pack.
+classify_page(Store, Hash) ->
     case bondy_mst_store:page_state(Store, Hash) of
         live -> live;
-        {tombstoned, _FreedAt} -> tombstoned;
+        {tombstoned, _} -> tombstoned;
         absent -> absent;
-        unknown -> probe_page(Fallback, Hash)
-    end.
-
-%% @private
-probe_fallback({bondy_mst_store, bondy_mst_pack_store, Backend, _}) ->
-    {bondy_mst_pack_store, Backend};
-probe_fallback(_) ->
-    undefined.
-
-%% @private
-probe_page(undefined, _Hash) ->
-    unknown;
-probe_page({Mod, Backend}, Hash) ->
-    case Mod:is_present(Backend, Hash) of
-        true -> tombstoned;
-        false -> absent
+        unknown -> unknown
     end.
 
 %% @private
@@ -7028,6 +7015,28 @@ finalize_catalogue_compaction(State0, Started, Frontier) ->
                 StateF, State, Started, Frontier, TruncateUs, FlushUs
             );
         {error, Reason} ->
+            %% Discard the truncation entirely and retry next cycle.
+            %%
+            %% DO NOT "fix" this to carry `MST1` forward on the belief that the
+            %% pre-truncate root is now dangling. It is not, and the reasoning
+            %% is worth spelling out because it is easy to get backwards:
+            %%
+            %%   - This branch is reachable ONLY on the pack backend.
+            %%     `bondy_mst_ets_store:flush/1` returns `{ok, _}`
+            %%     unconditionally, so an ephemeral instance never lands here.
+            %%   - On the pack backend `truncate_below_or_equal/4` takes the
+            %%     non-`ets` clause, which truncates WITHOUT collecting. So
+            %%     nothing was reclaimed.
+            %%   - `bondy_mst:truncate/2` does `free/3` the spine pages it
+            %%     rewrote, but `bondy_mst_pack_store:free/3` only adds the
+            %%     hash to the `free_set`, and that set is explicitly NOT a
+            %%     read mask (see `get/2` there — masking reads was removed
+            %%     precisely because it reported live pages as dangling).
+            %%
+            %% So `State0`'s root is still fully readable and reverting to it
+            %% is sound. Carrying the truncated tree forward instead would be
+            %% the actual bug: it drops events the durable checkpoint does not
+            %% cover, on the one path where we already know durability failed.
             ?LOG_ERROR(#{
                 description =>
                     "Aborting compaction: durable MST root flush failed; "

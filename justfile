@@ -22,6 +22,50 @@ default:
     @just --list
 
 # -----------------------------------------------------------------------------
+# Test gates
+# -----------------------------------------------------------------------------
+#
+# `CMAKE_POLICY_VERSION_MINIMUM=3.5` is required by a native dependency's build
+# under the CMake version we pin; without it the test profile fails to compile.
+#
+# NEVER run these concurrently. Several suites bind fixed ports, share `/tmp`
+# paths and assert on GLOBAL counters (telemetry, prometheus, the oplog
+# schedulers), so a parallel run produces failures that do not reproduce
+# serially and cost hours to chase.
+
+# Every gate, in sequence. `just` runs dependencies serially by default.
+test: eunit ct proper
+
+# NOTE this also runs most of the repo's PropEr work: the 20 `*_proper_test`
+# modules expose their properties through eunit `_test_()` entries that call
+# `proper:quickcheck/2`, so they are discovered here and NOT by `just proper`
+# below. Between the two gates all 200 properties in the tree are executed —
+# audited 2026-08-07, with zero defined-but-never-invoked.
+
+# EUnit across every app (also runs the *_proper_test property modules).
+eunit:
+    CMAKE_POLICY_VERSION_MINIMUM=3.5 rebar3 as test eunit
+
+# Common Test. Bondy must be running for these, which is why suites that need
+# the application live here rather than in eunit.
+
+# Common Test suites.
+ct:
+    CMAKE_POLICY_VERSION_MINIMUM=3.5 rebar3 as test ct
+
+# `rebar3_proper` discovers `prop_*`-NAMED modules only, so this gate covers
+# the 9 such modules (75 properties). It is NOT the whole property suite —
+# see the note on `eunit` above before concluding a property did not run.
+
+# PropEr gate: the prop_*-NAMED modules only (see note above).
+proper:
+    CMAKE_POLICY_VERSION_MINIMUM=3.5 rebar3 as test proper
+
+# Coverage report.
+cover:
+    CMAKE_POLICY_VERSION_MINIMUM=3.5 rebar3 as test cover
+
+# -----------------------------------------------------------------------------
 # Static checks
 # -----------------------------------------------------------------------------
 

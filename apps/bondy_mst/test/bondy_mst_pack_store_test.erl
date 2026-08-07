@@ -1370,3 +1370,49 @@ tombstones_seal_flushes_pending_test() ->
         _ = S2,
         bondy_mst_store:close(S2)
     end).
+
+%% =============================================================================
+%% page_state/2 — the durable half of the dangling-root diagnosis
+%% =============================================================================
+
+%% `bondy_oplog_instance:diagnose_root/1` reports a count per class, and the
+%% class is what names the faulting layer. Before this backend implemented
+%% `page_state/2` every durable shard came back `unknown`, so the diagnosis
+%% simply could not be made on `main/*` — the ETS half was fixed first and this
+%% is the other half. All three states must be distinguishable, and in
+%% particular a `free/3`-masked page must NOT read as `absent`: the bytes are
+%% still on disk, so the miss came from the read path, not from the store.
+page_state_distinguishes_live_tombstoned_and_absent_test() ->
+    with_tmp_dir(fun(Dir) ->
+        S0 = open_store(Dir),
+        try
+            P = mk_page(0, undefined, [{ps_k, ps_v, undefined}]),
+            {Hash, S1} = bondy_mst_store:put(S0, P),
+            ?assertEqual(live, bondy_mst_store:page_state(S1, Hash)),
+
+            %% Never written at all.
+            ?assertEqual(
+                absent,
+                bondy_mst_store:page_state(S1, crypto:hash(sha256, <<"nope">>))
+            ),
+
+            %% Freed. The epoch slot is `undefined` here because this backend
+            %% tombstones by set membership and keeps no per-hash free time.
+            %%
+            %% Note the page REMAINS READABLE: on this backend the `free_set`
+            %% gates physical reclamation and `list/1` enumeration only, and is
+            %% deliberately NOT a read mask (see `get/2` there). That is what
+            %% makes `tombstoned` mean "the store still had it, so the miss came
+            %% from the walk" — assert it, because if `get/2` ever started
+            %% masking again, `page_state/2` would still say `tombstoned` while
+            %% the read path reported a dangling root, and the diagnosis would
+            %% point at the wrong layer.
+            S2 = bondy_mst_store:free(S1, Hash, P),
+            ?assertEqual(
+                {tombstoned, undefined}, bondy_mst_store:page_state(S2, Hash)
+            ),
+            ?assertEqual(P, bondy_mst_store:get(S2, Hash))
+        after
+            _ = bondy_mst_store:close(S0)
+        end
+    end).

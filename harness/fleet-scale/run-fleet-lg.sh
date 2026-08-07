@@ -54,6 +54,19 @@ if [ "${SKIP_DEPLOY:-0}" != "1" ]; then
   fly scale count "$NODES" --app "$APP" --region "$REGION" --yes
 fi
 
+# `fly deploy` updates a STOPPED machine in place and leaves it stopped, and
+# `fly scale count` only reconciles how many exist -- neither starts anything.
+# An LG app idle long enough to have been suspended therefore comes back fully
+# deployed and entirely down, and the loop below just watches started=0 until
+# it gives up. Start them explicitly; already-running machines are unaffected.
+say "starting any stopped LG machines"
+for M in $(fly machines list --app "$APP" --json \
+            | jq -r '.[]|select(.state!="started")|.id'); do
+  echo "  starting $M"
+  fly machine start "$M" --app "$APP" >/dev/null 2>&1 || \
+    echo "  !! could not start $M"
+done
+
 say "waiting for $NODES LG machines to be running"
 for i in $(seq 1 40); do
   started=$(fly machines list --app "$APP" --json | jq '[.[]|select(.state=="started")]|length')
@@ -71,6 +84,21 @@ sub_machine="${ids[0]}"
 pub_machines=("${ids[@]:1}")
 n_pub=${#pub_machines[@]}
 pub_vus_per_lg=$(( PUB_VUS_TOTAL / n_pub ))
+
+# k6 holds a JS context + WS buffers per VU -- empirically ~150-180 KB for this
+# script, so a 32 GB performance-16x tops out around 180 K VUs. Past that k6 is
+# OOM-killed DURING VU init: it prints "Init [ nn% ]" progress, dies, and the
+# per-LG output file ends up with no scenario results at all. That failure is
+# silent in the summary (the PUBLISHERS section is simply empty) and reads as
+# "the run happened" -- so refuse up front rather than burn a campaign.
+# Observed 2026-08-06: 225 K VUs/LG died at 78% init (~175 K VUs).
+PUB_VUS_PER_LG_MAX="${PUB_VUS_PER_LG_MAX:-180000}"
+if [ "$pub_vus_per_lg" -gt "$PUB_VUS_PER_LG_MAX" ]; then
+  die "$pub_vus_per_lg publisher VUs per LG exceeds the ~${PUB_VUS_PER_LG_MAX} \
+that fits in 32 GB; k6 will be OOM-killed mid-init and the publishers will \
+produce NO results. Add LG machines (NODES=$(( (PUB_VUS_TOTAL / PUB_VUS_PER_LG_MAX) + 2 ))) \
+or lower PUB_VUS_TOTAL."
+fi
 
 say "$n LGs: 1 subscriber ($SUB_VUS_TOTAL VUs) + $n_pub publisher(s) (${pub_vus_per_lg} VUs each, ${PUB_VUS_TOTAL} total) -> $WS_URL"
 
