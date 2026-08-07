@@ -80,10 +80,10 @@ another subscribe request second might be permissible immediately.
 -type list_cont() ::
     {
         [bondy_registry_entry:t()],
-        bondy_registry_entry:continuation()
-        | bondy_registry_entry:eot()
+        bondy_registry:continuation()
+        | bondy_registry:eot()
     }
-    | bondy_registry_entry:eot().
+    | bondy_registry:eot().
 
 -type match_cont() ::
     {

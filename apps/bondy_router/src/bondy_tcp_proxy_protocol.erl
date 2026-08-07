@@ -21,6 +21,8 @@ falling back to the local IP when permitted.
     error => any() | undefined
 }.
 
+-export_type([t/0]).
+
 -export([init/1]).
 -export([init/2]).
 -export([enabled/1]).

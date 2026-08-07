@@ -29,6 +29,8 @@ such a large number space.
 
 -type t() :: binary().
 
+-export_type([t/0]).
+
 -export([new/0]).
 -export([new/1]).
 -export([node_hash/0]).

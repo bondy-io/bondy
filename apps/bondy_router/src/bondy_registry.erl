@@ -44,6 +44,9 @@ workers; each partition owns its own slice of the indices.
 -type continuation() :: bondy_registry_partition:continuation().
 -type eot() :: bondy_registry_partition:eot().
 
+-export_type([continuation/0]).
+-export_type([eot/0]).
+
 %% SERVER API
 -export([start_link/0]).
 -export([partitions/0]).
@@ -923,7 +926,7 @@ add_registration(RealmUri, Uri, Opts, Ref, Partition) ->
 -spec resolve_inconsistencies(
     Invoke :: binary(),
     SessionId :: optional(bondy_session_id:t()),
-    [bondy_registry_entry:entry()]
+    [bondy_registry_entry:t()]
 ) -> ok | {error, any()}.
 
 resolve_inconsistencies(_, _, []) ->
@@ -988,9 +991,9 @@ resolve_inconsistencies(_, _, L, _, [_ | _]) ->
 %% Sort registration `proc()' index entries by time
 %% -----------------------------------------------------------------------------
 -spec sort_registration_matches(
-    [bondy_registration_partition:reg_match()]
+    [bondy_registry_partition:reg_match()]
 ) ->
-    [bondy_registration_partition:reg_match()].
+    [bondy_registry_partition:reg_match()].
 
 sort_registration_matches(L) ->
     lists:sort(
@@ -1002,9 +1005,9 @@ sort_registration_matches(L) ->
 
 %% @private
 -spec find_registration_duplicates(
-    Triples :: [bondy_registration_partition:reg_match()],
+    Triples :: [bondy_registry_partition:reg_match()],
     SessionId :: bondy_session_id:t()
-) -> Duplicates :: [bondy_registration_partition:reg_match()].
+) -> Duplicates :: [bondy_registry_partition:reg_match()].
 
 find_registration_duplicates([], _) ->
     [];
@@ -1029,7 +1032,7 @@ revoke(_) ->
     ok.
 
 %% @private
--spec resolve_duplicates([bondy_registration_partition:reg_match()]) ->
+-spec resolve_duplicates([bondy_registry_partition:reg_match()]) ->
     ok | {error, {already_exists, entry()}}.
 
 resolve_duplicates([H | T]) ->
@@ -1052,8 +1055,8 @@ resolve_duplicates([]) ->
 %% @private
 -spec resolve_existing(
     entry_type(),
-    bondy_registration_partition:reg_match()
-    | [bondy_registration_partition:reg_match()]
+    bondy_registry_partition:reg_match()
+    | [bondy_registry_partition:reg_match()]
 ) -> ok | {error, {already_exists, entry()}}.
 
 resolve_existing(_, []) ->

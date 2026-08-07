@@ -244,10 +244,8 @@ check_root(T, Root, Model, Roots, OpTag) ->
                         {failed, {content_mismatch, OpTag, Expected, Got}}}
             end;
         Missing ->
-            {T, Model, Roots,
-                {failed, {own_root_unservable, OpTag, Missing}}}
+            {T, Model, Roots, {failed, {own_root_unservable, OpTag, Missing}}}
     end.
-
 
 %% Builds the peer's tree in its OWN store, as a real peer would hold it.
 peer_tree(Keys) ->

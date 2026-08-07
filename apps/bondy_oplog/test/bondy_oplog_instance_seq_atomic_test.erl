@@ -160,7 +160,9 @@ burned_range_is_backfilled_locally() ->
     %% that makes the range unreturnable.
     #{seq := SeqRef} = bondy_oplog_registry:fast_path(Id),
     5 = atomics:add_get(SeqRef, 1, 2),
-    K6 = bondy_oplog:append(Id, {cell_apply, <<>>, key_n(6), {set, 6, val_n(6)}}),
+    K6 = bondy_oplog:append(
+        Id, {cell_apply, <<>>, key_n(6), {set, 6, val_n(6)}}
+    ),
     ?assertEqual(6, bondy_oplog_event:key_seq(K6)),
 
     %% Trigger the backfill through the same message the burn site
@@ -213,7 +215,9 @@ fills_cross_sync_and_unpark_the_prefix_hold() ->
     ],
     #{seq := SeqRef} = bondy_oplog_registry:fast_path(A),
     5 = atomics:add_get(SeqRef, 1, 2),
-    K6 = bondy_oplog:append(A, {cell_apply, <<>>, key_n(6), {set, 6, val_n(6)}}),
+    K6 = bondy_oplog:append(
+        A, {cell_apply, <<>>, key_n(6), {set, 6, val_n(6)}}
+    ),
     ?assertEqual(6, bondy_oplog_event:key_seq(K6)),
     PidA = bondy_oplog_registry:instance_pid(A),
     ok = gen_server:cast(PidA, {fill_burned_seqs, 4, 5, 0}),

@@ -410,7 +410,13 @@ prune_unreachable(#?MODULE{} = T, KeepRoots) ->
                 false ->
                     %% Definitely not in the set so we free
                     true = ets:delete(Tab, Hash),
-                    {N + 1, case Trace of true -> [Hash | Acc]; false -> Acc end}
+                    {
+                        N + 1,
+                        case Trace of
+                            true -> [Hash | Acc];
+                            false -> Acc
+                        end
+                    }
             end
         end,
         {0, []},

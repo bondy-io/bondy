@@ -202,7 +202,6 @@ new(Type, Opts) when is_atom(Type) andalso is_map(Opts) ->
         trace_id => maps:get(trace_id, Opts, undefined),
         doc_uri => <<"/errors/", Handle/binary>>
     };
-
 new(Type, _) ->
     error({badarg, {type, Type}}).
 
@@ -234,7 +233,6 @@ is_type(#{
         (Nature == transient orelse Nature == permanent)
 ->
     true;
-
 is_type(_) ->
     false.
 
@@ -425,7 +423,6 @@ format_error(Reason, [{Module, _, _, Info} | _]) when is_list(Info) ->
         general => format_term(Reason),
         module => Module
     };
-
 format_error(Reason, _) ->
     #{general => format_term(Reason)}.
 
@@ -617,91 +614,70 @@ do_from_term(Term) ->
 %% through a map - a relay hop, a stored payload - without losing its identity.
 convert(#{~"uri" := Uri} = Map) when is_binary(Uri) ->
     from_projection(Uri, Map);
-
 convert(#{uri := Uri} = Map) when is_binary(Uri) ->
     from_projection(Uri, binary_keys(Map));
-
 convert(#{~"code" := Code} = Map) ->
     from_legacy_map(Code, Map);
-
 convert(#{code := Code} = Map) ->
     from_legacy_map(Code, binary_keys(Map));
-
 %% A doubly-wrapped error, produced by the `error({error, Reason})` idiom.
 convert({error, Reason}) ->
     do_from_term(Reason);
-
 %% Validation failures raised by maps_utils:validate/2 and by hand across the
 %% codebase.
 convert({missing_required_value, Key}) ->
     new(missing_required_value, #{details => #{key => Key}});
-
 convert({invalid_value, Key, Value}) ->
     new(invalid_value, #{details => #{key => Key, value => Value}});
-
 convert({invalid_value, Key, Value, Description}) ->
     new(invalid_value, #{
         description => to_binary(Description),
         details => #{key => Key, value => Value}
     });
-
 convert({property_range_limit, Key, Limit}) ->
     new(property_range_limit, #{details => #{key => Key, limit => Limit}});
-
 convert({inconsistency_error, Keys}) when is_list(Keys) ->
     new(inconsistency_error, #{details => keys_details(Keys)});
-
 convert({inconsistency_error, Keys, Description}) when is_list(Keys) ->
     new(inconsistency_error, #{
         description => to_binary(Description),
         details => keys_details(Keys)
     });
-
 convert({inconsistency_error, Key}) ->
     convert({inconsistency_error, [Key]});
-
 %% Identity
 convert({no_such_realm, Uri}) ->
     new(no_such_realm, #{details => #{realm_uri => Uri}});
-
 convert({no_such_user, Authid}) ->
     new(no_such_user, #{details => #{authid => Authid}});
-
 %% Decoding and request framing
 convert({badarg, {decoding, Format}}) ->
     new(invalid_data, #{details => #{format => Format}});
-
 convert({badarg, {body_max_bytes_exceeded, Max}}) ->
     new(body_max_bytes_exceeded, #{details => #{max_bytes => Max}});
-
 convert({badarg, Map}) when is_map(Map) ->
     convert(Map);
-
 convert({badarg, Message}) when
     is_binary(Message) orelse is_list(Message) orelse is_atom(Message)
 ->
     new(invalid_argument, #{message => to_binary(Message)});
-
 %% Cowboy request errors
 convert({request_error, Key, Description}) when is_atom(Key) ->
     new(invalid_request, #{
         description => to_binary(Description),
         details => #{key => Key}
     });
-
 convert({request_error, {Key, _}, Description}) when is_atom(Key) ->
     new(invalid_request, #{
         description => to_binary(Description),
         details => #{key => Key}
     });
-
 convert({badheader, Header, Description}) when is_binary(Header) ->
     new(invalid_argument, #{
         message => <<"The header '", Header/binary, "' is malformed.">>,
         description => to_binary(Description),
         details => #{header => Header}
     });
-
 %% A known type carrying an overriding message, and optionally a description.
 %% These two clauses must stay last among the tuple clauses: they are the
 %% catch-all for the `{Code, Message}` and `{Code, Message, Description}`
@@ -714,13 +690,11 @@ convert({Code, Message}) when
 ->
     Base = from_code(Code),
     Base#{message => to_binary(Message)};
-
 convert({Type, Message} = Term) when
     is_atom(Type) andalso
         (is_binary(Message) orelse is_list(Message) orelse is_atom(Message))
 ->
     known_or_internal(Type, Term, #{message => to_binary(Message)});
-
 convert({Code, Message, Description}) when
     is_binary(Code) andalso
         (is_binary(Message) orelse is_list(Message) orelse is_atom(Message))
@@ -730,7 +704,6 @@ convert({Code, Message, Description}) when
         message => to_binary(Message),
         description => to_binary(Description)
     };
-
 convert({Type, Message, Description} = Term) when
     is_atom(Type) andalso
         (is_binary(Message) orelse is_list(Message) orelse is_atom(Message))
@@ -739,7 +712,6 @@ convert({Type, Message, Description} = Term) when
         message => to_binary(Message),
         description => to_binary(Description)
     });
-
 convert(Type) when is_atom(Type) ->
     case entry(Type) of
         undefined ->
@@ -750,10 +722,8 @@ convert(Type) when is_atom(Type) ->
         _ ->
             new(Type)
     end;
-
 convert(Code) when is_binary(Code) ->
     from_code(Code);
-
 convert(Term) ->
     internal_error(Term).
 
@@ -781,13 +751,10 @@ from_code(Code0) ->
 %% @private
 qualify(<<"wamp.", _/binary>> = Uri) ->
     Uri;
-
 qualify(<<"bondy.", _/binary>> = Uri) ->
     Uri;
-
 qualify(<<"com.", _/binary>> = Uri) ->
     Uri;
-
 qualify(Code) ->
     <<"bondy.error.", Code/binary>>.
 
@@ -801,21 +768,18 @@ safe_uri(Candidate, Fallback) when is_binary(Candidate) ->
         true -> Candidate;
         false -> Fallback
     end;
-
 safe_uri(_, Fallback) ->
     Fallback.
 
 %% @private
 is_uri(<<>>) ->
     false;
-
 is_uri(Bin) ->
     is_uri_chars(Bin).
 
 %% @private
 is_uri_chars(<<>>) ->
     true;
-
 is_uri_chars(<<C, Rest/binary>>) when
     (C >= $a andalso C =< $z) orelse
         (C >= $A andalso C =< $Z) orelse
@@ -823,7 +787,6 @@ is_uri_chars(<<C, Rest/binary>>) when
         C == $_ orelse C == $. orelse C == $-
 ->
     is_uri_chars(Rest);
-
 is_uri_chars(_) ->
     false.
 
@@ -854,7 +817,9 @@ from_projection(Uri0, Map) ->
         uri => Uri,
         metadata => rejected_uri(Uri0, Uri),
         code => to_binary(maps:get(~"code", Map, maps:get(code, Base))),
-        message => to_binary(maps:get(~"message", Map, maps:get(message, Base))),
+        message => to_binary(
+            maps:get(~"message", Map, maps:get(message, Base))
+        ),
         description => to_binary(
             maps:get(~"description", Map, maps:get(description, Base))
         ),
@@ -866,7 +831,6 @@ from_projection(Uri0, Map) ->
 %% diagnosable rather than silently normalised away.
 rejected_uri(Uri, Uri) ->
     #{};
-
 rejected_uri(Rejected, _) ->
     #{rejected_uri => format_term(Rejected)}.
 
@@ -889,7 +853,9 @@ from_legacy_map(Code0, Map) ->
 
     Base#{
         code => Code,
-        message => to_binary(maps:get(~"message", Map, maps:get(message, Base))),
+        message => to_binary(
+            maps:get(~"message", Map, maps:get(message, Base))
+        ),
         description => to_binary(
             maps:get(~"description", Map, maps:get(description, Base))
         )
@@ -928,7 +894,6 @@ trace_id() ->
 %% @private
 to_causes(Causes) when is_list(Causes) ->
     [maybe_from_term(C) || C <- Causes];
-
 to_causes(_) ->
     [].
 
@@ -938,12 +903,13 @@ to_causes(_) ->
 
 %% @private
 %% Replaces every `%{key}` in Template with the corresponding entry of Details.
-interpolate(Template, Details) when is_binary(Template) andalso is_map(Details) ->
+interpolate(Template, Details) when
+    is_binary(Template) andalso is_map(Details)
+->
     case binary:match(Template, ~"%{") of
         nomatch -> Template;
         _ -> iolist_to_binary(interpolate_parts(Template, Details))
     end;
-
 interpolate(Template, Details) ->
     interpolate(to_binary(Template), Details).
 
@@ -994,7 +960,6 @@ format_term(Term) ->
 %% stays valid UTF-8 and therefore still encodable.
 truncate(Bin) when byte_size(Bin) =< ?MAX_BYTES ->
     Bin;
-
 truncate(Bin) ->
     Head = binary:part(Bin, 0, ?MAX_BYTES),
     <<(trim_to_character_boundary(Head))/binary, ?ELLIPSIS>>.
@@ -1019,23 +984,18 @@ to_binary(Term) when is_binary(Term) ->
         true -> Term;
         false -> format_term(Term)
     end;
-
 to_binary(Term) when is_atom(Term) ->
     atom_to_binary(Term, utf8);
-
 to_binary(Term) when is_integer(Term) ->
     integer_to_binary(Term);
-
 to_binary(Term) when is_float(Term) ->
     float_to_binary(Term, [short]);
-
 to_binary(Term) when is_list(Term) ->
     try
         iolist_to_binary(Term)
     catch
         _:_ -> format_term(Term)
     end;
-
 to_binary(Term) ->
     format_term(Term).
 
@@ -1050,28 +1010,20 @@ binary_keys(Map) ->
 %% @private
 sanitise(Term, Depth) when Depth =< 0 ->
     format_term(Term);
-
 sanitise(Term, _) when is_binary(Term) ->
     truncate(to_binary(Term));
-
 sanitise(Term, _) when is_number(Term) ->
     Term;
-
 sanitise(true, _) ->
     true;
-
 sanitise(false, _) ->
     false;
-
 sanitise(null, _) ->
     null;
-
 sanitise(undefined, _) ->
     null;
-
 sanitise(Term, _) when is_atom(Term) ->
     atom_to_binary(Term, utf8);
-
 sanitise(Term, Depth) when is_map(Term) ->
     maps:fold(
         fun(K, V, Acc) ->
@@ -1080,7 +1032,6 @@ sanitise(Term, Depth) when is_map(Term) ->
         #{},
         Term
     );
-
 sanitise(Term, Depth) when is_list(Term) ->
     %% A string is far more useful rendered as text than as an array of code
     %% points, and a JSON encoder cannot tell the two apart either.
@@ -1089,7 +1040,6 @@ sanitise(Term, Depth) when is_list(Term) ->
         Bin when is_binary(Bin) -> truncate(Bin);
         _ -> format_term(Term)
     end;
-
 sanitise(Term, _) ->
     format_term(Term).
 
@@ -1107,17 +1057,14 @@ sanitise_key(Key) ->
 %% proper is rendered as text instead of being half-converted.
 sanitise_list([], _, Acc) ->
     lists:reverse(Acc);
-
 sanitise_list([H | T], Depth, Acc) ->
     sanitise_list(T, Depth, [sanitise(H, Depth - 1) | Acc]);
-
 sanitise_list(Tail, _, Acc) ->
     format_term({improper_list, lists:reverse(Acc), Tail}).
 
 %% @private
 is_text([]) ->
     false;
-
 is_text(Term) ->
     try
         io_lib:printable_unicode_list(Term)
@@ -1140,7 +1087,6 @@ posix_message(Type) when is_atom(Type) ->
         "unknown POSIX error" ++ _ -> error;
         Message -> {ok, list_to_binary(Message)}
     end;
-
 posix_message(_) ->
     error.
 
@@ -1200,9 +1146,11 @@ entry(internal_error) ->
         ~"S001",
         transient,
         ~"Internal system error.",
-        <<"The request could not be completed because of an unexpected " "condition. Quote the trace_id when reporting this.">>
+        <<
+            "The request could not be completed because of an unexpected "
+            "condition. Quote the trace_id when reporting this."
+        >>
     );
-
 entry(unknown_error) ->
     entry(
         ~"bondy.error.unknown_error",
@@ -1210,7 +1158,6 @@ entry(unknown_error) ->
         transient,
         ~"An unknown error occurred."
     );
-
 entry(service_unavailable) ->
     entry(
         ~"wamp.error.unavailable",
@@ -1219,25 +1166,31 @@ entry(service_unavailable) ->
         ~"The service is temporarily unavailable.",
         ~"The condition is temporary. The client MAY retry after a short delay."
     );
-
 entry(unavailable) ->
     entry(
         ~"bondy.error.unavailable",
         ~"S004",
         transient,
         ~"The request could not be completed at this time.",
-        <<"One or more cluster nodes could not be reached, so the result could " "not be confirmed. Retry; a repeated failure indicates a node or " "network problem.">>
+        <<
+            "One or more cluster nodes could not be reached, so the result could "
+            "not be confirmed. Retry; a repeated failure indicates a node or "
+            "network problem."
+        >>
     );
-
 entry(temporarily_unavailable) ->
     entry(
         ~"bondy.error.temporarily_unavailable",
         ~"S005",
         transient,
         ~"The server is temporarily unable to complete authentication.",
-        <<"The authorization server is currently unable to handle the request " "due to a temporary condition: it has not yet confirmed its security " "state with the cluster (anti-entropy freshness fence). The client " "MAY retry after a short delay.">>
+        <<
+            "The authorization server is currently unable to handle the request "
+            "due to a temporary condition: it has not yet confirmed its security "
+            "state with the cluster (anti-entropy freshness fence). The client "
+            "MAY retry after a short delay."
+        >>
     );
-
 entry(gateway_timeout) ->
     entry(
         ~"bondy.error.gateway_timeout",
@@ -1245,7 +1198,6 @@ entry(gateway_timeout) ->
         transient,
         ~"The upstream service did not respond in time."
     );
-
 entry(bad_gateway) ->
     entry(
         ~"bondy.error.bad_gateway",
@@ -1253,13 +1205,10 @@ entry(bad_gateway) ->
         transient,
         ~"The upstream service returned an invalid response."
     );
-
 entry(disk_full) ->
     entry(~"bondy.error.disk_full", ~"S008", transient, ~"Out of disk space.");
-
 entry(out_of_memory) ->
     entry(~"bondy.error.out_of_memory", ~"S009", transient, ~"Out of memory.");
-
 entry(too_many_connections) ->
     entry(
         ~"bondy.error.too_many_connections",
@@ -1267,7 +1216,6 @@ entry(too_many_connections) ->
         transient,
         ~"The connection limit has been reached."
     );
-
 entry(too_many_processes) ->
     entry(
         ~"bondy.error.too_many_processes",
@@ -1275,7 +1223,6 @@ entry(too_many_processes) ->
         transient,
         ~"The process limit has been reached."
     );
-
 entry(insufficient_resources) ->
     entry(
         ~"bondy.error.insufficient_resources",
@@ -1283,7 +1230,6 @@ entry(insufficient_resources) ->
         transient,
         ~"There are insufficient resources to complete the request."
     );
-
 entry(system_shutdown) ->
     %% A close reason rather than an error URI, but it reaches the same
     %% projections and so needs an entry.
@@ -1293,7 +1239,6 @@ entry(system_shutdown) ->
         transient,
         ~"The system is shutting down."
     );
-
 entry(noproc) ->
     shared_uri(
         entry(
@@ -1303,7 +1248,6 @@ entry(noproc) ->
             ~"The service is temporarily unavailable."
         )
     );
-
 entry(overload) ->
     shared_uri(
         entry(
@@ -1313,7 +1257,6 @@ entry(overload) ->
             ~"The server is shedding load. Retry after a short delay."
         )
     );
-
 entry(overloaded) ->
     shared_uri(
         entry(
@@ -1323,7 +1266,6 @@ entry(overloaded) ->
             ~"The server is shedding load. Retry after a short delay."
         )
     );
-
 %% -----------------------------------------------------------------------------
 %% Limits
 %% -----------------------------------------------------------------------------
@@ -1335,7 +1277,6 @@ entry(rate_limit_exceeded) ->
         transient,
         ~"Rate limit exceeded."
     );
-
 entry(quota_exceeded) ->
     entry(
         ~"bondy.error.quota_exceeded",
@@ -1343,7 +1284,6 @@ entry(quota_exceeded) ->
         permanent,
         ~"Resource quota exceeded."
     );
-
 entry(too_many_requests) ->
     entry(
         ~"bondy.error.too_many_requests",
@@ -1351,7 +1291,6 @@ entry(too_many_requests) ->
         transient,
         ~"Request limit exceeded."
     );
-
 entry(too_many_sessions) ->
     entry(
         ~"bondy.error.too_many_sessions",
@@ -1359,7 +1298,6 @@ entry(too_many_sessions) ->
         transient,
         ~"Session limit exceeded."
     );
-
 entry(too_large_payload) ->
     entry(
         ~"bondy.error.too_large_payload",
@@ -1367,25 +1305,30 @@ entry(too_large_payload) ->
         permanent,
         ~"The payload is too large."
     );
-
 entry(too_many_results) ->
     entry(
         ~"bondy.error.too_many_results",
         ~"L006",
         permanent,
         ~"The result set is too large for this procedure.",
-        <<"This spec-compliant 'wamp.*' meta procedure returns a bounded " "result, and the set exceeds that bound on this cluster. Use the " "paginated 'bondy.*' equivalent (e.g. 'bondy.registration.list') with " "the '_limit' and '_cursor' options.">>
+        <<
+            "This spec-compliant 'wamp.*' meta procedure returns a bounded "
+            "result, and the set exceeds that bound on this cluster. Use the "
+            "paginated 'bondy.*' equivalent (e.g. 'bondy.registration.list') with "
+            "the '_limit' and '_cursor' options."
+        >>
     );
-
 entry(body_max_bytes_exceeded) ->
     entry(
         ~"bondy.error.body_max_bytes_exceeded",
         ~"L007",
         permanent,
-        <<"The body content size exceeds the allowable limit of %{max_bytes} " "bytes.">>,
+        <<
+            "The body content size exceeds the allowable limit of %{max_bytes} "
+            "bytes."
+        >>,
         ~"The body cannot be larger than the defined maximum allowed."
     );
-
 entry(payload_size_exceeded) ->
     entry(
         ~"wamp.error.payload_size_exceeded",
@@ -1393,7 +1336,6 @@ entry(payload_size_exceeded) ->
         permanent,
         ~"The payload size exceeds the allowable limit."
     );
-
 %% -----------------------------------------------------------------------------
 %% Authentication
 %% -----------------------------------------------------------------------------
@@ -1405,7 +1347,6 @@ entry(invalid_credentials) ->
         permanent,
         ~"The credentials provided are invalid."
     );
-
 entry(authentication_failed) ->
     entry(
         ~"wamp.error.authentication_failed",
@@ -1413,7 +1354,6 @@ entry(authentication_failed) ->
         permanent,
         ~"Authentication failed."
     );
-
 entry(token_expired) ->
     entry(
         ~"bondy.error.token_expired",
@@ -1421,16 +1361,20 @@ entry(token_expired) ->
         permanent,
         ~"The token has expired."
     );
-
 entry(token_invalid) ->
     entry(
         ~"bondy.error.token_invalid",
         ~"A004",
         permanent,
         ~"The token is invalid.",
-        <<"The provided authorization grant (e.g., authorization code, resource " "owner credentials) or refresh token is invalid, expired, revoked, " "does not match the redirection URI used in the authorization " "request, or was issued to another client. The client MAY request a " "new access token and retry the protected resource request.">>
+        <<
+            "The provided authorization grant (e.g., authorization code, resource "
+            "owner credentials) or refresh token is invalid, expired, revoked, "
+            "does not match the redirection URI used in the authorization "
+            "request, or was issued to another client. The client MAY request a "
+            "new access token and retry the protected resource request."
+        >>
     );
-
 entry(not_auth_method) ->
     entry(
         ~"wamp.error.not_auth_method",
@@ -1438,7 +1382,6 @@ entry(not_auth_method) ->
         permanent,
         ~"The authentication method requested is not supported."
     );
-
 entry(no_such_principal) ->
     entry(
         ~"wamp.error.no_such_principal",
@@ -1446,7 +1389,6 @@ entry(no_such_principal) ->
         permanent,
         ~"The request failed because the authid provided does not exist."
     );
-
 entry(no_such_user) ->
     legacy(
         shared_uri(
@@ -1454,12 +1396,14 @@ entry(no_such_user) ->
                 ~"wamp.error.no_such_principal",
                 ~"A007",
                 permanent,
-                <<"The request failed because the authid provided does not " "exist.">>
+                <<
+                    "The request failed because the authid provided does not "
+                    "exist."
+                >>
             )
         ),
         ~"wamp.error.no_such_principal"
     );
-
 %% -----------------------------------------------------------------------------
 %% Authorization
 %% -----------------------------------------------------------------------------
@@ -1471,7 +1415,6 @@ entry(forbidden) ->
         permanent,
         ~"The operation is forbidden."
     );
-
 entry(not_authorized) ->
     entry(
         ~"wamp.error.not_authorized",
@@ -1479,7 +1422,6 @@ entry(not_authorized) ->
         permanent,
         ~"You have no authorisation to perform this operation."
     );
-
 entry(unauthorized) ->
     shared_uri(
         entry(
@@ -1489,16 +1431,17 @@ entry(unauthorized) ->
             ~"You have no authorisation to perform this operation."
         )
     );
-
 entry(authorization_failed) ->
     entry(
         ~"wamp.error.authorization_failed",
         ~"Z003",
         transient,
         ~"Authorization could not be determined.",
-        <<"The router was unable to determine whether the operation is " "permitted. This is a server-side condition, not a rejection.">>
+        <<
+            "The router was unable to determine whether the operation is "
+            "permitted. This is a server-side condition, not a rejection."
+        >>
     );
-
 entry(insufficient_permissions) ->
     entry(
         ~"bondy.error.insufficient_permissions",
@@ -1506,7 +1449,6 @@ entry(insufficient_permissions) ->
         permanent,
         ~"You do not have sufficient permissions to perform this operation."
     );
-
 entry(role_not_allowed) ->
     entry(
         ~"bondy.error.role_not_allowed",
@@ -1514,7 +1456,6 @@ entry(role_not_allowed) ->
         permanent,
         ~"The role requested is not allowed."
     );
-
 entry(no_such_role) ->
     entry(
         ~"wamp.error.no_such_role",
@@ -1522,7 +1463,6 @@ entry(no_such_role) ->
         permanent,
         ~"The role provided does not exist."
     );
-
 %% -----------------------------------------------------------------------------
 %% Client / request
 %% -----------------------------------------------------------------------------
@@ -1534,7 +1474,6 @@ entry(bad_request) ->
         permanent,
         ~"The request is malformed."
     );
-
 entry(invalid_request) ->
     legacy(
         entry(
@@ -1542,11 +1481,15 @@ entry(invalid_request) ->
             ~"C002",
             permanent,
             ~"The request is malformed.",
-            <<"The request is missing a required parameter, includes an " "unsupported parameter value, repeats a parameter, includes " "multiple credentials, utilizes more than one mechanism for " "authenticating the client, or is otherwise malformed.">>
+            <<
+                "The request is missing a required parameter, includes an "
+                "unsupported parameter value, repeats a parameter, includes "
+                "multiple credentials, utilizes more than one mechanism for "
+                "authenticating the client, or is otherwise malformed."
+            >>
         ),
         ~"invalid_request"
     );
-
 entry(not_found) ->
     entry(
         ~"bondy.error.not_found",
@@ -1554,7 +1497,6 @@ entry(not_found) ->
         permanent,
         ~"The requested resource was not found."
     );
-
 entry(already_exists) ->
     entry(
         ~"bondy.error.already_exists",
@@ -1562,7 +1504,6 @@ entry(already_exists) ->
         permanent,
         ~"The resource already exists."
     );
-
 entry(method_not_allowed) ->
     entry(
         ~"bondy.error.method_not_allowed",
@@ -1570,7 +1511,6 @@ entry(method_not_allowed) ->
         permanent,
         ~"The method is not allowed for this resource."
     );
-
 entry(request_timeout) ->
     entry(
         ~"bondy.error.request_timeout",
@@ -1578,10 +1518,10 @@ entry(request_timeout) ->
         transient,
         ~"The request timed out."
     );
-
 entry(timeout) ->
-    entry(~"wamp.error.timeout", ~"C007", transient, ~"The operation timed out.");
-
+    entry(
+        ~"wamp.error.timeout", ~"C007", transient, ~"The operation timed out."
+    );
 entry(argument_error) ->
     shared_uri(
         entry(
@@ -1591,7 +1531,6 @@ entry(argument_error) ->
             ~"Invalid argument."
         )
     );
-
 entry(badarg) ->
     shared_uri(
         entry(
@@ -1601,7 +1540,6 @@ entry(badarg) ->
             ~"Invalid argument."
         )
     );
-
 entry(invalid_argument) ->
     legacy(
         entry(
@@ -1612,7 +1550,6 @@ entry(invalid_argument) ->
         ),
         ~"invalid_argument"
     );
-
 entry(invalid_value) ->
     legacy(
         entry(
@@ -1624,7 +1561,6 @@ entry(invalid_value) ->
         ),
         ~"invalid_value"
     );
-
 entry(missing_required_value) ->
     legacy(
         entry(
@@ -1636,7 +1572,6 @@ entry(missing_required_value) ->
         ),
         ~"missing_required_value"
     );
-
 entry(property_range_limit) ->
     legacy(
         entry(
@@ -1644,11 +1579,13 @@ entry(property_range_limit) ->
             ~"C012",
             permanent,
             ~"The operation failed because a property range limit was reached.",
-            <<"The value for property '%{key}' already contains the maximum " "number of values allowed (%{limit}).">>
+            <<
+                "The value for property '%{key}' already contains the maximum "
+                "number of values allowed (%{limit})."
+            >>
         ),
         ~"property_range_limit"
     );
-
 entry(inconsistency_error) ->
     legacy(
         entry(
@@ -1660,7 +1597,6 @@ entry(inconsistency_error) ->
         ),
         ~"invalid_argument"
     );
-
 entry(invalid_data) ->
     legacy(
         entry(
@@ -1668,11 +1604,13 @@ entry(invalid_data) ->
             ~"C014",
             permanent,
             ~"The data provided is not a valid %{format}.",
-            <<"Make sure the data type you are sending matches a supported mime " "type and that it matches the request content-type header.">>
+            <<
+                "Make sure the data type you are sending matches a supported mime "
+                "type and that it matches the request content-type header."
+            >>
         ),
         ~"invalid_data"
     );
-
 entry(invalid_uri) ->
     entry(
         ~"wamp.error.invalid_uri",
@@ -1680,7 +1618,6 @@ entry(invalid_uri) ->
         permanent,
         ~"The URI provided is invalid."
     );
-
 entry(conflict) ->
     entry(
         ~"bondy.error.conflict",
@@ -1688,7 +1625,6 @@ entry(conflict) ->
         permanent,
         ~"The request conflicts with the current state of the resource."
     );
-
 entry(proxy_protocol_error) ->
     entry(
         ~"bondy.error.proxy_protocol_error",
@@ -1697,14 +1633,12 @@ entry(proxy_protocol_error) ->
         ~"Operation forbidden.",
         ~"The source IP Address couldn't be determined."
     );
-
 %% -----------------------------------------------------------------------------
 %% Cluster
 %% -----------------------------------------------------------------------------
 
 entry(node_down) ->
     entry(~"bondy.error.node_down", ~"K001", transient, ~"The node is down.");
-
 entry(cluster_not_formed) ->
     entry(
         ~"bondy.error.cluster_not_formed",
@@ -1712,7 +1646,6 @@ entry(cluster_not_formed) ->
         transient,
         ~"The cluster has not been formed yet."
     );
-
 entry(partition_detected) ->
     entry(
         ~"bondy.error.partition_detected",
@@ -1720,7 +1653,6 @@ entry(partition_detected) ->
         transient,
         ~"A network partition has been detected."
     );
-
 %% -----------------------------------------------------------------------------
 %% WAMP
 %% -----------------------------------------------------------------------------
@@ -1736,16 +1668,17 @@ entry(no_such_realm) ->
         ),
         ~"wamp.error.no_such_realm"
     );
-
 entry(no_such_procedure) ->
     entry(
         ~"wamp.error.no_such_procedure",
         ~"W002",
         permanent,
         ~"There are no registered procedures matching the uri '%{procedure_uri}'.",
-        <<"Either no registration exists for the requested procedure or the " "match policy used did not match any registered procedures.">>
+        <<
+            "Either no registration exists for the requested procedure or the "
+            "match policy used did not match any registered procedures."
+        >>
     );
-
 entry(no_such_registration) ->
     entry(
         ~"wamp.error.no_such_registration",
@@ -1753,7 +1686,6 @@ entry(no_such_registration) ->
         permanent,
         ~"No registration exists for the supplied RegistrationId."
     );
-
 entry(no_such_subscription) ->
     entry(
         ~"wamp.error.no_such_subscription",
@@ -1761,7 +1693,6 @@ entry(no_such_subscription) ->
         permanent,
         ~"No subscription exists for the supplied SubscriptionId."
     );
-
 entry(no_such_session) ->
     entry(
         ~"wamp.error.no_such_session",
@@ -1769,7 +1700,6 @@ entry(no_such_session) ->
         permanent,
         ~"No session exists for the supplied SessionId."
     );
-
 entry(procedure_already_exists) ->
     entry(
         ~"wamp.error.procedure_already_exists",
@@ -1777,7 +1707,6 @@ entry(procedure_already_exists) ->
         permanent,
         ~"A procedure is already registered under this URI."
     );
-
 entry(option_not_allowed) ->
     entry(
         ~"wamp.error.option_not_allowed",
@@ -1785,7 +1714,6 @@ entry(option_not_allowed) ->
         permanent,
         ~"The option requested is not allowed."
     );
-
 entry(disclose_me_not_allowed) ->
     %% The URI's last segment is `not_allowed', which is too generic to serve as
     %% a code on its own.
@@ -1798,7 +1726,6 @@ entry(disclose_me_not_allowed) ->
         ),
         ~"disclose_me_not_allowed"
     );
-
 entry(no_eligible_callee) ->
     entry(
         ~"wamp.error.no_eligible_callee",
@@ -1806,7 +1733,6 @@ entry(no_eligible_callee) ->
         transient,
         ~"There is no eligible callee for this procedure."
     );
-
 entry(no_available_callee) ->
     entry(
         ~"wamp.error.no_available_callee",
@@ -1814,7 +1740,6 @@ entry(no_available_callee) ->
         transient,
         ~"There is no available callee for this procedure."
     );
-
 entry(protocol_violation) ->
     entry(
         ~"wamp.error.protocol_violation",
@@ -1822,7 +1747,6 @@ entry(protocol_violation) ->
         permanent,
         ~"The peer violated the WAMP protocol."
     );
-
 entry(feature_not_supported) ->
     entry(
         ~"wamp.error.feature_not_supported",
@@ -1830,7 +1754,6 @@ entry(feature_not_supported) ->
         permanent,
         ~"The feature requested is not supported by this peer."
     );
-
 entry(invalid_feature_request) ->
     legacy(
         entry(
@@ -1841,7 +1764,6 @@ entry(invalid_feature_request) ->
         ),
         ~"invalid_feature_request"
     );
-
 entry(invalid_payload) ->
     entry(
         ~"wamp.error.invalid_payload",
@@ -1849,7 +1771,6 @@ entry(invalid_payload) ->
         permanent,
         ~"The payload could not be decoded."
     );
-
 entry(canceled) ->
     entry(
         ~"wamp.error.canceled",
@@ -1857,7 +1778,6 @@ entry(canceled) ->
         permanent,
         ~"The operation was cancelled."
     );
-
 entry(not_in_session) ->
     entry(
         ~"bondy.error.not_in_session",
@@ -1865,7 +1785,6 @@ entry(not_in_session) ->
         permanent,
         ~"The operation requires an established session."
     );
-
 entry(deprecated_procedure) ->
     entry(
         ~"bondy.error.deprecated_procedure",
@@ -1873,7 +1792,6 @@ entry(deprecated_procedure) ->
         permanent,
         ~"The procedure '%{procedure_uri}' has been deprecated."
     );
-
 %% -----------------------------------------------------------------------------
 %% Gateway / OAuth2
 %%
@@ -1889,12 +1807,17 @@ entry(oauth2_invalid_request) ->
                 ~"G001",
                 permanent,
                 ~"The request is malformed.",
-                <<"The request is missing a required parameter, includes an " "unsupported parameter value (other than grant type), repeats " "a parameter, includes multiple credentials, utilizes more " "than one mechanism for authenticating the client, or is " "otherwise malformed.">>
+                <<
+                    "The request is missing a required parameter, includes an "
+                    "unsupported parameter value (other than grant type), repeats "
+                    "a parameter, includes multiple credentials, utilizes more "
+                    "than one mechanism for authenticating the client, or is "
+                    "otherwise malformed."
+                >>
             )
         ),
         ~"invalid_request"
     );
-
 entry(oauth2_invalid_client) ->
     legacy(
         entry(
@@ -1902,45 +1825,60 @@ entry(oauth2_invalid_client) ->
             ~"G002",
             permanent,
             ~"Unknown client or unsupported authentication method.",
-            <<"Client authentication failed (e.g., unknown client, no client " "authentication included, or unsupported authentication method).">>
+            <<
+                "Client authentication failed (e.g., unknown client, no client "
+                "authentication included, or unsupported authentication method)."
+            >>
         ),
         ~"invalid_client"
     );
-
 entry(oauth2_invalid_grant) ->
     legacy(
         entry(
             ~"bondy.error.invalid_grant",
             ~"G003",
             permanent,
-            <<"The access or refresh token provided is expired, revoked, " "malformed, or invalid.">>,
-            <<"The provided authorization grant (e.g., authorization code, " "resource owner credentials) or refresh token is invalid, " "expired, revoked, does not match the redirection URI used in the " "authorization request, or was issued to another client. The " "client MAY request a new access token and retry the protected " "resource request.">>
+            <<
+                "The access or refresh token provided is expired, revoked, "
+                "malformed, or invalid."
+            >>,
+            <<
+                "The provided authorization grant (e.g., authorization code, "
+                "resource owner credentials) or refresh token is invalid, "
+                "expired, revoked, does not match the redirection URI used in the "
+                "authorization request, or was issued to another client. The "
+                "client MAY request a new access token and retry the protected "
+                "resource request."
+            >>
         ),
         ~"invalid_grant"
     );
-
 entry(oauth2_unauthorized_client) ->
     legacy(
         entry(
             ~"bondy.error.unauthorized_client",
             ~"G004",
             permanent,
-            <<"The authenticated client is not authorized to use this " "authorization grant type.">>
+            <<
+                "The authenticated client is not authorized to use this "
+                "authorization grant type."
+            >>
         ),
         ~"unauthorized_client"
     );
-
 entry(oauth2_unsupported_grant_type) ->
     legacy(
         entry(
             ~"bondy.error.unsupported_grant_type",
             ~"G005",
             permanent,
-            <<"The requested scope is invalid, unknown, malformed, or exceeds " "the scope granted by the resource owner.">>
+            <<
+                "The requested scope is invalid, unknown, malformed, or exceeds "
+                "the scope granted by the resource owner."
+            >>
         ),
         ~"unsupported_grant_type"
     );
-
 entry(oauth2_invalid_scope) ->
     legacy(
         entry(
@@ -1948,23 +1886,34 @@ entry(oauth2_invalid_scope) ->
             ~"G006",
             permanent,
             ~"The requested scope is invalid, unknown or malformed.",
-            <<"The authorization grant type is not supported by the " "authorization server.">>
+            <<
+                "The authorization grant type is not supported by the "
+                "authorization server."
+            >>
         ),
         ~"invalid_scope"
     );
-
 entry(unsupported_token_type) ->
     legacy(
         entry(
             ~"bondy.error.unsupported_token_type",
             ~"G007",
             transient,
-            <<"The authorization server does not support the revocation of the " "presented token type. That is, the client tried to revoke an " "access token on a server not supporting this feature.">>,
-            <<"If the server responds with HTTP status code 503, the client " "must assume the token still exists and may retry after a " "reasonable delay. The server may include a 'Retry-After' header " "in the response to indicate how long the service is expected to " "be unavailable to the requesting client.">>
+            <<
+                "The authorization server does not support the revocation of the "
+                "presented token type. That is, the client tried to revoke an "
+                "access token on a server not supporting this feature."
+            >>,
+            <<
+                "If the server responds with HTTP status code 503, the client "
+                "must assume the token still exists and may retry after a "
+                "reasonable delay. The server may include a 'Retry-After' header "
+                "in the response to indicate how long the service is expected to "
+                "be unavailable to the requesting client."
+            >>
         ),
         ~"unsupported_token_type"
     );
-
 entry(invalid_scheme) ->
     legacy(
         shared_uri(
@@ -1972,13 +1921,19 @@ entry(invalid_scheme) ->
                 ~"bondy.error.invalid_client",
                 ~"G008",
                 permanent,
-                <<"The authorization scheme is missing or the one provided is " "not the one required.">>,
-                <<"Client authentication failed (e.g., unknown client, no " "client authentication included, or unsupported " "authentication method).">>
+                <<
+                    "The authorization scheme is missing or the one provided is "
+                    "not the one required."
+                >>,
+                <<
+                    "Client authentication failed (e.g., unknown client, no "
+                    "client authentication included, or unsupported "
+                    "authentication method)."
+                >>
             )
         ),
         ~"invalid_client"
     );
-
 entry(invalid_expression) ->
     legacy(
         entry(
@@ -1995,6 +1950,5 @@ entry(invalid_expression) ->
         %% The gateway has always emitted the full URI as the code here.
         ~"bondy.error.http_gateway.invalid_expression"
     );
-
 entry(_) ->
     undefined.

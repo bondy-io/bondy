@@ -23,6 +23,7 @@ protection.
     id => binary()
 }.
 
+-export_type([components/0]).
 -export_type([secret_key/0]).
 -export_type([timestamp/0]).
 

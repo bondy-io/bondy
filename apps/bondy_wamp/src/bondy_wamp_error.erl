@@ -137,6 +137,5 @@ coerce(Error) ->
 %% @private
 message_of([Message | _]) when is_binary(Message) ->
     Message;
-
 message_of(_) ->
     undefined.

@@ -123,6 +123,7 @@ Tokens are sharded by key. Cross-node replication awaits bondy_db anti-entropy (
 
 -export_type([t/0]).
 -export_type([id/0]).
+-export_type([token_id/0]).
 
 -export([cleanup/0]).
 -export([issue/3]).

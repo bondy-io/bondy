@@ -31,6 +31,13 @@ options/details maps are invalid.
     | wamp_unsubscribed()
     | wamp_yield().
 
+%% Per-message aliases for the record types in `bondy_wamp.hrl`. Callers spell
+%% these module-qualified (`bondy_wamp_message:call()`) precisely so they do not
+%% have to include the header to name one message; both were referenced that way
+%% long before they existed here, which made every such spec resolve to `any()`.
+-type call() :: wamp_call().
+-type publish() :: wamp_publish().
+
 -type error_source() ::
     wamp_subscribe()
     | wamp_unsubscribe()
@@ -54,7 +61,9 @@ options/details maps are invalid.
 -type partial() :: {encoding(), binary()}.
 
 -export_type([t/0]).
+-export_type([call/0]).
 -export_type([partial/0]).
+-export_type([publish/0]).
 -export_type([error_source/0]).
 
 %% Message types

@@ -679,13 +679,16 @@ open_main_into(State) ->
 %% once) and mirrored as an alarm so it surfaces wherever alarms already go.
 set_main_failed(Reason) ->
     _ = persistent_term:put(?PT_MAIN_FAILED, Reason),
-    _ = catch bondy_alarm_handler:set_alarm({
-        bondy_db_main_unavailable,
-        <<
-            "The durable `main` database could not be opened. Durable "
-            "operations will fail and this node reports NOT READY."
-        >>
-    }),
+    _ =
+        catch bondy_alarm_handler:set_alarm(
+            {
+                bondy_db_main_unavailable,
+                <<
+                    "The durable `main` database could not be opened. Durable "
+                    "operations will fail and this node reports NOT READY."
+                >>
+            }
+        ),
     ok.
 
 %% @private

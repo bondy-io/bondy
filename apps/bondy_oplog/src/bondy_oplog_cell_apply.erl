@@ -75,10 +75,15 @@ behaviour is byte-identical.
 %% hold a `ctx_source()` and dispatch through `apply_cell_batch_mux/3` /
 %% `apply_cell_pairs_mux/4`.
 -type ctx_source() :: bondy_oplog_mux:t().
+%% What `sec_idx/1` returns: the context's namespace paired with its secondary
+%% index descriptors. Named by `bondy_oplog_cell_utils:reindex/3`, which was
+%% referencing it before it was ever declared.
+-type sec_idx() :: {Namespace :: atom(), [index_descriptor()]}.
 
 -export_type([cell_apply_ctx/0]).
 -export_type([index_descriptor/0]).
 -export_type([ctx_source/0]).
+-export_type([sec_idx/0]).
 
 -export([apply_cell_batch/3]).
 -export([apply_cell_batch_mux/3]).
@@ -1038,7 +1043,9 @@ apply_cell_pairs_mux({single, undefined}, _Id, _Pairs, _LocalOrigin, _Opts) ->
     {0, 0};
 apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin, Opts) ->
     {Foldable, Held} =
-        case maps:get(hold, Opts, false) andalso bondy_oplog_config:prefix_hold() of
+        case
+            maps:get(hold, Opts, false) andalso bondy_oplog_config:prefix_hold()
+        of
             true -> partition_contiguous(Id, Pairs, LocalOrigin);
             false -> {Pairs, 0}
         end,

@@ -812,7 +812,9 @@ set_ticket_cookie(
     Opts = cookie_opts(
         BasePath, MaxAgeSecs, IsSecure, true, CookieDomain, CookieSameSite
     ),
-    cowboy_req:set_resp_cookie(bondy_http_utils:ticket_cookie_name(RealmUri), JWT, Req, Opts).
+    cowboy_req:set_resp_cookie(
+        bondy_http_utils:ticket_cookie_name(RealmUri), JWT, Req, Opts
+    ).
 
 %% @private
 clear_ticket_cookie(
@@ -826,7 +828,9 @@ clear_ticket_cookie(
     Opts = cookie_opts(
         BasePath, 0, IsSecure, true, CookieDomain, CookieSameSite
     ),
-    cowboy_req:set_resp_cookie(bondy_http_utils:ticket_cookie_name(RealmUri), <<>>, Req, Opts).
+    cowboy_req:set_resp_cookie(
+        bondy_http_utils:ticket_cookie_name(RealmUri), <<>>, Req, Opts
+    ).
 
 %% @private
 set_csrf_cookie(

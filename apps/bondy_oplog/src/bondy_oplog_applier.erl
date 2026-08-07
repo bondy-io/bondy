@@ -2575,7 +2575,10 @@ do_apply_replayed_pairs(
     #state{cell_apply_source = Source, instance_id = Id} = State, Pairs, NewRoot
 ) ->
     {_Count, Held} = bondy_oplog_cell_apply:apply_cell_pairs_mux(
-        Source, Id, Pairs, bondy_oplog_registry:origin(Id),
+        Source,
+        Id,
+        Pairs,
+        bondy_oplog_registry:origin(Id),
         #{hold => true}
     ),
     %% Prefix-closure hold: keep the cursor when events were held so the
@@ -2747,7 +2750,10 @@ do_replay_cell_events_r(
             {ok, State};
         {ok, {CurrentRoot, Pairs}} ->
             {Count, Held} = bondy_oplog_cell_apply:apply_cell_pairs_mux(
-                Source, Id, Pairs, bondy_oplog_registry:origin(Id),
+                Source,
+                Id,
+                Pairs,
+                bondy_oplog_registry:origin(Id),
                 #{hold => true}
             ),
             ?LOG_DEBUG(#{

@@ -118,6 +118,7 @@ at the write / delete chokepoints; the remote `on_merge` is a no-op.
 
 -export_type([t/0]).
 -export_type([external/0]).
+-export_type([name/0]).
 
 %% API
 -export([add/2]).

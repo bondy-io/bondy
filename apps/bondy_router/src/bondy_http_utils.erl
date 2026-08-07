@@ -56,10 +56,8 @@ explicit mapping is treated as a server-side condition, i.e. 500.
 
 http_status(#{uri := Uri}) ->
     status_of(Uri);
-
 http_status(Uri) when is_binary(Uri) ->
     status_of(Uri);
-
 http_status(Type) when is_atom(Type) ->
     status_of(bondy_error:uri(Type)).
 
@@ -224,7 +222,6 @@ validate_csrf(Req) ->
         false ->
             %% No ticket cookie — non-OIDC flow, skip CSRF
             ok;
-
         {value, {Name, _}} ->
             CsrfName = csrf_cookie_name(ticket_cookie_realm(Name)),
             CsrfHeader = cowboy_req:header(<<"x-csrf-token">>, Req, undefined),
@@ -332,94 +329,155 @@ on_load() ->
 %% -----------------------------------------------------------------------------
 
 %% @private
-status_of(?WAMP_NOT_AUTHORIZED) -> ?HTTP_FORBIDDEN;
-status_of(?WAMP_AUTHORIZATION_FAILED) -> ?HTTP_INTERNAL_SERVER_ERROR;
-status_of(?WAMP_AUTHENTICATION_FAILED) -> ?HTTP_UNAUTHORIZED;
-status_of(?WAMP_NOT_AUTH_METHOD) -> ?HTTP_BAD_REQUEST;
-status_of(?WAMP_NO_SUCH_PRINCIPAL) -> ?HTTP_BAD_REQUEST;
-status_of(?WAMP_NO_SUCH_ROLE) -> ?HTTP_BAD_REQUEST;
-
-status_of(?WAMP_INVALID_ARGUMENT) -> ?HTTP_BAD_REQUEST;
-status_of(?WAMP_INVALID_URI) -> ?HTTP_BAD_REQUEST;
-status_of(?WAMP_INVALID_PAYLOAD) -> ?HTTP_BAD_REQUEST;
-status_of(?WAMP_PROTOCOL_VIOLATION) -> ?HTTP_BAD_REQUEST;
-status_of(?WAMP_CANCELLED) -> ?HTTP_BAD_REQUEST;
-status_of(?WAMP_OPTION_NOT_ALLOWED) -> ?HTTP_BAD_REQUEST;
-status_of(?WAMP_OPTION_DISALLOWED_DISCLOSE_ME) -> ?HTTP_BAD_REQUEST;
-status_of(?WAMP_DISCLOSE_ME_NOT_ALLOWED) -> ?HTTP_BAD_REQUEST;
-status_of(?WAMP_PROCEDURE_ALREADY_EXISTS) -> ?HTTP_BAD_REQUEST;
-status_of(?WAMP_PAYLOAD_SIZE_EXCEEDED) -> ?HTTP_PAYLOAD_TOO_LARGE;
-
-status_of(?WAMP_NO_SUCH_PROCEDURE) -> ?HTTP_NOT_IMPLEMENTED;
-status_of(?WAMP_FEATURE_NOT_SUPPORTED) -> ?HTTP_NOT_IMPLEMENTED;
-
-status_of(?WAMP_NO_SUCH_REALM) -> ?HTTP_BAD_GATEWAY;
-status_of(?WAMP_NO_SUCH_REGISTRATION) -> ?HTTP_BAD_GATEWAY;
-status_of(?WAMP_NO_SUCH_SUBSCRIPTION) -> ?HTTP_BAD_GATEWAY;
-status_of(?WAMP_NO_ELIGIBLE_CALLE) -> ?HTTP_BAD_GATEWAY;
-status_of(?WAMP_NO_AVAILABLE_CALLEE) -> ?HTTP_BAD_GATEWAY;
-status_of(?WAMP_NET_FAILURE) -> ?HTTP_BAD_GATEWAY;
-
-status_of(?WAMP_UNAVAILABLE) -> ?HTTP_SERVICE_UNAVAILABLE;
-status_of(?WAMP_ERROR_TIMEOUT) -> ?HTTP_GATEWAY_TIMEOUT;
-
-status_of(?WAMP_NO_SUCH_SESSION) -> ?HTTP_INTERNAL_SERVER_ERROR;
-status_of(?WAMP_SYSTEM_SHUTDOWN) -> ?HTTP_INTERNAL_SERVER_ERROR;
-status_of(?WAMP_CLOSE_REALM) -> ?HTTP_INTERNAL_SERVER_ERROR;
-status_of(?WAMP_GOODBYE_AND_OUT) -> ?HTTP_INTERNAL_SERVER_ERROR;
-
-status_of(?BONDY_ERROR_NOT_FOUND) -> ?HTTP_NOT_FOUND;
-status_of(?BONDY_ERROR_ALREADY_EXISTS) -> ?HTTP_BAD_REQUEST;
-status_of(?BONDY_ERROR_TIMEOUT) -> ?HTTP_GATEWAY_TIMEOUT;
-status_of(?BONDY_ERROR_BAD_GATEWAY) -> ?HTTP_SERVICE_UNAVAILABLE;
-status_of(?BONDY_ERROR_TOO_MANY_REQUESTS) -> ?HTTP_TOO_MANY_REQUESTS;
-status_of(?BONDY_ERROR_NOT_IN_SESSION) -> ?HTTP_BAD_REQUEST;
-status_of(?BONDY_ERROR_INCONSISTENCY_ERROR) -> ?HTTP_BAD_REQUEST;
+status_of(?WAMP_NOT_AUTHORIZED) ->
+    ?HTTP_FORBIDDEN;
+status_of(?WAMP_AUTHORIZATION_FAILED) ->
+    ?HTTP_INTERNAL_SERVER_ERROR;
+status_of(?WAMP_AUTHENTICATION_FAILED) ->
+    ?HTTP_UNAUTHORIZED;
+status_of(?WAMP_NOT_AUTH_METHOD) ->
+    ?HTTP_BAD_REQUEST;
+status_of(?WAMP_NO_SUCH_PRINCIPAL) ->
+    ?HTTP_BAD_REQUEST;
+status_of(?WAMP_NO_SUCH_ROLE) ->
+    ?HTTP_BAD_REQUEST;
+status_of(?WAMP_INVALID_ARGUMENT) ->
+    ?HTTP_BAD_REQUEST;
+status_of(?WAMP_INVALID_URI) ->
+    ?HTTP_BAD_REQUEST;
+status_of(?WAMP_INVALID_PAYLOAD) ->
+    ?HTTP_BAD_REQUEST;
+status_of(?WAMP_PROTOCOL_VIOLATION) ->
+    ?HTTP_BAD_REQUEST;
+status_of(?WAMP_CANCELLED) ->
+    ?HTTP_BAD_REQUEST;
+status_of(?WAMP_OPTION_NOT_ALLOWED) ->
+    ?HTTP_BAD_REQUEST;
+status_of(?WAMP_OPTION_DISALLOWED_DISCLOSE_ME) ->
+    ?HTTP_BAD_REQUEST;
+status_of(?WAMP_DISCLOSE_ME_NOT_ALLOWED) ->
+    ?HTTP_BAD_REQUEST;
+status_of(?WAMP_PROCEDURE_ALREADY_EXISTS) ->
+    ?HTTP_BAD_REQUEST;
+status_of(?WAMP_PAYLOAD_SIZE_EXCEEDED) ->
+    ?HTTP_PAYLOAD_TOO_LARGE;
+status_of(?WAMP_NO_SUCH_PROCEDURE) ->
+    ?HTTP_NOT_IMPLEMENTED;
+status_of(?WAMP_FEATURE_NOT_SUPPORTED) ->
+    ?HTTP_NOT_IMPLEMENTED;
+status_of(?WAMP_NO_SUCH_REALM) ->
+    ?HTTP_BAD_GATEWAY;
+status_of(?WAMP_NO_SUCH_REGISTRATION) ->
+    ?HTTP_BAD_GATEWAY;
+status_of(?WAMP_NO_SUCH_SUBSCRIPTION) ->
+    ?HTTP_BAD_GATEWAY;
+status_of(?WAMP_NO_ELIGIBLE_CALLE) ->
+    ?HTTP_BAD_GATEWAY;
+status_of(?WAMP_NO_AVAILABLE_CALLEE) ->
+    ?HTTP_BAD_GATEWAY;
+status_of(?WAMP_NET_FAILURE) ->
+    ?HTTP_BAD_GATEWAY;
+status_of(?WAMP_UNAVAILABLE) ->
+    ?HTTP_SERVICE_UNAVAILABLE;
+status_of(?WAMP_ERROR_TIMEOUT) ->
+    ?HTTP_GATEWAY_TIMEOUT;
+status_of(?WAMP_NO_SUCH_SESSION) ->
+    ?HTTP_INTERNAL_SERVER_ERROR;
+status_of(?WAMP_SYSTEM_SHUTDOWN) ->
+    ?HTTP_INTERNAL_SERVER_ERROR;
+status_of(?WAMP_CLOSE_REALM) ->
+    ?HTTP_INTERNAL_SERVER_ERROR;
+status_of(?WAMP_GOODBYE_AND_OUT) ->
+    ?HTTP_INTERNAL_SERVER_ERROR;
+status_of(?BONDY_ERROR_NOT_FOUND) ->
+    ?HTTP_NOT_FOUND;
+status_of(?BONDY_ERROR_ALREADY_EXISTS) ->
+    ?HTTP_BAD_REQUEST;
+status_of(?BONDY_ERROR_TIMEOUT) ->
+    ?HTTP_GATEWAY_TIMEOUT;
+status_of(?BONDY_ERROR_BAD_GATEWAY) ->
+    ?HTTP_SERVICE_UNAVAILABLE;
+status_of(?BONDY_ERROR_TOO_MANY_REQUESTS) ->
+    ?HTTP_TOO_MANY_REQUESTS;
+status_of(?BONDY_ERROR_NOT_IN_SESSION) ->
+    ?HTTP_BAD_REQUEST;
+status_of(?BONDY_ERROR_INCONSISTENCY_ERROR) ->
+    ?HTTP_BAD_REQUEST;
 status_of(?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR) ->
     ?HTTP_INTERNAL_SERVER_ERROR;
-
-status_of(~"bondy.error.bad_request") -> ?HTTP_BAD_REQUEST;
-status_of(~"bondy.error.invalid_request") -> ?HTTP_BAD_REQUEST;
-status_of(~"bondy.error.invalid_value") -> ?HTTP_BAD_REQUEST;
-status_of(~"bondy.error.missing_required_value") -> ?HTTP_BAD_REQUEST;
-status_of(~"bondy.error.property_range_limit") -> ?HTTP_BAD_REQUEST;
-status_of(~"bondy.error.invalid_data") -> ?HTTP_BAD_REQUEST;
-status_of(~"bondy.error.body_max_bytes_exceeded") -> ?HTTP_BAD_REQUEST;
-status_of(~"bondy.error.too_many_results") -> ?HTTP_BAD_REQUEST;
-status_of(~"bondy.error.deprecated_procedure") -> ?HTTP_GONE;
-status_of(~"bondy.error.conflict") -> ?HTTP_CONFLICT;
-status_of(~"bondy.error.method_not_allowed") -> ?HTTP_METHOD_NOT_ALLOWED;
-status_of(~"bondy.error.request_timeout") -> ?HTTP_REQUEST_TIMEOUT;
-status_of(~"bondy.error.too_large_payload") -> ?HTTP_PAYLOAD_TOO_LARGE;
-
-status_of(~"bondy.error.invalid_credentials") -> ?HTTP_UNAUTHORIZED;
-status_of(~"bondy.error.token_expired") -> ?HTTP_UNAUTHORIZED;
-status_of(~"bondy.error.token_invalid") -> ?HTTP_UNAUTHORIZED;
-status_of(~"bondy.error.invalid_client") -> ?HTTP_UNAUTHORIZED;
-
-status_of(~"bondy.error.forbidden") -> ?HTTP_FORBIDDEN;
-status_of(~"bondy.error.insufficient_permissions") -> ?HTTP_FORBIDDEN;
-status_of(~"bondy.error.role_not_allowed") -> ?HTTP_FORBIDDEN;
-status_of(~"bondy.error.proxy_protocol_error") -> ?HTTP_FORBIDDEN;
-
-status_of(~"bondy.error.invalid_grant") -> ?HTTP_BAD_REQUEST;
-status_of(~"bondy.error.unauthorized_client") -> ?HTTP_BAD_REQUEST;
-status_of(~"bondy.error.unsupported_grant_type") -> ?HTTP_BAD_REQUEST;
-status_of(~"bondy.error.invalid_scope") -> ?HTTP_BAD_REQUEST;
-status_of(~"bondy.error.unsupported_token_type") -> ?HTTP_SERVICE_UNAVAILABLE;
-
-status_of(~"bondy.error.rate_limit_exceeded") -> ?HTTP_TOO_MANY_REQUESTS;
-status_of(~"bondy.error.quota_exceeded") -> ?HTTP_TOO_MANY_REQUESTS;
-status_of(~"bondy.error.too_many_sessions") -> ?HTTP_TOO_MANY_REQUESTS;
-status_of(~"bondy.error.too_many_connections") -> ?HTTP_SERVICE_UNAVAILABLE;
-
-status_of(~"bondy.error.unavailable") -> ?HTTP_SERVICE_UNAVAILABLE;
-status_of(~"bondy.error.temporarily_unavailable") -> ?HTTP_SERVICE_UNAVAILABLE;
-status_of(~"bondy.error.gateway_timeout") -> ?HTTP_GATEWAY_TIMEOUT;
-status_of(~"bondy.error.node_down") -> ?HTTP_SERVICE_UNAVAILABLE;
-status_of(~"bondy.error.cluster_not_formed") -> ?HTTP_SERVICE_UNAVAILABLE;
-status_of(~"bondy.error.partition_detected") -> ?HTTP_SERVICE_UNAVAILABLE;
-status_of(~"bondy.error.insufficient_resources") -> ?HTTP_SERVICE_UNAVAILABLE;
-
+status_of(~"bondy.error.bad_request") ->
+    ?HTTP_BAD_REQUEST;
+status_of(~"bondy.error.invalid_request") ->
+    ?HTTP_BAD_REQUEST;
+status_of(~"bondy.error.invalid_value") ->
+    ?HTTP_BAD_REQUEST;
+status_of(~"bondy.error.missing_required_value") ->
+    ?HTTP_BAD_REQUEST;
+status_of(~"bondy.error.property_range_limit") ->
+    ?HTTP_BAD_REQUEST;
+status_of(~"bondy.error.invalid_data") ->
+    ?HTTP_BAD_REQUEST;
+status_of(~"bondy.error.body_max_bytes_exceeded") ->
+    ?HTTP_BAD_REQUEST;
+status_of(~"bondy.error.too_many_results") ->
+    ?HTTP_BAD_REQUEST;
+status_of(~"bondy.error.deprecated_procedure") ->
+    ?HTTP_GONE;
+status_of(~"bondy.error.conflict") ->
+    ?HTTP_CONFLICT;
+status_of(~"bondy.error.method_not_allowed") ->
+    ?HTTP_METHOD_NOT_ALLOWED;
+status_of(~"bondy.error.request_timeout") ->
+    ?HTTP_REQUEST_TIMEOUT;
+status_of(~"bondy.error.too_large_payload") ->
+    ?HTTP_PAYLOAD_TOO_LARGE;
+status_of(~"bondy.error.invalid_credentials") ->
+    ?HTTP_UNAUTHORIZED;
+status_of(~"bondy.error.token_expired") ->
+    ?HTTP_UNAUTHORIZED;
+status_of(~"bondy.error.token_invalid") ->
+    ?HTTP_UNAUTHORIZED;
+status_of(~"bondy.error.invalid_client") ->
+    ?HTTP_UNAUTHORIZED;
+status_of(~"bondy.error.forbidden") ->
+    ?HTTP_FORBIDDEN;
+status_of(~"bondy.error.insufficient_permissions") ->
+    ?HTTP_FORBIDDEN;
+status_of(~"bondy.error.role_not_allowed") ->
+    ?HTTP_FORBIDDEN;
+status_of(~"bondy.error.proxy_protocol_error") ->
+    ?HTTP_FORBIDDEN;
+status_of(~"bondy.error.invalid_grant") ->
+    ?HTTP_BAD_REQUEST;
+status_of(~"bondy.error.unauthorized_client") ->
+    ?HTTP_BAD_REQUEST;
+status_of(~"bondy.error.unsupported_grant_type") ->
+    ?HTTP_BAD_REQUEST;
+status_of(~"bondy.error.invalid_scope") ->
+    ?HTTP_BAD_REQUEST;
+status_of(~"bondy.error.unsupported_token_type") ->
+    ?HTTP_SERVICE_UNAVAILABLE;
+status_of(~"bondy.error.rate_limit_exceeded") ->
+    ?HTTP_TOO_MANY_REQUESTS;
+status_of(~"bondy.error.quota_exceeded") ->
+    ?HTTP_TOO_MANY_REQUESTS;
+status_of(~"bondy.error.too_many_sessions") ->
+    ?HTTP_TOO_MANY_REQUESTS;
+status_of(~"bondy.error.too_many_connections") ->
+    ?HTTP_SERVICE_UNAVAILABLE;
+status_of(~"bondy.error.unavailable") ->
+    ?HTTP_SERVICE_UNAVAILABLE;
+status_of(~"bondy.error.temporarily_unavailable") ->
+    ?HTTP_SERVICE_UNAVAILABLE;
+status_of(~"bondy.error.gateway_timeout") ->
+    ?HTTP_GATEWAY_TIMEOUT;
+status_of(~"bondy.error.node_down") ->
+    ?HTTP_SERVICE_UNAVAILABLE;
+status_of(~"bondy.error.cluster_not_formed") ->
+    ?HTTP_SERVICE_UNAVAILABLE;
+status_of(~"bondy.error.partition_detected") ->
+    ?HTTP_SERVICE_UNAVAILABLE;
+status_of(~"bondy.error.insufficient_resources") ->
+    ?HTTP_SERVICE_UNAVAILABLE;
 status_of(_) ->
     ?HTTP_INTERNAL_SERVER_ERROR.

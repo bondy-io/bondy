@@ -38,7 +38,7 @@ data will be lost.
     id :: bondy_session_id:t(),
     %% WAMP ID
     external_id :: id(),
-    type = client :: bondy_ref:type(),
+    type = client :: bondy_ref:ref_type(),
     realm_uri :: uri(),
     authrealm :: uri(),
     authid :: optional(binary()),
@@ -138,8 +138,11 @@ data will be lost.
     {[match_proj()], continuation() | eot()}
     | eot()
     | [match_proj()].
+%% `ets` exports no continuation type (verified against OTP 28's own
+%% `export_type` list); a select continuation is opaque.
+-type ets_continuation() :: term().
 -type continuation() :: #{
-    continuation := ets:continuation(),
+    continuation := ets_continuation(),
     tabs := [ets:tab()],
     opts := match_opts_aux()
 }.
@@ -147,6 +150,7 @@ data will be lost.
 -type eot() :: ?EOT.
 
 -export_type([t/0]).
+-export_type([peer/0]).
 -export_type([peer_role/0]).
 -export_type([properties/0]).
 -export_type([external/0]).
@@ -263,7 +267,7 @@ new(Id, Realm, Opts) when is_binary(Id) andalso is_map(Opts) ->
         created = erlang:system_time(second)
     }.
 
--spec type(t()) -> bondy_ref:type().
+-spec type(t()) -> bondy_ref:ref_type().
 
 type(#session{type = Val}) ->
     Val.

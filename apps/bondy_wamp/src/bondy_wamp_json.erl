@@ -40,6 +40,8 @@ options over the Erlang `json` module.
     | compact
     | short.
 
+-export_type([decode_opt/0]).
+
 -export([decode/1]).
 -export([decode/2]).
 -export([decode_head/2]).

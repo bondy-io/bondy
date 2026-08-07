@@ -400,20 +400,20 @@ declare_metrics() ->
             "applied frontier strictly ahead of ours after settle. A single "
             "verdict per (instance, peer) is a benign door-fold transient "
             "(heals next round); repeats trip the rebootstrap remedy.", [
-            instance_id, peer
-        ]},
+                instance_id, peer
+            ]},
         {bondy_oplog_rebootstraps_scheduled_total,
             "Catalogue re-bootstraps scheduled (peer reclaimed pages this "
             "replica needs, or a frontier gap struck twice).", [
-            instance_id, peer
-        ]},
+                instance_id, peer
+            ]},
         {bondy_oplog_mst_rebuilt_total,
             "Unservable-own-root self-heals: the instance dropped an MST "
             "whose own root lost pages (after the domination gate proved "
             "no peer is stranded) and resumed AE on a fresh tree. Any "
             "occurrence deserves a look at WHY pages went missing.", [
-            instance_id, reason
-        ]},
+                instance_id, reason
+            ]},
         {bondy_mst_gc_aborted_total,
             "MST page GCs aborted because the current root was unservable "
             "(missing pages) at sweep time. The abort prevents the sweep "
@@ -423,8 +423,8 @@ declare_metrics() ->
             "consumer/read path), transient (readable on re-probe, nothing "
             "lost). Per-hash evidence is retained in-node: call "
             "bondy_oplog_instance:gc_aborts/0,1 - it outlives the log.", [
-            instance_id, classification
-        ]},
+                instance_id, classification
+            ]},
         {bondy_oplog_doored_events_total,
             "Never-applied peer events at or below the local watermark "
             "accepted by the watermark door instead of discarded: folded "
@@ -454,8 +454,8 @@ declare_metrics() ->
             "(seqs_filled_total) so the gap closes everywhere; a burn "
             "WITHOUT a matching fill is a permanent gap that converts into "
             "a catalogue rebootstrap on peers under db.aae.prefix_hold.", [
-            instance_id
-        ]},
+                instance_id
+            ]},
         {bondy_oplog_seqs_filled_total,
             "Burned sequence numbers successfully backfilled with no-op "
             "seq_fill events (durably appended at the origin; they "

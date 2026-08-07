@@ -94,7 +94,7 @@ Indeces for matching bondy_registry_entry(s).
     opts :: map(),
     original :: optional(
         term()
-        | ets:continuation()
+        | ets_continuation()
         | eot()
     )
 }).
@@ -111,6 +111,9 @@ Indeces for matching bondy_registry_entry(s).
 -type wildcard(T) :: T | '_'.
 -type var(T) :: wildcard(T) | '$1' | '$2' | '$3' | '$4'.
 -type eot() :: ?EOT.
+%% `ets` exports no continuation type (verified against OTP 28's own
+%% `export_type` list); a select continuation is opaque.
+-type ets_continuation() :: term().
 -type find_opts() :: store_opts().
 %% Option proplist for the maintenance find/fold/foreach API. Historically
 %% `store_opts()/get_opts()/fold_opts()'; the store now runs on bondy_db
@@ -141,6 +144,9 @@ Indeces for matching bondy_registry_entry(s).
     sort => bondy_registry_entry:comparator()
 }.
 -type match_result() :: reg_match_result() | sub_match_result().
+%% ONE registration match, as opposed to `reg_match_result/0`, which is the
+%% whole (possibly paged) set of them.
+-type reg_match() :: entry().
 -type reg_match_result() ::
     [entry()]
     | partial([entry()]).
@@ -162,8 +168,10 @@ Indeces for matching bondy_registry_entry(s).
 -export_type([match_result/0]).
 -export_type([partial/1]).
 -export_type([reg_idx/0]).
+-export_type([reg_match/0]).
 -export_type([reg_match_opts/0]).
 -export_type([reg_match_result/0]).
+-export_type([wildcard/1]).
 -export_type([store_fold_fun/0]).
 -export_type([store_foreach_fun/0]).
 -export_type([store_opts/0]).
@@ -2325,7 +2333,7 @@ match_local_exact_subscription(Store, RealmUri, Uri, Opts) ->
     end.
 
 %% @private
--spec match_remote_exact_subscription(ets:continuation()) ->
+-spec match_remote_exact_subscription(ets_continuation()) ->
     sub_match_result().
 
 match_remote_exact_subscription(#continuation{} = C) ->

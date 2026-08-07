@@ -409,7 +409,9 @@ reap_one_cell(Adapter, Handle, Kernel, Id, {Bucket, Key}, Retired) ->
 %% value column.
 value_preserving_frame(Hlc, StateBytes, undefined) ->
     bondy_oplog_cell_frame:encode(Hlc, StateBytes, undefined, true);
-value_preserving_frame(Hlc, StateBytes, ValueBytes) when is_binary(ValueBytes) ->
+value_preserving_frame(Hlc, StateBytes, ValueBytes) when
+    is_binary(ValueBytes)
+->
     bondy_oplog_cell_frame:encode(Hlc, StateBytes, ValueBytes, false).
 
 %% @private

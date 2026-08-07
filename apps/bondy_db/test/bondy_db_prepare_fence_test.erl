@@ -106,7 +106,9 @@ remote_delivery_fences_cell_context() ->
         ?assertMatch([{_, _} | _], Ctx),
 
         %% And the projection itself is caught up as a consequence.
-        ?assertEqual({ok, [<<"bval">>], read_hlc}, norm(bondy_db:read(TA, ?R, ?K)))
+        ?assertEqual(
+            {ok, [<<"bval">>], read_hlc}, norm(bondy_db:read(TA, ?R, ?K))
+        )
     after
         meck:unload(bondy_oplog_applier)
     end,

@@ -25,7 +25,6 @@
 unit(Id) ->
     {Id, #{count => 1, earliest => 1, latest => 1}}.
 
-
 %% =============================================================================
 %% THE NEVER-EMPTY INVARIANT
 %% =============================================================================
@@ -48,7 +47,6 @@ sole_candidate_skips_the_probe_test() ->
     Units = [unit(~"a@x")],
     Explode = fun(_) -> erlang:error(probe_must_not_run) end,
     ?assertEqual(Units, bondy_dealer:prefer_reachable(Units, Explode)).
-
 
 %% =============================================================================
 %% THE FILTER ITSELF
@@ -76,7 +74,6 @@ all_reachable_is_identity_test() ->
     Units = [unit(self), unit(~"a@x")],
     ?assertEqual(Units, bondy_dealer:prefer_reachable(Units, ?LIVE)).
 
-
 %% =============================================================================
 %% `self`
 %% =============================================================================
@@ -96,7 +93,6 @@ self_survives_a_dead_peer_test() ->
 
 self_is_always_reachable_test() ->
     ?assert(bondy_dealer:is_reachable(self)).
-
 
 %% =============================================================================
 %% THE PROBE

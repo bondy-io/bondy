@@ -170,7 +170,9 @@ run(Instance, Peer, Opts, Iterations) when is_binary(Instance) ->
     %% round under load), and adopting there would over-claim maxima the
     %% round never delivered.
     Result1 = maybe_unservable_behind(Result0, Instance, PeerFrontier),
-    Result = maybe_frontier_gap(Result1, Instance, Peer, PeerFrontier, PeerRoot),
+    Result = maybe_frontier_gap(
+        Result1, Instance, Peer, PeerFrontier, PeerRoot
+    ),
     ok = maybe_adopt_peer_frontier(Result, Instance, PeerFrontier, PeerRoot),
     maybe_record(Result, Instance, Peer, Record, PeerRoot, PeerFrontier),
     ok = maybe_confirm_root(
@@ -1109,8 +1111,7 @@ maybe_unservable_behind(
             E;
         Deficit ->
             {error,
-                {root_unservable_behind,
-                    lists:sublist(maps:keys(Deficit), 5)}}
+                {root_unservable_behind, lists:sublist(maps:keys(Deficit), 5)}}
     end;
 maybe_unservable_behind(Result, _Instance, _PeerFrontier) ->
     Result.
@@ -1148,7 +1149,9 @@ maybe_frontier_gap({ok, _} = Result, _Instance, _Peer, _PeerFrontier, skip) ->
     %% not evidence of compacted-away history. The next complete round
     %% judges.
     Result;
-maybe_frontier_gap({ok, _} = Result, Instance, Peer, PeerFrontier, PeerRoot) when
+maybe_frontier_gap(
+    {ok, _} = Result, Instance, Peer, PeerFrontier, PeerRoot
+) when
     is_map(PeerFrontier), map_size(PeerFrontier) > 0
 ->
     case frontier_deficit(Instance, PeerFrontier) of

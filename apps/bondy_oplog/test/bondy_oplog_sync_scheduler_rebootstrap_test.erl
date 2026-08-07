@@ -167,8 +167,8 @@ unservable_without_deficit_never_escalates() ->
             lists:seq(1, 4)
         ),
         receive
-            {telemetry, [bondy_oplog, sync_scheduler, rebootstrap_scheduled],
-                _, #{instance_id := Inst}} ->
+            {telemetry, [bondy_oplog, sync_scheduler, rebootstrap_scheduled], _,
+                #{instance_id := Inst}} ->
                 error(unexpected_unservable_escalation)
         after 500 ->
             ok

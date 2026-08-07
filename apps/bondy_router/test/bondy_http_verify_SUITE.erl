@@ -420,7 +420,9 @@ sso_ticket_rejected_by_unrelated_realm(_) ->
     %% scope is SSO-wide, so the scope check alone would let this through.
     %% `is_trusted_issuer/2` is what actually pins it: X has no SSO realm.
     {JWT, Claims} = issue_sso_ticket(),
-    ?assert(bondy_auth_scope:matches_realm(maps:get(scope, Claims), ?OTHER_REALM)),
+    ?assert(
+        bondy_auth_scope:matches_realm(maps:get(scope, Claims), ?OTHER_REALM)
+    ),
     ?assertNot(bondy_realm:is_trusted_issuer(?OTHER_REALM, ?SSO)),
 
     {Status, _, Body} = get_verify(?X_VERIFY, cookie_header(?SSO, JWT)),

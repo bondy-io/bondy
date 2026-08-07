@@ -184,11 +184,14 @@ struct_fold_cleanup({Db, T}) ->
 struct_fold_test_() ->
     {setup, fun struct_fold_setup/0, fun struct_fold_cleanup/1, fun({_Db, T}) ->
         [
-            {"sweep folds a struct cell's stable sub-op runs, "
-             "value-preserving and idempotent",
-                {timeout, 60, fun() -> struct_fold_reduces_stable_runs(T) end}},
-            {"duplicate same-field sub-ops in one batch are rejected",
-                fun() -> struct_duplicate_batch_rejected(T) end}
+            {
+                "sweep folds a struct cell's stable sub-op runs, "
+                "value-preserving and idempotent",
+                {timeout, 60, fun() -> struct_fold_reduces_stable_runs(T) end}
+            },
+            {"duplicate same-field sub-ops in one batch are rejected", fun() ->
+                struct_duplicate_batch_rejected(T)
+            end}
         ]
     end}.
 

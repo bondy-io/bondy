@@ -74,7 +74,8 @@ pre_auth_failure_does_not_echo_the_authid() ->
         {no_such_user, ~"alice"}
     ),
     ?assertEqual(
-        nomatch, binary:match(iolist_to_binary(io_lib:format("~p", [Details])), ~"alice")
+        nomatch,
+        binary:match(iolist_to_binary(io_lib:format("~p", [Details])), ~"alice")
     ).
 
 %% =============================================================================
@@ -95,22 +96,32 @@ abort_reason_uris() ->
         {{unsupported_authmethod, ~"ticket"}, ?WAMP_NOT_AUTH_METHOD},
         {{invalid_authmethod, ~"ticket"}, ?WAMP_NOT_AUTH_METHOD},
         {connections_not_allowed, ?WAMP_AUTHENTICATION_FAILED},
-        {{authentication_failed, invalid_authmethod}, ?WAMP_AUTHENTICATION_FAILED},
+        {
+            {authentication_failed, invalid_authmethod},
+            ?WAMP_AUTHENTICATION_FAILED
+        },
         {{authentication_failed, invalid_scheme}, ?WAMP_AUTHENTICATION_FAILED},
-        {{authentication_failed, oauth2_invalid_grant}, ?WAMP_AUTHENTICATION_FAILED},
+        {
+            {authentication_failed, oauth2_invalid_grant},
+            ?WAMP_AUTHENTICATION_FAILED
+        },
         {overload, ?WAMP_UNAVAILABLE},
         {{rate_limited, hello}, ?WAMP_UNAVAILABLE},
         {{authentication_failed, temporarily_unavailable}, ?WAMP_UNAVAILABLE},
         {no_such_realm, ?WAMP_NO_SUCH_REALM},
         {{no_such_realm, ~"com.a"}, ?WAMP_NO_SUCH_REALM},
-        {{authentication_failed, {no_such_realm, ~"com.a"}}, ?WAMP_NO_SUCH_REALM},
+        {
+            {authentication_failed, {no_such_realm, ~"com.a"}},
+            ?WAMP_NO_SUCH_REALM
+        },
         {{no_such_groups, [~"g1"]}, ?WAMP_NO_SUCH_ROLE},
         {{authentication_failed, {no_such_groups, [~"g1"]}}, ?WAMP_NO_SUCH_ROLE}
     ],
     [
         ?assertEqual(
             {Reason, Uri},
-            {Reason, (bondy_wamp_protocol:abort_message(Reason))#abort.reason_uri}
+            {Reason,
+                (bondy_wamp_protocol:abort_message(Reason))#abort.reason_uri}
         )
      || {Reason, Uri} <- Expected
     ].
@@ -130,8 +141,14 @@ abort_details_carry_a_message() ->
 %% The point of routing aborts through the error model: a client can tell a
 %% refusal it should retry from one it should not, without parsing prose.
 abort_nature_distinguishes_retryable() ->
-    Transient = [overload, {rate_limited, hello}, {authentication_failed, temporarily_unavailable}],
-    Permanent = [{authentication_failed, invalid_scheme}, {no_such_realm, ~"com.a"}],
+    Transient = [
+        overload,
+        {rate_limited, hello},
+        {authentication_failed, temporarily_unavailable}
+    ],
+    Permanent = [
+        {authentication_failed, invalid_scheme}, {no_such_realm, ~"com.a"}
+    ],
 
     [
         ?assertEqual({R, ~"transient"}, {R, nature(R)})

@@ -240,9 +240,13 @@ durable_gc_reclaims_sealed_bytes(Dir) ->
         After = sealed_bytes(Dir),
         ?assert(
             After < Before,
-            lists:flatten(io_lib:format(
-                "sealed bytes did not shrink: before=~p after=~p", [Before, After]
-            ))
+            lists:flatten(
+                io_lib:format(
+                    "sealed bytes did not shrink: before=~p after=~p", [
+                        Before, After
+                    ]
+                )
+            )
         ),
         %% ...and the shard is still fully servable afterwards, which is the
         %% part that matters: a collection that drops a reachable page would

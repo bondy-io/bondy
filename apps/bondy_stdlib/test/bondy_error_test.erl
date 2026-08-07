@@ -27,7 +27,10 @@ catalogue_is_total_test() ->
 %% The handle is what an operator quotes when reporting a problem, so two error
 %% types sharing one is a defect.
 handles_are_unique_test() ->
-    Handles = [maps:get(handle, bondy_error:catalogue(T)) || T <- bondy_error:types()],
+    Handles = [
+        maps:get(handle, bondy_error:catalogue(T))
+     || T <- bondy_error:types()
+    ],
     ?assertEqual(lists:sort(Handles), lists:usort(Handles)).
 
 catalogue_fields_are_binaries_test() ->
@@ -75,7 +78,9 @@ new_produces_a_valid_error_test() ->
     ?assert(bondy_error:is_type(bondy_error:new(not_found))).
 
 new_rejects_a_non_atom_type_test() ->
-    ?assertError({badarg, {type, <<"nope">>}}, bondy_error:new(<<"nope">>, #{})).
+    ?assertError(
+        {badarg, {type, <<"nope">>}}, bondy_error:new(<<"nope">>, #{})
+    ).
 
 %% causes used to be assigned the result of lists:all/2, i.e. a boolean, which
 %% made every error fail its own is_type/1 check.
@@ -103,7 +108,9 @@ interpolates_details_into_the_description_test() ->
 %% A missing substitution must be visible, not silently blanked.
 leaves_an_unresolved_placeholder_test() ->
     E = bondy_error:new(missing_required_value, #{details => #{}}),
-    ?assertEqual(~"A value for '%{key}' is required.", maps:get(description, E)).
+    ?assertEqual(
+        ~"A value for '%{key}' is required.", maps:get(description, E)
+    ).
 
 %% =============================================================================
 %% from_term/1
@@ -136,7 +143,9 @@ from_term_unwraps_a_doubled_error_test() ->
     ).
 
 from_term_maps_a_posix_atom_test() ->
-    ?assertEqual(~"bondy.error.enoent", maps:get(uri, bondy_error:from_term(enoent))).
+    ?assertEqual(
+        ~"bondy.error.enoent", maps:get(uri, bondy_error:from_term(enoent))
+    ).
 
 from_term_maps_a_known_uri_test() ->
     E = bondy_error:from_term(~"wamp.error.no_such_realm"),
@@ -167,7 +176,9 @@ from_term_accepts_a_known_tag_with_a_message_test() ->
 
 from_exception_keeps_identity_and_adds_the_stacktrace_test() ->
     Stacktrace = [{m, f, 1, []}],
-    E = bondy_error:from_exception(error, {no_such_realm, ~"com.a"}, Stacktrace),
+    E = bondy_error:from_exception(
+        error, {no_such_realm, ~"com.a"}, Stacktrace
+    ),
     ?assertEqual(no_such_realm, maps:get(type, E)),
     ?assertEqual(
         #{class => error, stacktrace => Stacktrace}, maps:get(metadata, E)
@@ -214,7 +225,9 @@ internal_is_always_opaque_test() ->
     E = bondy_error:internal(error, {no_such_realm, ~"com.a"}, []),
     ?assertEqual(internal_error, maps:get(type, E)),
     ?assertEqual(#{}, maps:get(details, E)),
-    ?assertEqual({no_such_realm, ~"com.a"}, maps:get(reason, maps:get(metadata, E))).
+    ?assertEqual(
+        {no_such_realm, ~"com.a"}, maps:get(reason, maps:get(metadata, E))
+    ).
 
 %% =============================================================================
 %% WIRE COMPATIBILITY
@@ -247,7 +260,8 @@ legacy_codes_test() ->
     ],
     [
         ?assertEqual(
-            Code, maps:get(~"code", bondy_error:to_map(bondy_error:from_term(Term)))
+            Code,
+            maps:get(~"code", bondy_error:to_map(bondy_error:from_term(Term)))
         )
      || {Term, Code} <- Expected
     ].

@@ -51,10 +51,10 @@ Configuration (`bondy_regulator` application environment, set via the
 -define(DEFAULT_SAMPLE_INTERVAL_MS, 100).
 
 -record(state, {
-    ref                     ::  atomics:atomics_ref(),
-    high                    ::  pos_integer(),
-    low                     ::  non_neg_integer(),
-    interval_ms             ::  pos_integer()
+    ref :: atomics:atomics_ref(),
+    high :: pos_integer(),
+    low :: non_neg_integer(),
+    interval_ms :: pos_integer()
 }).
 
 %% API

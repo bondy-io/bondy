@@ -543,7 +543,6 @@ token_version_rejected_cross_node(Config) ->
     ),
     ok.
 
-
 %% Stale-peer rejoin on the DURABLE path.
 %%
 %% A peer silent past `peer_timeout_ms` stops pinning the stability frontier,

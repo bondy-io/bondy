@@ -68,7 +68,8 @@ compaction_fused_test_() ->
         {timeout, 30, fun live_append_remote_reaches_projection_applier/0},
         {timeout, 30, fun frontier_gap_detected_after_peer_truncation/0},
         {timeout, 30, fun rederive_restores_cell_clobbered_by_live_bootstrap/0},
-        {timeout, 30, fun live_bootstrap_with_churn_between_batches_converges/0},
+        {timeout, 30,
+            fun live_bootstrap_with_churn_between_batches_converges/0},
         {timeout, 30, fun unservable_own_root_self_heals_when_peers_dominate/0},
         {timeout, 30, fun unservable_own_root_holds_until_peers_dominate/0},
         {timeout, 30, fun truncation_reclaims_store_pages/0}
@@ -223,7 +224,10 @@ retention_truncate_vs_drain_race() ->
     ok = bondy_oplog_instance:await_apply(Id),
 
     %% No cell lost: every key materialized in the projection.
-    Missing = [K || K <- Keys, bondy_oplog_core:read(NS, primary, K) =:= undefined],
+    Missing = [
+        K
+     || K <- Keys, bondy_oplog_core:read(NS, primary, K) =:= undefined
+    ],
     ?assertEqual([], Missing),
 
     %% And the tree is (or becomes, one more cycle) bounded BY THE
@@ -974,7 +978,9 @@ unservable_own_root_self_heals_when_peers_dominate() ->
         %% A recency-live peer whose recorded frontier EQUALS ours
         %% dominates it — our surplus is fully covered elsewhere.
         ok = bondy_oplog_peer_state:record_sync_complete(
-            {peer, sh_dominating}, Id, crypto:strong_rand_bytes(32),
+            {peer, sh_dominating},
+            Id,
+            crypto:strong_rand_bytes(32),
             bondy_oplog_registry:frontier(Id),
             os:system_time(millisecond)
         ),
@@ -1025,7 +1031,9 @@ unservable_own_root_holds_until_peers_dominate() ->
 
         %% A live peer with a BEHIND frontier (empty VV): not dominated.
         ok = bondy_oplog_peer_state:record_sync_complete(
-            {peer, hb_behind}, Id, crypto:strong_rand_bytes(32),
+            {peer, hb_behind},
+            Id,
+            crypto:strong_rand_bytes(32),
             #{<<"someone">> => 1},
             os:system_time(millisecond)
         ),
@@ -1038,7 +1046,9 @@ unservable_own_root_holds_until_peers_dominate() ->
         %% e.g. after its catalogue bootstrap from our projection) → the
         %% next tick rebuilds.
         ok = bondy_oplog_peer_state:record_sync_complete(
-            {peer, hb_behind}, Id, crypto:strong_rand_bytes(32),
+            {peer, hb_behind},
+            Id,
+            crypto:strong_rand_bytes(32),
             bondy_oplog_registry:frontier(Id),
             os:system_time(millisecond)
         ),

@@ -1174,7 +1174,9 @@ do_apply(Table, InstanceId, Bucket, Key, Event, Barrier) ->
             %% causality the type needs in-band, so the write is a
             %% straight WAL append with no server-side round-trip.
             append_with_barrier(
-                InstanceId, {cell_apply, Bucket, Key, Event}, undefined,
+                InstanceId,
+                {cell_apply, Bucket, Key, Event},
+                undefined,
                 Barrier
             )
     end.

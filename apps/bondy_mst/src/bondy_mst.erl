@@ -1101,8 +1101,11 @@ clear it per observation window.
 
 forget_swept() ->
     case ets:whereis(?SWEPT_TAB) of
-        undefined -> ok;
-        Tab -> true = ets:delete_all_objects(Tab), ok
+        undefined ->
+            ok;
+        Tab ->
+            true = ets:delete_all_objects(Tab),
+            ok
     end.
 
 %% @private

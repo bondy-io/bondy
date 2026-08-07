@@ -72,7 +72,6 @@ hostile() ->
 
 hostile(0) ->
     leaf();
-
 hostile(Size) ->
     Smaller = hostile(Size div 3),
     oneof([
@@ -182,6 +181,5 @@ is_encodable(Term) ->
 
 make_deep(0) ->
     leaf_value;
-
 make_deep(N) ->
     #{nested => [make_deep(N - 1)]}.

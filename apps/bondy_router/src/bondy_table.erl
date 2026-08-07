@@ -37,7 +37,8 @@ Provides `new/3`, `get/2,3`, `find/2`, `put/3`, `delete/2` and
 %% API
 %% =============================================================================
 
--spec new(Name :: atom(), Access :: ets:access(), Managed :: boolean()) -> ok.
+-spec new(Name :: atom(), Access :: ets:table_access(), Managed :: boolean()) ->
+    ok.
 
 new(Name, Access, Managed) when
     is_atom(Name), is_atom(Access), is_boolean(Managed)

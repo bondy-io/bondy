@@ -58,7 +58,10 @@ legacy_codes_test() ->
     [
         ?assertEqual(
             {Term, Code},
-            {Term, maps:get(~"code", bondy_error:to_map(bondy_error:from_term(Term)))}
+            {Term,
+                maps:get(
+                    ~"code", bondy_error:to_map(bondy_error:from_term(Term))
+                )}
         )
      || {Term, Code} <- Expected
     ].
@@ -108,31 +111,47 @@ derived_status_for_previously_defaulted_errors_test() ->
 %% Context has always been readable at the top level of the payload, so it stays
 %% there even though it now also appears under `details'.
 context_keys_stay_at_the_top_level_test() ->
-    Map = bondy_error:to_map(bondy_error:from_term({invalid_value, ~"k", ~"v"})),
+    Map = bondy_error:to_map(
+        bondy_error:from_term({invalid_value, ~"k", ~"v"})
+    ),
     ?assertEqual(~"k", maps:get(~"key", Map)),
     ?assertEqual(~"v", maps:get(~"value", Map)),
     ?assertEqual(~"k", maps:get(~"key", maps:get(~"details", Map))),
 
-    Limit = bondy_error:to_map(bondy_error:from_term({property_range_limit, ~"k", 3})),
+    Limit = bondy_error:to_map(
+        bondy_error:from_term({property_range_limit, ~"k", 3})
+    ),
     ?assertEqual(3, maps:get(~"limit", Limit)),
 
-    Keys = bondy_error:to_map(bondy_error:from_term({inconsistency_error, [~"a", ~"b"]})),
+    Keys = bondy_error:to_map(
+        bondy_error:from_term({inconsistency_error, [~"a", ~"b"]})
+    ),
     ?assertEqual([~"a", ~"b"], maps:get(~"keys", Keys)).
 
 legacy_map_carries_the_documented_prose_test() ->
-    Map = bondy_error:to_map(bondy_error:from_term({missing_required_value, ~"match"})),
+    Map = bondy_error:to_map(
+        bondy_error:from_term({missing_required_value, ~"match"})
+    ),
     ?assertEqual(
         ~"The operation failed due to a missing required value.",
         maps:get(~"message", Map)
     ),
-    ?assertEqual(~"A value for 'match' is required.", maps:get(~"description", Map)).
+    ?assertEqual(
+        ~"A value for 'match' is required.", maps:get(~"description", Map)
+    ).
 
 %% A `code' used to be an atom for some reasons and a binary for others. It is
 %% always a binary now, which is invisible in JSON but stops a header being
 %% built by binary concatenation from crashing.
 code_is_always_a_binary_test() ->
     [
-        ?assert(is_binary(maps:get(~"code", bondy_error:to_map(bondy_error:from_term(Term)))))
+        ?assert(
+            is_binary(
+                maps:get(
+                    ~"code", bondy_error:to_map(bondy_error:from_term(Term))
+                )
+            )
+        )
      || Term <- [
             {missing_required_value, ~"k"},
             {invalid_value, ~"k", 1},
@@ -208,7 +227,10 @@ wamp_uri_macros_are_catalogued_test() ->
         {?WAMP_FEATURE_NOT_SUPPORTED, feature_not_supported},
         {?WAMP_DISCLOSE_ME_NOT_ALLOWED, disclose_me_not_allowed}
     ],
-    [?assertEqual({Uri, Uri}, {Uri, bondy_error:uri(Type)}) || {Uri, Type} <- Expected].
+    [
+        ?assertEqual({Uri, Uri}, {Uri, bondy_error:uri(Type)})
+     || {Uri, Type} <- Expected
+    ].
 
 bondy_uri_macros_are_catalogued_test() ->
     Expected = [
@@ -221,13 +243,17 @@ bondy_uri_macros_are_catalogued_test() ->
         {?BONDY_ERROR_INCONSISTENCY_ERROR, inconsistency_error},
         {?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR, invalid_expression}
     ],
-    [?assertEqual({Uri, Uri}, {Uri, bondy_error:uri(Type)}) || {Uri, Type} <- Expected].
+    [
+        ?assertEqual({Uri, Uri}, {Uri, bondy_error:uri(Type)})
+     || {Uri, Type} <- Expected
+    ].
 
 %% ?BONDY_ERROR_TIMEOUT is bondy.error.timeout, whereas the catalogued `timeout'
 %% type carries the WAMP URI. Both are reachable, so both must have a status.
 bondy_error_timeout_macro_has_a_status_test() ->
     ?assertEqual(
-        ?HTTP_GATEWAY_TIMEOUT, bondy_http_utils:http_status(?BONDY_ERROR_TIMEOUT)
+        ?HTTP_GATEWAY_TIMEOUT,
+        bondy_http_utils:http_status(?BONDY_ERROR_TIMEOUT)
     ),
     ?assertEqual(
         ?HTTP_GATEWAY_TIMEOUT, bondy_http_utils:http_status(?WAMP_ERROR_TIMEOUT)
@@ -242,14 +268,18 @@ bondy_error_timeout_macro_has_a_status_test() ->
 %% the peer being refused, authorization_failed is the router being unable to
 %% decide.
 reconciled_status_rows_test() ->
-    ?assertEqual(?HTTP_FORBIDDEN, bondy_http_utils:http_status(?WAMP_NOT_AUTHORIZED)),
+    ?assertEqual(
+        ?HTTP_FORBIDDEN, bondy_http_utils:http_status(?WAMP_NOT_AUTHORIZED)
+    ),
     ?assertEqual(
         ?HTTP_INTERNAL_SERVER_ERROR,
         bondy_http_utils:http_status(?WAMP_AUTHORIZATION_FAILED)
     ).
 
 http_status_accepts_uri_type_and_error_test() ->
-    ?assertEqual(?HTTP_NOT_FOUND, bondy_http_utils:http_status(?BONDY_ERROR_NOT_FOUND)),
+    ?assertEqual(
+        ?HTTP_NOT_FOUND, bondy_http_utils:http_status(?BONDY_ERROR_NOT_FOUND)
+    ),
     ?assertEqual(?HTTP_NOT_FOUND, bondy_http_utils:http_status(not_found)),
     ?assertEqual(
         ?HTTP_NOT_FOUND,

@@ -45,11 +45,10 @@ outbound WAMP messages.
     | failed
     | established
     | shutting_down.
--type raw_wamp_message() ::
-    bondy_wamp_message:message()
-    | {raw, ping}
-    | {raw, pong}
-    | {raw, bondy_wamp_encoding:raw_error()}.
+%% The `{raw, ping | pong | Error}` arms this used to carry were vestigial: no
+%% clause of `handle_inbound_messages/2,3` ever matched them and nothing ever
+%% built one, and `bondy_wamp_encoding:raw_error/0` was never a type at all.
+-type raw_wamp_message() :: bondy_wamp_message:t().
 
 -export_type([frame_type/0]).
 -export_type([encoding/0]).
@@ -273,7 +272,7 @@ handle_inbound(Data, St) ->
             stop(internal_error, St)
     end.
 
--spec handle_outbound(bondy_wamp_message:message(), state()) ->
+-spec handle_outbound(bondy_wamp_message:t(), state()) ->
     {ok, iodata(), state()}
     | {error, any(), state()}
     | {stop, state()}

@@ -547,9 +547,13 @@ end#{
     cacertfile := file:filename_all(),
     certfile := file:filename_all(),
     keyfile := file:filename_all(),
-    verify := ssl:verify_type(),
-    versions := [ssl:tls_version()]
+    %% `ssl` exports neither `verify_type/0` nor `tls_version/0` (checked
+    %% against OTP 28's own export_type list), so both specs were vacuous.
+    verify := verify_none | verify_peer,
+    versions := [ssl:protocol_version()]
 }.
+
+-export_type([t/0]).
 
 % -export([fetch/1]).
 % -export([update/1]).

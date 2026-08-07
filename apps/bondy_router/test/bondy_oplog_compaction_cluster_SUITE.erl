@@ -316,8 +316,9 @@ await_rib_convergence(Nodes, Deadline) ->
         [{N, D} || D <- erpc:call(N, ?MODULE, do_rib_divergences, [])]
      || N <- Nodes
     ]),
-    case Divergences =:= [] orelse
-        erlang:monotonic_time(millisecond) >= Deadline
+    case
+        Divergences =:= [] orelse
+            erlang:monotonic_time(millisecond) >= Deadline
     of
         true ->
             Divergences;
@@ -368,7 +369,10 @@ silent_peer_truncated_past_recovers_on_rejoin(Config) ->
      || N <- Nodes
     ],
     _ = [ok = bondy_ct:freeze_gc(N) || N <- Nodes],
-    _ = [ok = erpc:call(N, ?MODULE, do_start_dispatch_collector, []) || N <- Nodes],
+    _ = [
+        ok = erpc:call(N, ?MODULE, do_start_dispatch_collector, [])
+     || N <- Nodes
+    ],
 
     try
         do_stale_rejoin(Nodes)
@@ -478,8 +482,14 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
         "compact results on ~p:~n~p~n"
         "compact results on ~p:~n~p",
         [
-            length(Advanced1), N1, length(Advanced2), N2,
-            N1, Compact1, N2, Compact2
+            length(Advanced1),
+            N1,
+            length(Advanced2),
+            N2,
+            N1,
+            Compact1,
+            N2,
+            Compact2
         ]
     ),
     ?assert(length(Advanced1) >= 1),
@@ -542,7 +552,12 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
     ]),
     ct:pal(
         "stale-rejoin: ~p rebootstraps flagged on ~p (~p bootstrap starts):~n~p",
-        [length(Rebootstraps), N3, BootstrapStarts, lists:sublist(Rebootstraps, 8)]
+        [
+            length(Rebootstraps),
+            N3,
+            BootstrapStarts,
+            lists:sublist(Rebootstraps, 8)
+        ]
     ),
     ?assert(length(Rebootstraps) >= 1),
     ?assert(BootstrapStarts >= 1),
@@ -652,7 +667,10 @@ truncated_prefix_below_peer_max_is_not_silently_adopted(Config) ->
      || N <- Nodes
     ],
     _ = [ok = bondy_ct:freeze_gc(N) || N <- Nodes],
-    _ = [ok = erpc:call(N, ?MODULE, do_start_dispatch_collector, []) || N <- Nodes],
+    _ = [
+        ok = erpc:call(N, ?MODULE, do_start_dispatch_collector, [])
+     || N <- Nodes
+    ],
     _ = [
         ok = erpc:call(
             N, application, set_env, [bondy_oplog, prefix_hold, false]
@@ -706,7 +724,10 @@ truncated_prefix_is_held_and_repaired_by_rebootstrap(Config) ->
      || N <- Nodes
     ],
     _ = [ok = bondy_ct:freeze_gc(N) || N <- Nodes],
-    _ = [ok = erpc:call(N, ?MODULE, do_start_dispatch_collector, []) || N <- Nodes],
+    _ = [
+        ok = erpc:call(N, ?MODULE, do_start_dispatch_collector, [])
+     || N <- Nodes
+    ],
     _ = [
         ok = erpc:call(N, application, set_env, [bondy_oplog, prefix_hold, true])
      || N <- Nodes
@@ -751,7 +772,8 @@ do_prefix_hole_enforced([N1, N2, N3] = Nodes) ->
             length(Holes0),
             length(Helds0),
             hole_fmt(Helds0),
-            length(LateMissing0), length(Late)
+            length(LateMissing0),
+            length(Late)
         ]
     ),
 
@@ -802,7 +824,9 @@ do_prefix_hole_enforced([N1, N2, N3] = Nodes) ->
             ok = stale_wait(
                 fun() ->
                     _ = [
-                        catch erpc:call(N, bondy_oplog_sync_scheduler, trigger, [])
+                        catch erpc:call(
+                            N, bondy_oplog_sync_scheduler, trigger, []
+                        )
                      || N <- Nodes
                     ],
                     lists:all(
@@ -825,9 +849,11 @@ do_prefix_hole_enforced([N1, N2, N3] = Nodes) ->
                         [
                             N3,
                             hole_fmt(Missing),
-                            hole_fmt(catch erpc:call(
-                                N3, ?MODULE, do_drain_dispatch_collector, []
-                            ))
+                            hole_fmt(
+                                catch erpc:call(
+                                    N3, ?MODULE, do_drain_dispatch_collector, []
+                                )
+                            )
                         ]
                     )
                 end
@@ -1042,8 +1068,10 @@ do_prefix_hole_verdict([N1, N2, N3], Early, Late, WriterOrigins) ->
         [
             N3,
             GapRaised,
-            length(EarlyMissing), length(Early),
-            length(LateMissing), length(Late),
+            length(EarlyMissing),
+            length(Early),
+            length(LateMissing),
+            length(Late),
             length(WriterHoles),
             hole_fmt(WriterHoles),
             length(Visible),
@@ -1108,15 +1136,16 @@ do_prefix_hole_verdict([N1, N2, N3], Early, Late, WriterOrigins) ->
             %% key but no late key — prefix-closed staleness, flagged by
             %% the gap check. The condition under test (a co-sharded
             %% early/late pair) did not materialise.
-            {skip, lists:flatten(
-                io_lib:format(
-                    "scenario not reached: ~p early write(s) missing but "
-                    "no same-origin fold-time hole detected — no instance "
-                    "hosted both an early and a late key. Raise "
-                    "?HOLE_TAGS_PER_BAND. Adoption probe: ~ts",
-                    [length(EarlyMissing), hole_fmt(Outcome)]
-                )
-            )}
+            {skip,
+                lists:flatten(
+                    io_lib:format(
+                        "scenario not reached: ~p early write(s) missing but "
+                        "no same-origin fold-time hole detected — no instance "
+                        "hosted both an early and a late key. Raise "
+                        "?HOLE_TAGS_PER_BAND. Adoption probe: ~ts",
+                        [length(EarlyMissing), hole_fmt(Outcome)]
+                    )
+                )}
     end.
 
 %% @private
@@ -1188,8 +1217,8 @@ writer_holes(Events, WriterOrigins) ->
     [
         maps:with([instance_id, origin, applied_seq, gaps], Meta)
      || {[bondy_oplog, applier, prefix_hole], _M, Meta} <- Events,
-        maps:get(maps:get(instance_id, Meta, undefined), ByInstance, x)
-            =:= maps:get(origin, Meta, undefined)
+        maps:get(maps:get(instance_id, Meta, undefined), ByInstance, x) =:=
+            maps:get(origin, Meta, undefined)
     ].
 
 %% @private
@@ -1245,7 +1274,8 @@ writer_deficit(PeerFrontiers, LocalFrontiers, WriterOrigins) ->
 frontier_deficit_origins(PeerFrontiers, LocalFrontiers) ->
     Local = maps:from_list(LocalFrontiers),
     lists:filtermap(
-        fun({I, PF}) when is_map(PF) ->
+        fun
+            ({I, PF}) when is_map(PF) ->
                 LF =
                     case maps:get(I, Local, #{}) of
                         M when is_map(M) -> M;
@@ -1487,20 +1517,29 @@ run_scenario(Config, _Label) ->
 
     Realms = create_realms(Nodes, ?NUM_REALMS),
 
-    _ = [ok = erpc:call(N, ?MODULE, do_start_dispatch_collector, []) || N <- Nodes],
+    _ = [
+        ok = erpc:call(N, ?MODULE, do_start_dispatch_collector, [])
+     || N <- Nodes
+    ],
 
     Parent = self(),
     SamplerPid = spawn_link(fun() ->
         sampler_loop(
-            Parent, Nodes,
-            ?WRITE_WINDOW_MS + ?SETTLE_WINDOW_MS, ?SAMPLE_INTERVAL_MS, []
+            Parent,
+            Nodes,
+            ?WRITE_WINDOW_MS + ?SETTLE_WINDOW_MS,
+            ?SAMPLE_INTERVAL_MS,
+            []
         )
     end),
 
     DriverPids = [
         spawn_link(fun() ->
             R = erpc:call(
-                N, ?MODULE, do_drive_load, [Realms, ?WRITE_WINDOW_MS],
+                N,
+                ?MODULE,
+                do_drive_load,
+                [Realms, ?WRITE_WINDOW_MS],
                 ?WRITE_WINDOW_MS + 15000
             ),
             Parent ! {driver_done, N, R}
@@ -1582,8 +1621,11 @@ growth_detail(Samples) ->
                     true -> LateAvg / EarlyAvg
                 end,
             #{
-                early => EarlyAvg, late => LateAvg, ratio => Ratio,
-                n_samples => N, raw => Sizes
+                early => EarlyAvg,
+                late => LateAvg,
+                ratio => Ratio,
+                n_samples => N,
+                raw => Sizes
             }
         end,
         ByKey
@@ -1624,8 +1666,10 @@ log_scenario_result(
     }
 ) ->
     #{
-        clean_total := CleanTotal, clean_unsettled := CleanUnsettled,
-        residue_total := ResidueTotal, residue_unsettled := ResidueUnsettled
+        clean_total := CleanTotal,
+        clean_unsettled := CleanUnsettled,
+        residue_total := ResidueTotal,
+        residue_unsettled := ResidueUnsettled
     } = settle_summary(Detail),
     ct:pal(
         "~n=== scenario ~p ===~n"
@@ -1646,10 +1690,16 @@ log_scenario_result(
         "unsettled instances (instance, node, first, last, full raw trace):~n~p~n"
         "peer dispatch histogram (started vs capped):~n~p~n",
         [
-            Label, WriteStats, Ratios,
-            ?QUIESCENT_THRESHOLD, ?QUIESCENT_THRESHOLD, ?QUIESCENT_THRESHOLD,
-            length(CleanUnsettled), CleanTotal,
-            length(ResidueUnsettled), ResidueTotal,
+            Label,
+            WriteStats,
+            Ratios,
+            ?QUIESCENT_THRESHOLD,
+            ?QUIESCENT_THRESHOLD,
+            ?QUIESCENT_THRESHOLD,
+            length(CleanUnsettled),
+            CleanTotal,
+            length(ResidueUnsettled),
+            ResidueTotal,
             CleanUnsettled ++ ResidueUnsettled,
             Hist
         ]
@@ -1671,18 +1721,24 @@ settle_summary(Detail) ->
                 {true, true} ->
                     bump_settle(Acc, clean_total);
                 {true, false} ->
-                    add_unsettled(bump_settle(Acc, clean_total), clean_unsettled, Entry);
+                    add_unsettled(
+                        bump_settle(Acc, clean_total), clean_unsettled, Entry
+                    );
                 {false, true} ->
                     bump_settle(Acc, residue_total);
                 {false, false} ->
                     add_unsettled(
-                        bump_settle(Acc, residue_total), residue_unsettled, Entry
+                        bump_settle(Acc, residue_total),
+                        residue_unsettled,
+                        Entry
                     )
             end
         end,
         #{
-            clean_total => 0, clean_unsettled => [],
-            residue_total => 0, residue_unsettled => []
+            clean_total => 0,
+            clean_unsettled => [],
+            residue_total => 0,
+            residue_unsettled => []
         },
         maps:to_list(Detail)
     ).
@@ -1701,14 +1757,18 @@ add_unsettled(Acc, Field, Entry) ->
 %% cheap), round-robined across the given nodes so realm creation itself is
 %% multi-writer, not funnelled through one node.
 create_realms(Nodes, Count) ->
-    NodeCycle = lists:flatten(lists:duplicate(1 + Count div length(Nodes), Nodes)),
+    NodeCycle = lists:flatten(
+        lists:duplicate(1 + Count div length(Nodes), Nodes)
+    ),
     [
         begin
             Uri = iolist_to_binary([
                 "com.test.compaction_cluster.r",
                 integer_to_binary(I)
             ]),
-            ok = erpc:call(lists:nth(I, NodeCycle), ?MODULE, do_create_open_realm, [Uri]),
+            ok = erpc:call(
+                lists:nth(I, NodeCycle), ?MODULE, do_create_open_realm, [Uri]
+            ),
             Uri
         end
      || I <- lists:seq(1, Count)
@@ -1795,8 +1855,10 @@ do_create_open_realm(Uri) ->
 do_drive_load(Realms, DurationMs) ->
     Deadline = erlang:monotonic_time(millisecond) + DurationMs,
     Stats0 = #{
-        sub_ok => 0, sub_err => 0,
-        user_ok => 0, user_err => 0,
+        sub_ok => 0,
+        sub_err => 0,
+        user_ok => 0,
+        user_err => 0,
         sample_errors => []
     },
     drive_loop(Realms, Deadline, 0, Stats0).
@@ -1815,8 +1877,10 @@ do_write_one(RealmUri, N, Stats) ->
     case N rem 2 of
         0 ->
             Uri = iolist_to_binary([
-                "com.test.topic.", integer_to_binary(node_seed()),
-                ".", integer_to_binary(N)
+                "com.test.topic.",
+                integer_to_binary(node_seed()),
+                ".",
+                integer_to_binary(N)
             ]),
             %% A `pid()` target with a REAL session id, matching what a real
             %% WAMP subscriber's ref looks like (a session always exists
@@ -1837,9 +1901,11 @@ do_write_one(RealmUri, N, Stats) ->
             %%    subscribers always carry a session anyway, so this test
             %%    uses one rather than exercising the broken path.
             Ref = bondy_ref:new(internal, self(), bondy_session_id:new()),
-            try bondy_registry:add(
-                subscription, RealmUri, Uri, #{match => <<"exact">>}, Ref
-            ) of
+            try
+                bondy_registry:add(
+                    subscription, RealmUri, Uri, #{match => <<"exact">>}, Ref
+                )
+            of
                 {ok, _, _} ->
                     %% The documented 3-tuple shape.
                     bump(Stats, sub_ok);
@@ -1858,7 +1924,8 @@ do_write_one(RealmUri, N, Stats) ->
             catch
                 Class:Reason:Stack ->
                     record_error(
-                        Stats, sub_err,
+                        Stats,
+                        sub_err,
                         {RealmUri, Uri, {Class, Reason, Stack}}
                     )
             end;
@@ -1874,7 +1941,9 @@ do_write_one(RealmUri, N, Stats) ->
             %% both survived even with the concurrency cap raised well past
             %% any contention, because it was never a compaction problem.
             Key = iolist_to_binary([
-                "u", integer_to_binary(node_seed()), "_",
+                "u",
+                integer_to_binary(node_seed()),
+                "_",
                 integer_to_binary(N rem ?USER_POOL_SIZE)
             ]),
             Value = #{username => Key, touch => N},
@@ -1917,12 +1986,16 @@ table_handle(Table) ->
 %% SIZE SAMPLER (test-process side)
 %% =============================================================================
 
-sampler_loop(Parent, _Nodes, RemainingMs, _IntervalMs, Acc) when RemainingMs =< 0 ->
+sampler_loop(Parent, _Nodes, RemainingMs, _IntervalMs, Acc) when
+    RemainingMs =< 0
+->
     Parent ! {samples, lists:append(Acc)};
 sampler_loop(Parent, Nodes, RemainingMs, IntervalMs, Acc) ->
     Batch = lists:append([sample_node(N) || N <- Nodes]),
     timer:sleep(IntervalMs),
-    sampler_loop(Parent, Nodes, RemainingMs - IntervalMs, IntervalMs, [Batch | Acc]).
+    sampler_loop(Parent, Nodes, RemainingMs - IntervalMs, IntervalMs, [
+        Batch | Acc
+    ]).
 
 sample_node(Node) ->
     Ts = erlang:monotonic_time(millisecond),
@@ -2027,8 +2100,10 @@ dispatch_collector_loop(Acc) ->
         {telemetry_event, Event, Measurements, Metadata} ->
             %% Receipt stamp so post-hoc analysis can order gap events
             %% against the sync-outcome timeline (self-heal latency).
-            Stamped = Metadata#{collected_at_ms =>
-                erlang:system_time(millisecond)},
+            Stamped = Metadata#{
+                collected_at_ms =>
+                    erlang:system_time(millisecond)
+            },
             dispatch_collector_loop([{Event, Measurements, Stamped} | Acc]);
         _Other ->
             dispatch_collector_loop(Acc)
@@ -2074,7 +2149,8 @@ do_gap_forensics() ->
      || {[bondy_oplog, instance, integrate_doored], M, Meta} <- Events
     ],
     GapPairs = lists:usort([
-        {maps:get(instance, G), maps:get(peer, G)} || G <- Gaps
+        {maps:get(instance, G), maps:get(peer, G)}
+     || G <- Gaps
     ]),
     Timeline = lists:sort([
         {
@@ -2085,8 +2161,10 @@ do_gap_forensics() ->
         }
      || {[bondy_oplog, sync, Outcome], _M, Meta} <- Events,
         lists:member(
-            {maps:get(instance_id, Meta, undefined),
-                maps:get(peer, Meta, undefined)},
+            {
+                maps:get(instance_id, Meta, undefined),
+                maps:get(peer, Meta, undefined)
+            },
             GapPairs
         )
     ]),

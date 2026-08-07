@@ -984,8 +984,18 @@ install_peer_log_handler(Env) ->
                         legacy_header => false,
                         single_line => false,
                         template => [
-                            time, " ", level, " ", pid, " ", mfa, ":", line,
-                            "\n", msg, "\n"
+                            time,
+                            " ",
+                            level,
+                            " ",
+                            pid,
+                            " ",
+                            mfa,
+                            ":",
+                            line,
+                            "\n",
+                            msg,
+                            "\n"
                         ]
                     }}
             },

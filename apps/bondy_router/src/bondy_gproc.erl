@@ -9,6 +9,11 @@ Thin wrapper around `m:gproc` for registering, unregistering and looking up
 local names and resources.
 """.
 
+%% `ets` exports no continuation type — verified against OTP 28's own
+%% `export_type` list — so the `ets:continuation()` these specs used to name
+%% resolved to `any()`. A select continuation is genuinely opaque.
+-type ets_continuation() :: term().
+
 -export([local_name/1]).
 -export([lookup_pid/1]).
 -export([lookup_pid/2]).
@@ -83,13 +88,13 @@ lookup_pid(Name) ->
 lookup_pid(Type, Id) ->
     lookup_pid({Type, Id}).
 
--spec select(Term :: ets:match_spec() | ets:continuation()) -> [any()].
+-spec select(Term :: ets:match_spec() | ets_continuation()) -> [any()].
 
 select(Term) when is_list(Term) ->
     gproc:select({l, resources}, Term).
 
 -spec select(MatchSpec :: ets:match_spec(), Limit :: integer()) ->
-    {[any()], Continuation :: ets:continuation()} | '$end_of_table'.
+    {[any()], Continuation :: ets_continuation()} | '$end_of_table'.
 
 select(MatchSpec, Limit) ->
     gproc:select({l, resources}, MatchSpec, Limit).

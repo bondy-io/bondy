@@ -302,11 +302,15 @@ test_encode_with_tail(_) ->
     %% Get tail from decode_head, encode new elements with it
     CBOR = bondy_wamp_cbor:encode([1, 2, 3, 4, 5]),
     {_, Tail1} = bondy_wamp_cbor:decode_head(CBOR, 2),
-    Result1 = iolist_to_binary(bondy_wamp_cbor:encode_with_tail([10, 20], Tail1)),
+    Result1 = iolist_to_binary(
+        bondy_wamp_cbor:encode_with_tail([10, 20], Tail1)
+    ),
     ?assertEqual([10, 20, 3, 4, 5], bondy_wamp_cbor:decode(Result1)),
 
     %% Empty tail
-    Result2 = iolist_to_binary(bondy_wamp_cbor:encode_with_tail([1, 2, 3], <<>>)),
+    Result2 = iolist_to_binary(
+        bondy_wamp_cbor:encode_with_tail([1, 2, 3], <<>>)
+    ),
     ?assertEqual([1, 2, 3], bondy_wamp_cbor:decode(Result2)),
 
     %% Complex elements with tail

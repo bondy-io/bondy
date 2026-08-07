@@ -228,7 +228,7 @@ hash_length(#{version := ?VERSION, params := #{hash_length := Val}}) ->
 hash_length(#{} = PW) ->
     hash_length(maybe_add_version(PW)).
 
--spec from_term(Term :: proplist:proplist() | map()) -> t().
+-spec from_term(Term :: proplists:proplist() | map()) -> t().
 
 from_term(Term) when is_list(Term) ->
     maybe_add_version(maps:from_list(Term));

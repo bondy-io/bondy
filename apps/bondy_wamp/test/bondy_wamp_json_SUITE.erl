@@ -329,31 +329,41 @@ test_encode_with_tail(_) ->
     %% Encode new elements with tail that has leading comma
     Elements1 = [1, 2],
     Tail1 = <<",3,4,5]">>,
-    Result1 = iolist_to_binary(bondy_wamp_json:encode_with_tail(Elements1, Tail1)),
+    Result1 = iolist_to_binary(
+        bondy_wamp_json:encode_with_tail(Elements1, Tail1)
+    ),
     ?assertEqual(<<"[1,2,3,4,5]">>, Result1),
 
     %% Encode with tail that is just closing bracket
     Elements2 = [1, 2, 3],
     Tail2 = <<"]">>,
-    Result2 = iolist_to_binary(bondy_wamp_json:encode_with_tail(Elements2, Tail2)),
+    Result2 = iolist_to_binary(
+        bondy_wamp_json:encode_with_tail(Elements2, Tail2)
+    ),
     ?assertEqual(<<"[1,2,3]">>, Result2),
 
     %% Encode with tail without leading comma (typical from decode_head)
     Elements3 = [<<"a">>, <<"b">>],
     Tail3 = <<"\"c\",\"d\"]">>,
-    Result3 = iolist_to_binary(bondy_wamp_json:encode_with_tail(Elements3, Tail3)),
+    Result3 = iolist_to_binary(
+        bondy_wamp_json:encode_with_tail(Elements3, Tail3)
+    ),
     ?assertEqual(<<"[\"a\",\"b\",\"c\",\"d\"]">>, Result3),
 
     %% Complex elements with tail with leading comma
     Elements4 = [#{<<"key">> => <<"value">>}],
     Tail4 = <<",2,3]">>,
-    Result4 = iolist_to_binary(bondy_wamp_json:encode_with_tail(Elements4, Tail4)),
+    Result4 = iolist_to_binary(
+        bondy_wamp_json:encode_with_tail(Elements4, Tail4)
+    ),
     ?assertEqual(<<"[{\"key\":\"value\"},2,3]">>, Result4),
 
     %% Complex elements with tail without leading comma
     Elements5 = [1],
     Tail5 = <<"2,3]">>,
-    Result5 = iolist_to_binary(bondy_wamp_json:encode_with_tail(Elements5, Tail5)),
+    Result5 = iolist_to_binary(
+        bondy_wamp_json:encode_with_tail(Elements5, Tail5)
+    ),
     ?assertEqual(<<"[1,2,3]">>, Result5).
 
 test_validate_opts(_) ->
@@ -447,7 +457,9 @@ test_roundtrip(_) ->
     %% Encode with tail roundtrip (with leading comma)
     Elements = [1, 2],
     OriginalTail = <<",3,4,5]">>,
-    Encoded = iolist_to_binary(bondy_wamp_json:encode_with_tail(Elements, OriginalTail)),
+    Encoded = iolist_to_binary(
+        bondy_wamp_json:encode_with_tail(Elements, OriginalTail)
+    ),
     ?assertEqual([1, 2, 3, 4, 5], bondy_wamp_json:decode(Encoded)),
 
     %% Encode with tail roundtrip (without leading comma, from decode_head)

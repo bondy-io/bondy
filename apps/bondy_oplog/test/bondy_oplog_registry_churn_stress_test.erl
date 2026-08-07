@@ -116,8 +116,11 @@ registry_churn_test_() ->
         %% a reportable event — and its classification is the diagnosis.
         ?assertEqual(
             [],
-            [A || #{classification := Cl} = A <- maps:get(aborts, R),
-                  Cl =/= transient]
+            [
+                A
+             || #{classification := Cl} = A <- maps:get(aborts, R),
+                Cl =/= transient
+            ]
         )
     end}.
 
@@ -173,15 +176,32 @@ tally(Name, Cfg, Reps) ->
             Aborts = maps:get(aborts, R),
             ?debugFmt(
                 "  ~p rep ~p/~p: ~s (~p violations, ~p gc calls, ~p aborts ~p)",
-                [Name, I, Reps,
-                 case Fired of true -> "FIRED"; false -> "clean" end,
-                 length(maps:get(violations, R)), maps:get(gc_calls, R),
-                 length(Aborts),
-                 [{maps:get(reason, A, aborted), maps:get(classification, A)}
-                  || A <- Aborts]]
+                [
+                    Name,
+                    I,
+                    Reps,
+                    case Fired of
+                        true -> "FIRED";
+                        false -> "clean"
+                    end,
+                    length(maps:get(violations, R)),
+                    maps:get(gc_calls, R),
+                    length(Aborts),
+                    [
+                        {
+                            maps:get(reason, A, aborted),
+                            maps:get(classification, A)
+                        }
+                     || A <- Aborts
+                    ]
+                ]
             ),
             Acc#{
-                fired := F + (case Fired of true -> 1; false -> 0 end),
+                fired := F +
+                    (case Fired of
+                        true -> 1;
+                        false -> 0
+                    end),
                 runs := N + 1,
                 samples := [first_sample(R) | maps:get(samples, Acc)]
             }
@@ -240,13 +260,19 @@ run_scenario(Cfg) ->
     ),
 
     Workers =
-        [spawn_monitor(fun() -> writer(Ctl, InstId, N) end)
-         || N <- lists:seq(1, maps:get(writers, Cfg))]
-        ++ optional(maps:get(compact, Cfg),
-                    fun() -> compactor(Ctl, InstId) end)
-        ++ optional(maps:get(inject, Cfg),
-                    fun() -> page_injector(Ctl, InstId, Cfg) end)
-        ++ [spawn_monitor(fun() -> watcher(Ctl, InstId) end)],
+        [
+            spawn_monitor(fun() -> writer(Ctl, InstId, N) end)
+         || N <- lists:seq(1, maps:get(writers, Cfg))
+        ] ++
+            optional(
+                maps:get(compact, Cfg),
+                fun() -> compactor(Ctl, InstId) end
+            ) ++
+            optional(
+                maps:get(inject, Cfg),
+                fun() -> page_injector(Ctl, InstId, Cfg) end
+            ) ++
+            [spawn_monitor(fun() -> watcher(Ctl, InstId) end)],
 
     %% Steady churn, then the close storm both field occurrences ended in.
     timer:sleep(maps:get(duration_ms, Cfg)),
@@ -294,9 +320,10 @@ writer_loop(Ctl, InstId) ->
             ok;
         false ->
             Key = key(),
-            _ = catch bondy_oplog:append(
-                InstId, {cell_apply, ?B, Key, {set, seq(), Key}}
-            ),
+            _ =
+                catch bondy_oplog:append(
+                    InstId, {cell_apply, ?B, Key, {set, seq(), Key}}
+                ),
             writer_loop(Ctl, InstId)
     end.
 
@@ -324,8 +351,12 @@ page_injector(Ctl, InstId, Cfg) ->
             %% Only lifecycle races are tolerated here — a crash in the
             %% injector itself must surface, not be swallowed into a silently
             %% ablated run.
-            _ = try inject_peer_pages(InstId, Cfg)
-                catch exit:{noproc, _} -> ok; exit:{normal, _} -> ok
+            _ =
+                try
+                    inject_peer_pages(InstId, Cfg)
+                catch
+                    exit:{noproc, _} -> ok;
+                    exit:{normal, _} -> ok
                 end,
             timer:sleep(15),
             page_injector(Ctl, InstId, Cfg)
@@ -477,9 +508,10 @@ trace_heal(InstId, Root0, N) ->
 close_storm(InstId) ->
     lists:foreach(
         fun(K) ->
-            _ = catch bondy_oplog:append(
-                InstId, {cell_apply, ?B, K, {clear, seq()}}
-            )
+            _ =
+                catch bondy_oplog:append(
+                    InstId, {cell_apply, ?B, K, {clear, seq()}}
+                )
         end,
         [integer_to_binary(I) || I <- lists:seq(1, ?KEYSPACE)]
     ).
@@ -554,7 +586,11 @@ await(Workers) ->
     ).
 
 stopped(Ctl) ->
-    try ets:lookup_element(Ctl, stop, 2) catch _:_ -> true end.
+    try
+        ets:lookup_element(Ctl, stop, 2)
+    catch
+        _:_ -> true
+    end.
 
 record(Ctl, V) ->
     Old = ets:lookup_element(Ctl, violations, 2),

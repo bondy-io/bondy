@@ -635,7 +635,9 @@ registry_rib_dual_write(Config) ->
                     _
                 }}
             ) when
-                I == ?INVOKE_ROUND_ROBIN, is_integer(E), is_integer(L),
+                I == ?INVOKE_ROUND_ROBIN,
+                is_integer(E),
+                is_integer(L),
                 E =< L
             ->
                 true;

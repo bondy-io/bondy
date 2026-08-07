@@ -493,14 +493,16 @@ transient_abort_retries_until_admitted(_) ->
 
     %% `connect/1` blocks, so drive it from a helper and watch what it does.
     Pid = spawn_link(fun() ->
-        Parent ! {result, self(), bondy_connect:connect(#{
-            transport => tcp,
-            endpoint => {?HOST, ?PORT},
-            realm => ?REALM,
-            auth => #{method => ?WAMP_ANON_AUTH},
-            serializers => [json],
-            reconnect => #{backoff_min => 200, backoff_max => 500}
-        })}
+        Parent !
+            {result, self(),
+                bondy_connect:connect(#{
+                    transport => tcp,
+                    endpoint => {?HOST, ?PORT},
+                    realm => ?REALM,
+                    auth => #{method => ?WAMP_ANON_AUTH},
+                    serializers => [json],
+                    reconnect => #{backoff_min => 200, backoff_max => 500}
+                })}
     end),
 
     %% It must still be trying: a fail-fast would have answered by now.
@@ -543,16 +545,18 @@ transient_abort_retry_backs_off(_) ->
     Parent = self(),
 
     Pid = spawn(fun() ->
-        Parent ! {result, self(), bondy_connect:connect(#{
-            transport => tcp,
-            endpoint => {?HOST, ?PORT},
-            realm => ?REALM,
-            auth => #{method => ?WAMP_ANON_AUTH},
-            serializers => [json],
-            reconnect => #{
-                backoff_min => 300, backoff_max => 5000, deadline => 0
-            }
-        })}
+        Parent !
+            {result, self(),
+                bondy_connect:connect(#{
+                    transport => tcp,
+                    endpoint => {?HOST, ?PORT},
+                    realm => ?REALM,
+                    auth => #{method => ?WAMP_ANON_AUTH},
+                    serializers => [json],
+                    reconnect => #{
+                        backoff_min => 300, backoff_max => 5000, deadline => 0
+                    }
+                })}
     end),
 
     timer:sleep(3000),

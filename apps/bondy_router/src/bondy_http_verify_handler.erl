@@ -93,7 +93,6 @@ handle(Method, Req, #{realm_uri := RealmUri}) when
     case do_verify(RealmUri, Req) of
         {ok, Identity} ->
             reply_ok(RealmUri, Identity, Req);
-
         {error, Reason} ->
             ?LOG_INFO(#{
                 description => "Credential verification failed",
@@ -102,7 +101,6 @@ handle(Method, Req, #{realm_uri := RealmUri}) when
             }),
             reply_error(?HTTP_UNAUTHORIZED, error_type(Reason), RealmUri, Req)
     end;
-
 handle(_, Req, _) ->
     Headers = maps:put(
         <<"allow">>, <<"GET, HEAD">>, no_store_headers()
@@ -132,7 +130,6 @@ do_verify(RealmUri, Req) ->
     catch
         throw:Reason ->
             {error, Reason};
-
         Class:Reason:Stacktrace ->
             %% Nothing may escape as a 5xx: a proxy cannot act on one, and an
             %% unauthenticated caller must not be able to provoke crash reports.
@@ -169,7 +166,6 @@ header_or_cookie_credential(RealmUri, Req) ->
     case cowboy_req:header(?TICKET_HEADER, Req, undefined) of
         Ticket when is_binary(Ticket), Ticket =/= <<>> ->
             Ticket;
-
         _ ->
             Cookies = bondy_http_utils:safe_parse_cookies(Req),
 
@@ -226,7 +222,6 @@ verify_ticket(RealmUri, Ticket) ->
                 issued_at => maps:get(issued_at, Claims),
                 expires_at => maps:get(expires_at, Claims)
             };
-
         {error, Reason} ->
             throw(Reason)
     end.
@@ -257,7 +252,6 @@ verify_access_token(RealmUri, JWT) ->
                 %% `exp` is a duration, not an instant.
                 expires_at => IssuedAt + maps:get(~"exp", Claims)
             };
-
         {error, Reason} ->
             throw(Reason)
     end.

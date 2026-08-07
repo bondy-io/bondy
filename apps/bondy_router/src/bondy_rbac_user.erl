@@ -737,10 +737,8 @@ lookup(RealmUri, SSORealmUri, UsernameOrAlias) ->
                 false ->
                     {error, user_disabled}
             end;
-
         {error, not_found} when SSORealmUri == undefined ->
             {error, not_found};
-
         {error, not_found} ->
             resolve_alias(RealmUri, SSORealmUri, UsernameOrAlias)
     end.
@@ -1153,7 +1151,6 @@ resolve_alias(RealmUri, SSORealmUri, Alias) ->
                 {error, _} = Error ->
                     Error
             end;
-
         {error, _} = Error ->
             Error
     end.

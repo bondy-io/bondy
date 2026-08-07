@@ -50,6 +50,7 @@ or callback function.
 -type wildcard(T) :: T | '_'.
 
 -export_type([t/0]).
+-export_type([ref_type/0]).
 -export_type([relay/0]).
 -export_type([bridge_relay/0]).
 -export_type([client/0]).

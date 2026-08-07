@@ -244,7 +244,8 @@ is_authorized(Req0, St0) ->
             {stop, Req1, St0};
         error:{no_such_realm, _} = Reason ->
             {StatusCode, Body} = take_status_code(
-                bondy_error:to_map(bondy_error:from_term(Reason)), ?HTTP_INTERNAL_SERVER_ERROR
+                bondy_error:to_map(bondy_error:from_term(Reason)),
+                ?HTTP_INTERNAL_SERVER_ERROR
             ),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, json, Response, Req0),
@@ -260,7 +261,8 @@ is_authorized(Req0, St0) ->
                 St0
             ),
             {StatusCode, Body} = take_status_code(
-                bondy_error:to_map(bondy_error:from_term(Reason)), ?HTTP_INTERNAL_SERVER_ERROR
+                bondy_error:to_map(bondy_error:from_term(Reason)),
+                ?HTTP_INTERNAL_SERVER_ERROR
             ),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, json, Response, Req0),
@@ -484,7 +486,9 @@ authenticate(Token, Ctxt0, Req0, St0) ->
             %% TODO update context
             {true, Req0, St1};
         {error, {no_such_realm, _} = Reason} ->
-            {_, ErrorMap} = take_status_code(bondy_error:to_map(bondy_error:from_term(Reason))),
+            {_, ErrorMap} = take_status_code(
+                bondy_error:to_map(bondy_error:from_term(Reason))
+            ),
             Response = #{
                 <<"body">> => ErrorMap,
                 <<"headers">> => eval_headers(Req0, St0)
@@ -533,7 +537,8 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
     catch
         throw:Reason ->
             {StatusCode, Body} = take_status_code(
-                bondy_error:to_map(bondy_error:from_term(Reason)), ?HTTP_INTERNAL_SERVER_ERROR
+                bondy_error:to_map(bondy_error:from_term(Reason)),
+                ?HTTP_INTERNAL_SERVER_ERROR
             ),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
@@ -549,7 +554,8 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 St0
             ),
             {StatusCode, Body} = take_status_code(
-                bondy_error:to_map(bondy_error:from_term(Reason)), ?HTTP_INTERNAL_SERVER_ERROR
+                bondy_error:to_map(bondy_error:from_term(Reason)),
+                ?HTTP_INTERNAL_SERVER_ERROR
             ),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
@@ -585,7 +591,8 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
     catch
         throw:Reason ->
             {StatusCode1, Body} = take_status_code(
-                bondy_error:to_map(bondy_error:from_term(Reason)), ?HTTP_BAD_REQUEST
+                bondy_error:to_map(bondy_error:from_term(Reason)),
+                ?HTTP_BAD_REQUEST
             ),
             ErrResp = #{<<"body">> => Body, <<"headers">> => #{}},
             Req = reply(StatusCode1, error_encoding(Enc), ErrResp, Req0),
@@ -601,7 +608,8 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 St0
             ),
             {StatusCode1, Body} = take_status_code(
-                bondy_error:to_map(bondy_error:from_term(Reason)), ?HTTP_INTERNAL_SERVER_ERROR
+                bondy_error:to_map(bondy_error:from_term(Reason)),
+                ?HTTP_INTERNAL_SERVER_ERROR
             ),
             ErrResp = #{<<"body">> => Body, <<"headers">> => #{}},
             Req = reply(StatusCode1, error_encoding(Enc), ErrResp, Req0),
@@ -1091,7 +1099,9 @@ from_http_response(StatusCode0, RespHeaders, RespBody, Spec, St0) ->
     {ok, StatusCode1, Response1, St1}.
 
 reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
-    {_, Body} = take_status_code(bondy_error:to_map(bondy_error:from_term(Error))),
+    {_, Body} = take_status_code(
+        bondy_error:to_map(bondy_error:from_term(Error))
+    ),
     Code = maps:get(<<"code">>, Body, <<>>),
     Msg = maps:get(<<"message">>, Body, <<>>),
     Desc = maps:get(<<"description">>, Body, <<>>),

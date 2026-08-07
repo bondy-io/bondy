@@ -449,8 +449,12 @@ without protocol changes.
     %% `bondy_oplog_sync_scheduler`). Requires `fused` (⇒ ephemeral, per
     %% `bondy_db:assert_fused_requires_ephemeral/2`); enforced at
     %% `init/1` via `validate_retention/2`.
-    retention :: #{max_age_ms := non_neg_integer(),
-                   max_events := non_neg_integer()} | undefined,
+    retention ::
+        #{
+            max_age_ms := non_neg_integer(),
+            max_events := non_neg_integer()
+        }
+        | undefined,
     %% Fused-writer drain state, or `undefined` for every non-fused
     %% (durable + non-fused ephemeral) instance. See `#fused_drain{}`.
     fused_drain = undefined :: undefined | #fused_drain{},
@@ -764,9 +768,7 @@ do_append_fast(InstanceId, FastPath, Op, Meta) ->
                     %% the applier reads from the WAL the instant it
                     %% becomes durable, and an in-flight overlay insert
                     %% races with `evict_overlay_batch/2`.
-                    case
-                        stage_overlay_rows(Tab, [overlay_row(Event, local)])
-                    of
+                    case stage_overlay_rows(Tab, [overlay_row(Event, local)]) of
                         stale ->
                             append(InstanceId, Op, Meta);
                         ok ->
@@ -3207,8 +3209,10 @@ do_handle_call(aae_root, _From, #state{mst = MST} = State) ->
                         case Servable of
                             true ->
                                 undefined;
-                            false when State#state.unservable_since =/=
-                                    undefined ->
+                            false when
+                                State#state.unservable_since =/=
+                                    undefined
+                            ->
                                 State#state.unservable_since;
                             false ->
                                 erlang:monotonic_time(millisecond)
@@ -3384,9 +3388,7 @@ do_handle_call(
         [] ->
             do_integrate_peer_root(PeerRoot, State000);
         Missing ->
-            {reply,
-                {error, {peer_pages_missing, length(Missing)}},
-                State000}
+            {reply, {error, {peer_pages_missing, length(Missing)}}, State000}
     end;
 do_handle_call({pin_peer_root, Root}, _From, State) when is_binary(Root) ->
     Now = erlang:monotonic_time(millisecond),
@@ -4425,7 +4427,10 @@ fused_replay_cell_events(
         _ ->
             Pairs = bondy_oplog_applier:diff_pairs(MST, LastRoot, Id),
             {_Count, Held} = bondy_oplog_cell_apply:apply_cell_pairs_mux(
-                FD#fused_drain.cell_apply_source, Id, Pairs, Origin,
+                FD#fused_drain.cell_apply_source,
+                Id,
+                Pairs,
+                Origin,
                 #{hold => true}
             ),
             %% Reads of a peer-authored value just became answerable — bump
@@ -4569,9 +4574,7 @@ deliver_remote(#state{} = State0) ->
             _ =
                 State#state.remote_gen_ref =/= undefined andalso
                     atomics:add(State#state.remote_gen_ref, 1, 1),
-            case
-                bondy_oplog_registry:applier_pid(State#state.instance_id)
-            of
+            case bondy_oplog_registry:applier_pid(State#state.instance_id) of
                 undefined ->
                     ok;
                 ApplierPid when is_pid(ApplierPid) ->
@@ -4701,7 +4704,8 @@ maybe_self_heal_unservable(
         Root =/= undefined andalso
             [] =/= bondy_mst:missing_set(MST, Root),
     Threshold = application:get_env(
-        bondy_oplog, unservable_self_heal_after_ms,
+        bondy_oplog,
+        unservable_self_heal_after_ms,
         ?SELF_HEAL_UNSERVABLE_AFTER_MS
     ),
     case
@@ -4846,9 +4850,10 @@ door_fold(
     %% never-applied below the watermark, so the caller's VV re-check
     %% keeps it doored — exactly this function's stated degrade path —
     %% and the fused replay re-presents it once the gap fills.
-    _ = catch bondy_oplog_cell_apply:apply_cell_pairs_mux(
-        S, Id, Pairs, Origin, #{hold => true}
-    ),
+    _ =
+        catch bondy_oplog_cell_apply:apply_cell_pairs_mux(
+            S, Id, Pairs, Origin, #{hold => true}
+        ),
     ok;
 door_fold(#state{}, _Pairs) ->
     ok.
@@ -7074,7 +7079,9 @@ finalize_catalogue_compaction(State0, Started, Frontier) ->
     State = drive_secondary_indexes(State0),
     {MST1, TruncateUs} = tc(fun() ->
         truncate_below_or_equal(
-            State#state.mst, Frontier, State#state.backend,
+            State#state.mst,
+            Frontier,
+            State#state.backend,
             pinned_roots(State)
         )
     end),
@@ -7463,7 +7470,9 @@ apply_loaded_snapshot(State, NewWatermark, Snapshot) ->
     ),
     %% Drop any live events that the new checkpoint already covers.
     MST1 = truncate_below_or_equal(
-        State#state.mst, NewWatermark, State#state.backend,
+        State#state.mst,
+        NewWatermark,
+        State#state.backend,
         pinned_roots(State)
     ),
     LiveSize1 = compute_live_size(MST1),

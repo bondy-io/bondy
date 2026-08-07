@@ -23,6 +23,8 @@ proxy or load balancer, inspecting the `Forwarded`, `X-Real-IP` and
     error => any() | undefined
 }.
 
+-export_type([t/0]).
+
 -export([init/1]).
 -export([enabled/1]).
 -export([error/1]).
