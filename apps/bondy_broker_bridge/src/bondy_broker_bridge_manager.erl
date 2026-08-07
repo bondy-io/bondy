@@ -276,7 +276,7 @@ Topic}` and forwards every received publication to `Bridge` after
 evaluating the action `Spec` with `mops`.
 """.
 -spec subscribe(uri(), map(), uri(), Bridge :: module(), Spec :: map()) ->
-    {ok, id()} | {error, already_exists}.
+    {ok, id()} | {error, already_exists | any()}.
 
 subscribe(RealmUri, Opts, Topic, Bridge, Spec) ->
     gen_server:call(
@@ -316,6 +316,15 @@ validate_spec(Map) ->
 %% =============================================================================
 
 init([]) ->
+    %% Without this the supervisor's `shutdown` exit kills this process
+    %% outright and `terminate/2` never runs -- so no bridge was ever
+    %% terminated and, worse, no subscriber was ever unsubscribed. The
+    %% subscribers live under `bondy_subscribers_sup` in the router app, not
+    %% under this app's tree, so nothing else was cleaning them up: restarting
+    %% the bridge left the previous generation of subscribers running and
+    %% every event was delivered once per generation.
+    _ = process_flag(trap_exit, true),
+
     %% We store the bridges configurations provided
     Bridges = application:get_env(bondy_broker_bridge, bridges, []),
     BridgesMap = maps:from_list(
@@ -339,11 +348,26 @@ handle_continue(init_bridges, State0) ->
             SpecFile = application:get_env(
                 bondy_broker_bridge, config_file, undefined
             ),
+            %% load_config/2 always answers `{Result, State}`. Matching a bare
+            %% `{error, Reason}` here would raise a case_clause on every
+            %% failure, which is how a bad specification used to take down the
+            %% manager without ever naming the problem.
             case load_config(SpecFile, State1) of
                 {ok, State2} ->
                     {noreply, State2};
-                {error, Reason} ->
-                    {stop, Reason, State1}
+                {{error, {subscriptions_failed, Failed}}, State2} ->
+                    %% Each failure has already been logged with its realm and
+                    %% topic. Stopping here would turn one bad subscription into
+                    %% a supervisor restart loop, taking every other bridge with
+                    %% it, so the manager starts with what it could subscribe.
+                    ?LOG_WARNING(#{
+                        description =>
+                            "Broker Bridge started with failed subscriptions",
+                        failed_count => length(Failed)
+                    }),
+                    {noreply, State2};
+                {{error, Reason}, State2} ->
+                    {stop, Reason, State2}
             end;
         {error, Reason} ->
             {stop, Reason, State0}
@@ -360,13 +384,18 @@ handle_call({subscriptions, Bridge}, _From, State) ->
     Res = get_subscriptions(Bridge),
     {reply, Res, State};
 handle_call({subscribe, RealmUri, Opts, Topic, Bridge, Spec0}, _From, State) ->
-    try do_subscribe(RealmUri, Opts, Topic, Bridge, Spec0, State) of
-        {ok, Id, _Pid} ->
-            {reply, {ok, Id}, State}
-    catch
-        _:Reason ->
-            {reply, {error, Reason}, State}
-    end;
+    %% bondy_broker:subscribe/4 answers `{ok, {Id, Pid}}` for a fun subscriber,
+    %% so do_subscribe/6 does too. Matching `{ok, Id, _Pid}` used to raise a
+    %% try_clause and report an error for a subscription that had in fact been
+    %% created.
+    Res =
+        case do_subscribe(RealmUri, Opts, Topic, Bridge, Spec0, State) of
+            {ok, {Id, _Pid}} ->
+                {ok, Id};
+            {error, _} = Error ->
+                Error
+        end,
+    {reply, Res, State};
 handle_call({unsubscribe, Pid}, _From, State) ->
     Res = bondy_broker:unsubscribe(Pid),
     {reply, Res, State};
@@ -453,11 +482,38 @@ init_bridges(State) ->
     end.
 
 terminate_bridges(Reason, #state{bridges = Map} = State) ->
-    Fun = fun(Bridge, _Config, Acc) ->
-        ok = Bridge:terminate(Reason),
-        Acc#state{bridges = maps:remove(Bridge, Map)}
+    %% Only bridges that were initialised carry a `ctxt` key, so only those get
+    %% terminated. The callback is `terminate/2` — calling `terminate/1` used to
+    %% fail with `undef` on every shutdown.
+    Fun = fun(Bridge, Bridge0, Acc) ->
+        _ =
+            case maps:find(ctxt, Bridge0) of
+                {ok, Ctxt} ->
+                    safe_terminate(Bridge, Reason, Ctxt);
+                error ->
+                    ok
+            end,
+        %% Remove from the accumulator, not from the original map, otherwise
+        %% every iteration discards the previous one's removal.
+        Acc#state{bridges = maps:remove(Bridge, Acc#state.bridges)}
     end,
     maps:fold(Fun, State, Map).
+
+%% @private
+safe_terminate(Bridge, Reason, Ctxt) ->
+    try
+        Bridge:terminate(Reason, Ctxt)
+    catch
+        Class:EReason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error while terminating bridge",
+                bridge => Bridge,
+                class => Class,
+                reason => EReason,
+                stacktrace => Stacktrace
+            }),
+            ok
+    end.
 
 get_bridge(Mod, State) ->
     maps:get(Mod, State#state.bridges, undefined).
@@ -475,19 +531,16 @@ load_config(Map, State) when is_map(Map) ->
             %% We make sure all subscriptions are unique
             Subscriptions = lists:usort(L),
             %% We instantiate the subscribers
-            Folder = fun(#{<<"bridge">> := Bridge} = Subs, Acc) ->
-                Bridges = Acc#state.bridges,
-
-                case key_value:get([Bridge, config, enabled], Bridges, false) of
-                    true ->
-                        {ok, _, _} = do_subscribe(Subs, Acc),
-                        Acc;
-                    false ->
-                        Acc
-                end
-            end,
-            NewState = lists:foldl(Folder, State, Subscriptions),
-            {ok, NewState};
+            {NewState, Failed} = lists:foldl(
+                fun do_load_subscription/2, {State, []}, Subscriptions
+            ),
+            case Failed of
+                [] ->
+                    {ok, NewState};
+                _ ->
+                    Reason = {subscriptions_failed, lists:reverse(Failed)},
+                    {{error, Reason}, NewState}
+            end;
         {error, _} = Error ->
             {Error, State}
     end;
@@ -517,17 +570,62 @@ load_config(undefined, State) ->
 load_config(_, State) ->
     {{error, badarg}, State}.
 
-mops_ctxt(Event, RealmUri, _Opts, Topic, Bridge, State) ->
-    %% mops require binary keys
-    Base = maps:get(ctxt, bridge(Bridge)),
-    CtxtEvent = bondy_broker_bridge_event:new(RealmUri, Topic, Event),
+%% @private
+%% A subscription that fails to instantiate is logged and skipped rather than
+%% aborting the whole load. The specification has already been validated, so a
+%% failure here is environmental — an absent realm, a bridge whose `init/1`
+%% never ran — and a partially loaded bridge beats a manager that cannot start.
+%% The failures are still returned, so an operator calling `load/1` sees them.
+do_load_subscription(#{<<"bridge">> := Bridge} = Subs, {Acc, Failed}) ->
+    case key_value:get([Bridge, config, enabled], Acc#state.bridges, false) of
+        true ->
+            case do_subscribe(Subs, Acc) of
+                {ok, {_Id, _Pid}} ->
+                    {Acc, Failed};
+                {error, Reason} ->
+                    #{
+                        <<"match">> := #{
+                            <<"realm">> := RealmUri, <<"topic">> := Topic
+                        }
+                    } = Subs,
+                    ?LOG_ERROR(#{
+                        description =>
+                            "Error while creating broker bridge subscription",
+                        bridge => Bridge,
+                        realm_uri => RealmUri,
+                        topic => Topic,
+                        reason => Reason
+                    }),
+                    {Acc, [{Bridge, RealmUri, Topic, Reason} | Failed]}
+            end;
+        false ->
+            {Acc, Failed}
+    end.
 
+%% @private
+%% The half of the mops context that does not change between events. It is
+%% computed once, at subscribe time, and captured by the subscriber's closure.
+%%
+%% This used to be rebuilt per event, and it reached the bridge configuration
+%% through the exported `bridge/1` — a `gen_server:call` into this very process.
+%% Every event, from every subscriber on the node, therefore queued behind a
+%% single mailbox. The state is already in scope here, so nothing needs to be
+%% asked for. `ctxt` is absent for a bridge whose `init/1` never ran, which is
+%% why it defaults rather than raising `{badkey, ctxt}` on every event.
+static_mops_ctxt(Bridge, State) ->
+    Base =
+        case get_bridge(Bridge, State) of
+            #{ctxt := Ctxt} when is_map(Ctxt) ->
+                Ctxt;
+            _ ->
+                #{}
+        end,
+    %% mops require binary keys
     Base#{
         <<"broker">> => #{
             <<"node">> => State#state.nodestring,
             <<"agent">> => State#state.broker_agent
-        },
-        <<"event">> => CtxtEvent
+        }
     }.
 
 do_subscribe(Subscription, State) ->
@@ -544,7 +642,7 @@ do_subscribe(Subscription, State) ->
 
     case get_bridge(Bridge, State) of
         undefined ->
-            error({unknown_bridge, Bridge});
+            {error, {unknown_bridge, Bridge}};
         #{id := Bridge} ->
             Opts1 = maps:put(meta, Meta, Opts0),
             do_subscribe(RealmUri, Opts1, Topic, Bridge, Action, State)
@@ -552,9 +650,13 @@ do_subscribe(Subscription, State) ->
 
 do_subscribe(RealmUri, Opts0, Topic, Bridge, Action0, State) ->
     try
+        %% Everything but the event itself is resolved once, here, so the
+        %% per-event path is a single map put.
+        StaticCtxt = static_mops_ctxt(Bridge, State),
         %% We build the fun that we will use for the subscriber
         Fun = fun(Topic1, #event{} = Event) when Topic1 == Topic ->
-            Ctxt = mops_ctxt(Event, RealmUri, Opts0, Topic, Bridge, State),
+            CtxtEvent = bondy_broker_bridge_event:new(RealmUri, Topic, Event),
+            Ctxt = StaticCtxt#{<<"event">> => CtxtEvent},
             Action1 = mops:eval(Action0, Ctxt),
             case Bridge:validate_action(Action1) of
                 {ok, Action2} ->
@@ -595,12 +697,15 @@ do_subscribe(RealmUri, Opts0, Topic, Bridge, Action0, State) ->
     catch
         Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
+                description => "Error while creating broker bridge subscriber",
                 class => Class,
                 reason => Reason,
                 stacktrace => Stacktrace,
                 bridge => Bridge
             }),
-            {{error, Reason}, State}
+            %% Answer the same shape on both paths. This used to return
+            %% `{{error, Reason}, State}`, which no caller matched.
+            {error, Reason}
     end.
 
 unsubscribe_all(State) ->

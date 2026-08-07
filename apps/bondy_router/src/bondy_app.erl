@@ -114,9 +114,13 @@ start(_Type, Args) ->
                 {ok, _} = application:ensure_all_started(
                     bondy_http_connector, permanent
                 ),
-                %% {ok, _} = application:ensure_all_started(
-                %%     bondy_broker_bridge, permanent
-                %% ),
+                %% Started here as well as by the release boot script, so that
+                %% it also runs under CT and `rebar3 shell`. Every bridge
+                %% defaults to disabled, so this starts a manager with no
+                %% subscribers unless one is configured.
+                {ok, _} = application:ensure_all_started(
+                    bondy_broker_bridge, permanent
+                ),
                 {ok, Pid}
             else
                 {error, _} = Error ->
