@@ -666,6 +666,9 @@
     stop_cluster/1,
     freeze_gc/1,
     stop_nodes/1,
+    stop_node/1,
+    restart_node/4,
+    rejoin/3,
     peer_boot/1,
     aae_reset_all_stale/0,
     aae_bump_isolated_all/0,
@@ -799,6 +802,92 @@ start_cluster(_Case, Config, #{names := Names}) ->
     start_cluster(Names, Config).
 
 %% -----------------------------------------------------------------------------
+%% @doc Stops ONE node of a cluster started by {@link start_cluster/2}, leaving
+%% the rest running and its data directory intact.
+%%
+%% Note this is `peer:stop/1', NOT {@link stop_nodes/1}: `start_cluster/2'
+%% brings nodes up with `peer:start/1', and `stop_nodes/1' belongs to the
+%% other (test_server) start path — calling it on a peer-started node fails.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec stop_node({atom(), node(), pid()}) -> ok.
+
+stop_node({_Name, _Node, Peer}) ->
+    catch peer:stop(Peer),
+    ok.
+
+%% -----------------------------------------------------------------------------
+%% @doc Stops one node of a running cluster and starts it again ON ITS OWN
+%% DATA DIRECTORY, then re-forms the cluster and waits for membership.
+%%
+%% `Idx' and `ExtraEnv' MUST be the node's ORIGINALS from `start_cluster/2':
+%% the index selects the port block and `ExtraEnv' carries boot-time overrides
+%% a testcase cannot set afterwards (notably `[partisan, peer_port]'). Passing
+%% `[]' here brings the node back on a different Partisan port, which boots a
+%% node that can never rejoin the cluster it left.
+%%
+%% The data directory is keyed on the node's NAME, so the restarted node picks
+%% up the durable state it wrote before going down. That is the whole point —
+%% a rejoin test that came back on an empty data dir would exercise a
+%% fresh-peer bootstrap, not a rejoin.
+%%
+%% Returns the new `{Name, Node, Peer}' (the node name is stable, the peer pid
+%% is not).
+%% @end
+%% -----------------------------------------------------------------------------
+-spec restart_node(
+    {atom(), node(), pid()}, pos_integer(), list(), list()
+) -> {atom(), node(), pid()}.
+
+restart_node({Name, Node, Peer}, Idx, ExtraEnv, Config) ->
+    PrivDir = proplists:get_value(priv_dir, Config),
+    PrivDir =/= undefined orelse error({missing_priv_dir, Config}),
+    Cookie = atom_to_list(erlang:get_cookie()),
+    catch peer:stop(Peer),
+    %% The replacement takes the SAME node name, so the controller's stale
+    %% connection to the previous incarnation has to be gone before we start
+    %% it — otherwise `peer:start/1' succeeds and the very first `erpc' into
+    %% the new node comes back `{erpc, noconnection}' against the dead one.
+    _ = erlang:disconnect_node(Node),
+    ok = wait_node_down(Node, 30000),
+    start_node(Name, Idx, PrivDir, Cookie, ExtraEnv).
+
+%% @private
+wait_node_down(Node, Timeout) ->
+    Deadline = erlang:monotonic_time(millisecond) + Timeout,
+    wait_node_down_loop(Node, Deadline).
+
+%% @private
+wait_node_down_loop(Node, Deadline) ->
+    case net_adm:ping(Node) of
+        pang ->
+            ok;
+        pong ->
+            case erlang:monotonic_time(millisecond) > Deadline of
+                true ->
+                    error({node_still_up, Node});
+                false ->
+                    _ = erlang:disconnect_node(Node),
+                    timer:sleep(250),
+                    wait_node_down_loop(Node, Deadline)
+            end
+    end.
+
+%% -----------------------------------------------------------------------------
+%% @doc Rejoins `Node' to `Existing' and waits until every node sees the full
+%% membership. Used after {@link restart_node/3}.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec rejoin(
+    {atom(), node(), pid()}, [{atom(), node(), pid()}], timeout()
+) -> ok.
+
+rejoin({_, Node, _}, Existing, Timeout) ->
+    [{_, First, _} | _] = Existing,
+    ok = join(Node, First, []),
+    wait_for_members(Existing, length(Existing), Timeout).
+
+%% -----------------------------------------------------------------------------
 %% @doc Stops a cluster started by {@link start_cluster/2}.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -849,6 +938,7 @@ freeze_gc_await(Node, Deadline) ->
 peer_boot(Env) ->
     ok = ensure_etc(),
     application:set_env([{kernel, ?KERNEL_ENV}]),
+    ok = install_peer_log_handler(Env),
     _ = [
         begin
             _ = application:unload(App),
@@ -861,6 +951,47 @@ peer_boot(Env) ->
      || {App, AppEnv} <- Env
     ],
     maybe_error(application:ensure_all_started(bondy_router)).
+
+%% @private
+%% Peer nodes are otherwise SILENT. Two reasons compound:
+%%
+%%   - `peer_boot/1' runs under `erpc', which gives the calling process the
+%%     CONTROLLER's group leader, and OTP's `default' handler carries a
+%%     `logger_filters:remote_gl/2' STOP filter — so every event logged while
+%%     the node boots (including the supervisor and crash reports that explain
+%%     a failed boot) is dropped on the floor;
+%%   - the peer's kernel is already running when `peer_boot/1' sets the kernel
+%%     env, so `?KERNEL_ENV''s handler config never takes effect there either.
+%%
+%% Attach a per-node file handler with `filter_default => log' and NO filters,
+%% so the node's own boot story lands next to its data directory
+%% (`<priv_dir>/<node>/node.log') and survives the run. Best-effort: a peer we
+%% cannot give a log file to should still boot.
+install_peer_log_handler(Env) ->
+    case key_value:get([bondy_router, platform_data_dir], Env, undefined) of
+        undefined ->
+            ok;
+        Dir ->
+            File = filename:join(Dir, "node.log"),
+            ok = filelib:ensure_dir(File),
+            Config = #{
+                level => info,
+                filter_default => log,
+                filters => [],
+                config => #{type => file, file => File},
+                formatter =>
+                    {logger_formatter, #{
+                        legacy_header => false,
+                        single_line => false,
+                        template => [
+                            time, " ", level, " ", pid, " ", mfa, ":", line,
+                            "\n", msg, "\n"
+                        ]
+                    }}
+            },
+            _ = logger:add_handler(bondy_ct_peer_file, logger_std_h, Config),
+            ok
+    end.
 
 %% -----------------------------------------------------------------------------
 %% @doc Stop the CT peers in `Nodes'.

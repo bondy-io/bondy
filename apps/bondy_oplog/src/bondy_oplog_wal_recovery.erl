@@ -1329,12 +1329,22 @@ read_and_decode_frame_body(Fd, Off, FrameLen, BodyEnc) ->
 %% Decodes the first and last events' HLCs out of an already-CRC-
 %% verified body. Used by both the head-scan path (to populate
 %% `head_scan.first_hlc` / `last_hlc`) and the sealed-segment index
-%% rebuild path (`scan_loop_for_index/4`). `[safe]` blocks atom-table-
-%% exhaustion attacks via crafted terms. The decoded events are not
+%% rebuild path (`scan_loop_for_index/4`). The decoded events are not
 %% retained — only the two HLCs survive — so the cost is bounded by
 %% the term-decode itself.
+%%
+%% Deliberately NOT `[safe]`. The threat it nominally covered — atom-table
+%% exhaustion via a crafted term — needs an attacker who can write this
+%% node's WAL directory AND forge the frame CRC, which is to say someone who
+%% already owns the node. The cost was concrete and severe: `[safe]` resolves
+%% atoms against the VM's atom table AT RECOVERY TIME, so a legitimate frame
+%% carrying an atom whose module has not loaded yet decodes as `badarg`,
+%% `absorb_frame/5` reads that as `{bad_body, _}`, and strict recovery treats
+%% it as TRUNCATION — silently discarding every frame after it. Peer-shipped
+%% bytes are decoded under `[safe]` at the wire boundary (`C-2`), where the
+%% control actually applies.
 decode_first_last_hlc(Body) ->
-    try binary_to_term(Body, [safe]) of
+    try binary_to_term(Body) of
         [_ | _] = Events ->
             try
                 FirstHlc = bondy_oplog_event:key_hlc(

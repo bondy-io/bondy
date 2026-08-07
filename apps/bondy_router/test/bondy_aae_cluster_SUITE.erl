@@ -44,6 +44,7 @@ all() ->
         realm_merge_event_fires_on_remote_write,
         grant_merge_event_fires_on_remote_write,
         concurrent_membership_adds_both_survive,
+        stale_peer_rejoin_durable_converges,
         rib_summary_converges_to_stub,
         rib_read_mode_cross_node_call,
         rib_stub_pubsub_cross_node,
@@ -541,6 +542,96 @@ token_version_rejected_cross_node(Config) ->
         erpc:call(N2, ?MODULE, do_authenticate, [Uri, User, JWT])
     ),
     ok.
+
+
+%% Stale-peer rejoin on the DURABLE path.
+%%
+%% A peer silent past `peer_timeout_ms` stops pinning the stability frontier,
+%% so durable truncation on the survivor proceeds WITHOUT its confirmation —
+%% deliberately, or one dead node would pin every shard forever. What this
+%% case checks is that rejoining is still lossless in BOTH directions:
+%%
+%%   - the survivor truncated history the returning node never saw, so that
+%%     range cannot arrive by page-sync and must come via catalogue install
+%%     + rederive;
+%%   - the returning node's OWN writes, made while isolated, live only in its
+%%     own MST and must flow back to the survivor.
+%%
+%% The second half is the one that would fail silently: a rejoin that only
+%% pulled would look perfectly healthy on the returning node while its unique
+%% rows had vanished from the cluster.
+%%
+%% The node restarts onto ITS OWN DATA DIRECTORY (`bondy_ct:restart_node/3`
+%% keys the dir on the node name), so this is a rejoin and not a fresh-peer
+%% bootstrap wearing the same name.
+stale_peer_rejoin_durable_converges(Config) ->
+    Names = [
+        {bondy_r1, [{[partisan, peer_port], 18194}]},
+        {bondy_r2, [{[partisan, peer_port], 18195}]}
+    ],
+    Nodes = bondy_ct:start_cluster(Names, Config),
+    [S1, S2] = Nodes,
+    {_, R1, _} = S1,
+    {_, R2, _} = S2,
+    try
+        _ = [push_module(N, ?MODULE) || N <- [R1, R2]],
+
+        %% Shrink the recency window so "silent past peer_timeout_ms" is
+        %% seconds rather than the 30s default.
+        _ = [
+            erpc:call(N, application, set_env, [
+                bondy_oplog, peer_timeout_ms, 2000
+            ])
+         || N <- [R1, R2]
+        ],
+
+        Shared = <<"rejoin_shared">>,
+        SharedV = #{username => Shared, marker => <<"before_split">>},
+        ok = apply_on(R1, ?USERS_TABLE, ?REALM, Shared, SharedV),
+        ok = wait_converge(R2, ?USERS_TABLE, ?REALM, Shared, SharedV),
+
+        %% R2 writes a row of its own and then goes down before it can sync.
+        %% Stopping its dispatch first is what makes the row genuinely unique
+        %% to R2's MST rather than a race we happened to win.
+        _ = erpc:call(R2, bondy_oplog_sync_scheduler, set_dispatch, [undefined]),
+        Only2 = <<"rejoin_only_on_r2">>,
+        Only2V = #{username => Only2, marker => <<"written_while_isolated">>},
+        ok = apply_on(R2, ?USERS_TABLE, ?REALM, Only2, Only2V),
+        ?assertMatch(
+            {ok, {Only2V, _}}, read_on(R2, ?USERS_TABLE, ?REALM, Only2)
+        ),
+
+        ok = bondy_ct:stop_node(S2),
+
+        %% R1 keeps writing while R2 is gone, then outlives the recency window
+        %% and compacts — truncating durable history R2 never saw.
+        Only1 = <<"rejoin_written_while_down">>,
+        Only1V = #{username => Only1, marker => <<"survivor_only">>},
+        ok = apply_on(R1, ?USERS_TABLE, ?REALM, Only1, Only1V),
+        timer:sleep(3000),
+        _ = erpc:call(R1, ?MODULE, do_compact_all, []),
+
+        %% R2 returns on its own data directory and rejoins.
+        S2b = bondy_ct:restart_node(
+            S2, 2, [{[partisan, peer_port], 18195}], Config
+        ),
+        {_, R2b, _} = S2b,
+        ok = push_module(R2b, ?MODULE),
+        ok = bondy_ct:rejoin(S2b, [S1, S2b], 60000),
+        _ = erpc:call(R2b, application, set_env, [
+            bondy_oplog, peer_timeout_ms, 2000
+        ]),
+
+        %% Direction 1: the returning node catches up on everything, including
+        %% the range the survivor truncated.
+        ok = wait_converge(R2b, ?USERS_TABLE, ?REALM, Shared, SharedV),
+        ok = wait_converge(R2b, ?USERS_TABLE, ?REALM, Only1, Only1V),
+
+        %% Direction 2: the returning node's isolated write flows BACK.
+        ok = wait_converge(R1, ?USERS_TABLE, ?REALM, Only2, Only2V)
+    after
+        catch bondy_ct:stop_cluster(Nodes)
+    end.
 
 %% =============================================================================
 %% CONTROLLER-SIDE HELPERS
@@ -1317,3 +1408,13 @@ collector_drain() ->
     after 5000 ->
         error(collector_drain_timeout)
     end.
+
+%% @private
+%% Runs a compaction cycle on every oplog instance of this node, so durable
+%% truncation actually happens instead of waiting on the scheduler's cadence.
+do_compact_all() ->
+    _ = [
+        catch bondy_oplog_instance:compact(I, [])
+     || I <- bondy_oplog:list_instances()
+    ],
+    ok.

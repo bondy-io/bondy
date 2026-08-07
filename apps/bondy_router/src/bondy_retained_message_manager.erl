@@ -277,19 +277,35 @@ init_evictor() ->
     Decr = fun(Realm, Msg) ->
         decr_counters(Realm, 1, bondy_retained_message:size(Msg))
     end,
+    %% A `jobs` producer that returns is restarted IMMEDIATELY, and one that
+    %% crashes never reaches the sleep below — so an eviction pass that raises
+    %% spins as fast as the scheduler can respawn it. That is not theoretical:
+    %% when the durable `main` DB fails to open, the catalogue boots with main
+    %% idle (see `bondy_namespace_catalog:open_main_into/1`) and
+    %% `bondy_retained_message:table/0` raises `retained_messages_not_provisioned`
+    %% on every pass, producing hundreds of crashed processes per millisecond
+    %% until the node's supervision tree gives out. Catch, log and sleep: a
+    %% cycle that cannot run is a cycle to skip, not a reason to melt the node.
     Fun = fun() ->
-        N = bondy_retained_message:evict_expired('_', Decr),
-        _ =
-            case N > 0 of
-                true ->
-                    ?LOG_INFO(#{
-                        description => "Evicted retained messages",
-                        count => N
-                    }),
-                    ok;
-                false ->
-                    ok
-            end,
+        try bondy_retained_message:evict_expired('_', Decr) of
+            N when N > 0 ->
+                ?LOG_INFO(#{
+                    description => "Evicted retained messages",
+                    count => N
+                });
+            _ ->
+                ok
+        catch
+            Class:Reason:Stacktrace ->
+                ?LOG_ERROR(#{
+                    description =>
+                        "Error while evicting expired retained messages; "
+                        "skipping this cycle",
+                    class => Class,
+                    reason => Reason,
+                    stacktrace => Stacktrace
+                })
+        end,
         %% We sleep for 60 secs (jobs standard min rate is 1/sec)
         timer:sleep(timer:seconds(60))
     end,

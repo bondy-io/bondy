@@ -338,12 +338,99 @@ This matters because:
 
 - **No tombstones to ship over AE.** Sync sessions exchange only
   pages that exist; truncated keys are simply gone.
-- **GC reclaims the space.** The pack-store rewrite GC reads only
-  pages reachable from the live root; freed pages are not written
-  to the new pack and the old packs are unlinked. (The ETS store
-  prunes freed pages by epoch.)
 - **Truncation is deterministic.** Every replica that truncates the
   same prefix arrives at the same tree (same pages, same root hash).
+
+Note what truncation does **not** do: it does not free space. It unlinks
+the dropped subtrees and leaves them unreferenced. Turning that into
+reclaimed bytes is a separate step with its own cost model — see below.
+
+### Reclamation: when the space actually comes back
+
+Truncation and reclamation are deliberately decoupled, because the two
+backends pay completely different prices for the second half.
+
+| | ephemeral (`bondy_mst_ets_store`) | durable (`bondy_mst_pack_store`) |
+| --- | --- | --- |
+| what a collection costs | mark from the roots, `ets:delete` the rest | **rewrite every sealed pack** into a new one |
+| when it runs | inline, on every truncation (`truncate_below_or_equal/4`) | on the compaction tick, at most hourly (`maybe_collect_durable/1`) |
+| what it reclaims | RAM | disk |
+
+On the **ephemeral** backend a collection is cheap enough to run on
+every truncation, which is what `truncate_below_or_equal/4` does — it
+composes `bondy_mst:truncate/2` with `bondy_mst:gc/2` in one step. This
+is reachability-mode GC (a keep-root list), not epoch mode; the caller
+passes the session-pinned peer roots and `gc/2` adds the current root.
+
+On the **durable** backend a collection is a full sealed-pack rewrite,
+so it cannot ride on truncation. `should_compact/3` coalesces whenever
+there is more than one sealed pack, so a per-truncation call would
+rewrite the entire sealed set every cycle. Instead it runs from the
+compaction tick — the instance's one periodic in-process hook, shared
+with the unservable-root self-heal — behind three gates:
+
+```mermaid
+flowchart TB
+    TICK[compaction tick]
+    PACK{"pack store?"}
+    ARM{"first tick<br/>since boot?"}
+    DUE{"≥ durable_gc_interval_ms<br/>since last collection?"}
+    SEAL{"seal in flight?"}
+    GC["bondy_mst:gc(MST, pinned_roots)"]
+    SKIP[skip]
+
+    TICK --> PACK
+    PACK -- no --> SKIP
+    PACK -- yes --> ARM
+    ARM -- "yes: arm the clock,<br/>do not collect" --> SKIP
+    ARM -- no --> DUE
+    DUE -- no --> SKIP
+    DUE -- yes --> SEAL
+    SEAL -- "yes: retry next tick,<br/>clock NOT stamped" --> SKIP
+    SEAL -- no --> GC
+```
+
+Each gate earns its place:
+
+- **Arm-on-boot.** A shard that ran for months reopens with many sealed
+  packs, so firing on the first tick would stall the instance on a full
+  rewrite exactly while it is coming up. The first tick records the time
+  and collects nothing.
+- **Interval** (`bondy_oplog.durable_gc_interval_ms`, default 1 h). The
+  leak being drained is slow — durable namespaces are low write-volume —
+  and the rewrite is the most expensive thing the instance does.
+- **Seal in flight.** A collection rewrites the very packs a seal is
+  producing. When skipped for this reason the clock is deliberately *not*
+  stamped, so the next tick retries rather than waiting out another hour.
+
+It runs **in the instance process** because the pack store declares
+`process_bound_reads => true` — its sealed-pack fds are owned by that
+process — and the rewrite reads every sealed record.
+
+#### Liveness is reachability, and only reachability
+
+Both backends decide what to keep by marking from the keep-roots. The
+pack rewrite keeps exactly the reachable set; a tombstone (`free/3`,
+which on this backend is `free_set` membership) is a *hint* that a page
+is probably garbage, never an independent reason to delete it.
+
+That distinction is load-bearing, and it is the same rule `get/2`
+follows on that backend: the `free_set` is not a read mask either.
+Adding "and not tombstoned" to the keep test can only change the outcome
+for a page that is **reachable from a live root yet tombstoned** — and it
+would delete that page from disk permanently. Such a page is exactly
+what a stray `free/3` produces, and one such bug (a merge freeing a
+*donor* page hash inside the *receiver's* store) was live in this tree.
+Being conservative costs no reclamation: a genuinely dead page is
+unreachable and is dropped by the reachability test anyway.
+
+Finally, `bondy_mst:gc/2` **refuses to sweep at all** while the current
+root is unservable. The mark walk skips missing pages silently, so a
+pre-existing hole would under-mark everything beneath it and the sweep
+would then delete live, reachable pages — turning a small anomaly into
+permanent subtree loss. On that path it keeps the garbage for the cycle,
+records a classified report retrievable in-node via
+`bondy_mst:gc_aborts()`, and emits `[bondy_mst, gc, aborted]`.
 
 `bondy_mst:truncate/2` is implemented in `bondy_mst.erl`
 (`truncate_at` / `truncate_scan` / `rebuild_truncated`);

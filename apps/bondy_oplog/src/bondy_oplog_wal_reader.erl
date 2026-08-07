@@ -777,8 +777,17 @@ deliver_or_filter(#iter{} = Iter, Batch, Hlcs, Seg, NextOff) ->
 %% A frame body is `term_to_binary([Event, ...])`. We accept any
 %% non-empty list of `#bondy_oplog_event{}` records; anything else is a
 %% framing error.
+%%
+%% Deliberately NOT `[safe]`: this reads frames THIS node wrote. Under
+%% `[safe]` an event carrying an atom absent from the VM's atom table at
+%% replay time raises `badarg` and is reported as `{invalid_batch, badarg}` —
+%% i.e. a perfectly good record is misattributed to frame corruption and
+%% silently dropped. `binary_to_term/1` still raises `badarg` on malformed
+%% bytes, so real framing errors are caught exactly as before. Peer-shipped
+%% bytes are decoded under `[safe]` at the wire boundary (`C-2`), which is
+%% where that control belongs.
 decode_batch_body(Body) ->
-    try binary_to_term(Body, [safe]) of
+    try binary_to_term(Body) of
         [_ | _] = Batch ->
             case lists:all(fun is_event/1, Batch) of
                 true -> {ok, Batch};

@@ -88,6 +88,13 @@
 %% first — see the domination gate.
 -define(SELF_HEAL_UNSERVABLE_AFTER_MS, 60_000).
 
+%% Minimum gap between durable (pack) page reclamations — see
+%% `maybe_collect_durable/1`. A collection rewrites every sealed pack, so this
+%% is deliberately coarse: the leak it drains is slow (durable namespaces are
+%% low write-volume) and the rewrite is the most expensive thing the instance
+%% can do. Override with `bondy_oplog.durable_gc_interval_ms`.
+-define(DURABLE_GC_INTERVAL_MS, 3_600_000).
+
 %% Async pack-store seal: how many times the instance re-runs a failed seal
 %% job before giving up and stopping so the supervisor restart + reopen
 %% recovery re-seals the frozen incoming pack from scratch. A persistent
@@ -244,6 +251,9 @@ without protocol changes.
     %% root, and the self-heal threshold must measure the streak, not
     %% the root. See `maybe_self_heal_unservable/2`.
     unservable_since = undefined :: undefined | integer(),
+    %% Monotonic ms of the last durable (pack) page reclamation. See
+    %% `maybe_collect_durable/1`.
+    last_durable_gc = undefined :: undefined | integer(),
     backend :: backend(),
     validator_module :: module(),
     validator_state :: term(),
@@ -6068,6 +6078,77 @@ truncate_below_or_equal(MST, Watermark, _Backend, _KeepRoots) ->
     bondy_mst:truncate(MST, Watermark).
 
 %% @private
+%% Durable (pack) page reclamation.
+%%
+%% `truncate_below_or_equal/4` collects only on the ETS backend; on the pack
+%% backend truncation merely unlinks the dropped subtrees, so every durable
+%% compaction left its prefix in the sealed packs and NOTHING ever reclaimed
+%% it — the disk-side twin of the ETS page leak, slow-burning but unbounded.
+%%
+%% Runs on the compaction tick (the one periodic in-process hook, alongside
+%% `maybe_self_heal_unservable/2`) rather than per truncation, because a pack
+%% collection is a full sealed-pack REWRITE: `should_compact/3` coalesces
+%% whenever there is more than one sealed pack, so invoking it per cycle would
+%% rewrite the entire sealed set every cycle. Gated on:
+%%
+%%   - the store actually being a pack store (ETS collects inline already);
+%%   - no seal in flight — a collection rewrites the very packs a seal is
+%%     producing;
+%%   - at most one collection per `durable_gc_interval_ms` (default 1 hour).
+%%
+%% It must run HERE, in the instance process: the pack store declares
+%% `process_bound_reads => true` because its sealed-pack fds are owned by this
+%% process, and the collection reads every sealed record to rewrite it.
+%%
+%% Liveness is `bondy_mst:gc/2`'s: it marks from the current root plus the
+%% session-pinned peer roots, and refuses to sweep at all while the current
+%% root is unservable.
+maybe_collect_durable(#state{mst = undefined} = State) ->
+    State;
+maybe_collect_durable(#state{mst = MST} = State) ->
+    case pack_backend(MST) of
+        undefined ->
+            State;
+        Backend ->
+            Now = erlang:monotonic_time(millisecond),
+            Interval = application:get_env(
+                bondy_oplog, durable_gc_interval_ms, ?DURABLE_GC_INTERVAL_MS
+            ),
+            case State#state.last_durable_gc of
+                undefined ->
+                    %% ARM the clock, do not collect. A shard that has been
+                    %% running for months reopens with many sealed packs, and
+                    %% `should_compact/3` coalesces whenever there is more than
+                    %% one — so firing on the first tick after boot would stall
+                    %% the instance on a full sealed-pack rewrite exactly when
+                    %% it is trying to come up.
+                    State#state{last_durable_gc = Now};
+                Last when Now - Last < Interval ->
+                    State;
+                _ ->
+                    case bondy_mst_pack_store:seal_in_flight(Backend) of
+                        true ->
+                            %% Leave the clock alone so the next tick retries
+                            %% rather than waiting out another whole interval.
+                            State;
+                        false ->
+                            MST1 = bondy_mst:gc(MST, pinned_roots(State)),
+                            State#state{mst = MST1, last_durable_gc = Now}
+                    end
+            end
+    end.
+
+%% @private
+%% The pack store's backend state, or `undefined` for any other store. Keyed
+%% off the store record rather than `#state.backend` so it cannot drift from
+%% how that field happens to be populated.
+pack_backend(MST) ->
+    case bondy_mst:store(MST) of
+        {bondy_mst_store, bondy_mst_pack_store, Backend, _} -> Backend;
+        _ -> undefined
+    end.
+
+%% @private
 %% The live (non-expired) session-pinned peer roots — the extra
 %% KeepRoots for `truncate_below_or_equal/4`'s page GC.
 pinned_roots(#state{pinned_peer_roots = Pins}) when map_size(Pins) =:= 0 ->
@@ -6110,7 +6191,9 @@ do_compact_sync(#state{} = State0, PeerRoots) ->
     %% Unservable-own-root self-heal runs on the compaction tick — the
     %% one periodic in-process hook — BEFORE the frontier computation
     %% (a rebuilt tree simply compacts as `no_change`).
-    State = maybe_self_heal_unservable(StateR, HasProjection),
+    State = maybe_collect_durable(
+        maybe_self_heal_unservable(StateR, HasProjection)
+    ),
     Result = run_compaction(
         State#state.instance_id,
         State#state.mst,

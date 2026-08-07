@@ -213,6 +213,15 @@ volume.
 -export([complete_seal/2]).
 -export([seal_in_flight/1]).
 
+-ifdef(TEST).
+%% The page codec is the durability contract with the on-disk format; the
+%% atom-table hazard it has to survive cannot be reached through the public
+%% API (constructing a page with an atom this VM does not know is impossible
+%% from inside this VM).
+-export([serialise/1]).
+-export([deserialise/1]).
+-endif.
+
 %% =============================================================================
 %% bondy_mst_store CALLBACKS
 %% =============================================================================
@@ -1270,8 +1279,25 @@ serialise(Page) ->
     ).
 
 %% @private
+%% Deliberately NOT `[safe]`. These bytes were produced by `serialise/1` on
+%% THIS node and read back from this node's own pack files, so `[safe]` buys
+%% no protection here: the atoms a page carries were already materialised in
+%% this VM when the page was built or when a peer's page was decoded off the
+%% wire. That wire boundary is where the `C-2` `[safe]` decodes live
+%% (`bondy_oplog_cell_kernel`, the `bondy_oplog_crdt_*` modules) and it is the
+%% one that matters.
+%%
+%% What `[safe]` did buy was a boot-time brick. It resolves atoms against the
+%% VM's atom table AT READ TIME, and on a cold start that table is a moving
+%% target — modules load lazily, and `bondy_oplog_instance:init/1` folds the
+%% store early. A page holding any atom whose defining module has not been
+%% loaded yet (a value that arrived from a peer on a newer version, or simply
+%% a module not reached this early in boot) fails `binary_to_term` with
+%% `badarg`. The fold dies, the instance dies, and the node cannot open a
+%% store it had written perfectly well. `binary_to_term/1` still raises
+%% `badarg` on genuinely malformed bytes, so corruption detection is unchanged.
 deserialise(Bytes) ->
-    {Level, Low, List} = erlang:binary_to_term(Bytes, [safe]),
+    {Level, Low, List} = erlang:binary_to_term(Bytes),
     bondy_mst_page:new(Level, Low, List).
 
 %% @private
@@ -1373,10 +1399,7 @@ walk_reachable(T, Hash, Acc) when is_binary(Hash) ->
 %% Walk every sealed entry once. Newest-first dedup: if the same hash
 %% appears in multiple sealed packs (legal because content is
 %% identical), it's accounted for exactly once.
-partition_sealed(
-    #?MODULE{sealed_views = Views, free_set = FreeSet},
-    Reachable
-) ->
+partition_sealed(#?MODULE{sealed_views = Views}, Reachable) ->
     Init = {[], 0, sets:new([{version, 2}])},
     {Kept, Dropped, _Seen} = lists:foldl(
         fun(#sealed_view{idx = Idx}, Acc) ->
@@ -1387,9 +1410,29 @@ partition_sealed(
                             {K, D, S};
                         false ->
                             S1 = sets:add_element(H, S),
-                            Keep =
-                                sets:is_element(H, Reachable) andalso
-                                    not sets:is_element(H, FreeSet),
+                            %% REACHABILITY ALONE decides. The `free_set` is
+                            %% deliberately NOT a second kill criterion here,
+                            %% for the same reason `get/2` refuses to treat it
+                            %% as a read mask: reachability from the keep-roots
+                            %% is the single source of truth for liveness, and
+                            %% a tombstone is only a hint that a page is
+                            %% PROBABLY garbage.
+                            %%
+                            %% Adding `andalso not tombstoned` (the previous
+                            %% shape) could only ever change the outcome for a
+                            %% page that is REACHABLE FROM A LIVE ROOT yet
+                            %% carries a tombstone — and it would delete that
+                            %% page from disk permanently. Such a page is
+                            %% exactly what a stray `free/3` produces; one such
+                            %% bug (a merge freeing a donor hash in the
+                            %% receiver's store) was live in this tree until
+                            %% 2026-08-07. It costs nothing to be conservative:
+                            %% a genuinely dead page is unreachable and gets
+                            %% dropped by this same test, so keeping
+                            %% reachable-but-tombstoned pages delays no
+                            %% reclamation — they are collected on the next
+                            %% cycle once they actually fall out of the tree.
+                            Keep = sets:is_element(H, Reachable),
                             case Keep of
                                 true -> {[H | K], D, S1};
                                 false -> {K, D + 1, S1}

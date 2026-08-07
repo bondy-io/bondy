@@ -30,7 +30,8 @@ durable_compaction_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(Dir) ->
         [
             {timeout, 60, fun() -> durable_compaction_no_seal(Dir) end},
-            {timeout, 60, fun() -> durable_compaction_with_seal(Dir) end}
+            {timeout, 60, fun() -> durable_compaction_with_seal(Dir) end},
+            {timeout, 120, fun() -> durable_gc_reclaims_sealed_bytes(Dir) end}
         ]
     end}.
 
@@ -203,3 +204,58 @@ del_tree(Dir) ->
         false ->
             file:delete(Dir)
     end.
+
+%% Durable page RECLAMATION, as opposed to truncation.
+%%
+%% Truncation on the pack backend only unlinks the dropped subtrees;
+%% `truncate_below_or_equal/4` collects on ETS alone. So until
+%% `maybe_collect_durable/1` existed, every durable compaction left its whole
+%% dropped prefix in the sealed packs and nothing ever reclaimed it — bytes on
+%% disk grew monotonically for the lifetime of the shard.
+%%
+%% Asserts the bytes actually come back, because the code path is otherwise
+%% invisible: it is gated behind a one-hour interval and a seal-in-flight
+%% check, so a shard could run for months without it ever being exercised.
+durable_gc_reclaims_sealed_bytes(Dir) ->
+    InstId = mk_id(),
+    NS = ns_of(InstId),
+    {Cache, Proj} = register_shard(NS, primary, 0, lww_register),
+    {ok, _} = open_pack_instance(InstId, NS, Dir),
+    %% The interval exists to stop a full sealed-pack rewrite running every
+    %% cycle; here we want it on every tick.
+    ok = application:set_env(bondy_oplog, durable_gc_interval_ms, 0),
+    try
+        append_batch(InstId, 1, 400),
+        _ = bondy_oplog_instance:await_apply(InstId),
+        ?assert(length(sealed_packs(Dir)) >= 1),
+        Before = sealed_bytes(Dir),
+        ?assert(Before > 0),
+
+        %% Drop essentially everything, then let the tick collect. Two rounds:
+        %% the first truncates and the second is the tick that reclaims.
+        Root = bondy_oplog_instance:root_hash(InstId),
+        _ = bondy_oplog_instance:compact(InstId, [Root]),
+        _ = bondy_oplog_instance:compact(InstId, []),
+
+        After = sealed_bytes(Dir),
+        ?assert(
+            After < Before,
+            lists:flatten(io_lib:format(
+                "sealed bytes did not shrink: before=~p after=~p", [Before, After]
+            ))
+        ),
+        %% ...and the shard is still fully servable afterwards, which is the
+        %% part that matters: a collection that drops a reachable page would
+        %% also "reclaim" bytes.
+        D = bondy_oplog_instance:diagnose_root(InstId),
+        ?assertEqual(true, maps:get(servable, D))
+    after
+        ok = application:unset_env(bondy_oplog, durable_gc_interval_ms),
+        ok = bondy_oplog:stop_instance(InstId),
+        ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
+        close_shard(Cache, Proj)
+    end.
+
+%% @private
+sealed_bytes(Dir) ->
+    lists:sum([filelib:file_size(F) || F <- sealed_packs(Dir)]).
