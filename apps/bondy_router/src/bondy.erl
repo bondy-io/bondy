@@ -47,6 +47,7 @@ per-process Bondy and Logger metadata.
 -export([cast/5]).
 -export([check_response/4]).
 -export([get_process_metadata/0]).
+-export([is_owner/1]).
 -export([lrw_nodes/2]).
 -export([peek_via/1]).
 -export([prepare_send/2]).
@@ -65,14 +66,43 @@ per-process Bondy and Logger metadata.
 %% =============================================================================
 
 -doc """
-Returns the N top set of connected nodes sorted in increasing order of
-their weight for a given key according to the Lowest Random Weight hashing
-algorithm (a.k.a Rendezvous hashing).
+Returns the N top nodes for `Key`, sorted in increasing order of their weight
+under Lowest Random Weight hashing (a.k.a. Rendezvous hashing).
+
+The candidate set is the WHOLE cluster — this node plus its visible peers.
+`partisan:nodes/0` is the counterpart of `erlang:nodes/1` and so excludes the
+local node; selecting over it alone meant this function could never return
+`node()`, and returned `[]` on a single-node cluster. Both make it useless for
+its only real purpose, which is deciding *which node owns Key*.
 """.
 -spec lrw_nodes(Key :: any(), N :: non_neg_integer()) -> [node()].
 
 lrw_nodes(Key, N) ->
-    lrw:top(Key, partisan:nodes(), N).
+    lrw:top(Key, cluster_nodes(), N).
+
+-doc """
+Whether this node is the owner of `Key` under `lrw_nodes/2`.
+
+The basis for coordination-free partitioning of cluster-wide work: every node
+asks this of every item, and — for a membership all nodes agree on — exactly
+one answers `true`. Nothing is exchanged to decide it.
+
+Membership changes are not atomic across the cluster, so during churn two nodes
+may briefly both claim a key, or neither. A caller MUST therefore be safe to run
+twice and safe to skip: use it to partition idempotent, best-effort work (a
+reclamation sweep), never to fence an irreversible one.
+""".
+-spec is_owner(Key :: any()) -> boolean().
+
+is_owner(Key) ->
+    case lrw_nodes(Key, 1) of
+        [Node] -> Node =:= partisan:node();
+        [] -> false
+    end.
+
+%% @private
+cluster_nodes() ->
+    [partisan:node() | partisan:nodes()].
 
 aae_exchanges() ->
     partisan_plumtree_broadcast:exchanges().

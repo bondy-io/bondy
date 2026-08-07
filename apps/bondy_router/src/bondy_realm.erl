@@ -805,6 +805,8 @@ connected to any realm.
 -export([is_trusted_issuer/2]).
 -export([is_type/1]).
 -export([is_value_inherited/2]).
+-export([auth_realm_uri/1]).
+-export([auth_realm_uris/0]).
 -export([list/0]).
 -export([lookup/1]).
 -export([password_opts/1]).
@@ -1495,10 +1497,12 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
 
                 ok = bondy_rbac:remove_all(Uri, Opts1),
 
-                %% Delete all tickets
+                %% Delete all tickets and tokens. Both are bucketed by the
+                %% AUTH realm, so for an SSO-backed realm they live in the SSO
+                %% realm's bucket alongside its sibling realms' — each revokes
+                %% only what is scoped to `Uri`, never the whole bucket.
                 ok = bondy_ticket:revoke_all(Uri),
-
-                %% TODO Delete all tokens
+                ok = bondy_oauth_token:revoke_all(Uri),
 
                 %% Delete all sources
                 bondy_rbac_source:remove_all(Uri),
@@ -1624,6 +1628,35 @@ list() ->
     %% `list/2` scatter-scans every realm across all shards.
     {ok, Rows} = bondy_db:list(table(), ?REALM_BAND),
     [from_term(V) || {_K, V, _Hlc} <- Rows, is_tuple(V)].
+
+-doc """
+The distinct realms that hold authentication state — tickets, OAuth2 tokens.
+
+Those are bucketed by a user's AUTHENTICATION realm, which is a realm's SSO
+realm where it has one and the realm itself otherwise. Several realms therefore
+collapse onto one bucket, and this returns each bucket ONCE.
+
+The collapse is why this exists rather than being open-coded per caller: a
+caller that partitions work across nodes must decide ownership of the BUCKET,
+after the collapse. Deciding per member realm instead would let two nodes owning
+two members of one SSO realm both claim the same bucket — the concurrent-writer
+case such partitioning exists to prevent.
+""".
+-spec auth_realm_uris() -> [uri()].
+
+auth_realm_uris() ->
+    lists:usort([auth_realm_uri(Realm) || Realm <- list()]).
+
+-doc """
+The realm that holds `Realm`'s authentication state: its SSO realm when it has
+one, otherwise `Realm` itself.
+""".
+-spec auth_realm_uri(Realm :: t() | uri()) -> uri().
+
+auth_realm_uri(#realm{uri = Uri} = Realm) ->
+    bondy_stdlib:or_else(sso_realm_uri(Realm), Uri);
+auth_realm_uri(Uri) when is_binary(Uri) ->
+    auth_realm_uri(fetch(Uri)).
 
 -doc "Returns the external map representation of the realm.".
 -spec to_external(t() | uri()) -> external().

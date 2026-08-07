@@ -20,7 +20,8 @@ all() ->
         {group, api_client},
         {group, resource_owner},
         {group, user},
-        {group, oauth}
+        {group, oauth},
+        {group, tickets}
     ].
 
 groups() ->
@@ -55,8 +56,19 @@ groups() ->
             password_token_crud_1,
             issue_revoke_by_device_id,
             issue_refresh_revoke_by_device_id,
+            %% Ownership first: the sweeps below partition their work by it, so
+            %% a broken primitive shows up as "ownership is broken" rather than
+            %% as a confusing "the sweep scanned nothing".
+            single_node_owns_every_realm,
             cleanup_keeps_live_tokens,
-            cleanup_reaps_disabled_user_tokens
+            cleanup_reaps_disabled_user_tokens,
+            reclaimer_sweep_reaps_via_jobs,
+            reclaimer_timer_path_sweeps_and_reschedules
+        ]},
+        {tickets, [sequence], [
+            ticket_cleanup_reaps_expired_single_cell,
+            ticket_cleanup_prunes_expired_device_entries,
+            ticket_cleanup_reaps_disabled_user_tickets
         ]}
     ].
 
@@ -642,6 +654,220 @@ cleanup_reaps_disabled_user_tokens(Config) ->
         bondy_oauth_token:lookup(Uri, RToken),
         "A disabled user's tokens must be reclaimed"
     ).
+
+%% The residue lazy pruning cannot reach: a `client_id = all` ticket is ONE
+%% ticket per cell, keyed by `{Authid, RealmUri, DeviceId}`, so a cell whose key
+%% stops being used is never rewritten and no write-path prune can see it. This
+%% is the DEFAULT shape — everything issued without a `client_ticket`.
+ticket_cleanup_reaps_expired_single_cell(Config) ->
+    Uri = ?config(realm_uri, Config),
+    U = new_user(Uri, <<"ticket_expired">>),
+    Live = local_scope(Uri, all),
+    Dead = local_scope(Uri, <<"device_dead">>),
+
+    ok = bondy_ticket:store_ticket(Uri, U, claims(Uri, U, Live, live)),
+    ok = bondy_ticket:store_ticket(Uri, U, claims(Uri, U, Dead, expired)),
+    ?assertMatch({ok, _}, bondy_ticket:lookup(Uri, U, Live)),
+    ?assertMatch({ok, _}, bondy_ticket:lookup(Uri, U, Dead)),
+
+    Stats = bondy_ticket:cleanup(),
+    ?assertEqual([], maps:get(errors, Stats)),
+    ?assert(maps:get(expired, Stats) >= 1),
+
+    ?assertEqual({error, not_found}, bondy_ticket:lookup(Uri, U, Dead)),
+    ?assertMatch(
+        {ok, _},
+        bondy_ticket:lookup(Uri, U, Live),
+        "An unexpired ticket must survive the sweep"
+    ).
+
+%% The other shape: a client-scoped cell is a per-device LIST, so an expired
+%% device entry is pruned from the cell while the cell itself survives.
+ticket_cleanup_prunes_expired_device_entries(Config) ->
+    Uri = ?config(realm_uri, Config),
+    U = new_user(Uri, <<"ticket_devices">>),
+    Client = <<"app_sweep">>,
+    Live = client_scope(Uri, Client, <<"device_live">>),
+    Dead = client_scope(Uri, Client, <<"device_dead">>),
+
+    ok = bondy_ticket:store_ticket(Uri, U, claims(Uri, U, Live, live)),
+    ok = bondy_ticket:store_ticket(Uri, U, claims(Uri, U, Dead, expired)),
+    ?assertMatch({ok, _}, bondy_ticket:lookup(Uri, U, Dead)),
+
+    Stats = bondy_ticket:cleanup(),
+    ?assertEqual([], maps:get(errors, Stats)),
+
+    ?assertEqual({error, not_found}, bondy_ticket:lookup(Uri, U, Dead)),
+    ?assertMatch(
+        {ok, _},
+        bondy_ticket:lookup(Uri, U, Live),
+        "Pruning one device's entry must not drop the cell"
+    ).
+
+%% `revoke_all/2` already runs on user disable, so this is the backstop for an
+%% event a node missed while partitioned or restarting — the sweep must reach
+%% the same conclusion independently.
+ticket_cleanup_reaps_disabled_user_tickets(Config) ->
+    Uri = ?config(realm_uri, Config),
+    U = new_user(Uri, <<"ticket_disabled">>),
+    Scope = local_scope(Uri, all),
+
+    ok = bondy_ticket:store_ticket(Uri, U, claims(Uri, U, Scope, live)),
+    ?assertMatch({ok, _}, bondy_ticket:lookup(Uri, U, Scope)),
+
+    ok = bondy_rbac_user:disable(Uri, U),
+
+    Stats = bondy_ticket:cleanup(),
+    ?assertEqual([], maps:get(errors, Stats)),
+    ?assert(maps:get(deactivated, Stats) >= 1),
+
+    ?assertEqual({error, not_found}, bondy_ticket:lookup(Uri, U, Scope)).
+
+%% A scope with `client_id = all` — the default shape, one ticket per cell.
+local_scope(Uri, DeviceId) ->
+    #{realm => Uri, client_id => all, device_id => DeviceId}.
+
+%% A client-scoped scope — a per-device list in one cell.
+client_scope(Uri, ClientId, DeviceId) ->
+    #{realm => Uri, client_id => ClientId, device_id => DeviceId}.
+
+claims(Uri, Authid, Scope, Liveness) ->
+    Now = erlang:system_time(second),
+    ExpiresAt =
+        case Liveness of
+            live -> Now + 3600;
+            %% Well clear of the leeway is_expired/2 applies.
+            expired -> Now - 3600
+        end,
+    #{
+        authrealm => Uri,
+        authid => Authid,
+        scope => Scope,
+        expires_at => ExpiresAt
+    }.
+
+new_user(Uri, U) ->
+    R = #{
+        <<"username">> => U,
+        <<"password">> => <<"123456">>,
+        <<"meta">> => #{},
+        <<"groups">> => []
+    },
+    {ok, _} = bondy_oauth2_resource_owner:add(Uri, R),
+    U.
+
+%% Ownership must hold on a cluster of one, and this is the regression guard
+%% that matters most: `bondy:lrw_nodes/2` used to select over `partisan:nodes()`,
+%% which — being the counterpart of `erlang:nodes/1` — EXCLUDES the local node.
+%% It could therefore never return `node()`, and returned `[]` on a single-node
+%% cluster. Ownership built on that would answer `false` everywhere and no realm
+%% would ever be swept, silently, with every test of the sweep itself still
+%% passing.
+single_node_owns_every_realm(Config) ->
+    Uri = ?config(realm_uri, Config),
+    Self = partisan:node(),
+
+    ?assertEqual([Self], bondy:lrw_nodes(Uri, 1)),
+    ?assert(bondy:is_owner(Uri)),
+
+    %% Whatever the key, the only node owns it — no key may route to nobody.
+    lists:foreach(
+        fun(N) ->
+            Key = <<"com.example.realm.", (integer_to_binary(N))/binary>>,
+            ?assertEqual([Self], bondy:lrw_nodes(Key, 1)),
+            ?assert(bondy:is_owner(Key))
+        end,
+        lists:seq(1, 25)
+    ).
+
+%% The whole wiring end to end: the scheduler enqueues onto `bondy_jobs`, a job
+%% worker runs the sweep, and the sweep reclaims. Deliberately goes through
+%% `bondy_reclaimer:sweep/0` rather than calling `cleanup/0` directly, so a
+%% break anywhere in that chain — supervision, enqueue, the fun it builds — is
+%% caught rather than assumed.
+reclaimer_sweep_reaps_via_jobs(Config) ->
+    Uri = ?config(realm_uri, Config),
+    {U, RToken} = new_user_with_token(Uri, <<"cleanup_via_jobs">>),
+    ?assertMatch({ok, _}, bondy_oauth_token:lookup(Uri, RToken)),
+
+    ok = bondy_rbac_user:disable(Uri, U),
+    ok = bondy_reclaimer:sweep(),
+
+    %% Asynchronous by design — the sweep runs on a job worker, not here.
+    wait_until(
+        fun() ->
+            {error, not_found} =:= bondy_oauth_token:lookup(Uri, RToken)
+        end,
+        reclaimed_via_jobs
+    ).
+
+%% The SCHEDULED path, which `reclaimer_sweep_reaps_via_jobs` does not reach:
+%% `sweep/0` enters at `handle_cast`, so it exercises neither `schedule/1`,
+%% the jitter in `next_interval/0`, nor the `handle_info({timeout, ...})`
+%% clause. A mistake in any of those would mean the sweeps NEVER fire on their
+%% own — silently, with every other reclamation test still green.
+%%
+%% Driven by delivering the timer message with the server's REAL ref rather than
+%% by waiting on wall-clock, so it is deterministic and costs no sleep.
+reclaimer_timer_path_sweeps_and_reschedules(Config) ->
+    Uri = ?config(realm_uri, Config),
+    {U, RToken} = new_user_with_token(Uri, <<"cleanup_via_timer">>),
+    ok = bondy_rbac_user:disable(Uri, U),
+    ?assertMatch({ok, _}, bondy_oauth_token:lookup(Uri, RToken)),
+
+    %% `init/1` must have armed a timer at all — this is the assertion that
+    %% would have caught a reclaimer that never scheduled anything.
+    {state, Ref0} = sys:get_state(bondy_reclaimer),
+    ?assert(is_reference(Ref0)),
+
+    Remaining = erlang:read_timer(Ref0),
+    ?assert(is_integer(Remaining) andalso Remaining > 0),
+
+    %% Jitter may only bring a sweep FORWARD, never push it out.
+    Interval = bondy_config:get([security, reclamation, interval], 21600000),
+    ?assert(
+        Remaining =< Interval,
+        "Jitter must only ever subtract from the configured interval"
+    ),
+
+    %% Fire the scheduled path itself.
+    bondy_reclaimer ! {timeout, Ref0, scheduled_sweep},
+
+    wait_until(
+        fun() ->
+            {error, not_found} =:= bondy_oauth_token:lookup(Uri, RToken)
+        end,
+        reclaimed_by_timer
+    ),
+
+    %% ...and it must RE-ARM, or reclamation would happen exactly once per boot.
+    wait_until(
+        fun() ->
+            case sys:get_state(bondy_reclaimer) of
+                {state, Ref} -> is_reference(Ref) andalso Ref =/= Ref0;
+                _ -> false
+            end
+        end,
+        reclaimer_rescheduled
+    ).
+
+%% @private
+wait_until(Fun, Tag) ->
+    wait_until(Fun, Tag, erlang:monotonic_time(millisecond) + 10000).
+
+%% @private
+wait_until(Fun, Tag, Deadline) ->
+    case Fun() of
+        true ->
+            ok;
+        _ ->
+            case erlang:monotonic_time(millisecond) > Deadline of
+                true -> error({wait_timeout, Tag});
+                false ->
+                    timer:sleep(100),
+                    wait_until(Fun, Tag, Deadline)
+            end
+    end.
 
 %% A fresh resource owner plus one issued password token, returned as
 %% `{Username, RefreshToken}`.

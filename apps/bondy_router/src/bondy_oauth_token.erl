@@ -462,24 +462,34 @@ revoke(RealmUri, RefreshToken) when is_binary(RefreshToken) ->
     end.
 
 -doc """
-Revokes all tokens issued to all users in realm `RealmUri`.
+Revokes every token that is valid on realm `RealmUri`.
+
+Tokens are bucketed by the AUTH realm, so a member realm's tokens sit in its SSO
+realm's bucket together with every SIBLING realm's. Clearing that bucket — which
+this used to do, having resolved the auth realm — would revoke the siblings'
+users too. Two buckets are therefore treated differently:
+
+- **`RealmUri`'s own bucket** holds tokens issued by sessions that authenticated
+  against it (its local, non-SSO users). Those users go with the realm, so it is
+  cleared wholesale.
+- **Every other auth realm** is a shared SSO bucket. Only tokens whose
+  `authscope` names `RealmUri` are removed; a token scoped to `all` is kept,
+  since it still grants the realms its user can reach.
+
+The auth realm is deliberately NOT resolved from `RealmUri`:
+`bondy_realm:delete/2` clears the realm record before running this, so there
+would be nothing to resolve — and the previous implementation, which did
+resolve it, therefore silently revoked NOTHING on that path. Every surviving
+auth realm is scanned instead. O(realms), on a cold one-off path.
 """.
 -spec revoke_all(RealmUri :: uri()) -> ok.
 
 revoke_all(RealmUri) when is_binary(RealmUri) ->
     try
-        case get_authrealm_uri(RealmUri) of
-            {ok, AuthRealmUri} ->
-                Table = table(),
-                {ok, Rows} = bondy_db:list(Table, AuthRealmUri),
-                _ = [
-                    bondy_db:apply(Table, AuthRealmUri, Key, clear)
-                 || {Key, _Set, _Hlc} <- Rows
-                ],
-                ok;
-            {error, _} ->
-                ok
-        end
+        Table = table(),
+        Buckets = lists:usort([RealmUri | bondy_realm:auth_realm_uris()]),
+        _ = [revoke_all_in(Table, Bucket, RealmUri) || Bucket <- Buckets],
+        ok
     catch
         _:Reason ->
             Job = {?MODULE, revoke_all, [RealmUri]},
@@ -534,8 +544,8 @@ to_refresh_token(#{type := ?MODULE, refresh_token := Val}) ->
     Val.
 
 -doc """
-Reclaims token cells that can no longer authenticate anyone, across every
-realm, and returns what it did.
+Reclaims token cells that can no longer authenticate anyone, across the realms
+THIS NODE OWNS, and returns what it did.
 
 Three things are dropped:
 
@@ -546,15 +556,23 @@ Three things are dropped:
   enforces through `check_authid/2` plus the `is_enabled` check auth applies;
 - **empty cells**, cleared rather than written back as an empty set.
 
-This is a cold, O(all tokens) operator task, not something on any request path.
-Nothing calls it — wire it to a scheduled job if you want it run.
+This is a cold task, not something on any request path. `bondy_reclaimer` runs
+it on an interval; it is also safe to call by hand.
 
-> #### Concurrency {: .warning}
+> #### Ownership is a safety property, not an optimisation {: .warning}
 >
-> A cell is read, filtered and written back, and the store is last-write-wins,
-> so a token issued for the same user between this read and its write is lost
-> (that user re-authenticates). Writes are therefore made ONLY when something
-> was actually removed. Prefer running it when issuance is quiet.
+> A cell is read, filtered and written back, and the store is last-write-wins.
+> If two nodes swept the same realm concurrently, one could write back a set it
+> read before the other's clear and RESURRECT reclaimed tokens. Restricting each
+> node to the realms it owns (`bondy:is_owner/1`) makes the sweep single-writer
+> per realm, which removes that hazard — so the filter is applied here rather
+> than left to the caller, and there is deliberately no "sweep everything"
+> variant.
+>
+> The remaining, unavoidable race is with live issuance on the SAME node: a
+> token issued between this read and its write is lost, and that user
+> re-authenticates. Mitigated by writing ONLY when something was actually
+> removed.
 """.
 -spec cleanup() -> map().
 
@@ -570,7 +588,7 @@ cleanup() ->
     Stats = lists:foldl(
         fun(AuthRealmUri, Acc) -> cleanup_realm(AuthRealmUri, Now, Acc) end,
         Stats0,
-        auth_realm_uris()
+        owned_auth_realm_uris()
     ),
     ?LOG_INFO(#{
         description => "Finished cleaning up OAuth2 tokens",
@@ -945,22 +963,52 @@ maybe_clear_legacy(true, AuthRealmUri, RefreshToken) ->
     bondy_db:apply(table(), AuthRealmUri, legacy_key(RefreshToken), clear).
 
 %% @private
-%% The realms that actually hold token cells. Tokens are bucketed by the AUTH
-%% realm (a realm's SSO realm when it has one, otherwise itself), so several
-%% realms collapse onto one bucket — hence the `usort`, or an SSO bucket would
-%% be scanned once per member realm.
-auth_realm_uris() ->
-    lists:usort(
-        lists:filtermap(
-            fun(Realm) ->
-                case get_authrealm_uri(bondy_realm:uri(Realm)) of
-                    {ok, Uri} -> {true, Uri};
-                    {error, _} -> false
-                end
-            end,
-            bondy_realm:list()
-        )
-    ).
+%% The realm's OWN bucket: everything in it was issued by a session that
+%% authenticated against this realm, and those users go with it.
+revoke_all_in(Table, RealmUri, RealmUri) ->
+    {ok, Rows} = bondy_db:list(Table, RealmUri),
+    _ = [
+        bondy_db:apply(Table, RealmUri, Key, clear)
+     || {Key, _V, _Hlc} <- Rows
+    ],
+    ok;
+%% Any OTHER bucket is an SSO realm shared with sibling member realms, so only
+%% the tokens scoped to `ScopeRealmUri` may go.
+revoke_all_in(Table, Bucket, ScopeRealmUri) ->
+    {ok, Rows} = bondy_db:list(Table, Bucket),
+    _ = [revoke_scoped(Table, Bucket, Row, ScopeRealmUri) || Row <- Rows],
+    ok.
+
+%% @private
+revoke_scoped(
+    Table,
+    Bucket,
+    {Key, #{type := bondy_oauth_token_set} = Set0, _Hlc},
+    ScopeRealmUri
+) ->
+    case bondy_oauth_token_set:remove_realm(Set0, ScopeRealmUri) of
+        {[], _Set} ->
+            %% Nothing matched: never rewrite a cell we did not change.
+            ok;
+        {_Removed, Set} ->
+            case bondy_oauth_token_set:size(Set) of
+                0 -> bondy_db:apply(Table, Bucket, Key, clear);
+                _ -> bondy_db:apply(Table, Bucket, Key, {set, Set})
+            end
+    end;
+revoke_scoped(_Table, _Bucket, _Row, _ScopeRealmUri) ->
+    %% A legacy refresh pointer carries no scope, so there is nothing to match
+    %% it on. One left dangling fails CLOSED: `refresh/2` resolves the pointer,
+    %% finds no token behind it, and errors.
+    ok.
+
+%% @private
+%% The token buckets THIS node owns. `bondy_realm:auth_realm_uris/0` has already
+%% collapsed each SSO realm's members onto one bucket, so filtering its result
+%% decides ownership of the bucket — which is the only correct grain (see that
+%% function).
+owned_auth_realm_uris() ->
+    lists:filter(fun bondy:is_owner/1, bondy_realm:auth_realm_uris()).
 
 %% @private
 %% One realm's cells. A failure here is recorded and the sweep CONTINUES: a

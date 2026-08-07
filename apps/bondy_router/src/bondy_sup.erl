@@ -73,6 +73,10 @@ init([]) ->
         %% Node-local reactor for bondy_db remote-merge (AAE) changes; depends
         %% on the namespace catalogue (above) having provisioned the tables.
         ?SUPERVISOR(bondy_aae_reactor_sup, [], permanent, infinity),
-        ?SUPERVISOR(bondy_bridge_relay_sup, [], permanent, infinity)
+        ?SUPERVISOR(bondy_bridge_relay_sup, [], permanent, infinity),
+        %% Periodic storage reclamation. Last: it only schedules, and every
+        %% sweep it enqueues needs the namespace catalogue and the jobs pool
+        %% (both above) already up.
+        ?WORKER(bondy_reclaimer, [], permanent, 5000)
     ],
     {ok, {SupFlags, Children}}.

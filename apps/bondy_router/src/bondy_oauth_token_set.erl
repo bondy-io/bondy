@@ -34,6 +34,7 @@ cleaning up expired tokens and truncating to a maximum size.
 -export([new/0]).
 -export([remove/2]).
 -export([remove/3]).
+-export([remove_realm/2]).
 -export([size/1]).
 -export([take/2]).
 -export([take/3]).
@@ -183,6 +184,41 @@ cleanup(#{type := ?MODULE, data := Data0, index := Index0} = T, Now) ->
         ),
 
     {Expired, T#{data => Data, index => Index, size => maps:size(Data)}}.
+
+-doc """
+Removes every token whose authorisation scope names realm `RealmUri`, returning
+those removed.
+
+A token scoped to `all` — an SSO token, not bound to any one realm — is KEPT: it
+stays valid for the realms its user can still reach, so deleting one member
+realm must not revoke it.
+""".
+-spec remove_realm(t(), RealmUri :: binary()) ->
+    {[bondy_oauth_token:t()], t()}.
+
+remove_realm(#{type := ?MODULE, data := Data0, index := Index0} = T, RealmUri) ->
+    {Removed, Data, Index} =
+        maps:fold(
+            fun(Scope, Token, {RemAcc, DataAcc, IndexAcc} = Acc) ->
+                %% Matched in a `case` rather than the fun head, which would
+                %% shadow the bound `RealmUri` rather than compare against it.
+                case maps:get(realm, Scope, undefined) of
+                    RealmUri ->
+                        #{id := TokenId} = Token,
+                        {
+                            [Token | RemAcc],
+                            maps:remove(Scope, DataAcc),
+                            maps:remove(TokenId, IndexAcc)
+                        };
+                    _ ->
+                        Acc
+                end
+            end,
+            {[], Data0, Index0},
+            Data0
+        ),
+
+    {Removed, T#{data => Data, index => Index, size => maps:size(Data)}}.
 
 -doc """
 Keeps the most recent `MaxSize` tokens on the set, returning those removed

@@ -235,6 +235,7 @@ WAMP permission required to call the procedures.
 -export_type([scope/0]).
 -export_type([opts/0]).
 
+-export([cleanup/0]).
 -export([issue/2]).
 -export([lookup/3]).
 -export([revoke/1]).
@@ -458,38 +459,117 @@ revoke(RealmUri, Authid, Scope) when
     bondy_db:apply(table(), RealmUri, encode_key(Key), clear).
 
 -doc """
-Revokes all tickets issued to all users in realm `RealmUri`.
+Reclaims persisted ticket cells that can no longer authenticate anyone, across
+the auth realms THIS NODE OWNS, and returns what it did.
+
+`verify/1` rejects an expired ticket before it even fetches the realm key, so
+this changes nothing about who can authenticate — it reclaims the storage that
+outlives the ticket. Two things are dropped:
+
+- **expired** tickets, using the same `is_expired/1` that `verify/1` rejects on,
+  so storage and authentication agree on exactly which tickets exist;
+- tickets whose user is **gone or disabled**. `revoke_all/2` already runs
+  eventfully on user disable and delete, so this is a BACKSTOP for an event a
+  node missed while partitioned or restarting, not the primary mechanism.
+
+Empty cells are cleared rather than written back.
+
+## Why a sweep is needed at all
+
+`update_tickets/3` already prunes expired entries from a CLIENT-SCOPED cell
+whenever it rewrites one, which bounds that shape to live devices. It cannot
+reach the other shape: a `client_id = all` ticket (plain local / SSO scope —
+the DEFAULT, everything issued without a `client_ticket`) is one ticket per
+cell, keyed by `{Authid, RealmUri, DeviceId}`, and re-issuing writes only that
+same key. A cell whose key stops being used is never read or written again, so
+there is no write to hang a prune off. That residue is what this reclaims.
+
+> #### Ownership is a safety property, not an optimisation {: .warning}
+>
+> Cells are read, filtered and written back over a last-write-wins store, so two
+> nodes sweeping one realm concurrently could resurrect what the other
+> reclaimed. Restricting each node to the realms it owns (`bondy:is_owner/1`)
+> leaves a single writer per realm. The filter is therefore applied here rather
+> than left to the caller, and there is deliberately no "sweep everything"
+> variant.
+""".
+-spec cleanup() -> map().
+
+cleanup() ->
+    Now = ?NOW,
+    Stats0 = #{
+        errors => [],
+        scanned => 0,
+        expired => 0,
+        deactivated => 0,
+        cells_cleared => 0
+    },
+    Stats = lists:foldl(
+        fun(RealmUri, Acc) -> cleanup_realm(RealmUri, Now, Acc) end,
+        Stats0,
+        owned_auth_realm_uris()
+    ),
+    ?LOG_INFO(#{
+        description => "Finished cleaning up tickets",
+        stats => Stats
+    }),
+    Stats.
+
+-doc """
+Revokes every ticket that is valid on realm `RealmUri`.
+
+Tickets are bucketed by the issuing session's AUTHENTICATION realm — an SSO
+user's ticket lives under the SSO realm, not under the realm they connected to.
+Scanning only `RealmUri` therefore missed every SSO-backed realm's tickets
+entirely, so deleting such a realm left working tickets behind.
+
+Two buckets can hold them, and they are treated differently:
+
+- **`RealmUri`'s own bucket** holds tickets issued by sessions that
+  authenticated against it (its local, non-SSO users). Those users go with the
+  realm, so the bucket is cleared wholesale.
+- **Every other auth realm** is a shared SSO bucket holding several member
+  realms' tickets. Only those scoped to `RealmUri` may go — clearing such a
+  bucket would revoke sibling realms' users too. An SSO-scoped ticket
+  (`scope.realm = all`) is deliberately KEPT: it still grants the realms its
+  user can still reach.
+
+The SSO realm is not resolved from `RealmUri`, because `bondy_realm:delete/2`
+clears the realm record BEFORE running this — so by now there is nothing to
+resolve. Every surviving auth realm is scanned instead. That is O(realms), but
+realm deletion is a cold, one-off path.
 """.
 -spec revoke_all(RealmUri :: uri()) -> ok.
 
 revoke_all(RealmUri) when is_binary(RealmUri) ->
     Table = table(),
-    {ok, Rows} = bondy_db:list(Table, RealmUri),
-    _ = [
-        bondy_db:apply(Table, RealmUri, Key, clear)
-     || {Key, _V, _Hlc} <- Rows
-    ],
+    Buckets = lists:usort([RealmUri | bondy_realm:auth_realm_uris()]),
+    _ = [revoke_all_in(Table, Bucket, RealmUri) || Bucket <- Buckets],
     ok.
 
 -doc """
-Revokes all tickets issued to user with `Username` in realm `RealmUri`.
-Notice that the ticket could have been issued by itself or by a client
-application.
+Revokes all tickets issued to user `Authid` in realm `RealmUri`, whether the
+user issued them itself or a client application did.
+
+Called when a user is deleted, disabled or has its credentials changed, so it
+must not miss any: a revocation that misses is a security failure, whereas one
+that over-reaches only costs a re-authentication. It therefore clears EVERY
+ticket held for `Authid`, including SSO-scoped ones that also grant the user's
+other realms.
+
+Both buckets a user's tickets can live in are scanned — the realm itself (where
+a local user authenticates) and its SSO realm (where an SSO user does).
+Scanning only `RealmUri` missed an SSO user's tickets entirely, which meant
+disabling or deleting such a user left their tickets working.
 """.
 -spec revoke_all(RealmUri :: uri(), Authid :: bondy_rbac_user:username()) ->
     ok.
 
 revoke_all(RealmUri, Authid) ->
-    %% The tickets for a user are distributed across all the shards because we
-    %% shard by key, and `term_to_binary/1` keys are not order-preserving — so
-    %% rather than a key-prefix range we scan the realm and filter by the
-    %% decoded Authid (the first element of the composed store key). Revocation
-    %% is a cold path, so the O(realm) scan is acceptable.
     Table = table(),
-    {ok, Rows} = bondy_db:list(Table, RealmUri),
     _ = [
-        bondy_db:apply(Table, RealmUri, Key, clear)
-     || {Key, _V, _Hlc} <- Rows, is_authid_key(Key, Authid)
+        revoke_all_for(Table, Bucket, Authid)
+     || Bucket <- ticket_buckets(RealmUri)
     ],
     ok.
 
@@ -747,6 +827,254 @@ update_tickets({_, _} = Key, Claims, Tickets) ->
     ).
 
 %% @private
+%% The realm's OWN bucket: everything in it was issued by a session that
+%% authenticated against this realm, and those users go with it.
+revoke_all_in(Table, RealmUri, RealmUri) ->
+    {ok, Rows} = bondy_db:list(Table, RealmUri),
+    _ = [
+        bondy_db:apply(Table, RealmUri, Key, clear)
+     || {Key, _V, _Hlc} <- Rows
+    ],
+    ok;
+%% Any OTHER bucket is an SSO realm shared by several member realms. Clearing it
+%% would revoke the siblings' users too, so only tickets scoped to
+%% `ScopeRealmUri` go.
+revoke_all_in(Table, Bucket, ScopeRealmUri) ->
+    {ok, Rows} = bondy_db:list(Table, Bucket),
+    _ = [revoke_scoped(Table, Bucket, Row, ScopeRealmUri) || Row <- Rows],
+    ok.
+
+%% @private
+%% A map-valued cell is ONE ticket of local or SSO scope, and `store_key/3` puts
+%% its scope realm in the key's second element — a realm URI for local scope,
+%% `<<>>` for SSO scope. So an SSO-scoped ticket never matches a realm URI and
+%% is correctly left alone: it still grants the realms its user can reach.
+revoke_scoped(Table, Bucket, {Key, Claims, _Hlc}, ScopeRealmUri) when
+    is_map(Claims)
+->
+    case key_scope_realm(Key) of
+        {ok, ScopeRealmUri} ->
+            bondy_db:apply(Table, Bucket, Key, clear);
+        _ ->
+            ok
+    end;
+%% A list-valued cell is a CLIENT-scoped per-device list. Its key holds the
+%% client id, not a realm (`store_key/3`), so the scope realm lives in each
+%% entry's `list_key/1` — `{ScopeRealm, DeviceId}`, with the atom `all` for
+%% client-SSO scope. Entries are therefore pruned individually.
+revoke_scoped(Table, Bucket, {Key, Entries, _Hlc}, ScopeRealmUri) when
+    is_list(Entries)
+->
+    Keep = [E || E <- Entries, not entry_has_realm(E, ScopeRealmUri)],
+
+    case length(Keep) =:= length(Entries) of
+        true ->
+            ok;
+        false when Keep == [] ->
+            bondy_db:apply(Table, Bucket, Key, clear);
+        false ->
+            bondy_db:apply(Table, Bucket, Key, {set, lists:sort(Keep)})
+    end;
+revoke_scoped(_, _, _Row, _ScopeRealmUri) ->
+    ok.
+
+%% @private
+entry_has_realm({{Realm, _DeviceId}, _Claims}, ScopeRealmUri) ->
+    Realm =:= ScopeRealmUri;
+entry_has_realm(_Other, _ScopeRealmUri) ->
+    %% The historical unkeyed form carries no list key to match on.
+    false.
+
+%% @private
+%% The scope realm a MAP-valued cell's key names, if it names one.
+key_scope_realm(EncKey) ->
+    try decode_key(EncKey) of
+        {_Authid, Uri, _} when is_binary(Uri) -> {ok, Uri};
+        _ -> error
+    catch
+        _:_ -> error
+    end.
+
+%% @private
+%% Every bucket a user's tickets can live in: the realm itself (where a local
+%% user authenticates) and its SSO realm (where an SSO user does). Unlike
+%% `revoke_all/1`, this path runs while the realm still exists, so the SSO realm
+%% can be resolved.
+ticket_buckets(RealmUri) ->
+    case bondy_realm:lookup(RealmUri) of
+        {ok, Realm} ->
+            lists:usort([RealmUri, bondy_realm:auth_realm_uri(Realm)]);
+        {error, _} ->
+            [RealmUri]
+    end.
+
+%% @private
+%% Shard by key means `term_to_binary/1` keys are not order-preserving, so
+%% rather than a key-prefix range this scans the bucket and filters by the
+%% decoded Authid (the first element of the composed store key). Revocation is a
+%% cold path, so the O(bucket) scan is acceptable.
+revoke_all_for(Table, Bucket, Authid) ->
+    {ok, Rows} = bondy_db:list(Table, Bucket),
+    _ = [
+        bondy_db:apply(Table, Bucket, Key, clear)
+     || {Key, _V, _Hlc} <- Rows, is_authid_key(Key, Authid)
+    ],
+    ok.
+
+%% @private
+%% The ticket buckets THIS node owns. `bondy_realm:auth_realm_uris/0` has
+%% already collapsed each SSO realm's members onto one bucket, so filtering its
+%% result decides ownership at the bucket grain — the only correct one.
+owned_auth_realm_uris() ->
+    lists:filter(fun bondy:is_owner/1, bondy_realm:auth_realm_uris()).
+
+%% @private
+%% One realm's cells. A failure is recorded and the sweep CONTINUES: one
+%% unreadable realm must not abandon every other realm's reclamation.
+cleanup_realm(RealmUri, Now, Stats0) ->
+    Table = table(),
+
+    try bondy_db:list(Table, RealmUri) of
+        {ok, Rows} ->
+            lists:foldl(
+                fun(Row, Acc) -> cleanup_cell(Table, RealmUri, Row, Now, Acc) end,
+                Stats0,
+                Rows
+            );
+        {error, Reason} ->
+            add_error(Stats0, RealmUri, Reason)
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_WARNING(#{
+                description => "Error while cleaning up tickets",
+                realm_uri => RealmUri,
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            add_error(Stats0, RealmUri, Reason)
+    end.
+
+%% @private
+%% A map-valued cell is ONE ticket (`client_id = all`); a list-valued cell is
+%% one entry per device for a single (user, client). Both are keyed
+%% `{Authid, _, _}`, so the user is recovered from the key rather than the
+%% value — it is present even when every entry in the cell is expired.
+cleanup_cell(Table, RealmUri, {Key, Claims, _Hlc}, Now, Stats0) when
+    is_map(Claims)
+->
+    Stats = bump(Stats0, scanned, 1),
+
+    case classify(Key, Claims, RealmUri, Now) of
+        live ->
+            Stats;
+        Reason ->
+            ok = bondy_db:apply(Table, RealmUri, Key, clear),
+            bump(bump(Stats, Reason, 1), cells_cleared, 1)
+    end;
+cleanup_cell(Table, RealmUri, {Key, Entries, _Hlc}, Now, Stats0) when
+    is_list(Entries)
+->
+    Stats1 = bump(Stats0, scanned, 1),
+
+    case authid_of(Key) of
+        {ok, Authid} ->
+            IsActive = is_user_active(RealmUri, Authid),
+            Live = [E || E <- Entries, entry_is_live(E, Now)],
+            Dropped = length(Entries) - length(Live),
+
+            case {IsActive, Live} of
+                {false, _} ->
+                    %% The user is gone: the whole cell goes, and every entry
+                    %% counts as reclaimed for that reason rather than expiry.
+                    ok = bondy_db:apply(Table, RealmUri, Key, clear),
+                    Stats2 = bump(Stats1, deactivated, length(Entries)),
+                    bump(Stats2, cells_cleared, 1);
+                {true, []} ->
+                    ok = bondy_db:apply(Table, RealmUri, Key, clear),
+                    Stats2 = bump(Stats1, expired, Dropped),
+                    bump(Stats2, cells_cleared, 1);
+                {true, _} when Dropped > 0 ->
+                    ok = bondy_db:apply(
+                        Table, RealmUri, Key, {set, lists:sort(Live)}
+                    ),
+                    bump(Stats1, expired, Dropped);
+                {true, _} ->
+                    %% Untouched: never rewrite a cell we did not change, so a
+                    %% concurrent issue on this node cannot be clobbered.
+                    Stats1
+            end;
+        error ->
+            Stats1
+    end;
+cleanup_cell(_, _, _Row, _Now, Stats) ->
+    Stats.
+
+%% @private
+%% Why a single-ticket cell is reclaimable, or `live`. Expiry is checked first
+%% so the stats attribute a ticket that is BOTH expired and orphaned to the
+%% cheaper, more specific reason.
+classify(Key, Claims, RealmUri, Now) ->
+    case is_expired(Claims, Now) of
+        true ->
+            expired;
+        false ->
+            case authid_of(Key) of
+                {ok, Authid} ->
+                    case is_user_active(RealmUri, Authid) of
+                        true -> live;
+                        false -> deactivated
+                    end;
+                error ->
+                    %% An undecodable key is left alone: it is not this
+                    %% function's job to delete what it cannot read.
+                    live
+            end
+    end.
+
+%% @private
+entry_is_live({_LKey, Claims}, Now) when is_map(Claims) ->
+    not (is_map_key(expires_at, Claims) andalso is_expired(Claims, Now));
+entry_is_live(_Other, _Now) ->
+    %% The historical unkeyed form — unreachable by `lookup/3`, but not this
+    %% function's to silently delete either.
+    true.
+
+%% @private
+%% The `Authid` a store key belongs to (its first element).
+authid_of(EncKey) ->
+    try decode_key(EncKey) of
+        Key when is_tuple(Key), tuple_size(Key) >= 1 ->
+            case element(1, Key) of
+                Authid when is_binary(Authid) -> {ok, Authid};
+                _ -> error
+            end;
+        _ ->
+            error
+    catch
+        _:_ -> error
+    end.
+
+%% @private
+%% A ticket authenticates only while its user both exists and is enabled — the
+%% pair `bondy_auth` applies on session establishment.
+is_user_active(RealmUri, Authid) ->
+    case bondy_rbac_user:lookup(RealmUri, Authid) of
+        {ok, User} -> bondy_rbac_user:is_enabled(User);
+        {error, _} -> false
+    end.
+
+%% @private
+bump(Stats, _Key, 0) ->
+    Stats;
+bump(Stats, Key, N) ->
+    maps:update_with(Key, fun(V) -> V + N end, N, Stats).
+
+%% @private
+add_error(#{errors := Errors} = Stats, RealmUri, Reason) ->
+    Stats#{errors := [{RealmUri, Reason} | Errors]}.
+
+%% @private
 %% Lazy reclamation of the other devices' expired tickets, performed while we
 %% are already rewriting this cell — the same shape as
 %% `bondy_oauth_token_set:cleanup_and_truncate/3` on the token write paths.
@@ -798,8 +1126,14 @@ allow_not_found(_) ->
     bondy_config:get([security, ticket, allow_not_found]).
 
 %% @private
-is_expired(#{expires_at := Exp}) ->
-    Exp =< ?NOW + ?LEEWAY_SECS.
+is_expired(Claims) ->
+    is_expired(Claims, ?NOW).
+
+%% @private
+%% Explicit `Now` so a sweep judges every cell in a realm against ONE instant —
+%% otherwise a long scan applies a drifting cutoff and is not reproducible.
+is_expired(#{expires_at := Exp}, Now) ->
+    Exp =< Now + ?LEEWAY_SECS.
 
 %% @private
 %% The open bondy_db `bondy_ticket` table handle. Raises if the catalogue has

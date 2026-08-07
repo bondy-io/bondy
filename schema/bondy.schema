@@ -753,6 +753,42 @@ end}.
 ]}.
 
 %% -----------------------------------------------------------------------------
+%% @doc Periodic reclamation of security state that can no longer be used —
+%% expired OAuth2 tokens, and tokens belonging to users that were deleted or
+%% disabled. Nothing reclaims this storage otherwise: it is bounded (one cell
+%% per user) but never shrinks, so a user who never returns leaves a cell
+%% behind permanently.
+%%
+%% Each node sweeps only the realms it owns under Rendezvous hashing, so the
+%% work spreads across the cluster with no coordination — and, because that
+%% leaves exactly one writer per realm, without nodes overwriting each other's
+%% reclamation. Turn it off only if you would rather retain dead tokens than
+%% spend the periodic scan.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "security.reclamation.enabled",
+"bondy_router.security.reclamation.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How often each node sweeps the realms it owns. Nothing waits on a
+%% sweep, so this should be generous; the scan is O(tokens in the owned
+%% realms).
+%%
+%% The actual delay is jittered down by up to 25%, because every node schedules
+%% independently from this same value — without jitter a cluster restarted
+%% together would sweep in lockstep forever.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "security.reclamation.interval",
+"bondy_router.security.reclamation.interval", [
+  {default, "6h"},
+  {datatype, {duration, ms}}
+]}.
+
+%% -----------------------------------------------------------------------------
 %% @doc Defines whether Bondy create's a new realm or not when a session wants
 %% to connect a non existing realm.
 %% @end

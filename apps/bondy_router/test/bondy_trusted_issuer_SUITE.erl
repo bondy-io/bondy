@@ -49,7 +49,12 @@ all() ->
 
         %% Ticket end-to-end.
         sso_ticket_rejected_by_unrelated_realm,
-        sso_ticket_accepted_by_sibling_member
+        sso_ticket_accepted_by_sibling_member,
+
+        %% Revocation must follow tickets into the SSO bucket they live in.
+        revoke_all_user_reaches_the_sso_bucket,
+        revoke_all_realm_spares_sibling_realms,
+        token_revoke_all_realm_spares_sibling_realms
     ].
 
 init_per_suite(Config) ->
@@ -62,6 +67,132 @@ init_per_suite(Config) ->
 
 end_per_suite(Config) ->
     {save_config, Config}.
+
+%% An SSO user's tickets are bucketed by the AUTH realm (`S`), not by the realm
+%% they connected to (`M1`). `revoke_all/2` scanned only the realm it was given,
+%% so disabling or deleting an SSO user left every ticket of theirs working.
+revoke_all_user_reaches_the_sso_bucket(_Config) ->
+    Scope = ticket_scope(?M1),
+    ok = bondy_ticket:store_ticket(?SSO, ?USER, ticket_claims(?SSO, Scope)),
+    ?assertMatch(
+        {ok, _},
+        bondy_ticket:lookup(?SSO, ?USER, Scope),
+        "Precondition: the ticket lives in the SSO realm's bucket"
+    ),
+
+    %% The caller passes the realm the user connected to, never the SSO realm.
+    ok = bondy_ticket:revoke_all(?M1, ?USER),
+
+    ?assertEqual(
+        {error, not_found},
+        bondy_ticket:lookup(?SSO, ?USER, Scope),
+        "Revoking an SSO user's tickets must reach the SSO realm's bucket"
+    ).
+
+%% The SSO bucket is SHARED by every member realm, so deleting one member must
+%% not revoke the siblings' tickets — nor the SSO-scoped ones, which still grant
+%% the realms the user can still reach.
+revoke_all_realm_spares_sibling_realms(_Config) ->
+    M1Scope = ticket_scope(?M1),
+    M2Scope = ticket_scope(?M2),
+    SsoScope = ticket_scope(all),
+
+    ok = bondy_ticket:store_ticket(?SSO, ?USER, ticket_claims(?SSO, M1Scope)),
+    ok = bondy_ticket:store_ticket(?SSO, ?USER, ticket_claims(?SSO, M2Scope)),
+    ok = bondy_ticket:store_ticket(?SSO, ?USER, ticket_claims(?SSO, SsoScope)),
+
+    ok = bondy_ticket:revoke_all(?M1),
+
+    ?assertEqual(
+        {error, not_found},
+        bondy_ticket:lookup(?SSO, ?USER, M1Scope),
+        "The deleted realm's tickets must go"
+    ),
+    ?assertMatch(
+        {ok, _},
+        bondy_ticket:lookup(?SSO, ?USER, M2Scope),
+        "A sibling member realm's tickets must survive"
+    ),
+    ?assertMatch(
+        {ok, _},
+        bondy_ticket:lookup(?SSO, ?USER, SsoScope),
+        "An SSO-scoped ticket still grants the realms its user can reach"
+    ),
+
+    %% Leave the bucket clean for any later case.
+    ok = bondy_ticket:revoke_all(?M2, ?USER).
+
+%% The token mirror of `revoke_all_realm_spares_sibling_realms`, and the reason
+%% resolving the auth realm and clearing its bucket is NOT a valid fix: all
+%% three of these tokens live in ONE cell in the SSO realm's bucket (the store
+%% key is a hash of the authid), so a bucket-wide clear would take every sibling
+%% realm's tokens with it.
+token_revoke_all_realm_spares_sibling_realms(_Config) ->
+    M1Scope = bondy_oauth_token:authscope(issue_scoped_token(?M1)),
+    M2Scope = bondy_oauth_token:authscope(issue_scoped_token(?M2)),
+    SsoScope = bondy_oauth_token:authscope(issue_sso_token()),
+
+    ?assertMatch({ok, _}, bondy_oauth_token:lookup(?M1, ?USER, M1Scope)),
+    ?assertMatch({ok, _}, bondy_oauth_token:lookup(?M2, ?USER, M2Scope)),
+    ?assertMatch({ok, _}, bondy_oauth_token:lookup(?M1, ?USER, SsoScope)),
+
+    ok = bondy_oauth_token:revoke_all(?M1),
+
+    %% `lookup/3` maps a missing token to `oauth2_invalid_grant`, not
+    %% `not_found` — the OAuth2 error a caller must not be able to distinguish
+    %% from a bad token.
+    ?assertEqual(
+        {error, oauth2_invalid_grant},
+        bondy_oauth_token:lookup(?M1, ?USER, M1Scope),
+        "The deleted realm's tokens must go"
+    ),
+    ?assertMatch(
+        {ok, _},
+        bondy_oauth_token:lookup(?M2, ?USER, M2Scope),
+        "A sibling member realm's tokens must survive"
+    ),
+    ?assertMatch(
+        {ok, _},
+        bondy_oauth_token:lookup(?M1, ?USER, SsoScope),
+        "An SSO-scoped token still grants the realms its user can reach"
+    ),
+
+    ok = bondy_oauth_token:revoke_all(?M2, ?USER).
+
+%% `allow_sso => false` pins the token's scope to the realm it was issued in,
+%% while the auth realm — and so the BUCKET — stays the SSO realm.
+issue_scoped_token(RealmUri) ->
+    SessionId = bondy_session_id:new(),
+    {ok, Ctxt} = bondy_auth:init(
+        SessionId, RealmUri, ?USER, [], {127, 0, 0, 1}
+    ),
+    {ok, Token} = bondy_oauth_token:issue(
+        password, Ctxt, #{allow_sso => false}
+    ),
+    Token.
+
+issue_sso_token() ->
+    SessionId = bondy_session_id:new(),
+    {ok, Ctxt} = bondy_auth:init(
+        SessionId, ?M1, ?USER, [], {127, 0, 0, 1}
+    ),
+    {ok, Token} = bondy_oauth_token:issue(
+        password, Ctxt, #{allow_sso => true}
+    ),
+    Token.
+
+%% A local-scope (`client_id = all`) scope on `RealmUri`, or the SSO scope when
+%% given `all` — one ticket per cell either way.
+ticket_scope(RealmUri) ->
+    #{realm => RealmUri, client_id => all, device_id => all}.
+
+ticket_claims(AuthRealmUri, Scope) ->
+    #{
+        authrealm => AuthRealmUri,
+        authid => ?USER,
+        scope => Scope,
+        expires_at => erlang:system_time(second) + 3600
+    }.
 
 %% =============================================================================
 %% FIXTURES
