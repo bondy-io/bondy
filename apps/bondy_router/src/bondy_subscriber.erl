@@ -118,18 +118,12 @@ handle_call(info, _From, State) ->
     },
     {reply, Info, State};
 handle_call(#event{} = Event, _From, State) ->
-    case do_handle_event(Event, State) of
+    %% Synchronous delivery does not retry -- see apply_callback/3.
+    case apply_callback(Event, undefined, State) of
         {ok, NewState} ->
             {reply, ok, NewState};
         {error, Reason, NewState} ->
-            ?LOG_ERROR(#{
-                description => "Error while handling event",
-                reason => Reason,
-                realm_uri => State#state.realm_uri,
-                topic => State#state.topic,
-                subscription_id => State#state.subscription_id,
-                pid => self()
-            }),
+            ok = log_event_error(Reason, State),
             {reply, {error, Reason}, NewState}
     end;
 handle_call(Event, From, State) ->
@@ -145,14 +139,7 @@ handle_cast(#event{} = Event, State) ->
         {ok, NewState} ->
             {noreply, NewState};
         {error, Reason, NewState} ->
-            ?LOG_ERROR(#{
-                description => "Error while handling event",
-                reason => Reason,
-                realm_uri => State#state.realm_uri,
-                topic => State#state.topic,
-                subscription_id => State#state.subscription_id,
-                pid => self()
-            }),
+            ok = log_event_error(Reason, State),
             {noreply, NewState}
     end;
 handle_cast(Event, State) ->
@@ -177,6 +164,14 @@ handle_info(
                 subscription_id => State#state.subscription_id,
                 wamp_event => WAMPEvent
             }),
+            {noreply, NewState}
+    end;
+handle_info({?MODULE, retry, Event, Retry}, State) ->
+    case apply_callback(Event, Retry, State) of
+        {ok, NewState} ->
+            {noreply, NewState};
+        {error, Reason, NewState} ->
+            ok = log_event_error(Reason, State),
             {noreply, NewState}
     end;
 handle_info(Event, State) ->
@@ -222,11 +217,20 @@ do_unsubscribe(#state{subscription_id = Id} = State) ->
 
 %% @private
 do_handle_event(Event, State) ->
+    apply_callback(Event, new_retry(), State).
+
+%% @private
+%% `Retry` is `undefined` for synchronous delivery: backing off inside a
+%% `gen_server:call/3` would hold the caller for the whole budget, so the
+%% outcome is reported and the caller decides what to do with it.
+apply_callback(Event, Retry, State) ->
     try (State#state.callback_fun)(State#state.topic, Event) of
         ok ->
             {ok, State};
-        {retry, _} ->
-            retry_handle_event(Event, State, 50, 1);
+        {retry, Reason} when Retry == undefined ->
+            {error, {retry_not_supported, Reason}, State};
+        {retry, Reason} ->
+            schedule_retry(Event, Reason, Retry, State);
         {error, Reason} ->
             {error, Reason, State}
     catch
@@ -240,11 +244,51 @@ do_handle_event(Event, State) ->
     end.
 
 %% @private
-retry_handle_event(Event, State, Time, Cnt) ->
-    timer:sleep(Time),
-    case handle_event(Event, State) of
-        {retry, Reason} when Cnt == 3 ->
-            {error, Reason};
-        {retry, _} ->
-            retry_handle_event(Event, State, Time * 2, Cnt + 1)
+%% A retry goes back through the mailbox instead of being slept on.
+%%
+%% This used to call `timer:sleep/1` and then `handle_event(Event, State)` --
+%% the public API, whose arguments are `(Subscriber, Event)` -- so the retry
+%% became `gen_server:cast(#event{}, State)` and crashed. Even had it called the
+%% right function, there was no `ok` clause, and it answered two-tuples where
+%% every caller matches three. The sleep also stalled this `gen_server`, and
+%% with it every later event on this subscription.
+%%
+%% Rescheduling means a retried event can be delivered after events published
+%% after it. Forwarding to an external sink is best-effort and unordered
+%% already, so a late retry beats a blocked subscriber.
+schedule_retry(Event, Reason, Retry0, State) ->
+    case bondy_retry:fail(Retry0) of
+        {Delay, Retry} when is_integer(Delay) ->
+            Msg = {?MODULE, retry, Event, Retry},
+            _ = erlang:send_after(Delay, self(), Msg),
+            {ok, State};
+        {Limit, _Retry} ->
+            {error, {retry_limit_reached, Limit, Reason}, State}
     end.
+
+%% @private
+%% Preserves the original budget -- three attempts from 50ms, doubling -- and
+%% adds jitter, so a fleet of subscribers failing against the same sink does not
+%% retry in lockstep.
+new_retry() ->
+    bondy_retry:init(?MODULE, #{
+        max_retries => 3,
+        interval => 50,
+        %% Bounded by attempts, not by wall clock.
+        deadline => 0,
+        backoff_enabled => true,
+        backoff_min => 50,
+        backoff_max => 400,
+        backoff_type => jitter
+    }).
+
+%% @private
+log_event_error(Reason, State) ->
+    ?LOG_ERROR(#{
+        description => "Error while handling event",
+        reason => Reason,
+        realm_uri => State#state.realm_uri,
+        topic => State#state.topic,
+        subscription_id => State#state.subscription_id,
+        pid => self()
+    }).

@@ -38,6 +38,7 @@ all() ->
         subscribe_returns_the_subscription_id,
         bridging_survives_a_busy_manager,
         resubscribe_after_restart_delivers,
+        retry_result_is_retried_then_abandoned,
         terminate_is_called_with_reason_and_context
     ].
 
@@ -261,6 +262,37 @@ resubscribe_after_restart_delivers(Config) ->
 
     %% Exactly once: the previous generation of subscribers is gone.
     ?assertEqual([<<"second">>], bodies(actions_after(500))).
+
+-doc """
+A bridge answering `{retry, Reason}` is retried, then given up on.
+
+`bondy_subscriber` used to answer a retry by sleeping and then calling
+`handle_event(Event, State)` -- the public API, whose arguments are
+`(Subscriber, Event)` -- so the retry became `gen_server:cast(#event{}, State)`
+and crashed. The contract was unreachable, which is why no shipped bridge could
+rely on it.
+
+The budget is the original one: the first attempt plus three retries. The
+subscriber must still be alive afterwards.
+""".
+retry_result_is_retried_then_abandoned(Config) ->
+    Topic = ?config(topic, Config),
+    {ok, _} = start_bridge_app(Config, [subscription(Topic)]),
+
+    ok = bondy_test_bridge:set_result({retry, sink_busy}),
+    ok = publish(Topic, [<<"retried">>], #{}),
+
+    %% One attempt plus three retries.
+    _ = await_actions(4),
+    ?assertEqual(4, length(actions_after(1000))),
+
+    %% The subscriber survived being unable to deliver.
+    ?assertEqual(1, length(subscriptions())),
+
+    %% `reset/0` also clears the forced result, so the next event succeeds.
+    ok = bondy_test_bridge:reset(),
+    ok = publish(Topic, [<<"after_retry">>], #{}),
+    ?assertEqual([<<"after_retry">>], bodies(await_actions(1))).
 
 -doc """
 Shutting the manager down calls `terminate/2` on every initialised bridge.
