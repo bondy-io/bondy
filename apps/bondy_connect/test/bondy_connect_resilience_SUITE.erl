@@ -56,6 +56,9 @@ all() ->
         unregister_unknown_ref_errors,
         in_flight_call_fails_on_drop,
         initial_connect_fails_fast,
+        transient_abort_retries_until_admitted,
+        transient_abort_retry_backs_off,
+        permanent_abort_still_fails_fast,
         initial_connect_retries_when_enabled,
         reconnect_budget_exhaustion_gives_up
     ].
@@ -468,6 +471,140 @@ initial_connect_fails_fast(_) ->
     ?assertMatch({error, _}, Result),
     %% Well under the 30s await_ready ceiling — proves it did not retry-loop.
     ?assert(Elapsed < 5000000).
+
+%% A router ABORT whose `nature` is `transient` must NOT be fatal: the HELLO
+%% load-admission gate sheds new sessions under load with
+%% `wamp.error.unavailable`, expecting well-behaved clients to back off and come
+%% back. This is the FIRST connect, where `retry_initial_connect` defaults to
+%% `false` — the exception is deliberate (a transient abort is the opposite of a
+%% misconfiguration, which is what fail-fast exists for).
+%%
+%% Before the fix the abort short-circuited out of `process_records/3` straight
+%% into a gen_statem stop, never reaching `is_retriable/1` at all, so EVERY
+%% abort killed the connection for good.
+%%
+%% The gate is closed deterministically rather than by generating real load:
+%% suspend the sampler so it cannot re-evaluate (it re-samples every 100ms and
+%% would immediately undo us), then flip the shared status cell it publishes.
+transient_abort_retries_until_admitted(_) ->
+    ok = force_hello_gate(closed),
+    Parent = self(),
+
+    %% `connect/1` blocks, so drive it from a helper and watch what it does.
+    Pid = spawn_link(fun() ->
+        Parent ! {result, self(), bondy_connect:connect(#{
+            transport => tcp,
+            endpoint => {?HOST, ?PORT},
+            realm => ?REALM,
+            auth => #{method => ?WAMP_ANON_AUTH},
+            serializers => [json],
+            reconnect => #{backoff_min => 200, backoff_max => 500}
+        })}
+    end),
+
+    %% It must still be trying: a fail-fast would have answered by now.
+    receive
+        {result, Pid, Early} ->
+            ok = force_hello_gate(open),
+            ct:fail({gave_up_on_transient_abort, Early})
+    after 1500 ->
+        ok
+    end,
+
+    %% Open the gate; the in-flight backoff loop must now get in.
+    ok = force_hello_gate(open),
+    receive
+        {result, Pid, {ok, Conn}} ->
+            ?assertEqual(established, bondy_connect:status(Conn)),
+            ok = bondy_connect:disconnect(Conn);
+        {result, Pid, Other} ->
+            ct:fail({did_not_recover, Other})
+    after 30000 ->
+        ct:fail(no_reply_after_gate_opened)
+    end.
+
+%% Retrying is only half the contract — retrying WITHOUT backoff is worse than
+%% not retrying at all, because an un-backed-off reconnect loop is itself what
+%% keeps the router's run queues deep.
+%%
+%% This is not covered by the case above (a hot loop passes it just as happily).
+%% The trap is specific: on a refused handshake the TCP connect SUCCEEDS every
+%% time, so `on_connect_failure/2` — the only caller of `backoff_retry/2` —
+%% never runs, and a plain `{next_state, connecting, _}` would reset the budget
+%% and re-dial on a 0ms timer.
+%%
+%% Count actual HELLO arrivals at the router over a fixed window: with the
+%% `bondy_retry` ladder engaged (min 300ms, jittered) a few attempts fit; a
+%% full-speed loop produces orders of magnitude more.
+transient_abort_retry_backs_off(_) ->
+    ok = force_hello_gate(closed),
+    Before = hello_refusals(),
+    Parent = self(),
+
+    Pid = spawn(fun() ->
+        Parent ! {result, self(), bondy_connect:connect(#{
+            transport => tcp,
+            endpoint => {?HOST, ?PORT},
+            realm => ?REALM,
+            auth => #{method => ?WAMP_ANON_AUTH},
+            serializers => [json],
+            reconnect => #{
+                backoff_min => 300, backoff_max => 5000, deadline => 0
+            }
+        })}
+    end),
+
+    timer:sleep(3000),
+    Attempts = hello_refusals() - Before,
+    _ = exit(Pid, kill),
+    ok = force_hello_gate(open),
+
+    %% It must have retried at all...
+    ?assert(Attempts >= 1),
+    %% ...and must NOT have hammered. 3s of 300ms-and-growing jittered backoff
+    %% is well under 20; a 0ms-timer loop is in the hundreds or thousands.
+    ?assert(
+        Attempts =< 20,
+        lists:flatten(
+            io_lib:format("no backoff: ~p HELLO refusals in 3s", [Attempts])
+        )
+    ).
+
+%% @private Count of HELLOs the load gate has refused on this node.
+hello_refusals() ->
+    lists:sum([
+        V
+     || {_, V} <- prometheus_counter:values(default, bondy_wamp_dropped_total)
+    ]).
+
+%% The other half of the contract: a `permanent` abort must still fail fast.
+%% An unknown realm is refused with `wamp.error.no_such_realm`, nature
+%% `permanent` — retrying that forever would be strictly worse than surfacing it.
+permanent_abort_still_fails_fast(_) ->
+    {Elapsed, Result} = timer:tc(fun() ->
+        bondy_connect:connect(#{
+            transport => tcp,
+            endpoint => {?HOST, ?PORT},
+            realm => <<"com.example.no.such.realm.at.all">>,
+            auth => #{method => ?WAMP_ANON_AUTH},
+            serializers => [json]
+        })
+    end),
+    ?assertMatch({error, _}, Result),
+    ?assert(Elapsed < 5000000).
+
+%% @private Force the router's HELLO admission gate open or closed.
+force_hello_gate(State) ->
+    Ref = persistent_term:get({bondy_regulator_load, status}),
+    case State of
+        closed ->
+            ok = sys:suspend(bondy_regulator_load),
+            atomics:put(Ref, 1, 1);
+        open ->
+            atomics:put(Ref, 1, 0),
+            ok = sys:resume(bondy_regulator_load)
+    end,
+    ok.
 
 %% With retry_initial_connect => true the initial connect retries the configured
 %% budget and then returns an error (still bounded, no infinite block).

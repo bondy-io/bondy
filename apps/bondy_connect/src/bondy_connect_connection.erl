@@ -39,6 +39,16 @@ replayed. When partisan network monitoring is available, a network-down failure
 parks in `waiting_for_network` until the network recovers. The initial connect
 is fail-fast by default (configurable via `reconnect.retry_initial_connect`).
 
+A router `ABORT` is classified before it is treated as fatal. Every Bondy abort
+carries `bondy_error`'s `nature` key: `transient` means retrying the operation
+unchanged could succeed, `permanent` means the request itself is at fault. A
+transient abort — the HELLO load-admission gate shedding new sessions under deep
+run queues with `wamp.error.unavailable` is the one that matters at scale —
+takes the same backoff loop as a dropped link, **including on the first
+connect**, because `retry_initial_connect`'s fail-fast intent is about
+misconfiguration and a transient abort is the opposite of that. Permanent
+aborts still fail fast. See `is_transient_abort/2`.
+
 ## Roles (M2)
 
 - **caller** — `call/5` (synchronous) and `call_async/5` (a token reply to the
@@ -82,6 +92,13 @@ authenticating and cleared on `established`. Progressive calls
     reconnect_retry :: bondy_retry:t() | undefined,
     retry_initial = false :: boolean(),
     established_once = false :: boolean(),
+    %% Set when we enter `connecting` as the CONTINUATION of a retry episode
+    %% rather than the start of one, carrying the already-advanced `bondy_retry`
+    %% delay. `connecting(enter, ...)` resets the budget and reconnects
+    %% immediately, which is right for a fresh disconnection but catastrophic
+    %% for a router that keeps refusing the handshake — see
+    %% `backoff_into_connecting/2`.
+    pending_delay :: non_neg_integer() | undefined,
     net_monitor = false :: boolean(),
     network_timeout :: pos_integer(),
     %% Idle keepalive (ping/pong) — pure state in bondy_connect_keepalive
@@ -353,9 +370,15 @@ init({Config, ConnSup}) ->
 %% We reset the retry budget on entry (a fresh disconnection episode) — the
 %% backoff loop below re-arms the timeout via `keep_state` so this enter does
 %% not re-run between attempts.
-connecting(enter, _Old, Data0) ->
+connecting(enter, _Old, #data{pending_delay = undefined} = Data0) ->
     Data = reset_reconnect_retry(Data0),
     {keep_state, Data, [{state_timeout, 0, connect}]};
+connecting(enter, _Old, #data{pending_delay = Delay} = Data0) ->
+    %% Continuation of an in-progress retry episode: the budget has already
+    %% been advanced by `backoff_into_connecting/2` and must NOT be reset here,
+    %% or the backoff can never grow.
+    Data = Data0#data{pending_delay = undefined},
+    {keep_state, Data, [{state_timeout, Delay, connect}]};
 connecting(state_timeout, connect, Data) ->
     #data{transport_mod = Mod, config = Config} = Data,
     {Endpoint, Opts} = endpoint(Config),
@@ -711,8 +734,45 @@ process_records([Record | Rest], StateName, Data) ->
         {continue, StateName1, Data1} ->
             process_records(Rest, StateName1, Data1);
         {stop, Reason, Data1} ->
-            {stop, Reason, Data1}
+            on_protocol_stop(Reason, Data1)
     end.
+
+%% @private The protocol layer asked to stop. A router ABORT is not
+%% automatically fatal: the router tells us in the message whether it is —
+%% `bondy_error`'s `nature` key is `transient` when retrying unchanged could
+%% succeed. The HELLO load-admission gate is exactly that case; it sheds new
+%% sessions under deep run queues with `wamp.error.unavailable`, expecting
+%% well-behaved clients to back off and come back (possibly landing on another
+%% node via their load balancer).
+%%
+%% Routing a transient abort through the ordinary failure path is what gets it
+%% the backoff loop. Stopping here unconditionally — which is what this used to
+%% do — bypassed `is_retriable/1` and `reconnect_allowed/2` entirely, so EVERY
+%% abort killed the connection for good, including the one the router had
+%% explicitly marked retryable.
+on_protocol_stop(Reason, Data) ->
+    case find_abort(Reason) of
+        {ok, {abort, Uri, Details} = Abort} ->
+            case is_transient_abort(Uri, Details) of
+                true -> on_transport_failure(Abort, Data);
+                false -> {stop, Reason, Data}
+            end;
+        error ->
+            {stop, Reason, Data}
+    end.
+
+%% @private Dig the `{abort, Uri, Details}` payload out of a protocol stop
+%% reason.
+%%
+%% `bondy_connect_protocol:handle_message/2` already wraps the abort in
+%% `shutdown`, and `route_handshake/3` wraps the result again, so the reason
+%% actually arrives as `{shutdown, {shutdown, {abort, _, _}}}`. Recursing on the
+%% wrapper instead of matching a fixed nesting depth means adding or removing a
+%% layer cannot silently turn a retryable refusal back into a fatal one — which
+%% is precisely the bug this function exists to have fixed once.
+find_abort({abort, _, _} = Abort) -> {ok, Abort};
+find_abort({shutdown, Inner}) -> find_abort(Inner);
+find_abort(_) -> error.
 
 %% @private
 %% Control frames. An inbound ping (router keepalive) is answered with a pong; a
@@ -1467,7 +1527,7 @@ stop_fail(Reason, Data) ->
 %% @private A connect attempt failed *while in `connecting'* — loop with backoff
 %% (or park on the network / give up).
 on_connect_failure(Reason, Data) ->
-    case reconnect_allowed(Data) andalso is_retriable(Reason) of
+    case reconnect_allowed(Reason, Data) andalso is_retriable(Reason) of
         true ->
             case is_netdown(Reason) andalso Data#data.net_monitor of
                 true -> {next_state, waiting_for_network, Data};
@@ -1483,18 +1543,56 @@ on_connect_failure(Reason, Data) ->
 %% the retry budget and attempts immediately; subsequent attempts back off.
 on_transport_failure(Reason, Data0) ->
     Data = teardown_session(Data0),
-    case reconnect_allowed(Data) andalso is_retriable(Reason) of
+    case reconnect_allowed(Reason, Data) andalso is_retriable(Reason) of
         true ->
             ?LOG_NOTICE(#{
                 description => "Session dropped; reconnecting.",
                 reason => Reason
             }),
             case is_netdown(Reason) andalso Data#data.net_monitor of
-                true -> {next_state, waiting_for_network, Data};
-                false -> {next_state, connecting, Data}
+                true ->
+                    {next_state, waiting_for_network, Data};
+                false ->
+                    reconnect_after_failure(Reason, Data)
             end;
         false ->
             stop_fail(Reason, Data)
+    end.
+
+%% @private A dropped LINK is one episode: re-entering `connecting' resets the
+%% budget and reconnects at once, which is what you want — the next attempt
+%% either works or starts backing off through `on_connect_failure/2'.
+%%
+%% A refused HANDSHAKE is not that. The transport connect SUCCEEDS every time
+%% (the router is up, it is shedding), so `on_connect_failure/2' — the only
+%% caller of `backoff_retry/2' — is never reached. Left as a plain transition
+%% each refusal would reset the budget and re-dial on a 0ms timer, i.e. a
+%% full-speed reconnect loop against a router that is already overloaded. That
+%% is the exact storm the load gate exists to stop, so a refusal has to advance
+%% the same `bondy_retry' ladder (jittered by default) that every other failure
+%% uses, and carry the delay into `connecting'.
+reconnect_after_failure({abort, _, _} = Reason, Data) ->
+    backoff_into_connecting(Reason, Data);
+reconnect_after_failure(_Reason, Data) ->
+    {next_state, connecting, Data}.
+
+%% @private
+backoff_into_connecting(Reason, #data{reconnect_retry = R0} = Data) ->
+    case bondy_retry:fail(R0) of
+        {Delay, R1} when is_integer(Delay) ->
+            ?LOG_NOTICE(#{
+                description =>
+                    "Router refused the session; will retry after delay.",
+                delay => Delay,
+                reason => Reason
+            }),
+            {next_state, connecting, Data#data{
+                reconnect_retry = R1, pending_delay = Delay
+            }};
+        {Limit, R1} when Limit == deadline; Limit == max_retries ->
+            stop_fail({reconnect_failed, Reason}, Data#data{
+                reconnect_retry = R1
+            })
     end.
 
 %% @private The backoff loop within `connecting': advance the retry state and
@@ -1519,10 +1617,26 @@ backoff_retry(Reason, #data{reconnect_retry = R0} = Data) ->
 %% @private Reconnect is allowed when it is enabled and either we have already
 %% established once (a genuine drop) or the user opted into retrying the initial
 %% connect.
-reconnect_allowed(#data{reconnect_retry = undefined}) -> false;
-reconnect_allowed(#data{established_once = true}) -> true;
-reconnect_allowed(#data{retry_initial = true}) -> true;
-reconnect_allowed(#data{}) -> false.
+reconnect_allowed(_Reason, #data{reconnect_retry = undefined}) ->
+    false;
+reconnect_allowed(_Reason, #data{established_once = true}) ->
+    true;
+reconnect_allowed(_Reason, #data{retry_initial = true}) ->
+    true;
+reconnect_allowed({abort, _, _}, #data{}) ->
+    %% `retry_initial_connect` defaults to `false` so that a MISCONFIGURED
+    %% `connect/1` — wrong URL, wrong realm, bad credentials — fails fast
+    %% instead of disappearing into a backoff loop. A transient ABORT is the
+    %% opposite of a misconfiguration: nothing about the request is wrong, and
+    %% the router has said so in the message. Honouring fail-fast here would
+    %% make every client give up at precisely the moment the router is
+    %% shedding load — which is when retrying is the whole point, and which is
+    %% overwhelmingly a FIRST connect (a fleet coming up against a busy
+    %% cluster). Permanent aborts do not reach this clause: the caller's
+    %% `is_retriable/1` has already rejected them.
+    true;
+reconnect_allowed(_Reason, #data{}) ->
+    false.
 
 %% @private
 reset_reconnect_retry(#data{reconnect_retry = undefined} = Data) ->
@@ -1647,6 +1761,7 @@ disable_net_monitor(false) ->
     ok.
 
 %% @private Failure reasons we treat as recoverable (worth reconnecting).
+is_retriable({abort, Uri, Details}) -> is_transient_abort(Uri, Details);
 is_retriable(connection_closed) -> true;
 is_retriable(establish_timeout) -> true;
 is_retriable(ping_timeout) -> true;
@@ -1657,6 +1772,33 @@ is_retriable({connection_error, _}) -> true;
 is_retriable({connect_error, R}) -> is_retriable_posix(R);
 is_retriable({handshake_error, R}) -> is_retriable_posix(R);
 is_retriable(_) -> false.
+
+%% @private Whether a router ABORT describes a condition that could clear.
+%%
+%% The authority is the router's own `nature` key, which every Bondy ABORT
+%% carries (`bondy_error:to_map/1`): `transient` means "retrying the operation
+%% unchanged could succeed", `permanent` means the request itself is at fault
+%% and will fail identically forever. Trusting the flag rather than a URI table
+%% means a new transient condition on the router is handled by clients that
+%% predate it.
+%%
+%% The URI fallback covers a router too old to send `nature`, or a non-Bondy
+%% WAMP router. It is deliberately an allow-list: an ABORT we cannot classify
+%% stays fatal, because retrying a genuinely permanent failure forever is worse
+%% than surfacing it.
+is_transient_abort(Uri, Details) when is_map(Details) ->
+    case maps:get(~"nature", Details, undefined) of
+        ~"transient" -> true;
+        ~"permanent" -> false;
+        _ -> is_transient_abort_uri(Uri)
+    end;
+is_transient_abort(Uri, _) ->
+    is_transient_abort_uri(Uri).
+
+%% @private
+is_transient_abort_uri(?WAMP_UNAVAILABLE) -> true;
+is_transient_abort_uri(~"bondy.error.unavailable") -> true;
+is_transient_abort_uri(_) -> false.
 
 %% @private
 is_retriable_posix(R) ->
