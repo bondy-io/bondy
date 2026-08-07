@@ -39,7 +39,9 @@ index_realm_test_() ->
         gen("realm_isolation", fun realm_isolation/1),
         gen("multi_valued_membership", fun multi_valued_membership/1),
         gen("after_key_pages_one_term", fun after_key_pages_one_term/1),
-        gen("delete_removes_all_entries", fun delete_removes_all_entries/1)
+        gen("delete_removes_all_entries", fun delete_removes_all_entries/1),
+        gen("range_filters_foreign_realms", fun range_filters_foreign_realms/1),
+        gen("range_rejects_a_realm_prefix", fun range_rejects_a_realm_prefix/1)
     ]}.
 
 gen(Title, Fn) ->
@@ -156,9 +158,56 @@ delete_removes_all_entries({_Db, Table, _Sup, _Dir}) ->
     ?assertEqual([], members(Table, <<"r1">>, <<"g2">>)),
     ?assertEqual([<<"u2">>], members(Table, <<"r1">>, <<"g1">>)).
 
+%% A term RANGE cannot use the realm sub-band an equality read gets, because a
+%% term range spans realms non-contiguously — so `index_rows/3` must FILTER on
+%% the realm prefix. Before it did, a foreign row had a fixed
+%% `byte_size(Realm) + 1` bytes lopped off and came back as a corrupted key
+%% indistinguishable from a real one.
+range_filters_foreign_realms({_Db, Table, _Sup, _Dir}) ->
+    put_user(Table, <<"rA">>, <<"a1">>, [<<"g1">>]),
+    put_user(Table, <<"rA">>, <<"a2">>, [<<"g3">>]),
+    put_user(Table, <<"rB">>, <<"b1">>, [<<"g1">>]),
+    put_user(Table, <<"rB">>, <<"b2">>, [<<"g2">>]),
+    ok = bondy_db:await_index(Table, by_group),
+
+    %% A band covering g1..g3 — every realm's entries share it.
+    ?assertEqual([<<"a1">>, <<"a2">>], range(Table, <<"rA">>, ~"g1", ~"g4")),
+    ?assertEqual([<<"b1">>, <<"b2">>], range(Table, <<"rB">>, ~"g1", ~"g4")),
+
+    %% Keys come back as the caller wrote them, NOT still realm-folded.
+    [
+        ?assertEqual(nomatch, binary:match(K, <<0>>))
+     || K <- range(Table, <<"rA">>, ~"g1", ~"g4")
+    ],
+
+    %% A realm with no entry in the band gets nothing rather than someone
+    %% else's rows.
+    ?assertEqual([], range(Table, <<"rC">>, ~"g1", ~"g4")).
+
+%% The check must be exact, not "starts with". Realm `<<"r">>` is a byte-prefix
+%% of `<<"rr">>`, so a naive `byte_size` strip would turn `<<"rr",0,"u1">>` into
+%% `<<0,"u1">>` and hand it back as one of `<<"r">>`'s keys. Requiring the NUL
+%% separator to land immediately after the realm rejects it — the same
+%% injectivity `assert_nul_free_realm/1` guards on the write side.
+range_rejects_a_realm_prefix({_Db, Table, _Sup, _Dir}) ->
+    put_user(Table, ~"r", ~"u1", [<<"g1">>]),
+    put_user(Table, ~"rr", ~"u2", [<<"g1">>]),
+    ok = bondy_db:await_index(Table, by_group),
+
+    ?assertEqual([~"u1"], range(Table, ~"r", ~"g1", ~"g2")),
+    ?assertEqual([~"u2"], range(Table, ~"rr", ~"g1", ~"g2")),
+    %% And the equality path agrees with the range path.
+    ?assertEqual([~"u1"], members(Table, ~"r", ~"g1")),
+    ?assertEqual([~"u2"], members(Table, ~"rr", ~"g1")).
+
 %% =============================================================================
 %% Helpers
 %% =============================================================================
+
+%% Usernames returned by index_range over `[Lo, Hi)`, in (term, key) order.
+range(Table, Realm, Lo, Hi) ->
+    {ok, Rows} = bondy_db:index_range(Table, Realm, by_group, Lo, Hi, #{}),
+    [U || {U, _Cols} <- Rows].
 
 put_user(Table, Realm, Username, Groups) ->
     V = #{type => user, username => Username, groups => Groups},

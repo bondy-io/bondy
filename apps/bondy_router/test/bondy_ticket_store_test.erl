@@ -41,6 +41,20 @@ storage_shape_test_() ->
         ]
     end}.
 
+%% Lazy reclamation. Re-issuing for device A replaces only A's entry, so
+%% without pruning a device that never comes back leaves its expired ticket in
+%% the cell forever. `store_ticket/3` must drop the OTHER devices' expired
+%% entries while it is already rewriting the cell.
+expiry_reclamation_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            {"storing a ticket prunes other devices' expired entries",
+                fun expired_device_tickets_are_pruned/0},
+            {"pruning preserves entries it cannot prove expired",
+                fun unrecognised_entries_survive_pruning/0}
+        ]
+    end}.
+
 %% revoke_all/2 must clear exactly the target user's cells. Seed alice (two
 %% distinct store keys) and bob (one); revoking alice leaves only bob.
 revoke_all_user() ->
@@ -129,6 +143,56 @@ client_tickets_list_in_one_cell() ->
     ok = bondy_ticket:revoke_all(?REALM, Authid),
     ?assertEqual([], rows_for(T, Authid)).
 
+%% One live device and one already-expired device share a cell. Writing any
+%% device then reclaims the expired one — but never the entry being written.
+expired_device_tickets_are_pruned() ->
+    T = table(),
+    Authid = <<"frank">>,
+    Client = <<"app2">>,
+
+    ok = store(Authid, Client, device(1), live),
+    ok = store(Authid, Client, device(2), expired),
+
+    %% Pruning runs BEFORE the keystore, so the entry being written is never a
+    %% candidate — it lands in the cell even when it is itself already expired.
+    ?assertEqual(2, cell_size(T, Authid)),
+    ?assertMatch({ok, _}, lookup(Authid, Client, device(2))),
+
+    %% Writing ANY device now reclaims device 2, and only device 2.
+    ok = store(Authid, Client, device(3), live),
+    ?assertEqual(2, cell_size(T, Authid)),
+    ?assertEqual({error, not_found}, lookup(Authid, Client, device(2))),
+    ?assertMatch({ok, _}, lookup(Authid, Client, device(1))),
+    ?assertMatch({ok, _}, lookup(Authid, Client, device(3))),
+
+    ok = bondy_ticket:revoke_all(?REALM, Authid).
+
+%% Pruning must drop only what it can positively prove expired. The historical
+%% unkeyed form — a bare claims map in the list rather than a
+%% `{list_key(), Claims}` pair — is already unreachable by `lookup/3`, but it is
+%% not the write path's job to silently delete data it does not recognise.
+unrecognised_entries_survive_pruning() ->
+    T = table(),
+    Authid = <<"grace">>,
+    Client = <<"app3">>,
+
+    %% Let store_ticket/3 create the cell so we splice into the real store key
+    %% rather than reconstructing its composition here.
+    ok = store(Authid, Client, device(1), live),
+    [{Key, Value0, _Hlc}] = rows_for(T, Authid),
+
+    Legacy = expired_claims(Authid, Client, device(9)),
+    ok = bondy_db:apply(T, ?REALM, Key, {set, [Legacy | Value0]}),
+    ?assertEqual(2, cell_size(T, Authid)),
+
+    ok = store(Authid, Client, device(2), live),
+
+    [{_, Value, _}] = rows_for(T, Authid),
+    ?assertEqual(3, length(Value)),
+    ?assert(lists:member(Legacy, Value)),
+
+    ok = bondy_ticket:revoke_all(?REALM, Authid).
+
 %% =============================================================================
 %% Helpers
 %% =============================================================================
@@ -146,6 +210,30 @@ client_claims(Authid, ClientId, DeviceId) ->
         scope => scope(ClientId, DeviceId),
         expires_at => erlang:system_time(second) + 3600
     }.
+
+%% Store one client-scoped ticket, either live or already past `expires_at`.
+store(Authid, ClientId, DeviceId, live) ->
+    bondy_ticket:store_ticket(
+        ?REALM, Authid, client_claims(Authid, ClientId, DeviceId)
+    );
+store(Authid, ClientId, DeviceId, expired) ->
+    bondy_ticket:store_ticket(
+        ?REALM, Authid, expired_claims(Authid, ClientId, DeviceId)
+    ).
+
+%% Claims whose `expires_at` is unambiguously in the past — well clear of the
+%% leeway `bondy_ticket:is_expired/1` applies.
+expired_claims(Authid, ClientId, DeviceId) ->
+    Claims = client_claims(Authid, ClientId, DeviceId),
+    Claims#{expires_at => erlang:system_time(second) - 3600}.
+
+lookup(Authid, ClientId, DeviceId) ->
+    bondy_ticket:lookup(?REALM, Authid, scope(ClientId, DeviceId)).
+
+%% The number of per-device entries in the single cell held for `Authid`.
+cell_size(Table, Authid) ->
+    [{_Key, Value, _Hlc}] = rows_for(Table, Authid),
+    length(Value).
 
 %% The cells (rows) in the realm whose decoded store key belongs to `Authid`
 %% (its first tuple element), regardless of map- or list-valued.
@@ -200,7 +288,7 @@ cleanup({Pid, Tmp}) ->
 make_tmpdir() ->
     Base = filename:join(
         "/tmp",
-        "bondy_ticket_store_test_" ++
+        "bondy_ticket_store_test_" ++ os:getpid() ++ "_" ++
             integer_to_list(erlang:unique_integer([positive, monotonic]))
     ),
     ok = filelib:ensure_path(Base),

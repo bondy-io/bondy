@@ -1791,10 +1791,16 @@ index entry key is `<<enc(Term), 0, Realm, 0, Key>>` (the primary key is
 realm-folded), so one realm's entries for a term are a contiguous
 sub-band and the read restricts to `[<<enc(Term),0,Realm,0>>,
 <<enc(Term),0,Realm,1>>)`. Cross-realm entries that share a term are
-therefore never returned. (The `index_range/6` term-RANGE case is not yet
-realm-scoped — a term range spans realms non-contiguously; that lands with
-the realm-before-term index fold, piece #2. The stale `fallback => primary`
-path below is likewise not yet realm-scoped.)
+therefore never returned.
+
+The term-RANGE `index_range/6` cannot use that sub-band, because a term range
+spans realms non-contiguously. It is realm-CORRECT — `index_rows/3` filters
+rows on the realm prefix rather than assuming it — but not realm-EFFICIENT: it
+scans every shard and discards what it filters. Making it efficient would mean
+ordering the index entry key realm-before-term, so a realm's whole term range
+is one contiguous band; that is a repartitioning (the index is term-sharded,
+so the shard function would have to change too, and every existing entry would
+move), and it buys nothing until a range read is actually on a hot path.
 
 ## Opts
 
@@ -3686,18 +3692,25 @@ recompute_columns(Spec, Value) ->
 
 %% @private
 %% Enumerate every primary cell in `Realm` (materialised values), across
-%% all primary shards, with overlay disabled. Uses an open-ended
-%% (`infinity` high) scan — no finite binary exceeds every key. Bounded by
+%% all primary shards, with overlay disabled. Bounded by
 %% `?PRIMARY_SCAN_LIMIT`; a scan that fills it is logged as potentially
 %% incomplete.
-primary_cells(#{namespace := NS} = Table, Realm) ->
+%%
+%% Scoped and un-folded exactly like `list/2`. It previously scanned the whole
+%% bucket (`{<<>>, infinity}`) and returned the raw storage keys, which under a
+%% realm-folding topology (G-1) meant a stale-index fallback read returned OTHER
+%% realms' cells, still carrying their `<<Realm, 0>>` prefix — so the fallback
+%% disagreed with the very `index_get/5` result it stands in for, both in which
+%% rows it produced and in the shape of their keys.
+primary_cells(#{namespace := NS, db_topology := Topology} = Table, Realm) ->
     PrimaryBucket = primary_bucket(Table, Realm),
+    {Lo, Hi} = realm_scan_range(Topology, Realm),
     case
         bondy_oplog_core:range_all(
             NS,
             ?INDEX,
             PrimaryBucket,
-            {<<>>, infinity},
+            {Lo, Hi},
             #{limit => ?PRIMARY_SCAN_LIMIT, include_overlay => false}
         )
     of
@@ -3716,7 +3729,10 @@ primary_cells(#{namespace := NS} = Table, Realm) ->
                 false ->
                     ok
             end,
-            {ok, Cells};
+            {ok, [
+                {uncell_key(Topology, Realm, K), V, Hlc}
+             || {K, V, Hlc} <- Cells
+            ]};
         {error, _} = Err ->
             Err
     end.
@@ -3745,23 +3761,36 @@ read_index(Topology, Realm, NS, IndexName, SecBucket, Low, High, RangeOpts) ->
 %%
 %% `PrimaryKey` is the cell's storage key, which a realm-folding topology
 %% (G-1) has NUL-prefixed with the realm — undo that so callers get the key
-%% they wrote (and can feed back to `read/3`). NOTE: the secondary index
-%% bucket is still realm-agnostic, so cross-realm entries sharing a term are
-%% physically co-located. `index_get/5` reads correctly anyway because it
-%% restricts its scan to the term's realm sub-band (`index_eq_bounds/4`); the
-%% term-RANGE `index_range/6` cannot (a term range spans realms
-%% non-contiguously), so it is not yet realm-scoped — that lands with the
-%% realm-before-term index fold (piece #2).
+%% they wrote (and can feed back to `read/3`).
+%%
+%% The secondary index bucket is realm-agnostic, so cross-realm entries sharing
+%% a term are physically co-located. `index_get/5` never sees another realm's
+%% row because it restricts its scan to the term's realm sub-band
+%% (`index_eq_bounds/4`); the term-RANGE `index_range/6` cannot, because a term
+%% range spans realms non-contiguously.
+%%
+%% So this FILTERS on the realm rather than assuming it. Rows belonging to
+%% another realm are dropped, which is what a caller asking about `Realm` means
+%% — and is the only safe option, since blindly stripping `byte_size(Realm) + 1`
+%% bytes off a foreign key yields a corrupted key indistinguishable from a real
+%% one. `index_range/6` is therefore realm-CORRECT; it is still not realm-
+%% EFFICIENT, since it scans every shard and discards the rows it filters. See
+%% `index_get/5`'s docs for what making it efficient would cost.
 index_rows(Topology, Realm, Rows) ->
-    [
-        {
-            uncell_key(
-                Topology, Realm, bondy_oplog_index_key:decode_pk(SecKey)
-            ),
-            bondy_oplog_index_spec:decode_projection(Columns)
-        }
-     || {SecKey, Columns, _Hlc} <- Rows
-    ].
+    lists:filtermap(
+        fun({SecKey, Columns, _Hlc}) ->
+            PK = bondy_oplog_index_key:decode_pk(SecKey),
+            case uncell_key_of_realm(Topology, Realm, PK) of
+                {ok, Key} ->
+                    {true, {
+                        Key, bondy_oplog_index_spec:decode_projection(Columns)
+                    }};
+                mismatch ->
+                    false
+            end
+        end,
+        Rows
+    ).
 
 %% @private
 %% Map an already-chosen shard index to its oplog instance_id.
@@ -3926,15 +3955,48 @@ assert_nul_free_realm(Realm) ->
     ok.
 
 %% @private
-%% Recover the caller's key from a (possibly folded) storage key.
-uncell_key(Topology, Realm, Stored) when is_binary(Realm), is_binary(Stored) ->
+%% Recover the caller's key from a (possibly folded) storage key, for the paths
+%% whose scan was ALREADY bounded to `Realm`'s key band (`range/5`, `list/2`,
+%% `range_all/5`, and `index_get/5` via `index_eq_bounds/4`). A key from another
+%% realm cannot occur there, so it is a broken invariant rather than input, and
+%% is raised instead of guessed at.
+uncell_key(Topology, Realm, Stored) ->
+    case uncell_key_of_realm(Topology, Realm, Stored) of
+        {ok, Key} ->
+            Key;
+        mismatch ->
+            error({badarg, {foreign_realm_key, Realm, Stored}})
+    end.
+
+%% @private
+%% The realm-checked inverse of `cell_key/3`: `mismatch` when `Stored` does not
+%% carry exactly `<<Realm, 0>>`.
+%%
+%% The check is the point. Stripping a FIXED `byte_size(Realm) + 1` bytes is
+%% only correct if the key really is this realm's — given another realm's key it
+%% silently returns a corrupted suffix (or badmatches when the key is shorter),
+%% and the caller cannot tell either outcome from a real key. That is unreachable
+%% for the realm-bounded scans above, but NOT for the term-range `index_range/6`,
+%% whose band spans realms non-contiguously.
+%%
+%% Matching the bound `Realm` in the pattern also makes the test exact: a prefix
+%% that merely starts with the same bytes (realm `<<"a">>` vs `<<"ab">>`) fails,
+%% because the `0` separator must land immediately after it. That is the same
+%% injectivity `assert_nul_free_realm/1` protects on the write side.
+uncell_key_of_realm(Topology, Realm, Stored) when
+    is_binary(Realm), is_binary(Stored)
+->
     case ?FOLDS_REALM(Topology) of
         true ->
-            Skip = byte_size(Realm) + 1,
-            <<_:Skip/binary, Key/binary>> = Stored,
-            Key;
+            Size = byte_size(Realm),
+            case Stored of
+                <<Realm:Size/binary, 0, Key/binary>> -> {ok, Key};
+                _ -> mismatch
+            end;
         false ->
-            Stored
+            %% Realm-in-bucket topologies store the key verbatim; the Bucket
+            %% already isolates the realm, so there is no prefix to check.
+            {ok, Stored}
     end.
 
 %% @private

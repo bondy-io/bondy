@@ -534,19 +534,44 @@ to_refresh_token(#{type := ?MODULE, refresh_token := Val}) ->
     Val.
 
 -doc """
+Reclaims token cells that can no longer authenticate anyone, across every
+realm, and returns what it did.
+
+Three things are dropped:
+
+- **expired** tokens, via `bondy_oauth_token_set:cleanup/2` — the same
+  predicate `refresh/2` rejects on, so storage and authentication agree on
+  exactly which tokens exist;
+- tokens whose user is **gone or disabled**, matching what `refresh/2`
+  enforces through `check_authid/2` plus the `is_enabled` check auth applies;
+- **empty cells**, cleared rather than written back as an empty set.
+
+This is a cold, O(all tokens) operator task, not something on any request path.
+Nothing calls it — wire it to a scheduled job if you want it run.
+
+> #### Concurrency {: .warning}
+>
+> A cell is read, filtered and written back, and the store is last-write-wins,
+> so a token issued for the same user between this read and its write is lost
+> (that user re-authenticates). Writes are therefore made ONLY when something
+> was actually removed. Prefer running it when issuance is quiet.
 """.
 -spec cleanup() -> map().
 
 cleanup() ->
+    Now = ?NOW,
     Stats0 = #{
         errors => [],
+        scanned => 0,
         expired => 0,
-        unused => 0,
-        deactivated => 0
+        deactivated => 0,
+        cells_cleared => 0
     },
-    Stats1 = cleanup_expired_tokens(Stats0),
-    Stats2 = cleanup_unused_tokens(Stats1),
-    Stats = cleanup_deactivated_user_tokens(Stats2),
+    Stats = lists:foldl(
+        fun(AuthRealmUri, Acc) -> cleanup_realm(AuthRealmUri, Now, Acc) end,
+        Stats0,
+        auth_realm_uris()
+    ),
     ?LOG_INFO(#{
         description => "Finished cleaning up OAuth2 tokens",
         stats => Stats
@@ -920,15 +945,114 @@ maybe_clear_legacy(true, AuthRealmUri, RefreshToken) ->
     bondy_db:apply(table(), AuthRealmUri, legacy_key(RefreshToken), clear).
 
 %% @private
-cleanup_expired_tokens(Stats0) ->
-    %% TODO
-    Stats0.
+%% The realms that actually hold token cells. Tokens are bucketed by the AUTH
+%% realm (a realm's SSO realm when it has one, otherwise itself), so several
+%% realms collapse onto one bucket — hence the `usort`, or an SSO bucket would
+%% be scanned once per member realm.
+auth_realm_uris() ->
+    lists:usort(
+        lists:filtermap(
+            fun(Realm) ->
+                case get_authrealm_uri(bondy_realm:uri(Realm)) of
+                    {ok, Uri} -> {true, Uri};
+                    {error, _} -> false
+                end
+            end,
+            bondy_realm:list()
+        )
+    ).
 
 %% @private
-cleanup_unused_tokens(Stats0) ->
-    %% TODO
-    Stats0.
+%% One realm's cells. A failure here is recorded and the sweep CONTINUES: a
+%% single unreadable realm must not abandon every other realm's reclamation.
+cleanup_realm(AuthRealmUri, Now, Stats0) ->
+    Table = table(),
 
-cleanup_deactivated_user_tokens(Stats0) ->
-    %% TODO
-    Stats0.
+    try bondy_db:list(Table, AuthRealmUri) of
+        {ok, Rows} ->
+            lists:foldl(
+                fun(Row, Acc) ->
+                    cleanup_cell(Table, AuthRealmUri, Row, Now, Acc)
+                end,
+                Stats0,
+                Rows
+            );
+        {error, Reason} ->
+            add_error(Stats0, AuthRealmUri, Reason)
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_WARNING(#{
+                description => "Error while cleaning up OAuth2 tokens",
+                realm_uri => AuthRealmUri,
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            add_error(Stats0, AuthRealmUri, Reason)
+    end.
+
+%% @private
+%% A legacy refresh pointer is not a token set — it is a one-shot indirection
+%% keyed under a `legacy:` prefix. Its lifetime is owned by `refresh/2`, which
+%% clears it the first time the legacy string is redeemed, so leave it alone.
+cleanup_cell(_, _, {_Key, #{type := ?LEGACY_POINTER}, _Hlc}, _Now, Stats) ->
+    Stats;
+cleanup_cell(
+    Table,
+    AuthRealmUri,
+    {Key, #{type := bondy_oauth_token_set} = Set0, _Hlc},
+    Now,
+    Stats0
+) ->
+    Stats1 = bump(Stats0, scanned, 1),
+    {Expired, Set} = bondy_oauth_token_set:cleanup(Set0, Now),
+    Stats2 = bump(Stats1, expired, length(Expired)),
+
+    case bondy_oauth_token_set:to_list(Set) of
+        [] ->
+            %% Nothing survived (or the cell was already empty) — drop it
+            %% rather than write an empty set back.
+            ok = bondy_db:apply(Table, AuthRealmUri, Key, clear),
+            bump(Stats2, cells_cleared, 1);
+        [#{authid := AuthId} | _] = Live ->
+            %% `store_key/1` hashes the authid, so a cell holds exactly ONE
+            %% user's tokens — the user is resolved once per cell, not once
+            %% per token.
+            case is_user_active(AuthRealmUri, AuthId) of
+                false ->
+                    ok = bondy_db:apply(Table, AuthRealmUri, Key, clear),
+                    Stats3 = bump(Stats2, deactivated, length(Live)),
+                    bump(Stats3, cells_cleared, 1);
+                true when Expired =/= [] ->
+                    ok = bondy_db:apply(
+                        Table, AuthRealmUri, Key, {set, Set}
+                    ),
+                    Stats2;
+                true ->
+                    %% Untouched: do not rewrite a cell we did not change, so
+                    %% a concurrent issue/refresh cannot be clobbered.
+                    Stats2
+            end
+    end;
+cleanup_cell(_, _, _Row, _Now, Stats) ->
+    Stats.
+
+%% @private
+%% A token authenticates only while its user both exists and is enabled — the
+%% pair `refresh/2` enforces via `check_authid/2` and auth applies on session
+%% establishment. A user that cannot be resolved is treated as gone.
+is_user_active(AuthRealmUri, AuthId) ->
+    case bondy_rbac_user:lookup(AuthRealmUri, AuthId) of
+        {ok, User} -> bondy_rbac_user:is_enabled(User);
+        {error, _} -> false
+    end.
+
+%% @private
+bump(Stats, Key, 0) when is_map(Stats), is_atom(Key) ->
+    Stats;
+bump(Stats, Key, N) ->
+    maps:update_with(Key, fun(V) -> V + N end, N, Stats).
+
+%% @private
+add_error(#{errors := Errors} = Stats, AuthRealmUri, Reason) ->
+    Stats#{errors := [{AuthRealmUri, Reason} | Errors]}.

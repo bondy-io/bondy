@@ -371,6 +371,57 @@ sanitise_renders_non_utf8_binaries_test() ->
     ?assert(is_utf8(Key)),
     ?assert(is_utf8(Value)).
 
+%% `sanitise/1` routes a char list through `unicode:characters_to_binary/1`,
+%% which ENCODES a code point rather than truncating it to a byte, so `[171]`
+%% becomes `<<194,171>>`. That is a different path from `to_binary/1` (pinned by
+%% `to_map_scalars_are_utf8_test`) and has always been correct; this holds the
+%% distinction in place.
+sanitise_encodes_a_char_list_test() ->
+    ?assert(is_utf8(bondy_error:sanitise([171]))),
+    ?assert(is_utf8(bondy_error:sanitise([255, 254, 253]))),
+    %% A list that IS valid UTF-8 text still converts rather than being escaped.
+    ?assertEqual(~"ok", bondy_error:sanitise("ok")).
+
+%% Two distinct gaps let invalid UTF-8 reach `json:encode/1`, which raises
+%% `{invalid_byte, _}` rather than escaping it:
+%%
+%% 1. `to_binary/1` gated its BINARY clause on `is_utf8/1` but its LIST clause
+%%    ran `iolist_to_binary/1`, which accepts any list of bytes — so the latin-1
+%%    char list `[171]` became `<<171>>`. (Note this is NOT the `sanitise/1`
+%%    path, which encodes code points properly — see the test above.)
+%% 2. `to_map/1` sanitised `details` only, so every scalar could carry a
+%%    non-UTF-8 binary straight through. It is the JSON projection, so producing
+%%    encodable output is its own contract, not a bet on every construction path
+%%    having normalised its input.
+%%
+%% `prop_to_map_is_json_encodable` found these, but only about 1 case in 1400,
+%% so they are pinned deterministically here. Mutation-checked: reverting
+%% EITHER fix alone fails this test.
+to_map_scalars_are_utf8_test() ->
+    E = #{
+        code => <<255>>,
+        message => [171],
+        description => <<254, 253>>,
+        uri => ~"bondy.error.unknown_error",
+        handle => <<1:3>>,
+        doc_uri => <<200>>,
+        nature => transient,
+        details => #{}
+    },
+    Map = bondy_error:to_map(E),
+    maps:foreach(
+        fun
+            (K, V) when is_binary(V) ->
+                ?assert(is_utf8(K)),
+                ?assert(is_utf8(V));
+            (K, _) ->
+                ?assert(is_utf8(K))
+        end,
+        Map
+    ),
+    %% The whole projection must survive a real encode, not just look plausible.
+    ?assert(is_binary(iolist_to_binary(json:encode(Map)))).
+
 %% Truncation cuts at a byte offset, which can land inside a multi-byte
 %% character; the result must still be valid UTF-8.
 truncation_does_not_split_a_character_test() ->

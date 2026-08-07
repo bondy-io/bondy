@@ -54,7 +54,9 @@ groups() ->
         {oauth, [sequence], [
             password_token_crud_1,
             issue_revoke_by_device_id,
-            issue_refresh_revoke_by_device_id
+            issue_refresh_revoke_by_device_id,
+            cleanup_keeps_live_tokens,
+            cleanup_reaps_disabled_user_tokens
         ]}
     ].
 
@@ -600,6 +602,63 @@ issue_refresh_revoke_by_device_id(Config) ->
         {error, not_found},
         bondy_oauth_token:lookup(Uri, RToken1)
     ).
+
+%% The reaper must not be over-eager: a live token belonging to an enabled user
+%% has to survive a sweep untouched. This is the assertion that matters most —
+%% a cleanup that reaps too much silently logs every user out.
+cleanup_keeps_live_tokens(Config) ->
+    Uri = ?config(realm_uri, Config),
+    {U, RToken} = new_user_with_token(Uri, <<"cleanup_live">>),
+
+    Stats = bondy_oauth_token:cleanup(),
+    ?assertEqual([], maps:get(errors, Stats)),
+    ?assert(maps:get(scanned, Stats) >= 1),
+
+    ?assertMatch(
+        {ok, _},
+        bondy_oauth_token:lookup(Uri, RToken),
+        "A live token of an enabled user must survive cleanup"
+    ),
+    {save_config, [{cleanup_username, U} | Config]}.
+
+%% A token authenticates only while its user is both present and enabled, so
+%% disabling the user makes every token it holds dead weight. The whole cell
+%% goes, since `store_key/1` hashes the authid and therefore one cell holds
+%% exactly one user's tokens.
+cleanup_reaps_disabled_user_tokens(Config) ->
+    Uri = ?config(realm_uri, Config),
+    {U, RToken} = new_user_with_token(Uri, <<"cleanup_disabled">>),
+    ?assertMatch({ok, _}, bondy_oauth_token:lookup(Uri, RToken)),
+
+    ok = bondy_rbac_user:disable(Uri, U),
+
+    Stats = bondy_oauth_token:cleanup(),
+    ?assertEqual([], maps:get(errors, Stats)),
+    ?assert(maps:get(deactivated, Stats) >= 1),
+    ?assert(maps:get(cells_cleared, Stats) >= 1),
+
+    ?assertEqual(
+        {error, not_found},
+        bondy_oauth_token:lookup(Uri, RToken),
+        "A disabled user's tokens must be reclaimed"
+    ).
+
+%% A fresh resource owner plus one issued password token, returned as
+%% `{Username, RefreshToken}`.
+new_user_with_token(Uri, U) ->
+    R = #{
+        <<"username">> => U,
+        <<"password">> => <<"123456">>,
+        <<"meta">> => #{},
+        <<"groups">> => []
+    },
+    {ok, _} = bondy_oauth2_resource_owner:add(Uri, R),
+
+    SessionId = bondy_session_id:new(),
+    SourceIP = {127, 0, 0, 1},
+    {ok, AuthCtxt} = bondy_auth:init(SessionId, Uri, U, [], SourceIP),
+    {ok, Token} = bondy_oauth_token:issue(password, AuthCtxt, #{}),
+    {U, bondy_oauth_token:to_refresh_token(Token)}.
 
 authenticate(Uri, Username, Secret) ->
     Result = do_authenticate(Uri, Username, Secret),

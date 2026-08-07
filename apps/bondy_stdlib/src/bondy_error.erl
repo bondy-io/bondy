@@ -327,16 +327,26 @@ Every key is a binary and every value is JSON-encodable. `metadata` is omitted;
 to_map(#{} = Error) ->
     Details = sanitise(maps:get(details, Error, #{})),
 
+    %% Every scalar goes through `to_binary/1`, not `maps:get/3` raw. This is
+    %% the JSON projection, so producing JSON-encodable output is its contract
+    %% — it must not depend on every construction path having normalised its
+    %% input. Only `details` used to be sanitised, which left `code`, `message`,
+    %% `description`, `uri`, `handle` and `doc_uri` able to carry a non-UTF-8
+    %% binary straight into `json:encode/1`.
+    %%
+    %% `to_binary/1` rather than `sanitise/1`: sanitise also truncates, and
+    %% silently shortening a description is a behaviour change this fix has no
+    %% business making.
     Canonical = #{
-        ~"code" => maps:get(code, Error, ~""),
-        ~"message" => maps:get(message, Error, ~""),
-        ~"description" => maps:get(description, Error, ~""),
-        ~"uri" => maps:get(uri, Error, ~""),
-        ~"handle" => maps:get(handle, Error, ~""),
+        ~"code" => to_binary(maps:get(code, Error, ~"")),
+        ~"message" => to_binary(maps:get(message, Error, ~"")),
+        ~"description" => to_binary(maps:get(description, Error, ~"")),
+        ~"uri" => to_binary(maps:get(uri, Error, ~"")),
+        ~"handle" => to_binary(maps:get(handle, Error, ~"")),
         ~"nature" => atom_to_binary(maps:get(nature, Error, transient), utf8),
         ~"details" => Details,
         ~"causes" => [to_map(C) || C <- maps:get(causes, Error, [])],
-        ~"doc_uri" => maps:get(doc_uri, Error, ~"")
+        ~"doc_uri" => to_binary(maps:get(doc_uri, Error, ~""))
     },
 
     Map =
@@ -991,8 +1001,15 @@ to_binary(Term) when is_integer(Term) ->
 to_binary(Term) when is_float(Term) ->
     float_to_binary(Term, [short]);
 to_binary(Term) when is_list(Term) ->
-    try
-        iolist_to_binary(Term)
+    %% `iolist_to_binary/1` accepts any list of bytes, so a latin-1 char list
+    %% such as `[171]` converts happily to `<<171>>` — which is NOT valid UTF-8
+    %% and makes `json:encode/1` raise `{invalid_byte, 171}`. Re-enter through
+    %% the binary clause so the result faces the same `is_utf8/1` gate a
+    %% caller-supplied binary does, and falls back to `format_term/1` when it
+    %% fails. Without this, list input was the one way to smuggle invalid UTF-8
+    %% past a converter whose whole job is to produce JSON-safe output.
+    try iolist_to_binary(Term) of
+        Bin -> to_binary(Bin)
     catch
         _:_ -> format_term(Term)
     end;

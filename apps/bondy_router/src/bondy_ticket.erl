@@ -237,12 +237,10 @@ WAMP permission required to call the procedures.
 
 -export([issue/2]).
 -export([lookup/3]).
--export([remove_expired/0]).
 -export([revoke/1]).
 -export([revoke/3]).
 -export([revoke_all/1]).
 -export([revoke_all/2]).
--export([revoke_all/3]).
 -export([store_ticket/3]).
 -export([update_claims/3]).
 -export([verify/1]).
@@ -496,22 +494,6 @@ revoke_all(RealmUri, Authid) ->
     ok.
 
 -doc """
-Revokes all tickets issued to user with `Username` in realm `RealmUri` matching
-the scope `Scope`.
-""".
--spec revoke_all(
-    RealmUri :: uri(),
-    Authid :: all | bondy_rbac_user:username(),
-    Scope :: scope()
-) -> ok.
-
-revoke_all(_RealmUri, _Authid, _Scope) ->
-    error(not_implemented).
-
-remove_expired() ->
-    ok.
-
--doc """
 Updates the claims stored in PlumDB for an existing ticket. This is used by the
 OIDC refresh worker to update OIDC tokens (refresh_token,
 access_token_expires_at) without re-issuing the ticket.
@@ -761,7 +743,34 @@ update_tickets(Scope, Claims, Tickets) when is_map(Scope) ->
     update_tickets(list_key(Scope), Claims, Tickets);
 update_tickets({_, _} = Key, Claims, Tickets) ->
     lists:sort(
-        lists:keystore(Key, 1, Tickets, {Key, Claims})
+        lists:keystore(Key, 1, prune_expired(Tickets), {Key, Claims})
+    ).
+
+%% @private
+%% Lazy reclamation of the other devices' expired tickets, performed while we
+%% are already rewriting this cell — the same shape as
+%% `bondy_oauth_token_set:cleanup_and_truncate/3` on the token write paths.
+%% Re-issuing for device A replaces only A's entry, so without this a device
+%% that never comes back leaves its expired ticket in the cell forever.
+%%
+%% Pruning uses the same `is_expired/1` that `verify/1` rejects on, so storage
+%% and authentication agree on exactly which tickets exist — an entry dropped
+%% here could not have authenticated anyway.
+%%
+%% Pruning happens BEFORE the `keystore`, so the entry being written is never
+%% a candidate, and only entries we can positively prove expired are dropped:
+%% the historical unkeyed `[Claims]` form described above is already unreachable
+%% by `lookup/3` (`lists:keyfind/3` skips non-tuples), but it is not this
+%% function's job to silently delete data it does not recognise.
+prune_expired(Tickets) ->
+    lists:filter(
+        fun
+            ({_, Claims}) when is_map(Claims) ->
+                not (is_map_key(expires_at, Claims) andalso is_expired(Claims));
+            (_) ->
+                true
+        end,
+        Tickets
     ).
 
 %% @private

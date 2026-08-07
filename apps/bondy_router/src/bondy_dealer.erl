@@ -314,7 +314,6 @@ another register request second might be permissible immediately.
 -export([is_feature_enabled/1]).
 -export([register/3]).
 -export([register/4]).
--export([unregister/1]).
 -export([unregister/2]).
 
 -ifdef(TEST).
@@ -478,19 +477,6 @@ register(Procedure, Opts0, RealmUri, Ref) ->
         {error, _} = Error ->
             Error
     end.
-
--doc """
-For internal Bondy use.
-
-Terminates the process identified by `Pid` by
-`bondy_subscribers_sup:terminate_subscriber/1`.
-""".
--spec unregister(pid()) -> ok | {error, not_found}.
-
-unregister(Callee) when is_integer(Callee) ->
-    error(not_implemented);
-unregister(Callee) when is_pid(Callee) ->
-    error(not_implemented).
 
 -spec unregister(RegId :: id(), bondy_context:t() | uri()) ->
     ok | {error, not_found}.
