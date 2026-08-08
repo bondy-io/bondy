@@ -83,6 +83,14 @@
 -define(BONDY_OAUTH2_TOKEN_REVOKE_ALL, <<"bondy.oauth2.token.revoke_all">>).
 -define(BONDY_OAUTH2_TOKEN_REFRESH, <<"bondy.oauth2.token.refresh">>).
 
+%% Outbound email. Dormant unless a `mail.relay.*` is configured, in which case
+%% every one of these answers `bondy.error.mail_not_configured`.
+-define(BONDY_MAIL_RELAY_LIST, <<"bondy.mail.relay.list">>).
+-define(BONDY_MAIL_SEND, <<"bondy.mail.send">>).
+-define(BONDY_MAIL_SEND_ASYNC, <<"bondy.mail.send_async">>).
+-define(BONDY_MAIL_STATUS_GET, <<"bondy.mail.status.get">>).
+-define(BONDY_MAIL_TEST, <<"bondy.mail.test">>).
+
 -define(BONDY_TICKET_ISSUE, <<"bondy.ticket.issue">>).
 -define(BONDY_TICKET_VERIFY, <<"bondy.ticket.verify">>).
 -define(BONDY_TICKET_REVOKE, <<"bondy.ticket.revoke">>).

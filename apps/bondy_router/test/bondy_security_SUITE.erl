@@ -862,7 +862,8 @@ wait_until(Fun, Tag, Deadline) ->
             ok;
         _ ->
             case erlang:monotonic_time(millisecond) > Deadline of
-                true -> error({wait_timeout, Tag});
+                true ->
+                    error({wait_timeout, Tag});
                 false ->
                     timer:sleep(100),
                     wait_until(Fun, Tag, Deadline)

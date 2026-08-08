@@ -201,7 +201,9 @@ terminate(Reason, Ctxt) ->
     %% The manager may be shutting down after `stop/0`, so tolerate a table
     %% that is already gone rather than failing a suite during teardown.
     try
-        N = ets:update_counter(?TAB, termination_seq, {2, 1}, {termination_seq, 0}),
+        N = ets:update_counter(
+            ?TAB, termination_seq, {2, 1}, {termination_seq, 0}
+        ),
         true = ets:insert(?TAB, {{termination, N}, {Reason, Ctxt}}),
         ok
     catch

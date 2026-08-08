@@ -1,0 +1,49 @@
+{
+    "id": "mail",
+    "version": "v1.0",
+    "kind": "broker_bridge",
+    "meta": {
+        "description": "Send a welcome email when a user registers. The relay named here is declared in bondy.conf under mail.relay.$name.*; a bridge specification names a relay and can never describe one, so no host or credential appears in this file."
+    },
+    "subscriptions": [
+        {
+            "bridge": "bondy_smtp_bridge",
+            "meta": {
+                "description": "Subscribe to com.example.user.registered and send a welcome email."
+            },
+            "match": {
+                "realm": "com.acme.app",
+                "topic": "com.example.user.registered",
+                "options": {"match": "exact"}
+            },
+            "action": {
+                "realm": "{{event.realm}}",
+                "relay": "transactional",
+                "to": "{{event.kwargs.email}}",
+                "subject": "\"Welcome, {{event.kwargs.name}}\"",
+                "html": "\"<h1>Welcome</h1><p>Your account on {{event.details.topic}} is ready.</p>\"",
+                "text": "\"Welcome. Your account is ready.\"",
+                "headers": {},
+                "options": {}
+            }
+        },
+        {
+            "bridge": "bondy_smtp_bridge",
+            "meta": {
+                "description": "The same thing without naming a relay: mail.default_relay is used. Sending the same event twice with one idempotency key sends one email."
+            },
+            "match": {
+                "realm": "com.acme.app",
+                "topic": "com.example.order.placed",
+                "options": {"match": "exact"}
+            },
+            "action": {
+                "realm": "{{event.realm}}",
+                "id": "\"order-{{event.kwargs.order_id}}\"",
+                "to": "{{event.kwargs.email}}",
+                "subject": "\"Order {{event.kwargs.order_id}} received\"",
+                "text": "\"Thank you. We have your order.\""
+            }
+        }
+    ]
+}

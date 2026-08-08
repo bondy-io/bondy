@@ -96,6 +96,15 @@
       "keepTime": true,
       "tags": [],
       "asDropdown": false
+    },
+    {
+      "title": "Mail",
+      "type": "link",
+      "url": "/d/bondy-mail",
+      "icon": "dashboard",
+      "targetBlank": false,
+      "keepTime": true,
+      "includeVars": true
     }
   ],
   "annotations": {

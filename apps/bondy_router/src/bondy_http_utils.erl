@@ -479,5 +479,27 @@ status_of(~"bondy.error.partition_detected") ->
     ?HTTP_SERVICE_UNAVAILABLE;
 status_of(~"bondy.error.insufficient_resources") ->
     ?HTTP_SERVICE_UNAVAILABLE;
+%% Mail. A permanent mail failure is a 4xx because the request is what has to
+%% change -- including `mail_rejected`, where the relay will refuse the same
+%% message however many times it is offered, so reporting it as a 502 would
+%% invite a retry that cannot succeed.
+status_of(~"bondy.error.mail_not_configured") ->
+    ?HTTP_NOT_IMPLEMENTED;
+status_of(~"bondy.error.no_such_relay") ->
+    ?HTTP_BAD_REQUEST;
+status_of(~"bondy.error.relay_not_permitted") ->
+    ?HTTP_FORBIDDEN;
+status_of(~"bondy.error.sender_not_permitted") ->
+    ?HTTP_FORBIDDEN;
+status_of(~"bondy.error.invalid_recipient") ->
+    ?HTTP_BAD_REQUEST;
+status_of(~"bondy.error.mail_rejected") ->
+    ?HTTP_BAD_REQUEST;
+status_of(~"bondy.error.mail_delivery_failed") ->
+    ?HTTP_BAD_GATEWAY;
+status_of(~"bondy.error.relay_unavailable") ->
+    ?HTTP_SERVICE_UNAVAILABLE;
+status_of(~"bondy.error.mail_queue_full") ->
+    ?HTTP_TOO_MANY_REQUESTS;
 status_of(_) ->
     ?HTTP_INTERNAL_SERVER_ERROR.

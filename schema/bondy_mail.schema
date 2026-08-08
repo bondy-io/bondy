@@ -1,0 +1,536 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+%% =============================================================================
+%% MAIL RELAYS
+%%
+%% A relay is operator-owned infrastructure: an SMTP endpoint, its credentials,
+%% and the policy saying which realms may send through it and as whom. Callers
+%% reference a relay by name; credentials never appear in a bridge
+%% specification, an RPC argument, a log line or an error payload.
+%%
+%% With no relay declared, outbound email is dormant: the application starts,
+%% supervises nothing, and the bondy.mail.* procedures answer
+%% `bondy.error.mail_not_configured`.
+%%
+%% Configuration file example:
+%%
+%%   mail.default_relay = transactional
+%%
+%%   mail.relay.transactional.host = smtp.example.com
+%%   mail.relay.transactional.port = 587
+%%   mail.relay.transactional.transport = starttls
+%%   mail.relay.transactional.username = apikey
+%%   mail.relay.transactional.secret.provider = env
+%%   mail.relay.transactional.secret.env.var = BONDY_SMTP_PASSWORD
+%%   mail.relay.transactional.from = no-reply@example.com
+%%   mail.relay.transactional.allowed_from = example.com, mail.example.com
+%%   mail.relay.transactional.realms = com.example.app, com.example.staging
+%%
+%% Sender identity is derived, not asserted: a request that does not name a
+%% sender gets `from`, and one that does must fall inside `allowed_from`. An
+%% empty `allowed_from` (the default) means callers cannot choose a sender at
+%% all, so a misconfiguration cannot open a spoofing hole.
+%%
+%% `realms` accepts realm URIs, prototype URIs, or `*`. A prototype entry
+%% admits every realm that inherits from it, which is the same inheritance that
+%% governs grants. Left unset, only the master realm may use the relay.
+%% =============================================================================
+
+%% =============================================================================
+%% VALIDATORS
+%% =============================================================================
+
+{validator, "positive_integer", "must be a positive integer",
+  fun(V) -> is_integer(V) andalso V > 0 end
+}.
+
+{validator, "non_negative_integer", "must be a non-negative integer",
+  fun(V) -> is_integer(V) andalso V >= 0 end
+}.
+
+{validator, "non_negative_number", "must be a non-negative number",
+  fun(V) -> is_number(V) andalso V >= 0 end
+}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc The relay used when a request does not name one. Optional when exactly
+%% one relay is declared, in which case that relay is the default.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.default_relay", "bondy_mail.default_relay", [
+  {datatype, string},
+  {commented, "transactional"}
+]}.
+
+%% Relay names are binaries everywhere else, so normalise here rather than
+%% making every reader cope with a string.
+{translation, "bondy_mail.default_relay",
+fun(Conf) ->
+    case cuttlefish:conf_get("mail.default_relay", Conf, undefined) of
+        undefined -> undefined;
+        Name when is_list(Name) -> list_to_binary(Name);
+        Name when is_binary(Name) -> Name
+    end
+end}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc How long the outcome of a message is remembered, and so also how long an
+%% idempotency key deduplicates: send the same key twice inside this window and
+%% the second request reports the first message instead of sending another.
+%%
+%% Status is held in memory on the node that accepted the message and is neither
+%% replicated nor written to disk. A restart forgets it.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.status.ttl", "bondy_mail.status_ttl", [
+  {datatype, {duration, ms}},
+  {default, "1h"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The most status records a node keeps. This is a backstop: the table is
+%% bounded by arrival rate times `mail.status.ttl`, and this only decides what
+%% happens when that product is larger than expected. Beyond the bound the
+%% oldest records are dropped, which degrades status reporting and idempotency
+%% rather than refusing mail.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.status.max_size", "bondy_mail.status_max_size", [
+  {datatype, integer},
+  {default, 50000},
+  {validators, ["positive_integer"]}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc The hostname or address of the SMTP relay.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.host", "bondy_mail.relays", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The TCP port of the SMTP relay. 587 for STARTTLS submission, 465 for
+%% implicit TLS, 25 for plain.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.port", "bondy_mail.relays", [
+  {datatype, integer},
+  {default, 587},
+  {validators, ["positive_integer"]}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How the connection is secured. `starttls` (the default) upgrades a plain
+%% connection and fails if the relay will not; `tls` connects with TLS from the
+%% first byte; `plain` does not encrypt at all and should be confined to a relay
+%% reached over a trusted network.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.transport", "bondy_mail.relays", [
+  {datatype, {enum, [plain, starttls, tls]}},
+  {default, starttls}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The username presented to the relay when authenticating.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.username", "bondy_mail.relays", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Where the relay password comes from. `env` reads an environment
+%% variable, `aws_sm` reads an AWS Secrets Manager secret, and `none` takes the
+%% literal value of `secret.value`. A literal is supported so a development
+%% setup needs no environment variable, and warns at every boot naming the
+%% relay.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.secret.provider", "bondy_mail.relays", [
+  {datatype, {enum, [none, env, aws_sm]}},
+  {default, none}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The literal relay password. Used only when `secret.provider` is `none`.
+%% Prefer a provider outside development: this value sits in the configuration
+%% file in the clear.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.secret.value", "bondy_mail.relays", [
+  {datatype, string},
+  hidden
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The environment variable holding the relay password. Used when
+%% `secret.provider` is `env`.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.secret.env.var", "bondy_mail.relays", [
+  {datatype, string},
+  {commented, "BONDY_SMTP_PASSWORD"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The AWS Secrets Manager secret holding the relay password. Used when
+%% `secret.provider` is `aws_sm`.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.secret.aws_sm.secret_id", "bondy_mail.relays", [
+  {datatype, string},
+  {commented, "bondy/smtp"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How the resolved secret is encoded. `base64` decodes it before use.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.secret.encoding", "bondy_mail.relays", [
+  {datatype, {enum, [raw, base64]}},
+  {default, raw}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc When to authenticate. `if_available` (the default) authenticates when
+%% the relay advertises AUTH and proceeds without it otherwise; `always`
+%% requires it and fails the send if it is unavailable; `never` does not
+%% authenticate.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.auth", "bondy_mail.relays", [
+  {datatype, {enum, [always, if_available, never]}},
+  {default, if_available}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Whether the relay's TLS certificate is verified. Leave at `verify_peer`.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.tls.verify", "bondy_mail.relays", [
+  {datatype, {enum, [verify_peer, verify_none]}},
+  {default, verify_peer}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc A CA bundle used to verify the relay's certificate. Defaults to the
+%% trust store managed by bondy_cert_manager.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.tls.cacertfile", "bondy_mail.relays", [
+  {datatype, file}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The envelope sender and header From used when a request does not name
+%% one. Because it is the default rather than a fallback, a caller that never
+%% sets a sender cannot claim someone else's.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.from", "bondy_mail.relays", [
+  {datatype, string},
+  {commented, "no-reply@example.com"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Comma-separated domains a caller may claim in `from`. Empty (the
+%% default) means callers cannot set a sender at all and always get `from`.
+%% Use `*` to allow any domain, which disables spoofing protection for this
+%% relay.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.allowed_from", "bondy_mail.relays", [
+  {datatype, string},
+  {commented, "example.com, mail.example.com"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Comma-separated realm URIs permitted to use this relay. A prototype URI
+%% admits every realm inheriting from it. Use `*` for any realm. Empty (the
+%% default) means the master realm only.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.realms", "bondy_mail.relays", [
+  {datatype, string},
+  {commented, "com.example.app, com.example.staging"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How many workers deliver to this relay concurrently. Each holds at most
+%% one SMTP conversation at a time, so this is the relay's concurrency limit.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.pool.size", "bondy_mail.relays", [
+  {datatype, integer},
+  {default, 4},
+  {validators, ["positive_integer"]}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How many messages may wait for a worker before new ones are refused.
+%% This is the backpressure bound: a relay that stops accepting mail fills its
+%% queue and then refuses, rather than growing without limit. Refusal is
+%% reported as a transient error; message routing is unaffected either way.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.queue.max_size", "bondy_mail.relays", [
+  {datatype, integer},
+  {default, 1000},
+  {validators, ["positive_integer"]}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How long a message may wait in the queue before it is dropped as stale.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.queue.ttl", "bondy_mail.relays", [
+  {datatype, {duration, ms}},
+  {default, "5m"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How long one delivery attempt may take, including connection and TLS.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.timeout", "bondy_mail.relays", [
+  {datatype, {duration, ms}},
+  {default, "30s"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How many times a transient failure is retried. Permanent failures -- a
+%% 5xx reply, a malformed address, an oversized message -- are never retried.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.retry.max_attempts", "bondy_mail.relays", [
+  {datatype, integer},
+  {default, 3},
+  {validators, ["non_negative_integer"]}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The shortest delay between retries. Backoff is exponential and
+%% jittered, so a fleet retrying against one relay does not do so in lockstep.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.retry.backoff.min", "bondy_mail.relays", [
+  {datatype, {duration, ms}},
+  {default, "1s"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The longest delay between retries.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.retry.backoff.max", "bondy_mail.relays", [
+  {datatype, {duration, ms}},
+  {default, "1m"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Messages per second accepted for this relay. 0 (the default) does not
+%% limit. Exceeding the rate is a transient error.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.rate_limit.rate", "bondy_mail.relays", [
+  {datatype, integer},
+  {default, 0},
+  {validators, ["non_negative_number"]}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How far the rate limit may be exceeded in a burst.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.rate_limit.burst", "bondy_mail.relays", [
+  {datatype, integer},
+  {default, 1},
+  {validators, ["positive_integer"]}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The largest encoded message accepted, including attachments. Exceeding
+%% it is a permanent failure and is never retried.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.max_message_size", "bondy_mail.relays", [
+  {datatype, bytesize},
+  {default, "25MB"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Consecutive transient delivery failures that mark this relay down,
+%% raising the `mail_relay_down` alarm and setting `bondy_mail_relay_up` to 0.
+%% Permanent failures do not count: a rejected recipient or an oversized
+%% message is the relay working correctly.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.health.failure_threshold", "bondy_mail.relays", [
+  {datatype, integer},
+  {default, 3},
+  {validators, ["positive_integer"]}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Consecutive successes that clear the `mail_relay_down` alarm again.
+%% Delivery itself recovers on the first success regardless of this setting;
+%% only the alarm waits, so that a relay which alternates between working and
+%% failing does not alternate the page.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.health.success_threshold", "bondy_mail.relays", [
+  {datatype, integer},
+  {default, 1},
+  {validators, ["positive_integer"]}
+]}.
+
+
+%% =============================================================================
+%% TRANSLATION
+%%
+%% Collects every `mail.relay.$name.*` key into a list of maps, one per relay,
+%% which bondy_mail_config validates again into records. Follows the same shape
+%% as the http_connector services translation.
+%% =============================================================================
+
+{translation, "bondy_mail.relays",
+fun(Conf0) ->
+    Conf = cuttlefish_variable:filter_by_prefix("mail.relay", Conf0),
+
+    %% Relay names are the third segment of `mail.relay.$name....`
+    Names = lists:usort(
+        lists:filtermap(
+            fun({[_, _, Name | _], _}) -> {true, Name};
+               (_) -> false
+            end,
+            Conf
+        )
+    ),
+
+    ToBin = fun
+        (V) when is_list(V) -> list_to_binary(V);
+        (V) when is_binary(V) -> V
+    end,
+
+    Get = fun(Key, Default) ->
+        case cuttlefish:conf_get(Key, Conf, Default) of
+            undefined -> Default;
+            Value -> Value
+        end
+    end,
+
+    %% "a, b" -> [<<"a">>, <<"b">>]; "*" -> any; unset -> []
+    CsvList = fun
+        (undefined) ->
+            [];
+        ("*") ->
+            any;
+        (Str) ->
+            [
+                list_to_binary(string:trim(Tok))
+             || Tok <- string:tokens(Str, ","), string:trim(Tok) =/= ""
+            ]
+    end,
+
+    lists:map(
+        fun(Name) ->
+            Pfx = "mail.relay." ++ Name,
+
+            Host = Get(Pfx ++ ".host", undefined),
+            Host =/= undefined orelse cuttlefish:invalid(
+                "mail.relay." ++ Name ++ ".host is required"
+            ),
+
+            %% The credential is described here, not resolved here: cuttlefish
+            %% runs before the node is up, and a resolved secret must not be
+            %% written into the generated configuration file.
+            Provider = Get(Pfx ++ ".secret.provider", none),
+            Encoding = Get(Pfx ++ ".secret.encoding", raw),
+            Secret =
+                case Provider of
+                    none ->
+                        case Get(Pfx ++ ".secret.value", undefined) of
+                            undefined ->
+                                undefined;
+                            Value ->
+                                #{
+                                    provider => none,
+                                    value => ToBin(Value)
+                                }
+                        end;
+                    env ->
+                        case Get(Pfx ++ ".secret.env.var", undefined) of
+                            undefined ->
+                                cuttlefish:invalid(
+                                    Pfx ++ ".secret.env.var is required "
+                                    "when the provider is env"
+                                );
+                            Var ->
+                                #{
+                                    provider => env,
+                                    var => ToBin(Var),
+                                    encoding => Encoding
+                                }
+                        end;
+                    aws_sm ->
+                        case Get(Pfx ++ ".secret.aws_sm.secret_id", undefined) of
+                            undefined ->
+                                cuttlefish:invalid(
+                                    Pfx ++ ".secret.aws_sm.secret_id is "
+                                    "required when the provider is aws_sm"
+                                );
+                            Id ->
+                                #{
+                                    provider => aws_sm,
+                                    secret_id => ToBin(Id),
+                                    encoding => Encoding
+                                }
+                        end
+                end,
+
+            Optional = fun
+                (undefined) -> undefined;
+                (V) -> ToBin(V)
+            end,
+
+            #{
+                name => list_to_binary(Name),
+                host => ToBin(Host),
+                port => Get(Pfx ++ ".port", 587),
+                transport => Get(Pfx ++ ".transport", starttls),
+                username => Optional(Get(Pfx ++ ".username", undefined)),
+                secret => Secret,
+                auth => Get(Pfx ++ ".auth", if_available),
+                tls_verify => Get(Pfx ++ ".tls.verify", verify_peer),
+                tls_cacertfile =>
+                    Optional(Get(Pfx ++ ".tls.cacertfile", undefined)),
+                from => Optional(Get(Pfx ++ ".from", undefined)),
+                allowed_from => CsvList(Get(Pfx ++ ".allowed_from", undefined)),
+                realms => CsvList(Get(Pfx ++ ".realms", undefined)),
+                pool_size => Get(Pfx ++ ".pool.size", 4),
+                queue_max_size => Get(Pfx ++ ".queue.max_size", 1000),
+                queue_ttl => Get(Pfx ++ ".queue.ttl", 300000),
+                timeout => Get(Pfx ++ ".timeout", 30000),
+                retry_max_attempts => Get(Pfx ++ ".retry.max_attempts", 3),
+                retry_backoff_min => Get(Pfx ++ ".retry.backoff.min", 1000),
+                retry_backoff_max => Get(Pfx ++ ".retry.backoff.max", 60000),
+                rate_limit_rate => Get(Pfx ++ ".rate_limit.rate", 0),
+                rate_limit_burst => Get(Pfx ++ ".rate_limit.burst", 1),
+                max_message_size => Get(Pfx ++ ".max_message_size", 26214400),
+                health_failure_threshold =>
+                    Get(Pfx ++ ".health.failure_threshold", 3),
+                health_success_threshold =>
+                    Get(Pfx ++ ".health.success_threshold", 1)
+            }
+        end,
+        Names
+    )
+end}.

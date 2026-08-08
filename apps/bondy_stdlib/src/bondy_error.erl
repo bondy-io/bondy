@@ -136,6 +136,7 @@ A catalogue entry: the fixed attributes of an error type.
 -export([format_error/2]).
 -export([from_exception/3]).
 -export([from_term/1]).
+-export([internal/1]).
 -export([internal/3]).
 -export([is_type/1]).
 -export([new/1]).
@@ -256,7 +257,7 @@ from_term(Term) ->
             %% do_from_term/1 is meant to be total. If it ever is not, an
             %% opaque internal error is still a better outcome than an
             %% exception raised from inside an error handler.
-            internal_error(Term)
+            internal(Term)
     end.
 
 -doc """
@@ -280,6 +281,28 @@ from_exception(Class, Reason, Stacktrace) ->
             stacktrace => Stacktrace
         }
     }.
+
+-doc """
+Builds an opaque `internal_error` from any term.
+
+The result carries a fresh `trace_id` and confines `Term` to `metadata`, so a
+peer learns only that something failed while an operator can join the reply to
+the log entry holding the actual reason.
+
+Use this wherever a failure has to be reported but cannot be described safely --
+including outside a `catch`, where there is a reason but no exception. Returning
+a bare `internal_error` instead would break the catalogue's contract: the peer
+gets nothing to quote and the two halves cannot be joined.
+
+`internal/3` is the equivalent for a caught exception.
+""".
+-spec internal(Term :: any()) -> t().
+
+internal(Term) ->
+    new(internal_error, #{
+        trace_id => trace_id(),
+        metadata => #{reason => Term}
+    }).
 
 -doc """
 Builds an opaque `internal_error` from a caught exception.
@@ -571,6 +594,16 @@ types() ->
         node_down,
         cluster_not_formed,
         partition_detected,
+        %% Mail
+        mail_not_configured,
+        no_such_relay,
+        relay_not_permitted,
+        sender_not_permitted,
+        invalid_recipient,
+        mail_rejected,
+        mail_delivery_failed,
+        relay_unavailable,
+        mail_queue_full,
         %% WAMP
         no_such_realm,
         no_such_procedure,
@@ -727,7 +760,7 @@ convert(Type) when is_atom(Type) ->
         undefined ->
             case posix_message(Type) of
                 {ok, _} -> new(Type);
-                error -> internal_error(Type)
+                error -> internal(Type)
             end;
         _ ->
             new(Type)
@@ -735,7 +768,7 @@ convert(Type) when is_atom(Type) ->
 convert(Code) when is_binary(Code) ->
     from_code(Code);
 convert(Term) ->
-    internal_error(Term).
+    internal(Term).
 
 %% @private
 %% A bare binary has historically been treated as a `code', not a URI: an
@@ -806,7 +839,7 @@ is_uri_chars(_) ->
 %% not author.
 known_or_internal(Type, Term, Opts) ->
     case entry(Type) of
-        undefined -> internal_error(Term);
+        undefined -> internal(Term);
         _ -> new(Type, Opts)
     end.
 
@@ -886,13 +919,6 @@ keys_details(Keys) ->
         [$[, lists:join(~", ", [to_binary(K) || K <- Keys]), $]]
     ),
     #{keys => Keys, keys_text => Text}.
-
-%% @private
-internal_error(Term) ->
-    new(internal_error, #{
-        trace_id => trace_id(),
-        metadata => #{reason => Term}
-    }).
 
 %% @private
 %% A W3C Trace Context `trace-id': 32 lowercase hex characters. Generated from
@@ -1669,6 +1695,137 @@ entry(partition_detected) ->
         ~"K003",
         transient,
         ~"A network partition has been detected."
+    );
+%% -----------------------------------------------------------------------------
+%% Mail
+%%
+%% A mail relay is operator-owned infrastructure, and none of these entries
+%% describes it. `details` carries the relay's configured NAME -- which the
+%% caller supplied in the first place, or could read from
+%% `bondy.mail.relay.list` -- and nothing else. No hostname, no username, no
+%% credential, and never the text of an SMTP reply: a relay's banner is written
+%% by someone other than us and can say anything at all.
+%% -----------------------------------------------------------------------------
+
+entry(mail_not_configured) ->
+    entry(
+        ~"bondy.error.mail_not_configured",
+        ~"M001",
+        permanent,
+        ~"Outbound email is not configured on this node.",
+        <<
+            "No mail relay has been declared, so there is nothing to send "
+            "through. An operator enables outbound email by declaring at least "
+            "one 'mail.relay.$name.*' in bondy.conf. A relay that is declared "
+            "but unusable -- its credential could not be resolved, or it will "
+            "not meet a security setting its own declaration requires -- is "
+            "reported here too: in both cases an operator must act before any "
+            "message can go out, and neither retrying nor changing the message "
+            "helps."
+        >>
+    );
+entry(no_such_relay) ->
+    entry(
+        ~"bondy.error.no_such_relay",
+        ~"M002",
+        permanent,
+        ~"There is no mail relay named '%{relay}'.",
+        <<
+            "Either the request named a relay that is not declared on this "
+            "node, or it named none while several are declared and no "
+            "'mail.default_relay' has been set."
+        >>
+    );
+entry(relay_not_permitted) ->
+    entry(
+        ~"bondy.error.relay_not_permitted",
+        ~"M003",
+        permanent,
+        ~"This realm may not use the mail relay '%{relay}'.",
+        <<
+            "Which realms may send through a relay is part of that relay's "
+            "declaration, and is closed by default. A realm is admitted by "
+            "being named, or by inheriting from a prototype that is named."
+        >>
+    );
+entry(sender_not_permitted) ->
+    entry(
+        ~"bondy.error.sender_not_permitted",
+        ~"M004",
+        permanent,
+        ~"The sender address is not permitted for the mail relay '%{relay}'.",
+        <<
+            "A request that names no sender is given the relay's own, so it "
+            "cannot claim anyone else's. A request that does name one must fall "
+            "inside that relay's 'allowed_from', which is empty by default: a "
+            "relay whose owner has not said which domains it owns does not let "
+            "a caller choose."
+        >>
+    );
+entry(invalid_recipient) ->
+    entry(
+        ~"bondy.error.invalid_recipient",
+        ~"M005",
+        permanent,
+        ~"The address '%{address}' is not a valid email address.",
+        <<
+            "Addresses are checked before a message is queued, so a malformed "
+            "one is reported here rather than by the relay long afterwards."
+        >>
+    );
+entry(mail_rejected) ->
+    entry(
+        ~"bondy.error.mail_rejected",
+        ~"M006",
+        permanent,
+        ~"The mail relay refused the message.",
+        <<
+            "The relay declined permanently, so the same message offered again "
+            "is declined again. A rejected recipient, a refused sender and a "
+            "message the relay considers unacceptable all arrive here. Change "
+            "the message rather than retrying it."
+        >>
+    );
+entry(mail_delivery_failed) ->
+    entry(
+        ~"bondy.error.mail_delivery_failed",
+        ~"M007",
+        transient,
+        ~"The message could not be delivered.",
+        <<
+            "Delivery was attempted and did not complete. Bondy has already "
+            "retried within the request's deadline, so retry with backoff "
+            "rather than immediately."
+        >>
+    );
+entry(relay_unavailable) ->
+    entry(
+        ~"bondy.error.relay_unavailable",
+        ~"M008",
+        transient,
+        %% No '%{relay}' here: this is also raised from the transport, which
+        %% reports a network failure without carrying the relay's name, and
+        %% `bondy_error` leaves an unsatisfiable placeholder visible rather than
+        %% blanking it. `details.relay` carries the name whenever it is known.
+        ~"The mail relay is unavailable.",
+        <<
+            "The relay could not be reached, or would not accept mail. Message "
+            "routing is unaffected either way: a failing relay degrades "
+            "outbound email and nothing else."
+        >>
+    );
+entry(mail_queue_full) ->
+    entry(
+        ~"bondy.error.mail_queue_full",
+        ~"M009",
+        transient,
+        ~"The mail relay '%{relay}' cannot accept the message at this time.",
+        <<
+            "The relay's queue has reached its bound. This is how backpressure "
+            "is applied: the message is refused immediately rather than the "
+            "caller being made to wait on a relay that is not keeping up. Retry "
+            "with backoff."
+        >>
     );
 %% -----------------------------------------------------------------------------
 %% WAMP

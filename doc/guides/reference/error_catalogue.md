@@ -149,6 +149,51 @@ type that shares another's URI.
 | `invalid_scheme` | `bondy.error.invalid_client` | `invalid_client` | permanent | 401 | G008 † |
 | `invalid_expression` | `bondy.error.http_gateway.invalid_expression` | `invalid_expression` | permanent | 500 | G009 |
 
+### Mail
+
+| Type | URI | Code | Nature | HTTP | Handle |
+| --- | --- | --- | --- | --- | --- |
+| `mail_not_configured` | `bondy.error.mail_not_configured` | `mail_not_configured` | permanent | 501 | M001 |
+| `no_such_relay` | `bondy.error.no_such_relay` | `no_such_relay` | permanent | 400 | M002 |
+| `relay_not_permitted` | `bondy.error.relay_not_permitted` | `relay_not_permitted` | permanent | 403 | M003 |
+| `sender_not_permitted` | `bondy.error.sender_not_permitted` | `sender_not_permitted` | permanent | 403 | M004 |
+| `invalid_recipient` | `bondy.error.invalid_recipient` | `invalid_recipient` | permanent | 400 | M005 |
+| `mail_rejected` | `bondy.error.mail_rejected` | `mail_rejected` | permanent | 400 | M006 |
+| `mail_delivery_failed` | `bondy.error.mail_delivery_failed` | `mail_delivery_failed` | transient | 502 | M007 |
+| `relay_unavailable` | `bondy.error.relay_unavailable` | `relay_unavailable` | transient | 503 | M008 |
+| `mail_queue_full` | `bondy.error.mail_queue_full` | `mail_queue_full` | transient | 429 | M009 |
+
+A mail relay is operator-owned infrastructure, and none of these errors
+describes it. `details` carries the relay's configured **name** — which the
+caller supplied, or could read from `bondy.mail.relay.list` — and nothing else.
+No hostname, no username, no credential.
+
+The text of an SMTP reply never reaches a caller either. Only the three-digit
+reply code survives, as `details.code`, because that is the part a caller can
+act on; a relay's banner is written by someone other than Bondy and routinely
+quotes the recipient it has just refused.
+
+`mail_rejected` is `permanent` and maps to `400` rather than `502`. The relay
+declined the message itself, so offering the same message again is declined
+again — reporting it as a gateway failure would invite a retry that cannot
+succeed. Change the message, not the timing.
+
+Some mail failures are reported through entries defined elsewhere in this
+catalogue, because they are not specific to mail:
+
+| Condition | Type | Handle |
+| --- | --- | --- |
+| Malformed request, unknown key, refused header | `invalid_request` | C002 |
+| Message larger than the relay's `max_message_size` | `too_large_payload` | L005 |
+| The relay's rate limit was exceeded | `rate_limit_exceeded` | L001 |
+| The deadline passed while delivering | `request_timeout` | C006 |
+| The node owning an idempotency key is unreachable | `unavailable` | S004 |
+
+A caller-supplied header carrying a line break is refused rather than stripped,
+and reported as `invalid_request` with the offending header in `details.key`.
+Silently removing the break would change what the message means without saying
+so.
+
 ### WAMP protocol
 
 | Type | URI | Code | Nature | HTTP | Handle |

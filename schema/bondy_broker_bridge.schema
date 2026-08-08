@@ -454,3 +454,28 @@ end}.
 {mapping, "broker_bridge.sendgrid.sender", "bondy_broker_bridge.bridges.bondy_sendgrid_bridge.email_sender", [
   {datatype, string}
 ]}.
+
+
+%% =============================================================================
+%% SMTP BRIDGE
+%%
+%% Sends email through bondy_mail, so relays -- hosts, credentials, TLS and
+%% sending policy -- are declared under `mail.relay.$name.*` and never here. A
+%% bridge specification names a relay; it cannot describe one.
+%%
+%% Enable it on EVERY node. A broker bridge subscribes with a group id, so each
+%% node handles only events published locally; a node without the bridge
+%% silently drops the events published on it.
+%% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Whether the SMTP broker bridge is enabled on this node. With no
+%% `mail.relay.$name.*` declared, enabling it warns at boot and every action
+%% fails: the bridge has nothing to send through.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.smtp.enabled", "bondy_broker_bridge.bridges.bondy_smtp_bridge.enabled", [
+  {datatype, flag},
+  {default, off}
+]}.

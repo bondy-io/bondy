@@ -1,0 +1,101 @@
+# =============================================================================
+# Mailpit: a real SMTP relay on localhost, for the `bondy_mail` integration
+# suite and for the "Sending email with the SMTP bridge" tutorial.
+#
+#   cd examples/mailpit && docker compose up -d
+#
+#   Web UI / API   http://localhost:8025    plain + STARTTLS relay, no auth
+#                  http://localhost:8026    implicit TLS relay, auth required
+#
+# Two Mailpit instances, because one process serves one SMTP listener and the
+# three transports Bondy speaks cannot share it: MP_SMTP_REQUIRE_TLS turns the
+# listener into an implicit-TLS ("SMTPS") one, which a `plain` or `starttls`
+# client can no longer talk to. One instance therefore covers plain and
+# STARTTLS, the other covers implicit TLS and AUTH.
+#
+# What this stack is NOT: Mailpit accepts every message and verifies almost
+# nothing. It cannot exercise a public certificate chain, a provider's own EHLO
+# capabilities, or a real greylisting 4xx. Those need a real relay --
+# apps/bondy_mail/test/bondy_mail_live_SUITE.erl runs against one.
+# =============================================================================
+
+services:
+  # A certificate authority, and a `localhost` server certificate signed by it.
+  # Regenerated on every `up`, so the certificate always matches what Mailpit
+  # then loads. Written to a bind mount rather than a named volume because the
+  # test suite verifies against `ca.pem` from the host -- it is what
+  # `mail.relay.$name.tls.cacertfile` points at.
+  #
+  # Two certificates and not one self-signed certificate: a self-signed leaf is
+  # refused as `selfsigned_peer` even when it is in the client's trust store,
+  # so a single certificate could not be used to test `verify_peer` at all.
+  certs:
+    image: alpine/openssl:3.3.2
+    container_name: bondy-mailpit-certs
+    entrypoint: ["/bin/sh", "-c"]
+    # A single-item list, and not a plain string: Compose word-splits a string
+    # command, so the script would arrive as `sh -c openssl` with every
+    # remaining word bound to $0, $1, ... -- which runs `openssl` with no
+    # arguments, prints its help, and exits 0. A one-element list is passed
+    # through as one argument.
+    command:
+      - |
+        set -e
+        openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+          -subj "/CN=Bondy Mailpit Test CA" \
+          -keyout /certs/ca-key.pem -out /certs/ca.pem
+        openssl req -newkey rsa:2048 -nodes \
+          -subj "/CN=localhost" \
+          -keyout /certs/key.pem -out /certs/csr.pem
+        printf '%s\n' \
+          'subjectAltName=DNS:localhost,DNS:mailpit,IP:127.0.0.1' \
+          'extendedKeyUsage=serverAuth' \
+          'basicConstraints=CA:FALSE' > /certs/ext.cnf
+        openssl x509 -req -in /certs/csr.pem -days 3650 \
+          -CA /certs/ca.pem -CAkey /certs/ca-key.pem -CAcreateserial \
+          -extfile /certs/ext.cnf -out /certs/cert.pem
+        rm -f /certs/csr.pem /certs/ext.cnf
+        chmod 0644 /certs/ca.pem /certs/cert.pem /certs/key.pem
+    volumes:
+      - ./certs:/certs
+
+  # Plain and STARTTLS on one listener. Setting the certificate enables the
+  # STARTTLS upgrade; it does not require it, so `plain` still connects.
+  mailpit:
+    image: axllent/mailpit:v1.21
+    container_name: bondy-mailpit
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    environment:
+      MP_SMTP_TLS_CERT: /certs/cert.pem
+      MP_SMTP_TLS_KEY: /certs/key.pem
+      # Keep the mailbox small and in memory: this is a test fixture, and every
+      # suite run starts by deleting everything in it anyway.
+      MP_MAX_MESSAGES: "500"
+    volumes:
+      - ./certs:/certs:ro
+
+  # Implicit TLS, and AUTH required. Both are on the same instance on purpose:
+  # AUTH over an unencrypted connection is something a relay should refuse, so
+  # testing it over an encrypted one is testing the combination that occurs.
+  mailpit-tls:
+    image: axllent/mailpit:v1.21
+    container_name: bondy-mailpit-tls
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+    ports:
+      - "1465:1025"
+      - "8026:8025"
+    environment:
+      MP_SMTP_TLS_CERT: /certs/cert.pem
+      MP_SMTP_TLS_KEY: /certs/key.pem
+      MP_SMTP_REQUIRE_TLS: "true"
+      MP_SMTP_AUTH: "bondy:s3cret"
+      MP_MAX_MESSAGES: "500"
+    volumes:
+      - ./certs:/certs:ro

@@ -26,8 +26,22 @@ Each bridge implementation exports four callbacks:
 |--------|------|
 | `bondy_kafka_bridge` | Apache Kafka (via `brod`) |
 | `bondy_aws_sns_bridge` | AWS SNS SMS (via `erlcloud`) |
+| `bondy_smtp_bridge` | Email over SMTP (via `bondy_mail`) |
 | `bondy_sendgrid_bridge` | SendGrid email (via `email`) |
 | `bondy_mailgun_bridge` | Mailgun email (via `email`) |
+
+`bondy_smtp_bridge` is the one to reach for. The SendGrid and Mailgun bridges
+predate it and share the `email` application, which they configure through the
+global application environment -- so enabling both at once is mutually
+destructive, and only one provider can be used per node.
+
+## What a callback may not do
+
+`apply_action/1` runs inside the subscriber process that is delivering the
+event. Anything slow there is slow for every subsequent event on that
+subscription, so a callback must hand work to something else rather than wait
+for it. `bondy_smtp_bridge` queues a message and returns; it never waits for an
+SMTP conversation.
 """.
 
 %% =============================================================================

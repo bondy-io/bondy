@@ -1,0 +1,45 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+{application, bondy_mail, [
+    {description,
+        "Outbound email for Bondy. Owns relay configuration, worker pooling, "
+        "MIME construction, retry, rate limiting and telemetry. Knows nothing "
+        "about WAMP: the broker bridge and the bondy.mail.* API are thin "
+        "surfaces over this one send path. Dormant unless a relay is "
+        "configured."
+    },
+    {vsn, "0.1.0"},
+    {registered, [
+        bondy_mail_sup,
+        bondy_mail_relay_sup,
+        bondy_mail_status
+    ]},
+    {mod, {bondy_mail_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        %% Relay and worker-supervisor names are registered via gproc.
+        gproc,
+        %% Each worker owns a `jobs` queue: that queue is the backpressure
+        %% bound, so this is a hard dependency rather than an optional one.
+        jobs,
+        %% Rendezvous hashing, used to pick the node that owns an idempotency
+        %% key. Partisan supplies the membership it runs over and the transport
+        %% used to reach the chosen node, but is deliberately absent here: it is
+        %% `{partisan, load}` in the release and `bondy_app` starts it by hand,
+        %% so no app.src may list it. See bondy_mail_status.
+        lrw,
+        telemetry,
+        gen_smtp,
+        bondy_metrics,
+        bondy_regulator,
+        bondy_stdlib
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

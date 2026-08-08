@@ -937,7 +937,9 @@ cleanup_realm(RealmUri, Now, Stats0) ->
     try bondy_db:list(Table, RealmUri) of
         {ok, Rows} ->
             lists:foldl(
-                fun(Row, Acc) -> cleanup_cell(Table, RealmUri, Row, Now, Acc) end,
+                fun(Row, Acc) ->
+                    cleanup_cell(Table, RealmUri, Row, Now, Acc)
+                end,
                 Stats0,
                 Rows
             );

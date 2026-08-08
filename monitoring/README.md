@@ -40,6 +40,13 @@ and node selection carry across):
   page store, secondary indexes.
 - **Bondy — Router / WAMP**, **Bondy — Runtime / BEAM**, **Bondy —
   HTTP Connector** — per-node domain detail.
+- **Bondy — Mail** (`bondy-mail`) — outbound email: relay health and the
+  `mail_relay_down` alarm, send rate and duration, failures split by
+  **nature** (permanent means someone has to change something; transient
+  means it ran out of retries), backpressure (queue depth, queue wait,
+  rejections, rate limiting) and retries. Empty on a node with no
+  `mail.relay.*` configured, which is the dormant state rather than a
+  fault.
 - **Bondy — Cluster Graph** (`bondy-cluster-graph`) — live topology
   node graph (needs a running node; served from `/cluster/topology`).
 

@@ -114,6 +114,22 @@ start(_Type, Args) ->
                 {ok, _} = application:ensure_all_started(
                     bondy_http_connector, permanent
                 ),
+                %% Realm inheritance is a router concept and bondy_mail sits
+                %% below the router in the dependency graph, so it is told
+                %% which module resolves a realm's prototype rather than
+                %% calling into one directly.
+                ok = application:set_env(
+                    bondy_mail, realm_module, bondy_realm
+                ),
+                ok = application:set_env(
+                    bondy_mail, master_realm_uri, ?MASTER_REALM_URI
+                ),
+                %% Dormant unless a `mail.relay.*` is configured: it starts,
+                %% supervises nothing, and the bondy.mail.* procedures report
+                %% that mail is not configured.
+                {ok, _} = application:ensure_all_started(
+                    bondy_mail, permanent
+                ),
                 %% Started here as well as by the release boot script, so that
                 %% it also runs under CT and `rebar3 shell`. Every bridge
                 %% defaults to disabled, so this starts a manager with no

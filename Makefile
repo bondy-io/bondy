@@ -50,7 +50,7 @@ unexport LDFLAGS
 unexport LDLIBS
 
 
-.PHONY: genvars compile check test xref eunit dialyzer release release-tar spellcheck spellfix conf docs clean-docs
+.PHONY: genvars compile check test xref eunit dialyzer release release-tar spellcheck spellfix conf docs clean-docs mailpit mailpit-clean
 
 conf:
 	@_build/default/bin/cuttlefish effective -s schema/ 2>/dev/null > config/bondy.conf.defaults
@@ -99,6 +99,15 @@ test: xref eunit
 eunit:
 	CMAKE_POLICY_VERSION_MINIMUM=3.5 \
 	${REBAR} eunit
+
+# A real SMTP relay on localhost for bondy_mail_mailpit_SUITE and for the SMTP
+# bridge tutorial. The suite skips itself when this is not running, so it is
+# never a build dependency. See examples/mailpit/README.md.
+mailpit:
+	docker compose -f examples/mailpit/docker-compose.yml up -d
+
+mailpit-clean:
+	docker compose -f examples/mailpit/docker-compose.yml down -v
 
 check: kill test xref dialyzer eqwalizer spellcheck
 
