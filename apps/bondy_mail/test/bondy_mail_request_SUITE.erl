@@ -46,6 +46,11 @@ all() ->
         caller_cannot_set_a_sender_by_default,
         caller_may_set_a_permitted_sender,
         caller_may_not_set_an_unpermitted_sender,
+        caller_may_set_a_display_name,
+        a_display_name_cannot_smuggle_a_sender_past_the_allow_list,
+        a_display_name_may_not_carry_control_characters,
+        relay_may_configure_a_display_name,
+        reply_to_may_carry_a_display_name,
         %% Headers
         reserved_header_is_refused,
         injected_header_is_refused,
@@ -250,6 +255,90 @@ caller_may_not_set_an_unpermitted_sender(_) ->
         new(?REALM, Req)
     ).
 
+-doc """
+A display name is accepted and kept apart from the address.
+
+`from` stays a bare address because it feeds the SMTP envelope and the
+`allowed_from` check; the name travels beside it and is put back together only
+when the `From` header is built.
+""".
+caller_may_set_a_display_name(_) ->
+    Req = (base())#{
+        ~"relay" => ~"branded",
+        ~"from" => ~"Acme Sales <sales@example.com>"
+    },
+    {ok, R} = new(?REALM, Req),
+    ?assertEqual(~"sales@example.com", R#bondy_mail_request.from),
+    ?assertEqual(~"Acme Sales", R#bondy_mail_request.from_name).
+
+-doc """
+**A display name cannot be used to smuggle a sender past `allowed_from`.**
+
+This is the case the whole split exists for. `allowed_from` is matched against
+the ADDRESS, so a name that looks like a permitted domain buys nothing: were it
+matched against the value the caller supplied, `Trusted <x@evil.example>` would
+be accepted by a relay scoped to `example.com` and the derived-sender guarantee
+would be worthless.
+""".
+a_display_name_cannot_smuggle_a_sender_past_the_allow_list(_) ->
+    Attempts = [
+        ~"sales@example.com <attacker@evil.example>",
+        ~"example.com <attacker@evil.example>",
+        ~"\"sales@example.com\" <attacker@evil.example>"
+    ],
+    lists:foreach(
+        fun(From) ->
+            Req = (base())#{~"relay" => ~"branded", ~"from" => From},
+            ?assertEqual(
+                {error,
+                    {sender_not_permitted, ~"branded",
+                        ~"attacker@evil.example"}},
+                new(?REALM, Req),
+                binary_to_list(From)
+            )
+        end,
+        Attempts
+    ).
+
+-doc """
+A display name is header data and takes the header injection rule.
+
+Rejected rather than stripped, exactly as a header value is: a truncation
+changes what a message means without saying so.
+""".
+a_display_name_may_not_carry_control_characters(_) ->
+    Attempts = [
+        ~"Acme\r\nBcc: victim@evil.example <sales@example.com>",
+        ~"Acme\n <sales@example.com>",
+        ~"Acme\0 <sales@example.com>"
+    ],
+    lists:foreach(
+        fun(From) ->
+            Req = (base())#{~"relay" => ~"branded", ~"from" => From},
+            ?assertMatch({error, {invalid_recipient, _}}, new(?REALM, Req))
+        end,
+        Attempts
+    ).
+
+-doc """
+A relay may configure a display name of its own.
+
+That is where the brand a recipient sees belongs: it applies to every message
+the relay sends, and no caller had to ask for it. It is not checked against
+`allowed_from` -- it IS the permitted sender.
+""".
+relay_may_configure_a_display_name(_) ->
+    {ok, R} = new(?REALM, (base())#{~"relay" => ~"named"}),
+    ?assertEqual(~"no-reply@example.com", R#bondy_mail_request.from),
+    ?assertEqual(~"Acme Ltd", R#bondy_mail_request.from_name).
+
+-doc "A display name on `Reply-To`, which is header-only and never routed.".
+reply_to_may_carry_a_display_name(_) ->
+    Req = (base())#{~"reply_to" => ~"Support <help@example.com>"},
+    {ok, R} = new(?REALM, Req),
+    ?assertEqual(~"help@example.com", R#bondy_mail_request.reply_to),
+    ?assertEqual(~"Support", R#bondy_mail_request.reply_to_name).
+
 %% =============================================================================
 %% HEADERS
 %% =============================================================================
@@ -393,6 +482,13 @@ relays() ->
             from => ~"no-reply@example.com",
             realms => [?REALM],
             allowed_from => [~"example.com"]
+        },
+        %% A relay whose configured sender carries a display name.
+        #{
+            name => ~"named",
+            host => ~"smtp.example.com",
+            from => ~"Acme Ltd <no-reply@example.com>",
+            realms => [?REALM]
         },
         %% No realms listed: the master realm only.
         #{

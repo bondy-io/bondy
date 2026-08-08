@@ -81,11 +81,18 @@
     message_id :: binary(),
     realm :: binary(),
     relay :: binary(),
+    %% ALWAYS a bare address, never `Name <addr>`. It feeds the SMTP envelope
+    %% and the `allowed_from` domain check, and neither may see a display name:
+    %% `MAIL FROM:<...>` cannot carry one, and a domain check against a string
+    %% with a name in it would let `Trusted <x@evil.com>` past an allow-list.
+    %% The display name lives beside it and is used only to build the header.
     from :: binary(),
+    from_name :: optional(binary()),
     to :: [binary()],
     cc :: [binary()],
     bcc :: [binary()],
     reply_to :: optional(binary()),
+    reply_to_name :: optional(binary()),
     subject :: binary(),
     text :: optional(binary()),
     html :: optional(binary()),

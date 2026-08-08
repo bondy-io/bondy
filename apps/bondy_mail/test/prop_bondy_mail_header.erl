@@ -106,6 +106,61 @@ prop_crlf_in_a_name_is_reported_as_injection() ->
     ).
 
 -doc """
+A display name can never carry a line break into a header.
+
+The `From` header is built from a caller-supplied display name, so it is the
+same attack surface as any other header value -- and a more attractive one,
+because a display name is the field a caller most expects to be free text.
+`Acme\\r\\nBcc: victim@evil.example <a@b.com>` must be refused outright, not
+trimmed into something that looks fine.
+
+Generated around the break rather than fixed, because the interesting failures
+are at the edges: a break at the very start or end of the name is exactly where
+a trim-then-check implementation stops noticing it.
+""".
+prop_crlf_in_a_display_name_is_refused() ->
+    ?FORALL(
+        {Prefix, Sep, Suffix},
+        {display_name_text(), line_break(), display_name_text()},
+        begin
+            Name = <<Prefix/binary, Sep/binary, Suffix/binary>>,
+            From = <<Name/binary, " <a@b.com>">>,
+            bondy_mail_address:parse_mailbox(From) == error
+        end
+    ).
+
+-doc """
+Whatever is accepted is re-encodable.
+
+The round trip is the property that matters: a value this module accepts is one
+`format_mailbox/2` renders and `mimemail` then parses back to the same name and
+the same address. An accepted-but-unrenderable name would be a validation that
+passes and an encode that fails later, on a worker, with the caller already
+gone.
+""".
+prop_an_accepted_display_name_round_trips() ->
+    ?FORALL(
+        Name,
+        display_name_text(),
+        begin
+            From = <<Name/binary, " <a@b.com>">>,
+            case bondy_mail_address:parse_mailbox(From) of
+                error ->
+                    true;
+                {ok, {Parsed, Address}} ->
+                    Header = bondy_mail_address:format_mailbox(Parsed, Address),
+                    case smtp_util:parse_rfc5322_addresses(Header) of
+                        {ok, [{ReName, ReAddress}]} ->
+                            list_to_binary(ReAddress) == Address andalso
+                                same_name(ReName, Parsed);
+                        _ ->
+                            false
+                    end
+            end
+        end
+    ).
+
+-doc """
 A reserved header is refused whatever its casing.
 
 Header names are case-insensitive, so a check that is not would let `bCc`
@@ -175,6 +230,22 @@ safe_text() ->
         list(oneof(lists:seq($\s, $~))),
         list_to_binary(lists:sublist(L, 100))
     ).
+
+%% Printable ASCII minus the characters a display name may not contain, so the
+%% generator explores names that are ACCEPTED and the property is about what
+%% happens to them rather than about them being rejected.
+display_name_text() ->
+    ?LET(
+        L,
+        list(oneof(lists:seq($\s, $~) -- "<>\"\\")),
+        list_to_binary(lists:sublist(L, 60))
+    ).
+
+%% `undefined` when the name was empty or all spaces: both parse to a bare
+%% address, and `format_mailbox/2` then emits one.
+same_name(undefined, undefined) -> true;
+same_name(undefined, _) -> false;
+same_name(ReName, Name) -> unicode:characters_to_binary(ReName) == Name.
 
 %% A reserved name in arbitrary casing.
 reserved_name() ->

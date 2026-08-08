@@ -167,24 +167,41 @@ split_content_type(ContentType) ->
 headers(#bondy_mail_request{} = Request) ->
     #bondy_mail_request{
         from = From,
+        from_name = FromName,
         to = To,
         cc = Cc,
         reply_to = ReplyTo,
+        reply_to_name = ReplyToName,
         subject = Subject,
         headers = Custom
     } = Request,
 
+    %% The only place a display name is put back together. The record holds the
+    %% address and the name apart precisely so that the envelope and the
+    %% `allowed_from` check cannot see one; this is the header, so it can.
+    %%
+    %% `mimemail` re-parses this value, RFC 2047-encodes the name when it is not
+    %% ASCII, and re-quotes only where it must -- so nothing here has to know
+    %% which characters are special.
     Base = [
-        {~"From", From},
+        {~"From", bondy_mail_address:format_mailbox(FromName, From)},
         {~"To", join(To)},
         {~"Subject", Subject}
     ],
     WithCc = maybe_header(~"Cc", join_optional(Cc), Base),
-    WithReplyTo = maybe_header(~"Reply-To", ReplyTo, WithCc),
+    WithReplyTo = maybe_header(
+        ~"Reply-To", reply_to(ReplyToName, ReplyTo), WithCc
+    ),
 
     %% Custom headers last. They cannot collide with anything above: every name
     %% set here is refused by bondy_mail_header:validate/1.
     WithReplyTo ++ Custom.
+
+%% @private
+reply_to(_Name, undefined) ->
+    undefined;
+reply_to(Name, Address) ->
+    bondy_mail_address:format_mailbox(Name, Address).
 
 %% @private
 maybe_header(_Name, undefined, Headers) ->

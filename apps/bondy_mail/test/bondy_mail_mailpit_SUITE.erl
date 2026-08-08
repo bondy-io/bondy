@@ -89,7 +89,8 @@ groups() ->
             unicode_subject_survives_encoding,
             long_line_survives_transfer_encoding,
             attachment_survives_a_real_mime_parser,
-            bcc_is_delivered_as_an_envelope_recipient
+            bcc_is_delivered_as_an_envelope_recipient,
+            display_name_is_parsed_as_a_name
         ]},
         {starttls, [sequence], [
             starttls_delivers_when_the_certificate_verifies,
@@ -235,6 +236,34 @@ attachment_survives_a_real_mime_parser(Config) ->
     ?assertEqual(Content, Body).
 
 -doc """
+A display name arrives as a name, not as part of the address.
+
+Only a real parser can settle this. The header Bondy emits is a quoted string,
+which `mimemail` re-parses and re-renders -- unquoting it, RFC 2047-encoding
+the name when it is not ASCII, and re-quoting only where it must. Asserting on
+the bytes we sent would assert that we quoted something; asserting on Mailpit's
+parse asserts that the result means what we intended.
+
+The non-ASCII name is the interesting half: it goes out as an encoded word and
+has to come back as the characters it started as.
+""".
+display_name_is_parsed_as_a_name(Config) ->
+    {ok, _} = send(#{
+        ~"relay" => ~"plain",
+        ~"from" => ~"Acmé, Ltd <no-reply@bondy.test>",
+        ~"reply_to" => ~"Support <help@bondy.test>"
+    }),
+
+    Msg = await_message(Config),
+    From = maps:get(~"From", Msg),
+    ?assertEqual(~"Acmé, Ltd", maps:get(~"Name", From)),
+    ?assertEqual(~"no-reply@bondy.test", maps:get(~"Address", From)),
+
+    [ReplyTo] = maps:get(~"ReplyTo", Msg),
+    ?assertEqual(~"Support", maps:get(~"Name", ReplyTo)),
+    ?assertEqual(~"help@bondy.test", maps:get(~"Address", ReplyTo)).
+
+-doc """
 A blind recipient is delivered to.
 
 The other half of the contract -- that the address does not appear in the
@@ -358,7 +387,16 @@ relays(CaCertFile) ->
         tls_cacertfile => CaCertFile
     },
     [
-        Common#{name => ~"plain", port => ?PLAIN_PORT, transport => plain},
+        %% `allowed_from` is set only on this relay, and only so that
+        %% `display_name_is_parsed_as_a_name` can supply a sender. Every other
+        %% relay here leaves it closed, which is the default and is what the
+        %% first version of that case ran into.
+        Common#{
+            name => ~"plain",
+            port => ?PLAIN_PORT,
+            transport => plain,
+            allowed_from => [~"bondy.test"]
+        },
         Verified#{name => ~"starttls", port => ?PLAIN_PORT},
         Common#{
             name => ~"starttls_insecure",

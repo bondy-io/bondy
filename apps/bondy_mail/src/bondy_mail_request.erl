@@ -431,7 +431,7 @@ is_prototype_permitted(RealmUri, Realms) ->
 %% @private
 build(RealmUri, Relay, Valid) ->
     maybe
-        {ok, From} ?= resolve_from(Relay, Valid),
+        {ok, {FromName, From}} ?= resolve_from(Relay, Valid),
         {ok, To} ?=
             bondy_mail_address:validate_many(as_list(maps:get(to, Valid))),
         ok ?= non_empty(To),
@@ -439,7 +439,8 @@ build(RealmUri, Relay, Valid) ->
             bondy_mail_address:validate_many(as_list(maps:get(cc, Valid))),
         {ok, Bcc} ?=
             bondy_mail_address:validate_many(as_list(maps:get(bcc, Valid))),
-        {ok, ReplyTo} ?= optional_address(maps:get(reply_to, Valid)),
+        {ok, {ReplyToName, ReplyTo}} ?=
+            optional_mailbox(maps:get(reply_to, Valid)),
         ok ?= has_body(Valid),
         {ok, Headers} ?= bondy_mail_header:validate(maps:get(headers, Valid)),
         {ok, Attachments} ?= attachments(Relay, maps:get(attachments, Valid)),
@@ -451,10 +452,12 @@ build(RealmUri, Relay, Valid) ->
             realm = RealmUri,
             relay = Relay#bondy_mail_relay.name,
             from = From,
+            from_name = FromName,
             to = To,
             cc = Cc,
             bcc = Bcc,
             reply_to = ReplyTo,
+            reply_to_name = ReplyToName,
             subject = maps:get(subject, Valid),
             text = maps:get(text, Valid),
             html = maps:get(html, Valid),
@@ -472,16 +475,29 @@ build(RealmUri, Relay, Valid) ->
 resolve_from(#bondy_mail_relay{from = undefined}, #{from := undefined}) ->
     {error, {invalid_request, missing_sender}};
 resolve_from(#bondy_mail_relay{from = From}, #{from := undefined}) ->
-    {ok, From};
+    %% The relay's own sender may carry a display name too -- that is where an
+    %% operator puts the brand a recipient sees. It is not checked against
+    %% `allowed_from`: it IS the allowed sender.
+    case bondy_mail_address:parse_mailbox(From) of
+        {ok, Mailbox} -> {ok, Mailbox};
+        error -> {error, {invalid_request, {relay_from, From}}}
+    end;
 resolve_from(Relay, #{from := From}) ->
-    case bondy_mail_address:validate(From) of
+    case bondy_mail_address:parse_mailbox(From) of
         error ->
             {error, {invalid_recipient, From}};
-        {ok, Address} ->
+        {ok, {DisplayName, Address}} ->
             Allowed = Relay#bondy_mail_relay.allowed_from,
+            %% Against the ADDRESS, never against what the caller supplied. A
+            %% check on the whole value would admit
+            %% `Trusted Sender <attacker@evil.com>` to a relay scoped to
+            %% `acme.com`, which is the one property the derived-sender design
+            %% exists to guarantee. `parse_mailbox/1` has already separated the
+            %% two, so there is nothing here that can be got wrong by reaching
+            %% for the wrong variable.
             case bondy_mail_address:is_domain_allowed(Address, Allowed) of
                 true ->
-                    {ok, Address};
+                    {ok, {DisplayName, Address}};
                 false ->
                     %% The relay's name travels with the refusal: which relay
                     %% refused the sender is the first thing anyone asks, and
@@ -492,11 +508,13 @@ resolve_from(Relay, #{from := From}) ->
     end.
 
 %% @private
-optional_address(undefined) ->
-    {ok, undefined};
-optional_address(Address) ->
-    case bondy_mail_address:validate(Address) of
-        {ok, Valid} -> {ok, Valid};
+%% `Reply-To` is header-only -- it never reaches the envelope -- so a display
+%% name here costs nothing beyond parsing it.
+optional_mailbox(undefined) ->
+    {ok, {undefined, undefined}};
+optional_mailbox(Address) ->
+    case bondy_mail_address:parse_mailbox(Address) of
+        {ok, Mailbox} -> {ok, Mailbox};
         error -> {error, {invalid_recipient, Address}}
     end.
 

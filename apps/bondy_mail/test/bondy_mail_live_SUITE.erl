@@ -45,10 +45,23 @@ purpose.
 
 ## The password is not read directly
 
-It is declared as `#{provider => env, var => ...}` and resolved through
-`bondy_secret_resolver`, which is the path a production node uses for
-`mail.relay.$name.password.provider = env`. Reading the variable here with
-`os:getenv/1` would test one line less and be one line shorter.
+It is declared as a `bondy_secret_resolver` reference and resolved through the
+resolver, which is the path a production node uses. Reading the variable here
+with `os:getenv/1` would test one line less and be one line shorter.
+
+Either provider can be exercised, and both are worth it:
+
+    # The default: the password in an environment variable.
+    BONDY_TEST_SMTP_PASSWORD=...
+
+    # Or AWS Secrets Manager, which is the path with more that can go wrong.
+    BONDY_TEST_SMTP_SECRET_PROVIDER=aws_sm
+    BONDY_TEST_SMTP_SECRET_ID=...
+    BONDY_TEST_SMTP_SECRET_REGION=...     # defaults to AWS_REGION
+    BONDY_TEST_SMTP_SECRET_FIELD=password # if the secret is a JSON document
+
+`aws_sm` needs the ambient AWS credentials to be valid. Expired STS session
+credentials fail here exactly as they would on a node, which is the point.
 """.
 
 -include_lib("common_test/include/ct.hrl").
@@ -67,11 +80,16 @@ all() ->
     [
         message_is_accepted_by_a_real_relay,
         credentials_resolve_through_the_env_provider,
+        display_name_is_accepted_by_a_real_relay,
         verify_peer_refuses_a_hostname_mismatch
     ].
 
 init_per_suite(Config) ->
     _ = application:ensure_all_started(ssl),
+    %% `bondy_secret_resolver_aws_sm` calls `erlcloud_aws:auto_config/0`, which
+    %% needs the application running. Harmless when the `env` provider is in
+    %% use, so it is unconditional rather than a branch on configuration.
+    _ = application:ensure_all_started(erlcloud),
     {ok, _} = application:ensure_all_started(gproc),
     {ok, _} = application:ensure_all_started(jobs),
     {ok, _} = application:ensure_all_started(bondy_regulator),
@@ -104,6 +122,16 @@ mechanism every relay that is not a test fixture is checked with.
 """.
 message_is_accepted_by_a_real_relay(_Config) ->
     Result = bondy_mail:send(?REALM, request(~"live")),
+    %% The receipt is logged, not merely asserted on. A soak whose output is a
+    %% green tick tells you the relay said yes and nothing about what it said
+    %% yes to -- and when the mail then fails to arrive, the receipt is the
+    %% only thing that ties Bondy's side to the provider's own logs. Most
+    %% providers put a queue or message id in it.
+    ct:pal("Relay accepted the message.~n  from: ~ts~n  to:   ~ts~n  ~p", [
+        getenv(~"BONDY_TEST_SMTP_FROM"),
+        getenv(~"BONDY_TEST_SMTP_TO"),
+        Result
+    ]),
     ?assertMatch({ok, #{status := sent}}, Result).
 
 -doc """
@@ -133,6 +161,48 @@ credentials_resolve_through_the_env_provider(Config) ->
             Result = bondy_mail:send(?REALM, request(~"live auth")),
             ?assertMatch({ok, #{status := sent}}, Result)
     end.
+
+-doc """
+A real relay accepts a message whose `From` carries a display name.
+
+Both paths, because they are configured differently and only one of them is
+what an operator actually reaches for:
+
+- the **operator** path, where the name is part of `mail.relay.$name.from` and
+  applies to everything the relay sends;
+- the **caller** path, where a request supplies `Name <address>` and it is
+  narrowed by `allowed_from`.
+
+The encoded `From` header is logged for both. Mailpit can be asked what it
+parsed; a real relay cannot, so the bytes Bondy put on the wire are the only
+evidence available here -- and a relay that dislikes a malformed `From` would
+show up as a rejection rather than as a mystery in someone's inbox.
+""".
+display_name_is_accepted_by_a_real_relay(Config) ->
+    Base = ?config(relay, Config),
+    Address = maps:get(from, Base),
+    Domain = bondy_mail_address:domain(Address),
+
+    Relay = Base#{
+        from => <<"Bondy Live Test <", Address/binary, ">">>,
+        %% Opened so the caller-supplied half of this case has somewhere to go.
+        %% Only this address, so the case cannot pass by sending as something
+        %% the relay was never scoped for.
+        allowed_from => [Domain]
+    },
+    ok = restart(Relay),
+
+    %% Operator path: the caller names no sender at all.
+    FromRelay = request(~"live display"),
+    ok = log_from_header(FromRelay),
+    ?assertMatch({ok, #{status := sent}}, bondy_mail:send(?REALM, FromRelay)),
+
+    %% Caller path: the request supplies its own, within `allowed_from`.
+    FromCaller = (request(~"live display caller"))#{
+        ~"from" => <<"Bondy Caller <", Address/binary, ">">>
+    },
+    ok = log_from_header(FromCaller),
+    ?assertMatch({ok, #{status := sent}}, bondy_mail:send(?REALM, FromCaller)).
 
 -doc """
 `verify_peer` refuses a certificate that is valid for a name we did not ask
@@ -172,6 +242,20 @@ verify_peer_refuses_a_hostname_mismatch(Config) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% The `From` line as it goes on the wire, encoded exactly as the worker would
+%% encode it. Built here rather than intercepted, because the send path offers
+%% no hook and a second encode of the same request is faithful enough to show
+%% what a display name became.
+log_from_header(Map) ->
+    {ok, Relay} = bondy_mail_config:relay(~"live"),
+    {ok, Request} = bondy_mail_request:new(?REALM, Map),
+    {ok, Message} = bondy_mail_mime:encode(Request, Relay),
+    Lines = binary:split(Message, ~"\r\n", [global]),
+    [From | _] = [L || L <- Lines, binary:match(L, ~"From:") =/= nomatch],
+    ct:pal("~ts", [From]),
+    ok.
 
 %% @private
 request(Tag) ->
@@ -235,8 +319,57 @@ relay() ->
                 username => Username,
                 %% Through the resolver, not through os:getenv/1. See the
                 %% module documentation.
-                secret => #{provider => env, var => ?PASSWORD_VAR}
+                secret => secret_ref()
             }
+    end.
+
+-doc """
+The credential reference, in whichever form this environment can supply.
+
+Both providers are worth running. `env` is the path a container deployment
+uses; `aws_sm` is the one a deployment with a secrets manager uses, and it has
+more that can go wrong -- a region, a role, a JSON document with the password
+under one of its keys. Neither had ever been exercised end to end before this
+suite.
+
+`aws_sm` needs no registration: `bondy_secret_resolver` resolves an unknown
+provider through the conventional `bondy_secret_resolver_<name>` module, which
+is how a real node reaches it too.
+""".
+secret_ref() ->
+    case getenv_atom(~"BONDY_TEST_SMTP_SECRET_PROVIDER", env, [env, aws_sm]) of
+        env ->
+            #{provider => env, var => ?PASSWORD_VAR};
+        aws_sm ->
+            Ref = #{
+                provider => aws_sm,
+                secret_id => require(~"BONDY_TEST_SMTP_SECRET_ID"),
+                %% Falls back to the ambient AWS_REGION, which is already set
+                %% for whatever else in this environment talks to AWS.
+                region => require_either(
+                    ~"BONDY_TEST_SMTP_SECRET_REGION", ~"AWS_REGION"
+                )
+            },
+            %% An SMTP secret is usually a JSON document rather than a bare
+            %% password, so name the key the password lives under.
+            case getenv(~"BONDY_TEST_SMTP_SECRET_FIELD") of
+                undefined -> Ref;
+                Field -> Ref#{field => Field}
+            end
+    end.
+
+%% @private
+require(Name) ->
+    case getenv(Name) of
+        undefined -> error({missing_env, Name});
+        Value -> Value
+    end.
+
+%% @private
+require_either(Name, Fallback) ->
+    case getenv(Name) of
+        undefined -> require(Fallback);
+        Value -> Value
     end.
 
 %% @private

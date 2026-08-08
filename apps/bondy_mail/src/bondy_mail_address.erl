@@ -5,6 +5,8 @@
 
 -module(bondy_mail_address).
 
+-include_lib("bondy_stdlib/include/bondy_stdlib.hrl").
+
 -moduledoc """
 Validation of email addresses, and of the domain policy applied to a sender.
 
@@ -27,9 +29,15 @@ whose envelope does not say what they think it says.
 -define(MAX_DOMAIN, 255).
 -define(MAX_ADDRESS, 254).
 
+%% A display name is not length-limited by the standard, but a header line is,
+%% and an unbounded name is an unbounded header.
+-define(MAX_NAME, 255).
+
 %% API
 -export([domain/1]).
+-export([format_mailbox/2]).
 -export([is_valid/1]).
+-export([parse_mailbox/1]).
 -export([validate/1]).
 -export([validate_many/1]).
 -export([is_domain_allowed/2]).
@@ -105,9 +113,145 @@ is_domain_allowed(Address, Allowed) when is_list(Allowed) ->
     Domain = string:lowercase(domain(Address)),
     lists:any(fun(D) -> string:lowercase(D) == Domain end, Allowed).
 
+-doc """
+Parse a mailbox: a bare address, or a display name and an address.
+
+Answers `{ok, {Name, Address}}` where `Name` is `undefined` for a bare address,
+or `error`. `Address` is always bare, and is validated exactly as `validate/1`
+validates one -- which is what lets the caller keep using it for the envelope
+and for the `allowed_from` domain check without knowing a display name was
+involved.
+
+    {ok, {undefined, <<"a@b.com">>}}  = parse_mailbox(<<"a@b.com">>).
+    {ok, {<<"Acme">>, <<"a@b.com">>}} = parse_mailbox(<<"Acme <a@b.com>">>).
+
+## What is refused, and why
+
+A display name may not contain a control character, for the same reason an
+address may not: it is header data, and CR or LF in it would let a caller
+append headers of their own.
+
+It may not contain `"` or `\\` either. Those are the two characters that make
+the quoted form ambiguous, and `format_mailbox/2` always emits the quoted form
+-- so accepting them would mean escaping, and escaping means a sanitiser and an
+encoder that have to agree about it. This module already refuses quoted local
+parts and comments on exactly that reasoning.
+
+An unquoted name containing an RFC 5322 special (`,` most commonly) is
+accepted, because `format_mailbox/2` quotes it on the way out. Left unquoted it
+would be a header that `gen_smtp`'s own parser rejects, which is a validation
+that passes and an encode that then fails.
+""".
+-spec parse_mailbox(Term :: any()) ->
+    {ok, {optional(binary()), binary()}} | error.
+
+parse_mailbox(<<>>) ->
+    %% Ahead of the clause below, which would raise on `binary:last/1`.
+    error;
+parse_mailbox(Bin) when is_binary(Bin) ->
+    case binary:last(Bin) == $> andalso binary:match(Bin, ~"<") =/= nomatch of
+        true -> parse_named(Bin);
+        false -> parse_bare(Bin)
+    end;
+parse_mailbox(_) ->
+    error.
+
+-doc """
+Render a mailbox as a header value.
+
+The display name is always quoted, which is what makes a name containing a
+comma safe without this module knowing which characters are special. `mimemail`
+strips the quotes, RFC 2047-encodes the name when it is not ASCII, and re-quotes
+only if it still needs to -- so a non-ASCII name becomes an encoded word rather
+than a quoted string, which is the correct rendering and not one this module has
+to construct.
+""".
+-spec format_mailbox(Name :: optional(binary()), Address :: binary()) ->
+    binary().
+
+format_mailbox(undefined, Address) ->
+    Address;
+format_mailbox(Name, Address) ->
+    <<$", Name/binary, $", $\s, $<, Address/binary, $>>>.
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+parse_bare(Bin) ->
+    case validate(Bin) of
+        {ok, Address} -> {ok, {undefined, Address}};
+        error -> error
+    end.
+
+%% @private
+%% The LAST `<`, so a name that somehow contains one cannot shift where the
+%% address is taken from. A name containing `<` is refused below in any case;
+%% this makes the split independent of that check rather than dependent on it.
+parse_named(Bin) ->
+    Size = byte_size(Bin),
+    case binary:matches(Bin, ~"<") of
+        [] ->
+            error;
+        Matches ->
+            {Pos, 1} = lists:last(Matches),
+            Name = binary:part(Bin, 0, Pos),
+            Address = binary:part(Bin, Pos + 1, Size - Pos - 2),
+            case validate(Address) of
+                {ok, Valid} -> named(Name, Valid);
+                error -> error
+            end
+    end.
+
+%% @private
+%% The control-character check runs on the RAW name, before anything is
+%% trimmed, and only spaces are trimmed afterwards.
+%%
+%% Order matters here, and getting it wrong is silent: `string:trim/1` treats CR
+%% and LF as whitespace, so trimming first would quietly turn `Acme\n <a@b>`
+%% into the name `Acme` and accept it. Stripping a control character out of
+%% header data is the behaviour this module refuses everywhere else -- a
+%% truncation changes what a message means without saying so -- and a caller
+%% who sent one is better told.
+named(Raw, Address) ->
+    case has_control(Raw) of
+        true ->
+            error;
+        false ->
+            Name = trim_spaces(unquote(trim_spaces(Raw))),
+            case is_valid_name(Name) of
+                {ok, <<>>} -> {ok, {undefined, Address}};
+                {ok, Valid} -> {ok, {Valid, Address}};
+                error -> error
+            end
+    end.
+
+%% @private
+has_control(Bin) ->
+    binary:match(Bin, [~"\r", ~"\n", ~"\0", ~"\t"]) =/= nomatch.
+
+%% @private
+%% Spaces only -- see named/2 for why this may not be `string:trim/1`.
+trim_spaces(Bin) ->
+    string:trim(Bin, both, " ").
+
+%% @private
+unquote(<<$", Rest/binary>>) when byte_size(Rest) > 0 ->
+    case binary:last(Rest) of
+        $" -> binary:part(Rest, 0, byte_size(Rest) - 1);
+        _ -> <<$", Rest/binary>>
+    end;
+unquote(Name) ->
+    Name.
+
+%% @private
+is_valid_name(Name) ->
+    Bad = binary:match(Name, [~"<", ~">", ~"\"", ~"\\"]),
+    case Bad == nomatch andalso byte_size(Name) =< ?MAX_NAME of
+        true -> {ok, Name};
+        false -> error
+    end.
 
 %% @private
 validate_many([], Acc) ->
