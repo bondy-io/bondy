@@ -63,7 +63,8 @@ groups() ->
             cleanup_keeps_live_tokens,
             cleanup_reaps_disabled_user_tokens,
             reclaimer_sweep_reaps_via_jobs,
-            reclaimer_timer_path_sweeps_and_reschedules
+            reclaimer_timer_path_sweeps_and_reschedules,
+            reclaimer_retries_sooner_when_the_job_queue_is_full
         ]},
         {tickets, [sequence], [
             ticket_cleanup_reaps_expired_single_cell,
@@ -850,6 +851,60 @@ reclaimer_timer_path_sweeps_and_reschedules(Config) ->
         end,
         reclaimer_rescheduled
     ).
+
+%% A round the job queue refuses must be reported, and must not then wait the
+%% full interval before trying again.
+%%
+%% `enqueue_sweeps/0` used to discard what `bondy_jobs` answered, so a full
+%% queue skipped reclamation with no log and six hours until the next attempt.
+%% The queue is fullest under load, which is exactly when there is most to
+%% reclaim, so that combination is the wrong way round.
+%%
+%% `bondy_jobs` is mocked rather than genuinely filled: the real queue holds
+%% roughly six hundred jobs per worker, which is a great deal of machinery to
+%% stand up in order to prove that one return value is read.
+reclaimer_retries_sooner_when_the_job_queue_is_full(_Config) ->
+    {state, Ref0} = sys:get_state(bondy_reclaimer),
+    ?assert(is_reference(Ref0)),
+
+    ok = meck:new(bondy_jobs, [passthrough]),
+
+    try
+        %% Arity 1 only, which is the arity the reclaimer uses and the only
+        %% caller of it; everything else in the node keeps the real function.
+        ok = meck:expect(bondy_jobs, enqueue, fun(_Fun) -> {error, full} end),
+
+        bondy_reclaimer ! {timeout, Ref0, scheduled_sweep},
+
+        ok = wait_until(
+            fun() ->
+                case sys:get_state(bondy_reclaimer) of
+                    {state, R} -> is_reference(R) andalso R =/= Ref0;
+                    _ -> false
+                end
+            end,
+            reclaimer_rescheduled_after_shed
+        ),
+
+        %% Both sweeps were offered. Giving up after the first refusal would
+        %% leave the second permanently unattempted whenever the first was
+        %% unlucky.
+        ?assertEqual(
+            length([oauth_tokens, tickets]),
+            meck:num_calls(bondy_jobs, enqueue, 1)
+        ),
+
+        %% Minutes, not hours: the point of noticing is to come back sooner.
+        {state, Ref} = sys:get_state(bondy_reclaimer),
+        Remaining = erlang:read_timer(Ref),
+        ?assert(is_integer(Remaining)),
+        ?assert(
+            Remaining =< timer:minutes(5),
+            "A shed round must be retried sooner than the configured interval"
+        )
+    after
+        ok = meck:unload(bondy_jobs)
+    end.
 
 %% @private
 wait_until(Fun, Tag) ->

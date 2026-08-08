@@ -32,6 +32,13 @@ Sweeps are cold — nothing waits on them — so the interval is long by default
 is jittered because every node schedules independently from the same configured
 value: without jitter a cluster restarted together would sweep in lockstep
 forever, concentrating scan load into the same instant on every node.
+
+One exception to the long interval: a round `bondy_jobs` refuses outright —
+because its queue is full — is logged and retried in minutes rather than hours.
+The queue is fullest under load, which is when there is most to reclaim, so
+letting a shed round wait for the next scheduled one is the wrong way round. The
+retry is bounded by the configured interval, so a short interval never gets a
+slower retry than a success.
 """.
 -behaviour(gen_server).
 
@@ -46,6 +53,12 @@ forever, concentrating scan load into the same instant on every node.
 ]).
 
 -define(DEFAULT_INTERVAL, timer:hours(6)).
+
+%% How soon a round comes back when the job queue refused it. Short, because
+%% the condition is transient by nature and the work is waiting; not
+%% configurable, because it is a recovery detail rather than a policy an
+%% operator has a view on. See delay/1 for the upper bound.
+-define(RETRY_INTERVAL, timer:minutes(5)).
 
 %% The fraction of the interval by which each scheduled sweep is randomly
 %% brought forward, so independently-scheduling nodes drift apart instead of
@@ -111,7 +124,10 @@ handle_call(Event, From, State) ->
     {reply, {error, {unsupported_call, Event}}, State}.
 
 handle_cast(sweep, State) ->
-    ok = enqueue_sweeps(),
+    %% Reported but not rescheduled. This entry point is documented as running
+    %% out of band "without disturbing the schedule", and bringing the next
+    %% scheduled round forward because an ad-hoc one was shed would disturb it.
+    ok = log_shed(enqueue_sweeps()),
     {noreply, State};
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
@@ -121,8 +137,9 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 handle_info({timeout, Ref, scheduled_sweep}, #state{timer_ref = Ref} = State) ->
-    ok = enqueue_sweeps(),
-    {noreply, schedule(State#state{timer_ref = undefined})};
+    Shed = enqueue_sweeps(),
+    ok = log_shed(Shed),
+    {noreply, schedule(Shed, State#state{timer_ref = undefined})};
 handle_info({timeout, _StaleRef, scheduled_sweep}, State) ->
     %% A timer cancelled by a reschedule that fired anyway.
     {noreply, State};
@@ -148,21 +165,46 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @private
 schedule(State) ->
+    schedule([], State).
+
+%% @private
+%% A round that enqueued cleanly waits the configured interval. A round that
+%% was shed comes back sooner, because waiting six hours after noticing that
+%% nothing was reclaimed would make noticing pointless.
+%%
+%% Repeating a round in which only some sweeps were shed is safe, and the
+%% moduledoc already says why: a sweep is idempotent and best-effort, so
+%% running one twice re-scans and reclaims the same cells.
+schedule(Shed, State) ->
     case is_enabled() of
         true ->
-            Ref = erlang:start_timer(next_interval(), self(), scheduled_sweep),
+            Ref = erlang:start_timer(delay(Shed), self(), scheduled_sweep),
             State#state{timer_ref = Ref};
         false ->
             State#state{timer_ref = undefined}
     end.
 
 %% @private
-%% The configured interval minus a random slice of up to `?JITTER_RATIO` of it,
-%% so nodes that scheduled together drift apart.
+delay([]) ->
+    next_interval();
+delay(_Shed) ->
+    %% Never longer than a clean round would wait. An operator who configured a
+    %% short interval must not be given a slower retry than a success, which is
+    %% what a fixed constant alone would do.
+    min(jittered(?RETRY_INTERVAL), next_interval()).
+
+%% @private
 next_interval() ->
-    Interval = bondy_config:get(
-        [security, reclamation, interval], ?DEFAULT_INTERVAL
-    ),
+    jittered(
+        bondy_config:get([security, reclamation, interval], ?DEFAULT_INTERVAL)
+    ).
+
+%% @private
+%% The interval minus a random slice of up to `?JITTER_RATIO` of it, so nodes
+%% that scheduled together drift apart. Applied to the retry interval too, and
+%% for the same reason: a cluster whose job queues filled at the same moment
+%% must not then retry in lockstep.
+jittered(Interval) ->
     Jitter = round(Interval * ?JITTER_RATIO),
     Interval - rand:uniform(max(1, Jitter)).
 
@@ -173,11 +215,38 @@ is_enabled() ->
 %% @private
 %% Each sweep is a separate job: one that fails must not prevent the others
 %% from running, and `bondy_jobs` regulates them independently.
+%%
+%% Answers the sweeps that could not be enqueued at all, which is not the same
+%% as a sweep that ran and failed -- `run/2` handles that. A full job queue is
+%% the expected reason, and discarding it (as this used to) is worse than it
+%% looks: the queue is fullest under load, which is exactly when there is most
+%% to reclaim, and the next round is six hours away.
 enqueue_sweeps() ->
-    _ = [
-        bondy_jobs:enqueue(fun() -> run(Name, MFA) end)
-     || {Name, MFA} <- ?SWEEPS
-    ],
+    lists:filtermap(
+        fun({Name, MFA}) ->
+            case bondy_jobs:enqueue(fun() -> run(Name, MFA) end) of
+                ok -> false;
+                {error, Reason} -> {true, {Name, Reason}}
+            end
+        end,
+        ?SWEEPS
+    ).
+
+%% @private
+%% Once per round rather than once per sweep, and never rate-limited: a round
+%% happens a handful of times a day, so there is nothing here to throttle and a
+%% warning an operator can trust to always appear is worth more than one that
+%% might have been suppressed.
+log_shed([]) ->
+    ok;
+log_shed(Shed) ->
+    ?LOG_WARNING(#{
+        description =>
+            "Storage reclamation sweeps could not be enqueued and did not "
+            "run. The job queue is full.",
+        sweeps => [Name || {Name, _} <- Shed],
+        reasons => lists:usort([Reason || {_, Reason} <- Shed])
+    }),
     ok.
 
 %% @private
