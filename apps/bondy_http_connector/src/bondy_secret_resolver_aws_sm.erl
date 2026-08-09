@@ -19,6 +19,7 @@ a caller wanting a single JSON field passes `field => <<"...">>`.
 
 -include_lib("kernel/include/logger.hrl").
 
+-export([ensure_transport/0]).
 -export([fetch/1]).
 
 %% =============================================================================
@@ -37,6 +38,7 @@ key from a JSON `SecretString`. Returns the raw bytes (or the field's value) as 
 
 fetch(#{secret_id := SecretId, region := Region} = Ref) ->
     try
+        ok = ensure_transport(),
         {ok, Config0} = erlcloud_aws:auto_config(),
         Config = erlcloud_aws:service_config(
             <<"sm">>, to_list(Region), Config0
@@ -73,6 +75,39 @@ fetch(#{secret_id := SecretId, region := Region} = Ref) ->
     end;
 fetch(Ref) ->
     {error, {invalid_ref, Ref}}.
+
+-doc """
+Give `lhttpc` usable TLS defaults, if nothing else has.
+
+`erlcloud` talks to AWS over `lhttpc`, which sends `{verify, verify_peer}` with
+no CA certificates unless its application environment says otherwise -- and
+since OTP 26 `ssl` rejects that pair outright with
+`{options, incompatible, [{verify, verify_peer}, {cacerts, undefined}]}`. So
+every AWS call fails, at the transport, before any credential is even offered.
+
+This lives here, beside the only code in Bondy that makes such a call, because
+it is a precondition of *this* provider rather than of whatever happens to have
+started first. It used to live in `bondy_http_connector_config:init/0`, which
+meant the AWS secret provider worked only on a node where that application had
+already started: `bondy_secret_resolver` is in `bondy_stdlib` and is reached
+from realm key encryption, the master key and outbound mail, none of which have
+any reason to know that. The failure it produced named TLS options and no part
+of the actual cause.
+
+Idempotent, and never overrides a configured value: an operator who has set
+`lhttpc`'s `ssl_options` has said something more specific than this can.
+""".
+-spec ensure_transport() -> ok.
+
+ensure_transport() ->
+    case application:get_env(lhttpc, ssl_options) of
+        undefined ->
+            application:set_env(
+                lhttpc, ssl_options, bondy_cert_manager:ssl_opts()
+            );
+        {ok, _} ->
+            ok
+    end.
 
 %% =============================================================================
 %% PRIVATE

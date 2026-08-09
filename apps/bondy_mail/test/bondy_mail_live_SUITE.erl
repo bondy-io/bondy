@@ -91,7 +91,6 @@ init_per_suite(Config) ->
     %% use, so it is unconditional rather than a branch on configuration.
     _ = application:ensure_all_started(erlcloud),
     {ok, _} = application:ensure_all_started(gproc),
-    {ok, _} = application:ensure_all_started(jobs),
     {ok, _} = application:ensure_all_started(bondy_regulator),
 
     ok = load_dotenv(),

@@ -47,9 +47,7 @@ caller's point of view.
 -export_type([info/0]).
 
 %% API
--export([config/1]).
 -export([info/1]).
--export([name/1]).
 -export([report/2]).
 -export([start_link/1]).
 
@@ -70,25 +68,6 @@ caller's point of view.
 
 start_link(#bondy_mail_relay{name = Name} = Relay) ->
     gen_server:start_link(name(Name), ?MODULE, [Relay], []).
-
--doc "Return the `gproc` name under which the relay `Name` is registered.".
--spec name(Name :: binary()) -> {via, module(), any()}.
-
-name(Name) when is_binary(Name) ->
-    {via, gproc, {n, l, {?MODULE, Name}}}.
-
--doc """
-Return the relay's configuration record.
-
-Read from the caller's process: the record is immutable for the life of the
-relay, so this does not go through the relay process and cannot be delayed by
-one that is busy.
-""".
--spec config(Name :: binary()) ->
-    {ok, #bondy_mail_relay{}} | {error, no_such_relay}.
-
-config(Name) when is_binary(Name) ->
-    bondy_mail_config:relay(Name).
 
 -doc """
 Return what is safe to tell a caller about this relay.
@@ -176,7 +155,11 @@ handle_call(Event, From, State) ->
         event => Event,
         from => From
     }),
-    {noreply, State}.
+    %% Answered, not dropped. A `{noreply, _}` here leaves the caller blocked
+    %% until its own timeout for a call this process is never going to serve --
+    %% and `info/1` uses a five-second one, so a typo in a call would look like
+    %% a slow relay.
+    {reply, {error, {unsupported_call, Event}}, State}.
 
 -doc false.
 handle_cast({report, permanent}, State) ->
@@ -218,6 +201,12 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% Where a relay is registered. A detail of how one is reached, not something a
+%% caller needs: everything outside this module addresses a relay by its name.
+name(Name) when is_binary(Name) ->
+    {via, gproc, {n, l, {?MODULE, Name}}}.
 
 %% @private
 %% Recovery is fail-open: the relay is `up` again on the first success, because

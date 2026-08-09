@@ -89,6 +89,7 @@ groups() ->
             unicode_subject_survives_encoding,
             long_line_survives_transfer_encoding,
             attachment_survives_a_real_mime_parser,
+            both_bodies_and_an_attachment_nest_correctly,
             bcc_is_delivered_as_an_envelope_recipient,
             display_name_is_parsed_as_a_name
         ]},
@@ -107,7 +108,6 @@ init_per_suite(Config) ->
     _ = application:ensure_all_started(inets),
     _ = application:ensure_all_started(ssl),
     {ok, _} = application:ensure_all_started(gproc),
-    {ok, _} = application:ensure_all_started(jobs),
     {ok, _} = application:ensure_all_started(bondy_regulator),
 
     case fixture() of
@@ -234,6 +234,41 @@ attachment_survives_a_real_mime_parser(Config) ->
             "/part/" ++ binary_to_list(maps:get(~"PartID", Attachment)),
     {ok, Body} = get(Api, Path),
     ?assertEqual(Content, Body).
+
+-doc """
+Both bodies and an attachment: one message with two renderings, plus a file.
+
+The nesting a parser notices and a substring match cannot. `multipart/mixed`
+wrapping a `multipart/alternative` is one message a client can show two ways
+with a file beside it; the same parts flattened into a single `mixed` is a
+message with two competing bodies, and a client picks one.
+
+Mailpit reporting both a Text and an HTML body *and* an attachment is exactly
+the statement that the nesting is right -- a flattened message would show the
+plain text as a second attachment, or lose it.
+""".
+both_bodies_and_an_attachment_nest_correctly(Config) ->
+    {ok, _} = send(#{
+        ~"relay" => ~"plain",
+        ~"text" => ~"plain body",
+        ~"html" => ~"<h1>rich body</h1>",
+        ~"attachments" => [
+            #{
+                ~"filename" => ~"note.txt",
+                ~"content_type" => ~"text/plain",
+                ~"data" => base64:encode(~"attached body")
+            }
+        ]
+    }),
+
+    Msg = await_message(Config),
+    ?assertEqual(~"plain body", trim(maps:get(~"Text", Msg))),
+    ?assertEqual(~"<h1>rich body</h1>", trim(maps:get(~"HTML", Msg))),
+
+    %% One attachment, not two: the plain-text body is a rendering of this
+    %% message, not a file that came with it.
+    [Attachment] = maps:get(~"Attachments", Msg),
+    ?assertEqual(~"note.txt", maps:get(~"FileName", Attachment)).
 
 -doc """
 A display name arrives as a name, not as part of the address.

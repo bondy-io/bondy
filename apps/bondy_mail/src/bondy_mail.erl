@@ -54,9 +54,7 @@ node that has not made it must still boot.
 %% API
 -export([default_relay/0]).
 -export([is_configured/0]).
--export([relay_info/1]).
 -export([relay_names/0]).
--export([relays/0]).
 -export([relays/1]).
 -export([send/2]).
 -export([send/3]).
@@ -147,6 +145,16 @@ send_async(RealmUri, Map, Opts) ->
 
 -doc """
 Return what is known about a message.
+
+`status` is one of:
+
+- `queued` -- accepted into a relay's queue on the owning node.
+- `sent` -- a relay took responsibility for it. Not a delivery guarantee.
+- `failed` -- a relay was shown the message and it will not be delivered.
+- `shed` -- it was dropped from the queue before any relay saw it, because it
+  outlived `queue.ttl` or the worker holding it stopped. An idempotency key
+  whose message was shed may be used again; one whose message `failed` may not.
+- `unknown` -- see below.
 
 `#{status := unknown}` when this cluster cannot say -- an id that never
 existed, a record that has been swept, a message belonging to another realm, or
@@ -252,6 +260,19 @@ to_error({too_large_payload, Size, Max}) ->
     bondy_error:new(too_large_payload, #{
         details => #{value => Size, limit => Max}
     });
+to_error({too_many_recipients, Count, Max}) ->
+    bondy_error:new(too_large_payload, #{
+        message =>
+            ~"The message names %{value} recipients; at most %{limit} are allowed.",
+        details => #{value => Count, limit => Max}
+    });
+%% The worker wraps the same failure once it has encoded the message. Unwrapped
+%% rather than answered bare, so a caller is told the limit whichever of the two
+%% checks refused them -- being told only "too large" by one of them and the
+%% actual number by the other is the kind of difference that sends someone
+%% looking for a second bug.
+to_error({permanent, too_large_payload, {too_large_payload, Size, Max}}) ->
+    to_error({too_large_payload, Size, Max});
 to_error({permanent, too_large_payload, _}) ->
     bondy_error:new(too_large_payload);
 to_error({invalid_request, Reason}) ->
@@ -372,23 +393,16 @@ relay_names() ->
     bondy_mail_config:relay_names().
 
 -doc """
-Return what is safe to report about every relay.
-
-Name, transport, status and default sender only -- never the host, the
-username or the credential. This is what `bondy.mail.relay.list` answers with,
-after filtering to the relays the calling realm may actually use.
-""".
--spec relays() -> [bondy_mail_relay:info()].
-
-relays() ->
-    lists:filtermap(fun info_or_false/1, relay_names()).
-
--doc """
 Return what is safe to report about every relay `RealmUri` may use.
 
+Name, transport, status and default sender only -- never the host, the username
+or the credential.
+
 Filtered, not annotated: a realm is not shown a relay it would be refused,
-because a list of things you cannot have is an invitation to try them. This is
-what `bondy.mail.relay.list` answers with.
+because a list of things you cannot have is an invitation to try them. There is
+deliberately no unfiltered form of this: an authority-sensitive list with a
+realm-scoped variant beside it is two functions where the wrong one is easy to
+reach for.
 """.
 -spec relays(RealmUri :: binary()) -> [bondy_mail_relay:info()].
 
@@ -402,13 +416,6 @@ relays(RealmUri) when is_binary(RealmUri) ->
         end,
         relay_names()
     ).
-
--doc "Return what is safe to report about one relay.".
--spec relay_info(Name :: binary()) ->
-    {ok, bondy_mail_relay:info()} | {error, no_such_relay}.
-
-relay_info(Name) when is_binary(Name) ->
-    bondy_mail_relay:info(Name).
 
 %% =============================================================================
 %% PRIVATE
@@ -493,7 +500,7 @@ named_relay(_) ->
 %% settled to.
 route(Node, RealmUri, Map, Kind, Opts) ->
     Args = [RealmUri, Map, Kind, Opts],
-    Timeout = route_timeout(RealmUri, Map, Kind),
+    Timeout = route_timeout(Map, Kind),
     try partisan_rpc:call(Node, ?MODULE, accept, Args, Timeout) of
         {badrpc, Reason} ->
             ok = log_route_failure(Node, RealmUri, Reason),
@@ -510,10 +517,10 @@ route(Node, RealmUri, Map, Kind, Opts) ->
 %% A routed `send_async` returns as soon as the owner has queued the message,
 %% so it needs no more than the hop. A routed `send` waits for delivery, which
 %% the owner bounds by the request's own budget.
-route_timeout(_RealmUri, _Map, send_async) ->
+route_timeout(_Map, send_async) ->
     ?ROUTE_OVERHEAD;
-route_timeout(RealmUri, Map, send) ->
-    bondy_mail_request:budget(RealmUri, Map) + ?ROUTE_OVERHEAD.
+route_timeout(Map, send) ->
+    bondy_mail_request:budget(Map) + ?ROUTE_OVERHEAD.
 
 %% @private
 run(Request, Kind) ->
@@ -527,19 +534,21 @@ run(Request, Kind) ->
     end.
 
 %% @private
-%% A claim is given back only when the message never reached a worker -- which
-%% means only when enqueueing itself failed. Once a worker has it the claim
-%% stands whatever the outcome, including a timeout: Bondy cannot tell a relay
-%% that never saw a message from one that accepted it and then dropped the
-%% connection, so a failure is not licence to send it twice. A caller who wants
-%% another attempt uses another key.
+%% A claim is given back only when no relay was ever shown the message. Here
+%% that means only when enqueueing itself failed; a worker that sheds a message
+%% gives the claim back for itself, through `bondy_mail_status:shed/2`. Once a
+%% relay has been shown the message the claim stands whatever the outcome,
+%% including a timeout: Bondy cannot tell a relay that never saw a message from
+%% one that accepted it and then dropped the connection, so a failure is not
+%% licence to send it twice. A caller who wants another attempt uses another key.
 %%
 %% Releasing on any error instead would leave exactly one hole -- a send whose
 %% await expired while its worker was still delivering -- through which the same
 %% key could be sent twice.
 deliver(Request, send) ->
     Id = bondy_mail_request:message_id(Request),
-    Ref = make_ref(),
+    %% An alias rather than a reference: see await/2.
+    Ref = alias([reply]),
     case bondy_mail_worker:enqueue(Request, {self(), Ref}) of
         ok ->
             case await(Request, Ref) of
@@ -547,6 +556,7 @@ deliver(Request, send) ->
                 {error, _} = Error -> Error
             end;
         {error, Reason} = Error ->
+            _ = unalias(Ref),
             ok = bondy_mail_status:release(Request),
             ok = report_enqueue_failure(Request, Reason),
             Error
@@ -596,14 +606,13 @@ relay_error(Type, _) ->
 %% The transport already truncates to the code, so this checks the shape rather
 %% than trusting it: this is the last thing between a relay's own words and a
 %% caller, and a second cheap check here is worth more than the line it costs.
-reply_code(<<A, B, C>> = Code) when
-    A >= $1 andalso A =< $5 andalso
-        B >= $0 andalso B =< $9 andalso
-        C >= $0 andalso C =< $9
-->
-    #{code => Code};
-reply_code(_) ->
-    #{}.
+%% The check itself lives in `bondy_mail_transport` -- checking twice is the
+%% point, defining twice was the bug.
+reply_code(Code) ->
+    case bondy_mail_transport:is_reply_code(Code) of
+        true -> #{code => Code};
+        false -> #{}
+    end.
 
 %% @private
 log_route_failure(Node, RealmUri, Reason) ->
@@ -619,6 +628,14 @@ log_route_failure(Node, RealmUri, Reason) ->
 %% The worker answers past the deadline only if it overran; the timeout here is
 %% a backstop so a caller is never held indefinitely by a worker that died
 %% between accepting the message and replying.
+%%
+%% `Ref` is a process alias, not a bare reference, and that is what makes the
+%% timeout safe. A worker that answers after this has given up sends to a dead
+%% alias and the runtime drops the message; a plain `Pid ! {_, Ref, _}` would
+%% leave it in the caller's mailbox for ever. Callers here are router pool
+%% processes, and whether that leaked depended on `load_regulation.router.pool.
+%% type`: transient workers die and take it with them, permanent ones do not.
+%% Correctness that depends on someone else's pool setting is not correctness.
 await(Request, Ref) ->
     Timeout =
         max(
@@ -628,9 +645,23 @@ await(Request, Ref) ->
         ) + 1000,
     receive
         {bondy_mail, Ref, Result} ->
+            %% `alias([reply])` deactivates itself once a message sent through
+            %% it is received, so there is nothing to release here.
             Result
     after Timeout ->
+        _ = unalias(Ref),
+        %% Deactivated above, but a reply may already have been sent before
+        %% that took effect. One non-blocking check clears it.
+        ok = flush(Ref),
         {error, {transient, timeout, Timeout}}
+    end.
+
+%% @private
+flush(Ref) ->
+    receive
+        {bondy_mail, Ref, _} -> ok
+    after 0 ->
+        ok
     end.
 
 %% @private

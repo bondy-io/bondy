@@ -221,7 +221,7 @@ classify_exception(_Other) ->
 detail(Bin) when is_binary(Bin) ->
     case Bin of
         <<Code:3/binary, _/binary>> ->
-            case is_reply_code(Code) of
+            case bondy_mail_transport:is_reply_code(Code) of
                 true -> Code;
                 false -> unspecified
             end;
@@ -232,10 +232,3 @@ detail(Atom) when is_atom(Atom) ->
     Atom;
 detail(_) ->
     unspecified.
-
-%% @private
-is_reply_code(<<A, B, C>>) ->
-    is_digit(A) andalso is_digit(B) andalso is_digit(C).
-
-%% @private
-is_digit(C) -> C >= $0 andalso C =< $9.

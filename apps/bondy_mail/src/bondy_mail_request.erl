@@ -183,7 +183,7 @@ and reported instead.
 -export_type([t/0]).
 
 %% API
--export([budget/2]).
+-export([budget/1]).
 -export([deadline/1]).
 -export([id/1]).
 -export([idempotency_key/1]).
@@ -266,9 +266,9 @@ a caller a premature timeout on a request that may still be delivered; it
 cannot cause a message to be sent twice, because the owner's own deadline is
 what stops the work.
 """.
--spec budget(RealmUri :: binary(), Map :: map()) -> pos_integer().
+-spec budget(Map :: map()) -> pos_integer().
 
-budget(_RealmUri, Map) when is_map(Map) ->
+budget(Map) when is_map(Map) ->
     Requested =
         case maps:get(~"timeout", Map, maps:get(timeout, Map, undefined)) of
             N when is_integer(N) andalso N > 0 -> N;
@@ -279,7 +279,7 @@ budget(_RealmUri, Map) when is_map(Map) ->
         Max when Requested == undefined -> Max;
         Max -> min(Requested, Max)
     end;
-budget(_, _) ->
+budget(_) ->
     ?DEFAULT_BUDGET.
 
 -doc "Return the realm the request was made in.".
@@ -439,11 +439,14 @@ build(RealmUri, Relay, Valid) ->
             bondy_mail_address:validate_many(as_list(maps:get(cc, Valid))),
         {ok, Bcc} ?=
             bondy_mail_address:validate_many(as_list(maps:get(bcc, Valid))),
+        ok ?= recipient_count(Relay, To ++ Cc ++ Bcc),
         {ok, {ReplyToName, ReplyTo}} ?=
             optional_mailbox(maps:get(reply_to, Valid)),
         ok ?= has_body(Valid),
         {ok, Headers} ?= bondy_mail_header:validate(maps:get(headers, Valid)),
-        {ok, Attachments} ?= attachments(Relay, maps:get(attachments, Valid)),
+        {ok, Attachments} ?= attachments(maps:get(attachments, Valid)),
+        Size = size_bytes(Valid, Headers, Attachments),
+        ok ?= within_budget(Relay, Size),
         Timeout = timeout(Relay, maps:get(timeout, Valid)),
         Key = maps:get(id, Valid),
         {ok, #bondy_mail_request{
@@ -463,6 +466,7 @@ build(RealmUri, Relay, Valid) ->
             html = maps:get(html, Valid),
             headers = Headers,
             attachments = Attachments,
+            size_bytes = Size,
             priority = maps:get(priority, Valid),
             timeout = Timeout,
             deadline = erlang:monotonic_time(millisecond) + Timeout
@@ -543,25 +547,65 @@ timeout(#bondy_mail_relay{timeout = Max}, Requested) ->
     min(Requested, Max).
 
 %% @private
-attachments(Relay, L) when is_list(L) ->
-    Max = round(Relay#bondy_mail_relay.max_message_size * ?ENCODING_HEADROOM),
-    attachments(L, Max, 0, []);
-attachments(_, Other) ->
+%% Envelope recipients, counted together. `to`, `cc` and `bcc` all become
+%% `RCPT TO` commands in one transaction, so the relay sees their sum and this
+%% has to bound the same thing.
+recipient_count(#bondy_mail_relay{max_recipients = Max}, Recipients) ->
+    case length(Recipients) of
+        N when N > Max -> {error, {too_many_recipients, N, Max}};
+        _ -> ok
+    end.
+
+%% @private
+%% Everything that becomes the message.
+%%
+%% Attachments used to be the only thing measured, which made the limit both
+%% incomplete and surprising: the same megabytes were refused as an attachment
+%% and accepted as an HTML body, and a body was not measured at all until a
+%% worker had already taken the message off a queue it had been occupying. A
+%% caller cannot reason about a limit that depends on which field they used.
+size_bytes(Valid, Headers, Attachments) ->
+    optional_size(maps:get(subject, Valid)) +
+        optional_size(maps:get(text, Valid)) +
+        optional_size(maps:get(html, Valid)) +
+        lists:sum([
+            byte_size(N) + byte_size(V)
+         || {N, V} <- Headers
+        ]) +
+        lists:sum([
+            byte_size(A#bondy_mail_attachment.data) +
+                byte_size(A#bondy_mail_attachment.filename)
+         || A <- Attachments
+        ]).
+
+%% @private
+optional_size(undefined) -> 0;
+optional_size(Bin) when is_binary(Bin) -> byte_size(Bin).
+
+%% @private
+%% Encoding inflates a message, so the decoded budget is scaled down: a request
+%% accepted here should not then be refused by the relay for size. The encoded
+%% message is measured exactly, later, in `bondy_mail_mime`.
+within_budget(#bondy_mail_relay{max_message_size = Limit}, Size) ->
+    Max = round(Limit * ?ENCODING_HEADROOM),
+    case Size > Max of
+        true -> {error, {too_large_payload, Size, Max}};
+        false -> ok
+    end.
+
+%% @private
+attachments(L) when is_list(L) ->
+    attachments(L, []);
+attachments(Other) ->
     {error, {invalid_request, {attachments, Other}}}.
 
 %% @private
-attachments([], _Max, _Size, Acc) ->
+attachments([], Acc) ->
     {ok, lists:reverse(Acc)};
-attachments([H | T], Max, Size0, Acc) ->
+attachments([H | T], Acc) ->
     case attachment(H) of
-        {ok, #bondy_mail_attachment{data = Data} = A} ->
-            Size = Size0 + byte_size(Data),
-            case Size > Max of
-                true -> {error, {too_large_payload, Size, Max}};
-                false -> attachments(T, Max, Size, [A | Acc])
-            end;
-        {error, _} = Error ->
-            Error
+        {ok, #bondy_mail_attachment{} = A} -> attachments(T, [A | Acc]);
+        {error, _} = Error -> Error
     end.
 
 %% @private
@@ -585,12 +629,17 @@ attachment(Other) ->
     {error, {invalid_request, {attachment, Other}}}.
 
 %% @private
-%% A filename lands in a `Content-Disposition` header, so it is subject to the
-%% same injection rule as any other header value. Path separators are refused
-%% as well: a recipient's client decides where a file goes, and a name that
-%% looks like a path invites it to decide badly.
+%% A filename lands in a `Content-Disposition` header, so it is header data and
+%% goes through the same control-character rule as any other header data --
+%% `bondy_mail_header:has_control/1`, which is the only definition of it.
+%%
+%% Path separators are refused as well, which is a different concern: a
+%% recipient's client decides where a file goes, and a name that looks like a
+%% path invites it to decide badly.
 valid_filename(Name) when is_binary(Name) andalso byte_size(Name) > 0 ->
-    Bad = binary:match(Name, [~"\r", ~"\n", ~"\0", ~"/", ~"\\"]) =/= nomatch,
+    Bad =
+        bondy_mail_header:has_control(Name) orelse
+            binary:match(Name, [~"/", ~"\\"]) =/= nomatch,
     case Bad of
         true -> {error, {invalid_request, {attachment_filename, Name}}};
         false -> ok
@@ -599,12 +648,16 @@ valid_filename(Name) ->
     {error, {invalid_request, {attachment_filename, Name}}}.
 
 %% @private
+%% Also header data: it becomes a `Content-Type`.
 valid_content_type(Bin) when is_binary(Bin) ->
     case binary:split(Bin, ~"/") of
         [Type, Sub] when byte_size(Type) > 0 andalso byte_size(Sub) > 0 ->
-            case binary:match(Bin, [~"\r", ~"\n", ~"\0", ~" "]) of
-                nomatch -> ok;
-                _ -> {error, {invalid_request, {content_type, Bin}}}
+            Bad =
+                bondy_mail_header:has_control(Bin) orelse
+                    binary:match(Bin, ~" ") =/= nomatch,
+            case Bad of
+                false -> ok;
+                true -> {error, {invalid_request, {content_type, Bin}}}
             end;
         _ ->
             {error, {invalid_request, {content_type, Bin}}}

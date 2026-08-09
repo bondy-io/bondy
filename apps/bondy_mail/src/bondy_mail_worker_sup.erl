@@ -19,7 +19,6 @@ worker's queue rather than one.
 -include("bondy_mail.hrl").
 
 %% API
--export([name/1]).
 -export([start_link/1]).
 
 %% SUPERVISOR CALLBACKS
@@ -34,12 +33,6 @@ worker's queue rather than one.
 
 start_link(#bondy_mail_relay{name = Name} = Relay) ->
     supervisor:start_link(name(Name), ?MODULE, [Relay]).
-
--doc "Return the `gproc` name for the worker supervisor of relay `Name`.".
--spec name(Name :: binary()) -> {via, module(), any()}.
-
-name(Name) when is_binary(Name) ->
-    {via, gproc, {n, l, {?MODULE, Name}}}.
 
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
@@ -61,6 +54,11 @@ init([#bondy_mail_relay{} = Relay]) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% Where this supervisor is registered.
+name(Name) when is_binary(Name) ->
+    {via, gproc, {n, l, {?MODULE, Name}}}.
 
 %% @private
 child_spec(Relay, Index) ->

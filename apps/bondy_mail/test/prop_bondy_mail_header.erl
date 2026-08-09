@@ -161,6 +161,58 @@ prop_an_accepted_display_name_round_trips() ->
     ).
 
 -doc """
+No control character, anywhere, survives into a display name.
+
+Sharper than the CRLF property above and aimed at the rule rather than at the
+attack. CR and LF are what makes injection work, and they were refused
+everywhere from the start; the rest of the control range was refused in a
+custom header and accepted in a display name, because the two were checked by
+two different hand-written lists. A vertical tab in the display name of a
+`From` reached the wire unencoded -- harmless, and one edit away from not being.
+
+There is now one predicate, `bondy_mail_header:has_control/1`, and this is the
+statement that a display name is held to it.
+""".
+prop_no_control_survives_into_a_display_name() ->
+    ?FORALL(
+        {Prefix, Control, Suffix},
+        {display_name_text(), control_char(), display_name_text()},
+        begin
+            Name = <<Prefix/binary, Control/binary, Suffix/binary>>,
+            From = <<Name/binary, " <a@b.com>">>,
+            bondy_mail_address:parse_mailbox(From) == error
+        end
+    ).
+
+-doc """
+Whatever `has_control/1` accepts, every caller of it accepts.
+
+The property that the rule is one rule. Four modules used to spell it out
+separately -- addresses, display names, attachment filenames, content types --
+and they disagreed. Rather than restate the byte ranges here, which would be a
+fifth spelling, this asserts that the header validator and the display-name
+parser agree about every string.
+""".
+prop_the_control_rule_is_one_rule() ->
+    ?FORALL(
+        Text,
+        oneof([safe_text(), display_name_text(), binary()]),
+        begin
+            ByHeader = bondy_mail_header:validate(#{~"X-Test" => Text}),
+            RefusedByHeader =
+                ByHeader == {error, {header_injection, ~"X-Test"}},
+            RefusedByName =
+                bondy_mail_address:parse_mailbox(
+                    <<Text/binary, " <a@b.com>">>
+                ) == error,
+            %% A name may be refused for reasons a header value is not -- it
+            %% may not carry a quote or an angle bracket -- so the implication
+            %% runs one way.
+            not RefusedByHeader orelse RefusedByName
+        end
+    ).
+
+-doc """
 A reserved header is refused whatever its casing.
 
 Header names are case-insensitive, so a check that is not would let `bCc`
@@ -208,6 +260,12 @@ injected_value() ->
 %% Every way a line can be broken, not just the canonical pair.
 line_break() ->
     oneof([~"\r\n", ~"\r", ~"\n", ~"\n\r", ~"\r\n\r\n"]).
+
+%% Any C0 control, or DEL. The whole range rather than the two that matter:
+%% the rule is about header data, and an exception carved out for the ones
+%% nobody attacks with is an exception someone widens later.
+control_char() ->
+    ?LET(C, oneof(lists:seq(0, 31) ++ [127]), <<C>>).
 
 %% A legal field name that is not reserved. `safe_name/0` draws from letters,
 %% so it can and does generate `to`, `cc` and `date` -- which are refused, and

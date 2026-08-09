@@ -41,11 +41,16 @@ neither.
 
 ## Queue depth is counted, not asked for
 
-`jobs:queue_info/2` is a call into the `jobs` server. Asking it per message
-would put a shared process on the path of every send -- the exact coupling this
-application exists to avoid. Depth is instead an `atomics` counter on the
-relay's own record, incremented when a message is queued and decremented when a
-worker takes it.
+Depth is a set of `atomics` counters on the relay's own record -- one pair per
+worker -- incremented when a message is queued and decremented when a worker
+takes it. Reading it is a handful of atomic loads and reaches no other process.
+
+It is also not merely an observation: the sum this gauge publishes is the same
+sum `bondy_mail_worker:reserve/3` checks to decide whether a message is admitted
+at all. A gauge that *is* the bound cannot drift from it -- but only if it is
+the same arithmetic, which is why this is the relay's total and not one worker's
+share of it. Publishing a share to a series labelled by relay has every worker
+in the pool overwriting the same number with a fraction of it.
 
 ## Help strings are ASCII
 
@@ -260,11 +265,21 @@ queue(Relay, Depth, Wait) ->
     ).
 
 -doc """
-A message was refused before reaching a worker.
+A message was refused before any delivery was attempted.
 
-`Reason` is `queue_full`, `not_permitted` or `oversized`. Distinct from
-`failed/5`, which is a relay declining a message it was shown: nothing here was
-ever offered to a relay.
+`Reason` is one of:
+
+- `queue_full` -- the relay's queue was at its message or byte bound.
+- `not_permitted` -- the realm may not use the relay, or claim that sender.
+- `oversized` -- the message is larger than the relay accepts.
+- `expired` -- it waited longer than `queue.ttl` and was shed unsent.
+- `shutdown` -- the worker holding it was stopped.
+
+Distinct from `failed/5`, which is a relay declining a message it was shown:
+nothing counted here was ever offered to a relay. That distinction is why a
+shed message does not touch relay health -- our queue backing up says nothing
+about whether the relay is answering -- and why it does not consume the caller's
+idempotency key either. See `bondy_mail_status:shed/2`.
 """.
 -spec rejected(Relay :: binary(), Reason :: atom()) -> ok.
 
@@ -389,7 +404,7 @@ do_declare_families() ->
     ok = bondy_metrics:declare(#{
         name => bondy_mail_rejected_total,
         help =>
-            ~"Total messages refused before reaching a worker, by relay and reason (queue_full | not_permitted | oversized). Nothing counted here was offered to a relay."
+            ~"Total messages refused before any delivery was attempted, by relay and reason (queue_full | not_permitted | oversized | expired | shutdown). Nothing counted here was offered to a relay, so none of it counts against relay health."
     }),
     ok = bondy_metrics:declare(#{
         name => bondy_mail_send_duration_milliseconds,
@@ -404,7 +419,7 @@ do_declare_families() ->
     ok = bondy_metrics:declare(#{
         name => bondy_mail_queue_depth,
         help =>
-            ~"Messages queued for a relay and not yet taken by a worker, by relay."
+            ~"Messages queued for a relay and not yet taken by a worker, by relay. This is the counter the queue bound is enforced against, not a separate observation of it."
     }),
     ok = bondy_metrics:declare(#{
         name => bondy_mail_relay_up,

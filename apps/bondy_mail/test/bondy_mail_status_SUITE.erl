@@ -64,13 +64,13 @@ all() ->
         different_keys_send_separately,
         same_key_in_another_realm_is_not_a_duplicate,
         refused_message_releases_its_claim,
+        shed_message_gives_its_key_back,
         %% Sweep
         expired_status_is_forgotten
     ].
 
 init_per_suite(Config) ->
     {ok, _} = application:ensure_all_started(gproc),
-    {ok, _} = application:ensure_all_started(jobs),
     {ok, _} = application:ensure_all_started(bondy_regulator),
     {ok, Port} = mock_smtp_server:start(),
     [{port, Port} | Config].
@@ -486,6 +486,47 @@ refused_message_releases_its_claim(_) ->
     ?assertNot(maps:is_key(duplicate, Result)),
     ?assertMatch(#{status := sent}, Result).
 
+-doc """
+A message shed from the queue reports what happened AND gives its key back.
+
+Both halves, because each without the other is a defect.
+
+Recording it as a failure -- which is what this did -- leaves the claim
+consumed, so every later request carrying that key is answered with the recorded
+failure and nothing is ever sent. For a message no relay was ever shown, which
+is exactly the case an idempotency key is supposed to make retryable. The
+alternative of simply deleting the record frees the key but leaves an
+asynchronous caller holding an id that now answers `unknown`, indistinguishable
+from one that never existed.
+
+So the record stays, saying `shed`, and `claim/1` takes it over.
+""".
+shed_message_gives_its_key_back(_) ->
+    %% One worker, held for longer than the queue's TTL, so the second message
+    %% is shed at the head of the queue without a connection ever being opened
+    %% for it.
+    ok = mock_smtp_server:latency(1000),
+    Key = ~"shed-1",
+    Req = (base())#{~"relay" => ~"shedding"},
+
+    {ok, _} = bondy_mail:send_async(?REALM, Req),
+    {ok, #{id := Id}} = bondy_mail:send_async(?REALM, Req#{~"id" => Key}),
+
+    ok = await_status(Id, shed),
+    {ok, Info} = bondy_mail:status(?REALM, Id),
+    ?assertEqual(transient, maps:get(nature, Info)),
+    ?assertEqual(expired, maps:get(error_class, Info)),
+
+    ok = mock_smtp_server:latency(0),
+    {ok, Result} = bondy_mail:send(?REALM, Req#{~"id" => Key}),
+    ?assertNot(maps:is_key(duplicate, Result)),
+    ?assertMatch(#{id := Id, status := sent}, Result),
+
+    %% And having been sent, the key holds again: shedding does not make a key
+    %% permanently reusable, it makes one reusable while nothing has been sent.
+    {ok, Again} = bondy_mail:send(?REALM, Req#{~"id" => Key}),
+    ?assertMatch(#{duplicate := true, status := sent}, Again).
+
 %% =============================================================================
 %% SWEEP
 %% =============================================================================
@@ -546,6 +587,22 @@ find_remote_key(Self, Peers) ->
      || Key <- Keys, lrw:top({?REALM, Key}, Nodes, 1) =/= [Self]
     ],
     hd(Remote).
+
+%% @private
+await_status(Id, Status) ->
+    await_status(Id, Status, 100).
+
+%% @private
+await_status(Id, Status, 0) ->
+    ct:fail({expected_status, Id, Status});
+await_status(Id, Status, Retries) ->
+    case bondy_mail:status(?REALM, Id) of
+        {ok, #{status := Status}} ->
+            ok;
+        _ ->
+            timer:sleep(50),
+            await_status(Id, Status, Retries - 1)
+    end.
 
 %% @private
 await_unknown(Id) ->
@@ -617,5 +674,12 @@ relays(Port) ->
             pool_size => 1,
             queue_max_size => 1,
             timeout => 20000
+        },
+        %% One worker and a TTL short enough that anything queued behind a
+        %% message in flight is shed rather than delivered.
+        Common#{
+            name => ~"shedding",
+            pool_size => 1,
+            queue_ttl => 200
         }
     ].

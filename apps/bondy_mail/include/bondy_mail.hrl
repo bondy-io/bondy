@@ -32,17 +32,27 @@
     %% Realm URIs, or prototype URIs, permitted to use this relay. `any` means
     %% every realm; `[]` means the master realm only.
     realms :: [binary()] | any,
+    %% The module delivering for this relay. One implementation today,
+    %% `bondy_mail_transport_smtp`; the worker dispatches on this value rather
+    %% than naming a module, so a provider transport is a new module and a
+    %% configuration value rather than an edit to the delivery path.
+    transport_mod :: module(),
     pool_size :: pos_integer(),
     %% Round-robin cursor over the relay's workers, held here so that picking
     %% one is a wait-free atomic increment off the relay's own record rather
-    %% than a call to anything. See bondy_mail_worker:pick_queue/1.
+    %% than a call to anything. See bondy_mail_worker:pick_worker/2.
     pool_cursor :: atomics:atomics_ref(),
-    %% Messages queued for this relay and not yet taken by a worker. Counted
-    %% here rather than asked of the `jobs` server, which is a single process
-    %% and must not be on the path of every send. See
-    %% bondy_mail_worker:depth_add/2.
-    queue_depth :: atomics:atomics_ref(),
+    %% Two counters: messages queued for this relay, and the bytes they hold.
+    %% Both are reserved before a message is handed to a worker and released
+    %% when one takes it, so the pair IS the admission bound rather than a
+    %% description of it. See bondy_mail_worker:reserve/2.
+    queue_counters :: atomics:atomics_ref(),
     queue_max_size :: pos_integer(),
+    %% The same bound expressed in bytes. A bound in messages alone bounds
+    %% nothing: one message may be a hundred bytes or twenty megabytes, and a
+    %% queue that holds a thousand of the latter is not bounded in any sense an
+    %% operator cares about.
+    queue_max_bytes :: pos_integer(),
     queue_ttl :: pos_integer(),
     timeout :: pos_integer(),
     retry_max_attempts :: non_neg_integer(),
@@ -52,6 +62,11 @@
     rate_limit_rate :: number(),
     rate_limit_burst :: pos_integer(),
     max_message_size :: pos_integer(),
+    %% Envelope recipients allowed in one message. RFC 5321 obliges a server to
+    %% accept 100, so that is the default; a single request naming thousands is
+    %% one SMTP transaction a relay will refuse anyway, and refusing it here
+    %% costs the relay nothing.
+    max_recipients :: pos_integer(),
     %% Consecutive TRANSIENT failures that mark the relay down, and consecutive
     %% successes that clear the alarm again. Traffic recovers on the first
     %% success regardless; only the alarm waits. See bondy_mail_relay.
@@ -98,6 +113,15 @@
     html :: optional(binary()),
     headers :: [{binary(), binary()}],
     attachments :: [#bondy_mail_attachment{}],
+    %% Everything that becomes the message: subject, bodies, headers and
+    %% decoded attachments. Measured once, at validation, and used twice --
+    %% to refuse an oversized request before it is queued, and to reserve the
+    %% queue's byte budget. The encoded message is measured again exactly, in
+    %% bondy_mail_mime; this is the estimate that keeps the oversized ones out
+    %% of the queue in the first place.
+    size_bytes :: non_neg_integer(),
+    %% Selects the worker's lane. `normal` is served before `low`, and within a
+    %% lane the order is the order of arrival.
     priority :: normal | low,
     timeout :: pos_integer(),
     %% `erlang:monotonic_time(millisecond)` past which no further attempt is

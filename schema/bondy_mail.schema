@@ -276,14 +276,33 @@ end}.
 
 %% -----------------------------------------------------------------------------
 %% @doc How many messages may wait for a worker before new ones are refused.
-%% This is the backpressure bound: a relay that stops accepting mail fills its
-%% queue and then refuses, rather than growing without limit. Refusal is
-%% reported as a transient error; message routing is unaffected either way.
+%% This is the backpressure bound for the relay as a whole, shared across its
+%% pool: a relay that stops accepting mail fills its queue and then refuses,
+%% rather than growing without limit. Refusal is reported as a transient error;
+%% message routing is unaffected either way.
+%%
+%% Use it together with queue.max_bytes. A bound in messages alone says nothing
+%% about memory, because a message may be a hundred bytes or twenty megabytes.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "mail.relay.$name.queue.max_size", "bondy_mail.relays", [
   {datatype, integer},
   {default, 1000},
+  {validators, ["positive_integer"]}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How much the messages waiting for this relay may hold in total, before
+%% new ones are refused. The second half of the backpressure bound, and the one
+%% that decides how much memory a relay that has stopped answering can occupy.
+%%
+%% Measured on the decoded request -- subject, bodies, headers and attachments.
+%% Whichever of this and queue.max_size is reached first refuses.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.queue.max_bytes", "bondy_mail.relays", [
+  {datatype, bytesize},
+  {default, "64MB"},
   {validators, ["positive_integer"]}
 ]}.
 
@@ -364,6 +383,19 @@ end}.
 {mapping, "mail.relay.$name.max_message_size", "bondy_mail.relays", [
   {datatype, bytesize},
   {default, "25MB"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The most envelope recipients one message may name, counting to, cc and
+%% bcc together -- they all become RCPT TO commands in a single transaction, so
+%% a relay sees their sum. RFC 5321 obliges a server to accept 100, which is
+%% why that is the default. Exceeding it is a permanent failure.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mail.relay.$name.max_recipients", "bondy_mail.relays", [
+  {datatype, integer},
+  {default, 100},
+  {validators, ["positive_integer"]}
 ]}.
 
 %% -----------------------------------------------------------------------------
@@ -517,6 +549,8 @@ fun(Conf0) ->
                 realms => CsvList(Get(Pfx ++ ".realms", undefined)),
                 pool_size => Get(Pfx ++ ".pool.size", 4),
                 queue_max_size => Get(Pfx ++ ".queue.max_size", 1000),
+                queue_max_bytes =>
+                    Get(Pfx ++ ".queue.max_bytes", 67108864),
                 queue_ttl => Get(Pfx ++ ".queue.ttl", 300000),
                 timeout => Get(Pfx ++ ".timeout", 30000),
                 retry_max_attempts => Get(Pfx ++ ".retry.max_attempts", 3),
@@ -525,6 +559,7 @@ fun(Conf0) ->
                 rate_limit_rate => Get(Pfx ++ ".rate_limit.rate", 0),
                 rate_limit_burst => Get(Pfx ++ ".rate_limit.burst", 1),
                 max_message_size => Get(Pfx ++ ".max_message_size", 26214400),
+                max_recipients => Get(Pfx ++ ".max_recipients", 100),
                 health_failure_threshold =>
                     Get(Pfx ++ ".health.failure_threshold", 3),
                 health_success_threshold =>

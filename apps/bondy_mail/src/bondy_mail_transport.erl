@@ -38,6 +38,9 @@ catalogue without translation.
 -export_type([nature/0]).
 -export_type([reason/0]).
 
+%% API
+-export([is_reply_code/1]).
+
 %% =============================================================================
 %% CALLBACKS
 %% =============================================================================
@@ -55,3 +58,32 @@ relay accepted responsibility, nothing more.
     Relay :: #bondy_mail_relay{}
 ) ->
     {ok, Receipt :: binary()} | {error, reason()}.
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+-doc """
+Return `true` when `Term` is a three-digit SMTP reply code.
+
+Lives here because two places need it: the transport, which reduces a relay's
+rejection text to just the code, and `bondy_mail:to_error/1`, which checks the
+shape again before putting it in front of a caller. Keeping the second check is
+deliberate -- it is the last thing between a relay's own words and a peer -- but
+the *rule* is written once.
+
+It was written twice, and had already drifted: one spelling accepted `0` in the
+leading position and the other did not, so a `6xx` survived the transport and
+was then silently dropped on its way to the caller. Nobody sends a `6xx`, which
+is exactly why nobody noticed.
+""".
+-spec is_reply_code(Term :: any()) -> boolean().
+
+is_reply_code(<<A, B, C>>) ->
+    %% RFC 5321 defines 2xx through 5xx. A reply outside that range is not a
+    %% code this system understands, whatever it looks like.
+    A >= $2 andalso A =< $5 andalso
+        B >= $0 andalso B =< $9 andalso
+        C >= $0 andalso C =< $9;
+is_reply_code(_) ->
+    false.

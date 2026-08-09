@@ -36,7 +36,6 @@ whose envelope does not say what they think it says.
 %% API
 -export([domain/1]).
 -export([format_mailbox/2]).
--export([is_valid/1]).
 -export([parse_mailbox/1]).
 -export([validate/1]).
 -export([validate_many/1]).
@@ -45,12 +44,6 @@ whose envelope does not say what they think it says.
 %% =============================================================================
 %% API
 %% =============================================================================
-
--doc "Return `true` when `Term` is a syntactically valid address.".
--spec is_valid(Term :: any()) -> boolean().
-
-is_valid(Term) ->
-    validate(Term) =/= error.
 
 -doc """
 Validate one address.
@@ -215,7 +208,7 @@ parse_named(Bin) ->
 %% truncation changes what a message means without saying so -- and a caller
 %% who sent one is better told.
 named(Raw, Address) ->
-    case has_control(Raw) of
+    case bondy_mail_header:has_control(Raw) of
         true ->
             error;
         false ->
@@ -228,13 +221,28 @@ named(Raw, Address) ->
     end.
 
 %% @private
-has_control(Bin) ->
-    binary:match(Bin, [~"\r", ~"\n", ~"\0", ~"\t"]) =/= nomatch.
+%% Spaces only, and at the byte level.
+%%
+%% Two reasons, and both were learned the hard way. `string:trim/1` treats CR
+%% and LF as whitespace, so it would quietly turn `Acme\n <a@b>` into the name
+%% `Acme` and accept it -- see named/2. And every `string` function raises
+%% `badarg` on a binary that is not valid UTF-8, so `string:trim(<<128>>, ...)`
+%% took down the calling process: a router pool process, over a display name a
+%% peer chose. Validation may refuse anything it likes and must crash at
+%% nothing.
+trim_spaces(<<$\s, Rest/binary>>) ->
+    trim_spaces(Rest);
+trim_spaces(Bin) ->
+    trim_trailing_spaces(Bin).
 
 %% @private
-%% Spaces only -- see named/2 for why this may not be `string:trim/1`.
-trim_spaces(Bin) ->
-    string:trim(Bin, both, " ").
+trim_trailing_spaces(<<>>) ->
+    <<>>;
+trim_trailing_spaces(Bin) ->
+    case binary:last(Bin) of
+        $\s -> trim_trailing_spaces(binary:part(Bin, 0, byte_size(Bin) - 1));
+        _ -> Bin
+    end.
 
 %% @private
 unquote(<<$", Rest/binary>>) when byte_size(Rest) > 0 ->
@@ -246,12 +254,28 @@ unquote(Name) ->
     Name.
 
 %% @private
+%% Valid UTF-8 as well as the character and length rules.
+%%
+%% A display name is header data, and the only way non-ASCII header data can be
+%% written is as an RFC 2047 encoded word naming a charset. `mimemail` names
+%% UTF-8, so a name that is not valid UTF-8 would be labelled as something it is
+%% not -- and refusing it here is the same decision this module makes about
+%% every other malformed input, rather than letting an encoder further down
+%% either mangle it or raise on a worker with the caller already gone.
 is_valid_name(Name) ->
     Bad = binary:match(Name, [~"<", ~">", ~"\"", ~"\\"]),
-    case Bad == nomatch andalso byte_size(Name) =< ?MAX_NAME of
+    Valid =
+        Bad == nomatch andalso
+            byte_size(Name) =< ?MAX_NAME andalso
+            is_utf8(Name),
+    case Valid of
         true -> {ok, Name};
         false -> error
     end.
+
+%% @private
+is_utf8(Bin) ->
+    is_binary(unicode:characters_to_binary(Bin, utf8, utf8)).
 
 %% @private
 validate_many([], Acc) ->
@@ -263,10 +287,12 @@ validate_many([H | T], Acc) ->
     end.
 
 %% @private
-%% No control characters anywhere. CR and LF are the header-injection vector and
-%% matter most, but a NUL or a bare tab has no business in an address either.
+%% No control character anywhere -- `bondy_mail_header:has_control/1` is the one
+%% definition of that -- and no space either, which is legal in a quoted local
+%% part and refused here along with the rest of the quoted form.
 is_clean(Bin) ->
-    binary:match(Bin, [~"\r", ~"\n", ~"\0", ~"\t", ~" "]) == nomatch.
+    binary:match(Bin, ~" ") == nomatch andalso
+        not bondy_mail_header:has_control(Bin).
 
 %% @private
 %% Exactly one `@`: `binary:split/2` without `global` stops at the first, so the

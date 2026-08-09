@@ -21,11 +21,11 @@
     {applications, [
         kernel,
         stdlib,
-        %% Relay and worker-supervisor names are registered via gproc.
+        %% Relay, worker and worker-supervisor names are registered via
+        %% gproc. Queues are this application's own -- held in the worker that
+        %% will deliver them -- so nothing on the send path calls into a
+        %% process shared with anything else. See bondy_mail_worker.
         gproc,
-        %% Each worker owns a `jobs` queue: that queue is the backpressure
-        %% bound, so this is a hard dependency rather than an optional one.
-        jobs,
         %% Rendezvous hashing, used to pick the node that owns an idempotency
         %% key. Partisan supplies the membership it runs over and the transport
         %% used to reach the chosen node, but is deliberately absent here: it is

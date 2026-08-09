@@ -49,6 +49,7 @@ all() ->
         caller_may_set_a_display_name,
         a_display_name_cannot_smuggle_a_sender_past_the_allow_list,
         a_display_name_may_not_carry_control_characters,
+        a_display_name_may_not_be_invalid_utf8,
         relay_may_configure_a_display_name,
         reply_to_may_carry_a_display_name,
         %% Headers
@@ -59,6 +60,7 @@ all() ->
         oversized_attachments_are_refused,
         attachment_must_be_base64,
         attachment_filename_may_not_be_a_path,
+        attachment_filename_may_not_carry_control_characters,
         %% Deadline
         timeout_is_capped_by_the_relay
     ].
@@ -339,6 +341,26 @@ reply_to_may_carry_a_display_name(_) ->
     ?assertEqual(~"help@example.com", R#bondy_mail_request.reply_to),
     ?assertEqual(~"Support", R#bondy_mail_request.reply_to_name).
 
+-doc """
+A display name that is not valid UTF-8 is refused, not crashed on.
+
+Found by `prop_bondy_mail_header:prop_the_control_rule_is_one_rule/0`, which is
+the whole argument for the property: `string:trim/1` raises `badarg` on a
+binary that is not valid UTF-8, so a single stray byte in a caller-supplied
+`from` took down the process validating it rather than producing an error.
+
+Refused rather than repaired for the reason this module refuses everything
+else: a name that is not UTF-8 cannot be written as the UTF-8 encoded word
+`mimemail` would label it, and quietly dropping the byte would send a message
+that differs from the one the caller described.
+""".
+a_display_name_may_not_be_invalid_utf8(_) ->
+    Bad = <<"Acme", 128, " <a@bondy.test>">>,
+    ?assertMatch(
+        {error, {invalid_recipient, _}},
+        new(?REALM, (base())#{~"from" => Bad})
+    ).
+
 %% =============================================================================
 %% HEADERS
 %% =============================================================================
@@ -417,6 +439,43 @@ attachment_filename_may_not_be_a_path(_) ->
         )
      || N <- [~"../../etc/passwd", ~"a/b.txt", ~"a\\b.txt", ~"a\r\nb.txt", ~""]
     ].
+
+-doc """
+An attachment filename may not carry a control character.
+
+A filename becomes a `Content-Disposition` parameter, so it is header data and
+is held to the same rule as any other header data. It used to be held to a
+shorter one -- CR, LF and NUL only -- so a filename could carry a vertical tab
+or a DEL that the very same bytes in a custom header would have been refused
+for. One rule, one function: `bondy_mail_header:has_control/1`.
+""".
+attachment_filename_may_not_carry_control_characters(_) ->
+    Attachment = fun(Name) ->
+        #{
+            ~"filename" => Name,
+            ~"content_type" => ~"text/plain",
+            ~"data" => base64:encode(~"x")
+        }
+    end,
+
+    [
+        ?assertMatch(
+            {error, {invalid_request, {attachment_filename, _}}},
+            new(?REALM, (base())#{~"attachments" => [Attachment(Name)]})
+        )
+     || Name <- [
+            <<"a", 11, "b.txt">>,
+            <<"a", 127, "b.txt">>,
+            <<"a", 0, "b.txt">>,
+            <<"a", 12, "b.txt">>
+        ]
+    ],
+
+    %% And an ordinary one is still accepted.
+    ?assertMatch(
+        {ok, _},
+        new(?REALM, (base())#{~"attachments" => [Attachment(~"notes.txt")]})
+    ).
 
 %% =============================================================================
 %% DEADLINE

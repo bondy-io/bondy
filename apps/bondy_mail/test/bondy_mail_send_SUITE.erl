@@ -41,11 +41,18 @@ all() ->
         transient_failure_is_retried_to_the_limit,
         transient_failure_then_success,
         rejected_recipient_is_permanent,
+        dropped_connection_is_transient,
+        unoffered_starttls_is_permanent,
+        unreachable_relay_is_transient,
+        deadline_stops_retrying_before_the_attempt_budget,
         %% Authentication
         auth_succeeds_when_credentials_match,
         auth_failure_is_permanent,
         %% Limits
         oversized_message_is_refused,
+        oversized_is_measured_across_every_field,
+        too_many_recipients_are_refused,
+        encoded_size_is_checked_exactly,
         rate_limit_refuses_transiently,
         queue_full_refuses_transiently,
         %% Dormancy
@@ -54,7 +61,6 @@ all() ->
 
 init_per_suite(Config) ->
     {ok, _} = application:ensure_all_started(gproc),
-    {ok, _} = application:ensure_all_started(jobs),
     {ok, _} = application:ensure_all_started(bondy_regulator),
     {ok, Port} = mock_smtp_server:start(),
     [{port, Port} | Config].
@@ -229,6 +235,98 @@ rejected_recipient_is_permanent(_) ->
     Result = send(base()),
     ?assertMatch({error, {permanent, rejected, _}}, Result).
 
+-doc """
+A connection dropped mid-`DATA` is transient.
+
+The failure a reply code cannot express, and the one a mocked client would
+never produce: the relay took the message and then went away, so nothing was
+said about it either way. Transient is the only honest reading -- it may well
+work next time -- and it is retried to the attempt budget like any other.
+""".
+dropped_connection_is_transient(_) ->
+    ok = mock_smtp_server:drop_data(true),
+
+    ?assertMatch({error, {transient, _, _}}, send(base())),
+    ?assertEqual([], mock_smtp_server:messages()),
+    %% Retried: three attempts on a relay whose budget is two retries.
+    ?assertEqual(3, rcpt_count()).
+
+-doc """
+A relay that does not offer `STARTTLS` to a relay declared `starttls` fails,
+permanently, without sending.
+
+Both halves matter. Continuing in plaintext would make asking for STARTTLS mean
+nothing, and retrying would only ask a relay that has already said what it
+supports to say it again. `gen_smtp` reports this as `missing_requirement`, and
+`bondy_mail:to_error/1` turns it into `mail_not_configured` -- because that is
+what it is, and telling an operator the relay rejected their mail would send
+them to look at the wrong end.
+""".
+unoffered_starttls_is_permanent(Config) ->
+    ok = mock_smtp_server:starttls(false),
+    Relays = [
+        R#{name => ~"upgrade", transport => starttls, tls_verify => verify_none}
+     || R <- [common(?config(port, Config))]
+    ],
+    ok = restart(Config, Relays),
+
+    Result = bondy_mail:send(?REALM, (base())#{~"relay" => ~"upgrade"}),
+    ?assertMatch({error, {permanent, missing_requirement, _}}, Result),
+    ?assertEqual([], mock_smtp_server:messages()),
+
+    Error = bondy_mail:to_error(element(2, Result)),
+    ?assertEqual(mail_not_configured, maps:get(type, Error)).
+
+-doc """
+A relay with nothing listening on its port is a transient network failure.
+
+Not permanent: a relay that is being restarted is exactly this, and refusing to
+retry would turn a thirty-second maintenance window into lost mail.
+""".
+unreachable_relay_is_transient(Config) ->
+    %% A port nothing is bound to. Chosen by binding and immediately closing,
+    %% so it is genuinely free rather than merely unlikely.
+    {ok, Socket} = gen_tcp:listen(0, [{ip, {127, 0, 0, 1}}]),
+    {ok, Dead} = inet:port(Socket),
+    ok = gen_tcp:close(Socket),
+
+    Relays = [(common(Dead))#{name => ~"gone", retry_max_attempts => 0}],
+    ok = restart(Config, Relays),
+
+    ?assertMatch(
+        {error, {transient, network, _}},
+        bondy_mail:send(?REALM, (base())#{~"relay" => ~"gone"})
+    ).
+
+-doc """
+The request's deadline stops the retries, even with attempts left over.
+
+Two budgets bound a retry and this is the one that is easy to get wrong: with
+`max_attempts` set high and a short deadline, a worker that only counted
+attempts would sit in backoff long after anyone stopped waiting for the answer.
+""".
+deadline_stops_retrying_before_the_attempt_budget(Config) ->
+    ok = mock_smtp_server:fail_data("451 try again later"),
+
+    %% Twenty retries allowed, each backing off at least 200ms, against a
+    %% request that may take 300ms in total. The attempt budget cannot be what
+    %% ends this.
+    Relays = [
+        (common(?config(port, Config)))#{
+            name => ~"impatient",
+            retry_max_attempts => 20,
+            retry_backoff_min => 200,
+            retry_backoff_max => 200
+        }
+    ],
+    ok = restart(Config, Relays),
+
+    Req = (base())#{~"relay" => ~"impatient", ~"timeout" => 300},
+    ?assertMatch(
+        {error, {transient, deadline, _}}, bondy_mail:send(?REALM, Req)
+    ),
+    ?assert(rcpt_count() < 20).
+
 %% =============================================================================
 %% AUTHENTICATION
 %% =============================================================================
@@ -262,12 +360,86 @@ auth_failure_is_permanent(Config) ->
 %% LIMITS
 %% =============================================================================
 
+-doc """
+An oversized message is refused at admission, naming the size and the limit.
+
+The body counts. It did not use to: only attachments were measured, so the same
+megabytes were refused as an attachment and accepted as a body -- and a body was
+not measured at all until a worker had taken the message off a queue it had been
+occupying all along. A limit whose answer depends on which field the caller used
+is not a limit anyone can work with.
+""".
 oversized_message_is_refused(_) ->
     Big = binary:copy(~"a", 20000),
     Req = (base())#{~"relay" => ~"tiny", ~"text" => Big},
 
-    ?assertMatch({error, {permanent, too_large_payload, _}}, send(Req)),
+    ?assertMatch({error, {too_large_payload, 20005, _}}, send(Req)),
     ?assertEqual([], mock_smtp_server:messages()).
+
+-doc """
+Headers and attachments are measured on the same budget as the body.
+
+Three fields, one limit. Each of these is under the limit on its own and over
+it together, which is the property a per-field check does not have.
+""".
+oversized_is_measured_across_every_field(_) ->
+    Third = binary:copy(~"a", 700),
+    Req = (base())#{
+        ~"relay" => ~"tiny",
+        ~"text" => Third,
+        ~"headers" => #{~"X-Padding" => Third},
+        ~"attachments" => [
+            #{
+                ~"filename" => ~"pad.bin",
+                ~"content_type" => ~"application/octet-stream",
+                ~"data" => base64:encode(Third)
+            }
+        ]
+    },
+
+    ?assertMatch({error, {too_large_payload, _, _}}, send(Req)),
+    ?assertEqual([], mock_smtp_server:messages()).
+
+-doc """
+A message naming more recipients than the relay allows is refused.
+
+`to`, `cc` and `bcc` are counted together because they all become `RCPT TO`
+commands in one transaction, so their sum is what a relay actually sees.
+""".
+too_many_recipients_are_refused(_) ->
+    Address = fun(N) ->
+        <<"user", (integer_to_binary(N))/binary, "@example.com">>
+    end,
+    Req = (base())#{
+        ~"relay" => ~"few",
+        ~"to" => [Address(N) || N <- lists:seq(1, 2)],
+        ~"cc" => [Address(N) || N <- lists:seq(3, 4)]
+    },
+
+    ?assertMatch({error, {too_many_recipients, 4, 3}}, send(Req)),
+    ?assertEqual([], mock_smtp_server:messages()).
+
+-doc """
+The encoded message is still measured exactly, after encoding.
+
+Admission works on the decoded request scaled by a headroom factor, which is an
+estimate; this is the check that is not. It is reached directly here because a
+request that passes the first check and fails the second is, by construction,
+hard to build -- which is the point of the headroom.
+""".
+encoded_size_is_checked_exactly(_) ->
+    {ok, Built} = bondy_mail_request:new(
+        ?REALM, (base())#{~"relay" => ~"tiny", ~"text" => ~"small enough"}
+    ),
+    {ok, Record} = bondy_mail_config:relay(~"tiny"),
+
+    ?assertMatch({ok, _}, bondy_mail_mime:encode(Built, Record)),
+
+    Tiny = Record#bondy_mail_relay{max_message_size = 10},
+    ?assertMatch(
+        {error, {too_large_payload, _, 10}},
+        bondy_mail_mime:encode(Built, Tiny)
+    ).
 
 -doc """
 Exceeding the rate limit is refused transiently, before anything is queued.
@@ -390,8 +562,10 @@ restart(_Config, Relays) ->
     ok.
 
 %% @private
-relays(Port) ->
-    Common = #{
+%% The shape every relay in this suite shares. Named so a case that needs one
+%% relay configured differently can build it without restating the rest.
+common(Port) ->
+    #{
         host => ~"127.0.0.1",
         port => Port,
         %% The mock speaks plain SMTP: TLS is exercised against Mailpit in the
@@ -402,7 +576,10 @@ relays(Port) ->
         realms => any,
         retry_backoff_min => 10,
         retry_backoff_max => 50
-    },
+    }.
+
+relays(Port) ->
+    Common = common(Port),
     [
         Common#{name => ~"default", retry_max_attempts => 2},
         Common#{name => ~"tiny", max_message_size => 2000},
@@ -418,6 +595,7 @@ relays(Port) ->
             rate_limit_burst => 1,
             retry_max_attempts => 0
         },
+        Common#{name => ~"few", max_recipients => 3},
         Common#{
             name => ~"slow",
             pool_size => 1,

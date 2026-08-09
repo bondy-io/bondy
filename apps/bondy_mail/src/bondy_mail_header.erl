@@ -64,6 +64,7 @@ through unchanged.
 -define(MAX_VALUE, 998).
 
 %% API
+-export([has_control/1]).
 -export([is_reserved/1]).
 -export([reserved/0]).
 -export([validate/1]).
@@ -77,6 +78,36 @@ through unchanged.
 
 reserved() ->
     ?RESERVED.
+
+-doc """
+Return `true` when `Bin` carries a byte that has no business in header data.
+
+Any C0 control, or DEL. **This is the one definition**, and every caller-supplied
+value that ends up in a header goes through it: header names and values here, a
+display name in `bondy_mail_address`, an attachment filename and a content type
+in `bondy_mail_request`.
+
+That it is one definition is the point. It used to be four -- addresses and
+display names refusing `\\r \\n \\0 \\t`, filenames refusing `\\r \\n \\0 / \\\\`,
+content types refusing `\\r \\n \\0` and space, and only this module refusing the
+whole control range. They agreed on the bytes that matter, which is why nothing
+was ever exploitable, and disagreed on the rest: a vertical tab was refused in a
+custom header and accepted in the display name of a `From`, where `mimemail`
+passes it through unencoded because it is ASCII. Four spellings of one rule is
+how the fifth one gets it wrong.
+
+CR and LF are why this exists -- they end a header and begin whatever the caller
+wrote next -- but the whole range is refused, so a value cannot carry a NUL or a
+bare tab into an encoder whose handling of them is its own business.
+""".
+-spec has_control(Bin :: binary()) -> boolean().
+
+has_control(<<C, _/binary>>) when C < 32 orelse C == 127 ->
+    true;
+has_control(<<_, Rest/binary>>) ->
+    has_control(Rest);
+has_control(<<>>) ->
+    false.
 
 -doc """
 Return `true` when `Name` is set by Bondy and may not be supplied by a caller.
@@ -160,18 +191,14 @@ validate_reserved(Name) ->
     end.
 
 %% @private
-%% Any C0 control, DEL, or a byte that would terminate a header. Checking the
-%% whole control range rather than just CR and LF means a value cannot carry a
-%% NUL or a vertical tab into an encoder whose handling of them is its own
-%% business.
-has_control(Bin) ->
-    lists:any(fun(C) -> C < 32 orelse C == 127 end, binary_to_list(Bin)).
-
-%% @private
 %% RFC 5322 field names are printable ASCII excluding the colon, which is what
 %% separates a name from its value.
-is_token(Name) ->
-    lists:all(
-        fun(C) -> C > 32 andalso C < 127 andalso C =/= $: end,
-        binary_to_list(Name)
-    ).
+%%
+%% Walked as a binary, like `has_control/1`: both run on every header of every
+%% message, and neither has any business building a list to look at bytes.
+is_token(<<C, Rest/binary>>) when C > 32 andalso C < 127 andalso C =/= $: ->
+    is_token(Rest);
+is_token(<<>>) ->
+    true;
+is_token(_) ->
+    false.

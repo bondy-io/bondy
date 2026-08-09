@@ -18,6 +18,10 @@ Modelled on `mock_auth_http_server` in `bondy_http_connector`, and offering the
 same three things: failure injection, latency injection, and a record of what
 was received.
 
+The failures that are not reply codes are here too, because they are the ones a
+mocked client could never produce: a relay that will not offer `STARTTLS` to a
+client declared to require it, and a connection dropped mid-`DATA`.
+
     init_per_suite(Config) ->
         {ok, Port} = mock_smtp_server:start(),
         [{smtp_port, Port} | Config].
@@ -48,6 +52,8 @@ from a test case while the server is running.
 -export([fail_mail/1]).
 -export([fail_rcpt/1]).
 -export([fail_next_data/1]).
+-export([drop_data/1]).
+-export([starttls/1]).
 -export([latency/1]).
 -export([messages/0]).
 -export([port/0]).
@@ -173,6 +179,31 @@ than just failure.
 fail_next_data({N, Reply}) ->
     set(fail_next_data, {N, Reply}).
 
+-doc """
+Drop the connection during `DATA` instead of answering it.
+
+The failure a reply code cannot express: the relay accepted the message and
+then went away, so the client never learns whether it was delivered. That has
+to classify as transient -- it may well work next time -- and it arrives at the
+client as a closed socket rather than as any part of the protocol.
+""".
+-spec drop_data(Enabled :: boolean()) -> ok.
+
+drop_data(Enabled) ->
+    set(drop_data, Enabled).
+
+-doc """
+Advertise `STARTTLS` in the `EHLO` response, or do not.
+
+Off is the interesting setting: a relay declared `transport = starttls` must
+fail rather than continue in plaintext, and the failure has to be permanent --
+retrying a relay that does not offer an upgrade only repeats the same answer.
+""".
+-spec starttls(Enabled :: boolean()) -> ok.
+
+starttls(Enabled) ->
+    set(starttls, Enabled).
+
 -doc "Answer every `MAIL FROM` with `Reply` until cleared.".
 -spec fail_mail(Reply :: string()) -> ok.
 
@@ -215,7 +246,12 @@ handle_HELO(_Hostname, State) ->
     {ok, 655360, State}.
 
 -doc false.
-handle_EHLO(_Hostname, Extensions, State) ->
+handle_EHLO(_Hostname, Extensions0, State) ->
+    Extensions =
+        case get(starttls, true) of
+            true -> Extensions0;
+            false -> proplists:delete("STARTTLS", Extensions0)
+        end,
     Advertised =
         case get(auth, false) of
             false ->
@@ -276,6 +312,14 @@ handle_RCPT_extension(_Extension, _State) ->
 -doc false.
 handle_DATA(From, To, Data, State) ->
     ok = maybe_sleep(),
+    case get(drop_data, false) of
+        true ->
+            %% Kills the session process, which closes the socket without a
+            %% reply. `gen_smtp_client` sees the close, not an SMTP code.
+            exit(dropped);
+        false ->
+            ok
+    end,
     case data_reply() of
         {error, Reply} ->
             {error, Reply, State};

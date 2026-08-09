@@ -44,23 +44,11 @@ bind it into anything that outlives the call.
 %% API
 -export([expose/1]).
 -export([is_type/1]).
--export([new/1]).
 -export([resolve/1]).
 
 %% =============================================================================
 %% API
 %% =============================================================================
-
--doc """
-Wrap a value that is already in hand.
-
-Prefer `resolve/1`: a literal credential means the value was sitting in
-`bondy.conf`.
-""".
--spec new(Value :: binary()) -> t().
-
-new(Value) when is_binary(Value) ->
-    {?MODULE, fun() -> Value end}.
 
 -doc """
 Resolve a credential reference into an opaque secret.
@@ -101,3 +89,14 @@ is_type({?MODULE, Fun}) when is_function(Fun, 0) ->
     true;
 is_type(_) ->
     false.
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+%% @private
+%% Not exported. A secret enters this module through `resolve/1` and no other
+%% way: an exported constructor is an invitation to wrap a value that came from
+%% somewhere the resolver would have refused.
+new(Value) when is_binary(Value) ->
+    {?MODULE, fun() -> Value end}.

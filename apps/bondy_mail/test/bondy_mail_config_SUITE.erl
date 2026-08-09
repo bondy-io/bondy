@@ -18,11 +18,16 @@ failed boot.
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
+
 -include_lib("bondy_mail/include/bondy_mail.hrl").
 
 -compile([nowarn_export_all, export_all]).
 
 -define(VAR, "BONDY_MAIL_SUITE_SECRET").
+
+%% `bondy_mail:relays/1` is realm-scoped -- there is deliberately no unfiltered
+%% form -- and the master realm is the one that sees every relay.
+-define(MASTER_REALM, ~"com.leapsight.bondy").
 
 all() ->
     [
@@ -35,6 +40,7 @@ all() ->
         explicit_default_relay_is_used,
         unknown_default_relay_is_reported,
         invalid_relay_is_dropped_and_others_survive,
+        unusable_transport_disables_the_relay,
         unresolvable_secret_disables_the_relay,
         env_secret_is_resolved,
         literal_secret_is_resolved,
@@ -82,7 +88,7 @@ dormant_without_relays(_Config) ->
 
     ?assertEqual(false, bondy_mail:is_configured()),
     ?assertEqual([], bondy_mail:relay_names()),
-    ?assertEqual([], bondy_mail:relays()),
+    ?assertEqual([], bondy_mail:relays(?MASTER_REALM)),
     ?assertEqual({error, no_such_relay}, bondy_mail_config:default_relay()),
 
     %% The tree is up but empty, and no relay supervisor was started.
@@ -202,6 +208,35 @@ invalid_relay_is_dropped_and_others_survive(_Config) ->
     ?assertEqual({error, no_such_relay}, bondy_mail_config:relay(~"bad")).
 
 -doc """
+A relay whose transport module cannot deliver is refused at startup.
+
+The worker calls `Mod:send/3` on this value. An absent module, or one that does
+not implement the behaviour, would raise `undef` inside the worker -- crashing
+the delivery path instead of classifying a failure on it, which is the one thing
+`bondy_mail_transport` says a transport must never do. Refusing here turns that
+into a log line naming the relay, before any mail has been accepted for it.
+
+`lists` stands in for the whole class: loaded, perfectly real, and no more a
+mail transport than `undefined` is.
+""".
+unusable_transport_disables_the_relay(_Config) ->
+    ok = start([
+        #{name => ~"good", host => ~"good.example.com"},
+        #{
+            name => ~"absent",
+            host => ~"a.example.com",
+            transport_mod => no_such_transport_module
+        },
+        #{
+            name => ~"wrong",
+            host => ~"b.example.com",
+            transport_mod => lists
+        }
+    ]),
+
+    ?assertEqual([~"good"], bondy_mail:relay_names()).
+
+-doc """
 A relay whose credential cannot be resolved is disabled, not started anyway.
 
 Starting it would mean attempting delivery unauthenticated. Failing closed is
@@ -311,7 +346,8 @@ relay_info_carries_nothing_sensitive(_Config) ->
         }
     ]),
 
-    [Info] = bondy_mail:relays(),
+    %% The master realm may use any relay, so this is the whole set.
+    [Info] = bondy_mail:relays(?MASTER_REALM),
     ?assertEqual(
         lists:sort([name, transport, status, from]),
         lists:sort(maps:keys(Info))

@@ -53,6 +53,7 @@ all() ->
         rate_limiting_is_its_own_event,
         a_message_with_no_caller_is_a_dead_letter,
         a_message_with_a_caller_is_not_a_dead_letter,
+        queue_depth_is_the_relays_not_one_workers,
         %% Metrics
         families_are_declared_before_anything_is_sent,
         a_send_writes_its_families,
@@ -68,7 +69,6 @@ init_per_suite(Config) ->
     %% would be asserting about a process that is not there.
     {ok, _} = application:ensure_all_started(sasl),
     {ok, _} = application:ensure_all_started(gproc),
-    {ok, _} = application:ensure_all_started(jobs),
     {ok, _} = application:ensure_all_started(bondy_regulator),
 
     %% `bondy_metrics` declares no `{mod, _}`: starting the application does
@@ -293,6 +293,44 @@ a_send_writes_its_families(_) ->
     AfterAccepted = counter_value(bondy_mail_accepted_total, Accepted),
     ?assertEqual(1, AfterAccepted - BeforeAccepted).
 
+-doc """
+The depth gauge reports the relay's queue, not one worker's share of it.
+
+`bondy_mail_queue_depth` is labelled by relay, and every worker in the pool
+writes it. Publishing a worker's own lane -- which is what this did -- has each
+of them overwriting the same series with roughly `depth / pool_size`, so the
+panel an operator reads to decide whether `queue.max_size` is too small reads a
+fraction of the truth and jitters by whichever worker wrote last.
+
+Worker 2 is suspended so its lane provably holds messages while worker 1 keeps
+draining. Worker 1's own lane is empty every time it reports; the relay's is
+not.
+""".
+queue_depth_is_the_relays_not_one_workers(_) ->
+    Held = worker(~"pool", 2),
+    ok = sys:suspend(Held),
+
+    try
+        _ = [
+            bondy_mail:send_async(?REALM, (base())#{~"relay" => ~"pool"})
+         || _ <- lists:seq(1, 8)
+        ],
+        Events = drain(),
+        Depths = [
+            maps:get(depth, M)
+         || {[bondy, mail, queue], M, #{relay := ~"pool"}} <- Events
+        ],
+
+        %% The rotation is exact, so the suspended worker holds four
+        %% reservations it never releases, and every one of them is in the
+        %% relay's depth. Worker 1's own lane is empty by the time it reports
+        %% the last of its four, which is what the old reading published.
+        ?assertNotEqual([], Depths),
+        ?assert(lists:max(Depths) >= 4)
+    after
+        ok = sys:resume(Held)
+    end.
+
 %% =============================================================================
 %% HEALTH AND ALARM
 %% =============================================================================
@@ -438,12 +476,19 @@ relays(Port) ->
             pool_size => 1,
             queue_max_size => 1,
             timeout => 10000
-        }
+        },
+        %% More than one worker, which is what makes the depth gauge's label
+        %% mean something to assert about.
+        Common#{name => ~"pool", pool_size => 2}
     ].
 
 %% =============================================================================
 %% PRIVATE -- TELEMETRY
 %% =============================================================================
+
+%% @private
+worker(Relay, Index) ->
+    gproc:where({n, l, {bondy_mail_worker, Relay, Index}}).
 
 %% @private
 subscribe() ->

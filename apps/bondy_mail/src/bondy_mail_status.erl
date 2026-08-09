@@ -43,18 +43,32 @@ still holding the record. A duplicate is possible in that window. This is
 inherent to coordination-free ownership, and the alternative -- consensus on a
 per-message key -- costs far more than the duplicate it prevents.
 
-## A claim is consumed when the message reaches a worker
+## A claim is consumed when a relay is shown the message
 
-Once a message has been handed to a delivery worker, a later request carrying
-the same key is answered with the recorded outcome rather than sent again --
-including when that outcome is `failed`. Bondy cannot distinguish a relay that
-never saw the message from one that accepted it and then dropped the
-connection, so a failure is not an invitation to send twice. A caller that
-genuinely wants another attempt uses a new key.
+Once a message has been offered to a relay, a later request carrying the same
+key is answered with the recorded outcome rather than sent again -- including
+when that outcome is `failed`. Bondy cannot distinguish a relay that never saw
+the message from one that accepted it and then dropped the connection, so a
+failure is not an invitation to send twice. A caller that genuinely wants
+another attempt uses a new key.
 
-A message that never reached a worker -- a full queue, for instance -- releases
-its claim, because refusing to retry something that was never attempted would
-be a lie.
+**A message no relay was ever shown does not consume its key**, because
+refusing to retry something that was never attempted would be a lie -- and a
+permanent one, since the recorded failure would answer that key for as long as
+it is remembered. There are two such messages and they are handled differently
+only because they differ in what a caller can see:
+
+- Refused at admission -- a full queue -- before the caller had an id at all.
+  `release/1` removes the record; there is nothing to report it to.
+- Shed after being queued: expired against `queue.ttl`, or held by a worker
+  that stopped. `shed/2` records `shed` with the reason, so an asynchronous
+  caller holding an id can still find out what became of their message, and the
+  next request carrying the same key takes the record over
+  (`ets:select_replace/2`, which is a compare-and-swap, so two concurrent
+  retries cannot both take it).
+
+The distinction that matters is *offered to a relay*, not *reached a worker*: a
+worker that sheds a message never opens a connection.
 
 ## What is never recorded
 
@@ -87,7 +101,7 @@ another realm's traffic by guessing ids.
     id :: binary(),
     realm :: binary(),
     relay :: binary(),
-    status :: queued | sent | failed,
+    status :: queued | sent | failed | shed,
     attempts :: non_neg_integer(),
     nature :: optional(permanent | transient),
     error_class :: optional(atom()),
@@ -105,7 +119,7 @@ another realm's traffic by guessing ids.
 
 -type info() :: #{
     id := binary(),
-    status := queued | sent | failed | unknown,
+    status := queued | sent | failed | shed | unknown,
     relay => binary(),
     attempts => non_neg_integer(),
     nature => permanent | transient,
@@ -123,6 +137,7 @@ another realm's traffic by guessing ids.
 -export([node_of/1]).
 -export([owner/2]).
 -export([release/1]).
+-export([shed/2]).
 -export([start_link/0]).
 -export([update/2]).
 
@@ -229,6 +244,10 @@ Answers `{ok, claimed}` when this request may proceed, or
 `{ok, {duplicate, Info}}` when the key names a message already accepted -- in
 which case the caller must not send, and reports `Info` instead.
 
+A key whose message was shed is claimable again, and taking it over replaces the
+record in the same atomic operation that tests it, so two retries arriving
+together cannot both proceed.
+
 The two paths fail differently on purpose. A keyed request whose claim cannot
 be recorded is refused with a transient error: the caller asked for a guarantee
 this node can no longer provide, and sending anyway would quietly break it. An
@@ -254,7 +273,7 @@ claim(Request) ->
                 true ->
                     {ok, claimed};
                 false ->
-                    {ok, {duplicate, lookup(Id)}}
+                    reclaim(Id, Entry)
             catch
                 error:badarg ->
                     {error, {transient, status_unavailable, Id}}
@@ -262,7 +281,12 @@ claim(Request) ->
     end.
 
 -doc """
-Give up a claim for a message that never reached a worker.
+Give up a claim for a message that was refused before it was queued anywhere.
+
+Removes the record entirely, which is right for this case and only this one: the
+caller was answered with an error and never given an id, so there is nobody who
+could ask what became of the message. A message that *was* queued and then shed
+uses `shed/2`, which leaves something to report.
 
 Only a record still in `queued` is removed, so this cannot race with a worker
 that has already reported an outcome.
@@ -274,6 +298,29 @@ release(Request) ->
     MS = [{#bondy_mail_status{id = Id, status = queued, _ = '_'}, [], [true]}],
     _ = catch ets:select_delete(?TAB, MS),
     ok.
+
+-doc """
+Record that a queued message was shed before any relay was shown it.
+
+`Reason` is `expired` -- it waited longer than `queue.ttl` -- or `shutdown`,
+meaning the worker holding it was stopped.
+
+The record stays, so a caller holding an id can still find out what happened,
+but it no longer holds the key: `claim/1` takes a shed record over. Recording
+this as a failure instead would answer every future request carrying that key
+with the failure, and nothing would ever be sent -- for a message that was never
+offered to a relay, which is precisely the case a key is supposed to make
+retryable.
+""".
+-spec shed(Request :: bondy_mail_request:t(), Reason :: atom()) -> ok.
+
+shed(Request, Reason) ->
+    Id = bondy_mail_request:message_id(Request),
+    write(Id, [
+        {#bondy_mail_status.status, shed},
+        {#bondy_mail_status.nature, transient},
+        {#bondy_mail_status.error_class, Reason}
+    ]).
 
 -doc """
 Record the outcome of a delivery attempt.
@@ -467,6 +514,29 @@ write(Id, Updates) ->
     ok.
 
 %% @private
+%% The key is taken, but a shed record does not hold it: nothing was offered to
+%% a relay, so this request may proceed in its place.
+%%
+%% `select_replace/2` rather than a lookup followed by a write, because it is
+%% atomic per object -- a compare-and-swap on `status = shed`. Exactly one of
+%% two concurrent retries sees 1, which is the same reason `claim/1` uses
+%% `insert_new/2` rather than reading first.
+reclaim(Id, Entry) ->
+    MS = [
+        {
+            #bondy_mail_status{id = Id, status = shed, _ = '_'},
+            [],
+            [{const, Entry}]
+        }
+    ],
+    try ets:select_replace(?TAB, MS) of
+        1 -> {ok, claimed};
+        0 -> {ok, {duplicate, lookup(Id)}}
+    catch
+        error:badarg -> {error, {transient, status_unavailable, Id}}
+    end.
+
+%% @private
 lookup(Id) ->
     try ets:lookup(?TAB, Id) of
         [Entry] -> to_info(Entry);
@@ -489,7 +559,7 @@ to_info(#bondy_mail_status{} = E) ->
         updated_at => E#bondy_mail_status.updated_at
     },
     case E#bondy_mail_status.status of
-        failed ->
+        Status when Status == failed orelse Status == shed ->
             Base#{
                 nature => E#bondy_mail_status.nature,
                 error_class => E#bondy_mail_status.error_class

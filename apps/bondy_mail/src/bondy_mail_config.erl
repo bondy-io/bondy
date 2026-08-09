@@ -151,6 +151,25 @@ declaration cannot take the others down with it.
             (_) -> {error, ~"Expected a list of realm URIs, or 'any'."}
         end
     },
+    %% Not exposed in the schema: there is one implementation, and the field
+    %% exists so the worker dispatches on data rather than naming a module.
+    %% A test transport is set here directly; a provider transport would add a
+    %% schema mapping and nothing else.
+    %%
+    %% Checked, because the worker calls `Mod:send/3` on this value: a module
+    %% that is absent or does not implement the behaviour would raise `undef`
+    %% inside the worker, which is the one thing `bondy_mail_transport` says a
+    %% transport must never do -- it would crash the delivery path instead of
+    %% classifying a failure on it. Refusing the relay at startup turns that
+    %% into one log line naming the relay, before any mail is accepted for it.
+    transport_mod => #{
+        required => true,
+        default => bondy_mail_transport_smtp,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => atom,
+        validator => fun is_transport/1
+    },
     pool_size => #{
         required => true,
         default => 4,
@@ -161,6 +180,17 @@ declaration cannot take the others down with it.
     queue_max_size => #{
         required => true,
         default => 1000,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => pos_integer
+    },
+    %% 64MB. The message bound is what an operator reasons about; this is the
+    %% one that decides how much memory a stalled relay can occupy, and it has
+    %% to be set from the size of the messages actually being sent rather than
+    %% from their number.
+    queue_max_bytes => #{
+        required => true,
+        default => 67108864,
         allow_null => false,
         allow_undefined => false,
         datatype => pos_integer
@@ -217,6 +247,15 @@ declaration cannot take the others down with it.
     max_message_size => #{
         required => true,
         default => 26214400,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => pos_integer
+    },
+    %% RFC 5321 obliges a server to accept 100 recipients in one transaction,
+    %% so that is the floor a caller can rely on anywhere.
+    max_recipients => #{
+        required => true,
+        default => 100,
         allow_null => false,
         allow_undefined => false,
         datatype => pos_integer
@@ -519,7 +558,19 @@ resolve_secret(_Name, #{secret := Ref}) ->
     bondy_mail_secret:resolve(Ref).
 
 %% @private
+%% `code:ensure_loaded/1` first, because `function_exported/3` answers about
+%% loaded code and a release loads lazily: asking about a perfectly good module
+%% that nothing has called yet would disable the relay.
+is_transport(Mod) when is_atom(Mod) ->
+    _ = code:ensure_loaded(Mod),
+    erlang:function_exported(Mod, send, 3) orelse
+        {error, ~"Expected a module implementing bondy_mail_transport."};
+is_transport(_) ->
+    {error, ~"Expected a module implementing bondy_mail_transport."}.
+
+%% @private
 to_record(Map, Secret) ->
+    PoolSize = maps:get(pool_size, Map),
     #bondy_mail_relay{
         name = maps:get(name, Map),
         host = maps:get(host, Map),
@@ -533,13 +584,20 @@ to_record(Map, Secret) ->
         from = maps:get(from, Map),
         allowed_from = maps:get(allowed_from, Map),
         realms = maps:get(realms, Map),
-        pool_size = maps:get(pool_size, Map),
+        transport_mod = maps:get(transport_mod, Map),
+        pool_size = PoolSize,
         pool_cursor = atomics:new(1, [{signed, false}]),
-        %% Signed: a worker draining a queue built up before a reconfiguration
-        %% can decrement past what it incremented, and wrapping an unsigned
-        %% counter would report a depth of 2^64 on a dashboard.
-        queue_depth = atomics:new(1, [{signed, true}]),
+        %% Two slots per worker -- the messages queued for it and the bytes
+        %% they hold -- so that a worker can zero its own pair when it starts
+        %% and a stranded reservation cannot outlive the process that stranded
+        %% it. See bondy_mail_worker.
+        %%
+        %% Signed, because a worker draining a queue built up before a
+        %% reconfiguration can decrement past what it incremented, and wrapping
+        %% an unsigned counter would report a depth of 2^64 on a dashboard.
+        queue_counters = atomics:new(2 * PoolSize, [{signed, true}]),
         queue_max_size = maps:get(queue_max_size, Map),
+        queue_max_bytes = maps:get(queue_max_bytes, Map),
         queue_ttl = maps:get(queue_ttl, Map),
         timeout = maps:get(timeout, Map),
         retry_max_attempts = maps:get(retry_max_attempts, Map),
@@ -548,6 +606,7 @@ to_record(Map, Secret) ->
         rate_limit_rate = maps:get(rate_limit_rate, Map),
         rate_limit_burst = maps:get(rate_limit_burst, Map),
         max_message_size = maps:get(max_message_size, Map),
+        max_recipients = maps:get(max_recipients, Map),
         health_failure_threshold = maps:get(health_failure_threshold, Map),
         health_success_threshold = maps:get(health_success_threshold, Map)
     }.
