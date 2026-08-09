@@ -99,13 +99,13 @@ init(Req0, _) ->
 
         case bondy_http_proxy_protocol:source_ip(ProxyProtocol) of
             {ok, SourceIP} ->
-                %% AV-1: throttle new connections per source IP (no-op unless
+                %% throttle new connections per source IP (no-op unless
                 %% enabled) before doing any per-connection work.
                 case bondy_rate_limit:throttle(connection, SourceIP) of
                     throttled ->
                         ?LOG_NOTICE(#{
                             description =>
-                                "WS connection rejected (AV-1 rate limit)",
+                                "WS connection rejected (rate limit)",
                             source_ip => SourceIP
                         }),
                         ThrottleReq = cowboy_req:reply(

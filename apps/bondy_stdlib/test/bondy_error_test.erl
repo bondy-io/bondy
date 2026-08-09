@@ -82,8 +82,8 @@ new_rejects_a_non_atom_type_test() ->
         {badarg, {type, <<"nope">>}}, bondy_error:new(<<"nope">>, #{})
     ).
 
-%% causes used to be assigned the result of lists:all/2, i.e. a boolean, which
-%% made every error fail its own is_type/1 check.
+%% `causes` is a list of errors, and an error carrying one must still satisfy
+%% its own `is_type/1` check.
 causes_round_trip_as_a_list_test() ->
     Cause = bondy_error:new(not_found),
     E = bondy_error:new(internal_error, #{causes => [Cause]}),

@@ -10,14 +10,15 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-On-disk **topology manifest** for a durable `bondy_db` database (AR-16).
+On-disk **topology manifest** for a durable `bondy_db` database.
 
 The keying configuration of a durable DB — partition strategy, shard count,
 realm-prefix depth, hash algorithm, key-encoding version, topology module, and
 each table's `aggregate_root` — determines the **physical key
 layout** on disk. Changing any of it **re-keys** existing data: a write that
-used to land on shard 3 now lands on shard 9, so the old data becomes
-unreadable through the new routing (it is not lost, just mis-addressed). That
+lands on shard 3 under one configuration lands on shard 9 under the next, so
+data written before the change is unreadable through the new routing (not lost,
+just mis-addressed). That
 makes these values **re-key-on-change** and therefore unsafe to silently apply
 to a populated data directory.
 

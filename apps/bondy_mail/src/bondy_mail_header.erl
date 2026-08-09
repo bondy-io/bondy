@@ -87,14 +87,12 @@ value that ends up in a header goes through it: header names and values here, a
 display name in `bondy_mail_address`, an attachment filename and a content type
 in `bondy_mail_request`.
 
-That it is one definition is the point. It used to be four -- addresses and
-display names refusing `\\r \\n \\0 \\t`, filenames refusing `\\r \\n \\0 / \\\\`,
-content types refusing `\\r \\n \\0` and space, and only this module refusing the
-whole control range. They agreed on the bytes that matter, which is why nothing
-was ever exploitable, and disagreed on the rest: a vertical tab was refused in a
-custom header and accepted in the display name of a `From`, where `mimemail`
-passes it through unencoded because it is ASCII. Four spellings of one rule is
-how the fifth one gets it wrong.
+That it is one definition is the point. Spelling the rule once per field --
+addresses one way, filenames another, content types a third -- gives a set of
+rules that agree on the bytes that matter and disagree on the rest, so a
+vertical tab is refused in a custom header and accepted in the display name of a
+`From`, where `mimemail` passes it through unencoded because it is ASCII. Every
+extra spelling is another chance to get it wrong.
 
 CR and LF are why this exists -- they end a header and begin whatever the caller
 wrote next -- but the whole range is refused, so a value cannot carry a NUL or a

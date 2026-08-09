@@ -246,12 +246,11 @@ apply_callback(Event, Retry, State) ->
 %% @private
 %% A retry goes back through the mailbox instead of being slept on.
 %%
-%% This used to call `timer:sleep/1` and then `handle_event(Event, State)` --
-%% the public API, whose arguments are `(Subscriber, Event)` -- so the retry
-%% became `gen_server:cast(#event{}, State)` and crashed. Even had it called the
-%% right function, there was no `ok` clause, and it answered two-tuples where
-%% every caller matches three. The sleep also stalled this `gen_server`, and
-%% with it every later event on this subscription.
+%% Sleeping instead would stall this `gen_server`, and with it every later
+%% event on this subscription. The reschedule also goes to the internal handler
+%% rather than the exported `handle_event/2`, whose arguments are
+%% `(Subscriber, Event)` — calling that would turn the retry into
+%% `gen_server:cast(#event{}, State)`.
 %%
 %% Rescheduling means a retried event can be delivered after events published
 %% after it. Forwarding to an external sink is best-effort and unordered

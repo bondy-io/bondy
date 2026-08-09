@@ -150,7 +150,7 @@ composite_comparator(_) ->
 
 %% A ref without a session id (internal subscribers/callbacks) stores its
 %% entries under `session_id = undefined', so `undefined' must be a valid
-%% exact-match value for key_pattern/3 — it used to crash the guard.
+%% exact-match value for key_pattern/3 rather than one its guard rejects.
 key_pattern_sessionless(_) ->
     RealmUri = <<"com.example.test.registry_entry">>,
     Ref = bondy_ref:new(internal, self()),

@@ -771,7 +771,7 @@ re-authentication.
 
 Grant/source changes do NOT advance it — those cells are separate from the user
 cell, and their cross-node freshness is enforced by the AE fence instead (option
-(c), `ISSUES.md` AR-4). The anonymous user has no stored cell and no revocable
+(c). The anonymous user has no stored cell and no revocable
 tokens, so it reports a stable sentinel of `0`. Aliases resolve to the canonical
 user's version.
 """.
@@ -1420,7 +1420,7 @@ decode_fwd_member(_) ->
 
 %% @private
 %% Add the user's derived `groups` (from the relation) to a user map read from
-%% the cell, which no longer carries them. The single-user get path uses this;
+%% the cell, which does not carry them. The single-user get path uses this;
 %% the list page path joins groups in bulk via `page_member_groups/2`.
 with_groups(RealmUri, Username, User) ->
     User#{groups => member_groups(RealmUri, Username)}.

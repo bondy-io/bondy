@@ -209,9 +209,9 @@ named_second_scheduler_is_independent() ->
 %% within a tick interval, successive ticks must rotate the cap across
 %% ALL instances — least-recently-fired first — instead of re-firing
 %% the head of the instance list every round and starving the rest.
-%% (Regression: registry shards were never compacted on clustered nodes
-%% because 16 idle main/* shards ahead of them in list order soaked up
-%% the whole cap on every tick.)
+%% Without the rotation, 16 idle main/* shards ahead of the registry shards
+%% in list order soak up the whole cap on every tick and the registry shards
+%% are never compacted.
 capped_ticks_rotate_across_all_instances() ->
     Self = self(),
     Ref = make_ref(),

@@ -5,7 +5,7 @@
 
 -module(bondy_trusted_issuer_SUITE).
 -moduledoc """
-WP-F / A-1 regression suite.
+Regression suite.
 
 Proves the cross-realm token/ticket trust boundary: a token or ticket signed by
 realm `S` (its `aud`/`authrealm` claim) may only establish a session in realm

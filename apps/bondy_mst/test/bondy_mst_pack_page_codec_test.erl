@@ -4,11 +4,11 @@
 %%
 %% The property under test is that a page this node wrote is a page this node
 %% can read back, INDEPENDENT of which modules happen to be loaded at read
-%% time. `deserialise/1` used to decode with `[safe]`, which resolves atoms
-%% against the VM's atom table AT READ TIME; a page carrying an atom whose
-%% defining module had not loaded yet raised `badarg`, killing the boot fold in
+%% time. Decoding with `[safe]` resolves atoms against the VM's atom table AT
+%% READ TIME, so a page carrying an atom whose defining module has not loaded
+%% yet raises `badarg` — killing the boot fold in
 %% `bondy_oplog_instance:init/1` and leaving the node unable to open a store it
-%% had written perfectly well.
+%% wrote perfectly well.
 %%
 %% That hazard is unreachable through the public API — a page holding an atom
 %% this VM does not know cannot be constructed from inside this VM — so the
@@ -51,10 +51,10 @@ deserialise_accepts_an_atom_absent_from_the_atom_table_test() ->
     Page = bondy_mst_pack_store:deserialise(Bytes),
     ?assertEqual([binary_to_atom(Name, utf8)], bondy_mst_page:list(Page)).
 
-%% Guard the guard: those bytes are only interesting if `[safe]` — what the
-%% codec used to pass — is what rejects them. Uses its own name, since the test
-%% above creates its atom on the way out.
-safe_decoding_is_what_used_to_reject_those_bytes_test() ->
+%% Guard the guard: those bytes are only interesting if `[safe]` is what
+%% rejects them. Uses its own name, since the test above creates its atom on
+%% the way out.
+safe_decoding_is_what_rejects_those_bytes_test() ->
     Name = never_loaded_name(2),
     Bytes = page_bytes_naming(Name),
     ?assertError(badarg, binary_to_term(Bytes, [safe])),

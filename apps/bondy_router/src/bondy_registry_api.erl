@@ -94,10 +94,10 @@ paginated_match(Type, RealmUri, Uri, M) ->
 %% @private
 %% The callees of a realm (1 arg) or of a procedure (2 args), as
 %% `#{node, session_id}`. Paginated and cluster-wide like the four procedures
-%% above — it used to be neither: it read `bondy_registry:match/3,4` via
-%% `bondy_dealer:callees/1,2`, which under write-only RIB returns the SERVING
-%% node's entries only, so the answer silently omitted every callee living
-%% elsewhere and grew less complete as the cluster grew.
+%% above. Reading it through `bondy_dealer:callees/1,2` instead would reach
+%% `bondy_registry:match/3,4`, which under write-only RIB answers with the
+%% SERVING node's entries only — silently omitting every callee living
+%% elsewhere, and growing less complete as the cluster grows.
 paginated_callees([RealmUri], M) ->
     paginated_callees(RealmUri, all, M);
 paginated_callees([RealmUri, ProcedureUri], M) ->

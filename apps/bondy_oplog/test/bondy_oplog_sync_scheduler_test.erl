@@ -10,9 +10,9 @@ setup() ->
     %% Instances are node-global and several of these tests assert on the
     %% whole set — `no_dispatch_when_no_instances` needs it empty. Each test
     %% stops what it started, but a test that fails or times out never reaches
-    %% those lines, so under whole-suite load one casualty used to cascade
-    %% into every later test in this module. Starting from a clean slate makes
-    %% each test independent of its predecessors' fate.
+    %% those lines, so under whole-suite load one casualty would cascade into
+    %% every later test in this module. Starting from a clean slate makes each
+    %% test independent of its predecessors' fate.
     _ = [bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
     %% Reset state before each test:
     bondy_oplog_sync_scheduler:set_dispatch(undefined),

@@ -606,8 +606,8 @@ relay_error(Type, _) ->
 %% The transport already truncates to the code, so this checks the shape rather
 %% than trusting it: this is the last thing between a relay's own words and a
 %% caller, and a second cheap check here is worth more than the line it costs.
-%% The check itself lives in `bondy_mail_transport` -- checking twice is the
-%% point, defining twice was the bug.
+%% The predicate itself lives in `bondy_mail_transport` -- checking twice is the
+%% point, defining twice is not.
 reply_code(Code) ->
     case bondy_mail_transport:is_reply_code(Code) of
         true -> #{code => Code};

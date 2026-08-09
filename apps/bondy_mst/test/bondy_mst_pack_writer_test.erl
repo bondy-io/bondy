@@ -250,12 +250,11 @@ append_then_reopen_preserves_pending_test() ->
         end
     end).
 
-%% Regression: prior to the resume_incoming fix, `scan_incoming` used
-%% `pread` only — which does not move the fd's file pointer. The
-%% pointer therefore stayed at offset 0 after resume, and the next
-%% `prim_file:write` in `do_append` overwrote the 48-byte pack
-%% header, surfacing on the next reopen as `{pending_scan, bad_magic}`.
-%% Pin the fix: append after reopen must preserve the header and the
+%% `scan_incoming` must leave the fd's file pointer at the end of what it
+%% scanned. `pread` alone does not move it, so the pointer stays at offset
+%% 0 after resume and the next `prim_file:write` in `do_append` overwrites
+%% the 48-byte pack header, surfacing on the next reopen as
+%% `{pending_scan, bad_magic}`. Append after reopen must preserve the header and the
 %% existing records, and a second reopen must scan cleanly.
 append_after_reopen_preserves_header_and_existing_records_test() ->
     with_tmp_dir(fun(Dir) ->
@@ -287,12 +286,10 @@ append_after_reopen_preserves_header_and_existing_records_test() ->
         end
     end).
 
-%% Regression: prior to the scan_incoming normalisation, a 48-byte
-%% header with bad magic / bad version returned `{pending_scan, R}`,
-%% which the store's `open/2` raised as `{pack_store_open,
-%% {pending_scan, _}}` — not recoverable via `bondy_mst_pack_recovery`.
-%% Pin the fix: corrupted header bytes now surface as
-%% `needs_recovery` so the store-level recovery can reset the file.
+%% A 48-byte header with bad magic or bad version must surface as
+%% `needs_recovery`, so `bondy_mst_pack_recovery` can reset the file.
+%% Reporting `{pending_scan, R}` instead reaches the store's `open/2` as
+%% `{pack_store_open, {pending_scan, _}}`, which recovery cannot act on.
 corrupt_header_surfaces_as_needs_recovery_test() ->
     with_tmp_dir(fun(Dir) ->
         {ok, W0} = open_writer(Dir),

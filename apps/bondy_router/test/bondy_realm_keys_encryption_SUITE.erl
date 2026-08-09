@@ -5,7 +5,7 @@
 
 -module(bondy_realm_keys_encryption_SUITE).
 -moduledoc """
-WP-H / S-2 — realm signing/encryption keys encrypted at rest in the
+realm signing/encryption keys encrypted at rest in the
 `bondy_realm_keys` cell via `bondy_keyring`.
 
 Proves: (1) with encryption off the layout is plaintext (backward-compatible);

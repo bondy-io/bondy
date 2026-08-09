@@ -5,7 +5,7 @@
 
 -module(bondy_http_proxy_protocol_test).
 -moduledoc """
-WP-M / G-2 — the trusted-proxy gate `bondy_http_proxy_protocol:is_trusted_peer/2`
+the trusted-proxy gate `bondy_http_proxy_protocol:is_trusted_peer/2`
 that decides whether client-supplied forwarding headers may be believed.
 """.
 

@@ -10,8 +10,8 @@ local names and resources.
 """.
 
 %% `ets` exports no continuation type — verified against OTP 28's own
-%% `export_type` list — so the `ets:continuation()` these specs used to name
-%% resolved to `any()`. A select continuation is genuinely opaque.
+%% `export_type` list — so naming `ets:continuation()` in a spec resolves to
+%% `any()`. A select continuation is genuinely opaque.
 -type ets_continuation() :: term().
 
 -export([local_name/1]).

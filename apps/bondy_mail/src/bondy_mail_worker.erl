@@ -18,20 +18,9 @@ subscribe are untouched throughout.
 
 A worker holds its queue in its own state, and a caller hands work over by
 sending it a message. Nothing on the send path calls into a process shared with
-anything else.
-
-That is a correction rather than a preference. This used to enqueue into
-`jobs`, where `jobs:enqueue/2` is a `gen_server:call/3` -- with an `infinity`
-timeout -- into the single, node-global `jobs_server` that also serves
-`bondy_jobs`, `bondy_event_wamp_publisher`, `bondy_meta_events` and the
-retained-message manager. The whole message, decoded attachments included, was
-copied into that process and held there until a worker took it. So a relay that
-stopped answering filled its queue exactly as designed and, in doing so, grew
-the heap of a process the router depends on. The claim above was false, by way
-of the queue library rather than by way of SMTP.
-
-Messages now sit in the process that will deliver them, which is where they
-were always supposed to be.
+anything else, and that is what the claim above rests on: a queue held anywhere
+else is a queue whose growth is somebody else's memory. A message waits in the
+process that will deliver it.
 
 ## Backpressure is a bound, not a wait
 
@@ -43,8 +32,8 @@ stalled relay has simply moved the stall somewhere else. Refusal is transient,
 and says so.
 
 Two counters because one is not a bound. `queue.max_size` alone says nothing
-about memory when a message may be a hundred bytes or twenty megabytes, and it
-was the byte total that made a full queue anyone else's problem.
+about memory when a message may be a hundred bytes or twenty megabytes; the byte
+total is what decides how much a stalled relay can occupy.
 
 **The bound is the relay's, the slots are each worker's.** Both are needed. The
 bound has to be relay-wide because that is what an operator configures and what
@@ -336,9 +325,9 @@ reset(#bondy_mail_relay{queue_counters = Ref}, Index) ->
 %% @private
 %% One of the two counters, summed across the pool. This is the relay's number:
 %% what the bound is enforced against, and what the depth gauge publishes. A
-%% single worker's slot is a fraction of it, and a gauge labelled by relay that
-%% is written with one worker's fraction -- as this used to be -- has every
-%% worker in the pool overwriting the same series with its own share.
+%% single worker's slot is a fraction of it, and writing a fraction to a gauge
+%% labelled by relay would have every worker in the pool overwriting the same
+%% series with its own share.
 total(Ref, Which, PoolSize) ->
     total(Ref, Which, PoolSize, 0).
 
@@ -416,9 +405,8 @@ schedule_drain(#state{draining = true} = State) ->
     State;
 schedule_drain(#state{normal = N, low = L} = State) ->
     %% `is_empty/1` rather than a length: `queue:len/1` is `length(R) + length(F)`
-    %% (`stdlib/src/queue.erl:151`), and asking it on every push and every pop
-    %% makes a burst quadratic in the queue bound for an answer that is a
-    %% one-bit question.
+    %% (`stdlib/src/queue.erl:151`), which on the push and pop paths would make
+    %% a burst quadratic in the queue bound to answer a one-bit question.
     case queue:is_empty(N) andalso queue:is_empty(L) of
         true ->
             State;
@@ -471,10 +459,9 @@ drain_one(#state{index = Index} = State0) ->
 %% @private
 %% A message that waited longer than the relay allows is not worth a delivery
 %% slot: whoever asked for it has long since been answered by their own
-%% deadline. Shedding it is reported rather than silent, which is more than the
-%% queue this replaced managed -- `jobs` dropped an expired entry inside its own
-%% server, leaving a synchronous caller to wait out its timeout and a status
-%% record saying `queued` for ever.
+%% deadline. Shedding it is reported rather than silent, so a synchronous caller
+%% is answered instead of waiting out its own timeout, and the status record
+%% stops saying `queued`.
 handle_item({Request, _, EnqueuedAt} = Item, State) ->
     Waited = erlang:monotonic_time(millisecond) - EnqueuedAt,
     case Waited >= queue_ttl(Request) of

@@ -5,7 +5,7 @@
 
 -module(bondy_app_peer_plane_test).
 -moduledoc """
-WP-G / C-1 — the pure peer-plane safety-gate decision
+the pure peer-plane safety-gate decision
 (`bondy_app:peer_plane_gate/1`).
 """.
 

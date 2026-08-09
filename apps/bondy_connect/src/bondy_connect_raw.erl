@@ -21,7 +21,7 @@ The concrete transport modules own only their `connect/2` socket-open strategy
 and their `messages/0` tag tuple; everything else — handshake, framing/codec,
 synchronous `recv/2`, active `handle_info/2`, and the option/peername/close
 plumbing — lives here once, parameterised by the `backend()` carried in the
-state (review D2).
+state.
 """.
 
 -record(raw, {

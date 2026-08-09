@@ -5,7 +5,7 @@
 
 -module(bondy_rate_limit).
 -moduledoc """
-AV-1 inbound rate-limiting policy: turns the `[security, rate_limit]`
+Inbound rate-limiting policy: turns the `[security, rate_limit]`
 configuration into per-source-IP / per-session token-bucket admission decisions
 over `bondy_rate_limiter`.
 
@@ -61,7 +61,7 @@ throttle(Class, Key) ->
                 false ->
                     ?LOG_INFO(#{
                         description =>
-                            "Inbound request throttled (AV-1 rate limit)",
+                            "Inbound request throttled (rate limit)",
                         class => Class,
                         key => Key
                     }),

@@ -29,8 +29,7 @@ plain_and_nested_elements_coexist_test() ->
     ),
     ?assertEqual(State, ?MOD:decode_state(?MOD:encode_state(State))).
 
-%% With no nested element, to_value/1 is unchanged from before this
-%% capability existed: a plain sorted list.
+%% With no nested element, to_value/1 answers a plain sorted list.
 no_nested_elements_keeps_list_shape_test() ->
     Log = [
         ev(1, <<"a">>, 1, {add, <<"x">>}, []),

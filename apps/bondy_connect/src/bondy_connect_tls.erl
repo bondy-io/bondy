@@ -12,9 +12,9 @@ socket (`bondy_connect_transport_tls`) and the `wss` WebSocket
 
 Centralising it gives a **single source of truth** for the security knobs —
 verification, CA trust, hostname/SNI, mutual-TLS client certificate, protocol
-floor and ciphers — so they cannot drift between the two transports. (Before this
-extraction the `wss` path silently lacked client-cert/mTLS and `ciphers` support
-because it carried its own, drifted copy — review D1.)
+floor and ciphers — so they cannot drift between the two transports. A
+transport carrying its own copy is a transport that silently lacks whatever the
+copy omits.
 
 ## Secure by default
 

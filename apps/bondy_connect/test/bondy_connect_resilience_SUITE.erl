@@ -19,7 +19,7 @@ M4 (Phase 6 — resilience) tests.
 - **Revocation** (live): a router-driven `registration_revocation` drops only
   the *established* registration (the callee survives, stops serving it) while
   keeping the *declared* entry, so a later reconnect replays it — a revocation
-  is session-scoped and must not survive the reconnect (review B5).
+  is session-scoped and must not survive the reconnect.
 - **Fail-fast** (live): an in-flight async call is terminated with
   `{error, #{kind := client, reason := disconnected}}` when the link drops;
   and the initial connect to a dead endpoint fails fast by default (no
@@ -180,7 +180,7 @@ ping_keepalive_survives_idle(_) ->
     ?assertEqual([<<"hi">>], maps:get(args, R)),
     ok = bondy_connect:disconnect(Conn).
 
-%% The flip side of the above (review B8): a client whose pings go *unanswered*
+%% The flip side of the above: a client whose pings go *unanswered*
 %% must give up after `max_attempts` and reconnect. We point the client at a
 %% **mock** raw-socket server that completes the WAMP handshake + an anonymous
 %% WELCOME — so the client genuinely reaches `established` — but then stays SILENT
@@ -327,7 +327,7 @@ malformed_frame_triggers_reconnect(_) ->
 %% because a revocation is scoped to the current session (Bondy has no durable
 %% sessions) a later reconnect replays the declared registration and the
 %% procedure is callable again — the revocation must NOT survive the reconnect
-%% (review B5).
+%%.
 revocation_keeps_declared_replays_on_reconnect(_) ->
     Proc = <<"com.example.res.revoked">>,
     {Callee, CalleeServer} = connect_and_server(#{}),
@@ -598,10 +598,10 @@ permanent_abort_still_fails_fast(_) ->
     ?assertMatch({error, _}, Result),
     ?assert(Elapsed < 5000000).
 
-%% `connect/1` must say WHY it failed. `terminate/3` used to reply every waiter
-%% a flat `{error, disconnected}`, so a wrong realm, a bad credential and a
-%% router refusal were indistinguishable — to the caller and to anyone
-%% debugging one.
+%% `connect/1` must say WHY it failed. Replying every waiter a flat
+%% `{error, disconnected}` from `terminate/3` would make a wrong realm, a bad
+%% credential and a router refusal indistinguishable — to the caller and to
+%% anyone debugging one.
 connect_error_reports_the_router_reason(_) ->
     Result = bondy_connect:connect(#{
         transport => tcp,

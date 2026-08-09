@@ -5,7 +5,7 @@
 
 -module(bondy_http_gateway_authz_test).
 -moduledoc """
-WP-L / G-1 — the API gateway `is_authorized/3` per-scheme fail-closed logic.
+the API gateway `is_authorized/3` per-scheme fail-closed logic.
 
 Only an endpoint declaring an EMPTY security map is served anonymously; every
 declared-but-unenforced scheme (`basic`, `oidc`, `api_key`) and any unknown

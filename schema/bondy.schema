@@ -892,7 +892,7 @@ end}.
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc (AV-1) Inbound application-level rate limiting. OFF by default — enabling
+%% @doc Inbound application-level rate limiting. OFF by default — enabling
 %% it applies per-source-IP token buckets to the pre-auth handshake and
 %% credential-verification path, and (opt-in) per-session message rate limits.
 %% Each `rate` is tokens per SECOND (steady-state); `capacity` is the burst size.
@@ -2844,8 +2844,8 @@ end}.
 "bondy_router.api_gateway_http.transport_opts.max_connections", [
   {datatype, integer},
   {validators, ["pos_integer"]},
-  %% AV-1: lowered from 500000 — match to host memory/fd capacity and raise
-  %% deliberately. A per-listener cap this high invites fd/memory exhaustion.
+  %% Match this to host memory/fd capacity and raise it deliberately. A
+  %% per-listener cap set very high invites fd/memory exhaustion.
   {default, 100000}
 ]}.
 
@@ -3342,7 +3342,7 @@ end}.
 "bondy_router.api_gateway_https.transport_opts.max_connections", [
   {datatype, integer},
   {validators, ["pos_integer"]},
-  %% AV-1: lowered from 500000 (see api_gateway.http.max_connections).
+  %% See api_gateway.http.max_connections.
   {default, 100000}
 ]}.
 

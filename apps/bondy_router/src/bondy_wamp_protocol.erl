@@ -31,7 +31,7 @@ outbound WAMP messages.
     state_name :: state_name(),
     context :: bondy_context:t() | undefined,
     goodbye_reason :: uri() | undefined,
-    %% AV-1: per-session message-throttle bucket, created at session open when
+    %% per-session message-throttle bucket, created at session open when
     %% message throttling is enabled (else `undefined`). Held here so the
     %% per-message path never reads config.
     msg_limiter :: bondy_rate_limit:session_limiter()
@@ -45,9 +45,9 @@ outbound WAMP messages.
     | failed
     | established
     | shutting_down.
-%% The `{raw, ping | pong | Error}` arms this used to carry were vestigial: no
-%% clause of `handle_inbound_messages/2,3` ever matched them and nothing ever
-%% built one, and `bondy_wamp_encoding:raw_error/0` was never a type at all.
+%% A WAMP message and nothing else. Ping, pong and transport errors are handled
+%% by the connection handler before this layer sees them, so no
+%% `{raw, ping | pong | _}` arm belongs here.
 -type raw_wamp_message() :: bondy_wamp_message:t().
 
 -export_type([frame_type/0]).
@@ -59,9 +59,9 @@ outbound WAMP messages.
 -export([format_status/1]).
 
 -ifdef(TEST).
-%% Exported for regression testing of the generic pre-auth ABORT (A-2 / WP-D).
+%% Exported for regression testing of the generic pre-auth ABORT.
 -export([abort_message/1]).
-%% Exported for testing the AV-1 inbound throttle (WP-K).
+%% Exported for testing the inbound throttle.
 -export([throttle/2]).
 -endif.
 
@@ -160,7 +160,7 @@ terminate(#wamp_state{context = undefined}) ->
 terminate(#wamp_state{} = State) ->
     Ctxt = State#wamp_state.context,
 
-    %% AV-1: free the per-session message-throttle bucket (no-op if none).
+    %% free the per-session message-throttle bucket (no-op if none).
     _ = bondy_rate_limit:delete_session_limiter(State#wamp_state.msg_limiter),
 
     case bondy_context:has_session(Ctxt) of
@@ -457,7 +457,7 @@ handle_inbound_messages(
     [#authenticate{} = M | _], #wamp_state{state_name = challenging} = St0, _
 ) ->
     %% Client is responding to a challenge
-    %% AV-1: throttle credential-verification attempts per source IP so a
+    %% throttle credential-verification attempts per source IP so a
     %% credential-stuffing / brute-force flood is rate-limited (no-op unless
     %% enabled). Applied before the (expensive) verification.
     case throttle(auth, St0) of
@@ -492,7 +492,7 @@ handle_inbound_messages(
     #wamp_state{state_name = established, context = #{session := _}} = St,
     Acc
 ) ->
-    %% AV-1 (opt-in): per-session throttle for flood-prone verbs before routing.
+    %% Opt-in: per-session throttle for flood-prone verbs before routing.
     case msg_throttle(H, St) of
         allow ->
             %% We have a session, so we forward messages via router
@@ -649,7 +649,7 @@ open_session(Extra, St0) when is_map(Extra) ->
 
         ok = bondy:set_process_metadata(Meta, LogKeys),
 
-        %% AV-1: resolve the per-session message-throttle bucket ONCE, now that
+        %% resolve the per-session message-throttle bucket ONCE, now that
         %% the session is open (or `undefined` if message throttling is off).
         {reply, [Bin], St1#wamp_state{
             state_name = established,
@@ -840,7 +840,7 @@ auth_challenge(Method, St0) ->
     end.
 
 %% =============================================================================
-%% PRIVATE: ADMISSION & RATE LIMITING (AV-1)
+%% PRIVATE: ADMISSION & RATE LIMITING
 %% =============================================================================
 
 %% @private
@@ -860,7 +860,7 @@ admit_hello() ->
 %% The admitted-HELLO path: per-source-IP handshake throttle, then realm
 %% lookup and the auth challenge / session open.
 handle_hello(#hello{realm_uri = Uri} = M, St0) ->
-    %% AV-1: throttle the pre-auth handshake per source IP (no-op unless
+    %% throttle the pre-auth handshake per source IP (no-op unless
     %% enabled).
     case throttle(handshake, St0) of
         throttled ->
@@ -896,7 +896,7 @@ throttle(Class, #wamp_state{} = St) ->
     bondy_rate_limit:throttle(Class, IP).
 
 %% @private
-%% AV-1 Stage 4: opt-in per-session throttle for the flood-prone verbs
+%% opt-in per-session throttle for the flood-prone verbs
 %% (CALL/PUBLISH/SUBSCRIBE/REGISTER), keyed by session id. Returns `allow`,
 %% `{throttled, ErrorMsg}` (a WAMP ERROR to return), or `drop` (throttled but the
 %% verb expects no reply — an unacknowledged PUBLISH). Non-throttled verbs (and
@@ -1005,7 +1005,7 @@ abort_message(overload) ->
         >>
     );
 abort_message({rate_limited, _Class}) ->
-    %% AV-1: inbound throttle tripped. A pre-auth signal, so the reason is not a
+    %% inbound throttle tripped. A pre-auth signal, so the reason is not a
     %% user-enumeration oracle; keep it generic and non-specific about the limit.
     abort(
         service_unavailable,

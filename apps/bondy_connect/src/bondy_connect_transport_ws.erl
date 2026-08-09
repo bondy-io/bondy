@@ -279,7 +279,7 @@ handle_frame({close, _Code, _Reason}, _St) ->
 %% gun has no WebSocket max-frame-size option, so a hostile/slow router could
 %% otherwise force decode of an arbitrarily large frame into terms (an
 %% asymmetric DoS). This mirrors the raw transports, which reject oversized
-%% frames pre-materialization in `bondy_connect_framing` (review B3).
+%% frames pre-materialization in `bondy_connect_framing`.
 decode_payload(
     Payload, #state{encoding = Enc, max_message_length = Max} = St
 ) when
@@ -326,7 +326,7 @@ negotiated(Headers) ->
 
 %% @private Assemble the `gun:open/3' options. ws ⇒ tcp, wss ⇒ tls. The TLS
 %% options are the shared, secure-by-default set (`bondy_connect_tls`), giving
-%% wss the same mTLS/cipher support as the raw `tls` transport (review D1).
+%% wss the same mTLS/cipher support as the raw `tls` transport.
 %% `protocols => [http]' forces HTTP/1.1, required for the ws upgrade;
 %% `retry => 0' leaves reconnection to the connection's own backoff.
 gun_opts(Host, Opts) ->

@@ -119,10 +119,10 @@ end#{
 -else.
 
 %% 5 minutes, expressed in SECONDS to match `Diff = Now - epoch` in
-%% refresh_context/1 (which is also in seconds). This was previously
-%% `timer:minutes(5)` = 300000, i.e. MILLISECONDS: compared against a
-%% seconds-valued Diff it deferred the RBAC context refresh for ~3.47 days, so
-%% grant/membership revocations were not honored within a live session.
+%% refresh_context/1 (which is also in seconds). A millisecond value here —
+%% `timer:minutes(5)` = 300000 — compares against a seconds-valued Diff and
+%% defers the RBAC context refresh for ~3.47 days, so grant and membership
+%% revocations go unhonoured for the life of a session.
 -define(CTXT_REFRESH_SECS, 300).
 
 -endif.

@@ -311,10 +311,10 @@ retries.
 %% peer's installed-consistency barrier on `get_frontier`, the
 %% complete-round gate, and the initiator's local settle — eliminates the
 %% SYSTEMATIC false positives (install lag, replay lag, capped rounds).
-%% The short-lived gaps this debounce used to ride out under sustained
-%% write load were the observable window of the WATERMARK DOOR —
+%% The debounce also rides out short-lived gaps under sustained write
+%% load. Those were the observable window of the WATERMARK DOOR —
 %% `integrate_peer_root` discarding a just-pulled never-applied peer
-%% event at or below the local watermark — which is now CLOSED
+%% event at or below the local watermark — which is CLOSED
 %% (`watermark_door/3` in `bondy_oplog_instance`: fused instances fold
 %% such events into the projection before truncating; applier-backed
 %% instances hold them for the applier's replay). With the door closed

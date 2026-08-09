@@ -3,17 +3,16 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% The tier_2 stamp-site context-regression guard (#27), on a **fused**
-%% oplog instance — the ephemeral single-process writer that has no
-%% separate applier. A fused instance previously had no `cell_context`
-%% handler at all: `bondy_oplog_registry:applier_pid/1` is permanently
-%% `undefined` for it, so every tier_2 write's `apply_with_context/4`
-%% permanently failed with `{error, {instance_unavailable, _}}` — not a
-%% transient race, a dead end. `bondy_oplog_instance:cell_context/3` (new)
-%% answers the same query in-process, guarded by the same
-%% `bondy_oplog_ctx_guard` the applier uses, so this file is the fused
-%% mirror of `bondy_db_tier2_stamp_guard_test.erl`: same two scenarios,
-%% same assertions, only `open_db/1` differs (`fused => true`).
+%% The tier_2 stamp-site context guard on a **fused** oplog instance — the
+%% ephemeral single-process writer that has no separate applier.
+%% `bondy_oplog_registry:applier_pid/1` is permanently `undefined` for a fused
+%% instance, so a tier_2 write routing `apply_with_context/4` through the
+%% applier would fail with `{error, {instance_unavailable, _}}` for ever — not
+%% a transient race, a dead end. `bondy_oplog_instance:cell_context/3` answers
+%% the same query in-process, guarded by the same `bondy_oplog_ctx_guard` the
+%% applier uses, so this file is the fused mirror of
+%% `bondy_db_tier2_stamp_guard_test.erl`: same two scenarios, same assertions,
+%% only `open_db/1` differs (`fused => true`).
 -module(bondy_db_tier2_stamp_guard_fused_test).
 
 -include_lib("eunit/include/eunit.hrl").

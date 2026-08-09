@@ -177,7 +177,7 @@ it).
 %% guard directly, without spinning a durable (leveled) Bookie just to
 %% reach its rejection branch.
 -export([assert_fused_requires_ephemeral/2]).
-%% Exposed so the strategy-aware routing (AR-2) can be pinned directly without
+%% Exposed so the strategy-aware routing can be pinned directly without
 %% standing up real shards. (`shard_for/3` is now a public API — see above.)
 -export([aggregate_root/2]).
 -endif.
@@ -444,7 +444,7 @@ open_table_provision(
     Db, EntityType, Merged, FoldModule, Backend, Topology, State
 ) ->
     ShardCount = maps:get(shard_count, Merged, ?DEFAULT_SHARD_COUNT),
-    %% Strategy-aware shard routing inputs (AR-2 / AR-3), threaded into the
+    %% Strategy-aware shard routing inputs, threaded into the
     %% table state and consumed by `shard_for/3`. The defaults reproduce the
     %% legacy `phash2({Bucket, Key})` placement (strategy `entity`), so a
     %% table declaring neither routes exactly as before.
@@ -921,7 +921,7 @@ apply(
     Bucket = Topology:bucket_for(EntityType, Realm, TableState),
     %% G-1: fold the realm into the storage key (see cell_key/3).
     SKey = cell_key(Topology, Realm, Key),
-    %% Strategy-aware shard placement (AR-2 / AR-3): pick the shard from the
+    %% Strategy-aware shard placement: pick the shard from the
     %% table's partition strategy (`aggregate` co-locates a subject's facts;
     %% `entity` is the legacy `phash2({Bucket, SKey})`), then map it to its
     %% oplog instance. The point read (`read/3`) derives the same shard.
@@ -1601,7 +1601,7 @@ read(
     Bucket = Topology:bucket_for(EntityType, Realm, TableState),
     %% G-1: fold the realm into the storage key (see cell_key/3).
     SKey = cell_key(Topology, Realm, Key),
-    %% Force the read onto the same shard the write chose (AR-2): under any
+    %% Force the read onto the same shard the write chose: under any
     %% non-`entity` strategy the shard is NOT `phash2({Bucket, SKey})`, so the
     %% explicit override is what keeps write and read addressing one shard.
     Shard = shard_for(Table, Realm, Key),
@@ -3696,12 +3696,12 @@ recompute_columns(Spec, Value) ->
 %% `?PRIMARY_SCAN_LIMIT`; a scan that fills it is logged as potentially
 %% incomplete.
 %%
-%% Scoped and un-folded exactly like `list/2`. It previously scanned the whole
-%% bucket (`{<<>>, infinity}`) and returned the raw storage keys, which under a
-%% realm-folding topology (G-1) meant a stale-index fallback read returned OTHER
-%% realms' cells, still carrying their `<<Realm, 0>>` prefix — so the fallback
-%% disagreed with the very `index_get/5` result it stands in for, both in which
-%% rows it produced and in the shape of their keys.
+%% Scoped and un-folded exactly like `list/2`, and for the same reason: a whole
+%% bucket scan (`{<<>>, infinity}`) returning raw storage keys would, under a
+%% realm-folding topology, hand a stale-index fallback read OTHER realms' cells
+%% still carrying their `<<Realm, 0>>` prefix — so the fallback would disagree
+%% with the very `index_get/5` result it stands in for, both in which rows it
+%% produces and in the shape of their keys.
 primary_cells(#{namespace := NS, db_topology := Topology} = Table, Realm) ->
     PrimaryBucket = primary_bucket(Table, Realm),
     {Lo, Hi} = realm_scan_range(Topology, Realm),
@@ -3805,10 +3805,10 @@ co-located shard (e.g. the membership group join) passes the band's lower bound
 as `Key`.
 
 - `entity` — legacy `phash2({Bucket, FoldedKey}, N)`, where `FoldedKey` is the
-  realm-folded cell key (G-1). Byte-identical to pre-AR-2 routing, so a table
+  realm-folded cell key. Byte-identical to hash-only routing, so a table
   that declares no strategy routes exactly as before.
 - `aggregate` — `phash2({Realm, AggregateRoot}, N)`: a subject's record + its
-  grants + sources co-locate on one shard (atomic batch, AR-4), while subjects
+  grants + sources co-locate on one shard (atomic batch), while subjects
   spread across shards so a single realm still fills every core. The shard is
   independent of the Bucket, which is precisely what co-locates different entity
   types of one subject (`aggregate_root/2` picks the root from the key).

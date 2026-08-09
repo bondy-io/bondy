@@ -20,7 +20,7 @@ properties rather than as prose:
 
 The generators deliberately produce terms a JSON encoder cannot handle - pids,
 references, funs, improper lists, bitstrings, non-UTF-8 binaries, deep nesting -
-because those are precisely the terms that used to leak.
+because those are precisely the terms an encoder must never be handed.
 """.
 
 -include_lib("proper/include/proper.hrl").

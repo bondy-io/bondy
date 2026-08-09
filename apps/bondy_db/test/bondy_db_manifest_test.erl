@@ -3,7 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %%
-%% Unit tests for the durable-DB topology manifest (AR-16): the on-disk freeze
+%% Unit tests for the durable-DB topology manifest: the on-disk freeze
 %% of the keying configuration and the boot-time reconciliation that protects
 %% an existing data dir from a silently-changed (re-key-on-change) topology.
 %%

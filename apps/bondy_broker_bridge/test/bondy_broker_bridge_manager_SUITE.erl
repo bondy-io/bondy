@@ -116,8 +116,8 @@ event_is_bridged(Config) ->
 -doc """
 The map returned by a bridge's `init/1` is in scope inside an action template.
 
-This is also the assertion that the base context is resolved at all: it used to
-be fetched per event through a `gen_server` call into the manager.
+This is also the assertion that the base context is resolved at all, and that
+resolving it costs no call into the manager.
 """.
 base_context_reaches_template(Config) ->
     Topic = ?config(topic, Config),
@@ -191,9 +191,9 @@ bad_subscription_does_not_stop_manager(Config) ->
 -doc """
 `subscribe/5` answers `{ok, Id}` for a subscription it created.
 
-It used to match `{ok, Id, _Pid}` inside a `try ... of`, so a successful
-subscribe raised `try_clause` and was reported as an error -- after the
-subscriber had been started.
+The shape matters: matching `{ok, Id, _Pid}` inside a `try ... of` raises
+`try_clause` on success, reporting an error for a subscriber that has already
+been started.
 """.
 subscribe_returns_the_subscription_id(Config) ->
     Topic = ?config(topic, Config),
@@ -217,10 +217,10 @@ subscribe_returns_the_subscription_id(Config) ->
 -doc """
 Events are bridged while the manager is blocked.
 
-Evaluating an action used to call `bridge/1`, a `gen_server:call` into the
-manager, on every event from every subscriber -- a single mailbox in front of
-all bridge traffic on the node. Suspending the manager is the sharpest way to
-show the dependency is gone: before the fix this case times out.
+Evaluating an action reads its context from the subscriber's own closure. A
+`gen_server:call` into the manager here would put a single mailbox in front of
+all bridge traffic on the node, so suspending the manager is the sharpest way to
+assert there is no such call.
 """.
 bridging_survives_a_busy_manager(Config) ->
     Topic = ?config(topic, Config),
@@ -266,14 +266,13 @@ resubscribe_after_restart_delivers(Config) ->
 -doc """
 A bridge answering `{retry, Reason}` is retried, then given up on.
 
-`bondy_subscriber` used to answer a retry by sleeping and then calling
-`handle_event(Event, State)` -- the public API, whose arguments are
-`(Subscriber, Event)` -- so the retry became `gen_server:cast(#event{}, State)`
-and crashed. The contract was unreachable, which is why no shipped bridge could
-rely on it.
+`bondy_subscriber` reschedules the event rather than sleeping, and it calls
+its own internal handler rather than the public `handle_event/2`, whose
+arguments are `(Subscriber, Event)` -- calling that would turn the retry into
+`gen_server:cast(#event{}, State)`.
 
-The budget is the original one: the first attempt plus three retries. The
-subscriber must still be alive afterwards.
+The budget is the first attempt plus three retries. The subscriber must still be
+alive afterwards.
 """.
 retry_result_is_retried_then_abandoned(Config) ->
     Topic = ?config(topic, Config),

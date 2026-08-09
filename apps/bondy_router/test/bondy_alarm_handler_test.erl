@@ -50,10 +50,11 @@ distinct_alarms_coexist_test() ->
     ),
     ?assertEqual([{?OTHER, <<"b">>}], alarms(clear(?ID, S1))).
 
-%% Regression: the old implementation special-cased
-%% `system_memory_high_watermark` with `lists:keyreplace/4`, which returns the
-%% list UNCHANGED when the key is absent. So the first memory alarm raised
-%% while any other alarm was already up was logged and then silently dropped.
+%% A memory alarm is recorded like any other. Special-casing
+%% `system_memory_high_watermark` with `lists:keyreplace/4` would drop it: that
+%% function returns the list UNCHANGED when the key is absent, so the first
+%% memory alarm raised while any other alarm is up would be logged and then
+%% silently discarded.
 first_memory_alarm_on_a_non_empty_list_is_recorded_test() ->
     S0 = set({?OTHER, <<"b">>}, state()),
     S1 = set({system_memory_high_watermark, <<"high">>}, S0),

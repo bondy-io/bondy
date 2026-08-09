@@ -559,11 +559,10 @@ recipient_count(#bondy_mail_relay{max_recipients = Max}, Recipients) ->
 %% @private
 %% Everything that becomes the message.
 %%
-%% Attachments used to be the only thing measured, which made the limit both
-%% incomplete and surprising: the same megabytes were refused as an attachment
-%% and accepted as an HTML body, and a body was not measured at all until a
-%% worker had already taken the message off a queue it had been occupying. A
-%% caller cannot reason about a limit that depends on which field they used.
+%% Every field, not only the attachments: a caller cannot reason about a limit
+%% whose answer depends on which field they put the megabytes in, and measuring
+%% here rather than at encode time keeps an oversized message out of the queue
+%% instead of refusing it once a worker has already taken it.
 size_bytes(Valid, Headers, Attachments) ->
     optional_size(maps:get(subject, Valid)) +
         optional_size(maps:get(text, Valid)) +

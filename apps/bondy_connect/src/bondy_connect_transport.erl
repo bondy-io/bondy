@@ -13,12 +13,12 @@ process (`bondy_connect_connection`) and the protocol layer deal only in WAMP
 
 Implementations:
 
-- `bondy_connect_transport_tcp` — WAMP raw socket over TCP (this phase).
-- `_tls` / `_uds` — raw socket over TLS / Unix domain socket (Phase 7).
+- `bondy_connect_transport_tcp` — WAMP raw socket over TCP.
+- `_tls` / `_uds` — raw socket over TLS / Unix domain socket.
   These three are thin shims over `bondy_connect_raw`, which holds the shared
-  raw-socket logic parameterised by socket backend (review D2).
-- `_ws` — WebSocket via gun (Phase 7).
-- `bondy_connect_local` — in-VM peer (Phase 7); dispatches to a router-side
+  raw-socket logic parameterised by socket backend.
+- `_ws` — WebSocket via gun.
+- `bondy_connect_local` — in-VM peer; dispatches to a router-side
   handler registered via `bondy_connect_local:register_handler/1`, so it holds
   no `bondy` dependency (the router app plugs in).
 

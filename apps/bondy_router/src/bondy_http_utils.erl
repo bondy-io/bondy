@@ -11,9 +11,8 @@ IP addresses as public or private, and mapping error URIs onto HTTP status
 codes.
 
 `http_status/1` is the single source of truth for the error URI to HTTP status
-mapping. Two divergent copies of this table used to exist - one in the REST
-handler and one supplying the API Gateway spec defaults - and they disagreed on
-`wamp.error.not_authorized` and `wamp.error.authorization_failed`.
+mapping. Both the REST handler and the API Gateway spec defaults read it here,
+so the two cannot disagree about what an error URI is worth.
 """.
 -include_lib("partisan/include/partisan_util.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").

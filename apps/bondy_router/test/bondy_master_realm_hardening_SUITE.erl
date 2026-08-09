@@ -5,7 +5,7 @@
 
 -module(bondy_master_realm_hardening_SUITE).
 -moduledoc """
-Regression tests for the master-realm hardening (D-1/D-2, WP-A): the master realm
+Regression tests for the master-realm hardening : the master realm
 must not accept anonymous connections, the administrators grant must be scoped to
 the Bondy admin namespaces, and the boot migration must remediate a legacy
 (pre-hardening) master realm.

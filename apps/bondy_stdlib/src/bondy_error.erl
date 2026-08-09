@@ -353,13 +353,12 @@ to_map(#{} = Error) ->
     %% Every scalar goes through `to_binary/1`, not `maps:get/3` raw. This is
     %% the JSON projection, so producing JSON-encodable output is its contract
     %% — it must not depend on every construction path having normalised its
-    %% input. Only `details` used to be sanitised, which left `code`, `message`,
+    %% input. Sanitising `details` alone would leave `code`, `message`,
     %% `description`, `uri`, `handle` and `doc_uri` able to carry a non-UTF-8
     %% binary straight into `json:encode/1`.
     %%
-    %% `to_binary/1` rather than `sanitise/1`: sanitise also truncates, and
-    %% silently shortening a description is a behaviour change this fix has no
-    %% business making.
+    %% `to_binary/1` rather than `sanitise/1`: sanitise also truncates, and a
+    %% description is not something this projection should silently shorten.
     Canonical = #{
         ~"code" => to_binary(maps:get(code, Error, ~"")),
         ~"message" => to_binary(maps:get(message, Error, ~"")),

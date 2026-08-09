@@ -10,16 +10,16 @@
 %% and on the operator `rebuild_index/2` call. The rebuild must re-derive
 %% the index from each live cell's CURRENT (converged) projection value.
 %%
-%% The bug this pins: the rebuild used to re-fold the primary's MST,
-%% re-applying every historical `cell_apply` event onto the
-%% already-advanced projection cell. For a context-carrying (tier_2) CRDT
-%% that re-application is NOT idempotent — a historical event re-mints its
-%% dot and, because the advanced cell holds newer dots the historical event
-%% never observed, the per-event intermediate states re-introduce
-%% superseded dots as spurious MV-leaf siblings. The primary reconverged
-%% (the complete causal suffix re-collapsed them) but the index, which
-%% captures a per-event term-diff, latched a divergent intermediate (e.g.
-%% `[n7, n8]` where the live cell is `[n8]`).
+%% What this pins: the rebuild must read each cell's current value, not
+%% re-fold the primary's MST by re-applying every historical `cell_apply`
+%% event onto the already-advanced projection cell. For a context-carrying
+%% (tier_2) CRDT that re-application is NOT idempotent — a historical event
+%% re-mints its dot and, because the advanced cell holds newer dots the
+%% historical event never observed, the per-event intermediate states
+%% re-introduce superseded dots as spurious MV-leaf siblings. The primary
+%% reconverges (the complete causal suffix re-collapses them) but the index,
+%% which captures a per-event term-diff, would latch a divergent intermediate
+%% (e.g. `[n7, n8]` where the live cell is `[n8]`).
 %%
 %% Two directions are pinned:
 %%   1. Sequential dominance: the rebuilt projected column EXACTLY equals

@@ -3,7 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% The tier_2 stamp-site context-regression guard (#27).
+%% The tier_2 stamp-site context-regression guard.
 %%
 %% On the tier_2 write path the substrate reads a cell's current causal
 %% context and stamps it into the new event so the origin's next dot

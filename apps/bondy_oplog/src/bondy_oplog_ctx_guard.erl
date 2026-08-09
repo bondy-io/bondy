@@ -10,7 +10,7 @@
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
-The tier_2 stamp-site context-regression guard (#27), extracted so both
+The tier_2 stamp-site context-regression guard, extracted so both
 `bondy_oplog_applier` (the per-instance applier process) and
 `bondy_oplog_instance` (a **fused** instance, which has no separate
 applier) enforce the identical safety check from one place instead of two

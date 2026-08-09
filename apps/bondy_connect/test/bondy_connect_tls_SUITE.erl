@@ -8,9 +8,9 @@
 -moduledoc """
 Pure unit tests for `bondy_connect_tls:options/2` — the shared, secure-by-default
 TLS client-option builder used by both the `tls` raw-socket and `wss` WebSocket
-transports (review D1). The `mutual_tls_and_ciphers_present` case is the D1
-regression guard: these options were absent from the `wss` path before the
-extraction.
+transports. `mutual_tls_and_ciphers_present` pins that both transports get the
+client-certificate and cipher knobs, which is the point of building them in one
+place.
 """.
 
 -include_lib("common_test/include/ct.hrl").
@@ -67,9 +67,9 @@ cacerts_is_honoured(_) ->
     Opts = bondy_connect_tls:options("h", #{cacerts => CAs}),
     ?assertEqual(CAs, proplists:get_value(cacerts, Opts)).
 
-%% D1 regression guard: the wss transport previously lacked client-cert/mTLS and
-%% ciphers. Both transports now build options via this module, so these knobs are
-%% available to both.
+%% Both transports build their options through this module, so client-cert
+%% (mTLS) and cipher selection are available to each of them.
+
 mutual_tls_and_ciphers_present(_) ->
     TLS = #{
         certfile => "/tmp/client.pem",

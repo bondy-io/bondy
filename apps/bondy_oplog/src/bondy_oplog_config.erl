@@ -9,9 +9,9 @@ The public configuration surface for the `bondy_oplog` layer.
 
 This module is the single source of truth for `bondy_oplog`'s tunable
 application-environment values: each key's **default lives here, once**, in its
-accessor — so the same default can no longer drift between read sites (the way
-`bootstrap_retry_base_ms` and friends previously carried a literal at every
-call). The export list is, in effect, the layer's config schema.
+accessor — so the same default cannot drift between read sites, which is what
+a literal repeated at every call site invites. The export list is, in effect,
+the layer's config schema.
 
 Value tunables that operators change at runtime expose a `set_*/1` write-through
 next to their accessor (e.g. `aae_load_adaptive/0` ↔ `set_aae_load_adaptive/1`).

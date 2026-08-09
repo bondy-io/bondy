@@ -9,9 +9,8 @@
 %% The catalogue snapshot install is `replace` (skip-if-older by HLC).
 %% That is correct for a register (the higher-HLC value wins) but WRONG for
 %% a counter: replacing a counter cell with the peer's higher-HLC state
-%% drops the contributions of any Origin that state does not carry. The
-%% removed CvRDT `merge_states` used to per-Origin-merge them; the op-based
-%% replacement is the post-bootstrap full re-derive (`op-replay`) that
+%% drops the contributions of any Origin that state does not carry. What
+%% restores them is the post-bootstrap full re-derive (`op-replay`), which
 %% re-folds the complete local+peer event set.
 %%
 %% This pins the convergence: two live replicas each increment the same

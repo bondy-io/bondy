@@ -363,11 +363,10 @@ auth_failure_is_permanent(Config) ->
 -doc """
 An oversized message is refused at admission, naming the size and the limit.
 
-The body counts. It did not use to: only attachments were measured, so the same
-megabytes were refused as an attachment and accepted as a body -- and a body was
-not measured at all until a worker had taken the message off a queue it had been
-occupying all along. A limit whose answer depends on which field the caller used
-is not a limit anyone can work with.
+The body counts, and so does every other field. A limit whose answer depends on
+which field the caller put the megabytes in is not a limit anyone can work with,
+and measuring at admission keeps an oversized message out of the queue rather
+than refusing it once a worker has already taken it.
 """.
 oversized_message_is_refused(_) ->
     Big = binary:copy(~"a", 20000),

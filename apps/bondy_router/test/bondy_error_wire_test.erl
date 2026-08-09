@@ -66,9 +66,9 @@ legacy_codes_test() ->
      || {Term, Code} <- Expected
     ].
 
-%% The status codes the payload used to carry inline. They now come from the
-%% shared table, and must still resolve to the same values.
-legacy_status_codes_test() ->
+%% Every error that pins an HTTP status inline resolves to the same value
+%% through the shared table.
+inline_status_codes_test() ->
     Expected = [
         {oauth2_invalid_client, ?HTTP_UNAUTHORIZED},
         {invalid_scheme, ?HTTP_UNAUTHORIZED},
@@ -90,10 +90,9 @@ legacy_status_codes_test() ->
      || {Term, Status} <- Expected
     ].
 
-%% These used to carry no inline status and fell back to a caller-supplied
-%% default. Their derived status is pinned so that removing the inline key did
-%% not silently change what a client sees.
-derived_status_for_previously_defaulted_errors_test() ->
+%% Errors that pin no status of their own derive one from the shared table.
+%% Pinned here, because a change in the table is a change in what a client sees.
+derived_status_test() ->
     Expected = [
         {{no_such_realm, ~"com.a"}, ?HTTP_BAD_GATEWAY},
         {{invalid_value, ~"k", 1}, ?HTTP_BAD_REQUEST},
@@ -140,9 +139,8 @@ legacy_map_carries_the_documented_prose_test() ->
         ~"A value for 'match' is required.", maps:get(~"description", Map)
     ).
 
-%% A `code' used to be an atom for some reasons and a binary for others. It is
-%% always a binary now, which is invisible in JSON but stops a header being
-%% built by binary concatenation from crashing.
+%% A `code' is always a binary, whatever the type was built from. Invisible in
+%% JSON, but it stops a header built by binary concatenation from crashing.
 code_is_always_a_binary_test() ->
     [
         ?assert(
@@ -166,7 +164,7 @@ code_is_always_a_binary_test() ->
 %% URI RESOLUTION
 %% =============================================================================
 
-%% Reproduces what the old code_to_uri/1 returned for each shape of input.
+%% The URI each shape of input resolves to.
 code_to_uri_test() ->
     ?assertEqual(?WAMP_INVALID_ARGUMENT, uri_of(invalid_argument)),
     ?assertEqual(
@@ -186,8 +184,8 @@ code_to_uri_test() ->
         uri_of(~"something_new")
     ).
 
-%% URI resolution used to have no clause for tuples, pids or integers, yet was
-%% called with whatever a catch handler produced.
+%% URI resolution is called with whatever a catch handler produced, so it has
+%% to answer for a tuple, a pid or an integer as readily as for an atom.
 code_to_uri_is_total_test() ->
     [
         ?assert(is_binary(uri_of(Term)))

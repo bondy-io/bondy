@@ -243,7 +243,7 @@ client_credentials(Config) ->
     ).
 
 %% =============================================================================
-%% WP-C / A-4: JWT algorithm pinning (alg-confusion + `none` rejected)
+%% JWT algorithm pinning (alg-confusion + `none` rejected)
 %% =============================================================================
 
 jwt_alg_confusion_rejected(Config) ->

@@ -7,7 +7,7 @@
 
 -moduledoc """
 Idle keepalive (ping/pong) state for a `bondy_connect` connection — a **pure
-data** helper extracted from `bondy_connect_connection` (review A2).
+data** helper extracted from `bondy_connect_connection`.
 
 After `idle_timeout` ms of inbound silence the connection sends a transport
 **ping** and waits up to `timeout` ms for the matching **pong**; an unanswered

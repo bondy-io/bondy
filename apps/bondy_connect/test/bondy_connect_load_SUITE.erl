@@ -7,7 +7,7 @@
 
 -moduledoc """
 Unit tests for `bondy_connect_load`: the in-flight cap, plus the rate-limiter
-token-bucket lifecycle (reuse on reconnect, free on teardown — review B4).
+token-bucket lifecycle (reuse on reconnect, free on teardown).
 """.
 
 -include_lib("common_test/include/ct.hrl").
@@ -86,7 +86,7 @@ delete_without_rate_is_noop(_) ->
 
 %% A rate-limited load reuses its token bucket across reconnects (`reset/1`)
 %% instead of orphaning a bondy_regulator ETS row each time, and frees it on
-%% `delete/1` (review B4). Measured as row-count deltas on the regulator's table.
+%% `delete/1`. Measured as row-count deltas on the regulator's table.
 rate_bucket_reused_on_reset_and_freed_on_delete(_) ->
     Before = ets:info(?REG_TAB, size),
 

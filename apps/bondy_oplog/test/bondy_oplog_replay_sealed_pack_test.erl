@@ -27,15 +27,14 @@ cold_replay_of_sealed_packs_runs_off_applier_test_() ->
         {timeout, 60, fun() -> run(Dir) end}
     end}.
 
-%% Regression, same bug class as above but on the RECLAMATION seam. The GC
-%% sweep enumerates cells through `bondy_oplog_cell_utils:mst_cell_directory/1`
-%% whenever the projection adapter cannot enumerate its own keyspace, and that
-%% fold used to run in whichever process swept — the applier, for the ordinary
-%% (non-fused) path. On a durable instance with sealed packs that means reading
-%% the instance's raw fds from the applier: `not_on_controlling_process`, which
-%% killed the applier and took the whole instance subtree down with it via
-%% one_for_all. Left latent when the cold-replay seam above was fixed; this
-%% pins the delegation so it cannot regress.
+%% The same seam as above, on the RECLAMATION path. The GC sweep enumerates
+%% cells through `bondy_oplog_cell_utils:mst_cell_directory/1` whenever the
+%% projection adapter cannot enumerate its own keyspace. Running that fold in
+%% whichever process swept — the applier, for the ordinary (non-fused) path —
+%% reads the instance's raw fds off-owner on a durable instance with sealed
+%% packs: `not_on_controlling_process`, which kills the applier and takes the
+%% whole instance subtree down with it via one_for_all. This pins the
+%% delegation.
 sweep_cell_directory_of_sealed_packs_runs_off_owner_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(Dir) ->
         {timeout, 60, fun() -> run_cell_directory(Dir) end}
@@ -104,7 +103,8 @@ run_cell_directory(Dir) ->
     ?assert(InstP =/= self()),
 
     %% Called from a process that does NOT own the fds — the position the
-    %% applier is in. This raised `not_on_controlling_process` before the fix.
+    %% applier is in. Reading them directly here raises
+    %% `not_on_controlling_process`.
     Keys = bondy_oplog_cell_utils:mst_cell_directory(InstId),
     ?assertEqual(?BATCH, length(Keys)),
     ?assertEqual(lists:usort(Keys), Keys),

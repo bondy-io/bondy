@@ -458,7 +458,7 @@ without protocol changes.
     %% Fused-writer drain state, or `undefined` for every non-fused
     %% (durable + non-fused ephemeral) instance. See `#fused_drain{}`.
     fused_drain = undefined :: undefined | #fused_drain{},
-    %% tier_2 stamp-site context-regression guard (#27) — see
+    %% tier_2 stamp-site context-regression guard — see
     %% `bondy_oplog_ctx_guard`. Only ever populated for a fused instance
     %% (a non-fused instance's applier holds its own copy); `undefined`
     %% for every non-fused instance.

@@ -297,10 +297,10 @@ a_send_writes_its_families(_) ->
 The depth gauge reports the relay's queue, not one worker's share of it.
 
 `bondy_mail_queue_depth` is labelled by relay, and every worker in the pool
-writes it. Publishing a worker's own lane -- which is what this did -- has each
-of them overwriting the same series with roughly `depth / pool_size`, so the
-panel an operator reads to decide whether `queue.max_size` is too small reads a
-fraction of the truth and jitters by whichever worker wrote last.
+writes it. Publishing a worker's own lane would have each of them overwriting
+the same series with roughly `depth / pool_size`, so the panel an operator reads
+to decide whether `queue.max_size` is too small would carry a fraction of the
+truth and jitter by whichever worker wrote last.
 
 Worker 2 is suspended so its lane provably holds messages while worker 1 keeps
 draining. Worker 1's own lane is empty every time it reports; the relay's is
@@ -324,7 +324,7 @@ queue_depth_is_the_relays_not_one_workers(_) ->
         %% The rotation is exact, so the suspended worker holds four
         %% reservations it never releases, and every one of them is in the
         %% relay's depth. Worker 1's own lane is empty by the time it reports
-        %% the last of its four, which is what the old reading published.
+        %% the last of its four, so a per-worker reading could not reach 4.
         ?assertNotEqual([], Depths),
         ?assert(lists:max(Depths) >= 4)
     after

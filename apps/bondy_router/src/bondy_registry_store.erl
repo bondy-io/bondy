@@ -551,12 +551,10 @@ doing (1) anyway, but we need to check, e.g. timestamp differences?
 
 dirty_delete(#bondy_registry_store{} = Store, Type, EntryKey) ->
     %% bondy_db `clear` is HLC-ordered and idempotent by construction, so the
-    %% plum_db deterministic-tombstone hack this used to need (a fixed ActorID
-    %% + the original timestamp, so the tombstone converged byte-for-byte
-    %% across nodes) is gone: a dirty delete is now just a local delete. With
-    %% AAE off there are no remote replicas to dirty-delete, so this is reached
-    %% only by the (inert) node-down `prune` path; the presence-FSM / EVICT
-    %% replacement lands with db.aae (design D-7).
+    %% a dirty delete needs no deterministic tombstone to converge: it is
+    %% just a local delete. With AAE off there are no remote replicas to
+    %% dirty-delete, so this is reached only by the (inert) node-down `prune`
+    %% path.
     take(Store, Type, EntryKey).
 
 -doc "".
@@ -1545,13 +1543,11 @@ Removes an entry's in-memory match indices (trie / ETS bags) ONLY — it does no
 touch the per-node remote index nor the bondy_db projection. Used by
 `remove/3` / `take/3` as the index half of a full delete.
 
-This used to cite a presence-FSM masking path (`bondy_registry_partition:mask/2`)
-as a second caller. That function has never existed and will not: the FSM it
-belonged to was designed for a registry in which full `#entry{}` records
-replicated and a peer could clear another node's entries under LWW. Neither
-holds — entries are partition-local ETS and the replicated RIB cells are
-single-writer per node — so there is no destructive replicated clear for
-masking to make unnecessary.
+There is no masking path calling this. Masking answers a registry in which full
+`#entry{}` records replicate and a peer can clear another node's entries under
+LWW; neither holds here — entries are partition-local ETS and the replicated RIB
+cells are single-writer per node — so there is no destructive replicated clear
+for masking to make unnecessary.
 """.
 -spec delete_indices(Store :: t(), Entry :: entry()) -> ok | {error, any()}.
 

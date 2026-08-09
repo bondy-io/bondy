@@ -159,8 +159,8 @@ volume.
     %% dead pages in a single sealed pack before paying for a full
     %% rewrite. Multi-pack coalescing is unaffected: when there are
     %% 2+ sealed packs, GC always merges them into one (the threshold
-    %% only gates the dead-fraction case). Default `0.0` preserves the
-    %% pre-PR-PS-6 behaviour. See QA #9 / design §8.1.
+    %% only gates the dead-fraction case). Default `0.0` never rewrites a
+    %% lone sealed pack for dead pages alone.
     gc_threshold_dead_fraction :: float()
 }).
 
@@ -893,7 +893,7 @@ info(#?MODULE{} = T) ->
         %% on-disk `incoming.pack` byte size, since the pending map
         %% mirrors the on-disk record layout including pack header,
         %% per-record headers, CRC, and body). Used by operators
-        %% sizing per-instance memory budgets and by the QA #15
+        %% sizing per-instance memory budgets and by the
         %% memory-audit bench.
         pending_bytes =>
             bondy_mst_pack_writer:incoming_offset(T#?MODULE.writer),

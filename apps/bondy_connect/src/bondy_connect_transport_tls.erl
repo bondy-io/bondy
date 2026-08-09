@@ -11,7 +11,7 @@ WAMP **raw socket over TLS** transport (`ssl`).
 Identical on the wire to `bondy_connect_transport_tcp` — the same 4-octet
 handshake and `bondy_connect_framing` frames — but over a TLS-secured socket.
 Only `connect/2` (the secure socket-open) and `messages/0` are specific to this
-transport; everything else is shared via `bondy_connect_raw` (review D2).
+transport; everything else is shared via `bondy_connect_raw`.
 
 ## Secure by default
 
@@ -132,7 +132,7 @@ close(St) ->
 %% =============================================================================
 
 %% @private Assemble the `ssl:connect/4` options: the raw-socket base plus the
-%% shared, secure-by-default TLS options (`bondy_connect_tls`, review D1).
+%% shared, secure-by-default TLS options (`bondy_connect_tls`).
 ssl_opts(Host, Opts) ->
     TLS = maps:get(tls, Opts, #{}),
     Base = [binary, {packet, 0}, {active, false}, {nodelay, true}],

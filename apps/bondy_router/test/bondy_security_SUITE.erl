@@ -757,13 +757,12 @@ new_user(Uri, U) ->
     {ok, _} = bondy_oauth2_resource_owner:add(Uri, R),
     U.
 
-%% Ownership must hold on a cluster of one, and this is the regression guard
-%% that matters most: `bondy:lrw_nodes/2` used to select over `partisan:nodes()`,
-%% which — being the counterpart of `erlang:nodes/1` — EXCLUDES the local node.
-%% It could therefore never return `node()`, and returned `[]` on a single-node
-%% cluster. Ownership built on that would answer `false` everywhere and no realm
-%% would ever be swept, silently, with every test of the sweep itself still
-%% passing.
+%% Ownership must hold on a cluster of one. `bondy:lrw_nodes/2` selects over a
+%% candidate set that INCLUDES the local node — `partisan:nodes()`, like
+%% `erlang:nodes/1`, excludes it, so a set built from that alone answers `[]` on
+%% a single-node cluster. Ownership built on that would answer `false`
+%% everywhere and no realm would ever be swept, silently, with every test of the
+%% sweep itself still passing.
 single_node_owns_every_realm(Config) ->
     Uri = ?config(realm_uri, Config),
     Self = partisan:node(),
@@ -855,10 +854,10 @@ reclaimer_timer_path_sweeps_and_reschedules(Config) ->
 %% A round the job queue refuses must be reported, and must not then wait the
 %% full interval before trying again.
 %%
-%% `enqueue_sweeps/0` used to discard what `bondy_jobs` answered, so a full
-%% queue skipped reclamation with no log and six hours until the next attempt.
-%% The queue is fullest under load, which is exactly when there is most to
-%% reclaim, so that combination is the wrong way round.
+%% `enqueue_sweeps/0` reads what `bondy_jobs` answers. Discarding it would let
+%% a full queue skip reclamation with no log and six hours until the next
+%% attempt — and the queue is fullest under load, which is exactly when there is
+%% most to reclaim.
 %%
 %% `bondy_jobs` is mocked rather than genuinely filled: the real queue holds
 %% roughly six hundred jobs per worker, which is a great deal of machinery to

@@ -95,7 +95,7 @@ in_flight(#load{in_flight = N}) ->
 Reset for a reconnect: zero the in-flight count (the previous session's handler
 workers have been torn down) while **keeping the same token bucket**. The bucket
 must be reused — creating a fresh one on every reconnect would orphan a
-`bondy_regulator` ETS row each time (review B4). The bucket's own token counters
+`bondy_regulator` ETS row each time. The bucket's own token counters
 are time-based and intentionally survive the reconnect.
 """.
 -spec reset(t()) -> t().

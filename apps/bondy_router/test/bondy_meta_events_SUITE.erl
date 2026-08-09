@@ -175,11 +175,10 @@ config_off_silences(_) ->
     ok.
 
 realm_meta_events_published(_) ->
-    %% Regression: bondy_event_wamp_publisher's realm clause matched
-    %% `[bondy, realm, created, Type]` while the emitted path is
-    %% `[bondy, realm, Type]`, so the bondy.realm.* meta events were
-    %% silently never published (breaking e.g. the HTTP gateway's
-    %% realm-deleted cleanup subscription).
+    %% `bondy_event_wamp_publisher`'s realm clause must match the emitted
+    %% path, `[bondy, realm, Type]`. A clause matching anything else leaves
+    %% the bondy.realm.* meta events silently unpublished, and with them
+    %% subscriptions like the HTTP gateway's realm-deleted cleanup.
     Master = <<"com.leapsight.bondy">>,
     Ref = bondy_ref:new(internal, self(), bondy_session_id:new()),
     {ok, SubId} = bondy_broker:subscribe(

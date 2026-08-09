@@ -87,12 +87,12 @@ every AWS call fails, at the transport, before any credential is even offered.
 
 This lives here, beside the only code in Bondy that makes such a call, because
 it is a precondition of *this* provider rather than of whatever happens to have
-started first. It used to live in `bondy_http_connector_config:init/0`, which
-meant the AWS secret provider worked only on a node where that application had
-already started: `bondy_secret_resolver` is in `bondy_stdlib` and is reached
-from realm key encryption, the master key and outbound mail, none of which have
-any reason to know that. The failure it produced named TLS options and no part
-of the actual cause.
+started first. Arming it from another application's startup would make the AWS
+secret provider work only on a node where that application had also started:
+`bondy_secret_resolver` is in `bondy_stdlib` and is reached from realm key
+encryption, the master key and outbound mail, none of which have any reason to
+know that -- and the resulting failure names TLS options and no part of the
+actual cause.
 
 Idempotent, and never overrides a configured value: an operator who has set
 `lhttpc`'s `ssl_options` has said something more specific than this can.

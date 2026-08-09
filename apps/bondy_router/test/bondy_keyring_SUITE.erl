@@ -5,7 +5,7 @@
 
 -module(bondy_keyring_SUITE).
 -moduledoc """
-WP-H / S-2 — `bondy_keyring` (master-key resolution + AES-256-GCM seal/open +
+`bondy_keyring` (master-key resolution + AES-256-GCM seal/open +
 the WAL key-registry behaviour).
 """.
 

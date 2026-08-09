@@ -117,8 +117,8 @@ prop_pipeline_delivers_exactly_once() ->
 
 %% The egress partition key is a pure, deterministic function of the flow
 %% pair — equal within a flow across topics and payloads — so a flow can
-%% never straddle two wire connections. This is the property the old code
-%% violated (no key at all by default, a per-realm key with ack enabled).
+%% never straddle two wire connections. Neither an absent key nor a per-realm
+%% one satisfies this.
 prop_partition_key_is_per_flow() ->
     ?FORALL(
         {From, To},

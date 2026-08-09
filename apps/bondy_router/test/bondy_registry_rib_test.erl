@@ -22,8 +22,8 @@
 %% One catalogue is booted for the whole suite (not one per test function):
 %% each fresh boot of the registry DB's (ephemeral, mem-backed, fused) oplog
 %% instance races its own cold-start drain scheduling, and churning through
-%% that repeatedly — once per test, as this suite used to — reliably
-%% surfaces it. A single shared boot is also the more faithful model: a real
+%% that repeatedly — once per test — reliably surfaces it. A single shared
+%% boot is also the more faithful model: a real
 %% node provisions its registry DB once, not once per test case.
 write_path_test_() ->
     {setup, fun setup_catalog/0, fun teardown_catalog/1, fun({_Pid, _Tmp, Tab}) ->

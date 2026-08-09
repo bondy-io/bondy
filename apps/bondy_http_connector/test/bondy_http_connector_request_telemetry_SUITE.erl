@@ -239,7 +239,7 @@ client_error_response_classified_correctly(Config) ->
         ProcConf, #{}, #{}
     ),
     ?assertMatch(
-        {error, ~"wamp.error.not_found", #{}, [], #{<<"status">> := 404}},
+        {error, ~"bondy.error.not_found", #{}, [], #{<<"status">> := 404}},
         Result
     ),
     ?assertEqual(1, requests_total(ServiceName, ProcUri, client_error)).

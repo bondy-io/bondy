@@ -14,7 +14,7 @@ synchronously. After the handshake the connection process switches it to
 `{active, once}` and feeds inbound `{tcp, _, Data}` to `handle_data/2`.
 
 Only `connect/2` (the socket-open) and `messages/0` are specific to this
-transport; everything else is shared via `bondy_connect_raw` (review D2).
+transport; everything else is shared via `bondy_connect_raw`.
 """.
 
 -behaviour(bondy_connect_transport).

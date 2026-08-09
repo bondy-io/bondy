@@ -1,12 +1,10 @@
 %% =============================================================================
-%% Regression coverage for self-healing `.idx` rebuild on
-%% `bondy_mst_pack_reader:open/1`. The read-only reader was a
-%% PR-PS-4 carry-over: the store self-healed but the reader bubbled
-%% up the original error. Both surfaces now share
-%% `bondy_mst_pack_sealed_view:open/3`, so the reader inherits the
-%% rebuild path. This module asserts that.
+%% Self-healing `.idx` rebuild on `bondy_mst_pack_reader:open/1`. The
+%% read-only reader and the store share
+%% `bondy_mst_pack_sealed_view:open/3`, so the reader inherits the rebuild
+%% path rather than bubbling up the original error. This module asserts
+%% that.
 %%
-%% Pack-store QA #4 sub-bullet (PR-PS-4 carry-over).
 %% =============================================================================
 
 -module(bondy_mst_pack_reader_rebuild_test).

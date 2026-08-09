@@ -94,12 +94,12 @@ init({Ref, Transport, _Opts0}) ->
 
     SourceIP = source_ip(ProxyProtocol, PeerIP),
 
-    %% AV-1: throttle new connections per source IP (no-op unless enabled).
+    %% throttle new connections per source IP (no-op unless enabled).
     %% Reject early by closing the just-accepted socket and terminating.
     case bondy_rate_limit:throttle(connection, SourceIP) of
         throttled ->
             ?LOG_NOTICE(#{
-                description => "TCP connection rejected (AV-1 rate limit)",
+                description => "TCP connection rejected (rate limit)",
                 source_ip => inet:ntoa(SourceIP)
             }),
             catch Transport:close(Socket),

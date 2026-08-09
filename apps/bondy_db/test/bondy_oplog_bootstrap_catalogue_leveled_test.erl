@@ -47,7 +47,7 @@ leveled_bootstrap_test_() ->
 fresh_replica_bootstraps_via_leveled() ->
     Dir1 = make_tempdir(),
     Dir2 = make_tempdir(),
-    %% head_only=with_lookup required by bondy_db_projection_leveled (PR-PS-15b).
+    %% head_only=with_lookup is required by bondy_db_projection_leveled.
     BookOpts = fun(D) ->
         [
             {root_path, D},

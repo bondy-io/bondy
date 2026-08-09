@@ -70,7 +70,7 @@ defaults are secure-by-default (`verify_peer`).
 %% 16 MB
 -define(DEFAULT_MAX_MESSAGE_LENGTH, 16777216).
 
-%% Resilient by default (Phase 6): a dropped session is re-established with a
+%% Resilient by default: a dropped session is re-established with a
 %% bounded, backed-off retry budget. `retry_initial_connect` (default `false`)
 %% keeps `connect/1` fail-fast on the *first* attempt — backoff/replay only kick
 %% in once a session has established at least once. Set it `true` to also retry

@@ -353,9 +353,9 @@ forward(M, Ctxt) ->
             Reply = not_found_error(M, Ctxt),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
         Class:Reason:Stacktrace ->
-            %% The log entry and the reply are projections of one error value.
-            %% The log used to omit the trace_id altogether, so the identifier
-            %% the caller was given could not be found again.
+            %% The log entry and the reply are projections of one error
+            %% value, so the trace_id the caller is given is the one the log
+            %% can be searched by.
             Error = bondy_error:internal(Class, Reason, Stacktrace),
             ?LOG_ERROR((bondy_error:to_log_map(Error))#{
                 description =>

@@ -270,8 +270,8 @@ mk_inst() ->
     {ok, _} = bondy_oplog:start_instance(Id, #{}),
     Id.
 
-%% A bare FUSED instance (no `mst_retention`) — the class the frontier-gap
-%% remedy used to exclude.
+%% A bare FUSED instance (no `mst_retention`) — a class the frontier-gap
+%% remedy must cover.
 mk_fused_inst() ->
     Id = iolist_to_binary([
         "rbf_", integer_to_binary(erlang:unique_integer([positive]))

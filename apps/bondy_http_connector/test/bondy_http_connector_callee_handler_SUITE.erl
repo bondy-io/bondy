@@ -342,7 +342,7 @@ error_uri_404(_Config) ->
     {error, Uri, _, _, _} = bondy_http_connector_callee_handler:http_to_wamp(
         404, <<"{}">>
     ),
-    ?assertEqual(<<"wamp.error.not_found">>, Uri).
+    ?assertEqual(<<"bondy.error.not_found">>, Uri).
 
 error_uri_408(_Config) ->
     {error, Uri, _, _, _} = bondy_http_connector_callee_handler:http_to_wamp(
@@ -367,7 +367,7 @@ error_uri_450(_Config) ->
     {error, Uri, _, _, _} = bondy_http_connector_callee_handler:http_to_wamp(
         450, <<"{}">>
     ),
-    ?assertEqual(<<"bondy.error.invalid_argument">>, Uri).
+    ?assertEqual(<<"wamp.error.invalid_argument">>, Uri).
 
 error_uri_502(_Config) ->
     {error, Uri, _, _, _} = bondy_http_connector_callee_handler:http_to_wamp(

@@ -187,11 +187,11 @@ prop_no_control_survives_into_a_display_name() ->
 -doc """
 Whatever `has_control/1` accepts, every caller of it accepts.
 
-The property that the rule is one rule. Four modules used to spell it out
-separately -- addresses, display names, attachment filenames, content types --
-and they disagreed. Rather than restate the byte ranges here, which would be a
-fifth spelling, this asserts that the header validator and the display-name
-parser agree about every string.
+The property that the rule is one rule. Four places apply it -- addresses,
+display names, attachment filenames, content types -- and restating the byte
+ranges here would be a fifth spelling to keep in step with the other four. So
+this asserts agreement instead: the header validator and the display-name parser
+answer the same way about every string.
 """.
 prop_the_control_rule_is_one_rule() ->
     ?FORALL(

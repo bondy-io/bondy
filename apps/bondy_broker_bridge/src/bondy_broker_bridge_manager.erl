@@ -350,8 +350,8 @@ handle_continue(init_bridges, State0) ->
             ),
             %% load_config/2 always answers `{Result, State}`. Matching a bare
             %% `{error, Reason}` here would raise a case_clause on every
-            %% failure, which is how a bad specification used to take down the
-            %% manager without ever naming the problem.
+            %% failure, taking the manager down without ever naming the bad
+            %% specification that caused it.
             case load_config(SpecFile, State1) of
                 {ok, State2} ->
                     {noreply, State2};
@@ -385,8 +385,8 @@ handle_call({subscriptions, Bridge}, _From, State) ->
     {reply, Res, State};
 handle_call({subscribe, RealmUri, Opts, Topic, Bridge, Spec0}, _From, State) ->
     %% bondy_broker:subscribe/4 answers `{ok, {Id, Pid}}` for a fun subscriber,
-    %% so do_subscribe/6 does too. Matching `{ok, Id, _Pid}` used to raise a
-    %% try_clause and report an error for a subscription that had in fact been
+    %% so do_subscribe/6 does too. Matching `{ok, Id, _Pid}` instead raises a
+    %% try_clause and reports an error for a subscription that has in fact been
     %% created.
     Res =
         case do_subscribe(RealmUri, Opts, Topic, Bridge, Spec0, State) of
@@ -606,12 +606,12 @@ do_load_subscription(#{<<"bridge">> := Bridge} = Subs, {Acc, Failed}) ->
 %% The half of the mops context that does not change between events. It is
 %% computed once, at subscribe time, and captured by the subscriber's closure.
 %%
-%% This used to be rebuilt per event, and it reached the bridge configuration
-%% through the exported `bridge/1` — a `gen_server:call` into this very process.
-%% Every event, from every subscriber on the node, therefore queued behind a
-%% single mailbox. The state is already in scope here, so nothing needs to be
-%% asked for. `ctxt` is absent for a bridge whose `init/1` never ran, which is
-%% why it defaults rather than raising `{badkey, ctxt}` on every event.
+%% Rebuilding it per event would reach the bridge configuration through the
+%% exported `bridge/1` — a `gen_server:call` into this very process — so every
+%% event, from every subscriber on the node, would queue behind a single
+%% mailbox. The state is already in scope here, so nothing needs to be asked
+%% for. `ctxt` is absent for a bridge whose `init/1` never ran, which is why it
+%% defaults rather than raising `{badkey, ctxt}` on every event.
 static_mops_ctxt(Bridge, State) ->
     Base =
         case get_bridge(Bridge, State) of
@@ -703,8 +703,8 @@ do_subscribe(RealmUri, Opts0, Topic, Bridge, Action0, State) ->
                 stacktrace => Stacktrace,
                 bridge => Bridge
             }),
-            %% Answer the same shape on both paths. This used to return
-            %% `{{error, Reason}, State}`, which no caller matched.
+            %% The same shape on both paths: `{error, Reason}`, which is what
+            %% every caller of this function matches.
             {error, Reason}
     end.
 

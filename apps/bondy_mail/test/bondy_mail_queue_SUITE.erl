@@ -13,11 +13,9 @@ This is the part of `bondy_mail` that carries the application's central claim --
 that a slow or dead relay degrades mail delivery and nothing else -- so it is
 tested on its own rather than through the send path that happens to use it.
 
-Every case here is a regression. The queue used to be a `jobs` queue, which is
-to say a `gen_server:call/3` with an `infinity` timeout into a single
-node-global process shared with the router's own job pool, holding whole
-messages in its heap. Replacing it fixed the coupling and, in the same change,
-a worker loop that never returned to its mailbox.
+Each case pins one property that is invisible from the shape of the code: that
+the bounds are the relay's, that a reservation survives a worker dying, that a
+lane decides service order, and that a worker still answers while it is idle.
 """.
 
 -include_lib("common_test/include/ct.hrl").
@@ -92,9 +90,8 @@ message_bound_refuses_transiently(Config) ->
 The byte bound refuses even when the message bound has room.
 
 The reason there are two. `queue.max_size` alone says nothing about memory,
-because a message may be a hundred bytes or twenty megabytes -- and it was the
-byte total, not the message count, that used to decide how much of a shared
-process's heap a stalled relay could occupy.
+because a message may be a hundred bytes or twenty megabytes; the byte total is
+what decides how much a stalled relay can occupy.
 """.
 byte_bound_refuses_transiently(Config) ->
     %% Room for a thousand messages, and for about three of these.
@@ -115,8 +112,7 @@ byte_bound_refuses_transiently(Config) ->
 
 The counters are per worker -- which is what makes a stranded reservation
 recoverable -- and the bound is the sum of them. Reading it as a single worker's
-share would let a relay configured for four hold sixteen, and the same mistake
-made in the other direction is what the depth gauge used to publish.
+share would let a relay configured for four hold sixteen.
 
 Four workers and a bound of four hold at most eight messages: one in flight per
 worker, whose reservation has already been given back, and four waiting. Reading
@@ -220,10 +216,9 @@ normal_priority_is_served_before_low(Config) ->
 A message that waited longer than `queue.ttl` is shed, and everyone is told.
 
 Shed rather than delivered, because whoever asked for it has long since been
-answered by their own deadline. Told rather than dropped, because the queue
-this replaced dropped an expired entry inside its own server: a synchronous
-caller waited out its full timeout for an answer that was never coming, and the
-status record said `queued` until it was swept.
+answered by their own deadline. Told rather than dropped, because a silent drop
+leaves a synchronous caller waiting out its full timeout for an answer that is
+never coming and a status record saying `queued` until it is swept.
 
 Deliberately not counted against relay health: our queue backing up says
 nothing about whether the relay is answering.
@@ -294,10 +289,11 @@ stopping_a_worker_sheds_what_it_held(Config) ->
 -doc """
 An idle worker answers.
 
-It used to not. `handle_continue/2` re-armed `{continue, dequeue}` on every
-pass, and `gen_server` dispatches a continuation without receiving anything --
-so the process never touched its mailbox, every callback below `handle_continue`
-was unreachable, and anything sent to a worker stayed there for ever.
+A worker drains by sending itself a message, so it returns to its mailbox
+between deliveries. A worker that instead re-armed `{continue, _}` would never
+touch its mailbox at all -- `gen_server` dispatches a continuation without
+receiving anything -- and every callback below `handle_continue/2` would be
+unreachable while anything sent to it sat there for ever.
 
 The assertion is not about `ping`. It is that a call to a worker returns at all.
 """.
@@ -312,13 +308,14 @@ a_worker_answers_while_it_is_idle(Config) ->
 -doc """
 A worker serves system messages, so it can be inspected and upgraded.
 
-The same defect as above seen from the other side: `sys:get_state/1` hung, which
-also means a release upgrade would have hung on every mail worker on the node.
+The same property as above seen from the other side: a worker that never
+returned to its mailbox would hang `sys:get_state/1`, and with it a release
+upgrade on every mail worker on the node.
 
 The assertion is that `sys` is answered at all. Matching the shape of the
-worker's private state -- which this used to do -- couples a liveness test to
-the field order of a record it cannot see, so adding a field breaks it for a
-reason that has nothing to do with what it is testing.
+worker's private state would couple a liveness test to the field order of a
+record it cannot see, so adding a field would break it for a reason that has
+nothing to do with what it is testing.
 """.
 a_worker_reports_its_state_to_sys(Config) ->
     ok = start(Config, #{pool_size => 1}),

@@ -8,7 +8,7 @@
 -moduledoc """
 Callee invocation + subscriber FIFO dispatch + worker lifecycle for a
 `bondy_connect` connection — a **pure(-ish) data** helper extracted from
-`bondy_connect_connection` (review A2).
+`bondy_connect_connection`.
 
 It owns the three previously-scattered `gen_statem` maps (in-flight callee
 `invocations`, the monitor reverse-index `mons`, and the per-subscription FIFO
@@ -359,7 +359,7 @@ interrupt(InvReqId, _Opts, #dispatch{invocations = Inv, mons = Mons} = D) ->
 -doc """
 A monitored worker died. An invocation worker that died before replying yields a
 synthetic `ERROR` and releases its load token; an event worker advances the FIFO.
-Also handles a `start_worker` failure (review B1) routed in as a DOWN. Pitfall 2:
+Also handles a `start_worker` failure routed in as a DOWN. Pitfall 2:
 the `DOWN` already removed the monitor, so this path never demonitors.
 """.
 -spec worker_down(MonRef :: reference(), Reason :: term(), t()) ->
@@ -446,14 +446,14 @@ kill_all(#dispatch{invocations = Inv, queues = Queues} = D) ->
 -doc """
 Clear all dispatch maps and reset the load counter, **reusing** the same token
 bucket across reconnects (a fresh `bondy_connect_load:new/1` would orphan a
-`bondy_regulator` ETS row each time — review B4).
+`bondy_regulator` ETS row each time).
 """.
 -spec reset(t()) -> t().
 
 reset(#dispatch{load = Load}) ->
     #dispatch{load = bondy_connect_load:reset(Load)}.
 
--doc "Free the load regulator's ETS row on connection terminate (review B4).".
+-doc "Free the load regulator's ETS row on connection terminate.".
 -spec delete(t()) -> ok.
 
 delete(#dispatch{load = Load}) ->

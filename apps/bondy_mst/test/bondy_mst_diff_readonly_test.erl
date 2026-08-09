@@ -157,13 +157,12 @@ diff_unknown_root_is_full_list_test() ->
 %% 2. Read-only: the mutable backends are left intact by a diff
 %% -----------------------------------------------------------------------------
 
-%% ETS: the old split-based descent `free`d pages *during* the diff. `free`
-%% now always tombstones (it once hard-deleted here, which is why this
-%% regression was written), so the damage would surface at the next
-%% collection rather than instantly — the assertions below hold either way.
-%% Two-tree form splits both stores; assert both trees survive, the result is
-%% correct, and a repeat diff is identical (the old code crashed on the
-%% second pass).
+%% ETS: a split-based descent that `free`s pages *during* the diff damages the
+%% store it is reading. `free` always tombstones rather than hard-deleting, so
+%% such damage would surface at the next collection rather than instantly —
+%% the assertions below hold either way. Two-tree form splits both stores;
+%% assert both trees survive, the result is correct, and a repeat diff is
+%% identical.
 diff_readonly_ets_two_tree_test() ->
     A = build(ets_tree("np_A"), kvs(lists:seq(1, 200), 0)),
     B = build(ets_tree("np_B"), kvs(lists:seq(100, 350), 7)),

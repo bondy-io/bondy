@@ -207,9 +207,10 @@ init_catalogue_multi(InstanceId) ->
 %% The instance's founding projection target, resolved through whichever
 %% process owns it: the applier for a non-fused instance, the fused
 %% instance's own gen_server otherwise (`bondy_oplog_instance:
-%% cell_apply_target/1` — a fused instance has no applier pid, which
-%% previously made every fused instance answer `no_snapshot` and left
-%% retention-bounded registry shards with no bootstrap producer at all).
+%% cell_apply_target/1`). A fused instance has no applier pid, so resolving
+%% through the applier alone would answer `no_snapshot` for every one of
+%% them, leaving retention-bounded registry shards with no bootstrap
+%% producer.
 resolve_cell_apply_target(InstanceId) ->
     case bondy_oplog_registry:applier_pid(InstanceId) of
         undefined ->

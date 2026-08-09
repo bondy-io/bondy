@@ -93,7 +93,7 @@ format_status(_Config) ->
     cbor_batched
 ]).
 %% NOTE: bert / bert_batched are intentionally absent — de-listed as a pre-auth
-%% DoS (bert:decode/1 => binary_to_term/1 without [safe]). See WP-B / P-1.
+%% DoS (bert:decode/1 => binary_to_term/1 without [safe]).
 -define(SUPPORTED_SUB_PROTOCOLS, [
     {raw, binary, erl},
     {raw, binary, json},
@@ -161,7 +161,7 @@ validate_subprotocol(_Config) ->
         bondy_wamp_protocol:validate_subprotocol(<<"wamp.2.not.supported">>)
     ),
 
-    %% WP-B / P-1: bert and bert_batched are de-listed (bert:decode/1 =>
+    %% bert and bert_batched are de-listed (bert:decode/1 =>
     %% binary_to_term/1 without [safe] is a pre-auth atom-exhaustion DoS).
     ?assertEqual(
         {error, invalid_subprotocol},
@@ -185,7 +185,7 @@ validate_subprotocol(_Config) ->
     ).
 
 %% -----------------------------------------------------------------------------
-%% WP-D / A-2: pre-auth ABORT must not be a user-enumeration oracle
+%% pre-auth ABORT must not be a user-enumeration oracle
 %% -----------------------------------------------------------------------------
 
 abort_message_preauth_is_generic(_Config) ->
@@ -237,7 +237,7 @@ init_ok(_Config) ->
     ?assertError(function_clause, bondy_wamp_protocol:ref(State)).
 
 %% -----------------------------------------------------------------------------
-%% bondy_wamp_protocol:throttle (AV-1 / WP-K)
+%% bondy_wamp_protocol:throttle
 %% -----------------------------------------------------------------------------
 
 throttle_disabled_by_default(_Config) ->

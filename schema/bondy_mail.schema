@@ -360,7 +360,10 @@ end}.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "mail.relay.$name.rate_limit.rate", "bondy_mail.relays", [
-  {datatype, integer},
+  %% A fractional rate is meaningful here: a relay permitting 30 messages a
+  %% minute is `0.5`, and an integer-only datatype would round that to nothing
+  %% or to double.
+  {datatype, [integer, float]},
   {default, 0},
   {validators, ["non_negative_number"]}
 ]}.

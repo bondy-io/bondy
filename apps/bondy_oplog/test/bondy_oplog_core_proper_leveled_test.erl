@@ -175,8 +175,8 @@ with_shard(Fn) ->
 
 start_shard(NS, Index, Shard, ShardCount) ->
     Dir = make_tempdir(),
-    %% head_only=with_lookup required by bondy_db_projection_leveled
-    %% (PR-PS-15b); use the proplist form to add it.
+    %% head_only=with_lookup is required by bondy_db_projection_leveled;
+    %% use the proplist form to add it.
     {ok, Bookie} = leveled_bookie:book_start(
         [
             {root_path, Dir},

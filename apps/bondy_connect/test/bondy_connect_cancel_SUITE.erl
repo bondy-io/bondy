@@ -125,7 +125,7 @@ cancel_kill_interrupts_callee(_) ->
 
 %% Cancelling one token among several in-flight async calls must cancel exactly
 %% that call and leave the others in flight — proving the token->ReqId secondary
-%% index (review C1) resolves each token to its own request, not just "some"
+%% index resolves each token to its own request, not just "some"
 %% pending call.
 cancel_specific_among_many(_) ->
     Callee = connect(),

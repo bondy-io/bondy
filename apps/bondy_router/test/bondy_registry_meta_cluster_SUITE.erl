@@ -96,10 +96,10 @@ cluster_get_by_id_across_nodes(Config) ->
 
 %% `page_members/4` pairs each member session with the node holding it, and that
 %% node is the whole point — it is what `bondy.registration.callee.list`
-%% reports. The realm-wide form must span the cluster: it used to read
-%% `bondy_registry:match/3`, which under write-only RIB returns the
-%% coordinator's OWN entries only, so the peer's callees were silently missing
-%% and the answer shrank as the cluster grew.
+%% reports. The realm-wide form must span the cluster: reading
+%% `bondy_registry:match/3` instead would answer with the coordinator's OWN
+%% entries only under write-only RIB, silently omitting the peer's callees and
+%% shrinking the answer as the cluster grows.
 %%
 %% The page size is deliberately smaller than one node's share, so the walk
 %% must cross a page boundary AND a node boundary to see both.

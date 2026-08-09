@@ -1580,7 +1580,7 @@ handle_call(
 ) ->
     Result = do_install_catalogue_batch(Id, Source, Cells),
     %% A catalogue install replaces/merges the projection wholesale, so
-    %% the tier_2 stamp-site high-water (#27) it tracks no longer reflects
+    %% the tier_2 stamp-site high-water it tracks no longer reflects
     %% the live projection — drop it. The next stamp per cell re-seeds
     %% from the installed value; a regression straddling an install is not
     %% a regression (the install is an authorised wholesale replacement).
@@ -2486,7 +2486,7 @@ apply_fold_batch(
     end.
 
 %% @private
-%% tier_2 stamp-site context-regression guard (#27) — delegates to the
+%% tier_2 stamp-site context-regression guard — delegates to the
 %% shared `bondy_oplog_ctx_guard`, so the applier and a fused instance
 %% (which has no separate applier process to hold this state) enforce the
 %% identical check from one place. tier_0/tier_1 carry no context

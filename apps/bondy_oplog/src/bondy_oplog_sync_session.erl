@@ -159,9 +159,8 @@ run(Instance, Peer, Opts, Iterations) when is_binary(Instance) ->
     %% catalogue rebootstrap, whose install + finalize supply BOTH the
     %% data and the frontier. This check IS the recovery half of the
     %% recency filter's liveness trade — without it a stale-peer rejoin
-    %% silently loses whatever was truncated past it (found by
-    %% `bondy_oplog_compaction_cluster_SUITE`'s stale-peer rejoin case,
-    %% which previously timed out here with zero rebootstraps flagged).
+    %% silently loses whatever was truncated past it (covered by
+    %% `bondy_oplog_compaction_cluster_SUITE`'s stale-peer rejoin case).
     %% Both the gap check and the adoption require a COMPLETE round
     %% (`PeerRoot =/= skip`): a benign-incomplete round (budget/byte caps,
     %% mid-session root refresh) has not pulled everything the peer's
@@ -754,8 +753,8 @@ pull_until_complete(
     %% not sweep pulled-but-not-yet-merged pages between our rounds —
     %% during a multi-round pull the earlier rounds' pages are
     %% unreachable from the LOCAL root until the final integrate, and
-    %% every concurrent compaction cycle used to collect them (the
-    %% merge then silently treated the missing subtrees as empty). The
+    %% a concurrent compaction cycle would otherwise collect them and the
+    %% merge would silently treat the missing subtrees as empty. The
     %% pin is consumed by a successful integrate and TTL-expires if
     %% this session dies. First entry only; chase re-pins its refreshed
     %% root.

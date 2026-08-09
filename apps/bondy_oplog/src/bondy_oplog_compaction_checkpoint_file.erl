@@ -55,12 +55,12 @@ versioning seam for future schema evolution.
 
 ## Why not DETS
 
-The library used to ship a DETS-backed implementation. DETS earned
-its keep on none of the dimensions that matter for a single-row
-checkpoint store: it has no real transactional guarantees, requires
-atom-named tables (atom-table footgun for many instances), and runs
-a slow repair pass on dirty restart. `file:rename/2` is atomic on
-POSIX by specification — strictly better than DETS for our use case.
+DETS earns its keep on none of the dimensions that matter for a
+single-row checkpoint store: it has no real transactional guarantees,
+requires atom-named tables (an atom-table footgun with many
+instances), and runs a slow repair pass on dirty restart.
+`file:rename/2` is atomic on POSIX by specification, which is all this
+store needs.
 """).
 
 -record(state, {

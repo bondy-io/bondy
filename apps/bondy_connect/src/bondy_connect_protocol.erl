@@ -134,7 +134,7 @@ handle_message(#welcome{} = Msg, #state{state_name = challenging} = St) ->
 %% a method that does not gate the session on a challenge — `anonymous`. For a
 %% credential-bearing method (`cra`/`cryptosign`/`ticket`) the client never got
 %% to present its credential, so silently accepting it would downgrade the
-%% operator's chosen security posture (review B2). Reject it with an ABORT.
+%% operator's chosen security posture. Reject it with an ABORT.
 handle_message(#welcome{} = Msg, #state{state_name = establishing} = St) ->
     Method = bondy_connect_auth:method(St#state.auth),
     case requires_challenge(Method) of
@@ -254,7 +254,7 @@ welcome(#welcome{session_id = SessionId, details = Details}, St) ->
 %% round before a WELCOME is acceptable. Only `anonymous` may be welcomed
 %% straight from `establishing`; every credential-bearing method (including
 %% `ticket`, which presents its secret in the AUTHENTICATE) must see a CHALLENGE
-%% first, so we default-deny any other method (review B2).
+%% first, so we default-deny any other method.
 requires_challenge(?WAMP_ANON_AUTH) -> false;
 requires_challenge(_Other) -> true.
 

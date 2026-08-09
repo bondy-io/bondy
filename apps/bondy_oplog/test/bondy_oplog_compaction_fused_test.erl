@@ -481,17 +481,16 @@ fused_catalogue_bootstrap_roundtrip() ->
 %% which retention bypasses — adopting would flip the convergence oracle
 %% to CONVERGED over silently missing data). The catalogue bootstrap is
 %% then the remedy: after install + finalize the same sync round passes.
-%% THE WATERMARK DOOR — data-loss reproducer and fix lock (fused).
-%% A peer event whose key sorts at or below this replica's watermark can
-%% arrive AFTER the watermark advanced: the peer-confirmed frontier and
-%% in-flight events race by design under concurrent writes.
-%% `integrate_peer_root` used to discard such an event UNAPPLIED at its
-%% watermark re-truncate — the op never reached this replica's
-%% projection, the completed round's `confirm_root` (a PAGE-holding
-%% claim) then let the origin compact the event away, and the applied
-%% VV max-merged past the hole on the next same-origin apply, masking
-%% the loss from every oracle. The door must FOLD a never-applied event
-%% into the projection (advancing the VV) before dropping it.
+%% THE WATERMARK DOOR (fused). A peer event whose key sorts at or below
+%% this replica's watermark can arrive AFTER the watermark advanced: the
+%% peer-confirmed frontier and in-flight events race by design under
+%% concurrent writes. Discarding such an event UNAPPLIED at the watermark
+%% re-truncate loses data silently — the op never reaches this replica's
+%% projection, the completed round's `confirm_root` (a PAGE-holding claim)
+%% lets the origin compact the event away, and the applied VV max-merges
+%% past the hole on the next same-origin apply, masking the loss from every
+%% oracle. The door must FOLD a never-applied event into the projection
+%% (advancing the VV) before dropping it.
 watermark_door_folds_unapplied_peer_event_fused() ->
     A = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),
     B = start_fused_instance(bondy_oplog_crdt_pn_counter, #{}, undefined),

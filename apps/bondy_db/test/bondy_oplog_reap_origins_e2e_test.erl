@@ -15,7 +15,7 @@
 %%
 %%   - value-preserving: the read is unchanged across the reap,
 %%   - the reap report counts (cells scanned/reaped, origins reaped),
-%%   - ctx_guard co-eviction (#27 NOTE): a same-origin write AFTER the reap
+%%   - ctx_guard co-eviction: a same-origin write AFTER the reap
 %%     is NOT mistaken for a context regression — without co-eviction the
 %%     reaped origin lingers in the stamp-site high-water and refuses it,
 %%   - idempotence, and

@@ -444,10 +444,10 @@ attachment_filename_may_not_be_a_path(_) ->
 An attachment filename may not carry a control character.
 
 A filename becomes a `Content-Disposition` parameter, so it is header data and
-is held to the same rule as any other header data. It used to be held to a
-shorter one -- CR, LF and NUL only -- so a filename could carry a vertical tab
-or a DEL that the very same bytes in a custom header would have been refused
-for. One rule, one function: `bondy_mail_header:has_control/1`.
+is held to the same rule as any other header data. A shorter rule here -- CR, LF
+and NUL only, say -- would accept a vertical tab or a DEL in a filename that the
+very same bytes in a custom header are refused for. One rule, one function:
+`bondy_mail_header:has_control/1`.
 """.
 attachment_filename_may_not_carry_control_characters(_) ->
     Attachment = fun(Name) ->

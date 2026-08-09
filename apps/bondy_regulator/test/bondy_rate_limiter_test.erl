@@ -4,7 +4,7 @@
 %% =============================================================================
 
 -module(bondy_rate_limiter_test).
--moduledoc "WP-K / AV-1 — keyed + GC'd token-bucket rate limiter.".
+-moduledoc "The keyed, GC'd token-bucket rate limiter.".
 
 -include_lib("eunit/include/eunit.hrl").
 

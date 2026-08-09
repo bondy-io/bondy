@@ -295,7 +295,7 @@ welcome_after_challenge(_) ->
 
 %% A WELCOME arriving straight from `establishing` (no prior CHALLENGE) must be
 %% rejected for every credential-bearing method — silently accepting it would
-%% downgrade the operator's configured security posture (review B2). Anonymous
+%% downgrade the operator's configured security posture. Anonymous
 %% is the only method that may be welcomed un-challenged (anonymous_welcome).
 welcome_without_challenge_aborts(_) ->
     #{secret := Secret} = bondy_wamp_cryptosign:generate_key(),

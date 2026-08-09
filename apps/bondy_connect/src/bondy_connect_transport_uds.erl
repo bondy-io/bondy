@@ -14,8 +14,8 @@ handshake and `bondy_connect_framing` frames, and the same `{tcp, _, _}` active
 message tags (a UDS stream socket is still a `gen_tcp` socket) — but it dials a
 filesystem path instead of a host/port. The endpoint is `{local, Path}` where
 `Path` is the socket file the router listens on. Only `connect/2` is specific to
-this transport; everything else is shared via `bondy_connect_raw` (review D2,
-using the `tcp` backend).
+this transport; everything else is shared via `bondy_connect_raw`, using the
+`tcp` backend.
 
 There is no transport-level security (UDS is constrained by filesystem
 permissions), so unlike `_tls` there are no certificate options.

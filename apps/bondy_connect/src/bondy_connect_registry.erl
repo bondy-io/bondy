@@ -13,7 +13,7 @@ It separates two views:
 
 - **declared** — the user's *desired* state (procedure/topic URI + handler +
   options). This is what `register/2`/`subscribe/2` record; it survives a
-  reconnect and is what Phase 6 replays.
+  reconnect and is what a reconnect replays.
 - **established** — the *server-confirmed* state, keyed by the id the router
   assigned (`registration_id`/`subscription_id`). This is what inbound
   `INVOCATION`/`EVENT` records are routed against.

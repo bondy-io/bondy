@@ -68,7 +68,7 @@ disconnect(Conn) ->
         %% The manager is unavailable because the application is stopping; the
         %% connection is therefore already gone, so the disconnect has
         %% effectively succeeded. Honour the `-> ok` contract rather than
-        %% exiting in the caller's teardown code (review B6).
+        %% exiting in the caller's teardown code.
         exit:{noproc, _} -> ok;
         exit:{normal, _} -> ok;
         exit:{shutdown, _} -> ok;

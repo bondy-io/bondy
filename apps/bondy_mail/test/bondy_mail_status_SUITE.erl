@@ -491,13 +491,12 @@ A message shed from the queue reports what happened AND gives its key back.
 
 Both halves, because each without the other is a defect.
 
-Recording it as a failure -- which is what this did -- leaves the claim
-consumed, so every later request carrying that key is answered with the recorded
-failure and nothing is ever sent. For a message no relay was ever shown, which
-is exactly the case an idempotency key is supposed to make retryable. The
-alternative of simply deleting the record frees the key but leaves an
-asynchronous caller holding an id that now answers `unknown`, indistinguishable
-from one that never existed.
+Recording it as a failure would leave the claim consumed, so every later request
+carrying that key is answered with the recorded failure and nothing is ever sent
+-- for a message no relay was ever shown, which is exactly the case an
+idempotency key is supposed to make retryable. Simply deleting the record frees
+the key but leaves an asynchronous caller holding an id that answers `unknown`,
+indistinguishable from one that never existed.
 
 So the record stays, saying `shed`, and `claim/1` takes it over.
 """.

@@ -27,13 +27,12 @@ lifecycle_test_() ->
         fun path_layouts_round_trip/0
     ]}.
 
-%% Regression: an instance whose registry row is gone while its subtree
-%% still runs (a consumer teardown that failed mid-close) must remain
-%% STOPPABLE. `list_instances/0` enumerates supervisor children while
-%% `stop_instance/1` used to resolve only via the registry row — the
-%% asymmetry made such an instance visible to every scheduler yet
-%% unkillable, so it polluted every later test module's clean slate for
-%% the VM's lifetime (the `my_db/0` zombie).
+%% An instance whose registry row is gone while its subtree still runs (a
+%% consumer teardown that failed mid-close) must remain STOPPABLE.
+%% `list_instances/0` enumerates supervisor children, so `stop_instance/1`
+%% must not resolve via the registry row alone: that asymmetry leaves such an
+%% instance visible to every scheduler yet unkillable, polluting every later
+%% test module's clean slate for the VM's lifetime.
 stop_survives_missing_registry_row() ->
     Id = mk_id(),
     {ok, _} = bondy_oplog:start_instance(Id),

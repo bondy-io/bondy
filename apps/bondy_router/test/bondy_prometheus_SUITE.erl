@@ -45,8 +45,8 @@ exposition_renders_all_family_groups(_) ->
 
     %% No series (name + labelset) may appear twice: duplicates make
     %% PromQL selectors fail with "vector cannot contain metrics with the
-    %% same labelset". Regression guard for the bondy_metrics passthrough
-    %% that used to render every declared family a second time.
+    %% same labelset". The `bondy_metrics` passthrough must render each
+    %% declared family once.
     Samples = [
         L
      || L <- binary:split(Output, <<"\n">>, [global]),

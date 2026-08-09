@@ -65,8 +65,7 @@ new_cra_too_low_iterations(_) ->
     ).
 
 new_cra_too_high_iterations(_) ->
-    %% S-1: the ceiling was raised from 65,536 to 10,000,000; a value above the
-    %% new ceiling is still rejected.
+    %% A value above the 10,000,000 iteration ceiling is rejected.
     ?assertError(
         {invalid_argument, iterations},
         bondy_password:new(?P1, #{

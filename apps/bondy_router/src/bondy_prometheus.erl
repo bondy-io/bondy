@@ -229,7 +229,7 @@ declare_wamp_metrics() ->
     _ = prometheus_counter:declare([
         {name, bondy_rate_limited_total},
         {help,
-            <<"The total number of inbound requests denied by the AV-1 rate limiter, by class (handshake | auth | connection | message).">>},
+            <<"The total number of inbound requests denied by the inbound rate limiter, by class (handshake | auth | connection | message).">>},
         {labels, [class]}
     ]),
     _ = prometheus_counter:declare([

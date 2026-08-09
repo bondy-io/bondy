@@ -143,7 +143,7 @@ ws_upgrade_bad_path_fails(_) ->
 
 %% An inbound WebSocket message larger than the negotiated `max_message_length`
 %% is rejected before it is decoded into terms, rather than materialized
-%% (asymmetric DoS protection — review B3). Callee `A` runs with the default
+%% (asymmetric DoS protection). Callee `A` runs with the default
 %% limit and returns a large result; caller `B` dials with a small limit and
 %% must see its call fail instead of decoding the oversized RESULT. The
 %% handshake WELCOME still fits comfortably under B's limit (asserted via

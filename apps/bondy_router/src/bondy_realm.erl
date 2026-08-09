@@ -602,10 +602,10 @@ connected to any realm.
     grants => [
         %% D-2: the administrators group is granted wamp.* on the Bondy admin
         %% namespaces ONLY (`bondy.*` and `wamp.*`), not on all URIs (`<<"">>`).
-        %% The anonymous grant that previously mirrored this has been REMOVED, so
-        %% the anonymous role holds no capability on the master realm. The
-        %% trailing-dot prefixes are component-safe under the current byte-prefix
-        %% match and become component-correct once Z-1/WP-N lands.
+        %% The anonymous role holds no capability on the master realm: there
+        %% is deliberately no anonymous grant mirroring this one. The
+        %% trailing-dot prefixes are component-safe under the byte-prefix
+        %% match.
         #{
             permissions => [
                 <<"wamp.call">>,
@@ -3033,10 +3033,9 @@ from_term(Term) when
     };
 from_term({realm, Uri, Desc, Authmethods, PrivKeys, PubKeys, PassOpts}) ->
     %% Legacy 7-tuple realm format; effectively dead (current realms
-    %% deserialise via the record clause above). Security status used to be
-    %% read from the old plum_db `{security_status, Uri}` prefix, now retired —
-    %% the live flag is the `security_enabled` record field, defaulting to
-    %% `false` here.
+    %% deserialise via the record clause above). It carries no security flag
+    %% of its own, so the `security_enabled` record field defaults to `false`
+    %% here.
     #realm{
         uri = Uri,
         description = Desc,

@@ -7,7 +7,7 @@
 
 -moduledoc """
 Pure unit tests for `bondy_connect_keepalive` — the idle keepalive budget
-extracted from the connection statem (review A2). No sockets, no processes.
+extracted from the connection statem. No sockets, no processes.
 """.
 
 -include_lib("common_test/include/ct.hrl").

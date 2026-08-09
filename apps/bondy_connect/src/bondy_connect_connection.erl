@@ -28,7 +28,7 @@ produces; `establishing` feeds inbound CHALLENGE/WELCOME/ABORT records to the
 protocol layer until it reports `established` (or aborts); `established` services
 the four client roles and runs idle ping/pong keepalive.
 
-## Resilience (Phase 6)
+## Resilience
 
 A dropped session is re-established in-process: on a transport failure the
 session state is torn down (in-flight calls fail-fast with `{error, disconnected}`,
@@ -88,7 +88,7 @@ authenticating and cleared on `established`. Progressive calls
     protocol :: bondy_connect_protocol:state(),
     session :: bondy_connect_session:t() | undefined,
     ready_waiters = [] :: [gen_statem:from()],
-    %% Resilience (Phase 6)
+    %% Resilience
     reconnect_retry :: bondy_retry:t() | undefined,
     retry_initial = false :: boolean(),
     established_once = false :: boolean(),
@@ -107,7 +107,7 @@ authenticating and cleared on `established`. Progressive calls
     %% ReqId => #{type, from, timer, meta}
     pending = #{} :: #{pos_integer() => map()},
     %% async-call token -> ReqId secondary index, kept in lockstep with the
-    %% `call_async' entries in `pending' so cancel/3 is O(1) (review C1).
+    %% `call_async' entries in `pending' so cancel/3 is O(1).
     async_index = #{} :: #{reference() => pos_integer()},
     handler_sup :: pid() | undefined,
     registry :: bondy_connect_registry:t(),
@@ -764,10 +764,9 @@ process_records([Record | Rest], StateName, Data) ->
 %% node via their load balancer).
 %%
 %% Routing a transient abort through the ordinary failure path is what gets it
-%% the backoff loop. Stopping here unconditionally — which is what this used to
-%% do — bypassed `is_retriable/1` and `reconnect_allowed/2` entirely, so EVERY
-%% abort killed the connection for good, including the one the router had
-%% explicitly marked retryable.
+%% the backoff loop. Stopping here unconditionally would bypass `is_retriable/1`
+%% and `reconnect_allowed/2` entirely, so EVERY abort would kill the connection
+%% for good, including the one the router has explicitly marked retryable.
 on_protocol_stop(Reason, Data) ->
     case find_abort(Reason) of
         {ok, {abort, Uri, Details} = Abort} ->
@@ -929,7 +928,7 @@ do_cancel(From, Token, Mode, Data) ->
     end.
 
 %% @private Resolve a `call_async` token to its pending CALL request id via the
-%% O(1) secondary index (review C1), avoiding an O(n) scan of `pending` on every
+%% O(1) secondary index, avoiding an O(n) scan of `pending` on every
 %% cancel/3. The index is maintained in lockstep by store/resolve/timeout/reply.
 find_async_call(Token, #data{async_index = Index}) ->
     maps:find(Token, Index).
@@ -1476,14 +1475,14 @@ handle_req_timeout(ReqId, TRef, #data{pending = Pending} = Data) ->
             Data
     end.
 
-%% @private Add a `call_async' entry's token to the secondary index (review C1).
+%% @private Add a `call_async' entry's token to the secondary index.
 %% Non-async entries (`sync`/`undefined' from) carry no token and are skipped.
 index_async(#{from := {async, _, Token}}, ReqId, Index) ->
     maps:put(Token, ReqId, Index);
 index_async(_Entry, _ReqId, Index) ->
     Index.
 
-%% @private Drop a removed entry's token from the secondary index (review C1).
+%% @private Drop a removed entry's token from the secondary index.
 unindex_async(#{from := {async, _, Token}}, Index) ->
     maps:remove(Token, Index);
 unindex_async(_Entry, Index) ->
@@ -1677,7 +1676,7 @@ teardown_session(Data0) ->
     Data1 = reply_pending({error, disconnected}, Data0),
     %% Kill in-flight invocation workers + demonitor event workers, then clear
     %% the dispatch maps and reset (not re-create) the load token bucket — a
-    %% fresh `new/1` would orphan a bondy_regulator ETS row each time (review B4).
+    %% fresh `new/1` would orphan a bondy_regulator ETS row each time.
     Data2 = run_dispatch(bondy_connect_dispatch:kill_all(disp(Data1)), Data1),
     Data3 = store_dispatch(bondy_connect_dispatch:reset(disp(Data2)), Data2),
     _ = close_transport(Data3),

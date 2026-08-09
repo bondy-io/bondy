@@ -465,9 +465,9 @@ revoke(RealmUri, RefreshToken) when is_binary(RefreshToken) ->
 Revokes every token that is valid on realm `RealmUri`.
 
 Tokens are bucketed by the AUTH realm, so a member realm's tokens sit in its SSO
-realm's bucket together with every SIBLING realm's. Clearing that bucket — which
-this used to do, having resolved the auth realm — would revoke the siblings'
-users too. Two buckets are therefore treated differently:
+realm's bucket together with every SIBLING realm's. Clearing that bucket
+wholesale would revoke the siblings' users too, so the two buckets are treated
+differently:
 
 - **`RealmUri`'s own bucket** holds tokens issued by sessions that authenticated
   against it (its local, non-SSO users). Those users go with the realm, so it is

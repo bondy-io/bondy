@@ -3,7 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %%
-%% Unit tests for strategy-aware shard routing (AR-2 / AR-3): the pure
+%% Unit tests for strategy-aware shard routing: the pure
 %% `bondy_db:shard_for/3` decision and its `aggregate_root/2` extractor,
 %% pinning the co-location invariant that makes an atomic per-subject batch
 %% possible — a subject's record (`identity`) and its grants / sources
@@ -102,7 +102,7 @@ aggregate_root_second_col_band_prefix_test() ->
 %% =============================================================================
 
 user_grant_source_colocate_test() ->
-    %% The whole point of AR-2: alice's user record + her grants + her sources
+    %% The point of shard co-location: alice's user record + her grants + her sources
     %% all land on one shard, so a token_version bump + grant write is one
     %% atomic per-shard batch (#73).
     UserT = agg_table(identity),

@@ -162,7 +162,7 @@
 %% to that fraction of dead pages in a single pack before paying for
 %% a full rewrite. Multi-pack coalescing is unaffected — when there
 %% are 2+ sealed packs, GC always merges them into one (the threshold
-%% only gates the dead-fraction case). See QA #9 / design §8.1.
+%% only gates the dead-fraction case).
 -define(BONDY_MST_PACK_DEFAULT_GC_THRESHOLD_DEAD_FRACTION, 0.0).
 
 %% -----------------------------------------------------------------------------
