@@ -197,6 +197,50 @@ corrupted_empty_file_returns_error_test() ->
     end).
 
 %% =============================================================================
+%% Atom table
+%% =============================================================================
+
+%% A checkpoint carries atoms from modules that need not be loaded when the
+%% instance reads it at boot. Decoding with `[safe]` rejects any atom the
+%% reading node has not created yet, so an intact checkpoint would be reported
+%% as corrupt and the instance would refuse to start. The file holds bytes this
+%% node wrote itself, so the decode must accept them.
+checkpoint_naming_an_unknown_atom_is_not_corrupt_test() ->
+    with_state(fun(S, Dir, Id) ->
+        Bin = checkpoint_bytes_naming_a_novel_atom(),
+
+        %% The fixture is only meaningful if it really does name an atom this
+        %% node has never created. Assert that before asserting the fix.
+        ?assertError(badarg, binary_to_term(Bin, [safe])),
+
+        Path = checkpoint_path(Dir, Id),
+        ok = filelib:ensure_dir(Path),
+        ok = file:write_file(Path, Bin),
+
+        ?assertMatch(
+            {ok, 42, #{tag := _}},
+            bondy_oplog_compaction_checkpoint_file:get_checkpoint(S)
+        ),
+        ?assertEqual(
+            42, bondy_oplog_compaction_checkpoint_file:current_watermark(S)
+        )
+    end).
+
+%% `term_to_binary/2` can only encode an atom that already exists, so the
+%% novel name is patched into the encoded bytes. ATOM_UTF8_EXT is
+%% length-prefixed, so a same-length substitution leaves a well-formed ETF
+%% binary and needs no length fixup.
+checkpoint_bytes_naming_a_novel_atom() ->
+    Placeholder = 'bondy_ckpt_placeholder_atom_nm',
+    Novel = <<"bondy_ckpt_atom_never_created1">>,
+    PlaceholderBin = atom_to_binary(Placeholder, utf8),
+    ?assertEqual(byte_size(PlaceholderBin), byte_size(Novel)),
+    Bin = term_to_binary(
+        {checkpoint_v1, 42, #{tag => Placeholder}}, [{minor_version, 2}]
+    ),
+    binary:replace(Bin, PlaceholderBin, Novel, [global]).
+
+%% =============================================================================
 %% Atomic-rename invariant
 %% =============================================================================
 

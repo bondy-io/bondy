@@ -785,13 +785,36 @@ start_cluster(Names, Config) when is_list(Names) ->
         end
      || N <- Names
     ],
-    Nodes = [
-        start_node(Name, Idx, PrivDir, Cookie, Extra)
-     || {{Name, Extra}, Idx} <- lists:zip(Specs, lists:seq(1, length(Specs)))
-    ],
-    ok = form_cluster(Nodes),
-    ok = wait_for_members(Nodes, length(Nodes), 30000),
-    Nodes.
+    Indexed = lists:zip(Specs, lists:seq(1, length(Specs))),
+    Nodes = start_nodes_or_unwind(Indexed, PrivDir, Cookie, []),
+    try
+        ok = form_cluster(Nodes),
+        ok = wait_for_members(Nodes, length(Nodes), 30000),
+        Nodes
+    catch
+        Class:Reason:Stacktrace ->
+            ok = stop_cluster(Nodes),
+            erlang:raise(Class, Reason, Stacktrace)
+    end.
+
+%% @private
+%% Peer ports are derived from a node's index within its cluster, so every
+%% cluster suite in a run binds the same ports. A node left running by a
+%% half-built cluster therefore makes every later cluster suite fail to bind
+%% with `eaddrinuse', turning one bad boot into a run-wide cascade. Whatever
+%% started before the failure is stopped before the error propagates.
+start_nodes_or_unwind([], _PrivDir, _Cookie, Acc) ->
+    lists:reverse(Acc);
+start_nodes_or_unwind([{{Name, Extra}, Idx} | T], PrivDir, Cookie, Acc) ->
+    Node =
+        try
+            start_node(Name, Idx, PrivDir, Cookie, Extra)
+        catch
+            Class:Reason:Stacktrace ->
+                ok = stop_cluster(lists:reverse(Acc)),
+                erlang:raise(Class, Reason, Stacktrace)
+        end,
+    start_nodes_or_unwind(T, PrivDir, Cookie, [Node | Acc]).
 
 %% -----------------------------------------------------------------------------
 %% @doc Backwards-compatible 3-arity form. `Options' must carry a `names' key
@@ -1156,18 +1179,28 @@ start_node(Name, Idx, PrivDir, Cookie, ExtraEnv) ->
     %% The `peer'-spawned control process owns the stdio channel, so the nodes
     %% still halt cleanly if the controller node dies.
     {ok, Peer, Node} = peer:start(PeerOpts),
-    %% `peer_boot/1' runs on the peer, so make sure this module is loaded there.
-    {?MODULE, Bin, File} = code:get_object_code(?MODULE),
-    {module, ?MODULE} =
-        erpc:call(Node, code, load_binary, [?MODULE, File, Bin]),
-    Env0 = node_env(DataDir, 18086 + Idx),
-    Env = lists:foldl(
-        fun({Path, Value}, Acc) -> key_value:set(Path, Value, Acc) end,
-        Env0,
-        ExtraEnv
-    ),
-    ok = erpc:call(Node, ?MODULE, peer_boot, [Env], 60000),
-    {Name, Node, Peer}.
+    %% The peer is up but not yet booted, and it already holds this index's
+    %% peer port. Every later cluster suite reuses that port, so a boot failure
+    %% that left the node running would make all of them fail to bind.
+    try
+        %% `peer_boot/1' runs on the peer, so make sure this module is loaded
+        %% there.
+        {?MODULE, Bin, File} = code:get_object_code(?MODULE),
+        {module, ?MODULE} =
+            erpc:call(Node, code, load_binary, [?MODULE, File, Bin]),
+        Env0 = node_env(DataDir, 18086 + Idx),
+        Env = lists:foldl(
+            fun({Path, Value}, Acc) -> key_value:set(Path, Value, Acc) end,
+            Env0,
+            ExtraEnv
+        ),
+        ok = erpc:call(Node, ?MODULE, peer_boot, [Env], 60000),
+        {Name, Node, Peer}
+    catch
+        Class:Reason:Stacktrace ->
+            catch peer:stop(Peer),
+            erlang:raise(Class, Reason, Stacktrace)
+    end.
 
 %% @private
 %% The host part of the controller's node name (e.g. "myhost" for
