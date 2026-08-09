@@ -647,8 +647,13 @@ cleanup_reaps_disabled_user_tokens(Config) ->
 
     Stats = bondy_oauth_token:cleanup(),
     ?assertEqual([], maps:get(errors, Stats)),
-    ?assert(maps:get(deactivated, Stats) >= 1),
-    ?assert(maps:get(cells_cleared, Stats) >= 1),
+    %% Matched rather than asserted field by field so a failure prints the whole
+    %% map: `deactivated` alone cannot distinguish "the realm was never swept"
+    %% from "the user still looked enabled", and those have different causes.
+    ?assertMatch(
+        #{deactivated := D, cells_cleared := C} when D >= 1 andalso C >= 1,
+        Stats
+    ),
 
     ?assertEqual(
         {error, not_found},
@@ -708,19 +713,37 @@ ticket_cleanup_prunes_expired_device_entries(Config) ->
 %% `revoke_all/2` already runs on user disable, so this is the backstop for an
 %% event a node missed while partitioned or restarting — the sweep must reach
 %% the same conclusion independently.
+%%
+%% That revocation is CAST to a router worker, so a ticket stored before the
+%% disable is racing it: whichever of the revocation and the sweep runs first
+%% reclaims the ticket, and the sweep reports nothing whenever it loses. The
+%% ticket therefore goes in AFTER the revocation has demonstrably run, which is
+%% also the situation being tested — a ticket the revocation never saw.
 ticket_cleanup_reaps_disabled_user_tickets(Config) ->
     Uri = ?config(realm_uri, Config),
     U = new_user(Uri, <<"ticket_disabled">>),
     Scope = local_scope(Uri, all),
+    Probe = local_scope(Uri, <<"revocation_probe">>),
+
+    %% The probe is how the cast is observed landing; nothing else here can
+    %% remove it.
+    ok = bondy_ticket:store_ticket(Uri, U, claims(Uri, U, Probe, live)),
+    ?assertMatch({ok, _}, bondy_ticket:lookup(Uri, U, Probe)),
+
+    ok = bondy_rbac_user:disable(Uri, U),
+    ok = wait_until(
+        fun() ->
+            {error, not_found} =:= bondy_ticket:lookup(Uri, U, Probe)
+        end,
+        revocation_on_disable
+    ),
 
     ok = bondy_ticket:store_ticket(Uri, U, claims(Uri, U, Scope, live)),
     ?assertMatch({ok, _}, bondy_ticket:lookup(Uri, U, Scope)),
 
-    ok = bondy_rbac_user:disable(Uri, U),
-
     Stats = bondy_ticket:cleanup(),
     ?assertEqual([], maps:get(errors, Stats)),
-    ?assert(maps:get(deactivated, Stats) >= 1),
+    ?assertMatch(#{deactivated := D} when D >= 1, Stats),
 
     ?assertEqual({error, not_found}, bondy_ticket:lookup(Uri, U, Scope)).
 
