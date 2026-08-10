@@ -2246,9 +2246,12 @@ do_update(Realm0, Map, Opts) ->
 
 %% @private
 merge_and_store(Realm0, Map, Opts) ->
-    Realm = maps:fold(fun fold_props/3, Realm0, Map),
+    Realm1 = maps:fold(fun fold_props/3, Realm0, Map),
 
-    ok = check_integrity_constraints(Realm),
+    ok = check_integrity_constraints(Realm1),
+
+    %% Only now that the prototype is known to exist, and to not be this realm.
+    Realm = derive_password_opts(Realm1, Map),
 
     %% We are going to call new on the respective modules so that we validate
     %% the data. This way we avoid adding anything to the database until all
@@ -2587,14 +2590,32 @@ keys_value_to_entries(_) ->
     [].
 
 %% @private
+%% `password_opts` is derived from `authmethods`, and a realm that names a
+%% prototype inherits `authmethods` from it — so deriving them dereferences the
+%% prototype. It therefore belongs after `check_integrity_constraints/1`, which
+%% is what establishes that the prototype exists and is not the realm itself:
+%% dereferencing an unvalidated prototype raises `not_found` from the fetch in
+%% place of the `badarg` the constraint reports, and resolves `authmethods`
+%% against a chain that may not hold.
+%%
+%% It also belongs outside `fold_props/3`, which sees one key at a time: the
+%% value derived there depends on whether `prototype_uri` has been folded yet,
+%% and `maps:fold/3` fixes no order.
+derive_password_opts(Realm, Map) ->
+    case maps:is_key(authmethods, Map) of
+        true ->
+            Realm#realm{
+                password_opts = get_password_opts(authmethods(Realm))
+            };
+        false ->
+            Realm
+    end.
+
+%% @private
 fold_props(allow_connections, V, Realm) ->
     Realm#realm{allow_connections = V};
-fold_props(authmethods, V, Realm0) ->
-    Realm = Realm0#realm{authmethods = V},
-    %% We get opts by calling the authmethods function which inherits the value
-    %% from the prototype
-    Opts = get_password_opts(authmethods(Realm)),
-    Realm#realm{password_opts = Opts};
+fold_props(authmethods, V, Realm) ->
+    Realm#realm{authmethods = V};
 fold_props(description, V, Realm) ->
     Realm#realm{description = V};
 fold_props(is_prototype, true, #realm{is_prototype = false} = Realm) ->

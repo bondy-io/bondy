@@ -713,6 +713,20 @@ stored frontier (`#{Origin => max Seq}`). Called by the applier at the commit
 barrier with the batch's per-origin maxima — a read-modify-write that is safe
 because the applier is the single writer of a given instance's frontier. An
 empty partial is a no-op.
+
+That single-writer rule is load-bearing, not hygiene. The frontier is the
+convergence oracle, and a per-origin maximum identifies an applied PREFIX only
+while every merge comes from events this replica actually folded. The applier
+guarantees that: `bondy_oplog_cell_apply:partition_contiguous/3` holds a remote
+origin's events beyond its first contiguity gap, so the maxima it merges cannot
+straddle a hole. A merge sourced from anywhere else — a peer's reported
+frontier, say — carries no such guarantee, and raising the oracle past a hole
+makes two replicas read IN SYNC over different data.
+
+The other two writers are legitimate because each supplies the DATA alongside
+the maxima: `finalize_catalogue_bootstrap/4` (catalogue install) and
+`restore_frontier/2` (compaction checkpoint, on restart). Any fourth caller
+needs the same property, or it reintroduces the over-claim.
 """).
 -spec merge_frontier(instance_id(), #{binary() => non_neg_integer()}) -> ok.
 

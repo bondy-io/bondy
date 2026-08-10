@@ -50,10 +50,17 @@ CONSTANTS
     GapCheckEnabled,   \* TRUE models maybe_frontier_gap/5; FALSE is the differential
     GatedCompaction,   \* TRUE = truncate only what every replica applied
                        \* FALSE = mst_retention / recency-filtered frontier
-    PrefixHold         \* TRUE models db.aae.prefix_hold (the increment-2 fix):
+    PrefixHold,        \* TRUE models db.aae.prefix_hold (the increment-2 fix):
                        \* a sync applies only the per-origin CONTIGUOUS closure
                        \* of local-applied + peer-tree; the held remainder stays
                        \* in the (fully merged) tree and out of the frontier
+    ContigClaim        \* TRUE replaces the per-origin MAX with the per-origin
+                       \* CONTIGUOUS PREFIX BOUND of what this replica APPLIED,
+                       \* and stops adopting the peer's claim wholesale. Same
+                       \* wire type (one integer per origin), but sound by
+                       \* construction: everything at or below the bound is
+                       \* held. This is `contig` from
+                       \* proofs/isabelle/Dot_Exactness_Gapped.thy.
 
 Origins == Replicas
 
@@ -77,6 +84,19 @@ MaxSeqOf(S, o) ==
     LET seqs == {e.seq : e \in {x \in S : x.org = o}}
     IN IF seqs = {} THEN 0
        ELSE CHOOSE m \in seqs : \A n \in seqs : n =< m
+
+\* Per-origin CONTIGUOUS prefix bound of S: the largest n such that every
+\* seq in 1..n is present. Unique, because {n : Full(n)} is downward closed,
+\* and total, because Full(MaxSeq+1) is false (no event carries that seq).
+\* Unlike MaxSeqOf this one cannot straddle a hole.
+ContigOf(S, o) ==
+    LET Full(n) == \A i \in 1..n : Ev(o, i) \in S
+    IN CHOOSE n \in 0..MaxSeq : Full(n) /\ ~Full(n + 1)
+
+\* The whole claim vector derived from what a replica APPLIED. Note it reads
+\* `applied`, never `tree`: compaction cannot lower it, which is what makes
+\* peer-claim adoption unnecessary under ContigClaim.
+ClaimFrom(S) == [o \in Origins |-> ContigOf(S, o)]
 
 VARIABLES
     applied,   \* [Replica -> SUBSET Event]  events actually folded here
@@ -119,7 +139,9 @@ Bootstrap(r) ==
          /\ booted[p]
          /\ applied' = [applied EXCEPT ![r] = applied[p]]
          /\ tree'    = [tree    EXCEPT ![r] = tree[p]]
-         /\ claim'   = [claim   EXCEPT ![r] = claim[p]]
+         /\ claim'   = IF ContigClaim
+                         THEN [claim EXCEPT ![r] = ClaimFrom(applied[p])]
+                         ELSE [claim EXCEPT ![r] = claim[p]]
     /\ booted' = [booted EXCEPT ![r] = TRUE]
     /\ UNCHANGED <<minted, gapFlag>>
 
@@ -131,10 +153,14 @@ Mint(r) ==
     /\ minted[r] < MaxSeq
     /\ ~gapFlag[r]
     /\ booted[r]
-    /\ LET e == Ev(r, minted[r] + 1) IN
-         /\ applied' = [applied EXCEPT ![r] = @ \cup {e}]
+    /\ LET e  == Ev(r, minted[r] + 1)
+           na == applied[r] \cup {e}
+       IN
+         /\ applied' = [applied EXCEPT ![r] = na]
          /\ tree'    = [tree    EXCEPT ![r] = @ \cup {e}]
-         /\ claim'   = [claim   EXCEPT ![r][r] = minted[r] + 1]
+         /\ claim'   = IF ContigClaim
+                         THEN [claim EXCEPT ![r] = ClaimFrom(na)]
+                         ELSE [claim EXCEPT ![r][r] = minted[r] + 1]
     /\ minted' = [minted EXCEPT ![r] = @ + 1]
     /\ UNCHANGED <<gapFlag, booted>>
 
@@ -152,14 +178,25 @@ SyncComplete(r, p) ==
            newApplied == IF PrefixHold THEN ContigClosure(union) ELSE union
            base == [o \in Origins |-> Max2(claim[r][o], MaxSeqOf(newApplied, o))]
            gap  == \E o \in Origins : claim[p][o] > base[o]
+           nc   == ClaimFrom(newApplied)
+           \* Under ContigClaim the deficit is measured against a bound that
+           \* stops AT a hole, so a peer seq above one of our holes is a
+           \* deficit -- the case a max-based comparison cannot see.
+           cgap == \E o \in Origins : claim[p][o] > nc[o]
        IN /\ applied' = [applied EXCEPT ![r] = newApplied]
           /\ tree'    = [tree    EXCEPT ![r] = @ \cup tree[p]]
-          /\ IF GapCheckEnabled /\ gap
-               THEN /\ claim'   = [claim   EXCEPT ![r] = base]
-                    /\ gapFlag' = [gapFlag EXCEPT ![r] = TRUE]
-               ELSE /\ claim'   = [claim EXCEPT ![r] =
-                                     [o \in Origins |-> Max2(base[o], claim[p][o])]]
-                    /\ UNCHANGED gapFlag
+          /\ IF ContigClaim
+               THEN \* Never adopt the peer's claim: report what we applied.
+                    /\ claim' = [claim EXCEPT ![r] = nc]
+                    /\ IF GapCheckEnabled /\ cgap
+                         THEN gapFlag' = [gapFlag EXCEPT ![r] = TRUE]
+                         ELSE UNCHANGED gapFlag
+               ELSE IF GapCheckEnabled /\ gap
+                      THEN /\ claim'   = [claim   EXCEPT ![r] = base]
+                           /\ gapFlag' = [gapFlag EXCEPT ![r] = TRUE]
+                      ELSE /\ claim'   = [claim EXCEPT ![r] =
+                                            [o \in Origins |-> Max2(base[o], claim[p][o])]]
+                           /\ UNCHANGED gapFlag
     /\ UNCHANGED <<minted, booted>>
 
 (***************************************************************************)
@@ -187,14 +224,18 @@ Rebootstrap(r) ==
          \* model must retain them — dropping them manufactured a spurious
          \* own-origin non-contiguity (a later Mint atop a forgotten own
          \* prefix) that no real replica exhibits.
-         /\ applied' = [applied EXCEPT
-                          ![r] = applied[p] \cup {e \in applied[r] : e.org = r}]
-         /\ tree'    = [tree    EXCEPT
-                          ![r] = tree[p] \cup {e \in tree[r] : e.org = r}]
-         /\ claim'   = [claim   EXCEPT
-                          ![r] = [o \in Origins |->
-                                    IF o = r THEN Max2(claim[p][o], claim[r][o])
-                                    ELSE claim[p][o]]]
+         /\ LET na == applied[p] \cup {e \in applied[r] : e.org = r}
+            IN
+              /\ applied' = [applied EXCEPT ![r] = na]
+              /\ tree'    = [tree    EXCEPT
+                               ![r] = tree[p] \cup {e \in tree[r] : e.org = r}]
+              /\ claim'   = IF ContigClaim
+                              THEN [claim EXCEPT ![r] = ClaimFrom(na)]
+                              ELSE [claim EXCEPT
+                                      ![r] = [o \in Origins |->
+                                                IF o = r
+                                                  THEN Max2(claim[p][o], claim[r][o])
+                                                  ELSE claim[p][o]]]
     /\ gapFlag' = [gapFlag EXCEPT ![r] = FALSE]
     /\ UNCHANGED <<minted, booted>>
 
@@ -221,5 +262,16 @@ PrefixClosed ==
 NoOverClaim ==
     \A r \in Replicas : \A o \in Origins : \A j \in 1..MaxSeq :
         (j =< claim[r][o]) => (Ev(o, j) \in applied[r])
+
+\* Oracle soundness in the form the field actually reads it: two replicas
+\* reporting the SAME frontier hold the SAME data. This is what
+\* bondy_frontier_cluster_SUITE observed violated -- equal frontiers over
+\* unequal content. A per-origin bound (max OR contiguous) is a lossy
+\* summary, so it cannot give this; only an exact context can. Checked here
+\* to record precisely which property each representation does and does not
+\* buy, rather than to assert it holds.
+OracleAgrees ==
+    \A r, q \in Replicas :
+        (claim[r] = claim[q]) => (applied[r] = applied[q])
 
 =============================================================================

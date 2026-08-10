@@ -217,25 +217,6 @@
   {default, refuse}
 ]}.
 
-%% -----------------------------------------------------------------------------
-%% @doc Whether replicated-table replay enforces per-origin prefix closure
-%% (default on). When on, a replica never materialises a peer origin's later
-%% operation while an earlier one is missing (history truncated at every live
-%% peer before this replica pulled it): the non-contiguous remainder is held
-%% and re-presented until the gap fills or the anti-entropy frontier-gap
-%% detection triggers a catalogue rebootstrap, which supplies both the data
-%% and the frontier. This closes a window in which observed-remove (add-wins)
-%% tables can silently drop a concurrent add. Turning this off is an
-%% emergency measure only: without it a rejoining replica can silently
-%% integrate a non-contiguous history. The hold's only cost is that a
-%% permanently-missing operation converts into a rebootstrap instead of a
-%% silent gap.
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "db.aae.prefix_hold", "bondy_oplog.prefix_hold", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
 
 %% -----------------------------------------------------------------------------
 %% @doc How long a per-shard WAL drain may actively process frames without

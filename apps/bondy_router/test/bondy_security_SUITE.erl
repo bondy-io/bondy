@@ -643,13 +643,21 @@ cleanup_reaps_disabled_user_tokens(Config) ->
     {U, RToken} = new_user_with_token(Uri, <<"cleanup_disabled">>),
     ?assertMatch({ok, _}, bondy_oauth_token:lookup(Uri, RToken)),
 
-    ok = bondy_rbac_user:disable(Uri, U),
+    ok = disable_without_lifecycle(Uri, U),
+    %% The sweep reclaims on this predicate and nothing else, so it is asserted
+    %% here as well: a disable that has not taken effect must be reported as
+    %% that, not as a sweep that failed to reclaim.
+    ?assertEqual(false, bondy_rbac_user:is_enabled(Uri, U)),
+    %% And the token is still there on the way in, which is what makes this a
+    %% test of the sweep rather than of the revocation.
+    ?assertMatch({ok, _}, bondy_oauth_token:lookup(Uri, RToken)),
 
     Stats = bondy_oauth_token:cleanup(),
     ?assertEqual([], maps:get(errors, Stats)),
     %% Matched rather than asserted field by field so a failure prints the whole
     %% map: `deactivated` alone cannot distinguish "the realm was never swept"
-    %% from "the user still looked enabled", and those have different causes.
+    %% from "this user's cell was not among those scanned", and those have
+    %% different causes.
     ?assertMatch(
         #{deactivated := D, cells_cleared := C} when D >= 1 andalso C >= 1,
         Stats
@@ -714,31 +722,21 @@ ticket_cleanup_prunes_expired_device_entries(Config) ->
 %% event a node missed while partitioned or restarting — the sweep must reach
 %% the same conclusion independently.
 %%
-%% That revocation is CAST to a router worker, so a ticket stored before the
-%% disable is racing it: whichever of the revocation and the sweep runs first
-%% reclaims the ticket, and the sweep reports nothing whenever it loses. The
-%% ticket therefore goes in AFTER the revocation has demonstrably run, which is
-%% also the situation being tested — a ticket the revocation never saw.
+%% That revocation is asynchronous, so a disable that fires it leaves the sweep
+%% racing it for the same ticket — and the sweep reports nothing whenever it
+%% loses. `disable_without_lifecycle/2` applies the disable the way a config
+%% apply or a replicated merge does, which IS the situation being tested: a
+%% node whose local revocation never ran.
 ticket_cleanup_reaps_disabled_user_tickets(Config) ->
     Uri = ?config(realm_uri, Config),
     U = new_user(Uri, <<"ticket_disabled">>),
     Scope = local_scope(Uri, all),
-    Probe = local_scope(Uri, <<"revocation_probe">>),
-
-    %% The probe is how the cast is observed landing; nothing else here can
-    %% remove it.
-    ok = bondy_ticket:store_ticket(Uri, U, claims(Uri, U, Probe, live)),
-    ?assertMatch({ok, _}, bondy_ticket:lookup(Uri, U, Probe)),
-
-    ok = bondy_rbac_user:disable(Uri, U),
-    ok = wait_until(
-        fun() ->
-            {error, not_found} =:= bondy_ticket:lookup(Uri, U, Probe)
-        end,
-        revocation_on_disable
-    ),
 
     ok = bondy_ticket:store_ticket(Uri, U, claims(Uri, U, Scope, live)),
+    ?assertMatch({ok, _}, bondy_ticket:lookup(Uri, U, Scope)),
+
+    ok = disable_without_lifecycle(Uri, U),
+    ?assertEqual(false, bondy_rbac_user:is_enabled(Uri, U)),
     ?assertMatch({ok, _}, bondy_ticket:lookup(Uri, U, Scope)),
 
     Stats = bondy_ticket:cleanup(),
@@ -927,6 +925,26 @@ reclaimer_retries_sooner_when_the_job_queue_is_full(_Config) ->
     after
         ok = meck:unload(bondy_jobs)
     end.
+
+%% @private
+%% Disables a user the way a declarative config apply does: the cell is written,
+%% no lifecycle side-effect fires.
+%%
+%% `bondy_rbac_user:disable/2` publishes `{[bondy, user, updated], ...}`, and
+%% `bondy_event_wamp_publisher` handles it ASYNCHRONOUSLY by calling
+%% `bondy_ticket:revoke_all/2` and `bondy_oauth_token:revoke_all/2`. A sweep
+%% invoked straight after the disable therefore races that handler for the same
+%% state, and reports reclaiming nothing whenever the handler wins.
+%%
+%% The sweeps exist as the backstop for a node whose local revocation never ran
+%% — one that was partitioned or restarting, or that received the disable as a
+%% replicated merge. This reproduces that node's state exactly, so the sweep is
+%% the only thing that can reclaim and the assertions mean what they say.
+disable_without_lifecycle(RealmUri, Username) ->
+    {ok, _} = bondy_rbac_user:update(
+        RealmUri, Username, #{enabled => false}, #{declarative => true}
+    ),
+    ok.
 
 %% @private
 wait_until(Fun, Tag) ->

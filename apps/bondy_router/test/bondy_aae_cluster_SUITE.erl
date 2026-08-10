@@ -614,20 +614,28 @@ stale_peer_rejoin_durable_converges(Config) ->
         S2b = bondy_ct:restart_node(
             S2, 2, [{[partisan, peer_port], 18195}], Config
         ),
-        {_, R2b, _} = S2b,
-        ok = push_module(R2b, ?MODULE),
-        ok = bondy_ct:rejoin(S2b, [S1, S2b], 60000),
-        _ = erpc:call(R2b, application, set_env, [
-            bondy_oplog, peer_timeout_ms, 2000
-        ]),
+        %% `Nodes` still names the peer that was stopped above, so the outer
+        %% `after` cannot reach the restarted one. Left running it outlives the
+        %% suite, holding its peer port and retrying AAE against a node that is
+        %% gone for the rest of the CT run.
+        try
+            {_, R2b, _} = S2b,
+            ok = push_module(R2b, ?MODULE),
+            ok = bondy_ct:rejoin(S2b, [S1, S2b], 60000),
+            _ = erpc:call(R2b, application, set_env, [
+                bondy_oplog, peer_timeout_ms, 2000
+            ]),
 
-        %% Direction 1: the returning node catches up on everything, including
-        %% the range the survivor truncated.
-        ok = wait_converge(R2b, ?USERS_TABLE, ?REALM, Shared, SharedV),
-        ok = wait_converge(R2b, ?USERS_TABLE, ?REALM, Only1, Only1V),
+            %% Direction 1: the returning node catches up on everything,
+            %% including the range the survivor truncated.
+            ok = wait_converge(R2b, ?USERS_TABLE, ?REALM, Shared, SharedV),
+            ok = wait_converge(R2b, ?USERS_TABLE, ?REALM, Only1, Only1V),
 
-        %% Direction 2: the returning node's isolated write flows BACK.
-        ok = wait_converge(R1, ?USERS_TABLE, ?REALM, Only2, Only2V)
+            %% Direction 2: the returning node's isolated write flows BACK.
+            ok = wait_converge(R1, ?USERS_TABLE, ?REALM, Only2, Only2V)
+        after
+            catch bondy_ct:stop_node(S2b)
+        end
     after
         catch bondy_ct:stop_cluster(Nodes)
     end.

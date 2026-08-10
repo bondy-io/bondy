@@ -76,7 +76,6 @@ all() ->
     [
         sustained_writes_registry_history_stays_bounded,
         silent_peer_truncated_past_recovers_on_rejoin,
-        truncated_prefix_below_peer_max_is_not_silently_adopted,
         truncated_prefix_is_held_and_repaired_by_rebootstrap
     ].
 
@@ -618,94 +617,11 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
     ],
     ok.
 
-%% The complement of `silent_peer_truncated_past_recovers_on_rejoin`.
+%% Per-origin prefix closure driven into the hazard it exists for,
+%% locking the enforcement contract:
 %%
-%% That case covers the silent peer whose applied frontier LAGS the live
-%% pair's: the deficit is visible per-origin, `{frontier_gap, _}` is
-%% raised, and a catalogue rebootstrap carries the truncated history
-%% across. This case covers the shape where the two frontiers END UP
-%% EQUAL while the rejoining node is missing events strictly BELOW that
-%% maximum:
-%%
-%%   1. the live pair truncates past an EARLY batch the silent node never
-%%      pulled, then
-%%   2. writes a LATE batch, which therefore survives in the shippable
-%%      tree, and
-%%   3. the silent node takes ONE COMPLETE round and integrates that
-%%      tree wholesale — raising its per-origin maximum to the peer's
-%%      while the early events remain absent.
-%%
-%% This case runs with `prefix_hold` explicitly OFF (it defaults on): it
-%% locks two facts about the UNENFORCED fold that the enforced sibling
-%% (`truncated_prefix_is_held_and_repaired_by_rebootstrap`) depends on:
-%%
-%%   - the hazard is real — the fold materialises a same-origin prefix
-%%     hole, breaking the per-origin closure that makes the compact
-%%     `Ctx[O] >= S` observed-remove test exact
-%%     (`bondy_oplog_crdt_aw_core:dot_observed/2`); and
-%%   - the DETECTOR sees it (`[bondy_oplog, applier, prefix_hole]` on
-%%     the writer's origin) — which is what gives the enforced case's
-%%     "zero holes" assertion its meaning.
-%%
-%% Passing on detection is the correct polarity: the misfold is
-%% intentional at flag-off. The only hard failure left is silent
-%% ADOPTION — the maxima meeting while early writes are missing with no
-%% detector witness (`frontier_deficit/2` compares per-origin maxima, so
-%% an empty deficit does not imply the applied set has no holes below).
-%%
-%% Recovery is deliberately NOT driven here: the production scheduler
-%% stays off so the assertion reads the state the round itself left.
-truncated_prefix_below_peer_max_is_not_silently_adopted(Config) ->
-    Nodes = nodes_of(Config),
-
-    %% Manual control: no scheduler dispatch, no scheduler-driven GC —
-    %% and prefix-closure enforcement explicitly OFF (it defaults on):
-    %% this case exercises the UNENFORCED fold to lock the detector's
-    %% ability to see the misfold the default prevents.
-    _ = [
-        ok = erpc:call(N, bondy_oplog_sync_scheduler, set_dispatch, [undefined])
-     || N <- Nodes
-    ],
-    _ = [ok = bondy_ct:freeze_gc(N) || N <- Nodes],
-    _ = [
-        ok = erpc:call(N, ?MODULE, do_start_dispatch_collector, [])
-     || N <- Nodes
-    ],
-    _ = [
-        ok = erpc:call(
-            N, application, set_env, [bondy_oplog, prefix_hold, false]
-        )
-     || N <- Nodes
-    ],
-
-    try
-        do_prefix_hole(Nodes)
-    after
-        _ = [
-            catch erpc:call(
-                N, application, set_env, [bondy_oplog, prefix_hold, true]
-            )
-         || N <- Nodes
-        ],
-        _ = [
-            catch erpc:call(N, ?MODULE, do_restore_sync_defaults, [])
-         || N <- Nodes
-        ]
-    end.
-
-do_prefix_hole(Nodes) ->
-    #{early := Early, late := Late, writer_origins := WriterOrigins} =
-        hole_scenario(Nodes),
-    do_prefix_hole_verdict(Nodes, Early, Late, WriterOrigins).
-
-%% Enforcement counterpart of
-%% `truncated_prefix_below_peer_max_is_not_silently_adopted`: the same
-%% scenario with `prefix_hold` ENABLED cluster-wide, locking the fix's
-%% contract:
-%%
-%%   (a) NO same-origin fold-time hole — the misfold the defaults case
-%%       proves simply never happens (`prefix_hole` stays silent for the
-%%       writer's origin);
+%%   (a) NO same-origin fold-time hole — the misfold never happens
+%%       (`prefix_hole` stays silent for the writer's origin);
 %%   (b) the non-contiguous suffix is HELD instead (`events_held` fires
 %%       on the writer's origin, and the co-sharded LATE keys are not
 %%       readable while held);
@@ -726,10 +642,6 @@ truncated_prefix_is_held_and_repaired_by_rebootstrap(Config) ->
     _ = [ok = bondy_ct:freeze_gc(N) || N <- Nodes],
     _ = [
         ok = erpc:call(N, ?MODULE, do_start_dispatch_collector, [])
-     || N <- Nodes
-    ],
-    _ = [
-        ok = erpc:call(N, application, set_env, [bondy_oplog, prefix_hold, true])
      || N <- Nodes
     ],
 
@@ -781,7 +693,7 @@ do_prefix_hole_enforced([N1, N2, N3] = Nodes) ->
     ?assertEqual(
         [],
         Holes0,
-        "prefix_hold is enabled, yet a same-origin fold-time hole was "
+        "prefix closure is enforced, yet a same-origin fold-time hole was "
         "detected — the enforcement failed to hold a non-contiguous batch"
     ),
 
@@ -836,7 +748,7 @@ do_prefix_hole_enforced([N1, N2, N3] = Nodes) ->
                         All
                     )
                 end,
-                {prefix_hold_repair_timeout, N3},
+                {prefix_closure_repair_timeout, N3},
                 fun() ->
                     Missing = [
                         {Band, K, stale_read(N3, Band, K)}
@@ -883,8 +795,7 @@ do_prefix_hole_enforced([N1, N2, N3] = Nodes) ->
     end.
 
 %% @private
-%% Steps 1-5 shared by the defaults case (`do_prefix_hole/1`) and the
-%% enforcement case (`do_prefix_hole_enforced/1`): seed+converge all
+%% Steps 1-5 of `do_prefix_hole_enforced/1`: seed+converge all
 %% three, silence N3, write EARLY confirmed by the live pair only, age
 %% N3 out of the recency filter, truncate past EARLY on both live nodes,
 %% then write LATE so the live pair's trees keep their per-origin
@@ -987,166 +898,6 @@ hole_scenario([N1, N2, N3] = Nodes) ->
         late => Late,
         writer_origins => erpc:call(N1, ?MODULE, do_hole_origins_main, [])
     }.
-
-do_prefix_hole_verdict([N1, N2, N3], Early, Late, WriterOrigins) ->
-    %% ---------------------------------------------------------------------
-    %% 6. REJOIN with ONE COMPLETE round from each live node. A fresh
-    %%    session against their CURRENT roots is fully servable — no
-    %%    truncated-page miss, so no rebootstrap on that path.
-    %%
-    %%    Note the gap check runs AFTER the integrate (`do_run/5` pulls and
-    %%    merges, then `maybe_frontier_gap/5` judges), so a refused round
-    %%    still delivers the peer's tree. That is what lets the loop below
-    %%    keep closing the distance.
-    %% ---------------------------------------------------------------------
-    R1 = erpc:call(N3, ?MODULE, do_stale_sync_main_from, [N1]),
-    R2 = erpc:call(N3, ?MODULE, do_stale_sync_main_from, [N2]),
-    GapRaised = hole_gap_raised(R1) orelse hole_gap_raised(R2),
-
-    %% ---------------------------------------------------------------------
-    %% 7. THE VERDICT. Two distinct questions, decided by two distinct
-    %%    witnesses:
-    %%
-    %%    (a) Did a SAME-ORIGIN prefix hole materialise? Decided by the
-    %%        fold-time contiguity detector
-    %%        (`[bondy_oplog, applier, prefix_hole]`,
-    %%        `bondy_oplog_cell_apply:detect_prefix_holes/2`) firing on N3
-    %%        for the WRITER's per-instance origin. Read-backs alone
-    %%        cannot decide this: origins are per instance, so "a late
-    %%        key reads while an early key does not" proves nothing
-    %%        unless both keys share an instance — which is exactly what
-    %%        the detector checks, per origin, at the fold.
-    %%
-    %%    (b) Was the loss ADOPTED silently? Decided by the probe below:
-    %%        complete rounds are taken until either the early writes
-    %%        arrive, or the writer origin's maxima meet while they are
-    %%        still missing (the max-blind state), or the deadline
-    %%        passes.
-    %% ---------------------------------------------------------------------
-    Outcome = hole_probe_until(
-        N3,
-        [N1, N2],
-        Early,
-        WriterOrigins,
-        erlang:monotonic_time(millisecond) + ?STALE_CONVERGE_MS
-    ),
-
-    EarlyMissing = [
-        {Band, K}
-     || {Band, K, V} <- Early, stale_read(N3, Band, K) =/= {ok_val, V}
-    ],
-    LateMissing = [
-        {Band, K}
-     || {Band, K, V} <- Late, stale_read(N3, Band, K) =/= {ok_val, V}
-    ],
-    %% Whether the max-based comparison could SEE the loss at all: the
-    %% origins for which the peer's frontier strictly exceeds ours are
-    %% exactly what `frontier_deficit/2` would return. An empty set here
-    %% while early writes are missing is the blind spot the TLA+ model
-    %% predicts; a non-empty set means the maxima did not in fact meet.
-    F1 = erpc:call(N1, ?MODULE, do_hole_frontiers_main, []),
-    F3 = erpc:call(N3, ?MODULE, do_hole_frontiers_main, []),
-    Visible = frontier_deficit_origins(F1, F3),
-    WriterVisible = writer_deficit(F1, F3, WriterOrigins),
-    Forensics = erpc:call(N3, ?MODULE, do_gap_forensics, []),
-    %% Witness (a): detector firings on N3 whose origin is the writer's
-    %% origin FOR THAT INSTANCE — a same-origin fold-time hole, the thing
-    %% read-backs cannot establish across instances.
-    N3Events = erpc:call(N3, ?MODULE, do_drain_dispatch_collector, []),
-    WriterHoles = writer_holes(N3Events, WriterOrigins),
-    ct:pal(
-        "prefix-hole outcome on ~ts:~n"
-        "  frontier_gap raised: ~p~n"
-        "  early writes missing: ~p of ~p~n"
-        "  late writes missing:  ~p of ~p~n"
-        "  WRITER-origin fold-time holes detected: ~p~n~ts~n"
-        "  instances whose deficit is VISIBLE (any origin): ~p~n"
-        "  per-instance visible deficit (origin -> {peer, local}):~n~ts~n"
-        "  WRITER-origin deficit: ~p~n~ts~n"
-        "  adoption probe outcome: ~ts~n"
-        "  gap forensics on ~ts:~n~ts",
-        [
-            N3,
-            GapRaised,
-            length(EarlyMissing),
-            length(Early),
-            length(LateMissing),
-            length(Late),
-            length(WriterHoles),
-            hole_fmt(WriterHoles),
-            length(Visible),
-            hole_fmt(Visible),
-            length(WriterVisible),
-            hole_fmt(WriterVisible),
-            hole_fmt(Outcome),
-            N3,
-            hole_fmt(Forensics)
-        ]
-    ),
-
-    %% The rounds must have delivered the surviving suffix — otherwise
-    %% nothing raised N3's maximum and this case degenerated into the
-    %% sibling lagging-frontier scenario, proving nothing.
-    ?assertEqual(
-        [],
-        LateMissing,
-        "post-truncation writes did not reach the rejoining node, so its "
-        "per-origin maximum never met the peer's — scenario did not set up"
-    ),
-
-    %% The verdict tree. HARD FAILURE only on a positively established
-    %% violation; SKIP when the scenario was not driven into the state
-    %% under test — never a silent pass either way.
-    if
-        WriterHoles =/= [] ->
-            %% Witness (a), EXPECTED here: with enforcement forced off,
-            %% the fold materialises a later seq of the writer's origin
-            %% past missing earlier seq(s) — the exact hazard
-            %% `db.aae.prefix_hold` (default on) exists to prevent, and
-            %% the detector must see it: the enforced sibling case's
-            %% "zero holes" assertion is only meaningful because this
-            %% case proves the detector catches the misfold when it
-            %% happens.
-            ct:pal(
-                "prefix-hole (unenforced): hazard demonstrated and "
-                "detected on ~ts — ~p same-origin fold-time gap(s): ~ts",
-                [N3, length(WriterHoles), hole_fmt(WriterHoles)]
-            ),
-            ok;
-        element(1, Outcome) =:= blind ->
-            %% Witness (b) without (a): the writer origin's maxima met
-            %% while early writes are missing, yet no fold-time hole was
-            %% detected — silent adoption AND a detector miss.
-            ct:fail(
-                "max-blind adoption on ~ts with NO fold-time hole "
-                "detected — the frontier deficit is empty while ~p early "
-                "write(s) are missing: ~ts. Either the detector missed a "
-                "same-origin hole or the maxima met without one; both "
-                "demand investigation.",
-                [N3, length(EarlyMissing), hole_fmt(EarlyMissing)]
-            );
-        EarlyMissing =:= [] ->
-            {skip,
-                "scenario not reached: every early write is readable on "
-                "the rejoining node, so the truncation never removed "
-                "anything it lacked — nothing was at risk this run"};
-        true ->
-            %% Early writes missing, deficit visible, no same-origin
-            %% hole: N3 is merely BEHIND on instances that host an early
-            %% key but no late key — prefix-closed staleness, flagged by
-            %% the gap check. The condition under test (a co-sharded
-            %% early/late pair) did not materialise.
-            {skip,
-                lists:flatten(
-                    io_lib:format(
-                        "scenario not reached: ~p early write(s) missing but "
-                        "no same-origin fold-time hole detected — no instance "
-                        "hosted both an early and a late key. Raise "
-                        "?HOLE_TAGS_PER_BAND. Adoption probe: ~ts",
-                        [length(EarlyMissing), hole_fmt(Outcome)]
-                    )
-                )}
-    end.
 
 %% @private
 stale_band(B) ->
@@ -2081,7 +1832,7 @@ dispatch_collector_init(Parent) ->
             %% are neither applied locally nor in the batch — the
             %% direct witness of a per-origin prefix hole.
             [bondy_oplog, applier, prefix_hole],
-            %% Prefix-closure enforcement (`prefix_hold`): events a
+            %% Prefix-closure enforcement: events a
             %% replay excluded from the fold instead of materialising
             %% past a gap.
             [bondy_oplog, applier, events_held]

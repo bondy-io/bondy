@@ -924,28 +924,43 @@ stop_cluster(Nodes) ->
     ok.
 
 %% -----------------------------------------------------------------------------
-%% @doc Freezes scheduler-driven GC (compaction) on `Node' and WAITS for its
-%% in-flight compaction workers to drain, so MST roots are frozen when this
-%% returns. Cluster suites that assert on root or frontier state call this per
-%% node — a live GC tick truncates MSTs mid-assertion, skewing root
-%% comparisons and (deliberately-)asymmetric compaction setups. Plain `erpc'
-%% into the node's scheduler; no suite module needs pushing.
+%% @doc Freezes BOTH scheduler-driven sweeps on `Node' and WAITS for their
+%% in-flight workers to drain, so MST roots and projection cells are frozen when
+%% this returns. Cluster suites that assert on root or frontier state call this
+%% per node — a live tick truncates MSTs mid-assertion, skewing root comparisons
+%% and (deliberately-)asymmetric compaction setups. Plain `erpc' into the node's
+%% schedulers; no suite module needs pushing.
+%%
+%% `bondy_oplog_sup' starts TWO `bondy_oplog_gc_scheduler' instances: the
+%% default-named one driving compaction, and `bondy_oplog_reclaim_scheduler'
+%% driving the causal-stability cell sweep (on by default, slower cadence).
+%% Freezing only the default leaves the second one running, so a suite that
+%% believes it has frozen the node still has a sweep mutating state underneath
+%% it.
 %% -----------------------------------------------------------------------------
 freeze_gc(Node) ->
-    ok = erpc:call(Node, bondy_oplog_gc_scheduler, set_interval_ms, [0]),
-    freeze_gc_await(Node, erlang:monotonic_time(millisecond) + 10_000).
+    Deadline = erlang:monotonic_time(millisecond) + 10_000,
+    lists:foreach(
+        fun(Name) ->
+            ok = erpc:call(
+                Node, bondy_oplog_gc_scheduler, set_interval_ms, [Name, 0]
+            ),
+            freeze_gc_await(Node, Name, Deadline)
+        end,
+        [bondy_oplog_gc_scheduler, bondy_oplog_reclaim_scheduler]
+    ).
 
 %% @private
-freeze_gc_await(Node, Deadline) ->
-    Info = erpc:call(Node, bondy_oplog_gc_scheduler, info, []),
+freeze_gc_await(Node, Name, Deadline) ->
+    Info = erpc:call(Node, bondy_oplog_gc_scheduler, info, [Name]),
     case maps:get(in_flight, Info) of
         0 ->
             ok;
         N ->
             erlang:monotonic_time(millisecond) =< Deadline orelse
-                error({gc_workers_stuck, Node, N}),
+                error({gc_workers_stuck, Node, Name, N}),
             timer:sleep(50),
-            freeze_gc_await(Node, Deadline)
+            freeze_gc_await(Node, Name, Deadline)
     end.
 
 %% -----------------------------------------------------------------------------

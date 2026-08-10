@@ -1023,8 +1023,8 @@ apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin) ->
 
 %% @private
 %% As `apply_cell_pairs_mux/4`, with per-origin prefix-closure
-%% enforcement: when `hold => true` AND `bondy_oplog_config:prefix_hold/0`
-%% is enabled, a remote origin's events beyond its first contiguity gap
+%% enforcement: when `hold => true`, a remote origin's events beyond its
+%% first contiguity gap
 %% are HELD — excluded from the fold and therefore from the
 %% applied-frontier merge (`batch_frontier/1` sees only folded pairs).
 %% Returns `{CellsApplied, HeldCount}`; a caller passing `hold => true`
@@ -1043,9 +1043,7 @@ apply_cell_pairs_mux({single, undefined}, _Id, _Pairs, _LocalOrigin, _Opts) ->
     {0, 0};
 apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin, Opts) ->
     {Foldable, Held} =
-        case
-            maps:get(hold, Opts, false) andalso bondy_oplog_config:prefix_hold()
-        of
+        case maps:get(hold, Opts, false) of
             true -> partition_contiguous(Id, Pairs, LocalOrigin);
             false -> {Pairs, 0}
         end,

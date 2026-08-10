@@ -213,7 +213,11 @@ end#{
 }.
 -type update_opts() :: #{
     update_credentials => boolean(),
-    password_opts => bondy_password:opts()
+    password_opts => bondy_password:opts(),
+    %% `true` when applying declarative config (idempotent write, no lifecycle
+    %% side-effects) — see `bondy_realm:apply_config/0`. `store/3` honours it on
+    %% the update path as it does on the add path.
+    declarative => boolean()
 }.
 -type list_opts() :: #{
     limit => pos_integer(),

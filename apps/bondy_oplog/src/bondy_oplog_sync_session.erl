@@ -124,14 +124,19 @@ run(Instance, Peer, Opts, Iterations) when is_binary(Instance) ->
     TransportOpts = maps:get(transport_opts, Opts, #{}),
     Record = maps:get(record_in_peer_state, Opts, true),
     Start = erlang:monotonic_time(),
-    %% Capture the peer's applied-frontier BEFORE the round. `get_root` inside
-    %% `do_run` is same-or-newer, so this is a LOWER BOUND for what a converged
-    %% round leaves us holding — merging it after a successful round can never
-    %% over-claim. This is the ONLY convergence path for a shard the peer has
-    %% fully compacted: its MST is a snapshot with no `cell_apply` keys, so the
-    %% roots are already equal (nothing to page-sync) and `frontier_from_mst`
-    %% folds nothing — without this the oracle stays DIVERGED forever despite
-    %% byte-identical data. Best-effort (`#{}` on transport error).
+    %% Capture the peer's applied-frontier BEFORE the round. It is read ONLY to
+    %% compare against — `maybe_unservable_behind/3` and `maybe_frontier_gap/5`
+    %% — never merged into ours. A frontier is a statement about what THIS
+    %% replica folded; a peer's maxima say nothing about which of its events
+    %% reached us, because a peer that compacted a prefix ships a tree whose
+    %% history starts above our applied seq.
+    %%
+    %% A replica that holds all of a compacted peer's DATA gets its frontier
+    %% from the paths that also deliver the data: catalogue bootstrap
+    %% (`bondy_oplog_instance:finalize_catalogue_bootstrap/4` adopts the peer
+    %% VV alongside the install) and, across a restart, the compaction
+    %% checkpoint (`restore_frontier/2`). Best-effort (`#{}` on transport
+    %% error).
     PeerFrontier = request_peer_frontier(
         Instance, Peer, Transport, TransportOpts
     ),
@@ -172,7 +177,6 @@ run(Instance, Peer, Opts, Iterations) when is_binary(Instance) ->
     Result = maybe_frontier_gap(
         Result1, Instance, Peer, PeerFrontier, PeerRoot
     ),
-    ok = maybe_adopt_peer_frontier(Result, Instance, PeerFrontier, PeerRoot),
     maybe_record(Result, Instance, Peer, Record, PeerRoot, PeerFrontier),
     ok = maybe_confirm_root(
         Result, Instance, Peer, Transport, TransportOpts, Record, PeerRoot
@@ -1042,44 +1046,6 @@ maybe_checkpoint_root(Root, Instance, Peer, Frontier0) when
     bondy_oplog_peer_state:record_sync_complete(
         Peer, Instance, Root, Frontier, os:system_time(millisecond)
     ).
-
-%% @private
-%% Adopt the peer's applied-frontier after a CONVERGED round (`{ok, _}`).
-%% `PeerFrontier` was captured before the round (a lower bound), so this only
-%% ever raises the local frontier to maxima we provably hold — never a false
-%% "in sync". Only merges + persists when the peer actually carries a HIGHER
-%% seq for some origin: the steady state (already converged) is a pure map
-%% comparison with no ETS write and no `fsync`. The persist makes an adopted
-%% maximum durable so an isolated restart (peer then unreachable) keeps the
-%% converged oracle rather than re-diverging until the peer returns.
-maybe_adopt_peer_frontier({ok, _}, _Instance, _PeerFrontier, skip) ->
-    %% Benign incomplete round: the pre-round frontier's maxima were not
-    %% necessarily delivered, so adopting would over-claim. The next
-    %% complete round adopts.
-    ok;
-maybe_adopt_peer_frontier({ok, _}, Instance, PeerFrontier, _PeerRoot) when
-    is_map(PeerFrontier), map_size(PeerFrontier) > 0
-->
-    Local = bondy_oplog_registry:frontier(Instance),
-    Adds = maps:filter(
-        fun(Origin, Seq) ->
-            case Local of
-                #{Origin := Cur} -> Seq > Cur;
-                _ -> true
-            end
-        end,
-        PeerFrontier
-    ),
-    case map_size(Adds) > 0 of
-        true ->
-            ok = bondy_oplog_registry:merge_frontier(Instance, Adds),
-            _ = catch bondy_oplog_instance:persist_frontier(Instance),
-            ok;
-        false ->
-            ok
-    end;
-maybe_adopt_peer_frontier(_Result, _Instance, _PeerFrontier, _PeerRoot) ->
-    ok.
 
 %% @private
 %% THE UNSERVABLE-BEHIND ESCALATION EVIDENCE. A peer whose responder

@@ -4,10 +4,10 @@ Every replicated `bondy_db` table converges because every replica eventually
 applies the same set of operations. The observed-remove (add-wins) tables rely
 on something stronger: that each replica applies any single origin's
 operations as an unbroken prefix — operation 7 never lands where operations 5
-and 6 are missing. This property is **per-origin prefix closure**, and
-`db.aae.prefix_hold` (on by default) is the mechanism that enforces it. This
-document explains what breaks without it, how the hold works, and how its
-repair chain and metrics behave in operation.
+and 6 are missing. This property is **per-origin prefix closure**, and the
+fold enforces it unconditionally. This document explains what breaks without
+it, how the hold works, and how its repair chain and metrics behave in
+operation.
 
 ## Why a prefix matters
 
@@ -51,11 +51,10 @@ existed. The machinery in this document is what that finding produced.
 
 ## The hold
 
-With `db.aae.prefix_hold` on, the replay that folds synced operations into a
-table's materialised state enforces closure at the fold. Each batch is
-partitioned per remote origin into the contiguous run rising from that
-origin's applied frontier and the non-contiguous remainder. The run folds;
-the remainder is **held**:
+The replay that folds synced operations into a table's materialised state
+enforces closure at the fold. Each batch is partitioned per remote origin
+into the contiguous run rising from that origin's applied frontier and the
+non-contiguous remainder. The run folds; the remainder is **held**:
 
 - Held operations are excluded from the fold, so no table state ever
   reflects an operation whose predecessors are missing.
@@ -106,10 +105,10 @@ Four counters, all labelled by instance:
   rate on a healthy cluster means a gap is not filling and the rebootstrap
   chain deserves a look.
 - `bondy_oplog_prefix_holes_total` — contiguity gaps that *materialised*
-  into a fold. With the hold on, only transient own-origin gaps from
-  concurrent local commit reordering should register; exclude those before
-  alerting. Any remote-origin count is a fold path the hold does not cover
-  and warrants investigation.
+  into a fold. Only transient own-origin gaps from concurrent local commit
+  reordering should register; exclude those before alerting. Any
+  remote-origin count is a fold path the hold does not cover and warrants
+  investigation.
 - `bondy_oplog_seqs_burned_total` — sequence numbers a rejected append could
   not return to the counter. Each is immediately backfilled.
 - `bondy_oplog_seqs_filled_total` — burned seqs whose `seq_fill` backfill
@@ -121,17 +120,13 @@ The `frontier-gap verdicts` and `re-bootstraps scheduled` counters complete
 the picture: a hold episode shows as held events, then gap verdicts, then a
 scheduled rebootstrap, then quiet.
 
-## Turning it off
+## Why it is not optional
 
-`db.aae.prefix_hold = off` restores the unenforced fold: a rejoining replica
-integrates a peer's truncated history as-is, the frontier max-merges past any
-hole, and the observed-remove exactness argument no longer holds. The knob
-exists as an emergency escape, not as a tuning option. The one cost of
-leaving enforcement on is that a permanently missing operation becomes a
+Without enforcement a rejoining replica integrates a peer's truncated history
+as-is, the applied frontier max-merges past any hole, and the
+observed-remove exactness argument no longer holds — a removal can drop an
+addition the writer never saw. The frontier is a per-origin maximum, so it
+cannot represent a hole and cannot report one either: the loss is silent.
+
+The one cost of enforcement is that a permanently missing operation becomes a
 catalogue rebootstrap instead of a silent gap — a repair, in place of a loss.
-
-## See also
-
-- [Understanding deletion and reclamation in bondy_db](deletion_and_reclamation.md)
-  — the other license that causal stability grants, and the stability
-  frontier the frontier-gap machinery protects.

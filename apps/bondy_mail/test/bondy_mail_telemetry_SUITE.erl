@@ -586,12 +586,22 @@ start_metrics() ->
 %% @private
 alarm_set(Relay) ->
     Id = {mail_relay_down, Relay},
-    lists:keymember(Id, 1, alarm_handler:get_alarms()).
+    lists:keymember(Id, 1, get_alarms()).
 
 %% @private
 clear_alarms() ->
-    _ = [
-        alarm_handler:clear_alarm(Id)
-     || {Id, _} <- alarm_handler:get_alarms()
-    ],
+    %% `clear_alarm/1` is a plain notify, so it reaches whichever handler is
+    %% installed.
+    _ = [alarm_handler:clear_alarm(Id) || {Id, _} <- get_alarms()],
     ok.
+
+%% @private
+%% Reading alarms is a `gen_event:call/3` addressed to a specific handler
+%% MODULE, so it cannot be hardcoded: starting the full router swaps the OTP
+%% `alarm_handler` for Bondy's own, and that swap is global to the node and
+%% outlives the suite that caused it. Asking `alarm_handler` by name returns
+%% `{error, bad_module}` in a run where any earlier suite started the router.
+%% Both handlers answer `get_alarms`, so address whichever one is installed.
+get_alarms() ->
+    [Handler | _] = gen_event:which_handlers(alarm_handler),
+    gen_event:call(alarm_handler, Handler, get_alarms).

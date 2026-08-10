@@ -253,7 +253,7 @@ events() ->
         [bondy_oplog, instance, integrate_doored],
         [bondy_oplog, instance, mst_rebuilt],
         [bondy_mst, gc, aborted],
-        %% Per-origin prefix closure (db.aae.prefix_hold)
+        %% Per-origin prefix closure
         [bondy_oplog, applier, prefix_hole],
         [bondy_oplog, applier, events_held],
         [bondy_oplog, instance, seq_burned],
@@ -433,14 +433,14 @@ declare_metrics() ->
         {bondy_oplog_prefix_holes_total,
             "Per-origin contiguity gaps that MATERIALISED into a projection "
             "fold (an origin's later seq applied while earlier seqs are "
-            "absent). With db.aae.prefix_hold on (default) this should only "
+            "absent). The fold enforces closure, so this should only "
             "count own-origin transients from concurrent local WAL commit "
             "reordering; any sustained rate, or any rate at all on a "
             "rejoining node, deserves a look. Exclude own-origin firings "
             "before alerting.", [instance_id]},
         {bondy_oplog_events_held_total,
             "Remote-origin events a replay excluded from the fold to "
-            "preserve per-origin prefix closure (db.aae.prefix_hold). Held "
+            "preserve per-origin prefix closure. Held "
             "events re-present each replay until the gap fills or a "
             "catalogue rebootstrap repairs it - a burst during a stale-peer "
             "rejoin is the mechanism working; a sustained rate on a healthy "
@@ -453,7 +453,7 @@ declare_metrics() ->
             "backfills each burned seq with a signed no-op seq_fill event "
             "(seqs_filled_total) so the gap closes everywhere; a burn "
             "WITHOUT a matching fill is a permanent gap that converts into "
-            "a catalogue rebootstrap on peers under db.aae.prefix_hold.", [
+            "a catalogue rebootstrap on peers.", [
                 instance_id
             ]},
         {bondy_oplog_seqs_filled_total,

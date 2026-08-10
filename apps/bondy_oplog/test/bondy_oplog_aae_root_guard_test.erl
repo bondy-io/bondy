@@ -24,7 +24,10 @@ aae_root_guard_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(Dir) ->
         [
             {timeout, 60, fun() -> healthy_advertises_real_root(Dir) end},
-            {timeout, 60, fun() -> dangling_root_not_advertised(Dir) end}
+            {timeout, 60, fun() -> dangling_root_not_advertised(Dir) end},
+            {timeout, 60, fun() ->
+                hold_keeps_frontier_off_an_unseen_prefix(Dir)
+            end}
         ]
     end}.
 
@@ -147,6 +150,79 @@ dangling_root_not_advertised(Dir) ->
         close_shard(Cache, Proj)
     end.
 
+%% Per-origin prefix closure: an event delivered ahead of its prefix is held
+%% out of BOTH the projection fold and the applied-frontier merge, and folds
+%% only once the gap fills.
+%%
+%% This is what keeps the applied frontier an honest witness. The frontier is
+%% a per-origin MAXIMUM, and `bondy_oplog_instance:watermark_door/3` uses it
+%% to decide which merged tree entries the projection has already folded and
+%% may therefore be truncated. A maximum cannot represent a hole, so a
+%% frontier that ran ahead of an unseen seq would license the door to drop
+%% the repair for that seq the moment a peer supplied it --- silently, and on
+%% every subsequent round. `bondy_oplog_cell_apply:partition_contiguous/3`
+%% is what stops the frontier getting there.
+hold_keeps_frontier_off_an_unseen_prefix(Dir) ->
+    Origin = <<"door-origin-aaaa">>,
+
+    PeerId = mk_id(),
+    PeerNS = ns_of(PeerId),
+    {PeerCache, PeerProj} = register_shard(PeerNS, primary, 0, lww_register),
+    {ok, _} = bondy_oplog:start_instance(PeerId, start_opts(PeerNS, Dir)),
+
+    LocalId = mk_id(),
+    LocalNS = ns_of(LocalId),
+    {Cache, Proj} = register_shard(LocalNS, primary, 0, lww_register),
+    {ok, _} = bondy_oplog:start_instance(LocalId, start_opts(LocalNS, Dir)),
+    try
+        %% The peer holds the origin's whole prefix.
+        _ = [
+            ok = bondy_oplog:append_remote(PeerId, hole_event(Origin, N))
+         || N <- [1, 2, 3]
+        ],
+        ok = bondy_oplog:await_apply(PeerId),
+
+        %% This replica saw only seq 3, so its applied frontier reads 3 for
+        %% the origin while 1 and 2 are a hole below that maximum.
+        ok = bondy_oplog:append_remote(LocalId, hole_event(Origin, 3)),
+        ok = bondy_oplog:await_apply(LocalId),
+        %% The peer saw the whole prefix, so its frontier records the
+        %% origin's maximum.
+        ?assertEqual(
+            #{Origin => 3}, bondy_oplog_instance:frontier(PeerId)
+        ),
+
+        %% This replica saw ONLY seq 3. The hold keeps it out of the fold
+        %% AND out of the frontier merge, so the frontier stays empty
+        %% rather than claiming 3 over an unseen 1 and 2. The event is in
+        %% the tree, waiting to be re-presented once the gap fills.
+        ?assertEqual(#{}, bondy_oplog_instance:frontier(LocalId)),
+        ?assertEqual(1, bondy_oplog:size(LocalId)),
+
+        %% Pull the missing prefix from the peer.
+        {ok, _} = bondy_oplog_sync_session:run(
+            LocalId,
+            PeerId,
+            #{transport => bondy_oplog_transport_inline}
+        ),
+        ok = bondy_oplog:await_apply(LocalId),
+
+        %% With the gap filled, the held event folds with its prefix and
+        %% the frontier advances to the origin's maximum in one step.
+        ?assertMatch({ok, _}, bondy_oplog:get(LocalId, hole_key(Origin, 1))),
+        ?assertMatch({ok, _}, bondy_oplog:get(LocalId, hole_key(Origin, 2))),
+        ?assertEqual(
+            #{Origin => 3}, bondy_oplog_instance:frontier(LocalId)
+        )
+    after
+        ok = bondy_oplog:stop_instance(LocalId),
+        ok = bondy_oplog:stop_instance(PeerId),
+        ok = bondy_oplog_core_registry:unregister(LocalNS, primary, 0),
+        ok = bondy_oplog_core_registry:unregister(PeerNS, primary, 0),
+        close_shard(Cache, Proj),
+        close_shard(PeerCache, PeerProj)
+    end.
+
 %% =============================================================================
 %% Helpers
 %% =============================================================================
@@ -164,6 +240,21 @@ start_opts(NS, Dir) ->
 mk_id() ->
     list_to_binary(
         "aaer_" ++ integer_to_list(erlang:unique_integer([positive, monotonic]))
+    ).
+
+%% A fixed-HLC key so both replicas address the same event by seq.
+hole_key(Origin, Seq) ->
+    bondy_oplog_event:key(
+        bondy_oplog_hlc:encode(1_000_000_000 + Seq, 0), Origin, Seq
+    ).
+
+%% A `cell_apply` op, so the applier folds it into the projection and the
+%% applied frontier records the origin's seq — the witness the door consults.
+hole_event(Origin, Seq) ->
+    bondy_oplog_event:new(
+        hole_key(Origin, Seq),
+        {cell_apply, ?B, <<"door-cell">>, {set, Seq, <<"v", Seq>>}},
+        undefined
     ).
 
 ns_of(Id) when is_binary(Id) ->
