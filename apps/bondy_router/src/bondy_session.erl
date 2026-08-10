@@ -212,6 +212,10 @@ stays opaque.
 -ifdef(TEST).
 
 -export([table/1]).
+%% `#session{}` is module-local and building one through `new/2` needs a
+%% realm, so this is how a plain eunit test reaches the optional-peer
+%% branch of `transport_external/1`.
+-export([transport_external_for_test/1]).
 
 -endif.
 
@@ -740,14 +744,24 @@ to_external(#session{} = S) ->
             session_guid => S#session.id,
             node => bondy_config:nodestring()
         },
-        transport => #{
-            peername => inet_utils:peername_to_binary(S#session.peer)
-        }
+        transport => transport_external(S)
     }.
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% `peer` is optional and an `internal` session genuinely has none: it is
+%% opened by an in-VM component with no socket (the HTTP Connector callee,
+%% for one) purely so the session manager monitors the process. Omit the
+%% key rather than fabricate a loopback address — this map is published on
+%% `wamp.session.on_join`, where a made-up peername would be
+%% indistinguishable from a real one.
+transport_external(#session{peer = undefined}) ->
+    #{};
+transport_external(#session{peer = Peer}) ->
+    #{peername => inet_utils:peername_to_binary(Peer)}.
 
 %% @private
 -doc """
@@ -1147,6 +1161,9 @@ maybe_revoke_tickets(_, _) ->
 
 table(Term) ->
     tuplespace:locate_table(?SESSION_SPACE, Term).
+
+transport_external_for_test(Peer) ->
+    transport_external(#session{peer = Peer}).
 
 -else.
 -endif.
