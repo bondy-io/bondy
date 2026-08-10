@@ -1,4 +1,8 @@
-_build
+## A bare `_build` matches only the root one -- each umbrella app has its own,
+## and together they are the largest thing left in the context. Same for the
+## per-app ex_doc output.
+**/_build
+**/doc
 _checkouts
 __checkouts
 .vscode
@@ -10,6 +14,17 @@ deployment
 jepsen
 bench
 _design
+_notes
+_spec
+_out
+monitoring
+## `proofs/tla/states` alone is ~1.5 GB of TLC state files. Nothing under
+## proofs/ is used by the release build, and uploading it dominates the
+## remote-builder context transfer.
+proofs
+## Nothing in the build reads git: the release version is literal in
+## rebar.config and pre_hooks is empty.
+.git
 ## M0 config template is delivered to the VM via fly.toml [[files]] (read from
 ## disk at deploy), never baked into the image — keep it out of the build
 ## context so editing it does not bust the release build cache.

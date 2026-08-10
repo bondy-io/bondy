@@ -358,7 +358,7 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
 ## 1.0.0-rc.27
 ## Changes
 * Moved json encoding to `bondy_json` module which now uses the new `json` moduled instead of `jsone` when running on OTP27. In addition, float and date formatting has been implemented to mirror those existing in `jsone`. Also the defaul float format respects the deprecated `jsx` lib format for backwards compatibility.
-* A new option `serializers.json.float_format` has been added to `bondy.conf` that takes a string representation of the options supported by `erlang:float_to_bionary/2`.
+* A new option `serializers.json.float_format` has been added to `bondy.conf` that takes a string representation of the options supported by `erlang:float_to_binary/2`.
 * **NOTICE**: This only affects HTTP Gateway JSON encoding at the moment and not WAMP. This will be addressed in the next release.
 
 ## 1.0.0-rc.26
@@ -384,7 +384,7 @@ support transport level hearbeats e.g. Web Browser Websocket pings. The RPC repl
 ### Changes
 **BREAKING CHANGE NOTICE**
 * This version replaces Leveldb with Rocksdb - Rocksdb storage is incompatible with Leveldb so if you rely on Bondy storing real information (realms, users, groups, grants, etc), you will need to export/import them using the `bondy.backup.create` and `bondy.backup.restore` WAMP procedures.
-* Bug fix in `bondy_registry_entry:dirty_delete/1`
+* Bug fix in bondy_registry_entry:dirty_delete/1
 
 ## 1.0.0-rc.22
 * Fix CI for OTP26 docker variant

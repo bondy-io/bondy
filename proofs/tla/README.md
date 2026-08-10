@@ -173,9 +173,7 @@ Increment 1 — landed, zero behaviour change:
   (never silently passes) when the scenario is not reached. It is
   **red by design** until increment 2 lands.
 
-Increment 2 — BUILT, CT-validated, Fly-validated, and now the **shipped
-default** (`db.aae.prefix_hold = on`; the knob remains as an emergency
-opt-out):
+Increment 2 — BUILT, CT-validated, Fly-validated, and **unconditional**:
 
 - `apply_cell_pairs_mux/5` partitions each replay batch per remote origin
   into the contiguous-foldable prefix and a HELD remainder, excluded from
@@ -192,9 +190,7 @@ opt-out):
   burned seq).
 
 **Fly-validated (s24, 2026-08-05).** 5×performance-8x `bondy-fleet-1` (lhr),
-enforcement ON cluster-wide via the new `db.aae.prefix_hold` conf knob
-(verified live: `application:get_env(bondy_oplog, prefix_hold) = {ok,true}`).
-Workload: s21-shaped 50k pub VUs (8 LGs) + 1k×1k subs, ramp 120s, hold 300s;
+enforcement ON cluster-wide. Workload: s21-shaped 50k pub VUs (8 LGs) + 1k×1k subs, ramp 120s, hold 300s;
 fault injection at steady state: one node stopped 11:58:45Z → restarted
 12:00:46Z (2m01s, past `peer_timeout`, live compaction truncating).
 
@@ -231,12 +227,10 @@ frontier-gap → rebootstrap chain to **full convergence of all 52 keys**
 (seed + early + late; the truncated EARLY values arrive via the catalogue
 bootstrap's projection cells), with zero holes through the repair included.
 
-With enforcement now the default, the sibling case
-`truncated_prefix_below_peer_max_is_not_silently_adopted` forces the flag
-OFF and **passes on detection**: it locks the detector's ability to see the
-misfold (which is what gives the enforced case's "zero holes" assertion its
-meaning) and documents the hazard the default closes. Its only remaining
-hard failure is silent adoption.
+The hold is unconditional — there is no key that disables it — so there is
+no sibling case exercising the unenforced polarity. What gives the "zero
+holes" assertion its meaning is the fourth-iteration run above, on the same
+scenario and the same detector, before enforcement existed.
 
 ### The model verifies the fix
 

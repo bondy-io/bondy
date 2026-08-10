@@ -633,8 +633,8 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
 truncated_prefix_is_held_and_repaired_by_rebootstrap(Config) ->
     Nodes = nodes_of(Config),
 
-    %% Manual control: no scheduler dispatch, no scheduler-driven GC —
-    %% and the enforcement flag ON everywhere before any fold runs.
+    %% Manual control: no scheduler dispatch and no scheduler-driven GC,
+    %% so every fold in this case is one the driver asked for.
     _ = [
         ok = erpc:call(N, bondy_oplog_sync_scheduler, set_dispatch, [undefined])
      || N <- Nodes

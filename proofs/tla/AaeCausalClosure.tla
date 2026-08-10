@@ -50,7 +50,7 @@ CONSTANTS
     GapCheckEnabled,   \* TRUE models maybe_frontier_gap/5; FALSE is the differential
     GatedCompaction,   \* TRUE = truncate only what every replica applied
                        \* FALSE = mst_retention / recency-filtered frontier
-    PrefixHold,        \* TRUE models db.aae.prefix_hold (the increment-2 fix):
+    PrefixHold,        \* TRUE models the shipped prefix hold (increment 2):
                        \* a sync applies only the per-origin CONTIGUOUS closure
                        \* of local-applied + peer-tree; the held remainder stays
                        \* in the (fully merged) tree and out of the frontier

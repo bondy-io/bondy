@@ -45,9 +45,11 @@ outbound WAMP messages.
     | failed
     | established
     | shutting_down.
-%% A WAMP message and nothing else. Ping, pong and transport errors are handled
-%% by the connection handler before this layer sees them, so no
-%% `{raw, ping | pong | _}` arm belongs here.
+-doc """
+A WAMP message and nothing else. Ping, pong and transport errors are handled by
+the connection handler before this layer sees them, so no
+`{raw, ping | pong | _}` arm belongs here.
+""".
 -type raw_wamp_message() :: bondy_wamp_message:t().
 
 -export_type([frame_type/0]).

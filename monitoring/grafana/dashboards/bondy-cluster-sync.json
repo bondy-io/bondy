@@ -3584,7 +3584,7 @@
     {
       "id": 212,
       "type": "row",
-      "title": "Prefix closure (db.aae.prefix_hold)",
+      "title": "Prefix closure",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -3602,7 +3602,7 @@
         "type": "prometheus",
         "uid": "bondy-prometheus"
       },
-      "description": "Per-origin contiguity gaps that MATERIALISED into a projection fold. With db.aae.prefix_hold on (default) only own-origin transients from concurrent local WAL commit reordering should register; anything sustained, or anything on a rejoining node, deserves a look. Exclude own-origin firings before alerting on this.",
+      "description": "Per-origin contiguity gaps that MATERIALISED into a projection fold. Only own-origin transients from concurrent local WAL commit reordering should register; anything sustained, or anything on a rejoining node, deserves a look. Exclude own-origin firings before alerting on this.",
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -3722,7 +3722,7 @@
         "type": "prometheus",
         "uid": "bondy-prometheus"
       },
-      "description": "Per-origin seqs a rejected WAL batch could not return (overtaken by a concurrent reservation). Each is immediately backfilled with a no-op seq_fill event (see Seqs filled); a burn without a matching fill is a permanent gap that converts into a catalogue rebootstrap on peers under prefix_hold. s24 baseline: zero at 32k pub/s.",
+      "description": "Per-origin seqs a rejected WAL batch could not return (overtaken by a concurrent reservation). Each is immediately backfilled with a no-op seq_fill event (see Seqs filled); a burn without a matching fill is a permanent gap that converts into a catalogue rebootstrap on peers. s24 baseline: zero at 32k pub/s.",
       "gridPos": {
         "h": 4,
         "w": 4,

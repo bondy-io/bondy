@@ -111,14 +111,18 @@ Indeces for matching bondy_registry_entry(s).
 -type wildcard(T) :: T | '_'.
 -type var(T) :: wildcard(T) | '$1' | '$2' | '$3' | '$4'.
 -type eot() :: ?EOT.
-%% `ets` exports no continuation type (verified against OTP 28's own
-%% `export_type` list); a select continuation is opaque.
+-doc """
+A `m:ets` select continuation. `m:ets` exports no continuation type, so this
+stays opaque.
+""".
 -type ets_continuation() :: term().
+
 -type find_opts() :: store_opts().
-%% Option proplist for the maintenance find/fold/foreach API. Historically
-%% `store_opts()/get_opts()/fold_opts()'; the store now runs on bondy_db
-%% and the only honoured option is `{limit, _}' (see `find/4'). Kept as a
-%% proplist so the return shape stays the plum_db-style `{limit,_}'-keyed result.
+
+-doc """
+Option proplist for the maintenance find/fold/foreach API. The only honoured
+option is `{limit, _}` (see `find/4`); the result shape is keyed on it.
+""".
 -type store_opts() :: proplists:proplist().
 -type store_fold_fun() ::
     fun(({Key :: term(), Value :: term()}, Acc :: term()) -> term()).
@@ -144,8 +148,10 @@ Indeces for matching bondy_registry_entry(s).
     sort => bondy_registry_entry:comparator()
 }.
 -type match_result() :: reg_match_result() | sub_match_result().
-%% ONE registration match, as opposed to `reg_match_result/0`, which is the
-%% whole (possibly paged) set of them.
+-doc """
+A single registration match, as opposed to `t:reg_match_result/0`, which is the
+whole (possibly paged) set of them.
+""".
 -type reg_match() :: entry().
 -type reg_match_result() ::
     [entry()]

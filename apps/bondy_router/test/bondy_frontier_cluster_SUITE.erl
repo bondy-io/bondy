@@ -35,7 +35,14 @@
 %% node's MST back from its peer, which is the very false-DIVERGED re-pull the
 %% frontier oracle exists to avoid.
 
--define(NODE_NAMES, [cfront1, cfront2]).
+%% GC is disabled at BOOT, not after it. `bondy_ct:freeze_gc/1` can only run
+%% once the cluster is up, and the default `bondy_oplog_gc_scheduler` ticks
+%% every second from node start, firing the least-recently-compacted subset of
+%% instances per round — so a tick lands in the gap and leaves ONE shard on ONE
+%% node carrying a compaction watermark before the suite has written anything.
+%% That is the non-determinism behind this suite's history of unequal roots.
+-define(GC_OFF_ENV, [{[bondy_oplog, gc_interval_ms], 0}]).
+-define(NODE_NAMES, [{cfront1, ?GC_OFF_ENV}, {cfront2, ?GC_OFF_ENV}]).
 -define(USERS_TABLE, security_users).
 %% Peer-side ETS + telemetry handler id counting bootstrap-flavoured
 %% convergence per instance (`do_install_bootstrap_counter/0`).
@@ -69,18 +76,23 @@ init_per_suite(Config) ->
     %% The peer-side helpers below run on the cluster nodes, so make this module
     %% loadable there.
     _ = [push_module(Node, ?MODULE) || {_, Node, _} <- Nodes],
-    %% Freeze scheduler-driven GC for the WHOLE suite, before any writes.
-    %% Both tests compact explicitly (`do_compact`) and assert on which
-    %% node's MSTs are truncated; a background compaction tick landing
-    %% during seeding truncates one node's MST ahead of the baseline
-    %% snapshot — equal frontiers, unequal roots, the intermittent step-3
-    %% `R1 =:= R2` failure — and can even empty the deliberately-UNCOMPACTED
-    %% node's roots. Convergence needs only the sync scheduler, not GC.
-    _ = [bondy_ct:freeze_gc(Node) || {_, Node, _} <- Nodes],
+    %% Counters BEFORE the freeze: a compaction can only slip through in the
+    %% window between node boot and `freeze_gc/1`, so installing them after it
+    %% blinds the diagnostics to the one thing they exist to catch. With
+    %% `?GC_OFF_ENV` the window is closed at boot and these must read zero.
     _ = [
         ok = erpc:call(Node, ?MODULE, do_install_bootstrap_counter, [])
      || {_, Node, _} <- Nodes
     ],
+    %% Freeze scheduler-driven GC for the WHOLE suite, before any writes.
+    %% Both tests compact explicitly (`do_compact`) and assert on which
+    %% node's MSTs are truncated; a background compaction tick landing
+    %% during seeding truncates one node's MST ahead of the baseline
+    %% snapshot — equal frontiers, unequal roots — and can even empty the
+    %% deliberately-UNCOMPACTED node's roots. Convergence needs only the sync
+    %% scheduler, not GC. Redundant with `?GC_OFF_ENV` for the default
+    %% scheduler; still required for `bondy_oplog_reclaim_scheduler`.
+    _ = [bondy_ct:freeze_gc(Node) || {_, Node, _} <- Nodes],
     [{cluster, Nodes} | Config].
 
 end_per_suite(Config) ->
@@ -668,12 +680,20 @@ do_install_bootstrap_counter() ->
                     [bondy_oplog, sync_scheduler, rebootstrap_scheduled],
                     [bondy_oplog, sync_session, frontier_gap],
                     [bondy_oplog, instance, integrate_doored],
-                    %% The watermark setters. Compaction commit is the only
-                    %% one reachable here that is not already counted above,
-                    %% and its driver is the default `bondy_oplog_gc_scheduler`
-                    %% — the one `bondy_ct:freeze_gc/1` stops.
+                    %% The watermark setters reachable here. Compaction
+                    %% commit is driven by the default
+                    %% `bondy_oplog_gc_scheduler` — the one
+                    %% `bondy_ct:freeze_gc/1` stops — so a non-zero count
+                    %% during a frozen window means the freeze did not take.
                     [bondy_oplog, compaction, ok],
                     [bondy_oplog, compaction, retention],
+                    %% The unservable-root self-heal
+                    %% (`maybe_self_heal_unservable/2`) drops the tree and
+                    %% advances the watermark past it. It runs inside
+                    %% `do_compact_sync/2`, so it is a second way a
+                    %% compaction tick sets a watermark, distinguishable
+                    %% from an ordinary commit only by this event.
+                    [bondy_oplog, instance, mst_rebuilt],
                     %% The reclaim scheduler is a SECOND gc_scheduler instance
                     %% (`bondy_oplog_reclaim_scheduler`) that `freeze_gc/1`
                     %% does not stop, so it keeps sweeping through the

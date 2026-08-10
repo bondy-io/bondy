@@ -138,9 +138,12 @@ data will be lost.
     {[match_proj()], continuation() | eot()}
     | eot()
     | [match_proj()].
-%% `ets` exports no continuation type (verified against OTP 28's own
-%% `export_type` list); a select continuation is opaque.
+-doc """
+A `m:ets` select continuation. `m:ets` exports no continuation type, so this
+stays opaque.
+""".
 -type ets_continuation() :: term().
+
 -type continuation() :: #{
     continuation := ets_continuation(),
     tabs := [ets:tab()],

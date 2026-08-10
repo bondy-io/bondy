@@ -66,18 +66,21 @@ behaviour is byte-identical.
     %% Defaults to `?DEFAULT_MAX_INFLIGHT` when absent.
     max_inflight => non_neg_integer()
 }.
-%% The cell-apply context multiplexer — a `bondy_oplog_mux:t()` whose key is the
-%% event's `Bucket` (entity type) and whose value is that table's
-%% `cell_apply_ctx()`. `{single, Ctx}` is the one-table-per-instance case (every
-%% bucket resolves to the same ctx, byte-identical to the pre-mux path);
-%% `{dir, Map}` is the per-shard multiplexer keyed by bucket. Consumed by both
-%% the applier (durable + non-fused ephemeral) and the fused instance, which each
-%% hold a `ctx_source()` and dispatch through `apply_cell_batch_mux/3` /
-%% `apply_cell_pairs_mux/4`.
+-doc """
+The cell-apply context multiplexer: a `bondy_oplog_mux:t()` whose key is the
+event's `Bucket` (entity type) and whose value is that table's
+`cell_apply_ctx()`. `{single, Ctx}` is the one-table-per-instance case, where
+every bucket resolves to the same context; `{dir, Map}` is the per-shard
+multiplexer keyed by bucket. The applier (durable and non-fused ephemeral) and
+the fused instance each hold a `ctx_source()` and dispatch through
+`apply_cell_batch_mux/3` / `apply_cell_pairs_mux/4`.
+""".
 -type ctx_source() :: bondy_oplog_mux:t().
-%% What `sec_idx/1` returns: the context's namespace paired with its secondary
-%% index descriptors. Named by `bondy_oplog_cell_utils:reindex/3`, which was
-%% referencing it before it was ever declared.
+
+-doc """
+A context's namespace paired with its secondary index descriptors, as returned
+by `sec_idx/1`.
+""".
 -type sec_idx() :: {Namespace :: atom(), [index_descriptor()]}.
 
 -export_type([cell_apply_ctx/0]).

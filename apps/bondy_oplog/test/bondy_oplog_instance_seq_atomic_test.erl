@@ -223,8 +223,7 @@ fills_cross_sync_and_unpark_the_prefix_hold() ->
     ok = gen_server:cast(PidA, {fill_burned_seqs, 4, 5, 0}),
     ok = wait_until(fun() -> bondy_oplog:size(A) =:= 6 end),
 
-    %% B pulls A's whole tree; the fold runs under the shipped default
-    %% (prefix_hold on).
+    %% B pulls A's whole tree; the fold enforces prefix closure.
     {ok, _} = bondy_oplog:sync(B, A),
     _ = barrier(B),
     ?assertEqual(6, maps:get(OriginA, bondy_oplog_registry:frontier(B))),
