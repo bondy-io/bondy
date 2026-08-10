@@ -1645,8 +1645,12 @@ end}.
 %% and every summary change is written through.
 %% @end
 %% -----------------------------------------------------------------------------
+%% `integer` is listed alongside the duration so that `0` is expressible: the
+%% duration parser rejects zero in every spelling (`0`, `0ms`, `0s`), so a
+%% bare duration datatype makes the documented "set 0 to disable" impossible
+%% to write and makes the generated defaults file fail to parse back.
 {mapping, "registry.rib.damping", "bondy_router.registry_rib_damping", [
-  {datatype, {duration, ms}},
+  {datatype, [integer, {duration, ms}]},
   {default, 0}
 ]}.
 

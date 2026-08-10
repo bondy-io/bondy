@@ -13,26 +13,33 @@ configuration.
 
 ## Steps
 
-### 1. Accept that this is not an in-place upgrade
+### 1. Move your data before you wipe anything
 
 On-disk data written by 1.0.0-rc.65 (or any earlier release) is in PlumDB's
-RocksDB format, which this release cannot read. There is no tool that
-converts it: `bondy_export`, this release's data mover, reads and writes only
-the new storage engine, so it has nothing to read on a PlumDB data
-directory.
+RocksDB format, which this release cannot read. `bondy_export` reads and
+writes only the new storage engine, so pointing it at a PlumDB data
+directory gives it nothing to read.
 
-Concretely, this means:
+The migration path runs through a backup **file**, not the data directory.
+Take one on the old node with `bondy.backup.create` while it is still
+running; this release's `bondy.export.import` recognises that file's format
+and translates each record as it reads. Users, groups, grants, sources, API
+Gateway specs and OAuth refresh tokens come across. Realm records do not —
+recreate realms from configuration, and their per-realm data still imports,
+because it is banded by the realm URI.
+
+The full procedure — backing up on the old deployment, confirming it
+finished, copying the file, and importing it — is
+[Upgrading to 1.0.0](https://developer.bondy.io/guides/deployment/upgrading_to_1_0_0).
+Follow that guide for the data; this one covers only the configuration.
+
+Two things hold either way:
 
 - **Wipe the data directory** (`platform_data_dir`) before starting the new
-  release on a node. Starting it against an old data directory does not
-  corrupt anything — the new code simply doesn't recognise the layout — but
-  it also doesn't give you your data back.
-- **Recreate realms, users, groups, grants, sources, tickets, tokens and
-  API Gateway specs** on the new cluster. If you provisioned these
-  originally through a script, Terraform/Ansible run, or a stored set of
-  WAMP `bondy.realm.create` / `bondy.security.*` / `bondy.http_gateway.*`
-  calls, replay it. If you provisioned by hand, there is no shortcut —
-  budget time to redo it.
+  release on a node — but only once the backup above is confirmed finished,
+  since the data directory is the only thing the backup can be taken from.
+  Starting the new release against an old data directory does not corrupt
+  anything; the new code simply doesn't recognise the layout.
 - This is a **new cluster**, not a rolling upgrade. Don't mix a 1.0.0-rc.65
   node and a node running this release in the same Partisan cluster.
 
@@ -175,8 +182,8 @@ the defaults are safe to run with unchanged.
 ## Result
 
 You have a `bondy.conf` (and, if applicable, `advanced.config`) that this
-release accepts, and a plan for recreating your realm and security state on
-a freshly provisioned cluster. To confirm your file is complete before
+release accepts. Your data moves separately, through the backup and import
+described in step 1. To confirm your file is complete before
 deploying it, start a node with it: an unrecognised or mistyped key fails
 boot immediately, naming the key and suggesting the closest valid one. If
 you're building from source, `config/bondy.conf.defaults` (regenerate it
@@ -185,6 +192,9 @@ diff target.
 
 ## See also
 
+- [Upgrading to 1.0.0](https://developer.bondy.io/guides/deployment/upgrading_to_1_0_0)
+  — the data half of the migration: back up on the old deployment, copy the
+  file, import it on the new cluster.
 - [Reclamation configuration reference](reclamation_options.md) — the full
   set of reclamation/retirement options and their telemetry.
 - [Understanding deletion and reclamation](../database/deletion_and_reclamation.md)
