@@ -770,9 +770,8 @@ dispatch_for(InstanceId, #state{} = State) ->
     end.
 
 %% @private
-%% `list_instances/0` calls `info/1` on each running worker — if a
-%% worker is mid-restart that call may briefly fail. Soft-fail to an
-%% empty list rather than crash the scheduler.
+%% Soft-fail to an empty list rather than crash the scheduler: the
+%% registry table is absent before it starts and after it stops.
 safe_list_instances() ->
     try
         bondy_oplog:list_instances()

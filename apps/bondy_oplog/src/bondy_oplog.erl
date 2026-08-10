@@ -211,22 +211,26 @@ stop_instance(InstanceId, _Opts) when is_binary(InstanceId) ->
 
 ?DOC("""
 Lists currently-running instances on this node. Order unspecified.
+
+Answered from the registry's key-only select, so it wakes no process and
+takes no lock. This is called from periodic sweeps (the sync and GC
+scheduler ticks, origin retirement) and from the Prometheus scrape, and
+a supervision-tree walk is the wrong shape for all of them:
+`supervisor:which_children/1` is a `gen_server:call` that serialises
+against the process managing child starts and stops, and copies the whole
+child list per call. Walking the tree to reach each instance cost one such
+call per instance supervisor plus an `info/1` call per instance — 2N
+round trips that made all N instances runnable at the same instant.
+
+A row exists from instance start until its `terminate/2`, so the set is
+the same one the tree reports, minus instances that have started but not
+yet registered. Sweeps pick those up on their next pass; boot-time
+enumeration uses `discover_instances/1,2` instead.
 """).
 -spec list_instances() -> [instance_id()].
 
 list_instances() ->
-    Children = supervisor:which_children(
-        bondy_oplog_instance_dyn_sup
-    ),
-    [
-        InstanceId
-     || {_Id, SupPid, supervisor, _} <- Children,
-        is_pid(SupPid),
-        InstancePid <- [bondy_oplog_instance_sup:instance_pid(SupPid)],
-        is_pid(InstancePid),
-        #{instance_id := InstanceId} <-
-            [bondy_oplog_instance:info(InstancePid)]
-    ].
+    bondy_oplog_registry:list().
 
 ?DOC("""
 Discovers instances on disk under `BaseDir`, using the sharded path

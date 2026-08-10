@@ -20,7 +20,13 @@ will time out expensively after holding resources.
 The status has hysteresis to avoid flapping at the boundary: it becomes
 `busy` when the sampled run queue reaches `high_watermark x
 schedulers_online` and returns to `normal` only when it falls to
-`low_watermark x schedulers_online`. Thresholds are expressed as factors
+`low_watermark x schedulers_online`. A crossing must also hold for three
+consecutive samples before it is committed. Hysteresis alone does not
+cover the dominant case on a quiet node: an instantaneous run queue
+spikes whenever a wave of periodic timers wakes together, and such a
+spike clears within one sample, so a single-sample commit would refuse
+admission — and log a state change — while nothing is actually
+saturated. Thresholds are expressed as factors
 of the online scheduler count so a configuration is portable across
 machine sizes: a run queue of N x schedulers means roughly N runnable
 processes ahead of any newly runnable one on every scheduler.
@@ -49,12 +55,19 @@ Configuration (`bondy_regulator` application environment, set via the
 -define(DEFAULT_HIGH_WATERMARK, 8).
 -define(DEFAULT_LOW_WATERMARK, 4).
 -define(DEFAULT_SAMPLE_INTERVAL_MS, 100).
+%% Consecutive samples a crossing must hold before the status changes. An
+%% instantaneous run queue spikes whenever a wave of periodic timers wakes
+%% together, which an idle node does routinely; committing on one sample
+%% turns that into a refused HELLO and a pair of log lines.
+-define(DWELL_SAMPLES, 3).
 
 -record(state, {
     ref :: atomics:atomics_ref(),
     high :: pos_integer(),
     low :: non_neg_integer(),
-    interval_ms :: pos_integer()
+    interval_ms :: pos_integer(),
+    %% Consecutive samples the pending (not yet committed) status has held.
+    dwell = 0 :: non_neg_integer()
 }).
 
 %% API
@@ -62,6 +75,13 @@ Configuration (`bondy_regulator` application environment, set via the
 -export([run_queue/0]).
 -export([start_link/0]).
 -export([status/0]).
+
+-ifdef(TEST).
+%% Exposed so the dwell window can be pinned directly: driving it through
+%% the sampler would mean manufacturing a real run-queue spike shorter
+%% than the sampling period, which is not reproducible.
+-export([step/3]).
+-endif.
 
 %% GEN_SERVER CALLBACKS
 -export([code_change/3]).
@@ -167,35 +187,41 @@ handle_cast(Event, State) ->
     }),
     {noreply, State}.
 
-handle_info(sample, State) ->
-    #state{ref = Ref, high = High, low = Low} = State,
+handle_info(sample, State0) ->
+    #state{ref = Ref, high = High, low = Low, dwell = Dwell0} = State0,
     RunQueue = erlang:statistics(total_run_queue_lengths_all),
     ok = atomics:put(Ref, ?RUN_QUEUE_SLOT, RunQueue),
 
     Status = atomics:get(Ref, ?STATUS_SLOT),
+    Pending = transition(Status, RunQueue, High, Low),
 
-    case transition(Status, RunQueue, High, Low) of
-        Status ->
-            ok;
-        1 ->
-            ok = atomics:put(Ref, ?STATUS_SLOT, 1),
-            ?LOG_NOTICE(#{
-                description =>
-                    "Node entered the busy state: admission gates will "
-                    "refuse new work until the run queue drains below "
-                    "the low watermark.",
-                run_queue => RunQueue,
-                high_watermark => High,
-                low_watermark => Low
-            });
-        0 ->
-            ok = atomics:put(Ref, ?STATUS_SLOT, 0),
-            ?LOG_NOTICE(#{
-                description => "Node returned to the normal state.",
-                run_queue => RunQueue,
-                low_watermark => Low
-            })
-    end,
+    State =
+        case step(Status, Pending, Dwell0) of
+            {hold, Dwell} ->
+                State0#state{dwell = Dwell};
+            {commit, 1} ->
+                ok = atomics:put(Ref, ?STATUS_SLOT, 1),
+                ?LOG_NOTICE(#{
+                    description =>
+                        "Node entered the busy state: admission gates will "
+                        "refuse new work until the run queue drains below "
+                        "the low watermark.",
+                    run_queue => RunQueue,
+                    high_watermark => High,
+                    low_watermark => Low,
+                    dwell_samples => ?DWELL_SAMPLES
+                }),
+                State0#state{dwell = 0};
+            {commit, 0} ->
+                ok = atomics:put(Ref, ?STATUS_SLOT, 0),
+                ?LOG_NOTICE(#{
+                    description => "Node returned to the normal state.",
+                    run_queue => RunQueue,
+                    low_watermark => Low,
+                    dwell_samples => ?DWELL_SAMPLES
+                }),
+                State0#state{dwell = 0}
+        end,
 
     {noreply, schedule_sample(State)};
 handle_info(Info, State) ->
@@ -216,6 +242,18 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% The dwell step. A crossing is committed only once it has held for
+%% `?DWELL_SAMPLES` consecutive samples; a return to the committed side
+%% voids any partial dwell, so a spike shorter than the dwell window
+%% never changes the status.
+step(Status, Status, _Dwell) ->
+    {hold, 0};
+step(_Status, Pending, Dwell) when Dwell + 1 >= ?DWELL_SAMPLES ->
+    {commit, Pending};
+step(_Status, _Pending, Dwell) ->
+    {hold, Dwell + 1}.
 
 %% @private
 %% The hysteresis step: `1` (busy) at or above the high watermark, `0`
