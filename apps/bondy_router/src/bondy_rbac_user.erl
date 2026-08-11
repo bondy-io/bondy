@@ -1283,20 +1283,21 @@ member_retract(RealmUri, Username, Group) ->
 
 %% @private
 %% Bring the relation in line with the user's desired group set: assert the
-%% added groups, retract the removed ones. Called at every (non-declarative)
-%% user store, so a no-op set (desired == current) costs one forward-band scan.
+%% added groups, retract the removed ones. Called at every user store, so a
+%% no-op set (desired == current) costs one forward-band scan and no write.
+%%
+%% Returns whether the relation changed. `store/3` needs that on the
+%% declarative path to decide whether the user cell must be re-stamped.
+-spec reconcile_membership(uri(), username_int(), [binary()]) -> boolean().
+
 reconcile_membership(RealmUri, Username, Desired0) ->
     Desired = ordsets:from_list(Desired0),
     Current = ordsets:from_list(member_groups(RealmUri, Username)),
-    _ = [
-        member_assert(RealmUri, Username, G)
-     || G <- ordsets:subtract(Desired, Current)
-    ],
-    _ = [
-        member_retract(RealmUri, Username, G)
-     || G <- ordsets:subtract(Current, Desired)
-    ],
-    ok.
+    Added = ordsets:subtract(Desired, Current),
+    Removed = ordsets:subtract(Current, Desired),
+    _ = [member_assert(RealmUri, Username, G) || G <- Added],
+    _ = [member_retract(RealmUri, Username, G) || G <- Removed],
+    Added =/= [] orelse Removed =/= [].
 
 %% @private
 %% Retract every membership fact for a user (on user deletion).
@@ -1790,17 +1791,32 @@ update_groups(RealmUri, Username, Groupnames, Fun) when is_binary(Username) ->
 %% advancing (a removed/added group forces the zookie forward, design §9.3).
 store(RealmUri, #{username := Username} = User, #{declarative := true}) ->
     %% Declarative config apply: write WITHOUT firing the runtime lifecycle
-    %% side-effects, and IDEMPOTENTLY — emit a write only when the stored value
+    %% side-effects, and IDEMPOTENTLY — emit a write only when something
     %% differs. Re-reading the same config file on every boot must not re-stamp
     %% the user cell with a fresh HLC (which would diverge the cross-node content
     %% digest); the op-based CRDT + anti-entropy handle convergence, so no
     %% deterministic-version rebase is needed. The user object is deterministic
     %% (see `bondy_realm:validate_rbac_config` for the deterministic salt), so an
-    %% unchanged config compares equal. Membership replicates via its own
-    %% relation cells, so this does NOT reconcile group membership.
+    %% unchanged config compares equal.
+    %%
+    %% The config file declares group membership, so the relation is reconciled
+    %% here exactly as on the runtime path: the file is the desired state, and a
+    %% group dropped from it is retracted. `reconcile_membership/3` writes
+    %% nothing when the relation already matches, so idempotency is preserved.
+    %%
+    %% A membership change forces the user-cell write even when the record
+    %% itself is unchanged: that cell's HLC is the revocation zookie
+    %% (`token_version/2`), so without the write, revoking a group through the
+    %% config file would leave already-issued tokens valid.
+    %%
+    %% Both properties are covered by
+    %% `bondy_rbac_user_SUITE:declarative_config_membership/1`.
     Desired = strip_groups(User),
+    Reconciled = reconcile_membership(
+        RealmUri, Username, maps:get(groups, User, [])
+    ),
     case do_get(RealmUri, Username) of
-        Desired ->
+        Desired when not Reconciled ->
             %% Unchanged — no write, no new operation, convergence undisturbed.
             ok;
         _ ->
@@ -1811,7 +1827,7 @@ store(RealmUri, #{username := Username} = User, _) ->
     %% Capture the previous value to tell a create from an update, the way
     %% plum_db passed `Old` to the on_update callback.
     Old = do_get(RealmUri, Username),
-    ok = reconcile_membership(RealmUri, Username, maps:get(groups, User, [])),
+    _ = reconcile_membership(RealmUri, Username, maps:get(groups, User, [])),
     ok = durable_apply(table(), RealmUri, Username, {set, strip_groups(User)}),
     ok = do_on_update(RealmUri, Username, Old == undefined),
     {ok, User}.

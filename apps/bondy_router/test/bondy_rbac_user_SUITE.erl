@@ -33,7 +33,8 @@ all() ->
         list_members,
         group_deletion_cleans_members,
         membership_is_relation_authoritative,
-        token_version
+        token_version,
+        declarative_config_membership
     ].
 
 init_per_suite(Config) ->
@@ -593,9 +594,66 @@ token_version(_) ->
         bondy_rbac_user:token_version(?REALM1_URI, <<"no_such_user_xyz">>)
     ).
 
+declarative_config_membership(_) ->
+    %% The declarative path is the one `bondy_realm:apply_config/0` takes at
+    %% every boot: overwrite the record, skip the runtime lifecycle
+    %% side-effects, and emit a write only when something actually differs.
+    U = <<"decl_user_1">>,
+    G1 = <<"decl_group_1">>,
+    G2 = <<"decl_group_2">>,
+    ok = add_group(?REALM1_URI, G1),
+    ok = add_group(?REALM1_URI, G2),
+
+    %% A declaratively created user gets the membership the config declares.
+    ok = declarative_add(?REALM1_URI, U, [G1]),
+    ?assertEqual([G1], user_groups(?REALM1_URI, U)),
+
+    {ok, V0} = bondy_rbac_user:token_version(?REALM1_URI, U),
+
+    %% Re-applying the SAME declaration writes nothing: membership is unchanged
+    %% and the user cell is not re-stamped, so the revocation zookie holds
+    %% still. This is what stops every boot perturbing cross-node convergence.
+    ok = declarative_add(?REALM1_URI, U, [G1]),
+    ?assertEqual([G1], user_groups(?REALM1_URI, U)),
+    ?assertEqual({ok, V0}, bondy_rbac_user:token_version(?REALM1_URI, U)),
+
+    %% A membership-only change still advances the zookie, even though the
+    %% record itself is identical. Without that write, a group revoked through
+    %% the config file would leave already-issued tokens valid.
+    ok = declarative_add(?REALM1_URI, U, [G1, G2]),
+    ?assertEqual([G1, G2], user_groups(?REALM1_URI, U)),
+    {ok, V1} = bondy_rbac_user:token_version(?REALM1_URI, U),
+    ?assert(V1 > V0),
+
+    %% The file is the desired state, so a group dropped from it is retracted.
+    ok = declarative_add(?REALM1_URI, U, []),
+    ?assertEqual([], user_groups(?REALM1_URI, U)),
+    {ok, V2} = bondy_rbac_user:token_version(?REALM1_URI, U),
+    ?assert(V2 > V1).
+
 %% =============================================================================
 %% Member-test helpers
 %% =============================================================================
+
+%% Adds a user the way `bondy_realm:apply_rbac_config/3` does. The user carries
+%% no credentials so the stored record is identical across applies — a password
+%% is salted per call, which would defeat the idempotency assertions.
+declarative_add(RealmUri, Username, Groups) ->
+    User = bondy_rbac_user:new(#{
+        username => Username,
+        groups => Groups
+    }),
+    {ok, _} = bondy_rbac_user:add(RealmUri, User, #{
+        declarative => true,
+        update_credentials => true,
+        forward_credentials => true
+    }),
+    ok.
+
+user_groups(RealmUri, Username) ->
+    lists:sort(
+        bondy_rbac_user:groups(bondy_rbac_user:fetch(RealmUri, Username))
+    ).
 
 add_group(RealmUri, Name) ->
     {ok, _} = bondy_rbac_group:add(
