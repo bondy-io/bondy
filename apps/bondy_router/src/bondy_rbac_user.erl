@@ -1785,9 +1785,10 @@ update_groups(RealmUri, Username, Groupnames, Fun) when is_binary(Username) ->
 %% `groups` is NOT persisted in the user cell — membership is the authoritative
 %% cell-per-fact `security_group_members` relation. The persisted value is the
 %% user map with `groups` stripped; the desired membership set (the map's
-%% `groups`) is reconciled into the relation. The user-cell write still happens
-%% on every membership change, so its HLC — the `token_version` — keeps
-%% advancing (a removed/added group forces the zookie forward, design §9.3).
+%% `groups`) is reconciled into the relation on every store, declarative or not.
+%% The user-cell write still happens on every membership change, so its HLC —
+%% the `token_version` — keeps advancing (a removed/added group forces the
+%% zookie forward, design §9.3).
 store(RealmUri, #{username := Username} = User, #{declarative := true}) ->
     %% Declarative config apply: write WITHOUT firing the runtime lifecycle
     %% side-effects, and IDEMPOTENTLY — emit a write only when the stored value
@@ -1796,9 +1797,13 @@ store(RealmUri, #{username := Username} = User, #{declarative := true}) ->
     %% digest); the op-based CRDT + anti-entropy handle convergence, so no
     %% deterministic-version rebase is needed. The user object is deterministic
     %% (see `bondy_realm:validate_rbac_config` for the deterministic salt), so an
-    %% unchanged config compares equal. Membership replicates via its own
-    %% relation cells, so this does NOT reconcile group membership.
+    %% unchanged config compares equal. The membership relation gets the same
+    %% idempotent treatment as grants/sources (`bondy_rbac:store/5`,
+    %% `bondy_rbac_source:store/5`): `reconcile_membership/3` diffs desired vs.
+    %% current and only asserts/retracts the delta, so a converged boot (or a
+    %% node that already has the fact via anti-entropy) performs zero writes.
     Desired = strip_groups(User),
+    ok = reconcile_membership(RealmUri, Username, maps:get(groups, User, [])),
     case do_get(RealmUri, Username) of
         Desired ->
             %% Unchanged — no write, no new operation, convergence undisturbed.
