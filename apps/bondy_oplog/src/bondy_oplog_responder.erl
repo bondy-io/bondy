@@ -68,6 +68,8 @@ partisan_gen_server:call(
 |---|---|
 | `get_root`                               | `{ok, hash() \| undefined, fingerprint()}`                             |
 | `get_frontier`                           | `{ok, #{origin() => seq()}, fingerprint()}`                            |
+| `get_origins`                            | `{ok, [origin()]}`                                                     |
+| `get_retired`                            | `{ok, [origin()]}`                                                     |
 | `{get_pages, Set}`                       | `{ok, #{hash() => page()}}`                                            |
 | `get_snapshot`                           | `{ok, no_snapshot}` \| `{ok, event_key(), term()}`                     |
 | `get_catalogue_snapshot_init`            | `{ok, no_snapshot}` \| `{ok, {init, {watermark(), cursor()}}}`         |
@@ -268,6 +270,17 @@ dispatch(InstanceId, get_origins) when is_binary(InstanceId) ->
     %% that lacks this verb answers `{error, {dispatch_failed, _}}`, which
     %% the retirement pass treats as member-unreachable — fail-closed.
     {ok, bondy_oplog_origin_retirement:local_origins()};
+dispatch(InstanceId, get_retired) when is_binary(InstanceId) ->
+    %% NODE-level, like `get_origins`: this node's view of the replicated
+    %% grow-only retirement set. Peers pull it and union it in, which is the
+    %% whole of the replication — the set only grows, so there is nothing to
+    %% order and nothing to reconcile.
+    %%
+    %% It is also the reap's precondition: a replica drops a retired
+    %% origin's frontier entry only once EVERY member's answer contains that
+    %% origin, so a mixed-version peer answering `{error, {dispatch_failed,
+    %% _}}` blocks the reap rather than licensing it.
+    {ok, bondy_oplog_origin_bans:retired()};
 dispatch(InstanceId, {get_pages, Hashes}) when is_binary(InstanceId) ->
     do_get_pages(InstanceId, Hashes);
 dispatch(InstanceId, {get_pages, _Peer, _PeerRoot, Hashes}) when

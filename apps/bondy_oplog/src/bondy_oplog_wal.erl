@@ -14,7 +14,7 @@
 -include("bondy_oplog_wal.hrl").
 
 -moduledoc #{format => "text/markdown"}.
-?MODULEDOC("""
+-moduledoc """
 Per-instance Write-Ahead Log writer.
 
 Current behaviour:
@@ -74,7 +74,7 @@ overrides to `batched` in its per-instance config.
 
 Retention, backpressure, the applier integration, and the full
 stateful-PropEr fault-injection harness are still to land.
-""").
+""".
 
 %% Pending `await_durable/3` caller. Sorted ascending by `pos` in
 %% `state.waiters` so satisfying on a durable advance is a
@@ -309,10 +309,10 @@ stateful-PropEr fault-injection harness are still to land.
 %% API
 %% =============================================================================
 
-?DOC("""
+-doc """
 Starts a WAL writer linked to the caller. See `open/2` for the public
 contract.
-""").
+""".
 -spec start_link(instance_id(), opts()) ->
     {ok, pid()} | {error, term()}.
 
@@ -321,12 +321,12 @@ start_link(InstanceId, Opts) when
 ->
     gen_server:start_link(?MODULE, {InstanceId, Opts}, []).
 
-?DOC("""
+-doc """
 Starts a WAL writer **without** linking to the caller. Useful in tests
 that exercise init-failure paths, where a linked exit signal would kill
 the test process. Production code should prefer `start_link/2` or
 `open/2` so the writer participates in supervision.
-""").
+""".
 -spec start(instance_id(), opts()) ->
     {ok, pid()} | {error, term()}.
 
@@ -335,11 +335,11 @@ start(InstanceId, Opts) when
 ->
     gen_server:start(?MODULE, {InstanceId, Opts}, []).
 
-?DOC("""
+-doc """
 Returns a `supervisor:child_spec/0` for hosting a WAL writer under a
 supervisor. Used by `bondy_oplog_instance_sup`, the per-instance
 one_for_all subtree that owns the writer, applier, and instance API.
-""").
+""".
 -spec child_spec(instance_id(), opts()) -> supervisor:child_spec().
 
 child_spec(InstanceId, Opts) ->
@@ -352,7 +352,7 @@ child_spec(InstanceId, Opts) ->
         modules => [?MODULE]
     }.
 
-?DOC("""
+-doc """
 Opens a per-instance WAL, creating a fresh one or recovering an
 existing one transparently.
 
@@ -418,19 +418,19 @@ Recovery errors are returned through `start_link/2`'s usual
 - `{sealed_segment, SegId, Reason}` — a sealed segment's header
   doesn't match this instance/origin.
 - `{consumer_offset, _}` — `consumer.offset` is malformed.
-""").
+""".
 -spec open(instance_id(), opts()) -> {ok, wal()} | {error, term()}.
 
 open(InstanceId, Opts) ->
     start_link(InstanceId, Opts).
 
-?DOC("""
+-doc """
 Stops the WAL writer. The head segment is fsynced and the fd is closed
 in `terminate/2`. Idempotent — calling `close/1` on a dead pid returns
 `ok`. `is_process_alive/1` is intentionally **not** used: it would race
 with the actual stop and tell us nothing the try/catch doesn't already
 handle.
-""").
+""".
 -spec close(wal()) -> ok.
 
 close(Pid) when is_pid(Pid) ->
@@ -441,7 +441,7 @@ close(Pid) when is_pid(Pid) ->
         exit:{noproc, _} -> ok
     end.
 
-?DOC("""
+-doc """
 Appends a single event as a one-element batch frame. Sugar for
 `append_batch(Pid, [Event])` that flattens the per-event result.
 
@@ -458,7 +458,7 @@ In `per_write` mode every successful `append/2` includes a
 the frame has been written; durability is reached at a later fsync
 boundary observable via `durable_position/1` or awaitable via
 `await_durable/3`.
-""").
+""".
 -spec append(wal(), bondy_oplog_event:t()) ->
     {ok, bondy_oplog_hlc:hlc(), position()}
     | {error, term()}.
@@ -469,7 +469,7 @@ append(Pid, #bondy_oplog_event{} = Event) when is_pid(Pid) ->
         {error, _} = E -> E
     end.
 
-?DOC("""
+-doc """
 Appends a list of events as a single atomic batch frame. Either every
 event in the batch is durably appended (and visible to readers) or none
 of them is.
@@ -506,7 +506,7 @@ Rejections (all leave the writer state untouched):
 Durability semantics match `append/2`: in `per_write` mode the batch
 is durable on return; in `batched` mode it is durable at the next
 fsync boundary.
-""").
+""".
 -spec append_batch(wal(), [bondy_oplog_event:t(), ...]) ->
     {ok, [{bondy_oplog_hlc:hlc(), position()}, ...]}
     | {error, term()}.
@@ -525,7 +525,7 @@ append_batch(Pid, []) when is_pid(Pid) ->
 is_event(#bondy_oplog_event{}) -> true;
 is_event(_) -> false.
 
-?DOC("""
+-doc """
 Forces an fsync of the head segment file descriptor.
 
 In `per_write` mode this is a barrier (every prior `append/2` was
@@ -533,13 +533,13 @@ already fsynced); the call still completes the protocol — advancing
 `durable_position/1` to the current head and notifying any
 `await_durable/3` waiters covered by the new durable boundary. In
 `batched` mode this is the user-facing way to force durability.
-""").
+""".
 -spec sync(wal()) -> ok | {error, term()}.
 
 sync(Pid) when is_pid(Pid) ->
     gen_server:call(Pid, sync, infinity).
 
-?DOC("""
+-doc """
 Returns the current durable position `{Segment, Offset}` — the highest
 byte offset that has been fsynced to disk.
 
@@ -549,13 +549,13 @@ interval. The result is read from the writer's serialised state so
 the pair is always consistent (unlike the `durable_pos_ref` atomics
 ref exposed via `reader_view/1`, which may race across segment
 rotations).
-""").
+""".
 -spec durable_position(wal()) -> position().
 
 durable_position(Pid) when is_pid(Pid) ->
     gen_server:call(Pid, durable_position, infinity).
 
-?DOC("""
+-doc """
 Blocks until the durable position reaches `{Segment, Offset}`, or
 until `Timeout` milliseconds (or `infinity`) elapse.
 
@@ -573,7 +573,7 @@ Returns:
 In `per_write` mode `await_durable/3` always returns `ok` immediately:
 appends are durable on return, so any `Pos <= head_offset` is
 already covered.
-""").
+""".
 -spec await_durable(wal(), position(), timeout()) ->
     ok | {error, timeout} | {error, term()}.
 
@@ -593,7 +593,7 @@ await_durable(Pid, {Seg, Off} = Pos, Timeout) when
     %% an `{Tag, Reply}` message into the caller's mailbox.
     gen_server:call(Pid, {await_durable, Pos, Timeout}, infinity).
 
-?DOC("""
+-doc """
 Returns a diagnostic snapshot of the writer's state. Suitable for
 operator status pages and tests; not a load-bearing protocol surface.
 
@@ -640,13 +640,13 @@ Current shape:
 
 The keys `committed_offset` / `committed_hlc` are stubbed until the
 consumer-commit machinery lands.
-""").
+""".
 -spec info(wal()) -> map().
 
 info(Pid) when is_pid(Pid) ->
     gen_server:call(Pid, info).
 
-?DOC("""
+-doc """
 Returns the static + atomics-published state a reader needs to open
 itself against this writer:
 
@@ -695,13 +695,13 @@ may be stale before the reader has finished walking them (the atomics
 ref keeps the reader correct even if the writer rotates afterwards).
 The reader uses `live_segments` only to resolve `beginning` /
 `{offset, Seg, Off}` starts and HLC-seek candidate selection.
-""").
+""".
 -spec reader_view(wal()) -> map().
 
 reader_view(Pid) when is_pid(Pid) ->
     gen_server:call(Pid, reader_view).
 
-?DOC("""
+-doc """
 Records `Hlc` as the new compaction snapshot watermark.
 
 The watermark bounds retention: a segment becomes eligible for
@@ -716,7 +716,7 @@ watermark advance still returns `ok`.
 
 `Hlc` must be monotonically non-decreasing; a request to move
 backwards is rejected with `{error, watermark_regression}`.
-""").
+""".
 -spec advance_snapshot_watermark(wal(), bondy_oplog_hlc:hlc()) ->
     ok | {error, term()}.
 
@@ -725,7 +725,7 @@ advance_snapshot_watermark(Pid, Hlc) when
 ->
     gen_server:call(Pid, {advance_snapshot_watermark, Hlc}).
 
-?DOC("""
+-doc """
 Runs a retention sweep and returns the segments that were deleted and
 the bytes freed.
 
@@ -740,21 +740,21 @@ startup orphan-cleanup removes on next open.
 Returns `{ok, [SegmentId], FreedBytes}`. The list is in ascending
 segment-id order. `FreedBytes` is the total bytes of `.qdata` files
 that were unlinked (the `.qidx` rebuild is cheap so it's not counted).
-""").
+""".
 -spec retention_sweep(wal()) ->
     {ok, [segment_id()], non_neg_integer()} | {error, term()}.
 
 retention_sweep(Pid) when is_pid(Pid) ->
     gen_server:call(Pid, retention_sweep).
 
-?DOC("""
+-doc """
 Sets the committed segment id used by the retention sweep.
 
 This is a stub interface for the consumer-commit machinery that lands
 later (along with `commit/4` and `committed/1`). For now it lets tests
 exercise retention without the full applier loop. `NewSegId` must be
 monotonically non-decreasing.
-""").
+""".
 -spec set_committed_segment(wal(), segment_id()) -> ok | {error, term()}.
 
 set_committed_segment(Pid, NewSegId) when
@@ -762,7 +762,7 @@ set_committed_segment(Pid, NewSegId) when
 ->
     gen_server:call(Pid, {set_committed_segment, NewSegId}).
 
-?DOC("""
+-doc """
 Records an integrity-scrubber alert against `SegmentId`.
 
 Called by the per-instance `bondy_oplog_wal_scrubber` when it detects
@@ -777,7 +777,7 @@ from a peer or a snapshot.
 Subsequent calls for the same segment replace the prior reason
 (last-writer-wins — multiple bad frames in one segment still produce
 one alert).
-""").
+""".
 -spec mark_segment_alert(wal(), segment_id(), atom()) -> ok | {error, term()}.
 
 mark_segment_alert(Pid, SegmentId, Reason) when
@@ -785,12 +785,12 @@ mark_segment_alert(Pid, SegmentId, Reason) when
 ->
     gen_server:call(Pid, {mark_segment_alert, SegmentId, Reason}).
 
-?DOC("""
+-doc """
 Clears any integrity-scrubber alert for `SegmentId`.
 
 Intended for operator use after a re-derivation has replaced the
 quarantined bytes. Returns `ok` whether or not an alert was present.
-""").
+""".
 -spec clear_segment_alert(wal(), segment_id()) -> ok | {error, term()}.
 
 clear_segment_alert(Pid, SegmentId) when

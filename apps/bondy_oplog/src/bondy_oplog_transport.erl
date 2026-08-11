@@ -41,6 +41,8 @@ transport delivers them to the peer's responder which calls back into
 |---|---|
 | `get_root`                             | `{ok, hash() \| undefined}` \| `{ok, hash() \| undefined, fingerprint()}` |
 | `get_frontier`                          | `{ok, #{origin() => seq()}}` \| `{ok, #{origin() => seq()}, fingerprint()}` |
+| `get_origins`                          | `{ok, [origin()]}`                                                     |
+| `get_retired`                          | `{ok, [origin()]}`                                                     |
 | `{get_pages, Set}`                     | `{ok, #{hash() => page()}}`                                            |
 | `get_snapshot`                         | `{ok, event_key(), term()}` \| `{ok, no_snapshot}`                     |
 | `get_catalogue_snapshot_init`          | `{ok, {init, {watermark(), cursor()}}}` \| `{ok, no_snapshot}`         |
@@ -71,6 +73,13 @@ the `Opts` argument.
 -type request() ::
     get_root
     | get_frontier
+    %% Node-level, not instance-level: the instance id only routes them.
+    %% `get_origins` is the origins the peer currently claims (the
+    %% reap-by-complement input); `get_retired` is the peer's view of the
+    %% replicated grow-only retirement set, which peers union in and which
+    %% gates frontier reaping.
+    | get_origins
+    | get_retired
     | {get_pages, [bondy_mst:hash()] | sets:set(bondy_mst:hash())}
     %% Reciprocal form: carries the requester's peer id and root so the
     %% responder learns, for free, that it is behind and can schedule its own
@@ -92,6 +101,8 @@ the `Opts` argument.
 -type response() ::
     {ok, bondy_mst:hash() | undefined}
     | {ok, #{binary() => non_neg_integer()}}
+    %% `get_origins` / `get_retired`
+    | {ok, [binary()]}
     | {ok, #{bondy_mst:hash() => bondy_mst_page:t()}}
     %% The peer cannot serve the requested pages — typically because they have
     %% been reclaimed by compaction. Distinct from an empty page map, which is

@@ -1047,8 +1047,10 @@ apply_cell_pairs_mux({single, undefined}, _Id, _Pairs, _LocalOrigin, _Opts) ->
 apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin, Opts) ->
     {Foldable, Held} =
         case maps:get(hold, Opts, false) of
-            true -> partition_contiguous(Id, Pairs, LocalOrigin);
-            false -> {Pairs, 0}
+            true ->
+                partition_contiguous(Id, drop_retired(Id, Pairs), LocalOrigin);
+            false ->
+                {drop_retired(Id, Pairs), 0}
         end,
     %% Detect on what will actually FOLD, after any hold: `prefix_hole`
     %% means a contiguity gap MATERIALISED into the projection, while a
@@ -1069,6 +1071,57 @@ apply_cell_pairs_mux(Source, Id, Pairs, LocalOrigin, Opts) ->
         bondy_oplog_mux:group_by(Foldable, fun pair_bucket/1)
     ),
     {Count, Held}.
+
+%% @private
+%% Drops pairs authored by a RETIRED origin before anything folds them.
+%%
+%% `bondy_oplog_instance` refuses a banned origin at `install_remote`, but
+%% that gate covers only the single-event path: a whole-root page merge
+%% (`do_integrate_peer_root`) brings a peer's subtree in structurally and
+%% never consults it. Without this filter a retired origin's events would
+%% still reach the projection by that route, which contradicts the
+%% retirement the frontier reap is licensed by — the reap drops the
+%% origin's frontier entry precisely because no further event from it will
+%% ever be applied here.
+%%
+%% Only RETIRED origins are dropped, never merely banned ones. Retirement
+%% is permanent, so never re-presenting these pairs is correct; an ordinary
+%% ban can be lifted, and dropping its events here would silently lose them
+%% once the replay cursor advanced past the diff that carried them.
+%%
+%% Filtering here rather than at the fold's tail also keeps them out of
+%% `batch_frontier/1`, so the applied frontier never rises for an origin
+%% whose events this replica declined.
+drop_retired(Id, Pairs) ->
+    case bondy_oplog_origin_bans:has_retired() of
+        false ->
+            Pairs;
+        true ->
+            %% The set is read ONCE for the batch. Asking per pair would put
+            %% a match-spec compilation per event on the applier's fold, paid
+            %% from the moment an operator retires anything.
+            Retired = bondy_oplog_origin_bans:retired_set(),
+            {Kept, Dropped} = lists:partition(
+                fun(Pair) ->
+                    case pair_cell_key(Pair) of
+                        undefined ->
+                            true;
+                        Key ->
+                            not is_map_key(
+                                bondy_oplog_event:key_origin(Key), Retired
+                            )
+                    end
+                end,
+                Pairs
+            ),
+            Dropped =/= [] andalso
+                telemetry:execute(
+                    [bondy_oplog, applier, retired_pairs_dropped],
+                    #{count => length(Dropped)},
+                    #{instance_id => Id}
+                ),
+            Kept
+    end.
 
 %% @private
 %% Splits a replay batch into the pairs the fold may materialise and the

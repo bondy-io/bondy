@@ -105,9 +105,13 @@ zero_cap_disables_dispatch() ->
 
 pre_bootstrap_instance() ->
     Id = mk_id(),
+    %% The OS pid is what makes this unique ACROSS runs: `mk_id/0` is built
+    %% from `unique_integer`, which restarts low on every VM, so without it
+    %% a rerun opens the previous run's WAL and fails on
+    %% `{head_segment, 0, truncated_header}`.
     Dir = filename:join([
         "/tmp",
-        "bondy_mst_scheduler_cap_test",
+        "bondy_mst_scheduler_cap_test_" ++ os:getpid(),
         binary_to_list(Id)
     ]),
     ok = filelib:ensure_path(Dir),

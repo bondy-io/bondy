@@ -4970,6 +4970,12 @@ terminate(_Reason, #state{
 %% under-counted — conservative (the oracle reads "behind", never a false IN
 %% SYNC) and self-healing at the next checkpoint write, which persists the full
 %% frontier.
+%% Goes through `merge_frontier/2` deliberately, like every other frontier
+%% writer: that is where the retired-origin ceiling lives, and it is what
+%% makes a frontier reap survive a restart. A reap is not stored as a
+%% deletion — the checkpoint still carries the reaped origin's maximum — so
+%% writing `#entry.frontier` directly here would resurrect every reaped
+%% entry on every boot.
 restore_frontier(_InstanceId, undefined) ->
     ok;
 restore_frontier(

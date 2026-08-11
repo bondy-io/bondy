@@ -38,6 +38,10 @@ CONSTANTS
                      \*         Coordination-free: a monotone function of
                      \*         confirmed peer state, fail-closed when a peer
                      \*         cannot be reached.
+    MembershipGrows, \* TRUE  = a non-member may (re)join. The solo carve-out
+                     \*         is only meaningful if it survives the cluster
+                     \*         growing again afterwards, which is the ordinary
+                     \*         life of a one-node deployment.
     SoloOnly         \* TRUE  = reap only when this replica is the sole member
                      \*         (`reclamation_members/0` returning {ok, []},
                      \*          which the source already calls the case that
@@ -157,6 +161,17 @@ Reap(r) ==
          /\ claim' = [claim EXCEPT ![r][o] = 0]
     /\ UNCHANGED <<applied, minted, member, gapFlag>>
 
+\* A join: a replica becomes a member again, carrying whatever it already
+\* holds. This covers both a brand-new node (one that never minted) and a
+\* departed node returning with its state. Membership in Partisan changes
+\* only by a deliberate join/leave, so this is the exact counterpart of
+\* `Depart`.
+Join(r) ==
+    /\ MembershipGrows
+    /\ ~member[r]
+    /\ member' = [member EXCEPT ![r] = TRUE]
+    /\ UNCHANGED <<applied, claim, minted, gapFlag>>
+
 Rebootstrap(r) ==
     /\ gapFlag[r]
     /\ \E p \in Replicas \ {r} :
@@ -171,6 +186,7 @@ Next ==
     \/ \E r \in Replicas : Mint(r)
     \/ \E r \in Replicas : Depart(r)
     \/ \E r \in Replicas : Reap(r)
+    \/ \E r \in Replicas : Join(r)
     \/ \E r \in Replicas : Rebootstrap(r)
     \/ \E r, p \in Replicas : Sync(r, p)
 

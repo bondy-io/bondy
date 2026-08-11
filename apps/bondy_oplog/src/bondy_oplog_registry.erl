@@ -272,6 +272,19 @@ table's lifecycle tied to a supervisor child.
 -export([set_fast_path/2]).
 -export([set_ae_targets/2]).
 -export([merge_frontier/2]).
+-export([reap_frontier/2]).
+-export([down/0]).
+-export([origins/0]).
+
+-ifdef(TEST).
+%% One frontier CAS with an interleaving injected between the read and the
+%% swap. The retry loop otherwise hides that window, so reproducing a lost
+%% update needs either contention — which is timing-dependent and, in a
+%% shared eunit VM, perturbs load-sensitive tests in other modules — or this.
+%% It drives the real `swap/5`, so it cannot pass while the production path
+%% is broken.
+-export([cas_with_interleaving/3]).
+-endif.
 -export([set_install_in_flight/3]).
 -export([set_lifecycle/2]).
 -export([set_remote_gen/2]).
@@ -380,14 +393,93 @@ lookup(InstanceId) when is_binary(InstanceId) ->
     end.
 
 ?DOC("""
-Every live instance id. A single `ets:select` returning just the keys —
-intended for periodic sweeps (e.g. the latency idle probe) that need to
-enumerate all instances without materialising full entries.
+Every LIVE instance id.
+
+A row is removed by the instance gen_server's `terminate/2`, which does not
+run when the process is killed brutally — so a row can outlive its instance.
+Enumerating those would hand every scheduler a dispatch target that no
+longer exists, for the lifetime of the node, so the dead ones are filtered
+here rather than reported.
+
+`instance_pid` is the liveness anchor, not `sup_pid`: the instance
+publishes its own pid from `init/1`, so a supervisor-driven subtree restart
+republishes it, whereas `sup_pid` is written only by
+`bondy_oplog_instance_dyn_sup:start_instance/2` and goes stale across such a
+restart. An `undefined` pid is treated as live — it is the window between
+the row appearing and the instance publishing, and hiding a starting
+instance is worse than briefly listing one.
+
+Still one `ets:select` plus a local liveness check per row: no supervisor
+round trip and no message to the instances themselves, which is what makes
+this usable from a periodic sweep.
+
+**Not for origin advertisement.** Hiding a restarting instance is right for a
+scheduler and wrong for `bondy_oplog_origin_retirement:local_origins/0`,
+where an unadvertised origin can be retired by a peer's reap-by-complement
+and a live replica banned permanently. That caller reads `origins/0`.
 """).
 -spec list() -> [instance_id()].
 
 list() ->
-    ets:select(?TABLE, [{#entry{instance_id = '$1', _ = '_'}, [], ['$1']}]).
+    Rows = ets:select(?TABLE, [
+        {
+            #entry{instance_id = '$1', instance_pid = '$2', _ = '_'},
+            [],
+            [{{'$1', '$2'}}]
+        }
+    ]),
+    [Id || {Id, Pid} <- Rows, Pid =:= undefined orelse is_process_alive(Pid)].
+
+?DOC("""
+The registered instances whose process is NOT alive — the complement of
+`list/0` over the same rows.
+
+A row is removed by the instance gen_server's `terminate/2`, which a brutal
+kill skips, so a non-empty answer means an instance died and its subtree has
+not yet republished. `bondy_oplog_origin_retirement:retire_dead/0` refuses
+while this is non-empty: an instance in that state is not serving, and an
+operator retiring origins wants a node that is whole
+(`bondy_oplog_frontier_reap_test:retire_dead_refuses_while_an_instance_is_down/0`).
+""").
+-spec down() -> [instance_id()].
+
+down() ->
+    Rows = ets:select(?TABLE, [
+        {
+            #entry{instance_id = '$1', instance_pid = '$2', _ = '_'},
+            [{'=/=', '$2', undefined}],
+            [{{'$1', '$2'}}]
+        }
+    ]),
+    [Id || {Id, Pid} <- Rows, not is_process_alive(Pid)].
+
+?DOC("""
+Every registered instance's origin, INCLUDING rows whose process is not
+currently alive.
+
+This is what the node advertises to peers, and the two error directions are
+not symmetric: naming an origin whose instance is momentarily down delays a
+peer's reap by a pass, whereas omitting it puts a LIVE origin into that
+peer's reap-by-complement, where retiring it bans a running replica
+permanently and irreversibly. So this deliberately does not filter by
+liveness the way `list/0` does.
+
+`origin` is written when the row is created
+(`bondy_oplog_instance:init/1` -> `register/1`), so a registered instance
+always has one.
+""").
+-spec origins() -> [bondy_oplog_origin:t()].
+
+origins() ->
+    lists:usort(
+        ets:select(?TABLE, [
+            {
+                #entry{origin = '$1', _ = '_'},
+                [{'=/=', '$1', undefined}],
+                ['$1']
+            }
+        ])
+    ).
 
 -spec instance_pid(instance_id()) -> pid() | undefined.
 
@@ -710,40 +802,194 @@ set_ae_targets(InstanceId, Targets) when
 ?DOC("""
 Max-merges a partial applied-frontier `#{Origin => Seq}` into the instance's
 stored frontier (`#{Origin => max Seq}`). Called by the applier at the commit
-barrier with the batch's per-origin maxima — a read-modify-write that is safe
-because the applier is the single writer of a given instance's frontier. An
-empty partial is a no-op.
+barrier with the batch's per-origin maxima. An empty partial is a no-op.
 
-That single-writer rule is load-bearing, not hygiene. The frontier is the
-convergence oracle, and a per-origin maximum identifies an applied PREFIX only
-while every merge comes from events this replica actually folded. The applier
-guarantees that: `bondy_oplog_cell_apply:partition_contiguous/3` holds a remote
-origin's events beyond its first contiguity gap, so the maxima it merges cannot
+**This is the only operation that may RAISE a frontier entry**, and every
+path that rebuilds a frontier goes through it — including all three durable
+restore sources at instance init (`restore_frontier/2` from the compaction
+checkpoint, `frontier_from_mst/1`, and the applier's WAL-tail replay). Two
+consequences follow:
+
+- the retired-origin ceiling below is applied once and inherited by every
+  caller, which is what makes a frontier reap survive a restart: the reap is
+  not stored as a deletion, it is re-derived from the retirement set on
+  every boot
+  (`bondy_oplog_frontier_reap_test:retired_origin_never_re_enters_the_frontier/0`);
+- a caller that wrote `#entry.frontier` directly would silently resurrect
+  every reaped entry, on every restart, with nothing to catch it.
+
+The "only operation" half is a property of the call graph, not of this
+module: it holds while `merge_frontier/2` and `reap_frontier/2` are the only
+writers of `#entry.frontier`, which a grep confirms today and nothing
+enforces.
+
+The maxima must come from events this replica actually FOLDED. The frontier
+is the convergence oracle, and a per-origin maximum identifies an applied
+PREFIX only under that condition. The applier guarantees it:
+`bondy_oplog_cell_apply:partition_contiguous/3` holds a remote origin's
+events beyond its first contiguity gap, so the maxima it merges cannot
 straddle a hole. A merge sourced from anywhere else — a peer's reported
-frontier, say — carries no such guarantee, and raising the oracle past a hole
-makes two replicas read IN SYNC over different data.
-
-The other two writers are legitimate because each supplies the DATA alongside
-the maxima: `finalize_catalogue_bootstrap/4` (catalogue install) and
-`restore_frontier/2` (compaction checkpoint, on restart). Any fourth caller
-needs the same property, or it reintroduces the over-claim.
+frontier, say — carries no such guarantee, and raising the oracle past a
+hole makes two replicas read IN SYNC over different data. The other two
+callers are legitimate because each supplies the DATA alongside the maxima:
+`finalize_catalogue_bootstrap/4` and `restore_frontier/2`.
 """).
 -spec merge_frontier(instance_id(), #{binary() => non_neg_integer()}) -> ok.
 
 merge_frontier(_InstanceId, Partial) when Partial =:= #{} ->
     ok;
-merge_frontier(InstanceId, Partial) when
-    is_binary(InstanceId), is_map(Partial)
+merge_frontier(InstanceId, Partial0) when
+    is_binary(InstanceId), is_map(Partial0)
 ->
+    %% A retired origin's entry never rises. Refusing its EVENTS while
+    %% still max-merging its maxima would leave the frontier asserting
+    %% events this replica declined to apply, which is the over-claim the
+    %% docstring above exists to prevent — and it would immediately undo
+    %% any reap of that entry.
+    Partial = drop_retired(Partial0),
+    merge_filtered(InstanceId, Partial).
+
+%% @private
+%% A batch whose origins are ALL retired filters to nothing. The guard above
+%% only catches an empty partial before filtering, so without this the CAS
+%% would write an identical row on every batch for as long as the retired
+%% origin keeps appearing.
+merge_filtered(_InstanceId, Partial) when Partial =:= #{} ->
+    ok;
+merge_filtered(InstanceId, Partial) ->
+    Merge = fun(Cur) ->
+        maps:merge_with(fun(_Origin, A, B) -> max(A, B) end, Cur, Partial)
+    end,
+    case cas_frontier(InstanceId, Merge) of
+        {ok, _} -> ok;
+        not_found -> ok
+    end.
+
+?DOC("""
+Removes `Origins` from `InstanceId`'s applied-frontier VV.
+
+The ONLY operation that moves the frontier down, and the only one that can
+break the join-semilattice discipline the convergence oracle rests on. It
+is sound only for an origin EVERY member has retired —
+`bondy_oplog_origin_retirement` owns that check, and nothing else may call
+this. Reaping an entry a member still expects a deficit signal about takes
+away the only route to events already reclaimed from every log. That the
+universal guard is the weakest sound one is checked in
+`proofs/tla/OriginRetirementSet.tla`: `_MeetProbe` holds `NotAllMembersReaped`
+(the meet cannot clear the entry cluster-wide), `_UniversalProbe` violates it
+in 10 steps, and `_NoneCompactS1` violates `NoStuckEvent` in 7.
+
+Compare-and-swap, and it must be: the reap runs on the retirement worker
+while `merge_frontier/2` runs on the applier and the sync session, so a plain
+read-modify-write would let a merge that read the pre-reap map write the
+entry back. The model treats the reap as atomic; `swap/6` is where that is
+paid for, and `reap_is_atomic_against_a_concurrent_merge/0` exercises it.
+
+Returns the origins actually removed — `[]` when none of them was in the
+frontier, or when the instance has no registry row.
+""").
+-spec reap_frontier(instance_id(), [binary()]) -> [binary()].
+
+reap_frontier(_InstanceId, []) ->
+    [];
+reap_frontier(InstanceId, Origins) when is_binary(InstanceId) ->
+    Reap = fun(Cur) ->
+        case [O || O <- Origins, is_map_key(O, Cur)] of
+            [] -> no_change;
+            Present -> {maps:without(Present, Cur), Present}
+        end
+    end,
+    case cas_frontier(InstanceId, Reap) of
+        {ok, Present} -> Present;
+        no_change -> [];
+        not_found -> []
+    end.
+
+%% @private
+%% Zero cost until an operator retires something: one `persistent_term`
+%% read decides it, and the set is read ONCE per merge rather than per
+%% origin, so a batch pays one match-spec compilation instead of one per
+%% element.
+drop_retired(Partial) ->
+    case bondy_oplog_origin_bans:has_retired() of
+        false ->
+            Partial;
+        true ->
+            Retired = bondy_oplog_origin_bans:retired_set(),
+            maps:filter(
+                fun(Origin, _Seq) -> not is_map_key(Origin, Retired) end,
+                Partial
+            )
+    end.
+
+%% @private
+%% Compare-and-swap on the frontier column. `Fun` maps the current frontier
+%% to either a new one, `{New, Result}`, or `no_change`.
+%%
+%% The compare covers the FRONTIER exactly (see `swap/6`) and the remaining
+%% columns as an ordinary match pattern. That is enough for the writers that
+%% exist: every other column is published once, at instance or WAL init, so
+%% frontier-against-frontier is the only contention a running node produces.
+%%
+%% Retries until it wins, with no attempt budget and no unguarded fallback.
+%% A budget needs somewhere to go when it runs out, and the only destination
+%% is a plain read-modify-write, which loses exactly the update the CAS
+%% exists to protect — observed: `concurrent_merges_lose_no_origin/0` lost
+%% origins through a 16-attempt budget's fallback and loses none without one.
+%% Retrying is safe because `Fun` is re-applied to the value just read, and
+%% the loop makes system-wide progress because a failed swap means another
+%% writer committed.
+cas_frontier(InstanceId, Fun) ->
     case ets:lookup(?TABLE, InstanceId) of
         [#entry{frontier = Cur} = E] ->
-            Merged = maps:merge_with(
-                fun(_Origin, A, B) -> max(A, B) end, Cur, Partial
-            ),
-            true = ets:insert(?TABLE, E#entry{frontier = Merged}),
+            case Fun(Cur) of
+                no_change ->
+                    no_change;
+                {New, Result} ->
+                    swap(InstanceId, E, New, Result, Fun);
+                New when is_map(New) ->
+                    swap(InstanceId, E, New, New, Fun)
+            end;
+        [] ->
+            not_found
+    end.
+
+-ifdef(TEST).
+cas_with_interleaving(InstanceId, Fun, Interleave) when is_function(Fun, 1) ->
+    case ets:lookup(?TABLE, InstanceId) of
+        [#entry{frontier = Cur} = E] ->
+            ok = Interleave(),
+            %% A losing compare retries through `cas_frontier/2`, which
+            %% reports the merged frontier rather than this call's own
+            %% result, so normalise: the caller is asserting on the table.
+            {ok, _} = swap(InstanceId, E, Fun(Cur), ok, Fun),
             ok;
         [] ->
-            ok
+            not_found
+    end.
+-endif.
+
+%% @private
+%% The frontier is BOUND and compared with `=:=` in a guard, not left as a
+%% literal in the head. A map in a match-spec head is a SUBSET pattern — it
+%% matches any map that contains those associations — so a stale head would
+%% still match a row whose frontier had gained an origin, and the replace
+%% would drop it. `=:=` in a guard is exact term equality.
+%%
+%% Evidence:
+%% `bondy_oplog_frontier_reap_test:a_stale_frontier_compare_loses_no_origin/0`
+%% loses an origin against the literal-head form and none against this one.
+swap(InstanceId, #entry{frontier = Cur} = E, New, Result, Fun) ->
+    MS = [
+        {
+            E#entry{frontier = '$1'},
+            [{'=:=', '$1', {const, Cur}}],
+            [{const, E#entry{frontier = New}}]
+        }
+    ],
+    case ets:select_replace(?TABLE, MS) of
+        1 -> {ok, Result};
+        0 -> cas_frontier(InstanceId, Fun)
     end.
 
 ?DOC("""

@@ -1250,11 +1250,28 @@ frontier_deficit(Instance, PeerFrontier) ->
             M when is_map(M) -> M;
             _ -> #{}
         end,
+    %% One read for the whole peer frontier, not one per origin.
+    Retired =
+        case bondy_oplog_origin_bans:has_retired() of
+            true -> bondy_oplog_origin_bans:retired_set();
+            false -> #{}
+        end,
     maps:fold(
         fun(Origin, Seq, Acc) ->
             case maps:get(Origin, Local, 0) of
                 Cur when Seq > Cur ->
-                    Acc#{Origin => #{peer => Seq, local => Cur}};
+                    %% A RETIRED origin is skipped: the origin is banned, so
+                    %% no further event from it will ever be applied here,
+                    %% and a deficit this replica cannot fill is not a
+                    %% deficit worth reporting. Reporting the
+                    %% peer's surviving entry as a deficit would flag a
+                    %% catalogue rebootstrap for data already held, on
+                    %% every round, until the peer reaps it too. An
+                    %% ordinary BAN does not qualify — it can be lifted.
+                    case is_map_key(Origin, Retired) of
+                        true -> Acc;
+                        false -> Acc#{Origin => #{peer => Seq, local => Cur}}
+                    end;
                 _ ->
                     Acc
             end

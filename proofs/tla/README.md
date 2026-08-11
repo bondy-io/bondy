@@ -345,6 +345,7 @@ convergence oracle rests on.
 java -cp tla2tools.jar tlc2.TLC -workers 4 -deadlock -config OriginReaping_Off.cfg        OriginReaping.tla
 java -cp tla2tools.jar tlc2.TLC -workers 4 -deadlock -config OriginReaping_Unilateral.cfg OriginReaping.tla
 java -cp tla2tools.jar tlc2.TLC -workers 4 -deadlock -config OriginReaping_Solo.cfg       OriginReaping.tla
+java -cp tla2tools.jar tlc2.TLC -workers 4 -deadlock -config OriginReaping_SoloJoin.cfg   OriginReaping.tla
 ```
 
 `-deadlock` because a terminal state (every origin minted out, all but one
@@ -354,7 +355,7 @@ replica departed) is expected here and is not a safety failure.
 | --- | --- |
 | `Off` — frontier never reaped (today) | exhaustive clean: 425,614 states, 104,447 distinct |
 | `Unilateral` — any member may reap a dead origin it has fully applied | **`SpuriousGap` violated in 6 steps** |
-| `Solo` — reap only when this replica is the sole member | exhaustive clean: 527,785 states, 155,240 distinct |
+| `Solo` — reap only when this replica is the sole member | clean: 527,785 states, 155,240 distinct — but see the join result below, which retires this row as a licence |
 
 The precondition granted to `Unilateral` is the strongest one a node can
 check locally: the origin is claimed by no member, and this replica holds
@@ -383,17 +384,48 @@ node has reaped.
 does not corrupt state, it desynchronises the ORACLE. The failure is
 expensive and self-inflicted, not silent.
 
+### The solo carve-out does not survive the cluster growing again
+
+`Solo` is clean at 527,785 states — but only because that configuration has no
+way for membership to GROW. Partisan membership changes by a deliberate
+join/leave in both directions, and a one-node deployment that later gains a
+node is ordinary operation, not an edge case. `MembershipGrows` adds the
+missing `Join` action.
+
+| Configuration | Result |
+| --- | --- |
+| `OffJoin` — join enabled, no reaping | exhaustive clean: 104,447 distinct — identical to `Off`, so `Join` adds no reachable state by itself |
+| `SoloJoin` — solo carve-out, join enabled | **`SpuriousGap` violated in 7 steps** |
+
+```
+1. Depart(r1)
+2. Mint(r2)          -- (r2,1)
+3. Sync(r3, r2)      -- r3 applies it
+4. Depart(r2)        -- r3 is now the sole member
+5. Reap(r3)          -- solo, so the carve-out licenses dropping the r2 entry
+6. Join(r2)          -- r2 returns
+```
+
+Both replicas hold `(r2,1)`, but `claim[r2][r2] = 1` and `claim[r3][r2] = 0`.
+The next round reads that as a deficit, raises `{frontier_gap, _}` and pays a
+catalogue rebootstrap for data `r3` already has — and the rebootstrap restores
+the entry, so the next retirement pass reaps it again.
+
+This does not contradict `reclamation_members/0`'s own doc. That statement is
+about the stability point for PROJECTION-CELL reclamation, where solo really
+does license maximal reclamation: a fresh HLC tick dominates every event the
+node holds, and a joiner brings its own state through a CRDT merge. The
+frontier VV is different in kind — it is a CLAIM compared against peers, so
+dropping an entry is only safe if no future member can hold a higher value for
+it. Solitude at the moment of the reap does not establish that.
+
 ### What this licenses
 
-Reaping under `reclamation_members/0 = {ok, []}` — the solo case the source
-already documents as licensing maximal reclamation, because no peer can
-contradict the drop or re-add the entry. Exhaustively clean at 3 replicas.
-
-Anything broader needs agreement on the retired set, which no node-local pass
-can synthesise. This is the standard version-vector GC result: removal from a
-join-semilattice is non-monotonic, so it is safe only when coordinated or
-when accompanied by a tombstone recording what was removed — and a tombstone
-costs exactly what the entry cost.
+Nothing node-local and unconditional. Removal from a join-semilattice is
+non-monotonic, so it is safe only when coordinated, or when accompanied by a
+record of what was removed — and per origin that record costs exactly what the
+entry cost. The scalar watermark below is the only form that is both sound and
+cheaper than what it replaces.
 
 ### The meet, and why the obvious form of it fails
 
@@ -411,7 +443,7 @@ never saw it"*. In the counterexample r3 never received the dead origin's
 event at all, so it skips a deficit that was real. The meet is sound;
 RECOMPUTING it from an absent entry is not.
 
-### The meet recorded as a scalar — `OriginReapingWatermark.tla`
+### The meet recorded as a scalar — `OriginWatermarkReap.tla`
 
 The fix is to record the meet rather than re-derive it. Per origin that is a
 tombstone and costs what the entry cost. As a SCALAR it costs O(1) — which is
@@ -422,27 +454,69 @@ origins today are opaque 128-bit randoms with no order at all.
 `reapedBefore[r]` advances past rank `k` only when every origin below `k` is
 dead AND every member holds exactly what this replica holds for it. Below the
 watermark, entries are dropped, not re-learned on merge, and excluded from the
-deficit. Both conjuncts read confirmed peer state, so it is coordination-free
-and fail-closed: a member that cannot be asked cannot satisfy the conjunct and
-the watermark simply stalls.
+deficit.
 
-```
-java -cp tla2tools.jar tlc2.TLC -workers 4 -deadlock -config OriginReapingWatermark_Off.cfg OriginReapingWatermark.tla
-java -cp tla2tools.jar tlc2.TLC -workers 4 -deadlock -config OriginReapingWatermark_On.cfg  OriginReapingWatermark.tla
-```
+This module carries origins that are BORN over time — a node rebuilding its
+instance directory takes a new epoch — rather than assuming the whole
+population exists at `Init`, and it sources the meet from what an
+implementation can actually read rather than from a live view of every peer.
+Three replicas, four ranks (so one replica gets a later epoch), `MaxSeq = 1`.
 
 | Configuration | Result |
 | --- | --- |
-| `Off` — never reap (control) | exhaustive clean: 425,614 states, 104,447 distinct |
-| `On` — meet-as-watermark | exhaustive clean: **5,440,051 states, 1,189,020 distinct** |
+| `Off` — never reap (control) | exhaustive clean: 105,483 distinct |
+| `Hlc` — HLC ids, fresh strict meet | exhaustive clean: **3,038,590 distinct** |
+| `Wallclock` — wall-clock ids | **`NoLiveOriginBelowWatermark` violated** in 6 steps |
+| `Stale` — meet read from `peer_state.frontier` | **`ReapedMeansLevel` violated** in 8 steps |
+| `Recency` — recency-filtered members | **`ReapedMeansLevel` violated** in 8 steps |
+| `StaleRecency` — both | **`ReapedMeansLevel` violated** in 7 steps |
 
-Invariants checked in both: `TypeOK`, `NoOverClaim`, `NoDataLoss`,
-`SpuriousGap`, `ReapedMeansLevel`.
+Invariants: `TypeOK`, `NoOverClaim`, `NoLiveOriginBelowWatermark`,
+`ReapedMeansLevel`, `SpuriousGap`. `NeverReaps` is a reachability probe rather
+than a safety property — checking it as an invariant makes TLC report the
+trace in which the watermark first advances, which separates "reaping is safe"
+from "reaping happens". It is violated under `Hlc` in 5 steps, so the rule
+below is not vacuous.
 
-**So consensus is not required.** What is required is (a) a total order on
-origins, so the meet can be recorded in O(1), and (b) the deficit check and
-the frontier merge both honouring the watermark — a reap that only changes
-the stored VV is undone by the next `merge_frontier/2`.
+**So consensus is not required**, and three things are.
+
+**(1) The id scheme is load-bearing, and the reason is domination, not
+gap-freedom.** The rule cannot be "every RANK below `k` is born": ids are
+timestamps, the rank space is sparse, and the born set is never a contiguous
+prefix — that rule is safe but can never advance past the first id ever
+issued. The condition that actually holds is that no member can mint beneath
+`k`. An HLC-derived id strictly exceeds its minter's clock and every clock
+absorbs every clock it syncs with, so a member already at or above `k` cannot
+mint below it. A wall clock offers no such guarantee, and the counterexample
+is direct: replicas hold ranks 4, 2, 3, every clock is at or above 2, so `r1`
+advances its watermark to 2 — and then mints origin **1**, live, beneath its
+own watermark.
+
+Counterexample depths are quoted rather than state counts: with parallel BFS
+the number of states explored before a violation surfaces varies between runs,
+while the minimal depth does not.
+
+**(2) The meet must be read fresh, and `bondy_oplog_peer_state` cannot supply
+it.** Its `frontier` column is documented as the peer's vector *"as observed
+at the start of the last completed round"* — a snapshot. A dead origin's
+events keep propagating between rounds, so a peer's value grows after the
+snapshot is taken, and the meet is then computed against a number the peer has
+already moved past. In the counterexample `r3` records `r2` at 0 for a dead
+origin, reaps on that basis, and ends holding nothing of an origin `r2` has an
+event from. The available fix is the round trip `origin_retirement` already
+performs for `get_origins`: ask every member for its current frontier at reap
+time — `get_frontier` is an existing responder verb — and fail closed if any
+member cannot answer.
+
+**(3) The read must be strict, not recency-filtered.** `bondy_oplog_peer_state`
+already asserts this in prose (*"Reclamation MUST use the strict reading"*);
+the `Recency` row is that assertion failing under a checker rather than a new
+discovery. A member dropped for silence is a member whose value was never
+compared.
+
+Finally, the deficit check and the frontier merge must both honour the
+watermark — a reap that only changes the stored VV is undone by the next
+`merge_frontier/2`.
 
 ## Cell-context reaping: does the membership-only driver need a stability gate?
 
@@ -480,8 +554,8 @@ reduction, exhaustive.
 | --- | --- | --- |
 | reap off, causal delivery | clean, 426,389 distinct | clean |
 | reap **on**, causal delivery | clean, 5,046,890 distinct | clean |
-| reap off, out-of-order delivery | clean, 751,829 distinct | **violated**, 884 states |
-| reap **on**, out-of-order delivery | clean, 10,570,826 distinct | **violated**, 906 states |
+| reap off, out-of-order delivery | clean, 751,829 distinct | **violated** in 6 steps |
+| reap **on**, out-of-order delivery | clean, 10,570,826 distinct | **violated** in 6 steps |
 
 Two replicas at `MaxSeq = 2` are exhaustively clean on every invariant in all
 four configurations (724k / 526k / 1.86M / 1.35M distinct) — the inversion
@@ -516,26 +590,142 @@ requirement is cross-origin causal delivery, and no per-origin mechanism
 supplies it — the same distinction as the vector-vs-HLC stability gap
 `bondy_oplog_crdt_nested_core`'s moduledoc records for the stabilization fold.
 
-## Origin birth order: is any total order enough for the watermark?
+## Frontier reaping: what survives a node coming back
 
-`OriginBirthOrder.tla`. `OriginReapingWatermark.tla` has every origin present
-at `Init`, so it never explores an origin born BELOW an established watermark
-— the case a wall-clock-prefixed id (UUIDv7, ULID, KSUID) admits under clock
-skew or rollback.
+Every membership-derived design fails on one action. `OriginReaping.tla` and
+`OriginWatermarkReap.tla` were both checked without a `Join`, and both fall
+over once it exists:
 
-The first run violated `NoLiveOriginBelowWatermark` under BOTH orders, which
-located a defect in the watermark rule rather than in any id scheme: it
-advanced past ranks that were merely UNBORN, and an unborn rank can be taken
-later. Requiring every rank below `k` to be already born makes the rule safe
-under **any** total order:
+| Model | With `Join` |
+| --- | --- |
+| `OriginReaping_SoloJoin` — solo carve-out | **`SpuriousGap` violated in 7 steps** |
+| `OriginWatermarkReap_HlcJoin` — HLC watermark | **`NoLiveOriginBelowWatermark` violated**, 1,894 distinct |
+
+The watermark counterexample is the decisive one: `r2` departs, `r1` reaps
+`r2`'s origin, `r2` rejoins — and because
+`bondy_oplog_origin:load_or_create/1` reuses the persisted id, `r2` resumes
+minting under the very origin the survivors reaped. They then skip its new
+events. Membership-derived "dead" is not dead; it is "away".
+
+`OriginRetirementSet.tla` replaces membership with a REPLICATED grow-only
+retirement set, driven by an operator decommissioning a node. Three replicas,
+`MaxSeq = 1` unless stated, `Join` enabled.
 
 | Configuration | Result |
 | --- | --- |
-| `Wallclock` — a new origin may take any unborn rank | exhaustive clean, 74,585 states |
-| `Hlc` — a new origin outranks every origin already born | exhaustive clean, 71,561 states |
+| `OffS1` — never reap (control) | exhaustive clean: 861 distinct |
+| `BannedS1` — retire + ban + reap | **exhaustive clean: 16,529,485 states, 2,538,102 distinct** |
+| `UniversalS1` — the shipped guard | **exhaustive clean: 17,013,691 states, 2,538,102 distinct** |
+| `UnbannedS1` — retire + reap, ban NOT enforced | **`RetiredSkipIsSafe` violated in 5 steps** |
+| `Universal` — the shipped guard, `MaxSeq = 2` | **exhaustive clean: 685,709,113 states, 95,684,190 distinct** |
+| `Banned` — `MaxSeq = 2` | exhaustive clean: 649,547,353 states, 95,684,190 distinct |
 
-So the id scheme is not a SAFETY question once the rule requires born-ness.
-It is an EFFECTIVENESS question: the watermark advances only over a
-contiguous born prefix, and a wall clock produces gaps that stall it
-indefinitely, while an HLC allocates ranks in issue order so the prefix is
-gap-free. Both are safe; only one reaps.
+Six requirements, and three of them are things an implementation would get
+wrong by default:
+
+1. **The retirement set is replicated and grow-only.** Monotone, so it
+   converges by union with no ordering requirement — the `Propagate` action is
+   just a set union over what a member currently holds. Every replica
+   therefore skips the same origins, so the skip is symmetric rather than a
+   private opinion.
+2. **It must be persisted.** A node that forgets it retired an origin reads a
+   peer's surviving entry as a deficit and pays a rebootstrap.
+3. **Retirement must be operator-driven, not derived from membership** — that
+   is the whole point of the module.
+4. **The ban is load-bearing.** Skipping a retired origin's deficit is safe
+   only because no replica will ever accept another event from it, so there is
+   no future data to be blind to. `UnbannedS1` is that conjunct failing.
+5. **Ban the claim, not just the events.** Filtering incoming events while
+   still max-merging the peer's vector for that origin leaves the frontier
+   asserting events the replica refused — `NoOverClaim` violated in 8 steps
+   before this was fixed.
+6. **The claim rises from the events actually folded**, not only from the
+   peer's advertised vector. A peer that has already reaped advertises less
+   than it just gave you; adopting only its number leaves this replica
+   claiming less than it holds, and reading a permanent deficit against a
+   third node — `SpuriousGap` violated in 10 steps before this was fixed. The
+   real code already has this shape (`batch_frontier/1` ->
+   `merge_frontier/2`); the model did not, which is what surfaced it.
+
+### Which precondition licenses the drop
+
+Three candidate guards, all of them safe against the invariants above, so
+those invariants cannot choose between them. What separates them is log
+reclamation, which `CompactionModelled` adds: an event reclaimed from every
+holder's log moves only by catalogue rebootstrap, and only a frontier deficit
+flags one. `NoStuckEvent` says no replica is ever left wanting an event with
+every route to it closed.
+
+Judged with the survivors stable (`StableMembership = TRUE`), which is the
+deployment the reap exists for — an operator removes one node and the rest
+carry on:
+
+| Guard (`ReapRule`) | `NoStuckEvent` | Can every member clear the entry? |
+| --- | --- | --- |
+| — (`OffCompactS1`, never reap) | clean: 124,558 distinct | n/a |
+| `"none"` — retirement alone | **violated in 7 steps** | — |
+| `"meet"` — every member level on it | clean: 654,082 distinct | **no** — exhaustive, 4,035 distinct |
+| `"universal"` — every member has retired it | clean: 662,464 distinct | **yes**, in 10 steps |
+
+The right-hand column is `NotAllMembersReaped`, an inverted invariant: a
+violation is a run in which every member dropped an entry it genuinely held,
+so **holding** is the bad result. The meet rule holds it exhaustively, and the
+reason is mechanical — only a reap lowers a claim, and a retired origin's
+claim never rises again, so the first replica to reap leaves every other
+replica permanently unequal to it. It is safe and it never finishes: the entry
+survives on every replica but one, which is the leak it was written to remove.
+
+`"none"` fails the other way. Its counterexample is six steps of ordinary
+operation — mint, sync, compact, depart, retire, reap — and ends with a
+surviving member that never retired the origin, is missing an event reclaimed
+everywhere, and will never be told. So the guard has to be universal
+retirement: a replica that has retired the origin refuses its events and has
+no use for the signal, and one that has not still does.
+
+### May a replica enforce a retirement it has not persisted?
+
+No, and the model is what settles it. `RetirementDurable` splits the two
+halves of recording a retirement — enforcing it (the ban, and the licence to
+reap) and persisting it — and `Restart(r)` drops everything not persisted.
+Nothing else a node holds regresses across a restart: `applied`, `claim` and
+the frontier all survive by other means, so the retirement set is the only
+thing a restart can take away, and it is the one thing the design needs to
+be monotone.
+
+| Configuration | Result |
+| --- | --- |
+| `ForgetfulS1` — enforce first, persist may fail | **`SpuriousGap` violated in 9 steps** |
+| `UniversalS1` — durable when enforced | exhaustive clean: 2,538,102 distinct |
+
+The counterexample is mint, depart, sync, depart, retire, **reap**,
+**restart**, join. The restart forgets the retirement while the reap it
+licensed has already removed the frontier entry, so the replica reads a
+peer's surviving entry as a deficit for data it holds — on every round,
+with no way to fill it, forever.
+
+So `bondy_oplog_origin_bans` writes the file BEFORE inserting into its
+table, and a failed write leaves nothing enforced. That reverses the
+ordering the code originally argued for ("persisting first would leave a
+durable retirement the running node does not enforce"): a durable retirement
+not yet enforced is harmless and self-corrects, while an enforced retirement
+that is not durable is the counterexample above.
+
+It also settles what to do with a path whose write failed — keep it. With
+persist-before-enforce a failure changes nothing, so there is no divergent
+state to contain, and the only thing left is to let the next attempt retry.
+
+### What the universal guard does not cover
+
+`UniversalChurnS1` is the same configuration with membership churn allowed:
+**`NoStuckEvent` violated in 9 steps**. The trace shrinks the cluster to one
+member, reaps there, and then rejoins a replica that holds neither the
+retirement nor the reclaimed event. A node absent at reap time was not
+consulted by it.
+
+That window closes as soon as the returning node pulls the retirement set,
+after which it refuses those events anyway — so this is the ban's cost, not
+the reap's. Both point at the same operator contract: **retire an origin only
+once the cluster has converged on its events.** The implementation reports the
+violation rather than preventing it, on
+`[bondy_oplog, retirement, reaped_unconverged]`, because refusing to reap over
+unequal claims is exactly the meet rule and inherits its deadlock.

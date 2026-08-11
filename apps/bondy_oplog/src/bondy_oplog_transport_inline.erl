@@ -78,6 +78,11 @@ do_request(PeerInstance, get_origins) ->
     %% Node-level origin advertisement for retirement reap-by-complement;
     %% delegate so the in-VM path exercises the responder verb.
     bondy_oplog_responder:dispatch(PeerInstance, get_origins);
+do_request(PeerInstance, get_retired) ->
+    %% Node-level retirement set. In-VM every "peer" shares this node's set,
+    %% so the answer is this node's own — enough to exercise the verb and
+    %% the union, not enough to exercise divergent sets between replicas.
+    bondy_oplog_responder:dispatch(PeerInstance, get_retired);
 do_request(PeerInstance, {get_pages, _} = Request) ->
     %% Delegate to the responder so the in-VM path exercises exactly the same
     %% logic as the network transports — notably the `unavailable` reply when

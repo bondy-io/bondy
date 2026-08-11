@@ -412,9 +412,18 @@ setup() ->
     {ok, _} = application:ensure_all_started(bondy_db),
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
     bondy_oplog_gc_scheduler:set_trigger(undefined),
+    %% `unique_integer` restarts low on every VM, so a name built from it
+    %% alone reuses the previous run's directory and this suite reads another
+    %% run's packs. The OS pid is what makes the name unique ACROSS runs.
+    %%
+    %% This does NOT address the `not_on_controlling_process` failure seen
+    %% intermittently in full-suite runs: that one is `survives_restart/1`
+    %% calling `bondy_mst:last/2` from the eunit process for a pack the
+    %% instance process owns the fd for, so it fires only once the async seal
+    %% has run — never in isolation, roughly one full run in four.
     Dir = filename:join(
         "/tmp",
-        "creplay_" ++
+        "creplay_" ++ os:getpid() ++ "_" ++
             integer_to_list(erlang:unique_integer([positive, monotonic]))
     ),
     ok = filelib:ensure_dir(filename:join(Dir, "x")),
@@ -478,7 +487,7 @@ run(Dir) ->
 
 mk_id() ->
     list_to_binary(
-        "creplay_" ++
+        "creplay_" ++ os:getpid() ++ "_" ++
             integer_to_list(erlang:unique_integer([positive, monotonic]))
     ).
 

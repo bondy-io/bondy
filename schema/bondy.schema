@@ -591,15 +591,44 @@ end}.
 %% to an observed membership removal — and reconciles once at boot, covering
 %% removals that happened while it was down — by forgetting departed peers
 %% from its peer state and reaping dead origins from cell state by
-%% complement. The pass is fail-closed: if any current member cannot be
-%% queried for the origins it claims, nothing is reaped and the pass retries
-%% on the next trigger. It never bans an origin. On by default.
+%% complement. The pass also carries the retirement set between nodes,
+%% pulling every member's set and unioning it in, and drops the
+%% applied-frontier entry of any origin every member has retired. The pass
+%% is fail-closed: if any current member cannot be queried, nothing is
+%% learned and nothing is reaped, and the pass retries on the next trigger.
+%% It never retires an origin on its own — that is an operator act
+%% (`bondy_oplog_origin_retirement:retire_dead/0`). On by default.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "db.origin_retirement", "bondy_oplog.origin_retirement", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Where this node stores the origin retirement set. Retirement is the
+%% operator asserting a replica is permanently gone; it bans the origin and
+%% licenses dropping its applied-frontier entry, so a node that forgot it on
+%% restart would re-learn the entry from a peer and then read its own absence
+%% as a deficit. A node that cannot persist the set refuses to retire and
+%% refuses to reap — retirement is disabled there, nothing else is affected.
+%% Relative paths are resolved against `platform_data_dir`.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.origin_retirement.path", "bondy_oplog.retirement_path", [
+  {datatype, file},
+  {default, "origin_retirement"}
+]}.
+
+{translation, "bondy_oplog.retirement_path", fun(Conf) ->
+    Path = cuttlefish:conf_get("db.origin_retirement.path", Conf),
+    case filename:pathtype(Path) of
+        absolute ->
+            Path;
+        _ ->
+            filename:join(cuttlefish:conf_get("platform_data_dir", Conf), Path)
+    end
+end}.
 
 %% -----------------------------------------------------------------------------
 %% @doc Interval between periodic origin-retirement passes, in addition to
