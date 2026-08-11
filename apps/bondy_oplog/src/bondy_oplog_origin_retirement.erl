@@ -50,6 +50,29 @@ ephemeral VM boots) are unclaimed by construction and get reaped too.
 
 ## What is deliberately NOT done
 
+**The applied-frontier VV is never reaped.** A dead origin's frontier entry
+is a true and permanent statement — "every event this origin ever minted, up
+to seq N, is applied here" — and two consumers depend on it:
+`bondy_oplog_sync_session:frontier_deficit/2` reads a MISSING local origin as
+seq 0, so dropping an entry a peer still advertises manufactures a deficit
+that page-sync can never fill (the events were compacted away long ago); the
+resulting `{frontier_gap, _}` flags a catalogue rebootstrap on every complete
+round until the peer drops it too. And `bondy_oplog_registry:merge_frontier/2`
+max-merges over the union of keys, so a peer that has not yet reaped simply
+re-adds the entry. Reaping the frontier therefore needs a cluster-wide
+agreement on the retired set, which nothing here has: this pass is node-local
+by construction.
+
+The consequence, stated plainly: a departed node leaves one permanent
+frontier entry PER DURABLE SHARD, because `bondy_oplog_instance_sup:
+resolve_origin_opt/2` persists a separate origin under each instance's own
+directory — so the cost of a departure scales with `db.main.shard_count`,
+not with the number of nodes. Ephemeral instances contribute nothing: they
+share one per-VM origin and their frontiers stay empty. The entries are
+version-vector entries, not data, and cost a few tens of bytes each; but
+nothing removes them, so `dead_origins` in this module's telemetry only
+ever grows.
+
 No automatic bans. Banning a live origin makes this node silently refuse its
 remote appends — permanent divergence — and the complement can over-claim if
 a member under-advertises (see `local_origins/0`). The membership plane gate
@@ -71,6 +94,7 @@ fail-closed, never fail-open.
 
 %% API
 -export([run/0]).
+-export([run/1]).
 -export([local_origins/0]).
 
 %% gen_server callbacks
@@ -85,7 +109,15 @@ fail-closed, never fail-open.
     %% Single-flight cleanup worker; a membership event during a run sets
     %% `pending` and the run is repeated once the worker exits.
     worker :: undefined | pid(),
-    pending = false :: boolean()
+    pending = false :: boolean(),
+    %% Dead origins already swept out of this node's cell contexts. The
+    %% candidate set is drawn from the applied-frontier VVs, which are never
+    %% reaped, so a departed node stays a candidate for the life of the node
+    %% — and rescanning every cell of every instance for it, every interval,
+    %% is an unbounded background full scan that can never find anything.
+    %% Cleared on a real membership event so a topology change always
+    %% re-sweeps once.
+    swept = [] :: [bondy_oplog_origin:t()]
 }).
 
 %% =============================================================================
@@ -134,6 +166,29 @@ any error as "nothing retired, retry later".
     | {error, term()}.
 
 run() ->
+    run([]).
+
+-doc """
+As `run/0`, but skips the cell scan for dead origins listed in `Swept` —
+origins a previous pass on this node already reaped out of every cell
+context. The returned report carries the updated `swept` set.
+
+The scan is a FULL enumeration of every cell of every instance
+(`bondy_oplog_cell_utils:member_cells/4`), and the candidate set is drawn
+from the applied-frontier VVs, which are never reaped. Without this, a
+single departed node makes every subsequent pass rescan the entire
+projection, for the life of the node, to find nothing.
+""".
+-spec run(Swept :: [bondy_oplog_origin:t()]) ->
+    {ok, #{
+        forgotten_peers := [term()],
+        dead_origins := [bondy_oplog_origin:t()],
+        origins_reaped := [bondy_oplog_origin:t()],
+        swept := [bondy_oplog_origin:t()]
+    }}
+    | {error, term()}.
+
+run(Swept) ->
     case bondy_oplog_instance:reclamation_members() of
         error ->
             retirement_skipped(membership_unavailable);
@@ -143,7 +198,7 @@ run() ->
                 {error, Reason} ->
                     retirement_skipped(Reason);
                 {ok, MemberOrigins} ->
-                    reap_complement(MemberOrigins, Forgotten)
+                    reap_complement(MemberOrigins, Forgotten, Swept)
             end
     end.
 
@@ -207,8 +262,17 @@ handle_cast(membership_update, #state{worker = Pid} = State) when
     %% stacking workers.
     {noreply, State#state{pending = true}};
 handle_cast(membership_update, State) ->
-    {Pid, _Ref} = spawn_monitor(fun() -> _ = run() end),
+    Owner = self(),
+    Swept = State#state.swept,
+    {Pid, _Ref} = spawn_monitor(fun() ->
+        case run(Swept) of
+            {ok, #{swept := S}} -> gen_server:cast(Owner, {swept, S});
+            _ -> ok
+        end
+    end),
     {noreply, State#state{worker = Pid, pending = false}};
+handle_cast({swept, Swept}, State) ->
+    {noreply, State#state{swept = Swept}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -220,7 +284,12 @@ handle_info({'DOWN', _Ref, process, Pid, Reason}, #state{worker = Pid} = State) 
         }),
     State#state.pending andalso gen_server:cast(?MODULE, membership_update),
     {noreply, State#state{worker = undefined, pending = false}};
-handle_info({partisan_membership, _Members}, State) ->
+handle_info({partisan_membership, _Members}, State0) ->
+    %% A real topology change re-sweeps from scratch: an origin already
+    %% swept could have gained a context entry from a late delivery, and a
+    %% membership event is rare enough that one full pass is the right
+    %% price for not having to reason about that.
+    State = State0#state{swept = []},
     %% A membership change pushed by Partisan. The payload is ignored (see
     %% subscribe_membership/0); the single-flight worker re-reads the current
     %% member set itself. The periodic tick is the safety net if a push is ever
@@ -317,35 +386,65 @@ collect_member_origins([M | Rest], I, Transport, TOpts, Acc) ->
     end.
 
 %% @private
-reap_complement(MemberOrigins, Forgotten) ->
+reap_complement(MemberOrigins, Forgotten, Swept) ->
     Live = lists:usort(MemberOrigins ++ local_origins()),
     Dead = [O || O <- frontier_origins(), not lists:member(O, Live)],
+    %% Only origins this node has not already swept out of every cell
+    %% context drive a scan; the rest are dead candidates whose contexts
+    %% are known clean.
+    Unswept = [O || O <- Dead, not lists:member(O, Swept)],
     Targets =
-        case Dead of
+        case Unswept of
             [] -> [];
             _ -> bondy_oplog:list_instances()
         end,
     Reaped = lists:usort(
-        lists:append([reap_instance(I, Dead) || I <- Targets])
+        lists:append([reap_instance(I, Unswept) || I <- Targets])
     ),
+    %% Everything scanned this pass is now known clean, whether or not it
+    %% had anything to remove — that is precisely what makes the next pass
+    %% cheap.
+    Swept1 = lists:usort(Swept ++ Unswept),
     telemetry:execute(
         [bondy_oplog, retirement, completed],
-        #{dead_origins => length(Dead), origins_reaped => length(Reaped)},
-        #{forgotten_peers => Forgotten}
-    ),
-    Dead =/= [] andalso
-        ?LOG_NOTICE(#{
-            description =>
-                "Origin retirement pass reaped dead origins (origins in "
-                "the frontier claimed by no current member).",
+        #{
             dead_origins => length(Dead),
             origins_reaped => length(Reaped),
-            forgotten_peers => Forgotten
-        }),
+            origins_scanned => length(Unswept)
+        },
+        #{forgotten_peers => Forgotten}
+    ),
+    case Reaped of
+        [] ->
+            %% The steady state, not an anomaly: `Dead` is drawn from the
+            %% applied-frontier VVs, which this pass does NOT reap (see
+            %% `frontier_origins/0`), so a dead origin remains a candidate
+            %% on every pass forever while its cell contexts are already
+            %% clean. Reporting that as a reap once per interval, for the
+            %% life of the node, is how a quiet steady state gets mistaken
+            %% for a leak.
+            ?LOG_DEBUG(#{
+                description =>
+                    "Origin retirement pass found no causal-context "
+                    "entries to reap.",
+                dead_origins => length(Dead),
+                forgotten_peers => Forgotten
+            });
+        _ ->
+            ?LOG_NOTICE(#{
+                description =>
+                    "Origin retirement pass reaped dead origins (origins "
+                    "in the frontier claimed by no current member).",
+                dead_origins => length(Dead),
+                origins_reaped => length(Reaped),
+                forgotten_peers => Forgotten
+            })
+    end,
     {ok, #{
         forgotten_peers => Forgotten,
         dead_origins => Dead,
-        origins_reaped => Reaped
+        origins_reaped => Reaped,
+        swept => Swept1
     }}.
 
 %% @private
@@ -366,6 +465,11 @@ reap_instance(InstanceId, Dead) ->
 
 %% @private
 %% Union of origin ids across every local instance's applied-frontier VV.
+%% This is the CANDIDATE population only — the frontier itself is never
+%% reaped (the moduledoc says why, and why the obvious fix is unsafe). The
+%% reap acts on tier_2 cell causal contexts, so a candidate that has no
+%% surviving context entry is reported dead on every pass and reaped by
+%% none of them.
 frontier_origins() ->
     lists:usort(
         lists:append([

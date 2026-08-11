@@ -333,3 +333,209 @@ Until that is done, the finding stands as: the check is structurally
 max-based (`frontier_deficit/2`, `merge_frontier/2` — both confirmed by
 reading), the model says that is insufficient, and no cluster run has yet put
 the system in the state where it matters.
+
+## Origin reaping: can the frontier be reaped without agreement?
+
+`OriginReaping.tla`. The frontier is a join-semilattice element (per-origin
+max, merged by `merge_frontier/2`); reaping is the only operation that moves
+it DOWN, so it is the only one that can break the lattice discipline the
+convergence oracle rests on.
+
+```
+java -cp tla2tools.jar tlc2.TLC -workers 4 -deadlock -config OriginReaping_Off.cfg        OriginReaping.tla
+java -cp tla2tools.jar tlc2.TLC -workers 4 -deadlock -config OriginReaping_Unilateral.cfg OriginReaping.tla
+java -cp tla2tools.jar tlc2.TLC -workers 4 -deadlock -config OriginReaping_Solo.cfg       OriginReaping.tla
+```
+
+`-deadlock` because a terminal state (every origin minted out, all but one
+replica departed) is expected here and is not a safety failure.
+
+| Configuration | Result |
+| --- | --- |
+| `Off` — frontier never reaped (today) | exhaustive clean: 425,614 states, 104,447 distinct |
+| `Unilateral` — any member may reap a dead origin it has fully applied | **`SpuriousGap` violated in 6 steps** |
+| `Solo` — reap only when this replica is the sole member | exhaustive clean: 527,785 states, 155,240 distinct |
+
+The precondition granted to `Unilateral` is the strongest one a node can
+check locally: the origin is claimed by no member, and this replica holds
+every event that origin ever minted. It is still not enough.
+
+### The counterexample
+
+```
+1. Init
+2. Mint(r1)              -- (r1,1)
+3. Sync(r2, r1)          -- r2 applies it; both claim r1 |-> 1
+4. Depart(r1)            -- r1 leaves; origin r1 is now dead
+5. Sync(r3, r2)          -- r3 applies it; claims r1 |-> 1
+6. Reap(r2)              -- r2 drops its r1 entry, having applied everything
+```
+
+Final state: `applied` is IDENTICAL at r2 and r3 (both hold `(r1,1)`), but
+`claim[r3][r1] = 1` while `claim[r2][r1] = 0`. The next round r2 takes from
+r3 reads that as a deficit, raises `{frontier_gap, _}` and flags a catalogue
+rebootstrap — for data r2 already has. The rebootstrap re-merges r3's
+frontier, restoring the entry, and the next retirement pass reaps it again:
+the cost recurs once per retirement interval per disagreeing pair until every
+node has reaped.
+
+`NoDataLoss` holds throughout, which is the useful discrimination: reaping
+does not corrupt state, it desynchronises the ORACLE. The failure is
+expensive and self-inflicted, not silent.
+
+### What this licenses
+
+Reaping under `reclamation_members/0 = {ok, []}` — the solo case the source
+already documents as licensing maximal reclamation, because no peer can
+contradict the drop or re-add the entry. Exhaustively clean at 3 replicas.
+
+Anything broader needs agreement on the retired set, which no node-local pass
+can synthesise. This is the standard version-vector GC result: removal from a
+join-semilattice is non-monotonic, so it is safe only when coordinated or
+when accompanied by a tombstone recording what was removed — and a tombstone
+costs exactly what the entry cost.
+
+### The meet, and why the obvious form of it fails
+
+`OriginReaping_Meet.cfg` models the natural reading of "use the meet, like
+MST GC does": reap an origin when every member is known level on it, and let
+`frontier_deficit/2` skip origins this replica has reaped. **`ReapedMeansLevel`
+violated in 4 steps.** The predicate it must use to recognise a reaped origin,
+
+```
+Dead(o) /\ claim[r][o] = 0
+```
+
+cannot distinguish *"I reaped this after verifying I was level"* from *"I
+never saw it"*. In the counterexample r3 never received the dead origin's
+event at all, so it skips a deficit that was real. The meet is sound;
+RECOMPUTING it from an absent entry is not.
+
+### The meet recorded as a scalar — `OriginReapingWatermark.tla`
+
+The fix is to record the meet rather than re-derive it. Per origin that is a
+tombstone and costs what the entry cost. As a SCALAR it costs O(1) — which is
+exactly how MST compaction gets away with a watermark. The prerequisite is an
+ORDER on origins: compaction can use a scalar because keys sort by HLC, while
+origins today are opaque 128-bit randoms with no order at all.
+
+`reapedBefore[r]` advances past rank `k` only when every origin below `k` is
+dead AND every member holds exactly what this replica holds for it. Below the
+watermark, entries are dropped, not re-learned on merge, and excluded from the
+deficit. Both conjuncts read confirmed peer state, so it is coordination-free
+and fail-closed: a member that cannot be asked cannot satisfy the conjunct and
+the watermark simply stalls.
+
+```
+java -cp tla2tools.jar tlc2.TLC -workers 4 -deadlock -config OriginReapingWatermark_Off.cfg OriginReapingWatermark.tla
+java -cp tla2tools.jar tlc2.TLC -workers 4 -deadlock -config OriginReapingWatermark_On.cfg  OriginReapingWatermark.tla
+```
+
+| Configuration | Result |
+| --- | --- |
+| `Off` — never reap (control) | exhaustive clean: 425,614 states, 104,447 distinct |
+| `On` — meet-as-watermark | exhaustive clean: **5,440,051 states, 1,189,020 distinct** |
+
+Invariants checked in both: `TypeOK`, `NoOverClaim`, `NoDataLoss`,
+`SpuriousGap`, `ReapedMeansLevel`.
+
+**So consensus is not required.** What is required is (a) a total order on
+origins, so the meet can be recorded in O(1), and (b) the deficit check and
+the frontier merge both honouring the watermark — a reap that only changes
+the stored VV is undone by the next `merge_frontier/2`.
+
+## Cell-context reaping: does the membership-only driver need a stability gate?
+
+`CellContextReap.tla`. `bondy_oplog_crdt_aw_map:reap_origins/2` states its
+own precondition — *"Safe only once the origin is permanently gone AND
+causally stable cluster-wide — the operator's obligation"* — while
+`bondy_oplog_origin_retirement:reap_complement/3` establishes only the first
+conjunct, from membership alone. This asks what the second conjunct buys.
+
+**It buys nothing, because the cell context is not what makes re-delivery
+idempotent.** Every call site of `bondy_oplog_crdt_aw_core:drop_observed/2`
+— `bondy_oplog_crdt_nested_core:put/5` and `rmv/3`,
+`bondy_oplog_crdt_ew_flag` — is handed the OPERATION's stamped context,
+threaded from the event `meta` through `bondy_oplog_cell_kernel:apply/6` and
+`bondy_oplog_crdt_commutative:apply_op/5`. `put/5` adds its dot
+unconditionally; it never asks whether `CC` already observed it. `CC`'s only
+readers are `cc_absorb/3` and `context_of/1`, which supplies the stamp for
+the NEXT write.
+
+Re-delivery is filtered upstream of the CRDT entirely, by the
+applied-frontier VV — which the reaper does not touch:
+`append_remote_install/3` refuses an event key already in the local MST,
+and `append_remote_below_watermark/3` / `watermark_door/3` drop an
+at-or-below-watermark event unless the applied VV says this replica never
+applied it.
+
+So the model gives ops their own stamped contexts, gives `CC` only the stamp
+role, and gates delivery on the two doors above — the code's actual shape.
+`Compact` is deliberately weaker than the real truncation (any applied op may
+leave the tree, not just an HLC-ordered prefix), so a clean result covers a
+superset of reachable states. Three replicas, one origin each, symmetry
+reduction, exhaustive.
+
+| Configuration | `NoResurrection`, `NoPhantomDot`, `ContextCoversDots` | `Convergence` |
+| --- | --- | --- |
+| reap off, causal delivery | clean, 426,389 distinct | clean |
+| reap **on**, causal delivery | clean, 5,046,890 distinct | clean |
+| reap off, out-of-order delivery | clean, 751,829 distinct | **violated**, 884 states |
+| reap **on**, out-of-order delivery | clean, 10,570,826 distinct | **violated**, 906 states |
+
+Two replicas at `MaxSeq = 2` are exhaustively clean on every invariant in all
+four configurations (724k / 526k / 1.86M / 1.35M distinct) — the inversion
+below needs three parties.
+
+**The reap does not resurrect and does not break convergence.** It moves the
+stamped context down, so a later remove drops fewer dots at replicas that
+still hold them — an error toward FALSE concurrency (extra siblings the CRDT
+resolves), never toward lost causality, which is the direction
+`bondy_oplog_applier`'s I1 note already names as acceptable. Nothing
+interprets an existing event differently, because every event carries its own
+context and is replicated verbatim.
+
+**What the model did find is orthogonal to reaping.** `Convergence` — two
+replicas that folded the same operation set hold the same value — fails
+whenever delivery is not causal, with the reap on or off, and `ReapCell` never
+fires in either counterexample. The shape is a three-party inversion: `r2`
+folds `r1`'s put and then mints a put observing it; a third replica folds
+`r2`'s op first (dropping nothing, because it has not seen `r1`'s dot) and
+`r1`'s afterwards, whose `put/5` adds the dot back. Both dots survive at `r3`
+and only one at `r2`, permanently.
+
+Whole-root page sync supplies causal order in the common case — the peer's
+tree carries both events and the replay folds them in MST key order, which is
+HLC order. The inversion needs the peer to have compacted the earlier event
+away, which is the prefix-closure hazard `AaeCausalClosure.tla` covers. The
+hold that closes that hazard (`bondy_oplog_cell_apply:partition_contiguous/3`)
+is **per-origin**: it computes a contiguous run per origin against the applied
+frontier and holds beyond the first gap. In the inversion above each origin
+delivers exactly one event with no per-origin gap, so nothing is held. The
+requirement is cross-origin causal delivery, and no per-origin mechanism
+supplies it — the same distinction as the vector-vs-HLC stability gap
+`bondy_oplog_crdt_nested_core`'s moduledoc records for the stabilization fold.
+
+## Origin birth order: is any total order enough for the watermark?
+
+`OriginBirthOrder.tla`. `OriginReapingWatermark.tla` has every origin present
+at `Init`, so it never explores an origin born BELOW an established watermark
+— the case a wall-clock-prefixed id (UUIDv7, ULID, KSUID) admits under clock
+skew or rollback.
+
+The first run violated `NoLiveOriginBelowWatermark` under BOTH orders, which
+located a defect in the watermark rule rather than in any id scheme: it
+advanced past ranks that were merely UNBORN, and an unborn rank can be taken
+later. Requiring every rank below `k` to be already born makes the rule safe
+under **any** total order:
+
+| Configuration | Result |
+| --- | --- |
+| `Wallclock` — a new origin may take any unborn rank | exhaustive clean, 74,585 states |
+| `Hlc` — a new origin outranks every origin already born | exhaustive clean, 71,561 states |
+
+So the id scheme is not a SAFETY question once the rule requires born-ness.
+It is an EFFECTIVENESS question: the watermark advances only over a
+contiguous born prefix, and a wall clock produces gaps that stall it
+indefinitely, while an HLC allocates ranks in issue order so the prefix is
+gap-free. Both are safe; only one reaps.
