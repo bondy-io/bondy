@@ -53,8 +53,12 @@ all() ->
         group_deletion_cascades_grants,
         grant_to_any_resource,
         reverse_grants_on_resource,
+        reverse_grants_drop_on_revoke,
+        recreated_group_inherits_nothing,
+        every_publishing_table_has_a_live_subscriber,
         security_disabled_allows_all,
-        session_rbac_invalidated_on_revoke
+        session_rbac_invalidated_on_revoke,
+        session_rbac_invalidated_on_group_inheritance_change
     ].
 
 init_per_suite(Config) ->
@@ -1194,6 +1198,76 @@ session_rbac_invalidated_on_revoke(_) ->
     %% The session was re-evaluated in place, NOT torn down.
     ?assertMatch({ok, _}, bondy_session:lookup(bondy_session:id(Session))).
 
+session_rbac_invalidated_on_group_inheritance_change(_) ->
+    %% A group's parent list is a role-inheritance edge, and a cached context
+    %% bakes in the grants it resolves to. Removing a parent is therefore a
+    %% revocation and must invalidate live sessions in place, exactly as
+    %% revoking the grant directly does.
+    Uri = <<"com.test.group_inherit_invalidate">>,
+    _ = bondy_realm:create(#{
+        uri => Uri,
+        security_enabled => true,
+        authmethods => [?TRUST_AUTH],
+        groups => [
+            #{name => <<"gi_parent">>},
+            #{name => <<"gi_child">>, groups => [<<"gi_parent">>]}
+        ],
+        users => [#{username => <<"gi_u">>, groups => [<<"gi_child">>]}],
+        grants => [
+            #{
+                permissions => [<<"wamp.call">>],
+                uri => <<"com.gi.">>,
+                match => <<"prefix">>,
+                roles => [<<"gi_parent">>]
+            }
+        ],
+        sources => [
+            #{
+                usernames => [<<"gi_u">>],
+                authmethod => ?TRUST_AUTH,
+                cidr => <<"0.0.0.0/0">>
+            }
+        ]
+    }),
+
+    %% A STORED session, so the context is cached in ETS rather than rebuilt.
+    {ok, Session} = bondy_session:store(
+        bondy_session:new(Uri, #{
+            peer => {{127, 0, 0, 1}, 52051},
+            authid => <<"gi_u">>,
+            authmethod => ?TRUST_AUTH,
+            security_enabled => true,
+            roles => #{caller => #{}}
+        })
+    ),
+
+    Ctxt = #{
+        realm_uri => Uri,
+        security_enabled => true,
+        authid => <<"gi_u">>,
+        session => Session
+    },
+
+    %% The permission reaches the user only through gi_child -> gi_parent.
+    ?assertEqual(
+        ok,
+        bondy_rbac:authorize(<<"wamp.call">>, <<"com.gi.foo">>, Ctxt)
+    ),
+
+    %% Cut the inheritance edge. No grant and no membership changed — only the
+    %% group record.
+    ok = bondy_rbac_group:remove_group(Uri, <<"gi_child">>, <<"gi_parent">>),
+
+    %% Checked immediately, well within the 1s TEST epoch, so a denial is
+    %% attributable to eager invalidation and not to the lazy epoch refresh.
+    ?assertError(
+        {not_authorized, _},
+        bondy_rbac:authorize(<<"wamp.call">>, <<"com.gi.foo">>, Ctxt)
+    ),
+
+    %% Re-evaluated in place, not torn down.
+    ?assertMatch({ok, _}, bondy_session:lookup(bondy_session:id(Session))).
+
 %% =============================================================================
 %% EXPLICIT GROUPS (OIDC)
 %% =============================================================================
@@ -1735,6 +1809,149 @@ reverse_grants_on_resource(_) ->
     ),
     ?assertEqual([<<"g_intruder">>], reverse_roles(Uri2, Shared)).
 
+reverse_grants_drop_on_revoke(_) ->
+    %% The `by_resource` index is a second structure derived from the grant
+    %% cells, and a revoke has to reach both. It does: the index entry is
+    %% retracted with its grant, asserted here on the raw index rows and not
+    %% only on what the reverse query returns — `grants_on_resource/3` re-reads
+    %% each candidate primary and drops the ones that are gone, so an index full
+    %% of stale rows would still read correctly and hide the leak. That fetch is
+    %% the second line of defence, covering the window before the asynchronous
+    %% index writer catches up; retraction is the first, and it is what this
+    %% case pins.
+    Uri = <<"com.test.reverse_grants_revoke">>,
+    _ = bondy_realm:create(#{
+        uri => Uri,
+        security_enabled => true,
+        authmethods => [?TRUST_AUTH],
+        groups => [#{name => <<"g_keep">>}, #{name => <<"g_drop">>}],
+        users => [#{username => <<"u_drop">>}],
+        grants => [
+            #{
+                permissions => [<<"wamp.call">>],
+                uri => <<"com.revoked.api">>,
+                match => <<"exact">>,
+                roles => [<<"g_keep">>, <<"g_drop">>, <<"u_drop">>]
+            }
+        ]
+    }),
+    ok = flush_grant_indexes(),
+
+    Resource = stored_resource(
+        bondy_rbac:grants(Uri, #{}), <<"com.revoked.api">>
+    ),
+    ?assertEqual(
+        lists:sort([<<"g_keep">>, <<"g_drop">>, <<"u_drop">>]),
+        reverse_roles(Uri, Resource)
+    ),
+    %% One index row per granted role, so the emptiness asserted at the end is
+    %% retraction rather than a helper that never finds anything.
+    ?assertEqual(3, length(index_rows(Uri, Resource))),
+
+    %% Revoke through the grant API: the group keeps existing, only the grant
+    %% goes, so anything the reverse query still reports is a stale index entry.
+    ok = bondy_rbac:revoke(Uri, #{
+        <<"permissions">> => [<<"wamp.call">>],
+        <<"uri">> => <<"com.revoked.api">>,
+        <<"match">> => <<"exact">>,
+        <<"roles">> => [<<"g_drop">>]
+    }),
+    ok = flush_grant_indexes(),
+    ?assertEqual(
+        lists:sort([<<"g_keep">>, <<"u_drop">>]), reverse_roles(Uri, Resource)
+    ),
+
+    %% Revoking every grant of a role at once (the user-delete path) drops its
+    %% entries too.
+    ok = bondy_rbac:revoke_user(Uri, <<"u_drop">>),
+    ok = flush_grant_indexes(),
+    ?assertEqual([<<"g_keep">>], reverse_roles(Uri, Resource)),
+
+    %% And when the last grant on the resource goes, the reverse query is empty
+    %% rather than pointing at cells that are no longer there.
+    ok = bondy_rbac:revoke_group(Uri, <<"g_keep">>),
+    ok = flush_grant_indexes(),
+    ?assertEqual([], reverse_roles(Uri, Resource)),
+
+    %% Read the index itself, not just what the composition returns: the entries
+    %% are retracted with their grants, so the emptiness above is retraction and
+    %% not the forward fetch quietly filtering a table full of stale rows.
+    ?assertEqual([], index_rows(Uri, Resource)).
+
+recreated_group_inherits_nothing(_) ->
+    %% A group name is a key like a username is. Re-creating one must not hand
+    %% the new group the old one's grants, nor the members the old one had.
+    Uri = <<"com.test.group_recreate">>,
+    Group = <<"g_recreated">>,
+    Member = <<"member_r">>,
+    Resource = <<"com.grouprecreate.">>,
+
+    _ = bondy_realm:create(#{
+        uri => Uri,
+        security_enabled => true,
+        authmethods => [?TRUST_AUTH],
+        groups => [#{name => Group}],
+        users => [#{username => Member, groups => [Group]}],
+        grants => [
+            #{
+                permissions => [<<"wamp.call">>],
+                uri => Resource,
+                match => <<"prefix">>,
+                roles => [Group]
+            }
+        ]
+    }),
+
+    C0 = bondy_rbac:get_context(Uri, Member),
+    ?assertEqual(ok, bondy_rbac:authorize(<<"wamp.call">>, Resource, C0)),
+
+    ok = bondy_rbac_group:remove(Uri, Group),
+    {ok, _} = bondy_rbac_group:add(
+        Uri, bondy_rbac_group:new(#{name => Group})
+    ),
+
+    %% The member's membership went with the deleted group...
+    ?assertEqual(
+        [],
+        bondy_rbac_user:groups(bondy_rbac_user:fetch(Uri, Member))
+    ),
+    {Members, _Cont} = bondy_rbac_group:members(Uri, Group, #{}),
+    ?assertEqual([], Members),
+
+    %% ...and so did its grants, so re-joining the new group grants nothing.
+    ok = bondy_rbac_user:add_group(Uri, Member, Group),
+    C1 = bondy_rbac:get_context(Uri, Member),
+    ?assertError(
+        {not_authorized, _},
+        bondy_rbac:authorize(<<"wamp.call">>, Resource, C1)
+    ).
+
+every_publishing_table_has_a_live_subscriber(_) ->
+    %% `publish => true` on a table spec only wires the change-event hook; the
+    %% side-effect it exists for lives in a consumer that has to subscribe to
+    %% that table's namespace. The flag and the consumer are declared in
+    %% different modules, so either half can be added without the other and
+    %% nothing complains: an unconsumed flag is a reaction that silently never
+    %% happens (`security_groups` shipped that way, leaving role inheritance the
+    %% one permission edge with no cache invalidation). Asserted against the
+    %% live dispatcher rather than a list of module names, so it holds whoever
+    %% the consumer is.
+    Publishing = [
+        Name
+     || #{name := Name} = Spec <- bondy_namespace_catalog:tables(),
+        maps:get(publish, Spec, false)
+    ],
+    ?assertNotEqual([], Publishing),
+
+    Unconsumed = [
+        Name
+     || Name <- Publishing,
+        bondy_oplog_core_dispatcher:subscription_count(
+            bondy_db:namespace(bondy_namespace_catalog:table(Name))
+        ) == 0
+    ],
+    ?assertEqual([], Unconsumed, "a table publishes changes nobody consumes").
+
 %% The stored, normalised resource for a grant whose URI is `WantUri`.
 stored_resource(Grants, WantUri) ->
     hd([
@@ -1746,6 +1963,20 @@ reverse_roles(Uri, Resource) ->
     lists:sort([
         Role
      || {{Role, _Res}, _Perms} <- bondy_rbac:grants_on_resource(Uri, Resource)
+    ]).
+
+%% The raw `by_resource` index rows for a resource, across both grant tables —
+%% the candidate primary keys, before the forward fetch filters them.
+index_rows(Uri, Resource) ->
+    lists:append([
+        begin
+            Table = bondy_namespace_catalog:table(Name),
+            {ok, Rows} = bondy_db:index_get(
+                Table, Uri, by_resource, Resource, #{}
+            ),
+            Rows
+        end
+     || Name <- [security_user_grants, security_group_grants]
     ]).
 
 %% The by_resource index is asynchronous; flush both grant tables' writers so the

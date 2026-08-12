@@ -90,6 +90,13 @@ the default (`undefined`) selects the adaptive budget.
 -export([start_bootstrap/3]).
 -export([start_bootstrap_catalogue/3]).
 
+-ifdef(TEST).
+%% Exposed so the classification and the level it selects can be unit tested
+%% against the exit shapes Partisan produces, without standing up a cluster.
+-export([is_peer_unreachable/1]).
+-export([log_failure/3]).
+-endif.
+
 %% Bounded-batch pull needs many rounds for a bulk sync, so the round ceiling
 %% scales with the initial missing set (`(missing / per_round) * SLACK + FLOOR`).
 %% SLACK covers deeper pages revealed while descending the tree; FLOOR keeps a
@@ -213,16 +220,57 @@ start(Instance, Peer, Opts, Iterations) ->
             {ok, _} ->
                 ok;
             {error, Reason} ->
-                ?LOG_WARNING(#{
-                    description => "sync session failed",
-                    instance => Instance,
-                    peer => Peer,
-                    reason => Reason
-                }),
+                ok = log_failure(Instance, Peer, Reason),
                 exit({sync_failed, Reason})
         end
     end),
     {ok, Pid}.
+
+%% @private
+%% A session against a peer this node cannot reach is an expected outcome in a
+%% cluster, not an operational problem: the scheduler offers one session per
+%% instance per tick, so a single absent node otherwise produces a warning per
+%% instance per tick for as long as it is away. Those are logged at debug and
+%% counted through the `[bondy_oplog, sync, error]` telemetry event, which is
+%% where the rate belongs. Every other failure — a protocol error, a timeout, a
+%% peer that answers wrongly — stays a warning.
+%%
+%% The exit reason is unchanged either way: the scheduler reads it to drive
+%% backoff and re-bootstrap decisions.
+log_failure(Instance, Peer, Reason) ->
+    case is_peer_unreachable(Reason) of
+        true ->
+            ?LOG_DEBUG(#{
+                description => "sync session skipped, peer unreachable",
+                instance => Instance,
+                peer => Peer,
+                reason => Reason
+            });
+        false ->
+            ?LOG_WARNING(#{
+                description => "sync session failed",
+                instance => Instance,
+                peer => Peer,
+                reason => Reason
+            })
+    end,
+    ok.
+
+?DOC(false).
+-spec is_peer_unreachable(term()) -> boolean().
+
+%% A `partisan_gen_server:call` to an absent node exits with `nodedown`; to a
+%% node that is up but whose responder has not started yet — a peer still
+%% booting — with `noproc`. Both mean "nothing to talk to", and both resolve on
+%% their own when the peer returns.
+is_peer_unreachable({partisan_call_failed, {{nodedown, _}, _}}) ->
+    true;
+is_peer_unreachable({partisan_call_failed, {nodedown, _}}) ->
+    true;
+is_peer_unreachable({partisan_call_failed, {noproc, _}}) ->
+    true;
+is_peer_unreachable(_) ->
+    false.
 
 ?DOC("""
 Bootstrap session: fetch the peer's snapshot first, install it

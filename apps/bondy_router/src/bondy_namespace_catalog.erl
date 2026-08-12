@@ -128,6 +128,7 @@ and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
 -export([table/1]).
 -export([table_names/1]).
 -export([tables/0]).
+-export([fold_type/1]).
 
 %% GEN_SERVER CALLBACKS
 -export([init/1]).
@@ -199,13 +200,19 @@ tables() ->
             publish => true,
             indexes => user_indexes()
         },
-        %% security_groups — storage-only (no `publish`). Local lifecycle events
-        %% fire inline in bondy_rbac_group; on_merge is a no-op.
+        %% security_groups — local lifecycle events fire inline in
+        %% bondy_rbac_group; `publish => true` wires the remote on_merge seam so
+        %% a peer's change to a group's PARENT groups invalidates this node's
+        %% cached RBAC contexts (`bondy_aae_reactor:react_group/2`). The parent
+        %% list is a role-inheritance edge and a cached context bakes in the
+        %% grants it resolves to, so without this a revoked inheritance is
+        %% honoured only when the context expires.
         #{
             name => ?BONDY_DB_GROUP_TAB,
             db => main,
             durability => durable,
-            fold => lww
+            fold => lww,
+            publish => true
         },
         %% security_group_members — the AUTHORITATIVE group-membership relation.
         %% Membership is cell-per-fact, add-wins: each `(user, group)` fact is an
@@ -522,6 +529,26 @@ fold_opts(presence) ->
     %% Reserved presence-FSM fold — no current table uses it (the registry
     %% tables converge as `lww`); no mapping yet.
     error({not_yet_supported, presence}).
+
+-doc """
+The declared `fold` type of table `Name`, or `undefined` when no table
+declares that name.
+
+A cell's fold type IS the language its writes are expressed in — an `lww`
+register takes `{set, V}`, an `ew` flag takes `enable` / `disable`, an `aw` map
+takes `{put, K, V}` / `{rmv, K}`. Any code that synthesises a write for a table
+it does not know statically (`bondy_export`'s import) must ask for the type
+rather than assume the register form: the applier SKIPS a cell whose operation
+its CRDT cannot interpret and carries on, so a wrong operation is a silent
+loss, not an error.
+""".
+-spec fold_type(Name :: atom()) -> fold_class() | undefined.
+
+fold_type(Name) ->
+    case [F || #{name := N, fold := F} <- tables(), N == Name] of
+        [Fold | _] -> Fold;
+        [] -> undefined
+    end.
 
 -doc """
 The durable database's name. Callers that need to filter or assert on

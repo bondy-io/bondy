@@ -587,8 +587,35 @@ import_entry(?BONDY_DB_REALM_KEYS_TAB, Table, Band, Key, Value, C) ->
     put_realm_keys_into(
         Table, Band, Key, bondy_realm:keys_value_to_entries(Value), C
     );
-import_entry(_Name, Table, Band, Key, Value, C) ->
-    buffer_write(Table, Band, Key, {set, Value}, C).
+import_entry(Name, Table, Band, Key, Value, C) ->
+    import_by_fold(
+        bondy_namespace_catalog:fold_type(Name), Table, Band, Key, Value, C
+    ).
+
+%% @private
+%% A cell's fold type is the language its writes are expressed in, so the
+%% operation to re-apply an exported value is chosen from the type, never
+%% assumed. The applier SKIPS a cell whose CRDT cannot interpret the operation
+%% it was given (`cell_apply raised; the cell has been skipped`) and the batch
+%% carries on, so getting this wrong loses data while the import still reports
+%% success — which is how `security_group_members` (an `ew` flag, given the
+%% register's `{set, V}`) silently dropped every group membership on restore.
+%%
+%% `aw` never reaches here: the only add-wins table is `bondy_realm_keys`, which
+%% has its own clause above. Anything else is counted as skipped rather than
+%% written with a guessed operation — a visible gap beats a silent one.
+import_by_fold(lww, Table, Band, Key, Value, C) ->
+    buffer_write(Table, Band, Key, {set, Value}, C);
+import_by_fold(ew, Table, Band, Key, true, C) ->
+    buffer_write(Table, Band, Key, enable, C);
+import_by_fold(ew, _Table, _Band, _Key, false, C) ->
+    %% A retracted fact. `disable` is an observed-remove: replayed without the
+    %% causal context it was issued under it removes nothing, so importing one
+    %% cannot faithfully reproduce the retraction. The absence of an enabled
+    %% fact is the same observable, so the entry is skipped rather than written.
+    skip(retracted_fact, C);
+import_by_fold(Fold, _Table, _Band, _Key, _Value, C) ->
+    skip({unsupported_fold, Fold}, C).
 
 %% @private
 put_realm_keys(_Band, _Key, [], C) ->
@@ -622,24 +649,40 @@ import_legacy(Term, C0) ->
     do_import_legacy(Term, C).
 
 %% @private
+%% The whole body sits INSIDE the `try`, not in an `of` clause: an exception
+%% raised in an `of` clause body is not caught by the `catch` — only exceptions
+%% from the try expression itself are. With the translation and the write in an
+%% `of` body, one malformed record aborted the entire import instead of being
+%% counted and skipped, and `translate_error` — the very failure it names —
+%% could never be reached.
 do_import_legacy({{{Prefix, Sub}, Key}, {object, _} = Object}, C) ->
-    try resolve_object(Object) of
-        deleted ->
-            skip(tombstone, C);
-        {ok, Payload} ->
-            case legacy_translate(Prefix, Sub, Key, Payload) of
-                {entry, Table, Band, Key1, Value1} ->
-                    apply_legacy(Table, Band, Key1, Value1, C);
-                {oauth_token, AuthRealm, AuthId, IssuedAt, ExpiresIn, Spec} ->
-                    accumulate_token(
-                        AuthRealm, AuthId, IssuedAt, ExpiresIn, Spec, C
-                    );
-                {skip, Reason} ->
-                    skip(Reason, C)
-            end
+    try
+        case resolve_object(Object) of
+            deleted ->
+                skip(tombstone, C);
+            {ok, Payload} ->
+                case legacy_translate(Prefix, Sub, Key, Payload) of
+                    {entry, Table, Band, Key1, Value1} ->
+                        apply_legacy(Table, Band, Key1, Value1, C);
+                    {oauth_token, AuthRealm, AuthId, IssuedAt, ExpiresIn, Spec} ->
+                        accumulate_token(
+                            AuthRealm, AuthId, IssuedAt, ExpiresIn, Spec, C
+                        );
+                    {skip, Reason} ->
+                        skip(Reason, C)
+                end
+        end
     catch
-        _:_ ->
-            skip(translate_error, C)
+        Class:Reason0 ->
+            ?LOG_WARNING(#{
+                description =>
+                    "Skipping a legacy record that could not be imported",
+                prefix => Prefix,
+                sub_prefix => Sub,
+                class => Class,
+                reason => Reason0
+            }),
+            skip(import_error, C)
     end;
 do_import_legacy(_Other, C) ->
     skip(unrecognised_term, C).
@@ -700,7 +743,24 @@ flush_tokens(C) ->
     C.
 
 %% @private
+apply_legacy(?BONDY_DB_USER_TAB, Band, Key, Value, C) ->
+    %% The `security_users` domain does not map onto a plain `{set, V}` per
+    %% cell. It holds user records — whose groups are a relation of their own,
+    %% `groups` not being a key of the user cell — alongside alias-pointer
+    %% cells, and only `bondy_rbac_user` decides which a value is and where its
+    %% parts go. So the whole domain goes through that module's chokepoint,
+    %% the same reason `bondy_oauth_token:import_legacy/1` owns the token case.
+    %% The write is immediate rather than buffered, which a one-off restore can
+    %% afford.
+    case bondy_rbac_user:import_legacy(Band, Key, Value) of
+        ok -> bump(written_count, C);
+        {error, Reason} -> skip({user_import, Reason}, C)
+    end;
 apply_legacy(Table, Band, Key, Value, C) ->
+    apply_legacy_write(Table, Band, Key, Value, C).
+
+%% @private
+apply_legacy_write(Table, Band, Key, Value, C) ->
     case bondy_namespace_catalog:table(Table) of
         undefined ->
             skip({table_not_provisioned, Table}, C);
@@ -775,7 +835,9 @@ intentionally-unmigrated domain (see the moduledoc). The reshape per domain:
 
 - per-realm security tables band by the realm URI (the legacy `SubPrefix`);
 - grants / sources re-key through the live `encode_key/1`;
-- users / groups upgrade their value via the module's `from_term/1`;
+- groups upgrade their value via the module's `from_term/1`;
+- users pass through unread — `bondy_rbac_user:import_legacy/3` owns the shape
+  upgrade, because it also owns telling a user record from an alias pointer;
 - `api_gateway` specs live under the global band.
 """.
 -spec legacy_translate(
@@ -786,11 +848,12 @@ intentionally-unmigrated domain (see the moduledoc). The reshape per domain:
 ) ->
     {entry, atom(), binary(), term(), term()} | {skip, term()}.
 
-legacy_translate(security_users, Realm, Username, Payload) when
-    is_binary(Realm)
-->
-    {entry, ?BONDY_DB_USER_TAB, Realm, Username,
-        bondy_rbac_user:from_term({Username, Payload})};
+legacy_translate(security_users, Realm, Key, Payload) when is_binary(Realm) ->
+    %% Passed through unread: a `security_users` cell is a user record or an
+    %% alias pointer, and `bondy_rbac_user:import_legacy/3` is the one place
+    %% that tells them apart and upgrades each. Interpreting the value here as
+    %% well would put that knowledge in two places.
+    {entry, ?BONDY_DB_USER_TAB, Realm, Key, Payload};
 legacy_translate(security_groups, Realm, Name, Payload) when is_binary(Realm) ->
     {entry, ?BONDY_DB_GROUP_TAB, Realm, Name,
         bondy_rbac_group:from_term({Name, Payload})};

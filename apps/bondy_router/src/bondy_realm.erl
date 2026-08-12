@@ -845,6 +845,7 @@ connected to any realm.
 uri(#realm{uri = Uri}) ->
     Uri.
 
+-doc "Returns the realm's human-readable description.".
 -spec description(t() | uri()) -> map().
 
 description(#realm{description = Value}) ->
@@ -852,6 +853,7 @@ description(#realm{description = Value}) ->
 description(Uri) when is_binary(Uri) ->
     description(fetch(Uri)).
 
+-doc "Whether `Realm` is a realm record.".
 -spec is_type(Realm :: t() | uri()) -> boolean().
 
 is_type(#realm{}) ->
@@ -1188,6 +1190,10 @@ password_opts(#realm{password_opts = Opts}) ->
 password_opts(RealmUri) ->
     password_opts(fetch(RealmUri)).
 
+-doc """
+Returns the realm's private signing keys, one per key id. These sign the tickets
+and access tokens issued for the realm.
+""".
 -spec private_keys(t() | uri()) -> [map()].
 
 private_keys(#realm{private_keys = undefined}) ->
@@ -1201,6 +1207,7 @@ private_keys(#realm{private_keys = Keys}) ->
 private_keys(Uri) when is_binary(Uri) ->
     private_keys(fetch(Uri)).
 
+-doc "Returns the realm's public signing keys, one per key id.".
 -spec public_keys(t() | uri()) -> [map()].
 
 public_keys(#realm{public_keys = Keys} = Realm0) when map_size(Keys) == 0 ->
@@ -1211,6 +1218,11 @@ public_keys(#realm{public_keys = Keys}) ->
 public_keys(Uri) when is_binary(Uri) ->
     public_keys(fetch(Uri)).
 
+-doc """
+Returns the private signing key with key id `Kid`, or `undefined` when the realm
+has no such key — which is what verification sees for a token signed with a key
+that has since been rotated away.
+""".
 -spec get_private_key(t() | uri(), Kid :: binary()) -> map() | undefined.
 
 get_private_key(#realm{private_keys = Keys}, Kid) ->
@@ -1221,6 +1233,7 @@ get_private_key(#realm{private_keys = Keys}, Kid) ->
 get_private_key(Uri, Kid) when is_binary(Uri) ->
     get_private_key(fetch(Uri), Kid).
 
+-doc "Returns the public signing key with key id `Kid`, or `undefined`.".
 -spec get_public_key(t() | uri(), Kid :: binary()) -> map() | undefined.
 
 get_public_key(#realm{public_keys = Keys}, Kid) ->
@@ -1231,6 +1244,12 @@ get_public_key(#realm{public_keys = Keys}, Kid) ->
 get_public_key(Uri, Kid) when is_binary(Uri) ->
     get_public_key(fetch(Uri), Kid).
 
+-doc """
+Returns the key id of one of the realm's signing keys, chosen at random.
+
+Signing spreads across the realm's keys rather than pinning one, so rotating a
+key out affects only the tokens it signed.
+""".
 -spec get_random_kid(t() | uri()) -> binary().
 
 get_random_kid(#realm{private_keys = Keys} = Realm0) when map_size(Keys) == 0 ->
@@ -1267,6 +1286,7 @@ get_random_private_key(#realm{private_keys = Keys}) ->
 get_random_private_key(Uri) when is_binary(Uri) ->
     get_random_private_key(fetch(Uri)).
 
+-doc "Returns the realm's encryption keys, one per key id.".
 -spec encryption_keys(t() | uri()) -> [map()].
 
 encryption_keys(#realm{encryption_keys = Keys} = Realm0) when
@@ -1280,6 +1300,7 @@ encryption_keys(#realm{encryption_keys = Keys}) ->
 encryption_keys(Uri) when is_binary(Uri) ->
     encryption_keys(fetch(Uri)).
 
+-doc "Returns the encryption key with key id `Kid`, or `undefined`.".
 -spec get_encryption_key(t() | uri(), Kid :: binary()) -> map() | undefined.
 
 get_encryption_key(#realm{encryption_keys = Keys}, Kid) ->
@@ -1290,6 +1311,9 @@ get_encryption_key(#realm{encryption_keys = Keys}, Kid) ->
 get_encryption_key(Uri, Kid) when is_binary(Uri) ->
     get_encryption_key(fetch(Uri), Kid).
 
+-doc """
+Returns the key id of one of the realm's encryption keys, chosen at random.
+""".
 -spec get_random_encryption_kid(t() | uri()) -> map().
 
 get_random_encryption_kid(#realm{encryption_keys = Keys} = Realm0) when
@@ -1306,6 +1330,10 @@ get_random_encryption_kid(#realm{encryption_keys = Keys}) ->
 get_random_encryption_kid(Uri) when is_binary(Uri) ->
     get_random_encryption_kid(fetch(Uri)).
 
+-doc """
+Returns the realm's properties as a map, with private key material stripped.
+The representation exposed over the API.
+""".
 -spec info(t() | uri()) -> map() | no_return().
 
 info(#realm{info = Info}) ->
@@ -1340,15 +1368,17 @@ get_oidc_provider(Realm, ProviderName) when is_binary(ProviderName) ->
     end.
 
 %% @private
-%% Removes ticket_expiry_secs from provider configs where the value matches
-%% the old hardcoded validator default (3600). This allows the handler to
-%% fall through to the global bondy.conf setting. Explicitly set values
-%% (different from the old default) are preserved.
+%% A provider config carrying exactly 3600 for `ticket_expiry_secs` is treated
+%% as unset, so the handler falls through to the global `bondy.conf` setting.
+%% 3600 is the value a config that never named the key was stored with, and it
+%% is indistinguishable from one that named it deliberately; any other value is
+%% taken as deliberate and preserved.
 maybe_migrate_provider_config(#{ticket_expiry_secs := 3600} = Config) ->
     maps:remove(ticket_expiry_secs, Config);
 maybe_migrate_provider_config(Config) ->
     Config.
 
+-doc "Whether a realm with URI `Uri` exists.".
 -spec exists(uri()) -> boolean().
 
 exists(Uri) ->
@@ -1410,6 +1440,17 @@ get(Uri, Opts) ->
         end
     ).
 
+-doc """
+Creates a realm from `Uri` or from a map declaring it, and returns it.
+
+The map may declare the realm's users, groups, sources and grants, which are
+created with it. A realm created this way is authoritative: its signing and
+encryption keys are generated now unless the map supplies them.
+
+Raises when the realm already exists, when the URI is reserved, or when the
+declaration is inconsistent — naming a prototype or SSO realm that does not
+exist, or setting a property the named prototype forbids overriding.
+""".
 -spec create(uri() | map()) -> t() | no_return().
 
 create(Map0) when is_map(Map0) ->
@@ -1430,6 +1471,14 @@ create(Map0) when is_map(Map0) ->
 create(Uri) when is_binary(Uri) ->
     create(#{uri => Uri}).
 
+-doc """
+Applies `Data` to an existing realm and returns the updated realm.
+
+Only the properties `Data` names change; `uri` is immutable and is ignored when
+present. Declaring users, groups, sources or grants here creates or updates
+them, but never deletes ones left out — the map is not the realm's full
+definition. Raises when the realm does not exist or the update is inconsistent.
+""".
 -spec update(Realm :: t() | uri(), Data :: map()) -> Realm :: t() | no_return().
 
 update(#realm{uri = ?CONTROL_REALM_URI}, _) ->
@@ -1443,6 +1492,7 @@ update(#realm{} = Realm, Data0) ->
 update(Uri, Data) when is_binary(Uri) ->
     update(fetch(Uri), Data).
 
+-doc "Deletes a realm. Equivalent to `delete/2` with `force` disabled.".
 -spec delete(t() | uri()) ->
     ok | {error, not_found | active_users} | no_return().
 
@@ -1450,10 +1500,17 @@ delete(Term) ->
     delete(Term, #{force => false}).
 
 -doc """
-Deletes the realm and all its associated resources in case the realm
-has no users or the option `force` was passed with a value of `true`.
-Calls close/2 which amongst other cleanup tasks should
-kick out all opened sessions attached to the realm.
+Deletes a realm and everything scoped to it: its key material, users, groups,
+grants, sources, tickets, tokens and retained messages.
+
+Refuses with `{error, active_users}` when the realm still has users, unless
+`force` is set. Existing sessions are closed and new connections refused before
+the data is removed.
+
+Deleting the realm record is synchronous; removing the associated data is not —
+it is handed to a router worker, so the realm reads as gone before the last of
+its data does. Raises `badarg` for the master and internal realms, which cannot
+be deleted.
 """.
 -spec delete(t() | uri(), delete_opts()) ->
     ok | {error, not_found | active_users} | no_return().
@@ -1495,6 +1552,11 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
             Work = fun() ->
                 Opts1 = Opts0#{dirty => true},
 
+                %% The other half of the realm record: key material lives in
+                %% its own cell, so clearing the identity cell above does not
+                %% take it with it.
+                ok = delete_keys(Uri),
+
                 ok = bondy_rbac:remove_all(Uri, Opts1),
 
                 %% Delete all tickets and tokens. Both are bucketed by the
@@ -1506,6 +1568,11 @@ delete(#realm{uri = Uri} = Realm, Opts0) ->
 
                 %% Delete all sources
                 bondy_rbac_source:remove_all(Uri),
+
+                %% Delete all retained messages. They are keyed by topic within
+                %% the realm, so one left behind is delivered to the subscribers
+                %% of whatever realm next claims this URI.
+                _ = bondy_retained_message:remove_all(Uri),
 
                 %% Delete all groups
                 bondy_rbac_group:remove_all(Uri, Opts1),
@@ -1551,12 +1618,12 @@ apply_config() ->
             %% with `bondy_db:reconcile` (an idempotent set), so re-applying the
             %% unchanged file on every boot emits NO operations and never
             %% perturbs cross-node convergence — the op-based CRDT + anti-entropy
-            %% reconcile multi-node writes, so plum_db's deterministic-version
-            %% "rebase" hack is obsolete. The `declarative` flag carries that
-            %% intent: overwrite-if-present and skip the runtime lifecycle
-            %% side-effects. (Idempotency relies on each object being
-            %% deterministic across nodes/boots; see `validate_rbac_config` for
-            %% the deterministic password salt.)
+            %% reconcile multi-node writes, so no deterministic-version rebase
+            %% is needed. The `declarative` flag carries that intent:
+            %% overwrite-if-present and skip the runtime lifecycle side-effects.
+            %% Idempotency relies on each object being byte-identical across
+            %% nodes and boots; see `validate_rbac_config` for the deterministic
+            %% password salt that makes a config-declared password so.
             from_file(Filename, #{declarative => true})
     end.
 
@@ -1621,6 +1688,11 @@ from_file(Filename, Opts) ->
             error(invalid_config)
     end.
 
+-doc """
+Returns every realm, including the internal ones Bondy creates for itself.
+
+Reads the whole realm registry, so this is an administrative listing.
+""".
 -spec list() -> [t()].
 
 list() ->
@@ -2480,6 +2552,23 @@ key_aad(Uri, Kid, Field) ->
 %% singleton. Tolerate a bare map for forward-compatibility.
 bundle_of([B | _]) -> B;
 bundle_of(B) when is_map(B) -> B.
+
+%% @private
+%% Remove the realm's key material on realm deletion. The keys are NOT in the
+%% realm identity cell (see the REALM KEY MATERIAL section), so clearing that
+%% cell leaves them behind.
+%%
+%% The cell is an add-wins MAP, and a collection type has no whole-cell removal:
+%% `bondy_oplog_crdt_aw_map` exports no `removal_op/0`, so `bondy_db:delete/3`
+%% answers `{error, {no_removal_op, _}}` and a `clear` op is not the map's
+%% language. Each kid is therefore retracted individually — the same `{rmv, Kid}`
+%% `store_keys/2` issues for a revoked key. An observed-remove, so a rotation
+%% racing the delete on another node survives; the realm is going away, so what
+%% matters is that everything this node observed is retracted.
+delete_keys(Uri) ->
+    Table = keys_table(),
+    _ = [aw_apply(Table, Uri, {rmv, Kid}) || Kid <- maps:keys(read_keys(Uri))],
+    ok.
 
 %% @private
 %% Read the realm's key material from its `bondy_realm_keys` cell, or `#{}` when

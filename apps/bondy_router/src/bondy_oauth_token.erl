@@ -6,12 +6,45 @@
 -module(bondy_oauth_token).
 
 -moduledoc """
+OAuth 2.0 tokens: issuing them, refreshing them, and revoking them.
+
+A refresh token is a durable credential; an access token is a short-lived JWT
+minted from one. `issue/3` returns a token record, `to_refresh_token/1` yields
+the opaque string a client stores, and `to_access_token/1` the signed JWT it
+presents. `refresh/2` exchanges the former for a fresh pair.
+
+A token's authority is fixed when it is issued. The roles and grants resolved at
+that moment are written into it, so a token keeps asserting them after the
+user's permissions change. Two things are re-checked instead of re-resolved: a
+refresh fails once the user is deleted or disabled, and an access token is
+rejected at authentication when the `token_version` it carries no longer matches
+the user's, which is how a credential change invalidates tokens issued before
+it.
+
+Tokens are held per subject, not per token. All of a user's tokens in one
+authentication realm live in a single `bondy_oauth_token_set` bounded by
+`oauth2.max_tokens_per_user`; issuing past that bound evicts the oldest. Within
+the set a token is identified by its scope — realm, client and device — so
+re-issuing for the same device replaces that device's token rather than adding
+one.
+
+Expiry is not enforced by deletion. `is_expired/2` is the single predicate both
+`refresh/2` and `cleanup/0` apply, so an expired token stops working at the
+moment it expires whether or not anything has swept it yet.
 
 ## Storage
-Tokens are stored in the bondy_db `bondy_oauth_token` main table, bucketed by the authentication realm `RealmUri` (either the realm this user is connecting to or its associated SSO realm). The key is the sha256 hash of the user's username (`authid`); the value is the user's `bondy_oauth_token_set`, stored directly as a term in an `lww_register` cell (`clear` deletes). The catalogue (`bondy_namespace_catalog`) provisions the table.
 
-Tokens are sharded by key. Cross-node replication awaits bondy_db anti-entropy (`db.aae`); until then storage is node-local.
+Each subject's set is one cell of the durable `bondy_oauth_token` table, banded
+by the authentication realm — the realm the user authenticated against, which
+for an SSO user is the SSO realm rather than the realm they connected to. The
+key is the sha256 of the casefolded username, and the value is the set itself in
+a last-writer-wins register.
 
+Because the whole set is one cell, a write is read-modify-write, and two nodes
+writing concurrently for one subject resolve last-writer-wins: a token issued on
+the losing side is lost and that client re-authenticates. `cleanup/0` therefore
+sweeps only the realms this node owns, which makes the sweep single-writer per
+realm.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -43,13 +76,14 @@ Tokens are sharded by key. Cross-node replication awaits bondy_db anti-entropy (
 ).
 -define(REFRESH_TOKEN_TTL, bondy_config:get([oauth2, refresh_token_duration])).
 -define(MAX_TOKENS, bondy_config:get([oauth2, max_tokens_per_user])).
-%% Legacy-backup compatibility (bondy_export legacy import): a pre-existing
-%% (plum_db-era) refresh token is a bare opaque string that the current,
-%% self-describing token format cannot locate. On import we store a pointer from
-%% that string to the imported token's `{key, id}` under a `legacy:`-prefixed key
-%% in this same table (never read by the token-set paths). The first refresh that
-%% presents the legacy string resolves it through the pointer, issues a current
-%% token, and clears the pointer — so a legacy token works exactly once.
+%% Legacy-backup compatibility (bondy_export legacy import): a refresh token
+%% from a legacy backup is a bare opaque string, carrying none of the subject or
+%% scope the current self-describing format uses to locate a token. On import a
+%% pointer from that string to the imported token's `{key, id}` is stored under
+%% a
+%% `legacy:`-prefixed key in this same table, never read by the token-set paths.
+%% The first refresh presenting the legacy string resolves it through the
+%% pointer, issues a current token and clears it, so the string works once.
 -define(LEGACY_POINTER, legacy_refresh_pointer).
 -define(LEGACY_KEY_PREFIX, "legacy:").
 
@@ -151,7 +185,18 @@ Tokens are sharded by key. Cross-node replication awaits bondy_db anti-entropy (
 %% =============================================================================
 
 -doc """
-Issues a token.
+Issues a token for the subject `AuthCtxt` authenticated, and stores it.
+
+`GrantType` decides the kind: `password` and `authorization_code` yield a
+refresh token, `client_credentials` an access token with no refresh. The scope
+follows from `Opts` — `client_id` and `device_id` narrow it, and `allow_sso`
+decides whether a token authenticated through an SSO realm is valid across the
+realms that realm serves or only the one the session is on.
+
+The user's roles and grants are resolved now and written into the token, so it
+carries the authority they had at issue time. Adding a token to a subject's set
+can evict its oldest token when `oauth2.max_tokens_per_user` is reached, and
+re-issuing within a scope replaces the token already there.
 """.
 -spec issue(
     GrantType :: grant_type(),
@@ -250,7 +295,7 @@ issue(GrantType, AuthCtxt, Opts0) when ?IS_GRANT_TYPE(GrantType) ->
     end.
 
 -doc """
-Imports a single legacy (plum_db-era) refresh token, reconstructing a current
+Imports a single refresh token from a legacy backup, reconstructing a current
 token for the subject and storing it in the subject's token set, plus a pointer
 from the bare legacy refresh-token string to that token so the first refresh that
 presents the legacy string resolves (see `refresh/2`).
@@ -328,6 +373,16 @@ import_legacy(#{
     end.
 
 -doc """
+Exchanges `RefreshToken` for a fresh token, and returns it.
+
+The presented refresh token stops working: a refresh rotates it, so a token
+replayed after a successful refresh is refused. The user is re-checked — a
+refresh fails once they are deleted or disabled — while the roles and grants of
+the new token are carried over from the old one rather than re-resolved.
+
+Answers `{error, oauth2_invalid_grant}` for a token that is unknown, expired,
+already rotated, or whose user is gone. The reason is deliberately the same in
+every case, so a caller cannot use the error to distinguish them.
 """.
 -spec refresh(Realm :: bondy_realm:uri(), RefreshToken :: binary()) ->
     {ok, t()} | {error, oauth2_invalid_grant}.
@@ -359,6 +414,11 @@ refresh(RealmUri, RefreshToken) when
     end.
 
 -doc """
+Returns the stored token that `RefreshToken` identifies in `RealmUri`, without
+redeeming it.
+
+Reads storage only: it neither rotates the token nor checks that the user still
+exists, so a caller needing a usable token wants `refresh/2`.
 """.
 -spec lookup(RealmUri :: uri(), RefreshToken :: binary()) ->
     {ok, Token :: t()} | {error, no_found | oauth2_invalid_grant}.
@@ -376,6 +436,11 @@ lookup(RealmUri, RefreshToken) when is_binary(RefreshToken) ->
     end.
 
 -doc """
+Returns the token stored for `AuthId` under `Scope` in `RealmUri`, without
+redeeming it.
+
+Addresses a token by who holds it and in what scope, rather than by the string a
+client presents.
 """.
 -spec lookup(
     RealmUri :: uri(),
@@ -396,6 +461,14 @@ lookup(RealmUri, AuthId, Scope) when is_map(Scope) ->
             Error
     end.
 
+-doc """
+Revokes token `T`, removing it from the set stored for its subject.
+
+Revocation is per token, not per subject: the subject's other tokens — issued
+under different scopes — keep working. The refresh token cannot be redeemed
+afterwards; access tokens already minted from it remain valid until they expire,
+which is the trade the short access-token lifetime pays for.
+""".
 -spec revoke(t()) -> ok.
 
 revoke(#{type := ?MODULE} = T) ->
@@ -420,18 +493,13 @@ revoke(#{type := ?MODULE} = T) ->
     end.
 
 -doc """
-RFC: https://tools.ietf.org/html/rfc7009
-The authorization server responds with HTTP status code 200 if the
-token has been revoked successfully or if the client submitted an
-invalid token.
-Note: invalid tokens do not cause an error response since the client
-cannot handle such an error in a reasonable way.  Moreover, the
-purpose of the revocation request, invalidating the particular token,
-is already achieved.
-The content of the response body is ignored by the client as all
-necessary information is conveyed in the response code.
-An invalid token type hint value is ignored by the authorization
-server and does not influence the revocation response.
+Revokes a token of `RealmUri`, given either the token or the refresh-token
+string a client presented.
+
+Answers `ok` whether or not the token existed. RFC 7009 requires this: an
+invalid token is not an error, because the caller's goal — that the token no
+longer work — already holds, and reporting otherwise would make the endpoint an
+oracle for guessing valid tokens.
 """.
 -spec revoke(RealmUri :: binary(), t() | binary()) -> ok.
 
@@ -524,6 +592,11 @@ revoke_all(RealmUri, AuthId) ->
     end.
 
 -doc """
+Returns the signed access-token JWT for `T`, and the seconds it remains valid.
+
+Each call mints a new JWT with a fresh id, signed with the realm key named by
+the token's `kid`. Rotating that key out of the realm makes tokens signed with
+it unverifiable. Raises when the realm or the key is gone.
 """.
 -spec to_access_token(t()) ->
     {ok, {JWT :: binary(), ExpiresIn :: pos_integer()}}.
@@ -535,11 +608,16 @@ to_access_token(#{type := ?MODULE, authrealm := RealmUri, kid := Kid} = T0) ->
     to_access_token(T, PrivKey).
 
 -doc """
+Returns the opaque refresh-token string for `T` — what a client stores and later
+presents to `refresh/2`.
+
+Raises when `T` carries no refresh token, which is the case for a token issued
+under the `client_credentials` grant.
 """.
 -spec to_refresh_token(t()) -> binary() | no_return().
 
 to_refresh_token(#{type := ?MODULE, refresh_token := undefined}) ->
-    error(bardag);
+    error(badarg);
 to_refresh_token(#{type := ?MODULE, refresh_token := Val}) ->
     Val.
 
@@ -596,21 +674,44 @@ cleanup() ->
     }),
     Stats.
 
+-doc "Returns the token's unique identifier.".
 id(#{type := ?MODULE, id := Val}) ->
     Val.
 
+-doc "Returns the username the token was issued to.".
 authid(#{type := ?MODULE, authid := Val}) ->
     Val.
 
+-doc """
+Returns the token's scope: the realm, client and device it is valid for. Two
+tokens of the same subject with different scopes coexist; re-issuing within one
+scope replaces the token already there.
+""".
 authscope(#{type := ?MODULE, authscope := Val}) ->
     Val.
 
+-doc """
+Whether the token's refresh lifetime has elapsed. This is the predicate
+`refresh/2` rejects on and the one reclamation deletes on, so storage and
+authentication agree on which tokens exist.
+""".
 is_expired(#{type := ?MODULE} = T) ->
     is_expired(T, ?NOW).
 
+-doc """
+Whether the token has expired as of `Now`, a POSIX timestamp in seconds.
+
+A token is expired once `Now` reaches `expires_at/1`; no clock-skew leeway is
+applied.
+""".
 is_expired(#{type := ?MODULE} = T, Now) ->
     expires_at(T) + ?LEEWAY_SECS =< Now.
 
+-doc """
+Returns the POSIX second at which the token's refresh lifetime ends.
+`is_expired/2`
+allows a leeway past this instant.
+""".
 expires_at(#{type := ?MODULE, issued_at := Ts, refresh_expires_in := Exp}) ->
     Ts + Exp.
 
@@ -798,10 +899,12 @@ check_expired(#{type := ?MODULE} = T) ->
     end.
 
 %% @private
+%% A token can outlive the user it names — an import, a peer's merge, a partly
+%% applied teardown — so this returns the error for `refresh/2` to map to
+%% `oauth2_invalid_grant` rather than matching on success.
 check_authid(#{authid := AuthId}, RealmUri) ->
-    Result = bondy_rbac_user:lookup(RealmUri, AuthId),
-    {ok, _} = resulto:map_error(
-        Result,
+    resulto:map_error(
+        bondy_rbac_user:lookup(RealmUri, AuthId),
         fun
             (not_found) ->
                 user_not_found;

@@ -50,9 +50,38 @@ lifecycle_test_() ->
     {timeout, 10, fun lifecycle/0}.
 
 lifecycle() ->
+    %% Pin the watermarks above any run queue this machine can reach, so the
+    %% assertions about the normal state describe the sampler rather than
+    %% whatever else is running on the host. The sampler loop, the hysteresis,
+    %% the atomics publication and the restart behaviour are all still
+    %% exercised; only the dependency on an idle machine goes. Read at init/1,
+    %% so they must be set before the process starts.
+    Saved = [
+        {K, application:get_env(bondy_regulator, K)}
+     || K <- [load_monitor_high_watermark, load_monitor_low_watermark]
+    ],
+    ok = application:set_env(
+        bondy_regulator, load_monitor_high_watermark, 1000000
+    ),
+    ok = application:set_env(
+        bondy_regulator, load_monitor_low_watermark, 1000000
+    ),
+    try
+        do_lifecycle()
+    after
+        _ = [restore_env(K, V) || {K, V} <- Saved]
+    end.
+
+restore_env(Key, undefined) ->
+    application:unset_env(bondy_regulator, Key);
+restore_env(Key, {ok, Value}) ->
+    application:set_env(bondy_regulator, Key, Value).
+
+do_lifecycle() ->
     {ok, Pid} = bondy_regulator_load:start_link(),
 
-    %% An idle node samples as normal within a few intervals.
+    %% A node below the high watermark samples as normal within a few
+    %% intervals.
     ok = timer:sleep(350),
     ?assertEqual(normal, bondy_regulator_load:status()),
     ?assert(bondy_regulator_load:run_queue() >= 0),
@@ -65,8 +94,8 @@ lifecycle() ->
     ?assert(bondy_regulator_load:busy()),
     ?assertEqual(busy, bondy_regulator_load:status()),
 
-    %% The sampler's next tick returns an idle node to normal (run
-    %% queue far below the low watermark).
+    %% The sampler's next tick returns the node to normal: the run queue is
+    %% below the low watermark.
     ok = sys:resume(bondy_regulator_load),
     ok = timer:sleep(350),
     ?assertNot(bondy_regulator_load:busy()),

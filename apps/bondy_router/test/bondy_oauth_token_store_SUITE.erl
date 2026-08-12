@@ -34,11 +34,19 @@
 
 -export([bounded_set_caps_at_max/1]).
 -export([one_cell_per_user_not_per_token/1]).
+-export([user_delete_revokes_tokens/1]).
+-export([refresh_rejects_token_whose_user_is_gone/1]).
+-export([refresh_token_of_access_only_grant_raises_badarg/1]).
+-export([credential_change_revokes_tokens/1]).
 
 all() ->
     [
         bounded_set_caps_at_max,
-        one_cell_per_user_not_per_token
+        one_cell_per_user_not_per_token,
+        user_delete_revokes_tokens,
+        refresh_rejects_token_whose_user_is_gone,
+        refresh_token_of_access_only_grant_raises_badarg,
+        credential_change_revokes_tokens
     ].
 
 init_per_suite(Config) ->
@@ -109,22 +117,137 @@ one_cell_per_user_not_per_token(_Config) ->
         [?USER, ?USER2]
     ).
 
+user_delete_revokes_tokens(_Config) ->
+    %% A user's tokens are a second cell hanging off the user record, in another
+    %% table. Deleting the user must take them with it: a token cell outliving
+    %% its user is storage nothing will ever read, and a user re-created under
+    %% the same name would adopt the set.
+    User = <<"tokendel">>,
+    ok = add_user(User),
+    ok = issue(User, device(1)),
+
+    ?assertMatch(
+        {ok, {_Set, _Hlc}},
+        bondy_db:read(token_table(), ?REALM_URI, store_key(User))
+    ),
+
+    ok = bondy_rbac_user:remove(?REALM_URI, User),
+
+    ?assertEqual(
+        {error, not_found},
+        bondy_db:read(token_table(), ?REALM_URI, store_key(User))
+    ).
+
+refresh_rejects_token_whose_user_is_gone(_Config) ->
+    %% A token can outlive its user whatever the delete path does — an import,
+    %% a peer's merge, a half-applied teardown. Redeeming one must be a clean
+    %% refusal, not a crash: `refresh/2` names `oauth2_invalid_grant` as the
+    %% answer for a vanished user, and that answer has to be reachable.
+    User = <<"tokenorphan">>,
+    ok = add_user(User),
+    {ok, Token} = issue_token(User, device(1)),
+    RefreshToken = bondy_oauth_token:to_refresh_token(Token),
+
+    %% Clear the USER cell only, leaving the token cell in place — the state a
+    %% delete path that forgets the tokens leaves behind.
+    UserTab = bondy_namespace_catalog:table(?BONDY_DB_USER_TAB),
+    ok = bondy_db:apply(UserTab, ?REALM_URI, User, clear),
+    ?assertEqual({error, not_found}, bondy_rbac_user:lookup(?REALM_URI, User)),
+
+    ?assertEqual(
+        {error, oauth2_invalid_grant},
+        bondy_oauth_token:refresh(?REALM_URI, RefreshToken)
+    ).
+
+refresh_token_of_access_only_grant_raises_badarg(_Config) ->
+    %% A `client_credentials` token is access-only, so asking it for a refresh
+    %% token is a caller error. It must be reported as `badarg`, the term a
+    %% caller can actually match on.
+    User = <<"ccgrant">>,
+    ok = add_user(User),
+    SessionId = bondy_session_id:new(),
+    {ok, Ctxt} = bondy_auth:init(
+        SessionId, ?REALM_URI, User, [<<"g">>], {127, 0, 0, 1}
+    ),
+    {ok, Token} = bondy_oauth_token:issue(client_credentials, Ctxt, #{}),
+
+    ?assertError(badarg, bondy_oauth_token:to_refresh_token(Token)).
+
+credential_change_revokes_tokens(_Config) ->
+    %% A password change fences every token issued before it — the
+    %% `token_version` they carry no longer matches the user's, so they cannot
+    %% authenticate. They are also removed from storage, off the
+    %% credentials-changed event, which is what this pins: reclamation drops
+    %% expired tokens and those whose user is gone, never fenced ones, so a
+    %% token left behind here would sit in the set until its refresh lifetime
+    %% ran out.
+    User = <<"pwchange">>,
+    ok = add_user(User),
+    {ok, Token} = issue_token(User, device(1)),
+    RefreshToken = bondy_oauth_token:to_refresh_token(Token),
+
+    ?assertMatch(
+        {ok, {_Set, _Hlc}},
+        bondy_db:read(token_table(), ?REALM_URI, store_key(User))
+    ),
+
+    ok = bondy_rbac_user:change_password(
+        ?REALM_URI, User, <<"aD1fferentSecret">>, ?PASS
+    ),
+
+    %% Revocation runs off the event, so it lands shortly after the call
+    %% returns rather than within it.
+    ok = wait_until(
+        fun() ->
+            bondy_db:read(token_table(), ?REALM_URI, store_key(User)) ==
+                {error, not_found}
+        end,
+        5000
+    ),
+    ?assertEqual(
+        {error, oauth2_invalid_grant},
+        bondy_oauth_token:refresh(?REALM_URI, RefreshToken)
+    ).
+
+wait_until(_Fun, Remaining) when Remaining =< 0 ->
+    {error, timeout};
+wait_until(Fun, Remaining) ->
+    case Fun() of
+        true ->
+            ok;
+        false ->
+            timer:sleep(100),
+            wait_until(Fun, Remaining - 100)
+    end.
+
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
 
 %% @private
+add_user(Username) ->
+    User = bondy_rbac_user:new(#{
+        username => Username,
+        password => ?PASS,
+        groups => [<<"g">>]
+    }),
+    {ok, _} = bondy_rbac_user:add(?REALM_URI, User),
+    ok.
+
+%% @private
 %% Issue one refresh token (password grant → refresh type) for `User`, scoped to
 %% `DeviceId` so each issue is a distinct authscope.
 issue(User, DeviceId) ->
+    {ok, _Token} = issue_token(User, DeviceId),
+    ok.
+
+%% @private
+issue_token(User, DeviceId) ->
     SessionId = bondy_session_id:new(),
     {ok, Ctxt} = bondy_auth:init(
         SessionId, ?REALM_URI, User, [<<"g">>], {127, 0, 0, 1}
     ),
-    {ok, _Token} = bondy_oauth_token:issue(
-        password, Ctxt, #{device_id => DeviceId}
-    ),
-    ok.
+    bondy_oauth_token:issue(password, Ctxt, #{device_id => DeviceId}).
 
 %% @private
 %% Mirrors `bondy_oauth_token:store_key/1` (private): the cell key is the sha256

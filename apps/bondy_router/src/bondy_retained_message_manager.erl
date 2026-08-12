@@ -53,7 +53,7 @@ get(Realm, Topic) ->
 
 take(Realm, Topic) ->
     Msg = bondy_retained_message:take(Realm, Topic),
-    ok = maybe_decr_counters(get_counters_ref(Realm), Msg),
+    ok = maybe_decr_counters(Realm, Msg),
     Msg.
 
 -spec match(bondy_retained_message:continuation()) ->
@@ -116,7 +116,7 @@ put(Realm, Topic, Event, MatchOpts, TTL) ->
             MaxMem = max_memory(),
 
             case counters(Realm) of
-                #{count := Val} when Val > N ->
+                #{messages := Val} when Val > N ->
                     bondy_alarm_handler:set_alarm({
                         retained_messages_count_limit,
                         <<"The number of retained messages has reached the system limit.">>

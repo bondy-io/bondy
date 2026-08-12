@@ -10,7 +10,9 @@
 
 all() ->
     [
-        {group, crud}
+        {group, crud},
+        take_decrements_counters,
+        count_limit_is_enforced
     ].
 
 groups() ->
@@ -81,3 +83,60 @@ wildcard_match(Config) ->
     {L2, C2} = bondy_retained_message:match(C1),
     ?assertEqual(100, length(L2)),
     ?assertNotEqual(C1, C2).
+
+take_decrements_counters(_) ->
+    %% The per-realm counters gate retention: once they read at the configured
+    %% limit the realm retains nothing more. Taking a message removes it from
+    %% storage, so a take that does not decrement them makes the realm look
+    %% permanently fuller than it is.
+    R = <<"com.example.retained.counters">>,
+    T = <<"com.example.counters.topic">>,
+    Event = bondy_wamp_message:event(1, 1, #{}),
+
+    #{messages := M0, memory := B0} =
+        bondy_retained_message_manager:counters(R),
+
+    ok = bondy_retained_message_manager:put(R, T, Event, #{}),
+    #{messages := M1, memory := B1} =
+        bondy_retained_message_manager:counters(R),
+    ?assertEqual(M0 + 1, M1),
+    ?assert(B1 > B0),
+
+    ?assertNotEqual(undefined, bondy_retained_message_manager:take(R, T)),
+    ?assertEqual(undefined, bondy_retained_message:get(R, T)),
+
+    #{messages := M2, memory := B2} =
+        bondy_retained_message_manager:counters(R),
+    ?assertEqual(M0, M2, "taking the message must give the count back"),
+    ?assertEqual(B0, B2, "taking the message must give the memory back").
+
+count_limit_is_enforced(_) ->
+    %% `wamp_message_retention.max_messages` is a cap on how many messages a
+    %% realm retains. Past it a publish is dropped and an alarm raised, so the
+    %% limit has to be read from the same counters `put/5` maintains.
+    R = <<"com.example.retained.count_limit">>,
+    Event = bondy_wamp_message:event(1, 1, #{}),
+    Old = bondy_config:get([wamp_message_retention, max_messages]),
+    ok = bondy_config:set([wamp_message_retention, max_messages], 2),
+
+    try
+        _ = [
+            bondy_retained_message_manager:put(
+                R, topic(I), Event, #{}
+            )
+         || I <- lists:seq(1, 5)
+        ],
+        #{messages := N} = bondy_retained_message_manager:counters(R),
+        ?assert(
+            N =< 3,
+            lists:flatten(
+                io_lib:format("retained ~p messages under a limit of 2", [N])
+            )
+        )
+    after
+        ok = bondy_config:set([wamp_message_retention, max_messages], Old),
+        _ = bondy_retained_message:remove_all(R)
+    end.
+
+topic(I) ->
+    <<"com.example.count_limit.", (integer_to_binary(I))/binary>>.

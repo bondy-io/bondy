@@ -5,20 +5,39 @@
 
 -module(bondy_rbac_source).
 -moduledoc """
-**Note:**
-Usernames and group names are stored in lower case. All functions in this
-module are case sensitice so when using the functions in this module make
-sure the inputs you provide are in lowercase to. If you need to convert your
-input to lowercase use `string:casefold/1`.
+Sources: the rules that say which authentication method a user may use, from
+which network.
 
-### Storage
+A source binds a `(username, CIDR, authmethod)` triple within a realm. When a
+peer connects, `bondy_auth` calls `match/3` and offers the methods the matching
+sources name, intersected with the realm's own `authmethods`. A peer no source
+matches is offered nothing and cannot authenticate. A source assigned to the
+reserved username `all` applies to every user of the realm, and a realm inherits
+its prototype's `all` sources.
 
-Sources are stored in the bondy_db `security_sources` main table. The store is
-realm-sharded; the compound `{Username, AMask, Authmethod}` key is encoded to a
-binary with `term_to_binary/1`. That encoding is not order-preserving and the
-match is on the `Username` (and optionally the `AMask`) — never the
-`Authmethod` alone — so a lookup is a realm scan (`bondy_db:list/2`) that
-decodes each key and filters. Storage-only (no change reactor).
+Order carries meaning: `match/3` returns its results most specific first — a
+source naming the user before one naming `all`, and the narrowest CIDR mask
+before a broader one — and `bondy_auth` preserves that order when deciding which
+method to prefer.
+
+Start from `new_assignment/1` and `add/3` to define sources, and `match/3` to
+resolve them at connection time.
+
+## Names are case-sensitive
+
+Usernames and group names are stored casefolded, and nothing in this module
+folds them for you. Pass inputs through `string:casefold/1` first, or a source
+written under one spelling will not be found under another.
+
+## Storage
+
+Sources live in the `security_sources` table of the durable `main` database,
+banded by realm. The `{Username, AMask, Authmethod}` key is encoded as an
+order-preserving composite that leads with the username (`encode_key/1`), so
+every source of one user occupies a contiguous key range and matching is a
+bounded band scan rather than a realm-wide filter. The reverse lookup — sources
+by network — has no index: the stored CIDR differs from the key's anchor mask,
+and CIDR matching is containment rather than equality.
 """.
 -include_lib("partisan/include/partisan_util.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -133,6 +152,14 @@ decodes each key and filters. Storage-only (no change reactor).
 %% API
 %% =============================================================================
 
+-doc """
+Returns a validated source assignment built from `Data`: one source definition
+together with the usernames it is to be assigned to.
+
+`usernames` and `authmethod` are required; `cidr` defaults to `0.0.0.0/0`, which
+matches every peer. Raises on invalid input, so `add/3` — which calls this for a
+plain map — converts the raise into an error tuple.
+""".
 -spec new_assignment(Data :: map()) -> Source :: assignment().
 
 new_assignment(Data) when is_map(Data) ->
@@ -153,8 +180,8 @@ cidr(#{type := source, cidr := Val}) -> Val.
 meta(#{type := source, meta := Val}) -> Val.
 
 -doc """
-Adds a source to the realm identified by `RealmUri` using assignment or map
-`Assignment`.
+Assigns a source to each of the usernames `Assignment` names. Equivalent to
+`add/3` with default options.
 """.
 -spec add(
     RealmUri :: uri(), Assignment :: map() | assignment()
@@ -165,8 +192,17 @@ add(RealmUri, Assignment) ->
     add(RealmUri, Assignment, #{}).
 
 -doc """
-Adds a source to the realm identified by `RealmUri` using assignment or map
-`Assignment`.
+Assigns a source to each of the usernames `Assignment` names, in realm
+`RealmUri`.
+
+`Assignment` is either a `t:assignment/0` from `new_assignment/1` or the plain
+map that function validates; passing a map that fails validation returns
+`{error, Reason}` rather than raising. One assignment writes one source per
+username, all sharing the same CIDR and method.
+
+The CIDR is stored reduced to its anchor mask, so an assignment written as
+`192.168.1.7/24` is indistinguishable afterwards from `192.168.1.0/24`. Adding a
+source that already exists overwrites it.
 """.
 -spec add(
     RealmUri :: uri(),
@@ -191,6 +227,14 @@ add(RealmUri, #source_assignment{} = A, Opts) ->
         Opts
     ).
 
+-doc """
+Removes the sources that bind each of `Usernames` to network `CIDR`, whatever
+authentication method they name.
+
+`CIDR` is reduced to its anchor mask before matching, so `192.168.1.7/24` and
+`192.168.1.0/24` remove the same sources. Removing a source that does not exist
+is not an error. Raises `badarg` for a malformed username list or CIDR.
+""".
 -spec remove(
     RealmUri :: uri(),
     Usernames :: [binary() | anonymous] | binary() | anonymous | all,
@@ -250,6 +294,12 @@ remove_all(RealmUri) ->
     ],
     ok.
 
+-doc """
+Removes every source of `Username` in `RealmUri`.
+
+Part of deleting the user: a source left behind would apply to whoever next
+holds the name.
+""".
 -spec remove_all(RealmUri :: uri(), Username :: binary()) -> ok.
 
 remove_all(RealmUri, Username) ->
@@ -263,7 +313,11 @@ remove_all(RealmUri, Username) ->
     ok.
 
 -doc """
-Returns all the sources for user including the ones for special use 'all'.
+Returns every source that can govern `Username`, in no particular order: those
+naming the user, those naming `all`, and the prototype realm's `all` sources.
+
+Use `match/3` or `match_first/3` on the authentication path — they additionally
+filter by the peer's address and order by specificity.
 """.
 -spec match(uri(), binary() | all | anonymous) -> [t()].
 
@@ -275,6 +329,17 @@ match(RealmUri, Username) ->
         match(RealmUri, all)
     ).
 
+-doc """
+Returns every source that governs `Username` for a peer connecting from
+`ConnIP`, most specific first. This is what the authentication path resolves
+against.
+
+Sources naming the user precede those naming `all`, and within each the
+narrowest CIDR mask comes first; `bondy_auth` keeps that order when ranking the
+methods it offers. Sources whose CIDR does not contain `ConnIP` are excluded.
+Covers the realm's `all` sources and its prototype's as well as `Username`'s
+own.
+""".
 -spec match(
     RealmUri :: uri(),
     Username :: binary() | all | anonymous,
@@ -298,8 +363,12 @@ match(RealmUri, Username, ConnIP) when ?IS_IP(ConnIP) ->
     [from_term(Term) || Term <- lists:filter(Pred, Sources)].
 
 -doc """
-Returns the first matching source of all the sources available for username
-`Username`.
+Returns the single source governing `Username` for a peer connecting from
+`ConnIP` — the one `match/3` ranks first — or `{error, nomatch}` when none does.
+
+Resolves against the same candidates as `match/3`: `Username`'s own sources, the
+realm's `all` sources and the prototype realm's. A source naming the user wins
+over one naming `all`, and the narrowest CIDR wins within each.
 """.
 -spec match_first(
     RealmUri :: uri(),
@@ -308,9 +377,14 @@ Returns the first matching source of all the sources available for username
 ) -> {ok, t()} | {error, nomatch}.
 
 match_first(RealmUri, Username, ConnIP) ->
-    %% We need to use the internal match function (do_match) as it returns Keys
-    %% and Values, we need the keys to be able to sort the result
-    Sources = sort_sources(do_match(RealmUri, Username)),
+    %% `do_match/2` is the internal form because sorting by specificity needs
+    %% the keys, which the public `match/2` has already discarded.
+    Sources = sort_sources(
+        lists:append(
+            do_match(RealmUri, Username),
+            do_match(RealmUri, all)
+        )
+    ),
     Fun = fun({{_, {_, Mask} = CIDR, _}, _} = Term) ->
         bondy_cidr:match(CIDR, {ConnIP, Mask}) andalso
             throw({result, from_term(Term)})
@@ -320,14 +394,24 @@ match_first(RealmUri, Username, ConnIP) ->
         {error, nomatch}
     catch
         throw:{result, Source} ->
-            Source
+            {ok, Source}
     end.
 
+-doc """
+Returns every source of `RealmUri`. Equivalent to `list/2` with no limit.
+""".
 -spec list(uri()) -> list(t()).
 
 list(RealmUri) ->
     list(RealmUri, #{}).
 
+-doc """
+Returns the sources of `RealmUri`, at most `limit` of them when that option is
+given.
+
+Reads the whole realm band, so this is an administrative listing rather than
+something to call on the authentication path.
+""".
 -spec list(RealmUri :: uri(), Opts :: list_opts()) -> list(t()).
 
 list(RealmUri, Opts) ->
@@ -387,7 +471,7 @@ do_add(RealmUri, Usernames, #{type := source} = Source, Opts) ->
 %% via `bondy_db:reconcile`, so re-reading the same config file on every boot emits
 %% no operation and never re-stamps the cell with a fresh HLC (which would
 %% diverge cross-node convergence). The op-based CRDT + anti-entropy
-%% handle convergence; plum_db's deterministic-version rebase is obsolete.
+%% handle convergence, so no deterministic-version rebase is needed.
 store(RealmUri, Key, Source, Opts) ->
     EncKey = encode_key(Key),
     %% `Opts` may be a map (`#{declarative => true}` from config apply) or a
@@ -480,9 +564,9 @@ table() ->
     end.
 
 %% @private
-%% All live sources in a realm as decoded `{Key, Value}` pairs (the same shape
-%% the old `plum_db:match` returned), where `Key` is the 3-tuple
-%% `{Username, AMask, Authmethod}`. Cleared cells (non-map values) are dropped.
+%% All live sources in a realm as decoded `{Key, Value}` pairs, where `Key` is
+%% the 3-tuple `{Username, AMask, Authmethod}`. Cleared cells read back as
+%% non-map values and are dropped.
 scan(RealmUri) ->
     {ok, Rows} = bondy_db:list(table(), RealmUri),
     [{decode_key(EncKey), V} || {EncKey, V, _Hlc} <- Rows, is_map(V)].
@@ -497,14 +581,17 @@ scan_user(RealmUri, Username) ->
     {ok, Rows} = bondy_db:range_all(table(), RealmUri, Lo, Hi, #{}),
     [{decode_key(EncKey), V} || {EncKey, V, _Hlc} <- Rows, is_map(V)].
 
-%% @private
 %% The source store key is the 3-tuple `{Username, AMask, Authmethod}`, encoded
-%% as an **order-preserving composite**: the username as a type-tagged leading
+%% as an order-preserving composite: the username as a type-tagged leading
 %% column (`encode_col/1`, covering binary usernames and the reserved atoms
 %% `all`/`anonymous`), a `0x00` separator, then the canonical `term_to_binary`
 %% of `{AMask, Authmethod}`. The username column is `0x00`-free, so all of a
-%% user's sources are a contiguous band (`col_bounds(Username)`) — the auth-path
-%% match (`do_match/2,3`) is a bounded range scan, not a full-realm filter.
+%% user's sources form a contiguous band (`col_bounds(Username)`) and the
+%% auth-path match is a bounded range scan rather than a full-realm filter.
+%%
+%% Exported so the legacy-backup import translator encodes keys byte-identically
+%% to the live write path; not part of the module's public surface.
+-doc false.
 encode_key({Username, AMask, Authmethod}) ->
     <<
         (bondy_oplog_index_key:encode_col(Username))/binary,
