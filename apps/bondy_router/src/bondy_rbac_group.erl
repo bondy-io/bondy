@@ -5,25 +5,38 @@
 
 -module(bondy_rbac_group).
 -moduledoc """
-**Note:**
-Usernames and group names are stored in lower case. All functions in this
-module are case sensitice so when using the functions in this module make
-sure the inputs you provide are in lowercase to. If you need to convert your
-input to lowercase use `string:casefold/1`.
+Groups: the named roles a realm grants permissions to, and the inheritance
+edges between them.
+
+A group is a role. Permissions are granted to it rather than to each user, and a
+group may name parent groups in its `groups` property, so a user's effective
+permissions are the transitive closure over that graph. The graph must stay
+acyclic — `topsort/1` is what establishes that — because `bondy_rbac` resolves
+it eagerly when building an authorization context.
+
+**A group does not know its members.** Membership is a relation of its own,
+`security_group_members`, read and written through `bondy_rbac_user`; this
+module owns the group's identity and its parent edges. `members/3` reads that
+relation, and the group's own cell says nothing about who belongs to it.
+
+Every realm has a synthetic `anonymous` group that is never stored. It heads
+every listing and is returned by `lookup/2` without a read.
+
+Start from `new/1` and `add/3` to define a group, `add_group/3` to add a parent
+edge, and `members/3` to page through its members.
+
+## Names are case-sensitive
+
+Group names are stored casefolded and nothing here folds them for you. Pass
+inputs through `normalise_name/1`, or a group written under one spelling will
+not be found under another.
 
 ## Storage
 
-Groups are persisted in `bondy_db`. The durable `security_groups` table is
-provisioned by `bondy_namespace_catalog` (`fold => lww`);
-each group is a cell keyed by its `Name` binary, addressed as
-`(Table, RealmUri, Name)`. The value carries the group's `groups` property (its
-parent groups, for role inheritance). Group *membership* is not held here: it
-is the cell-per-fact `security_group_members` relation, read and written
-through `bondy_rbac_user`.
-
-The **local** `on_update`/`on_delete` side-effects (the
-`{[bondy, rbac, group, added | updated | deleted], ...}` events) fire **inline**
-at the write / delete chokepoints; the remote `on_merge` is a no-op.
+Each group is one cell in the durable `security_groups` table, banded by realm
+and keyed by name. Changing a group's parents changes what its members may do
+without touching any grant, so both the local write path and the merge of a
+peer's write invalidate this node's cached authorization contexts for the realm.
 """.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
@@ -154,6 +167,13 @@ at the write / delete chokepoints; the remote `on_merge` is a no-op.
 %% API
 %% =============================================================================
 
+-doc """
+Returns a validated group built from `Data`.
+
+`name` is required and must be a valid, non-reserved group name; `groups` — the
+parent list — defaults to empty. Raises on invalid input. The result is not
+persisted; pass it to `add/3`.
+""".
 -spec new(Data :: map()) -> Group :: t().
 
 new(Data) ->
@@ -184,6 +204,10 @@ is_member(Name0, #{type := ?TYPE, groups := Val}) ->
 
 meta(#{type := ?TYPE, meta := Val}) -> Val.
 
+-doc """
+Adds group `Group` to realm `RealmUri`. Equivalent to `add/3` with default
+options.
+""".
 -spec add(uri(), t()) -> {ok, t()} | {error, any()}.
 
 add(RealmUri, Group) ->
@@ -301,12 +325,25 @@ remove_groups(RealmUri, Groups, Groupnames) ->
     end,
     update_groups(RealmUri, Groups, Groupnames, Fun).
 
+-doc """
+Removes group `Name` from `RealmUri`. Equivalent to `remove/3` with default
+options.
+""".
 -spec remove(uri(), binary() | map()) ->
     ok | {error, unknown_group | reserved_name}.
 
 remove(RealmUri, Name) ->
     remove(RealmUri, Name, #{}).
 
+-doc """
+Removes group `Name` from `RealmUri`, together with everything that referred to
+it: its grants, its members' memberships, and its appearance in any other
+group's parent list.
+
+The name becomes free, and nothing a later group of the same name inherits comes
+from this one. Returns `{error, unknown_group}` for a group that does not exist
+and `{error, reserved_name}` for a reserved one.
+""".
 -spec remove(uri(), binary() | map(), map()) ->
     ok | {error, unknown_group | reserved_name}.
 
@@ -331,8 +368,7 @@ remove(RealmUri, Name, _Opts) ->
         ok = bondy_rbac_user:remove_group_from_members(RealmUri, Name),
         ok = remove_group(RealmUri, all, Name),
 
-        %% Delete the group and fire the local delete side-effect (formerly
-        %% plum_db's on_delete callback).
+        %% Delete the group and fire the local delete side-effect.
         ok = bondy_db:apply(table(), RealmUri, Name, clear),
         do_on_delete(RealmUri, Name)
     catch
@@ -364,8 +400,8 @@ remove_all(RealmUri, Opts) ->
             _ =
                 case Dirty of
                     true ->
-                        %% Realm teardown: clear the cell and mirror plum_db's
-                        %% per-delete on_delete event.
+                        %% Realm teardown: clear the cell and fire the same
+                        %% per-group delete event `remove/3` fires.
                         ok = bondy_db:apply(Table, RealmUri, Name, clear),
                         do_on_delete(RealmUri, Name);
                     false ->
@@ -377,6 +413,13 @@ remove_all(RealmUri, Opts) ->
     ),
     ok.
 
+-doc """
+Returns group `Name` of realm `RealmUri`, or `{error, not_found}`.
+
+Note the shape: the group is returned bare, not wrapped in an `ok` tuple. The
+name `anonymous` resolves to the synthetic group every realm has, without a
+read.
+""".
 -spec lookup(uri(), list() | binary()) -> t() | {error, not_found}.
 
 lookup(RealmUri, Name0) ->
@@ -394,6 +437,10 @@ lookup(RealmUri, Name0) ->
             end
     end.
 
+-doc """
+Returns group `Name` of realm `RealmUri`, raising `not_found` when there is
+none. The raising counterpart of `lookup/2`.
+""".
 -spec fetch(uri(), list() | binary()) -> t() | no_return().
 
 fetch(RealmUri, Name) ->
@@ -402,6 +449,7 @@ fetch(RealmUri, Name) ->
         Group -> Group
     end.
 
+-doc "Whether realm `RealmUri` has a group named `Name`.".
 -spec exists(uri(), list() | binary()) -> boolean().
 
 exists(RealmUri, Name) ->
@@ -410,11 +458,20 @@ exists(RealmUri, Name) ->
         _ -> true
     end.
 
+-doc "Returns every group of `RealmUri`. Equivalent to `list/2` with no limit.".
 -spec list(uri()) -> list(t()).
 
 list(RealmUri) ->
     list(RealmUri, #{}).
 
+-doc """
+Returns the groups of `RealmUri`, at most `limit` of them when that option is
+given.
+
+The synthetic `anonymous` group heads the list and is not stored, so a realm
+that declares no groups still lists one. Groups inherited from the realm's
+prototype are not included.
+""".
 -spec list(RealmUri :: uri(), Opts :: list_opts()) -> list(t()).
 
 list(RealmUri, Opts) ->
@@ -527,6 +584,14 @@ topsort(Groups) ->
         digraph:delete(Graph)
     end.
 
+-doc """
+Returns `Term` in the form group names are stored in: casefolded, with the
+reserved names `all` and `anonymous` as atoms whichever way they were written.
+
+Every read and write path folds names this way, so a caller supplying a name
+from outside Bondy should fold it here first. Raises `badarg` for anything that
+is not a binary or a reserved name.
+""".
 -spec normalise_name(Term :: name()) -> name() | no_return().
 
 normalise_name(all) ->
@@ -585,8 +650,8 @@ decode_raw_row(_) ->
     skip.
 
 %% @private
-%% Reads a cell, returning the bare value or `undefined` when the cell is absent
-%% or cleared — mirroring the old `plum_db:get/2` contract.
+%% Reads a cell, returning the bare value, or `undefined` when the cell is
+%% absent or cleared — the two are indistinguishable to callers by design.
 do_get(RealmUri, Name) ->
     case bondy_db:read(table(), RealmUri, Name) of
         {ok, {Value, _Hlc}} -> Value;
@@ -594,10 +659,10 @@ do_get(RealmUri, Name) ->
     end.
 
 %% @private
-%% These were the plum_db `on_update` / `on_delete` prefix callbacks (`on_merge`
-%% was a no-op). They publish the group lifecycle events; with bondy_db they are
-%% invoked inline from the write / delete chokepoints (`store/4`, `remove/3`,
-%% `remove_all/2`).
+%% The group lifecycle events, published inline from the write and delete
+%% chokepoints (`store/4`, `remove/3`, `remove_all/2`). A peer's merged write
+%% does not reach here; the invalidation it needs is wired through the
+%% merge-side reactor instead.
 -spec do_on_update(uri(), name(), IsCreate :: boolean()) -> ok.
 
 do_on_update(RealmUri, Name, true) ->
@@ -639,13 +704,40 @@ store(RealmUri, Name, Group, #{declarative := true}) ->
     %% HLC — that would diverge cross-node convergence. The op-based CRDT
     %% + anti-entropy handle convergence, so no deterministic-version write is
     %% needed.
-    bondy_db:reconcile(table(), RealmUri, Name, Group);
+    %%
+    %% The RBAC invalidation is NOT a lifecycle side-effect and is therefore not
+    %% skipped here: `bondy_rbac:grant/4` invalidates on this path too. An
+    %% unchanged config reconciles to no write, so the common boot emits none.
+    invalidate_rbac_on(
+        bondy_db:reconcile(table(), RealmUri, Name, Group), RealmUri
+    );
 store(RealmUri, Name, Group, _) ->
-    %% Capture the previous value to tell a create from an update (the way
-    %% plum_db passed `Old` to the on_update callback), then fire the event.
+    %% The previous value distinguishes a create from an update, which is the
+    %% only difference between the two lifecycle events.
     Old = do_get(RealmUri, Name),
-    ok = bondy_db:apply(table(), RealmUri, Name, {set, Group}),
+    ok = invalidate_rbac_on(
+        bondy_db:apply(table(), RealmUri, Name, {set, Group}), RealmUri
+    ),
     do_on_update(RealmUri, Name, Old == undefined).
+
+%% @private
+%% A group's `groups` property is its parent list — the role-inheritance edge —
+%% and `bondy_rbac:get_context/2` bakes the grants that edge resolves to into
+%% the cached context. So a group write changes what a live session is
+%% authorized to do, exactly as a grant or membership write does, and gets the
+%% same in-place re-evaluation (§9.5): no teardown, the next authorize re-walks
+%% the group graph.
+%%
+%% Realm-wide and unconditional on a successful write. Narrowing it to "only
+%% when the parents changed" would need an old/new comparison whose failure
+%% mode is a missed revocation; over-invalidating costs one lazy rebuild. This
+%% mirrors `bondy_rbac:invalidate_sessions_on/2`, which is deliberately
+%% realm-wide for the same reason. Group DELETION is already covered — it goes
+%% through `bondy_rbac:revoke_group/2`, which invalidates.
+invalidate_rbac_on(ok, RealmUri) ->
+    bondy_session_manager:invalidate_rbac_all(RealmUri);
+invalidate_rbac_on(Other, _RealmUri) ->
+    Other.
 
 %% @private
 -doc "Doesn't take into account realm inheritance.".

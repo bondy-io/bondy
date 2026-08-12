@@ -51,15 +51,16 @@ method that is neither `ticket` nor `anonymous` authentication.
 
 ## Claims Storage
 
-Claims for a ticket are stored in PlumDB using the prefix
-`{bondy_ticket, Suffix :: binary()}` where `Suffix` is the concatenation of the
-authentication realm's URI and the user's username (a.k.a `authid`) and a key
-which is derived by the ticket's scope. The scope itself is the result of the
-combination of the different options provided by the `issue/2` function.
+Claims are stored in the `bondy_ticket` table of the durable `main` database,
+banded by the authentication realm's URI and keyed by the triple
+`{authid, client_id | realm, device_id}` derived from the ticket's scope. The
+scope itself follows from the options given to `issue/2`.
 
-The decision to use this key as opposed to the ticket's unique identifier is so
-that we are able to bound the number of tickets a user can have at any point in
-time in order to reduce data storage and cluster replication traffic.
+The key is the scope rather than the ticket's unique identifier, which bounds
+how many tickets one user can hold: re-issuing within a scope replaces the
+claims already stored there instead of accumulating a new cell. That bound is
+what keeps ticket storage and its replication traffic proportional to users and
+scopes rather than to issuance rate.
 
 ## Ticket Scopes
 A ticket can be issued using different scopes. The scope is determined based on
@@ -302,12 +303,29 @@ issue(Session, Opts0) ->
             {error, Reason}
     end.
 
+-doc """
+Verifies `Ticket` and returns its claims. Equivalent to `verify/2` with default
+options.
+""".
 -spec verify(Ticket :: binary()) ->
     {ok, t()} | {error, expired | invalid | no_match}.
 
 verify(Ticket) ->
     verify(Ticket, #{}).
 
+-doc """
+Verifies `Ticket` and returns the claims persisted for it.
+
+Verification is three questions, in order: is the signature valid and the ticket
+well-formed (`invalid`), has it passed its expiry (`expired`), and do the
+claims it carries still match the ones stored under its scope (`no_match`)?
+The last is what makes revocation effective — a syntactically perfect ticket
+whose stored claims are gone verifies to `no_match`.
+
+The scope decoded from a ticket arrives in its JSON form, where the wildcard
+realm is the string `~"all"` rather than the atom. This normalises it before
+deriving the storage key, so a caller never has to.
+""".
 -spec verify(Ticket :: binary(), Opts :: verify_opts()) ->
     {ok, t()} | {error, expired | invalid | no_match}.
 
@@ -399,6 +417,18 @@ verify(Ticket, Opts) ->
             {error, invalid}
     end.
 
+-doc """
+Returns the claims persisted for `Authid` under `Scope` in `RealmUri`, or
+`{error, not_found}`.
+
+`RealmUri` is the authentication realm — the ticket's `authrealm` claim — not
+the realm the ticket grants access to; for an SSO ticket the two differ. `Scope`
+must be normalised (`bondy_auth_scope:normalize/1`); an un-normalised scope
+derives a different storage key and finds nothing.
+
+Reads storage only. It does not check expiry, so a caller that needs a usable
+ticket wants `verify/1`.
+""".
 -spec lookup(
     RealmUri :: uri(),
     Authid :: bondy_rbac_user:username(),
@@ -424,6 +454,15 @@ lookup(RealmUri, Authid, Scope) ->
             end
     end.
 
+-doc """
+Revokes a ticket, given either the encoded ticket or its claims, by deleting the
+claims stored under its scope. A ticket that cannot be verified is not revoked
+and the verification error is returned; `undefined` is accepted and does
+nothing.
+
+Revocation is by scope, so it also invalidates any other ticket issued into the
+same scope. The next `verify/1` of a revoked ticket answers `no_match`.
+""".
 -spec revoke(optional(t())) -> ok | {error, any()}.
 
 revoke(undefined) ->
@@ -444,7 +483,12 @@ revoke(Claims) when is_map(Claims) ->
     revoke(RealmUri, Authid, Scope).
 
 -doc """
-`RealmUri` should be the value of the ticket's `authrealm` claim.
+Revokes whatever ticket `Authid` holds in `Scope`, by clearing the claims stored
+there.
+
+`RealmUri` is the ticket's `authrealm` claim — the authentication realm — which
+for an SSO ticket is not the realm the ticket grants access to. Revoking a scope
+that holds no ticket succeeds.
 """.
 -spec revoke(
     RealmUri :: uri(),
@@ -786,7 +830,10 @@ lookup_key(Authid, Scope) ->
 list_key(#{realm := Uri, device_id := Id}) ->
     {Uri, Id}.
 
-%% @private
+%% Exported so tests can seed storage through the real write path — the
+%% per-scope keying and per-device entry handling are what they exercise — not
+%% part of the module's public surface.
+-doc false.
 store_ticket(AuthRealmUri, Authid, Claims) ->
     Table = table(),
     Scope = maps:get(scope, Claims),
@@ -1038,8 +1085,8 @@ classify(Key, Claims, RealmUri, Now) ->
 entry_is_live({_LKey, Claims}, Now) when is_map(Claims) ->
     not (is_map_key(expires_at, Claims) andalso is_expired(Claims, Now));
 entry_is_live(_Other, _Now) ->
-    %% The historical unkeyed form — unreachable by `lookup/3`, but not this
-    %% function's to silently delete either.
+    %% An entry that is not a `{Key, Claims}` pair cannot be returned by
+    %% `lookup/3`, and reclamation does not delete what it cannot interpret.
     true.
 
 %% @private
@@ -1087,11 +1134,11 @@ add_error(#{errors := Errors} = Stats, RealmUri, Reason) ->
 %% and authentication agree on exactly which tickets exist — an entry dropped
 %% here could not have authenticated anyway.
 %%
-%% Pruning happens BEFORE the `keystore`, so the entry being written is never
-%% a candidate, and only entries we can positively prove expired are dropped:
-%% the historical unkeyed `[Claims]` form described above is already unreachable
-%% by `lookup/3` (`lists:keyfind/3` skips non-tuples), but it is not this
-%% function's job to silently delete data it does not recognise.
+%% Pruning happens BEFORE the `keystore`, so the entry being written is never a
+%% candidate, and only entries positively proven expired are dropped. An entry
+%% that is not a `{Key, Claims}` pair is left in place: `lookup/3` cannot return
+%% it either way, and dropping what cannot be interpreted is not this function's
+%% decision to make.
 prune_expired(Tickets) ->
     lists:filter(
         fun

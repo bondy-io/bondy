@@ -37,7 +37,9 @@ all() ->
         prototype_inheritance,
 
         migration,
-        strip_private_keys
+        strip_private_keys,
+        delete_removes_key_material,
+        delete_removes_retained_messages
     ].
 
 init_per_suite(Config) ->
@@ -485,3 +487,71 @@ test(_) ->
         ]
     },
     _ = bondy_realm:create(Config).
+
+delete_removes_key_material(_) ->
+    %% A realm's signing/encryption keys live OUTSIDE its identity cell, in
+    %% `bondy_realm_keys`, so that the identity's cross-node digest is the Uri
+    %% plus config and not the random key bytes. Deleting the realm must take
+    %% that second cell with it; otherwise the key material of a deleted realm
+    %% stays on disk and is replicated forever.
+    Uri = <<"com.example.realm.delete.keys">>,
+    Realm = bondy_realm:create(#{uri => Uri, security_enabled => true}),
+
+    %% Keys were minted with the realm (an authoritative, non-declarative
+    %% create generates eagerly).
+    ?assertNotEqual([], bondy_realm:private_keys(Realm)),
+    ?assertNotEqual(#{}, stored_keys(Uri)),
+
+    ok = bondy_realm:delete(Uri, #{force => true}),
+
+    %% Associated data is removed by a router worker, so the cell empties
+    %% shortly after `delete/2` returns rather than within it.
+    ok = wait_until(fun() -> stored_keys(Uri) == #{} end, 5000),
+    ?assertEqual(#{}, stored_keys(Uri)),
+    ?assertEqual({error, not_found}, bondy_realm:lookup(Uri)).
+
+delete_removes_retained_messages(_) ->
+    %% Retained events are per-realm state keyed by topic. Deleting the realm
+    %% must take them with it: the URI can be created again, and a new realm
+    %% must not deliver the deleted realm's events to its subscribers.
+    Uri = <<"com.example.realm.delete.retained">>,
+    _ = bondy_realm:create(#{uri => Uri, security_enabled => true}),
+
+    Topic = <<"com.example.retained.topic">>,
+    Event = bondy_wamp_message:event(1, 1, #{}),
+    ok = bondy_retained_message:put(Uri, Topic, Event, #{}),
+    ?assertNotEqual(undefined, bondy_retained_message:get(Uri, Topic)),
+
+    ok = bondy_realm:delete(Uri, #{force => true}),
+
+    %% Associated data is removed by a router worker, so the band empties
+    %% shortly after `delete/2` returns rather than within it.
+    ok = wait_until(fun() -> retained(Uri) == [] end, 5000),
+    ?assertEqual([], retained(Uri)),
+    ?assertEqual(undefined, bondy_retained_message:get(Uri, Topic)).
+
+%% Every retained-message cell of a realm, as `{Topic, Message}`.
+retained(Uri) ->
+    Table = bondy_namespace_catalog:table(retained_messages),
+    {ok, Rows} = bondy_db:list(Table, Uri),
+    [{K, V} || {K, V, _Hlc} <- Rows].
+
+%% The raw `bondy_realm_keys` cell as `#{Kid => Bundle}`, or `#{}` when the cell
+%% is absent or has had every kid retracted.
+stored_keys(Uri) ->
+    Table = bondy_namespace_catalog:table(?BONDY_DB_REALM_KEYS_TAB),
+    case bondy_db:read(Table, <<>>, Uri) of
+        {ok, {Map, _Hlc}} when is_map(Map) -> Map;
+        _ -> #{}
+    end.
+
+wait_until(_Fun, Remaining) when Remaining =< 0 ->
+    {error, timeout};
+wait_until(Fun, Remaining) ->
+    case Fun() of
+        true ->
+            ok;
+        false ->
+            timer:sleep(100),
+            wait_until(Fun, Remaining - 100)
+    end.

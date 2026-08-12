@@ -107,6 +107,8 @@ the dispatcher is configured to effectively never restart.
 -export([react_realm/2]).
 -export([react_grant/4]).
 -export([react_member/2]).
+-export([react_group/2]).
+-export([reacted_table_names/0]).
 -export([react_source/4]).
 -export([react_rib/3]).
 -export([unfold_user_key/1]).
@@ -215,6 +217,11 @@ reacted_tables() ->
             kind = member
         },
         #sub{
+            table = ?BONDY_DB_GROUP_TAB,
+            label = "security_groups",
+            kind = group
+        },
+        #sub{
             table = ?BONDY_DB_SOURCE_TAB,
             label = "security_sources",
             kind = source
@@ -307,6 +314,8 @@ apply_reaction(#sub{kind = grant, label = Label}, Key, Op, Old) ->
     react_grant(Label, Key, Op, Old);
 apply_reaction(#sub{kind = member}, Key, Op, _Old) ->
     react_member(Key, Op);
+apply_reaction(#sub{kind = group}, Key, Op, _Old) ->
+    react_group(Key, Op);
 apply_reaction(#sub{kind = source, label = Label}, Key, Op, Old) ->
     react_source(Label, Key, Op, Old);
 apply_reaction(#sub{kind = rib, table = Table}, Key, Op, _Old) ->
@@ -481,6 +490,25 @@ react_member(Key, _Op) ->
     bondy_session_manager:invalidate_rbac_all(RealmUri).
 
 %% @private
+%% React to a remote group-record change (security_groups). A group's `groups`
+%% property is its parent list — the role-inheritance edge — and a cached RBAC
+%% context bakes in the grants that edge resolves to, so changing it changes the
+%% authorization a live session computes. Invalidate in place (§9.5) exactly as
+%% a membership or grant change does; the next authorize re-walks the group
+%% graph. Realm-wide, and on any op: a group create carries no members yet and a
+%% delete already invalidates through `bondy_rbac:revoke_group/2`, so the
+%% over-invalidation costs one rebuild and needs no old/new comparison to be
+%% correct.
+react_group(Key, _Op) ->
+    RealmUri = unfold_realm_banded_key(Key, malformed_group_cell_key),
+    ?LOG_INFO(#{
+        description =>
+            "Invalidating local RBAC contexts after a peer group change",
+        realm_uri => RealmUri
+    }),
+    bondy_session_manager:invalidate_rbac_all(RealmUri).
+
+%% @private
 %% A peer's RIB summary cell changed via anti-entropy: delegate to
 %% `bondy_registry_rib:on_remote_merge/2`, which reads the cell's current
 %% converged value and maintains this node's stub store. Unlike the other
@@ -521,35 +549,37 @@ unfold_realm_key(Key) ->
     end.
 
 %% @private
-%% Grant tables are realm-banded, so on the folding (`shared_shards`) main
-%% topology a grant cell key is `<<RealmUri, 0, EncodedGrantKey/binary>>`. The
-%% realm URI is NUL-free, so the first separator recovers it; the trailing
-%% composite grant key (role + resource) is not needed, as invalidation is
-%% realm-wide.
-unfold_grant_key(Key) ->
+%% The realm URI of a REALM-BANDED cell. On the folding (`shared_shards`) main
+%% topology such a cell key is `<<RealmUri, 0, EncodedKey/binary>>`, and the
+%% realm URI is NUL-free, so the first separator recovers it. The trailing
+%% encoded key — a composite grant key, a membership fact, a group name — is
+%% never needed here: every reaction that uses this invalidates realm-wide.
+%% `Tag` names the table in the error so a malformed key still says which.
+unfold_realm_banded_key(Key, Tag) ->
     case binary:split(Key, <<0>>) of
-        [RealmUri, _EncGrantKey] ->
+        [RealmUri, _EncodedKey] ->
             RealmUri;
         _ ->
-            error({malformed_grant_cell_key, Key})
+            error({Tag, Key})
     end.
 
 %% @private
-%% security_group_members is realm-banded, so on the folding (`shared_shards`)
-%% main topology a membership cell key is `<<RealmUri, 0, EncodedFactKey>>`. The
-%% realm URI is NUL-free, so the first separator recovers it; the trailing
-%% band-tagged fact key is not needed, as invalidation is realm-wide.
+unfold_grant_key(Key) ->
+    unfold_realm_banded_key(Key, malformed_grant_cell_key).
+
+%% @private
 unfold_member_key(Key) ->
-    case binary:split(Key, <<0>>) of
-        [RealmUri, _EncFactKey] ->
-            RealmUri;
-        _ ->
-            error({malformed_member_cell_key, Key})
-    end.
+    unfold_realm_banded_key(Key, malformed_member_cell_key).
 
 -ifdef(TEST).
 %% TEST-only: build a `#sub{}` for exercising `apply_reaction/4` dispatch without
 %% a running subscription (`ns`/`ref` are unused on the reaction path).
 make_sub(Kind, Label, Table) ->
     #sub{kind = Kind, label = Label, table = Table}.
+
+%% TEST-only: the tables this node reacts on, as plain names. `#sub{}` is
+%% private, and a reaction the routing set never names is dead code — so the
+%% set itself is worth asserting on.
+reacted_table_names() ->
+    [T || #sub{table = T} <- reacted_tables()].
 -endif.

@@ -5,6 +5,29 @@
 
 -module(bondy_rbac).
 -moduledoc """
+Authorization: the grants that say which roles may perform which operation on
+which resource, and the contexts sessions are authorized against.
+
+A grant binds a role — a user or a group — to a set of permissions on a
+resource. `authorize/3` answers whether a session may act, and it answers from a
+**context**: a snapshot in which the role's own grants and everything it
+inherits through its groups have already been resolved. Resolving that graph on
+every message would be too costly, so a context is built once and cached on the
+session.
+
+Because a context is a snapshot, a grant change has to reach it. Every write
+path here invalidates the realm's cached contexts, and a session re-resolves on
+its next authorization; `refresh_context/1` additionally rebuilds a context that
+has outlived its epoch. This is why authorization changes take effect without
+tearing sessions down, whereas authentication changes do close them.
+
+A resource is matched by policy rather than by equality: a grant names an
+exact URI, a prefix, or a wildcard pattern, and `authorize/3` accepts when any
+grant of the role matches under its own policy.
+
+Start from `grant/2` and `revoke/2` to change permissions, `get_context/2` to
+build a context, and `authorize/3` to decide.
+
 ### WAMP Permissions:
 
 - "wamp.register"
@@ -36,17 +59,19 @@ module are case sensitice so when using the functions in this module make
 sure the inputs you provide are in lowercase to. If you need to convert your
 input to lowercase use `string:casefold/1`.
 
-### Storage
+## Storage
 
-Grants are stored in the bondy_db `security_user_grants` and
-`security_group_grants` main tables. The store is realm-sharded; the compound
-`{Rolename, Resource}` key is encoded to a binary with `term_to_binary/1`. That
-encoding is not order-preserving and the match is always on the `Rolename` (the
-`Resource` component is a wildcard), so a lookup is a realm scan
-(`bondy_db:list/2`) that decodes each key and filters by `Rolename`. A
-grant/revoke invalidates this node's cached RBAC contexts for the realm —
-inline locally, and via the `publish => true` / `bondy_aae_reactor` seam when a
-peer's change arrives through anti-entropy.
+Grants live in the `security_user_grants` and `security_group_grants` tables of
+the durable `main` database, banded by realm. The `{Rolename, Resource}` key is
+an order-preserving composite leading with the role (`encode_key/1`), so every
+grant of one role occupies a contiguous key range and `grants/2` is a bounded
+band scan. The reverse question — which roles hold a grant on a resource — is
+answered by a `by_resource` index, whose rows are re-read against their primary
+cells so a revoked grant cannot surface through a stale index entry.
+
+A grant or revoke invalidates this node's cached authorization contexts for the
+realm: inline for a local change, and through the merge-side reactor when a
+peer's change arrives by anti-entropy.
 """.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
@@ -248,6 +273,10 @@ authorize(Permission, Resource, Ctxt) ->
             error({no_such_realm, RealmUri})
     end.
 
+-doc """
+Returns the authorization context for the session `Ctxt` belongs to, resolving
+the anonymous case to `get_anonymous_context/1`.
+""".
 -spec get_context(Ctxt :: bondy_context:t()) -> context().
 
 get_context(Ctxt) ->
@@ -260,6 +289,14 @@ get_context(Ctxt) ->
             get_context(RealmUri, AuthId)
     end.
 
+-doc """
+Returns `{Refreshed, Context}`: the context rebuilt if it has outlived its
+epoch or been invalidated, otherwise the one given, with `Refreshed` saying
+which happened.
+
+A caller that holds a context across messages calls this so a grant change made
+elsewhere takes effect without the session being closed.
+""".
 -spec refresh_context(Ctxt :: bondy_context:t()) -> {boolean(), context()}.
 
 refresh_context(#bondy_rbac_context{realm_uri = Uri} = Context) ->
@@ -292,6 +329,14 @@ refresh_context(#bondy_rbac_context{realm_uri = Uri} = Context) ->
             {false, Context}
     end.
 
+-doc """
+Returns the authorization context for an anonymous session, resolved against the
+realm's `anonymous` group.
+
+Whether anonymous access is permitted at all is a policy question decided
+before the grants are consulted: `security.allow_anonymous_user` may forbid it,
+or permit it only from a loopback address.
+""".
 -spec get_anonymous_context(Ctxt :: bondy_context:t()) -> context().
 
 get_anonymous_context(Ctxt) ->
@@ -305,6 +350,14 @@ get_anonymous_context(Ctxt) ->
             error({not_authorized, <<"Anonymous user not allowed.">>})
     end.
 
+-doc """
+Returns an authorization context for an anonymous session of `RealmUri`,
+resolved against the realm's `anonymous` group.
+
+Takes the realm and username directly, without consulting the
+`security.allow_anonymous_user` policy that `get_anonymous_context/1` applies —
+the caller has already decided anonymous access is permitted.
+""".
 get_anonymous_context(RealmUri, Username) ->
     Ctxt = build_context(
         RealmUri, Username, grants(RealmUri, anonymous, group)
@@ -363,12 +416,18 @@ get_context(RealmUri, Username) when
     build_context(RealmUri, Username, grants(RealmUri, Username, user)).
 
 -doc """
-Returns an RBAC context for `Username` with explicit group memberships.
+Returns an authorization context for `Username` in `RealmUri`, resolved against
+`ExplicitGroups` in addition to the user's own memberships.
 
-Used for claim-based sessions (e.g. OIDC) where the user may not have a
-local `bondy_rbac_user` record but carries group memberships from the
-Identity Provider. The explicit groups are traversed for their grants in
-addition to the `all` group and any direct user grants.
+The context is a snapshot: the role's grants and everything reachable through
+the group graph are resolved now and answer every later `authorize/3` without a
+further read. It carries an epoch, so `refresh_context/1` can tell when it has
+grown stale.
+
+Explicit groups are how a claim-based session contributes roles Bondy does not
+store — an OIDC subject may have no local user record at all, and carries its
+group memberships from the identity provider. They are added to, never
+substituted for, the user's own memberships and the `all` group.
 """.
 -spec get_context(
     RealmUri :: uri(),
@@ -419,6 +478,10 @@ get_context(RealmUri, Username, ExplicitGroups0) when
         ExplicitGroups
     ).
 
+-doc """
+Returns the metadata `Username` accumulates in `RealmUri`: their own, merged
+with that of every group they reach through the group graph.
+""".
 get_metadata(_, anonymous) ->
     #{};
 get_metadata(RealmUri, Username) ->
@@ -432,6 +495,10 @@ get_metadata(RealmUri, Username) ->
             #{}
     end.
 
+-doc """
+Returns the metadata `Username` accumulates in `RealmUri`, resolving `Groups` in
+addition to the user's own memberships.
+""".
 get_metadata(RealmUri, Username, Groups) ->
     ProtoUri = bondy_realm:prototype_uri(RealmUri),
     RealmProto = {RealmUri, ProtoUri},
@@ -538,6 +605,16 @@ grant(RealmUri, #{type := request} = Request, Opts) ->
 grant(RealmUri, Data, Opts) when is_map(Data) ->
     grant(RealmUri, request(Data), Opts).
 
+-doc """
+Revokes the permissions `Request` names, from the roles it names, on the
+resource it names.
+
+Revocation is per permission: a grant carrying permissions this request does not
+name keeps them. Removing every permission removes the grant. Invalidates the
+realm's cached authorization contexts, so sessions lose the permission on their
+next authorization rather than when they next connect. Raises
+`{no_such_realm, _}` for an unknown realm.
+""".
 -spec revoke(RealmUri :: uri(), Request :: request() | map()) ->
     ok | {error, Reason :: any()} | no_return().
 
@@ -552,9 +629,23 @@ revoke(RealmUri, #{type := request} = Request) ->
 revoke(RealmUri, Data) when is_map(Data) ->
     revoke(RealmUri, validate(Data)).
 
+-doc """
+Revokes every grant held directly by user `Username`. Grants reaching them
+through a group are unaffected — those belong to the group.
+
+Part of deleting the user: a grant left behind would apply to whoever next holds
+the name.
+""".
 revoke_user(RealmUri, Username) ->
     revoke_role_grants(grant_table(user), RealmUri, Username).
 
+-doc """
+Revokes every grant held directly by group `Name`. Grants reaching it through a
+parent group are unaffected — those belong to the parent.
+
+Part of deleting the group: a grant left behind would apply to whatever group
+next holds the name.
+""".
 revoke_group(RealmUri, Name) ->
     revoke_role_grants(grant_table(group), RealmUri, Name).
 
@@ -583,16 +674,17 @@ grants(RealmUri, Opts0) ->
     lists:append(GroupGrants, UserGrants).
 
 -doc """
-The **reverse** grant lookup: every role (user and group) holding a grant on
-exactly `Resource` within `RealmUri`, as `{{Rolename, Resource}, Permissions}`.
+Returns every role holding a grant on exactly `Resource` in `RealmUri`, as
+`{{Rolename, Resource}, Permissions}` — the reverse of `grants/2`.
 
-This is the equality reverse of `find_grants` — "who can act on resource R" —
-served by the `by_resource` covering index (piece #2). It is intended for
-admin/introspection, NOT the authorization hot path (which always reads forward,
-by role): the index is asynchronous, so a just-written grant may take a coalesce
-window to appear, and a grant cleared after the index read is filtered by the
-forward fetch below. `Resource` must be a normalised resource (`any |
-{Uri, Strategy}`), the same form `grant/2` stores.
+`Resource` must be in stored, normalised form (`any | {Uri, Strategy}`), the
+same form `grant/2` writes; a resource built by hand will not match otherwise.
+
+Intended for administration and introspection, not for authorization, which
+always reads forward by role. Answered through the `by_resource` index, which is
+maintained asynchronously — a grant written moments ago may not appear yet —
+and then re-read against the primary cells, so a grant revoked since the index
+was written does not appear either.
 """.
 -spec grants_on_resource(RealmUri :: uri(), Resource :: normalised_resource()) ->
     [{{binary() | all | anonymous, normalised_resource()}, [permission()]}].
@@ -631,11 +723,19 @@ grants_on_resource(Table, RealmUri, Resource) ->
 grants(RealmUri, Name, Type) ->
     group_grants(acc_grants(RealmUri, Name, Type)).
 
+-doc """
+Returns the grants held by user `Username` — those granted to the user directly
+and those reaching them through their groups.
+""".
 -spec user_grants(RealmUri :: uri(), Username :: binary()) -> [grant()].
 
 user_grants(RealmUri, Username) ->
     grants(RealmUri, Username, user).
 
+-doc """
+Returns the grants held by group `Name` — those granted to the group directly
+and those reaching it through its parent groups.
+""".
 -spec group_grants(RealmUri :: uri(), Name :: binary()) -> [grant()].
 
 group_grants(RealmUri, Name) ->
@@ -669,6 +769,10 @@ check_permission(
             end
     end.
 
+-doc """
+Removes every grant of `RealmUri`, user and group alike. Part of realm teardown
+rather than an administrative operation.
+""".
 -spec remove_all(RealmUri :: uri(), Opts :: map()) -> ok.
 
 remove_all(RealmUri, _Opts) ->
@@ -852,7 +956,10 @@ permission_denied_message(
         utf8
     ).
 
-%% @private
+%% Walks the group graph breadth-first, accumulating each role's metadata.
+%% Exported so `bondy_rbac_user` can resolve metadata without duplicating the
+%% traversal; not part of the module's public surface.
+-doc false.
 do_get_metadata([H | T], {RealmUri, ProtoUri} = RealmProto, Acc0) ->
     case bondy_rbac_group:lookup(RealmUri, H) of
         {error, not_found} when ProtoUri == undefined ->
@@ -1104,8 +1211,8 @@ do_grant([{Rolename, RoleType} | T], RealmUri, Resources, Permissions0, Opts) ->
 %% config file on every boot emits no operation and never re-stamps the cell
 %% with a fresh HLC — which would diverge cross-node convergence and make
 %% peers ping-pong grant merges on every restart. The op-based CRDT +
-%% anti-entropy reconcile multi-node grants, so plum_db's deterministic-version
-%% rebase is obsolete.
+%% anti-entropy reconcile multi-node grants, so no deterministic-version rebase
+%% is needed here.
 store(Table, RealmUri, {_Rolename, Resource} = Key, Permissions, Opts) ->
     %% The grant cell value is the fact map `#{resource, permissions}` (reshaped
     %% from the bare permissions list) so the `by_resource` reverse index can
@@ -1475,9 +1582,9 @@ grant_table(EntityType) ->
     end.
 
 %% @private
-%% Reads the permissions list for a grant key, or `undefined` (mirrors the old
-%% `plum_db:get/2`). Extracts `permissions` from the fact-map value; cleared
-%% cells read back as `not_found`.
+%% Reads the permissions list for a grant key, or `undefined`. The stored value
+%% is the fact map `#{resource, permissions}`; a cleared cell reads back as
+%% `not_found` and is reported the same way as one that never existed.
 do_get(Table, RealmUri, Key) ->
     case bondy_db:read(Table, RealmUri, encode_key(Key)) of
         {ok, {#{permissions := Permissions}, _Hlc}} ->
@@ -1511,14 +1618,17 @@ clear_all_grants(Table, RealmUri) ->
     ],
     ok.
 
-%% @private
 %% The grant store key is the compound `{Rolename, Resource}`, encoded as an
-%% **order-preserving composite**: the role as a type-tagged leading column
+%% order-preserving composite: the role as a type-tagged leading column
 %% (`encode_col/1`, so the reserved atoms `all`/`anonymous` and binary rolenames
 %% coexist), a `0x00` separator, then the canonical `term_to_binary` of the
 %% resource (`any | {Uri, Strategy}`). The role column is `0x00`-free, so every
 %% grant for a role is a contiguous band (`col_bounds(Rolename)`) and the forward
 %% "grants for role" query is a bounded range scan, not a full-realm filter.
+%%
+%% Exported so the legacy-backup import translator encodes keys byte-identically
+%% to the live write path; not part of the module's public surface.
+-doc false.
 encode_key({Rolename, Resource}) ->
     <<
         (bondy_oplog_index_key:encode_col(Rolename))/binary,

@@ -414,3 +414,75 @@ worker_survives_bad_event(_) ->
         ),
         ?assert(is_process_alive(Worker))
     end.
+
+%% A remote group-record change invalidates this node's cached RBAC contexts
+%% for the realm. The group's `groups` property is the role-inheritance edge and
+%% a cached context bakes in the grants it resolves to, so a peer's change to it
+%% must re-evaluate live sessions exactly as a membership change does.
+remote_group_invalidates_realm_rbac_test() ->
+    GroupKey = <<?REALM/binary, 0, "admins">>,
+    ok = meck:new(bondy_session_manager, [passthrough]),
+    ok = meck:expect(
+        bondy_session_manager,
+        invalidate_rbac_all,
+        fun(R) -> {invalidated, R} end
+    ),
+    try
+        %% Any op: a parent list is changed by a `set`, and a `clear` arriving
+        %% from a peer's group delete is equally a permission change here.
+        ?assertEqual(
+            {invalidated, ?REALM},
+            bondy_aae_reactor:react_group(GroupKey, {set, #{}})
+        ),
+        ?assertEqual(
+            {invalidated, ?REALM},
+            bondy_aae_reactor:react_group(GroupKey, clear)
+        ),
+
+        %% And it is reachable through the dispatcher, not just directly — a
+        %% reaction the `reacted_tables/0` set never routes to is dead code.
+        Sub = bondy_aae_reactor:make_sub(
+            group, "security_groups", ?BONDY_DB_GROUP_TAB
+        ),
+        ?assertEqual(
+            {invalidated, ?REALM},
+            bondy_aae_reactor:apply_reaction(
+                Sub, GroupKey, {set, #{}}, undefined
+            )
+        ),
+        ?assertEqual(
+            3,
+            meck:num_calls(
+                bondy_session_manager, invalidate_rbac_all, [?REALM]
+            )
+        )
+    after
+        meck:unload(bondy_session_manager)
+    end.
+
+%% Every reaction above is only ever reached if BOTH ends are wired: the reactor
+%% must route the table, and the catalogue entry must publish its merges. Either
+%% half missing leaves a reaction that is dead code and still passes its own
+%% test — which is exactly how the inheritance edge went uninvalidated, the
+%% reactor having no `security_groups` subscription to route to.
+%%
+%% This is the reaction→flag direction. The flag→consumer direction is
+%% `bondy_rbac_SUITE:every_publishing_table_has_a_live_subscriber/1`, which
+%% needs a running dispatcher and covers consumers other than this reactor.
+reacted_tables_publish_their_merges_test() ->
+    Reacted = bondy_aae_reactor:reacted_table_names(),
+    ?assertNotEqual([], Reacted),
+
+    Publishing = [
+        Name
+     || #{name := Name} = Spec <- bondy_namespace_catalog:tables(),
+        maps:get(publish, Spec, false)
+    ],
+    ?assertEqual(
+        [],
+        Reacted -- Publishing,
+        "the reactor routes a table whose merges are never published"
+    ),
+    %% The table this went wrong on, named so the case cannot be weakened into
+    %% vacuity by an empty `reacted_table_names/0`.
+    ?assert(lists:member(?BONDY_DB_GROUP_TAB, Reacted)).

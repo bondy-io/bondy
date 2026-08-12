@@ -45,23 +45,32 @@ resolve_mixed_test() ->
 %% legacy_translate/4 — the per-domain reshape
 %% =============================================================================
 
-%% A pre-v1.1 proplist user is upgraded to the current map, banded by the realm,
-%% keyed by the username, with the username folded back into the value.
+%% A `security_users` cell is banded by the realm and keyed by the cell's own
+%% key, and its value is passed through untouched: a user record and an alias
+%% pointer share this domain, and `bondy_rbac_user:import_legacy/3` is what
+%% tells them apart. Deciding here as well would split that knowledge in two.
 translate_user_test() ->
     PList = [
         {<<"groups">>, []},
         {<<"meta">>, #{}},
         {<<"password">>, [{auth_name, pbkdf2}]}
     ],
-    {entry, Table, Band, Key, Value} =
+    ?assertEqual(
+        {entry, ?BONDY_DB_USER_TAB, ?REALM, <<"admin">>, PList},
         bondy_export:legacy_translate(
             security_users, ?REALM, <<"admin">>, PList
-        ),
-    ?assertEqual(?BONDY_DB_USER_TAB, Table),
-    ?assertEqual(?REALM, Band),
-    ?assertEqual(<<"admin">>, Key),
-    ?assertMatch(
-        #{type := user, version := <<"1.1">>, username := <<"admin">>}, Value
+        )
+    ).
+
+%% An alias-pointer cell keeps its own key, and is not mistaken for the user it
+%% names — the target's record is the one thing an alias must never overwrite.
+translate_user_alias_test() ->
+    Entry = #{type => alias, username => <<"admin">>},
+    ?assertEqual(
+        {entry, ?BONDY_DB_USER_TAB, ?REALM, <<"root">>, Entry},
+        bondy_export:legacy_translate(
+            security_users, ?REALM, <<"root">>, Entry
+        )
     ).
 
 %% A group value is upgraded via from_term, banded + keyed by realm / name.

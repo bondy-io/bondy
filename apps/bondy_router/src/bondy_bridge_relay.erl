@@ -5,26 +5,39 @@
 
 -module(bondy_bridge_relay).
 -moduledoc """
-`restart` defines when a terminated bridge must be restarted.
+Bridge relays: the configuration of an outbound connection from this node to
+another Bondy router.
 
-A permanent bridge is always restarted, even after recovering from a Bondy
-node crash or when the node is manually stopped and re-started. Bondy
-persists the configuration of permanent bridges in the database and reads
-them during startup.
+A bridge relay carries a realm's traffic across a router boundary — the local
+node opens a client connection to a remote router and forwards the messages the
+bridge's subscriptions and registrations name. This module owns the
+configuration record; `bondy_bridge_relay_manager` runs the bridges and
+`bondy_bridge_relay_client` is the connection itself.
 
-A transient bridge is restarted only if it terminated abnormally. In case of
-a node crash or manually stopped and re-started they will not be restarted.
+**A bridge belongs to one node, not to the cluster.** Each configuration names
+the node that runs it, and a node starts only its own bridges. Two nodes cannot
+run the same bridge, and a bridge whose node is down does not migrate.
+
+## Restart policy
+
+`restart` says when a terminated bridge is started again.
+
+- `permanent` — always restarted, including after a node crash or a manual
+  stop and start. A permanent bridge's configuration is persisted here and read
+  back at startup.
+- `transient` — restarted only after an abnormal termination. It does not
+  survive a node restart.
+
+Bridges declared in `bondy.conf` are transient, because that file re-declares
+them on every boot; a bridge created through the API defaults to transient for
+the same reason.
 
 ## Storage
 
-Permanent bridge configurations are persisted in the bondy_db
-`bondy_bridge_relay` main table, keyed by bridge name, with the config map
-carried in an `lww_register` cell. The table is provisioned by
-`bondy_namespace_catalog`.
-Storage is node-local: `bondy_bridge_relay_manager` reads the configs once at
-startup and runs only the bridges tagged with this node's `nodestring`, so the
-table needs no cluster-wide change notification (cross-node replication awaits
-bondy_db anti-entropy, `db.aae`).
+Each bridge is one cell of the durable `bondy_bridge_relay` table, keyed by
+bridge name in a single global band — bridge names are cluster-wide, not
+per-realm. Deleting a bridge clears its cell, and a later `add/1` under the same
+name creates it afresh rather than reviving what was there.
 """.
 
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -570,6 +583,13 @@ end#{
 %% API
 %% =============================================================================
 
+-doc """
+Forwards `Msg` over the bridge connections `Ref` names, which may be a single
+reference or a list of them.
+
+Delivery is best-effort: the message is handed to each bridge's client process,
+and a bridge that is not running silently receives nothing.
+""".
 -spec forward(Ref :: bondy_ref:t() | [bondy_ref:t()], Msg :: any()) ->
     ok.
 
@@ -581,11 +601,28 @@ forward([H | T], Msg) ->
 forward(Ref, Msg) ->
     bondy_bridge_relay_client:forward(Ref, Msg).
 
+-doc """
+Returns a validated bridge relay configuration built from `Data`.
+
+`name` and `endpoint` are required; the rest — transport, timeouts, reconnect
+policy and `restart` — take defaults. Raises on invalid input. The result is not
+persisted; pass it to `add/1`.
+""".
 -spec new(Data :: map()) -> t() | no_return().
 
 new(Data) ->
     type_and_version(maps_utils:validate(Data, ?BRIDGE_RELAY_SPEC)).
 
+-doc """
+Persists bridge `Bridge`, or returns `{error, already_exists}` when a bridge of
+that name is already configured.
+
+**The calling node becomes the bridge's owner**: its nodestring is stamped into
+the stored configuration, and only that node will run the bridge. Persisting a
+configuration does not start it — the owning node's manager reads the table at
+startup — so a bridge added to a running node takes effect when that node next
+starts.
+""".
 -spec add(t()) -> ok | {error, already_exists | any()}.
 
 add(#{type := ?TYPE, name := Name} = Bridge0) ->
@@ -597,12 +634,20 @@ add(#{type := ?TYPE, name := Name} = Bridge0) ->
             bondy_db:apply(table(), ?BUCKET, Name, {set, Bridge})
     end.
 
+-doc """
+Removes the configuration of bridge `Name`, so its owning node no longer starts
+it. Removing a bridge that does not exist succeeds.
+
+This is a configuration change, not a disconnect: a bridge already running keeps
+running until its node restarts.
+""".
 -spec remove(Name :: binary()) -> ok.
 
 remove(Name) ->
     ok = bondy_db:apply(table(), ?BUCKET, Name, clear),
     ok.
 
+-doc "Whether a bridge named `Name` is configured, on any node.".
 -spec exists(Name :: binary()) -> boolean().
 
 exists(Name) ->
@@ -611,6 +656,7 @@ exists(Name) ->
         {error, not_found} -> false
     end.
 
+-doc "Returns the configuration of bridge `Name`, or `{error, not_found}`.".
 -spec lookup(Name :: binary()) -> {ok, t()} | {error, not_found}.
 
 lookup(Name) ->
@@ -621,12 +667,20 @@ lookup(Name) ->
             {error, not_found}
     end.
 
+-doc """
+Returns every configured bridge, of every node — the table is a single global
+keyspace rather than one per node.
+""".
 -spec list() -> [t()].
 
 list() ->
     {ok, Rows} = bondy_db:list(table(), ?BUCKET),
     [Value || {_Name, Value, _Hlc} <- Rows, is_map(Value)].
 
+-doc """
+Returns `Bridge` in its API representation, with the endpoint rendered as
+`host:port` rather than the `{Host, Port}` pair used internally.
+""".
 -spec to_external(Bridge :: t()) -> map().
 
 to_external(Bridge) ->

@@ -5,15 +5,29 @@
 
 -module(bondy_retained_message).
 -moduledoc """
-When publishing an event a topic the Publisher can ask the Broker to
-retain the event being published as the most-recent event on this topic.
+Storage for WAMP retained events: the most recent event published to a topic,
+kept so that a session subscribing later receives it at once.
 
-Retained events are stored in `bondy_db` (the durable `main` DB), keyed by
-topic within a realm and matched via key-ordered `bondy_db:range_all/5` prefix /
-wildcard scans.
+A realm holds at most one retained message per topic, keyed by the topic URI in
+the durable `main` database. Keys are byte-ordered, which is what makes the
+three WAMP matching policies range scans rather than table walks: `exact` is a
+point read, `prefix` scans from the topic and stops at the first key that no
+longer carries it, and `wildcard` scans from the fixed prefix preceding the
+pattern's first wildcard component.
 
-**This is experimental and does not scale with high traffic at the
-moment.**
+Delivery constraints travel with the message rather than being resolved when it
+is stored. Each retained message carries the publisher's `eligible` / `exclude`
+session lists and its expiry, and both are applied when a subscriber matches, so
+a message stops being deliverable without anyone rewriting it. Expiry is
+therefore lazy: an expired message occupies its cell until `evict_expired/1`
+sweeps it, and is filtered out of every match until then.
+
+Start from `put/5` to retain an event, `match/4` to collect the messages a
+subscribing session should receive, and `to_event/2` to turn one back into the
+EVENT that session is sent. `match/4` answers one page and a continuation;
+`match/1` resumes from that continuation.
+
+**Experimental. The implementation does not scale to high publication rates.**
 """.
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -47,16 +61,39 @@ moment.**
     opts :: list()
 }).
 
+-doc """
+A retained event together with the delivery constraints it was stored under.
+""".
 -type t() :: #bondy_retained_message{}.
+
+-doc "The sentinel that ends a paged match: no further page follows.".
 -type eot() :: ?EOT.
+
+-doc """
+An opaque resume point for a paged match. Pass it to `match/1` to continue the
+scan; it is only meaningful to the realm, topic, session and policy that
+produced it.
+""".
 -type continuation() :: #bondy_retained_continuation{}.
+
+-doc """
+The publisher's delivery constraints, in WAMP terms: `eligible` restricts
+delivery to the listed sessions, `exclude` withholds it from them. An empty
+`eligible` list excludes every session, which WAMP treats as intentional rather
+than as an omitted option.
+""".
 -type match_opts() :: #{
     eligible => [id()],
     exclude => [id()]
 }.
-%% The key_value options threaded through match/5 and its continuation:
-%% first (the inclusive resume key) and limit (max messages per page).
+
+-doc """
+Scan controls for a paged match: `first` is the inclusive key to resume from,
+`limit` the maximum number of messages in a page.
+""".
 -type scan_opts() :: [{first, binary()} | {limit, pos_integer()}].
+
+-doc "Called with the realm and each message an eviction sweep removes.".
 -type evict_fun() :: fun((uri(), t()) -> ok).
 
 -export_type([t/0]).
@@ -71,6 +108,7 @@ moment.**
 -export([put/4]).
 -export([put/5]).
 -export([get/2]).
+-export([remove_all/1]).
 -export([take/2]).
 -export([match/1]).
 -export([match/4]).
@@ -82,6 +120,13 @@ moment.**
 %% API
 %% =============================================================================
 
+-doc """
+Returns the message retained for `Topic` in `Realm`, or `undefined` when the
+topic has none.
+
+The message is returned whatever its expiry or delivery constraints say; this
+is the raw read. Use `match/4` to obtain only what a given session may receive.
+""".
 -spec get(Realm :: uri(), Topic :: uri()) -> t() | undefined.
 
 get(Realm, Topic) ->
@@ -90,6 +135,13 @@ get(Realm, Topic) ->
         {error, not_found} -> undefined
     end.
 
+-doc """
+Returns the message retained for `Topic` in `Realm` and clears it, so the topic
+retains nothing afterwards. Returns `undefined` when there was none.
+
+The read and the clear are separate operations, so a concurrent `put/5` on the
+same topic can be lost.
+""".
 -spec take(Realm :: uri(), Topic :: uri()) -> t() | undefined.
 
 take(Realm, Topic) ->
@@ -102,11 +154,21 @@ take(Realm, Topic) ->
             undefined
     end.
 
+-doc """
+Returns the heap size of `Mssg` in bytes, the unit the per-realm memory counter
+and the `max_message_size` limit are expressed in.
+""".
 -spec size(t()) -> integer().
 
 size(Mssg) ->
     term_size(Mssg).
 
+-doc """
+Returns the next page of a match started by `match/4` or `match/5`.
+
+Answers `?EOT` for a continuation that has no successor, so a caller can loop on
+the result until it is the sentinel.
+""".
 -spec match(continuation() | eot()) -> {[t()] | continuation()} | eot().
 
 match(?EOT) ->
@@ -121,6 +183,11 @@ match(#bondy_retained_continuation{} = Cont) ->
     Opts = Cont#bondy_retained_continuation.opts,
     match(Realm, Topic, SessionId, Strategy, Opts).
 
+-doc """
+Returns the first page of retained messages that session `SessionId` should
+receive on subscribing to `Topic` under matching policy `Strategy`, at most 100
+per page. Equivalent to `match/5` with that limit.
+""".
 -spec match(
     Realm :: uri(),
     Topic :: uri(),
@@ -132,6 +199,20 @@ match(#bondy_retained_continuation{} = Cont) ->
 match(Realm, Topic, SessionId, Strategy) ->
     match(Realm, Topic, SessionId, Strategy, [{limit, 100}]).
 
+-doc """
+Returns a page of the retained messages that session `SessionId` should receive
+on subscribing to `Topic`, and a continuation for the rest.
+
+`Strategy` is the WAMP matching policy — `exact`, `prefix` or `wildcard` — and
+selects how the topic space is scanned. Only messages the session is entitled
+to are returned: expired ones and those its id is excluded from (or not eligible
+for) are skipped, and they consume no page budget.
+
+A page holds at most `limit` messages, defaulting to 100. The second element is
+a continuation to pass to `match/1`, or `?EOT` when the scan reached the end of
+the matching key range. A `wildcard` `Topic` that contains no wildcard component
+raises `{invalid_wildcard_pattern, Topic}`.
+""".
 -spec match(
     Realm :: uri(),
     Topic :: uri(),
@@ -179,6 +260,10 @@ match(Realm, Topic, SessionId, <<"wildcard">> = Strategy, Opts0) ->
     MkCont = mk_cont_fun(Realm, Topic, SessionId, Strategy, Opts),
     scan(table(), Realm, Lo, Classify, SessionId, Limit, MkCont).
 
+-doc """
+Retains `Event` as the current message for `Topic`, with no expiry. Equivalent
+to `put/5` with a TTL of `0`.
+""".
 -spec put(
     Realm :: uri(),
     Topic :: uri(),
@@ -189,6 +274,19 @@ match(Realm, Topic, SessionId, <<"wildcard">> = Strategy, Opts0) ->
 put(Realm, Topic, Event, MatchOpts) ->
     put(Realm, Topic, Event, MatchOpts, 0).
 
+-doc """
+Retains `Event` as the current message for `Topic` in `Realm`, replacing
+whatever that topic retained before.
+
+`MatchOpts` records the publisher's `eligible` / `exclude` session lists, which
+are evaluated on each later match rather than now. `TTL` is a lifetime in
+seconds from the call; `0` means the message never expires. An expired message
+is withheld from every match and removed by the next `evict_expired/1` sweep.
+
+Maintains the realm's retained-message count and memory counters. Those are
+node-local and updated from a read followed by a write, so two concurrent calls
+on one topic can leave them approximate.
+""".
 -spec put(
     Realm :: uri(),
     Topic :: uri(),
@@ -201,12 +299,12 @@ put(Realm, Topic, #event{} = Event, MatchOpts, TTL) ->
     Retained = new(Event, MatchOpts, TTL),
     Size = term_size(Retained),
     Table = table(),
-    %% Counter delta: read the existing value (if any) so we can subtract its
-    %% size before adding the new one. bondy_db has no put-modifier, so we
-    %% read-then-apply. Single-node, experimental feature — approximate counters
-    %% under a concurrent same-topic write race are acceptable (the trie /
-    %% routing path is unaffected). The remote-replication counter sync is
-    %% deferred until bondy_db anti-entropy reconciles the counters.
+    %% The memory counter tracks a delta, so the message being replaced has to
+    %% be read to subtract its size. bondy_db offers no read-modify-write, hence
+    %% the separate read; counters drifting under a same-topic write race is
+    %% accepted here and affects neither routing nor delivery. Counters are
+    %% node-local: a replicated write does not adjust them on the node that
+    %% receives it.
     _ =
         case bondy_db:read(Table, Realm, Topic) of
             {ok, {#bondy_retained_message{} = Old, _Hlc}} ->
@@ -219,6 +317,14 @@ put(Realm, Topic, #event{} = Event, MatchOpts, TTL) ->
         end,
     bondy_db:apply(Table, Realm, Topic, {set, Retained}).
 
+-doc """
+Returns the WAMP EVENT to send to a subscriber for `Retained`, under
+`SubscriptionId`.
+
+The event's details carry `retained => true`, which is how a subscriber tells a
+replayed message from one published while it was subscribed. The publication id
+is the original publisher's, not a fresh one.
+""".
 -spec to_event(Retained :: t(), SubscriptionId :: id()) -> wamp_event().
 
 to_event(Retained, SubscriptionId) ->
@@ -233,7 +339,8 @@ to_event(Retained, SubscriptionId) ->
     }.
 
 -doc """
-Evict expired retained messages from all realms.
+Removes the expired retained messages of every realm and returns how many were
+removed.
 """.
 -spec evict_expired() -> non_neg_integer().
 
@@ -241,7 +348,8 @@ evict_expired() ->
     evict_expired('_').
 
 -doc """
-Evict expired retained messages from realm `Realm`.
+Removes the expired retained messages of `Realm` and returns how many were
+removed.
 """.
 -spec evict_expired(uri() | '_') -> non_neg_integer().
 
@@ -249,9 +357,12 @@ evict_expired(Realm) ->
     evict_expired(Realm, undefined).
 
 -doc """
-Evict expired retained messages from realm `Realm` or all realms if
-wildcard `'_'` is used.
-Evaluates function `Fun` for each entry passing `Realm` and `Entry` as arguments.
+Removes the expired retained messages of `Realm`, or of every realm when
+`Realm` is `'_'`, and returns how many were removed.
+
+`EvictFun` is called with the realm and each removed message, which is how the
+per-realm counters are kept in step with the sweep; pass `undefined` to remove
+without a callback. A message with no TTL never expires and is never swept.
 """.
 -spec evict_expired(uri() | '_', evict_fun() | undefined) -> non_neg_integer().
 
@@ -263,9 +374,9 @@ evict_expired(Realm, EvictFun) when
 evict_expired('_', EvictFun) when
     EvictFun == undefined orelse is_function(EvictFun, 2)
 ->
-    %% bondy_db is realm-scoped, so "all realms" enumerates the realm registry
-    %% and evicts each (the plum_db `{'_', '_'}` whole-store fold has no direct
-    %% analogue). Same O(retained messages) cost as before.
+    %% Storage is realm-scoped and offers no whole-store fold, so "all realms"
+    %% means enumerating the realm registry and sweeping each. Cost is linear in
+    %% the number of retained messages either way.
     Table = table(),
     lists:foldl(
         fun(Realm0, Acc) ->
@@ -277,6 +388,23 @@ evict_expired('_', EvictFun) when
         0,
         bondy_realm:list()
     ).
+
+-doc """
+Removes every retained message of `Realm`, expired or not, and returns how many
+were removed.
+
+This is realm teardown rather than maintenance: retained messages are per-realm
+state keyed by topic, so any left behind would be delivered to the subscribers
+of whatever realm next claims the URI. Use `evict_expired/1` for the routine
+sweep.
+""".
+-spec remove_all(Realm :: uri()) -> non_neg_integer().
+
+remove_all(Realm) when is_binary(Realm) ->
+    EvictFun = fun(R, Msg) ->
+        bondy_retained_message_manager:decr_counters(R, 1, term_size(Msg))
+    end,
+    do_remove_realm(table(), Realm, fun(_) -> true end, EvictFun).
 
 %% =============================================================================
 %% PRIVATE
@@ -337,12 +465,9 @@ match_fun(Components) ->
     end.
 
 %% @private
--doc """
-Returns true if both lists have the same length and if each element of
-the first list subsumes the corresponding element on the second list.
-A term subsumes another term when is equal or when the first term is the
-empty binary (wildcard).
-""".
+%% Whether each component of the pattern subsumes the corresponding component of
+%% the key: a component subsumes one that is equal to it, and the empty binary —
+%% the wildcard component — subsumes any.
 subsumes(Term, Term) ->
     true;
 subsumes(H1, H2) when length(H1) =/= length(H2) ->
@@ -366,8 +491,8 @@ table() ->
 
 %% @private
 %% Whether `Msg` should be delivered to session `SessionId`: not expired, not
-%% excluded and (if an `eligible` list is set) eligible. The old plum_db fold
-%% expressed this through `maybe_append/3`.
+%% excluded and, when an `eligible` list is set, eligible. Applied per match
+%% rather than per write, so a message's audience can narrow without a rewrite.
 session_eligible(#bondy_retained_message{match_opts = Opts} = Msg, SessionId) ->
     not is_expired(Msg) andalso
         not is_excluded(SessionId, Opts) andalso
@@ -389,11 +514,10 @@ mk_cont_fun(Realm, Topic, SessionId, Strategy, Opts) ->
 
 %% @private
 %% Chunked, key-ordered scan of a realm's retained messages from `Lo`
-%% (inclusive) to the end of the realm band, replacing the old plum_db
-%% `fold_elements/4` + `throw({break, _})` loop. `Classify(Key)` returns
-%% `keep | skip | done` (`done` = no later key can match, stop with ?EOT).
-%% Gathers up to `Limit` session-eligible messages; the first `keep` key seen
-%% once `Limit` are gathered becomes the (unprocessed) resume point via
+%% (inclusive) to the end of the realm band. `Classify(Key)` returns
+%% `keep | skip | done`, where `done` means no later key can match and the scan
+%% stops with ?EOT. Gathers up to `Limit` session-eligible messages; the first
+%% `keep` key seen after that becomes the resume point, unprocessed, via
 %% `MkCont/1`. Returns `{[t()], continuation() | eot()}`.
 scan(Table, Realm, Lo, Classify, SessionId, Limit, MkCont) ->
     do_scan(Table, Realm, Lo, Classify, SessionId, Limit, MkCont, []).
@@ -464,19 +588,27 @@ scan_rows([{Key, Msg, _Hlc} | Rest], Classify, SessionId, Limit, MkCont, Acc) ->
 %% Evict expired retained messages from a single realm, deleting each and
 %% evaluating `EvictFun` (e.g. the counter decrement). Returns the count.
 do_evict_realm(Table, Realm, EvictFun) ->
-    Now = erlang:system_time(second),
+    do_remove_realm(Table, Realm, fun is_expired/1, EvictFun).
+
+%% @private
+%% Delete the retained messages of a single realm for which `Pred` holds,
+%% evaluating `EvictFun` on each. Returns the count.
+do_remove_realm(Table, Realm, Pred, EvictFun) ->
     case bondy_db:list(Table, Realm) of
         {ok, Rows} ->
             lists:foldl(
                 fun
-                    (
-                        {Topic, #bondy_retained_message{valid_to = T} = Msg,
-                            _Hlc},
-                        Acc
-                    ) when T > 0 andalso T =< Now ->
-                        ok = bondy_db:apply(Table, Realm, Topic, clear),
-                        ok = maybe_eval(Realm, EvictFun, Msg),
-                        Acc + 1;
+                    ({Topic, #bondy_retained_message{} = Msg, _Hlc}, Acc) ->
+                        case Pred(Msg) of
+                            true ->
+                                ok = bondy_db:apply(
+                                    Table, Realm, Topic, clear
+                                ),
+                                ok = maybe_eval(Realm, EvictFun, Msg),
+                                Acc + 1;
+                            false ->
+                                Acc
+                        end;
                     (_, Acc) ->
                         Acc
                 end,
@@ -485,7 +617,7 @@ do_evict_realm(Table, Realm, EvictFun) ->
             );
         {error, _} = Error ->
             ?LOG_WARNING(#{
-                description => "Retained message eviction scan failed",
+                description => "Retained message scan failed",
                 realm_uri => Realm,
                 reason => Error
             }),

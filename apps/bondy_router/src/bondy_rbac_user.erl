@@ -5,27 +5,48 @@
 
 -module(bondy_rbac_user).
 -moduledoc """
-A user is a role that is able to log into a Bondy Realm.
-Users have attributes associated with themelves like username, credentials
-(password or authorized keys) and metadata determined by the client
-applications. Users can be assigned group memberships.
+Users: the identities that can log into a realm, and their group memberships.
+
+A user is a role with credentials — a password, authorized keys, or neither —
+plus client-supplied metadata. Users are named by a casefolded `username` that
+is unique within a realm, and may carry aliases: additional names that resolve
+to the same user at authentication.
+
+**A user record does not list its groups.** Membership is a relation of its own,
+`security_group_members`, and this module owns both sides of it: the primitives
+that read and write the relation live here, and every write path that accepts a
+`groups` field reconciles the relation to match. `groups/1` on a record read
+through `lookup/2` reports what the relation says, not what was persisted in the
+cell.
+
+A user may be backed by a **single sign-on realm**. Such a user's credentials
+live in the SSO realm and their local record carries `sso_realm_uri`;
+`resolve/2`
+merges the two into the view authentication uses. This is why several functions
+take an authentication realm distinct from the realm being operated on.
+
+Start from `new/2` and `add/3` to create a user, `lookup/2` to read one,
+`add_group/3` and `remove_group/3` to change memberships, and
+`change_password/4`
+for credentials.
 
 ## Storage
 
-Users are persisted in `bondy_db`. The
-durable `security_users` table is provisioned by `bondy_namespace_catalog`
-(`fold => lww`). Each user (and each alias index entry)
-is a cell keyed by its `Username` / `Alias` binary, addressed as
-`(Table, RealmUri, Key)` — the realm is the bucket.
+Each user is one cell of the durable `security_users` table, banded by realm and
+keyed by username; each alias is a second cell in the same table, keyed by the
+alias and pointing at the username. Only one writer maintains that split — every
+path that persists a user record goes through this module.
 
-The **local** side-effects — revoking the user's tickets, closing local
-sessions and publishing the `{[bondy, user, added | updated | deleted], ...}`
-events — fire **inline** at the write / delete chokepoints (`do_on_update/3`,
-`do_on_delete/2`). The **remote** side-effect — closing local sessions when a
-peer's anti-entropy merge shows a user *delete* — is the `publish => true` /
-`bondy_aae_reactor:react_user/2` seam (see `bondy_namespace_catalog`); a remote
-credential change is a `set`, a no-op there, with the auth freshness fence
-covering credential staleness instead.
+The cell's version is the user's `token_version/2`, which authentication uses as
+a revocation stamp: any change to the record, including a change of group
+membership, moves it forward and invalidates tokens issued before it.
+
+Deleting or changing a user has consequences beyond the cell. Locally, deletion
+revokes the user's tickets and tokens, closes their sessions, and retracts every
+membership fact; a credential change closes their sessions. When a peer's write
+arrives by anti-entropy, the merge-side reactor applies the same session closes
+on this node — a delete closing sessions with `bondy.user.deleted`, a credential
+change with `bondy.user.credentials_changed`.
 """.
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
@@ -244,16 +265,9 @@ end#{
 -export([add/2]).
 -export([add/3]).
 -export([add_alias/3]).
-%% Exported for the legacy-backup import translator (bondy_export): upgrades a
-%% pre-v1.1 proplist user value (or passes a current map through).
--export([from_term/1]).
 -export([add_group/3]).
 -export([add_groups/3]).
 -export([authorized_keys/1]).
-%% TODO new API
-%% -export([add_authorized_key/2]).
-%% -export([remove_authorized_key/2]).
-%% -export([is_authorized_key/2]).
 -export([change_password/3]).
 -export([change_password/4]).
 -export([close_sessions/3]).
@@ -261,6 +275,8 @@ end#{
 -export([enable/2]).
 -export([exists/2]).
 -export([fetch/2]).
+-export([from_term/1]).
+-export([import_legacy/3]).
 -export([groups/1]).
 -export([has_authorized_keys/1]).
 -export([has_password/1]).
@@ -280,8 +296,8 @@ end#{
 -export([password/1]).
 -export([remove/2]).
 -export([remove/3]).
--export([remove_all/2]).
 -export([remove_alias/3]).
+-export([remove_all/2]).
 -export([remove_group/3]).
 -export([remove_group_from_members/2]).
 -export([remove_groups/3]).
@@ -295,15 +311,34 @@ end#{
 -export([update/4]).
 -export([username/1]).
 
+%% TODO new API
+%% -export([add_authorized_key/2]).
+%% -export([remove_authorized_key/2]).
+%% -export([is_authorized_key/2]).
+
 %% =============================================================================
 %% API
 %% =============================================================================
 
+-doc """
+Returns a validated user built from `Data`. Equivalent to `new/2` with
+default options.
+""".
 -spec new(Data :: map()) -> User :: t().
 
 new(Data) ->
     new(Data, #{}).
 
+-doc """
+Returns a validated user built from `Data`.
+
+`username` is required and is casefolded. A `password` in `Data` is hashed here,
+under `Opts`' password options or the realm's, so the returned record carries
+credential material rather than a plaintext secret. Raises on invalid input.
+
+The result is not persisted, and its `groups` are a request rather than a fact
+until `add/3` reconciles them into the membership relation.
+""".
 -spec new(Data :: map(), Opts :: new_opts()) -> User :: t().
 
 new(Data, Opts) ->
@@ -398,6 +433,14 @@ resolve(#{type := ?USER_TYPE, sso_realm_uri := Uri} = User) when
 resolve(#{type := ?USER_TYPE} = User) ->
     User.
 
+-doc """
+Returns `User` with the credentials of `SSOUser` merged in — the view
+authentication uses for an SSO-backed user.
+
+The local record supplies identity and metadata, the SSO record supplies the
+password and authorized keys. Use this form when the SSO user has already been
+read; `resolve/1` reads it.
+""".
 -spec resolve(User :: t(), SSOUser :: t()) -> Resolved :: t() | no_return().
 
 resolve(LocalUser, SSOUser) ->
@@ -574,12 +617,26 @@ update(RealmUri, Username0, Data0, Opts) when is_binary(Username0) ->
 update(_, anonymous, _, _) ->
     {error, not_allowed}.
 
+-doc """
+Removes user `Arg` from `RealmUri`. Equivalent to `remove/3` with default
+options.
+""".
 -spec remove(RealmUri :: uri(), Arg :: username() | t()) ->
     ok | {error, {no_such_user, username()} | reserved_name}.
 
 remove(RealmUri, Arg) ->
     remove(RealmUri, Arg, #{}).
 
+-doc """
+Removes a user from `RealmUri` together with everything keyed by their name:
+aliases, sources, grants, group memberships, tickets and OAuth tokens.
+
+The name is left free, and a user created under it afterwards inherits none of
+this. Local sessions for the user are closed with `bondy.user.deleted`.
+
+Returns `{error, {no_such_user, Username}}` when there is no such user and
+`{error, reserved_name}` for a reserved one.
+""".
 -spec remove(uri(), username() | t(), Opts :: map()) ->
     ok | {error, {no_such_user, username()} | reserved_name}.
 
@@ -608,12 +665,7 @@ remove(RealmUri, Username0, _Opts) when is_binary(Username0) ->
         %% is added again, it doesn't pick up these grants
         ok = bondy_rbac:revoke_user(RealmUri, Username),
 
-        %% Retract every membership fact for the user, so it does not linger as
-        %% a member of any group.
-        ok = clear_memberships(RealmUri, Username),
-
-        %% We finally delete the user and fire the local delete side-effects
-        %% (formerly plum_db's on_delete callback).
+        %% Delete the user last: the cleanup above reads the record.
         ok = bondy_db:apply(Table, RealmUri, Username, clear),
         do_on_delete(RealmUri, Username)
     catch
@@ -628,8 +680,8 @@ remove(_, anonymous, _) ->
 -doc """
 Removes all users that belongs to realm `RealmUri`.
 If the option `dirty` is set to `true` this removes the user directly from
-store (triggering a broadcast to other Bondy nodes). If set to `false` (the
-default) then for each user the function remove/2 is called.
+store. If set to `false` (the default) then for each user the function remove/2
+is called.
 
 Use `dirty` with a value of `true` only when you are removing the realm
 entirely.
@@ -650,9 +702,8 @@ remove_all(RealmUri, Opts) ->
             _ =
                 case {Dirty, ?IS_USER(V)} of
                     {true, true} ->
-                        %% Realm teardown: clear the cell and mirror plum_db's
-                        %% per-delete on_delete for user records.
-                        ok = clear_memberships(RealmUri, Key),
+                        %% Realm teardown: clear the cell and fire the same
+                        %% per-user delete side-effects `remove/3` fires.
                         ok = bondy_db:apply(Table, RealmUri, Key, clear),
                         do_on_delete(RealmUri, Key);
                     {true, false} ->
@@ -672,6 +723,15 @@ remove_all(RealmUri, Opts) ->
     ),
     ok.
 
+-doc """
+Returns the user named `Username` in `RealmUri`, resolving an alias to the user
+it points at.
+
+The returned record's `groups` come from the membership relation rather than
+from the stored cell. Credentials are the local record's; for an SSO-backed user
+they live in the SSO realm, so use `resolve/2` when the authentication view is
+what is wanted.
+""".
 -spec lookup(RealmUri :: uri(), Username :: username_int()) ->
     {ok, t()} | {error, not_found}.
 
@@ -747,11 +807,16 @@ lookup(RealmUri, SSORealmUri, UsernameOrAlias) ->
             resolve_alias(RealmUri, SSORealmUri, UsernameOrAlias)
     end.
 
+-doc "Whether `RealmUri` has a user or alias named `Username`.".
 -spec exists(RealmUri :: uri(), Username :: username_int()) -> boolean().
 
 exists(RealmUri, Username0) ->
     resulto:is_ok(lookup(RealmUri, Username0)).
 
+-doc """
+Returns the user named `Username` in `RealmUri`, raising `{no_such_user, _}`
+when there is none. The raising counterpart of `lookup/2`.
+""".
 -spec fetch(uri(), username_int()) -> t() | no_return().
 
 fetch(RealmUri, Username) ->
@@ -797,11 +862,21 @@ token_version(RealmUri, Username0) ->
             end
     end.
 
+-doc "Returns every user of `RealmUri`. Equivalent to `list/2` with no limit.".
 -spec list(uri()) -> list(t()).
 
 list(RealmUri) ->
     list(RealmUri, #{}).
 
+-doc """
+Returns a page of the users of `RealmUri`, together with their group
+memberships.
+
+Without a `limit` the whole realm is returned, streamed rather than materialised
+as raw cells, and memberships are joined from one scan of the realm's membership
+band. With a `limit`, returns `{Users, Continuation}`; pass the continuation
+back as `cursor` for the next page.
+""".
 -spec list(RealmUri :: uri(), Opts :: list_opts()) ->
     [t()]
     | {[t()], Continuation :: bondy_relation:cursor() | undefined}.
@@ -886,6 +961,10 @@ list_members(RealmUri, Groupname, Opts) ->
             {Users, undefined}
     end.
 
+-doc """
+Sets the password of `Username` in `RealmUri` without requiring the current one.
+The administrative form; `change_password/4` is the user-initiated one.
+""".
 -spec change_password(
     RealmUri :: uri(),
     Username :: username(),
@@ -895,6 +974,14 @@ list_members(RealmUri, Groupname, Opts) ->
 change_password(RealmUri, Username, New) ->
     change_password(RealmUri, Username, New, undefined).
 
+-doc """
+Replaces the password of `Username` in `RealmUri`, requiring `Old` to match the
+current one. Pass `undefined` for `Old` to set it administratively.
+
+For an SSO-backed user the password lives in the SSO realm and is changed there.
+The change closes the user's other sessions and moves their `token_version/2`
+forward, so tokens issued under the old password stop authenticating.
+""".
 -spec change_password(
     RealmUri :: uri(),
     Username :: username(),
@@ -977,6 +1064,13 @@ add_alias(RealmUri, #{type := ?USER_TYPE} = User, Alias) ->
 add_alias(RealmUri, Username, Alias) ->
     add_alias(RealmUri, fetch(RealmUri, Username), Alias).
 
+-doc """
+Removes `Alias` from `User`, so the name no longer resolves to them and is free
+for anyone else.
+
+For an SSO-backed user the alias belongs to the SSO realm and is removed there.
+Removing an alias the user does not hold succeeds.
+""".
 -spec remove_alias(
     RealmUri :: uri(), User :: t() | username(), Alias :: username()
 ) ->
@@ -1126,6 +1220,14 @@ unknown(RealmUri, Usernames) ->
         Set
     ).
 
+-doc """
+Returns `Term` in the form usernames are stored in: casefolded, with the
+reserved name `anonymous` as an atom whichever way it was written.
+
+Every read and write path folds names this way, so a caller supplying a name
+from outside Bondy should fold it here first. Raises `badarg` for anything that
+is not a binary or the reserved name.
+""".
 -spec normalise_username(Term :: username()) -> username() | no_return().
 
 normalise_username(anonymous) ->
@@ -1514,8 +1616,8 @@ do_fold_members(RealmUri, Group, After, Fun, Acc) ->
     end.
 
 %% @private
-%% Reads a cell, returning the bare value or `undefined` when the cell is absent
-%% or cleared — mirroring the old `plum_db:get/2` contract.
+%% Reads a cell, returning the bare value, or `undefined` when the cell is
+%% absent or cleared — the two are indistinguishable to callers by design.
 do_get(RealmUri, Key) ->
     case bondy_db:read(table(), RealmUri, Key) of
         {ok, {Value, _Hlc}} -> Value;
@@ -1525,12 +1627,10 @@ do_get(RealmUri, Key) ->
 %% =============================================================================
 %% PRIVATE: LIFECYCLE SIDE-EFFECTS
 %% =============================================================================
-%% These were the plum_db `on_update` / `on_delete` prefix callbacks: plum_db
-%% fired them after every LOCAL write/delete. With bondy_db they are invoked
-%% inline from the write / delete chokepoints (`store/3`, `remove/3`,
-%% `remove_all/2`). The REMOTE `on_merge` side-effect — closing local sessions
-%% when a peer's AAE merge shows a delete or credential change — is deferred to
-%% the `db.aae` phase, where it becomes a `bondy_db` publish/reactor seam.
+%% The user lifecycle side-effects, invoked inline from the write and delete
+%% chokepoints (`store/3`, `remove/3`, `remove_all/2`). A peer's merged write
+%% does not reach here: the equivalent session closes are applied by the
+%% merge-side reactor.
 
 %% @private
 -spec do_on_update(uri(), username_int(), IsCreate :: boolean()) -> ok.
@@ -1553,11 +1653,21 @@ do_on_update(RealmUri, Username, false) ->
 -spec do_on_delete(uri(), username_int()) -> ok.
 
 do_on_delete(RealmUri, Username) ->
-    %% 1. Revoke all auth tickets (OAUTH2 tokens: TODO).
+    %% 1. Revoke all auth tickets.
     _ = revoke_tickets(RealmUri, Username),
-    %% 2. Close all local sessions.
+    %% 2. Revoke the user's OAuth tokens. A token cell is a second cell hanging
+    %% off the user record, in another table, and nothing else drops it on this
+    %% path — `bondy_oauth_token:refresh/2` names this function as what removes
+    %% them. Left behind, the set is storage no one can ever redeem, and a user
+    %% re-created under the same name adopts it. One cell, one clear, so it is
+    %% synchronous unlike the ticket scan.
+    ok = bondy_oauth_token:revoke_all(RealmUri, Username),
+    %% 3. Close all local sessions.
     ok = close_sessions(RealmUri, Username, ?BONDY_USER_DELETED),
-    %% 3. Publish the event.
+    %% 4. Retract every membership fact for the user, so it does not linger as
+    %% a member of any group.
+    ok = clear_memberships(RealmUri, Username),
+    %% 5. Publish the event.
     ok = bondy_telemetry:user_event(deleted, RealmUri, Username),
     bondy_event_manager:notify({[bondy, user, deleted], RealmUri, Username}),
     ok.
@@ -1782,6 +1892,39 @@ update_groups(
 update_groups(RealmUri, Username, Groupnames, Fun) when is_binary(Username) ->
     update_groups(RealmUri, fetch(RealmUri, Username), Groupnames, Fun).
 
+-doc """
+Persists one cell of a legacy `security_users` backup — one written before the
+current storage layout — keyed by `Key` within `RealmUri`.
+
+The table holds two kinds of cell, and this is the one place that decides which
+a value is, so a restore splits a record exactly as the live write path does.
+
+**An alias-pointer cell** (`#{type => alias, username => Target}`) is written
+verbatim under its own key. It names its target in the same field a user record
+names itself, so the `type` decides, never the presence of `username`.
+
+**A user record** is upgraded to the current shape and routed through the
+declarative write path. A legacy record carries its groups inline, and `groups`
+is not a key of the user cell: they belong in the membership relation, which is
+where authorization reads them. Declarative is what a restore is — overwrite the
+record, reconcile the membership to what the backup declares, and fire no
+runtime lifecycle side-effects.
+
+Not routed through `add/3`, which re-derives credentials and requires every
+named group to already exist. A restore must accept a record whose password
+shape it cannot re-derive and whose groups have not been read out of the backup
+yet.
+""".
+-spec import_legacy(RealmUri :: uri(), Key :: binary(), Value :: term()) ->
+    ok | no_return().
+
+import_legacy(RealmUri, Alias, Entry) when ?IS_ALIAS(Entry) ->
+    bondy_db:apply(table(), RealmUri, Alias, {set, Entry});
+import_legacy(RealmUri, Username, Value) ->
+    User = from_term({Username, Value}),
+    {ok, _} = store(RealmUri, User, #{declarative => true}),
+    ok.
+
 %% @private
 %% `groups` is NOT persisted in the user cell — membership is the authoritative
 %% cell-per-fact `security_group_members` relation. The persisted value is the
@@ -1824,8 +1967,8 @@ store(RealmUri, #{username := Username} = User, #{declarative := true}) ->
     end,
     {ok, User};
 store(RealmUri, #{username := Username} = User, _) ->
-    %% Capture the previous value to tell a create from an update, the way
-    %% plum_db passed `Old` to the on_update callback.
+    %% The previous value distinguishes a create from an update, which is the
+    %% only difference between the two lifecycle events.
     Old = do_get(RealmUri, Username),
     _ = reconcile_membership(RealmUri, Username, maps:get(groups, User, [])),
     ok = durable_apply(table(), RealmUri, Username, {set, strip_groups(User)}),
@@ -2009,9 +2152,9 @@ do_remove_alias(RealmUri, User0, Alias0) ->
 
 %% @private
 %% The alias index entry is a separate cell keyed by the alias. Writing it does
-%% NOT fire user lifecycle side-effects (it is not a user record). plum_db's
-%% modifier-fn read-modify-write becomes an explicit read + conditional set; the
-%% multi-sibling guard is unreachable under lww (a read yields a single value).
+%% NOT fire the user lifecycle side-effects: an alias cell is not a user record.
+%% The read before the write is what makes the name collision detectable — a
+%% username or a different alias already occupying the key is refused.
 store_alias(RealmUri, Alias, AliasEntry) ->
     Table = table(),
     case bondy_db:read(Table, RealmUri, Alias) of

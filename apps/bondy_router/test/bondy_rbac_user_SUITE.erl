@@ -34,7 +34,8 @@ all() ->
         group_deletion_cleans_members,
         membership_is_relation_authoritative,
         token_version,
-        declarative_config_membership
+        declarative_config_membership,
+        recreated_user_inherits_nothing
     ].
 
 init_per_suite(Config) ->
@@ -630,6 +631,83 @@ declarative_config_membership(_) ->
     ?assertEqual([], user_groups(?REALM1_URI, U)),
     {ok, V2} = bondy_rbac_user:token_version(?REALM1_URI, U),
     ?assert(V2 > V1).
+
+recreated_user_inherits_nothing(_) ->
+    %% A username is not an identity — it is a key that can be handed to someone
+    %% else. Everything keyed by it lives in a table of its own (memberships,
+    %% grants, sources, alias pointers, tokens), so a delete that forgets one of
+    %% them silently grants the next holder of the name whatever it left behind.
+    Uri = <<"com.example.user.recreate">>,
+    User = <<"recreated">>,
+    Alias = <<"recreated_alias">>,
+    Group = <<"recreate_group">>,
+    Resource = <<"com.recreate.">>,
+
+    _ = bondy_realm:create(#{
+        uri => Uri,
+        security_enabled => true,
+        authmethods => [?PASSWORD_AUTH],
+        groups => [#{name => Group}],
+        users => [
+            #{username => User, password => User, groups => [Group]}
+        ],
+        grants => [
+            #{
+                permissions => [<<"wamp.call">>],
+                uri => Resource,
+                match => <<"prefix">>,
+                roles => [Group]
+            }
+        ]
+    }),
+
+    %% A user-specific grant, a source and an alias — the state that is keyed by
+    %% the username rather than reached through the group.
+    ok = bondy_rbac:grant(Uri, #{
+        <<"permissions">> => [<<"wamp.register">>],
+        <<"uri">> => Resource,
+        <<"match">> => <<"prefix">>,
+        <<"roles">> => [User]
+    }),
+    {ok, _} = bondy_rbac_source:add(Uri, #{
+        <<"usernames">> => [User],
+        <<"authmethod">> => ?PASSWORD_AUTH,
+        <<"cidr">> => <<"0.0.0.0/0">>,
+        <<"meta">> => #{}
+    }),
+    ok = bondy_rbac_user:add_alias(Uri, User, Alias),
+
+    %% Everything is in place before the delete.
+    C0 = bondy_rbac:get_context(Uri, User),
+    ?assertEqual(ok, bondy_rbac:authorize(<<"wamp.call">>, Resource, C0)),
+    ?assertEqual(ok, bondy_rbac:authorize(<<"wamp.register">>, Resource, C0)),
+    ?assertEqual([Group], user_groups(Uri, User)),
+    ?assertNotEqual([], bondy_rbac_source:match(Uri, User)),
+    ?assertMatch({ok, #{username := User}}, bondy_rbac_user:lookup(Uri, Alias)),
+
+    ok = bondy_rbac_user:remove(Uri, User),
+    ?assertEqual({error, not_found}, bondy_rbac_user:lookup(Uri, User)),
+
+    %% Re-create the name. The group still exists and still holds its grant, so
+    %% anything the new user inherits came from the old one's leftovers — the
+    %% new user declares no groups.
+    ok = declarative_add(Uri, User, []),
+
+    ?assertEqual([], user_groups(Uri, User)),
+
+    C1 = bondy_rbac:get_context(Uri, User),
+    ?assertError(
+        {not_authorized, _},
+        bondy_rbac:authorize(<<"wamp.call">>, Resource, C1),
+        "the group grant must not be reachable without the membership"
+    ),
+    ?assertError(
+        {not_authorized, _},
+        bondy_rbac:authorize(<<"wamp.register">>, Resource, C1),
+        "the deleted user's own grant must not survive its user"
+    ),
+    ?assertEqual([], bondy_rbac_source:match(Uri, User)),
+    ?assertEqual({error, not_found}, bondy_rbac_user:lookup(Uri, Alias)).
 
 %% =============================================================================
 %% Member-test helpers
