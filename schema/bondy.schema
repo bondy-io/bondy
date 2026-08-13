@@ -812,7 +812,7 @@ end}.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "db.leveled.waste_retention_period", "bondy_db.leveled_waste_retention_period", [
-  {datatype, [{duration, s}, {atom, off}]},
+  {datatype, [{atom, off}, {duration, s}]},
   {default, off}
 ]}.
 
@@ -823,7 +823,7 @@ end}.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "db.leveled.max_run_length", "bondy_db.leveled_max_run_length", [
-  {datatype, [integer, {atom, default}]},
+  {datatype, [{atom, default}, integer]},
   {default, default}
 ]}.
 
