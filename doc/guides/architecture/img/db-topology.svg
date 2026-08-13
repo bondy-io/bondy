@@ -1,0 +1,173 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 780" font-family="Inter, ui-sans-serif, system-ui, sans-serif">
+  <defs>
+    <marker id="t-ars" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--sp,#14705f)"/>
+    </marker>
+    <marker id="t-arm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--mu,#6b6862)"/>
+    </marker>
+  </defs>
+  <style>
+    /* Self-sufficient palette. A plate embedded as an image renders in its own
+       document, so the host page's custom properties cannot reach it — these
+       are the values that apply standalone, in either theme. When the plate is
+       inlined into a page instead, this block is dropped and the page's own
+       tokens drive the same var() references. */
+    :root{--ik:#0b0b0c;--pa:#f1efec;--mu:#6b6862;--sp:#14705f;--ru:#d9d5cf}
+    @media (prefers-color-scheme:dark){
+      :root{--ik:#eeece8;--pa:#121415;--mu:#9a968f;--sp:#5fd6b4;--ru:#2c3032}
+    }
+
+    .ink{fill:var(--ik,#0b0b0c)} .mu{fill:var(--mu,#6b6862)} .sp{fill:var(--sp,#14705f)}
+    .fill{fill:var(--pa,#f1efec); stroke:var(--ik,#0b0b0c); stroke-width:1.3}
+    .lit{fill:var(--sp,#14705f); fill-opacity:.30; stroke:var(--sp,#14705f); stroke-width:1.6}
+    .axis{stroke:var(--mu,#6b6862); stroke-width:1}
+    .cfg{stroke:var(--sp,#14705f); stroke-width:1.6; stroke-dasharray:5 4; fill:none}
+    .cfgbx{fill:var(--sp,#14705f); fill-opacity:.10; stroke:var(--sp,#14705f); stroke-width:1}
+    .ts{font-size:10.5px} .t{font-size:12px} .tb{font-size:13.5px; font-weight:600}
+    .tt{font-size:11px; font-family:'JetBrains Mono',ui-monospace,monospace}
+    .tk{font-size:10.5px; font-family:'JetBrains Mono',ui-monospace,monospace; font-weight:600}
+  </style>
+
+  <rect width="100%" height="100%" fill="var(--pa,#f1efec)"/>
+
+
+  <text class="tb ink" x="40" y="34">Catalogue &amp; topology — where one subject's records land</text>
+  <text class="ts mu"  x="40" y="52">The strategy sets the write-atomicity grain: things that share a shard are written in one atomic batch, on one causal log.</text>
+
+  <text class="ts mu" x="40" y="88">One subject in one realm</text>
+  <text class="ts mu" x="486" y="88">The 16 shards of <tspan class="tt">main</tspan> — lit where that subject's records land</text>
+  <rect class="cfgbx" x="486" y="96" width="330" height="20" rx="4"/>
+  <text class="tk sp" x="494" y="110">db.main.shard_count = 16 · db.registry.shard_count = 16</text>
+  <rect class="cfgbx" x="40" y="96" width="420" height="20" rx="4"/>
+  <text class="tk sp" x="48" y="110">db.main.partition_strategy = aggregate | realm | entity</text>
+
+  <!-- ============ aggregate ============ -->
+  <text class="t ink" x="40" y="164">aggregate</text>
+  <text class="ts sp" x="40" y="179">default</text>
+  <text class="tt mu" x="40" y="200">hash(realm, aggregate_root)</text>
+    <rect class="fill" x="150" y="150" width="78" height="22"/>
+    <text class="ts ink" x="189" y="165" text-anchor="middle">record</text>
+    <rect class="fill" x="232" y="150" width="78" height="22"/>
+    <text class="ts ink" x="271" y="165" text-anchor="middle">grants</text>
+    <rect class="fill" x="314" y="150" width="78" height="22"/>
+    <text class="ts ink" x="353" y="165" text-anchor="middle">members</text>
+    <rect class="fill" x="486.0" y="150" width="21" height="24"/>
+    <rect class="fill" x="508.6" y="150" width="21" height="24"/>
+    <rect class="fill" x="531.2" y="150" width="21" height="24"/>
+    <rect class="fill" x="553.8" y="150" width="21" height="24"/>
+    <rect class="fill" x="576.4" y="150" width="21" height="24"/>
+    <rect class="fill" x="599.0" y="150" width="21" height="24"/>
+    <rect class="lit" x="621.6" y="150" width="21" height="24"/>
+    <rect class="fill" x="644.2" y="150" width="21" height="24"/>
+    <rect class="fill" x="666.8" y="150" width="21" height="24"/>
+    <rect class="fill" x="689.4" y="150" width="21" height="24"/>
+    <rect class="fill" x="712.0" y="150" width="21" height="24"/>
+    <rect class="fill" x="734.6" y="150" width="21" height="24"/>
+    <rect class="fill" x="757.2" y="150" width="21" height="24"/>
+    <rect class="fill" x="779.8" y="150" width="21" height="24"/>
+    <rect class="fill" x="802.4" y="150" width="21" height="24"/>
+    <rect class="fill" x="825.0" y="150" width="21" height="24"/>
+  <path d="M189 172 V 180 H 353 V 172 M271 180 V 188"
+        fill="none" stroke="var(--sp,#14705f)" stroke-width="1.4"/>
+  <path d="M271 188 C 420 188, 430 162, 617.6 162"
+        fill="none" stroke="var(--sp,#14705f)" stroke-width="1.6" marker-end="url(#t-ars)"/>
+  <text class="ts sp" x="486" y="196">one shard — the three are written as one atomic batch</text>
+  <text class="ts mu" x="486" y="210">A different subject hashes to a different shard, so a single realm still uses every shard.</text>
+  <text class="ts mu" x="486" y="224">Realm-wide listings scatter-gather.</text>
+
+  <!-- ============ realm ============ -->
+  <line x1="40" y1="248" x2="920" y2="248" stroke="var(--ru,#d9d5cf)" stroke-width="1"/>
+  <text class="t ink" x="40" y="290">realm</text>
+  <text class="tt mu" x="40" y="326">hash(realm-prefix, depth)</text>
+    <rect class="fill" x="150" y="276" width="78" height="22"/>
+    <text class="ts ink" x="189" y="291" text-anchor="middle">record</text>
+    <rect class="fill" x="232" y="276" width="78" height="22"/>
+    <text class="ts ink" x="271" y="291" text-anchor="middle">grants</text>
+    <rect class="fill" x="314" y="276" width="78" height="22"/>
+    <text class="ts ink" x="353" y="291" text-anchor="middle">members</text>
+    <rect class="fill" x="486.0" y="276" width="21" height="24"/>
+    <rect class="fill" x="508.6" y="276" width="21" height="24"/>
+    <rect class="fill" x="531.2" y="276" width="21" height="24"/>
+    <rect class="fill" x="553.8" y="276" width="21" height="24"/>
+    <rect class="fill" x="576.4" y="276" width="21" height="24"/>
+    <rect class="fill" x="599.0" y="276" width="21" height="24"/>
+    <rect class="fill" x="621.6" y="276" width="21" height="24"/>
+    <rect class="fill" x="644.2" y="276" width="21" height="24"/>
+    <rect class="fill" x="666.8" y="276" width="21" height="24"/>
+    <rect class="lit" x="689.4" y="276" width="21" height="24"/>
+    <rect class="fill" x="712.0" y="276" width="21" height="24"/>
+    <rect class="fill" x="734.6" y="276" width="21" height="24"/>
+    <rect class="fill" x="757.2" y="276" width="21" height="24"/>
+    <rect class="fill" x="779.8" y="276" width="21" height="24"/>
+    <rect class="fill" x="802.4" y="276" width="21" height="24"/>
+    <rect class="fill" x="825.0" y="276" width="21" height="24"/>
+  <path d="M189 298 V 306 H 353 V 298 M271 306 V 314"
+        fill="none" stroke="var(--sp,#14705f)" stroke-width="1.4"/>
+  <path d="M271 314 C 420 314, 430 288, 685.4 288"
+        fill="none" stroke="var(--sp,#14705f)" stroke-width="1.6" marker-end="url(#t-ars)"/>
+  <text class="ts ink" x="486" y="322">one shard — and so is every other subject in the realm</text>
+  <text class="ts mu" x="486" y="336">Single-shard realm scans, but the whole realm collapses onto one shard.</text>
+  <text class="ts mu" x="486" y="350">Many-small-realm fleets only.</text>
+
+  <!-- ============ entity ============ -->
+  <line x1="40" y1="374" x2="920" y2="374" stroke="var(--ru,#d9d5cf)" stroke-width="1"/>
+  <text class="t ink" x="40" y="416">entity</text>
+  <text class="tt mu" x="40" y="452">hash(entity_type, key)</text>
+    <rect class="fill" x="150" y="402" width="78" height="22"/>
+    <text class="ts ink" x="189" y="417" text-anchor="middle">record</text>
+    <rect class="fill" x="232" y="402" width="78" height="22"/>
+    <text class="ts ink" x="271" y="417" text-anchor="middle">grants</text>
+    <rect class="fill" x="314" y="402" width="78" height="22"/>
+    <text class="ts ink" x="353" y="417" text-anchor="middle">members</text>
+    <rect class="fill" x="486.0" y="402" width="21" height="24"/>
+    <rect class="fill" x="508.6" y="402" width="21" height="24"/>
+    <rect class="lit" x="531.2" y="402" width="21" height="24"/>
+    <rect class="fill" x="553.8" y="402" width="21" height="24"/>
+    <rect class="fill" x="576.4" y="402" width="21" height="24"/>
+    <rect class="fill" x="599.0" y="402" width="21" height="24"/>
+    <rect class="fill" x="621.6" y="402" width="21" height="24"/>
+    <rect class="lit" x="644.2" y="402" width="21" height="24"/>
+    <rect class="fill" x="666.8" y="402" width="21" height="24"/>
+    <rect class="fill" x="689.4" y="402" width="21" height="24"/>
+    <rect class="fill" x="712.0" y="402" width="21" height="24"/>
+    <rect class="fill" x="734.6" y="402" width="21" height="24"/>
+    <rect class="lit" x="757.2" y="402" width="21" height="24"/>
+    <rect class="fill" x="779.8" y="402" width="21" height="24"/>
+    <rect class="fill" x="802.4" y="402" width="21" height="24"/>
+    <rect class="fill" x="825.0" y="402" width="21" height="24"/>
+  <path d="M189 424 V 434 C 269 434, 430 414, 527.2 414"
+        fill="none" stroke="var(--mu,#6b6862)" stroke-width="1.5" marker-end="url(#t-arm)"/>
+  <path d="M271 424 V 434 C 351 434, 430 414, 640.2 414"
+        fill="none" stroke="var(--mu,#6b6862)" stroke-width="1.5" marker-end="url(#t-arm)"/>
+  <path d="M353 424 V 434 C 433 434, 430 414, 753.2 414"
+        fill="none" stroke="var(--mu,#6b6862)" stroke-width="1.5" marker-end="url(#t-arm)"/>
+  <text class="ts ink" x="486" y="448">three shards — maximum write parallelism, no shared batch</text>
+  <text class="ts mu" x="486" y="462">NO cross-entity atomicity: the three records can no longer be written as one batch.</text>
+
+  <!-- ============ prefix depth ============ -->
+  <line x1="40" y1="490" x2="920" y2="490" stroke="var(--ru,#d9d5cf)" stroke-width="1"/>
+  <text class="tb ink" x="40" y="522">Prefix depth — read only when the strategy is <tspan class="tt">realm</tspan></text>
+  <text class="tt ink" x="150" y="562">org . acme . sso</text>
+  <text class="tt ink" x="150" y="586">org . acme . app</text>
+  <rect x="146" y="546" width="36" height="48" fill="none" stroke="var(--mu,#6b6862)" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <text class="ts mu" x="164" y="612" text-anchor="middle">depth 1</text>
+  <text class="ts mu" x="164" y="626" text-anchor="middle">separate shards</text>
+  <rect x="142" y="542" width="92" height="56" fill="none" stroke="var(--sp,#14705f)" stroke-width="1.6"/>
+  <text class="ts sp" x="252" y="566">depth 2 — the two realms share a shard</text>
+  <text class="ts mu" x="252" y="582">The Spanner directory co-location pattern.</text>
+  <rect class="cfgbx" x="560" y="552" width="270" height="20" rx="4"/>
+  <text class="tk sp" x="568" y="566">db.main.realm_prefix_depth = 1</text>
+
+  <!-- ============ the manifest ============ -->
+  <line x1="40" y1="648" x2="920" y2="648" stroke="var(--ru,#d9d5cf)" stroke-width="1"/>
+  <text class="tb ink" x="40" y="680">Frozen at first provision</text>
+  <rect class="fill" x="150" y="694" width="170" height="34"/>
+  <text class="tt ink" x="235" y="715" text-anchor="middle">topology manifest</text>
+  <text class="ts mu" x="336" y="708">strategy · shard_count · realm_prefix_depth · per-table shard keys</text>
+  <text class="ts mu" x="336" y="722">On-disk data is keyed under it, so a changed config cannot apply without a re-key.</text>
+  <rect class="cfgbx" x="150" y="740" width="330" height="20" rx="4"/>
+  <text class="tk sp" x="158" y="754">db.main.on_topology_mismatch = warn | stop</text>
+  <text class="ts mu" x="494" y="754">warn keeps running on the on-disk topology; stop refuses to boot.</text>
+  <text class="ts mu" x="40" y="774">Every option above is a bondy.conf key; values shown are the defaults. registry is ephemeral — no manifest, so it cannot mismatch.</text>
+</svg>

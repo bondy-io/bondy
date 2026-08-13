@@ -82,6 +82,83 @@ order-independent CRDTs. Across instances there is no ordering — a batch is
 atomic only within one shard, which is why the facade co-shards entities
 that must commit together (the aggregate-root declaration).
 
+## Variability guide
+
+Configuration does not change the structure above; it changes what each
+element costs and how much of it may run at once. Each plate marks the
+options on the geometry they govern, with the values `bondy.conf` uses when
+you set nothing.
+
+### Durability of the append
+
+`db.wal.fsync_mode` decides whether `append/2` returns before or after the
+platter has the frame, which is the difference between the head position
+and the durable position. `per_write` collapses the two. `batched` opens a
+window bounded by whichever of `db.wal.batched_fsync_bytes` or
+`db.wal.batched_fsync_interval` fires first, and callers that need a
+specific position on disk wait for it through `await_durable/3`.
+`db.wal.max_segment_bytes` sets where the head segment rotates — a soft
+target, since rotation is checked between appends so no batch spans a
+boundary.
+
+![WAL segment geometry: the header, frames, the rotation threshold, and the
+window between head and durable position under each fsync mode](img/db-wal.svg)
+
+### Sealing the pack
+
+`db.pack_seal_mode` decides whether the seal runs on the apply path.
+`async`, the default, keeps it off that path; `sync` puts one long datasync
+in front of the pipeline. `db.pack_auto_seal_bytes` sets how much
+accumulates first, and is deliberately low so a seal rewrites the pack in
+short passes.
+
+![MST pack sealing: incoming.pack filling to the seal threshold, and the
+apply-latency trace under each seal mode](img/db-pack.svg)
+
+### Detecting a stalled drain
+
+`db.drain.stall_alarm` is how long the applier may process frames without
+committing past the highest position it has ever committed before it raises
+`{bondy_oplog_drain_stalled, InstanceId}`. Progress is measured against
+that high-water mark, so re-reading ground already committed does not count.
+`0` disables the detector.
+
+![Applier drain: consumer position as a ratchet, with the alarm window
+measured across a span that makes no forward progress](img/db-drain.svg)
+
+### Sizing the projection
+
+Twenty-two `db.leveled.*` options size the two paths a write takes into the
+projection. The ledger path is bounded by `db.leveled.cache_size` and its
+`db.leveled.cache_multiple` ceiling, past which every PUT pauses; the
+journal path rolls on `db.leveled.max_journal_size` or
+`db.leveled.max_journal_objects`. `db.leveled.sync_strategy` is `none` on
+purpose: the write is already durable in the log before the fold reaches
+leveled, and the projection rebuilds from it.
+
+![Leveled write paths: the ledger through cache, penciller and LSM levels;
+the journal as rolling CDB files](img/db-leveled.svg)
+
+Compaction scores journal files and either compacts one alone or sweeps
+several into a run, governed by
+`db.leveled.singlefile_compaction_percentage`,
+`db.leveled.maxrunlength_compaction_percentage` and
+`db.leveled.max_run_length`. `db.leveled.compression_point` decides whether
+the CPU goes on the write path or at compaction.
+
+![Leveled compaction: journal files as a score histogram against the
+single-file and full-run eligibility lines, and where compression runs](img/db-leveled-compaction.svg)
+
+### Bounding an index rebuild
+
+`db.primary_scan_limit` caps the primary-cell rescan behind an index
+rebuild. A scan that fills the cap returns a potentially incomplete result
+and logs a warning naming the key — the caller is not told. The correct
+value follows from realm size and nothing else.
+
+![The bounded primary scan: one realm inside the cap and one that fills
+it](img/db-scan-limit.svg)
+
 ## Rationale
 
 Acknowledging at the log rather than the fold makes write latency the price

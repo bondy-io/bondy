@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" font-family="Inter, ui-sans-serif, system-ui, sans-serif">
+  <defs>
+    <marker id="f-arm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--mu,#6b6862)"/>
+    </marker>
+  </defs>
+  <style>
+    /* Self-sufficient palette. A plate embedded as an image renders in its own
+       document, so the host page's custom properties cannot reach it — these
+       are the values that apply standalone, in either theme. When the plate is
+       inlined into a page instead, this block is dropped and the page's own
+       tokens drive the same var() references. */
+    :root{--ik:#0b0b0c;--pa:#f1efec;--mu:#6b6862;--sp:#14705f;--ru:#d9d5cf}
+    @media (prefers-color-scheme:dark){
+      :root{--ik:#eeece8;--pa:#121415;--mu:#9a968f;--sp:#5fd6b4;--ru:#2c3032}
+    }
+
+    .ink{fill:var(--ik,#0b0b0c)} .mu{fill:var(--mu,#6b6862)} .sp{fill:var(--sp,#14705f)}
+    .fill{fill:var(--pa,#f1efec); stroke:var(--ik,#0b0b0c); stroke-width:1.4}
+    .axis{stroke:var(--mu,#6b6862); stroke-width:1}
+    .cfg{stroke:var(--sp,#14705f); stroke-width:1.6; stroke-dasharray:5 4; fill:none}
+    .cfgbx{fill:var(--sp,#14705f); fill-opacity:.10; stroke:var(--sp,#14705f); stroke-width:1}
+    .ts{font-size:10.5px} .t{font-size:12px} .tb{font-size:13.5px; font-weight:600}
+    .tk{font-size:10.5px; font-family:'JetBrains Mono',ui-monospace,monospace; font-weight:600}
+  </style>
+
+  <rect width="100%" height="100%" fill="var(--pa,#f1efec)"/>
+
+
+  <text class="tb ink" x="40" y="34">Anti-entropy — live-sync cadence and the auth fence</text>
+  <text class="ts mu"  x="40" y="52">A converged instance polls less often; a stale one stops authenticating.</text>
+
+  <!-- ===== Panel A: adaptive cadence ===== -->
+  <text class="t ink" x="40" y="102">live-sync</text>
+  <text class="t ink" x="40" y="118">cadence</text>
+  <line class="axis" x1="200" y1="130" x2="880" y2="130"/>
+  <g stroke="var(--sp,#14705f)" stroke-width="2.2">
+    <line x1="220" y1="118" x2="220" y2="142"/><line x1="248" y1="118" x2="248" y2="142"/>
+    <line x1="276" y1="118" x2="276" y2="142"/><line x1="304" y1="118" x2="304" y2="142"/>
+    <line x1="340" y1="118" x2="340" y2="142"/><line x1="388" y1="118" x2="388" y2="142"/>
+    <line x1="452" y1="118" x2="452" y2="142"/><line x1="536" y1="118" x2="536" y2="142"/>
+    <line x1="640" y1="118" x2="640" y2="142"/><line x1="760" y1="118" x2="760" y2="142"/>
+    <line x1="788" y1="118" x2="788" y2="142"/><line x1="816" y1="118" x2="816" y2="142"/>
+    <line x1="844" y1="118" x2="844" y2="142"/>
+  </g>
+  <line class="axis" x1="220" y1="98" x2="248" y2="98" marker-start="url(#f-arm)" marker-end="url(#f-arm)"/>
+  <text class="ts mu" x="234" y="92" text-anchor="middle">500ms</text>
+  <line class="axis" x1="640" y1="98" x2="760" y2="98" marker-start="url(#f-arm)" marker-end="url(#f-arm)"/>
+  <text class="ts mu" x="700" y="92" text-anchor="middle">5s</text>
+  <text class="ts ink" x="270" y="164" text-anchor="middle">root moving</text>
+  <text class="ts mu"  x="270" y="178" text-anchor="middle">base cadence</text>
+  <text class="ts ink" x="530" y="164" text-anchor="middle">converged — backing off</text>
+  <text class="ts ink" x="806" y="164" text-anchor="middle">root moves again</text>
+  <text class="ts mu"  x="806" y="178" text-anchor="middle">back to base</text>
+  <rect class="cfgbx" x="200" y="192" width="180" height="20" rx="4"/>
+  <text class="tk sp" x="208" y="206">db.aae.live_sync = on</text>
+  <rect class="cfgbx" x="392" y="192" width="216" height="20" rx="4"/>
+  <text class="tk sp" x="400" y="206">db.aae.live_sync.max = 5s</text>
+  <text class="ts mu" x="620" y="206">base cadence follows db.aae.interval</text>
+
+  <!-- ===== Panel B: the fence ===== -->
+  <line x1="40" y1="240" x2="920" y2="240" stroke="var(--ru,#d9d5cf)" stroke-width="1"/>
+  <text class="tb ink" x="40" y="272">The auth fence — freshness of this node's security view</text>
+
+  <line class="axis" x1="200" y1="330" x2="880" y2="330"/>
+  <rect x="200" y="306" width="420" height="24" fill="var(--sp,#14705f)" fill-opacity=".14" stroke="none"/>
+  <rect x="620" y="306" width="260" height="24" fill="var(--ik,#0b0b0c)" fill-opacity=".10" stroke="none"/>
+  <line class="cfg" x1="620" y1="288" x2="620" y2="348"/>
+  <text class="ts mu" x="200" y="348">0</text>
+  <text class="ts mu" x="620" y="364" text-anchor="middle">60s</text>
+  <text class="ts mu" x="880" y="348" text-anchor="end">staleness of users / grants tables →</text>
+  <text class="ts sp"  x="410" y="322" text-anchor="middle">authentication proceeds</text>
+  <text class="ts ink" x="750" y="322" text-anchor="middle">ALL new authentication refused</text>
+  <rect class="cfgbx" x="628" y="278" width="228" height="20" rx="4"/>
+  <text class="tk sp" x="636" y="292">db.aae.fence.max_lag = 60s</text>
+  <text class="ts mu" x="200" y="384">temporarily_unavailable — regardless of method. Such a node must not authenticate against a view that may predate a</text>
+  <text class="ts mu" x="200" y="398">credential or permission change made elsewhere.</text>
+
+  <!-- isolation policy -->
+  <text class="t ink" x="40" y="446">isolated,</text>
+  <text class="t ink" x="40" y="462">non-solo</text>
+  <text class="t ink" x="40" y="478">minority</text>
+  <rect class="fill" x="200" y="432" width="120" height="30"/>
+  <text class="ts ink" x="260" y="452" text-anchor="middle">refuse</text>
+  <rect class="fill" x="336" y="432" width="120" height="30"/>
+  <text class="ts mu" x="396" y="452" text-anchor="middle">proceed</text>
+  <rect class="fill" x="472" y="432" width="120" height="30"/>
+  <text class="ts mu" x="532" y="452" text-anchor="middle">quorum</text>
+  <line class="cfg" x1="200" y1="428" x2="320" y2="428"/>
+  <text class="ts sp" x="260" y="422" text-anchor="middle">default</text>
+  <rect class="cfgbx" x="608" y="437" width="290" height="20" rx="4"/>
+  <text class="tk sp" x="616" y="451">db.aae.fence.on_isolation = refuse</text>
+  <text class="ts mu" x="200" y="486">The freshness signal is produced AE-side and honours this policy; the fence only reads it.</text>
+  <text class="ts mu" x="200" y="504">The whole fence is a no-op when db.aae is off — local writes are then synchronous and no cross-node staleness window exists.</text>
+  <text class="ts mu" x="40" y="528">Every option above is a bondy.conf key; values shown are the defaults.</text>
+</svg>

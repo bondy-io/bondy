@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 700" font-family="Inter, ui-sans-serif, system-ui, sans-serif">
+  <defs>
+    <marker id="l-ars" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--sp,#14705f)"/>
+    </marker>
+    <marker id="l-arm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--mu,#6b6862)"/>
+    </marker>
+  </defs>
+  <style>
+    /* Self-sufficient palette. A plate embedded as an image renders in its own
+       document, so the host page's custom properties cannot reach it — these
+       are the values that apply standalone, in either theme. When the plate is
+       inlined into a page instead, this block is dropped and the page's own
+       tokens drive the same var() references. */
+    :root{--ik:#0b0b0c;--pa:#f1efec;--mu:#6b6862;--sp:#14705f;--ru:#d9d5cf}
+    @media (prefers-color-scheme:dark){
+      :root{--ik:#eeece8;--pa:#121415;--mu:#9a968f;--sp:#5fd6b4;--ru:#2c3032}
+    }
+
+    .ink{fill:var(--ik,#0b0b0c)} .mu{fill:var(--mu,#6b6862)} .sp{fill:var(--sp,#14705f)}
+    .fill{fill:var(--pa,#f1efec); stroke:var(--ik,#0b0b0c); stroke-width:1.3}
+    .axis{stroke:var(--mu,#6b6862); stroke-width:1}
+    .cfg{stroke:var(--sp,#14705f); stroke-width:1.6; stroke-dasharray:5 4; fill:none}
+    .cfgbx{fill:var(--sp,#14705f); fill-opacity:.10; stroke:var(--sp,#14705f); stroke-width:1}
+    .fixbx{fill:var(--mu,#6b6862); fill-opacity:.10; stroke:var(--mu,#6b6862); stroke-width:1; stroke-dasharray:3 3}
+    .ts{font-size:10.5px} .t{font-size:12px} .tb{font-size:13.5px; font-weight:600}
+    .tt{font-size:11px; font-family:'JetBrains Mono',ui-monospace,monospace}
+    .tk{font-size:10.5px; font-family:'JetBrains Mono',ui-monospace,monospace; font-weight:600}
+  </style>
+
+  <rect width="100%" height="100%" fill="var(--pa,#f1efec)"/>
+
+
+  <text class="tb ink" x="40" y="34">Projection (leveled) — the two paths a write takes</text>
+  <text class="ts mu"  x="40" y="52">The value goes to the journal; the key and metadata go to the ledger. Each option sizes one stage of one path.</text>
+
+  <rect class="fill" x="40" y="96" width="76" height="30"/>
+  <text class="tt ink" x="78" y="116" text-anchor="middle">PUT</text>
+  <path d="M118 104 L146 104" stroke="var(--sp,#14705f)" stroke-width="1.6" fill="none" marker-end="url(#l-ars)"/>
+  <path d="M118 118 L596 118" stroke="var(--mu,#6b6862)" stroke-width="1.6" fill="none" marker-end="url(#l-arm)"/>
+  <text class="ts mu" x="330" y="134">value  →</text>
+
+  <line x1="578" y1="80" x2="578" y2="546" stroke="var(--ru,#d9d5cf)" stroke-width="1"/>
+
+  <!-- ================= COLUMN A : LEDGER  (x 150 .. 560) ================= -->
+  <text class="tb ink" x="150" y="90">Ledger</text>
+
+  <rect class="fill" x="150" y="96" width="190" height="46"/>
+  <text class="tt ink" x="245" y="116" text-anchor="middle">ledger cache</text>
+  <text class="ts mu"  x="245" y="132" text-anchor="middle">2000 objects</text>
+  <rect x="346" y="96" width="96" height="46" fill="none" stroke="var(--sp,#14705f)" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <text class="ts sp" x="394" y="116" text-anchor="middle">2x ceiling</text>
+  <text class="ts sp" x="394" y="132" text-anchor="middle">PUT pauses</text>
+
+  <rect class="cfgbx" x="150" y="156" width="270" height="20" rx="4"/>
+  <text class="tk sp" x="158" y="170">db.leveled.cache_size = 2000</text>
+  <rect class="cfgbx" x="150" y="182" width="270" height="20" rx="4"/>
+  <text class="tk sp" x="158" y="196">db.leveled.cache_multiple = 2</text>
+  <text class="ts mu" x="150" y="220">Past the ceiling every PUT returns a pause — back-pressure</text>
+  <text class="ts mu" x="150" y="234">on the writer instead of unbounded memory. Leveled ignores a</text>
+  <text class="ts mu" x="150" y="248">cache_size under 100 and jitters it, so Bookies never flush together.</text>
+
+  <path d="M245 258 L245 288" stroke="var(--sp,#14705f)" stroke-width="1.6" fill="none" marker-end="url(#l-ars)"/>
+  <text class="ts mu" x="256" y="278">flush when full</text>
+
+  <rect class="fill" x="150" y="290" width="190" height="46"/>
+  <text class="tt ink" x="245" y="310" text-anchor="middle">penciller</text>
+  <text class="ts mu"  x="245" y="326" text-anchor="middle">28000 keys in memory</text>
+  <rect class="cfgbx" x="150" y="350" width="300" height="20" rx="4"/>
+  <text class="tk sp" x="158" y="364">db.leveled.penciller_cache_size = 28000</text>
+  <text class="ts mu" x="150" y="388">Larger means fewer, bigger L0 pushes and more memory held.</text>
+
+  <path d="M245 396 L245 424" stroke="var(--sp,#14705f)" stroke-width="1.6" fill="none" marker-end="url(#l-ars)"/>
+  <text class="ts mu" x="256" y="416">push L0 SST</text>
+
+  <rect class="fill" x="190" y="426" width="112" height="18"/><text class="ts ink" x="246" y="439" text-anchor="middle">L0</text>
+  <rect class="fill" x="176" y="446" width="140" height="18"/><text class="ts ink" x="246" y="459" text-anchor="middle">L1</text>
+  <rect class="fill" x="162" y="466" width="168" height="18"/><text class="ts ink" x="246" y="479" text-anchor="middle">L2</text>
+  <rect class="fill" x="148" y="486" width="196" height="18"/><text class="ts ink" x="246" y="499" text-anchor="middle">L3</text>
+  <rect class="fill" x="134" y="506" width="224" height="18"/><text class="ts ink" x="246" y="519" text-anchor="middle">L4</text>
+  <line class="cfg" x1="128" y1="528" x2="366" y2="528"/>
+  <rect class="cfgbx" x="150" y="538" width="330" height="20" rx="4"/>
+  <text class="tk sp" x="158" y="552">db.leveled.ledger_preload_pagecache_level = 4</text>
+  <text class="ts mu" x="150" y="576">SSTs at or below this level are preloaded into the page cache on open.</text>
+
+  <!-- ================= COLUMN B : JOURNAL (x 600 .. 930) ================= -->
+  <text class="tb ink" x="600" y="90">Journal</text>
+  <rect class="fill" x="600" y="96" width="52" height="28"/>
+  <rect class="fill" x="656" y="96" width="52" height="28"/>
+  <rect class="fill" x="712" y="96" width="52" height="28"/>
+  <rect x="768" y="96" width="52" height="28" fill="none" stroke="var(--sp,#14705f)" stroke-width="1.4"/>
+  <text class="ts mu" x="626" y="114" text-anchor="middle">CDB</text>
+  <text class="ts mu" x="682" y="114" text-anchor="middle">CDB</text>
+  <text class="ts mu" x="738" y="114" text-anchor="middle">CDB</text>
+  <text class="ts sp" x="794" y="114" text-anchor="middle">head</text>
+  <text class="ts mu" x="600" y="142">append-only; rolls on whichever bound is reached first</text>
+
+  <rect class="cfgbx" x="600" y="156" width="300" height="20" rx="4"/>
+  <text class="tk sp" x="608" y="170">db.leveled.max_journal_size = 1000000000</text>
+  <rect class="cfgbx" x="600" y="182" width="300" height="20" rx="4"/>
+  <text class="tk sp" x="608" y="196">db.leveled.max_journal_objects = 200000</text>
+  <text class="ts mu" x="600" y="220">4 GB is the absolute ceiling — leveled uses 4-byte</text>
+  <text class="ts mu" x="600" y="234">file pointers.</text>
+
+  <rect class="cfgbx" x="600" y="290" width="300" height="20" rx="4"/>
+  <text class="tk sp" x="608" y="304">db.leveled.sync_strategy = none</text>
+  <text class="ts mu" x="600" y="328">This governs the durable projection, not the log.</text>
+  <text class="ts mu" x="600" y="342">A write is already durable in the WAL before the fold</text>
+  <text class="ts mu" x="600" y="356">reaches leveled, and the projection can be rebuilt</text>
+  <text class="ts mu" x="600" y="370">from it — so none is deliberate, not an oversight.</text>
+  <text class="ts sp" x="600" y="392">Durability of the write itself is db.wal.fsync_mode.</text>
+
+  <!-- ================= fixed band ================= -->
+  <line x1="40" y1="606" x2="920" y2="606" stroke="var(--ru,#d9d5cf)" stroke-width="1"/>
+  <text class="tb ink" x="40" y="634">Two options Bondy fixes</text>
+  <rect class="fixbx" x="330" y="620" width="250" height="20" rx="4"/>
+  <text class="tk mu" x="338" y="634">root_path — derived per Bookie</text>
+  <rect class="fixbx" x="596" y="620" width="250" height="20" rx="4"/>
+  <text class="tk mu" x="604" y="634">head_only = with_lookup</text>
+  <text class="ts mu" x="40" y="662">The topology derives each Bookie's directory, and the projection adapter is built on book_headonly/4 and book_mput/2 — so</text>
+  <text class="ts mu" x="40" y="676">head_only must stay with_lookup. Neither is reachable from bondy.conf, by design.</text>
+  <text class="ts mu" x="40" y="694">Every option above is a bondy.conf key; values shown are the defaults. Compaction, compression and snapshots are on the next plate.</text>
+</svg>

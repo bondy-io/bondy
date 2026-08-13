@@ -35,10 +35,13 @@ document's subject.
 | [The shard at runtime](db_view_shard_runtime.md) | Component-and-connector | What happens inside one shard on a write and on a read? |
 | [Replication](db_view_replication.md) | Component-and-connector, peer-to-peer | How does a shard reconcile with its peers, page by page? |
 | [The data lifecycle](db_view_lifecycle.md) | Component-and-connector | How history is bounded: stability, compaction, reclamation, repair |
+| [Topology: what is fixed at provision](db_topology.md) | Beyond views | How a write finds its shard, and which options cannot be changed afterwards |
 | [Rationale: invariants and verification](db_rationale.md) | Beyond views | Which properties hold, why, and which are machine-checked |
 
 Reading order for a first pass is top to bottom: parts, then one shard,
-then many shards, then time, then why it holds.
+then many shards, then time, then what was fixed at provision, then why
+it holds. Each view carries a variability guide naming the `bondy.conf`
+options that govern its elements.
 
 ## Vocabulary
 

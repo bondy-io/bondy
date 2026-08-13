@@ -54,6 +54,47 @@ The asymmetry is the design: every cluster-wide license in the
 [lifecycle view](db_view_lifecycle.md) rests on confirmations, so
 confirmations must be impossible to earn partially.
 
+## Variability guide
+
+Anti-entropy is background work subordinate to routing, and its options say
+how subordinate. Each plate marks them on the geometry they govern, with the
+values `bondy.conf` uses when you set nothing.
+
+### The page budget, and what concurrency does to it
+
+`db.aae.max_pages_in_flight` is the node-wide ceiling on reconciliation
+pages held at any instant, and it is the option that bounds peak memory.
+`db.aae.max_concurrency` divides that ceiling rather than adding to it: each
+session fetches at most budget ÷ concurrency pages per round. Raising
+concurrency therefore buys fairness — more shards make progress at once,
+each more slowly — and never more memory. `1` serialises anti-entropy, which
+is simplest but lets a busy node starve some shards indefinitely.
+
+`db.aae.interval` spaces the ticks and `db.aae.fanout` sets how many peers
+one tick reaches. When `db.aae.load_adaptive` is on, a run queue at or above
+`db.aae.load_run_queue_threshold` per scheduler makes anti-entropy yield its
+throttleable dispatches for that tick; the signal is smoothed, so a
+momentary burst does not flap the yield.
+
+![Anti-entropy budget: the node-wide page ceiling cut into lanes by
+concurrency, the tick and fanout, and the run-queue yield line](img/db-aae.svg)
+
+### Cadence, and the fence that reads freshness
+
+A converged instance widens its live-sync cadence from `db.aae.interval`
+toward `db.aae.live_sync.max`, and returns to base when its root moves
+again. `db.aae.live_sync` turns that backoff off.
+
+`db.aae.fence.max_lag` bounds how stale this node's view of the security
+tables may be before it refuses all new authentication, regardless of
+method. The whole fence is a no-op when `db.aae` is off, because local
+writes are then synchronous and no cross-node staleness window exists. The
+freshness signal is produced here, on the anti-entropy side, honouring
+`db.aae.fence.on_isolation`; authentication only reads it.
+
+![Live-sync cadence widening as an instance converges, and the staleness
+axis with the point past which authentication is refused](img/db-aae-fence.svg)
+
 ## Rationale
 
 Pull-only rounds over a deterministic tree make the steady state one
