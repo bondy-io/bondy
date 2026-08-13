@@ -59,9 +59,12 @@ frontier it cannot back — rather than approximating.
   only a backfill that itself fails after retries leaves a gap, which then
   converts into a rebootstrap on peers — noise traded for correctness.
   Burns measured at zero in validation.
-- Model-checking of the hold is exhaustive at pairwise scope; the
-  three-replica space is beyond practical bounds. The protocol is
-  pairwise, and the cluster tests run three nodes.
+- Model-checking of the hold is exhaustive at pairwise scope, which is the
+  protocol-shaped one — the sync, hold and frontier logic is pairwise. Three
+  replicas cannot be exhausted, but the triangular interleavings were
+  checked bounded and came back clean on both methods: breadth-first to
+  depth 18 (25.2M distinct states) and 800k simulated traces to depth 40.
+  The cluster tests run three nodes.
 
 ## Related
 

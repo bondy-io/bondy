@@ -6,34 +6,55 @@ behaviour is [replication](db_view_replication.md).
 
 ## Primary presentation
 
+The write path is a chain, not a fan-out. Three processes run it — the
+caller, the shard's applier, the shard's instance — and each stage begins
+only when the one before it has committed.
+
 ```mermaid
 flowchart TD
-    W["write: apply/4"] --> MINT["mint event key<br/>HLC tick · seq range"]
-    MINT --> OV["stage overlay row"]
+    W["caller: bondy_db:apply/4"] --> MINT["caller: mint event key<br/>HLC tick · seq from an<br/>atomically reserved range"]
+    MINT --> OV["caller: stage overlay row"]
     OV --> WA{"WAL append"}
-    WA -->|ok| ACK["acknowledge caller"]
-    WA -->|rejected| RB["roll back: unstage overlay,<br/>return seq range"]
-    WA --> DR["applier drain"]
-    DR --> FOLD["fold via CRDT module<br/>(cell_apply)"]
+    WA -->|rejected| RB["unstage overlay ·<br/>return or burn the seq range"]
+    WA -->|durable| ASY["apply_async/4 returns here"]
+    WA -->|durable| DR["applier: drain batch ·<br/>re-verify signatures"]
+    DR --> FOLD["applier: fold via CRDT<br/>module (cell_apply)"]
     FOLD --> PROJ[("projection<br/>ETS or leveled")]
-    FOLD --> FRONT["advance applied frontier<br/>contiguous seqs only"]
-    DR --> INSTALL["install into MST"]
-    RD["read: read/3"] --> OV2{"in overlay?"}
-    OV2 -->|yes| V["value"]
-    OV2 -->|no| PROJ
+    PROJ --> POST["applier: invalidate read cache ·<br/>advance applied frontier ·<br/>enqueue secondary-index ops"]
+    POST --> CAST["cast install_local_batch"]
+    CAST --> INSTALL["instance: install into MST"]
+    INSTALL --> PUB["instance: publish root ·<br/>evict the overlay rows"]
+    PUB --> ACK["apply/4 returns here"]
+    RD["bondy_db:read/3"] --> CA{"read cache"}
+    CA -->|hit| V["value"]
+    CA -->|miss| PROJ
     PROJ --> V
 ```
+
+The fold's input is the WAL batch and the cell's prior state; it reads that
+prior state from the projection (or a write-through cache of it), never
+from the MST. The MST install is strictly downstream of the fold and runs
+in a different process. What overlaps is *batches*, not stages: while the
+instance installs batch N, the applier is already reading, verifying and
+folding batch N+1.
 
 ## The write path, step by step
 
 1. **Mint.** The event key is created caller-side on the fast path: one
    hybrid-logical-clock tick (strictly monotone per instance, dominated by
    every timestamp ever received) and a sequence number from an atomically
-   reserved contiguous range. Both fast (lock-free, stateless-validator)
-   and gen-server paths share one minting core.
+   reserved contiguous range. The lock-free (stateless-validator) paths and
+   the gen-server path mint identically — one tick per event, one atomic
+   add per batch — and the event is signed in whichever process minted it.
+   A `tier_2` table pays one extra round-trip before this step: the cell's
+   current causal context is read from the instance and stamped into the
+   event's metadata, so the read path can resolve concurrency later.
 2. **Stage, then append.** The overlay row is staged *before* the WAL
-   append, so the moment the event is durable a reader can see it — there
-   is no window where a durable write is invisible. If the WAL rejects the
+   append, so the row exists the instant the log entry does. The applier
+   reads the log the moment it commits; staging afterwards would let the
+   install handler's eviction run before the row was there, leaving an
+   orphan row that inflates the overlay size the drain barrier watches.
+   If the WAL rejects the
    append, the overlay row is unstaged and the reserved sequence range is
    returned to the counter when still topmost; a range overtaken by a
    concurrent reservation cannot be returned, so it is counted
@@ -41,8 +62,16 @@ flowchart TD
    `seq_fill` events (`bondy_oplog_seqs_filled_total`) that occupy the
    seqs — replicating and advancing frontiers like any event, folding to
    nothing — so the gap never becomes sync-unfillable.
-3. **Acknowledge.** The caller's write is complete at durable append —
-   before the fold. `db.wal.fsync_mode` governs what "durable" costs.
+3. **Acknowledge.** Two acknowledgement points exist, and the facade
+   exposes both. `apply_async/4` returns at durable append, before the
+   fold: the caller pays for durability, not for interpretation.
+   `apply/4` returns later — it blocks until the shard's overlay has
+   drained, which is to say until the fold, the projection write and the
+   MST install of its own event have all completed. That barrier is what
+   makes a subsequent `read/3` observe the write, because the facade
+   registers its tables with the read-path overlay merge *disabled*; the
+   barrier, not an overlay lookup, is the read-your-write mechanism.
+   `db.wal.fsync_mode` governs what "durable" costs.
    `per_write`, the default, fsyncs every append: each write is durable
    before it returns, at the price of binding the writer to the device's
    fsync rate. `batched` defers the fsync to a size or time boundary
@@ -52,35 +81,78 @@ flowchart TD
    exchange for a bounded durability window. All three are global: they
    affect every durable instance node-wide. The ephemeral `registry`
    database's in-memory WAL never fsyncs and ignores them.
-4. **Drain and fold.** The applier consumes the log in order and folds
-   each event through the table's CRDT module into the projection. The
-   fold is the only interpreter of operations; every event source passes
-   through it, so a locally minted event and the same event arriving from
-   a peer produce identical state.
-5. **Frontier and install.** The applied frontier advances at the fold's
-   commit point, per origin, across contiguous sequences only. The event
-   is installed into the MST, becoming visible to
-   [replication](db_view_replication.md). The overlay row is evicted once
-   the projection covers it.
+4. **Drain and fold.** The applier consumes the log in order,
+   re-verifies each event's stored signature, and folds the survivors
+   through the table's CRDT module into the projection. The cell's prior
+   state comes from an in-batch shadow, the applier's frame cache, or a
+   projection read — in that order of precedence. The fold is the only
+   interpreter of operations; every event source reaches it, so a locally
+   minted event and the same event arriving from a peer produce identical
+   state.
+5. **Commit the projection.** Once the projection write returns, and only
+   then, the applier invalidates the read cache for the touched cells,
+   advances the applied frontier over the batch's `{origin, seq}` claims,
+   and enqueues the secondary-index operations. Ordering the frontier
+   after the durable write is what keeps it from ever leading the
+   projection it is meant to certify.
+6. **Install.** The applier casts the verified batch to the instance,
+   which merges any casts queued behind it into one `put_batch` against
+   the MST, publishes the new root — making the events visible to
+   [replication](db_view_replication.md) — and then deletes the matching
+   overlay rows. Publishing before evicting is deliberate — for a
+   substrate consumer that does merge the overlay on read (see below), it
+   closes the window in which an event is in neither place.
+
+Peer-authored events reach the same fold from the opposite direction.
+They are installed into the MST first, and the projection catches up by
+diffing the tree against the last replayed root and folding the pairs the
+diff yields — so on that path, and only on that path, the fold does read
+the MST. [Replication](db_view_replication.md) covers it.
 
 ## The read path
 
-`read/3` consults the overlay first (writes not yet drained), then the
-projection — a lookup, never a fold, never the MST. Folds and relational
-queries run over the projection and its secondary indexes, which
-`cell_apply` maintains in the same commit as the values. Reads on the
-writing node therefore observe writes immediately; reads elsewhere observe
-them after replication.
+`bondy_db:read/3` consults the per-shard value cache first and falls back
+to the projection, decoding the stored cell and populating the cache. It
+never touches the MST and never re-folds history. Folds and relational
+queries run over the projection and its secondary indexes.
+
+The substrate underneath can also merge an overlay of not-yet-drained
+events into a read, interpreting them over the projection state. The
+facade does not use it: it registers its tables with `overlay =>
+disabled`, and gets read-your-writes from `apply/4`'s barrier instead.
+Reads on the writing node therefore observe writes as soon as `apply/4`
+returns; reads elsewhere observe them after replication.
+
+**The secondary index is not part of the primary commit.** `cell_apply`
+derives each index operation from the cell's old and new value, but
+dispatches them only after the primary write is durable, and dispatches
+them *asynchronously* to a shared index writer. That writer has a
+bounded in-flight budget; a batch that would exceed it is dropped, the
+index shard is marked for rebuild, and its freshness is reset so indexed
+reads refuse to serve until the rebuild completes. The index is a
+deterministic function of the primary, which is what makes discarding and
+rebuilding it a legitimate response to saturation — but a query is
+reading a projection that trails the values, not a co-committed one.
 
 ## Ordering and concurrency contract
 
-Within one instance: events fold in per-origin sequence order (holes are
-held, not skipped — the prefix-closure enforcement lives at this fold);
-concurrent writers to one instance interleave freely at mint time, and the
-HLC gives every event a total order consistent with causality for
-order-independent CRDTs. Across instances there is no ordering — a batch is
-atomic only within one shard, which is why the facade co-shards entities
-that must commit together (the aggregate-root declaration).
+Within one instance: the applier folds a batch's events in log order, and
+concurrent writers interleave freely at mint time — the HLC gives every
+event a total order consistent with causality for order-independent CRDTs.
+Across instances there is no ordering at all: a batch is atomic only within
+one shard, which is why the facade co-shards entities that must commit
+together (the aggregate-root declaration).
+
+Per-origin contiguity is treated differently on the two paths, and the
+difference matters. Locally minted events are contiguous by construction —
+one origin, one reserved range per batch, with a burned range backfilled by
+`seq_fill` — so the local drain folds unconditionally and only *measures*
+contiguity, reporting any gap it sees as telemetry. The prefix-closure
+*enforcement* — hold an origin's events beyond a gap rather than fold them
+— lives on the replication fold, where a page sync can genuinely present a
+hole; see [replication](db_view_replication.md). The applied frontier is a
+per-origin maximum over what was folded, so it reads as a contiguous
+prefix exactly to the extent that the path feeding it holds.
 
 ## Variability guide
 
@@ -128,26 +200,47 @@ measured across a span that makes no forward progress](img/db-drain.svg)
 
 ### Sizing the projection
 
-Twenty-two `db.leveled.*` options size the two paths a write takes into the
-projection. The ledger path is bounded by `db.leveled.cache_size` and its
-`db.leveled.cache_multiple` ceiling, past which every PUT pauses; the
-journal path rolls on `db.leveled.max_journal_size` or
-`db.leveled.max_journal_objects`. `db.leveled.sync_strategy` is `none` on
-purpose: the write is already durable in the log before the fold reaches
+Durable shards open every leveled Bookie in **`head_only` mode**
+(`{head_only, with_lookup}`), and that one decision reshapes what the
+twenty-two `db.leveled.*` options actually govern. In this mode the whole
+cell — state and value — is stored as a ledger HEAD entry, written in
+batches through `book_mput/2`; the journal receives the same object specs
+but no body, and leveled's own contract for that call is that the journal
+entries exist *only for handling consistency on startup*. Nothing on the
+read path goes near them: `book_get` becomes equivalent to `book_headonly`,
+so the fold's read of the previous state is a ledger lookup with no journal
+seek.
+
+The ledger path is therefore the whole of the live write path. It is
+bounded by `db.leveled.cache_size` and its `db.leveled.cache_multiple`
+ceiling, past which every PUT returns a pause — backpressure on the writer
+rather than unbounded memory — then flushed through the penciller into the
+LSM levels. The journal still rolls files on `db.leveled.max_journal_size`
+or `db.leveled.max_journal_objects`. `db.leveled.sync_strategy` is `none`
+on purpose: the write is already durable in the log before the fold reaches
 leveled, and the projection rebuilds from it.
 
-![Leveled write paths: the ledger through cache, penciller and LSM levels;
-the journal as rolling CDB files](img/db-leveled.svg)
+![Leveled in head_only mode: the whole value into the ledger through cache,
+penciller and LSM levels; the journal taking object specs only, never
+read](img/db-leveled.svg)
 
-Compaction scores journal files and either compacts one alone or sweeps
-several into a run, governed by
+**Journal compaction does not run.** Leveled accepts `compact_journal` only
+when `head_only` is `false`; its head_only counterpart is `trim`, which
+drops journal entries below the persisted sequence number. Bondy calls
+neither, and leveled schedules neither on its own, so
 `db.leveled.singlefile_compaction_percentage`,
-`db.leveled.maxrunlength_compaction_percentage` and
-`db.leveled.max_run_length`. `db.leveled.compression_point` decides whether
-the CPU goes on the write path or at compaction.
+`db.leveled.maxrunlength_compaction_percentage`,
+`db.leveled.max_run_length`, `db.leveled.journal_compaction_score_one_in`
+and `db.leveled.waste_retention_period` have no effect as things stand, and
+rolled journal files accumulate. `db.leveled.max_merge_below` is unaffected
+— it bounds a *ledger* merge, not a journal one — as are the compression,
+snapshot and statistics options. `db.leveled.compression_point` keeps only
+its `on_receipt` meaning; `on_compact` would defer compression to a pass
+that never happens.
 
-![Leveled compaction: journal files as a score histogram against the
-single-file and full-run eligibility lines, and where compression runs](img/db-leveled-compaction.svg)
+![Leveled compaction, compression and snapshots: the journal scoring block
+that head_only mode leaves inert, alongside the ledger-merge, compression
+and snapshot options that still apply](img/db-leveled-compaction.svg)
 
 ### Bounding an index rebuild
 
@@ -161,12 +254,25 @@ it](img/db-scan-limit.svg)
 
 ## Rationale
 
-Acknowledging at the log rather than the fold makes write latency the price
-of durability, not of interpretation, and lets the fold batch. Staging the
-overlay before the append trades a rollback obligation on the failure path
-for read-your-write with no coordination on the success path — the common
-case pays nothing. One minting core and one fold path exist because both
-were once two, and each pair drifted; the invariants each must uphold
-(gap-free sequences; identical interpretation everywhere) are now stated in
-one place each. See [rationale](db_rationale.md) for which of these are
-machine-checked.
+Splitting the acknowledgement in two is the central trade. Returning at the
+log makes write latency the price of durability, not of interpretation, and
+lets the fold batch; returning after the drain costs the caller the whole
+in-flight backlog but leaves read-your-writes true without a read-side
+merge. The facade defaults to the barrier and offers `apply_async/4` for
+deltas whose consumers are eventually consistent by design.
+
+Staging the overlay before the append is what makes both work: it
+guarantees the row exists the instant the WAL entry does, so the drain's
+eviction can never race ahead of it, and it gives the barrier something
+exact to wait on. The cost is a rollback obligation on the failure path,
+paid only when the WAL refuses.
+
+Running the fold ahead of the MST install, rather than beside it, is a
+correctness choice and not a performance one: the barrier is signalled by
+the install handler, so a caller released by it must find the projection
+already written. The pipeline recovers the lost overlap across batches.
+
+One fold path exists because it was once two and they drifted; the
+invariant it must uphold — identical interpretation of an event whatever
+its source — is now stated in one place. See [rationale](db_rationale.md)
+for which of these are machine-checked.

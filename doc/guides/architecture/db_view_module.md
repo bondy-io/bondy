@@ -50,9 +50,9 @@ flowchart TD
 
 | Part | Responsibility |
 | --- | --- |
-| Instance | One process per shard: owns the MST, coordinates the log, serves integration, publishes its state (root, frontier, watermark) to the registry. |
-| WAL | Durable (segmented, fsync-by-policy) and in-memory variants. Mints event keys — one HLC tick per event, sequence ranges reserved atomically, ranges returned on rejection so sequences stay gap-free. Serves an overlay of just-appended events to readers ahead of the drain. |
-| Applier & cell_apply | The drain and the fold. `cell_apply` is the single materialisation path for every event source — local drain, live remote append, page-sync integration, re-derivation — and the enforcement point for per-origin prefix closure. |
+| Instance | One process per shard: owns the MST and the overlay table, mints and signs event keys (one HLC tick per event, sequence ranges reserved atomically, ranges returned on rejection so sequences stay gap-free), installs drained batches into the tree, serves integration, and publishes its state (root, frontier, watermark) to the registry. Its lock-free append path lets an eligible caller mint and stage in its own process, bypassing the gen-server hop. |
+| WAL | Durable (segmented, fsync-by-policy) and in-memory variants. A byte log positioned by a cursor: it appends already-minted events as all-or-nothing frames, rejecting a batch whose HLCs are not strictly increasing, and never depends on tree state. |
+| Applier & cell_apply | The drain and the fold, in a process of their own. The applier reads the WAL, re-verifies signatures, folds through `cell_apply`, then hands the batch to the instance to install. `cell_apply` is the single materialisation path for every event source — local drain, live remote append, page-sync integration, re-derivation — and the point where per-origin prefix closure is enforced on the paths that can present a hole, and measured on the ones that cannot. |
 | CRDT modules | The `bondy_oplog_crdt` behaviour and its implementations (registers, counters, sets, maps, flags, structs), each declaring its causal tier, fold, and reclamation callbacks. Semantics live here and nowhere else. |
 | Sync machinery | The scheduler (tick, peer sampling, concurrency caps), the session (one shard, one peer, one round), the responder (serves roots, frontiers, pages), and peer-state (confirmed roots, recency). |
 | Lifecycle | Compaction and garbage collection under the stability frontier; catalogue bootstrap and rebootstrap. |

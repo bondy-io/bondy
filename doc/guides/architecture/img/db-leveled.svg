@@ -32,14 +32,13 @@
   <rect width="100%" height="100%" fill="var(--pa,#f1efec)"/>
 
 
-  <text class="tb ink" x="40" y="34">Projection (leveled) — the two paths a write takes</text>
-  <text class="ts mu"  x="40" y="52">The value goes to the journal; the key and metadata go to the ledger. Each option sizes one stage of one path.</text>
+  <text class="tb ink" x="40" y="34">Projection (leveled, head_only mode) — where a write lands</text>
+  <text class="ts mu"  x="40" y="52">The whole value goes to the ledger, as a HEAD entry. The journal takes the same object specs — kept only for startup consistency, never read.</text>
 
   <rect class="fill" x="40" y="96" width="76" height="30"/>
   <text class="tt ink" x="78" y="116" text-anchor="middle">PUT</text>
   <path d="M118 104 L146 104" stroke="var(--sp,#14705f)" stroke-width="1.6" fill="none" marker-end="url(#l-ars)"/>
   <path d="M118 118 L596 118" stroke="var(--mu,#6b6862)" stroke-width="1.6" fill="none" marker-end="url(#l-arm)"/>
-  <text class="ts mu" x="330" y="134">value  →</text>
 
   <line x1="578" y1="80" x2="578" y2="546" stroke="var(--ru,#d9d5cf)" stroke-width="1"/>
 
@@ -94,7 +93,7 @@
   <text class="ts mu" x="682" y="114" text-anchor="middle">CDB</text>
   <text class="ts mu" x="738" y="114" text-anchor="middle">CDB</text>
   <text class="ts sp" x="794" y="114" text-anchor="middle">head</text>
-  <text class="ts mu" x="600" y="142">append-only; rolls on whichever bound is reached first</text>
+  <text class="ts mu" x="600" y="142">object specs, no body; rolls on whichever bound is first</text>
 
   <rect class="cfgbx" x="600" y="156" width="300" height="20" rx="4"/>
   <text class="tk sp" x="608" y="170">db.leveled.max_journal_size = 1000000000</text>
@@ -102,6 +101,10 @@
   <text class="tk sp" x="608" y="196">db.leveled.max_journal_objects = 200000</text>
   <text class="ts mu" x="600" y="220">4 GB is the absolute ceiling — leveled uses 4-byte</text>
   <text class="ts mu" x="600" y="234">file pointers.</text>
+
+  <text class="ts sp" x="600" y="256">No read path reaches this column.</text>
+  <text class="ts mu" x="600" y="270">head_only makes book_get equivalent to book_headonly,</text>
+  <text class="ts mu" x="600" y="284">so the apply path reads OldState from the ledger alone.</text>
 
   <rect class="cfgbx" x="600" y="290" width="300" height="20" rx="4"/>
   <text class="tk sp" x="608" y="304">db.leveled.sync_strategy = none</text>

@@ -14,7 +14,7 @@ flowchart TD
             LST["Listeners<br/>WAMP WS · WAMP TCP · API gateway HTTP/S · admin API"]
             RP["Routing plane<br/>sessions, broker/dealer, flow workers"]
             SP["State plane<br/>main: 16 shards · registry: 16 shards"]
-            PART["Partisan peer service<br/>channels: control · wamp_relay · data"]
+            PART["Partisan peer service<br/>channels: membership · wamp_relay ·<br/>bondy_aae · data"]
         end
         DISK[("Data directory<br/>WAL segments · leveled store ·<br/>topology manifest")]
         SP --- DISK
@@ -34,7 +34,7 @@ flowchart TD
 | --- | --- |
 | The node | One Erlang/OTP release, one OS process. Every node runs the same release with the same responsibilities — there are no roles to assign and no master to elect. Configuration is one file (`bondy.conf`), rendered at boot. |
 | Listeners | Client-facing sockets: WAMP over WebSocket and over raw TCP (each with an optional TLS variant), the HTTP API gateway, and the admin API (health, metrics, cluster operations). Each listener's port, ACL, and TLS material is configuration. |
-| Partisan mesh | Node-to-node connectivity: a full mesh of plain TCP connections managed by Partisan, *outside* Erlang distribution. Traffic is segregated by named channels with per-channel parallelism (`cluster.channels.*`) — relay data cannot head-of-line-block membership control. Peer discovery (static seeds, DNS) forms the mesh; membership changes propagate through it. |
+| Partisan mesh | Node-to-node connectivity: a full mesh of plain TCP connections managed by Partisan, *outside* Erlang distribution. Traffic is segregated by named channels with per-channel parallelism and compression, so no class can head-of-line-block another: `wamp_relay` carries the WAMP data plane (one connection per flow, pinned by partition key), `bondy_aae` carries anti-entropy sync, `partisan_membership` carries cluster control, and `data` carries the remainder. The first three and the default channel are tunable as `cluster.channels.{wamp_relay,control_plane,data,default}.*`; the anti-entropy channel is not operator-tunable. Peer discovery (static seeds, DNS) forms the mesh; membership changes propagate through it. |
 | Data directory | Everything a durable node owns at rest: write-ahead log segments per `main` shard, the `leveled` store holding durable projections, and the keying-topology manifest that pins how keys map to shards. This directory is the unit of backup and the thing a re-keyed or re-provisioned node wipes. The `registry` database writes nothing here. |
 | Metrics endpoint | Prometheus text format on the admin API. The convergence view's elements are directly observable: sync sessions, frontier-gap verdicts, rebootstraps, held events, compaction. |
 

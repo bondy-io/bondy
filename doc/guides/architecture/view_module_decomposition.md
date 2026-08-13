@@ -14,7 +14,6 @@ flowchart TD
         ROUTER[bondy_router<br/>WAMP routing, sessions, security,<br/>API gateway, admin API]
         BRIDGE[bondy_broker_bridge]
         HTTPC[bondy_http_connector]
-        MCP[bondy_mcp]
     end
     subgraph L3["Replicated storage facade"]
         DB[bondy_db<br/>sharded tables, per-table CRDT semantics]
@@ -26,8 +25,10 @@ flowchart TD
     subgraph L1["Foundations"]
         MST[bondy_mst<br/>Merkle Search Tree]
         WAMP[bondy_wamp<br/>protocol encode/decode/validate]
+        CBOR[bondy_cbor]
         CONNECT[bondy_connect]
         REG[bondy_regulator<br/>load & rate regulation]
+        MAIL[bondy_mail<br/>outbound email]
         METRICS[bondy_metrics]
         STDLIB[bondy_stdlib]
     end
@@ -35,10 +36,11 @@ flowchart TD
     ROUTER --> WAMP
     ROUTER --> CONNECT
     ROUTER --> REG
+    ROUTER --> MAIL
     ROUTER --> METRICS
+    WAMP --> CBOR
     BRIDGE --> ROUTER
     HTTPC --> ROUTER
-    MCP --> ROUTER
     DB --> OPLOG
     DB --> LEVELED
     OPLOG --> MST
@@ -55,15 +57,17 @@ are usable from every layer and are drawn once for legibility.
 | --- | --- |
 | `bondy_router` | Everything protocol-facing: WAMP sessions, the broker and dealer roles, the Routing Information Base, security (realms, authentication, RBAC), the HTTP API gateway, the admin API, node-to-node relay. The largest application, and the only one that knows WAMP semantics. |
 | `bondy_wamp` | The WAMP protocol as a library: message records, serialisation (JSON, MessagePack, BERT, CBOR), URI and option validation. No processes; pure functions over messages. |
+| `bondy_cbor` | The CBOR codec `bondy_wamp` encodes and decodes that serialisation with. Depends on nothing but the standard library. |
 | `bondy_db` | The storage facade the rest of the system writes and reads: named tables with per-table CRDT semantics over sharded, replicated instances. Owns table provisioning (the catalogue) and the two databases — durable `main`, ephemeral `registry`. |
 | `bondy_oplog` | The replication substrate under every table: per-shard write-ahead log, the applier that folds operations into materialised projections, Merkle-tree indexing of history, anti-entropy synchronisation, compaction and reclamation. Knows nothing about what the operations mean. |
 | `bondy_mst` | The Merkle Search Tree: a page-oriented, content-addressed ordered map whose root hash summarises its contents, enabling efficient set reconciliation between peers. |
 | `leveled` | The LSM-tree store backing durable shards' projections at rest. Third-party, vendored. |
 | `bondy_connect` | Client connection transport plumbing shared by listeners. |
 | `bondy_regulator` | Admission control: system-load sampling (`bondy_regulator_load`) and token-bucket rate limiting, consulted at connection and session admission. |
+| `bondy_mail` | Outbound email: relay configuration, queueing and delivery. Dormant unless a `mail.relay.*` is configured — it starts, supervises nothing, and the `bondy.mail.*` procedures report that mail is not configured. It sits *below* the router and is told which module resolves a realm's prototype (`realm_module`) rather than calling up into one. |
 | `bondy_metrics` | Metric primitives and a declaration registry; wait-free counters the hot paths can afford. |
 | `bondy_stdlib` | Types and utilities shared by all layers (`optional/1`, keys, encoding helpers). |
-| `bondy_broker_bridge`, `bondy_http_connector`, `bondy_mcp` | Integrations that consume the router's interfaces: bridging events to external brokers, invoking upstream HTTP services as callees, and the Model Context Protocol endpoint. |
+| `bondy_broker_bridge`, `bondy_http_connector` | Integrations that consume the router's interfaces: bridging events to external brokers, and invoking upstream HTTP services as callees. |
 
 ## Interfaces between layers
 

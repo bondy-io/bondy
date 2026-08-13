@@ -23,8 +23,9 @@ durable or replicated ground truth.
 Cross-node forwarding is not assumed reliable either. The relay treats
 Partisan channels as what they are — TCP that can drop — and WAMP's
 delivery contract (per-pair ordering, at-most-once eventing) is preserved
-by lane discipline and by re-derivable state rather than by pretending the
-network is a bus.
+by re-derivable state and by a chain of already-serial stages — the
+sender's connection process, one pinned channel connection per flow, one
+keyed worker on ingress — rather than by pretending the network is a bus.
 
 ## Overload design: refuse early, shed nothing silently
 
@@ -35,9 +36,15 @@ The system's posture under load is asymmetric on purpose:
   explicit, cheap, retryable ABORT — before authentication, before RIB
   writes, before any real cost. Admitted sessions are protected at the
   expense of unadmitted ones.
-- **The data plane does not silently drop.** Routing ingress runs through
-  a regulated pool with an inline fallback, so pool saturation slows the
-  caller instead of losing the message.
+- **The data plane backpressures rather than queues, and never drops
+  without saying so.** Client-submitted messages are routed synchronously
+  in the connection process that received them, so a loaded router slows
+  that connection instead of accumulating unbounded work; the regulated
+  pool, with its inline fallback, carries only the meta-API calls. The one
+  place the data plane does discard is relay *ingress*, where a message
+  whose flow worker is at its share of the pool's capacity is shed — WAMP
+  eventing is at-most-once, so this is a legitimate response to saturation
+  rather than a failure, and every shed is counted.
 - **Background work yields to foreground work.** Anti-entropy runs under
   a node-wide concurrency cap and a node-wide page-memory budget
   (independent of shard count), backs off on converged shards, and can

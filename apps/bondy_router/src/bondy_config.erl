@@ -386,14 +386,22 @@ setup_mods() ->
     ok = configure_transport_queue().
 
 setup_partisan_channels() ->
+    %% FALLBACK ONLY, for boots that never render cuttlefish (tests,
+    %% `rebar3 shell'). `schema/bondy.schema' is authoritative for every
+    %% channel it names — `cluster.channels.{default,data,control_plane,
+    %% wamp_relay}.*' — and always supplies a value, so the merge below
+    %% overrides each of these. Any value here that disagrees with the
+    %% schema's default is therefore DEAD in a released node: keep the two
+    %% in step, or the disagreement is silent. `bondy_aae' is the one
+    %% channel with no schema key, so its value here is the effective one.
     DefaultChannels = #{
         ?BONDY_DB_DATA_CHANNEL => #{parallelism => 2, compression => false},
-        %% The wamp_relay channel carries the WAMP data plane. Each
-        %% connection is one ordered pipe (flows are pinned by
-        %% partition_key) with its own sender and receiver process on
-        %% each side, so parallelism is the relay's ingress/egress
-        %% process parallelism — size it for data-plane throughput, not
-        %% like the control-plane channels.
+        %% Matches `cluster.channels.wamp_relay.parallelism'. The channel
+        %% carries the WAMP data plane: each connection is one ordered pipe
+        %% (flows are pinned by partition_key) with its own sender and
+        %% receiver process on each side, so parallelism is the relay's
+        %% ingress/egress process parallelism — size it for data-plane
+        %% throughput, not like the control-plane channels.
         ?WAMP_RELAY_CHANNEL => #{parallelism => 8, compression => false},
         ?BONDY_AAE_CHANNEL => #{parallelism => 2, compression => false}
     },

@@ -21,6 +21,7 @@ sequenceDiagram
         SS->>INST: missing_set(peer root)
         SS->>RSP: get_pages(batch)
         RSP-->>SS: pages (byte-capped)
+        SS->>INST: merge_pages
     end
     SS->>INST: integrate_peer_root
     Note over INST: whole-root atomic merge<br/>watermark door · fold with prefix hold<br/>frontier advances (contiguous only)
@@ -37,8 +38,8 @@ sequenceDiagram
 | Element | Responsibility |
 | --- | --- |
 | Scheduler | Ticks every `db.aae.interval`; samples `db.aae.fanout` peers; dispatches sessions under `db.aae.max_concurrency`. Adaptive live-sync backs converged shards off; shards backing the authentication fence are exempt. Escalates repeated gap verdicts and unservable-page reports into rebootstraps. |
-| Sync session | One shard, one peer, one round, pull-only. Pins the peer root against the peer's page GC for the round's duration; pulls missing pages in batches sized by the node-wide budget (`db.aae.max_pages_in_flight ÷ max_concurrency`), byte-capped to the mesh's frame limit; chases a refreshed root if the peer compacts mid-session. Delivers *nothing* unless it completes: only a round that held the peer's whole tree may integrate, record confirmation, or judge frontiers. |
-| Responder | The serving side: answers roots, applied frontiers (behind an installed-consistency barrier, so a frontier never claims what the tree cannot ship), origins, and pages. Refuses to serve across a keying-topology mismatch rather than diverge silently. |
+| Sync session | One shard, one peer, one round, pull-only. Verifies that the peer's keying-topology fingerprint matches its own before pulling anything. Pins the peer root against its **own** node's page GC for the round's duration — during a multi-round pull the earlier rounds' pages are unreachable from the local root until the final integrate, and a concurrent compaction cycle would otherwise collect them and leave the merge treating the missing subtrees as empty. Pulls and merges missing pages in batches sized by the node-wide budget (`db.aae.max_pages_in_flight ÷ max_concurrency`), byte-capped to the mesh's frame limit, so peak memory is bounded however divergent the trees are; chases a refreshed root if the peer compacts mid-session. Delivers *nothing* unless it completes: only a round that held the peer's whole tree may integrate, record confirmation, or judge frontiers. |
+| Responder | The serving side: answers roots, applied frontiers (behind an installed-consistency barrier, so a frontier never claims what the tree cannot ship), origins, and pages, and stamps each root and frontier reply with this node's keying-topology fingerprint so the initiator can refuse a mismatch rather than diverge silently. Its own refusal is narrower and about servability: if its root is dangling — a referenced page is missing, transiently normal under truncate-and-page-GC churn — it answers `undefined` so the peer pulls nothing unservable and this node heals by its own pull. |
 | Peer state | The confirmation ledger: which peer roots this node holds in full, and how recently each peer confirmed. Recency-filtered reads of this ledger license compaction ([lifecycle](db_view_lifecycle.md)). |
 | Integration | Whole-root atomic: merge the peer tree, pass the **watermark door** (an event at or below the local watermark that was never applied here is accepted, not discarded — "below the watermark" means *compacted history*, only provably so for events this replica folded), fold new events with the **prefix hold** (a remote origin's events beyond a contiguity gap are excluded from fold and frontier and re-presented until the gap fills or repair supplies them), and advance the frontier. |
 

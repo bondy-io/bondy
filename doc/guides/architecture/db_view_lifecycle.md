@@ -74,9 +74,12 @@ monitor, each with its interval and its per-pass budget](img/db-sweeps.svg)
 trade above. It governs the compaction scheduler only. Reclamation takes a
 strict, membership-based reading with no recency filter, so a silent member
 holds reclamation down until an explicit membership act retires it — no
-timeout changes that. `db.gc_max_concurrency` caps concurrent compaction
-cycles; despite the shared prefix it has nothing to do with the heap
-monitor.
+timeout changes that. `db.gc_max_concurrency` caps how many instances either
+sweep may cycle at once — reclamation runs a second instance of the same
+scheduler that drives compaction, and both read this one cap; instances over
+it are skipped that tick and retried on the next. Despite the shared prefix
+it has nothing to do with the `db.gc_interval` / `db.gc_heap_delta` heap
+monitor, which is a separate subsystem.
 
 ```mermaid
 flowchart LR

@@ -62,8 +62,11 @@ here.
   return.
 - **Fold** — applying an event to the projection through the table's CRDT
   module; the only place operation semantics execute.
-- **Applied frontier** — per instance, per origin: the highest
-  contiguously folded seq.
+- **Applied frontier** — per instance, per origin: the highest folded seq,
+  advanced once the projection write is durable. It reads as a contiguous
+  prefix because of what feeds it: locally minted seqs are contiguous by
+  construction, and the replication fold holds a remote origin's events
+  behind a gap rather than folding past it.
 - **Watermark** — per instance: the compaction bound; history at or below
   it may be truncated from the MST.
 - **Catalogue** — the provisioning layer that turns table declarations

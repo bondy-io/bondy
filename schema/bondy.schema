@@ -733,6 +733,13 @@ end}.
 %% on reaching either this or `db.leveled.max_journal_objects`, whichever
 %% comes first. The absolute ceiling is 4GB, imposed by leveled's 4-byte file
 %% pointers.
+%%
+%% This bounds the size of each file, not the number of them. Under
+%% `head_only` mode nothing reclaims a rolled journal file — compaction is
+%% refused and no `trim` is invoked — so files accumulate for the life of the
+%% data directory. In `head_only` a journal record carries the write's object
+%% specs rather than a value body, and exists only for startup consistency, so
+%% the growth is modest relative to the ledger; it is nonetheless unbounded.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "db.leveled.max_journal_size", "bondy_db.leveled_max_journalsize", [
@@ -804,11 +811,18 @@ end}.
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc How long journal files that have already been compacted are kept
-%% before deletion. `off` (the default) garbage-collects every such file at
-%% compaction and retains no waste. Setting a period keeps them, which allows
-%% restoring the store to a point in time by clearing the ledger and reverting
-%% the inker manifest — at the cost of the disk the waste occupies.
+%% @doc NO EFFECT at present. Bondy opens every durable Bookie in `head_only`
+%% mode, and leveled accepts journal compaction only when `head_only` is
+%% false; its head_only counterpart is a `trim`, which Bondy does not invoke
+%% and leveled does not schedule on its own. No journal file is compacted, so
+%% none is ever waste, so this option is never consulted.
+%%
+%% Were compaction to run, this would set how long already-compacted journal
+%% files are kept before deletion. `off` (the default) would garbage-collect
+%% every such file at compaction and retain no waste. A period would keep
+%% them, allowing the store to be restored to a point in time by clearing the
+%% ledger and reverting the inker manifest, at the cost of the disk the waste
+%% occupies.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "db.leveled.waste_retention_period", "bondy_db.leveled_waste_retention_period", [
@@ -817,9 +831,15 @@ end}.
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc How many journal files may be compacted in a single run. `default`
-%% uses leveled's built-in run length of 8. Raising it lets one run reclaim
-%% more space at the cost of a longer, heavier compaction.
+%% @doc NO EFFECT at present. Journal compaction never runs: Bondy opens every
+%% durable Bookie in `head_only` mode, leveled accepts compaction only when
+%% `head_only` is false, and the head_only alternative — a `trim` — is invoked
+%% neither by Bondy nor by leveled itself.
+%%
+%% Were it to run, this would set how many journal files may be compacted in a
+%% single run. `default` uses leveled's built-in run length of 8. Raising it
+%% would let one run reclaim more space at the cost of a longer, heavier
+%% compaction.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "db.leveled.max_run_length", "bondy_db.leveled_max_run_length", [
@@ -828,9 +848,14 @@ end}.
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc Compaction score at or below which a single journal file is eligible
-%% for compaction on its own. Lower values make solitary-file compactions
-%% rarer, favouring longer runs.
+%% @doc NO EFFECT at present. Journal compaction never runs: Bondy opens every
+%% durable Bookie in `head_only` mode, leveled accepts compaction only when
+%% `head_only` is false, and the head_only alternative — a `trim` — is invoked
+%% neither by Bondy nor by leveled itself. Nothing scores a journal file.
+%%
+%% Were it to run, this would be the compaction score at or below which a
+%% single journal file is eligible for compaction on its own. Lower values
+%% would make solitary-file compactions rarer, favouring longer runs.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "db.leveled.singlefile_compaction_percentage", "bondy_db.leveled_singlefile_compactionpercentage", [
@@ -839,10 +864,15 @@ end}.
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc Compaction score required for a full-length run to be eligible.
-%% Raising this, or lowering
-%% `db.leveled.singlefile_compaction_percentage`, makes leveled prefer a long
-%% run over a short one.
+%% @doc NO EFFECT at present. Journal compaction never runs: Bondy opens every
+%% durable Bookie in `head_only` mode, leveled accepts compaction only when
+%% `head_only` is false, and the head_only alternative — a `trim` — is invoked
+%% neither by Bondy nor by leveled itself. Nothing scores a journal file.
+%%
+%% Were it to run, this would be the compaction score required for a
+%% full-length run to be eligible. Raising it, or lowering
+%% `db.leveled.singlefile_compaction_percentage`, would make leveled prefer a
+%% long run over a short one.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "db.leveled.maxrunlength_compaction_percentage", "bondy_db.leveled_maxrunlength_compactionpercentage", [
@@ -851,11 +881,17 @@ end}.
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc How often a journal file is scored. `1` scores every file on every
-%% compaction run. A value of `n` scores any given file on roughly one run in
-%% `n`, using a cached score otherwise; all files are scored on the first run
-%% after startup. Raising it saves significant work on large journals under
-%% frequent compaction.
+%% @doc NO EFFECT at present. Journal compaction never runs: Bondy opens every
+%% durable Bookie in `head_only` mode, leveled accepts compaction only when
+%% `head_only` is false, and the head_only alternative — a `trim` — is invoked
+%% neither by Bondy nor by leveled itself. There are no compaction runs to
+%% score files on.
+%%
+%% Were it to run, this would set how often a journal file is scored. `1`
+%% would score every file on every compaction run. A value of `n` would score
+%% any given file on roughly one run in `n`, using a cached score otherwise,
+%% with all files scored on the first run after startup. Raising it would save
+%% significant work on large journals under frequent compaction.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "db.leveled.journal_compaction_score_one_in", "bondy_db.leveled_journalcompaction_scoreonein", [
@@ -875,10 +911,21 @@ end}.
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc When values are compressed. `on_receipt` (the default) compresses as
-%% the value arrives, spending CPU on the write path to keep the journal
-%% small. `on_compact` stores values uncompressed and compresses only when the
-%% journal is compacted, which is faster to write and larger at rest.
+%% @doc When journal records are compressed. This governs the journal only —
+%% the ledger's own setting is `db.leveled.ledger_compression`.
+%%
+%% `on_receipt` (the default) compresses each record as it arrives, spending
+%% CPU on the write path to keep the journal small. `on_compact` defers
+%% compression to journal compaction — which never runs here, because Bondy
+%% opens every durable Bookie in `head_only` mode and leveled accepts
+%% compaction only when `head_only` is false. Setting `on_compact` therefore
+%% means records stay uncompressed indefinitely; only `on_receipt` has a
+%% compressing effect.
+%%
+%% In `head_only` mode a journal record holds the write's object specs rather
+%% than a value body, and no read path reads it — the entries exist only for
+%% startup consistency — so what this option trades is the disk those
+%% startup-consistency records occupy against CPU on the write path.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "db.leveled.compression_point", "bondy_db.leveled_compression_point", [
@@ -5610,9 +5657,22 @@ end}.
 ]}.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Number of connections Partisan opens for the `wamp_relay' channel,
+%% which carries the WAMP data plane between nodes. Each connection is one
+%% ordered pipe — a flow is pinned to a single connection by its partition
+%% key — with its own sender and receiver process on each side, so this is
+%% the relay's ingress/egress process parallelism. Size it for data-plane
+%% throughput, not like the control-plane channels.
+%%
+%% AUTHORITATIVE. `bondy_config:setup_partisan_channels/0' keeps a matching
+%% fallback map for boots that never render cuttlefish; config set here wins
+%% over it, so the two MUST agree or the fallback's value is dead.
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "cluster.channels.wamp_relay.parallelism",
 "bondy_router.channels.wamp_relay.parallelism", [
-  {default, 2},
+  {default, 8},
   {datatype, integer}
 ]}.
 
