@@ -494,6 +494,37 @@ end}.
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Interval at which each durable Bookie's journal is trimmed back to the
+%% files needed to recover the ledger's un-persisted tail.
+%%
+%% Bondy opens every durable Bookie in leveled's `head_only` mode, where a
+%% write lands in BOTH stores: the whole cell in the ledger as a HEAD entry,
+%% and the same object specs in the journal, which exists only to make the
+%% ledger recoverable after an unclean stop — no read path reads it. Leveled
+%% reclaims that journal on its own in neither mode: `book_compactjournal` is
+%% refused under `head_only`, and its `book_trimjournal` counterpart is never
+%% self-scheduled. Without this sweep the journal grows with cumulative
+%% writes — every version of every cell, indefinitely — while the ledger holds
+%% only the live set.
+%%
+%% A trim drops journal files strictly older than the one holding the
+%% penciller's persisted SQN, which is exactly the history a clean restart
+%% would no longer replay, so it cannot cost durability. Leveled defers the
+%% unlink until no snapshot can still be reading the file, so disk returns a
+%% few seconds after each pass rather than during it.
+%%
+%% The pass is a manifest scan, not a rewrite, so it is cheap and the cadence
+%% is about how promptly disk is returned, not about load. `0` disables it,
+%% which restores the unbounded-growth behaviour.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.journal_trim_interval",
+ "bondy_db.journal_trim_interval_ms", [
+  {datatype, {duration, ms}},
+  {default, "1h"}
+]}.
+
+%% -----------------------------------------------------------------------------
 %% @doc Interval at which each oplog instance checks its own heap and
 %% fullsweep-hibernates if it has grown past `db.gc_heap_delta` over its
 %% post-GC baseline. This reclaims the transient apply/AAE garbage a long-lived
@@ -735,11 +766,11 @@ end}.
 %% pointers.
 %%
 %% This bounds the size of each file, not the number of them. Under
-%% `head_only` mode nothing reclaims a rolled journal file — compaction is
-%% refused and no `trim` is invoked — so files accumulate for the life of the
-%% data directory. In `head_only` a journal record carries the write's object
-%% specs rather than a value body, and exists only for startup consistency, so
-%% the growth is modest relative to the ledger; it is nonetheless unbounded.
+%% `head_only` a journal record carries the write's object specs INCLUDING
+%% their payload, so the journal accumulates every version ever written while
+%% the ledger holds only the live set. `db.journal_trim_interval` is what
+%% bounds the total: it drops files below the ledger's persisted sequence
+%% number. Setting that to `0` restores unbounded growth.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "db.leveled.max_journal_size", "bondy_db.leveled_max_journalsize", [
@@ -922,10 +953,10 @@ end}.
 %% means records stay uncompressed indefinitely; only `on_receipt` has a
 %% compressing effect.
 %%
-%% In `head_only` mode a journal record holds the write's object specs rather
-%% than a value body, and no read path reads it — the entries exist only for
-%% startup consistency — so what this option trades is the disk those
-%% startup-consistency records occupy against CPU on the write path.
+%% In `head_only` mode a journal record holds the write's object specs, and
+%% those carry the payload, so this option governs real volume — but no read
+%% path reads the journal (the entries exist only for startup consistency)
+%% and `db.journal_trim_interval` bounds how long any of it is retained.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "db.leveled.compression_point", "bondy_db.leveled_compression_point", [

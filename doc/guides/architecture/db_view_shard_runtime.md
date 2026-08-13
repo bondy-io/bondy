@@ -204,12 +204,13 @@ Durable shards open every leveled Bookie in **`head_only` mode**
 (`{head_only, with_lookup}`), and that one decision reshapes what the
 twenty-two `db.leveled.*` options actually govern. In this mode the whole
 cell — state and value — is stored as a ledger HEAD entry, written in
-batches through `book_mput/2`; the journal receives the same object specs
-but no body, and leveled's own contract for that call is that the journal
-entries exist *only for handling consistency on startup*. Nothing on the
-read path goes near them: `book_get` becomes equivalent to `book_headonly`,
-so the fold's read of the previous state is a ledger lookup with no journal
-seek.
+batches through `book_mput/2`. The same batch also goes to the journal, and
+it goes there *whole*: the object specs carry the payload, serialised and
+compressed, so the journal is a complete record of every version ever
+written. Leveled's contract for that call is that those entries exist *only
+for handling consistency on startup*. Nothing on the read path goes near
+them: `book_get` becomes equivalent to `book_headonly`, so the fold's read
+of the previous state is a ledger lookup with no journal seek.
 
 The ledger path is therefore the whole of the live write path. It is
 bounded by `db.leveled.cache_size` and its `db.leveled.cache_multiple`
@@ -224,19 +225,32 @@ leveled, and the projection rebuilds from it.
 penciller and LSM levels; the journal taking object specs only, never
 read](img/db-leveled.svg)
 
-**Journal compaction does not run.** Leveled accepts `compact_journal` only
-when `head_only` is `false`; its head_only counterpart is `trim`, which
-drops journal entries below the persisted sequence number. Bondy calls
-neither, and leveled schedules neither on its own, so
+**Journal compaction does not run; a trim reclaims instead.** Leveled
+accepts `compact_journal` only when `head_only` is `false`. Its head_only
+counterpart is `trim`, which drops journal files older than the one holding
+the penciller's persisted sequence number — precisely the history a clean
+restart would no longer replay, so it cannot cost durability. Leveled never
+schedules either on its own, so `db.journal_trim_interval` (hourly by
+default) drives the trim from Bondy's side; without it the journal grows
+with cumulative writes while the ledger holds only the live set. Reclaimed
+disk returns a few seconds after each pass, because leveled defers the
+unlink until no snapshot can still be reading the file.
+
+Opening a store leaves waste of its own: the inker renames journal files
+absent from its manifest, and the penciller renames SSTs it did not use to
+rebuild the ledger, both to `.bak` — files leveled describes as removable
+waste and leaves for an operator to collect. Bondy collects them itself,
+on each Bookie start, which is the moment they appear.
+
+Because compaction is the pass that never runs,
 `db.leveled.singlefile_compaction_percentage`,
 `db.leveled.maxrunlength_compaction_percentage`,
 `db.leveled.max_run_length`, `db.leveled.journal_compaction_score_one_in`
-and `db.leveled.waste_retention_period` have no effect as things stand, and
-rolled journal files accumulate. `db.leveled.max_merge_below` is unaffected
-— it bounds a *ledger* merge, not a journal one — as are the compression,
-snapshot and statistics options. `db.leveled.compression_point` keeps only
-its `on_receipt` meaning; `on_compact` would defer compression to a pass
-that never happens.
+and `db.leveled.waste_retention_period` have no effect.
+`db.leveled.max_merge_below` is unaffected — it bounds a *ledger* merge, not
+a journal one — as are the compression, snapshot and statistics options.
+`db.leveled.compression_point` keeps only its `on_receipt` meaning;
+`on_compact` would defer compression to a pass that never happens.
 
 ![Leveled compaction, compression and snapshots: the journal scoring block
 that head_only mode leaves inert, alongside the ledger-merge, compression

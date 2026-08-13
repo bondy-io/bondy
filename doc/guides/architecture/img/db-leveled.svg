@@ -33,7 +33,7 @@
 
 
   <text class="tb ink" x="40" y="34">Projection (leveled, head_only mode) — where a write lands</text>
-  <text class="ts mu"  x="40" y="52">The whole value goes to the ledger, as a HEAD entry. The journal takes the same object specs — kept only for startup consistency, never read.</text>
+  <text class="ts mu"  x="40" y="52">The whole value goes to the ledger, as a HEAD entry. The journal takes the same batch, payload and all — kept only for startup consistency, never read.</text>
 
   <rect class="fill" x="40" y="96" width="76" height="30"/>
   <text class="tt ink" x="78" y="116" text-anchor="middle">PUT</text>
@@ -93,7 +93,7 @@
   <text class="ts mu" x="682" y="114" text-anchor="middle">CDB</text>
   <text class="ts mu" x="738" y="114" text-anchor="middle">CDB</text>
   <text class="ts sp" x="794" y="114" text-anchor="middle">head</text>
-  <text class="ts mu" x="600" y="142">object specs, no body; rolls on whichever bound is first</text>
+  <text class="ts mu" x="600" y="142">full payload; rolls on whichever bound is first</text>
 
   <rect class="cfgbx" x="600" y="156" width="300" height="20" rx="4"/>
   <text class="tk sp" x="608" y="170">db.leveled.max_journal_size = 1000000000</text>
@@ -113,6 +113,13 @@
   <text class="ts mu" x="600" y="356">reaches leveled, and the projection can be rebuilt</text>
   <text class="ts mu" x="600" y="370">from it — so none is deliberate, not an oversight.</text>
   <text class="ts sp" x="600" y="392">Durability of the write itself is db.wal.fsync_mode.</text>
+
+  <rect class="cfgbx" x="600" y="424" width="300" height="20" rx="4"/>
+  <text class="tk sp" x="608" y="438">db.journal_trim_interval = 1h</text>
+  <text class="ts mu" x="600" y="462">Nothing in leveled reclaims this column on its own:</text>
+  <text class="ts mu" x="600" y="476">compaction is refused under head_only and the trim</text>
+  <text class="ts mu" x="600" y="490">counterpart is never self-scheduled. Bondy drives it,</text>
+  <text class="ts mu" x="600" y="504">dropping every file below the persisted SQN.</text>
 
   <!-- ================= fixed band ================= -->
   <line x1="40" y1="606" x2="920" y2="606" stroke="var(--ru,#d9d5cf)" stroke-width="1"/>

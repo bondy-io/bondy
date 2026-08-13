@@ -6,6 +6,7 @@
 -module(bondy_db_leveled_sup).
 -behaviour(supervisor).
 
+-include_lib("kernel/include/logger.hrl").
 -include("bondy_doc.hrl").
 
 -moduledoc #{format => "text/markdown"}.
@@ -84,6 +85,7 @@ down.
 
 %% Child start callback (keyed Bookies) — not part of the public API.
 -export([start_registered/3]).
+-export([book_start/1]).
 
 -export([init/1]).
 
@@ -222,12 +224,38 @@ handles current across a crash.
 ) -> {ok, pid()} | {error, term()}.
 
 start_registered(Sup, Key, Opts) ->
-    case leveled_bookie:book_start(Opts) of
+    case book_start(Opts) of
         {ok, Pid} ->
             ok = persistent_term:put(?PT_KEY(Sup, Key), Pid),
             {ok, Pid};
         {error, _} = Err ->
             Err
+    end.
+
+-doc """
+Starts a Bookie and sweeps the archived files its startup just produced.
+
+Both halves of leveled archive on open rather than delete: the inker
+renames journal files absent from its manifest, and the penciller renames
+SST files not used to rebuild the ledger, each to `.bak`. Neither is ever
+reopened — leveled's own words are "removable waste not of backup", and
+"to make it easier for an admin to garbage collect these files". Bondy is
+that admin, and start is the moment to act: the renames have just
+happened and the store is not yet serving.
+
+Sweep failures are not start failures. A file we cannot unlink costs disk,
+not correctness, and the next start tries again.
+""".
+-spec book_start(Opts :: proplists:proplist()) ->
+    {ok, pid()} | {error, term()}.
+
+book_start(Opts) ->
+    case leveled_bookie:book_start(Opts) of
+        {ok, Pid} ->
+            _ = sweep_archived(proplists:get_value(root_path, Opts)),
+            {ok, Pid};
+        Other ->
+            Other
     end.
 
 -doc """
@@ -238,10 +266,13 @@ between tables sharing the pool.
 -spec bookie_count(Sup :: pid()) -> non_neg_integer().
 
 bookie_count(Sup) when is_pid(Sup) ->
+    %% Filter by module: this supervisor also owns a `journal_trimmer`
+    %% child, which is not a Bookie.
     length([
         Pid
-     || {_Id, Pid, _Type, _Mods} <- supervisor:which_children(Sup),
-        is_pid(Pid)
+     || {_Id, Pid, _Type, Mods} <- supervisor:which_children(Sup),
+        is_pid(Pid),
+        Mods =:= [leveled_bookie]
     ]).
 
 %% =============================================================================
@@ -260,7 +291,22 @@ init([]) ->
         intensity => 5,
         period => 60
     },
-    {ok, {SupFlags, []}}.
+    %% The journal trimmer is this supervisor's own child, started here
+    %% rather than by each topology, so every Bookie pool gets exactly one
+    %% without threading anything through the three topology modules. It
+    %% enumerates its siblings via `which_children/1` — `init/1` runs in
+    %% the supervisor process, so `self()` is the pid it needs. Bookies are
+    %% `head_only`, where nothing in leveled reclaims journal disk on its
+    %% own; see `bondy_db_journal_trimmer`.
+    Trimmer = #{
+        id => journal_trimmer,
+        start => {bondy_db_journal_trimmer, start_link, [self()]},
+        restart => permanent,
+        shutdown => 5_000,
+        type => worker,
+        modules => [bondy_db_journal_trimmer]
+    },
+    {ok, {SupFlags, [Trimmer]}}.
 
 %% =============================================================================
 %% PRIVATE
@@ -272,12 +318,55 @@ init([]) ->
 child_spec(Id, Opts) ->
     #{
         id => Id,
-        start => {leveled_bookie, book_start, [Opts]},
+        %% `book_start/1` here, not `leveled_bookie:book_start/1` — it is
+        %% the same start plus the archived-file sweep. `modules` stays
+        %% `[leveled_bookie]`: it declares the callback module for code
+        %% change, and is also what identifies Bookies among this
+        %% supervisor's children (see `bookie_count/1`).
+        start => {?MODULE, book_start, [Opts]},
         restart => temporary,
         shutdown => 30_000,
         type => worker,
         modules => [leveled_bookie]
     }.
+
+%% @private
+%% Deletes the `.bak` files leveled leaves behind on open, under both
+%% `<root>/journal/journal_files` and `<root>/ledger/ledger_files`. The
+%% middle segment is wildcarded rather than spelled out so the sweep does
+%% not encode leveled's directory names twice.
+sweep_archived(undefined) ->
+    0;
+sweep_archived(RootPath) ->
+    Files = filelib:wildcard(
+        filename:join([RootPath, "*", "*", "*.bak"])
+    ),
+    Deleted = lists:foldl(
+        fun(F, Acc) ->
+            case file:delete(F) of
+                ok ->
+                    Acc + 1;
+                {error, Reason} ->
+                    ?LOG_WARNING(#{
+                        description =>
+                            "Could not delete an archived leveled file; "
+                            "it holds disk until the next start retries.",
+                        file => F,
+                        reason => Reason
+                    }),
+                    Acc
+            end
+        end,
+        0,
+        Files
+    ),
+    Deleted > 0 andalso
+        ?LOG_INFO(#{
+            description => "Swept archived leveled files on Bookie start",
+            root_path => RootPath,
+            deleted => Deleted
+        }),
+    Deleted.
 
 %% @private
 %% Keyed child: permanent, started through `start_registered/3` so every
