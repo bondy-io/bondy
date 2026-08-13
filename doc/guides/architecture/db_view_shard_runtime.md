@@ -42,8 +42,16 @@ flowchart TD
    seqs — replicating and advancing frontiers like any event, folding to
    nothing — so the gap never becomes sync-unfillable.
 3. **Acknowledge.** The caller's write is complete at durable append —
-   before the fold. Durability policy (`db.fsync`) governs what "durable"
-   costs.
+   before the fold. `db.wal.fsync_mode` governs what "durable" costs.
+   `per_write`, the default, fsyncs every append: each write is durable
+   before it returns, at the price of binding the writer to the device's
+   fsync rate. `batched` defers the fsync to a size or time boundary
+   (`db.wal.batched_fsync_bytes`, `db.wal.batched_fsync_interval`) and
+   exposes durability through an explicit wait rather than through the
+   append returning — roughly two orders of magnitude more throughput, in
+   exchange for a bounded durability window. All three are global: they
+   affect every durable instance node-wide. The ephemeral `registry`
+   database's in-memory WAL never fsyncs and ignores them.
 4. **Drain and fold.** The applier consumes the log in order and folds
    each event through the table's CRDT module into the projection. The
    fold is the only interpreter of operations; every event source passes

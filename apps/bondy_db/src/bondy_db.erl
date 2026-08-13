@@ -193,13 +193,6 @@ it).
 -define(PROBE_BUCKET, <<"$probe">>).
 -define(PROBE_KEY, <<"$probe">>).
 -define(PROBE_TOKEN, <<"$probe">>).
-%% Substrate default range cap, mirrored from `bondy_oplog_core`.
--define(DEFAULT_RANGE_LIMIT, 1000).
-%% Upper bound on the primary-scan fallback: how many primary
-%% cells a single stale-index fallback read will enumerate. Bounded so the
-%% "slow but correct" path cannot run unbounded; a scan that hits the cap
-%% logs a warning (the fallback result may be incomplete).
--define(PRIMARY_SCAN_LIMIT, 1000000).
 
 -type realm() :: binary().
 
@@ -3656,7 +3649,7 @@ cell_terms(Spec, Value) ->
 %% value's index terms, and keep the keys whose terms include `NormTerm`.
 %% Returns the same `{Key, ColumnsMap}` shape as `index_get/5`.
 primary_scan_eq(Table, Realm, Spec, NormTerm, Opts) ->
-    Limit = maps:get(limit, Opts, ?DEFAULT_RANGE_LIMIT),
+    Limit = maps:get(limit, Opts, bondy_oplog_core:default_range_limit()),
     primary_scan(Table, Realm, fun(Cells) ->
         Rows = [
             {Key, recompute_columns(Spec, Value)}
@@ -3671,7 +3664,7 @@ primary_scan_eq(Table, Realm, Spec, NormTerm, Opts) ->
 %% in `[Lo, Hi)`, globally ordered by `(term, key)` to match
 %% `index_range/6`.
 primary_scan_range(Table, Realm, Spec, Lo, Hi, Opts) ->
-    Limit = maps:get(limit, Opts, ?DEFAULT_RANGE_LIMIT),
+    Limit = maps:get(limit, Opts, bondy_oplog_core:default_range_limit()),
     primary_scan(Table, Realm, fun(Cells) ->
         Rows = [
             {Term, Key, recompute_columns(Spec, Value)}
@@ -3693,7 +3686,7 @@ recompute_columns(Spec, Value) ->
 %% @private
 %% Enumerate every primary cell in `Realm` (materialised values), across
 %% all primary shards, with overlay disabled. Bounded by
-%% `?PRIMARY_SCAN_LIMIT`; a scan that fills it is logged as potentially
+%% `db.primary_scan_limit`; a scan that fills it is logged as potentially
 %% incomplete.
 %%
 %% Scoped and un-folded exactly like `list/2`, and for the same reason: a whole
@@ -3705,17 +3698,18 @@ recompute_columns(Spec, Value) ->
 primary_cells(#{namespace := NS, db_topology := Topology} = Table, Realm) ->
     PrimaryBucket = primary_bucket(Table, Realm),
     {Lo, Hi} = realm_scan_range(Topology, Realm),
+    ScanLimit = bondy_db_config:primary_scan_limit(),
     case
         bondy_oplog_core:range_all(
             NS,
             ?INDEX,
             PrimaryBucket,
             {Lo, Hi},
-            #{limit => ?PRIMARY_SCAN_LIMIT, include_overlay => false}
+            #{limit => ScanLimit, include_overlay => false}
         )
     of
         {ok, Cells} ->
-            case length(Cells) >= ?PRIMARY_SCAN_LIMIT of
+            case length(Cells) >= ScanLimit of
                 true ->
                     ?LOG_WARNING(#{
                         description =>
@@ -3724,7 +3718,7 @@ primary_cells(#{namespace := NS, db_topology := Topology} = Table, Realm) ->
                             "incomplete.",
                         namespace => NS,
                         realm => Realm,
-                        cap => ?PRIMARY_SCAN_LIMIT
+                        cap => ScanLimit
                     });
                 false ->
                     ok

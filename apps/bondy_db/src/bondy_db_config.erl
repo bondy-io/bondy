@@ -44,6 +44,8 @@ surface to configure them through, rather than reaching into the raw
 -export([oplog_realm_prefix_depth/1]).
 -export([oplog_mst_retention/1]).
 -export([oplog_on_topology_mismatch/1]).
+-export([leveled_opts/0]).
+-export([primary_scan_limit/0]).
 -export([will_set/2]).
 -export([on_set/2]).
 
@@ -145,6 +147,118 @@ oplog_mst_retention(DbName) ->
         {0, 0} -> undefined;
         _ -> #{max_age_ms => MaxAge, max_events => MaxEvents}
     end.
+
+-doc """
+Maximum number of primary cells a single stale-index fallback read will
+enumerate (default 1,000,000).
+
+When an index is stale, `bondy_db` answers the query by scanning every
+primary cell in the realm and recomputing each value's index terms. This
+bounds that scan so the "slow but correct" path cannot run unbounded.
+
+A scan that fills the cap returns a **potentially incomplete** result and
+logs a warning; the caller is not told. Deployments whose realms hold more
+cells than this should raise it, since the right value follows from realm
+size and nothing else.
+""".
+-spec primary_scan_limit() -> pos_integer().
+
+primary_scan_limit() ->
+    get(primary_scan_limit, 1_000_000).
+
+-doc """
+Tunable `leveled_bookie:book_start/1` options, sourced from the
+`db.leveled.*` Cuttlefish family.
+
+Global rather than per-database: every durable Bookie a node starts uses
+the same values, matching how `db.wal.*` behaves. The ephemeral
+`registry` database keeps its projection in memory and starts no Bookie,
+so none of these apply to it.
+
+Two options are deliberately absent, because `bondy_db` fixes them rather
+than exposing them:
+
+- `root_path` is derived per Bookie by the topology from the data
+  directory. An operator-supplied value would collide across shards.
+- `head_only` must be `with_lookup`. `bondy_db_projection_leveled` is
+  built on `book_headonly/4` and `book_mput/2`, and `book_get`/`book_put`
+  are unsupported under that flag, so any other value only breaks the
+  adapter.
+
+Every default is leveled's own (`?OPTION_DEFAULTS` in `leveled_bookie`),
+which applied before by omission, with two exceptions.
+
+`cache_size` stays at 2000, the value `bondy_db` has always passed. It sits
+20% under leveled's 2500 and the difference is not worth a behaviour change.
+
+`max_journalsize` is leveled's 1 GB rather than the 100 MB `bondy_db`
+previously passed. That 100 MB came from a default the code itself
+described as tuned for fast tests, and it costs a large store ten times the
+journal files, file handles and compaction runs it needs. The option is the
+inker's roll threshold for the head file, not a format parameter, so raising
+it leaves sealed journals untouched and only makes files rolled from now on
+larger.
+""".
+-spec leveled_opts() -> proplists:proplist().
+
+leveled_opts() ->
+    [
+        %% Ledger cache and journal sizing.
+        {cache_size, get(leveled_cache_size, 2000)},
+        {cache_multiple, get(leveled_cache_multiple, 2)},
+        {max_journalsize, get(leveled_max_journalsize, 1_000_000_000)},
+        {max_journalobjectcount, get(leveled_max_journalobjectcount, 200_000)},
+        {max_pencillercachesize, get(leveled_max_pencillercachesize, 28_000)},
+        {max_mergebelow, get(leveled_max_mergebelow, 24)},
+        {ledger_preloadpagecache_level,
+            get(leveled_ledger_preloadpagecache_level, 4)},
+
+        %% Durability.
+        {sync_strategy, get(leveled_sync_strategy, none)},
+
+        %% Journal compaction.
+        {waste_retention_period,
+            optional(get(leveled_waste_retention_period, off))},
+        {max_run_length, optional(get(leveled_max_run_length, default))},
+        {singlefile_compactionpercentage,
+            get(leveled_singlefile_compactionpercentage, 30.0)},
+        {maxrunlength_compactionpercentage,
+            get(leveled_maxrunlength_compactionpercentage, 70.0)},
+        {journalcompaction_scoreonein,
+            get(leveled_journalcompaction_scoreonein, 1)},
+
+        %% Compression.
+        {compression_method, get(leveled_compression_method, lz4)},
+        {compression_point, get(leveled_compression_point, on_receipt)},
+        {compression_level, get(leveled_compression_level, 1)},
+        {ledger_compression, get(leveled_ledger_compression, as_store)},
+
+        %% Snapshots.
+        {snapshot_timeout_short, get(leveled_snapshot_timeout_short, 900)},
+        {snapshot_timeout_long, get(leveled_snapshot_timeout_long, 43_200)},
+
+        %% Logging and statistics.
+        {log_level, get(leveled_log_level, info)},
+        {stats_percentage, get(leveled_stats_percentage, 10)},
+        {stats_logfrequency, get(leveled_stats_logfrequency, 30)}
+    ].
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+%% @private
+%% Leveled spells two different absences as `undefined`: "retain no waste
+%% on compaction" and "use the built-in compaction run length of 8".
+%% Neither is a value an operator can write in a `.conf` file, so the
+%% schema takes `off` and `default` respectively and this maps either
+%% back.
+optional(off) -> undefined;
+optional(default) -> undefined;
+optional(Value) -> Value.
+
 
 -spec will_set(Key :: key_value:key(), Value :: any()) ->
     ok | {ok, NewValue :: any()} | {error, Reason :: any()}.

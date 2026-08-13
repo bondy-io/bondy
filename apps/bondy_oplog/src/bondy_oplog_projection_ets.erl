@@ -6,6 +6,7 @@
 -module(bondy_oplog_projection_ets).
 
 -include("bondy_doc.hrl").
+-include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
@@ -121,7 +122,7 @@ Single-bucket half-open `[Low, High)` ascending range scan, capped at
 fallback uses, since no finite binary exceeds every possible key.
 """.
 range(Tab, Bucket, Low, High, Opts) ->
-    Limit = maps:get(limit, Opts, 1000),
+    Limit = maps:get(limit, Opts, ?DEFAULT_RANGE_LIMIT),
     %% Rows are keyed by `{Bucket, Key}`. To scan a single bucket's
     %% `[Low, High)` we constrain the composite key to that bucket. An
     %% `infinity` high drops the upper-bound guard.

@@ -661,6 +661,306 @@ end}.
   {default, "30s"}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc Maximum number of primary cells a single stale-index fallback read
+%% will enumerate. When an index is stale, Bondy answers the query by
+%% scanning every primary cell in the realm and recomputing each value's
+%% index terms; this bounds that scan so the slow-but-correct path cannot
+%% run unbounded.
+%%
+%% A scan that fills the cap returns a POTENTIALLY INCOMPLETE result and
+%% logs a warning naming this key; the caller is not told. Raise it for
+%% realms holding more cells than the default, since the correct value
+%% follows from realm size and nothing else. Global, like `db.wal.*`.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.primary_scan_limit", "bondy_db.primary_scan_limit", [
+  {datatype, integer},
+  {default, 1000000}
+]}.
+
+
+%% =============================================================================
+%% LEVELED (DURABLE PROJECTION STORE)
+%% =============================================================================
+%% Options passed to `leveled_bookie:book_start/1` for every durable Bookie
+%% this node starts. Global, like `db.wal.*` — not per-database. The
+%% ephemeral `registry` database keeps its projection in memory and starts
+%% no Bookie, so none of these apply to it.
+%%
+%% `root_path` and `head_only` are deliberately absent: the first is derived
+%% per Bookie from the data directory, and the second must stay
+%% `with_lookup` because the projection adapter is built on `book_headonly/4`
+%% and `book_mput/2`.
+%%
+%% Every default is leveled's own, which applied before by omission, except
+%% `db.leveled.cache_size`, which keeps the 2000 Bondy has always passed.
+%%
+%% `db.leveled.max_journal_size` is a deliberate change: Bondy previously
+%% passed 100MB, a test-tuned value that costs a large store ten times the
+%% journal files, handles and compaction runs it needs. It is now leveled's
+%% own 1GB. The option is the head file's roll threshold, not a format
+%% parameter, so sealed journals are unaffected and only files rolled after
+%% the upgrade grow.
+
+%% -----------------------------------------------------------------------------
+%% @doc Size of the Bookie's ledger cache — the in-memory buffer of recent
+%% additions to the ledger, measured in objects, flushed to the penciller when
+%% full. Larger values reduce penciller pressure and raise memory use.
+%% Leveled ignores any value below 100, and adds randomised jitter to whatever
+%% is configured so that Bookies do not flush in lockstep.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.cache_size", "bondy_db.leveled_cache_size", [
+  {datatype, integer},
+  {default, 2000}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Multiple of `db.leveled.cache_size` beyond which the ledger cache
+%% will not grow even while the penciller is busy. On reaching it, every PUT
+%% returns a pause, applying back-pressure to the writer rather than growing
+%% memory without bound.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.cache_multiple", "bondy_db.leveled_cache_multiple", [
+  {datatype, integer},
+  {default, 2}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Maximum size of a single journal file. Leveled rolls to a new file
+%% on reaching either this or `db.leveled.max_journal_objects`, whichever
+%% comes first. The absolute ceiling is 4GB, imposed by leveled's 4-byte file
+%% pointers.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.max_journal_size", "bondy_db.leveled_max_journalsize", [
+  {datatype, bytesize},
+  {default, "1000000000"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Maximum number of objects in a single journal file. The companion
+%% bound to `db.leveled.max_journal_size`; the journal stays within both.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.max_journal_objects", "bondy_db.leveled_max_journalobjectcount", [
+  {datatype, integer},
+  {default, 200000}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Maximum number of keys the penciller holds in memory before pushing
+%% a new level-zero SST file to disk. Larger values mean fewer, bigger L0
+%% pushes and more memory held.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.penciller_cache_size", "bondy_db.leveled_max_pencillercachesize", [
+  {datatype, integer},
+  {default, 28000}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Maximum number of ledger files a single file may be merged into.
+%% With fewer than this many overlapping files below, the merge runs
+%% unbounded; at or above it, the merge is partial. `infinity` never bounds
+%% the merge. Leveled tests at the default; changing it is for tuning under
+%% measurement, not routine operation.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.max_merge_below", "bondy_db.leveled_max_mergebelow", [
+  {datatype, [integer, {atom, infinity}]},
+  {default, 24}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Ledger level at and above which SST files are preloaded into the OS
+%% page cache on open. Higher values preload more of the tree, trading memory
+%% and startup work for lower first-read latency.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.ledger_preload_pagecache_level", "bondy_db.leveled_ledger_preloadpagecache_level", [
+  {datatype, integer},
+  {default, 4}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Whether leveled flushes to disk after every write. `none` (the
+%% default) lets the operating system schedule the flush. `sync` forces a
+%% flush per write, which is markedly slower unless the hardware absorbs it
+%% (battery-backed write cache). `riak_sync` calls sync() manually after each
+%% write and exists for OTP16 compatibility.
+%%
+%% This governs the durable *projection*, not the write-ahead log. A write is
+%% already durable in the WAL before the fold reaches leveled, and the
+%% projection can be rebuilt from the log, so `none` is the deliberate
+%% default. Durability of the write itself is `db.wal.fsync_mode`.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.sync_strategy", "bondy_db.leveled_sync_strategy", [
+  {datatype, {enum, [none, sync, riak_sync]}},
+  {default, none}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How long journal files that have already been compacted are kept
+%% before deletion. `off` (the default) garbage-collects every such file at
+%% compaction and retains no waste. Setting a period keeps them, which allows
+%% restoring the store to a point in time by clearing the ledger and reverting
+%% the inker manifest — at the cost of the disk the waste occupies.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.waste_retention_period", "bondy_db.leveled_waste_retention_period", [
+  {datatype, [{duration, s}, {atom, off}]},
+  {default, off}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How many journal files may be compacted in a single run. `default`
+%% uses leveled's built-in run length of 8. Raising it lets one run reclaim
+%% more space at the cost of a longer, heavier compaction.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.max_run_length", "bondy_db.leveled_max_run_length", [
+  {datatype, [integer, {atom, default}]},
+  {default, default}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Compaction score at or below which a single journal file is eligible
+%% for compaction on its own. Lower values make solitary-file compactions
+%% rarer, favouring longer runs.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.singlefile_compaction_percentage", "bondy_db.leveled_singlefile_compactionpercentage", [
+  {datatype, float},
+  {default, 30.0}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Compaction score required for a full-length run to be eligible.
+%% Raising this, or lowering
+%% `db.leveled.singlefile_compaction_percentage`, makes leveled prefer a long
+%% run over a short one.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.maxrunlength_compaction_percentage", "bondy_db.leveled_maxrunlength_compactionpercentage", [
+  {datatype, float},
+  {default, 70.0}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How often a journal file is scored. `1` scores every file on every
+%% compaction run. A value of `n` scores any given file on roughly one run in
+%% `n`, using a cached score otherwise; all files are scored on the first run
+%% after startup. Raising it saves significant work on large journals under
+%% frequent compaction.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.journal_compaction_score_one_in", "bondy_db.leveled_journalcompaction_scoreonein", [
+  {datatype, integer},
+  {default, 1}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Compression algorithm for stored values. `none` disables
+%% compression. `native` uses the Erlang term compressor. `lz4` (the default)
+%% and `zstd` trade CPU for space, `zstd` more aggressively than `lz4`.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.compression_method", "bondy_db.leveled_compression_method", [
+  {datatype, {enum, [lz4, native, zstd, none]}},
+  {default, lz4}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc When values are compressed. `on_receipt` (the default) compresses as
+%% the value arrives, spending CPU on the write path to keep the journal
+%% small. `on_compact` stores values uncompressed and compresses only when the
+%% journal is compacted, which is faster to write and larger at rest.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.compression_point", "bondy_db.leveled_compression_point", [
+  {datatype, {enum, [on_receipt, on_compact]}},
+  {default, on_receipt}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Compression level, applicable when `db.leveled.compression_method` is
+%% `zstd`. Higher values compress harder and cost more CPU.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.compression_level", "bondy_db.leveled_compression_level", [
+  {datatype, integer},
+  {default, 1}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Compression for the ledger specifically. `as_store` (the default)
+%% follows `db.leveled.compression_method`; the remaining values override it
+%% for the ledger alone, which is useful when ledger and journal deserve
+%% different trade-offs.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.ledger_compression", "bondy_db.leveled_ledger_compression", [
+  {datatype, {enum, [as_store, native, lz4, zstd, none]}},
+  {default, as_store}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How long a short-lived snapshot may remain open before leveled
+%% releases it. Snapshots pin the files they were opened against, so a leaked
+%% snapshot holds disk that compaction would otherwise reclaim; the timeout
+%% bounds that.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.snapshot_timeout_short", "bondy_db.leveled_snapshot_timeout_short", [
+  {datatype, {duration, s}},
+  {default, "15m"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc As `db.leveled.snapshot_timeout_short`, for snapshots registered as
+%% long-running — full-store folds and similar.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.snapshot_timeout_long", "bondy_db.leveled_snapshot_timeout_long", [
+  {datatype, {duration, s}},
+  {default, "12h"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Minimum severity leveled logs at. Independent of Bondy's own log
+%% level: leveled is verbose at `debug`, and this keeps that separable.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.log_level", "bondy_db.leveled_log_level", [
+  {datatype, {enum, [debug, info, warning, error, critical]}},
+  {default, info}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Percentage of operations sampled for leveled's internal timing
+%% statistics. Sampling rather than measuring everything keeps the cost of
+%% statistics off the hot path; raising it sharpens the numbers and costs more.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.stats_percentage", "bondy_db.leveled_stats_percentage", [
+  {datatype, integer},
+  {default, 10}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How often leveled logs its accumulated timing statistics.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "db.leveled.stats_log_frequency", "bondy_db.leveled_stats_logfrequency", [
+  {datatype, {duration, s}},
+  {default, "30s"}
+]}.
+
+
 
 %% -----------------------------------------------------------------------------
 %% @doc The period in seconds that Bondy will waith for clients to gracefully

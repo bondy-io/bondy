@@ -35,16 +35,22 @@ only the leaf functions the three topology modules call.
 %% =============================================================================
 
 ?DOC("""
-Default leveled `book_start/1` options for a Bookie rooted at `Dir`.
+Leveled `book_start/1` options for a Bookie rooted at `Dir`.
 
-`head_only=with_lookup` enables `book_mput/2` (atomic batched writes)
-and `book_headonly/4` (ledger-only point reads), both required by
-`bondy_db_projection_leveled`. With the flag on,
-`book_get`/`book_put` are unsupported; the adapter uses `book_headonly`
-+ `book_mput` exclusively.
+Two options are fixed here rather than configured, because neither is the
+operator's to choose:
 
-The defaults are tuned for fast tests, not production. Deployments
-should override `book_opts_fun` in `topology_opts`.
+- `root_path` is this Bookie's own directory, derived by the topology.
+- `head_only=with_lookup` enables `book_mput/2` (atomic batched writes)
+  and `book_headonly/4` (ledger-only point reads), both required by
+  `bondy_db_projection_leveled`. With the flag on, `book_get`/`book_put`
+  are unsupported; the adapter uses `book_headonly` + `book_mput`
+  exclusively, so any other value breaks it.
+
+Everything else comes from `bondy_db_config:leveled_opts/0`, backed by the
+`db.leveled.*` Cuttlefish family. A deployment that needs different values
+sets them in `bondy.conf`; overriding `book_opts_fun` in `topology_opts`
+remains available for tests and for callers that need per-Bookie options.
 """).
 -spec default_book_opts(Dir :: file:filename_all()) ->
     proplists:proplist().
@@ -52,10 +58,8 @@ should override `book_opts_fun` in `topology_opts`.
 default_book_opts(Dir) ->
     [
         {root_path, Dir},
-        {cache_size, 2000},
-        {max_journalsize, 100_000_000},
-        {sync_strategy, none},
         {head_only, with_lookup}
+        | bondy_db_config:leveled_opts()
     ].
 
 ?DOC("Ensures `Dir` exists by creating it (via a sentinel child path).").

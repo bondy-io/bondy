@@ -6,6 +6,7 @@
 -module(bondy_oplog_core).
 
 -include("bondy_doc.hrl").
+-include("bondy_oplog.hrl").
 
 -moduledoc #{format => "text/markdown"}.
 ?MODULEDOC("""
@@ -64,6 +65,7 @@ overlay, fold_module}` for each `(NS, Index, Shard)` they manage.
 -export([range/5]).
 -export([range_all/4]).
 -export([range_all/5]).
+-export([default_range_limit/0]).
 -export([read_at_hlc/3]).
 -export([read_at_hlc/4]).
 -export([write_through/4]).
@@ -126,6 +128,22 @@ overlay, fold_module}` for each `(NS, Index, Shard)` they manage.
 %% =============================================================================
 %% API
 %% =============================================================================
+
+-doc """
+Rows a range read returns when the caller does not pass a `limit`.
+
+The single definition of that default. `range/5`, `range_all/5` and
+`bondy_db`'s stale-index fallback all read it, so the layers cannot drift
+apart — the value was previously repeated as a literal at each site, with
+only a comment recording that they were meant to agree.
+
+This is a default, not a bound: every range API takes an explicit `limit`
+in its options, and a caller that passes one is unaffected.
+""".
+-spec default_range_limit() -> pos_integer().
+
+default_range_limit() ->
+    ?DEFAULT_RANGE_LIMIT.
 
 -doc """
 Backward-compatible point read in the default `(NS, primary, '', Key)`
@@ -422,7 +440,7 @@ If `(NS, Index)` has no registered shards the call returns `{ok, []}`.
 range_all(NS, Index, Bucket, {Low, High}, Opts) when
     is_atom(NS), is_atom(Index), is_map(Opts)
 ->
-    Limit = maps:get(limit, Opts, 1000),
+    Limit = maps:get(limit, Opts, default_range_limit()),
     Shards = shards_in(NS, Index),
     T0 = erlang:monotonic_time(microsecond),
     Result = scatter_range(Shards, NS, Index, Bucket, Low, High, Opts),
@@ -966,7 +984,7 @@ registry_lookup(NS, Index, Shard) ->
     end.
 
 do_range(Entry, Bucket, Low, High, Opts) ->
-    Limit = maps:get(limit, Opts, 1000),
+    Limit = maps:get(limit, Opts, default_range_limit()),
     IncludeOverlay = maps:get(include_overlay, Opts, true),
     Fence = maps:get(fence, Opts, infinity),
     Kernel = kernel_for(Entry),

@@ -288,7 +288,7 @@ range(H, Bucket, Low, High, Opts) when
     is_map(Opts)
 ->
     Pid = bookie(H),
-    Limit = maps:get(limit, Opts, 1000),
+    Limit = maps:get(limit, Opts, ?DEFAULT_RANGE_LIMIT),
     %% ONE streaming head-fold over BOTH subkeys reconstructs every frame in a
     %% single ledger pass. The value lives in the head (no journal hop), so
     %% there is no need for the old keylist + per-key `get/3` — that was an N+1

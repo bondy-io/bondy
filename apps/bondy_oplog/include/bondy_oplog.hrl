@@ -20,6 +20,15 @@
 -ifndef(BONDY_OPLOG_HRL).
 -define(BONDY_OPLOG_HRL, true).
 
+%% Rows a range read returns when the caller passes no `limit`. THE single
+%% definition of that default: the substrate's `range/5` and `range_all/5`,
+%% both projection adapters' `range/5`, and `bondy_db`'s stale-index
+%% fallback all resolve to it. It was previously a literal repeated at each
+%% of those five sites, with only a comment recording that they were meant
+%% to agree. A default, not a bound — every range API takes an explicit
+%% `limit`, and a caller that passes one is unaffected.
+-define(DEFAULT_RANGE_LIMIT, 1000).
+
 %% Origin identifier: opaque binary. 16 bytes is the recommended default
 %% (random per-replica id). Larger values are accepted (e.g. SHA-256 of a
 %% public key) — the replication layer treats it as opaque.
