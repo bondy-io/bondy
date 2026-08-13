@@ -116,8 +116,9 @@ Steps:
 2. Write the 48-byte header.
 3. `datasync` the file descriptor.
 4. `datasync` the enclosing directory so the new dirent is durable.
-5. Close the write fd and re-open it for read/write so the caller can
-   append frames.
+
+The fd is opened read/write up front and returned as-is, so the caller
+can append frames without re-opening.
 
 Returns `{ok, Fd, Header}` on success or `{error, Reason}` on failure.
 """).
@@ -167,23 +168,53 @@ Opens an existing segment file for read/write and parses its header.
 Returns `{ok, Fd, Header}` if the segment header parses cleanly, or
 `{error, Reason}`. Caller-side identity verification should use
 `verify/3` against the parsed header.
+
+`{error, missing_segment}` means the file does not exist — distinct from
+`truncated_header`, which means it exists but is shorter than the 48-byte
+header. Never creates the file.
 """).
 -spec open(file:filename_all()) ->
-    {ok, file:fd(), t()} | {error, term()}.
+    {ok, file:fd(), t()} | {error, missing_segment | term()}.
 
 open(Path) ->
-    case prim_file:open(Path, [read, write, raw, binary]) of
-        {ok, Fd} ->
-            case read_header(Fd) of
-                {ok, Header} ->
-                    {ok, Fd, Header};
-                {error, _} = E ->
-                    ok = prim_file:close(Fd),
-                    E
-            end;
+    %% The header is probed through a READ-ONLY fd on purpose. Opening
+    %% `[read, write]` creates the file when it is absent, which would
+    %% turn "this segment is missing" into a 0-byte file reported as
+    %% `truncated_header` — a corruption class — and make that verdict
+    %% self-confirming on every subsequent open. Recovery inspects the
+    %% directory before deciding what to do with it; inspection must not
+    %% mutate it. `missing_segment` keeps the two conditions apart.
+    case prim_file:open(Path, [read, raw, binary]) of
+        {ok, ROFd} ->
+            Result = read_header(ROFd),
+            ok = prim_file:close(ROFd),
+            open_verified(Path, Result);
+        {error, enoent} ->
+            {error, missing_segment};
         {error, _} = E ->
             E
     end.
+
+%% @private
+%% Re-opens read/write once the header has verified, so the caller gets
+%% the appendable fd it expects. Only reached for a file that existed a
+%% moment ago with a valid header.
+%%
+%% `read_header/1` positions the fd it validates past the header; that fd
+%% is the read-only probe and is closed here, so the returned fd is
+%% positioned explicitly to keep `open/1`'s contract — callers resume
+%% sequential frame I/O at offset 48.
+open_verified(Path, {ok, Header}) ->
+    case prim_file:open(Path, [read, write, raw, binary]) of
+        {ok, Fd} ->
+            {ok, _} = prim_file:position(Fd, ?HEADER_BYTES),
+            {ok, Fd, Header};
+        {error, _} = E ->
+            E
+    end;
+
+open_verified(_Path, {error, _} = E) ->
+    E.
 
 ?DOC("""
 Reads and parses the 48-byte segment header from the start of `Fd`.

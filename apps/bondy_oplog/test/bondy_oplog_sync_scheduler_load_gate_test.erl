@@ -104,6 +104,15 @@ cleanup(Prev) ->
     [bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
     restore(aae_load_adaptive, maps:get(adaptive, Prev)),
     restore(aae_load_run_queue_threshold, maps:get(threshold, Prev)),
+    %% Remove this run's storage tree. Without it each test leaves its
+    %% instance directories behind for good: 733, 462 and 168 stale trees
+    %% had accumulated under the three bases these scheduler suites use.
+    %% Stale trees are not merely untidy — a directory holding a manifest
+    %% whose segment has since gone missing makes any later run that
+    %% reuses the path fail in recovery.
+    _ = file:del_dir_r(
+        filename:join("/tmp/" ++ os:getpid(), "bondy_oplog_load_gate_test")
+    ),
     ok.
 
 %% Gate on with a 0.0 threshold ⇒ every tick yields. A non-fence live shard's
@@ -181,7 +190,7 @@ restore(Key, {ok, V}) ->
 live_instance(Fence) ->
     Id = mk_id(),
     Dir = filename:join([
-        "/tmp", "bondy_oplog_load_gate_test", binary_to_list(Id)
+        "/tmp/" ++ os:getpid(), "bondy_oplog_load_gate_test", binary_to_list(Id)
     ]),
     ok = filelib:ensure_path(Dir),
     Opts0 = #{storage_path => list_to_binary(Dir)},

@@ -117,7 +117,18 @@ Returns `{ok, recovery_result()}` on success or `{error, Reason}` for:
   for a different instance.
 - `{orphan_segment, _}` — a sealed segment's header doesn't match this
   instance/origin (e.g., backup restored onto the wrong node).
+- `{head_segment, SegId, missing_segment}` — the manifest names a head
+  segment whose file is absent. Distinct from a corrupt header: absence
+  means something removed a segment the manifest still considers live,
+  which the WAL's own write ordering cannot produce (`create/4` fsyncs
+  the header and the dirent before the manifest names the segment).
 - `{head_segment, _}` — head segment header is corrupt or unreadable.
+  Under that same write ordering this state is unreachable for a
+  manifest-named segment, so it is reported rather than repaired: a
+  sub-48-byte file provably holds no frame and could be re-initialised
+  without data loss, but doing so silently would erase the evidence that
+  an invariant was violated. Detection here is deliberate, matching
+  `bondy_oplog_wal_scrubber`'s stance that repair is operator-driven.
 - `{consumer_offset, _}` — `consumer.offset` file is malformed.
 
 The caller (typically `bondy_oplog_wal:init/1`) is responsible for

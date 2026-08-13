@@ -570,7 +570,7 @@ reconcile_idempotent({Db, _Sup, _Dir}) ->
 
 make_tempdir() ->
     Base = filename:join([
-        "/tmp",
+        "/tmp/" ++ os:getpid(),
         "bondy_db_test",
         integer_to_list(erlang:unique_integer([positive, monotonic]))
     ]),

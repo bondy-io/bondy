@@ -57,7 +57,7 @@ manifest_test_() ->
 setup() ->
     Dir = filename:join(
         [
-            "/tmp",
+            "/tmp/" ++ os:getpid(),
             "bondy_db_manifest_test",
             integer_to_list(erlang:unique_integer([positive]))
         ]

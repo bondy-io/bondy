@@ -178,7 +178,7 @@ read_value(T, K) ->
 make_tempdir() ->
     Dir = filename:join(
         [
-            "/tmp",
+            "/tmp/" ++ os:getpid(),
             "bondy_db_bookie_restart_test",
             integer_to_list(erlang:unique_integer([positive]))
         ]

@@ -191,7 +191,7 @@ mk_frame(Bytes) when is_binary(Bytes) ->
 
 make_tempdir() ->
     Base = filename:join([
-        "/tmp",
+        "/tmp/" ++ os:getpid(),
         "bondy_db_single_bookie_test",
         integer_to_list(erlang:unique_integer([positive, monotonic]))
     ]),

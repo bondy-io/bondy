@@ -233,7 +233,7 @@ setup() ->
     bondy_oplog_sync_scheduler:set_dispatch(undefined),
     bondy_oplog_gc_scheduler:set_trigger(undefined),
     Dir = filename:join(
-        "/tmp",
+        "/tmp/" ++ os:getpid(),
         "walresume_" ++
             integer_to_list(erlang:unique_integer([positive, monotonic]))
     ),

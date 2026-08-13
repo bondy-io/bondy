@@ -393,7 +393,7 @@ foreach_shard(Table, IndexName, Fun) ->
 
 make_tempdir() ->
     Base = filename:join([
-        "/tmp",
+        "/tmp/" ++ os:getpid(),
         "bondy_db_index_lag_test",
         integer_to_list(erlang:unique_integer([positive, monotonic]))
     ]),

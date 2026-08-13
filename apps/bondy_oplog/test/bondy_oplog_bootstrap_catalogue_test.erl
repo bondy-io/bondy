@@ -462,7 +462,7 @@ setup_instance_persistent(BaseDir, ExtraOpts) ->
 
 test_dir() ->
     Base = filename:join([
-        "/tmp",
+        "/tmp/" ++ os:getpid(),
         "bondy_mst_bootstrap_catalogue_test",
         integer_to_list(erlang:unique_integer([positive]))
     ]),

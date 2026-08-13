@@ -394,7 +394,7 @@ rebuild_counter_handler() ->
 
 make_tempdir(Prefix) ->
     Base = filename:join([
-        "/tmp",
+        "/tmp/" ++ os:getpid(),
         "bondy_db_index_coldstart",
         Prefix,
         integer_to_list(erlang:unique_integer([positive, monotonic]))

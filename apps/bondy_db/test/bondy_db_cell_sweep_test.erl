@@ -434,7 +434,7 @@ mux_cleanup({Db, _T1, _T2, _T3, Sup, Dir}) ->
 
 mux_tempdir() ->
     Base = filename:join([
-        "/tmp",
+        "/tmp/" ++ os:getpid(),
         "bondy_db_cell_sweep_mux",
         integer_to_list(erlang:unique_integer([positive, monotonic]))
     ]),

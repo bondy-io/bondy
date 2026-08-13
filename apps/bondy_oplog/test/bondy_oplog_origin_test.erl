@@ -118,7 +118,7 @@ validate_test_() ->
 
 mktemp_dir(Prefix) ->
     Base = filename:join(
-        "/tmp",
+        "/tmp/" ++ os:getpid(),
         Prefix ++ integer_to_list(erlang:unique_integer([positive]))
     ),
     ok = filelib:ensure_dir(filename:join(Base, ".keep")),

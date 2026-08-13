@@ -146,7 +146,16 @@ verify_origin_mismatch_test() ->
 open_missing_file_test() ->
     with_dir(fun(Dir) ->
         Path = filename:join(Dir, "does-not-exist.qdata"),
-        ?assertMatch({error, _}, bondy_oplog_wal_segment:open(Path))
+        %% An absent segment is reported as absent, NOT as a corrupt
+        %% header, and probing for it must not bring it into existence.
+        %% Opening `[read, write]` here would create a 0-byte file and
+        %% report `truncated_header`, which then looks like real
+        %% corruption to every later open.
+        ?assertEqual(
+            {error, missing_segment},
+            bondy_oplog_wal_segment:open(Path)
+        ),
+        ?assertNot(filelib:is_regular(Path))
     end).
 
 open_truncated_header_test() ->

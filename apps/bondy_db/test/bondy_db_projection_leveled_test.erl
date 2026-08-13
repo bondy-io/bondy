@@ -461,7 +461,7 @@ mk_state_frame(Bytes) when is_binary(Bytes) ->
 
 make_tempdir() ->
     Base = filename:join([
-        "/tmp",
+        "/tmp/" ++ os:getpid(),
         "bondy_mst_leveled_test",
         integer_to_list(erlang:unique_integer([positive, monotonic]))
     ]),

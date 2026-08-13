@@ -373,7 +373,7 @@ cell_key(Policy, Uri, Node) ->
 
 make_tmpdir() ->
     Base = filename:join(
-        "/tmp",
+        "/tmp/" ++ os:getpid(),
         "bondy_rib_test_" ++
             integer_to_list(erlang:unique_integer([positive, monotonic]))
     ),

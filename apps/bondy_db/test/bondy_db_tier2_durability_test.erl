@@ -202,7 +202,7 @@ value(Other) -> Other.
 
 make_tempdir(Prefix) ->
     Base = filename:join([
-        "/tmp",
+        "/tmp/" ++ os:getpid(),
         "bondy_db_tier2_durability",
         Prefix,
         integer_to_list(erlang:unique_integer([positive, monotonic]))

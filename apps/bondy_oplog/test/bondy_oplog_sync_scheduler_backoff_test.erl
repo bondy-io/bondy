@@ -52,6 +52,15 @@ cleanup(_) ->
     %% Wipe lingering backoff entries between modules so a later
     %% suite doesn't inherit "instance X is in backoff".
     ets:delete_all_objects(?BACKOFF_TAB),
+    %% Remove this run's storage tree. Without it each test leaves its
+    %% instance directories behind for good: 733, 462 and 168 stale trees
+    %% had accumulated under the three bases these scheduler suites use.
+    %% Stale trees are not merely untidy — a directory holding a manifest
+    %% whose segment has since gone missing makes any later run that
+    %% reuses the path fail in recovery.
+    _ = file:del_dir_r(
+        filename:join("/tmp/" ++ os:getpid(), "bondy_mst_scheduler_backoff_test")
+    ),
     ok.
 
 backoff_test_() ->
@@ -206,7 +215,7 @@ push_failure(InstanceId, Reason) ->
 pre_bootstrap_instance() ->
     Id = mk_id(),
     Dir = filename:join([
-        "/tmp",
+        "/tmp/" ++ os:getpid(),
         "bondy_mst_scheduler_backoff_test",
         binary_to_list(Id)
     ]),

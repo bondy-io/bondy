@@ -342,7 +342,7 @@ open_shared_db(Name, Crdt) ->
 
 tempdir(Name) ->
     Base = filename:join([
-        "/tmp",
+        "/tmp/" ++ os:getpid(),
         "bondy_reap_e2e",
         atom_to_list(Name) ++ "_" ++
             integer_to_list(erlang:unique_integer([positive, monotonic]))

@@ -250,7 +250,7 @@ barrier(Id) ->
 
 test_dir() ->
     Base = filename:join([
-        "/tmp",
+        "/tmp/" ++ os:getpid(),
         "bondy_mst_scheduler_bootstrap_test",
         integer_to_list(erlang:unique_integer([positive]))
     ]),

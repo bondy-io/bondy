@@ -416,7 +416,7 @@ mk_id() ->
 
 make_tempdir() ->
     Base = filename:join([
-        "/tmp",
+        "/tmp/" ++ os:getpid(),
         "a3_oldstate_cache_test",
         integer_to_list(erlang:unique_integer([positive]))
     ]),

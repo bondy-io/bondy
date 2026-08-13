@@ -205,7 +205,7 @@ end_to_end_put_get_through_topology({Sup, Dir}) ->
 
 make_tempdir() ->
     Base = filename:join([
-        "/tmp",
+        "/tmp/" ++ os:getpid(),
         "bondy_db_per_entity_test",
         integer_to_list(erlang:unique_integer([positive, monotonic]))
     ]),
