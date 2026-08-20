@@ -71,8 +71,16 @@ gc_abort_retains_classified_report_test() ->
         %% Ring is newest-first and bounded.
         ?assertEqual([], bondy_mst:gc_aborts())
     after
-        catch bondy_mst:forget_gc_aborts(),
-        catch bondy_mst:destroy(T)
+        try
+            bondy_mst:forget_gc_aborts()
+        catch
+            _:_ -> ok
+        end,
+        try
+            bondy_mst:destroy(T)
+        catch
+            _:_ -> ok
+        end
     end.
 
 gc_aborts_on_unservable_root_test() ->
@@ -135,7 +143,11 @@ gc_aborts_on_unservable_root_test() ->
         ok
     after
         telemetry:detach(HandlerId),
-        catch bondy_mst:destroy(T)
+        try
+            bondy_mst:destroy(T)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% =============================================================================
@@ -159,7 +171,11 @@ page_tab(RootHash) ->
      || T <- ets:all(),
         ets:info(T, owner) =:= Self,
         ets:info(T, type) =:= set,
-        (catch ets:lookup(T, <<"$root">>)) =:= [{<<"$root">>, RootHash}]
+        try
+            ets:lookup(T, <<"$root">>) =:= [{<<"$root">>, RootHash}]
+        catch
+            _:_ -> false
+        end
     ],
     Tab.
 

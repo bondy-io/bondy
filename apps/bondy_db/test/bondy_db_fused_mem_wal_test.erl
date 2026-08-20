@@ -214,7 +214,12 @@ ff_writer(T, Id, N, Parent) ->
     after 0 ->
         K = list_to_binary("ck" ++ integer_to_list(N)),
         H = bondy_db:tick(T),
-        _ = catch bondy_db:apply(T, <<"r">>, K, {set, H, <<"v">>}),
+        _ =
+            try
+                bondy_db:apply(T, <<"r">>, K, {set, H, <<"v">>})
+            catch
+                _:_ -> ok
+            end,
         ff_writer(T, Id, N + 2, Parent)
     end.
 

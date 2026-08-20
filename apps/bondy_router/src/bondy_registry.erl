@@ -850,13 +850,8 @@ add_callback_registration(RealmUri, Uri, Opts0, Ref, Partition) ->
 maybe_add_registration(RealmUri, Uri, Opts, Ref, Partition) ->
     Invoke = maps:get(invoke, Opts, ?INVOKE_SINGLE),
     Shared = maps:get(shared_registration, Opts, false),
-    Match = maps:get(match, Opts, ?EXACT_MATCH),
-    PBR = bondy_config:get([wamp, dealer, features, pattern_based_registration]),
 
     try
-        Match =/= ?EXACT_MATCH andalso PBR == false andalso
-            throw(pattern_based_registration_disabled),
-
         Invoke == ?INVOKE_SINGLE orelse Shared == true orelse
             throw(shared_registration_disabled),
 
@@ -1162,7 +1157,8 @@ rebuild_indices(Type, Now, Node) ->
             _ = [
                 rebuild_realm_indices(Type, RealmUri, Now, Node)
              || Realm <- bondy_realm:list(),
-                (RealmUri = bondy_realm:uri(Realm)) =/= undefined
+                RealmUri <- [bondy_realm:uri(Realm)],
+                RealmUri =/= undefined
             ],
             ok
     end.

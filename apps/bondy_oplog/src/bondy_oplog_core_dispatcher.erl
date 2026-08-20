@@ -330,10 +330,13 @@ handle_cast(_, State) ->
     {noreply, State}.
 
 handle_info({broadcast_started, Epoch}, State) ->
-    catch bondy_oplog_core_events:notify(
-        bondy_oplog_core_dispatcher_started,
-        Epoch
-    ),
+    try
+        bondy_oplog_core_events:notify(
+            bondy_oplog_core_dispatcher_started, Epoch
+        )
+    catch
+        _:_ -> ok
+    end,
     {noreply, State};
 handle_info({'DOWN', Mon, process, _Pid, _Reason}, State) ->
     MS = [{#sub{monitor = Mon, _ = '_'}, [], [true]}],

@@ -212,7 +212,6 @@ open_verified(Path, {ok, Header}) ->
         {error, _} = E ->
             E
     end;
-
 open_verified(_Path, {error, _} = E) ->
     E.
 

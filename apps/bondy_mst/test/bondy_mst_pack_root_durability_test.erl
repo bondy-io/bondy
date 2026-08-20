@@ -68,7 +68,12 @@ eager_set_root_syncs_pages_first() ->
         S3 = bondy_mst_pack_store:set_root(S2, TopHash),
         ?assertEqual(0, writer_unsynced(S3)),
 
-        _ = (catch bondy_mst_pack_store:close(S3)),
+        _ =
+            try
+                bondy_mst_pack_store:close(S3)
+            catch
+                _:_ -> ok
+            end,
         ok
     end).
 

@@ -28,7 +28,12 @@ setup() ->
     %% The sink labels rows with `bondy_config:node()` →
     %% `partisan_config:get(name)`; seed it so a bare eunit run (no
     %% partisan app) resolves the same name the assertions read back.
-    _ = catch partisan_config:set(name, node()),
+    _ =
+        try
+            partisan_config:set(name, node())
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 cleanup(_) ->

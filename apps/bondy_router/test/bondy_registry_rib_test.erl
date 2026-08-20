@@ -328,7 +328,12 @@ setup_catalog() ->
 
 teardown_catalog({Pid, Tmp, Tab}) ->
     ets:delete(Tab),
-    _ = catch gen_server:stop(Pid, normal, 30000),
+    _ =
+        try
+            gen_server:stop(Pid, normal, 30000)
+        catch
+            _:_ -> ok
+        end,
     ok = bondy_db_config:set([databases, main, oplog, shard_count], 16),
     application:unset_env(bondy_router, platform_data_dir),
     _ = file:del_dir_r(Tmp),

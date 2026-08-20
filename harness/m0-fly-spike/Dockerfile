@@ -6,13 +6,12 @@
 #
 # M0 Fly fault-injection spike image.
 #
-# Two differences from deployment/Dockerfile, both required by the harness:
-#   1. OTP-28 builder (erlang:28.5.0) — the pinned tag sets minimum_otp_vsn
-#      "R28" (rebar.config:6); deployment/Dockerfile is still on erlang:27.3.4
-#      and would FAIL to build this branch (00 §9 / 03 §1). This is that fix.
-#   2. Runner adds the fault-injection toolbox (iptables, tc via iproute2,
-#      libfaketime, stress-ng, fallocate) + the capability probe, so the M0
-#      spike can attempt every fault class in 03 §5 and confirm its effect.
+# One difference from deployment/Dockerfile, required by the harness: the
+# runner adds the fault-injection toolbox (iptables, tc via iproute2,
+# libfaketime, stress-ng, fallocate) + the capability probe, so the M0 spike
+# can attempt every fault class in 03 §5 and confirm its effect. The builder
+# stage tracks deployment/Dockerfile — keep the two `FROM erlang:` tags equal,
+# or the spike stops measuring the image that ships.
 #
 # Build context is the REPO ROOT (COPY . /bondy/src). Deploy with:
 #   fly deploy --config harness/m0-fly-spike/fly.toml \
@@ -21,9 +20,9 @@
 # =============================================================================
 
 # =============================================================================
-# Build stage 1 — OTP-28 release build
+# Build stage 1 — OTP-29 release build
 # =============================================================================
-FROM erlang:28.5.0.3 AS builder
+FROM erlang:29.0.5 AS builder
 
 # Only what the surviving native NIFs need (RocksDB is gone — no snappy/openssl-dev):
 #   build-essential (crc32cer C++, lz4/ezstd C) · cmake (crc32cer's `make nif`) ·
@@ -42,7 +41,7 @@ COPY . /bondy/src
 
 RUN mkdir -p /bondy/rel
 
-# Some NIFs need a modern CMake policy floor on OTP-28 toolchains.
+# Some NIFs need a modern CMake policy floor on OTP-29 toolchains.
 ENV CMAKE_POLICY_VERSION_MINIMUM=3.5
 
 RUN rebar3 as docker tar && \

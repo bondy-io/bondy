@@ -60,7 +60,11 @@ explicit_origin_wins() ->
         ),
         ?assertNot(filelib:is_regular(OriginPath))
     after
-        catch bondy_oplog:stop_instance(Id),
+        try
+            bondy_oplog:stop_instance(Id)
+        catch
+            _:_ -> ok
+        end,
         rm_rf(Dir)
     end.
 
@@ -82,7 +86,11 @@ storage_path_origin_persists() ->
         {ok, Bin} = file:read_file(OriginPath),
         ?assertEqual(Origin, Bin)
     after
-        catch bondy_oplog:stop_instance(Id),
+        try
+            bondy_oplog:stop_instance(Id)
+        catch
+            _:_ -> ok
+        end,
         rm_rf(Dir)
     end.
 
@@ -104,7 +112,11 @@ storage_path_origin_survives_restart() ->
         OriginAfter = bondy_oplog:origin(Id),
         ?assertEqual(OriginBefore, OriginAfter)
     after
-        catch bondy_oplog:stop_instance(Id),
+        try
+            bondy_oplog:stop_instance(Id)
+        catch
+            _:_ -> ok
+        end,
         rm_rf(Dir)
     end.
 
@@ -118,7 +130,11 @@ no_storage_path_falls_back_to_default() ->
         Origin = bondy_oplog:origin(Id),
         ?assertEqual(bondy_oplog_origin:default(), Origin)
     after
-        catch bondy_oplog:stop_instance(Id)
+        try
+            bondy_oplog:stop_instance(Id)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% ---------------------------------------------------------------------------

@@ -43,6 +43,15 @@ WebSocket subprotocol registry.
     auth_token :: map() | undefined,
     proxy_protocol :: bondy_http_proxy_protocol:t(),
     source_ip :: inet:ip_address(),
+    %% The listener's resolved `websocket' carrier config, carried from the
+    %% route state (`bondy_http_services:carrier_state/3') so a lookup that
+    %% needs it after `init/2' — e.g. `terminate/3' on an idle timeout — does
+    %% not have to consult a global.
+    config :: map(),
+    %% The listener's name, so a connection's log lines say which listener's
+    %% carrier config applied — two listeners can now enforce different
+    %% frame sizes and timeouts.
+    listener :: atom(),
     ping_idle_timeout :: non_neg_integer(),
     ping_tref :: optional(reference()),
     ping_payload :: binary(),
@@ -59,25 +68,54 @@ WebSocket subprotocol registry.
 
 -type state() :: #state{}.
 
+%% The route's `init/2' opts, built once per listener by
+%% `bondy_http_services:carrier_state/3'.
+-type route_state() :: #{
+    listener := atom(),
+    protocols := [atom()],
+    config := map()
+}.
+
 -export([init/2]).
 -export([websocket_init/1]).
 -export([websocket_handle/2]).
 -export([websocket_info/2]).
 -export([terminate/3]).
 
+-ifdef(TEST).
+%% Exposed so the "absent `enabled' means ping off" fall-through is pinned:
+%% `bondy_listener_config:assert_ping_keys/4' stopped requiring `enabled'
+%% BECAUSE of it, so the two have to be tested together.
+-export([maybe_enable_ping/2]).
+-endif.
+
 %% =============================================================================
 %% COWBOY HANDLER CALLBACKS
 %% =============================================================================
 
--spec init(cowboy_req:req(), state()) ->
+-spec init(cowboy_req:req(), route_state()) ->
     {ok | module(), cowboy_req:req(), state()}
     | {module(), cowboy_req:req(), state(), hibernate}
     | {module(), cowboy_req:req(), state(), timeout()}
     | {module(), cowboy_req:req(), state(), timeout(), hibernate}.
 
-init(Req0, _) ->
+init(Req0, RouteState) ->
     %% This callback is called from the temporary (HTTP) request process and
     %% the websocket_ callbacks from the connection process.
+
+    %% `RouteState' is built once per listener by
+    %% `bondy_http_services:carrier_state/3', which always sets `protocols'
+    %% and `config' unconditionally, so this performs no configuration
+    %% lookup per connection and a missing key here means the route state was
+    %% built some other way.
+    %%
+    %% `Protocols' is the listener's operator-chosen subprotocol families
+    %% (`wamp', `bamp', ...); `Config' is this carrier's resolved option map
+    %% (the per-listener override, or else the global fallback — see
+    %% `bondy_listener_config:resolve_carrier_config/3').
+    Protocols = maps:get(protocols, RouteState),
+    Config = maps:get(config, RouteState),
+    Listener = maps:get(listener, RouteState),
 
     %% From Cowboy's
     %% [Users Guide](http://ninenines.eu/docs/en/cowboy/1.0/guide/ws_handlers/)
@@ -89,7 +127,7 @@ init(Req0, _) ->
     Subprotocols = cowboy_req:parse_header(?SUBPROTO_HEADER, Req0),
 
     try
-        {ok, Subproto, BinProto} = select_subprotocol(Subprotocols),
+        {ok, Subproto, BinProto} = select_subprotocol(Subprotocols, Protocols),
 
         %% If we have a token we pass it to the WAMP protocol state so that
         %% we can verify it and immediately authenticate the client using
@@ -116,7 +154,9 @@ init(Req0, _) ->
                         State0 = #state{
                             proxy_protocol = ProxyProtocol,
                             source_ip = SourceIP,
-                            auth_token = AuthToken
+                            auth_token = AuthToken,
+                            config = Config,
+                            listener = Listener
                         },
                         do_init(Subproto, BinProto, Req0, State0)
                 end;
@@ -200,7 +240,8 @@ websocket_init(#state{protocol_state = PSt} = State) ->
     ok = logger:update_process_metadata(#{
         transport => websockets,
         protocol => wamp,
-        source_ip => inet:ntoa(State#state.source_ip)
+        source_ip => inet:ntoa(State#state.source_ip),
+        listener => State#state.listener
     }),
     ok = bondy_wamp_protocol:update_process_metadata(PSt),
 
@@ -341,7 +382,13 @@ terminate(stop, _Req, State) ->
     }),
     do_terminate(State);
 terminate(timeout, _Req, State) ->
-    Timeout = bondy_config:get([wamp_websocket, idle_timeout]),
+    %% The deadline is Cowboy's: `set_idle_timeout/2' reads `idle_timeout' from
+    %% the options map `do_init/4' builds out of this same `config'. Where the
+    %% listener configured none, Cowboy's own default is in force and that number
+    %% is deliberately NOT restated here — a constant copied out of a third-party
+    %% module goes stale silently, and the reader needs to know which of the two
+    %% applied rather than a figure this module cannot keep true.
+    Timeout = maps:get(idle_timeout, State#state.config, cowboy_default),
     ?LOG_ERROR(#{
         description => "Connection closed",
         reason => idle_timeout,
@@ -446,7 +493,7 @@ maybe_token(Req) ->
 
 %% @private
 do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State0) ->
-    Peer = cowboy_req:peer(Req0),
+    Peer = bondy_http_utils:peer(Req0),
     SourceIP = State0#state.source_ip,
     AuthToken = State0#state.auth_token,
     ProtoOpts = #{auth_token => AuthToken, source_ip => SourceIP},
@@ -454,21 +501,29 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State0) ->
     ok = logger:update_process_metadata(#{
         transport => websockets,
         protocol => wamp,
-        source_ip => SourceIP
+        source_ip => SourceIP,
+        listener => State0#state.listener
     }),
 
     case bondy_wamp_protocol:init(Subproto, Peer, ProtoOpts) of
         {ok, CBState} ->
-            Opts0 = maps_utils:from_property_list(
-                bondy_config:get(wamp_websocket)
-            ),
             %% This works only on HTTP1, we will change this for a stratgy
             %% based on {active, boolean()} and bondy_regulator.
-            Opts1 = maps:put(active_n, 1, Opts0),
-            {PingOpts, Opts2} = maps:take(ping, Opts1),
+            Opts0 = maps:put(active_n, 1, State0#state.config),
+            %% `ping' is the one carrier key this handler's own code (below,
+            %% and `maybe_enable_ping/2') requires to be present. A listener
+            %% for which no `ping.*' key was set anywhere — neither on the
+            %% listener nor on the global `wamp.websocket.*' block — resolves
+            %% to a config with no `ping' key at all
+            %% (`bondy_listener_config:resolve_carrier_config/3' leaves an
+            %% unset key absent rather than inventing a default), so the
+            %% default here is "ping off", not a reconstruction of the
+            %% schema's own `wamp.websocket.ping.enabled' default.
+            PingOpts = maps:get(ping, Opts0, #{enabled => false}),
+            Opts1 = maps:remove(ping, Opts0),
             %% Ours, not Cowboy's: see maybe_hibernate/3.
-            Hibernate = maps:get(hibernate, Opts2, idle),
-            Opts = maps:remove(hibernate, Opts2),
+            Hibernate = maps:get(hibernate, Opts1, idle),
+            Opts = maps:remove(hibernate, Opts1),
 
             State1 = State0#state{
                 frame_type = FrameType,
@@ -480,13 +535,14 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State0) ->
 
             Req = cowboy_req:set_resp_header(?SUBPROTO_HEADER, BinProto, Req0),
 
-            %% We upgrade the HTTP connection to Websockets
-            %% We pass the wamp.websocket.* opts
-            %% (defined via bondy.conf) which include:
+            %% We upgrade the HTTP connection to Websockets. `Opts` is this
+            %% listener's resolved `websocket' carrier config — the
+            %% per-listener `listeners.$name.websocket.*` override where set,
+            %% the global `wamp.websocket.*` block otherwise — and includes:
             %% - idle_timeout
             %% - max_frame_size
             %% - compress
-            %% - deplate_opts
+            %% - deflate_opts
             {cowboy_websocket, Req, State, Opts};
         {error, _Reason} ->
             %% Returning ok will cause the handler to stop in websocket_handle
@@ -496,30 +552,55 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State0) ->
 
 %% @private
 -doc """
-The order is undefined.
+The order of `Offered` is undefined.
+
+`Allowed` restricts the subprotocol FAMILY (`wamp`, `bamp`, ...), not the
+validated subprotocol itself: a family a client offers and this build
+supports is not necessarily one the listener it connected to carries, since
+the operator chooses per listener which families it serves.
 """.
--spec select_subprotocol(list(binary()) | undefined) ->
+-spec select_subprotocol(list(binary()) | undefined, [atom()]) ->
     {ok, bondy_wamp_protocol:subprotocol(), binary()}
     | no_return().
 
-select_subprotocol(undefined) ->
+select_subprotocol(undefined, _Allowed) ->
     throw(missing_subprotocol);
-select_subprotocol(L) when is_list(L) ->
-    try
-        Fun = fun(X) ->
-            case bondy_wamp_protocol:validate_subprotocol(X) of
-                {ok, SP} ->
-                    throw({break, SP, X});
-                {error, invalid_subprotocol} ->
-                    ok
-            end
-        end,
-        ok = lists:foreach(Fun, L),
-        throw(invalid_subprotocol)
-    catch
-        throw:{break, SP, X} ->
-            {ok, SP, X}
+select_subprotocol(L, Allowed) when is_list(L) ->
+    %% Filtered by family BEFORE validation: `bondy_wamp_protocol:subprotocol/1'
+    %% maps each `?WAMP2_*' id to a `{Transport, Framing, Encoding}' tuple —
+    %% `<<"wamp.2.json">>' becomes `{ws, text, json}' — discarding the family,
+    %% which therefore survives only in the id's own prefix and cannot be
+    %% recovered after validation.
+    Offered = [X || X <- L, lists:member(protocol_family(X), Allowed)],
+    case Offered of
+        [] -> throw(invalid_subprotocol);
+        _ -> select_valid(Offered)
     end.
+
+%% @private
+select_valid([]) ->
+    throw(invalid_subprotocol);
+select_valid([X | T]) ->
+    case bondy_wamp_protocol:validate_subprotocol(X) of
+        {ok, SP} -> {ok, SP, X};
+        {error, invalid_subprotocol} -> select_valid(T)
+    end.
+
+%% @private
+%% The subprotocol id's prefix is the only place the protocol family
+%% survives: see `select_subprotocol/2'.
+%%
+%% An unrecognised prefix answers `'$unknown'' rather than `undefined'. Both are
+%% rejected today, but for different reasons: `undefined' is rejected only
+%% because `bondy_listener_config:add_protocol/2' happens to drop it from a
+%% carrier's protocol set, so `Allowed' never contains it. `'$unknown'' cannot be
+%% a member of `Allowed' whatever that function does, since every family there
+%% comes from a `service_spec/1' row and no valid protocol atom is spelled this
+%% way. The filter in `select_subprotocol/2' is then closed by construction
+%% rather than by an invariant held in another module.
+protocol_family(<<"wamp.", _/binary>>) -> wamp;
+protocol_family(<<"bamp.", _/binary>>) -> bamp;
+protocol_family(_) -> '$unknown'.
 
 %% @private
 do_terminate(State) ->
@@ -606,6 +687,15 @@ maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
         ping_retry = Retry
     };
 maybe_enable_ping(#{enabled := false}, State) ->
+    State;
+maybe_enable_ping(#{enabled := Invalid}, _State) ->
+    error({invalid_ping_enabled, Invalid});
+%% Same three cases, and the same reasoning, as
+%% `bondy_wamp_tcp_connection_handler:maybe_enable_ping/2'. A carrier makes the
+%% absent case reachable in one more way than a listener does: every `ping.*'
+%% path resolves INDEPENDENTLY, so `ping.idle_timeout' can come from the listener
+%% while `ping.enabled' is set nowhere, leaving a `ping' map with no `enabled'.
+maybe_enable_ping(_PingOpts, State) ->
     State.
 
 %% @private

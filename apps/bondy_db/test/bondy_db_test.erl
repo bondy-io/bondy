@@ -94,7 +94,12 @@ setup(Topology) ->
     {Db, Sup, Dir}.
 
 cleanup({Db, Sup, Dir}) ->
-    _ = catch bondy_db:close(Db),
+    _ =
+        try
+            bondy_db:close(Db)
+        catch
+            _:_ -> ok
+        end,
     case is_process_alive(Sup) of
         true -> bondy_db_leveled_sup:stop(Sup);
         false -> ok

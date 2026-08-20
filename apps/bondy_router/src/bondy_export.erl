@@ -429,7 +429,9 @@ main_table_names() ->
 realm_uris() ->
     [
         Uri
-     || R <- bondy_realm:list(), (Uri = bondy_realm:uri(R)) =/= undefined
+     || R <- bondy_realm:list(),
+        Uri <- [bondy_realm:uri(R)],
+        Uri =/= undefined
     ].
 
 %% @private

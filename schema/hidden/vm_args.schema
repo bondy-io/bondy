@@ -4,37 +4,21 @@
 %% =============================================================================
 
 
-% IMPORTANT NOTE
-%
-% Note that '-name' and '-setcookie' are NOT a part of the Erlang VM flags
-% schema. This is left for the Erlang Developer to add to his own handwritten
-% vm.args/vm.args.src. This is so that 'relx' is able to parse the 'vm.args' and
-% find the name/cookie of the node which it needs to talk to
-% (eg. ping, remote_console, etc).
+%% IMPORTANT NOTE
+%%
+%% Note that '-name' and '-setcookie' are NOT a part of the Erlang VM flags
+%% schema. This is left for the Erlang Developer to add to his own handwritten
+%% vm.args/vm.args.src. This is so that 'relx' is able to parse the 'vm.args' and
+%% find the name/cookie of the node which it needs to talk to
+%% (eg. ping, remote_console, etc).
+%%
+%% All of the Erlang VM options below can be consulted at
+%%   http://erlang.org/doc/man/erl.html
+%%
+%% Up-to-date doc on how to write one of these schema files
+%% available at:
+%%   https://github.com/basho/cuttlefish/wiki/Cuttlefish-for-Erlang-Developers
 
-% Note: all of the Erlang VM options below can be consulted at
-%   http://erlang.org/doc/man/erl.html
-%
-% Up-to-date doc on how to write one of these schema files
-% available at:
-%   https://github.com/basho/cuttlefish/wiki/Cuttlefish-for-Erlang-Developers
-
-
-
-%% @doc Suggested stack size, in kilowords, for threads in the async thread
-%% pool. Valid range is 16-8192 kilowords. The default suggested stack size is
-%% 16 kilowords, that is, 64 kilobyte on 32-bit architectures. This small
-%% default size has been chosen because the number of async threads can be
-%% large. The default size is enough for drivers delivered with Erlang/OTP, but
-%% might not be large enough for other dynamically linked-in drivers that use
-%% the driver_async() functionality. Notice that the value passed is only a
-%% suggestion, and it can even be ignored on some platforms.
-%% More information at: http://erlang.org/doc/man/erl.html
-{mapping, "vm.async_thread.stack_size", "vm_args.+a", [
-  {datatype, integer},
-  {default, 16},
-  {validators, ["range:16-8192"]}
-]}.
 
 
 %% @doc Sets the number of threads in async thread pool. Valid range is 1-1024.
@@ -43,111 +27,49 @@
 %% the default Erlang/OTP distribution that uses the async thread pool. Most of
 %% them have been migrated to dirty IO schedulers. Defaults to 1.
 %% More information at: http://erlang.org/doc/man/erl.html
+%% Deliberately has no {default, …}: every key here is emitted into
+%% etc/generated/vm.generated.args, which vm.args pulls in with -args_file as
+%% its LAST line, and a duplicated erts + flag resolves to the LAST occurrence
+%% (measured). So a default here silently overrides any +A written inline in
+%% vm.args — which is what made config/{dev,bridge,prod_named}/vm.args' +A 64
+%% ineffective. 1 is already the erts default, so dropping it costs nothing.
 {mapping, "vm.async_thread.number", "vm_args.+A", [
   {datatype, integer},
-  {default, 1},
+  {commented, 1},
   {validators, ["range:1-1024"]}
 ]}.
 
-
-%% @doc Enable or disable time correction. Defaults to on.
-%% More information: http://erlang.org/doc/man/erl.html#emulator-flags
-{mapping, "vm.time_correction", "vm_args.+c", [
-  {default, on},
-  {datatype, flag}
+%% @doc Suggested stack size, in kilowords, for threads in the async thread pool.
+%% Valid range is 16-8192 kilowords.
+%% The default suggested stack size is 16 kilowords, that is, 64 kilobyte on
+%% 32-bit architectures. This small default size has been chosen because the
+%% number of async threads can be large. The default size is enough for drivers
+%% delivered with Erlang/OTP, but might not be large enough for other
+%% dynamically linked-in drivers that use the driver_async() functionality.
+%% Notice that the value passed is only a suggestion, and it can even be ignored
+%% on some platforms.
+{mapping, "vm.async_thread.stack_size", "vm_args.+a", [
+  {datatype, bytesize},
+  {validators, [ "stack-size-divisible", "stack-size-range"]}
 ]}.
 
+{translation, "vm_args.+a",
+     fun(Conf) ->
+       RawValue = cuttlefish:conf_get("vm.async_thread.stack_size", Conf),
+       RawValue div (1024 * erlang:system_info({wordsize, external}))
+     end
+}.
 
-%% @doc Sets the Erlang Time Warp Mode. Defaults to no_time_warp.
-%% More information: http://erlang.org/doc/man/erl.html#emulator-flags
-{mapping, "vm.time_correction.warp_mode", "vm_args.+C", [
-  {default, multi_time_warp},
-  {datatype, {enum, [no_time_warp, single_time_warp, multi_time_warp]}}
-]}.
 
-
-%% @doc Sets the maximum number of ETS tables.
-%% This limit is partially obsolete but usefull to be set anyways.
-%% See http://erlang.org/doc/man/ets.html#max_ets_tables
-{mapping, "vm.ets.max_tables", "vm_args.+e", [
+%% @doc Sets the maximum number of atoms the emulator can handle (+t).
+%% Atoms are never garbage collected, so a node that derives atoms from
+%% untrusted input can exhaust this table and terminate. Leave unset to keep
+%% the erts default.
+{mapping, "vm.atom.limit", "vm_args.+t", [
   {datatype, integer},
-  {default, 256000},
+  {commented, 1048576},
+  {validators, ["atom_limit"]},
   hidden
-]}.
-
-
-%% @doc Sets the number of IO pollsets to use when polling for I/O. This option
-%% is only used on platforms that support concurrent updates of a pollset,
-%% otherwise the same number of pollsets are used as IO poll threads. The
-%% default is 1.
-{mapping, "vm.io.poolset.number", "vm_args.+IOp", [
-  {datatype, integer},
-  {commented, 1}
-]}.
-
-
-%% @doc Similar to +IOp but uses percentages to set the number of IO pollsets to
-%% create, based on the number of poll threads configured. If both +IOPp and
-%% +IOp are used, +IOPp is ignored.
-{mapping, "vm.io.poolset.percentage", "vm_args.+IOpp", [
-{datatype, integer}
-]}.
-
-
-%% @doc Sets the number of IO poll threads to use when polling for I/O. The
-%% maximum number of poll threads allowed is 1024. The default is 1.
-%% A good way to check if more IO poll threads are needed is to use microstate
-%% accounting and see what the load of the IO poll thread is. If it is high it
-%% could be a good idea to add more threads.
-{mapping, "vm.io.pool_thread.number", "vm_args.+IOt", [
-{datatype, integer},
-{validators, ["range:1-1024"]},
-{commented, 1}
-]}.
-
-
-%% @doc Similar to +IOt but uses percentages to set the number of IO poll
-%% threads to create, based on the number of schedulers configured. If both
-%% +IOPt and +IOt are used, +IOPt is ignored.
-{mapping, "vm.io.pool_thread.percentage", "vm_args.+IOtp", [
-{datatype, integer}
-]}.
-
-
-%% @doc Sets the maximum number of simultaneously existing processes for this
-%% system if a Number is passed as value. Valid range for Number is
-%% [1024-134217727]
-%% NOTE: The actual maximum chosen may be much larger than the Number passed.
-%% Currently the runtime system often, but not always, chooses a value that is
-%% a power of 2.
-%% This might, however, be changed in the future.
-%% The actual value chosen can be checked by calling erlang:system_info
-%% (process_limit).
-{mapping, "vm.process.limit", "vm_args.+P", [
-  {datatype, integer},
-  {default, 2097152},
-  {validators, ["process_limit"]}
-]}.
-
-
-%% @doc Sets the maximum number of simultaneously existing ports for this system
-%% if a Number is passed as value. Valid range for Number is [1024-134217727]
-%% NOTE: The actual maximum chosen may be much larger than the actual Number
-%% passed.
-%% Currently the runtime system often, but not always, chooses a value that is a
-%% power of 2. This might, however, be changed in the future. The actual value
-%% chosen can be checked by calling erlang:system_info(port_limit).
-%% The default value used is normally 65536. However, if the runtime system is
-%% able to determine maximum amount of file descriptors that it is allowed to
-%% open and this value is larger than 65536, the chosen value will increased to
-%% a value larger or equal to the maximum amount of file descriptors that can be
-%% opened.
-%%% On Windows the default value is set to 8196 because the normal OS limitations
-%%% are set higher than most machines can handle.
-{mapping, "vm.port.limit", "vm_args.+Q", [
-  {datatype, integer},
-  {default, 2097152},
-  {validators, ["port_limit"]}
 ]}.
 
 
@@ -208,6 +130,106 @@
   {datatype, {enum, [none, very_short, short, medium, long, very_long]}},
   {default, none}
 ]}.
+
+
+%% @doc Sets scheduler wakeup threshold (+swt). Where the busy wait threshold
+%% governs how long a scheduler spins before sleeping, this governs how much
+%% work must pile up before a sleeping scheduler is woken.
+%% Note: This flag can be removed or changed at any time without prior notice.
+{mapping, "vm.cpu.scheduler.wakeup_threshold", "vm_args.+swt", [
+  {datatype, {enum, [very_low, low, medium, high, very_high]}},
+  {commented, medium},
+  hidden
+]}.
+
+
+%% @doc As vm.cpu.scheduler.wakeup_threshold but for dirty CPU schedulers
+%% (+swtdcpu).
+{mapping, "vm.cpu.dirty_scheduler.wakeup_threshold", "vm_args.+swtdcpu", [
+  {datatype, {enum, [very_low, low, medium, high, very_high]}},
+  {commented, medium},
+  hidden
+]}.
+
+
+%% @doc Sets the number of schedulers as a percentage of the logical processors
+%% configured (+SP). Preferred over vm.cpu.scheduler.total under a CPU quota,
+%% where the absolute count that suits one host suits no other. If both are set,
+%% erts ignores the percentage form.
+{mapping, "vm.cpu.scheduler.percentage", "vm_args.+SP", [
+  {datatype, integer},
+  {commented, 100},
+  {validators, ["positive_integer"]},
+  hidden
+]}.
+
+%% @see vm.cpu.scheduler.percentage
+{mapping, "vm.cpu.scheduler.online_percentage", "vm_args.+SP", [
+  {datatype, integer},
+  {commented, 100},
+  {validators, ["positive_integer"]},
+  hidden
+]}.
+
+%% Same shape as the vm_args.+S translation: erts takes 'p1:p2', and either
+%% half may be omitted. Unset when neither key is given, so no flag is emitted.
+{translation, "vm_args.+SP",
+     fun(Conf) ->
+      Total0 = cuttlefish:conf_get("vm.cpu.scheduler.percentage", Conf, undefined),
+      Online0 = cuttlefish:conf_get(
+          "vm.cpu.scheduler.online_percentage", Conf, undefined
+      ),
+      case {Total0, Online0} of
+          {undefined, undefined} ->
+              cuttlefish:unset();
+          {undefined, Online} ->
+              ":" ++ integer_to_list(Online);
+          {Total, undefined} ->
+              integer_to_list(Total);
+          {Total, Online} ->
+              integer_to_list(Total) ++ ":" ++ integer_to_list(Online)
+      end
+     end
+}.
+
+
+%% @doc Sets the number of dirty CPU schedulers as a percentage of the logical
+%% processors configured (+SDPcpu). See vm.cpu.scheduler.percentage.
+{mapping, "vm.cpu.dirty_scheduler.percentage", "vm_args.+SDPcpu", [
+  {datatype, integer},
+  {commented, 100},
+  {validators, ["positive_integer"]},
+  hidden
+]}.
+
+%% @see vm.cpu.dirty_scheduler.percentage
+{mapping, "vm.cpu.dirty_scheduler.online_percentage", "vm_args.+SDPcpu", [
+  {datatype, integer},
+  {commented, 100},
+  {validators, ["positive_integer"]},
+  hidden
+]}.
+
+{translation, "vm_args.+SDPcpu",
+     fun(Conf) ->
+      Total0 = cuttlefish:conf_get(
+          "vm.cpu.dirty_scheduler.percentage", Conf, undefined
+      ),
+      Online0 = cuttlefish:conf_get(
+          "vm.cpu.dirty_scheduler.online_percentage", Conf, undefined
+      ),
+      case {Total0, Online0} of
+          {undefined, undefined} ->
+              cuttlefish:unset();
+          {undefined, Online} ->
+              ":" ++ integer_to_list(Online);
+          {Total, undefined} ->
+              integer_to_list(Total);
+          {Total, Online} ->
+              integer_to_list(Total) ++ ":" ++ integer_to_list(Online)
+      end
+     end
+}.
 
 
 %% @doc Set scheduler forced wakeup interval. All run queues will be
@@ -327,77 +349,73 @@
 ]}.
 
 
-%% @doc Sets the number of dirty I/O scheduler threads to create. Valid range
-%% is 1-1024. By default, the number of dirty I/O scheduler threads created is
-%% 10.
-%%
-%% The amount of dirty IO schedulers is not limited by the amount of normal
-%% schedulers like the amount of dirty CPU schedulers. This since only I/O
-%% bound work is expected to execute on dirty I/O schedulers. If the user
-%% should schedule CPU bound jobs on dirty I/O schedulers, these jobs might
-%% starve ordinary jobs executing on ordinary schedulers.
-%%
-%% Typical users of the dirty IO schedulers are reading and writing to files.
-%%
-%% You can use msacc(3) in order to see the current load of the dirty IO
-%% schedulers threads and adjust the number used accordingly.
-{mapping, "vm.io.dirty_scheduler.number", "vm_args.+SDio", [
+
+%% @doc As vm.cpu.scheduler.wakeup_threshold but for dirty IO schedulers
+%% (+swtdio).
+{mapping, "vm.io.dirty_scheduler.wakeup_threshold", "vm_args.+swtdio", [
+  {datatype, {enum, [very_low, low, medium, high, very_high]}},
+  {commented, medium},
+  hidden
+]}.
+
+
+%% @doc Sets how scheduler threads are bound to logical processors (+sbt).
+%% Binding only helps when the node owns the machine; on a shared host or with
+%% a CPU quota it can make scheduling worse. Leave unset unless measured.
+%% Support is platform-dependent and cuttlefish cannot check it: any value
+%% other than 'u' refuses to start the emulator on a platform that does not
+%% expose a CPU topology, with `setting scheduler bind type '<type>' failed:
+%% not supported` and no mention of bondy.conf. Verified on macOS with 'ns'.
+{mapping, "vm.cpu.scheduler.bind_type", "vm_args.+sbt", [
+  {datatype, {enum, [u, ns, ts, ps, s, nnts, nnps, tnnps, db]}},
+  {commented, u},
+  hidden
+]}.
+
+
+%% @doc Suggests the stack size, in kilowords, for scheduler threads (+sss).
+{mapping, "vm.cpu.scheduler.stack_size", "vm_args.+sss", [
   {datatype, integer},
-  {default, 128},
-  {validators, ["range:1-1024"]}
+  {commented, 128},
+  {validators, ["range:20-8192"]},
+  hidden
 ]}.
 
-%% GPU Executions run in dirty IO threads, which have a considerable smaller
-%% stack size than regular scheduler threads. This may lead to problems with
-%% certain CUDA or cuDNN versions, leading to segmentation fails.
-%% We increase the stack size of dirty IO threads from 40 kilowords to 128
-%% kilowords.
-{mapping, "vm.io.dirty_scheduler.stack_size", "vm_args.+sssdio", [
+
+%% @doc Suggests the stack size, in kilowords, for dirty CPU scheduler threads
+%% (+sssdcpu). The dirty IO counterpart is
+%% vm.io.dirty_scheduler.stack_size.
+{mapping, "vm.cpu.dirty_scheduler.stack_size", "vm_args.+sssdcpu", [
   {datatype, integer},
-  {default, 40},
-  {validators, ["=<128"]}
+  {commented, 40},
+  {validators, ["range:20-8192"]},
+  hidden
 ]}.
 
 
-%% @doc As +sbwt but affects dirty IO schedulers. Defaults to short.
-{mapping, "vm.io.dirty_scheduler.busy_wait_threshold", "vm_args.+sbwtdio", [
-  {datatype, {enum, [none, very_short, short, medium, long, very_long]}},
-  {default, none}
+%% @doc Selects the scheduler wakeup strategy (+sws).
+%% Note: This flag can be removed or changed at any time without prior notice.
+{mapping, "vm.cpu.scheduler.wakeup_strategy", "vm_args.+sws", [
+  {datatype, {enum, [default, legacy]}},
+  {commented, default},
+  hidden
 ]}.
 
 
-%% @doc Sets the mapping of warning messages for error_logger.
-%% Messages sent to the error logger using one of the warning routines can
-%% be mapped to errors (+W e), warnings (+W w), or information reports (+W i).
-%% Defaults to warnings. The current mapping can be retrieved using
-%% error_logger:warning_map/0. For more information,
-%% see error_logger:warning_map/0 in Kernel.
-{mapping, "vm.W", "vm_args.+W", [
-  {datatype, {enum, [w, i, e]}},
-  {default, w}
+%% @doc Sets the scheduler wake cleanup threshold (+swct).
+%% Note: This flag can be removed or changed at any time without prior notice.
+{mapping, "vm.cpu.scheduler.wake_cleanup_threshold", "vm_args.+swct", [
+  {datatype, {enum, [very_lazy, lazy, medium, eager, very_eager]}},
+  {commented, medium},
+  hidden
 ]}.
 
-%% @doc Suggested stack size, in kilowords, for threads in the async thread pool.
-%% Valid range is 16-8192 kilowords.
-%% The default suggested stack size is 16 kilowords, that is, 64 kilobyte on
-%% 32-bit architectures. This small default size has been chosen because the
-%% number of async threads can be large. The default size is enough for drivers
-%% delivered with Erlang/OTP, but might not be large enough for other
-%% dynamically linked-in drivers that use the driver_async() functionality.
-%% Notice that the value passed is only a suggestion, and it can even be ignored
-%% on some platforms.
-{mapping, "vm.async_thread.stack_size", "vm_args.+a", [
-  {datatype, bytesize},
-  {validators, [ "stack-size-divisible", "stack-size-range"]}
+
+%% @doc Set the location of crash dumps
+{mapping, "vm.crash_dump", "vm_args.-env ERL_CRASH_DUMP", [
+  {datatype, file},
+  {commented, ""}
 ]}.
-
-{translation, "vm_args.+a",
-     fun(Conf) ->
-       RawValue = cuttlefish:conf_get("vm.async_thread.stack_size", Conf),
-       RawValue div (1024 * erlang:system_info({wordsize, external}))
-     end
-}.
-
 
 %% @doc Sets the distribution buffer busy limit (dist_buf_busy_limit) in kilobytes.
 %%      Valid range is 1-2097151. Defaults to 1024.
@@ -521,6 +539,27 @@
 ]}.
 
 
+%% @doc Delays garbage collection of the distribution node table by this many
+%% seconds after a node goes down (+zdntgc). A node that churns through many
+%% short-lived peers accumulates entries until this expires; 'infinity' never
+%% collects them.
+{mapping, "vm.distribution.node_table_gc_delay", "vm_args.+zdntgc", [
+  {datatype, [{atom, infinity}, {duration, s}]},
+  {commented, "60s"},
+  hidden
+]}.
+
+%% @doc Sets the maximum number of ETS tables.
+%% This limit is partially obsolete but usefull to be set anyways.
+%% See http://erlang.org/doc/man/ets.html#max_ets_tables
+{mapping, "vm.ets.max_tables", "vm_args.+e", [
+  {datatype, integer},
+  {default, 256000},
+  hidden
+]}.
+
+
+
 %% @doc A non-negative integer which indicates how many times
 %% generational garbage collections can be done without forcing a
 %% fullsweep collection. In low-memory systems (especially without
@@ -536,19 +575,104 @@
   hidden
 ]}.
 
-%% @doc Set the location of crash dumps
-{mapping, "vm.crash_dump", "vm_args.-env ERL_CRASH_DUMP", [
-  {datatype, file},
-  {commented, ""}
+
+
+%% @doc How long the emulator waits for outstanding output to flush during
+%% halt (+zhft). 'infinity' waits indefinitely, which can hold a shutdown open;
+%% 0 discards pending output.
+{mapping, "vm.halt_flush_timeout", "vm_args.+zhft", [
+  {datatype, [{atom, infinity}, integer]},
+  {commented, 524288},
+  hidden
 ]}.
 
 
 
+%% @doc Enables or disables eager check I/O scheduling (+secio).
+{mapping, "vm.io.eager_check", "vm_args.+secio", [
+  {datatype, flag},
+  {commented, on},
+  hidden
+]}.
 
-%% =============================================================================
-%% MEMORY ALLOCATORS
-%% =============================================================================
 
+%% @doc Sets the number of dirty I/O scheduler threads to create. Valid range
+%% is 1-1024. By default, the number of dirty I/O scheduler threads created is
+%% 10.
+%%
+%% The amount of dirty IO schedulers is not limited by the amount of normal
+%% schedulers like the amount of dirty CPU schedulers. This since only I/O
+%% bound work is expected to execute on dirty I/O schedulers. If the user
+%% should schedule CPU bound jobs on dirty I/O schedulers, these jobs might
+%% starve ordinary jobs executing on ordinary schedulers.
+%%
+%% Typical users of the dirty IO schedulers are reading and writing to files.
+%%
+%% You can use msacc(3) in order to see the current load of the dirty IO
+%% schedulers threads and adjust the number used accordingly.
+{mapping, "vm.io.dirty_scheduler.number", "vm_args.+SDio", [
+  {datatype, integer},
+  {default, 128},
+  {validators, ["range:1-1024"]}
+]}.
+
+%% @doc Suggests the stack size, in kilowords, for dirty IO scheduler threads
+%% (+sssdio). Dirty IO threads get a smaller stack than normal schedulers, which
+%% a linked-in driver or NIF doing deep work can overflow.
+%% Carries no default: 40 is already the erts default (stated by the emulator's
+%% own usage text), so a default here would only shadow a value set in vm.args.
+%% The comment this replaces claimed the stack was raised from 40 to 128 for
+%% CUDA/cuDNN; {default, 40} never did that, and Bondy loads no such driver.
+{mapping, "vm.io.dirty_scheduler.stack_size", "vm_args.+sssdio", [
+  {datatype, integer},
+  {commented, 40},
+  {validators, ["=<128"]}
+]}.
+
+
+%% @doc As +sbwt but affects dirty IO schedulers. Defaults to short.
+{mapping, "vm.io.dirty_scheduler.busy_wait_threshold", "vm_args.+sbwtdio", [
+  {datatype, {enum, [none, very_short, short, medium, long, very_long]}},
+  {default, none}
+]}.
+
+
+%% @doc Sets the number of IO pollsets to use when polling for I/O. This option
+%% is only used on platforms that support concurrent updates of a pollset,
+%% otherwise the same number of pollsets are used as IO poll threads. The
+%% default is 1.
+{mapping, "vm.io.poolset.number", "vm_args.+IOp", [
+  {datatype, integer},
+  {commented, 1}
+]}.
+
+
+%% @doc Similar to +IOp but uses percentages to set the number of IO pollsets to
+%% create, based on the number of poll threads configured. If both +IOPp and
+%% +IOp are used, +IOPp is ignored.
+{mapping, "vm.io.poolset.percentage", "vm_args.+IOPp", [
+{datatype, integer}
+]}.
+
+
+%% @doc Sets the number of IO poll threads to use when polling for I/O. The
+%% maximum number of poll threads allowed is 1024. The default is 1.
+%% A good way to check if more IO poll threads are needed is to use microstate
+%% accounting and see what the load of the IO poll thread is. If it is high it
+%% could be a good idea to add more threads.
+{mapping, "vm.io.pool_thread.number", "vm_args.+IOt", [
+{datatype, integer},
+{validators, ["range:1-1024"]},
+{commented, 1}
+]}.
+
+
+%% @doc Similar to +IOt but uses percentages to set the number of IO poll
+%% threads to create, based on the number of schedulers configured. If both
+%% +IOPt and +IOt are used, +IOPt is ignored.
+{mapping, "vm.io.pool_thread.percentage", "vm_args.+IOPt", [
+{datatype, integer}
+]}.
 
 
 
@@ -598,7 +722,208 @@
 
 
 
-% ----------- Validators ----------------------
+%% @doc Sets the maximum number of simultaneously existing ports for this system
+%% if a Number is passed as value. Valid range for Number is [1024-134217727]
+%% NOTE: The actual maximum chosen may be much larger than the actual Number
+%% passed.
+%% Currently the runtime system often, but not always, chooses a value that is a
+%% power of 2. This might, however, be changed in the future. The actual value
+%% chosen can be checked by calling erlang:system_info(port_limit).
+%% The default value used is normally 65536. However, if the runtime system is
+%% able to determine maximum amount of file descriptors that it is allowed to
+%% open and this value is larger than 65536, the chosen value will increased to
+%% a value larger or equal to the maximum amount of file descriptors that can be
+%% opened.
+%%% On Windows the default value is set to 8196 because the normal OS limitations
+%%% are set higher than most machines can handle.
+{mapping, "vm.port.limit", "vm_args.+Q", [
+  {datatype, integer},
+  {default, 2097152},
+  {validators, ["port_limit"]}
+]}.
+
+
+%% @doc Sets the port parallelism scheduling hint (+spp). Per the emulator's
+%% own usage text this is a hint only; erts is free to ignore it.
+{mapping, "vm.port.parallelism", "vm_args.+spp", [
+  {datatype, flag},
+  {commented, off},
+  hidden
+]}.
+
+
+%% @doc Sets the maximum number of simultaneously existing processes for this
+%% system if a Number is passed as value. Valid range for Number is
+%% [1024-134217727]
+%% NOTE: The actual maximum chosen may be much larger than the Number passed.
+%% Currently the runtime system often, but not always, chooses a value that is
+%% a power of 2.
+%% This might, however, be changed in the future.
+%% The actual value chosen can be checked by calling erlang:system_info
+%% (process_limit).
+{mapping, "vm.process.limit", "vm_args.+P", [
+  {datatype, integer},
+  {default, 2097152},
+  {validators, ["process_limit"]}
+]}.
+
+
+
+%% @doc Sets the default minimum heap size for processes, in words (+hms).
+%% erts rounds the value up to the next heap generation size, so
+%% erlang:system_info(min_heap_size) will usually report a larger number than
+%% the one set here.
+{mapping, "vm.process.min_heap_size", "vm_args.+hms", [
+  {datatype, integer},
+  {commented, 233},
+  {validators, ["positive_integer"]},
+  hidden
+]}.
+
+
+%% @doc Sets the default minimum binary virtual heap size for processes, in
+%% words (+hmbs).
+{mapping, "vm.process.min_bin_vheap_size", "vm_args.+hmbs", [
+  {datatype, integer},
+  {commented, 32768},
+  {validators, ["positive_integer"]},
+  hidden
+]}.
+
+
+%% @doc Sets the default maximum heap size for processes, in words (+hmax).
+%% Zero means no limit. A process reaching the limit is killed unless
+%% vm.process.max_heap_size.kill is off. This is a per-process bound, not a
+%% node-wide memory cap.
+{mapping, "vm.process.max_heap_size", "vm_args.+hmax", [
+  {datatype, integer},
+  {commented, 0},
+  {validators, ["positive_integer"]},
+  hidden
+]}.
+
+
+%% @doc Whether a process that reaches vm.process.max_heap_size is killed
+%% (+hmaxk). Only meaningful when vm.process.max_heap_size is non-zero.
+{mapping, "vm.process.max_heap_size.kill", "vm_args.+hmaxk", [
+  {datatype, flag},
+  {commented, on},
+  hidden
+]}.
+
+
+%% @doc Whether reaching vm.process.max_heap_size emits a logger report
+%% (+hmaxel). Only meaningful when vm.process.max_heap_size is non-zero.
+{mapping, "vm.process.max_heap_size.error_logger", "vm_args.+hmaxel", [
+  {datatype, flag},
+  {commented, on},
+  hidden
+]}.
+
+
+%% @doc Whether off-heap binaries count towards vm.process.max_heap_size
+%% (+hmaxib). Only meaningful when vm.process.max_heap_size is non-zero.
+{mapping, "vm.process.max_heap_size.include_shared_binaries",
+"vm_args.+hmaxib", [
+  {datatype, flag},
+  {commented, off},
+  hidden
+]}.
+
+
+%% @doc Sets the default message queue data placement for processes (+hmqd).
+%% Bondy already selects off_heap explicitly for the process classes that need
+%% it, so this changes the default for every other process on the node.
+{mapping, "vm.process.message_queue_data", "vm_args.+hmqd", [
+  {datatype, {enum, [off_heap, on_heap]}},
+  {commented, on_heap},
+  hidden
+]}.
+
+
+%% @doc Sets the initial process dictionary size (+hpds).
+{mapping, "vm.process.dictionary_size", "vm_args.+hpds", [
+  {datatype, integer},
+  {commented, 8},
+  {validators, ["positive_integer"]},
+  hidden
+]}.
+
+
+
+
+%% @doc Which character range io_lib treats as printable (+pc). This decides
+%% whether strings in logger reports and shell output are rendered as text or
+%% as lists of integers. Note that a latin1 setting does not make non-latin1
+%% data safe to emit; it only changes how it is formatted.
+{mapping, "vm.printable_range", "vm_args.+pc", [
+  {datatype, {enum, [latin1, unicode]}},
+  {commented, latin1},
+  hidden
+]}.
+
+
+
+%% @doc Sets the reader groups limit (+rg), which bounds how many reader groups
+%% erts uses for its internal read-optimised locks. Raising it trades memory for
+%% less reader contention on many-core machines.
+{mapping, "vm.reader_groups.limit", "vm_args.+rg", [
+  {datatype, integer},
+  {commented, 64},
+  {validators, ["positive_integer"]},
+  hidden
+]}.
+
+
+
+
+
+%% @doc Sets the outstanding requests limit for system processes (+zosrl).
+{mapping, "vm.system_process.outstanding_request_limit", "vm_args.+zosrl", [
+  {datatype, integer},
+  {commented, 65535},
+  {validators, ["range:1-134217727"]},
+  hidden
+]}.
+
+%% @doc Enable or disable time correction. Defaults to on.
+%% More information: http://erlang.org/doc/man/erl.html#emulator-flags
+{mapping, "vm.time_correction", "vm_args.+c", [
+  {default, on},
+  {datatype, flag}
+]}.
+
+
+%% @doc Sets the Erlang Time Warp Mode. Defaults to no_time_warp.
+%% More information: http://erlang.org/doc/man/erl.html#emulator-flags
+{mapping, "vm.time_correction.warp_mode", "vm_args.+C", [
+  {default, multi_time_warp},
+  {datatype, {enum, [no_time_warp, single_time_warp, multi_time_warp]}}
+]}.
+
+
+
+%% @doc Sets the mapping of warning messages for error_logger.
+%% Messages sent to the error logger using one of the warning routines can
+%% be mapped to errors (+W e), warnings (+W w), or information reports (+W i).
+%% Defaults to warnings. The current mapping can be retrieved using
+%% error_logger:warning_map/0. For more information,
+%% see error_logger:warning_map/0 in Kernel.
+%% Carries no default: measured, error_logger:warning_map/0 already returns
+%% 'warning' with no flags, so {default, w} only restated erts and shadowed any
+%% +W set in vm.args.
+{mapping, "vm.W", "vm_args.+W", [
+  {datatype, {enum, [w, i, e]}},
+  {commented, w}
+]}.
+
+
+
+
+%% =============================================================================
+%% VALIDATORS
+%% =============================================================================
+
 {validator, "=<1024", "has a maximum value of 1024",
      fun(X) ->
         X =< 1024
@@ -611,8 +936,26 @@
 {validator, "range:1-1024", "must be 1 to 1024",
  fun(X) -> X >= 1 andalso X =< 1024 end}.
 
-{validator, "range:16-8192", "must be 0 to 1024",
- fun(X) -> X >= 16 andalso X =< 8192 end}.
+%% Referenced by vm.io.dirty_scheduler.stack_size. Without this definition the
+%% reference resolved to nothing and the bound was not enforced, so a value
+%% outside the erts range reached +sssdio and the emulator refused to start.
+{validator, "=<128", "has a maximum value of 128",
+ fun(X) -> X =< 128 end}.
+
+%% erts accepts [20-8192] kilowords for +sss, +sssdcpu and +sssdio.
+{validator, "range:20-8192", "must be 20 to 8192",
+ fun(X) -> X >= 20 andalso X =< 8192 end}.
+
+%% erts accepts [8192-2147483647] for +t.
+{validator, "atom_limit", "must be 8192 to 2147483647",
+ fun(X) -> X >= 8192 andalso X =< 2147483647 end}.
+
+%% erts accepts [1-134217727] for +zosrl.
+{validator, "range:1-134217727", "must be 1 to 134217727",
+ fun(X) -> X >= 1 andalso X =< 134217727 end}.
+
+%% "range:16-8192" was removed with the shadowed vm.async_thread.stack_size
+%% mapping that was its only user. Its message also read "must be 0 to 1024".
 
 {validator, "stack-size-divisible", ("must be divisible by " ++ integer_to_list(erlang:system_info({wordsize,external}))),
  fun(X) ->

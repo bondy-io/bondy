@@ -30,7 +30,11 @@ setup() ->
     ok.
 
 cleanup(_) ->
-    catch meck:unload(partisan_peer_service),
+    try
+        meck:unload(partisan_peer_service)
+    catch
+        _:_ -> ok
+    end,
     [bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
     [
         bondy_oplog_core_registry:unregister(N, I, S)

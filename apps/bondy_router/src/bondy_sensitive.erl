@@ -63,11 +63,12 @@ restrictions on the form Status can take.
 format_status(Mod, State) ->
     case conforms(Mod) of
         true ->
-            case catch Mod:format_status(State) of
-                {'EXIT', _} ->
-                    State;
+            try Mod:format_status(State) of
                 Formatted ->
                     Formatted
+            catch
+                _:_ ->
+                    State
             end;
         false ->
             State

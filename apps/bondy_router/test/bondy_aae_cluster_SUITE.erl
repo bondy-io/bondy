@@ -634,10 +634,18 @@ stale_peer_rejoin_durable_converges(Config) ->
             %% Direction 2: the returning node's isolated write flows BACK.
             ok = wait_converge(R1, ?USERS_TABLE, ?REALM, Only2, Only2V)
         after
-            catch bondy_ct:stop_node(S2b)
+            try
+                bondy_ct:stop_node(S2b)
+            catch
+                _:_ -> ok
+            end
         end
     after
-        catch bondy_ct:stop_cluster(Nodes)
+        try
+            bondy_ct:stop_cluster(Nodes)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% =============================================================================
@@ -687,8 +695,19 @@ wait_token_version(Node, Uri, User, Expected) ->
 
 %% @private
 wait_token_version_loop(Node, Uri, User, Expected, Deadline) ->
-    _ = catch erpc:call(Node, bondy_oplog_sync_scheduler, trigger, []),
-    case catch erpc:call(Node, bondy_rbac_user, token_version, [Uri, User]) of
+    _ =
+        try
+            erpc:call(Node, bondy_oplog_sync_scheduler, trigger, [])
+        catch
+            _:_ -> ok
+        end,
+    Actual =
+        try
+            erpc:call(Node, bondy_rbac_user, token_version, [Uri, User])
+        catch
+            C:R -> {'EXIT', {C, R}}
+        end,
+    case Actual of
         {ok, Expected} ->
             ok;
         Other ->
@@ -728,8 +747,19 @@ wait_groups_exist(Node, Uri, Groups) ->
 
 %% @private
 wait_until_eq(Fun, Expected, Node, Deadline) ->
-    _ = catch erpc:call(Node, bondy_oplog_sync_scheduler, trigger, []),
-    case catch Fun() of
+    _ =
+        try
+            erpc:call(Node, bondy_oplog_sync_scheduler, trigger, [])
+        catch
+            _:_ -> ok
+        end,
+    Actual =
+        try
+            Fun()
+        catch
+            C:R -> {'EXIT', {C, R}}
+        end,
+    case Actual of
         Expected ->
             ok;
         Other ->
@@ -903,7 +933,12 @@ wait_converge(Node, Table, Band, Key, Expected) ->
 %% @private
 wait_converge_loop(Node, Table, Band, Key, Expected, Deadline) ->
     %% Nudge the scheduler on the reading node to pull now.
-    _ = catch erpc:call(Node, bondy_oplog_sync_scheduler, trigger, []),
+    _ =
+        try
+            erpc:call(Node, bondy_oplog_sync_scheduler, trigger, [])
+        catch
+            _:_ -> ok
+        end,
     case read_on(Node, Table, Band, Key) of
         {ok, {Expected, _Hlc}} ->
             ok;
@@ -1071,7 +1106,11 @@ do_start_event_probe(RealmUri, Subscriptions) ->
         error(probe_start_timeout)
     end,
     %% Re-register if a previous test left one behind.
-    catch unregister(rib_event_probe),
+    try
+        unregister(rib_event_probe)
+    catch
+        _:_ -> ok
+    end,
     true = register(rib_event_probe, Pid),
     ok.
 
@@ -1252,7 +1291,12 @@ do_user_exists(Uri, User) ->
 %% has no side effect — there is no live session). `no_link` keeps the mock
 %% installed after the erpc worker that armed it exits.
 do_arm_close_recorder() ->
-    _ = (catch meck:unload(bondy_rbac_user)),
+    _ =
+        try
+            meck:unload(bondy_rbac_user)
+        catch
+            _:_ -> ok
+        end,
     ok = meck:new(bondy_rbac_user, [passthrough, no_link]),
     ok = meck:expect(bondy_rbac_user, close_sessions, fun(_, _, _) -> ok end),
     ok.
@@ -1263,7 +1307,12 @@ do_close_recorded(Uri, User) ->
 
 %% @private
 do_disarm_close_recorder() ->
-    _ = (catch meck:unload(bondy_rbac_user)),
+    _ =
+        try
+            meck:unload(bondy_rbac_user)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% @private
@@ -1333,11 +1382,18 @@ do_create_auth_realm(Uri, User, Pass) ->
 %% results (exceptions captured as terms).
 do_diag(Uri, User) ->
     RealmFound =
-        case catch bondy_realm:lookup(Uri) of
+        try bondy_realm:lookup(Uri) of
             {ok, _} -> true;
             Other -> Other
+        catch
+            C0:R0 -> {'EXIT', {C0, R0}}
         end,
-    TV = catch bondy_rbac_user:token_version(Uri, User),
+    TV =
+        try
+            bondy_rbac_user:token_version(Uri, User)
+        catch
+            C1:R1 -> {'EXIT', {C1, R1}}
+        end,
     Issue =
         try do_issue_jwt(Uri, User) of
             J when is_binary(J) -> {ok, J}
@@ -1346,8 +1402,14 @@ do_diag(Uri, User) ->
         end,
     Auth =
         case Issue of
-            {ok, JWT} -> catch do_authenticate(Uri, User, JWT);
-            _ -> not_issued
+            {ok, JWT} ->
+                try
+                    do_authenticate(Uri, User, JWT)
+                catch
+                    _:_ -> ok
+                end;
+            _ ->
+                not_issued
         end,
     #{
         realm => RealmFound,
@@ -1383,7 +1445,11 @@ start_collector(NS) ->
         error(collector_start_timeout)
     end,
     %% Re-register if a previous test left one behind.
-    catch unregister(merge_collector),
+    try
+        unregister(merge_collector)
+    catch
+        _:_ -> ok
+    end,
     true = register(merge_collector, Pid),
     ok.
 
@@ -1421,7 +1487,11 @@ collector_drain() ->
 %% truncation actually happens instead of waiting on the scheduler's cadence.
 do_compact_all() ->
     _ = [
-        catch bondy_oplog_instance:compact(I, [])
+        try
+            bondy_oplog_instance:compact(I, [])
+        catch
+            _:_ -> ok
+        end
      || I <- bondy_oplog:list_instances()
     ],
     ok.

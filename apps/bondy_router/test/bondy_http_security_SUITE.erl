@@ -118,7 +118,7 @@ dynamic_buffer_unset_leaves_cowboy_default(_Config) ->
             Opts = bondy_config:listener_protocol_opts(Listener),
             ?assertEqual(absent, maps:get(dynamic_buffer, Opts, absent))
         end,
-        [api_gateway_http, api_gateway_https, admin_api_http, admin_api_https]
+        [api_gateway_http, api_gateway_https, admin, admin_api_https]
     ).
 
 admin_ping_security_headers(_Config) ->

@@ -546,9 +546,24 @@ peer_shard_owner_loop(NS, Index, Shard, FoldModule) ->
 peer_shard_owner_loop_serve(NS, Index, Shard, Cache, Proj) ->
     receive
         {unregister, From} ->
-            _ = catch bondy_oplog_core_registry:unregister(NS, Index, Shard),
-            _ = catch bondy_oplog_projection_ets:close(Proj),
-            _ = catch bondy_oplog_cache_ets:close(Cache),
+            _ =
+                try
+                    bondy_oplog_core_registry:unregister(NS, Index, Shard)
+                catch
+                    _:_ -> ok
+                end,
+            _ =
+                try
+                    bondy_oplog_projection_ets:close(Proj)
+                catch
+                    _:_ -> ok
+                end,
+            _ =
+                try
+                    bondy_oplog_cache_ets:close(Cache)
+                catch
+                    _:_ -> ok
+                end,
             From ! {self(), unregistered},
             ok
     end.

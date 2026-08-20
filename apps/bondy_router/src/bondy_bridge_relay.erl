@@ -158,7 +158,13 @@ name creates it afresh rather than reviving what was there.
     reconnect => #{
         alias => <<"reconnect">>,
         required => true,
-        default => #{},
+        %% Filled from its own spec, for the reason given on `ping' below. This
+        %% one did not crash — `bondy_bridge_relay_client:maybe_enable_reconnect/2'
+        %% HAS a fall-through clause — it did something quieter: a bridge that
+        %% configured no `reconnect' block reached that clause and never
+        %% reconnected at all, though this spec has said `enabled => true' with
+        %% 100 retries the whole time.
+        default => fun() -> maps_utils:validate(#{}, ?RECONNECT_SPEC) end,
         validator => begin
             ?RECONNECT_SPEC
         end
@@ -166,12 +172,40 @@ name creates it afresh rather than reviving what was there.
     ping => #{
         alias => <<"ping">>,
         required => true,
-        default => #{},
+        %% The FILLED block, not `#{}'. `maps_utils' returns a key's default as
+        %% it is written and does NOT run the key's own `validator' spec over it
+        %% (`maps_utils.erl:865' takes the `error' branch straight to
+        %% `maybe_get_default/3'), so `#{}' handed the client a ping map with no
+        %% `enabled' and no siblings — and
+        %% `bondy_bridge_relay_client:maybe_enable_ping/2' matches only
+        %% `enabled := true' and `enabled := false', so it died with
+        %% `function_clause' in `init/1'. Every bridge is built here
+        %% (`bondy_bridge_relay_manager' for the `bondy.conf' ones,
+        %% `bondy_bridge_relay_api' for the rest) and every
+        %% `bridge.$name.ping.*' mapping is `commented', so a bridge that says
+        %% nothing about ping took that path.
+        %%
+        %% Validating an empty map against the same spec is what makes the four
+        %% documented defaults apply, and keeps them written down once. A partial
+        %% block was never affected: a PRESENT key does run its spec, so its
+        %% siblings were always filled in.
+        default => fun() -> maps_utils:validate(#{}, ?PING_SPEC) end,
         validator => begin
             ?PING_SPEC
         end
     },
     %% Client opts!
+    %% Deliberately NOT filled from `?TLS_OPTS_SPEC', unlike its three siblings.
+    %% That spec defaults `versions' to `['tlsv1.3']' alone, so filling this
+    %% block would pin every bridge that states no TLS options to TLS 1.3 and
+    %% drop connections to a peer that offers only 1.2 — a narrowing, arriving
+    %% through a key nobody wrote. What is written here is what such a bridge has
+    %% always been given, and `ssl' decides the versions.
+    %%
+    %% The cost is that a default added to `?TLS_OPTS_SPEC' will not reach a
+    %% bridge that configures no `tls_opts', which is exactly the trap the other
+    %% three now avoid. It is accepted here, once, in exchange for not changing
+    %% what a TLS bridge negotiates.
     tls_opts => #{
         alias => <<"tls_opts">>,
         required => true,
@@ -182,13 +216,14 @@ name creates it afresh rather than reviving what was there.
             ?TLS_OPTS_SPEC
         end
     },
+    %% Filled from its spec. Unlike `tls_opts' this one is value-preserving —
+    %% `keepalive' and `nodelay' are the only defaulted keys and both were
+    %% already written out here — so it costs nothing and gains the same
+    %% property `ping' and `reconnect' now have.
     socket_opts => #{
         alias => <<"socket_opts">>,
         required => true,
-        default => #{
-            keepalive => true,
-            nodelay => true
-        },
+        default => fun() -> maps_utils:validate(#{}, ?SOCKET_OPTS_SPEC) end,
         validator => begin
             ?SOCKET_OPTS_SPEC
         end
@@ -370,10 +405,17 @@ name creates it afresh rather than reviving what was there.
         default => timer:seconds(10),
         datatype => pos_integer
     },
+    %% 3, matching every listener's `ping.max_attempts'
+    %% (`bondy_listener_config:option_defaults/2' for a raw-socket or
+    %% bridge-relay listener, `wamp.websocket.ping.max_attempts' for a WebSocket
+    %% one). How many unanswered probes mean a dead peer is one judgement, and
+    %% this end of a bridge has no reason to make it differently from the end
+    %% that accepts the connection. It shipped 2 while the schema's own commented
+    %% example showed 3.
     max_attempts => #{
         alias => <<"max_attempts">>,
         required => true,
-        default => 2,
+        default => 3,
         datatype => pos_integer
     }
 }).
@@ -405,9 +447,10 @@ name creates it afresh rather than reviving what was there.
                     (Mod) when is_atom(Mod) ->
                         true;
                     (Mod) when is_binary(Mod) ->
-                        case catch binary_to_existing_atom(Mod) of
-                            {'EXIT', _} -> false;
+                        try binary_to_existing_atom(Mod) of
                             Val -> {ok, Val}
+                        catch
+                            _:_ -> false
                         end
                 end
             },

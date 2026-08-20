@@ -165,9 +165,11 @@ invalidate(ServiceName) ->
                 ok;
             (WorkerName) ->
                 _ =
-                    catch gen_server:cast(
-                        WorkerName, {invalidate, ServiceName}
-                    ),
+                    try
+                        gen_server:cast(WorkerName, {invalidate, ServiceName})
+                    catch
+                        _:_ -> ok
+                    end,
                 ok
         end,
         ServiceName

@@ -89,9 +89,18 @@ cleanup({Db, Sup, Dir}) ->
     %% applier instances alive whose cached projection-adapter handles
     %% point at the (about-to-die) bookies. Force-stop every running
     %% instance so the next test boots from a clean substrate.
-    _ = catch bondy_db:close(Db),
+    _ =
+        try
+            bondy_db:close(Db)
+        catch
+            _:_ -> ok
+        end,
     _ = [
-        catch bondy_oplog:stop_instance(I)
+        try
+            bondy_oplog:stop_instance(I)
+        catch
+            _:_ -> ok
+        end
      || I <- bondy_oplog:list_instances()
     ],
     case is_process_alive(Sup) of

@@ -11,7 +11,7 @@ method (Ed25519).
 
 This is the single source of truth for cryptosign in the Bondy monorepo: both
 the server (`bondy_cryptosign`, which delegates here) and the WAMP client
-(`bondy_connect`) share these functions, so that any signature produced by one
+(`bondy_connect_sdk`) share these functions, so that any signature produced by one
 side verifies on the other.
 
 The module is split in three concerns:
@@ -319,10 +319,18 @@ exec_receive(Port, Acc) ->
         {Port, {exit_status, 0}} ->
             string:trim(Acc);
         {Port, {exit_status, Status}} ->
-            catch erlang:port_close(Port),
+            try
+                erlang:port_close(Port)
+            catch
+                _:_ -> ok
+            end,
             error({cryptosign_exit_status, Status})
     after ?EXEC_TIMEOUT ->
-        catch erlang:port_close(Port),
+        try
+            erlang:port_close(Port)
+        catch
+            _:_ -> ok
+        end,
         error(cryptosign_timeout)
     end.
 

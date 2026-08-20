@@ -72,7 +72,11 @@ run(Topology) ->
     Violations = ets:lookup_element(Ctl, violations, 2),
     T = ets_tree(Ctl, T1),
     ets:delete(Ctl),
-    catch bondy_mst:destroy(T),
+    try
+        bondy_mst:destroy(T)
+    catch
+        _:_ -> ok
+    end,
 
     %% DELETIONS are the defect: a page gone for good under a live root.
     %%
@@ -214,7 +218,11 @@ inserter_loop(Ctl) ->
                 T,
                 Pages
             ),
-            catch bondy_mst:destroy(PeerT),
+            try
+                bondy_mst:destroy(PeerT)
+            catch
+                _:_ -> ok
+            end,
             inserter_loop(Ctl)
     end.
 
@@ -321,7 +329,11 @@ adopt_and_merge(T0) ->
         T0,
         Pages
     ),
-    catch bondy_mst:destroy(PeerT),
+    try
+        bondy_mst:destroy(PeerT)
+    catch
+        _:_ -> ok
+    end,
     %% The production integrate guard.
     case bondy_mst:missing_set(T1, PeerRoot) of
         [] -> bondy_mst:merge(T1, T1, PeerRoot);
@@ -356,7 +368,11 @@ page_tab(RootHash) ->
      || T <- ets:all(),
         ets:info(T, owner) =:= Self,
         ets:info(T, type) =:= set,
-        (catch ets:lookup(T, <<"$root">>)) =:= [{<<"$root">>, RootHash}]
+        try
+            ets:lookup(T, <<"$root">>) =:= [{<<"$root">>, RootHash}]
+        catch
+            _:_ -> false
+        end
     ],
     Tab.
 

@@ -6,11 +6,11 @@
 -module(bondy_connect_local_handler).
 
 -moduledoc """
-Router-side adapter for the `bondy_connect` **in-VM (local) transport**.
+Router-side adapter for the `bondy_connect_sdk` **in-VM (local) transport**.
 
 This is the `bondy`-app implementation of the `bondy_connect_local` handler
 behaviour. It is the *only* place the in-VM transport touches the router core
-(`bondy_router`, `bondy_session_manager`, …); `bondy_connect` itself names no
+(`bondy_router`, `bondy_session_manager`, …); `bondy_connect_sdk` itself names no
 `bondy` module. `bondy_app:start/2` registers this module via
 `bondy_connect_local:register_handler/1`, so on a router node `transport =>
 local` works, while on a peer node (no `bondy` app) the transport is simply
@@ -87,7 +87,12 @@ handle_info(_Info, #local_session{}) ->
 -spec close(term()) -> ok.
 
 close(#local_session{session = Session}) ->
-    _ = catch bondy_session_manager:close(Session),
+    _ =
+        try
+            bondy_session_manager:close(Session)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% =============================================================================

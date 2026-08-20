@@ -65,8 +65,16 @@ enable_encryption() ->
 
 disable_encryption() ->
     os:unsetenv(?ENV_VAR),
-    catch bondy_config:set([security, master_key], undefined),
-    catch bondy_keyring:reset_cache(),
+    try
+        bondy_config:set([security, master_key], undefined)
+    catch
+        _:_ -> ok
+    end,
+    try
+        bondy_keyring:reset_cache()
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 new_realm(Suffix) ->
@@ -92,7 +100,8 @@ sensitive_values(KeysMap) ->
         [
             V
          || F <- [private, encryption],
-            (V = maps:get(F, bundle_of(B), undefined)) =/= undefined
+            V <- [maps:get(F, bundle_of(B), undefined)],
+            V =/= undefined
         ]
      || {_Kid, B} <- maps:to_list(KeysMap)
     ]).

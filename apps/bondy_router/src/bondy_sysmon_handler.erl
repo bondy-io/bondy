@@ -55,13 +55,18 @@ init([]) ->
     %% the time this handler is installed; the catch covers embedded or
     %% test setups that install the handler without it.
     _ =
-        (catch prometheus_counter:declare([
-            {name, bondy_sysmon_events_total},
-            {help,
-                "BEAM system-monitor events received (long_gc, long_schedule, "
-                "large_heap, busy_port, busy_dist_port, ...)."},
-            {labels, [type]}
-        ])),
+        try
+            prometheus_counter:declare([
+                {name, bondy_sysmon_events_total},
+                {help,
+                    "BEAM system-monitor events received (long_gc, "
+                    "long_schedule, large_heap, busy_port, busy_dist_port, "
+                    "...)."},
+                {labels, [type]}
+            ])
+        catch
+            _:_ -> ok
+        end,
     State = #state{},
     {ok, State, hibernate}.
 
@@ -110,7 +115,12 @@ handle_event(_Event, #state{} = State) ->
 %% A raising gen_event callback would remove this handler; never let the
 %% metric update take the logging down with it.
 count_event(Type) when is_atom(Type) ->
-    _ = (catch prometheus_counter:inc(bondy_sysmon_events_total, [Type], 1)),
+    _ =
+        try
+            prometheus_counter:inc(bondy_sysmon_events_total, [Type], 1)
+        catch
+            _:_ -> ok
+        end,
     ok;
 count_event(_) ->
     ok.

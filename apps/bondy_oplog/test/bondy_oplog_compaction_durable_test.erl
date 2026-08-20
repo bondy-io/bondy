@@ -54,7 +54,12 @@ cleanup(Dir) ->
      || E <- bondy_oplog_core_registry:list(),
         {N, I, S} <- [bondy_oplog_core_registry:entry_key(E)]
     ],
-    _ = (catch del_tree(Dir)),
+    _ =
+        try
+            del_tree(Dir)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% Below the seal threshold: every page is still in the pending map (RAM,

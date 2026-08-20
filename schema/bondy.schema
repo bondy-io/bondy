@@ -1792,8 +1792,9 @@ end}.
 %% outbound TLS connections (OIDC providers, HTTP Connector HTTP backends, etc.).
 %% These certificates are merged with the certifi Mozilla CA bundle and
 %% (when available) the OS trust store.
-%% If not set, Bondy will try to use the api_gateway.https.cacertfile value
-%% as a fallback.
+%% If not set, only those two sources are used. A listener's own
+%% listeners.$name.tls.cacertfile is not consulted: that anchors verification of
+%% inbound clients on one socket, not Bondy's own outbound trust.
 {mapping, "cert_manager.cacertfile", "bondy_router.cert_manager.cacertfile", [
   {datatype, file},
   {commented, "{{platform_etc_dir}}/cacert.pem"}
@@ -2066,1085 +2067,1191 @@ end}.
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% ADMIN REST API CLEAR
+%% OPERATOR-DEFINED LISTENERS
 %% -----------------------------------------------------------------------------
+%% Each `listeners.$name' block describes one socket.
+%%
+%% Every mapping in this section targets the SAME key, `bondy_router.listeners',
+%% and the single translation below turns them into `[{Name, Spec}]' — the shape
+%% `bondy_listener_config:resolve/2' consumes. A mapping cannot target a
+%% per-listener key: `cuttlefish_generator' tokenises a target string as written
+%% and passes each token through `list_to_atom/1' (see :153 and :257-267 of
+%% cuttlefish_generator.erl, cuttlefish 3.0.1), so `$name' in a target yields
+%% the atom `'$name'' rather than the listener's name. Each listener's option
+%% block therefore travels nested inside its own spec, at the path its consumer
+%% reads it from.
+%%
+%% This section cannot write to `bondy_router.<name>.*' directly, but that IS
+%% the path its option blocks end up on. `bondy_config:splat_listener_blocks/0'
+%% copies every key of every spec that is not one of `?SPEC_KEYS' out to
+%% `bondy_router.<name>.<key>', leaf by leaf, and `bondy_config:init/1' calls it
+%% before `bondy_listener_manager:init/0' — so
+%% `bondy_config:listener_transport_opts/2', `bondy_cert_manager',
+%% `bondy_http_cors' and `bondy_http_security_headers' all read what this
+%% section renders.
+%%
+%% One consequence a consumer must handle: the splat writes each leaf with
+%% `set/2', which builds nested PROPLISTS, so a block reached at `[Name, Block]'
+%% is a proplist and not the map its consumer wants. `bondy_http_cors' and
+%% `bondy_http_security_headers' both convert with `key_value:to_map/1'.
+%%
+%% NO mapping in this section may declare a `{default, ...}'.
+%% `cuttlefish_generator:add_fuzzy_default/4' materialises a $name mapping's
+%% default for EVERY name mentioned anywhere under the `listeners' prefix — the
+%% prefix, not the individual key (`get_possible_values_for_fuzzy_matches/2') —
+%% which would make the global `wamp.<carrier>.*' fallback that
+%% `bondy_listener_config:resolve_carrier_key/5' depends on permanently dead,
+%% and would give every listener a key its operator never wrote. Defaults belong
+%% to the global blocks and to `bondy_listener_config'.
+%%
+%% A `{validators, ...}' would be inert here, so none is declared.
+%% `cuttlefish_generator:run_validations/2' (:612-639) looks a value up under
+%% the mapping's OWN variable, which for a fuzzy mapping is the literal
+%% `["listeners","$name",...]' and never a key in the rendered conf; its list
+%% comprehension also admits a mapping only if it has a default or that same
+%% literal variable is set. Both conditions fail for every mapping here, so a
+%% validator would never be consulted — e.g. a `port_number' validator would
+%% accept `listeners.pub.port = 99999', which its own predicate
+%% `(Port band bnot 16#ffff) =:= 0' rejects. Range and coercion checks are
+%% therefore applied inline in the translation's `Value' fun instead: a
+%% lower-bound check (`Min'), a bounded-range check (`Range'), the
+%% `port_number' predicate, IP-address parsing and TLS-version coercion.
+%% `Value' checks exactly the keys named in its own clauses; every other key
+%% falls through unchecked. Which keys those are is inherited rather than
+%% derived, so a key absent from `Value' is not thereby known to need no
+%% check — see the `linger.timeout' clause, whose `http.' sibling is
+%% deliberately not checked.
 
+%% --------------------------------------------------------------------------
+%% Identity and bind target. These reach the inventory spec's top level, which
+%% is where bondy_listener_config:resolve_one/3 reads them.
+%% --------------------------------------------------------------------------
 
-{mapping, "admin_api.http.enabled",
-"bondy_router.admin_api_http.enabled", [
-  {default, on},
-  {datatype, {flag, on, off}}
+%% @doc The transport the listener binds: `tcp', `tls' or `uds'. TLS is a
+%% transport, not a protocol — an HTTPS listener is protocol = http with
+%% transport = tls.
+{mapping, "listeners.$name.transport", "bondy_router.listeners", [
+  {datatype, {enum, [tcp, tls, uds]}}
 ]}.
 
-%% @doc http.port is the TCP port that Bondy uses for
-%% exposing the Admin Rest APIs.
-{mapping, "admin_api.http.port",
-"bondy_router.admin_api_http.transport_opts.socket_opts.port", [
-  {default, 18081},
-  {validators, ["port_number"]},
-  {datatype, integer},
-  hidden
+%% @doc What frames the wire. `http' takes a `services' list; a raw-socket
+%% protocol carries exactly one protocol and takes none.
+{mapping, "listeners.$name.protocol", "bondy_router.listeners", [
+  {datatype, {enum, [http, wamp_rawsocket, bridge_relay]}}
 ]}.
 
-%% @doc admin_api.http.ip is the IP address that Bondy uses for
-%% exposing the API Gateway managed APIs.. When the host has many network
-%% interfaces, this option specifies which one to listen on.
-{mapping, "admin_api.http.ip",
-"bondy_router.admin_api_http.ip", [
-  %% D-1: default to loopback. The admin API is the control plane; the previous
-  %% no-default behaviour bound all interfaces (0.0.0.0). Set an explicit address
-  %% to expose it deliberately.
-  {default, "127.0.0.1"},
-  {datatype, string},
-  {validators, ["ip_address"]}
+%% @doc The TCP port. Required for tcp and tls. Deliberately has no default: a
+%% default would silently collide between listeners.
+{mapping, "listeners.$name.port", "bondy_router.listeners", [
+  {datatype, integer}
 ]}.
 
-%% @doc The IP version to use. Either 4 or 6.
-{mapping, "admin_api.http.ip_version",
-"bondy_router.admin_api_http.transport_opts.socket_opts.ip_version", [
-  {default, "4"},
+%% @doc Filesystem path for a `uds' listener, instead of a port.
+{mapping, "listeners.$name.path", "bondy_router.listeners", [
+  {datatype, file}
+]}.
+
+%% @doc Comma-separated services reachable on this listener. Valid only when
+%% protocol = http. Each entry names a protocol over a carrier, so BAMP can
+%% be offered over WebSocket without also offering WAMP.
+{mapping, "listeners.$name.services", "bondy_router.listeners", [
   {datatype, string}
 ]}.
 
-{translation, "bondy_router.admin_api_http.transport_opts.socket_opts.ip_version",
-  fun(Conf) ->
-    Value =  cuttlefish:conf_get("admin_api.http.ip_version", Conf),
-      try
-        case string:strip(Value) of
-          "4" -> 'inet';
-          "6" -> 'inet6';
-          _ -> throw(invalid_version)
-        end
-      catch
-        throw:invalid_version ->
-          cuttlefish:invalid(
-            "Invalid IP version: "
-            ++ Value
-            ++ " . Value should be 4 or 6."
-          )
-      end
-  end
-}.
-
-%% The Cowboy acceptors_pool_size for the Admin API http listener
-{mapping, "admin_api.http.acceptors_pool_size",
-"bondy_router.admin_api_http.transport_opts.num_acceptors", [
-  {datatype, integer},
-  {validators, ["pos_integer"]},
-  {default, 100}
-]}.
-
-%% The Cowboy max number of connections for the Admin API http listener
-{mapping, "admin_api.http.max_connections",
-"bondy_router.admin_api_http.transport_opts.max_connections", [
-  {datatype, integer},
-  {validators, ["pos_integer"]},
-  {default, 10000}
-]}.
-
-
-%% The backlog value defines the maximum length that the queue of pending
-%% connections can grow to. Defaults to 1024.
-{mapping, "admin_api.http.backlog",
-"bondy_router.admin_api_http.transport_opts.socket_opts.backlog", [
-{datatype, integer},
-{validators, ["pos_integer"]},
-{default, 1024}
-]}.
-
-%% Enables/disables periodic transmission on a connected socket when no other
-%% data is exchanged. If the other end does not respond, the connection is
-%% considered broken and an error message is sent to the controlling process.
-{mapping, "admin_api.http.keepalive",
-"bondy_router.admin_api_http.transport_opts.socket_opts.keepalive", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-%% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
-%% means that also small amounts of data are sent immediately.
-{mapping, "admin_api.http.nodelay",
-"bondy_router.admin_api_http.transport_opts.socket_opts.nodelay", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
-
-
-%% {mapping, "admin_api.http.reuseaddr",
-%% "bondy_router.admin_api_http.transport_opts.socket_opts.reuseaddr", [
-%%   {datatype, {flag, on, off}},
-%%   {default, on}
-%% ]}.
-
-{mapping, "admin_api.http.reuseport",
-"bondy_router.admin_api_http.transport_opts.socket_opts.reuseport", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-
-%% The minimum size of the send buffer to use for the socket.
-{mapping, "admin_api.http.sndbuf",
-"bondy_router.admin_api_http.transport_opts.socket_opts.sndbuf", [
-  {datatype, bytesize}
-]}.
-
-%% The minimum size of the receive buffer to use for the socket.
-{mapping, "admin_api.http.recbuf",
-"bondy_router.admin_api_http.transport_opts.socket_opts.recbuf", [
-  {datatype, bytesize}
-]}.
-
-%% The size of the user-level software buffer used by the driver.
-%% Not to be confused with options sndbuf and recbuf, which correspond to the
-%% Kernel socket buffers.
-%% It is recommended to have val(buffer) >= max(val(sndbuf),val(recbuf)) to
-%% avoid performance issues because of unnecessary copying.
-%% val(buffer) is automatically set to the above maximum when values sndbuf or
-%% recbuf are set.
-{mapping, "admin_api.http.buffer",
-"bondy_router.admin_api_http.transport_opts.socket_opts.buffer", [
-  {datatype, bytesize}
-]}.
-
-%% Bondy dynamically resizes the socket's receive buffer between these two
-%% bounds based on the size of the data it receives, using the optimal buffer
-%% size for the current workload. When neither bound is set, an adaptive
-%% default of 512B..128KB applies. To tune it, BOTH min and max must be set,
-%% within 1KB..128KB and with min =< max; setting either to 0 disables
-%% dynamic buffering entirely. This option is ignored when the socket
-%% 'buffer' size is set explicitly.
-{mapping, "admin_api.http.buffer.min",
-"bondy_router.admin_api_http.protocol_opts.dynamic_buffer.min", [
-  {datatype, bytesize}
-]}.
-
-{mapping, "admin_api.http.buffer.max",
-"bondy_router.admin_api_http.protocol_opts.dynamic_buffer.max", [
-  {datatype, bytesize}
-]}.
-
-
-%% The number of packets Cowboy will request from the socket at once. This can
-%% be used to tweak the performance of the server. Higher values reduce the
-%% number of times Cowboy need to request more packets from the port driver at t
-%% he expense of potentially higher memory being used.
-{mapping, "admin_api.http.active_n",
-"bondy_router.admin_api_http.protocol_opts.active_n", [
-  {default, 100},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% Maximum allowed time for the listening process handshake call to finish.
-{mapping, "admin_api.http.handshake_timeout",
-"bondy_router.admin_api_http.transport_opts.handshake_timeout", [
-  {default, "5s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Time in ms with no data received before Cowboy closes the connection.
-{mapping, "admin_api.http.idle_timeout",
-"bondy_router.admin_api_http.protocol_opts.idle_timeout", [
-  {default, "15s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Time in ms with nothing received at all before Cowboy closes the connection.
-{mapping, "admin_api.http.inactivity_timeout",
-"bondy_router.admin_api_http.protocol_opts.inactivity_timeout", [
-  {default, "5m"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Time in ms that Cowboy will wait when closing the connection. This is
-%% necessary to avoid the TCP reset problem as described in the section 6.6 of
-%% RFC7230.
-{mapping, "admin_api.http.linger.timeout",
-"bondy_router.admin_api_http.protocol_opts.linger_timeout", [
-  {default, "1s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Time in ms with no requests before Cowboy closes the connection.
-{mapping, "admin_api.http.request_timeout",
-"bondy_router.admin_api_http.protocol_opts.request_timeout", [
-  {default, "5s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Whether the protocol_opts.idle_timeout gets reset when sending data to the socket.
-{mapping, "admin_api.http.reset_idle_timeout_on_send",
-"bondy_router.admin_api_http.protocol_opts.reset_idle_timeout_on_send", [
-  {default, off},
+%% @doc Whether the listener starts. Absent means enabled.
+{mapping, "listeners.$name.enabled", "bondy_router.listeners", [
   {datatype, {flag, on, off}}
 ]}.
 
-%% Maximum number of requests allowed per connection.
-{mapping, "admin_api.http.max_keepalive",
-"bondy_router.admin_api_http.protocol_opts.max_keepalive", [
-  {default, 1000},
-  {validators, ["pos_integer"]},
+%% @doc `early' starts the listener before any `normal' one and while the
+%% node still reports `initialising', so liveness and readiness probes answer
+%% before clients are accepted. Absent means `normal'.
+{mapping, "listeners.$name.start_phase", "bondy_router.listeners", [
+  {datatype, {enum, [early, normal]}}
+]}.
+
+%% @doc The IP address to listen on, for a host with several interfaces.
+%% Parsed to an address tuple at render time: it reaches ranch's socket
+%% options after the normalisation that would otherwise convert it.
+{mapping, "listeners.$name.ip", "bondy_router.listeners", [
+  {datatype, string}
+]}.
+
+%% --------------------------------------------------------------------------
+%% Stream-socket and connection options shared by every protocol.
+%% --------------------------------------------------------------------------
+
+%% @doc The IP version to use. Either 4 or 6. This selects the family only
+%% for a listener that configures no `ip': there it chooses the wildcard
+%% bound, `0.0.0.0' or `::'. An address determines its own family, so where
+%% both keys are set and disagree the address wins and this key has no
+%% effect.
+{mapping, "listeners.$name.ip_version", "bondy_router.listeners", [
+  {datatype, string}
+]}.
+
+%% @doc Size of the acceptor pool.
+{mapping, "listeners.$name.acceptors_pool_size", "bondy_router.listeners", [
   {datatype, integer}
 ]}.
 
+%% @doc Maximum number of concurrent connections. Match this to host
+%% memory/fd capacity and raise it deliberately: a per-listener cap set very
+%% high invites fd/memory exhaustion.
+{mapping, "listeners.$name.max_connections", "bondy_router.listeners", [
+  {datatype, integer}
+]}.
 
-{mapping, "admin_api.http.initial_stream_flow_size",
-"bondy_router.admin_api_http.protocol_opts.initial_stream_flow_size", [
-  {default, "65535"}, % bytes
+%% @doc The maximum length that the queue of pending connections can grow to.
+{mapping, "listeners.$name.backlog", "bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Enables/disables periodic transmission on a connected socket when no
+%% other data is exchanged. If the other end does not respond, the connection
+%% is considered broken and an error message is sent to the controlling
+%% process.
+{mapping, "listeners.$name.keepalive", "bondy_router.listeners", [
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc If on, option TCP_NODELAY is turned on for the socket, which means
+%% that also small amounts of data are sent immediately.
+{mapping, "listeners.$name.nodelay", "bondy_router.listeners", [
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc Allows multiple listen sockets on the same port, so accepts fan out
+%% across schedulers.
+{mapping, "listeners.$name.reuseport", "bondy_router.listeners", [
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc The minimum size of the send buffer to use for the socket.
+{mapping, "listeners.$name.sndbuf", "bondy_router.listeners", [
   {datatype, bytesize}
 ]}.
 
-{mapping, "admin_api.http.max_empty_lines",
-"bondy_router.admin_api_http.protocol_opts.max_empty_lines", [
-  {default, 5},
-  {validators, ["pos_integer"]},
+%% @doc The minimum size of the receive buffer to use for the socket.
+{mapping, "listeners.$name.recbuf", "bondy_router.listeners", [
+  {datatype, bytesize}
+]}.
+
+%% @doc The size of the user-level software buffer used by the driver. Not to
+%% be confused with sndbuf and recbuf, which correspond to the kernel socket
+%% buffers. It is recommended to have val(buffer) >=
+%% max(val(sndbuf),val(recbuf)) to avoid unnecessary copying; val(buffer) is
+%% set to that maximum automatically when sndbuf or recbuf are set.
+{mapping, "listeners.$name.buffer", "bondy_router.listeners", [
+  {datatype, bytesize}
+]}.
+
+%% @doc Maximum allowed time for the listening process handshake call to
+%% finish.
+{mapping, "listeners.$name.handshake_timeout", "bondy_router.listeners", [
+  {datatype, {duration, ms}}
+]}.
+
+%% @doc How long the socket blocks on close waiting for unsent data to be
+%% acknowledged. `-1' disables lingering; `0' aborts the connection on close,
+%% discarding anything unsent. Defaults to 1s.
+%%
+%% Expressed in SECONDS, unlike every other duration in this file, because the
+%% value is handed to the OS socket option `{linger, {true, N}}' whose second
+%% component the `inet' module documents in seconds. A sub-second value is
+%% rounded UP to one second rather than down to zero, which would mean abort.
+%%
+%% A bare integer is accepted, and also means seconds, because the raw-socket
+%% form of this setting always accepted one. See also
+%% listeners.$name.http.linger.timeout, the Cowboy-level setting, which is a
+%% different thing and is in milliseconds.
+{mapping, "listeners.$name.linger.timeout", "bondy_router.listeners", [
+  {datatype, [{duration, s}, integer]}
+]}.
+
+%% @doc Drops a raw-socket connection after a period of inactivity. This
+%% option does not take effect when ping.enabled is `on' and
+%% ping.idle_timeout times ping.max_attempts results in a value higher than
+%% this option. For an HTTP listener the equivalent is
+%% listeners.$name.http.idle_timeout.
+{mapping, "listeners.$name.idle_timeout", "bondy_router.listeners", [
+  {datatype, [{duration, ms}, {atom, infinity}]}
+]}.
+
+%% @doc The period of time without a session after which the connection is
+%% dropped. Applies to a protocol = bridge_relay listener, which authenticates
+%% the peer router before it may relay anything; other protocols ignore it.
+%% Absent, bondy_bridge_relay_server:init/1 uses 5000 ms.
+{mapping, "listeners.$name.auth_timeout", "bondy_router.listeners", [
+  {datatype, [{atom, infinity}, {duration, ms}]}
+]}.
+
+%% @doc Whether the connection process hibernates when idle, trading a little
+%% latency on the next message for a smaller heap. Applies to a
+%% protocol = bridge_relay listener; a Websocket connection has its own
+%% websocket.hibernate. Absent, bondy_bridge_relay_server:init/1 uses `idle'.
+{mapping, "listeners.$name.hibernate", "bondy_router.listeners", [
+  {datatype, {enum, [never, idle, always]}}
+]}.
+
+%% @doc Enables or disables proxy-protocol source-address capture, used for
+%% matching against RBAC Source assignments.
+{mapping, "listeners.$name.proxy_protocol", "bondy_router.listeners", [
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc How to treat a connection with no proxy-protocol information when
+%% proxy_protocol is enabled. `strict' drops it; `relaxed' accepts it and
+%% logs.
+{mapping, "listeners.$name.proxy_protocol.mode", "bondy_router.listeners", [
+  {datatype, {enum, [strict, relaxed]}}
+]}.
+
+%% @doc Trusted reverse-proxy CIDRs, comma separated.
+{mapping, "listeners.$name.proxy_protocol.trusted_proxies",
+"bondy_router.listeners", [
+  {datatype, string}
+]}.
+
+%% @doc Defines if server-initiated PING control messages are enabled. Bondy
+%% always answers a client-initiated ping even when this is off. Enabling it
+%% implies one additional timer per connection.
+{mapping, "listeners.$name.ping.enabled", "bondy_router.listeners", [
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc When ping.enabled is `on', the maximum time permitted to elapse
+%% between the point at which the client finishes transmitting a message and
+%% the point it starts sending the next.
+{mapping, "listeners.$name.ping.idle_timeout", "bondy_router.listeners", [
+  {datatype, {duration, ms}}
+]}.
+
+%% @doc When ping.enabled is `on', how long Bondy waits for a ping response
+%% before counting a failed attempt.
+{mapping, "listeners.$name.ping.timeout", "bondy_router.listeners", [
+  {datatype, {duration, ms}}
+]}.
+
+%% @doc When ping.enabled is `on', how many missed pings are allowed before
+%% the connection is closed.
+{mapping, "listeners.$name.ping.max_attempts", "bondy_router.listeners", [
   {datatype, integer}
 ]}.
 
-{mapping, "admin_api.http.max_header_name_length",
-"bondy_router.admin_api_http.protocol_opts.max_header_name_length", [
-  {default, 64},
-  {validators, ["pos_integer"]},
+%% --------------------------------------------------------------------------
+%% Cowboy protocol-level options. These carry an `http.' prefix so that one conf
+%% key has one meaning: `idle_timeout' and `linger.timeout' name a different
+%% setting here than they do on a raw socket, and a key whose effect depended on
+%% a sibling `protocol' value would be worse than a longer name. All 23 are
+%% prefixed, not only the two that collide, so the group does not drift as keys
+%% are added.
+%% --------------------------------------------------------------------------
+
+%% @doc The number of packets Cowboy requests from the socket at once. Higher
+%% values reduce how often Cowboy asks the port driver for more packets, at
+%% the expense of potentially higher memory use.
+{mapping, "listeners.$name.http.active_n", "bondy_router.listeners", [
   {datatype, integer}
 ]}.
 
-{mapping, "admin_api.http.max_header_value_length",
-"bondy_router.admin_api_http.protocol_opts.max_header_value_length", [
-  {default, 4096},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
+%% @doc Lower bound of the dynamically resized socket receive buffer. To tune
+%% it, BOTH min and max must be set, within 1KB..128KB and with min =< max;
+%% setting either to 0 disables dynamic buffering entirely. Ignored when the
+%% socket `buffer' size is set explicitly.
+{mapping, "listeners.$name.http.buffer.min", "bondy_router.listeners", [
+  {datatype, bytesize}
 ]}.
 
-{mapping, "admin_api.http.max_headers",
-"bondy_router.admin_api_http.protocol_opts.max_headers", [
-  {default, 100},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
+%% @doc Upper bound of the dynamically resized socket receive buffer. See
+%% listeners.$name.http.buffer.min.
+{mapping, "listeners.$name.http.buffer.max", "bondy_router.listeners", [
+  {datatype, bytesize}
 ]}.
 
-%% Maximum length of the Authorization header value, in bytes. Authorization
-%% headers routinely carry bearer tokens (JWTs) larger than typical header
-%% values, so Cowboy allows raising this limit independently of
-%% admin_api.http.max_header_value_length, which is used when this option
-%% is not set.
-{mapping, "admin_api.http.max_authorization_header_value_length",
-"bondy_router.admin_api_http.protocol_opts.max_authorization_header_value_length", [
-  {validators, ["pos_integer"]},
-  {datatype, integer}
+%% @doc Time with no data received before Cowboy closes the connection.
+{mapping, "listeners.$name.http.idle_timeout", "bondy_router.listeners", [
+  {datatype, {duration, ms}}
 ]}.
 
-%% Maximum length of the Cookie header value, in bytes. Cookie headers can
-%% legitimately exceed typical header values, so Cowboy allows raising this
-%% limit independently of admin_api.http.max_header_value_length, which is
-%% used when this option is not set.
-{mapping, "admin_api.http.max_cookie_header_value_length",
-"bondy_router.admin_api_http.protocol_opts.max_cookie_header_value_length", [
-  {validators, ["pos_integer"]},
-  {datatype, integer}
+%% @doc Time with nothing received at all before Cowboy closes the
+%% connection.
+{mapping, "listeners.$name.http.inactivity_timeout", "bondy_router.listeners", [
+  {datatype, {duration, ms}}
 ]}.
 
-%% Maximum length of the authority component of the request URI (the
-%% host[:port] part), in bytes. Requests exceeding it are rejected.
-%% Defaults to 255 (the DNS name length limit).
-{mapping, "admin_api.http.max_authority_length",
-"bondy_router.admin_api_http.protocol_opts.max_authority_length", [
-  {validators, ["pos_integer"]},
-  {datatype, integer}
+%% @doc HTTP/2 initial stream flow-control window.
+{mapping, "listeners.$name.http.initial_stream_flow_size",
+"bondy_router.listeners", [
+  {datatype, bytesize}
 ]}.
 
-%% What to do when a response given to Cowboy contains invalid header names
-%% or values (for example control characters): 'error_terminate' replies
-%% with a 500 and terminates the stream — preventing header injection and
-%% response splitting — while 'ignore' relays the response unchanged
-%% (Cowboy's behaviour before 2.16). Keep the default unless a legacy
-%% upstream behind the API gateway requires relaying such headers.
-{mapping, "admin_api.http.invalid_response_headers",
-"bondy_router.admin_api_http.protocol_opts.invalid_response_headers", [
-  {default, error_terminate},
+%% @doc What to do when a response given to Cowboy contains invalid header
+%% names or values (for example control characters): `error_terminate'
+%% replies with a 500 and terminates the stream — preventing header injection
+%% and response splitting — while `ignore' relays the response unchanged.
+{mapping, "listeners.$name.http.invalid_response_headers",
+"bondy_router.listeners", [
   {datatype, {enum, [error_terminate, ignore]}}
 ]}.
 
-%% HTTP/2 only: maximum number of concurrent streams (requests) a single
-%% client connection may have open. HTTP/2 is negotiated via ALPN on TLS
-%% listeners. Unbounded concurrent streams let one connection exhaust the
-%% node (Cowboy versions before 2.17 defaulted to infinity); 100 is the
-%% Cowboy 2.17 default. Raise it only for trusted, heavily multiplexing
-%% clients.
-{mapping, "admin_api.http.max_concurrent_streams",
-"bondy_router.admin_api_http.protocol_opts.max_concurrent_streams", [
-  {default, 100},
-  {validators, ["pos_integer"]},
+%% @doc Time Cowboy waits when closing the connection, to avoid the TCP reset
+%% problem described in section 6.6 of RFC7230. Distinct from
+%% listeners.$name.linger.timeout, which is the socket-level option.
+{mapping, "listeners.$name.http.linger.timeout", "bondy_router.listeners", [
+  {datatype, {duration, ms}}
+]}.
+
+%% @doc Maximum length of the authority component of the request URI (the
+%% host[:port] part), in bytes. Requests exceeding it are rejected.
+{mapping, "listeners.$name.http.max_authority_length",
+"bondy_router.listeners", [
   {datatype, integer}
 ]}.
 
-
-{mapping, "admin_api.http.max_method_length",
-"bondy_router.admin_api_http.protocol_opts.max_method_length", [
-  {default, 32},
-  {validators, ["pos_integer"]},
+%% @doc Maximum length of the Authorization header value, in bytes.
+%% Authorization headers routinely carry bearer tokens (JWTs) larger than
+%% typical header values, so Cowboy allows raising this limit independently
+%% of max_header_value_length, which is used when this option is not set.
+{mapping, "listeners.$name.http.max_authorization_header_value_length",
+"bondy_router.listeners", [
   {datatype, integer}
 ]}.
 
-{mapping, "admin_api.http.max_request_line_length",
-"bondy_router.admin_api_http.protocol_opts.max_request_line_length", [
-  {default, 8000},
-  {validators, ["pos_integer"]},
+%% @doc HTTP/2 only: maximum number of concurrent streams (requests) a single
+%% client connection may have open. Unbounded concurrent streams let one
+%% connection exhaust the node. Raise it only for trusted, heavily
+%% multiplexing clients.
+{mapping, "listeners.$name.http.max_concurrent_streams",
+"bondy_router.listeners", [
   {datatype, integer}
 ]}.
 
-{mapping, "admin_api.http.max_skip_body_length",
-"bondy_router.admin_api_http.protocol_opts.max_skip_body_length", [
-  {default, 1000000},
-  {validators, ["pos_integer"]},
+%% @doc Maximum length of the Cookie header value, in bytes. Cookie headers
+%% can legitimately exceed typical header values, so Cowboy allows raising
+%% this limit independently of max_header_value_length, which is used when
+%% this option is not set.
+{mapping, "listeners.$name.http.max_cookie_header_value_length",
+"bondy_router.listeners", [
   {datatype, integer}
 ]}.
 
-{mapping, "admin_api.http.sendfile",
-"bondy_router.admin_api_http.protocol_opts.sendfile", [
-  {default, on},
+%% @doc Maximum number of cookies parsed out of the Cookie header of a
+%% request. A request carrying more is rejected with a 400, which bounds the
+%% work a single header of legal length can cause. This is a limit on the
+%% COUNT of cookies; max_cookie_header_value_length bounds the header's SIZE.
+%% Unset means the 100 cowlib applies (cow_cookie:parse_cookie/2).
+%%
+%% Unlike its siblings in this block, Cowboy's protocol loop does not read
+%% this option: cowlib takes it per call, so Bondy passes it to
+%% cowboy_req:parse_cookies/2 at each site that parses cookies
+%% (bondy_http_utils:parse_cookies/1). It is rendered into the same
+%% protocol_opts block as the rest of listeners.$name.http.* because that is
+%% where a listener's HTTP request limits live and where that function reads
+%% it from; Cowboy ignores an option it does not know.
+{mapping, "listeners.$name.http.max_cookies", "bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Maximum number of empty lines accepted before the request line.
+{mapping, "listeners.$name.http.max_empty_lines", "bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Maximum length of a header name, in bytes.
+{mapping, "listeners.$name.http.max_header_name_length",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Maximum length of a header value, in bytes.
+{mapping, "listeners.$name.http.max_header_value_length",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Maximum number of headers accepted per request.
+{mapping, "listeners.$name.http.max_headers", "bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Maximum number of requests allowed per connection.
+{mapping, "listeners.$name.http.max_keepalive", "bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Maximum length of the request method, in bytes.
+{mapping, "listeners.$name.http.max_method_length", "bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Maximum length of the request line, in bytes.
+{mapping, "listeners.$name.http.max_request_line_length",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Maximum number of bytes of an unread request body Cowboy will skip in
+%% order to reuse the connection.
+{mapping, "listeners.$name.http.max_skip_body_length",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Time with no requests before Cowboy closes the connection.
+{mapping, "listeners.$name.http.request_timeout", "bondy_router.listeners", [
+  {datatype, {duration, ms}}
+]}.
+
+%% @doc Whether the idle_timeout gets reset when sending data to the socket.
+{mapping, "listeners.$name.http.reset_idle_timeout_on_send",
+"bondy_router.listeners", [
   {datatype, {flag, on, off}}
 ]}.
 
-
-%% @doc Enables or disables the HTTP x-forwarded-for or x-real-ip heather check.
-%% This is used to capture the source IP address which will be used for matching
-%% against RBAC Source assignments.
-{mapping, "admin_api.http.proxy_protocol",
-"bondy_router.admin_api_http.proxy_protocol.enabled", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-%% @doc Defines the mode in which Bondy operates when
-%% admin_api.http.proxy_protocol is enabled. If 'strict' a connection that
-%% is not sending the x-forwarded-for or x-real-ip header or with invalid
-%% headers will be dropped. If 'relaxed' the connection is always accepted and
-%% Bondy will log when there is no header or if it is invalid.
-{mapping, "admin_api.http.proxy_protocol.mode",
-"bondy_router.admin_api_http.proxy_protocol.mode", [
-  {datatype, {enum, [strict, relaxed]}},
-  {default, relaxed}
-]}.
-
-%% @doc (G-2) Comma-separated CIDR list of trusted reverse proxies. The
-%% `Forwarded`/`X-Real-IP`/`X-Forwarded-For` headers are only believed when the
-%% immediate socket peer is within one of these ranges; otherwise the socket
-%% peer is used as the source IP. EMPTY (the default) means no proxy is trusted,
-%% so spoofed forwarding headers can never influence source-IP-based auth.
-{mapping, "admin_api.http.proxy_protocol.trusted_proxies",
-"bondy_router.admin_api_http.proxy_protocol.trusted_proxies", [
-  {datatype, string},
-  {commented, "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"}
-]}.
-
-
-%% -----------------------------------------------------------------------------
-%% ADMIN REST API HTTP - CORS
-%% -----------------------------------------------------------------------------
-
-%% @doc Whether CORS headers are enabled for the Admin API HTTP listener.
-{mapping, "admin_api.http.cors.enabled",
-"bondy_router.admin_api_http.cors.enabled", [
-  {default, on},
+%% @doc Whether Cowboy uses sendfile to serve static files.
+{mapping, "listeners.$name.http.sendfile", "bondy_router.listeners", [
   {datatype, {flag, on, off}}
 ]}.
 
-%% @doc The allowed origins for CORS requests.
-%% Can be "*" (wildcard), "auto" (derive from request host), or a
-%% comma-separated list of origins e.g.
-%% "https://app.example.com, https://admin.example.com".
-{mapping, "admin_api.http.cors.allowed_origins",
-"bondy_router.admin_api_http.cors.allowed_origins", [
-  {default, "*"},
+%% --------------------------------------------------------------------------
+%% HTTP response-header policy.
+%% --------------------------------------------------------------------------
+
+%% @doc Whether CORS headers are enabled for this listener.
+{mapping, "listeners.$name.cors.enabled", "bondy_router.listeners", [
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc The allowed origins for CORS requests. Can be "*" (wildcard), "auto"
+%% (derive from request host), or a comma-separated list of origins.
+{mapping, "listeners.$name.cors.allowed_origins", "bondy_router.listeners", [
   {datatype, string}
 ]}.
 
 %% @doc The allowed HTTP methods for CORS requests.
-{mapping, "admin_api.http.cors.allowed_methods",
-"bondy_router.admin_api_http.cors.allowed_methods", [
-  {default, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"},
+{mapping, "listeners.$name.cors.allowed_methods", "bondy_router.listeners", [
   {datatype, string}
 ]}.
 
 %% @doc The allowed HTTP headers for CORS requests.
-{mapping, "admin_api.http.cors.allowed_headers",
-"bondy_router.admin_api_http.cors.allowed_headers", [
-  {default, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"},
+{mapping, "listeners.$name.cors.allowed_headers", "bondy_router.listeners", [
   {datatype, string}
 ]}.
 
-%% @doc The max age in seconds for CORS preflight cache.
-{mapping, "admin_api.http.cors.max_age",
-"bondy_router.admin_api_http.cors.max_age", [
-  {default, 86400},
-  {datatype, integer},
-  {validators, ["non_neg_integer"]}
+%% @doc The max age in seconds for the CORS preflight cache.
+{mapping, "listeners.$name.cors.max_age", "bondy_router.listeners", [
+  {datatype, integer}
 ]}.
 
-{translation, "bondy_router.admin_api_http.cors",
-  fun(Conf) ->
-    Prefix = "admin_api.http.cors",
-    Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
-    OriginsStr = cuttlefish:conf_get(Prefix ++ ".allowed_origins", Conf, "*"),
-    MethodsStr = cuttlefish:conf_get(Prefix ++ ".allowed_methods", Conf, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"),
-    HeadersStr = cuttlefish:conf_get(Prefix ++ ".allowed_headers", Conf, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"),
-    MaxAge = cuttlefish:conf_get(Prefix ++ ".max_age", Conf, 86400),
-    Origins = case string:strip(OriginsStr) of
-      "*" -> '*';
-      "auto" -> auto;
-      Other ->
-        [list_to_binary(string:strip(S))
-         || S <- string:tokens(Other, ","), string:strip(S) =/= ""]
-    end,
-    #{
-      enabled => Enabled,
-      allowed_origins => Origins,
-      allowed_methods => list_to_binary(MethodsStr),
-      allowed_headers => list_to_binary(HeadersStr),
-      max_age => integer_to_binary(MaxAge)
-    }
-  end
-}.
-
-
-%% -----------------------------------------------------------------------------
-%% ADMIN REST API HTTP - Security Headers
-%% -----------------------------------------------------------------------------
-
-%% @doc Whether static security headers are enabled for the Admin API HTTP
-%% listener.
-{mapping, "admin_api.http.security_headers.enabled",
-"bondy_router.admin_api_http.security_headers.enabled", [
-  {default, on},
+%% @doc Whether static security headers are enabled for this listener.
+{mapping, "listeners.$name.security_headers.enabled",
+"bondy_router.listeners", [
   {datatype, {flag, on, off}}
 ]}.
 
-%% @doc The value for the Strict-Transport-Security header.
-%% Only meaningful for HTTPS listeners.
-{mapping, "admin_api.http.security_headers.hsts",
-"bondy_router.admin_api_http.security_headers.hsts", [
-  {datatype, string}
+%% @doc The value for the Strict-Transport-Security header, or `off' to suppress
+%% this one header while the others are still sent. Sent by default on a
+%% listener that terminates TLS, and never on a plaintext one.
+{mapping, "listeners.$name.security_headers.hsts", "bondy_router.listeners", [
+  {datatype, [{atom, off}, string]}
 ]}.
 
-%% @doc The value for the X-Frame-Options header.
-%% Set to an empty string to disable.
-{mapping, "admin_api.http.security_headers.frame_options",
-"bondy_router.admin_api_http.security_headers.frame_options", [
-  {default, "SAMEORIGIN"},
-  {datatype, string}
+%% @doc The value for the X-Frame-Options header, or `off' to suppress this one
+%% header while the others are still sent.
+{mapping, "listeners.$name.security_headers.frame_options",
+"bondy_router.listeners", [
+  {datatype, [{atom, off}, string]}
 ]}.
 
-%% @doc The value for the X-Content-Type-Options header.
-%% Set to an empty string to disable.
-{mapping, "admin_api.http.security_headers.content_type_options",
-"bondy_router.admin_api_http.security_headers.content_type_options", [
-  {default, "nosniff"},
-  {datatype, string}
+%% @doc The value for the X-Content-Type-Options header, or `off' to suppress
+%% this one header while the others are still sent.
+{mapping, "listeners.$name.security_headers.content_type_options",
+"bondy_router.listeners", [
+  {datatype, [{atom, off}, string]}
 ]}.
 
-%% @doc The value for the Content-Security-Policy header.
-{mapping, "admin_api.http.security_headers.content_security_policy",
-"bondy_router.admin_api_http.security_headers.content_security_policy", [
-  {datatype, string}
+%% @doc The value for the Content-Security-Policy header, or `off' to suppress
+%% this one header while the others are still sent.
+{mapping, "listeners.$name.security_headers.content_security_policy",
+"bondy_router.listeners", [
+  {datatype, [{atom, off}, string]}
 ]}.
 
 %% @doc The value for the Server response header.
-%% Set to "bondy" to emit "bondy/<version>", or an empty string to suppress.
-{mapping, "admin_api.http.server_header",
-"bondy_router.admin_api_http.server_header", [
-  {default, "bondy"},
+{mapping, "listeners.$name.server_header", "bondy_router.listeners", [
   {datatype, string}
 ]}.
 
-{translation, "bondy_router.admin_api_http.security_headers",
-  fun(Conf) ->
-    Prefix = "admin_api.http.security_headers",
-    Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
-    ToUndefined = fun("") -> undefined; (V) -> list_to_binary(V) end,
-    #{
-      enabled => Enabled,
-      hsts => ToUndefined(cuttlefish:conf_get(Prefix ++ ".hsts", Conf, "")),
-      frame_options => ToUndefined(cuttlefish:conf_get(Prefix ++ ".frame_options", Conf, "SAMEORIGIN")),
-      content_type_options => ToUndefined(cuttlefish:conf_get(Prefix ++ ".content_type_options", Conf, "nosniff")),
-      content_security_policy => ToUndefined(cuttlefish:conf_get(Prefix ++ ".content_security_policy", Conf, ""))
-    }
-  end
-}.
+%% --------------------------------------------------------------------------
+%% Websocket carrier. Overrides the global `wamp.websocket.*' block for this
+%% listener only.
+%%
+%% `wamp.websocket.buffer.min' and `.max' are the two keys of that block with no
+%% counterpart here, deliberately. Since Cowboy 2.13 a Websocket connection
+%% inherits the dynamic buffer of the LISTENER it arrived on and
+%% `cowboy_websocket' overrides any handler-supplied value, so a WebSocket-
+%% specific setting cannot take effect; the listener-level
+%% `listeners.$name.http.buffer.min'/`.max' are the ones that do.
+%% `bondy_listener_config:?CARRIER_KEYS' excludes them for the same reason, so
+%% adding them here would ship two knobs that do nothing.
+%% --------------------------------------------------------------------------
 
-
-%% =============================================================================
-%% ADMIN REST API TLS
-%% =============================================================================
-
-
-{mapping, "admin_api.https.enabled",
-"bondy_router.admin_api_https.enabled", [
-  {default, off},
+%% @doc Defines if server-initiated Websocket PING control messages are
+%% enabled. Bondy always answers a client-initiated ping even when this is
+%% off. Notice web browsers typically kill websocket connections after 60s
+%% and will not initiate PINGs.
+{mapping, "listeners.$name.websocket.ping.enabled", "bondy_router.listeners", [
   {datatype, {flag, on, off}}
 ]}.
 
-%% @doc https.port is the TCP port that Bondy uses for
-%% exposing the Admin Rest APIs.
-{mapping, "admin_api.https.port",
-"bondy_router.admin_api_https.transport_opts.socket_opts.port", [
-  {default, 18084},
-  {validators, ["port_number"]},
-  {datatype, integer},
-  hidden
+%% @doc When websocket.ping.enabled is `on', the maximum time permitted to
+%% elapse between the point at which the client finishes transmitting a
+%% message and the point it starts sending the next. Not the same as
+%% websocket.idle_timeout.
+{mapping, "listeners.$name.websocket.ping.idle_timeout",
+"bondy_router.listeners", [
+  {datatype, {duration, ms}}
 ]}.
 
-%% @doc admin_api.http.ip is the IP address that Bondy uses for
-%% exposing the API Gateway managed APIs.. When the host has many network
-%% interfaces, this option specifies which one to listen on.
-{mapping, "admin_api.https.ip",
-"bondy_router.admin_api_https.ip", [
-  %% D-1: default to loopback (see admin_api.http.ip).
-  {default, "127.0.0.1"},
-  {datatype, string},
-  {validators, ["ip_address"]}
+%% @doc When websocket.ping.enabled is `on', how long Bondy waits for a ping
+%% response before counting a failed attempt.
+{mapping, "listeners.$name.websocket.ping.timeout", "bondy_router.listeners", [
+  {datatype, {duration, ms}}
 ]}.
 
-%% @doc The IP version to use. Either 4 or 6.
-{mapping, "admin_api.https.ip_version",
-"bondy_router.admin_api_https.transport_opts.socket_opts.ip_version", [
-  {default, "4"},
+%% @doc When websocket.ping.enabled is `on', how many missed pings are
+%% allowed to time out before the connection is closed.
+{mapping, "listeners.$name.websocket.ping.max_attempts",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Drops the connection after a period of inactivity. Does not take
+%% effect when websocket.ping.enabled is `on' and ping.idle_timeout times
+%% ping.max_attempts exceeds it. For some clients this option alone is not
+%% enough to keep a connection alive.
+{mapping, "listeners.$name.websocket.idle_timeout", "bondy_router.listeners", [
+  {datatype, [{duration, ms}, {atom, infinity}]}
+]}.
+
+%% @doc Maximum frame size allowed by this Websocket handler. Cowboy closes
+%% the connection when a client attempts to send a larger frame. For
+%% fragmented frames this applies to the reconstituted frame.
+{mapping, "listeners.$name.websocket.max_frame_size",
+"bondy_router.listeners", [
+  {datatype, bytesize}
+]}.
+
+%% @doc Controls when a Websocket connection process hibernates (a
+%% hibernation forces a full-sweep garbage collection and shrinks the process
+%% heap). `idle' hibernates only on control events, so a connection under
+%% sustained traffic never pays a GC per message while quiet connections
+%% still shrink; `always' hibernates after every message (lowest memory,
+%% highest CPU); `never' disables hibernation.
+{mapping, "listeners.$name.websocket.hibernate", "bondy_router.listeners", [
+  {datatype, {enum, [never, idle, always]}}
+]}.
+
+%% @doc Defines if Websocket compression (the permessage-deflate extension)
+%% is enabled. If enabled it is negotiated with supporting clients.
+{mapping, "listeners.$name.websocket.compression_enabled",
+"bondy_router.listeners", [
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc Compression level, 0..9. 0 gives no compression, 1 best speed, 9 best
+%% compression.
+{mapping, "listeners.$name.websocket.deflate.level", "bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc How much memory is allocated for the internal compression state,
+%% 1..9, where 1 uses minimum memory but is slow and reduces the compression
+%% ratio and 9 uses maximum memory for optimal speed.
+{mapping, "listeners.$name.websocket.deflate.mem_level",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Tunes the compression algorithm: `default' for normal data,
+%% `filtered' for data produced by a filter or predictor, `huffman_only' to
+%% force Huffman encoding only, `rle' to limit match distances to one.
+%% Affects only the compression ratio, never correctness.
+{mapping, "listeners.$name.websocket.deflate.strategy",
+"bondy_router.listeners", [
+  {datatype, {enum, [default, filtered, huffman_only, rle]}}
+]}.
+
+%% @doc Using no_takeover can severely limit the usefulness of compression.
+{mapping, "listeners.$name.websocket.deflate.server_context_takeover",
+"bondy_router.listeners", [
+  {datatype, {enum, [takeover, no_takeover]}}
+]}.
+
+%% @doc Using no_takeover can severely limit the usefulness of compression.
+{mapping, "listeners.$name.websocket.deflate.client_context_takeover",
+"bondy_router.listeners", [
+  {datatype, {enum, [takeover, no_takeover]}}
+]}.
+
+%% @doc The base two logarithm of the server window size (the size of the
+%% history buffer), 8..15. Larger values give better compression at the
+%% expense of memory.
+{mapping, "listeners.$name.websocket.deflate.server_max_window_bits",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc The base two logarithm of the client window size (the size of the
+%% history buffer), 8..15. Larger values give better compression at the
+%% expense of memory.
+{mapping, "listeners.$name.websocket.deflate.client_max_window_bits",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% --------------------------------------------------------------------------
+%% Server-sent events carrier. Overrides the global `wamp.sse.*' block for this
+%% listener only.
+%% --------------------------------------------------------------------------
+
+%% @doc Whether SSE keepalive comments are sent.
+{mapping, "listeners.$name.sse.ping.enabled", "bondy_router.listeners", [
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc Interval between SSE keepalive comments (`:keepalive\n\n') sent to
+%% prevent intermediary timeouts.
+{mapping, "listeners.$name.sse.ping.interval", "bondy_router.listeners", [
+  {datatype, {duration, ms}}
+]}.
+
+%% @doc Cowboy HTTP connection idle timeout for SSE endpoints.
+{mapping, "listeners.$name.sse.idle_timeout", "bondy_router.listeners", [
+  {datatype, {duration, ms}}
+]}.
+
+%% @doc Whether the SSE idle timeout is reset when sending data.
+{mapping, "listeners.$name.sse.reset_idle_timeout_on_send",
+"bondy_router.listeners", [
+  {datatype, {flag, on, off}}
+]}.
+
+%% --------------------------------------------------------------------------
+%% Long-poll carrier. Overrides the global `wamp.longpoll.*' block for this
+%% listener only.
+%% --------------------------------------------------------------------------
+
+%% @doc How long a longpoll receive request blocks waiting for messages
+%% before returning an empty 204. This MUST be strictly less than
+%% longpoll.idle_timeout, otherwise Cowboy may close the connection before
+%% the longpoll reply is sent, stripping the response (including CORS
+%% headers) that browser clients depend on.
+{mapping, "listeners.$name.longpoll.poll_timeout", "bondy_router.listeners", [
+  {datatype, {duration, ms}}
+]}.
+
+%% @doc Cowboy HTTP connection idle timeout for longpoll endpoints. It MUST
+%% be strictly greater than longpoll.poll_timeout so the server has time to
+%% reply before the connection is torn down for inactivity.
+{mapping, "listeners.$name.longpoll.idle_timeout", "bondy_router.listeners", [
+  {datatype, {duration, ms}}
+]}.
+
+%% @doc Whether the longpoll idle timeout is reset when sending data.
+{mapping, "listeners.$name.longpoll.reset_idle_timeout_on_send",
+"bondy_router.listeners", [
+  {datatype, {flag, on, off}}
+]}.
+
+%% --------------------------------------------------------------------------
+%% TLS material. bondy_listener_config:tls_material/3 is the single reader of
+%% these, for both the boot-time validation and live certificate rotation.
+%% --------------------------------------------------------------------------
+
+%% @doc Path to the server certificate. Required when transport is tls.
+{mapping, "listeners.$name.tls.certfile", "bondy_router.listeners", [
+  {datatype, file}
+]}.
+
+%% @doc Path to the server private key. Required when transport is tls.
+{mapping, "listeners.$name.tls.keyfile", "bondy_router.listeners", [
+  {datatype, file}
+]}.
+
+%% @doc Path to the CA certificate bundle used to verify peers.
+{mapping, "listeners.$name.tls.cacertfile", "bondy_router.listeners", [
+  {datatype, file}
+]}.
+
+%% @doc A comma separated list of TLS protocol versions to support. At the
+%% moment Bondy supports versions 1.2 and 1.3.
+{mapping, "listeners.$name.tls.versions", "bondy_router.listeners", [
   {datatype, string}
 ]}.
 
-{translation, "bondy_router.admin_api_https.transport_opts.socket_opts.ip_version",
-  fun(Conf) ->
-    Value =  cuttlefish:conf_get("admin_api.https.ip_version", Conf),
-      try
-        case string:strip(Value) of
-          "4" -> 'inet';
-          "6" -> 'inet6';
-          _ -> throw(invalid_version)
+%% @doc TLS peer verification mode. Set to verify_peer to request client
+%% certificates (mTLS). On its own verify_peer only REQUESTS one: a client
+%% presenting none still connects. Set fail_if_no_peer_cert to `on' as well to
+%% require it.
+{mapping, "listeners.$name.tls.verify", "bondy_router.listeners", [
+  {datatype, {enum, [verify_peer, verify_none]}}
+]}.
+
+%% @doc Whether a client that presents no certificate is rejected. Only
+%% meaningful together with tls.verify = verify_peer, which without this
+%% accepts such a client.
+{mapping, "listeners.$name.tls.fail_if_no_peer_cert",
+"bondy_router.listeners", [
+  {datatype, {flag, on, off}}
+]}.
+
+
+%% ---------------------------------------------------------------------------
+%% Builds `[{Name, Spec}]' from every `listeners.$name.*' key.
+%%
+%% This is the only translation the listener block needs. A mapping's target is
+%% tokenised literally, so no mapping can write a listener's name into its own
+%% target; every key therefore renders into this one term, and each value's
+%% coercion and range check happens in the `Coerce' fun below rather than in a
+%% per-key translation.
+%% ---------------------------------------------------------------------------
+{translation, "bondy_router.listeners", fun(Conf0) ->
+    Conf = cuttlefish_variable:filter_by_prefix("listeners", Conf0),
+
+    %% Where each `listeners.$name.<Tail>' key lands inside the listener's map.
+    %% Each path is where that option's consumer reads it from once
+    %% `bondy_config:splat_listener_blocks/0' has copied the entry out to
+    %% `bondy_router.<name>.<path>' — ranch and Cowboy option names, not conf
+    %% key names. Three paths differ from the conf key's own name:
+    %% `websocket.compression_enabled' lands on `compress',
+    %% `websocket.deflate.*' on `deflate_opts.*', and `linger.timeout' on
+    %% `linger_timeout'.
+    Routes = [
+        {["transport"], [transport]},
+        {["protocol"], [protocol]},
+        {["port"], [port]},
+        {["path"], [path]},
+        {["services"], [services]},
+        {["enabled"], [enabled]},
+        {["start_phase"], [start_phase]},
+        {["ip"], [ip]},
+        {["ip_version"], [transport_opts, socket_opts, ip_version]},
+        {["acceptors_pool_size"], [transport_opts, num_acceptors]},
+        {["max_connections"], [transport_opts, max_connections]},
+        {["backlog"], [transport_opts, socket_opts, backlog]},
+        {["keepalive"], [transport_opts, socket_opts, keepalive]},
+        {["nodelay"], [transport_opts, socket_opts, nodelay]},
+        {["reuseport"], [transport_opts, socket_opts, reuseport]},
+        {["sndbuf"], [transport_opts, socket_opts, sndbuf]},
+        {["recbuf"], [transport_opts, socket_opts, recbuf]},
+        {["buffer"], [transport_opts, socket_opts, buffer]},
+        {["handshake_timeout"], [transport_opts, handshake_timeout]},
+        {["linger", "timeout"], [transport_opts, socket_opts, linger_timeout]},
+        {["idle_timeout"], [idle_timeout]},
+        %% Top level of the option block: `bondy_bridge_relay_server:init/1'
+        %% reads both from `bondy_router.<name>.<key>'.
+        {["auth_timeout"], [auth_timeout]},
+        {["hibernate"], [hibernate]},
+        {["proxy_protocol"], [proxy_protocol, enabled]},
+        {["proxy_protocol", "mode"], [proxy_protocol, mode]},
+        {["proxy_protocol", "trusted_proxies"],
+            [proxy_protocol, trusted_proxies]},
+        {["ping", "enabled"], [ping, enabled]},
+        {["ping", "idle_timeout"], [ping, idle_timeout]},
+        {["ping", "timeout"], [ping, timeout]},
+        {["ping", "max_attempts"], [ping, max_attempts]},
+        {["http", "active_n"], [protocol_opts, active_n]},
+        {["http", "buffer", "min"], [protocol_opts, dynamic_buffer, min]},
+        {["http", "buffer", "max"], [protocol_opts, dynamic_buffer, max]},
+        {["http", "idle_timeout"], [protocol_opts, idle_timeout]},
+        {["http", "inactivity_timeout"], [protocol_opts, inactivity_timeout]},
+        {["http", "initial_stream_flow_size"],
+            [protocol_opts, initial_stream_flow_size]},
+        {["http", "invalid_response_headers"],
+            [protocol_opts, invalid_response_headers]},
+        {["http", "linger", "timeout"], [protocol_opts, linger_timeout]},
+        {["http", "max_authority_length"],
+            [protocol_opts, max_authority_length]},
+        {["http", "max_authorization_header_value_length"],
+            [protocol_opts, max_authorization_header_value_length]},
+        {["http", "max_concurrent_streams"],
+            [protocol_opts, max_concurrent_streams]},
+        {["http", "max_cookie_header_value_length"],
+            [protocol_opts, max_cookie_header_value_length]},
+        {["http", "max_cookies"], [protocol_opts, max_cookies]},
+        {["http", "max_empty_lines"], [protocol_opts, max_empty_lines]},
+        {["http", "max_header_name_length"],
+            [protocol_opts, max_header_name_length]},
+        {["http", "max_header_value_length"],
+            [protocol_opts, max_header_value_length]},
+        {["http", "max_headers"], [protocol_opts, max_headers]},
+        {["http", "max_keepalive"], [protocol_opts, max_keepalive]},
+        {["http", "max_method_length"], [protocol_opts, max_method_length]},
+        {["http", "max_request_line_length"],
+            [protocol_opts, max_request_line_length]},
+        {["http", "max_skip_body_length"],
+            [protocol_opts, max_skip_body_length]},
+        {["http", "request_timeout"], [protocol_opts, request_timeout]},
+        {["http", "reset_idle_timeout_on_send"],
+            [protocol_opts, reset_idle_timeout_on_send]},
+        {["http", "sendfile"], [protocol_opts, sendfile]},
+        {["cors", "enabled"], [cors, enabled]},
+        {["cors", "allowed_origins"], [cors, allowed_origins]},
+        {["cors", "allowed_methods"], [cors, allowed_methods]},
+        {["cors", "allowed_headers"], [cors, allowed_headers]},
+        {["cors", "max_age"], [cors, max_age]},
+        {["security_headers", "enabled"], [security_headers, enabled]},
+        {["security_headers", "hsts"], [security_headers, hsts]},
+        {["security_headers", "frame_options"],
+            [security_headers, frame_options]},
+        {["security_headers", "content_type_options"],
+            [security_headers, content_type_options]},
+        {["security_headers", "content_security_policy"],
+            [security_headers, content_security_policy]},
+        {["server_header"], [server_header]},
+        {["websocket", "ping", "enabled"], [websocket, ping, enabled]},
+        {["websocket", "ping", "idle_timeout"],
+            [websocket, ping, idle_timeout]},
+        {["websocket", "ping", "timeout"], [websocket, ping, timeout]},
+        {["websocket", "ping", "max_attempts"],
+            [websocket, ping, max_attempts]},
+        {["websocket", "idle_timeout"], [websocket, idle_timeout]},
+        {["websocket", "max_frame_size"], [websocket, max_frame_size]},
+        {["websocket", "hibernate"], [websocket, hibernate]},
+        {["websocket", "compression_enabled"], [websocket, compress]},
+        {["websocket", "deflate", "level"], [websocket, deflate_opts, level]},
+        {["websocket", "deflate", "mem_level"],
+            [websocket, deflate_opts, mem_level]},
+        {["websocket", "deflate", "strategy"],
+            [websocket, deflate_opts, strategy]},
+        {["websocket", "deflate", "server_context_takeover"],
+            [websocket, deflate_opts, server_context_takeover]},
+        {["websocket", "deflate", "client_context_takeover"],
+            [websocket, deflate_opts, client_context_takeover]},
+        {["websocket", "deflate", "server_max_window_bits"],
+            [websocket, deflate_opts, server_max_window_bits]},
+        {["websocket", "deflate", "client_max_window_bits"],
+            [websocket, deflate_opts, client_max_window_bits]},
+        {["sse", "ping", "enabled"], [sse, ping, enabled]},
+        {["sse", "ping", "interval"], [sse, ping, interval]},
+        {["sse", "idle_timeout"], [sse, idle_timeout]},
+        {["sse", "reset_idle_timeout_on_send"],
+            [sse, reset_idle_timeout_on_send]},
+        {["longpoll", "poll_timeout"], [longpoll, poll_timeout]},
+        {["longpoll", "idle_timeout"], [longpoll, idle_timeout]},
+        {["longpoll", "reset_idle_timeout_on_send"],
+            [longpoll, reset_idle_timeout_on_send]},
+        {["tls", "certfile"], [tls, certfile]},
+        {["tls", "keyfile"], [tls, keyfile]},
+        {["tls", "cacertfile"], [tls, cacertfile]},
+        {["tls", "versions"], [tls, versions]},
+        {["tls", "verify"], [tls, verify]},
+        {["tls", "fail_if_no_peer_cert"], [tls, fail_if_no_peer_cert]}
+    ],
+
+    Trim = fun(S) -> string:trim(S) end,
+
+    Split = fun(V) ->
+        [Trim(S) || S <- string:tokens(V, ","), Trim(S) =/= ""]
+    end,
+
+    %% Every diagnostic below is prefixed with the full conf key, including
+    %% the listener name, so a render failure among 90 possible keys across
+    %% however many listeners names the one that is wrong.
+    FullKey = fun(Name, Tail) ->
+        "listeners." ++ Name ++ "." ++ lists:flatten(lists:join(".", Tail))
+    end,
+
+    %% Folded from the four `wamp.websocket.deflate.*' translations. These are
+    %% the only validation those keys ever had, and a `{validators, ...}' cannot
+    %% replace them here (see the note above the mappings).
+    Range = fun(Key, Value, Lo, Hi) ->
+        case is_integer(Value) andalso Value >= Lo andalso Value =< Hi of
+            true ->
+                Value;
+            false ->
+                cuttlefish:invalid(
+                    Key ++ " should be an integer between " ++
+                        integer_to_list(Lo) ++ " and " ++ integer_to_list(Hi)
+                )
         end
-      catch
-        throw:invalid_version ->
-          cuttlefish:invalid(
-            "Invalid IP version: "
-            ++ Value
-            ++ " . Value should be 4 or 6."
-          )
-      end
-  end
-}.
-
-%% The Cowboy acceptors_pool_size for the Admin API https listener
-{mapping, "admin_api.https.acceptors_pool_size",
-"bondy_router.admin_api_https.transport_opts.num_acceptors", [
-  {datatype, integer},
-  {validators, ["pos_integer"]},
-  {default, 100}
-]}.
-
-%% The Cowboy max number of connections for the Admin API https listener
-{mapping, "admin_api.https.max_connections",
-"bondy_router.admin_api_https.transport_opts.max_connections", [
-  {datatype, integer},
-  {validators, ["pos_integer"]},
-  {default, 10000}
-]}.
-
-%% The backlog value defines the maximum length that the queue of pending
-%% connections can grow to. Defaults to 1024.
-{mapping, "admin_api.https.backlog",
-"bondy_router.admin_api_https.transport_opts.socket_opts.backlog", [
-  {datatype, integer},
-  {validators, ["pos_integer"]},
-  {default, 1024}
-]}.
-
-
-%% Enables/disables periodic transmission on a connected socket when no other
-%% data is exchanged. If the other end does not respond, the connection is
-%% considered broken and an error message is sent to the controlling process.
-{mapping, "admin_api.https.keepalive",
-"bondy_router.admin_api_https.transport_opts.socket_opts.keepalive", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-
-%% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
-%% means that also small amounts of data are sent immediately.
-{mapping, "admin_api.https.nodelay",
-"bondy_router.admin_api_https.transport_opts.socket_opts.nodelay", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
-
-
-%% {mapping, "admin_api.https.reuseaddr",
-%% "bondy_router.admin_api_https.transport_opts.socket_opts.reuseaddr", [
-%%   {datatype, {flag, on, off}},
-%%   {default, on}
-%% ]}.
-
-{mapping, "admin_api.https.reuseport",
-"bondy_router.admin_api_https.transport_opts.socket_opts.reuseport", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-
-%% The minimum size of the send buffer to use for the socket.
-{mapping, "admin_api.https.sndbuf",
-"bondy_router.admin_api_https.transport_opts.socket_opts.sndbuf", [
-  {datatype, bytesize}
-]}.
-
-%% The minimum size of the receive buffer to use for the socket.
-{mapping, "admin_api.https.recbuf",
-"bondy_router.admin_api_https.transport_opts.socket_opts.recbuf", [
-  {datatype, bytesize}
-]}.
-
-%% The size of the user-level software buffer used by the driver.
-%% Not to be confused with options sndbuf and recbuf, which correspond to the
-%% Kernel socket buffers.
-%% It is recommended to have val(buffer) >= max(val(sndbuf),val(recbuf)) to
-%% avoid performance issues because of unnecessary copying.
-%% val(buffer) is automatically set to the above maximum when values sndbuf or
-%% recbuf are set.
-{mapping, "admin_api.https.buffer",
-"bondy_router.admin_api_https.transport_opts.socket_opts.buffer", [
-  {datatype, bytesize}
-]}.
-
-%% Bondy dynamically resizes the socket's receive buffer between these two
-%% bounds based on the size of the data it receives, using the optimal buffer
-%% size for the current workload. When neither bound is set, an adaptive
-%% default of 512B..128KB applies. To tune it, BOTH min and max must be set,
-%% within 1KB..128KB and with min =< max; setting either to 0 disables
-%% dynamic buffering entirely. This option is ignored when the socket
-%% 'buffer' size is set explicitly.
-{mapping, "admin_api.https.buffer.min",
-"bondy_router.admin_api_https.protocol_opts.dynamic_buffer.min", [
-  {datatype, bytesize}
-]}.
-
-{mapping, "admin_api.https.buffer.max",
-"bondy_router.admin_api_https.protocol_opts.dynamic_buffer.max", [
-  {datatype, bytesize}
-]}.
-
-
-%% The number of packets Cowboy will request from the socket at once. This can
-%% be used to tweak the performance of the server. Higher values reduce the
-%% number of times Cowboy need to request more packets from the port driver at t
-%% he expense of potentially higher memory being used.
-{mapping, "admin_api.https.active_n",
-"bondy_router.admin_api_https.protocol_opts.active_n", [
-  {default, 100},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% Maximum allowed time for the listening process handshake call to finish.
-{mapping, "admin_api.https.handshake_timeout",
-"bondy_router.admin_api_https.transport_opts.handshake_timeout", [
-  {default, "5s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Time in ms with no data received before Cowboy closes the connection.
-{mapping, "admin_api.https.idle_timeout",
-"bondy_router.admin_api_https.protocol_opts.idle_timeout", [
-  {default, "15s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Time in ms with nothing received at all before Cowboy closes the connection.
-{mapping, "admin_api.https.inactivity_timeout",
-"bondy_router.admin_api_https.protocol_opts.inactivity_timeout", [
-  {default, "5m"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Time in ms that Cowboy will wait when closing the connection. This is
-%% necessary to avoid the TCP reset problem as described in the section 6.6 of
-%% RFC7230.
-{mapping, "admin_api.https.linger.timeout",
-"bondy_router.admin_api_https.protocol_opts.linger_timeout", [
-  {default, "1s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Time in ms with no requests before Cowboy closes the connection.
-{mapping, "admin_api.https.request_timeout",
-"bondy_router.admin_api_https.protocol_opts.request_timeout", [
-  {default, "5s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Whether the idle_timeout gets reset when sending data to the socket.
-{mapping, "admin_api.https.reset_idle_timeout_on_send",
-"bondy_router.admin_api_https.protocol_opts.reset_idle_timeout_on_send", [
-  {default, off},
-  {datatype, {flag, on, off}}
-]}.
-
-%% Maximum number of requests allowed per connection.
-{mapping, "admin_api.https.max_keepalive",
-"bondy_router.admin_api_https.protocol_opts.max_keepalive", [
-  {default, 1000},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-
-{mapping, "admin_api.https.initial_stream_flow_size",
-"bondy_router.admin_api_https.protocol_opts.initial_stream_flow_size", [
-  {default, "65535"}, % bytes
-  {datatype, bytesize}
-]}.
-
-{mapping, "admin_api.https.max_empty_lines",
-"bondy_router.admin_api_https.protocol_opts.max_empty_lines", [
-  {default, 5},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "admin_api.https.max_header_name_length",
-"bondy_router.admin_api_https.protocol_opts.max_header_name_length", [
-  {default, 64},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "admin_api.https.max_header_value_length",
-"bondy_router.admin_api_https.protocol_opts.max_header_value_length", [
-  {default, 4096},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "admin_api.https.max_headers",
-"bondy_router.admin_api_https.protocol_opts.max_headers", [
-  {default, 100},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% Maximum length of the Authorization header value, in bytes. Authorization
-%% headers routinely carry bearer tokens (JWTs) larger than typical header
-%% values, so Cowboy allows raising this limit independently of
-%% admin_api.https.max_header_value_length, which is used when this option
-%% is not set.
-{mapping, "admin_api.https.max_authorization_header_value_length",
-"bondy_router.admin_api_https.protocol_opts.max_authorization_header_value_length", [
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% Maximum length of the Cookie header value, in bytes. Cookie headers can
-%% legitimately exceed typical header values, so Cowboy allows raising this
-%% limit independently of admin_api.https.max_header_value_length, which is
-%% used when this option is not set.
-{mapping, "admin_api.https.max_cookie_header_value_length",
-"bondy_router.admin_api_https.protocol_opts.max_cookie_header_value_length", [
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% Maximum length of the authority component of the request URI (the
-%% host[:port] part), in bytes. Requests exceeding it are rejected.
-%% Defaults to 255 (the DNS name length limit).
-{mapping, "admin_api.https.max_authority_length",
-"bondy_router.admin_api_https.protocol_opts.max_authority_length", [
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% What to do when a response given to Cowboy contains invalid header names
-%% or values (for example control characters): 'error_terminate' replies
-%% with a 500 and terminates the stream — preventing header injection and
-%% response splitting — while 'ignore' relays the response unchanged
-%% (Cowboy's behaviour before 2.16). Keep the default unless a legacy
-%% upstream behind the API gateway requires relaying such headers.
-{mapping, "admin_api.https.invalid_response_headers",
-"bondy_router.admin_api_https.protocol_opts.invalid_response_headers", [
-  {default, error_terminate},
-  {datatype, {enum, [error_terminate, ignore]}}
-]}.
-
-%% HTTP/2 only: maximum number of concurrent streams (requests) a single
-%% client connection may have open. HTTP/2 is negotiated via ALPN on TLS
-%% listeners. Unbounded concurrent streams let one connection exhaust the
-%% node (Cowboy versions before 2.17 defaulted to infinity); 100 is the
-%% Cowboy 2.17 default. Raise it only for trusted, heavily multiplexing
-%% clients.
-{mapping, "admin_api.https.max_concurrent_streams",
-"bondy_router.admin_api_https.protocol_opts.max_concurrent_streams", [
-  {default, 100},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-
-{mapping, "admin_api.https.max_method_length",
-"bondy_router.admin_api_https.protocol_opts.max_method_length", [
-  {default, 32},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "admin_api.https.max_request_line_length",
-"bondy_router.admin_api_https.protocol_opts.max_request_line_length", [
-  {default, 8000},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "admin_api.https.max_skip_body_length",
-"bondy_router.admin_api_https.protocol_opts.max_skip_body_length", [
-  {default, 1000000},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "admin_api.https.sendfile",
-"bondy_router.admin_api_https.protocol_opts.sendfile", [
-  {default, on},
-  {datatype, {flag, on, off}}
-]}.
-
-%% @doc Enables or disables the HTTP x-forwarded-for or x-real-ip heather check.
-%% This is used to capture the source IP address which will be used for matching
-%% against RBAC Source assignments.
-{mapping, "admin_api.https.proxy_protocol",
-"bondy_router.admin_api_https.proxy_protocol.enabled", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-%% @doc Defines the mode in which Bondy operates when
-%% admin_api.http.proxy_protocol is enabled. If 'strict' a connection that
-%% is not sending the x-forwarded-for or x-real-ip header or with invalid
-%% headers will be dropped. If 'relaxed' the connection is always accepted and
-%% Bondy will log when there is no header or if it is invalid.
-{mapping, "admin_api.https.proxy_protocol.mode",
-"bondy_router.admin_api_https.proxy_protocol.mode", [
-  {datatype, {enum, [strict, relaxed]}},
-  {default, relaxed}
-]}.
-
-%% @doc (G-2) Trusted reverse-proxy CIDRs; see admin_api.http.proxy_protocol.trusted_proxies.
-{mapping, "admin_api.https.proxy_protocol.trusted_proxies",
-"bondy_router.admin_api_https.proxy_protocol.trusted_proxies", [
-  {datatype, string},
-  {commented, "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"}
-]}.
-
-
-%% -----------------------------------------------------------------------------
-%% ADMIN REST API HTTPS - CORS
-%% -----------------------------------------------------------------------------
-
-%% @doc Whether CORS headers are enabled for the Admin API HTTPS listener.
-{mapping, "admin_api.https.cors.enabled",
-"bondy_router.admin_api_https.cors.enabled", [
-  {default, on},
-  {datatype, {flag, on, off}}
-]}.
-
-%% @doc The allowed origins for CORS requests.
-%% Can be "*" (wildcard), "auto" (derive from request host), or a
-%% comma-separated list of origins.
-{mapping, "admin_api.https.cors.allowed_origins",
-"bondy_router.admin_api_https.cors.allowed_origins", [
-  {default, "*"},
-  {datatype, string}
-]}.
-
-%% @doc The allowed HTTP methods for CORS requests.
-{mapping, "admin_api.https.cors.allowed_methods",
-"bondy_router.admin_api_https.cors.allowed_methods", [
-  {default, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"},
-  {datatype, string}
-]}.
-
-%% @doc The allowed HTTP headers for CORS requests.
-{mapping, "admin_api.https.cors.allowed_headers",
-"bondy_router.admin_api_https.cors.allowed_headers", [
-  {default, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"},
-  {datatype, string}
-]}.
-
-%% @doc The max age in seconds for CORS preflight cache.
-{mapping, "admin_api.https.cors.max_age",
-"bondy_router.admin_api_https.cors.max_age", [
-  {default, 86400},
-  {datatype, integer},
-  {validators, ["non_neg_integer"]}
-]}.
-
-{translation, "bondy_router.admin_api_https.cors",
-  fun(Conf) ->
-    Prefix = "admin_api.https.cors",
-    Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
-    OriginsStr = cuttlefish:conf_get(Prefix ++ ".allowed_origins", Conf, "*"),
-    MethodsStr = cuttlefish:conf_get(Prefix ++ ".allowed_methods", Conf, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"),
-    HeadersStr = cuttlefish:conf_get(Prefix ++ ".allowed_headers", Conf, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"),
-    MaxAge = cuttlefish:conf_get(Prefix ++ ".max_age", Conf, 86400),
-    Origins = case string:strip(OriginsStr) of
-      "*" -> '*';
-      "auto" -> auto;
-      Other ->
-        [list_to_binary(string:strip(S))
-         || S <- string:tokens(Other, ","), string:strip(S) =/= ""]
     end,
-    #{
-      enabled => Enabled,
-      allowed_origins => Origins,
-      allowed_methods => list_to_binary(MethodsStr),
-      allowed_headers => list_to_binary(HeadersStr),
-      max_age => integer_to_binary(MaxAge)
-    }
-  end
-}.
 
-%% -----------------------------------------------------------------------------
-%% ADMIN REST API HTTPS - Security Headers
-%% -----------------------------------------------------------------------------
+    %% One lower-bound check, called with Lo = 1 for a positive integer, 0 for a
+    %% non-negative one and -1 for `linger.timeout'.
+    Min = fun(Key, Value, Lo) ->
+        case is_integer(Value) andalso Value >= Lo of
+            true ->
+                Value;
+            false ->
+                cuttlefish:invalid(
+                    Key ++ " should be an integer greater than or equal to " ++
+                        integer_to_list(Lo)
+                )
+        end
+    end,
 
-%% @doc Whether static security headers are enabled for the Admin API HTTPS
-%% listener.
-{mapping, "admin_api.https.security_headers.enabled",
-"bondy_router.admin_api_https.security_headers.enabled", [
-  {default, on},
-  {datatype, {flag, on, off}}
-]}.
+    %% cuttlefish's own `port_number' predicate rather than an equivalent
+    %% `0 =< N =< 65535' range: the two agree for every value, and this is the
+    %% form the check has everywhere else.
+    PortNumber = fun(Key, Value) ->
+        case (Value band bnot 16#ffff) =:= 0 of
+            true ->
+                Value;
+            false ->
+                cuttlefish:invalid(
+                    Key ++ " should be an integer between 0 and 65535"
+                )
+        end
+    end,
 
-%% @doc The value for the Strict-Transport-Security header.
-%% Set to an empty string to disable.
-{mapping, "admin_api.https.security_headers.hsts",
-"bondy_router.admin_api_https.security_headers.hsts", [
-  {default, "max-age=31536000; includeSubDomains"},
-  {datatype, string}
-]}.
+    %% Folded from the two equivalent `*.ip_version' translations.
+    Family = fun(Key, V) ->
+        case Trim(V) of
+            "4" ->
+                inet;
+            "6" ->
+                inet6;
+            Other ->
+                cuttlefish:invalid(
+                    Key ++ " invalid IP version: " ++ Other ++
+                        ". Value should be 4 or 6."
+                )
+        end
+    end,
 
-%% @doc The value for the X-Frame-Options header.
-{mapping, "admin_api.https.security_headers.frame_options",
-"bondy_router.admin_api_https.security_headers.frame_options", [
-  {default, "SAMEORIGIN"},
-  {datatype, string}
-]}.
+    %% ranch's `versions' socket option takes atoms, not the strings an operator
+    %% writes.
+    Versions = fun(Key, V) ->
+        [
+            case S of
+                "1.2" -> 'tlsv1.2';
+                "1.3" -> 'tlsv1.3';
+                Bad -> cuttlefish:invalid(Key ++ " invalid TLS version " ++ Bad)
+            end
+         || S <- Split(V)
+        ]
+    end,
 
-%% @doc The value for the X-Content-Type-Options header.
-{mapping, "admin_api.https.security_headers.content_type_options",
-"bondy_router.admin_api_https.security_headers.content_type_options", [
-  {default, "nosniff"},
-  {datatype, string}
-]}.
+    %% Parsed HERE, at render time, rather than left to
+    %% `bondy_listener_config:to_address/2', which would also convert a string:
+    %% failing here is a `cuttlefish:invalid' naming the key while the file is
+    %% being read, instead of an `{invalid_listener, Name, {unresolvable_ip, _}}'
+    %% at boot. It also fixes what `ip' accepts: a literal address only, since
+    %% `inet:parse_address/1' does not resolve names. A hostname is rejected
+    %% while the file is being read. And it keeps one type across both cases:
+    %% `resolve_ip/3''s only other outcome, the `admin'/`metrics' narrowing,
+    %% is an address tuple.
+    %%
+    %% `inet:parse_address/1' is documented to return only `{error, einval}'
+    %% on failure, never anything else, so the `{error, _}' clause below is
+    %% not known to be reachable; it exists so an unanticipated error shape
+    %% is still a diagnostic rather than a `case_clause' crash in the
+    %% generator.
+    Address = fun(Key, V) ->
+        case inet:parse_address(Trim(V)) of
+            {ok, Parsed} ->
+                Parsed;
+            {error, _} ->
+                cuttlefish:invalid(Key ++ " invalid IP address " ++ V)
+        end
+    end,
 
-%% @doc The value for the Content-Security-Policy header.
-{mapping, "admin_api.https.security_headers.content_security_policy",
-"bondy_router.admin_api_https.security_headers.content_security_policy", [
-  {datatype, string}
-]}.
+    %% Every path below is a key checked as a positive integer, and every one
+    %% has datatype plain `{datatype, integer}' — never a type admitting an atom
+    %% such as `infinity' — so checking the raw conf value is safe. This list is
+    %% consulted only for a key the operator actually wrote; a value
+    %% defaulted downstream in `bondy_listener_config' (for example
+    %% `max_connections' defaulting to `infinity') never reaches here.
+    PosIntegerPaths = [
+        ["acceptors_pool_size"],
+        ["max_connections"],
+        ["backlog"],
+        ["ping", "max_attempts"],
+        ["websocket", "ping", "max_attempts"],
+        ["http", "active_n"],
+        ["http", "max_authority_length"],
+        ["http", "max_authorization_header_value_length"],
+        ["http", "max_concurrent_streams"],
+        ["http", "max_cookie_header_value_length"],
+        %% Positive, not non-negative, though cowlib's own type admits 0.
+        %% Zero rejects every request carrying a Cookie header at all, which
+        %% would break the OIDC and CSRF flows on the listener. There is no
+        %% Bondy use for that, and no way to reach it by accident either: the
+        %% key is default-free, so an operator with no opinion leaves it unset
+        %% and gets cowlib's 100.
+        ["http", "max_cookies"],
+        ["http", "max_empty_lines"],
+        ["http", "max_header_name_length"],
+        ["http", "max_header_value_length"],
+        ["http", "max_headers"],
+        ["http", "max_keepalive"],
+        ["http", "max_method_length"],
+        ["http", "max_request_line_length"],
+        ["http", "max_skip_body_length"]
+    ],
 
-%% @doc The value for the Server response header.
-{mapping, "admin_api.https.server_header",
-"bondy_router.admin_api_https.server_header", [
-  {default, "bondy"},
-  {datatype, string}
-]}.
+    %% The three conversions the `cors' and `security_headers' members need.
+    %%
+    %% This section renders each member SEPARATELY and completes nothing. It
+    %% used to hand the consumers a total map, restating all ten of their
+    %% default values here, because `bondy_http_cors:build_headers/2' reads its
+    %% members with `maps:get/2' and a partial map raised `badkey' on the
+    %% request path. Both
+    %% consumers now merge their own `default_config/0' UNDER whatever arrives
+    %% (`bondy_http_cors:config_from_req/1',
+    %% `bondy_http_security_headers:init/1'), so restating those values here
+    %% would be a second copy of a security-relevant policy with nothing keeping
+    %% the two in step. It also defeated
+    %% `bondy_listener_config:option_defaults(tls, http)': a completed block
+    %% carries `hsts => undefined', an operator value, which wins the merge — so
+    %% a TLS listener stating any one header lost HSTS
+    %% (`a_rendered_partial_block_does_not_defeat_the_hsts_default').
+    Origins = fun(V) ->
+        case Trim(V) of
+            "*" -> '*';
+            "auto" -> auto;
+            _ -> [list_to_binary(S) || S <- Split(V)]
+        end
+    end,
 
-{translation, "bondy_router.admin_api_https.security_headers",
-  fun(Conf) ->
-    Prefix = "admin_api.https.security_headers",
-    Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
-    ToUndefined = fun("") -> undefined; (V) -> list_to_binary(V) end,
-    #{
-      enabled => Enabled,
-      hsts => ToUndefined(cuttlefish:conf_get(Prefix ++ ".hsts", Conf, "max-age=31536000; includeSubDomains")),
-      frame_options => ToUndefined(cuttlefish:conf_get(Prefix ++ ".frame_options", Conf, "SAMEORIGIN")),
-      content_type_options => ToUndefined(cuttlefish:conf_get(Prefix ++ ".content_type_options", Conf, "nosniff")),
-      content_security_policy => ToUndefined(cuttlefish:conf_get(Prefix ++ ".content_security_policy", Conf, ""))
-    }
-  end
-}.
+    %% One clause is total here: every key it serves has `{datatype, string}',
+    %% and cuttlefish delivers a string for that datatype.
+    Bin = fun(V) when is_list(V) -> list_to_binary(V) end,
 
+    %% A security-header value, or `off' to suppress that ONE header while the
+    %% others are still sent. `security_headers.enabled = off' is the all-or-
+    %% nothing switch and stays as it is.
+    %%
+    %% `off' becomes `undefined', which is not a new convention:
+    %% `bondy_http_security_headers:init/1' merges its own `default_config/0'
+    %% UNDER the listener's block and emits only the members that are not
+    %% `undefined' (`build_headers/2'), so this reuses a meaning the consumer
+    %% already implements rather than adding a second mechanism. It also beats
+    %% the HSTS default a TLS listener gets, because that merge fills only
+    %% ABSENT keys.
+    %%
+    %% `off' cannot collide with a real value: those are `max-age=...', `DENY',
+    %% `SAMEORIGIN', `nosniff' and a CSP. The datatype is
+    %% `[{atom, off}, string]', an EXTENDED type — cuttlefish parses as `atom'
+    %% and accepts only the literal `off', so any other word falls through to
+    %% `string' (`cuttlefish_generator:transform_extended_type/2'). `office' is
+    %% a value, not a typo for `off'.
+    Header = fun
+        (off) -> undefined;
+        (V) when is_list(V) -> list_to_binary(V)
+    end,
 
-%% @doc Default cert location for https can be overridden
-%% with the admin_api.ssl config variable, for example:
-{mapping, "admin_api.https.certfile",
-"bondy_router.admin_api_https.transport_opts.socket_opts.certfile", [
-  {datatype, file},
-  {default, "{{platform_etc_dir}}/keycert.pem"}
-]}.
+    Value = fun
+        (["services"], V, _Name) ->
+            [list_to_atom(S) || S <- Split(V)];
+        (["ip"] = Tail, V, Name) ->
+            Address(FullKey(Name, Tail), V);
+        (["ip_version"] = Tail, V, Name) ->
+            Family(FullKey(Name, Tail), V);
+        (["tls", "versions"] = Tail, V, Name) ->
+            Versions(FullKey(Name, Tail), V);
+        (["port"] = Tail, V, Name) ->
+            PortNumber(FullKey(Name, Tail), V);
+        %% A max-age is a non-negative number of seconds. Rendered as a BINARY:
+        %% `bondy_http_cors:build_headers/2' puts it straight into the
+        %% `access-control-max-age' header value.
+        (["cors", "max_age"] = Tail, V, Name) ->
+            integer_to_binary(Min(FullKey(Name, Tail), V, 0));
+        (["cors", "allowed_origins"], V, _Name) ->
+            Origins(V);
+        (["cors", "allowed_methods"], V, _Name) ->
+            Bin(V);
+        (["cors", "allowed_headers"], V, _Name) ->
+            Bin(V);
+        %% `Bin', not a converter with an empty-string clause. The deleted
+        %% completion had one, because it turned its OWN default of `""' into the
+        %% `undefined' that `bondy_http_security_headers:build_headers/1' reads
+        %% as "do not send this header". No operator value can be an empty
+        %% string: `key =' with nothing after it is a conf SYNTAX error, and
+        %% `key = ""' renders the two-character string `""' — both measured, and
+        %% the first is pinned by
+        %% `an_empty_security_header_value_is_a_syntax_error'. So a clause for it
+        %% would be dead. An embedded caller can still put `undefined' straight
+        %% into the block, and the consumer honours it.
+        (["security_headers", "hsts"], V, _Name) ->
+            Header(V);
+        (["security_headers", "frame_options"], V, _Name) ->
+            Header(V);
+        (["security_headers", "content_type_options"], V, _Name) ->
+            Header(V);
+        (["security_headers", "content_security_policy"], V, _Name) ->
+            Header(V);
+        %% Only the FLAT key is checked. `["http", "linger", "timeout"]' — the
+        %% `http.' sibling, which reaches Cowboy's `linger_timeout' rather than
+        %% the socket option — deliberately falls through to the pass-through
+        %% clause below and is not range-checked. The asymmetry is inherited,
+        %% not derived from a difference between the two options.
+        (["linger", "timeout"] = Tail, V, Name) ->
+            Min(FullKey(Name, Tail), V, -1);
+        (["websocket", "deflate", "level"] = Tail, V, Name) ->
+            Range(FullKey(Name, Tail), V, 0, 9);
+        (["websocket", "deflate", "mem_level"] = Tail, V, Name) ->
+            Range(FullKey(Name, Tail), V, 1, 9);
+        (["websocket", "deflate", "server_max_window_bits"] = Tail, V, Name) ->
+            Range(FullKey(Name, Tail), V, 8, 15);
+        (["websocket", "deflate", "client_max_window_bits"] = Tail, V, Name) ->
+            Range(FullKey(Name, Tail), V, 8, 15);
+        (Tail, V, Name) ->
+            case lists:member(Tail, PosIntegerPaths) of
+                true -> Min(FullKey(Name, Tail), V, 1);
+                false -> V
+            end
+    end,
 
-%% @doc Default key location for https can be overridden with the
-%%admin_api.ssl config variable, for example:
-{mapping, "admin_api.https.keyfile",
-"bondy_router.admin_api_https.transport_opts.socket_opts.keyfile", [
-  {datatype, file},
-  {default, "{{platform_etc_dir}}/key.pem"}
-]}.
+    %% No path in `Routes' is deeper than three, so this needs no recursion.
+    Put = fun
+        ([K], V, M) ->
+            maps:put(K, V, M);
+        ([K1, K2], V, M) ->
+            maps:put(K1, maps:put(K2, V, maps:get(K1, M, #{})), M);
+        ([K1, K2, K3], V, M) ->
+            Inner1 = maps:get(K1, M, #{}),
+            Inner2 = maps:get(K2, Inner1, #{}),
+            maps:put(K1, maps:put(K2, maps:put(K3, V, Inner2), Inner1), M)
+    end,
 
-%% @doc Default signing authority location for https can be overridden
-%% with the admin_api.ssl config variable, for example:
-{mapping, "admin_api.https.cacertfile",
-"bondy_router.admin_api_https.transport_opts.socket_opts.cacertfile", [
-  {datatype, file},
-  {default, "{{platform_etc_dir}}/cacert.pem"}
-]}.
+    Path = fun(Name, Tail) ->
+        case lists:keyfind(Tail, 1, Routes) of
+            {_, P} ->
+                P;
+            false ->
+                %% Only reachable for a mapping declared above and left out of
+                %% `Routes': cuttlefish discards keys with no mapping before a
+                %% translation runs (`transform_datatypes/3'), silently under
+                %% the release's `--allow_extra'. Without this the operator's
+                %% setting would vanish with no diagnostic.
+                cuttlefish:invalid(
+                    FullKey(Name, Tail) ++ ": no listener option path"
+                )
+        end
+    end,
 
-%% @doc SSL verification mode for Admin API HTTPS connections. Set to
-%% verify_peer to require client certificates (mTLS).
-{mapping, "admin_api.https.verify",
-"bondy_router.admin_api_https.transport_opts.socket_opts.verify", [
-  {datatype, {enum, [verify_peer, verify_none]}},
-  {default, verify_none}
-]}.
+    Specs = lists:foldl(
+        fun({["listeners", Name | Tail], V}, Acc) ->
+            Spec = Put(
+                Path(Name, Tail), Value(Tail, V, Name), maps:get(Name, Acc, #{})
+            ),
+            maps:put(Name, Spec, Acc)
+        end,
+        #{},
+        Conf
+    ),
 
-%% @doc Whether to reject connections where the client does not provide a
-%% certificate when verify is set to verify_peer.
-{mapping, "admin_api.https.fail_if_no_peer_cert",
-"bondy_router.admin_api_https.transport_opts.socket_opts.fail_if_no_peer_cert", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-%% @doc A comma separate list of TLS protocol versions that will be supported
-%% At the moment Bondy only supports versions 1.2 and 1.3
-{mapping, "admin_api.https.versions",
-"bondy_router.admin_api_https.transport_opts.socket_opts.versions", [
-  {datatype, string},
-  {default, "1.3"}
-]}.
-
-
-{translation, "bondy_router.admin_api_https.transport_opts.socket_opts.versions",
-  fun(Conf) ->
-    case cuttlefish:conf_get("admin_api.https.versions", Conf) of
-        Value when is_list(Value) ->
-          try
-            [
-              begin
-                case string:strip(Version) of
-                  "1.2" -> 'tlsv1.2';
-                  "1.3" -> 'tlsv1.3';
-                  _ -> throw({invalid_version, Version})
-                end
-              end || Version <- string:split(Value, ",")
-            ]
-          catch
-            throw:{invalid_version, Version} ->
-              cuttlefish:invalid("invalid TLS version " ++ Version)
-          end;
-        _ ->
-            cuttlefish:invalid(
-              "value should be string containing valid comma separated version numbers e.g. \"1.2, 1.3\""
-            )
-    end
-  end
-}.
+    %% Sorted by name so the rendered inventory is stable across renders of the
+    %% same `bondy.conf'.
+    [
+        {list_to_atom(Name), Spec}
+     || {Name, Spec} <- lists:sort(maps:to_list(Specs))
+    ]
+end}.
 
 
 %% =============================================================================
@@ -3163,1074 +3270,6 @@ end}.
 "bondy_router.api_gateway.config_file", [
   {datatype, file}
 ]}.
-
-
-%% -----------------------------------------------------------------------------
-%% API GATEWAY CLEAR
-%% -----------------------------------------------------------------------------
-
-
-{mapping, "api_gateway.http.enabled",
-"bondy_router.api_gateway_http.enabled", [
-  {default, on},
-  {datatype, {flag, on, off}}
-]}.
-
-%% @doc api_gateway.http.port is the TCP port that Bondy uses for
-%% exposing the API Gateway managed APIs.
-{mapping, "api_gateway.http.port",
-"bondy_router.api_gateway_http.transport_opts.socket_opts.port", [
-  {default, 18080},
-  {validators, ["port_number"]},
-  {datatype, integer},
-  hidden
-]}.
-
-%% @doc api_gateway.http.ip is the IP address that Bondy uses for
-%% exposing the API Gateway managed APIs.. When the host has many network
-%% interfaces, this option specifies which one to listen on.
-{mapping, "api_gateway.http.ip",
-"bondy_router.api_gateway_http.ip", [
-  {datatype, string},
-  {validators, ["ip_address"]}
-]}.
-
-%% @doc The IP version to use. Either 4 or 6.
-{mapping, "api_gateway.http.ip_version",
-"bondy_router.api_gateway_http.transport_opts.socket_opts.ip_version", [
-  {default, "4"},
-  {datatype, string}
-]}.
-
-{translation, "bondy_router.api_gateway_http.transport_opts.socket_opts.ip_version",
-  fun(Conf) ->
-    Value =  cuttlefish:conf_get("api_gateway.http.ip_version", Conf),
-      try
-        case string:strip(Value) of
-          "4" -> 'inet';
-          "6" -> 'inet6';
-          _ -> throw(invalid_version)
-        end
-      catch
-        throw:invalid_version ->
-          cuttlefish:invalid(
-            "Invalid IP version: "
-            ++ Value
-            ++ " . Value should be 4 or 6."
-          )
-      end
-  end
-}.
-
-%% The Cowboy acceptors_pool_size for the API Gateway's http listener
-{mapping, "api_gateway.http.acceptors_pool_size",
-"bondy_router.api_gateway_http.transport_opts.num_acceptors", [
-  {datatype, integer},
-  {validators, ["pos_integer"]},
-  {default, 200}
-]}.
-
-
-%% The Cowboy max number of connections for the Admin API http listener
-{mapping, "api_gateway.http.max_connections",
-"bondy_router.api_gateway_http.transport_opts.max_connections", [
-  {datatype, integer},
-  {validators, ["pos_integer"]},
-  %% Match this to host memory/fd capacity and raise it deliberately. A
-  %% per-listener cap set very high invites fd/memory exhaustion.
-  {default, 100000}
-]}.
-
-%% The backlog value defines the maximum length that the queue of pending
-%% connections can grow to. Defaults to 1024.
-{mapping, "api_gateway.http.backlog",
-"bondy_router.api_gateway_http.transport_opts.socket_opts.backlog", [
-  {datatype, integer},
-  {validators, ["pos_integer"]},
-  {default, 1024}
-]}.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Enables/disables periodic transmission on a connected socket when no
-%% other data is exchanged. If the other end does not respond, the connection is
-%% considered broken and an error message is sent to the controlling process.
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "api_gateway.http.keepalive",
-"bondy_router.api_gateway_http.transport_opts.socket_opts.keepalive", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-
-%% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
-%% means that also small amounts of data are sent immediately.
-{mapping, "api_gateway.http.nodelay",
-"bondy_router.api_gateway_http.transport_opts.socket_opts.nodelay", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
-
-%% {mapping, "api_gateway.http.reuseaddr",
-%% "bondy_router.api_gateway_http.transport_opts.socket_opts.reuseaddr", [
-%%   {datatype, {flag, on, off}},
-%%   {default, on}
-%% ]}.
-
-{mapping, "api_gateway.http.reuseport",
-"bondy_router.api_gateway_http.transport_opts.socket_opts.reuseport", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-%% The minimum size of the send buffer to use for the socket.
-{mapping, "api_gateway.http.sndbuf",
-"bondy_router.api_gateway_http.transport_opts.socket_opts.sndbuf", [
-  {datatype, bytesize}
-]}.
-
-%% The minimum size of the receive buffer to use for the socket.
-{mapping, "api_gateway.http.recbuf",
-"bondy_router.api_gateway_http.transport_opts.socket_opts.recbuf", [
-  {datatype, bytesize}
-]}.
-
-%% The size of the user-level software buffer used by the driver.
-%% Not to be confused with options sndbuf and recbuf, which correspond to the
-%% Kernel socket buffers.
-%% It is recommended to have val(buffer) >= max(val(sndbuf),val(recbuf)) to
-%% avoid performance issues because of unnecessary copying.
-%% val(buffer) is automatically set to the above maximum when values sndbuf or
-%% recbuf are set.
-{mapping, "api_gateway.http.buffer",
-"bondy_router.api_gateway_http.transport_opts.socket_opts.buffer", [
-  {datatype, bytesize}
-]}.
-
-%% Bondy dynamically resizes the socket's receive buffer between these two
-%% bounds based on the size of the data it receives, using the optimal buffer
-%% size for the current workload. When neither bound is set, an adaptive
-%% default of 512B..128KB applies. To tune it, BOTH min and max must be set,
-%% within 1KB..128KB and with min =< max; setting either to 0 disables
-%% dynamic buffering entirely. This option is ignored when the socket
-%% 'buffer' size is set explicitly.
-{mapping, "api_gateway.http.buffer.min",
-"bondy_router.api_gateway_http.protocol_opts.dynamic_buffer.min", [
-  {datatype, bytesize}
-]}.
-
-{mapping, "api_gateway.http.buffer.max",
-"bondy_router.api_gateway_http.protocol_opts.dynamic_buffer.max", [
-  {datatype, bytesize}
-]}.
-
-%% The number of packets Cowboy will request from the socket at once. This can
-%% be used to tweak the performance of the server. Higher values reduce the
-%% number of times Cowboy need to request more packets from the port driver at t
-%% he expense of potentially higher memory being used.
-{mapping, "api_gateway.http.active_n",
-"bondy_router.api_gateway_http.protocol_opts.active_n", [
-  {default, 100},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% Maximum allowed time for the listening process handshake call to finish.
-{mapping, "api_gateway.http.handshake_timeout",
-"bondy_router.api_gateway_http.transport_opts.handshake_timeout", [
-  {default, "5s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Time in ms with no data received before Cowboy closes the connection.
-{mapping, "api_gateway.http.idle_timeout",
-"bondy_router.api_gateway_http.protocol_opts.idle_timeout", [
-  {default, "15s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Time in ms with nothing received at all before Cowboy closes the connection.
-{mapping, "api_gateway.http.inactivity_timeout",
-"bondy_router.api_gateway_http.protocol_opts.inactivity_timeout", [
-  {default, "5m"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Time in ms that Cowboy will wait when closing the connection. This is
-%% necessary to avoid the TCP reset problem as described in the section 6.6 of
-%% RFC7230.
-{mapping, "api_gateway.http.linger.timeout",
-"bondy_router.api_gateway_http.protocol_opts.linger_timeout", [
-  {default, "1s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Time in ms with no requests before Cowboy closes the connection.
-{mapping, "api_gateway.http.request_timeout",
-"bondy_router.api_gateway_http.protocol_opts.request_timeout", [
-  {default, "5s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Whether the idle_timeout gets reset when sending data to the socket.
-{mapping, "api_gateway.http.reset_idle_timeout_on_send",
-"bondy_router.api_gateway_http.protocol_opts.reset_idle_timeout_on_send", [
-  {default, off},
-  {datatype, {flag, on, off}}
-]}.
-
-%% Maximum number of requests allowed per connection.
-{mapping, "api_gateway.http.max_keepalive",
-"bondy_router.api_gateway_http.protocol_opts.max_keepalive", [
-  {default, 1000},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-
-{mapping, "api_gateway.http.initial_stream_flow_size",
-"bondy_router.api_gateway_http.protocol_opts.initial_stream_flow_size", [
-  {default, "65535"}, % bytes
-  {datatype, bytesize}
-]}.
-
-{mapping, "api_gateway.http.max_empty_lines",
-"bondy_router.api_gateway_http.protocol_opts.max_empty_lines", [
-  {default, 5},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "api_gateway.http.max_header_name_length",
-"bondy_router.api_gateway_http.protocol_opts.max_header_name_length", [
-  {default, 64},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "api_gateway.http.max_header_value_length",
-"bondy_router.api_gateway_http.protocol_opts.max_header_value_length", [
-  {default, 4096},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "api_gateway.http.max_headers",
-"bondy_router.api_gateway_http.protocol_opts.max_headers", [
-  {default, 100},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% Maximum length of the Authorization header value, in bytes. Authorization
-%% headers routinely carry bearer tokens (JWTs) larger than typical header
-%% values, so Cowboy allows raising this limit independently of
-%% api_gateway.http.max_header_value_length, which is used when this option
-%% is not set.
-{mapping, "api_gateway.http.max_authorization_header_value_length",
-"bondy_router.api_gateway_http.protocol_opts.max_authorization_header_value_length", [
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% Maximum length of the Cookie header value, in bytes. Cookie headers can
-%% legitimately exceed typical header values, so Cowboy allows raising this
-%% limit independently of api_gateway.http.max_header_value_length, which is
-%% used when this option is not set.
-{mapping, "api_gateway.http.max_cookie_header_value_length",
-"bondy_router.api_gateway_http.protocol_opts.max_cookie_header_value_length", [
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% Maximum length of the authority component of the request URI (the
-%% host[:port] part), in bytes. Requests exceeding it are rejected.
-%% Defaults to 255 (the DNS name length limit).
-{mapping, "api_gateway.http.max_authority_length",
-"bondy_router.api_gateway_http.protocol_opts.max_authority_length", [
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% What to do when a response given to Cowboy contains invalid header names
-%% or values (for example control characters): 'error_terminate' replies
-%% with a 500 and terminates the stream — preventing header injection and
-%% response splitting — while 'ignore' relays the response unchanged
-%% (Cowboy's behaviour before 2.16). Keep the default unless a legacy
-%% upstream behind the API gateway requires relaying such headers.
-{mapping, "api_gateway.http.invalid_response_headers",
-"bondy_router.api_gateway_http.protocol_opts.invalid_response_headers", [
-  {default, error_terminate},
-  {datatype, {enum, [error_terminate, ignore]}}
-]}.
-
-%% HTTP/2 only: maximum number of concurrent streams (requests) a single
-%% client connection may have open. HTTP/2 is negotiated via ALPN on TLS
-%% listeners. Unbounded concurrent streams let one connection exhaust the
-%% node (Cowboy versions before 2.17 defaulted to infinity); 100 is the
-%% Cowboy 2.17 default. Raise it only for trusted, heavily multiplexing
-%% clients.
-{mapping, "api_gateway.http.max_concurrent_streams",
-"bondy_router.api_gateway_http.protocol_opts.max_concurrent_streams", [
-  {default, 100},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-
-{mapping, "api_gateway.http.max_method_length",
-"bondy_router.api_gateway_http.protocol_opts.max_method_length", [
-  {default, 32},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "api_gateway.http.max_request_line_length",
-"bondy_router.api_gateway_http.protocol_opts.max_request_line_length", [
-  {default, 8000},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "api_gateway.http.max_skip_body_length",
-"bondy_router.api_gateway_http.protocol_opts.max_skip_body_length", [
-  {default, 1000000},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "api_gateway.http.sendfile",
-"bondy_router.api_gateway_http.protocol_opts.sendfile", [
-  {default, on},
-  {datatype, {flag, on, off}}
-]}.
-
-%% @doc Enables or disables the HTTP x-forwarded-for or x-real-ip heather check.
-%% This is used to capture the source IP address which will be used for matching
-%% against RBAC Source assignments.
-{mapping, "api_gateway.http.proxy_protocol",
-"bondy_router.api_gateway_http.proxy_protocol.enabled", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-%% @doc Defines the mode in which Bondy operates when
-%% api_gateway.http.proxy_protocol is enabled. If 'strict' a connection that
-%% is not sending the x-forwarded-for or x-real-ip header or with invalid
-%% headers will be dropped. If 'relaxed' the connection is always accepted and
-%% Bondy will log when there is no header or if it is invalid.
-{mapping, "api_gateway.http.proxy_protocol.mode",
-"bondy_router.api_gateway_http.proxy_protocol.mode", [
-  {datatype, {enum, [strict, relaxed]}},
-  {default, relaxed}
-]}.
-
-%% @doc (G-2) Trusted reverse-proxy CIDRs; see admin_api.http.proxy_protocol.trusted_proxies.
-{mapping, "api_gateway.http.proxy_protocol.trusted_proxies",
-"bondy_router.api_gateway_http.proxy_protocol.trusted_proxies", [
-  {datatype, string},
-  {commented, "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"}
-]}.
-
-
-%% -----------------------------------------------------------------------------
-%% API GATEWAY HTTP - CORS
-%% -----------------------------------------------------------------------------
-
-%% @doc Whether CORS headers are enabled for the API Gateway HTTP listener.
-{mapping, "api_gateway.http.cors.enabled",
-"bondy_router.api_gateway_http.cors.enabled", [
-  {default, on},
-  {datatype, {flag, on, off}}
-]}.
-
-%% @doc The allowed origins for CORS requests.
-%% Can be "*" (wildcard), "auto" (derive from request host), or a
-%% comma-separated list of origins.
-{mapping, "api_gateway.http.cors.allowed_origins",
-"bondy_router.api_gateway_http.cors.allowed_origins", [
-  {default, "*"},
-  {datatype, string}
-]}.
-
-%% @doc The allowed HTTP methods for CORS requests.
-{mapping, "api_gateway.http.cors.allowed_methods",
-"bondy_router.api_gateway_http.cors.allowed_methods", [
-  {default, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"},
-  {datatype, string}
-]}.
-
-%% @doc The allowed HTTP headers for CORS requests.
-{mapping, "api_gateway.http.cors.allowed_headers",
-"bondy_router.api_gateway_http.cors.allowed_headers", [
-  {default, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"},
-  {datatype, string}
-]}.
-
-%% @doc The max age in seconds for CORS preflight cache.
-{mapping, "api_gateway.http.cors.max_age",
-"bondy_router.api_gateway_http.cors.max_age", [
-  {default, 86400},
-  {datatype, integer},
-  {validators, ["non_neg_integer"]}
-]}.
-
-{translation, "bondy_router.api_gateway_http.cors",
-  fun(Conf) ->
-    Prefix = "api_gateway.http.cors",
-    Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
-    OriginsStr = cuttlefish:conf_get(Prefix ++ ".allowed_origins", Conf, "*"),
-    MethodsStr = cuttlefish:conf_get(Prefix ++ ".allowed_methods", Conf, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"),
-    HeadersStr = cuttlefish:conf_get(Prefix ++ ".allowed_headers", Conf, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"),
-    MaxAge = cuttlefish:conf_get(Prefix ++ ".max_age", Conf, 86400),
-    Origins = case string:strip(OriginsStr) of
-      "*" -> '*';
-      "auto" -> auto;
-      Other ->
-        [list_to_binary(string:strip(S))
-         || S <- string:tokens(Other, ","), string:strip(S) =/= ""]
-    end,
-    #{
-      enabled => Enabled,
-      allowed_origins => Origins,
-      allowed_methods => list_to_binary(MethodsStr),
-      allowed_headers => list_to_binary(HeadersStr),
-      max_age => integer_to_binary(MaxAge)
-    }
-  end
-}.
-
-%% -----------------------------------------------------------------------------
-%% API GATEWAY HTTP - Security Headers
-%% -----------------------------------------------------------------------------
-
-%% @doc Whether static security headers are enabled for the API Gateway HTTP
-%% listener.
-{mapping, "api_gateway.http.security_headers.enabled",
-"bondy_router.api_gateway_http.security_headers.enabled", [
-  {default, on},
-  {datatype, {flag, on, off}}
-]}.
-
-%% @doc The value for the Strict-Transport-Security header.
-%% Only meaningful for HTTPS listeners.
-{mapping, "api_gateway.http.security_headers.hsts",
-"bondy_router.api_gateway_http.security_headers.hsts", [
-  {datatype, string}
-]}.
-
-%% @doc The value for the X-Frame-Options header.
-{mapping, "api_gateway.http.security_headers.frame_options",
-"bondy_router.api_gateway_http.security_headers.frame_options", [
-  {default, "SAMEORIGIN"},
-  {datatype, string}
-]}.
-
-%% @doc The value for the X-Content-Type-Options header.
-{mapping, "api_gateway.http.security_headers.content_type_options",
-"bondy_router.api_gateway_http.security_headers.content_type_options", [
-  {default, "nosniff"},
-  {datatype, string}
-]}.
-
-%% @doc The value for the Content-Security-Policy header.
-{mapping, "api_gateway.http.security_headers.content_security_policy",
-"bondy_router.api_gateway_http.security_headers.content_security_policy", [
-  {datatype, string}
-]}.
-
-%% @doc The value for the Server response header.
-{mapping, "api_gateway.http.server_header",
-"bondy_router.api_gateway_http.server_header", [
-  {default, "bondy"},
-  {datatype, string}
-]}.
-
-{translation, "bondy_router.api_gateway_http.security_headers",
-  fun(Conf) ->
-    Prefix = "api_gateway.http.security_headers",
-    Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
-    ToUndefined = fun("") -> undefined; (V) -> list_to_binary(V) end,
-    #{
-      enabled => Enabled,
-      hsts => ToUndefined(cuttlefish:conf_get(Prefix ++ ".hsts", Conf, "")),
-      frame_options => ToUndefined(cuttlefish:conf_get(Prefix ++ ".frame_options", Conf, "SAMEORIGIN")),
-      content_type_options => ToUndefined(cuttlefish:conf_get(Prefix ++ ".content_type_options", Conf, "nosniff")),
-      content_security_policy => ToUndefined(cuttlefish:conf_get(Prefix ++ ".content_security_policy", Conf, ""))
-    }
-  end
-}.
-
-
-%% -----------------------------------------------------------------------------
-%% API GATEWAY TLS
-%% -----------------------------------------------------------------------------
-
-
-{mapping, "api_gateway.https.enabled",
-"bondy_router.api_gateway_https.enabled", [
-  {default, off},
-  {datatype, {flag, on, off}}
-]}.
-
-%% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
-%% exposing the API Gateway managed APIs.
-{mapping, "api_gateway.https.port",
-"bondy_router.api_gateway_https.transport_opts.socket_opts.port", [
-  {default, 18083},
-  {datatype, integer},
-  {validators, ["port_number"]},
-  hidden
-]}.
-
-%% @doc api_gateway.http.ip is the IP address that Bondy uses for
-%% exposing the API Gateway managed APIs.. When the host has many network
-%% interfaces, this option specifies which one to listen on.
-{mapping, "api_gateway.https.ip",
-"bondy_router.api_gateway_https.ip", [
-  {datatype, string},
-  {validators, ["ip_address"]}
-]}.
-
-%% @doc The IP version to use. Either 4 or 6.
-{mapping, "api_gateway.https.ip_version",
-"bondy_router.api_gateway_https.transport_opts.socket_opts.ip_version", [
-  {default, "4"},
-  {datatype, string}
-]}.
-
-{translation, "bondy_router.api_gateway_https.transport_opts.socket_opts.ip_version",
-  fun(Conf) ->
-    Value =  cuttlefish:conf_get("api_gateway.https.ip_version", Conf),
-      try
-        case string:strip(Value) of
-          "4" -> 'inet';
-          "6" -> 'inet6';
-          _ -> throw(invalid_version)
-        end
-      catch
-        throw:invalid_version ->
-          cuttlefish:invalid(
-            "Invalid IP version: "
-            ++ Value
-            ++ " . Value should be 4 or 6."
-          )
-      end
-  end
-}.
-
-
-%% The Cowboy acceptors_pool_size for the API Gateway's http listener
-{mapping, "api_gateway.https.acceptors_pool_size",
-"bondy_router.api_gateway_https.transport_opts.num_acceptors", [
-  {datatype, integer},
-  {validators, ["pos_integer"]},
-  {default, 200}
-]}.
-
-%% The Cowboy max number of connections for the Admin API https listener
-{mapping, "api_gateway.https.max_connections",
-"bondy_router.api_gateway_https.transport_opts.max_connections", [
-  {datatype, integer},
-  {validators, ["pos_integer"]},
-  %% See api_gateway.http.max_connections.
-  {default, 100000}
-]}.
-
-%% The maximum length that the queue of pending connections can grow to.
-{mapping, "api_gateway.https.backlog",
-"bondy_router.api_gateway_https.transport_opts.socket_opts.backlog", [
-  {datatype, integer},
-  {validators, ["pos_integer"]},
-  {default, 1024}
-]}.
-
-
-% SOCKET OPTS
-
-%% Enables/disables periodic transmission on a connected socket when no other
-%% data is exchanged. If the other end does not respond, the connection is
-%% considered broken and an error message is sent to the controlling process.
-{mapping, "api_gateway.https.keepalive",
-"bondy_router.api_gateway_https.transport_opts.socket_opts.keepalive", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-
-%% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
-%% means that also small amounts of data are sent immediately.
-{mapping, "api_gateway.https.nodelay",
-"bondy_router.api_gateway_https.transport_opts.socket_opts.nodelay", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
-
-%% {mapping, "api_gateway.https.reuseaddr",
-%% "bondy_router.api_gateway_https.transport_opts.socket_opts.reuseaddr", [
-%%   {datatype, {flag, on, off}},
-%%   {default, on}
-%% ]}.
-
-{mapping, "api_gateway.https.reuseport",
-"bondy_router.api_gateway_https.transport_opts.socket_opts.reuseport", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-%% The minimum size of the send buffer to use for the socket.
-{mapping, "api_gateway.https.sndbuf",
-"bondy_router.api_gateway_https.transport_opts.socket_opts.sndbuf", [
-  {datatype, bytesize}
-]}.
-
-%% The minimum size of the receive buffer to use for the socket.
-{mapping, "api_gateway.https.recbuf",
-"bondy_router.api_gateway_https.transport_opts.socket_opts.recbuf", [
-  {datatype, bytesize}
-]}.
-
-%% The size of the user-level software buffer used by the driver.
-%% Not to be confused with options sndbuf and recbuf, which correspond to the
-%% Kernel socket buffers.
-%% It is recommended to have val(buffer) >= max(val(sndbuf),val(recbuf)) to
-%% avoid performance issues because of unnecessary copying.
-%% val(buffer) is automatically set to the above maximum when values sndbuf or
-%% recbuf are set.
-{mapping, "api_gateway.https.buffer",
-"bondy_router.api_gateway_https.transport_opts.socket_opts.buffer", [
-  {datatype, bytesize}
-]}.
-
-%% Bondy dynamically resizes the socket's receive buffer between these two
-%% bounds based on the size of the data it receives, using the optimal buffer
-%% size for the current workload. When neither bound is set, an adaptive
-%% default of 512B..128KB applies. To tune it, BOTH min and max must be set,
-%% within 1KB..128KB and with min =< max; setting either to 0 disables
-%% dynamic buffering entirely. This option is ignored when the socket
-%% 'buffer' size is set explicitly.
-{mapping, "api_gateway.https.buffer.min", "bondy_router.api_gateway_https.protocol_opts.dynamic_buffer.min", [
-  {datatype, bytesize}
-]}.
-
-{mapping, "api_gateway.https.buffer.max", "bondy_router.api_gateway_https.protocol_opts.dynamic_buffer.max", [
-  {datatype, bytesize}
-]}.
-
-
-%% The number of packets Cowboy will request from the socket at once. This can
-%% be used to tweak the performance of the server. Higher values reduce the
-%% number of times Cowboy need to request more packets from the port driver at t
-%% he expense of potentially higher memory being used.
-{mapping, "api_gateway.https.active_n",
-"bondy_router.api_gateway_https.protocol_opts.active_n", [
-  {default, 100},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% Maximum allowed time for the listening process handshake call to finish.
-{mapping, "api_gateway.https.handshake_timeout",
-"bondy_router.api_gateway_https.transport_opts.handshake_timeout", [
-  {default, "5s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Time in ms with no data received before Cowboy closes the connection.
-{mapping, "api_gateway.https.idle_timeout",
-"bondy_router.api_gateway_https.protocol_opts.idle_timeout", [
-  {default, "15s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Time in ms with nothing received at all before Cowboy closes the connection.
-{mapping, "api_gateway.https.inactivity_timeout",
-"bondy_router.api_gateway_https.protocol_opts.inactivity_timeout", [
-  {default, "5m"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Time in ms that Cowboy will wait when closing the connection. This is
-%% necessary to avoid the TCP reset problem as described in the section 6.6 of
-%% RFC7230.
-{mapping, "api_gateway.https.linger.timeout",
-"bondy_router.api_gateway_https.protocol_opts.linger_timeout", [
-  {default, "1s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Time in ms with no requests before Cowboy closes the connection.
-{mapping, "api_gateway.https.request_timeout",
-"bondy_router.api_gateway_https.protocol_opts.request_timeout", [
-  {default, "5s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Whether the idle_timeout gets reset when sending data to the socket.
-{mapping, "api_gateway.https.reset_idle_timeout_on_send",
-"bondy_router.api_gateway_https.protocol_opts.reset_idle_timeout_on_send", [
-  {default, off},
-  {datatype, {flag, on, off}}
-]}.
-
-%% Maximum number of requests allowed per connection.
-{mapping, "api_gateway.https.max_keepalive",
-"bondy_router.api_gateway_https.protocol_opts.max_keepalive", [
-  {default, 1000},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-
-{mapping, "api_gateway.https.initial_stream_flow_size",
-"bondy_router.api_gateway_https.protocol_opts.initial_stream_flow_size", [
-  {default, "65535"}, % bytes
-  {datatype, bytesize}
-]}.
-
-{mapping, "api_gateway.https.max_empty_lines",
-"bondy_router.api_gateway_https.protocol_opts.max_empty_lines", [
-  {default, 5},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "api_gateway.https.max_header_name_length",
-"bondy_router.api_gateway_https.protocol_opts.max_header_name_length", [
-  {default, 64},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "api_gateway.https.max_header_value_length",
-"bondy_router.api_gateway_https.protocol_opts.max_header_value_length", [
-  {default, 4096},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "api_gateway.https.max_headers",
-"bondy_router.api_gateway_https.protocol_opts.max_headers", [
-  {default, 100},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% Maximum length of the Authorization header value, in bytes. Authorization
-%% headers routinely carry bearer tokens (JWTs) larger than typical header
-%% values, so Cowboy allows raising this limit independently of
-%% api_gateway.https.max_header_value_length, which is used when this option
-%% is not set.
-{mapping, "api_gateway.https.max_authorization_header_value_length",
-"bondy_router.api_gateway_https.protocol_opts.max_authorization_header_value_length", [
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% Maximum length of the Cookie header value, in bytes. Cookie headers can
-%% legitimately exceed typical header values, so Cowboy allows raising this
-%% limit independently of api_gateway.https.max_header_value_length, which is
-%% used when this option is not set.
-{mapping, "api_gateway.https.max_cookie_header_value_length",
-"bondy_router.api_gateway_https.protocol_opts.max_cookie_header_value_length", [
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% Maximum length of the authority component of the request URI (the
-%% host[:port] part), in bytes. Requests exceeding it are rejected.
-%% Defaults to 255 (the DNS name length limit).
-{mapping, "api_gateway.https.max_authority_length",
-"bondy_router.api_gateway_https.protocol_opts.max_authority_length", [
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-%% What to do when a response given to Cowboy contains invalid header names
-%% or values (for example control characters): 'error_terminate' replies
-%% with a 500 and terminates the stream — preventing header injection and
-%% response splitting — while 'ignore' relays the response unchanged
-%% (Cowboy's behaviour before 2.16). Keep the default unless a legacy
-%% upstream behind the API gateway requires relaying such headers.
-{mapping, "api_gateway.https.invalid_response_headers",
-"bondy_router.api_gateway_https.protocol_opts.invalid_response_headers", [
-  {default, error_terminate},
-  {datatype, {enum, [error_terminate, ignore]}}
-]}.
-
-%% HTTP/2 only: maximum number of concurrent streams (requests) a single
-%% client connection may have open. HTTP/2 is negotiated via ALPN on TLS
-%% listeners. Unbounded concurrent streams let one connection exhaust the
-%% node (Cowboy versions before 2.17 defaulted to infinity); 100 is the
-%% Cowboy 2.17 default. Raise it only for trusted, heavily multiplexing
-%% clients.
-{mapping, "api_gateway.https.max_concurrent_streams",
-"bondy_router.api_gateway_https.protocol_opts.max_concurrent_streams", [
-  {default, 100},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-
-{mapping, "api_gateway.https.max_method_length",
-"bondy_router.api_gateway_https.protocol_opts.max_method_length", [
-  {default, 32},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "api_gateway.https.max_request_line_length",
-"bondy_router.api_gateway_https.protocol_opts.max_request_line_length", [
-  {default, 8000},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "api_gateway.https.max_skip_body_length",
-"bondy_router.api_gateway_https.protocol_opts.max_skip_body_length", [
-  {default, 1000000},
-  {validators, ["pos_integer"]},
-  {datatype, integer}
-]}.
-
-{mapping, "api_gateway.https.sendfile",
-"bondy_router.api_gateway_https.protocol_opts.sendfile", [
-  {default, on},
-  {datatype, {flag, on, off}}
-]}.
-
-%% @doc Enables or disables the HTTP x-forwarded-for or x-real-ip heather check.
-%% This is used to capture the source IP address which will be used for matching
-%% against RBAC Source assignments.
-{mapping, "api_gateway.https.proxy_protocol",
-"bondy_router.api_gateway_https.proxy_protocol.enabled", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-%% @doc Defines the mode in which Bondy operates when
-%% api_gateway.http.proxy_protocol is enabled. If 'strict' a connection that
-%% is not sending the x-forwarded-for or x-real-ip header or with invalid
-%% headers will be dropped. If 'relaxed' the connection is always accepted and
-%% Bondy will log when there is no header or if it is invalid.
-{mapping, "api_gateway.https.proxy_protocol.mode",
-"bondy_router.api_gateway_https.proxy_protocol.mode", [
-  {datatype, {enum, [strict, relaxed]}},
-  {default, relaxed}
-]}.
-
-%% @doc (G-2) Trusted reverse-proxy CIDRs; see admin_api.http.proxy_protocol.trusted_proxies.
-{mapping, "api_gateway.https.proxy_protocol.trusted_proxies",
-"bondy_router.api_gateway_https.proxy_protocol.trusted_proxies", [
-  {datatype, string},
-  {commented, "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"}
-]}.
-
-
-%% -----------------------------------------------------------------------------
-%% API GATEWAY HTTPS - CORS
-%% -----------------------------------------------------------------------------
-
-%% @doc Whether CORS headers are enabled for the API Gateway HTTPS listener.
-{mapping, "api_gateway.https.cors.enabled",
-"bondy_router.api_gateway_https.cors.enabled", [
-  {default, on},
-  {datatype, {flag, on, off}}
-]}.
-
-%% @doc The allowed origins for CORS requests.
-%% Can be "*" (wildcard), "auto" (derive from request host), or a
-%% comma-separated list of origins.
-{mapping, "api_gateway.https.cors.allowed_origins",
-"bondy_router.api_gateway_https.cors.allowed_origins", [
-  {default, "*"},
-  {datatype, string}
-]}.
-
-%% @doc The allowed HTTP methods for CORS requests.
-{mapping, "api_gateway.https.cors.allowed_methods",
-"bondy_router.api_gateway_https.cors.allowed_methods", [
-  {default, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"},
-  {datatype, string}
-]}.
-
-%% @doc The allowed HTTP headers for CORS requests.
-{mapping, "api_gateway.https.cors.allowed_headers",
-"bondy_router.api_gateway_https.cors.allowed_headers", [
-  {default, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"},
-  {datatype, string}
-]}.
-
-%% @doc The max age in seconds for CORS preflight cache.
-{mapping, "api_gateway.https.cors.max_age",
-"bondy_router.api_gateway_https.cors.max_age", [
-  {default, 86400},
-  {datatype, integer},
-  {validators, ["non_neg_integer"]}
-]}.
-
-{translation, "bondy_router.api_gateway_https.cors",
-  fun(Conf) ->
-    Prefix = "api_gateway.https.cors",
-    Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
-    OriginsStr = cuttlefish:conf_get(Prefix ++ ".allowed_origins", Conf, "*"),
-    MethodsStr = cuttlefish:conf_get(Prefix ++ ".allowed_methods", Conf, "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE"),
-    HeadersStr = cuttlefish:conf_get(Prefix ++ ".allowed_headers", Conf, "origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token"),
-    MaxAge = cuttlefish:conf_get(Prefix ++ ".max_age", Conf, 86400),
-    Origins = case string:strip(OriginsStr) of
-      "*" -> '*';
-      "auto" -> auto;
-      Other ->
-        [list_to_binary(string:strip(S))
-         || S <- string:tokens(Other, ","), string:strip(S) =/= ""]
-    end,
-    #{
-      enabled => Enabled,
-      allowed_origins => Origins,
-      allowed_methods => list_to_binary(MethodsStr),
-      allowed_headers => list_to_binary(HeadersStr),
-      max_age => integer_to_binary(MaxAge)
-    }
-  end
-}.
-
-%% -----------------------------------------------------------------------------
-%% API GATEWAY HTTPS - Security Headers
-%% -----------------------------------------------------------------------------
-
-%% @doc Whether static security headers are enabled for the API Gateway HTTPS
-%% listener.
-{mapping, "api_gateway.https.security_headers.enabled",
-"bondy_router.api_gateway_https.security_headers.enabled", [
-  {default, on},
-  {datatype, {flag, on, off}}
-]}.
-
-%% @doc The value for the Strict-Transport-Security header.
-%% Set to an empty string to disable.
-{mapping, "api_gateway.https.security_headers.hsts",
-"bondy_router.api_gateway_https.security_headers.hsts", [
-  {default, "max-age=31536000; includeSubDomains"},
-  {datatype, string}
-]}.
-
-%% @doc The value for the X-Frame-Options header.
-{mapping, "api_gateway.https.security_headers.frame_options",
-"bondy_router.api_gateway_https.security_headers.frame_options", [
-  {default, "SAMEORIGIN"},
-  {datatype, string}
-]}.
-
-%% @doc The value for the X-Content-Type-Options header.
-{mapping, "api_gateway.https.security_headers.content_type_options",
-"bondy_router.api_gateway_https.security_headers.content_type_options", [
-  {default, "nosniff"},
-  {datatype, string}
-]}.
-
-%% @doc The value for the Content-Security-Policy header.
-{mapping, "api_gateway.https.security_headers.content_security_policy",
-"bondy_router.api_gateway_https.security_headers.content_security_policy", [
-  {datatype, string}
-]}.
-
-%% @doc The value for the Server response header.
-{mapping, "api_gateway.https.server_header",
-"bondy_router.api_gateway_https.server_header", [
-  {default, "bondy"},
-  {datatype, string}
-]}.
-
-{translation, "bondy_router.api_gateway_https.security_headers",
-  fun(Conf) ->
-    Prefix = "api_gateway.https.security_headers",
-    Enabled = cuttlefish:conf_get(Prefix ++ ".enabled", Conf, true),
-    ToUndefined = fun("") -> undefined; (V) -> list_to_binary(V) end,
-    #{
-      enabled => Enabled,
-      hsts => ToUndefined(cuttlefish:conf_get(Prefix ++ ".hsts", Conf, "max-age=31536000; includeSubDomains")),
-      frame_options => ToUndefined(cuttlefish:conf_get(Prefix ++ ".frame_options", Conf, "SAMEORIGIN")),
-      content_type_options => ToUndefined(cuttlefish:conf_get(Prefix ++ ".content_type_options", Conf, "nosniff")),
-      content_security_policy => ToUndefined(cuttlefish:conf_get(Prefix ++ ".content_security_policy", Conf, ""))
-    }
-  end
-}.
-
-
-%% @doc Default cert location for https can be overridden
-%% with the api_gateway.ssl config variable, for example:
-{mapping, "api_gateway.https.certfile", "bondy_router.api_gateway_https.transport_opts.socket_opts.certfile", [
-  {datatype, file},
-  {default, "{{platform_etc_dir}}/keycert.pem"}
-]}.
-
-%% @doc Default key location for https can be overridden with the
-%%api_gateway.ssl config variable, for example:
-{mapping, "api_gateway.https.keyfile",
-"bondy_router.api_gateway_https.transport_opts.socket_opts.keyfile", [
-  {datatype, file},
-  {default, "{{platform_etc_dir}}/key.pem"}
-]}.
-
-%% @doc Default signing authority location for https can be overridden
-%% with the admin_api.ssl config variable, for example:
-{mapping, "api_gateway.https.cacertfile",
-"bondy_router.api_gateway_https.transport_opts.socket_opts.cacertfile", [
-  {datatype, file},
-  {default, "{{platform_etc_dir}}/cacert.pem"}
-]}.
-
-%% @doc SSL verification mode for API Gateway HTTPS connections. Set to
-%% verify_peer to require client certificates (mTLS).
-{mapping, "api_gateway.https.verify",
-"bondy_router.api_gateway_https.transport_opts.socket_opts.verify", [
-  {datatype, {enum, [verify_peer, verify_none]}},
-  {default, verify_none}
-]}.
-
-%% @doc Whether to reject connections where the client does not provide a
-%% certificate when verify is set to verify_peer.
-{mapping, "api_gateway.https.fail_if_no_peer_cert",
-"bondy_router.api_gateway_https.transport_opts.socket_opts.fail_if_no_peer_cert", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-%% @doc A comma separate list of TLS protocol versions that will be supported
-%% At the moment Bondy only supports versions 1.2 and 1.3
-{mapping, "api_gateway.https.versions",
-"bondy_router.api_gateway_https.transport_opts.socket_opts.versions", [
-  {datatype, string},
-  {default, "1.3"}
-]}.
-
-
-{translation, "bondy_router.api_gateway_https.transport_opts.socket_opts.versions",
-  fun(Conf) ->
-    case cuttlefish:conf_get("api_gateway.https.versions", Conf) of
-        Value when is_list(Value) ->
-          try
-            [
-              begin
-                case string:strip(Version) of
-                  "1.2" -> 'tlsv1.2';
-                  "1.3" -> 'tlsv1.3';
-                  _ -> throw({invalid_version, Version})
-                end
-              end || Version <- string:split(Value, ",")
-            ]
-          catch
-            throw:{invalid_version, Version} ->
-              cuttlefish:invalid("invalid TLS version " ++ Version)
-          end;
-        _ ->
-            cuttlefish:invalid(
-              "value should be string containing valid comma separated version numbers e.g. \"1.2, 1.3\""
-            )
-    end
-  end
-}.
 
 
 %% =============================================================================
@@ -4386,11 +3425,6 @@ end}.
   {default, true},
   {datatype, flag}
 ]}.
-{mapping, "wamp.broker.pattern_based_subscription",
-"bondy_router.wamp.broker.features.pattern_based_subscription", [
-  {default, true},
-  {datatype, {flag, on, off}}
-]}.
 {mapping, "wamp.broker.payload_passthru_mode",
 "bondy_router.wamp.broker.features.payload_passthru_mode", [
   {default, false},
@@ -4484,11 +3518,6 @@ end}.
 "bondy_router.wamp.dealer.features.caller_identification", [
   {default, true},
   {datatype, flag}
-]}.
-{mapping, "wamp.dealer.pattern_based_registration",
-"bondy_router.wamp.dealer.features.pattern_based_registration", [
-  {default, true},
-  {datatype, {flag, on, off}}
 ]}.
 {mapping, "wamp.dealer.payload_passthru_mode",
 "bondy_router.wamp.dealer.features.payload_passthru_mode", [
@@ -4653,7 +3682,7 @@ end}.
 {mapping, "wamp.websocket.ping.max_attempts",
 "bondy_router.wamp_websocket.ping.max_attempts",
   [
-    {default, 2},
+    {default, 3},
     {datatype, integer},
     {validators, ["pos_integer"]}
   ]
@@ -4678,7 +3707,9 @@ end}.
 %% connection when a client attempts to send a frame that goes over this limit.
 %% For fragmented frames this applies to the size of the reconstituted frame.
 %%
-%% A value of zero means un unbounded size (internally translated to 'infinity')
+%% The value reaches Cowboy as written. There is no unbounded spelling: the
+%% translation that would have turned 0 into 'infinity' is not live (it is
+%% commented out below), so 0 configures a limit of zero bytes.
 {mapping, "wamp.websocket.max_frame_size",
 "bondy_router.wamp_websocket.max_frame_size", [
   {default, "4MB"},
@@ -4689,8 +3720,8 @@ end}.
 %% Has NO effect since Cowboy 2.13: a WebSocket connection always inherits
 %% the dynamic buffer of the LISTENER it arrived on (Cowboy overrides any
 %% handler-supplied value), so configure the listener's buffer options
-%% instead (e.g. api_gateway.http.buffer.min/max). The mappings are kept so
-%% existing configuration files still parse.
+%% instead (listeners.$name.http.buffer.min/max). These two mappings are kept
+%% only so an existing configuration file that sets them still parses.
 {mapping, "wamp.websocket.buffer.min",
 "bondy_router.wamp_websocket.protocol_opts.dynamic_buffer.min", [
   {datatype, bytesize}
@@ -4980,539 +4011,6 @@ end}.
 "bondy_router.wamp_sse.reset_idle_timeout_on_send", [
   {default, on},
   {datatype, {flag, on, off}}
-]}.
-
-
-
-%% =============================================================================
-%% WAMP RAW SOCKET
-%% =============================================================================
-
-
-
-{mapping, "wamp.tcp.enabled",
-"bondy_router.wamp_tcp.enabled", [
-  {default, on},
-  {datatype, {flag, on, off}}
-]}.
-
-%% @doc wamp.tcp.port is the TCP port that Bondy uses for
-%% exposing the WAMP raw socket transport
-{mapping, "wamp.tcp.port",
-"bondy_router.wamp_tcp.transport_opts.socket_opts.port", [
-  {default, 18082},
-  {validators, ["port_number"]},
-  {datatype, integer}
-]}.
-
-%% @doc wamp.tcp.ip is the IP address that Bondy uses for
-%% exposing the WAMP raw socket transport. When the host has many network
-%% interfaces, this option specifies which one to listen on.
-{mapping, "wamp.tcp.ip",
-"bondy_router.wamp_tcp.transport_opts.ip", [
-  {datatype, string},
-  {validators, ["ip_address"]}
-]}.
-
-%% @doc The IP version to use. Either 4 or 6.
-{mapping, "wamp.tcp.ip_version",
-"bondy_router.wamp_tcp.transport_opts.socket_opts.ip_version", [
-  {default, "4"},
-  {datatype, string}
-]}.
-
-{translation, "bondy_router.wamp_tcp.transport_opts.socket_opts.ip_version",
-  fun(Conf) ->
-    Value =  cuttlefish:conf_get("wamp.tcp.ip_version", Conf),
-      try
-        case string:strip(Value) of
-          "4" -> 'inet';
-          "6" -> 'inet6';
-          _ -> throw(invalid_version)
-        end
-      catch
-        throw:invalid_version ->
-          cuttlefish:invalid(
-            "Invalid IP version: "
-            ++ Value
-            ++ " . Value should be 4 or 6."
-          )
-      end
-  end
-}.
-
-%% The ranch acceptors_pool_size for the WAMP raw socket tcp listener
-{mapping, "wamp.tcp.acceptors_pool_size",
-"bondy_router.wamp_tcp.transport_opts.num_acceptors", [
-  {datatype, integer},
-  {validators, ["pos_integer"]},
-  {default, 200}
-]}.
-
-%% The ranch max number of connections for the WAMP raw socket tcp listener
-{mapping, "wamp.tcp.max_connections",
-"bondy_router.wamp_tcp.transport_opts.max_connections", [
-  {datatype, integer},
-  {validators, ["pos_integer"]},
-  {default, 100000}
-]}.
-
-%% The maximum length that the queue of pending connections can grow to.
-{mapping, "wamp.tcp.backlog",
-"bondy_router.wamp_tcp.transport_opts.socket_opts.backlog", [
-  {datatype, integer},
-  {validators, ["pos_integer"]},
-  {default, 1024}
-]}.
-
-%% TCP SOCKET OPTS
-
-%% Enables/disables periodic transmission on a connected socket when no other
-%% data is exchanged. If the other end does not respond, the connection is
-%% considered broken and an error message is sent to the controlling process.
-{mapping, "wamp.tcp.keepalive",
-"bondy_router.wamp_tcp.transport_opts.socket_opts.keepalive", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
-
-{mapping, "wamp.tcp.linger.timeout",
-"bondy_router.wamp_tcp.transport_opts.socket_opts.linger_timeout", [
-  {default, "1s"},
-  {validators, ["duration or -1..0"]},
-  {datatype, [{duration, ms}, integer]}
-]}.
-
-%% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
-%% means that also small amounts of data are sent immediately.
-{mapping, "wamp.tcp.nodelay",
-"bondy_router.wamp_tcp.transport_opts.socket_opts.nodelay", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
-
-
-%% {mapping, "wamp.tcp.reuseaddr",
-%% "bondy_router.wamp_tcp.transport_opts.socket_opts.reuseaddr", [
-%%   {datatype, {flag, on, off}},
-%%   {default, on}
-%% ]}.
-
-{mapping, "wamp.tcp.reuseport",
-"bondy_router.wamp_tcp.transport_opts.socket_opts.reuseport", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-%% The minimum size of the send buffer to use for the socket.
-{mapping, "wamp.tcp.sndbuf",
-"bondy_router.wamp_tcp.transport_opts.socket_opts.sndbuf", [
-  {datatype, bytesize}
-]}.
-
-%% The minimum size of the receive buffer to use for the socket.
-{mapping, "wamp.tcp.recbuf",
-"bondy_router.wamp_tcp.transport_opts.socket_opts.recbuf", [
-  {datatype, bytesize}
-]}.
-
-%% The size of the user-level software buffer used by the driver.
-%% Not to be confused with options sndbuf and recbuf, which correspond to the
-%% Kernel socket buffers.
-%% It is recommended to have val(buffer) >= max(val(sndbuf),val(recbuf)) to
-%% avoid performance issues because of unnecessary copying.
-%% val(buffer) is automatically set to the above maximum when values sndbuf or
-%% recbuf are set.
-{mapping, "wamp.tcp.buffer",
-"bondy_router.wamp_tcp.transport_opts.socket_opts.buffer", [
-  {datatype, bytesize}
-]}.
-
-
-%% @doc Defines if PING control message functionality is enabled or
-%% not.
-%% This option affects server (Bondy) initiated pings only. Some clients
-%% might also initiate ping requests and Bondy will always respond to those
-%% even if this option is turned off.
-%% This feature is useful to keep a connection alive and validate the
-%% connection is healthy.
-%% Enabling this feature implies having an additional timer per connection and
-%% this can be a considerable cost for servers that need to handle large
-%% numbers of connections. A better solution in most cases is to let the client
-%% handle pings.
-{mapping, "wamp.tcp.ping.enabled",
-"bondy_router.wamp_tcp.ping.enabled", [
-{default, on},
-{datatype, {flag, on, off}}
-]}.
-
-%% @doc If wamp.tcp.ping.enabled is 'on', this parameter controls the
-%% maximum time interval that is permitted to elapse between the point at which
-%% the Client finishes transmitting a message and the point it starts sending
-%% the next.
-%% Notice this is not the same as wamp.tcp.idle_timeout.
-{mapping, "wamp.tcp.ping.idle_timeout",
-"bondy_router.wamp_tcp.ping.idle_timeout", [
-{default, "20s"},
-{datatype, {duration, ms}}
-]}.
-
-%% @doc If wamp.tcp.ping.enabled is 'on', this parameter controls the
-%% amount of time Bondy waits for a ping response from the client.
-%% Once that time has passed this counts as a fail attempt
-%% (see wamp.tcp.ping.max_attempts).
-{mapping, "wamp.tcp.ping.timeout",
-"bondy_router.wamp_tcp.ping.timeout", [
-{default, "10s"},
-{datatype, {duration, ms}}
-]}.
-
-%% @doc If wamp.tcp.ping.enabled is 'on', this parameter controls how many
-%% missed pings are considered a timeout. Thus, after this number of attempts
-%% Bondy will drop the connection.
-{mapping, "wamp.tcp.ping.max_attempts",
-"bondy_router.wamp_tcp.ping.max_attempts",
-[
-  {default, 2},
-  {datatype, integer},
-  {validators, ["pos_integer"]}
-]
-}.
-
-%% @doc Drops the connection after a period of inactivity. This option does not
-%% take effect when wamp.tcp.ping.enabled is 'on' and wamp.tcp.ping.
-%% interval times wamp.tcp.ping.max_attempts results in a value higher
-%% than this option.
-%% Notice that for some clients using this option alone is not enough to keep
-%% a connection alive as the client will drop the connection due to inactivity.
-%% If the client supports tcp PING control messages, enabled them,
-%% otherwise e.g. web browsers set wamp.tcp.ping.enabled to on.
-{mapping, "wamp.tcp.idle_timeout",
-"bondy_router.wamp_tcp.idle_timeout", [
-{default, "8h"},
-{datatype, [{duration, ms}, {atom, infinity}]}
-]}.
-
-%% @doc Enables or disables the TCP Proxy Protocol. This is used to capture
-%% the source IP address which will be used for matching against RBAC Source
-%% assignments.
-{mapping, "wamp.tcp.proxy_protocol",
-"bondy_router.wamp_tcp.proxy_protocol.enabled", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-%% @doc Defines the mode in which Bondy operates when wamp.tcp.proxy_protocol is
-%% enabled. If 'strict' a connection that is not using the Proxy Protocol or
-%% with invalid headers will be dropped. If 'relaxed' the connection is
-%% always accepted and Bondy will log when there is not Proxy Procotol header
-%% or if it is invalid.
-{mapping, "wamp.tcp.proxy_protocol.mode",
-"bondy_router.wamp_tcp.proxy_protocol.mode", [
-  {datatype, {enum, [strict, relaxed]}},
-  {default, relaxed}
-]}.
-
-
-
-
-
-%% =============================================================================
-%% WAMP RAWSOCKET TLS
-%% =============================================================================
-
-
-
-{mapping, "wamp.tls.enabled",
-"bondy_router.wamp_tls.enabled", [
-  {default, off},
-  {datatype, {flag, on, off}}
-]}.
-
-
-%% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
-%% exposing the WAMP raw socket transport
-{mapping, "wamp.tls.port",
-"bondy_router.wamp_tls.transport_opts.socket_opts.port", [
-  {default, 18085},
-  {validators, ["port_number"]},
-  {datatype, integer}
-]}.
-
-%% @doc wamp.tls.ip is the IP address that Bondy uses for
-%% exposing the WAMP raw socket transport. When the host has many network
-%% interfaces, this option specifies which one to listen on.
-{mapping, "wamp.tls.ip",
-"bondy_router.wamp_tls.transport_opts.ip", [
-  {datatype, string},
-  {validators, ["ip_address"]}
-]}.
-
-%% @doc The IP version to use. Either 4 or 6.
-{mapping, "wamp.tls.ip_version",
-"bondy_router.wamp_tls.transport_opts.socket_opts.ip_version", [
-  {default, "4"},
-  {datatype, string}
-]}.
-
-{translation, "bondy_router.wamp_tls.transport_opts.socket_opts.ip_version",
-  fun(Conf) ->
-    Value =  cuttlefish:conf_get("wamp.tls.ip_version", Conf),
-      try
-        case string:strip(Value) of
-          "4" -> 'inet';
-          "6" -> 'inet6';
-          _ -> throw(invalid_version)
-        end
-      catch
-        throw:invalid_version ->
-          cuttlefish:invalid(
-            "Invalid IP version: "
-            ++ Value
-            ++ " . Value should be 4 or 6."
-          )
-      end
-  end
-}.
-
-%% The ranch acceptors_pool_size for the WAMP raw socket tcp listener
-{mapping, "wamp.tls.acceptors_pool_size",
-"bondy_router.wamp_tls.transport_opts.num_acceptors", [
-  {datatype, integer},
-  {default, 200}
-]}.
-
-%% The ranch max number of connections for the WAMP raw socket tcp listener
-{mapping, "wamp.tls.max_connections",
-"bondy_router.wamp_tls.transport_opts.max_connections", [
-  {datatype, integer},
-  {default, 100000}
-]}.
-
-%% The maximum length that the queue of pending connections can grow to.
-{mapping, "wamp.tls.backlog",
-"bondy_router.wamp_tls.transport_opts.socket_opts.backlog", [
-  {datatype, integer},
-  {default, 1024}
-]}.
-
-
-%% SOCKET OPTS
-
-%% Enables/disables periodic transmission on a connected socket when no other
-%% data is exchanged. If the other end does not respond, the connection is
-%% considered broken and an error message is sent to the controlling process.
-{mapping, "wamp.tls.keepalive",
-"bondy_router.wamp_tls.transport_opts.socket_opts.keepalive", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
-
-
-{mapping, "wamp.tls.linger.timeout",
-"bondy_router.wamp_tls.transport_opts.socket_opts.linger_timeout", [
-  {default, "1s"},
-  {validators, ["duration or -1..0"]},
-  {datatype, [{duration, ms}, integer]}
-]}.
-
-%% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
-%% means that also small amounts of data are sent immediately.
-{mapping, "wamp.tls.nodelay",
-"bondy_router.wamp_tls.transport_opts.socket_opts.nodelay", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
-
-
-%% {mapping, "wamp.tls.reuseaddr",
-%% "bondy_router.wamp_tls.transport_opts.socket_opts.reuseaddr", [
-%%   {datatype, {flag, on, off}},
-%%   {default, on}
-%% ]}.
-
-{mapping, "wamp.tls.reuseport",
-"bondy_router.wamp_tls.transport_opts.socket_opts.reuseport", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-%% The minimum size of the send buffer to use for the socket.
-{mapping, "wamp.tls.sndbuf",
-"bondy_router.wamp_tls.transport_opts.socket_opts.sndbuf", [
-  {datatype, bytesize}
-]}.
-
-%% The minimum size of the receive buffer to use for the socket.
-{mapping, "wamp.tls.recbuf",
-"bondy_router.wamp_tls.transport_opts.socket_opts.recbuf", [
-  {datatype, bytesize}
-]}.
-
-%% The size of the user-level software buffer used by the driver.
-%% Not to be confused with options sndbuf and recbuf, which correspond to the
-%% Kernel socket buffers.
-%% It is recommended to have val(buffer) >= max(val(sndbuf),val(recbuf)) to
-%% avoid performance issues because of unnecessary copying.
-%% val(buffer) is automatically set to the above maximum when values sndbuf or
-%% recbuf are set.
-{mapping, "wamp.tls.buffer",
-"bondy_router.wamp_tls.transport_opts.socket_opts.buffer", [
-  {datatype, bytesize}
-]}.
-
-
-%% @doc Defines if PING control message functionality is enabled or
-%% not. This option affects server (Bondy) initiated pings only. Some clients
-%% might also initiate ping requests and Bondy will always respond to those
-%% even if this option is turned off.
-%% This feature is useful to keep a connection alive and validate the
-%% connection is healthy.
-%% Enabling this feature implies having an additional timer per connection and
-%% this can be a considerable cost for servers that need to handle large
-%% numbers of connections. A better solution in most cases is to let the client
-%% handle pings.
-{mapping, "wamp.tls.ping.enabled",
-"bondy_router.wamp_tls.ping.enabled", [
-{default, on},
-{datatype, {flag, on, off}}
-]}.
-
-%% @doc If wamp.tls.ping.enabled is 'on', this parameter controls the interval
-%% in which Bondy sends WebSockets PING control messages.
-{mapping, "wamp.tls.ping.interval",
-"bondy_router.wamp_tls.ping.interval", [
-{default, "30s"},
-{datatype, {duration, ms}}
-]}.
-
-%% @doc If wamp.tls.ping.enabled is 'on', this parameter controls the time
-%% Bondy will wait for a ping response. Once that time has passed this counts
-%% as a fail attempt (see max_attempts).
-{mapping, "wamp.tls.ping.timeout",
-"bondy_router.wamp_tls.ping.timeout", [
-{default, "10s"},
-{datatype, {duration, ms}}
-]}.
-
-%% @doc If wamp.tls.ping.enabled is 'on', this parameter controls how many
-%% missed pings are considered a timeout. Thus, after this number of attempts
-%% Bondy will drop the connection.
-%% If the value is 'infinity' Bondy will never timeout based on missed pings.
-{mapping,
-"wamp.tls.ping.max_attempts",
-"bondy_router.wamp_tls.ping.max_attempts",
-[
-  {default, 3},
-  {datatype, [integer, {atom, infinity}]}
-]
-}.
-
-%% @doc Drops the connection after a period of inactivity. This option does not
-%% take effect when wamp.tls.ping.enabled is 'on' and wamp.tls.ping.
-%% interval times wamp.tls.ping.max_attempts results in a value higher
-%% than this option.
-%% Notice that for some clients using this option alone is not enough to keep
-%% a connection alive as the client will drop the connection due to inactivity.
-%% If the client supports tls PING control messages, enabled them,
-%% otherwise e.g. web browsers set wamp.tls.ping.enabled to on.
-{mapping, "wamp.tls.idle_timeout",
-"bondy_router.wamp_tls.idle_timeout", [
-{default, "8h"},
-{datatype, [{duration, ms}, {atom, infinity}]}
-]}.
-
-%% @doc Default cert location for https can be overridden
-%% with the wamp.tls config variable, for example:
-{mapping, "wamp.tls.certfile",
-"bondy_router.wamp_tls.transport_opts.socket_opts.certfile", [
-  {datatype, file},
-  {default, "{{platform_etc_dir}}/keycert.pem"}
-]}.
-
-%% @doc Default key location for https can be overridden with the
-%%wamp.tls config variable, for example:
-{mapping, "wamp.tls.keyfile",
-"bondy_router.wamp_tls.transport_opts.socket_opts.keyfile", [
-  {datatype, file},
-  {default, "{{platform_etc_dir}}/key.pem"}
-]}.
-
-%% @doc Default signing authority location for https can be overridden
-%% with the wamp.tls config variable, for example:
-{mapping, "wamp.tls.cacertfile",
-"bondy_router.wamp_tls.transport_opts.socket_opts.cacertfile", [
-  {datatype, file},
-  {default, "{{platform_etc_dir}}/cacert.pem"}
-]}.
-
-%% @doc A comma separate list of TLS protocol versions that will be supported
-%% At the moment Bondy only supports versions 1.2 and 1.3
-{mapping, "wamp.tls.versions",
-"bondy_router.wamp_tls.transport_opts.socket_opts.versions", [
-  {datatype, string},
-  {default, "1.3"}
-]}.
-
-
-{translation, "bondy_router.wamp_tls.transport_opts.socket_opts.versions",
-  fun(Conf) ->
-    case cuttlefish:conf_get("wamp.tls.versions", Conf) of
-        Value when is_list(Value) ->
-          try
-            [
-              begin
-                case string:strip(Version) of
-                  "1.2" -> 'tlsv1.2';
-                  "1.3" -> 'tlsv1.3';
-                  _ -> throw({invalid_version, Version})
-                end
-              end || Version <- string:split(Value, ",")
-            ]
-          catch
-            throw:{invalid_version, Version} ->
-              cuttlefish:invalid("invalid TLS version " ++ Version)
-          end;
-        _ ->
-            cuttlefish:invalid(
-              "value should be string containing valid comma separated version numbers e.g. \"1.2, 1.3\""
-            )
-    end
-  end
-}.
-
-%% @doc SSL verification mode for WAMP TLS connections
-{mapping, "wamp.tls.verify",
-"bondy_router.wamp_tls.transport_opts.socket_opts.verify", [
-  {datatype, {enum, [verify_peer, verify_none]}},
-  {default, verify_none}
-]}.
-
-%% @doc Whether to reject connections where the client does not provide a
-%% certificate when verify is set to verify_peer.
-{mapping, "wamp.tls.fail_if_no_peer_cert",
-"bondy_router.wamp_tls.transport_opts.socket_opts.fail_if_no_peer_cert", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-%% @doc Enables or disables the TCP Proxy Protocol. This is used to capture
-%% the source IP address which will be used for matching against RBAC Source
-%% assignments.
-{mapping, "wamp.tls.proxy_protocol",
-"bondy_router.wamp_tls.proxy_protocol.enabled", [
-  {datatype, {flag, on, off}},
-  {default, off}
-]}.
-
-%% @doc Defines the mode in which Bondy operates when wamp.tls.proxy_protocol is
-%% enabled. If 'strict' a connection that is not using the Proxy Protocol or
-%% with invalid headers will be dropped. If 'relaxed' the connection is
-%% always accepted and Bondy will log when there is not Proxy Procotol header
-%% or if it is invalid.
-{mapping, "wamp.tls.proxy_protocol.mode",
-"bondy_router.wamp_tls.proxy_protocol.mode", [
-  {datatype, {enum, [strict, relaxed]}},
-  {default, relaxed}
 ]}.
 
 

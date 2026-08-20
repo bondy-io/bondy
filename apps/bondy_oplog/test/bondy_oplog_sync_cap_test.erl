@@ -190,7 +190,12 @@ alarm_clears() ->
     clear_all(bondy_oplog_sync_oversized_items),
     ok = bondy_oplog_sync_metrics:report_oversized(cell, {i, k}, 99999, 1000),
     Total = bondy_oplog_sync_metrics:oversized_total(),
-    _ = catch alarm_handler:set_alarm({bondy_oplog_sync_oversized_items, x}),
+    _ =
+        try
+            alarm_handler:set_alarm({bondy_oplog_sync_oversized_items, x})
+        catch
+            _:_ -> ok
+        end,
     %% Alarmed, last increase older than the clear window (a real monotonic
     %% timestamp), no new skips → clears.
     Past = erlang:monotonic_time(millisecond) - 400000,
@@ -214,7 +219,12 @@ alarm_active(Id) ->
 clear_all(Id) ->
     case alarm_active(Id) of
         true ->
-            _ = catch alarm_handler:clear_alarm(Id),
+            _ =
+                try
+                    alarm_handler:clear_alarm(Id)
+                catch
+                    _:_ -> ok
+                end,
             clear_all(Id);
         false ->
             ok
@@ -231,7 +241,12 @@ alarm_setup() ->
     ok.
 
 alarm_cleanup(_) ->
-    _ = catch alarm_handler:clear_alarm(bondy_oplog_sync_oversized_items),
+    _ =
+        try
+            alarm_handler:clear_alarm(bondy_oplog_sync_oversized_items)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% =============================================================================

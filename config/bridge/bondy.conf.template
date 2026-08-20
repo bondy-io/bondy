@@ -41,129 +41,84 @@ shutdown.grace_period = 30s
 ## ADMIN HTTP/S API
 ## =============================================================================
 
-admin_api.http.enabled = on
-admin_api.http.acceptors_pool_size = 100
-admin_api.http.backlog = 1024
-admin_api.http.keepalive = off
-admin_api.http.max_connections = 10000
-admin_api.http.nodelay = on
+## `admin` is the reserved name for the node's administrable listener: an
+## operator declares it under this name rather than the historical
+## `admin_api_http`, or the manager injects its own default in its place.
+##
+## Every setting this listener needs is restated under `listeners.admin.*`,
+## because config is read by a listener's CURRENT name and nothing reads
+## `admin_api_http`'s historical block any more. The socket options go
+## directly on `listeners.admin.*`; the Cowboy ones go under
+## `listeners.admin.http.*`.
+##
+## `http.idle_timeout` and `http.active_n` are here to preserve what this
+## listener already had, because Cowboy's own defaults differ
+## — 60s rather than 15s, and `active_n` 1 rather than 100
+## (`cowboy_http.erl:214,336`). Leaving them out silently changed both.
+listeners.admin.transport = tcp
+listeners.admin.protocol = http
+listeners.admin.port = 18081
+listeners.admin.start_phase = early
+listeners.admin.services = admin_api, wamp_ws, admin, metrics
+listeners.admin.acceptors_pool_size = 100
+listeners.admin.max_connections = 10000
+listeners.admin.backlog = 1024
+listeners.admin.keepalive = off
+listeners.admin.nodelay = on
+listeners.admin.http.idle_timeout = 15s
+listeners.admin.http.active_n = 100
 
+listeners.admin_api_https.transport = tls
+listeners.admin_api_https.protocol = http
+listeners.admin_api_https.port = 18084
+listeners.admin_api_https.start_phase = early
+listeners.admin_api_https.services = admin_api, wamp_ws, admin, metrics
+listeners.admin_api_https.enabled = off
 
-admin_api.https.enabled = off
-admin_api.https.acceptors_pool_size = 100
-admin_api.https.keepalive = off
-admin_api.https.max_connections = 10000
-admin_api.https.versions = 1.3
-# admin_api.https.cacertfile = ${BONDY_ETC_DIR}/ssl/cacert.pem
-# admin_api.https.certfile = ${BONDY_ETC_DIR}/ssl/keycert.pem
-# admin_api.https.keyfile = ${BONDY_ETC_DIR}/ssl/key.pem
+## No certificate: a disabled listener is not checked for one. Uncomment the
+## three below and point them at a real certificate before setting
+## `enabled = on`.
+listeners.admin_api_https.acceptors_pool_size = 100
+listeners.admin_api_https.keepalive = off
+listeners.admin_api_https.max_connections = 10000
+listeners.admin_api_https.tls.versions = 1.3
+# listeners.admin_api_https.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/cacert.pem
+# listeners.admin_api_https.tls.certfile = ${BONDY_ETC_DIR}/ssl/keycert.pem
+# listeners.admin_api_https.tls.keyfile = ${BONDY_ETC_DIR}/ssl/key.pem
 
 ## =============================================================================
 ## API GATEWAY
 ## =============================================================================
 
-##
-## Default: on
-##
-## Acceptable values:
-##   - on or off
-admin_api.http.enabled = on
-
-##
-## Default: 200
-##
-## Acceptable values:
-##   - an integer
-# admin_api.http.acceptors_pool_size = 200
-
-##
-## Default: 250000
-##
-## Acceptable values:
-##   - an integer
-# admin_api.http.max_connections = 250000
-
-##
-## Default: 1024
-##
-## Acceptable values:
-##   - an integer
-# admin_api.http.backlog = 1024
-
-##
-## Default: off
-##
-## Acceptable values:
-##   - on or off
-# admin_api.http.keepalive = off
-
-##
-## Default: on
-##
-## Acceptable values:
-##   - on or off
-# admin_api.http.nodelay = on
-
 # api_gateway.config_file = ${BONDY_ETC_DIR}/api_gateway_config.json
 
+listeners.api_gateway_http.transport = tcp
+listeners.api_gateway_http.protocol = http
+listeners.api_gateway_http.port = 18080
+listeners.api_gateway_http.services = api_gateway, wamp_ws, wamp_sse, wamp_longpoll
 
+listeners.api_gateway_http.acceptors_pool_size = 50
+listeners.api_gateway_http.max_connections = 10000
+listeners.api_gateway_http.backlog = 4096
+listeners.api_gateway_http.keepalive = off
+listeners.api_gateway_http.nodelay = on
 
-##
-## Default: on
-##
-## Acceptable values:
-##   - on or off
-api_gateway.http.enabled = on
+listeners.api_gateway_https.transport = tls
+listeners.api_gateway_https.protocol = http
+listeners.api_gateway_https.port = 18083
+listeners.api_gateway_https.services = api_gateway, wamp_ws, wamp_sse, wamp_longpoll
+listeners.api_gateway_https.enabled = off
 
-##
-## Default: 200
-##
-## Acceptable values:
-##   - an integer
-api_gateway.http.acceptors_pool_size = 50
-
-##
-## Default: 500000
-##
-## Acceptable values:
-##   - an integer
-api_gateway.http.max_connections = 10000
-
-##
-## Default: 4096
-##
-## Acceptable values:
-##   - an integer
-api_gateway.http.backlog = 4096
-
-## Enables/disables periodic transmission on a connected socket when no
-## other data is exchanged. If the other end does not respond, the connection is
-## considered broken and an error message is sent to the controlling process.
-##
-## Default: off
-##
-## Acceptable values:
-##   - on or off
-api_gateway.http.keepalive = off
-
-##
-## Default: on
-##
-## Acceptable values:
-##   - on or off
-api_gateway.http.nodelay = on
-
-
-api_gateway.https.enabled = off
-api_gateway.https.acceptors_pool_size = 50
-api_gateway.https.backlog = 4096
-api_gateway.https.keepalive = off
-api_gateway.https.max_connections = 10000
-api_gateway.https.nodelay = off
-api_gateway.https.versions = 1.3
-# api_gateway.https.cacertfile = ${BONDY_ETC_DIR}/ssl/cacert.pem
-# api_gateway.https.certfile = ${BONDY_ETC_DIR}/ssl/keycert.pem
-# api_gateway.https.keyfile = ${BONDY_ETC_DIR}/ssl/key.pem
+listeners.api_gateway_https.acceptors_pool_size = 50
+listeners.api_gateway_https.backlog = 4096
+listeners.api_gateway_https.keepalive = off
+listeners.api_gateway_https.max_connections = 10000
+listeners.api_gateway_https.nodelay = off
+listeners.api_gateway_https.tls.versions = 1.3
+## No certificate, for the same reason as `admin_api_https` above.
+# listeners.api_gateway_https.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/cacert.pem
+# listeners.api_gateway_https.tls.certfile = ${BONDY_ETC_DIR}/ssl/keycert.pem
+# listeners.api_gateway_https.tls.keyfile = ${BONDY_ETC_DIR}/ssl/key.pem
 
 
 ## =============================================================================
@@ -525,145 +480,31 @@ wamp.serializers.bert = 4
 
 
 
-##
-## Default: on
-##
-## Acceptable values:
-##   - on or off
-wamp.tcp.enabled = on
+listeners.wamp_tcp.transport = tcp
+listeners.wamp_tcp.protocol = wamp_rawsocket
+listeners.wamp_tcp.port = 18082
 
-## api_gateway.ssl.port is the TCP port that Bondy uses for
-## exposing the WAMP raw socket transport
-##
-## Default: 18082
-##
-## Acceptable values:
-##   - an integer
-wamp.tcp.port = 18082
+listeners.wamp_tcp.acceptors_pool_size = 50
+listeners.wamp_tcp.max_connections = 1000
+listeners.wamp_tcp.backlog = 1024
+listeners.wamp_tcp.keepalive = on
+listeners.wamp_tcp.nodelay = on
 
-##
-## Default: 200
-##
-## Acceptable values:
-##   - an integer
-wamp.tcp.acceptors_pool_size = 50
+listeners.wamp_tls.transport = tls
+listeners.wamp_tls.protocol = wamp_rawsocket
+listeners.wamp_tls.port = 18085
+listeners.wamp_tls.enabled = off
 
-##
-## Default: 100000
-##
-## Acceptable values:
-##   - an integer
-wamp.tcp.max_connections = 1000
-
-##
-## Default: 1024
-##
-## Acceptable values:
-##   - an integer
-wamp.tcp.backlog = 1024
-
-##
-## Default: on
-##
-## Acceptable values:
-##   - on or off
-wamp.tcp.keepalive = on
-
-##
-## Default: on
-##
-## Acceptable values:
-##   - on or off
-wamp.tcp.nodelay = on
-
-
-##
-## Default: off
-##
-## Acceptable values:
-##   - on or off
-wamp.tls.enabled = off
-
-##
-## Default: 200
-##
-## Acceptable values:
-##   - an integer
-wamp.tls.acceptors_pool_size = 200
-
-##
-## Default: 1024
-##
-## Acceptable values:
-##   - an integer
-wamp.tls.backlog = 1024
-
-## Default signing authority location for https can be overridden
-## with the wamp.tls config variable, for example:
-##
-## Default: ./etc/cacert.pem
-##
-## Acceptable values:
-##   - the path to a file
-# wamp.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/cacert.pem
-
-## Default cert location for https can be overridden
-## with the wamp.tls config variable, for example:
-##
-## Default: ./etc/keycert.pem
-##
-## Acceptable values:
-##   - the path to a file
-# wamp.tls.certfile = ${BONDY_ETC_DIR}/ssl/keycert.pem
-
-## Default key location for https can be overridden with the
-## wamp.tls config variable, for example:
-##
-## Default: ./etc/key.pem
-##
-## Acceptable values:
-##   - the path to a file
-# wamp.tls.keyfile = ${BONDY_ETC_DIR}/ssl/key.pem
-
-##
-## Default: on
-##
-## Acceptable values:
-##   - on or off
-wamp.tls.keepalive = off
-
-##
-## Default: 100000
-##
-## Acceptable values:
-##   - an integer
-wamp.tls.max_connections = 100000
-
-##
-## Default: on
-##
-## Acceptable values:
-##   - on or off
-wamp.tls.nodelay = off
-
-## api_gateway.ssl.port is the TCP port that Bondy uses for
-## exposing the WAMP raw socket transport
-##
-## Default: 18085
-##
-## Acceptable values:
-##   - an integer
-wamp.tls.port = 18085
-
-
-## A comma separate list of TLS protocol versions that will be supported
-## At the moment Bondy only supports versions 1.2 and 1.3
-##
-## Default: 1.3
-##
-## Acceptable values:
-##   - text
-wamp.tls.versions = 1.3
+listeners.wamp_tls.acceptors_pool_size = 200
+listeners.wamp_tls.backlog = 1024
+## No certificate, for the same reason as `admin_api_https` above.
+# listeners.wamp_tls.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/cacert.pem
+# listeners.wamp_tls.tls.certfile = ${BONDY_ETC_DIR}/ssl/keycert.pem
+# listeners.wamp_tls.tls.keyfile = ${BONDY_ETC_DIR}/ssl/key.pem
+listeners.wamp_tls.keepalive = off
+listeners.wamp_tls.max_connections = 100000
+listeners.wamp_tls.nodelay = off
+listeners.wamp_tls.tls.versions = 1.3
 
 ## Defines if Websockets PING control message functionality is enabled or
 ## not. This option affects server (Bondy) initiated pings only. Some clients
@@ -679,14 +520,15 @@ wamp.tls.versions = 1.3
 ##   - on or off
 wamp.websocket.ping.enabled = on
 
-## If wamp.websocket.ping.enabled is 'on', this value controls the interval
-## in which Bondy sends WebSockets PING control messages.
+## If wamp.websocket.ping.enabled is 'on', this value controls how long a
+## connection may sit idle before Bondy sends a WebSockets PING control
+## message.
 ##
-## Default: 30s
+## Default: 20s
 ##
 ## Acceptable values:
 ##   - a time duration with units, e.g. '10s' for 10 seconds
-wamp.websocket.ping.interval = 30s
+wamp.websocket.ping.idle_timeout = 30s
 
 ## If wamp.websocket.ping.enabled is 'on', this value controls how many
 ## missed pings are considered a timeout. Thus, after this number of attempts
@@ -719,12 +561,19 @@ wamp.websocket.idle_timeout = 8h
 
 
 ##
-## Default: infinity
+## Default: 4MB
 ##
 ## Acceptable values:
-##   - the text "infinity"
-##   - an integer
-wamp.websocket.max_frame_size = infinity
+##   - a byte size with units, e.g. 10GB
+##
+## Neither the bare word "infinity" nor `0` means unbounded here, despite
+## what an older comment in this schema mapping claims: `0` is handed
+## straight to Cowboy's `max_frame_size` websocket option, and Cowboy closes
+## a connection on any frame whose length exceeds it — checked directly
+## against `cowboy_websocket:parse_header/3`, `Len > MaxFrameSize` with
+## `MaxFrameSize = 0` closes on the first non-empty frame. There is no valid
+## encoding of "no limit" for this key; this is a generous ceiling instead.
+wamp.websocket.max_frame_size = 64MB
 
 ##
 ## Default: off
@@ -931,20 +780,6 @@ cluster.peer_discovery.enabled = off
 ## Acceptable values:
 ##   - a time duration with units, e.g. '10s' for 10 seconds
 cluster.peer_discovery.initial_delay = 30s
-
-##
-## Default: off
-##
-## Acceptable values:
-##   - on or off
-cluster.peer_discovery.automatic_join = off
-
-##
-## Default: 5s
-##
-## Acceptable values:
-##   - a time duration with units, e.g. '10s' for 10 seconds
-cluster.peer_discovery.join_retry_interval = 5s
 
 ##
 ## Default: 10s
@@ -1757,276 +1592,31 @@ log.handlers.id.formatter.time_designator = T
 ## =============================================================================
 
 
-## Enables or disables Bondy edge nodes to connect to Bondy.
-##
-## Default: off
-##
-## Acceptable values:
-##   - on or off
-bridge.listener.tcp = off
+listeners.bridge_relay_tcp.transport = tcp
+listeners.bridge_relay_tcp.protocol = bridge_relay
+listeners.bridge_relay_tcp.port = 18092
+listeners.bridge_relay_tcp.enabled = off
 
-## TCP port that Bondy edge nodes will use to connect to Bondy.
-##
-## Default: 18092
-##
-## Acceptable values:
-##   - an integer
-# bridge.listener.tcp.port = 18092
+listeners.bridge_relay_tls.transport = tls
+listeners.bridge_relay_tls.protocol = bridge_relay
+listeners.bridge_relay_tls.port = 18093
+listeners.bridge_relay_tls.enabled = off
 
-##
-## Default: 200
-##
-## Acceptable values:
-##   - an integer
-# bridge.listener.tcp.acceptors_pool_size = 200
-
-##
-## Default: 100000
-##
-## Acceptable values:
-##   - an integer
-# bridge.listener.tcp.max_connections = 100000
-
-##
-## Default: 1024
-##
-## Acceptable values:
-##   - an integer
-# bridge.listener.tcp.backlog = 1024
-
-##
-## Default: on
-##
-## Acceptable values:
-##   - on or off
-# bridge.listener.tcp.keepalive = on
-
-##
-## Default: on
-##
-## Acceptable values:
-##   - on or off
-# bridge.listener.tcp.nodelay = on
-
-## Defines if  PING control message functionality is enabled or
-## not. This option affects server (Bondy) initiated pings only. Bondy Edge
-## might also initiate ping requests and Bondy will always respond to those
-## even if this option is turned off.
-## This feature is useful to keep a connection alive and validate the
-## connection is healthy.
-##
-## Default: on
-##
-## Acceptable values:
-##   - on or off
-# bridge.listener.tcp.ping = on
-
-## If bridge.listener.tcp.ping.enabled is 'on', this value controls the interval
-## in which Bondy sends PING control messages to edge peers.
-##
-## Default: 30s
-##
-## Acceptable values:
-##   - a time duration with units, e.g. '10s' for 10 seconds
-# bridge.listener.tcp.ping.interval = 30s
-
-## If bridge.listener.tcp.ping.enabled is 'on', this value controls how many
-## missed pings are considered a timeout. Thus, after this number of attempts
-## Bondy will drop the connection.
-## If the value is 'infinity' Bondy will never timeout based on missed pings.
-##
-## Default: 3
-##
-## Acceptable values:
-##   - an integer
-##   - the text "infinity"
-# bridge.listener.tcp.ping.max_retries = 3
-
-## Drops the connection after a period of inactivity. This option does not
-## take effect when bridge.listener.tcp.ping.enabled is 'on'
-## and bridge.listener.tcp.ping.interval times
-## bridge.listener.tcp.ping.max_retries results in a value higher than this
-## option.
-## Notice that for some clients using this option alone is not enough to keep
-## a connection alive as the client will drop the connection due to inactivity.
-##
-## Default: 8h
-##
-## Acceptable values:
-##   - a time duration with units, e.g. '10s' for 10 seconds
-##   - the text "infinity"
-# bridge.listener.tcp.idle_timeout = 8h
-
-##
-## Default: infinity
-##
-## Acceptable values:
-##   - the text "infinity"
-##   - an integer
-# bridge.listener.tcp.max_frame_size = infinity
-
-## Enables or disables Bondy edge nodes to connect to Bondy.
-##
-## Default: off
-##
-## Acceptable values:
-##   - on or off
-bridge.listener.tls = off
-
-## TCP port that Bondy edge nodes will use to connect to Bondy.
-##
-## Default: 18093
-##
-## Acceptable values:
-##   - an integer
-bridge.listener.tls.port = 18093
-
-##
-## Default: 200
-##
-## Acceptable values:
-##   - an integer
-bridge.listener.tls.acceptors_pool_size = 200
-
-##
-## Default: 100000
-##
-## Acceptable values:
-##   - an integer
-bridge.listener.tls.max_connections = 100000
-
-##
-## Default: 1024
-##
-## Acceptable values:
-##   - an integer
-bridge.listener.tls.backlog = 1024
-
-##
-## Default: on
-##
-## Acceptable values:
-##   - on or off
-bridge.listener.tls.keepalive = off
-
-##
-## Default: on
-##
-## Acceptable values:
-##   - on or off
-bridge.listener.tls.nodelay = off
-
-## Defines if  PING control message functionality is enabled or
-## not. This option affects server (Bondy) initiated pings only. Bondy Edge
-## might also initiate ping requests and Bondy will always respond to those
-## even if this option is turned off.
-## This feature is useful to keep a connection alive and validate the
-## connection is healthy.
-##
-## Default: on
-##
-## Acceptable values:
-##   - on or off
-bridge.listener.tls.ping = off
-
-## If bridge.listener.tls.ping.enabled is 'on', this value controls the interval
-## in which Bondy sends PING control messages to edge peers.
-##
-## Default: 30s
-##
-## Acceptable values:
-##   - a time duration with units, e.g. '10s' for 10 seconds
-bridge.listener.tls.ping.interval = 30s
-
-## If bridge.listener.tls.ping.enabled is 'on', this value controls how many
-## missed pings are considered a timeout. Thus, after this number of attempts
-## Bondy will drop the connection.
-## If the value is 'infinity' Bondy will never timeout based on missed pings.
-##
-## Default: 3
-##
-## Acceptable values:
-##   - an integer
-##   - the text "infinity"
-bridge.listener.tls.ping.max_retries = 3
-
-## Drops the connection after a period of inactivity. This option does not
-## take effect when bridge.listener.tls.ping.enabled is 'on' and bridge.listener.tls.ping.
-## interval times bridge.listener.tls.ping.max_retries results in a value higher
-## than this option.
-## Notice that for some clients using this option alone is not enough to keep
-## a connection alive as the client will drop the connection due to inactivity.
-##
-## Default: 8h
-##
-## Acceptable values:
-##   - a time duration with units, e.g. '10s' for 10 seconds
-##   - the text "infinity"
-bridge.listener.tls.idle_timeout = 8h
-
-##
-## Default: infinity
-##
-## Acceptable values:
-##   - the text "infinity"
-##   - an integer
-bridge.listener.tls.max_frame_size = infinity
-
-## Default cert location for https can be overridden
-## with the bridge.tls config variable, for example:
-##
-## Default: ./etc/keycert.pem
-##
-## Acceptable values:
-##   - the path to a file
-# bridge.listener.tls.certfile = ${BONDY_ETC_DIR}/ssl/keycert.pem
-
-## Default key location for https can be overridden with the
-## bridge.tls config variable, for example:
-##
-## Default: ./etc/key.pem
-##
-## Acceptable values:
-##   - the path to a file
-# bridge.listener.tls.keyfile = ${BONDY_ETC_DIR}/ssl/key.pem
-
-## Default signing authority location for https can be overridden
-## with the bridge.tls config variable, for example:
-##
-## Default: ./etc/cacert.pem
-##
-## Acceptable values:
-##   - the path to a file
-# bridge.listener.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/cacert.pem
-
-## A comma separate list of TLS protocol versions that will be supported
-## At the moment Bondy only supports versions 1.2 and 1.3
-##
-## Default: 1.3
-##
-## Acceptable values:
-##   - text
-bridge.listener.tls.versions = 1.3
-
-
-bridge.listener.tls.verify = verify_none
-
-
-## =============================================================================
-## STORE
-## =============================================================================
-
-## This parameter defines the percentage of total server memory
-## to assign to LevelDB. LevelDB will dynamically adjust its internal
-## cache sizes to stay within this size.  The memory size can
-## alternately be assigned as a byte count via leveldb.maximum_memory
-## instead.
-##
-## Default: 70
-##
-## Acceptable values:
-##   - an integer
-leveldb.maximum_memory.percent = 70
+listeners.bridge_relay_tls.acceptors_pool_size = 200
+listeners.bridge_relay_tls.max_connections = 100000
+listeners.bridge_relay_tls.backlog = 1024
+listeners.bridge_relay_tls.keepalive = off
+listeners.bridge_relay_tls.nodelay = off
+listeners.bridge_relay_tls.ping.enabled = off
+listeners.bridge_relay_tls.ping.idle_timeout = 30s
+listeners.bridge_relay_tls.ping.max_attempts = 3
+listeners.bridge_relay_tls.idle_timeout = 8h
+## No certificate, for the same reason as `admin_api_https` above.
+# listeners.bridge_relay_tls.tls.certfile = ${BONDY_ETC_DIR}/ssl/keycert.pem
+# listeners.bridge_relay_tls.tls.keyfile = ${BONDY_ETC_DIR}/ssl/key.pem
+# listeners.bridge_relay_tls.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/cacert.pem
+listeners.bridge_relay_tls.tls.versions = 1.3
+listeners.bridge_relay_tls.tls.verify = verify_none
 
 
 ## =============================================================================
@@ -2058,13 +1648,15 @@ load_regulation.session_manager.pool.size = 50
 ## ERLANG VM
 ## =============================================================================
 
-erlang.async_threads = 64
-erlang.max_ports = 500000
-erlang.process_limit = 2000000
-erlang.distribution_buffer_size = 32MB
-erlang.time_correction = on
-erlang.time_correction.warp_mode = multi_time_warp
+## Every key here lands in etc/generated/vm.generated.args, which vm.args
+## pulls in with -args_file.
+vm.async_thread.number = 64
+vm.port.limit = 500000
+vm.process.limit = 2000000
+vm.distribution.buffer_size = 32MB
+vm.time_correction = on
+vm.time_correction.warp_mode = multi_time_warp
 
 ## The following is required when running in Docker / K8s
 ## Refer to https://adoptingerlang.org/docs/production/kubernetes/
-erlang.sbwt = none
+vm.cpu.scheduler.busy_wait_threshold = none

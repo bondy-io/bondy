@@ -100,22 +100,36 @@ init_per_suite(Config) ->
     [{port, Port}, {base_url, BaseUrl}, {pool_sup, PoolSup} | Config].
 
 end_per_suite(_Config) ->
-    catch meck:unload(erlcloud_sm),
-    catch meck:unload(erlcloud_aws),
+    try
+        meck:unload(erlcloud_sm)
+    catch
+        _:_ -> ok
+    end,
+    try
+        meck:unload(erlcloud_aws)
+    catch
+        _:_ -> ok
+    end,
     mock_auth_http_server:stop(),
     ok.
 
 init_per_testcase(_TC, Config) ->
     Port = ?config(port, Config),
-    case catch ranch:get_port(mock_auth_http_listener) of
+    try ranch:get_port(mock_auth_http_listener) of
         Port -> ok;
         _ -> {ok, _} = mock_auth_http_server:start(#{port => Port})
+    catch
+        _:_ -> {ok, _} = mock_auth_http_server:start(#{port => Port})
     end,
     mock_auth_http_server:reset(),
     Config.
 
 end_per_testcase(_TC, _Config) ->
-    catch gen_server:stop(bondy_http_connector_manager),
+    try
+        gen_server:stop(bondy_http_connector_manager)
+    catch
+        _:_ -> ok
+    end,
     ok = application:unset_env(bondy_http_connector, services),
     stop_all_pools(),
     ok.
@@ -146,7 +160,11 @@ stop_all_pools() ->
             lists:foreach(
                 fun
                     ({_, Pid, _, _}) when is_pid(Pid) ->
-                        catch gen_server:stop(Pid);
+                        try
+                            gen_server:stop(Pid)
+                        catch
+                            _:_ -> ok
+                        end;
                     (_) ->
                         ok
                 end,

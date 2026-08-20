@@ -37,7 +37,14 @@ setup() ->
     ok.
 
 cleanup(_) ->
-    [catch bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
+    [
+        try
+            bondy_oplog:stop_instance(I)
+        catch
+            _:_ -> ok
+        end
+     || I <- bondy_oplog:list_instances()
+    ],
     ok.
 
 oldstate_cache_test_() ->
@@ -315,9 +322,18 @@ open_db(Name, Fold, CacheOn) ->
     {Db, Sup, Dir}.
 
 close_db(Db, Sup, Dir) ->
-    _ = catch bondy_db:close(Db),
+    _ =
+        try
+            bondy_db:close(Db)
+        catch
+            _:_ -> ok
+        end,
     _ = [
-        catch bondy_oplog:stop_instance(I)
+        try
+            bondy_oplog:stop_instance(I)
+        catch
+            _:_ -> ok
+        end
      || I <- bondy_oplog:list_instances()
     ],
     case is_process_alive(Sup) of
@@ -334,7 +350,11 @@ with_cache_counter(Fun) ->
     ets:insert(Tab, [{hit, 0}, {miss, 0}]),
     HandlerId = {?MODULE, make_ref()},
     Handler = fun(_E, _M, #{result := R}, _Cfg) ->
-        catch ets:update_counter(Tab, R, 1)
+        try
+            ets:update_counter(Tab, R, 1)
+        catch
+            _:_ -> ok
+        end
     end,
     ok = telemetry:attach(
         HandlerId, [bondy_oplog, applier, oldstate_cache], Handler, undefined
@@ -384,8 +404,18 @@ setup_cached_cell_instance() ->
     {Id, NS, Proj}.
 
 teardown_cell_instance(Id, NS) ->
-    _ = catch bondy_oplog:stop_instance(Id),
-    _ = catch bondy_oplog_core_registry:unregister(NS, primary, 0),
+    _ =
+        try
+            bondy_oplog:stop_instance(Id)
+        catch
+            _:_ -> ok
+        end,
+    _ =
+        try
+            bondy_oplog_core_registry:unregister(NS, primary, 0)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% Build a catalogue cell `{Bucket, Key, Frame}` for the LWW fold at a
@@ -424,5 +454,10 @@ make_tempdir() ->
     Base.
 
 rmrf(Dir) ->
-    _ = catch file:del_dir_r(Dir),
+    _ =
+        try
+            file:del_dir_r(Dir)
+        catch
+            _:_ -> ok
+        end,
     ok.

@@ -243,8 +243,16 @@ mk_counter_pair() ->
     {A, B}.
 
 stop_pair(A, B) ->
-    catch bondy_oplog:stop_instance(A),
-    catch bondy_oplog:stop_instance(B),
+    try
+        bondy_oplog:stop_instance(A)
+    catch
+        _:_ -> ok
+    end,
+    try
+        bondy_oplog:stop_instance(B)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 distinct_origin_opts() ->

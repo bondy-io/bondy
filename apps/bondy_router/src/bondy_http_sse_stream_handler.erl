@@ -16,8 +16,9 @@ Messages arrive via two paths:
 2. Async messages (EVENT, INVOCATION, etc.) — drained from the transport queue
    on `drain_queue` notifications
 
-Keepalive SSE comments are sent periodically (default 15s) to prevent
-intermediaries from closing the connection.
+Keepalive SSE comments are sent periodically to prevent intermediaries from
+closing the connection, unless the listener's resolved `sse.ping.enabled` is
+`false`. The interval is the listener's resolved `sse.ping.interval`.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -30,6 +31,9 @@ intermediaries from closing the connection.
     session_pid :: pid(),
     session_mon :: reference(),
     encoding :: encoding(),
+    %% `undefined' when the listener's resolved `ping.enabled' is `false':
+    %% no keepalive timer is ever scheduled for this connection.
+    keepalive_interval :: optional(pos_integer()),
     keepalive_ref :: optional(reference())
 }).
 
@@ -45,6 +49,10 @@ intermediaries from closing the connection.
 %% =============================================================================
 
 init(Req0, Opts) ->
+    %% The route state is built once per listener by
+    %% `bondy_http_services:carrier_state/2', which always sets `config', so
+    %% this performs no configuration lookup per connection.
+    Config = maps:get(config, Opts),
     CorsConfig = bondy_http_cors:config_from_req(Req0),
     Req0a = bondy_http_cors:set_headers(Req0, CorsConfig),
     Req1 = bondy_http_utils:set_all_headers(Req0a),
@@ -98,13 +106,15 @@ init(Req0, Opts) ->
                     },
                     Req = cowboy_req:stream_reply(200, Headers, Req1),
 
-                    IdleTimeout = bondy_config:get(
-                        [wamp_sse, idle_timeout],
-                        timer:minutes(10)
+                    %% Absent from the resolved config on both the listener
+                    %% and the global sides, so this default matches what
+                    %% this handler always used before its idle timeout was
+                    %% wired to `bondy_listener_config'.
+                    IdleTimeout = maps:get(
+                        idle_timeout, Config, timer:minutes(10)
                     ),
-                    ResetOnSend = bondy_config:get(
-                        [wamp_sse, reset_idle_timeout_on_send],
-                        true
+                    ResetOnSend = maps:get(
+                        reset_idle_timeout_on_send, Config, true
                     ),
                     ok = cowboy_req:cast(
                         {set_options, #{
@@ -116,15 +126,15 @@ init(Req0, Opts) ->
 
                     %% Schedule initial drain and keepalive
                     self() ! drain_queue,
-                    KeepaliveRef = schedule_keepalive(),
 
-                    State = #state{
+                    State0 = #state{
                         transport_id = TransportId,
                         session_pid = SessionPid,
                         session_mon = MonRef,
                         encoding = Encoding,
-                        keepalive_ref = KeepaliveRef
+                        keepalive_interval = keepalive_interval(Config)
                     },
+                    State = schedule_keepalive(State0),
 
                     {cowboy_loop, Req, State}
             end
@@ -157,8 +167,7 @@ info(keepalive, Req, State) ->
         nofin,
         Req
     ),
-    KeepaliveRef = schedule_keepalive(),
-    {ok, Req, State#state{keepalive_ref = KeepaliveRef}};
+    {ok, Req, schedule_keepalive(State)};
 info(
     {'DOWN', Ref, process, Pid, _Reason},
     Req,
@@ -201,7 +210,7 @@ validate_sse_auth(SessionPid, Req) ->
         undefined ->
             ok;
         #{authrealm := Authrealm} = StoredClaims ->
-            Cookies = cowboy_req:parse_cookies(Req),
+            Cookies = bondy_http_utils:parse_cookies(Req),
             CookieName = bondy_http_utils:ticket_cookie_name(Authrealm),
             case lists:keyfind(CookieName, 1, Cookies) of
                 false ->
@@ -229,11 +238,33 @@ validate_sse_auth(SessionPid, Req) ->
     end.
 
 %% @private
-schedule_keepalive() ->
-    Interval = bondy_config:get(
-        [http_sse, keepalive_interval], ?DEFAULT_KEEPALIVE_INTERVAL
-    ),
-    erlang:send_after(Interval, self(), keepalive).
+%% `ping.enabled'/`ping.interval' resolve as a pair: `assert_ping_complete/3'
+%% (`bondy_listener_config.erl') aborts boot on a listener whose resolved
+%% config has `ping.enabled =:= true' without `ping.interval', so the only
+%% shapes reaching here are `#{enabled := false}' or a map carrying both. The
+%% one case that map cannot produce is total absence of the `ping' key
+%% itself — nothing anywhere ever set `sse.ping.*' for this listener — which
+%% this default treats as "on", at the interval this module always used
+%% before that key existed: the keepalive was previously unconditional, so
+%% this is the one case where preserving that behaviour, rather than the
+%% narrower "off", keeps a deployment that upgrades without touching
+%% `bondy.conf' from losing its keepalive. Production never reaches this
+%% default: `wamp.sse.ping.enabled' carries its own schema default
+%% (`schema/bondy.schema:6091', `{default, on}'), so the global always
+%% supplies the key when a listener does not.
+keepalive_interval(Config) ->
+    Default = #{enabled => true, interval => ?DEFAULT_KEEPALIVE_INTERVAL},
+    case maps:get(ping, Config, Default) of
+        #{enabled := true, interval := Interval} -> Interval;
+        #{enabled := false} -> undefined
+    end.
+
+%% @private
+schedule_keepalive(#state{keepalive_interval = undefined} = State) ->
+    State;
+schedule_keepalive(#state{keepalive_interval = Interval} = State) ->
+    Ref = erlang:send_after(Interval, self(), keepalive),
+    State#state{keepalive_ref = Ref}.
 
 %% @private
 send_wamp_events([], _Req, _State) ->

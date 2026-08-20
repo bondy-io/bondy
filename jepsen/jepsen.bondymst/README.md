@@ -36,11 +36,11 @@ kernel monitor, and exposes a small Cowboy HTTP shim on port 8080.
 ## 1. Build the release
 
 The release must be built on Linux because it runs inside the Debian
-node containers. The Makefile target does that inside a one-shot
+node containers. The `rel-jepsen` recipe does that inside a one-shot
 Docker container:
 
 ```sh
-make rel-jepsen
+just rel-jepsen
 ```
 
 The tarball ends up at `jepsen/jepsen.bondymst/bondy_mst_jepsen_release-0.4.0.tar.gz`.
@@ -48,7 +48,7 @@ The tarball ends up at `jepsen/jepsen.bondymst/bondy_mst_jepsen_release-0.4.0.ta
 ## 2. Bring up the cluster
 
 ```sh
-make jepsen-up      # generates ssh key, brings up compose, runs provision.sh
+just jepsen-up      # generates ssh key, brings up compose, runs provision.sh
 ```
 
 Or, equivalently:
@@ -106,7 +106,7 @@ Common options:
 ## Tear down
 
 ```sh
-make jepsen-down
+just jepsen-down
 ```
 
 ## How the cluster wiring works

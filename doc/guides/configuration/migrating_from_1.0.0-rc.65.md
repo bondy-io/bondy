@@ -98,11 +98,53 @@ if you scripted anything against the old path.
 
 ### 4. Remove keys that no longer exist
 
-These keys are gone with no replacement. Bondy refuses to boot if it finds
-a key it doesn't recognise, so leaving one of these in place is not a silent
-no-op — it's a startup failure. The boot log names the offending key and
-suggests the closest current key by edit distance, which will point you back
-to this guide's renamed keys if you miss one.
+These keys are gone with no replacement. **Leaving one in place is silent.**
+A key that matches no schema is dropped without a word: the node boots, and
+the setting you thought you were applying simply isn't — that part of Bondy
+runs on its default. The same is true of every rename in the two tables
+above, so a key you miss here will not announce itself.
+
+The reason is structural rather than a choice. The release generates its
+application config by running `cuttlefish` once per schema set — the VM
+arguments, then the application schemas — and each run reads your *whole*
+`bondy.conf` while knowing only its own subset of keys. Every key belonging
+to another set therefore looks unrecognised to it, so the runs are told to
+tolerate keys they don't know. That tolerance cannot distinguish "belongs to
+the other schema set" from "belongs to no schema at all".
+
+So check the file rather than trusting the boot:
+
+```bash
+./scripts/migrate_conf.escript check etc/bondy.conf
+```
+
+This reports every key no schema maps, and attributes each one to a rename, a
+removal, or neither — "neither" being the interesting answer. It also covers
+every rename in the two tables above, so you do not have to apply them by hand
+and hope you caught them all. See
+[How to check your configuration](checking_your_configuration.md) for the full
+output, and for `migrate`, which applies the renames for you.
+
+Run it against the schemas of the release you are moving **to**, which is the
+release that has to read your file.
+
+If you have neither a checkout nor the script to hand, the same question can be
+answered with the release's own `cuttlefish`, one schema directory at a time.
+A key is genuinely dead only if *every* schema set rejects it, so take only the
+complaints common to all the runs:
+
+```bash
+bin/cuttlefish --etc_dir etc --conf_file etc/bondy.conf \
+    --dest_dir /tmp/check --dest_file out.config \
+    --schema_dir releases/<version>
+bin/cuttlefish --etc_dir etc --conf_file etc/bondy.conf \
+    --dest_dir /tmp/check --dest_file out.config \
+    --schema_dir releases/<version>/schema/
+```
+
+Omitting the tolerance flag is what makes the complaints visible; each run
+names the keys it does not recognise and suggests the closest key it does.
+Treat a key as dead only when it appears in the output of both.
 
 | Removed key | Why |
 |---|---|
@@ -179,19 +221,66 @@ active-alarms metric/dashboard panel) after `liveness.failure_threshold`
 consecutive failures and clears it on recovery. This is new, not a rename —
 the defaults are safe to run with unchanged.
 
+### 8. Declare your listeners
+
+This is the largest single change in the file, and the one most likely to leave
+a node running but not serving.
+
+The per-scheme keys that configured Bondy's fixed listeners are **gone**:
+`admin_api.{http,https}.*`, `api_gateway.{http,https}.*`, `wamp.{tcp,tls}.*` and
+`bridge.listener.{tcp,tls}.*`. A listener is now something you declare, by name,
+with its own transport, protocol and bind target:
+
+```
+listeners.api_gateway_http.transport = tcp
+listeners.api_gateway_http.protocol  = http
+listeners.api_gateway_http.port      = 18080
+listeners.api_gateway_http.services  = api_gateway, wamp_ws, wamp_sse, wamp_longpoll
+```
+
+Two failures to know about, because a file can hit the second while looking as
+though it survived the first:
+
+- **A listener you do not declare does not exist.** A file with no `listeners.*`
+  key at all starts three built-in defaults — `admin`, `api_gateway_http` and
+  `wamp_tcp` — and nothing else. Every TLS listener and every bridge-relay
+  listener is gone, and the only symptom is a refused connection.
+- **Renaming the keys is not enough.** A `listeners.<name>.*` block with options
+  but no identity is refused at boot with
+  `{invalid_listener, <name>, {missing, transport}}`, which aborts the whole node.
+
+`scripts/migrate_conf.escript` reports both and applies the renames. The name
+each removed block maps to, where the tails move (TLS material under `tls.*`,
+Cowboy options on an HTTP listener under `http.*`), and the one narrowed
+capability — `ip` no longer accepts a hostname — are all in
+[Listeners](listeners.md#migrating-from-the-pre-10-keys).
+
+One thing to check before you deploy: every **enabled** `transport = tls`
+listener must state `tls.certfile` and `tls.keyfile`. The removed keys supplied a
+default certificate path and nothing does now, so a TLS listener that relied on
+that default is refused at boot — and because the inventory is resolved as a unit,
+that refusal stops every other listener too. A listener with `enabled = off` is
+not checked, so declaring one and provisioning its certificate later is fine.
+
 ## Result
 
 You have a `bondy.conf` (and, if applicable, `advanced.config`) that this
 release accepts. Your data moves separately, through the backup and import
-described in step 1. To confirm your file is complete before
-deploying it, start a node with it: an unrecognised or mistyped key fails
-boot immediately, naming the key and suggesting the closest valid one. If
-you're building from source, `config/bondy.conf.defaults` (regenerate it
-with `make conf`) lists every current key and its default and is a useful
-diff target.
+described in step 1.
+
+Confirming the file is complete takes more than starting a node, because a
+booting node is not evidence that your keys are live — see step 4 for why a
+stale or mistyped key is dropped silently, and for the `cuttlefish` check that
+does surface it. Run that check before deploying. If you're building from
+source, `config/bondy.conf.defaults` (regenerate it with `just conf`) lists
+every current key and its default, and diffing your file's key names against it
+catches the same class of mistake.
 
 ## See also
 
+- [How to check your configuration](checking_your_configuration.md) — the tool
+  that reports which of your settings this release no longer reads, and applies
+  the renames in this guide for you.
 - [Upgrading to 1.0.0](https://developer.bondy.io/guides/deployment/upgrading_to_1_0_0)
   — the data half of the migration: back up on the old deployment, copy the
   file, import it on the new cluster.

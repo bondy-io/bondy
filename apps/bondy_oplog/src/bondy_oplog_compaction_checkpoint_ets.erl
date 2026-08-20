@@ -59,5 +59,10 @@ current_watermark(#state{tab = Tab}) ->
     end.
 
 close(#state{tab = Tab}) ->
-    _ = catch ets:delete(Tab),
+    _ =
+        try
+            ets:delete(Tab)
+        catch
+            _:_ -> ok
+        end,
     ok.

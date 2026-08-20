@@ -97,16 +97,16 @@ wamp.dealer.progressive_call_results = on
   session is closed with `wamp.error.protocol_violation` and the caller's
   call fails fast with `wamp.error.no_eligible_callee`.
 
-## Using it from bondy_connect (Erlang client)
+## Using it from bondy_connect_sdk (Erlang client)
 
-Both RPC roles of the built-in `bondy_connect` client announce
+Both RPC roles of the built-in `bondy_connect_sdk` client announce
 `progressive_call_results`.
 
 **Caller** — progressive results require `call_async/5` (a synchronous
 `call/5` cannot represent a stream and rejects the option):
 
 ```erlang
-{ok, Token} = bondy_connect:call_async(
+{ok, Token} = bondy_connect_client:call_async(
     Conn, <<"com.example.stream">>, [], #{}, #{
         receive_progress => true,
         %% inactivity window between results (WAMP timeout)
@@ -119,18 +119,18 @@ receive_loop(Token).
 
 receive_loop(Token) ->
     receive
-        {bondy_connect, Token, {progress, #{args := Chunk}}} ->
+        {bondy_connect_client, Token, {progress, #{args := Chunk}}} ->
             handle_chunk(Chunk),
             receive_loop(Token);
-        {bondy_connect, Token, {ok, Final}} ->
+        {bondy_connect_client, Token, {ok, Final}} ->
             {done, Final};
-        {bondy_connect, Token, {error, Reason}} ->
+        {bondy_connect_client, Token, {error, Reason}} ->
             {error, Reason}
     end.
 ```
 
 Each progressive result is delivered as
-`{bondy_connect, Token, {progress, Result}}`; the `{ok, _}` or
+`{bondy_connect_client, Token, {progress, Result}}`; the `{ok, _}` or
 `{error, _}` delivery remains the single terminal message.
 
 **Callee** — when the caller requested progressive results, the handler
@@ -149,7 +149,7 @@ Handler = fun(_Args, _KWArgs, Details) ->
             {reply, [<<"final">>]}
     end
 end,
-{ok, _} = bondy_connect:register(Conn, <<"com.example.stream">>, Handler).
+{ok, _} = bondy_connect_client:register(Conn, <<"com.example.stream">>, Handler).
 ```
 
 The `progress` fun is only present when

@@ -111,8 +111,16 @@ prop_interleaved_deliveries_absorb() ->
                     )
                 )
             after
-                catch bondy_oplog:stop_instance(L),
-                catch bondy_oplog:stop_instance(P)
+                try
+                    bondy_oplog:stop_instance(L)
+                catch
+                    _:_ -> ok
+                end,
+                try
+                    bondy_oplog:stop_instance(P)
+                catch
+                    _:_ -> ok
+                end
             end
         end
     ).
@@ -192,8 +200,16 @@ prop_bootstrap_absorbs() ->
                     ProbeHlc > MaxHlc
                 )
             after
-                catch bondy_oplog:stop_instance(Peer),
-                catch bondy_oplog:stop_instance(Local),
+                try
+                    bondy_oplog:stop_instance(Peer)
+                catch
+                    _:_ -> ok
+                end,
+                try
+                    bondy_oplog:stop_instance(Local)
+                catch
+                    _:_ -> ok
+                end,
                 unregister_ns(PeerNS),
                 unregister_ns(LocalNS)
             end

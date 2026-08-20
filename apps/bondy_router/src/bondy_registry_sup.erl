@@ -67,12 +67,22 @@ partitions() ->
 
     %% If the supervisor restarts and we call groc_pool:new it will fail with
     %% an exception
-    _ = catch gproc_pool:new(?REGISTRY_POOL, hash, [{size, N}]),
+    _ =
+        try
+            gproc_pool:new(?REGISTRY_POOL, hash, [{size, N}])
+        catch
+            _:_ -> ok
+        end,
 
     Indices = [
         begin
             WorkerName = {WorkerMod, Index},
-            _ = catch gproc_pool:add_worker(?REGISTRY_POOL, WorkerName, Index),
+            _ =
+                try
+                    gproc_pool:add_worker(?REGISTRY_POOL, WorkerName, Index)
+                catch
+                    _:_ -> ok
+                end,
             Index
         end
      || Index <- lists:seq(1, N)

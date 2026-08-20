@@ -31,11 +31,16 @@ event — any stamp that regressed below it, converting a silent, permanent
 fork into a recoverable write error.
 
 This is sound only while a context never legitimately shrinks, which holds
-by default (every path joins/grows it). When membership-driven dead-origin
-VV reaping runs, a retired origin's entry is removed on purpose — a
-legitimate shrink `stamp/5` would otherwise flag as a regression. The
-caller must co-evict the reaped ids via `coevict/2` (or reset the whole
-guard via `new/0`, as a wholesale catalogue install does).
+by default (every path joins/grows it). Two paths shrink one on purpose,
+and each has to tell the guard, or the next local write to the cell is
+refused for a loss that never happened:
+
+* membership-driven dead-origin VV reaping removes a retired origin's
+  entry — co-evict the reaped ids via `coevict/2`;
+* the causal-stability reclamation sweep DELETES a stable cell, taking its
+  whole context with it — drop the cell via `forget/2`.
+
+A wholesale catalogue install resets the guard outright (`new/0`).
 
 ## Ownership
 
@@ -45,6 +50,7 @@ field) — this module is pure and holds no state of its own.
 """).
 
 -export([coevict/2]).
+-export([forget/2]).
 -export([new/0]).
 -export([stamp/5]).
 
@@ -136,6 +142,23 @@ coevict(Guard, Reaped) ->
         Guard,
         Reaped
     ).
+
+-doc """
+Drops `CellKeys` (`{Bucket, Key}`) from the high-water entirely, for cells
+whose projection state was deliberately REMOVED — the causal-stability
+reclamation sweep's `discard`, which deletes the cell. There is no
+high-water left to defend once the state it summarised is gone: the next
+local write to the key legitimately reads an empty context, and the
+sweep's own contract is that such a cell is re-created by a later replay.
+
+Distinct from `coevict/2`, which drops named origins from a cell that
+SURVIVES. Passing a key the guard never tracked is a no-op, so a sweep
+need not know which of the cells it discarded had been stamped locally.
+""".
+-spec forget(Guard :: guard(), CellKeys :: [{term(), term()}]) -> guard().
+
+forget(Guard, CellKeys) ->
+    maps:without(CellKeys, Guard).
 
 %% =============================================================================
 %% PRIVATE

@@ -56,7 +56,11 @@ maybe_reclaim_metrics_name() ->
     ),
     case {IsBooted, whereis(bondy_metrics)} of
         {false, Pid} when is_pid(Pid) ->
-            catch gen_server:stop(Pid),
+            try
+                gen_server:stop(Pid)
+            catch
+                _:_ -> ok
+            end,
             ok;
         _ ->
             ok

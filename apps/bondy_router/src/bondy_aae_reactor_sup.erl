@@ -75,12 +75,22 @@ shards() ->
 
     %% On a supervisor restart the pool already exists; `gproc_pool:new/3` raises
     %% (the pool server is owned by the gproc supervisor), so we ignore it.
-    _ = catch gproc_pool:new(PoolName, hash, [{size, N}]),
+    _ =
+        try
+            gproc_pool:new(PoolName, hash, [{size, N}])
+        catch
+            _:_ -> ok
+        end,
 
     Shards = [
         begin
             WorkerName = {WorkerMod, Shard},
-            _ = catch gproc_pool:add_worker(PoolName, WorkerName, Shard),
+            _ =
+                try
+                    gproc_pool:add_worker(PoolName, WorkerName, Shard)
+                catch
+                    _:_ -> ok
+                end,
             Shard
         end
      || Shard <- lists:seq(1, N)

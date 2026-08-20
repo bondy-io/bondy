@@ -18,7 +18,7 @@ jobs:
 
       # Optional: run your normal build / tests here
       # - uses: erlef/setup-beam@v1
-      # - run: make test
+      # - run: just test
 
       - name: Run ORT (analyze + scan + reports)
         uses: oss-review-toolkit/ort-ci-github-action@v1

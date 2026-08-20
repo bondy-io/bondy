@@ -42,7 +42,11 @@ init_per_suite(Config) ->
 
 end_per_suite(Config) ->
     Nodes = proplists:get_value(nodes, Config, []),
-    catch bondy_ct:stop_cluster(Nodes),
+    try
+        bondy_ct:stop_cluster(Nodes)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 %% =============================================================================
@@ -304,7 +308,11 @@ start_probe(RealmUri, Subscriptions, Procedures) ->
     after 5000 ->
         error(probe_start_timeout)
     end,
-    catch unregister(router_ordering_probe),
+    try
+        unregister(router_ordering_probe)
+    catch
+        _:_ -> ok
+    end,
     true = register(router_ordering_probe, Pid),
     ok.
 

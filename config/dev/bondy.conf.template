@@ -1,32 +1,69 @@
-admin_api.http.acceptors_pool_size = 200
-admin_api.http.backlog = 1024
-admin_api.http.enabled = on
-admin_api.http.keepalive = off
-admin_api.http.max_connections = 250000
-admin_api.http.nodelay = on
-admin_api.https.acceptors_pool_size = 200
-admin_api.https.enabled = off
-admin_api.https.keepalive = off
-admin_api.https.max_connections = 250000
-admin_api.https.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
-admin_api.https.certfile = ${BONDY_ETC_DIR}/ssl/server/keycert.pem
-admin_api.https.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
-admin_api.https.enabled = on
+## `admin` is the reserved name for the node's administrable listener: an
+## operator declares it under this name rather than the historical
+## `admin_api_http`, or the manager injects its own default in its place.
+##
+## Every setting this listener needs is restated under `listeners.admin.*`,
+## because config is read by a listener's CURRENT name and nothing reads
+## `admin_api_http`'s historical block any more. The socket options go
+## directly on `listeners.admin.*`; the Cowboy ones go under
+## `listeners.admin.http.*`.
+##
+## `http.idle_timeout` and `http.active_n` are stated explicitly because
+## Cowboy's own defaults differ from the values this listener has always run
+## with — 60s rather than 15s, and `active_n` 1 rather than 100
+## (`cowboy_http.erl:214,336`).
+listeners.admin.transport = tcp
+listeners.admin.protocol = http
+listeners.admin.port = 18081
+listeners.admin.start_phase = early
+listeners.admin.services = admin_api, wamp_ws, admin, metrics
+listeners.admin.acceptors_pool_size = 200
+listeners.admin.max_connections = 250000
+listeners.admin.backlog = 1024
+listeners.admin.keepalive = off
+listeners.admin.nodelay = on
+listeners.admin.http.idle_timeout = 15s
+listeners.admin.http.active_n = 100
+
+listeners.admin_api_https.transport = tls
+listeners.admin_api_https.protocol = http
+listeners.admin_api_https.port = 18084
+listeners.admin_api_https.start_phase = early
+listeners.admin_api_https.services = admin_api, wamp_ws, admin, metrics
+
+listeners.admin_api_https.acceptors_pool_size = 200
+listeners.admin_api_https.keepalive = off
+listeners.admin_api_https.max_connections = 250000
+listeners.admin_api_https.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
+listeners.admin_api_https.tls.certfile = ${BONDY_ETC_DIR}/ssl/server/keycert.pem
+listeners.admin_api_https.tls.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
+
 api_gateway.config_file = ${BONDY_ETC_DIR}/api_spec.json
-api_gateway.http.acceptors_pool_size = 200
-api_gateway.http.backlog = 4096
-api_gateway.http.keepalive = off
-api_gateway.http.max_connections = 500000
-api_gateway.http.nodelay = on
-api_gateway.https.acceptors_pool_size = 200
-api_gateway.https.backlog = 4096
-api_gateway.https.keepalive = off
-api_gateway.https.max_connections = 500000
-api_gateway.https.nodelay = on
-api_gateway.https.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
-api_gateway.https.certfile = ${BONDY_ETC_DIR}/ssl/server/keycert.pem
-api_gateway.https.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
-api_gateway.https.enabled = on
+
+listeners.api_gateway_http.transport = tcp
+listeners.api_gateway_http.protocol = http
+listeners.api_gateway_http.port = 18080
+listeners.api_gateway_http.services = api_gateway, wamp_ws, wamp_sse, wamp_longpoll
+
+listeners.api_gateway_http.acceptors_pool_size = 200
+listeners.api_gateway_http.backlog = 4096
+listeners.api_gateway_http.keepalive = off
+listeners.api_gateway_http.max_connections = 500000
+listeners.api_gateway_http.nodelay = on
+
+listeners.api_gateway_https.transport = tls
+listeners.api_gateway_https.protocol = http
+listeners.api_gateway_https.port = 18083
+listeners.api_gateway_https.services = api_gateway, wamp_ws, wamp_sse, wamp_longpoll
+
+listeners.api_gateway_https.acceptors_pool_size = 200
+listeners.api_gateway_https.backlog = 4096
+listeners.api_gateway_https.keepalive = off
+listeners.api_gateway_https.max_connections = 500000
+listeners.api_gateway_https.nodelay = on
+listeners.api_gateway_https.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
+listeners.api_gateway_https.tls.certfile = ${BONDY_ETC_DIR}/ssl/server/keycert.pem
+listeners.api_gateway_https.tls.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
 
 broker_bridge.config_file = ${BONDY_ETC_DIR}/broker_bridge_config.json
 broker_bridge.kafka.clients.default.allow_topic_auto_creation = on
@@ -60,20 +97,14 @@ cluster.tls.client.certfile = ${BONDY_ETC_DIR}/ssl/client/keycert.pem
 cluster.tls.client.keyfile = ${BONDY_ETC_DIR}/ssl/client/key.pem
 cluster.tls.client.versions = 1.2,1.3
 # cluster.tls.client.verify = verify_none
-distributed_cookie = bondy
-erlang.async_threads = 64
-erlang.max_ports = 65536
 load_regulation.router.pool.capacity = 100000
 
-log.async_threshold.size = 500
-log.async_threshold.window = 50
-log.console = console
-log.console.level = debug
+## The primary level gates before any handler does, so debug output needs
+## both. The default handler already writes to the console, which is why
+## there is no backend key here.
+log.level = debug
+log.handlers.default.level = debug
 
-log.error.redirect = off
-log.syslog = off
-
-nodename = bondy@127.0.0.1
 oauth2.client_credentials_grant.duration = 15m
 oauth2.code_grant.duration = 10m
 oauth2.config_file = ${BONDY_ETC_DIR}/oauth2_config.json
@@ -81,37 +112,48 @@ oauth2.password_grant.duration = 15m
 oauth2.refresh_token.duration = 30d
 oauth2.refresh_token.length = 40
 platform_data_dir = ./data
-platform_etc_dir = ./etc
 platform_log_dir = ./log
 platform_tmp_dir = ./tmp
 security.allow_anonymous_user = on
 security.automatically_create_realms = off
 security.config_file = ${BONDY_ETC_DIR}/security_config.json
 shutdown.grace_period = 5s
-wamp.tcp.acceptors_pool_size = 200
-wamp.tcp.backlog = 1024
-wamp.tcp.enabled = on
-wamp.tcp.keepalive = on
-wamp.tcp.max_connections = 100000
-wamp.tcp.nodelay = on
-wamp.tcp.port = 18082
-wamp.tls.acceptors_pool_size = 200
-wamp.tls.backlog = 1024
-wamp.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/cacert.pem
-wamp.tls.certfile = ${BONDY_ETC_DIR}/ssl/cert.pem
-wamp.tls.keyfile = ${BONDY_ETC_DIR}/ssl/key.pem
-wamp.tls.enabled = on
-wamp.tls.keepalive = on
-wamp.tls.max_connections = 100000
-wamp.tls.nodelay = on
-wamp.tls.port = 18085
+listeners.wamp_tcp.transport = tcp
+listeners.wamp_tcp.protocol = wamp_rawsocket
+listeners.wamp_tcp.port = 18082
+
+listeners.wamp_tcp.acceptors_pool_size = 200
+listeners.wamp_tcp.backlog = 1024
+listeners.wamp_tcp.keepalive = on
+listeners.wamp_tcp.max_connections = 100000
+listeners.wamp_tcp.nodelay = on
+
+listeners.wamp_tls.transport = tls
+listeners.wamp_tls.protocol = wamp_rawsocket
+listeners.wamp_tls.port = 18085
+
+## The same `ssl/server/` material the two HTTPS listeners above use. This
+## listener previously pointed at `${BONDY_ETC_DIR}/ssl/{cacert,cert,key}.pem`,
+## which does not exist in this template's certificate layout.
+listeners.wamp_tls.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
+listeners.wamp_tls.tls.certfile = ${BONDY_ETC_DIR}/ssl/server/keycert.pem
+listeners.wamp_tls.tls.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
+listeners.wamp_tls.acceptors_pool_size = 200
+listeners.wamp_tls.backlog = 1024
+listeners.wamp_tls.keepalive = on
+listeners.wamp_tls.max_connections = 100000
+listeners.wamp_tls.nodelay = on
 
 
-erlang.time_correction = on
-erlang.time_correction.warp_mode = multi_time_warp
-erlang.process_limit = 2000000
-# erlang.sbwt = none
-erlang.kernel_polling = on
-erlang.async_threads = 16
-erlang.distribution_buffer_size = 32MB
-erlang.dirty_io_schedulers.number = 160
+## Every key here lands in etc/generated/vm.generated.args, which vm.args
+## pulls in with -args_file.
+vm.time_correction = on
+vm.time_correction.warp_mode = multi_time_warp
+vm.process.limit = 2000000
+## No vm.port.limit: the historical `erlang.max_ports = 65536` never reached
+## the VM, and 65536 would cap total ports below the max_connections this file
+## declares. The erts default is what this node has been running with.
+vm.async_thread.number = 64
+vm.distribution.buffer_size = 32MB
+vm.io.dirty_scheduler.number = 160
+# vm.cpu.scheduler.busy_wait_threshold = none

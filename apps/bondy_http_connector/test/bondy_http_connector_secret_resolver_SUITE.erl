@@ -129,8 +129,16 @@ init_per_group(_Group, Config) ->
 end_per_group(Group, _Config) when
     Group =:= integration_mocked; Group =:= non_crashing
 ->
-    catch meck:unload(erlcloud_sm),
-    catch meck:unload(erlcloud_aws),
+    try
+        meck:unload(erlcloud_sm)
+    catch
+        _:_ -> ok
+    end,
+    try
+        meck:unload(erlcloud_aws)
+    catch
+        _:_ -> ok
+    end,
     ok;
 end_per_group(_Group, _Config) ->
     ok.

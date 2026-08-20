@@ -8,7 +8,7 @@
 # both rebar3 and mix so the first ssh session lands at usable
 # speed.
 #
-# Why hexpm/elixir vs the bare official `erlang:28`: the bench
+# Why hexpm/elixir vs the bare official `erlang:29`: the bench
 # harness under `bench/` is an Elixir Mix project, so we need both
 # toolchains anyway; hexpm/elixir bakes them in together. Why
 # hexpm/elixir vs kerl-built OTP: ~10 min faster cold builds, and
@@ -21,7 +21,10 @@
 # for the QA #14 execution context.
 # =============================================================================
 
-# OTP 28 + Elixir 1.18.4 on Debian 12 (bookworm) slim.
+# OTP 29 + Elixir 1.20.3 on Debian 12 (bookworm) slim. There is no
+# hexpm/elixir tag pairing Elixir 1.18.x with OTP 29, so tracking
+# production OTP forces the Elixir minor forward too; bench/mix.exs
+# requires `~> 1.15`, which 1.20 satisfies.
 #
 # `hexpm/elixir` tag format is
 # `<elixir>-erlang-<otp>-<os>-<os_version>[-slim]`. Rolling tags
@@ -29,9 +32,9 @@
 # Fly.io substrate doc whenever production OTP is fixed; if you
 # need fully reproducible image bytes, pin to a dated snapshot
 # tag from https://hub.docker.com/r/hexpm/elixir/tags.
-FROM hexpm/elixir:1.18.4-erlang-28.0-debian-bookworm-20260518-slim
+FROM hexpm/elixir:1.20.3-erlang-29.0.5-debian-bookworm-20260803-slim
 
-ARG REBAR3_VERSION=3.24.0
+ARG REBAR3_VERSION=3.27.0
 ARG JUST_VERSION=1.36.0
 
 ENV DEBIAN_FRONTEND=noninteractive \

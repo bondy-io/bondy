@@ -173,7 +173,7 @@ do_handle_open_body(Req0, State) ->
 open_session(Protocol, Req0, State) ->
     TransportId = bondy_utils:uuid(),
     SessionId = bondy_session_id:new(),
-    Peer = cowboy_req:peer(Req0),
+    Peer = bondy_http_utils:peer(Req0),
 
     %% RealmUri is unknown at open time; it comes from the WAMP HELLO message.
     RealmUri = <<>>,
@@ -340,19 +340,24 @@ do_handle_receive(Req0, State) ->
                     {ok, Req1, State};
                 ok ->
                     bondy_http_transport_session:touch(Pid),
-                    PollTimeout = bondy_config:get(
-                        [wamp_longpoll, poll_timeout], ?DEFAULT_POLL_TIMEOUT
+                    %% `carrier_state/2' always sets `config' in the route
+                    %% state this handler was started with, so this is no
+                    %% per-connection configuration lookup. Each default
+                    %% below matches what this handler used before its
+                    %% options were wired to `bondy_listener_config'.
+                    Config = maps:get(config, State),
+                    PollTimeout = maps:get(
+                        poll_timeout, Config, ?DEFAULT_POLL_TIMEOUT
                     ),
                     Encoding = bondy_http_transport_session:encoding(Pid),
                     ok = bondy_http_transport_session:request_poll(
                         Pid, PollTimeout
                     ),
-                    IdleTimeout = bondy_config:get(
-                        [wamp_longpoll, idle_timeout], ?DEFAULT_IDLE_TIMEOUT
+                    IdleTimeout = maps:get(
+                        idle_timeout, Config, ?DEFAULT_IDLE_TIMEOUT
                     ),
-                    ResetOnSend = bondy_config:get(
-                        [wamp_longpoll, reset_idle_timeout_on_send],
-                        true
+                    ResetOnSend = maps:get(
+                        reset_idle_timeout_on_send, Config, true
                     ),
                     ok = cowboy_req:cast(
                         {set_options, #{
@@ -436,7 +441,7 @@ to_longpoll_subprotocol(?WAMP2_JSON) ->
 
 %% @private
 maybe_set_auth_ticket(Pid, Req) ->
-    Cookies = cowboy_req:parse_cookies(Req),
+    Cookies = bondy_http_utils:parse_cookies(Req),
     case bondy_http_utils:find_ticket_cookie(Cookies) of
         {value, {_, Ticket}} when Ticket =/= <<>> ->
             case bondy_ticket:verify(Ticket) of
@@ -461,7 +466,7 @@ validate_auth_ticket(Pid, Req) ->
             %% No OIDC claims — non-cookie flow, skip validation
             ok;
         #{authrealm := Authrealm} = StoredClaims ->
-            Cookies = cowboy_req:parse_cookies(Req),
+            Cookies = bondy_http_utils:parse_cookies(Req),
             CookieName = bondy_http_utils:ticket_cookie_name(Authrealm),
             case lists:keyfind(CookieName, 1, Cookies) of
                 false ->

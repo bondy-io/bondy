@@ -189,9 +189,13 @@ terminate(_Reason, #state{relay = Relay}) ->
     %% A relay that is being removed cannot be down: leaving the alarm set
     %% would leave an operator paging about something that no longer exists.
     _ =
-        catch alarm_handler:clear_alarm(
-            {mail_relay_down, Relay#bondy_mail_relay.name}
-        ),
+        try
+            alarm_handler:clear_alarm(
+                {mail_relay_down, Relay#bondy_mail_relay.name}
+            )
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 -doc false.
@@ -265,7 +269,12 @@ fail(#state{relay = Relay} = State0) ->
 %% host, and never the credential.
 set_alarm(Name, Failures) ->
     Desc = #{relay => Name, consecutive_failures => Failures},
-    _ = catch alarm_handler:set_alarm({{mail_relay_down, Name}, Desc}),
+    _ =
+        try
+            alarm_handler:set_alarm({{mail_relay_down, Name}, Desc})
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% @private
@@ -275,9 +284,13 @@ maybe_clear_alarm(#state{relay = Relay, consec_successes = Successes}) ->
     case Successes >= Relay#bondy_mail_relay.health_success_threshold of
         true ->
             _ =
-                catch alarm_handler:clear_alarm(
-                    {mail_relay_down, Relay#bondy_mail_relay.name}
-                ),
+                try
+                    alarm_handler:clear_alarm(
+                        {mail_relay_down, Relay#bondy_mail_relay.name}
+                    )
+                catch
+                    _:_ -> ok
+                end,
             ok;
         false ->
             ok

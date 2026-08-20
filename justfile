@@ -1,11 +1,12 @@
-# bondy umbrella — bench + Fly substrate + Jepsen task runner
-# (https://just.systems)
+# bondy umbrella task runner (https://just.systems)
 #
-# These recipes drive the bondy_oplog/bondy_db-layer benchmarks (under
-# `bench/`, a Mix project) and the Jepsen harness (under `jepsen/`).
-# They were extracted from the bondy_mst repo alongside the apps they
-# exercise. The MST-library-only benchmarks stay in the bondy_mst repo's
-# own `justfile`.
+# This is the repo's only task runner; it replaced the root `Makefile`.
+# It covers the build, the test gates, the static checks, the releases and the
+# dev cluster, the Docker images, the oplog/db benchmarks (under `bench/`, a
+# Mix project), the Fly substrate and the Jepsen harness (under `jepsen/`).
+# The MST-library-only benchmarks stay in the bondy_mst repo's own `justfile`.
+#
+# `just` with no arguments lists every recipe.
 
 set shell := ["bash", "-cu"]
 
@@ -17,16 +18,103 @@ jepsen_build_image := "erlang:27"
 jepsen_release_name := "bondy_mst_jepsen_release"
 jepsen_release_vsn := "0.4.0"
 
+# Release knobs. Override per invocation (`just release profile=dev`) or, for
+# the node name and cookie, from the environment.
+profile := "prod"
+erl_nodename := env("BONDY_ERL_NODENAME", "bondy@127.0.0.1")
+erl_cookie := env("BONDY_ERL_DISTRIBUTED_COOKIE", "bondy")
+
+# EVERY rebar3 invocation goes through this. Both halves are load-bearing.
+#
+# 1. `env -u` genuinely UNSETS the C toolchain variables, keeping native
+#    dependency builds hermetic against whatever the caller's shell exports.
+#    Bondy's NIF deps (ezstd, lz4, stringprep, crc32cer) choose their own
+#    platform compile/link flags with `?=` in their `c_src` Makefiles. On
+#    macOS ezstd needs `-flat_namespace -undefined suppress`, or the beam
+#    cannot resolve the `enif_*` NIF API at load time and the link fails with
+#    "Undefined symbols for architecture arm64 ... _enif_*".
+#
+#    It must be `env -u`, NOT an empty `export LDFLAGS := ""`. GNU make's `?=`
+#    assigns only when the variable is UNDEFINED, and a variable exported with
+#    an empty value still reports `origin=environment`. Measured 2026-08-20
+#    against a probe Makefile holding `LDFLAGS ?= DEFAULT_FLAG`:
+#      env -u LDFLAGS   -> LDFLAGS=[DEFAULT_FLAG]  origin=file        (wanted)
+#      LDFLAGS=         -> LDFLAGS=[]              origin=environment (breaks)
+#      LDFLAGS=-arch... -> LDFLAGS=[-arch arm64]   origin=environment (breaks)
+#    An empty export therefore drops the dep's own default exactly as a wrong
+#    value does; removing the variable is the only form that restores it.
+#
+#    This replaces the `unexport CFLAGS CXXFLAGS CPPFLAGS LDFLAGS LDLIBS` the
+#    Makefile relied on. `just` has no `unexport`, and since each recipe line
+#    runs in its own shell, a bare `unset` on a preceding line would not carry.
+#
+# 2. `CMAKE_POLICY_VERSION_MINIMUM=3.5` — google/crc32c 1.1.2, fetched by
+#    crc32cer's cmake ExternalProject, ships a pre-3.5 CMakeLists that the
+#    cmake version we pin rejects outright.
+rebar := "env -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS -u LDLIBS CMAKE_POLICY_VERSION_MINIMUM=3.5 rebar3"
+
+# codespell arguments, shared by `spellcheck` and `spellfix`.
+spell_args := "-S _build -S doc -S .git -L applys,nd,accout,mattern,pres,fo"
+
 # Show every recipe.
 default:
     @just --list
 
 # -----------------------------------------------------------------------------
+# Build
+# -----------------------------------------------------------------------------
+
+# Compile the umbrella (default profile).
+compile:
+    {{rebar}} compile
+
+# Clean the umbrella and every dev-cluster profile's build tree.
+clean: node1-clean node2-clean node3-clean
+    {{rebar}} clean
+
+# Needs a built checkout — the cuttlefish escript is taken from _build.
+
+# Regenerate config/bondy.conf.defaults from the cuttlefish schemas.
+conf:
+    @_build/default/bin/cuttlefish effective -s schema/ 2>/dev/null > config/bondy.conf.defaults
+    @echo "Generated config/bondy.conf.defaults"
+
+# Generate the self-signed certificates used by the dev/test listeners.
+certs:
+    cd config && ./make_certs
+
+# ex_doc writes one doc/ tree per app under apps/. Two things it does not
+# provide are added here for every generated tree: `doc/js/docs_config.js`
+# (the script every generated page loads — it renders the mermaid diagrams
+# embedded in the moduledocs) and the shared images the README and guides
+# reference. Looping over the generated trees keeps this correct as apps are
+# added or renamed.
+
+# Generate the per-app ex_doc trees under apps/*/doc.
+docs: xref
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{rebar}} ex_doc
+    for d in apps/*/doc; do
+      [ -d "$d" ] || continue
+      cp -r doc/js/* "$d/"
+      mkdir -p "$d/assets"
+      cp -r doc/assets/* "$d/assets/"
+    done
+    echo "Generated docs for: $(ls -d apps/*/doc | cut -d/ -f2 | tr '\n' ' ')"
+
+# Remove the generated per-app doc/ trees.
+clean-docs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for d in apps/*/doc; do
+      [ -d "$d" ] || continue
+      rm -rf "$d"
+    done
+
+# -----------------------------------------------------------------------------
 # Test gates
 # -----------------------------------------------------------------------------
-#
-# `CMAKE_POLICY_VERSION_MINIMUM=3.5` is required by a native dependency's build
-# under the CMake version we pin; without it the test profile fails to compile.
 #
 # NEVER run these concurrently. Several suites bind fixed ports, share `/tmp`
 # paths and assert on GLOBAL counters (telemetry, prometheus, the oplog
@@ -44,14 +132,21 @@ test: eunit ct proper
 
 # EUnit across every app (also runs the *_proper_test property modules).
 eunit:
-    CMAKE_POLICY_VERSION_MINIMUM=3.5 rebar3 as test eunit
+    {{rebar}} as test eunit
 
 # Common Test. Bondy must be running for these, which is why suites that need
 # the application live here rather than in eunit.
+#
+# To scope a run, pass `suite`. Several suites go in ONE comma-separated value:
+#   just ct apps/bondy_router/test/bondy_listener_SUITE.erl
+#   just ct "apps/bondy_router/test/a_SUITE.erl,apps/bondy_router/test/b_SUITE.erl"
+# Repeating the underlying `--suite` flag does NOT accumulate — rebar3 runs one
+# of them and reports a clean pass for the rest — which is why this takes a
+# single string and forwards it unsplit.
 
-# Common Test suites.
-ct:
-    CMAKE_POLICY_VERSION_MINIMUM=3.5 rebar3 as test ct
+# Common Test suites. Optionally scoped: `just ct path/to/x_SUITE.erl`.
+ct suite="":
+    {{rebar}} as test ct {{ if suite == "" { "" } else { "--suite=" + suite } }}
 
 # `rebar3_proper` discovers `prop_*`-NAMED modules only, so this gate covers
 # the 9 such modules (75 properties). It is NOT the whole property suite —
@@ -59,22 +154,266 @@ ct:
 
 # PropEr gate: the prop_*-NAMED modules only (see note above).
 proper:
-    CMAKE_POLICY_VERSION_MINIMUM=3.5 rebar3 as test proper
+    {{rebar}} as test proper
+
+# Run a gate first — this only renders the accumulated coverdata, it does not
+# execute any tests.
 
 # Coverage report.
 cover:
-    CMAKE_POLICY_VERSION_MINIMUM=3.5 rebar3 as test cover
+    {{rebar}} as test cover
 
 # -----------------------------------------------------------------------------
 # Static checks
 # -----------------------------------------------------------------------------
 
+# Serial by design — see the concurrency warning above.
+
+# Every static check, then the full test gate.
+check: xref dialyzer eqwalizer spellcheck test
+
+# Cross-reference check over the umbrella.
+xref: compile
+    {{rebar}} xref skip_deps=true
+
+# NOTE the PLT under _build is an accumulated cache, not a function of the
+# config: deleting it does not rebuild the same analysis, and the warning
+# COUNT is not a stable metric. Read the warnings, do not count them.
+
+# Dialyzer over the umbrella.
+dialyzer: compile
+    {{rebar}} dialyzer
+
+# eqWAlizer (via ELP). Requires `elp` on PATH.
+eqwalizer: compile
+    elp eqwalize-all
+
+# Report spelling mistakes across the tree.
+spellcheck:
+    @command -v codespell >/dev/null || { echo "aborting: codespell not found in PATH" >&2; exit 1; }
+    codespell {{spell_args}}
+
+# Interactively fix the spelling mistakes `spellcheck` reports.
+spellfix:
+    @command -v codespell >/dev/null || { echo "aborting: codespell not found in PATH" >&2; exit 1; }
+    codespell {{spell_args}} -i 3 -w
+
 # Enforce the storage-stack layering invariant: dependencies flow strictly
 # bondy_db -> bondy_oplog -> bondy_mst, with no cycles and no layer-skips.
 # Scoped xref check over those three apps (see scripts/check_layering.escript).
 xref-layering:
-    rebar3 compile
+    {{rebar}} compile
     ./scripts/check_layering.escript _build/default/lib
+
+# Guard the bondy.conf migration tool against passing vacuously: every rule
+# destination must be a live key, the shipped conf files must be clean and must
+# declare every listener they configure, their pre-cleanup versions must still
+# yield the 84 dead keys established by hand, migrating a clean file must be
+# byte-identical, a migrated file must re-check clean, and every changed-meaning
+# entry must name a key still read and flag one in the corpus. Needs a built
+# checkout: cuttlefish and bondy_listener_config are loaded from _build.
+
+# Self-test the bondy.conf migration tool.
+conf-selftest:
+    {{rebar}} compile
+    ./scripts/migrate_conf.escript selftest
+
+# Report every key in a bondy.conf that this release no longer reads, plus every
+# key it still reads but reads differently. Point it at an operator's file before
+# an upgrade; exits non-zero if there is anything to change, and names the
+# changed-meaning keys without affecting the exit code.
+
+# Report the dead/changed keys in a bondy.conf: `just conf-check etc/bondy.conf`
+conf-check file:
+    ./scripts/migrate_conf.escript check {{file}}
+
+# -----------------------------------------------------------------------------
+# Releases
+# -----------------------------------------------------------------------------
+#
+# `profile` defaults to prod: `just release`, `just release profile=docker`.
+
+# Build a release from scratch (wipes _build/<profile> first).
+release:
+    rm -rf _build/{{profile}}
+    {{rebar}} as {{profile}} release
+
+# Build a release tarball and unpack it into _build/tar.
+release-tar:
+    rm -rf _build/{{profile}}
+    {{rebar}} as {{profile}} tar
+    mkdir -p _build/tar
+    tar -zxvf _build/{{profile}}/rel/*/*.tar.gz -C _build/tar
+
+# The dev overlay in rebar.config does not install the example configs, so
+# they are copied here. `security_config.json` is optional: only the .template
+# is checked in (the real file was removed from the tree), so it is copied
+# when present and otherwise reported rather than failing the run.
+
+# Build the dev release, seed its etc/ from examples/config, open a console.
+devrun:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{rebar}} as dev release
+    etc=_build/dev/rel/bondy/etc
+    cp examples/config/api_spec.json "$etc/api_spec.json"
+    cp examples/config/broker_bridge_config.json "$etc/broker_bridge_config.json"
+    if [ -f examples/config/security_config.json ]; then
+      cp examples/config/security_config.json "$etc/security_config.json"
+    else
+      echo "note: examples/config/security_config.json absent — starting without it."
+      echo "      Copy examples/config/security_config.json.template and fill it in."
+    fi
+    _build/dev/rel/bondy/bin/bondy console
+
+# Build the prod release and open a console on it.
+prodrun:
+    {{rebar}} as prod release
+    RELX_REPLACE_OS_VARS=true \
+      BONDY_ERL_NODENAME={{erl_nodename}} \
+      BONDY_ERL_DISTRIBUTED_COOKIE={{erl_cookie}} \
+      _build/prod/rel/bondy/bin/bondy console
+
+# Exercises the artefact operators actually receive, not the build tree.
+
+# Build the release tarball, unpack it, open a console on the unpacked copy.
+prodtarrun: release-tar
+    BONDY_ERL_NODENAME={{erl_nodename}} \
+      BONDY_ERL_DISTRIBUTED_COOKIE={{erl_cookie}} \
+      _build/tar/bin/bondy console
+
+# -----------------------------------------------------------------------------
+# Local dev cluster
+# -----------------------------------------------------------------------------
+#
+# Three nodes on distinct ERL_DIST_PORTs plus an edge node. Each recipe builds
+# its profile's release and opens a console; use `run-nodeN` to reopen a
+# console on an already-built release without rebuilding.
+#
+# `.env` (OIDC / SMTP / AWS test credentials) is sourced when present. The
+# Makefile chained this as `set -a && [ -f .env ] && . .env && set +a`, whose
+# non-zero exit ABORTED the whole recipe whenever .env was absent, and it did
+# so for node1/node2 only. The shared helper below sources it for every node
+# and skips it cleanly when the file is not there.
+_node prof port:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{rebar}} as {{prof}} release
+    if [ -f .env ]; then set -a; . ./.env; set +a; fi
+    ERL_DIST_PORT={{port}} _build/{{prof}}/rel/bondy/bin/bondy console
+
+# Build and run dev cluster node 1 (ERL_DIST_PORT 27781).
+node1: (_node "node1" "27781")
+
+# Build and run dev cluster node 2 (ERL_DIST_PORT 27782).
+node2: (_node "node2" "27782")
+
+# Build and run dev cluster node 3 (ERL_DIST_PORT 27783).
+node3: (_node "node3" "27783")
+
+# Build and run the edge node (ERL_DIST_PORT 27784).
+edge1:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{rebar}} as edge1 release
+    if [ -f .env ]; then set -a; . ./.env; set +a; fi
+    EDGE1_DEVICE1_PRIVKEY=4ffddd896a530ce5ee8c86b83b0d31835490a97a9cd718cb2f09c9fd31c4a7d71766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd \
+      ERL_DIST_PORT=27784 \
+      _build/edge1/rel/bondy/bin/bondy console
+
+# Reopen a console on an already-built node release (no rebuild).
+run-node1:
+    _build/node1/rel/bondy/bin/bondy console
+
+run-node2:
+    _build/node2/rel/bondy/bin/bondy console
+
+run-node3:
+    _build/node3/rel/bondy/bin/bondy console
+
+run-edge1:
+    _build/edge1/rel/bondy/bin/bondy console
+
+# Clean a single dev-cluster node's build tree.
+node1-clean:
+    {{rebar}} as node1 clean
+
+node2-clean:
+    {{rebar}} as node2 clean
+
+node3-clean:
+    {{rebar}} as node3 clean
+
+# -----------------------------------------------------------------------------
+# Docker
+# -----------------------------------------------------------------------------
+
+# Shared body for the image builds. The host architecture is resolved HERE
+# rather than in a top-level variable: a top-level `error()` is evaluated on
+# every `just` invocation, so an unsupported arch would break unrelated
+# recipes. The Makefile instead left DOCKER_PLATFORM empty and passed
+# `--platform linux/`, which fails later and less clearly.
+_docker-build dockerfile *extra_args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "$(uname -m)" in
+      x86_64)        platform=amd64 ;;
+      aarch64|arm64) platform=arm64 ;;
+      armv7l)        platform=arm32v7 ;;
+      *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+    esac
+    docker buildx install
+    docker stop bondy-prod || true
+    docker rm bondy-prod || true
+    docker rmi bondy-prod || true
+    docker build \
+      --pull \
+      --platform "linux/$platform" \
+      --load \
+      -t bondy-prod \
+      -f {{dockerfile}} {{extra_args}} .
+
+# Build the Debian production image.
+docker-build: (_docker-build "deployment/Dockerfile")
+
+# Build the Debian production image on the Docker Build Cloud builder.
+docker-cloud-build: (_docker-build "deployment/Dockerfile" "--builder" "cloud-leapsight-bondy-cloud-builder")
+
+# Build the Alpine production image.
+docker-build-alpine: (_docker-build "deployment/alpine.Dockerfile")
+
+# Run the image produced by docker-build or docker-build-alpine.
+docker-run-prod:
+    docker run \
+      --rm \
+      -e BONDY_ERL_NODENAME=bondy1@127.0.0.1 \
+      -e BONDY_ERL_DISTRIBUTED_COOKIE=bondy \
+      -p 18080:18080 \
+      -p 18081:18081 \
+      -p 18082:18082 \
+      -p 18086:18086 \
+      -u 0:1000 \
+      -v "{{justfile_directory()}}/examples/custom_config/etc:/bondy/etc" \
+      --name bondy-prod \
+      bondy-prod:latest
+
+# Scan the built image for vulnerabilities.
+docker-scan-prod:
+    docker scan bondy-prod
+
+# -----------------------------------------------------------------------------
+# Mailpit — a real SMTP relay on localhost for bondy_mail_mailpit_SUITE and for
+# the SMTP bridge tutorial. The suite skips itself when this is not running, so
+# it is never a build dependency. See examples/mailpit/README.md.
+# -----------------------------------------------------------------------------
+
+# Start the local Mailpit SMTP relay.
+mailpit:
+    docker compose -f examples/mailpit/docker-compose.yml up -d
+
+# Stop the local Mailpit SMTP relay and delete its volumes.
+mailpit-clean:
+    docker compose -f examples/mailpit/docker-compose.yml down -v
 
 # -----------------------------------------------------------------------------
 # Local benchmarks (oplog/db layer). Compile the umbrella with rebar3,
@@ -84,7 +423,7 @@ xref-layering:
 
 # Run the full oplog/db benchmark suite.
 bench:
-    rebar3 compile
+    {{rebar}} compile
     cd {{bench_dir}} && mix deps.get
     cd {{bench_dir}} && mix run benchmarks/all.exs
     @echo ""
@@ -94,43 +433,43 @@ bench:
 # Run a single benchmark script by name (without the .exs).
 #   just bench-one e2e_pipeline
 bench-one name:
-    rebar3 compile
+    {{rebar}} compile
     cd {{bench_dir}} && mix deps.get
     cd {{bench_dir}} && mix run benchmarks/{{name}}.exs
 
 # Run the substrate read-path primitive benchmarks (HLC, codec, overlay).
 bench-primitives:
-    rebar3 compile
+    {{rebar}} compile
     cd {{bench_dir}} && mix deps.get
     cd {{bench_dir}} && mix run benchmarks/primitives.exs
 
 # Run the native CRDT primitive benchmarks (apply_op, interpret_cog, codec).
 bench-folds:
-    rebar3 compile
+    {{rebar}} compile
     cd {{bench_dir}} && mix deps.get
     cd {{bench_dir}} && mix run benchmarks/folds.exs
 
 # Run the bondy_db substrate read-path benchmarks across cache hit rates.
 bench-db:
-    rebar3 compile
+    {{rebar}} compile
     cd {{bench_dir}} && mix deps.get
     cd {{bench_dir}} && mix run benchmarks/mst_db.exs
 
 # Run the bondy_oplog instance end-to-end benchmarks.
 bench-oplog:
-    rebar3 compile
+    {{rebar}} compile
     cd {{bench_dir}} && mix deps.get
     cd {{bench_dir}} && mix run benchmarks/oplog.exs
 
 # Run the WAL benchmarks. Disk-dependent — writes to /tmp/bondy_mst_bench_wal.
 bench-wal:
-    rebar3 compile
+    {{rebar}} compile
     cd {{bench_dir}} && mix deps.get
     cd {{bench_dir}} && mix run benchmarks/wal.exs
 
 # Concurrency: full suite. Pass DURATION_S=N to override per-scenario seconds.
 bench-concurrency duration="10":
-    rebar3 compile
+    {{rebar}} compile
     cd {{bench_dir}} && mix deps.get
     DURATION_S={{duration}} cd {{bench_dir}} && \
       mix run benchmarks/concurrency_oplog.exs && \
@@ -139,19 +478,19 @@ bench-concurrency duration="10":
 
 # Concurrency: oplog instance only.
 bench-concurrency-oplog duration="10":
-    rebar3 compile
+    {{rebar}} compile
     cd {{bench_dir}} && mix deps.get
     DURATION_S={{duration}} cd {{bench_dir}} && mix run benchmarks/concurrency_oplog.exs
 
 # Concurrency: mst_db substrate only.
 bench-concurrency-db duration="10":
-    rebar3 compile
+    {{rebar}} compile
     cd {{bench_dir}} && mix deps.get
     DURATION_S={{duration}} cd {{bench_dir}} && mix run benchmarks/concurrency_mst_db.exs
 
 # Concurrency: WAL only.
 bench-concurrency-wal duration="8":
-    rebar3 compile
+    {{rebar}} compile
     cd {{bench_dir}} && mix deps.get
     DURATION_S={{duration}} cd {{bench_dir}} && mix run benchmarks/concurrency_wal.exs
 
@@ -161,7 +500,7 @@ bench-concurrency-wal duration="8":
 #   duration DURATION_S | shards SHARDS | fsync WAL_FSYNC (per_write|batched)
 #   batch BATCH_SIZE | cache BYPASS_CACHE | backends BACKENDS (ets,leveled)
 bench-e2e duration="10" shards="4" fsync="per_write" batch="1" cache="false" backends="ets,leveled":
-    rebar3 compile
+    {{rebar}} compile
     cd {{bench_dir}} && mix deps.get
     cd {{bench_dir}} && \
       ELIXIR_ERL_OPTIONS="+SDio {{shards}}" \
@@ -178,7 +517,7 @@ bench-e2e duration="10" shards="4" fsync="per_write" batch="1" cache="false" bac
 #   ephemeral = ets projection + in-memory MST + batched fsync
 #   durable   = leveled projection + pack-store MST + per_write fsync
 bench-ephemeral-vs-leveled duration="15" shards="4" cache="false":
-    rebar3 compile
+    {{rebar}} compile
     cd {{bench_dir}} && mix deps.get
     cd {{bench_dir}} && \
       ELIXIR_ERL_OPTIONS="+SDio {{shards}}" \
@@ -607,7 +946,7 @@ rel-jepsen:
 # Same as rel-jepsen but builds locally (skip Docker). Only useful on a
 # Linux dev box; macOS-built releases will not run inside the Debian nodes.
 rel-jepsen-local:
-    cd jepsen/bondy_mst_jepsen && rebar3 release tar
+    cd jepsen/bondy_mst_jepsen && {{rebar}} release tar
     cp jepsen/bondy_mst_jepsen/_build/default/rel/{{jepsen_release_name}}/{{jepsen_release_name}}-{{jepsen_release_vsn}}.tar.gz jepsen/jepsen.bondymst/
 
 # Bring up the 3-node docker compose cluster + provision.

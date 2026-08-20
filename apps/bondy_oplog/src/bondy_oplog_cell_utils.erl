@@ -45,7 +45,7 @@ with the wrong kernel.
 -export([primary_cell_directory/4]).
 -export([with_cell_state/10]).
 -export([reap/4]).
--export([sweep/5]).
+-export([sweep/6]).
 -export([reindex/3]).
 
 -export_type([reap_report/0]).
@@ -144,7 +144,7 @@ mst_cell_directory(Id) ->
             %% caught exception.
             %%
             %% Memory backends fold here, in the caller: their pages are
-            %% process-independent, and `sweep/5` runs in the applier on the
+            %% process-independent, and `sweep/6` runs in the applier on the
             %% ordinary path — routing those folds through the instance would
             %% serialise every sweep against the append path for no benefit.
             case process_bound_reads(MST) of
@@ -160,7 +160,7 @@ process_bound_reads(MST) ->
     maps:get(process_bound_reads, bondy_mst:capabilities(MST), false).
 
 %% @private
-%% The fold must run in the instance process. `sweep/5` executes in the
+%% The fold must run in the instance process. `sweep/6` executes in the
 %% applier for the ordinary path but in the instance itself for the fused
 %% one, so the owner is tested for rather than assumed — delegating
 %% unconditionally would have the instance call itself and deadlock.
@@ -506,21 +506,36 @@ reap_report(Supported, Scanned, OriginsReaped) ->
 -doc """
 One bounded sweep pass over `Source`'s member tables' cells, judging
 against `StableHlc`. `Opts`: `max_cells` (default `infinity`) bounds this
-call's work, returning `{ok, Stats, {resume, Cursor}}` when the budget
-runs out with cells still pending — pass `Cursor` back as `Opts#{cursor =>
-Cursor}` on the next call to continue; `{ok, Stats, done}` once every
-member's cells have been swept. `Stats` is
-`#{scanned, discarded, rewritten, skipped}`.
+call's work, returning `{{ok, Stats, {resume, Cursor}}, Guard1}` when the
+budget runs out with cells still pending — pass `Cursor` back as
+`Opts#{cursor => Cursor}` on the next call to continue;
+`{{ok, Stats, done}, Guard1}` once every member's cells have been swept.
+`Stats` is `#{scanned, discarded, rewritten, skipped}`.
+
+Takes and returns the caller's stamp-site guard, exactly as `reap/4` does,
+and for the same reason: a discarded cell's causal context is deleted along
+with the cell, so the sweep drops every cell it deleted from the guard
+(`bondy_oplog_ctx_guard:forget/2`) and the caller stores the returned guard
+back into its own state. The guard travels through the signature rather
+than being the caller's business to remember: a sweep that returned `Stats`
+alone left the guard defending high-waters for cells it had just deleted,
+and refused the next local write to each of them
+(`bondy_db_tier2_reclaim_coevict_test`).
 """.
 -spec sweep(
     InstanceId :: term(),
+    Guard :: bondy_oplog_ctx_guard:guard(),
     Ctx :: map(),
     Source :: bondy_oplog_cell_apply:ctx_source(),
     StableHlc :: integer(),
     Opts :: map()
-) -> {ok, map(), done | {resume, term()}}.
+) ->
+    {
+        {ok, map(), done | {resume, term()}},
+        bondy_oplog_ctx_guard:guard()
+    }.
 
-sweep(InstanceId, Ctx, Source, StableHlc, Opts) ->
+sweep(InstanceId, Guard, Ctx, Source, StableHlc, Opts) ->
     Limit = maps:get(max_cells, Opts, infinity),
     Cursor = maps:get(cursor, Opts, undefined),
     Overlay = overlay_tab(Ctx),
@@ -545,7 +560,11 @@ sweep(InstanceId, Ctx, Source, StableHlc, Opts) ->
             scanned => 0,
             discarded => 0,
             rewritten => 0,
-            skipped => 0
+            skipped => 0,
+            %% Carried in the accumulator rather than as a tenth argument to
+            %% `sweep_cells/9`: the guard is updated at the one site that
+            %% deletes a cell, which already has the accumulator in hand.
+            ctx_guard => Guard
         },
         undefined
     ),
@@ -556,7 +575,7 @@ sweep(InstanceId, Ctx, Source, StableHlc, Opts) ->
         ),
         #{instance_id => InstanceId, stable_hlc => StableHlc}
     ),
-    {ok, Acc, Next}.
+    {{ok, maps:remove(ctx_guard, Acc), Next}, maps:get(ctx_guard, Acc)}.
 
 %% @private
 %% Bounded pass over the sorted mux members. `Cursor` names where the
@@ -726,7 +745,11 @@ apply_stabilize(
                         Bucket,
                         Key
                     ),
-                    bump(discarded, Acc);
+                    %% The stamp-site guard mirrors the projection too, and
+                    %% the cell is now gone from it: a high-water left behind
+                    %% here reads the re-created cell's empty context as a
+                    %% regression and refuses the write that re-creates it.
+                    bump(discarded, forget_cell(Acc, Bucket, Key));
                 false ->
                     %% Pending work for this cell: leave it and retry on a
                     %% later pass, once the applier has drained.
@@ -846,6 +869,11 @@ overlay_clear(Tab, Bucket, Key) ->
 %% @private
 bump(Key, Acc) ->
     maps:update_with(Key, fun(X) -> X + 1 end, Acc).
+
+%% @private
+%% Drop a just-deleted cell from the sweep accumulator's stamp-site guard.
+forget_cell(#{ctx_guard := Guard} = Acc, Bucket, Key) ->
+    Acc#{ctx_guard := bondy_oplog_ctx_guard:forget(Guard, [{Bucket, Key}])}.
 
 %% =============================================================================
 %% REINDEX — full secondary-index rebuild

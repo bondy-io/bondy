@@ -81,9 +81,11 @@ end_per_suite(_Config) ->
 
 init_per_testcase(TC, Config) ->
     Port = ?config(port, Config),
-    case catch ranch:get_port(mock_auth_http_listener) of
+    try ranch:get_port(mock_auth_http_listener) of
         Port -> ok;
         _ -> {ok, _} = mock_auth_http_server:start(#{port => Port})
+    catch
+        _:_ -> {ok, _} = mock_auth_http_server:start(#{port => Port})
     end,
     mock_auth_http_server:reset(),
     bondy_http_connector_mock_auth:reset_call_count(),
@@ -115,14 +117,32 @@ init_per_testcase(TC, Config) ->
 
 end_per_testcase(_TC, Config) ->
     PoolPid = ?config(pool_pid, Config),
-    catch gen_server:stop(PoolPid),
+    try
+        gen_server:stop(PoolPid)
+    catch
+        _:_ -> ok
+    end,
     CacheReg = ?config(cache_reg, Config),
     CacheSup = ?config(cache_sup, Config),
-    catch exit(CacheReg, shutdown),
-    catch exit(CacheSup, shutdown),
+    try
+        exit(CacheReg, shutdown)
+    catch
+        _:_ -> ok
+    end,
+    try
+        exit(CacheSup, shutdown)
+    catch
+        _:_ -> ok
+    end,
     timer:sleep(50),
     lists:foreach(
-        fun(Key) -> catch persistent_term:erase(Key) end,
+        fun(Key) ->
+            try
+                persistent_term:erase(Key)
+            catch
+                _:_ -> ok
+            end
+        end,
         [
             {bondy_http_connector_mock_auth, result},
             {bondy_http_connector_mock_auth, fetch_fun},

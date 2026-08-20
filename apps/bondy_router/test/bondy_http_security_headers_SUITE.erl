@@ -27,7 +27,8 @@ all() ->
         server_header_suppressed,
         server_header_custom,
         headers_from_req_extracts_ref,
-        cleanup_removes_persistent_term
+        cleanup_removes_persistent_term,
+        partial_block_keeps_the_default_headers
     ].
 
 init_per_suite(Config) ->
@@ -203,6 +204,32 @@ cleanup_removes_persistent_term(_Config) ->
     ?assertNotEqual(#{}, bondy_http_security_headers:headers(Name)),
     ok = bondy_http_security_headers:cleanup(Name),
     ?assertEqual(#{}, bondy_http_security_headers:headers(Name)).
+
+partial_block_keeps_the_default_headers(_Config) ->
+    %% A block that is PRESENT but states only one key. Written to break the
+    %% claim that defaulting on the read is equivalent to merging: taking the
+    %% block as-is loses `frame_options` and `content_type_options`, so a
+    %% listener that asked for HSTS would emit FEWER security headers than one
+    %% that configured nothing at all — the dangerous direction. Not reachable
+    %% through cuttlefish, whose `SecurityHeaders` completion renders all five
+    %% members whenever any one is set, but reachable from a hand-written
+    %% `sys.config` and from any future caller that writes the block directly.
+    Name = partial_block_keeps_the_default_headers,
+    mock_config(Name, #{hsts => <<"max-age=31536000">>}, <<>>),
+    ok = bondy_http_security_headers:init(Name),
+    Headers = bondy_http_security_headers:headers(Name),
+    ?assertEqual(
+        <<"max-age=31536000">>,
+        maps:get(<<"strict-transport-security">>, Headers)
+    ),
+    %% The two the defaults supply, and which a partial block used to drop.
+    ?assertEqual(<<"SAMEORIGIN">>, maps:get(<<"x-frame-options">>, Headers)),
+    ?assertEqual(
+        <<"nosniff">>, maps:get(<<"x-content-type-options">>, Headers)
+    ),
+    %% `enabled` is absent from the block too, and defaults to `true` — so the
+    %% headers above are emitted rather than skipped wholesale.
+    ?assertNot(maps:is_key(<<"content-security-policy">>, Headers)).
 
 %% =============================================================================
 %% HELPERS

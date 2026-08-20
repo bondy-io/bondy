@@ -828,24 +828,16 @@ make_match_opts(SessionId, Opts) ->
     MatchOpts0 = #{exclude => Exclusions},
 
     %% Subscriber Eligibility: we only support sessionIds for now
-    MatchOpts1 =
-        case maps:find(eligible, Opts) of
-            error ->
-                MatchOpts0;
-            {ok, L} when is_list(L) ->
-                Eligible = sets:subtract(
-                    sets:from_list(L), sets:from_list(Exclusions)
-                ),
-                MatchOpts0#{eligible => sets:to_list(Eligible)}
-        end,
-
-    case
-        bondy_config:get([wamp, broker, features, pattern_based_subscription])
-    of
-        true ->
-            MatchOpts1;
-        false ->
-            MatchOpts1#{match => ?EXACT_MATCH}
+    %% No `match' key, so every policy is considered: pattern-based subscription
+    %% is not optional (see `bondy_config:setup_wamp/0').
+    case maps:find(eligible, Opts) of
+        error ->
+            MatchOpts0;
+        {ok, L} when is_list(L) ->
+            Eligible = sets:subtract(
+                sets:from_list(L), sets:from_list(Exclusions)
+            ),
+            MatchOpts0#{eligible => sets:to_list(Eligible)}
     end.
 
 %% @private
@@ -1006,7 +998,11 @@ send_retained(Entry) ->
                 bondy_retained_message_manager:match(Cont);
             (M) ->
                 Event = bondy_retained_message:to_event(M, SubsId),
-                catch bondy:send(RealmUri, Ref, Event)
+                try
+                    bondy:send(RealmUri, Ref, Event)
+                catch
+                    _:_ -> ok
+                end
         end,
         Matches
     ).

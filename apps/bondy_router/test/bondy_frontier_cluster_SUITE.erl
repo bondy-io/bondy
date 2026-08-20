@@ -395,8 +395,18 @@ quiesce(N1, N2) ->
 
 %% @private
 unquiesce(N1, N2) ->
-    _ = catch erpc:call(N1, ?MODULE, do_set_dispatch, [on]),
-    _ = catch erpc:call(N2, ?MODULE, do_set_dispatch, [on]),
+    _ =
+        try
+            erpc:call(N1, ?MODULE, do_set_dispatch, [on])
+        catch
+            _:_ -> ok
+        end,
+    _ =
+        try
+            erpc:call(N2, ?MODULE, do_set_dispatch, [on])
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% @private
@@ -452,7 +462,12 @@ wait_converge(Node, Band, Key, Expected) ->
 
 %% @private
 wait_converge_loop(Node, Band, Key, Expected, Deadline) ->
-    _ = catch erpc:call(Node, bondy_oplog_sync_scheduler, trigger, []),
+    _ =
+        try
+            erpc:call(Node, bondy_oplog_sync_scheduler, trigger, [])
+        catch
+            _:_ -> ok
+        end,
     case erpc:call(Node, ?MODULE, do_read, [?USERS_TABLE, Band, Key]) of
         {ok, {Expected, _Hlc}} ->
             ok;
@@ -557,7 +572,11 @@ await_pairwise_sigs(N1, N2, Targets, DriveSync, Deadline) ->
 %% CT load. Best-effort: a node mid-restart just misses this tick.
 drive_sync(Nodes) ->
     _ = [
-        catch erpc:call(N, bondy_oplog_sync_scheduler, trigger, [])
+        try
+            erpc:call(N, bondy_oplog_sync_scheduler, trigger, [])
+        catch
+            _:_ -> ok
+        end
      || N <- Nodes
     ],
     ok.
@@ -1046,9 +1065,11 @@ do_instance_sigs(InstIds) ->
         fun(I, Acc) ->
             Frontier = bondy_oplog_instance:frontier(I),
             Root =
-                case catch patient_root_hash(I) of
+                try patient_root_hash(I) of
                     R when is_binary(R) -> R;
                     _ -> undefined
+                catch
+                    _:_ -> undefined
                 end,
             Acc#{I => {Frontier, Root}}
         end,
@@ -1073,11 +1094,11 @@ patient_root_hash(InstId) ->
 do_local_frontier_sig(InstId) ->
     Frontier = bondy_oplog_instance:frontier(InstId),
     Fp =
-        case
-            catch bondy_oplog:topology_fingerprint(bondy_oplog:db_of(InstId))
-        of
+        try bondy_oplog:topology_fingerprint(bondy_oplog:db_of(InstId)) of
             F when is_binary(F) -> F;
             _ -> undefined
+        catch
+            _:_ -> undefined
         end,
     {Frontier, Fp}.
 
@@ -1088,13 +1109,13 @@ do_local_frontier_sig(InstId) ->
 do_peer_sig(InstId) ->
     Peer = single_peer(),
     Opts = #{timeout => 5000, channel => aae_channel()},
-    case
-        catch bondy_oplog_transport_partisan:request(
-            Peer, InstId, get_frontier, Opts
-        )
+    try
+        bondy_oplog_transport_partisan:request(Peer, InstId, get_frontier, Opts)
     of
         {ok, Frontier, Fp} -> {Frontier, Fp};
         Other -> error({peer_frontier_failed, Peer, InstId, Other})
+    catch
+        C:R -> error({peer_frontier_failed, Peer, InstId, {C, R}})
     end.
 
 %% @private
@@ -1106,15 +1127,24 @@ single_peer() ->
 
 %% @private
 aae_channel() ->
-    case catch bondy_config:get(aae_channel) of
+    try bondy_config:get(aae_channel) of
         Ch when is_atom(Ch) -> Ch;
         _ -> bondy_aae
+    catch
+        _:_ -> bondy_aae
     end.
 
 %% @private
 do_drain_all() ->
     lists:foreach(
-        fun(I) -> _ = catch bondy_oplog_instance:await_apply(I) end,
+        fun(I) ->
+            _ =
+                try
+                    bondy_oplog_instance:await_apply(I)
+                catch
+                    _:_ -> ok
+                end
+        end,
         bondy_oplog:list_instances()
     ).
 
@@ -1123,7 +1153,12 @@ do_drain_all() ->
 %% emptying its MST. Mirrors `bondy_oplog_compaction_durable_test`. A no-op
 %% (`{ok, no_change}`) for an already-empty MST.
 do_compact(InstId) ->
-    _ = catch bondy_oplog_instance:await_apply(InstId),
+    _ =
+        try
+            bondy_oplog_instance:await_apply(InstId)
+        catch
+            _:_ -> ok
+        end,
     case bondy_oplog_instance:root_hash(InstId) of
         Root when is_binary(Root) ->
             bondy_oplog_instance:compact(InstId, [Root]);

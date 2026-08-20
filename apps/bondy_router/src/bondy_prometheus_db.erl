@@ -1157,17 +1157,20 @@ alarm_rows() ->
 
 %% @private
 alarms() ->
-    case catch bondy_alarm_handler:get_alarms() of
+    try bondy_alarm_handler:get_alarms() of
         L when is_list(L) -> [A || {_, _} = A <- L];
         _ -> []
+    catch
+        _:_ -> []
     end.
 
 %% @private
 node_ready() ->
-    case catch bondy_config:get(status, undefined) of
+    try bondy_config:get(status, undefined) of
         ready -> [{[], 1}];
-        {'EXIT', _} -> [];
         _ -> [{[], 0}]
+    catch
+        _:_ -> []
     end.
 
 %% @private
@@ -1229,11 +1232,13 @@ instance_lifecycle_rows() ->
 instance_live_size_rows() ->
     lists:filtermap(
         fun(Id) ->
-            case catch bondy_oplog_registry:live_size(Id) of
+            try bondy_oplog_registry:live_size(Id) of
                 N when is_integer(N) ->
                     {true, {[{instance_id, Id}], N}};
                 _ ->
                     false
+            catch
+                _:_ -> false
             end
         end,
         instances()
@@ -1319,9 +1324,11 @@ collect_wal(CB) ->
 %% Emits the sync-scheduler gauges from ONE `info/0` call per scrape.
 collect_sync_scheduler(CB) ->
     Info =
-        case catch bondy_oplog_sync_scheduler:info() of
+        try bondy_oplog_sync_scheduler:info() of
             #{} = M -> M;
             _ -> #{}
+        catch
+            _:_ -> #{}
         end,
     Scalars = [
         {bondy_oplog_sync_scheduler_enabled,
@@ -1406,7 +1413,9 @@ collect_leveled(CB) ->
     ),
     Backlog = [
         {bookie_labels(Labels), element(1, B)}
-     || {Labels, S} <- Statuses, is_tuple(B = backlog(S))
+     || {Labels, S} <- Statuses,
+        B <- [backlog(S)],
+        is_tuple(B)
     ],
     emit_gauge_mf(
         CB,
@@ -1492,8 +1501,10 @@ collect_leveled(CB) ->
                     {put_mem, put_mem_time, put_sample_count},
                     {put_prep, put_prep_time, put_sample_count}
                 ],
-                is_number(Time = maps:get(TimeKey, S, undefined)),
-                is_integer(Count = maps:get(CountKey, S, 0)),
+                Time <- [maps:get(TimeKey, S, undefined)],
+                is_number(Time),
+                Count <- [maps:get(CountKey, S, 0)],
+                is_integer(Count),
                 Count > 0
             ]
         end,
@@ -1533,13 +1544,11 @@ peer_age_rows(Key) ->
     lists:flatmap(
         fun(Id) ->
             Entries =
-                case
-                    catch bondy_oplog_peer_state:get_instance_peer_states(
-                        Id, 0
-                    )
-                of
+                try bondy_oplog_peer_state:get_instance_peer_states(Id, 0) of
                     L when is_list(L) -> L;
                     _ -> []
+                catch
+                    _:_ -> []
                 end,
             [
                 {
@@ -1554,21 +1563,25 @@ peer_age_rows(Key) ->
 
 %% @private
 peer_state_size() ->
-    case catch bondy_oplog_peer_state:info() of
+    try bondy_oplog_peer_state:info() of
         #{table_size := N} when is_integer(N) -> [{[], N}];
         _ -> []
+    catch
+        _:_ -> []
     end.
 
 %% @private
 ae_lag_rows() ->
     Namespaces =
-        case catch bondy_oplog_core_registry:namespaces() of
+        try bondy_oplog_core_registry:namespaces() of
             L when is_list(L) -> L;
             _ -> []
+        catch
+            _:_ -> []
         end,
     lists:flatmap(
         fun(NS) ->
-            case catch bondy_oplog_core:freshness(NS) of
+            try bondy_oplog_core:freshness(NS) of
                 Map when is_map(Map) ->
                     [
                         {
@@ -1584,6 +1597,8 @@ ae_lag_rows() ->
                     ];
                 _ ->
                     []
+            catch
+                _:_ -> []
             end
         end,
         Namespaces
@@ -1591,9 +1606,11 @@ ae_lag_rows() ->
 
 %% @private
 gc_scheduler_inflight() ->
-    case catch bondy_oplog_gc_scheduler:info() of
+    try bondy_oplog_gc_scheduler:info() of
         #{in_flight := N} when is_integer(N) -> [{[], N}];
         _ -> []
+    catch
+        _:_ -> []
     end.
 
 %% =============================================================================
@@ -1602,24 +1619,30 @@ gc_scheduler_inflight() ->
 
 %% @private
 instances() ->
-    case catch bondy_oplog:list_instances() of
+    try bondy_oplog:list_instances() of
         L when is_list(L) -> lists:sort(L);
         _ -> []
+    catch
+        _:_ -> []
     end.
 
 %% @private
 frontier(Id) ->
-    case catch bondy_oplog_registry:frontier(Id) of
+    try bondy_oplog_registry:frontier(Id) of
         F when is_map(F) -> F;
         _ -> #{}
+    catch
+        _:_ -> #{}
     end.
 
 %% @private
 lifecycle(Id) ->
-    case catch bondy_oplog_instance:lifecycle_state(Id) of
+    try bondy_oplog_instance:lifecycle_state(Id) of
         live -> live;
         pre_bootstrap -> pre_bootstrap;
         _ -> starting
+    catch
+        _:_ -> starting
     end.
 
 %% @private
@@ -1637,17 +1660,21 @@ self_node() ->
 
 %% @private
 members() ->
-    case catch partisan_peer_service:members() of
+    try partisan_peer_service:members() of
         {ok, M} when is_list(M) -> M;
         M when is_list(M) -> M;
         _ -> []
+    catch
+        _:_ -> []
     end.
 
 %% @private
 connected() ->
-    case catch partisan:nodes() of
+    try partisan:nodes() of
         N when is_list(N) -> N;
         _ -> []
+    catch
+        _:_ -> []
     end.
 
 %% @private
@@ -1657,9 +1684,11 @@ connected() ->
 wal_infos() ->
     Pairs = lists:filtermap(
         fun(Id) ->
-            case catch bondy_oplog_registry:wal_pid(Id) of
+            try bondy_oplog_registry:wal_pid(Id) of
                 Pid when is_pid(Pid) -> {true, {Id, Pid}};
                 _ -> false
+            catch
+                _:_ -> false
             end
         end,
         instances()
@@ -1676,9 +1705,11 @@ wal_infos() ->
 %% scrape.
 bookie_statuses() ->
     Entries =
-        case catch bondy_oplog_core_registry:list() of
+        try bondy_oplog_core_registry:list() of
             L when is_list(L) -> L;
             _ -> []
+        catch
+            _:_ -> []
         end,
     ByPid = lists:foldl(
         fun(Entry, Acc) ->

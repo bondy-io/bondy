@@ -14,9 +14,9 @@ down, in the only module the broker bridge also passes through, so that the two
 surfaces cannot drift apart on what is allowed.
 
 This module lives in `bondy_router` rather than in `bondy_mail` because it has
-to: the `bondy.*` dispatcher is a fixed prefix chain in
-`bondy_wamp_api:do_handle_call/3` and the URIs are macros in `bondy_uris.hrl`,
-so an application cannot register a `bondy.*` namespace from outside.
+to: the `bondy.*` dispatcher is a fixed prefix chain inside `bondy_wamp_api`
+and the URIs are macros in `bondy_uris.hrl`, so an application cannot register
+a `bondy.*` namespace from outside.
 
 ## The realm is not an argument
 

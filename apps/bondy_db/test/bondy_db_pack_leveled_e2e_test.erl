@@ -106,9 +106,18 @@ setup(Topology) ->
     {Topology, Db, Sup, LeveledDir, PackDir}.
 
 cleanup({_T, Db, Sup, LeveledDir, PackDir}) ->
-    _ = catch bondy_db:close(Db),
+    _ =
+        try
+            bondy_db:close(Db)
+        catch
+            _:_ -> ok
+        end,
     _ = [
-        catch bondy_oplog:stop_instance(I)
+        try
+            bondy_oplog:stop_instance(I)
+        catch
+            _:_ -> ok
+        end
      || I <- bondy_oplog:list_instances()
     ],
     case is_process_alive(Sup) of
@@ -271,7 +280,11 @@ mst_state_persists_across_close_reopen({Topology, Db, _Sup, LDir, PDir}) ->
     ok = bondy_db:close_table(T0),
     ok = bondy_db:close(Db),
     _ = [
-        catch bondy_oplog:stop_instance(I)
+        try
+            bondy_oplog:stop_instance(I)
+        catch
+            _:_ -> ok
+        end
      || I <- bondy_oplog:list_instances()
     ],
 
@@ -302,10 +315,24 @@ mst_state_persists_across_close_reopen({Topology, Db, _Sup, LDir, PDir}) ->
             Writes
         )
     after
-        _ = catch bondy_db:close_table(T1),
-        _ = catch bondy_db:close(Db1),
+        _ =
+            try
+                bondy_db:close_table(T1)
+            catch
+                _:_ -> ok
+            end,
+        _ =
+            try
+                bondy_db:close(Db1)
+            catch
+                _:_ -> ok
+            end,
         _ = [
-            catch bondy_oplog:stop_instance(I)
+            try
+                bondy_oplog:stop_instance(I)
+            catch
+                _:_ -> ok
+            end
          || I <- bondy_oplog:list_instances()
         ],
         case is_process_alive(Sup1) of

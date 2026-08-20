@@ -3123,7 +3123,11 @@ do_handle_call(
                     reason => R,
                     stacktrace => S
                 }),
-                catch gen_server:reply(From, {error, {verify_crashed, R}})
+                try
+                    gen_server:reply(From, {error, {verify_crashed, R}})
+                catch
+                    _:_ -> ok
+                end
         end
     end),
     {noreply, State};
@@ -3555,6 +3559,7 @@ do_handle_call(
     _From,
     #state{
         instance_id = Id,
+        ctx_guard = Guard,
         fused_drain = #fused_drain{
             cell_apply_source = Source, cell_apply_ctx = Ctx
         }
@@ -3568,8 +3573,10 @@ do_handle_call(
     %% INLINE at `integrate_peer_root`, in this same process, so this
     %% call is serialized after every delivery it must observe (I1 holds
     %% by construction — see `bondy_oplog_applier:ensure_remote_caught_up/1`).
-    {reply, bondy_oplog_cell_utils:sweep(Id, Ctx, Source, StableHlc, Opts),
-        State};
+    {Reply, Guard1} = bondy_oplog_cell_utils:sweep(
+        Id, Guard, Ctx, Source, StableHlc, Opts
+    ),
+    {reply, Reply, State#state{ctx_guard = Guard1}};
 do_handle_call(
     rederive_projection,
     _From,
@@ -4274,7 +4281,12 @@ fused_commit_now(#state{fused_drain = FD} = State0) ->
             Seg = bondy_oplog_wal_state:committed_segment(
                 FD#fused_drain.consumer_offset
             ),
-            _ = catch bondy_oplog_wal:set_committed_segment(WalPid, Seg),
+            _ =
+                try
+                    bondy_oplog_wal:set_committed_segment(WalPid, Seg)
+                catch
+                    _:_ -> ok
+                end,
             %% AE-freshness: mirror the applier's `commit_now` so
             %% secondary-index reads on the target shards see the fused
             %% writer's committed progress (Step 4).
@@ -4851,9 +4863,13 @@ door_fold(
     %% keeps it doored — exactly this function's stated degrade path —
     %% and the fused replay re-presents it once the gap fills.
     _ =
-        catch bondy_oplog_cell_apply:apply_cell_pairs_mux(
-            S, Id, Pairs, Origin, #{hold => true}
-        ),
+        try
+            bondy_oplog_cell_apply:apply_cell_pairs_mux(
+                S, Id, Pairs, Origin, #{hold => true}
+            )
+        catch
+            _:_ -> ok
+        end,
     ok;
 door_fold(#state{}, _Pairs) ->
     ok.
@@ -4929,7 +4945,12 @@ terminate(_Reason, #state{
     %% `instance_pid` field will be stale until the new instance
     %% gen_server's init runs and republishes; lock-free read paths
     %% use `is_process_alive/1` to detect that case.
-    _ = catch CkptMod:close(CkptState),
+    _ =
+        try
+            CkptMod:close(CkptState)
+        catch
+            _:_ -> ok
+        end,
     %% CLOSE (not destroy) a durable MST: `terminate` runs on EVERY stop —
     %% node shutdown, supervisor `one_for_all` subtree restart — none of which
     %% mean "delete this data". For a pack-store backend `destroy/1` does
@@ -4942,17 +4963,26 @@ terminate(_Reason, #state{
     %% to lose. Deleting a durable table's data belongs on an explicit drop
     %% path, not here. Unknown backends fail safe to `close` (never delete).
     _ =
-        case Backend of
-            ets -> catch bondy_mst:destroy(MST);
-            map -> catch bondy_mst:destroy(MST);
-            _ -> catch bondy_mst:close(MST)
+        try
+            case Backend of
+                ets -> bondy_mst:destroy(MST);
+                map -> bondy_mst:destroy(MST);
+                _ -> bondy_mst:close(MST)
+            end
+        catch
+            _:_ -> ok
         end,
     %% Drop the overlay — it dies with the instance, no heir, no
     %% survival across subtree restart. The applier reads the tid
     %% from the registry, and the registry row's `overlay_tab`
     %% becomes stale here until the next `init/1` republishes a
     %% fresh one. Applier-side reads tolerate `undefined`.
-    _ = catch ets:delete(Overlay),
+    _ =
+        try
+            ets:delete(Overlay)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% =============================================================================
@@ -4992,18 +5022,21 @@ restore_frontier(_InstanceId, _Other) ->
 %% checkpoint as `{projection_managed, frontier, FrontierVV}` so the next start
 %% restores the compacted-prefix maxima (see `restore_frontier/2`). Durable
 %% backends only — an ephemeral instance has no checkpoint. The registry read is
-%% wrapped in `catch`: at node shutdown the core registry may already be gone,
+%% wrapped in `try`: at node shutdown the core registry may already be gone,
 %% and a miss just falls back to a WAL-replay-only frontier next boot.
 maybe_persist_frontier(InstanceId, Backend, Watermark, CkptMod, CkptState) ->
-    is_durable_backend(Backend) andalso
-        (catch begin
-            FrontierVV = bondy_oplog_registry:frontier(InstanceId),
-            CkptMod:put_checkpoint(
-                CkptState,
-                Watermark,
-                {projection_managed, frontier, FrontierVV}
-            )
-        end),
+    _ =
+        is_durable_backend(Backend) andalso
+            try
+                FrontierVV = bondy_oplog_registry:frontier(InstanceId),
+                CkptMod:put_checkpoint(
+                    CkptState,
+                    Watermark,
+                    {projection_managed, frontier, FrontierVV}
+                )
+            catch
+                _:_ -> ok
+            end,
     ok.
 
 %% @private

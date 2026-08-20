@@ -221,7 +221,11 @@ terminate(Reason, StateName, #state{} = State0) ->
     %% Ensure we closed socket
     Transport = State0#state.transport,
     Socket = State0#state.socket,
-    catch Transport:close(Socket),
+    try
+        Transport:close(Socket)
+    catch
+        _:_ -> ok
+    end,
 
     State1 = State0#state{socket = undefined},
 

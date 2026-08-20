@@ -7,7 +7,7 @@
 # =============================================================================
 # Build stage 1
 # =============================================================================
-FROM erlang:28.5.0.3 AS builder
+FROM erlang:29.0.5 AS builder
 
 # Build dependencies. RocksDB is gone, so the packages that existed only for it
 # are removed: libsnappy-dev (RocksDB linked system snappy), plus libssl-dev and

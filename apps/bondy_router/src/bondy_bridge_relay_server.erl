@@ -99,6 +99,10 @@ stateDiagram-v2
 -ifdef(TEST).
 %% Exposed for testing the read side of the bondy_db full sync.
 -export([realm_sync_cells/1]).
+%% Exposed so the "absent `enabled' means ping off" fall-through is pinned:
+%% `bondy_listener_config:assert_ping_keys/4' stopped requiring `enabled'
+%% BECAUSE of it, so the two have to be tested together.
+-export([maybe_enable_ping/2]).
 -endif.
 
 %% =============================================================================
@@ -140,8 +144,15 @@ init({Ref, Transport, Opts}) ->
         start_ts = erlang:system_time(millisecond)
     },
 
-    %% Setup ping
-    PingOpts = maps:from_list(key_value:get(ping, Opts, [])),
+    %% Setup ping. `enabled => false` rather than an empty default for the
+    %% same reason as in `bondy_wamp_tcp_connection_handler:init_wamp/3`:
+    %% `maybe_enable_ping/2` below has a clause for `enabled` true and one for
+    %% false and none for its absence, and a listener declared under
+    %% `listeners.<name>.*` need not configure ping at all — every
+    %% `listeners.$name.ping.*` mapping is default-free.
+    PingOpts = maps:from_list(
+        key_value:get(ping, Opts, [{enabled, false}])
+    ),
     State = maybe_enable_ping(PingOpts, State0),
 
     %% We setup the auth_timeout timer. This is the period we allow between
@@ -168,7 +179,11 @@ terminate(Reason, StateName, #state{} = State) ->
     Transport = State#state.transport,
     Socket = State#state.socket,
 
-    catch Transport:close(Socket),
+    try
+        Transport:close(Socket)
+    catch
+        _:_ -> ok
+    end,
 
     terminate(Reason, StateName, State#state{socket = undefined}).
 
@@ -183,12 +198,12 @@ connecting(enter, connecting, State0) ->
     Ref = State0#state.ranch_ref,
     Transport = State0#state.transport,
 
-    %% We to make this call before ranch:handshake/2
+    %% Has to be called before the handshake.
     ProxyProtocol = bondy_tcp_proxy_protocol:init(Ref, 15_000),
 
-    %% Setup and configure socket
-    TLSOpts = bondy_config:get([Ref, tls_opts], []),
-    {ok, Socket} = ranch:handshake(Ref, TLSOpts),
+    %% No per-connection TLS options: ranch already holds this listener's
+    %% material, from the transport options the listen socket was bound with.
+    {ok, Socket} = ranch:handshake(Ref),
 
     {PeerIP, _} = Peername = peername(Transport, Socket),
 
@@ -1069,6 +1084,15 @@ maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
         ping_retry = Retry
     };
 maybe_enable_ping(#{enabled := false}, State) ->
+    State;
+maybe_enable_ping(#{enabled := Invalid}, _State) ->
+    error({invalid_ping_enabled, Invalid});
+%% Same three cases, and the same reasoning, as
+%% `bondy_wamp_tcp_connection_handler:maybe_enable_ping/2': absent `enabled' is
+%% ping off (a partially-configured block arrives here without it, which matching
+%% only `false' turned into a `function_clause'); a non-boolean is a loud
+%% configuration error.
+maybe_enable_ping(_PingOpts, State) ->
     State.
 
 %% @private

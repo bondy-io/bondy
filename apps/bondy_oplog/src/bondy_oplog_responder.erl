@@ -530,10 +530,20 @@ set_oversized_alarm() ->
         "the bondy_oplog_sync_oversized_item_last_bytes metric and the WARNING "
         "logs for the size and identity."
     >>,
-    _ = catch alarm_handler:set_alarm({?OVERSIZED_ALARM_ID, Desc}),
+    _ =
+        try
+            alarm_handler:set_alarm({?OVERSIZED_ALARM_ID, Desc})
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% @private
 clear_oversized_alarm() ->
-    _ = catch alarm_handler:clear_alarm(?OVERSIZED_ALARM_ID),
+    _ =
+        try
+            alarm_handler:clear_alarm(?OVERSIZED_ALARM_ID)
+        catch
+            _:_ -> ok
+        end,
     ok.

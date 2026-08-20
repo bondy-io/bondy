@@ -629,12 +629,22 @@ set_persist_alarm(Path, Reason) ->
             [Path, Reason]
         )
     ),
-    _ = catch alarm_handler:set_alarm({?PERSIST_ALARM_ID, Desc}),
+    _ =
+        try
+            alarm_handler:set_alarm({?PERSIST_ALARM_ID, Desc})
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% @private
 clear_persist_alarm() ->
-    _ = catch alarm_handler:clear_alarm(?PERSIST_ALARM_ID),
+    _ =
+        try
+            alarm_handler:clear_alarm(?PERSIST_ALARM_ID)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% @private

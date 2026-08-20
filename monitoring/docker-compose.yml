@@ -1,7 +1,7 @@
 # =============================================================================
 # Bondy monitoring stack: Prometheus + Grafana.
 #
-# Scrapes the local 3-node dev cluster (make node1 / node2 / node3) through
+# Scrapes the local 3-node dev cluster (just node1 / node2 / node3) through
 # the Admin API /metrics endpoint on ports 18081 / 18181 / 18281 of the
 # Docker host. See prometheus/prometheus.yml to add or change targets.
 #

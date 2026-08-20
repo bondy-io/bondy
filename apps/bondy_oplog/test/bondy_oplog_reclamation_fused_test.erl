@@ -11,7 +11,7 @@
 %% permanently: `bondy_oplog_gc_scheduler` drives every instance
 %% unfiltered, so a fused shard's dead cells (e.g. an emptied group's
 %% tombstone) accumulated forever, silently. `bondy_oplog_cell_utils:
-%% sweep/5` (shared with the applier) now runs in-process on the fused
+%% sweep/6` (shared with the applier) now runs in-process on the fused
 %% instance.
 -module(bondy_oplog_reclamation_fused_test).
 

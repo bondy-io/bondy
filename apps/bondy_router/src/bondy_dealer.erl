@@ -2986,17 +2986,12 @@ rib_local_callee(RealmUri, ProcUri, Msg, Opts) ->
     choose({Locals, ?EOT}, Opts#{call_opts => Msg#call.options}).
 
 %% @private
-%% The registration match options a CALL routes with: all match policies
-%% when pattern-based registration is enabled, exact only otherwise.
+%% The registration match options a CALL routes with: every match policy.
+%% Pattern-based registration is not optional — see `bondy_config:setup_wamp/0'
+%% — so a CALL that considered exact registrations alone would miss the
+%% router's own `wamp.session.<hash>..get' wildcard.
 reg_match_opts() ->
-    case
-        bondy_config:get([wamp, dealer, features, pattern_based_registration])
-    of
-        true ->
-            #{limit => ?MATCH_LIMIT, match => '_'};
-        false ->
-            #{limit => ?MATCH_LIMIT, match => ?EXACT_MATCH}
-    end.
+    #{limit => ?MATCH_LIMIT, match => '_'}.
 
 %% @private
 %% A node-addressed forwarded CALL found no live local callee (a stale

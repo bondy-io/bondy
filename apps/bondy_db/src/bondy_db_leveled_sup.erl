@@ -124,7 +124,12 @@ stop(Sup) when is_pid(Sup) ->
     ],
     lists:foreach(
         fun(Id) ->
-            _ = catch supervisor:terminate_child(Sup, Id),
+            _ =
+                try
+                    supervisor:terminate_child(Sup, Id)
+                catch
+                    _:_ -> ok
+                end,
             %% Erase the keyed handle registration (no-op for the
             %% never-registered anonymous ids).
             _ = persistent_term:erase(?PT_KEY(Sup, Id))
@@ -135,7 +140,12 @@ stop(Sup) when is_pid(Sup) ->
     %% parent (start_link/0) or just a holder of the pid — `kill`
     %% works either way and we have already flushed the children.
     Ref = erlang:monitor(process, Sup),
-    _ = catch unlink(Sup),
+    _ =
+        try
+            unlink(Sup)
+        catch
+            _:_ -> ok
+        end,
     exit(Sup, kill),
     receive
         {'DOWN', Ref, process, Sup, _} -> ok
@@ -173,8 +183,18 @@ supervisor to immediately restart.
 -spec stop_bookie(Sup :: pid(), Key :: term()) -> ok.
 
 stop_bookie(Sup, Key) when is_pid(Sup) ->
-    _ = catch supervisor:terminate_child(Sup, Key),
-    _ = catch supervisor:delete_child(Sup, Key),
+    _ =
+        try
+            supervisor:terminate_child(Sup, Key)
+        catch
+            _:_ -> ok
+        end,
+    _ =
+        try
+            supervisor:delete_child(Sup, Key)
+        catch
+            _:_ -> ok
+        end,
     _ = persistent_term:erase(?PT_KEY(Sup, Key)),
     ok.
 

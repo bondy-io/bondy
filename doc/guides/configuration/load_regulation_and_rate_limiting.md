@@ -320,7 +320,7 @@ The mechanisms above protect the router. A callee has the opposite problem: it
 is one process pool serving invocations the router sends it, and a burst can
 overwhelm the handler rather than the router.
 
-Connections built with `bondy_connect` regulate invocation **admission** per
+Connections built with `bondy_connect_sdk` regulate invocation **admission** per
 connection, through two independent limits: a hard in-flight cap
 (`max_concurrency`, where `0` means unlimited) counting invocations currently
 being serviced, and an optional token bucket for the rate. Both live in the

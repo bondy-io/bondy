@@ -3,21 +3,20 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-{application, bondy_router,
- [
+{application, bondy_router, [
     {description,
         "Bondy is an open source, always-on and scalable "
         "application networking platform for modern architectures. "
         "It is an all-in-one event and service mesh "
-        "that offers both Publish-Subscribe (PubSub) and routed Remote " "Procedure Calls (RPC), additional protocols and secure multi-tenancy. "
+        "that offers both Publish-Subscribe (PubSub) and routed Remote "
+        "Procedure Calls (RPC), additional protocols and secure multi-tenancy. "
         "Bondy implements the open Web Application Messaging Protocol (WAMP) "
-        "and is written in Erlang."
-    },
-    {vsn, "1.0.0-rc-mustard"},
+        "and is written in Erlang."},
+    {vsn, "1.0.0-rc-pineapple"},
     {registered, []},
     %% We pass the version number in the bondy_app:start/2 arguments
-    {mod, {bondy_app, [{vsn, "1.0.0-rc-mustard"}]}},
-    {applications,[
+    {mod, {bondy_app, [{vsn, "1.0.0-rc-pineapple"}]}},
+    {applications, [
         %% Erlang/OTP
         stdlib,
         kernel,
@@ -58,7 +57,7 @@
         bondy_regulator,
         %% bondy implements bondy_connect_local's handler behaviour and
         %% registers it at boot (the in-VM WAMP transport for co-located clients)
-        bondy_connect
+        bondy_connect_sdk
         %% tuplespace, partisan and bondy_db are started manually by bondy_app
         %% (partisan is `{partisan, load}` in the release; bondy_app owns
         %% starting it, before bondy_db). plum_db is no longer started.
@@ -73,4 +72,4 @@
         {"Website", "https://getbondy.io"},
         {"Docker", "https://hub.docker.com/r/leapsight/bondy"}
     ]}
- ]}.
+]}.

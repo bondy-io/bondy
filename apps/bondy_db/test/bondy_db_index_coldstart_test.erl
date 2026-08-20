@@ -287,8 +287,18 @@ close(Table, Db, Sup) ->
     %% (`flush_and_mark_clean`) that stamps each index shard's clean-shutdown
     %% flag. Passing `Db` here (as an earlier version did) silently no-ops under
     %% `catch` and leaves every shard dirty → a needless rebuild on reopen.
-    _ = catch bondy_db:close_table(Table),
-    _ = catch bondy_db:close(Db),
+    _ =
+        try
+            bondy_db:close_table(Table)
+        catch
+            _:_ -> ok
+        end,
+    _ =
+        try
+            bondy_db:close(Db)
+        catch
+            _:_ -> ok
+        end,
     stop_everything(),
     case is_process_alive(Sup) of
         true -> bondy_db_leveled_sup:stop(Sup);
@@ -303,7 +313,12 @@ close(Table, Db, Sup) ->
 %% recovered on the next open, but the index is left without its tail or a clean
 %% flag, forcing a rebuild.
 crash(Db, Sup) ->
-    _ = catch bondy_db:close(Db),
+    _ =
+        try
+            bondy_db:close(Db)
+        catch
+            _:_ -> ok
+        end,
     stop_everything(),
     case is_process_alive(Sup) of
         true -> bondy_db_leveled_sup:stop(Sup);
@@ -313,7 +328,11 @@ crash(Db, Sup) ->
 
 stop_everything() ->
     _ = [
-        catch bondy_oplog:stop_instance(I)
+        try
+            bondy_oplog:stop_instance(I)
+        catch
+            _:_ -> ok
+        end
      || I <- bondy_oplog:list_instances()
     ],
     ok.

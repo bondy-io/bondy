@@ -1,0 +1,78 @@
+# Fly.io deployment for the public bondy.fly.dev demo cluster.
+# Replaces the Makefile that used to live here. Run from this directory:
+#   cd deployment/fly && just --list
+#
+# Every recipe drives `fly` against the app configured in ./fly.toml, so it
+# acts on whatever Fly org/app your `fly auth` context currently selects.
+# `deploy-bondy` and `stop-bondy` change a live, publicly reachable cluster.
+
+set shell := ["bash", "-cu"]
+
+# Regions the demo cluster spans, as Fly region codes:
+#   ams Amsterdam · bos Boston      · eze Buenos Aires · fra Frankfurt
+#   hkg Hong Kong · iad Virginia    · nrt Japan        · waw Poland
+#   yyz Canada
+#
+# lhr (London) is deliberately absent: it is the primary region and is scaled
+# by `deploy-bondy-primary`, which also sets the VM size and memory.
+#
+# gig (Rio de Janeiro) was commented out in the Makefile this replaces and
+# stays out.
+regions := "ams bos eze fra hkg iad nrt waw yyz"
+
+# The Makefile also had `deploy` and `destroy` aggregate targets. Both listed
+# `deploy-marketplace`/`deploy-bots`/`destroy-marketplace`/`destroy-bots`,
+# which were never defined in it, so both aborted with "No rule to make
+# target". They are not carried over rather than reinvented — call the
+# recipes below directly.
+
+# Show every recipe.
+default:
+    @just --list
+
+# `scale` is the argument the Makefile passed as `${BONDY_SCALE}`; it expanded
+# to nothing when unset, leaving a bare `fly scale --yes --region lhr`. Here it
+# must be given explicitly, either as an argument or via BONDY_SCALE.
+
+# Deploy to the primary region (London) and size the VMs there.
+deploy-bondy-primary scale=env("BONDY_SCALE", ""):
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "{{scale}}" ]; then
+      echo "usage: just deploy-bondy-primary <scale>   (or set BONDY_SCALE)" >&2
+      exit 1
+    fi
+    fly deploy --config ./fly.toml --regions lhr
+    fly scale vm shared-cpu-2x
+    fly scale memory 2048
+    fly scale count 2
+    fly scale {{scale}} --yes --region lhr
+
+# Scale every secondary region to `count` machines.
+_scale count:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for r in {{regions}}; do
+      echo "scaling $r to {{count}}"
+      fly scale count {{count}} --yes --region "$r"
+    done
+
+# Bring every secondary region up to 2 machines.
+deploy-bondy: (_scale "2")
+
+# Scale every secondary region to 0 machines (London is left running).
+stop-bondy: (_scale "0")
+
+# Needs `wick` (https://github.com/bondy-io/wick) on PATH.
+
+# Smoke-test the live cluster: call bondy.cluster.info over WAMP and print it.
+check:
+    wick --url ws://bondy.fly.dev/ws \
+      --realm com.leapsight.bondy \
+      --authmethod anonymous \
+      --debug \
+      call bondy.cluster.info
+
+# Print how many nodes the live cluster currently reports.
+nodes:
+    wick --url ws://bondy.fly.dev/ws --realm com.leapsight.bondy --authmethod anonymous call bondy.cluster.info | jq '.[0].nodes | length'

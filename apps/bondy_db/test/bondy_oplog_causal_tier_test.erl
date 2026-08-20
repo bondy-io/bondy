@@ -138,5 +138,9 @@ with_db(Opts, Fun) ->
     try
         Fun(Db)
     after
-        catch bondy_db:close(Db)
+        try
+            bondy_db:close(Db)
+        catch
+            _:_ -> ok
+        end
     end.

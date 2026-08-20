@@ -17,8 +17,10 @@ Fly.io substrate.
 
 ## Image contents
 
-- Base: `hexpm/elixir:1.18.4-erlang-28.0-debian-bookworm-*-slim`
-  — community-maintained, OTP 28 + Elixir 1.18 baked in.
+- Base: `hexpm/elixir:1.20.3-erlang-29.0.5-debian-bookworm-*-slim`
+  — community-maintained, OTP 29 + Elixir 1.20 baked in. No
+  hexpm/elixir tag pairs Elixir 1.18 with OTP 29, so tracking
+  production OTP moves the Elixir minor with it.
 - `rebar3`, `just` pinned in the Dockerfile build args.
 - `sysstat` (iostat, vmstat), `strace`, `procps` — companion data
   tools the bench plan §4 calls for.
@@ -114,7 +116,7 @@ elixir --version
 just --version
 ```
 
-Should print OTP 28, Elixir 1.18, just 1.36.
+Should print OTP 29, Elixir 1.20, just 1.36.
 
 ## Companion data (bench plan §4)
 
@@ -164,7 +166,7 @@ reflected in any results doc; the key ones for the substrate:
    overhead vs the host kernel. Doesn't change the OS-specific
    vs architectural verdict at the ~70× signal level, but the
    `_RESULTS.md` environment section must note the substrate.
-2. **OTP 28** — if production ships on a different OTP minor,
+2. **OTP 29** — if production ships on a different OTP minor,
    the bench numbers may be off by whatever `prim_file` driver
    changes happened between versions. Re-pin the `OTP_VERSION`
    build arg when production OTP is fixed.

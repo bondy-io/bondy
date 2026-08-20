@@ -20,9 +20,9 @@
 # =============================================================================
 
 # =============================================================================
-# Build stage 1 — OTP-28 release build
+# Build stage 1 — OTP-29 release build
 # =============================================================================
-FROM erlang:28.5.0.3 AS builder
+FROM erlang:29.0.5 AS builder
 
 RUN --mount=type=cache,id=apt,sharing=locked,target=/var/cache/apt apt-get update && \
     apt-get -y install --no-install-recommends \
@@ -38,7 +38,7 @@ COPY . /bondy/src
 
 RUN mkdir -p /bondy/rel
 
-# Some NIFs need a modern CMake policy floor on OTP-28 toolchains.
+# Some NIFs need a modern CMake policy floor on OTP-29 toolchains.
 ENV CMAKE_POLICY_VERSION_MINIMUM=3.5
 
 RUN rebar3 as docker tar && \

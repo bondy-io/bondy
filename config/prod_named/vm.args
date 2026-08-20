@@ -22,22 +22,22 @@
 ## -----------------------------------------------------------------------------
 ## Erlang
 ## -----------------------------------------------------------------------------
+##
+## Only flags that bondy.conf cannot set belong here. The generated args file
+## below is loaded last, and a duplicated erts + flag resolves to the last
+## occurrence, so anything the schema emits wins over a value written here.
+## +sbwt, +c, +C and +P were removed for that reason: the schema already emits
+## them, so the copies here never took effect (+P was set to 2000000 while the
+## schema's deliberate 2097152 is what the node actually ran with). Set those
+## through bondy.conf: vm.cpu.scheduler.busy_wait_threshold, vm.time_correction,
+## vm.time_correction.warp_mode, vm.process.limit.
 
-+sbwt none
+## +K was removed too: it is absent from the erts 16.4 usage output, and both
+## `+K true` and `+K false` leave erlang:system_info(kernel_poll) at true, so
+## kernel polling is unconditional and the flag does nothing.
 
-## Enable Time Correction
-+c true
-
-## Enable Multi-time warp mode
-+C multi_time_warp
-
-## Max processes
-+P 2000000
-
-## Kernel polling
-+K true
-
-## Async I/O threads
+## Async I/O threads. vm.async_thread.number carries no default precisely so
+## that this line takes effect; setting that key in bondy.conf overrides it.
 +A 64
 
 

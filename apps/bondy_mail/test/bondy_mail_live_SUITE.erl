@@ -26,7 +26,7 @@ world rather than of a container:
 ## Running it
 
 Put the relay's details in `.env` at the repository root -- the same file
-`make node1` reads, already ignored by git (`.gitignore:43`):
+`just node1` reads, already ignored by git (`.gitignore:43`):
 
     BONDY_TEST_SMTP_HOST=smtp.example.com
     BONDY_TEST_SMTP_PORT=587

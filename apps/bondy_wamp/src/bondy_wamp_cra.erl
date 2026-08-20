@@ -11,7 +11,7 @@ Authentication** (WAMP-CRA) method.
 
 This is the single source of truth for WAMP-CRA in the Bondy monorepo: the
 server (`bondy_password_cra` and `bondy_auth_wamp_cra`, which delegate here) and
-the WAMP client (`bondy_connect`) share these functions so that the response
+the WAMP client (`bondy_connect_sdk`) share these functions so that the response
 computed by the client matches the one expected by the server.
 
 WAMP-CRA derives a key from the user's secret with PBKDF2 (`salted_password/3`)

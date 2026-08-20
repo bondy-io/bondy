@@ -686,7 +686,7 @@ update_context({body, Body}, #{<<"request">> := _} = Ctxt0) ->
 
 %% @private
 init_context(Req) ->
-    Peer = cowboy_req:peer(Req),
+    Peer = bondy_http_utils:peer(Req),
     Id = bondy_telemetry:trace_id(),
 
     M = #{

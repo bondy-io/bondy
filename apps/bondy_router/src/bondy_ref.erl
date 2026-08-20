@@ -275,7 +275,11 @@ is_local(#bondy_ref{nodestring = Val}, Nodestring) ->
 -spec is_self(Ref :: t()) -> boolean().
 
 is_self(#bondy_ref{} = Ref) ->
-    (catch pid(Ref)) =:= self().
+    try
+        pid(Ref) =:= self()
+    catch
+        _:_ -> false
+    end.
 
 -doc "Returns `true` if term `Term` is a reference. Otherwise returns `false`.".
 -spec is_type(t()) -> boolean().

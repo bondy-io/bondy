@@ -134,7 +134,13 @@ run_in(Pid, Fun) ->
     Ref = make_ref(),
     %% `replace_state/2` returns the (unchanged) state, not `ok`.
     _ = sys:replace_state(Pid, fun(S) ->
-        Self ! {Ref, catch Fun()},
+        Self !
+            {Ref,
+                try
+                    Fun()
+                catch
+                    C:R:Stack -> {'EXIT', {C, R, Stack}}
+                end},
         S
     end),
     receive
@@ -436,7 +442,12 @@ cleanup(Dir) ->
      || E <- bondy_oplog_core_registry:list(),
         {N, I, S} <- [bondy_oplog_core_registry:entry_key(E)]
     ],
-    _ = (catch del_tree(Dir)),
+    _ =
+        try
+            del_tree(Dir)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 run(Dir) ->
@@ -469,7 +480,12 @@ run(Dir) ->
     %% sealed page not in the page cache and crashes with
     %% `not_on_controlling_process` — the failure the fix avoids. Not asserted,
     %% because a warm page cache can serve every page from RAM.
-    _ = (catch bondy_mst:to_list(bondy_oplog_registry:mst(InstId))),
+    _ =
+        try
+            bondy_mst:to_list(bondy_oplog_registry:mst(InstId))
+        catch
+            _:_ -> ok
+        end,
 
     %% The applier's cold-replay path (which delegates to the instance) completes
     %% without crashing — the exact sequence that crash-looped on restart before.

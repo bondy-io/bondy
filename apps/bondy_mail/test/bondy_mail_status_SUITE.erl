@@ -91,7 +91,11 @@ init_per_testcase(_Case, Config) ->
     Config.
 
 end_per_testcase(_Case, _Config) ->
-    catch meck:unload(partisan),
+    try
+        meck:unload(partisan)
+    catch
+        _:_ -> ok
+    end,
     _ = application:stop(bondy_mail),
     ok.
 
@@ -570,7 +574,11 @@ base() ->
 %% and standing up real nodes to compute a hash would test Partisan rather than
 %% the selection.
 mock_cluster(Self, Peers) ->
-    catch meck:unload(partisan),
+    try
+        meck:unload(partisan)
+    catch
+        _:_ -> ok
+    end,
     meck:new(partisan, [passthrough, no_link]),
     meck:expect(partisan, node, fun() -> Self end),
     meck:expect(partisan, nodes, fun() -> Peers end),

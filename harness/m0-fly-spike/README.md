@@ -11,7 +11,7 @@ proven, not assumed.)
 
 | File | Role |
 |---|---|
-| `Dockerfile` | OTP-28 image (`erlang:28.5.0`) of the pinned tag + fault toolbox + probe. Fixes the R28 build gap in `deployment/Dockerfile` (`00 §9`). |
+| `Dockerfile` | OTP-29 image (`erlang:29.0.5`) of the pinned tag + fault toolbox + probe. Builder tag tracks `deployment/Dockerfile`. |
 | `fly.toml` | 3-node cluster manifest: 6PN DNS discovery, per-machine volume, no autostop. |
 | `config/bondy.conf.template` | Bootable profile from `03 §2`, key-verified against `schema/bondy.schema`. |
 | `setup.sh` | Bring-up hook (Erlang node name from the 6PN IP). |

@@ -43,12 +43,23 @@ setup() ->
 
 cleanup({Dir, Sup}) ->
     _ = [
-        catch bondy_oplog:stop_instance(I)
+        try
+            bondy_oplog:stop_instance(I)
+        catch
+            _:_ -> ok
+        end
      || I <- bondy_oplog:list_instances()
     ],
     case is_process_alive(Sup) of
-        true -> _ = catch bondy_db_leveled_sup:stop(Sup);
-        false -> ok
+        true ->
+            _ =
+                try
+                    bondy_db_leveled_sup:stop(Sup)
+                catch
+                    _:_ -> ok
+                end;
+        false ->
+            ok
     end,
     rmrf(Dir),
     rmrf(filename:join(["/tmp", "bondy_oplog_wal", os:getpid()])),

@@ -67,7 +67,11 @@ trim_reclaims_journal_files() ->
         ),
         ok
     after
-        catch bondy_db_leveled_sup:stop(Sup),
+        try
+            bondy_db_leveled_sup:stop(Sup)
+        catch
+            _:_ -> ok
+        end,
         os:cmd("rm -rf " ++ Dir)
     end.
 
@@ -78,9 +82,11 @@ trim_reclaims_journal_files() ->
 test_dir() ->
     %% Per-pid so concurrent runs cannot share a store.
     filename:join(
-        "/tmp", "bondy_db_jtrim_" ++ os:getpid() ++ "_" ++ integer_to_list(
-            erlang:unique_integer([positive])
-        )
+        "/tmp",
+        "bondy_db_jtrim_" ++ os:getpid() ++ "_" ++
+            integer_to_list(
+                erlang:unique_integer([positive])
+            )
     ).
 
 book_opts(Dir) ->
@@ -204,7 +210,11 @@ sweep_removes_archived_files() ->
         ),
         ok
     after
-        catch bondy_db_leveled_sup:stop(Sup),
+        try
+            bondy_db_leveled_sup:stop(Sup)
+        catch
+            _:_ -> ok
+        end,
         os:cmd("rm -rf " ++ Dir)
     end.
 

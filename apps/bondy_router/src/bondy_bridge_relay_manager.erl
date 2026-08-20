@@ -21,9 +21,6 @@ Bridges created through the API will only start on the receiving node.
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 
--define(TCP, bridge_relay_tcp).
--define(TLS, bridge_relay_tls).
-
 -define(OPTS_SPEC, #{
     autostart => #{
         alias => <<"autostart">>,
@@ -52,24 +49,17 @@ Bridges created through the API will only start on the receiving node.
 
 %% API
 -export([add_bridge/2]).
--export([connections/0]).
 -export([disable_bridge/1]).
 -export([enable_bridge/1]).
 -export([get_bridge/1]).
 -export([status/0]).
 -export([list_bridges/0]).
 -export([remove_bridge/1]).
--export([resume_listeners/0]).
 -export([start_bridge/1]).
 -export([start_bridges/0]).
 -export([start_link/0]).
--export([start_listeners/0]).
 -export([stop_bridge/1]).
 -export([stop_bridges/0]).
--export([stop_listeners/0]).
--export([suspend_listeners/0]).
--export([tcp_connections/0]).
--export([tls_connections/0]).
 
 %% GEN_SERVER CALLBACKS
 -export([init/1]).
@@ -172,42 +162,6 @@ stop_bridge(Name) ->
 
 stop_bridges() ->
     gen_server:call(?MODULE, stop_bridges, timer:seconds(30)).
-
--doc "Starts the tcp and tls raw socket listeners.".
--spec start_listeners() -> ok.
-
-start_listeners() ->
-    Protocol = bondy_bridge_relay_server,
-    ok = bondy_ranch_listener:start(?TCP, Protocol, bondy_config:get(?TCP)),
-    ok = bondy_ranch_listener:start(?TLS, Protocol, bondy_config:get(?TLS)).
-
--spec stop_listeners() -> ok.
-
-stop_listeners() ->
-    ok = bondy_ranch_listener:stop(?TCP),
-    ok = bondy_ranch_listener:stop(?TLS).
-
--spec suspend_listeners() -> ok.
-
-suspend_listeners() ->
-    ok = bondy_ranch_listener:suspend(?TCP),
-    ok = bondy_ranch_listener:suspend(?TLS).
-
--spec resume_listeners() -> ok.
-
-resume_listeners() ->
-    bondy_ranch_listener:resume(?TCP),
-    bondy_ranch_listener:resume(?TLS).
-
-connections() ->
-    bondy_ranch_listener:connections(?TCP) ++
-        bondy_ranch_listener:connections(?TLS).
-
-tls_connections() ->
-    bondy_ranch_listener:connections(?TLS).
-
-tcp_connections() ->
-    bondy_ranch_listener:connections(?TCP).
 
 %% =============================================================================
 %% GEN_SERVER CALLBACKS

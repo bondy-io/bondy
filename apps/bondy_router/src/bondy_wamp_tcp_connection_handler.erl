@@ -25,6 +25,10 @@ A ranch handler for the wamp protocol over either tcp or tls transports.
     frame_type :: frame_type(),
     encoding :: atom(),
     max_len :: pos_integer(),
+    %% The listener's resolved option block, handed over by
+    %% `bondy_listener_ranch:stream_protocol_opts/2' at listener start. Held so
+    %% the handshake can read `ping' out of it without a second lookup.
+    opts = [] :: key_value:t(),
     idle_timeout :: timeout(),
     ping_idle_timeout :: non_neg_integer(),
     ping_tref :: optional(reference()),
@@ -53,6 +57,13 @@ A ranch handler for the wamp protocol over either tcp or tls transports.
 -export([code_change/3]).
 -export([format_status/1]).
 
+-ifdef(TEST).
+%% Exposed so the "absent `enabled' means ping off" fall-through is pinned:
+%% `bondy_listener_config:assert_ping_keys/4' stopped requiring `enabled'
+%% BECAUSE of it, so the two have to be tested together.
+-export([maybe_enable_ping/2]).
+-endif.
+
 %% =============================================================================
 %% API
 %% =============================================================================
@@ -70,7 +81,7 @@ start_link(Ref, Transport, Opts) ->
 %% GEN SERVER CALLBACKS
 %% =============================================================================
 
-init({Ref, Transport, _Opts0}) ->
+init({Ref, Transport, Opts}) ->
     ok = logger:update_process_metadata(#{
         listener => Ref,
         transport => Transport
@@ -83,12 +94,12 @@ init({Ref, Transport, _Opts0}) ->
         bondy_config:get([wamp_connection, message_queue_data], off_heap)
     ),
 
-    %% We to make this call before ranch:handshake/2
+    %% Has to be called before the handshake.
     ProxyProtocol = bondy_tcp_proxy_protocol:init(Ref, 15_000),
 
-    %% Setup and configure socket
-    TLSOpts = bondy_config:get([Ref, tls_opts], []),
-    {ok, Socket} = ranch:handshake(Ref, TLSOpts),
+    %% No per-connection TLS options: ranch already holds this listener's
+    %% material, from the transport options the listen socket was bound with.
+    {ok, Socket} = ranch:handshake(Ref),
 
     {PeerIP, _} = Peername = peername(Transport, Socket),
 
@@ -102,7 +113,11 @@ init({Ref, Transport, _Opts0}) ->
                 description => "TCP connection rejected (rate limit)",
                 source_ip => inet:ntoa(SourceIP)
             }),
-            catch Transport:close(Socket),
+            try
+                Transport:close(Socket)
+            catch
+                _:_ -> ok
+            end,
             exit(normal);
         ok ->
             ok
@@ -115,7 +130,13 @@ init({Ref, Transport, _Opts0}) ->
 
     State = #state{
         listener = Ref,
-        idle_timeout = bondy_config:get([Ref, idle_timeout], infinity),
+        opts = Opts,
+        %% From the listener's option block, resolved once at listener start.
+        %% `bondy_listener_config:option_defaults/2` puts an `idle_timeout` in
+        %% every raw-socket listener's spec, so the fallback here is for a
+        %% listener started straight from `resolve/2` without option defaults —
+        %% which is what several test cases do.
+        idle_timeout = key_value:get(idle_timeout, Opts, infinity),
         start_time = erlang:monotonic_time(second),
         transport = Transport,
         socket = Socket,
@@ -573,8 +594,26 @@ init_wamp(Len, Enc, State0) ->
                 protocol_state = ProtoState
             },
 
+            %% From the listener's option block in state, not a fresh
+            %% application-environment read: this runs on every accepted
+            %% connection, and the block was already resolved once at listener
+            %% start.
+            %%
+            %% An absent `ping` block is a legitimate listener, not a
+            %% misconfiguration: every `listeners.$name.ping.*` mapping is
+            %% default-free, so a listener that configured no ping has no key
+            %% at this path at all, and a read with no default raises `badarg`
+            %% here — after the socket is accepted, so the listener binds and
+            %% then dies on the first client's handshake.
+            %%
+            %% The default is `enabled => false` rather than the empty list:
+            %% `maybe_enable_ping/2` has a clause for `enabled` true and one
+            %% for false and NONE for its absence, so `#{}` would move the
+            %% same crash one line down.
             PingOpts = maps_utils:from_property_list(
-                bondy_config:get([State0#state.listener, ping])
+                key_value:get(
+                    ping, State0#state.opts, [{enabled, false}]
+                )
             ),
 
             State = maybe_enable_ping(PingOpts, State1),
@@ -703,7 +742,11 @@ socket_opened(_St) ->
 %% @private
 close_socket(Reason, St) ->
     Socket = St#state.socket,
-    catch (St#state.transport):close(Socket),
+    try
+        (St#state.transport):close(Socket)
+    catch
+        _:_ -> ok
+    end,
 
     Seconds = erlang:monotonic_time(second) - St#state.start_time,
 
@@ -755,8 +798,16 @@ maybe_exit(Term) ->
 
 %% @private
 maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
-    %% Use the listener's idle_timeout, not from ping options
-    IdleTimeout = State#state.idle_timeout,
+    %% The ping block's OWN interval, not the listener's `idle_timeout`. Taken
+    %% from `idle_timeout`, the probe timer and the reap timer came due at the
+    %% same moment, so the connection was closed rather than probed: the
+    %% keepalive could neither hold a NAT binding open nor notice a dead peer any
+    %% sooner than the reap already did. At `idle_timeout = infinity` — the
+    %% handler's own fallback, in force since the `wamp.{tcp,tls}.idle_timeout`
+    %% mapping was removed — `erlang:start_timer/3` in `reset_ping/1` raises
+    %% `badarg` instead, killing every connection on a listener whose ping is
+    %% enabled.
+    IdleTimeout = maps:get(idle_timeout, PingOpts),
     Timeout = maps:get(timeout, PingOpts),
     Attempts = maps:get(max_attempts, PingOpts),
 
@@ -777,6 +828,22 @@ maybe_enable_ping(#{enabled := true} = PingOpts, State) ->
         ping_retry = Retry
     };
 maybe_enable_ping(#{enabled := false}, State) ->
+    State;
+%% A value that is neither boolean is a configuration ERROR, and stays loud: it
+%% is the one case where silently running without a keepalive would hide the
+%% mistake, on the very mechanism whose job is to notice a dead peer. Unreachable
+%% from `bondy.conf' — the schema datatype is `{flag, on, off}', so cuttlefish
+%% renders a boolean — and rejected at boot by
+%% `bondy_listener_config:assert_ping_keys/4' for anything that resolves through
+%% an inventory, so this is the backstop for a direct or `sys.config' caller.
+maybe_enable_ping(#{enabled := Invalid}, _State) ->
+    error({invalid_ping_enabled, Invalid});
+%% Ping off is the fall-through: `enabled' ABSENT is a legitimate listener, not a
+%% mistake — every `listeners.$name.ping.*' mapping is default-free, so one that
+%% set some other `ping' key and not this one arrives here with no `enabled' at
+%% all. Matching only `false' made that a `function_clause' on the first
+%% connection, after the socket was accepted.
+maybe_enable_ping(_PingOpts, State) ->
     State.
 
 %% @private

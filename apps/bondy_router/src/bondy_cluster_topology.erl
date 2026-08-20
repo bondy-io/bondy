@@ -150,9 +150,11 @@ add_rtt(Peer, Channel, Side, {Sum, Count}) ->
         name => bondy_cluster_peer_rtt_milliseconds,
         label => #{peer => Peer, channel => Channel, side => Side}
     },
-    case catch bondy_metrics:histogram_snapshot(Q) of
+    try bondy_metrics:histogram_snapshot(Q) of
         {ok, #{count := C, sum := S}} -> {Sum + S, Count + C};
         _ -> {Sum, Count}
+    catch
+        _:_ -> {Sum, Count}
     end.
 
 %% =============================================================================
@@ -169,38 +171,48 @@ self_node() ->
 
 %% @private
 members() ->
-    case catch partisan_peer_service:members() of
+    try partisan_peer_service:members() of
         {ok, M} when is_list(M) -> M;
         M when is_list(M) -> M;
         _ -> []
+    catch
+        _:_ -> []
     end.
 
 %% @private
 connected() ->
-    case catch partisan:nodes() of
+    try partisan:nodes() of
         N when is_list(N) -> N;
         _ -> []
+    catch
+        _:_ -> []
     end.
 
 %% @private
 channels() ->
-    case catch partisan_config:channels() of
+    try partisan_config:channels() of
         M when is_map(M) -> M;
         _ -> #{}
+    catch
+        _:_ -> #{}
     end.
 
 %% @private
 conn_count(Peer) ->
-    case catch partisan_peer_connections:count(Peer) of
+    try partisan_peer_connections:count(Peer) of
         N when is_integer(N) -> N;
         _ -> 0
+    catch
+        _:_ -> 0
     end.
 
 %% @private
 alarm_count() ->
-    case catch bondy_alarm_handler:get_alarms() of
+    try bondy_alarm_handler:get_alarms() of
         L when is_list(L) -> length(L);
         _ -> 0
+    catch
+        _:_ -> 0
     end.
 
 %% @private

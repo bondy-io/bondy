@@ -43,14 +43,6 @@ Must be initialised by calling `init/0` before first use (called from
 -include_lib("kernel/include/logger.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
-%% Known TLS listener refs
--define(TLS_LISTENERS, [
-    api_gateway_https,
-    admin_api_https,
-    wamp_tls,
-    bridge_relay_tls
-]).
-
 %% CA Cert API
 -export([init/0]).
 -export([reload_cacerts/0]).
@@ -63,6 +55,7 @@ Must be initialised by calling `init/0` before first use (called from
 -export([get_server_cert_info/1]).
 -export([server_ssl_opts/1]).
 -export([maybe_inject_sni_fun/2]).
+-export([server_cert_from_config/1]).
 
 %% Live Rotation API
 -export([rotate_listener/1]).
@@ -73,12 +66,7 @@ Must be initialised by calling `init/0` before first use (called from
 -export([get_client_auth/1]).
 
 %% Types
--type listener_ref() ::
-    api_gateway_https
-    | admin_api_https
-    | wamp_tls
-    | bridge_relay_tls
-    | atom().
+-type listener_ref() :: atom().
 
 -type cert_source() :: #{
     certfile => file:filename_all(),
@@ -227,7 +215,7 @@ server_ssl_opts(ListenerRef) ->
 
 -doc """
 Conditionally injects `sni_fun` into socket options for TLS listeners.
-Called from `bondy_config:listener_transport_opts/1`.
+Called from `bondy_config:listener_transport_opts/2`.
 
 If `certfile` is present in the socket opts (indicating a TLS listener), adds
 an `sni_fun` that enables live certificate rotation.
@@ -240,6 +228,35 @@ maybe_inject_sni_fun(ListenerRef, SocketOpts) ->
             [{sni_fun, make_sni_fun(ListenerRef)} | SocketOpts];
         false ->
             SocketOpts
+    end.
+
+-doc """
+Resolves a listener's certificate and key file paths from configuration,
+without reading or parsing the files.
+
+Reads through `bondy_listener_config:tls_material/3`, the single definition of
+where a listener's certificate material comes from — the same call
+`bondy_listener_config` uses to validate the listener at boot. Answers exactly
+what
+`load_server_cert_from_config/1` (boot-time preload and `rotate_listener/1`)
+will find, so this is what to call to check whether a listener's certificate
+is visible to live rotation.
+""".
+-spec server_cert_from_config(listener_ref()) ->
+    {ok, #{certfile := file:filename_all(), keyfile := file:filename_all()}}
+    | {error, not_configured}.
+
+server_cert_from_config(ListenerRef) ->
+    Get = fun bondy_config:get/2,
+    CertFile = bondy_listener_config:tls_material(ListenerRef, certfile, Get),
+    KeyFile = bondy_listener_config:tls_material(ListenerRef, keyfile, Get),
+    case {CertFile, KeyFile} of
+        {undefined, _} ->
+            {error, not_configured};
+        {_, undefined} ->
+            {error, not_configured};
+        {_, _} ->
+            {ok, #{certfile => CertFile, keyfile => KeyFile}}
     end.
 
 %% =============================================================================
@@ -282,7 +299,7 @@ rotate_all_listeners() ->
                     })
             end
         end,
-        ?TLS_LISTENERS
+        bondy_listener_manager:tls_listeners()
     ).
 
 %% =============================================================================
@@ -346,23 +363,14 @@ do_load_cacerts() ->
     ok.
 
 %% @private
+%% `cert_manager.cacertfile` is the only source. A listener's own
+%% `listeners.$name.tls.cacertfile` is deliberately not consulted: it is the
+%% trust anchor for verifying INBOUND clients on that one socket, which is a
+%% different question from which CAs Bondy trusts for its own OUTBOUND
+%% connections, and with operator-named listeners there is no longer a
+%% privileged listener to read it from.
 load_user_cacerts() ->
-    Path =
-        case bondy_config:get([cert_manager, cacertfile], undefined) of
-            undefined ->
-                try
-                    Opts = bondy_config:get(
-                        [api_gateway_https, transport_opts]
-                    ),
-                    SocketOpts = key_value:get(socket_opts, Opts, []),
-                    key_value:get(cacertfile, SocketOpts, undefined)
-                catch
-                    _:_ -> undefined
-                end;
-            Configured ->
-                Configured
-        end,
-    load_pem_certs(Path).
+    load_pem_certs(bondy_config:get([cert_manager, cacertfile], undefined)).
 
 %% @private
 load_os_cacerts() ->
@@ -413,30 +421,24 @@ load_all_server_certs() ->
                     })
             end
         end,
-        ?TLS_LISTENERS
+        bondy_listener_manager:tls_listeners()
     ).
 
 %% @private
+%% `server_cert_from_config/1` cannot raise for a listener with no
+%% configuration at all — every path it reads goes through `bondy_config:get/2`
+%% with a default — so nothing here needs to guard against that any more.
+%% Whatever `set_server_cert/2` itself returns or raises for a certificate that
+%% IS configured propagates unchanged: a genuinely broken certificate path
+%% (unreadable file, empty PEM, invalid key) is a configuration error, not the
+%% same thing as `not_configured`, and must be told apart from it rather than
+%% collapsed into it.
 load_server_cert_from_config(ListenerRef) ->
-    try
-        Opts = bondy_config:get([ListenerRef, transport_opts]),
-        SocketOpts = key_value:get(socket_opts, Opts, []),
-        CertFile = key_value:get(certfile, SocketOpts, undefined),
-        KeyFile = key_value:get(keyfile, SocketOpts, undefined),
-        case CertFile of
-            undefined ->
-                {error, not_configured};
-            _ when KeyFile =:= undefined ->
-                {error, not_configured};
-            _ ->
-                set_server_cert(ListenerRef, #{
-                    certfile => CertFile,
-                    keyfile => KeyFile
-                })
-        end
-    catch
-        _:_ ->
-            {error, not_configured}
+    case server_cert_from_config(ListenerRef) of
+        {ok, CertSource} ->
+            set_server_cert(ListenerRef, CertSource);
+        {error, not_configured} = Error ->
+            Error
     end.
 
 %% @private
@@ -615,43 +617,56 @@ load_all_client_auth() ->
                     })
             end
         end,
-        ?TLS_LISTENERS
+        bondy_listener_manager:tls_listeners()
     ).
 
 %% @private
+%% `verify`, `cacertfile` and `fail_if_no_peer_cert` are all read through
+%% `bondy_listener_config:tls_material/3` — the same call
+%% `load_server_cert_from_config/1` and boot-time validation use — so a
+%% listener declaring its mTLS policy only in its `tls` block is visible to
+%% rotation too, not just to the static bind.
+%%
+%% `fail_if_no_peer_cert` matters as much as `verify` does: `verify_peer` on its
+%% own makes ssl REQUEST a client certificate and accept a client that presents
+%% none, so a listener whose whole TLS block is new-style could not enforce
+%% mTLS at all while this key had no `tls.*` counterpart.
+%%
+%% Cannot raise for a listener with no configuration at all, for the same
+%% reason `server_cert_from_config/1` cannot: every read here carries a
+%% default, either through `tls_material/3` or directly.
 load_client_auth_from_config(ListenerRef) ->
-    try
-        Opts = bondy_config:get([ListenerRef, transport_opts]),
-        SocketOpts = key_value:get(socket_opts, Opts, []),
-        Verify = key_value:get(verify, SocketOpts, undefined),
-        case Verify of
-            undefined ->
-                {error, not_configured};
-            _ ->
-                CACertFile = key_value:get(
-                    cacertfile, SocketOpts, undefined
-                ),
-                FailIfNoPeerCert = key_value:get(
-                    fail_if_no_peer_cert, SocketOpts, false
-                ),
-                CACerts =
-                    case CACertFile of
-                        undefined -> [];
-                        _ -> load_pem_certs(CACertFile)
-                    end,
-                MtlsOpts = #{
-                    verify => Verify,
-                    fail_if_no_peer_cert => FailIfNoPeerCert,
-                    cacerts => CACerts
-                },
-                ok = persistent_term:put(
-                    {?MODULE, client_auth, ListenerRef}, MtlsOpts
-                ),
-                ok
-        end
-    catch
-        _:_ ->
-            {error, not_configured}
+    Get = fun bondy_config:get/2,
+    case bondy_listener_config:tls_material(ListenerRef, verify, Get) of
+        undefined ->
+            {error, not_configured};
+        Verify ->
+            CACertFile = bondy_listener_config:tls_material(
+                ListenerRef, cacertfile, Get
+            ),
+            FailIfNoPeerCert =
+                case
+                    bondy_listener_config:tls_material(
+                        ListenerRef, fail_if_no_peer_cert, Get
+                    )
+                of
+                    undefined -> false;
+                    Value -> Value
+                end,
+            CACerts =
+                case CACertFile of
+                    undefined -> [];
+                    _ -> load_pem_certs(CACertFile)
+                end,
+            MtlsOpts = #{
+                verify => Verify,
+                fail_if_no_peer_cert => FailIfNoPeerCert,
+                cacerts => CACerts
+            },
+            ok = persistent_term:put(
+                {?MODULE, client_auth, ListenerRef}, MtlsOpts
+            ),
+            ok
     end.
 
 %% @private

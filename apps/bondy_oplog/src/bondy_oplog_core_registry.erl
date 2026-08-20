@@ -1088,7 +1088,12 @@ persist_trust_marker(#entry{
     projection_handle = H
 }) when A =/= undefined ->
     {B, K} = bondy_oplog_index_key:trust_marker_loc(NS, IndexName, Shard),
-    _ = catch A:put_batch(H, [{B, K, trust_marker_frame()}]),
+    _ =
+        try
+            A:put_batch(H, [{B, K, trust_marker_frame()}])
+        catch
+            _:_ -> ok
+        end,
     ok;
 persist_trust_marker(_) ->
     ok.
@@ -1100,7 +1105,12 @@ remove_trust_marker(#entry{
     projection_handle = H
 }) when A =/= undefined ->
     {B, K} = bondy_oplog_index_key:trust_marker_loc(NS, IndexName, Shard),
-    _ = catch A:delete(H, B, K),
+    _ =
+        try
+            A:delete(H, B, K)
+        catch
+            _:_ -> ok
+        end,
     ok;
 remove_trust_marker(_) ->
     ok.
@@ -1112,9 +1122,11 @@ has_trust_marker(#entry{
     projection_handle = H
 }) when A =/= undefined ->
     {B, K} = bondy_oplog_index_key:trust_marker_loc(NS, IndexName, Shard),
-    case catch A:get(H, B, K) of
+    try A:get(H, B, K) of
         {ok, _} -> true;
         _ -> false
+    catch
+        _:_ -> false
     end;
 has_trust_marker(_) ->
     false.
@@ -1152,7 +1164,12 @@ index_mark_clean(#entry{
     projection_handle = H
 }) when A =/= undefined ->
     {B, K} = bondy_oplog_index_key:clean_flag_loc(NS, IndexName, Shard),
-    _ = catch A:put_batch(H, [{B, K, trust_marker_frame()}]),
+    _ =
+        try
+            A:put_batch(H, [{B, K, trust_marker_frame()}])
+        catch
+            _:_ -> ok
+        end,
     ok;
 index_mark_clean(_) ->
     ok.
@@ -1170,9 +1187,11 @@ index_has_clean(#entry{
     projection_handle = H
 }) when A =/= undefined ->
     {B, K} = bondy_oplog_index_key:clean_flag_loc(NS, IndexName, Shard),
-    case catch A:get(H, B, K) of
+    try A:get(H, B, K) of
         {ok, _} -> true;
         _ -> false
+    catch
+        _:_ -> false
     end;
 index_has_clean(_) ->
     false.
@@ -1191,7 +1210,12 @@ index_clear_clean(#entry{
     projection_handle = H
 }) when A =/= undefined ->
     {B, K} = bondy_oplog_index_key:clean_flag_loc(NS, IndexName, Shard),
-    _ = catch A:delete(H, B, K),
+    _ =
+        try
+            A:delete(H, B, K)
+        catch
+            _:_ -> ok
+        end,
     ok;
 index_clear_clean(_) ->
     ok.
@@ -1287,10 +1311,11 @@ handle_info({broadcast_started, Epoch}, State) ->
     %% `bondy_oplog_sup`, so the notify is safe at init time. If the
     %% events module is down, swallow the error — it is a diagnostic
     %% gap, not a substrate-correctness issue.
-    catch bondy_oplog_core_events:notify(
-        bondy_oplog_core_registry_started,
-        Epoch
-    ),
+    try
+        bondy_oplog_core_events:notify(bondy_oplog_core_registry_started, Epoch)
+    catch
+        _:_ -> ok
+    end,
     {noreply, State};
 handle_info({'DOWN', Mon, process, _Pid, _Reason}, State0) ->
     case maps:take(Mon, State0#state.mon_to_key) of

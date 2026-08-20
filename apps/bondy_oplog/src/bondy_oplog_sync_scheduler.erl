@@ -1162,9 +1162,11 @@ do_maybe_dispatch_live(InstanceId, Peers) ->
 %% lookup error we fail safe — treat it as fence-backing (do not
 %% throttle).
 backs_fence(InstanceId) ->
-    case catch bondy_oplog_registry:ae_targets(InstanceId) of
+    try bondy_oplog_registry:ae_targets(InstanceId) of
         L when is_list(L) -> L =/= [];
         _ -> true
+    catch
+        _:_ -> true
     end.
 
 %% @private

@@ -93,8 +93,14 @@ init_per_testcase(_TC, Config) ->
 
 end_per_testcase(_TC, Config) ->
     case ?config(handle, Config) of
-        undefined -> ok;
-        H -> catch bondy_registry_ptrie:delete(H)
+        undefined ->
+            ok;
+        H ->
+            try
+                bondy_registry_ptrie:delete(H)
+            catch
+                _:_ -> ok
+            end
     end,
     ok.
 

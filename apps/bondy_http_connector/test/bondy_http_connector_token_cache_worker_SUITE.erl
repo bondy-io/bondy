@@ -59,9 +59,19 @@ init_per_testcase(_TC, Config) ->
     bondy_http_connector_mock_auth:set_token(<<"default-token">>),
 
     %% Create a fresh gproc pool for this test
-    _ = catch gproc_pool:force_delete(?POOL_NAME),
+    _ =
+        try
+            gproc_pool:force_delete(?POOL_NAME)
+        catch
+            _:_ -> ok
+        end,
     gproc_pool:new(?POOL_NAME, hash, [{size, 1}]),
-    _ = catch gproc_pool:add_worker(?POOL_NAME, ?WORKER_NAME),
+    _ =
+        try
+            gproc_pool:add_worker(?POOL_NAME, ?WORKER_NAME)
+        catch
+            _:_ -> ok
+        end,
 
     Config.
 
@@ -74,16 +84,31 @@ end_per_testcase(_TC, _Config) ->
 
     %% Clean up ETS table (created by the worker)
     case ets:whereis(?WORKER_NAME) of
-        undefined -> ok;
-        _ -> catch ets:delete(?WORKER_NAME)
+        undefined ->
+            ok;
+        _ ->
+            try
+                ets:delete(?WORKER_NAME)
+            catch
+                _:_ -> ok
+            end
     end,
 
     %% Remove the pool
-    _ = catch gproc_pool:force_delete(?POOL_NAME),
+    _ =
+        try
+            gproc_pool:force_delete(?POOL_NAME)
+        catch
+            _:_ -> ok
+        end,
 
     lists:foreach(
         fun(Key) ->
-            catch persistent_term:erase(Key)
+            try
+                persistent_term:erase(Key)
+            catch
+                _:_ -> ok
+            end
         end,
         [
             {bondy_http_connector_mock_auth, result},

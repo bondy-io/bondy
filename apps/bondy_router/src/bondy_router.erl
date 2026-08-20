@@ -277,7 +277,11 @@ pre_stop() ->
                     []
             end;
         ({RealmUri, Ref}) ->
-            catch bondy:send(RealmUri, Ref, M),
+            try
+                bondy:send(RealmUri, Ref, M)
+            catch
+                _:_ -> ok
+            end,
             ok
     end,
 

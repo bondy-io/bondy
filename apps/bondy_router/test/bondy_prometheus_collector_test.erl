@@ -46,7 +46,11 @@ cleanup({new, Pid}) ->
 cleanup({reused, _}) ->
     %% Server owned elsewhere: clear only the declaration registry (same
     %% effect the old persistent_term erase had — a full reset).
-    catch ets:delete_all_objects(?DECLARED_TAB),
+    try
+        ets:delete_all_objects(?DECLARED_TAB)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 %% =============================================================================

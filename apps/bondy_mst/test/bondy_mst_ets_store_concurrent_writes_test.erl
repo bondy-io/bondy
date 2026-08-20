@@ -77,8 +77,18 @@ non_owner_can_insert_into_store_tab_test() ->
         end,
     %% Wait for the worker to exit cleanly so the link teardown is
     %% deterministic.
-    _ = catch unlink(Pid),
-    _ = catch exit(Pid, kill),
+    _ =
+        try
+            unlink(Pid)
+        catch
+            _:_ -> ok
+        end,
+    _ =
+        try
+            exit(Pid, kill)
+        catch
+            _:_ -> ok
+        end,
     ok = bondy_mst_ets_store:destroy(Store),
     ?assertEqual(ok, Outcome).
 

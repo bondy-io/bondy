@@ -1070,7 +1070,11 @@ drop_root_referenced_page(Id) ->
      || T <- ets:all(),
         ets:info(T, owner) =:= Pid,
         ets:info(T, type) =:= set,
-        (catch ets:lookup(T, <<"$root">>)) =/= []
+        try
+            ets:lookup(T, <<"$root">>) =/= []
+        catch
+            _:_ -> false
+        end
     ],
     [{<<"$root">>, RootHash}] = ets:lookup(Tab, <<"$root">>),
     [{RootHash, RootPage, _}] = ets:lookup(Tab, RootHash),

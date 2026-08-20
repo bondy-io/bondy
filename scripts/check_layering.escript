@@ -52,7 +52,17 @@ main(Args) ->
             io:format(standard_error, "FAIL  " ++ Fmt ++ "~n", FArgs),
             halt(1)
     after
-        catch xref:stop(layering)
+        %% Unlike most cleanup calls, `xref:stop/1` EXITS rather than returning
+        %% an error when the server is already gone -- measured:
+        %% `{'EXIT', {noproc, {gen_server, call, [_, stop, infinity]}}}`. That
+        %% is precisely the state an abnormal exit through this `after` can
+        %% leave behind, so it is tolerated and nothing else is.
+        try
+            xref:stop(layering)
+        catch
+            exit:{noproc, _} ->
+                ok
+        end
     end.
 
 %% Add each app's ebin dir to the xref server; a missing one is a hard failure

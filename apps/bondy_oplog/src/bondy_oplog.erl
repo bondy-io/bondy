@@ -197,13 +197,17 @@ stop_instance(InstanceId, _Opts) when is_binary(InstanceId) ->
             %% Best-effort: if a registry isn't running (e.g. tests
             %% bring up only part of the tree) we silently skip.
             _ =
-                catch bondy_oplog_peer_state:forget_instance(
-                    InstanceId
-                ),
+                try
+                    bondy_oplog_peer_state:forget_instance(InstanceId)
+                catch
+                    _:_ -> ok
+                end,
             _ =
-                catch bondy_oplog_quarantine:forget_instance(
-                    InstanceId
-                ),
+                try
+                    bondy_oplog_quarantine:forget_instance(InstanceId)
+                catch
+                    _:_ -> ok
+                end,
             ok;
         Other ->
             Other

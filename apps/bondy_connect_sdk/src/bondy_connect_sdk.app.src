@@ -1,0 +1,27 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+{application, bondy_connect_sdk, [
+    {description,
+        "An idiomatic, supervised, multi-session WAMP client for the Bondy "
+        "ecosystem. Reuses the router-independent bondy_wamp building blocks; "
+        "has no dependency on the bondy router app."},
+    {vsn, "0.1.0"},
+    {registered, [bondy_connect_sup]},
+    {mod, {bondy_connect_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        ssl,
+        gun,
+        bondy_stdlib,
+        bondy_wamp,
+        bondy_regulator
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

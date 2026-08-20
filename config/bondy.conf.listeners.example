@@ -1,0 +1,553 @@
+## =============================================================================
+## LISTENERS — hand-maintained example, not generated
+## =============================================================================
+## `config/bondy.conf.defaults` is produced by `just conf`
+## (`cuttlefish effective -s schema/`), which cannot emit `listeners.$name.*`
+## examples: a fuzzy `$name` mapping materialises nothing until some name is
+## mentioned, and `effective` renders with no conf file to mention one. This
+## file exists so that content has somewhere to live that `just conf` does
+## not overwrite. It is not read by Bondy and not consumed by any tool —
+## copy the lines you need into your own `bondy.conf`.
+##
+## No key below has a default IN THE SCHEMA, so every line stays commented.
+## That is not the same as having no default at all: a listener's transport and
+## protocol imply some, in code, and this file notes them where they exist.
+## `admin` is reserved: declaring it overrides the node's built-in
+## administrable listener in place; an operator does not need to declare it
+## at all.
+
+##
+## The transport this listener binds. TLS is a transport, not a protocol: an
+## HTTPS listener is `protocol = http` with `transport = tls`.
+## Acceptable values:
+##   - one of: tcp, tls, uds
+# listeners.$name.transport = tcp
+
+## What frames the wire. `http` takes a `services` list; a raw-socket
+## protocol carries exactly one protocol and takes none.
+## Acceptable values:
+##   - one of: http, wamp_rawsocket, bridge_relay
+# listeners.$name.protocol = http
+
+## The TCP port. Required for tcp and tls.
+## Acceptable values:
+##   - an integer
+# listeners.$name.port = 18080
+
+## Filesystem path for a `uds` listener, instead of a port.
+## Acceptable values:
+##   - the path to a file
+# listeners.$name.path = /tmp/bondy.sock
+
+## Comma-separated services reachable on this listener. Valid only when
+## protocol = http.
+## Acceptable values:
+##   - a comma separated list of: api_gateway, admin_api, admin, metrics,
+##     wamp_ws, bamp_ws, wamp_sse, wamp_longpoll
+##
+## `bamp_ws` binds and mounts `/ws` restricted to the `bamp` subprotocol, so a
+## WAMP client is refused there. What it cannot do yet is carry a session:
+## BAMP's wire implementation has not shipped.
+# listeners.$name.services = api_gateway, wamp_ws, wamp_sse, wamp_longpoll
+
+## Whether the listener starts. Absent means enabled.
+## Acceptable values:
+##   - on or off
+# listeners.$name.enabled = on
+
+## `early` starts the listener before any `normal` one and while the node
+## still reports `initialising`. Absent means `normal`.
+## Acceptable values:
+##   - one of: early, normal
+# listeners.$name.start_phase = normal
+
+## The IP address to listen on, for a host with several interfaces.
+## Acceptable values:
+##   - an IP address
+# listeners.$name.ip = 0.0.0.0
+
+## The IP version to use.
+## Acceptable values:
+##   - one of: 4, 6
+# listeners.$name.ip_version = 4
+
+## Size of the acceptor pool.
+## Acceptable values:
+##   - an integer
+# listeners.$name.acceptors_pool_size = 200
+
+## Maximum number of concurrent connections.
+## Acceptable values:
+##   - an integer
+# listeners.$name.max_connections = 100000
+
+## The maximum length that the queue of pending connections can grow to.
+## Acceptable values:
+##   - an integer
+# listeners.$name.backlog = 1024
+
+## Enables/disables periodic transmission on a connected socket when no
+## other data is exchanged.
+## Acceptable values:
+##   - on or off
+# listeners.$name.keepalive = on
+
+## If on, TCP_NODELAY is turned on for the socket.
+## Acceptable values:
+##   - on or off
+# listeners.$name.nodelay = on
+
+## Allows multiple listen sockets on the same port, so accepts fan out
+## across schedulers.
+## Acceptable values:
+##   - on or off
+# listeners.$name.reuseport = off
+
+## The minimum size of the send buffer to use for the socket.
+## Acceptable values:
+##   - a byte size with units, e.g. 10GB
+# listeners.$name.sndbuf = 32KB
+
+## The minimum size of the receive buffer to use for the socket.
+## Acceptable values:
+##   - a byte size with units, e.g. 10GB
+# listeners.$name.recbuf = 32KB
+
+## The size of the user-level software buffer used by the driver.
+## Acceptable values:
+##   - a byte size with units, e.g. 10GB
+# listeners.$name.buffer = 64KB
+
+## Maximum allowed time for the listening process handshake call to finish.
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# listeners.$name.handshake_timeout = 5s
+
+## How long the socket blocks on close waiting for unsent data to be
+## acknowledged. `-1` disables lingering; `0` aborts the connection on close,
+## discarding anything unsent. Raw-socket and bridge-relay listeners default
+## to 1s.
+##
+## In SECONDS, unlike every other duration here: the value becomes the OS
+## socket option `{linger, {true, N}}`, whose second component is seconds. A
+## sub-second value rounds UP to 1s rather than down to 0, which would abort.
+## `listeners.$name.http.linger.timeout` below is a different setting and is in
+## milliseconds.
+## Acceptable values:
+##   - an integer, in seconds
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# listeners.$name.linger.timeout = 1s
+
+## Drops a raw-socket connection after a period of inactivity. For an HTTP
+## listener the equivalent is listeners.$name.http.idle_timeout.
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+##   - the text "infinity"
+# listeners.$name.idle_timeout = 8h
+
+## Enables or disables proxy-protocol source-address capture, used for
+## matching against RBAC Source assignments.
+## Acceptable values:
+##   - on or off
+# listeners.$name.proxy_protocol = off
+
+## How to treat a connection with no proxy-protocol information when
+## proxy_protocol is enabled.
+## Acceptable values:
+##   - one of: strict, relaxed
+# listeners.$name.proxy_protocol.mode = relaxed
+
+## Trusted reverse-proxy CIDRs, comma separated.
+## Acceptable values:
+##   - a comma separated list of CIDRs
+# listeners.$name.proxy_protocol.trusted_proxies = 10.0.0.0/8
+
+## Defines if server-initiated PING control messages are enabled on a
+## raw-socket listener. Bondy always answers a client-initiated ping even
+## when this is off.
+## Acceptable values:
+##   - on or off
+# listeners.$name.ping.enabled = on
+
+## When ping.enabled is `on`, the maximum time permitted to elapse between
+## messages before a ping is sent.
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# listeners.$name.ping.idle_timeout = 20s
+
+## When ping.enabled is `on`, how long Bondy waits for a ping response
+## before counting a failed attempt.
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# listeners.$name.ping.timeout = 10s
+
+## When ping.enabled is `on`, how many missed pings are allowed before the
+## connection is closed.
+## Acceptable values:
+##   - an integer
+# listeners.$name.ping.max_attempts = 3
+
+## The five keys below (`tls.certfile` through `tls.verify`) are where a
+## listener declares its own certificate, and the only place it can: the
+## historical per-scheme certificate keys were removed, so an enabled
+## `transport = tls` listener that does not state its own material is refused at
+## boot. A disabled listener is not checked, so its certificate can be
+## provisioned later. See the listener configuration reference for details.
+
+## Path to the server certificate. Required when transport is tls.
+## Acceptable values:
+##   - the path to a file
+# listeners.$name.tls.certfile = /path/to/keycert.pem
+
+## Path to the server private key. Required when transport is tls.
+## Acceptable values:
+##   - the path to a file
+# listeners.$name.tls.keyfile = /path/to/key.pem
+
+## Path to the CA certificate bundle used to verify peers.
+## Acceptable values:
+##   - the path to a file
+# listeners.$name.tls.cacertfile = /path/to/cacert.pem
+
+## A comma separated list of TLS protocol versions to support.
+## Acceptable values:
+##   - a comma separated list of: 1.2, 1.3
+# listeners.$name.tls.versions = 1.2, 1.3
+
+## TLS peer verification mode. Set to verify_peer to request client
+## certificates (mTLS). On its own verify_peer only REQUESTS one: a client
+## presenting none still connects. Set fail_if_no_peer_cert below as well to
+## require it.
+## Acceptable values:
+##   - one of: verify_peer, verify_none
+# listeners.$name.tls.verify = verify_none
+
+## Whether a client that presents no certificate is rejected. Only meaningful
+## together with tls.verify = verify_peer.
+## Acceptable values:
+##   - on or off
+# listeners.$name.tls.fail_if_no_peer_cert = off
+
+## The number of packets Cowboy requests from the socket at once.
+## Acceptable values:
+##   - an integer
+# listeners.$name.http.active_n = 100
+
+## Lower bound of the dynamically resized socket receive buffer. Both min
+## and max must be set for either to take effect.
+## Acceptable values:
+##   - a byte size with units, e.g. 10GB
+# listeners.$name.http.buffer.min = 1KB
+
+## Upper bound of the dynamically resized socket receive buffer.
+## Acceptable values:
+##   - a byte size with units, e.g. 10GB
+# listeners.$name.http.buffer.max = 128KB
+
+## Time with no data received before Cowboy closes the connection.
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# listeners.$name.http.idle_timeout = 15s
+
+## Time with nothing received at all before Cowboy closes the connection.
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# listeners.$name.http.inactivity_timeout = 5m
+
+## HTTP/2 initial stream flow-control window.
+## Acceptable values:
+##   - a byte size with units, e.g. 10GB
+# listeners.$name.http.initial_stream_flow_size = 65535
+
+## What to do when a response contains invalid header names or values.
+## Acceptable values:
+##   - one of: error_terminate, ignore
+# listeners.$name.http.invalid_response_headers = error_terminate
+
+## Time Cowboy waits when closing the connection.
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# listeners.$name.http.linger.timeout = 1s
+
+## Maximum length of the authority component of the request URI, in bytes.
+## Acceptable values:
+##   - an integer
+# listeners.$name.http.max_authority_length = 512
+
+## Maximum length of the Authorization header value, in bytes.
+## Acceptable values:
+##   - an integer
+# listeners.$name.http.max_authorization_header_value_length = 4096
+
+## HTTP/2 only: maximum number of concurrent streams a single client
+## connection may have open.
+## Acceptable values:
+##   - an integer
+# listeners.$name.http.max_concurrent_streams = 100
+
+## Maximum length of the Cookie header value, in bytes.
+## Acceptable values:
+##   - an integer
+# listeners.$name.http.max_cookie_header_value_length = 4096
+
+## Maximum number of cookies parsed out of a request's Cookie header. A
+## request carrying more is answered with a 400. Unset means 100.
+## Acceptable values:
+##   - an integer
+# listeners.$name.http.max_cookies = 100
+
+## Maximum number of empty lines accepted before the request line.
+## Acceptable values:
+##   - an integer
+# listeners.$name.http.max_empty_lines = 5
+
+## Maximum length of a header name, in bytes.
+## Acceptable values:
+##   - an integer
+# listeners.$name.http.max_header_name_length = 64
+
+## Maximum length of a header value, in bytes.
+## Acceptable values:
+##   - an integer
+# listeners.$name.http.max_header_value_length = 4096
+
+## Maximum number of headers accepted per request.
+## Acceptable values:
+##   - an integer
+# listeners.$name.http.max_headers = 100
+
+## Maximum number of requests allowed per connection.
+## Acceptable values:
+##   - an integer
+# listeners.$name.http.max_keepalive = 1000
+
+## Maximum length of the request method, in bytes.
+## Acceptable values:
+##   - an integer
+# listeners.$name.http.max_method_length = 32
+
+## Maximum length of the request line, in bytes.
+## Acceptable values:
+##   - an integer
+# listeners.$name.http.max_request_line_length = 8000
+
+## Maximum number of bytes of an unread request body Cowboy will skip in
+## order to reuse the connection.
+## Acceptable values:
+##   - an integer
+# listeners.$name.http.max_skip_body_length = 1000000
+
+## Time with no requests before Cowboy closes the connection.
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# listeners.$name.http.request_timeout = 5s
+
+## Whether the idle_timeout gets reset when sending data to the socket.
+## Acceptable values:
+##   - on or off
+# listeners.$name.http.reset_idle_timeout_on_send = off
+
+## Whether Cowboy uses sendfile to serve static files.
+## Acceptable values:
+##   - on or off
+# listeners.$name.http.sendfile = on
+
+## Whether CORS headers are enabled for this listener.
+## Acceptable values:
+##   - on or off
+# listeners.$name.cors.enabled = on
+
+## The allowed origins for CORS requests. Can be "*" (wildcard), "auto"
+## (derive from request host), or a comma-separated list of origins.
+## Acceptable values:
+##   - text
+# listeners.$name.cors.allowed_origins = *
+
+## The allowed HTTP methods for CORS requests.
+## Acceptable values:
+##   - a comma separated list of HTTP methods
+# listeners.$name.cors.allowed_methods = GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE
+
+## The allowed HTTP headers for CORS requests.
+## Acceptable values:
+##   - a comma separated list of header names
+# listeners.$name.cors.allowed_headers = origin,x-requested-with,content-type,accept,authorization,accept-language,x-csrf-token
+
+## The max age in seconds for the CORS preflight cache.
+## Acceptable values:
+##   - an integer
+# listeners.$name.cors.max_age = 86400
+
+## Whether static security headers are enabled for this listener.
+## Acceptable values:
+##   - on or off
+# listeners.$name.security_headers.enabled = on
+
+## The value for the Strict-Transport-Security header, or `off` to suppress
+## this one header while the others are still sent. Sent by default on a
+## listener that terminates TLS, and never on a plaintext one.
+## Acceptable values:
+##   - text
+##   - the atom `off`
+# listeners.$name.security_headers.hsts = max-age=31536000; includeSubDomains
+
+## The value for the X-Frame-Options header, or `off` to suppress this one
+## header while the others are still sent.
+## Acceptable values:
+##   - text
+##   - the atom `off`
+# listeners.$name.security_headers.frame_options = SAMEORIGIN
+
+## The value for the X-Content-Type-Options header, or `off` to suppress this
+## one header while the others are still sent.
+## Acceptable values:
+##   - text
+##   - the atom `off`
+# listeners.$name.security_headers.content_type_options = nosniff
+
+## The value for the Content-Security-Policy header, or `off` to suppress this
+## one header while the others are still sent. Omitting the key leaves the
+## header disabled too, which is the module default. Note there is no "empty
+## value" spelling: `... = ` with nothing after it is a conf SYNTAX error, not
+## an empty setting.
+## Acceptable values:
+##   - text
+##   - the atom `off`
+# listeners.$name.security_headers.content_security_policy = default-src 'self'
+
+## The value for the Server response header.
+## Acceptable values:
+##   - text
+# listeners.$name.server_header = bondy
+
+## Defines if server-initiated Websocket PING control messages are enabled.
+## Overrides wamp.websocket.ping.enabled for this listener only.
+## Acceptable values:
+##   - on or off
+# listeners.$name.websocket.ping.enabled = on
+
+## When websocket.ping.enabled is `on`, the maximum time permitted to
+## elapse before a ping is sent. Overrides wamp.websocket.ping.idle_timeout.
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# listeners.$name.websocket.ping.idle_timeout = 20s
+
+## When websocket.ping.enabled is `on`, how long Bondy waits for a ping
+## response. Overrides wamp.websocket.ping.timeout.
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# listeners.$name.websocket.ping.timeout = 10s
+
+## When websocket.ping.enabled is `on`, how many missed pings are allowed.
+## Overrides wamp.websocket.ping.max_attempts.
+## Acceptable values:
+##   - an integer
+# listeners.$name.websocket.ping.max_attempts = 3
+
+## Drops the Websocket connection after a period of inactivity. Overrides
+## wamp.websocket.idle_timeout.
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+##   - the text "infinity"
+# listeners.$name.websocket.idle_timeout = 8h
+
+## Maximum frame size allowed by this Websocket handler. Overrides
+## wamp.websocket.max_frame_size.
+## Acceptable values:
+##   - a byte size with units, e.g. 10GB
+##   - the text "infinity"
+# listeners.$name.websocket.max_frame_size = 4MB
+
+## Controls when a Websocket connection process hibernates. Overrides
+## wamp.websocket.hibernate.
+## Acceptable values:
+##   - one of: never, idle, always
+# listeners.$name.websocket.hibernate = idle
+
+## Defines if Websocket compression (permessage-deflate) is enabled.
+## Overrides wamp.websocket.compression_enabled.
+## Acceptable values:
+##   - on or off
+# listeners.$name.websocket.compression_enabled = off
+
+## Compression level, 0..9. Overrides wamp.websocket.deflate.level.
+## Acceptable values:
+##   - an integer
+# listeners.$name.websocket.deflate.level = 5
+
+## Memory allocated for the internal compression state, 1..9. Overrides
+## wamp.websocket.deflate.mem_level.
+## Acceptable values:
+##   - an integer
+# listeners.$name.websocket.deflate.mem_level = 8
+
+## Tunes the compression algorithm. Overrides wamp.websocket.deflate.strategy.
+## Acceptable values:
+##   - one of: default, filtered, huffman_only, rle
+# listeners.$name.websocket.deflate.strategy = default
+
+## Whether the server context is reused between messages. Overrides
+## wamp.websocket.deflate.server_context_takeover.
+## Acceptable values:
+##   - one of: takeover, no_takeover
+# listeners.$name.websocket.deflate.server_context_takeover = takeover
+
+## Whether the client context is reused between messages. Overrides
+## wamp.websocket.deflate.client_context_takeover.
+## Acceptable values:
+##   - one of: takeover, no_takeover
+# listeners.$name.websocket.deflate.client_context_takeover = takeover
+
+## Base two logarithm of the server window size, 8..15. Overrides
+## wamp.websocket.deflate.server_max_window_bits.
+## Acceptable values:
+##   - an integer
+# listeners.$name.websocket.deflate.server_max_window_bits = 11
+
+## Base two logarithm of the client window size, 8..15. Overrides
+## wamp.websocket.deflate.client_max_window_bits.
+## Acceptable values:
+##   - an integer
+# listeners.$name.websocket.deflate.client_max_window_bits = 11
+
+## Whether SSE keepalive comments are sent. Overrides wamp.sse.ping.enabled.
+## Acceptable values:
+##   - on or off
+# listeners.$name.sse.ping.enabled = on
+
+## Interval between SSE keepalive comments. Overrides wamp.sse.ping.interval.
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# listeners.$name.sse.ping.interval = 20s
+
+## Cowboy HTTP connection idle timeout for SSE endpoints. Overrides
+## wamp.sse.idle_timeout.
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# listeners.$name.sse.idle_timeout = 10m
+
+## Whether the SSE idle timeout is reset when sending data. Overrides
+## wamp.sse.reset_idle_timeout_on_send.
+## Acceptable values:
+##   - on or off
+# listeners.$name.sse.reset_idle_timeout_on_send = on
+
+## How long a longpoll receive request blocks before returning an empty
+## 204. MUST be strictly less than longpoll.idle_timeout. Overrides
+## wamp.longpoll.poll_timeout.
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# listeners.$name.longpoll.poll_timeout = 30s
+
+## Cowboy HTTP connection idle timeout for longpoll endpoints. MUST be
+## strictly greater than longpoll.poll_timeout. Overrides
+## wamp.longpoll.idle_timeout.
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# listeners.$name.longpoll.idle_timeout = 10m
+
+## Whether the longpoll idle timeout is reset when sending data. Overrides
+## wamp.longpoll.reset_idle_timeout_on_send.
+## Acceptable values:
+##   - on or off
+# listeners.$name.longpoll.reset_idle_timeout_on_send = on

@@ -47,7 +47,17 @@
 
 -compile([nowarn_export_all, export_all]).
 
--define(NODE_NAMES, [bondy1, bondy2, bondy3]).
+%% Distinct from `bondy_aae_cluster_SUITE`'s `bondy1..3`, which these used to
+%% share: `bondy_ct` roots a peer's data directory at `<priv_dir>/<node>`, and
+%% Common Test hands every suite in a run the SAME `priv_dir`, so two suites
+%% using one peer name boot on each other's storage. This suite runs second and
+%% its peer died opening the other's MST pack store manifest
+%% (`{pack_store_open, {manifest, {_, file_io_server, invalid_unicode}}}`),
+%% restarting until `bondy_sup` hit its restart intensity — surfacing as a
+%% `noproc` from an unrelated supervisor in `init_per_suite`. Peer PORTS are
+%% derived from the index rather than the name and are unchanged; suites within
+%% a run are sequential, so they do not overlap.
+-define(NODE_NAMES, [ccomp1, ccomp2, ccomp3]).
 -define(NUM_REALMS, 16).
 -define(WRITE_WINDOW_MS, 25000).
 -define(SETTLE_WINDOW_MS, 45000).
@@ -378,7 +388,11 @@ silent_peer_truncated_past_recovers_on_rejoin(Config) ->
     after
         %% Leave the cluster schedulable for any case added after this one.
         _ = [
-            catch erpc:call(N, ?MODULE, do_restore_sync_defaults, [])
+            try
+                erpc:call(N, ?MODULE, do_restore_sync_defaults, [])
+            catch
+                _:_ -> ok
+            end
          || N <- Nodes
         ]
     end.
@@ -504,7 +518,12 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
     ok = erpc:call(N3, ?MODULE, do_restore_sync_defaults, []),
     ok = stale_wait(
         fun() ->
-            _ = catch erpc:call(N3, bondy_oplog_sync_scheduler, trigger, []),
+            _ =
+                try
+                    erpc:call(N3, bondy_oplog_sync_scheduler, trigger, [])
+                catch
+                    _:_ -> ok
+                end,
             lists:all(
                 fun({Band, K, V}) ->
                     stale_read(N3, Band, K) =:= {ok_val, V}
@@ -527,10 +546,16 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
                 [
                     N3,
                     Missing,
-                    catch erpc:call(
-                        N3, ?MODULE, do_drain_dispatch_collector, []
-                    ),
-                    catch erpc:call(N3, bondy_oplog_sync_scheduler, info, [])
+                    try
+                        erpc:call(N3, ?MODULE, do_drain_dispatch_collector, [])
+                    catch
+                        C1:R1 -> {'EXIT', {C1, R1}}
+                    end,
+                    try
+                        erpc:call(N3, bondy_oplog_sync_scheduler, info, [])
+                    catch
+                        C2:R2 -> {'EXIT', {C2, R2}}
+                    end
                 ]
             )
         end
@@ -594,7 +619,11 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
     ok = stale_wait(
         fun() ->
             _ = [
-                catch erpc:call(N, bondy_oplog_sync_scheduler, trigger, [])
+                try
+                    erpc:call(N, bondy_oplog_sync_scheduler, trigger, [])
+                catch
+                    _:_ -> ok
+                end
              || N <- Nodes
             ],
             lists:all(
@@ -649,7 +678,11 @@ truncated_prefix_is_held_and_repaired_by_rebootstrap(Config) ->
         do_prefix_hole_enforced(Nodes)
     after
         _ = [
-            catch erpc:call(N, ?MODULE, do_restore_sync_defaults, [])
+            try
+                erpc:call(N, ?MODULE, do_restore_sync_defaults, [])
+            catch
+                _:_ -> ok
+            end
          || N <- Nodes
         ]
     end.
@@ -736,9 +769,13 @@ do_prefix_hole_enforced([N1, N2, N3] = Nodes) ->
             ok = stale_wait(
                 fun() ->
                     _ = [
-                        catch erpc:call(
-                            N, bondy_oplog_sync_scheduler, trigger, []
-                        )
+                        try
+                            erpc:call(
+                                N, bondy_oplog_sync_scheduler, trigger, []
+                            )
+                        catch
+                            _:_ -> ok
+                        end
                      || N <- Nodes
                     ],
                     lists:all(
@@ -762,9 +799,16 @@ do_prefix_hole_enforced([N1, N2, N3] = Nodes) ->
                             N3,
                             hole_fmt(Missing),
                             hole_fmt(
-                                catch erpc:call(
-                                    N3, ?MODULE, do_drain_dispatch_collector, []
-                                )
+                                try
+                                    erpc:call(
+                                        N3,
+                                        ?MODULE,
+                                        do_drain_dispatch_collector,
+                                        []
+                                    )
+                                catch
+                                    C:R -> {'EXIT', {C, R}}
+                                end
                             )
                         ]
                     )
@@ -926,7 +970,11 @@ hole_key(Tag) ->
 %% `{inconclusive, _, _}` — they never met before the deadline.
 hole_probe_until(Node, Peers, Early, WriterOrigins, Deadline) ->
     _ = [
-        catch erpc:call(Node, ?MODULE, do_stale_sync_main_from, [P])
+        try
+            erpc:call(Node, ?MODULE, do_stale_sync_main_from, [P])
+        catch
+            _:_ -> ok
+        end
      || P <- Peers
     ],
     Missing = [
@@ -935,7 +983,11 @@ hole_probe_until(Node, Peers, Early, WriterOrigins, Deadline) ->
     ],
     Local = erpc:call(Node, ?MODULE, do_hole_frontiers_main, []),
     PeerFrontiers = [
-        catch erpc:call(P, ?MODULE, do_hole_frontiers_main, [])
+        try
+            erpc:call(P, ?MODULE, do_hole_frontiers_main, [])
+        catch
+            _:_ -> ok
+        end
      || P <- Peers
     ],
     WriterVisible = lists:append([
@@ -1087,7 +1139,11 @@ stale_converge_all(Nodes, Triples) ->
     stale_wait(
         fun() ->
             _ = [
-                catch erpc:call(X, ?MODULE, do_stale_sync_main_from, [Y])
+                try
+                    erpc:call(X, ?MODULE, do_stale_sync_main_from, [Y])
+                catch
+                    _:_ -> ok
+                end
              || X <- Nodes, Y <- Nodes, X =/= Y
             ],
             lists:all(
@@ -1126,7 +1182,12 @@ stale_wait(Fun, ErrorTag, DiagFun, Deadline) ->
                 true ->
                     ok;
                 false ->
-                    _ = catch DiagFun(),
+                    _ =
+                        try
+                            DiagFun()
+                        catch
+                            _:_ -> ok
+                        end,
                     error(ErrorTag)
             end,
             timer:sleep(400),
@@ -1188,7 +1249,12 @@ do_stale_read(Band, Key) ->
 do_stale_sync_main_from(Peer) ->
     Opts = application:get_env(bondy_oplog, sync_session_opts, #{}),
     [
-        {I, catch bondy_oplog:sync(I, Peer, Opts)}
+        {I,
+            try
+                bondy_oplog:sync(I, Peer, Opts)
+            catch
+                C:R -> {'EXIT', {C, R}}
+            end}
      || I <- bondy_oplog:list_instances(),
         binary:match(I, <<"main/">>) =/= nomatch
     ].
@@ -1202,8 +1268,22 @@ do_stale_sync_and_compact_main(Peer) ->
     Opts = application:get_env(bondy_oplog, sync_session_opts, #{}),
     [
         begin
-            _ = catch bondy_oplog:sync(I, Peer, Opts),
-            {I, stale_compact_resolved(I, catch bondy_oplog:compact(I), 25)}
+            _ =
+                try
+                    bondy_oplog:sync(I, Peer, Opts)
+                catch
+                    _:_ -> ok
+                end,
+            {I,
+                stale_compact_resolved(
+                    I,
+                    try
+                        bondy_oplog:compact(I)
+                    catch
+                        C:R -> {'EXIT', {C, R}}
+                    end,
+                    25
+                )}
         end
      || I <- bondy_oplog:list_instances(),
         binary:match(I, <<"main/">>) =/= nomatch
@@ -1217,7 +1297,15 @@ stale_compact_resolved(_I, Result, 0) ->
     Result;
 stale_compact_resolved(I, {ok, compaction_pending}, N) ->
     timer:sleep(200),
-    stale_compact_resolved(I, catch bondy_oplog:compact(I), N - 1);
+    stale_compact_resolved(
+        I,
+        try
+            bondy_oplog:compact(I)
+        catch
+            C:R -> {'EXIT', {C, R}}
+        end,
+        N - 1
+    );
 stale_compact_resolved(_I, Result, _N) ->
     Result.
 
@@ -1225,7 +1313,12 @@ stale_compact_resolved(_I, Result, _N) ->
 %% Every `main/*` instance's current compaction watermark.
 do_stale_watermarks_main() ->
     [
-        {I, catch bondy_oplog:current_watermark(I)}
+        {I,
+            try
+                bondy_oplog:current_watermark(I)
+            catch
+                C:R -> {'EXIT', {C, R}}
+            end}
      || I <- bondy_oplog:list_instances(),
         binary:match(I, <<"main/">>) =/= nomatch
     ].
@@ -1235,7 +1328,12 @@ do_stale_watermarks_main() ->
 %% map `bondy_oplog_sync_session:frontier_deficit/2` compares per origin.
 do_hole_frontiers_main() ->
     [
-        {I, catch bondy_oplog_registry:frontier(I)}
+        {I,
+            try
+                bondy_oplog_registry:frontier(I)
+            catch
+                C:R -> {'EXIT', {C, R}}
+            end}
      || I <- bondy_oplog:list_instances(),
         binary:match(I, <<"main/">>) =/= nomatch
     ].
@@ -1245,7 +1343,12 @@ do_hole_frontiers_main() ->
 %% under which its own writes are dotted.
 do_hole_origins_main() ->
     [
-        {I, catch bondy_oplog:origin(I)}
+        {I,
+            try
+                bondy_oplog:origin(I)
+            catch
+                C:R -> {'EXIT', {C, R}}
+            end}
      || I <- bondy_oplog:list_instances(),
         binary:match(I, <<"main/">>) =/= nomatch
     ].
@@ -1316,7 +1419,11 @@ run_scenario(Config, _Label) ->
             error(sampler_timeout)
         end,
     unlink(SamplerPid),
-    catch exit(SamplerPid, kill),
+    try
+        exit(SamplerPid, kill)
+    catch
+        _:_ -> ok
+    end,
 
     DispatchEvents = lists:append([
         erpc:call(N, ?MODULE, do_drain_dispatch_collector, [])
@@ -1546,8 +1653,18 @@ do_recovery_diagnostics() ->
         lists:suffix([cells_swept], E)
     ]),
     Frontiers = [
-        {I, catch bondy_oplog_registry:frontier(I)}
-     || I <- catch bondy_oplog:list_instances(),
+        {I,
+            try
+                bondy_oplog_registry:frontier(I)
+            catch
+                C:R -> {'EXIT', {C, R}}
+            end}
+     || I <-
+            try
+                bondy_oplog:list_instances()
+            catch
+                _:_ -> []
+            end,
         binary:match(I, <<"registry/">>) =/= nomatch
     ],
     #{
@@ -1568,7 +1685,13 @@ do_unservable_roots() ->
     [
         {I, D}
      || I <- bondy_oplog:list_instances(),
-        D <- [catch bondy_oplog_instance:diagnose_root(I)],
+        D <- [
+            try
+                bondy_oplog_instance:diagnose_root(I)
+            catch
+                _:_ -> undefined
+            end
+        ],
         is_map(D),
         maps:get(servable, D, true) =:= false
     ].
@@ -1759,8 +1882,18 @@ sample_node(Node) ->
 
 do_sample_sizes() ->
     [
-        {InstId, catch bondy_oplog:size(InstId)}
-     || InstId <- catch bondy_oplog:list_instances()
+        {InstId,
+            try
+                bondy_oplog:size(InstId)
+            catch
+                C:R -> {'EXIT', {C, R}}
+            end}
+     || InstId <-
+            try
+                bondy_oplog:list_instances()
+            catch
+                _:_ -> []
+            end
     ].
 
 %% Total ETS bytes owned by bondy_oplog_instance processes on THIS node —
@@ -1791,7 +1924,11 @@ do_start_dispatch_collector() ->
     after 5000 ->
         error(dispatch_collector_start_timeout)
     end,
-    catch unregister(oplog_dispatch_collector),
+    try
+        unregister(oplog_dispatch_collector)
+    catch
+        _:_ -> ok
+    end,
     true = register(oplog_dispatch_collector, Pid),
     ok.
 

@@ -707,15 +707,20 @@ open_main_into(State) ->
 set_main_failed(Reason) ->
     _ = persistent_term:put(?PT_MAIN_FAILED, Reason),
     _ =
-        catch bondy_alarm_handler:set_alarm(
-            {
-                bondy_db_main_unavailable,
-                <<
-                    "The durable `main` database could not be opened. Durable "
-                    "operations will fail and this node reports NOT READY."
-                >>
-            }
-        ),
+        try
+            bondy_alarm_handler:set_alarm(
+                {
+                    bondy_db_main_unavailable,
+                    <<
+                        "The durable `main` database could not be opened. "
+                        "Durable operations will fail and this node reports "
+                        "NOT READY."
+                    >>
+                }
+            )
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% @private
@@ -944,18 +949,29 @@ open_tables(Db, [#{name := Name} = Spec | Rest], EffTables) ->
 close_main(Db, Sup) ->
     _ = [
         begin
-            _ = catch bondy_db:close_table(T),
+            _ =
+                try
+                    bondy_db:close_table(T)
+                catch
+                    _:_ -> ok
+                end,
             _ = persistent_term:erase(?PT_TABLE(Name))
         end
      || #{name := Name, db := main} <- tables(),
-        (T = table(Name)) =/= undefined
+        T <- [table(Name)],
+        T =/= undefined
     ],
     _ =
         case Db of
             undefined ->
                 ok;
             _ ->
-                _ = catch bondy_db:close(Db),
+                _ =
+                    try
+                        bondy_db:close(Db)
+                    catch
+                        _:_ -> ok
+                    end,
                 persistent_term:erase(?PT_DB(main))
         end,
     _ = stop_sup(Sup),
@@ -970,13 +986,24 @@ close_registry(undefined) ->
 close_registry(Db) ->
     _ = [
         begin
-            _ = catch bondy_db:close_table(T),
+            _ =
+                try
+                    bondy_db:close_table(T)
+                catch
+                    _:_ -> ok
+                end,
             _ = persistent_term:erase(?PT_TABLE(Name))
         end
      || #{name := Name, db := registry} <- tables(),
-        (T = table(Name)) =/= undefined
+        T <- [table(Name)],
+        T =/= undefined
     ],
-    _ = catch bondy_db:close(Db),
+    _ =
+        try
+            bondy_db:close(Db)
+        catch
+            _:_ -> ok
+        end,
     _ = persistent_term:erase(?PT_DB(registry)),
     ok.
 
@@ -984,7 +1011,11 @@ close_registry(Db) ->
 stop_sup(undefined) ->
     ok;
 stop_sup(Sup) when is_pid(Sup) ->
-    catch bondy_db_leveled_sup:stop(Sup),
+    try
+        bondy_db_leveled_sup:stop(Sup)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 %% @private

@@ -52,7 +52,7 @@ if [ "${M0_SKIP_DEPLOY:-0}" != "1" ]; then
   fi
 
   # ---- 2. build + deploy (remote) -------------------------------------------
-  say "deploying (remote build) — OTP-28 image of $GITSHA (tag $GITTAG)"
+  say "deploying (remote build) — OTP-29 image of $GITSHA (tag $GITTAG)"
   fly deploy --config "$CONFIG" --dockerfile "$DOCKERFILE" \
     --app "$APP" --regions "$REGION" --remote-only --ha=false --yes
 

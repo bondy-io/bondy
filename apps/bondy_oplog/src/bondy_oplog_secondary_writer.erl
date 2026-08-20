@@ -306,7 +306,11 @@ maybe_request_rebuild(NS, IName, Entry) ->
             bondy_oplog_core_registry:entry_ever_freshened(Entry),
     case Trigger of
         true ->
-            catch bondy_oplog_index_rebuild:request(NS, IName),
+            try
+                bondy_oplog_index_rebuild:request(NS, IName)
+            catch
+                _:_ -> ok
+            end,
             ok;
         false ->
             ok
@@ -501,7 +505,12 @@ invalidate_cache(undefined, _Handle, _Bucket, _Key) ->
 invalidate_cache(_Adapter, undefined, _Bucket, _Key) ->
     ok;
 invalidate_cache(Adapter, Handle, Bucket, Key) ->
-    _ = catch Adapter:delete(Handle, Bucket, Key),
+    _ =
+        try
+            Adapter:delete(Handle, Bucket, Key)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 bump_ae(undefined) ->

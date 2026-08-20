@@ -61,7 +61,12 @@ truncate_under_churn_keeps_root_servable() ->
             {M1, N},
             lists:seq(1, 30)
         ),
-        _ = (catch bondy_mst_store:close(bondy_mst:store(Mf))),
+        _ =
+            try
+                bondy_mst_store:close(bondy_mst:store(Mf))
+            catch
+                _:_ -> ok
+            end,
         ok
     end).
 
@@ -87,7 +92,12 @@ merge_old_root_after_truncate_servable() ->
         assert_servable(M3),
         Keys = lists:sort([K || {K, _} <- bondy_mst:to_list(M3)]),
         ?assertEqual(lists:seq(1, 1000), Keys),
-        _ = (catch bondy_mst_store:close(bondy_mst:store(M3))),
+        _ =
+            try
+                bondy_mst_store:close(bondy_mst:store(M3))
+            catch
+                _:_ -> ok
+            end,
         ok
     end).
 

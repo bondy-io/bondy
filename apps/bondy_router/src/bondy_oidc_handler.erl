@@ -524,7 +524,7 @@ handle_logout(Req0, State) ->
 
 %% @private
 do_handle_logout(Req0, #{realm_uri := DefaultRealmUri} = State) ->
-    Cookies = cowboy_req:parse_cookies(Req0),
+    Cookies = bondy_http_utils:parse_cookies(Req0),
     BasePath = maps:get(base_path, State, <<>>),
     QsVals = cowboy_req:parse_qs(Req0),
     RealmUri = proplists:get_value(
@@ -546,7 +546,12 @@ do_handle_logout(Req0, #{realm_uri := DefaultRealmUri} = State) ->
                         _ = bondy_ticket:revoke(Claims),
                         Claims;
                     {error, _} ->
-                        _ = catch bondy_ticket:revoke(JWT),
+                        _ =
+                            try
+                                bondy_ticket:revoke(JWT)
+                            catch
+                                _:_ -> ok
+                            end,
                         #{}
                 catch
                     _:_ ->

@@ -687,7 +687,11 @@ cleanup(#state{janitors = Js}) ->
     %% because we are already inside terminate/2.
     maps:foreach(
         fun(Pid, _Handle) ->
-            catch bondy_registry_ptrie_janitor:stop(Pid)
+            try
+                bondy_registry_ptrie_janitor:stop(Pid)
+            catch
+                _:_ -> ok
+            end
         end,
         Js
     ),

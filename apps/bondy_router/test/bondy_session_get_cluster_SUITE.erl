@@ -198,8 +198,19 @@ wait_owner_stub(Owner, Observer, RealmUri) ->
 
 %% @private
 wait_until_eq(Fun, Expected, Node, Deadline) ->
-    _ = catch erpc:call(Node, bondy_oplog_sync_scheduler, trigger, []),
-    case catch Fun() of
+    _ =
+        try
+            erpc:call(Node, bondy_oplog_sync_scheduler, trigger, [])
+        catch
+            _:_ -> ok
+        end,
+    Actual =
+        try
+            Fun()
+        catch
+            C:R -> {'EXIT', {C, R}}
+        end,
+    case Actual of
         Expected ->
             ok;
         Other ->

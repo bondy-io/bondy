@@ -78,11 +78,15 @@ handle_info(evict, State) ->
 
         %% Eviction must never depend on the metrics subsystem being up.
         _ =
-            (catch prometheus_counter:inc(
-                bondy_rpc_promise_timeouts_total,
-                [bondy_rpc_promise:type(Promise)],
-                1
-            )),
+            try
+                prometheus_counter:inc(
+                    bondy_rpc_promise_timeouts_total,
+                    [bondy_rpc_promise:type(Promise)],
+                    1
+                )
+            catch
+                _:_ -> ok
+            end,
 
         ?LOG_DEBUG(#{
             description => "RPC Promise evicted from queue",

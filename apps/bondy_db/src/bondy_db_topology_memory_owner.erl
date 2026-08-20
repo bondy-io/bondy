@@ -235,7 +235,11 @@ terminate(_Reason, #{handles := Handles}) ->
     %% explicitly here keeps the teardown unambiguous and runs in the
     %% owner (the process the VM permits to do it).
     _ = [
-        catch Adapter:close(Handle)
+        try
+            Adapter:close(Handle)
+        catch
+            _:_ -> ok
+        end
      || {Handle, Adapter} <- maps:to_list(Handles)
     ],
     ok.

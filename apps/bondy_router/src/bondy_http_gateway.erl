@@ -6,26 +6,15 @@
 -module(bondy_http_gateway).
 
 -moduledoc """
-Manages Cowboy HTTP/HTTPS listeners and the API Gateway dispatch tables.
+Owns the API Gateway specifications and the dispatch tables compiled from them.
 
-This gen_server is responsible for the full lifecycle of the Bondy HTTP
-API Gateway: loading API specification documents, storing them in the bondy_db
-`api_gateway` table, compiling them into Cowboy dispatch tables, and
-starting/stopping/suspending the underlying Ranch/Cowboy listeners.
+This gen_server loads API specification documents, stores them in the bondy_db
+`api_gateway` table, and rebuilds the Cowboy dispatch table of every HTTP
+listener that exposes the API Gateway whenever a specification changes.
 
-## Listeners
-
-Four listener names are supported:
-
-| Name | Description |
-|---|---|
-| `api_gateway_http` | Public HTTP listener |
-| `api_gateway_https` | Public HTTPS listener |
-| `admin_api_http` | Admin HTTP listener |
-| `admin_api_https` | Admin HTTPS listener |
-
-Each listener can be independently started, stopped, suspended and resumed
-via the corresponding public API functions.
+Listeners themselves belong to `bondy_listener_manager`: which listeners exist,
+what each one serves and when it starts are properties of the listener
+inventory, not of the API Gateway.
 
 ## API specifications
 
@@ -41,7 +30,8 @@ is loaded:
 3. The **source JSON** (not the parsed form) is persisted in bondy_db —
    parsed specs can contain `mops` proxy funs that become invalid after a
    code upgrade, so we always re-parse from source
-4. The dispatch tables are rebuilt for all active listeners
+4. The dispatch table of every HTTP listener that exposes the API Gateway is
+   rebuilt
 
 ## Cluster replication
 
@@ -60,28 +50,11 @@ The server subscribes to `bondy.realm.deleted` on the master realm. When
 a realm is deleted the server can tear down all API specs associated with
 that realm (currently a placeholder).
 
-## Base routes
-
-Every listener includes a base set of routes that are always present
-regardless of loaded API specs:
-
-- Public listeners: `/ws` (WAMP WebSocket endpoint)
-- Admin listeners: `/ws`, `/ping`, `/ready`, `/metrics/[:registry]`
-
 ## Configuration
 
 - `bondy.api_gateway.config_file` — optional path to a JSON file
   containing one or more API spec documents, loaded at startup via
   `apply_config/0`
-
-## Connection alarms
-
-Listeners are configured with two connection-count alarms:
-
-- **75% threshold** — logs a warning when 75% of `max_connections` is
-  reached
-- **90% threshold** — logs an alert when 90% of `max_connections` is
-  reached
 """.
 
 -behaviour(gen_server).
@@ -90,7 +63,6 @@ Listeners are configured with two connection-count alarms:
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
 
--define(DISPATCH_KEY(Name), {?MODULE, dispatch, Name}).
 %% API specs live in the bondy_db `api_gateway` main table. The store is a flat,
 %% id-keyed keyspace (a spec's realm is a field in the value, not part of the
 %% key), so a single
@@ -99,10 +71,6 @@ Listeners are configured with two connection-count alarms:
 %% (non-terminal, so a re-`load` reanimates). The catalogue
 %% (`bondy_namespace_catalog`) provisions the table.
 -define(BUCKET, <<>>).
--define(HTTP, api_gateway_http).
--define(HTTPS, api_gateway_https).
--define(ADMIN_HTTP, admin_api_http).
--define(ADMIN_HTTPS, admin_api_https).
 %% Debounce window (ms) for coalescing a burst of spec-change events (boot
 %% config load, an AE sync) into a single dispatch-table rebuild.
 -define(REBUILD_DEBOUNCE, 250).
@@ -118,13 +86,8 @@ Listeners are configured with two connection-count alarms:
     subscriptions = #{} :: #{id() => uri()}
 }).
 
--type listener() ::
-    api_gateway_http
-    | api_gateway_https
-    | admin_api_http
-    | admin_api_https.
-
 %% API
+-export([admin_api_routes/1]).
 -export([delete/1]).
 -export([dispatch_table/1]).
 -export([list/0]).
@@ -132,15 +95,8 @@ Listeners are configured with two connection-count alarms:
 -export([load/1]).
 -export([lookup/1]).
 -export([rebuild_dispatch_tables/0]).
--export([resume_admin_listeners/0]).
--export([resume_listeners/0]).
--export([start_admin_listeners/0]).
+-export([routes/1]).
 -export([start_link/0]).
--export([start_listeners/0]).
--export([stop_admin_listeners/0]).
--export([stop_listeners/0]).
--export([suspend_admin_listeners/0]).
--export([suspend_listeners/0]).
 
 %% GEN_SERVER CALLBACKS
 -export([init/1]).
@@ -157,79 +113,6 @@ Listeners are configured with two connection-count alarms:
 -doc "Starts the gen_server and registers it as `bondy_http_gateway`.".
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
-
--doc """
-Starts the public HTTP and HTTPS listeners based on the configuration.
-
-Loads all API specs from the metadata store, compiles them into Cowboy
-dispatch tables, and starts the `api_gateway_http` and `api_gateway_https`
-Ranch listeners (when enabled). This does not start the admin listeners;
-use `start_admin_listeners/0` for that.
-""".
--spec start_listeners() -> ok | {error, any()}.
-
-start_listeners() ->
-    gen_server:call(?MODULE, {start_listeners, public}).
-
--doc """
-Suspends the public HTTP and HTTPS listeners.
-
-Suspended listeners stop accepting new connections but keep existing
-connections alive.
-""".
--spec suspend_listeners() -> ok.
-
-suspend_listeners() ->
-    gen_server:call(?MODULE, {suspend_listeners, public}).
-
--doc "Resumes the public HTTP and HTTPS listeners after a suspension.".
--spec resume_listeners() -> ok.
-
-resume_listeners() ->
-    gen_server:call(?MODULE, {resume_listeners, public}).
-
--doc "Stops the public HTTP and HTTPS listeners and closes all connections.".
--spec stop_listeners() -> ok.
-
-stop_listeners() ->
-    gen_server:call(?MODULE, {stop_listeners, public}).
-
--doc """
-Starts the admin HTTP and HTTPS listeners.
-
-Loads the built-in admin API spec from `priv/specs/bondy_admin_api.json`,
-compiles the dispatch table, and starts the `admin_api_http` and
-`admin_api_https` Ranch listeners (when enabled). The admin listeners
-include the `/ping`, `/ready` and `/metrics` endpoints in addition to
-the WAMP WebSocket endpoint.
-""".
--spec start_admin_listeners() -> ok | {error, any()}.
-
-start_admin_listeners() ->
-    gen_server:call(?MODULE, {start_listeners, admin}).
-
--doc "Stops the admin HTTP and HTTPS listeners and closes all connections.".
--spec stop_admin_listeners() -> ok.
-
-stop_admin_listeners() ->
-    gen_server:call(?MODULE, {stop_listeners, admin}).
-
--doc """
-Suspends the admin HTTP and HTTPS listeners.
-
-Suspended listeners stop accepting new connections but keep existing
-connections alive.
-""".
--spec suspend_admin_listeners() -> ok.
-
-suspend_admin_listeners() ->
-    gen_server:call(?MODULE, {suspend_listeners, admin}).
-
--doc "Resumes the admin HTTP and HTTPS listeners after a suspension.".
--spec resume_admin_listeners() -> ok.
-
-resume_admin_listeners() ->
-    gen_server:call(?MODULE, {resume_listeners, admin}).
 
 -doc """
 Loads API specs from the configuration file into the metadata store.
@@ -266,27 +149,75 @@ Returns the current Cowboy dispatch table for the given listener.
 Retrieves the compiled dispatch rules from Ranch's protocol options
 for `Listener`.
 """.
--spec dispatch_table(listener()) -> any().
+-spec dispatch_table(Listener :: atom()) -> any().
 
 dispatch_table(Listener) ->
     Map = ranch:get_protocol_options(Listener),
     maps_utils:get_path([env, dispatch], Map).
 
 -doc """
-Rebuilds the Cowboy dispatch tables for all active public listeners.
+Cowboy route rules compiled from the stored API Gateway specifications, for the
+scheme `Listener` serves.
 
-Loads every API spec from bondy_db, re-parses them, compiles the
-dispatch table via `cowboy_router:compile/1`, and stores the result
-in `persistent_term` for each enabled listener (`api_gateway_http`,
-`api_gateway_https`).
+`bondy_http_gateway_api_spec_parser:dispatch_table/2` keys its result by the
+scheme declared in each specification, so a listener takes the table matching
+its own scheme: `https` when it terminates TLS, `http` otherwise.
+
+The parser groups its rules BY HOST, and they are returned that way. Flattening
+them discarded each specification's `host` field, so a specification declared for
+one virtual host answered on every host.
+""".
+-spec routes(bondy_listener_config:t()) ->
+    [bondy_http_service:route_rule()].
+
+routes(Listener) ->
+    Scheme = scheme(maps:get(transport, Listener)),
+    Tables = load_dispatch_tables(),
+    case lists:keyfind(Scheme, 1, Tables) of
+        {Scheme, Rules} -> Rules;
+        false -> []
+    end.
+
+-doc """
+Routes compiled from the built-in Admin API specification, for one listener.
+
+Distinct from `routes/1`, which returns the routes of every specification stored
+in `bondy_db`. This specification ships in `priv/` and is mounted only on
+listeners that declare the `admin_api` service, which is what keeps realm, user,
+grant and backup administration off a listener that declares only
+`api_gateway`.
+""".
+-spec admin_api_routes(bondy_listener_config:t()) ->
+    [bondy_http_service:route_rule()].
+
+admin_api_routes(Listener) ->
+    Scheme = scheme(maps:get(transport, Listener)),
+    Spec = bondy_http_gateway_api_spec_parser:parse(admin_spec()),
+    ok = maybe_init_groups(maps:get(~"realm_uri", Spec)),
+    %% No base routes: the service route sets in `bondy_http_services' supply
+    %% those, and each is mounted by naming its own service.
+    Tables = bondy_http_gateway_api_spec_parser:dispatch_table([Spec], []),
+    case lists:keyfind(Scheme, 1, Tables) of
+        {Scheme, Rules} -> Rules;
+        false -> []
+    end.
+
+-doc """
+Rebuilds the Cowboy dispatch table of every HTTP listener that exposes the
+API Gateway.
+
+A listener that does not include the `api_gateway` service has no routes derived
+from a STORED specification, so a stored-specification change cannot affect it.
+The built-in Admin API specification ships in `priv/` and cannot change at
+runtime, so an `admin_api`-only listener needs no rebuild either.
 """.
 rebuild_dispatch_tables() ->
-    ?LOG_NOTICE(#{
-        description => "Rebuilding HTTP Gateway dispatch tables"
-    }),
+    ?LOG_NOTICE(#{description => "Rebuilding HTTP Gateway dispatch tables"}),
     _ = [
-        rebuild_dispatch_table(Scheme, Routes)
-     || {Scheme, Routes} <- load_dispatch_tables()
+        bondy_listener_ranch:recompile_dispatch(L)
+     || L <- bondy_listener_manager:listeners(),
+        maps:get(protocol, L) =:= http,
+        lists:member(api_gateway, maps:get(services, L))
     ],
     ok.
 
@@ -335,18 +266,6 @@ init([]) ->
     State = subscribe(#state{bondy_ref = Ref}),
     {ok, State}.
 
-handle_call({start_listeners, Type}, _From, State) ->
-    Res = do_start_listeners(Type),
-    {reply, Res, State};
-handle_call({suspend_listeners, Type}, _From, State) ->
-    Res = do_suspend_listeners(Type),
-    {reply, Res, State};
-handle_call({resume_listeners, Type}, _From, State) ->
-    Res = do_resume_listeners(Type),
-    {reply, Res, State};
-handle_call({stop_listeners, Type}, _From, State) ->
-    Res = do_stop_listeners(Type),
-    {reply, Res, State};
 handle_call(apply_config, _From, State) ->
     Res = do_apply_config(),
     {reply, Res, State};
@@ -529,94 +448,6 @@ note_spec_change(
     St#state{updated_specs = Specs1, rebuild_timer = Timer1}.
 
 %% @private
-do_start_listeners(public) ->
-    ?LOG_NOTICE(#{
-        description => "Starting public HTTP(S) listeners"
-    }),
-
-    DTables = load_dispatch_tables(),
-
-    try
-        _ = [
-            resulto:throw_or(start_listener({Scheme, Routes}))
-         || {Scheme, Routes} <- DTables
-        ],
-        ok
-    catch
-        throw:Reason ->
-            {error, Reason}
-    end;
-do_start_listeners(admin) ->
-    ?LOG_NOTICE(#{
-        description => "Starting admin HTTP(S) listeners"
-    }),
-
-    DTables = parse_specs([admin_spec()], admin_base_routes()),
-
-    try
-        _ = [
-            resulto:throw_or(start_admin_listener({Scheme, Routes}))
-         || {Scheme, Routes} <- DTables
-        ],
-        ok
-    catch
-        throw:Reason ->
-            {error, Reason}
-    end.
-
-%% @private
-do_suspend_listeners(public) ->
-    ?LOG_NOTICE(#{
-        description => "Suspending public HTTP(S) listeners"
-    }),
-    catch ranch:suspend_listener(?HTTP),
-    catch ranch:suspend_listener(?HTTPS),
-    ok;
-do_suspend_listeners(admin) ->
-    ?LOG_NOTICE(#{
-        description => "Suspending admin HTTP(S) listeners"
-    }),
-    catch ranch:suspend_listener(?ADMIN_HTTP),
-    catch ranch:suspend_listener(?ADMIN_HTTPS),
-    ok.
-
-%% @private
-do_resume_listeners(public) ->
-    ?LOG_NOTICE(#{
-        description => "Resuming public HTTP(S) listeners"
-    }),
-    catch ranch:resume_listener(?HTTP),
-    catch ranch:resume_listener(?HTTPS),
-    ok;
-do_resume_listeners(admin) ->
-    ?LOG_NOTICE(#{
-        description => "Resuming admin HTTP(S) listeners"
-    }),
-    catch ranch:resume_listener(?ADMIN_HTTP),
-    catch ranch:resume_listener(?ADMIN_HTTPS),
-    ok.
-
-%% @private
-do_stop_listeners(public) ->
-    ?LOG_NOTICE(#{
-        description => "Stopping public HTTP(S) listeners"
-    }),
-    catch cowboy:stop_listener(?HTTP),
-    catch cowboy:stop_listener(?HTTPS),
-    bondy_http_security_headers:cleanup(?HTTP),
-    bondy_http_security_headers:cleanup(?HTTPS),
-    ok;
-do_stop_listeners(admin) ->
-    ?LOG_NOTICE(#{
-        description => "Stopping admin HTTP(S) listeners"
-    }),
-    catch cowboy:stop_listener(?ADMIN_HTTP),
-    catch cowboy:stop_listener(?ADMIN_HTTPS),
-    bondy_http_security_headers:cleanup(?ADMIN_HTTP),
-    bondy_http_security_headers:cleanup(?ADMIN_HTTPS),
-    ok.
-
-%% @private
 -spec do_apply_config() -> ok | no_return().
 
 do_apply_config() ->
@@ -750,139 +581,6 @@ will no longer be valid and will fail with a badfun exception.
 add(Id, Spec) when is_binary(Id), is_map(Spec) ->
     bondy_db:apply(spec_table(), ?BUCKET, Id, {set, Spec}).
 
--spec start_listener({Scheme :: binary(), [tuple()]}) -> ok.
-
-start_listener({~"http", Routes}) ->
-    ok = maybe_start_http(Routes, ?HTTP),
-    ok;
-start_listener({~"https", Routes}) ->
-    ok = maybe_start_https(Routes, ?HTTPS),
-    ok.
-
--spec start_admin_listener({Scheme :: binary(), [tuple()]}) ->
-    ok | {error, any()}.
-
-start_admin_listener({~"http", Routes}) ->
-    maybe_start_http(Routes, ?ADMIN_HTTP);
-start_admin_listener({~"https", Routes}) ->
-    maybe_start_https(Routes, ?ADMIN_HTTPS).
-
-maybe_start_http(Routes, Name) ->
-    case bondy_config:get([Name, enabled], true) of
-        true ->
-            start_http(Routes, Name);
-        false ->
-            ok
-    end.
-
--spec start_http(list(), atom()) -> ok | {error, any()}.
-
-start_http(Routes, Name) ->
-    TransportOpts = listener_transport_opts(Name),
-    ProtoOpts = listener_protocol_opts(Routes, Name),
-    LogMeta = #{
-        listener => Name,
-        transport_opts => TransportOpts,
-        protocol_opts => maps:without([env], ProtoOpts)
-    },
-
-    case cowboy:start_clear(Name, TransportOpts, ProtoOpts) of
-        {ok, _} ->
-            ?LOG_NOTICE(LogMeta#{description => "Started HTTP Listener"}),
-            ok;
-        {error, eaddrinuse = Reason} = Error ->
-            ?LOG_ERROR(LogMeta#{
-                description =>
-                    "Failed to start HTTPS listener, "
-                    "the address is already in use",
-                reason => Reason
-            }),
-            Error;
-        {error, Reason} = Error ->
-            ?LOG_ERROR(LogMeta#{
-                description => "Failed to start HTTP listener",
-                reason => Reason
-            }),
-            Error
-    end.
-
-maybe_start_https(Routes, Name) ->
-    case bondy_config:get([Name, enabled], true) of
-        true ->
-            start_https(Routes, Name);
-        false ->
-            ok
-    end.
-
-listener_protocol_opts(Routes, Name) ->
-    ProtocolOpts0 = bondy_config:listener_protocol_opts(Name),
-    ok = compile_dispatch(Routes, Name),
-    ok = bondy_http_security_headers:init(Name),
-
-    ProtocolOpts0#{
-        env => #{
-            bondy => #{
-                auth => #{
-                    %% REVIEW this in light of recent changes to auth methods
-                    schemes => [basic, bearer]
-                }
-            },
-            dispatch => {persistent_term, ?DISPATCH_KEY(Name)}
-        },
-        metrics_callback => fun bondy_prometheus_cowboy_collector:observe/1,
-        %% cowboy_metrics_h must be first on the list
-        stream_handlers => [
-            cowboy_metrics_h,
-            cowboy_compress_h,
-            cowboy_stream_h
-        ],
-        middlewares => [
-            cowboy_router,
-            cowboy_handler
-        ],
-        hibernate => true
-        %% `protocols` is deliberately NOT set: Cowboy's default ([http2,
-        %% http]) serves HTTP/2 on every listener — via ALPN on TLS (which
-        %% `cowboy:start_tls/3` advertises unconditionally, so h2 was always
-        %% served there) and via the h2c upgrade / prior-knowledge preface on
-        %% clear listeners. HTTP/2 resource use is bounded by
-        %% `max_concurrent_streams` (default 100) and Cowboy's HPACK and
-        %% frame-rate caps. NOTE for capacity alarms: one HTTP/2 connection
-        %% carries up to `max_concurrent_streams` in-flight requests, so the
-        %% `max_connections` thresholds undercount request-level load.
-    }.
-
--spec start_https(list(), atom()) -> ok | {error, any()}.
-
-start_https(Routes, Name) ->
-    TransportOpts = listener_transport_opts(Name),
-    ProtoOpts = listener_protocol_opts(Routes, Name),
-    LogMeta = #{
-        listener => Name,
-        transport_opts => TransportOpts,
-        protocol_opts => maps:without([env], ProtoOpts)
-    },
-
-    case cowboy:start_tls(Name, TransportOpts, ProtoOpts) of
-        {ok, _} ->
-            ?LOG_NOTICE(LogMeta#{description => "Started HTTPS Listener"}),
-            ok;
-        {error, eaddrinuse = Reason} = Error ->
-            ?LOG_ERROR(LogMeta#{
-                description =>
-                    "Failed to start HTTPS listener, "
-                    "the address is already in use",
-                reason => Reason
-            }),
-            Error;
-        {error, Reason} = Error ->
-            ?LOG_ERROR(LogMeta#{
-                description => "Failed to start HTTP listener",
-                reason => Reason
-            }),
-            Error
-    end.
-
 validate_spec(Map) ->
     try
         Spec = bondy_http_gateway_api_spec_parser:parse(Map),
@@ -935,44 +633,16 @@ load_dispatch_tables() ->
      || {K, V} <- stored_specs()
     ]),
 
+    %% No base routes: the paths a listener serves besides its
+    %% specification-derived ones come from the services it declares, and
+    %% `bondy_http_services:dispatch/1` assembles them.
     Result = bondy_http_gateway_api_spec_parser:dispatch_table(
-        [element(3, S) || S <- Specs], base_routes()
+        [element(3, S) || S <- Specs], []
     ),
 
     case Result of
-        [] ->
-            [
-                {~"http", base_routes()},
-                {~"https", base_routes()}
-            ];
-        _ ->
-            Result
-    end.
-
-compile_dispatch(Routes, Name) ->
-    _ = persistent_term:put(?DISPATCH_KEY(Name), cowboy_router:compile(Routes)),
-    ok.
-
-%% @private
--spec rebuild_dispatch_table(atom() | binary(), list()) -> ok.
-
-rebuild_dispatch_table(http, Routes) ->
-    rebuild_dispatch_table(~"http", Routes);
-rebuild_dispatch_table(https, Routes) ->
-    rebuild_dispatch_table(~"https", Routes);
-rebuild_dispatch_table(~"http", Routes) ->
-    case bondy_config:get([?HTTP, enabled], true) of
-        true ->
-            compile_dispatch(Routes, ?HTTP);
-        false ->
-            ok
-    end;
-rebuild_dispatch_table(~"https", Routes) ->
-    case bondy_config:get([?HTTPS, enabled], true) of
-        true ->
-            compile_dispatch(Routes, ?HTTPS);
-        false ->
-            ok
+        [] -> [{~"http", []}, {~"https", []}];
+        _ -> Result
     end.
 
 %% @private
@@ -992,46 +662,10 @@ handle_spec_updates(#state{updated_specs = L}) ->
     rebuild_dispatch_tables().
 
 %% @private
-base_routes() ->
-    %% The WS entrypoint required for WAMP WS subprotocol,
-    %% SSE transport endpoints, and Longpoll transport endpoints
-    [
-        {'_', [
-            {"/ws", bondy_wamp_ws_connection_handler, #{}},
-            {"/wamp/sse/open", bondy_http_sse_handler, #{action => open}},
-            {"/wamp/sse/:transport_id/receive", bondy_http_sse_stream_handler,
-                #{}},
-            {"/wamp/sse/:transport_id/send", bondy_http_sse_handler, #{
-                action => send
-            }},
-            {"/wamp/sse/:transport_id/close", bondy_http_sse_handler, #{
-                action => close
-            }},
-            {"/wamp/longpoll/open", bondy_http_longpoll_handler, #{
-                action => open
-            }},
-            {"/wamp/longpoll/:transport_id/receive",
-                bondy_http_longpoll_handler, #{action => receive_msgs}},
-            {"/wamp/longpoll/:transport_id/send", bondy_http_longpoll_handler,
-                #{action => send}},
-            {"/wamp/longpoll/:transport_id/close", bondy_http_longpoll_handler,
-                #{action => close}}
-        ]}
-    ].
-
-%% @private
-admin_base_routes() ->
-    [
-        {'_', [
-            {"/ws", bondy_wamp_ws_connection_handler, #{}},
-            {"/ping", bondy_admin_ping_http_handler, #{}},
-            {"/ready", bondy_admin_ready_http_handler, #{}},
-            {"/cluster/topology", bondy_admin_cluster_topology_http_handler,
-                #{}},
-            {"/metrics/[:registry]", prometheus_cowboy2_handler, []}
-        ]}
-    ].
-
+%% The built-in Admin API specification, read from `priv/'. Mandatory, not
+%% best-effort: a missing or malformed file means the node cannot serve its own
+%% admin API, which must not degrade silently into a listener that binds and
+%% answers 404.
 admin_spec() ->
     Base = bondy_config:get(priv_dir),
     File = filename:join(Base, "specs/bondy_admin_api.json"),
@@ -1057,22 +691,12 @@ admin_spec() ->
     end.
 
 %% @private
-parse_specs(Specs, BaseRoutes) ->
-    case [bondy_http_gateway_api_spec_parser:parse(S) || S <- Specs] of
-        [] ->
-            [
-                {~"http", BaseRoutes},
-                {~"https", BaseRoutes}
-            ];
-        L ->
-            _ = [
-                maybe_init_groups(maps:get(~"realm_uri", Spec))
-             || Spec <- L
-            ],
-            bondy_http_gateway_api_spec_parser:dispatch_table(L, BaseRoutes)
-    end.
+scheme(tls) -> ~"https";
+scheme(_) -> ~"http".
 
 %% @private
+%% `dispatch_table/2` returns `[{'_', Routes}]` groups; a carrier contributes a
+%% flat route list, so unwrap.
 maybe_init_groups(RealmUri) ->
     Gs = [
         #{
@@ -1102,58 +726,6 @@ maybe_init_groups(RealmUri) ->
      || G <- Gs
     ],
     ok.
-
-listener_transport_opts(Name) ->
-    Opts0 = bondy_config:listener_transport_opts(Name),
-    MaxConnections = key_value:get(max_connections, Opts0),
-
-    Threshold75 = trunc(MaxConnections * 0.75),
-    Threshold90 = trunc(MaxConnections * 0.90),
-
-    Opts = Opts0#{
-        alarms => #{
-            num_connections_70 => #{
-                type => num_connections,
-                threshold => Threshold75,
-                cooldown => timer:seconds(5),
-                callback => fun(LName, AlarmName, _SupPid, Pids) ->
-                    ?LOG_WARNING(#{
-                        description => "Connection 75% threshold exceeded",
-                        listener => LName,
-                        alarm_name => AlarmName,
-                        connections => length(Pids)
-                    })
-                end
-            },
-            num_connections_90 => #{
-                type => num_connections,
-                threshold => Threshold90,
-                cooldown => timer:seconds(5),
-                callback => fun(LName, AlarmName, _SupPid, Pids) ->
-                    ?LOG_ALERT(#{
-                        description => "Connection 90% threshold exceeded",
-                        listener => LName,
-                        alarm_name => AlarmName,
-                        connections => length(Pids)
-                    })
-                end
-            }
-        }
-    },
-
-    SocketOpts = key_value:get(socket_opts, Opts),
-
-    case key_value:get(reuseport, SocketOpts, false) of
-        true ->
-            %% 15 acceptors per listen socket with at least 1 per scheduler
-            NumAcceptors = key_value:get(num_acceptors, Opts),
-            Schedulers = erlang:system_info(schedulers),
-            Opts#{
-                num_listen_sockets => max(Schedulers, trunc(NumAcceptors / 15))
-            };
-        false ->
-            Opts
-    end.
 
 %% @private
 -doc "Tear down all APIs for that realm when event occurs.".

@@ -73,7 +73,12 @@ setup() ->
         {
             fun(Event, _) ->
                 _ =
-                    (catch ets:insert(?MODULE, {level, maps:get(level, Event)})),
+                    _ =
+                    try
+                        ets:insert(?MODULE, {level, maps:get(level, Event)})
+                    catch
+                        _:_ -> ok
+                    end,
                 Event
             end,
             []
@@ -83,7 +88,12 @@ setup() ->
 
 cleanup(_) ->
     _ = logger:remove_primary_filter(?MODULE),
-    _ = (catch ets:delete(?MODULE)),
+    _ =
+        try
+            ets:delete(?MODULE)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 an_absent_peer_emits_no_warning() ->

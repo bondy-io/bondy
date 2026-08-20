@@ -105,12 +105,9 @@ start(_Type, Args) ->
                 ok ?= configure_services(),
                 ok ?= init_registry_indices(),
                 ok ?= setup_wamp_subscriptions(),
-                %% We just start the admin API rest listeners [HTTP(S), WS(S)].
-                %% This is to enable certain operations during startup i.e.
-                %% liveness and readiness http probes.
-                ok ?= start_admin_listeners(),
+                ok ?= start_early_listeners(),
                 %% Finally we allow clients to connect
-                ok ?= start_public_listeners(),
+                ok ?= start_normal_listeners(),
                 {ok, _} = application:ensure_all_started(
                     bondy_http_connector, permanent
                 ),
@@ -181,6 +178,12 @@ prep_stop(_State) ->
 Application behaviour callback.
 """.
 stop(_State) ->
+    %% The `early' listeners, which `prep_stop/1' deliberately left running so
+    %% that liveness, readiness and metrics kept answering for the whole grace
+    %% period. Nothing is left to drain by the time this runs, so releasing
+    %% their sockets — and, for the internal admin listener, unlinking its
+    %% socket file — is the last thing to do rather than the first.
+    ok = bondy_listener_manager:stop(early),
     ?LOG_NOTICE(#{description => "Shutdown finished"}),
     ok.
 
@@ -330,41 +333,32 @@ init_registry_indices() ->
     end.
 
 %% @private
-start_admin_listeners() ->
-    %% The /ping (liveness) and /metrics paths will now go live
-    %% The /ready (readiness) path will now go live but will return false as
-    %% bondy_config:get(status) will return `initialising'
-    ?LOG_NOTICE(#{description => "Starting Admin API listeners"}),
-    bondy_http_gateway:start_admin_listeners().
+%% Listeners marked `start_phase => early' come up first so the liveness
+%% (`/ping'), readiness (`/ready') and metrics paths answer while
+%% `bondy_config:get(status)' is still `initialising'.
+start_early_listeners() ->
+    %% The inventory was resolved during `bondy_config:init/1', which had to
+    %% happen there because `bondy_cert_manager:init/0' and `setup_wamp/0' both
+    %% consume it.
+    ?LOG_NOTICE(#{description => "Starting early-phase listeners"}),
+    bondy_listener_manager:start(early).
 
 %% @private
-start_public_listeners() ->
+start_normal_listeners() ->
     ?LOG_NOTICE(#{description => "Starting listeners"}),
-    %% Now that the registry has been initialised we can initialise
-    %% the remaining listeners for clients to connect
-    %% WAMP TCP listeners
-    ok = bondy_wamp_tcp:start_listeners(),
-
-    %% WAMP Unix domain socket listener (opt-in; no-op unless configured)
-    ok = bondy_wamp_uds:start_listeners(),
 
     %% WAMP in-VM (local) transport: register the router-side adapter so a
-    %% co-located bondy_connect client can use `transport => local'. On a peer
+    %% co-located bondy_connect_sdk client can use `transport => local'. On a peer
     %% node (no bondy app) no handler is registered and local is unavailable.
     ok = bondy_connect_local:register_handler(bondy_connect_local_handler),
 
-    %% WAMP Websocket and REST Gateway HTTP listeners
-    %% @TODO We need to separate the /ws path into another listener/port number
-    ok = bondy_http_gateway:start_listeners(),
+    ok = bondy_listener_manager:start(normal),
 
     %% We flag the status, the HTTP /ready path will now return true.
     ok = bondy_config:set(status, ready),
 
-    %% Bondy Router Bridge Relay (server) connection listeners
-    ok = bondy_bridge_relay_manager:start_listeners(),
-
     %% Bondy Router Bridge Relay (client) connections
-    ok = bondy_bridge_relay_manager:start_bridges().
+    bondy_bridge_relay_manager:start_bridges().
 
 %% @private
 setup_event_handlers() ->
@@ -457,52 +451,29 @@ maybe_setup_oplog_replication() ->
     end.
 
 suspend_listeners() ->
-    %% We stop accepting new connections on all listeners.
+    %% We stop accepting new connections on the client-facing listeners.
     %% Existing connections are unaffected.
-
+    %%
+    %% The NORMAL phase only. `early' is the phase that carries `/ping',
+    %% `/ready' and `/metrics', and this runs at the START of a drain that then
+    %% sleeps for the whole grace period: suspending those paths would make an
+    %% orchestrator read the draining node as dead and hard-kill it, which is
+    %% the outcome the grace period exists to avoid. `stop/1' takes them down
+    %% once the drain is over.
     ?LOG_NOTICE(#{
         description =>
-            "Suspending HTTP(S) and WS(S) client listeners. "
-            "No new connections will be accepted from now on."
+            "Suspending the normal-phase listeners. No new connections will be "
+            "accepted from now on; the readiness and metrics endpoints stay up "
+            "for the duration of the drain."
     }),
-    ok = bondy_http_gateway:suspend_listeners(),
-
-    ?LOG_NOTICE(#{
-        description =>
-            "Suspending TCP(TLS) client listeners. "
-            "No new connections will be accepted from now on."
-    }),
-    ok = bondy_wamp_tcp:suspend_listeners(),
-    ok = bondy_wamp_uds:suspend_listeners(),
-
-    ?LOG_NOTICE(#{
-        description =>
-            "Suspending Bridge Relay listeners. "
-            "No new connections will be accepted from now on."
-    }),
-    ok = bondy_bridge_relay_manager:suspend_listeners().
+    bondy_listener_manager:suspend(normal).
 
 stop_listeners() ->
-    %% We force all listeners to stop.
+    %% We force the client-facing listeners to stop.
     %% All existing connections will be terminated.
-
-    ?LOG_NOTICE(#{
-        description =>
-            "Terminating all client HTTP(S) and WS(S) client connections."
-    }),
-    ok = bondy_http_gateway:stop_listeners(),
-
-    ?LOG_NOTICE(#{
-        description => "Terminating all TCP(TLS) client connections."
-    }),
-    ok = bondy_wamp_tcp:stop_listeners(),
-    ok = bondy_wamp_uds:stop_listeners(),
-    ok = bondy_connect_local:unregister_handler(),
-
-    ?LOG_NOTICE(#{
-        description => "Terminating all Bridge Relay connections."
-    }),
-    ok = bondy_bridge_relay_manager:stop_listeners().
+    ?LOG_NOTICE(#{description => "Terminating all client connections."}),
+    ok = bondy_listener_manager:stop(normal),
+    bondy_connect_local:unregister_handler().
 
 maybe_leave() ->
     case bondy_config:get(automatic_leave, false) of

@@ -271,7 +271,7 @@ or binary representation of it.
     IPOrHostname :: inet:ip_address() | string() | any | localhost | hostname,
     Family :: inet | inet6
 ) ->
-    {inet:ip_address(), inet | inet6} | no_return().
+    inet:ip_address() | no_return().
 
 get_ipaddr(any, inet) ->
     {0, 0, 0, 0};
@@ -290,10 +290,19 @@ get_ipaddr(hostname, Family) ->
 get_ipaddr(partisan, _) ->
     #{listen_addrs := [Addr | _]} = partisan:node_spec(),
     maps:get(ip, Addr);
+%% An address decides its own family, so `Family' is ignored here — the two
+%% clauses below return the address, as the doc above states and as
+%% `get_ipaddr_family/2' requires (it pattern-matches the result on arity to
+%% derive the family). They returned the `is_*_address/1' BOOLEAN instead until
+%% an address tuple first reached this function, which made
+%% `get_ipaddr_family/2' fail with `{case_clause, true}'; the validation the
+%% call expressed is kept as a match, so a malformed tuple still cannot pass.
 get_ipaddr({_, _, _, _} = IP, _) ->
-    inet:is_ipv4_address(IP);
+    true = inet:is_ipv4_address(IP),
+    IP;
 get_ipaddr({_, _, _, _, _, _, _, _} = IP, _) ->
-    inet:is_ipv6_address(IP);
+    true = inet:is_ipv6_address(IP),
+    IP;
 get_ipaddr(IPOrHostname, Family) when is_binary(IPOrHostname) ->
     get_ipaddr(binary_to_list(IPOrHostname), Family);
 get_ipaddr(IPOrHostname, Family) when is_list(IPOrHostname) ->

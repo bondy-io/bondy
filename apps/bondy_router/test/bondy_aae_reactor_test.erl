@@ -343,13 +343,22 @@ pool_test_() ->
 setup_pool() ->
     {ok, _} = application:ensure_all_started(gproc),
     N = 4,
-    _ = catch gproc_pool:new(?AAE_REACTOR_POOL, hash, [{size, N}]),
+    _ =
+        try
+            gproc_pool:new(?AAE_REACTOR_POOL, hash, [{size, N}])
+        catch
+            _:_ -> ok
+        end,
     [
         begin
             _ =
-                catch gproc_pool:add_worker(
-                    ?AAE_REACTOR_POOL, {bondy_aae_reactor_worker, I}, I
-                ),
+                try
+                    gproc_pool:add_worker(
+                        ?AAE_REACTOR_POOL, {bondy_aae_reactor_worker, I}, I
+                    )
+                catch
+                    _:_ -> ok
+                end,
             {ok, Pid} = bondy_aae_reactor_worker:start_link(I),
             true = unlink(Pid),
             Pid
@@ -358,8 +367,20 @@ setup_pool() ->
     ].
 
 cleanup_pool(Workers) ->
-    _ = [catch gen_server:stop(P) || P <- Workers],
-    _ = catch gproc_pool:force_delete(?AAE_REACTOR_POOL),
+    _ = [
+        try
+            gen_server:stop(P)
+        catch
+            _:_ -> ok
+        end
+     || P <- Workers
+    ],
+    _ =
+        try
+            gproc_pool:force_delete(?AAE_REACTOR_POOL)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% Same cell key always hashes to the same worker (ordering); a pid is returned

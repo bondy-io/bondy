@@ -675,7 +675,11 @@ secondary_saturation_drop(NS, IName, SecShard, Entry, NumOps) ->
         #{dropped_ops => NumOps},
         #{namespace => NS, index_name => IName, shard => SecShard}
     ),
-    catch bondy_oplog_index_rebuild:request(NS, IName),
+    try
+        bondy_oplog_index_rebuild:request(NS, IName)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 %% @private
@@ -1320,7 +1324,12 @@ invalidate_cache(_Adapter, undefined, _Bucket, _Key) ->
 invalidate_cache(Adapter, Handle, Bucket, Key) ->
     %% `delete/3` is the cache_adapter callback. Swallow any errors —
     %% a failed cache eviction must not stop the drain.
-    _ = catch Adapter:delete(Handle, Bucket, Key),
+    _ =
+        try
+            Adapter:delete(Handle, Bucket, Key)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% @private

@@ -189,16 +189,20 @@ cell(Content, Width, Colour) ->
 
 %% @private
 instances() ->
-    case catch bondy_oplog:list_instances() of
+    try bondy_oplog:list_instances() of
         L when is_list(L) -> lists:sort(L);
         _ -> []
+    catch
+        _:_ -> []
     end.
 
 %% @private
 peers() ->
-    case catch partisan:nodes() of
+    try partisan:nodes() of
         N when is_list(N) -> N;
         _ -> []
+    catch
+        _:_ -> []
     end.
 
 %% @private
@@ -207,17 +211,21 @@ peers() ->
 %% lock-free registry read; the topology fingerprint gates cross-node comparison.
 local_sig(Id) ->
     Frontier =
-        case catch bondy_oplog_instance:frontier(Id) of
+        try bondy_oplog_instance:frontier(Id) of
             F when is_map(F) -> F;
             _ -> #{}
+        catch
+            _:_ -> #{}
         end,
     {Frontier, local_fingerprint(Id)}.
 
 %% @private
 local_fingerprint(Id) ->
-    case catch bondy_oplog:topology_fingerprint(bondy_oplog:db_of(Id)) of
+    try bondy_oplog:topology_fingerprint(bondy_oplog:db_of(Id)) of
         FP when is_binary(FP) -> FP;
         _ -> undefined
+    catch
+        _:_ -> undefined
     end.
 
 %% @private
@@ -228,21 +236,21 @@ local_fingerprint(Id) ->
 %% would serve right now.
 peer_sig(Peer, Id) ->
     Opts = #{timeout => 2000, channel => aae_channel()},
-    case
-        catch bondy_oplog_transport_partisan:request(
-            Peer, Id, get_frontier, Opts
-        )
-    of
+    try bondy_oplog_transport_partisan:request(Peer, Id, get_frontier, Opts) of
         {ok, Map, Fp} when is_map(Map) -> {frontier, Map, Fp};
         {ok, Map} when is_map(Map) -> {frontier, Map, undefined};
         _ -> not_found
+    catch
+        _:_ -> not_found
     end.
 
 %% @private
 aae_channel() ->
-    case catch bondy_config:get(aae_channel) of
+    try bondy_config:get(aae_channel) of
         Ch when is_atom(Ch) -> Ch;
         _ -> bondy_aae
+    catch
+        _:_ -> bondy_aae
     end.
 
 %% @private
@@ -295,10 +303,12 @@ status_label(unknown) -> "?".
 %% snapshot lands, then `live`). Any error / unknown maps to `undefined`
 %% (rendered `starting`).
 lifecycle(Id) ->
-    case catch bondy_oplog_instance:lifecycle_state(Id) of
+    try bondy_oplog_instance:lifecycle_state(Id) of
         live -> live;
         pre_bootstrap -> pre_bootstrap;
         _ -> undefined
+    catch
+        _:_ -> undefined
     end.
 
 %% @private

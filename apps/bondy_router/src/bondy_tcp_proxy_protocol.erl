@@ -44,9 +44,33 @@ init(Ref) ->
 -spec init(atom(), timeout()) -> t().
 
 init(Ref, Timeout) ->
-    Opts = maps:from_list(bondy_config:get([Ref, proxy_protocol], [])),
+    %% `enabled` AND `mode` are defaulted into the map, not merely read with a
+    %% default below: every `source_ip/2` clause matches on one or both —
+    %% including the invalid-input clause, which requires `mode` — so a map
+    %% missing either makes `source_ip/2`, called on every accepted connection,
+    %% fail with `function_clause` naming no listener.
+    %%
+    %% Both gaps are reachable, because `listeners.$name.proxy_protocol` and
+    %% `listeners.$name.proxy_protocol.mode` are two independent default-free
+    %% mappings. A listener needs no option block at all
+    %% (`bondy_config:listener_transport_opts/2` supplies ranch's), which leaves
+    %% `enabled` absent; and one that sets only `proxy_protocol = on` yields
+    %% `[{enabled, true}]`, which leaves `mode` absent. Verified directly:
+    %% `source_ip/2` on the map `init/2` builds for the latter matches none of
+    %% its five clauses.
+    %%
+    %% `relaxed` is the value all eight legacy `*.proxy_protocol.mode` mappings
+    %% already carry as their schema default, so a legacy deployment is
+    %% unaffected — its own value wins this merge.
+    Opts = maps:merge(
+        #{enabled => false, mode => relaxed},
+        maps:from_list(bondy_config:get([Ref, proxy_protocol], []))
+    ),
 
-    case maps:get(enabled, Opts, false) of
+    %% No default here: the merge above always supplies `enabled`, so a default
+    %% would be unreachable and would quietly restore the `function_clause` in
+    %% `source_ip/2` if the merge were ever removed.
+    case maps:get(enabled, Opts) of
         true ->
             case ranch:recv_proxy_header(Ref, Timeout) of
                 {ok, ProxyInfo} ->

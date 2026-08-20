@@ -41,11 +41,30 @@ Configuration is read from the Bondy application environment at path
 %% API
 %% =============================================================================
 
--doc "Returns the CORS configuration for the listener associated with the given Cowboy request.".
+-doc """
+Returns the CORS configuration for the listener associated with the given
+Cowboy request.
+
+The listener's own settings are merged OVER `default_config/0`, so the result
+is a total `cors_config()` whatever the listener configured: `headers/2` and
+`build_headers/2` read `allowed_origins`, `allowed_methods`, `allowed_headers`
+and `max_age` with no default, and a listener that set only one of them would
+otherwise reach them partial.
+
+`bondy_config:splat_listener_blocks/1` writes the block one leaf at a time, so
+what is stored is a proplist rather than the map merged here — hence
+`key_value:to_map/1`.
+`splatted_cors_and_security_headers_reach_the_consumers` in
+`bondy_listener_SUITE` drives that shape through this function and on into
+`build_headers/2`.
+""".
 -spec config_from_req(cowboy_req:req()) -> cors_config().
 
 config_from_req(#{ref := Ref}) ->
-    bondy_config:get([Ref, cors], default_config()).
+    maps:merge(
+        default_config(),
+        key_value:to_map(bondy_config:get([Ref, cors], []))
+    ).
 
 -doc "Returns the default CORS configuration (wildcard origin, all methods).".
 -spec default_config() -> cors_config().

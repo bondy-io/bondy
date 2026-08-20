@@ -137,7 +137,12 @@ allow_session(T) ->
 %% The throttling verdict must never depend on the metrics subsystem
 %% being up (e.g. before `bondy_prometheus` setup, or in embedded tests).
 count_denial(Class) ->
-    _ = (catch prometheus_counter:inc(bondy_rate_limited_total, [Class], 1)),
+    _ =
+        try
+            prometheus_counter:inc(bondy_rate_limited_total, [Class], 1)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 -doc "Deletes a per-session limiter (frees its bucket). No-op for `undefined`.".
@@ -146,7 +151,11 @@ count_denial(Class) ->
 delete_session_limiter(undefined) ->
     ok;
 delete_session_limiter(T) ->
-    catch bondy_regulator_rate_limit:delete(T),
+    try
+        bondy_regulator_rate_limit:delete(T)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 %% =============================================================================

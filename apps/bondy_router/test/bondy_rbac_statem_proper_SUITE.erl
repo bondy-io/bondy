@@ -1259,13 +1259,22 @@ ensure_realm(RealmUri) ->
 %% @private
 cleanup_realm(RealmUri) ->
     %% Remove all grants (user and group)
-    _ = (catch bondy_rbac:remove_all(RealmUri, #{})),
+    _ =
+        try
+            bondy_rbac:remove_all(RealmUri, #{})
+        catch
+            _:_ -> ok
+        end,
     %% Remove all custom users
     lists:foreach(
         fun(User) ->
-            catch bondy_rbac_user:remove(
-                RealmUri, bondy_rbac_user:username(User)
-            )
+            try
+                bondy_rbac_user:remove(
+                    RealmUri, bondy_rbac_user:username(User)
+                )
+            catch
+                _:_ -> ok
+            end
         end,
         try
             bondy_rbac_user:list(RealmUri)
@@ -1276,9 +1285,13 @@ cleanup_realm(RealmUri) ->
     %% Remove all custom groups
     lists:foreach(
         fun(Group) ->
-            catch bondy_rbac_group:remove(
-                RealmUri, bondy_rbac_group:name(Group)
-            )
+            try
+                bondy_rbac_group:remove(
+                    RealmUri, bondy_rbac_group:name(Group)
+                )
+            catch
+                _:_ -> ok
+            end
         end,
         try
             bondy_rbac_group:list(RealmUri)

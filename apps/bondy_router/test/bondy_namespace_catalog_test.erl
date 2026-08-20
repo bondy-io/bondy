@@ -253,7 +253,12 @@ reset_env() ->
     application:unset_env(bondy_router, platform_data_dir).
 
 stop_catalog(Pid) ->
-    _ = catch gen_server:stop(Pid, normal, 30000),
+    _ =
+        try
+            gen_server:stop(Pid, normal, 30000)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 make_tmpdir() ->

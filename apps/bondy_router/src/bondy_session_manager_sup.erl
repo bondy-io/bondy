@@ -65,12 +65,22 @@ init_pool() ->
 
     %% If the supervisor restarts and we call groc_pool:new it will fail with
     %% an exception
-    _ = catch gproc_pool:new(PoolName, Algorithm, [{size, Size}]),
+    _ =
+        try
+            gproc_pool:new(PoolName, Algorithm, [{size, Size}])
+        catch
+            _:_ -> ok
+        end,
 
     WorkerNames = [
         begin
             WorkerName = worker_name(Id),
-            _ = catch gproc_pool:add_worker(PoolName, WorkerName),
+            _ =
+                try
+                    gproc_pool:add_worker(PoolName, WorkerName)
+                catch
+                    _:_ -> ok
+                end,
             WorkerName
         end
      || Id <- lists:seq(1, Size)

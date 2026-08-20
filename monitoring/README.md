@@ -9,7 +9,7 @@ as time series.
 
 ```bash
 # 1. Start one or more dev nodes (in the repo root)
-make node1        # and optionally: make node2, make node3
+just node1        # and optionally: just node2, just node3
 
 # 2. Start the monitoring stack
 cd monitoring

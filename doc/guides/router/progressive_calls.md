@@ -120,9 +120,9 @@ mid-stream.
   input that will never arrive — for local callees directly, and for callees
   on other nodes by relaying the cancellation to their node.
 
-## Using it from bondy_connect (Erlang client)
+## Using it from bondy_connect_sdk (Erlang client)
 
-Both RPC roles of the built-in `bondy_connect` client announce
+Both RPC roles of the built-in `bondy_connect_sdk` client announce
 `progressive_calls`.
 
 **Caller** — open the stream with `call_stream/5`, send further argument
@@ -130,7 +130,7 @@ chunks with `send_input/4`, and close it with `finish_input/4`. The reply is
 delivered against the returned `Token` exactly like `call_async/5`:
 
 ```erlang
-{ok, Token} = bondy_connect:call_stream(
+{ok, Token} = bondy_connect_client:call_stream(
     Conn, <<"com.example.upload">>, [<<"part-1">>], #{}, #{
         %% inactivity window between chunks (WAMP timeout)
         timeout => 30000,
@@ -138,18 +138,18 @@ delivered against the returned `Token` exactly like `call_async/5`:
         '_deadline' => 300000
     }
 ),
-ok = bondy_connect:send_input(Conn, Token, [<<"part-2">>], #{}),
-ok = bondy_connect:finish_input(Conn, Token, [<<"part-3">>], #{}),
+ok = bondy_connect_client:send_input(Conn, Token, [<<"part-2">>], #{}),
+ok = bondy_connect_client:finish_input(Conn, Token, [<<"part-3">>], #{}),
 receive
-    {bondy_connect, Token, {ok, Final}} -> {done, Final};
-    {bondy_connect, Token, {error, Reason}} -> {error, Reason}
+    {bondy_connect_client, Token, {ok, Final}} -> {done, Final};
+    {bondy_connect_client, Token, {error, Reason}} -> {error, Reason}
 end.
 ```
 
 `call_stream/5` sends the first chunk and returns immediately; `send_input/4`
 sends a non-final chunk; `finish_input/4` sends the final chunk and closes the
 input stream. The result arrives as the single terminal
-`{bondy_connect, Token, {ok, _} | {error, _}}` message.
+`{bondy_connect_client, Token, {ok, _} | {error, _}}` message.
 
 **Callee** — when the caller opened a progressive call, the handler receives
 an `input` fun in its details. The invocation's own arguments are the first
@@ -175,7 +175,7 @@ collect(Acc, Input) ->
         {last, Args, _KWArgs} -> lists:reverse([Args | Acc])
     end.
 
-{ok, _} = bondy_connect:register(Conn, <<"com.example.upload">>, Handler).
+{ok, _} = bondy_connect_client:register(Conn, <<"com.example.upload">>, Handler).
 ```
 
 The `input` fun is only present when `INVOCATION.Details.progress` is `true`,

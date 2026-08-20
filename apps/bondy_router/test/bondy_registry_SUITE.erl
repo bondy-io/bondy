@@ -29,6 +29,7 @@ groups() ->
             register_invoke_single,
             register_shared,
             register_callback,
+            pattern_based_registration_is_not_optional,
             registry_rib_dual_write,
             rib_completion_selects_local,
             rib_completion_no_local_fails_fast,
@@ -599,6 +600,42 @@ register_callback(Config) ->
         {error, already_exists},
         bondy_dealer:register(Uri1, Opts, RealmUri, Ref3)
     ).
+
+pattern_based_registration_is_not_optional(Config) ->
+    %% `wamp.dealer.pattern_based_registration` and
+    %% `wamp.broker.pattern_based_subscription` used to be operator flags.
+    %% Turning the first off refused the wildcard that
+    %% `bondy_session_manager:register_node_session_get/1` registers to serve
+    %% `wamp.session.get`, and the refusal came back as
+    %% `{error, pattern_based_registration_disabled}` where a `case` had no
+    %% clause for it — so setting the flag did not disable a feature, it stopped
+    %% the node opening sessions at all. There is no longer anything to set:
+    %% `bondy_config:setup_wamp/0` seats both, with no mapping to override them.
+    %%
+    %% Two halves, because a re-introduced flag and a dropped `set` break
+    %% different ones.
+    RealmUri = key_value:get(realm_uri, Config),
+
+    %% One: the registration the router makes of itself. The same shape as the
+    %% session manager's — an internal callback reference, wildcard policy, the
+    %% empty component standing in for the session's id segment.
+    Frag = bondy_utils:generate_fragment(12),
+    Uri = <<"com.example.", Frag/binary, "..get">>,
+    Ref = bondy_ref:new(internal, {bondy_session_api, get}),
+    Opts = #{match => ?WILDCARD_MATCH, callback_args => [RealmUri]},
+    ?assertMatch(
+        {ok, _},
+        bondy_dealer:register(Uri, Opts, RealmUri, Ref),
+        "A wildcard registration is not refusable"
+    ),
+
+    %% Two: what WELCOME tells a client. Advertising these as absent is the
+    %% quieter half of the same fault — a client that reads the roles before it
+    %% registers a pattern would conclude the router cannot route one.
+    #{dealer := #{features := DF}, broker := #{features := BF}} =
+        bondy_router:roles(),
+    ?assertEqual(true, maps:get(pattern_based_registration, DF, false)),
+    ?assertEqual(true, maps:get(pattern_based_subscription, BF, false)).
 
 %% Proves the RIB dual-write path end-to-end: local register/unregister
 %% drives this node's replicated summary cell via the partition hooks + the

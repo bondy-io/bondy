@@ -37,7 +37,8 @@ all() ->
         wildcard_subdomain_no_match,
         wildcard_subdomain_exact_domain_no_match,
         wildcard_subdomain_with_port,
-        wildcard_subdomain_mixed_with_exact
+        wildcard_subdomain_mixed_with_exact,
+        a_partial_listener_block_is_totalised_on_read
     ].
 
 init_per_suite(Config) ->
@@ -233,16 +234,48 @@ wildcard_subdomain_mixed_with_exact(_Config) ->
 %% HELPERS
 %% =============================================================================
 
+a_partial_listener_block_is_totalised_on_read(_Config) ->
+    %% The property the schema translation now depends on: it stopped completing
+    %% a listener's `cors' block, so a listener may set ONE member and
+    %% `config_from_req/1' has to answer a total map anyway.
+    %%
+    %% This is the only case that drives a PARTIAL block through that function.
+    %% `config/1' below merges `default_config/0' itself, so every other case
+    %% hands `headers/2' a map that was already total — verified by removing the
+    %% merge from `config_from_req/1', which left all nineteen of them green.
+    %%
+    %% `build_headers/2' reads `allowed_methods', `allowed_headers' and `max_age'
+    %% with `maps:get/2', so a partial map raises `badkey' here, on the request
+    %% path, after the response has begun.
+    %%
+    %% Set as a PROPLIST because that is what arrives:
+    %% `bondy_config:splat_listener_blocks/1' writes the block one leaf at a
+    %% time.
+    ok = bondy_config:set([cors_partial, cors], [{max_age, <<"60">>}]),
+    Req = fake_req(<<"https://any.example.com">>, cors_partial),
+    Config = bondy_http_cors:config_from_req(Req),
+    ?assertEqual(<<"60">>, maps:get(max_age, Config)),
+    Headers = bondy_http_cors:headers(Req, Config),
+    ?assertEqual(<<"60">>, maps:get(<<"access-control-max-age">>, Headers)),
+    ?assertEqual(
+        <<"GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE">>,
+        maps:get(<<"access-control-allow-methods">>, Headers)
+    ),
+    ?assert(maps:is_key(<<"access-control-allow-headers">>, Headers)).
+
 config(Overrides) ->
     maps:merge(bondy_http_cors:default_config(), Overrides).
 
 fake_req(Origin) ->
+    fake_req(Origin, test_listener).
+
+fake_req(Origin, Ref) ->
     meck:expect(
         cowboy_req,
         header,
         fun(<<"origin">>, _Req) -> Origin end
     ),
-    #{ref => test_listener}.
+    #{ref => Ref}.
 
 fake_req_auto(Scheme, Host, Port) ->
     meck:expect(cowboy_req, scheme, fun(_) -> Scheme end),

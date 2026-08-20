@@ -9,8 +9,8 @@ it, and serves them over an HTTP API. Used by two things:
   this stack so that it is executable rather than illustrative.
 
 ```bash
-make mailpit          # or: cd examples/mailpit && docker compose up -d
-make mailpit-clean
+just mailpit          # or: cd examples/mailpit && docker compose up -d
+just mailpit-clean
 ```
 
 | | SMTP | Web UI and API | Transport | Auth |

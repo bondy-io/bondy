@@ -105,12 +105,32 @@ bondy_config_check(EtcDir, AllFiles) ->
                 [B1, B2, EtcDir]
             ),
             DisabledDir = filename:join(EtcDir, "disabled"),
-            _ = catch file:make_dir(DisabledDir),
-            ok = file:rename(
-                filename:join(EtcDir, "bondy.conf"),
-                filename:join(DisabledDir, "bondy.conf")
-            ),
-            true
+
+            %% `file:make_dir/1` REPORTS an already-existing directory as
+            %% `{error, eexist}`; it does not raise. Measured on OTP 28.5:
+            %% existing dir => `{error, eexist}`, missing parent =>
+            %% `{error, enoent}`, otherwise `ok`. So `eexist` is the only
+            %% value worth tolerating, and no exception handler is needed.
+            %% The `catch` this replaces swallowed genuine failures too (a
+            %% read-only `etc`, say), leaving the rename below to fail as an
+            %% opaque badmatch instead of saying what went wrong.
+            case file:make_dir(DisabledDir) of
+                Res when Res == ok; Res == {error, eexist} ->
+                    ok = file:rename(
+                        filename:join(EtcDir, "bondy.conf"),
+                        filename:join(DisabledDir, "bondy.conf")
+                    ),
+                    true;
+
+                {error, Reason} ->
+                    ?LOG_ERROR(
+                        "Could not create the ~p directory (~p), so "
+                        "'bondy.conf' was left in place. Remove or rename it "
+                        "so that only one configuration file variant remains.",
+                        [DisabledDir, Reason]
+                    ),
+                    false
+            end
     end.
 
 vm_extra_check(EtcDir, AllFiles) ->

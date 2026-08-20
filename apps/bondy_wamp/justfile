@@ -1,0 +1,29 @@
+# App-scoped gates for bondy_wamp, kept from when this was a standalone repo.
+# Replaces the Makefile that used to live here.
+#
+# The umbrella's own gates are the normal path — run `just ct` / `just
+# dialyzer` from the repo root, where the test profile and the shared elvis
+# configuration apply. These are here for working on this app in isolation.
+#
+# The Makefile also had a `lint` target running `rebar3 as lint lint`. It is
+# not carried over: this app's rebar.config declares neither a `lint` profile
+# nor the rebar3_lint plugin that provides the `lint` command, so the target
+# could not have run. Style rules for this app live in its `{elvis, ...}`
+# block and are checked from the umbrella.
+
+set shell := ["bash", "-cu"]
+
+# Show every recipe.
+default:
+    @just --list
+
+# Both gates, in sequence.
+all: test dialyzer
+
+# Common Test suites for this app.
+test:
+    rebar3 ct
+
+# Dialyzer for this app.
+dialyzer:
+    rebar3 dialyzer

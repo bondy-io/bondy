@@ -215,17 +215,21 @@ families() ->
 %% @private
 peer_connection_rows() ->
     Nodes =
-        case catch partisan:nodes() of
+        try partisan:nodes() of
             L when is_list(L) -> L;
             _ -> []
+        catch
+            _:_ -> []
         end,
     lists:filtermap(
         fun(Node) ->
-            case catch partisan_peer_connections:count(Node) of
+            try partisan_peer_connections:count(Node) of
                 N when is_integer(N) ->
                     {true, {[{peer, Node}], N}};
                 _ ->
                     false
+            catch
+                _:_ -> false
             end
         end,
         Nodes
@@ -234,17 +238,21 @@ peer_connection_rows() ->
 %% @private
 channel_connection_rows() ->
     Channels =
-        case catch partisan_config:channels() of
+        try partisan_config:channels() of
             M when is_map(M) -> maps:keys(M);
             _ -> []
+        catch
+            _:_ -> []
         end,
     lists:filtermap(
         fun(Channel) ->
-            case catch partisan_peer_connections:count('_', Channel) of
+            try partisan_peer_connections:count('_', Channel) of
                 N when is_integer(N) ->
                     {true, {[{channel, Channel}], N}};
                 _ ->
                     false
+            catch
+                _:_ -> false
             end
         end,
         Channels
@@ -253,11 +261,24 @@ channel_connection_rows() ->
 %% @private
 rpc_promises() ->
     Tabs =
-        case catch tuplespace:tables(bondy_rpc_promise) of
+        try tuplespace:tables(bondy_rpc_promise) of
             L when is_list(L) -> L;
             _ -> []
+        catch
+            _:_ -> []
         end,
-    Sizes = [S || T <- Tabs, is_integer(S = (catch ets:info(T, size)))],
+    Sizes = [
+        S
+     || T <- Tabs,
+        S <- [
+            try
+                ets:info(T, size)
+            catch
+                _:_ -> undefined
+            end
+        ],
+        is_integer(S)
+    ],
     case Tabs of
         [] -> [];
         _ -> [{[], lists:sum(Sizes)}]
@@ -265,7 +286,7 @@ rpc_promises() ->
 
 %% @private
 rpc_promises_by_procedure() ->
-    case catch bondy_rpc_promise:count_by_procedure() of
+    try bondy_rpc_promise:count_by_procedure() of
         Counts when is_map(Counts) ->
             [
                 {[{procedure_uri, Uri}], N}
@@ -273,11 +294,13 @@ rpc_promises_by_procedure() ->
             ];
         _ ->
             []
+    catch
+        _:_ -> []
     end.
 
 %% @private
 registry_info_rows(Key) ->
-    case catch bondy_registry:info() of
+    try bondy_registry:info() of
         #{} = Info ->
             case maps:get(Key, Info, undefined) of
                 N when is_integer(N) -> [{[], N}];
@@ -285,6 +308,8 @@ registry_info_rows(Key) ->
             end;
         _ ->
             []
+    catch
+        _:_ -> []
     end.
 
 %% @private
@@ -292,7 +317,8 @@ listener_gauge_rows(Key) ->
     [
         {[{listener, label(Ref)}], V}
      || {Ref, Info} <- listeners(),
-        is_integer(V = maps:get(Key, Info, undefined))
+        V <- [maps:get(Key, Info, undefined)],
+        is_integer(V)
     ].
 
 %% @private
@@ -327,9 +353,11 @@ listener_metric_rows(Suffix) ->
 
 %% @private
 listeners() ->
-    case catch ranch:info() of
+    try ranch:info() of
         M when is_map(M) -> maps:to_list(M);
         _ -> []
+    catch
+        _:_ -> []
     end.
 
 %% @private
@@ -345,7 +373,7 @@ jobs_queue_rows(Kind) ->
     lists:filtermap(
         fun(Index) ->
             Queue = {bondy_jobs_worker, Index, queue},
-            case catch jobs:queue_info(Queue) of
+            try jobs:queue_info(Queue) of
                 {queue, Props} when is_list(Props) ->
                     case jobs_queue_value(Kind, Props) of
                         N when is_integer(N) ->
@@ -355,6 +383,8 @@ jobs_queue_rows(Kind) ->
                     end;
                 _ ->
                     false
+            catch
+                _:_ -> false
             end
         end,
         lists:seq(1, PoolSize)
@@ -363,8 +393,14 @@ jobs_queue_rows(Kind) ->
 %% @private
 jobs_queue_value(depth, Props) ->
     case lists:keyfind(st, 1, Props) of
-        {st, {st, Tab}} -> catch ets:info(Tab, size);
-        _ -> undefined
+        {st, {st, Tab}} ->
+            try
+                ets:info(Tab, size)
+            catch
+                _:_ -> undefined
+            end;
+        _ ->
+            undefined
     end;
 jobs_queue_value(enqueued, Props) ->
     case lists:keyfind(queued, 1, Props) of
@@ -377,14 +413,23 @@ rate_limiter_rows() ->
     [
         {[{table, Tab}], Size}
      || Tab <- [bondy_rate_limiter, bondy_regulator_rate_limit],
-        is_integer(Size = (catch ets:info(Tab, size)))
+        Size <- [
+            try
+                ets:info(Tab, size)
+            catch
+                _:_ -> undefined
+            end
+        ],
+        is_integer(Size)
     ].
 
 %% @private
 oidc_inflight() ->
-    case catch ets:info(bondy_oidc_state, size) of
+    try ets:info(bondy_oidc_state, size) of
         N when is_integer(N) -> [{[], N}];
         _ -> []
+    catch
+        _:_ -> []
     end.
 
 %% @private

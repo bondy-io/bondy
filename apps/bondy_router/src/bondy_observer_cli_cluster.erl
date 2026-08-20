@@ -139,17 +139,21 @@ self_node() ->
 
 %% @private
 members() ->
-    case catch partisan_peer_service:members() of
+    try partisan_peer_service:members() of
         {ok, M} when is_list(M) -> M;
         M when is_list(M) -> M;
         _ -> []
+    catch
+        _:_ -> []
     end.
 
 %% @private
 connected() ->
-    case catch partisan:nodes() of
+    try partisan:nodes() of
         N when is_list(N) -> N;
         _ -> []
+    catch
+        _:_ -> []
     end.
 
 %% @private

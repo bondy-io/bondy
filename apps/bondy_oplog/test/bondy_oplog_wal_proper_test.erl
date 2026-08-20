@@ -2138,7 +2138,11 @@ prop_multiproc_convergence() ->
             WriterDone = make_ref(),
             spawn(fun() ->
                 _ = [
-                    catch bondy_oplog_wal:append(Pid, E)
+                    try
+                        bondy_oplog_wal:append(Pid, E)
+                    catch
+                        _:_ -> ok
+                    end
                  || E <- RestEvents
                 ],
                 Parent ! {WriterDone, done}

@@ -76,7 +76,11 @@ crash_loses_staged_root_wal_replay_recovers() ->
             _ = os:cmd("kill -9 " ++ integer_to_list(PeerOsPid)),
             ok = await_peer_exit(Peer, 5_000)
         after
-            catch peer:stop(Peer)
+            try
+                peer:stop(Peer)
+            catch
+                _:_ -> ok
+            end
         end,
 
         %% Phase 4 — verify staged R1 was lost. The on-disk manifest is
@@ -213,7 +217,11 @@ await_peer_exit(Peer, TimeoutMs) ->
         {'EXIT', Peer, _Reason} -> ok
     after TimeoutMs ->
         %% Belt-and-braces: peer:stop will reap any zombie state.
-        catch peer:stop(Peer),
+        try
+            peer:stop(Peer)
+        catch
+            _:_ -> ok
+        end,
         ok
     end.
 

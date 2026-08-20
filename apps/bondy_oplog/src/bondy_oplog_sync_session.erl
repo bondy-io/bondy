@@ -557,10 +557,12 @@ rederive_projection(Instance) ->
 %% Reuses the existing `get_frontier` request; tolerates both the Partisan
 %% 3-tuple (`{ok, Frontier, Fp}`) and the inline 2-tuple (`{ok, Frontier}`).
 request_peer_frontier(Instance, Peer, Transport, TransportOpts) ->
-    case catch Transport:request(Peer, Instance, get_frontier, TransportOpts) of
+    try Transport:request(Peer, Instance, get_frontier, TransportOpts) of
         {ok, Frontier, _Fp} when is_map(Frontier) -> Frontier;
         {ok, Frontier} when is_map(Frontier) -> Frontier;
         _ -> #{}
+    catch
+        _:_ -> #{}
     end.
 
 %% @private
@@ -812,7 +814,11 @@ pull_until_complete(
     %% root.
     _ =
         Budget0 =:= undefined andalso
-            (catch bondy_oplog_instance:pin_peer_root(Instance, PeerRoot)),
+            (try
+                bondy_oplog_instance:pin_peer_root(Instance, PeerRoot)
+            catch
+                _:_ -> ok
+            end),
     case bondy_oplog_instance:missing_set(Instance, PeerRoot) of
         [] ->
             %% Every page reachable from PeerRoot is now in our store.
@@ -961,7 +967,12 @@ chase_refreshed_root(
         _ ->
             %% Chasing a refreshed root: pin it like the session-start
             %% root (the stale pin expires by TTL).
-            _ = (catch bondy_oplog_instance:pin_peer_root(Instance, NewRoot)),
+            _ =
+                try
+                    bondy_oplog_instance:pin_peer_root(Instance, NewRoot)
+                catch
+                    _:_ -> ok
+                end,
             pull_until_complete(
                 Instance,
                 Peer,
@@ -1187,7 +1198,11 @@ maybe_frontier_gap(
                 Deficit ->
                     Presence = deficit_presence(Instance, Deficit),
                     LocalRoot =
-                        catch bondy_oplog_instance:root_hash(Instance),
+                        try
+                            bondy_oplog_instance:root_hash(Instance)
+                        catch
+                            _:_ -> ok
+                        end,
                     telemetry:execute(
                         [bondy_oplog, sync_session, frontier_gap],
                         #{count => 1, origins => map_size(Deficit)},
@@ -1277,10 +1292,20 @@ deficit_presence(Instance, Deficit) ->
 %% projected + installed) and, when the instance is applier-backed, the
 %% applier caught up (queued replay casts served + the I1 fence run).
 settle_local(Instance) ->
-    _ = catch bondy_oplog_instance:await_apply(Instance),
+    _ =
+        try
+            bondy_oplog_instance:await_apply(Instance)
+        catch
+            _:_ -> ok
+        end,
     case bondy_oplog_registry:applier_pid(Instance) of
         Pid when is_pid(Pid) ->
-            _ = catch bondy_oplog_applier:barrier(Pid),
+            _ =
+                try
+                    bondy_oplog_applier:barrier(Pid)
+                catch
+                    _:_ -> ok
+                end,
             ok;
         _ ->
             ok

@@ -74,17 +74,27 @@ init_per_testcase(TC, Config) ->
     %% listener itself may have been stopped by a previous testcase to
     %% simulate an outage — make sure it's back up before each test.
     Port = ?config(port, Config),
-    case catch ranch:get_port(mock_auth_http_listener) of
+    try ranch:get_port(mock_auth_http_listener) of
         Port -> ok;
         _ -> {ok, _} = mock_auth_http_server:start(#{port => Port})
+    catch
+        _:_ -> {ok, _} = mock_auth_http_server:start(#{port => Port})
     end,
     ServiceName = atom_to_binary(TC, utf8),
     [{service_name, ServiceName} | Config].
 
 end_per_testcase(_TC, Config) ->
     ServiceName = ?config(service_name, Config),
-    catch gen_server:stop(binary_to_atom(<<"pool_", ServiceName/binary>>)),
-    catch alarm_handler:clear_alarm(?ALARM_ID(ServiceName)),
+    try
+        gen_server:stop(binary_to_atom(<<"pool_", ServiceName/binary>>))
+    catch
+        _:_ -> ok
+    end,
+    try
+        alarm_handler:clear_alarm(?ALARM_ID(ServiceName))
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 %% ===================================================================

@@ -83,7 +83,12 @@ ensure_reg_realms_table() ->
         {read_concurrency, true},
         {write_concurrency, true}
     ],
-    _ = (catch ets:new(?REG_REALMS_TAB, Opts)),
+    _ =
+        try
+            ets:new(?REG_REALMS_TAB, Opts)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 -spec pool() -> pool().
@@ -485,7 +490,12 @@ do_close(State0, Session, ReasonUri) ->
     ok = maybe_send_goodbye(Session, ReasonUri),
 
     %% Close session to cleanup in-memory state
-    _ = catch bondy_session:close(Session, ReasonUri),
+    _ =
+        try
+            bondy_session:close(Session, ReasonUri)
+        catch
+            _:_ -> ok
+        end,
 
     State.
 
@@ -586,7 +596,12 @@ maybe_send_goodbye(Session, ReasonUri) ->
         #{message => <<"The session was closed by the Router.">>},
         ReasonUri
     ),
-    _ = catch bondy:send(RealmUri, ProcRef, Msg),
+    _ =
+        try
+            bondy:send(RealmUri, ProcRef, Msg)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% @private

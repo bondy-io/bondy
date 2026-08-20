@@ -86,12 +86,102 @@ reload_after_remove_test(_) ->
     ?assert(bondy_bridge_relay:exists(Name)),
     ok = bondy_bridge_relay:remove(Name).
 
+%% "How many unanswered probes mean a dead peer" is ONE judgement, and this end
+%% of a bridge has no reason to make it differently from the end that accepts the
+%% connection. The two ends are configured by unrelated code — `?PING_SPEC` here,
+%% `bondy_listener_config:option_defaults/2` for the listener — so nothing but
+%% this makes them agree; the outbound default shipped 2 while every listener
+%% shipped 3 (and the bridge schema's own commented example showed 3).
+%%
+%% Asserted against the listener AND against the literal: the first catches one
+%% side moving, the second catches both moving to a value nobody chose. It runs
+%% through `new/1` rather than reading a constant, because the default only
+%% exists as one, and `new/1` needs a booted node — which is why this case lives
+%% in a suite that boots one rather than beside the pure listener tests.
+outbound_ping_matches_the_listener_test(_) ->
+    Bridge = bondy_bridge_relay:new(unvalidated_bridge()),
+    Ping = maps:get(ping, Bridge),
+    Attempts = maps:get(max_attempts, Ping),
+    Listener = bondy_listener_config:option_defaults(tcp, bridge_relay),
+    ?assertEqual(3, Attempts),
+    ?assertEqual(maps:get(max_attempts, maps:get(ping, Listener)), Attempts),
+    %% The input carries NO ping block, so this also pins that an absent one is
+    %% FILLED rather than left as `#{}`. It was `#{}` — a map
+    %% `bondy_bridge_relay_client:maybe_enable_ping/2` has no clause for, so the
+    %% client died with `function_clause` in `init/1` on any bridge that said
+    %% nothing about ping. Asserting the whole block rather than one key,
+    %% because all four are read with `maps:get/2` once ping is enabled and any
+    %% one of them missing is the same crash.
+    ?assertEqual(
+        #{
+            enabled => true,
+            idle_timeout => timer:seconds(20),
+            timeout => timer:seconds(10),
+            max_attempts => 3
+        },
+        Ping
+    ).
+
+%% The same defect on the sibling blocks, which is why it is worth a case of its
+%% own rather than a line in the one above: `ping` was the only one that crashed,
+%% so a fix aimed at the crash would have left the rest.
+%%
+%% `reconnect` was the quiet one — its spec has said `enabled => true` with 100
+%% retries the whole time, while a bridge that configured no block got `#{}`,
+%% reached `maybe_enable_reconnect/2`'s fall-through clause and never
+%% reconnected at all.
+%%
+%% `socket_opts` was not broken: it spelled out by hand exactly what its spec
+%% produces, and is asserted at those same values so that putting it on the
+%% shared idiom is pinned as value-preserving.
+%%
+%% `tls_opts` is the one that is deliberately NOT filled, and this is where that
+%% decision is recorded: `?TLS_OPTS_SPEC` defaults `versions` to `['tlsv1.3']`
+%% alone, so filling it would pin every bridge that states no TLS options to TLS
+%% 1.3 and drop a peer offering only 1.2. Asserting the absence of `versions` is
+%% the point — it fails if someone later makes this block uniform with its
+%% siblings, which is a change to what a bridge negotiates and not a tidy-up.
+outbound_nested_blocks_are_filled_from_their_specs_test(_) ->
+    Bridge = bondy_bridge_relay:new(unvalidated_bridge()),
+    ?assertEqual(
+        #{
+            enabled => true,
+            max_retries => 100,
+            backoff_type => jitter,
+            backoff_min => timer:seconds(5),
+            backoff_max => timer:seconds(60)
+        },
+        maps:get(reconnect, Bridge)
+    ),
+    ?assertEqual(
+        #{keepalive => true, nodelay => true}, maps:get(socket_opts, Bridge)
+    ),
+    ?assertEqual(#{verify => verify_none}, maps:get(tls_opts, Bridge)).
+
 %% =============================================================================
 %% Helpers
 %% =============================================================================
 
 has_bridge(Name, Bridges) ->
     lists:any(fun(B) -> maps:get(name, B) =:= Name end, Bridges).
+
+%% Input for `new/1`: the three keys `?BRIDGE_RELAY_SPEC` requires without a
+%% default. No `ping` block on purpose — what the case reads is what `new/1`
+%% fills in.
+unvalidated_bridge() ->
+    #{
+        name => <<"com.bondy.test.bridge_store.defaults">>,
+        endpoint => {"localhost", 18092},
+        realms => [
+            #{
+                uri => <<"com.example.realm">>,
+                authid => <<"bridge">>,
+                cryptosign => #{pubkey => <<"abcd1234">>},
+                procedures => [],
+                topics => []
+            }
+        ]
+    }.
 
 %% A realistic post-validation bridge config (the shape `bondy_bridge_relay:new/1`
 %% produces). `add/1` only requires `type` + `name`; the rest exercises nested

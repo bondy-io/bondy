@@ -36,8 +36,16 @@ setup() ->
     {Db, T}.
 
 cleanup({Db, T}) ->
-    catch bondy_db:close_table(T),
-    catch bondy_db:close(Db),
+    try
+        bondy_db:close_table(T)
+    catch
+        _:_ -> ok
+    end,
+    try
+        bondy_db:close(Db)
+    catch
+        _:_ -> ok
+    end,
     [bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
     ok.
 
@@ -176,8 +184,16 @@ struct_fold_setup() ->
     {Db, T}.
 
 struct_fold_cleanup({Db, T}) ->
-    catch bondy_db:close_table(T),
-    catch bondy_db:close(Db),
+    try
+        bondy_db:close_table(T)
+    catch
+        _:_ -> ok
+    end,
+    try
+        bondy_db:close(Db)
+    catch
+        _:_ -> ok
+    end,
     [bondy_oplog:stop_instance(I) || I <- bondy_oplog:list_instances()],
     ok.
 
@@ -309,9 +325,18 @@ fence_setup() ->
     {Db, T, Sup, Dir}.
 
 fence_cleanup({Db, _T, Sup, Dir}) ->
-    _ = catch bondy_db:close(Db),
+    _ =
+        try
+            bondy_db:close(Db)
+        catch
+            _:_ -> ok
+        end,
     _ = [
-        catch bondy_oplog:stop_instance(I)
+        try
+            bondy_oplog:stop_instance(I)
+        catch
+            _:_ -> ok
+        end
      || I <- bondy_oplog:list_instances()
     ],
     case is_process_alive(Sup) of
@@ -420,9 +445,18 @@ mux_setup() ->
     {Db, T1, T2, T3, Sup, Dir}.
 
 mux_cleanup({Db, _T1, _T2, _T3, Sup, Dir}) ->
-    _ = catch bondy_db:close(Db),
+    _ =
+        try
+            bondy_db:close(Db)
+        catch
+            _:_ -> ok
+        end,
     _ = [
-        catch bondy_oplog:stop_instance(I)
+        try
+            bondy_oplog:stop_instance(I)
+        catch
+            _:_ -> ok
+        end
      || I <- bondy_oplog:list_instances()
     ],
     case is_process_alive(Sup) of

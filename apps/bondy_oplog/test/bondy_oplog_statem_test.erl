@@ -302,8 +302,16 @@ setup() ->
     {A, B}.
 
 cleanup(A, B) ->
-    catch bondy_oplog:stop_instance(A),
-    catch bondy_oplog:stop_instance(B),
+    try
+        bondy_oplog:stop_instance(A)
+    catch
+        _:_ -> ok
+    end,
+    try
+        bondy_oplog:stop_instance(B)
+    catch
+        _:_ -> ok
+    end,
     bondy_oplog_peer_state:forget_peer({peer, statem_a, B}),
     bondy_oplog_peer_state:forget_peer({peer, statem_b, A}),
     ok.

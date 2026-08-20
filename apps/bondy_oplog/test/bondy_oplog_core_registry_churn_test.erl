@@ -47,7 +47,11 @@ cleanup(Namespaces) ->
     %% be defensive in case a property regression leaks state.
     lists:foreach(
         fun(NS) ->
-            catch bondy_oplog_core_registry:unregister(NS, primary, 0)
+            try
+                bondy_oplog_core_registry:unregister(NS, primary, 0)
+            catch
+                _:_ -> ok
+            end
         end,
         Namespaces
     ),
@@ -63,7 +67,11 @@ churn_invariants_hold() ->
     after
         [exit(P, kill) || P <- Owners],
         [
-            catch bondy_oplog_core_registry:unregister(NS, primary, 0)
+            try
+                bondy_oplog_core_registry:unregister(NS, primary, 0)
+            catch
+                _:_ -> ok
+            end
          || NS <- Namespaces
         ],
         %% Sync registry to absorb every pending DOWN before the next

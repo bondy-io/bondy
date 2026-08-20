@@ -263,7 +263,12 @@ claim(Request) ->
     case bondy_mail_request:id(Request) of
         undefined ->
             %% Best effort: an untracked message is still a sent message.
-            _ = catch ets:insert(?TAB, Entry),
+            _ =
+                try
+                    ets:insert(?TAB, Entry)
+                catch
+                    _:_ -> ok
+                end,
             {ok, claimed};
         _Key ->
             %% One atomic insert, not a lookup followed by one. The window
@@ -296,7 +301,12 @@ that has already reported an outcome.
 release(Request) ->
     Id = bondy_mail_request:message_id(Request),
     MS = [{#bondy_mail_status{id = Id, status = queued, _ = '_'}, [], [true]}],
-    _ = catch ets:select_delete(?TAB, MS),
+    _ =
+        try
+            ets:select_delete(?TAB, MS)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 -doc """
@@ -510,7 +520,12 @@ write(Id, Updates) ->
         {#bondy_mail_status.updated_at, erlang:system_time(millisecond)}
         | Updates
     ],
-    _ = catch ets:update_element(?TAB, Id, All),
+    _ =
+        try
+            ets:update_element(?TAB, Id, All)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% @private

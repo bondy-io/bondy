@@ -162,7 +162,11 @@ with_ptrie(Patterns, Fun) ->
         populate(H, Patterns),
         Fun(H)
     after
-        catch bondy_registry_ptrie:delete(H)
+        try
+            bondy_registry_ptrie:delete(H)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% @private
@@ -203,7 +207,11 @@ bench_insert(Inserts) ->
         T1 = erlang:monotonic_time(nanosecond),
         summarize(throughput, length(Inserts), T1 - T0)
     after
-        catch bondy_registry_ptrie:delete(H)
+        try
+            bondy_registry_ptrie:delete(H)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% @private

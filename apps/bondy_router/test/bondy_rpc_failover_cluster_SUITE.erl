@@ -59,7 +59,11 @@ end_per_suite(Config) ->
     Nodes = proplists:get_value(nodes, Config, []),
     %% The case stops node 2 itself; `stop_cluster/1' catches per node, so
     %% the already-dead one is harmless here.
-    catch bondy_ct:stop_cluster(Nodes),
+    try
+        bondy_ct:stop_cluster(Nodes)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 %% =============================================================================
@@ -213,7 +217,11 @@ do_start_callee(RealmUri, Proc) ->
     after 5000 ->
         error(callee_start_timeout)
     end,
-    catch unregister(rpc_failover_callee),
+    try
+        unregister(rpc_failover_callee)
+    catch
+        _:_ -> ok
+    end,
     true = register(rpc_failover_callee, Pid),
     ok.
 

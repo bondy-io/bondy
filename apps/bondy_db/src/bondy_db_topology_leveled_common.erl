@@ -83,7 +83,12 @@ supervisor reaps the now-dead `temporary` child without restarting it.
 stop_bookie_safe(Bookie) when is_pid(Bookie) ->
     case is_process_alive(Bookie) of
         true ->
-            _ = catch leveled_bookie:book_close(Bookie),
+            _ =
+                try
+                    leveled_bookie:book_close(Bookie)
+                catch
+                    _:_ -> ok
+                end,
             ok;
         false ->
             ok

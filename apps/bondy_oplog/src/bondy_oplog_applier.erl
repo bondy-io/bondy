@@ -1473,7 +1473,11 @@ handle_call(
                 %% documented as never failing on a dead caller, but
                 %% the wrapping `catch` swallows any pathological
                 %% exception so the worker always exits cleanly.
-                catch gen_server:reply(From, {error, {verify_crashed, R}})
+                try
+                    gen_server:reply(From, {error, {verify_crashed, R}})
+                catch
+                    _:_ -> ok
+                end
         end
     end),
     {noreply, State};
@@ -1517,10 +1521,15 @@ handle_call(
     #state{
         cell_apply_ctx = Ctx,
         cell_apply_source = Source,
-        instance_id = Id
+        instance_id = Id,
+        ctx_guard = Guard
     } = State = ensure_remote_caught_up(StateIn),
-    {reply, bondy_oplog_cell_utils:sweep(Id, Ctx, Source, StableHlc, Opts),
-        State};
+    %% The guard is read from the POST-catch-up state: catching up applies
+    %% events, and an event stamps the guard.
+    {Reply, Guard1} = bondy_oplog_cell_utils:sweep(
+        Id, Guard, Ctx, Source, StableHlc, Opts
+    ),
+    {reply, Reply, State#state{ctx_guard = Guard1}};
 handle_call(barrier, _From, StateIn) ->
     %% Queue-ordering alone settles every earlier cast; the I1 fence on
     %% top also covers a LOST best-effort replay cast (gen gap → replay

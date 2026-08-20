@@ -46,10 +46,38 @@ proxy or load balancer, inspecting the `Forwarded`, `X-Real-IP` and
 -spec init(cowboy_req:req()) -> t().
 
 init(#{ref := Ref} = Req) ->
-    {LocalIP, _Port} = cowboy_req:peer(Req),
-    Opts = maps:from_list(bondy_config:get([Ref, proxy_protocol], [])),
+    %% `bondy_http_utils:peer/1`, not `cowboy_req:peer/1`: a Unix domain socket
+    %% has no network peer and `LocalIP` here feeds `is_trusted_peer/2` and
+    %% `bondy_rbac_source` CIDR matching, neither of which has a meaning for the
+    %% atom `local`.
+    {LocalIP, _Port} = bondy_http_utils:peer(Req),
+    %% `enabled` AND `mode` are defaulted INTO the map, not merely read with a
+    %% default below: every `source_ip/1` clause matches on both, so a map
+    %% missing either fails with `function_clause` on every request that reaches
+    %% `bondy_http_gateway_rest_handler:init/2`.
+    %%
+    %% Both gaps are reachable, because `listeners.$name.proxy_protocol` and
+    %% `listeners.$name.proxy_protocol.mode` are two independent default-free
+    %% mappings. An HTTP listener may carry no block at all (`admin_local`
+    %% carries none), which leaves `enabled` absent; and one that sets only
+    %% `proxy_protocol = on` yields `[{enabled, true}]`, which leaves `mode`
+    %% absent. Verified directly: `source_ip/1` on the map `init/1` builds for
+    %% the latter matches none of its three clauses.
+    %%
+    %% `relaxed` is the value all eight legacy `*.proxy_protocol.mode` mappings
+    %% already carry as their schema default, so a legacy deployment is
+    %% unaffected — its own value wins this merge.
+    %% `bondy_tcp_proxy_protocol:init/2` carries the same two defaults for the
+    %% same reason.
+    Opts = maps:merge(
+        #{enabled => false, mode => relaxed},
+        maps:from_list(bondy_config:get([Ref, proxy_protocol], []))
+    ),
 
-    case maps:get(enabled, Opts, false) of
+    %% No default here: the merge above always supplies `enabled`, so a default
+    %% would be unreachable and would quietly restore the `function_clause` in
+    %% `source_ip/1` if the merge were ever removed.
+    case maps:get(enabled, Opts) of
         true ->
             %% G-2: the `Forwarded`/`X-Real-IP`/`X-Forwarded-For` headers are
             %% client-supplied and trivially spoofable. Only honour them when the

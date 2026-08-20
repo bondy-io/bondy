@@ -145,6 +145,57 @@
         {uri_strictness, loose}
     ]},
     {bondy_router, [
+        %% The listener inventory, declared the way an operator now declares it.
+        %% There is no second spelling: the legacy `admin_api.*',
+        %% `api_gateway.*', `wamp.{tcp,tls}.*' and `bridge.listener.*' mappings
+        %% are gone, so a listener exists only if it is named here. The seven
+        %% below are exactly the seven this harness enabled before; the two
+        %% bridge relays were disabled and are therefore simply absent.
+        %%
+        %% Each name matches its option block further down, which is what makes
+        %% the block reach it: a listener's options are read under its CURRENT
+        %% name. The admin listener is `admin' -- the reserved name -- so
+        %% `bondy_listener_manager:with_reserved/1' finds it already present
+        %% instead of injecting a second listener on 18081.
+        {listeners, [
+            {admin, #{
+                transport => tcp,
+                protocol => http,
+                port => 18081,
+                start_phase => early,
+                services => [admin_api, wamp_ws, admin, metrics]
+            }},
+            {admin_api_https, #{
+                transport => tls,
+                protocol => http,
+                port => 18084,
+                start_phase => early,
+                services => [admin_api, wamp_ws, admin, metrics]
+            }},
+            {api_gateway_http, #{
+                transport => tcp,
+                protocol => http,
+                port => 18080,
+                services => [api_gateway, wamp_ws, wamp_sse, wamp_longpoll]
+            }},
+            {api_gateway_https, #{
+                transport => tls,
+                protocol => http,
+                port => 18083,
+                services => [api_gateway, wamp_ws, wamp_sse, wamp_longpoll]
+            }},
+            {wamp_tcp, #{
+                transport => tcp, protocol => wamp_rawsocket, port => 18082
+            }},
+            {wamp_tls, #{
+                transport => tls, protocol => wamp_rawsocket, port => 18085
+            }},
+            {wamp_uds, #{
+                transport => uds,
+                protocol => wamp_rawsocket,
+                path => "/tmp/bondy_ct_wamp_uds_" ++ os:getpid() ++ ".sock"
+            }}
+        ]},
         {wamp, [
             {dealer, [
                 {features, [
@@ -158,7 +209,6 @@
                     {progressive_calls, false},
                     {progressive_call_results, false},
                     {payload_passthru_mode, false},
-                    {pattern_based_registration, true},
                     {caller_identification, true},
                     {caller_auth_claims, true},
                     {call_trustlevels, false},
@@ -179,7 +229,6 @@
                     {publisher_exclusion, true},
                     {publication_trustlevels, false},
                     {payload_passthru_mode, false},
-                    {pattern_based_subscription, true},
                     {event_retention, true},
                     {event_history, false},
                     {acknowledge_subscriber_received, false},
@@ -217,17 +266,19 @@
         {bridge_relay, [{forward, #{ack => false, retransmission => false}}]},
         {bridge_relay_tls, [
             {proxy_protocol, [{mode, relaxed}, {enabled, false}]},
+            {tls, [
+                {cacertfile, "./etc/ssl/server/cacert.pem"},
+                {keyfile, "./etc/ssl/server/key.pem"},
+                {certfile, "./etc/ssl/server/keycert.pem"},
+                {versions, ['tlsv1.3']}
+            ]},
             {transport_opts, [
                 {socket_opts, [
-                    {cacertfile, "./etc/ssl/server/cacert.pem"},
-                    {keyfile, "./etc/ssl/server/key.pem"},
-                    {certfile, "./etc/ssl/server/keycert.pem"},
                     {nodelay, true},
                     {keepalive, true},
                     {backlog, 1024},
                     {port, 18093},
-                    {ip_version, inet},
-                    {versions, ['tlsv1.3']}
+                    {ip_version, inet}
                 ]},
                 {max_connections, 100000},
                 {num_acceptors, 200}
@@ -257,18 +308,26 @@
             ]},
             {transport_opts, [
                 {socket_opts, [
-                    {nodelay, true}, {keepalive, true}, {backlog, 1024}
+                    {nodelay, true},
+                    {keepalive, true},
+                    {backlog, 1024},
+                    {ip_version, inet}
                 ]},
                 {max_connections, 100000},
                 {num_acceptors, 200}
             ]},
             {port, 18092},
-            {enabled, false},
-            {ip_version, inet}
+            {enabled, false}
         ]},
         {platform_log_dir, "./log"},
         {platform_etc_dir, "./etc"},
-        {platform_tmp_dir, "./tmp"},
+        %% Per-OS-pid: `admin_local` puts its socket here, and two concurrent CT
+        %% runs sharing one path would collide —
+        %% `bondy_listener_ranch:maybe_unlink_socket/1` deletes the node before
+        %% binding, so the second run would silently take the first run's socket
+        %% away. `bondy_listener_SUITE:init_per_suite/1` does the same for the
+        %% same reason.
+        {platform_tmp_dir, "./tmp/" ++ os:getpid()},
         {platform_data_dir, "./data"},
         {platform_lib_dir, "./lib"},
         {platform_bin_dir, "./bin"},
@@ -283,19 +342,21 @@
         ]},
         {wamp_tls, [
             {proxy_protocol, [{mode, relaxed}, {enabled, false}]},
+            {tls, [
+                {cacertfile, "./etc/ssl/server/cacert.pem"},
+                {keyfile, "./etc/ssl/server/key.pem"},
+                {certfile, "./etc/ssl/server/keycert.pem"},
+                {versions, ['tlsv1.2', 'tlsv1.3']}
+            ]},
             {transport_opts, [
                 {socket_opts, [
-                    {cacertfile, "./etc/ssl/server/cacert.pem"},
-                    {keyfile, "./etc/ssl/server/key.pem"},
-                    {certfile, "./etc/ssl/server/keycert.pem"},
                     {reuseport, false},
                     {nodelay, true},
                     {linger_timeout, 1000},
                     {keepalive, true},
                     {backlog, 1024},
                     {port, 18085},
-                    {ip_version, inet},
-                    {versions, ['tlsv1.2', 'tlsv1.3']}
+                    {ip_version, inet}
                 ]},
                 {max_connections, 100000},
                 {num_acceptors, 200}
@@ -336,7 +397,14 @@
         ]},
         {wamp_uds, [
             {proxy_protocol, [{mode, relaxed}, {enabled, false}]},
-            {path, "/tmp/bondy_ct_wamp_uds.sock"},
+            %% The OS pid keeps two concurrent CT runs from stealing each
+            %% other's socket. Not cosmetic: the driver deletes a socket node
+            %% before binding (`maybe_unlink_socket/1`), so the second run
+            %% SUCCEEDS on a shared path and the first keeps an unreachable
+            %% listen socket, with nothing reported at either end. `/tmp`
+            %% rather than a CT-nested directory because
+            %% `sockaddr_un.sun_path` is 104 bytes on Darwin.
+            {path, "/tmp/bondy_ct_wamp_uds_" ++ os:getpid() ++ ".sock"},
             {idle_timeout, 28800000},
             {ping, [
                 {max_attempts, 2},
@@ -344,8 +412,18 @@
                 {idle_timeout, 20000},
                 {enabled, true}
             ]},
-            {num_acceptors, 10},
-            {max_connections, 100000},
+            %% Nested under `transport_opts` like every other listener's,
+            %% because ranch options now come from
+            %% `bondy_config:listener_transport_opts/2` for every listener
+            %% rather than from a per-transport module. `socket_opts` needs no
+            %% address: `bondy_listener_ranch:with_bind/2` sets `{local, Path}`
+            %% from the inventory's bind target and drops the address family,
+            %% which a Unix domain socket has none of.
+            {transport_opts, [
+                {num_acceptors, 10},
+                {max_connections, 100000},
+                {socket_opts, [{ip_version, inet}]}
+            ]},
             {enabled, true}
         ]},
         {wamp_websocket, [
@@ -370,18 +448,20 @@
         ]},
         {wamp_serializers, [{bert, 4}, {erl, 15}]},
         {api_gateway_https, [
+            {tls, [
+                {cacertfile, "./etc/ssl/server/cacert.pem"},
+                {keyfile, "./etc/ssl/server/key.pem"},
+                {certfile, "./etc/ssl/server/keycert.pem"},
+                {versions, ['tlsv1.3']}
+            ]},
             {transport_opts, [
                 {socket_opts, [
-                    {cacertfile, "./etc/ssl/server/cacert.pem"},
-                    {keyfile, "./etc/ssl/server/key.pem"},
-                    {certfile, "./etc/ssl/server/keycert.pem"},
                     {reuseport, false},
                     {nodelay, true},
                     {keepalive, false},
                     {backlog, 1024},
                     {port, 18083},
-                    {ip_version, inet},
-                    {versions, ['tlsv1.3']}
+                    {ip_version, inet}
                 ]},
                 {handshake_timeout, 5000},
                 {max_connections, 500000},
@@ -474,7 +554,7 @@
             {enabled, true}
         ]},
         {api_gateway, [{config_file, "./etc/api_gateway_config.json"}]},
-        {admin_api_http, [
+        {admin, [
             {proxy_protocol, [{mode, relaxed}, {enabled, true}]},
             {protocol_opts, [
                 {sendfile, true},
@@ -526,18 +606,20 @@
             {enabled, true}
         ]},
         {admin_api_https, [
+            {tls, [
+                {cacertfile, "./etc/ssl/server/cacert.pem"},
+                {keyfile, "./etc/ssl/server/key.pem"},
+                {certfile, "./etc/ssl/server/keycert.pem"},
+                {versions, ['tlsv1.3']}
+            ]},
             {transport_opts, [
                 {socket_opts, [
-                    {cacertfile, "./etc/ssl/server/cacert.pem"},
-                    {keyfile, "./etc/ssl/server/key.pem"},
-                    {certfile, "./etc/ssl/server/keycert.pem"},
                     {reuseport, false},
                     {nodelay, true},
                     {keepalive, false},
                     {backlog, 4096},
                     {port, 18084},
-                    {ip_version, inet},
-                    {versions, ['tlsv1.3']}
+                    {ip_version, inet}
                 ]},
                 {handshake_timeout, 5000},
                 {max_connections, 250000},
@@ -659,6 +741,7 @@
     groups/1,
     suite/0,
     tests/1,
+    ensure_etc/0,
     start_bondy/0,
     stop_bondy/0,
     start_cluster/2,
@@ -729,9 +812,24 @@ start_bondy() ->
              || {App, Env} <- ?ENV
             ],
 
+            %% Every key `?ENV` declares must have been applied. Checked as a
+            %% SUBSET, not by comparing lengths: `bondy_config:set/2` reaches
+            %% `application:set_env/3` (`app_config:do_set/3`), so a test that
+            %% configures a listener adds a top-level `bondy_router` key and an
+            %% equal-length check then fails on a legitimate addition. It did:
+            %% `bondy_admin_listener_SUITE` run after `bondy_listener_SUITE` in
+            %% one `rebar3 ct` invocation exited `configuration_error` here,
+            %% while each suite passed alone. The subset check catches what this
+            %% guard is for — `?ENV` not reaching the application — and names
+            %% the keys instead of reporting a bare atom.
             {bondy_router, BondyEnv} = lists:keyfind(bondy_router, 1, ?ENV),
-            length(BondyEnv) == length(application:get_all_env(bondy_router)) orelse
-                exit(configuration_error),
+            Applied = application:get_all_env(bondy_router),
+            Missing = [
+                K
+             || {K, _} <- BondyEnv, not lists:keymember(K, 1, Applied)
+            ],
+            Missing == [] orelse
+                exit({configuration_error, {missing, Missing}}),
 
             maybe_error(application:ensure_all_started(bondy_router)),
             persistent_term:put({?MODULE, bondy_started}, true),
@@ -836,7 +934,11 @@ start_cluster(_Case, Config, #{names := Names}) ->
 -spec stop_node({atom(), node(), pid()}) -> ok.
 
 stop_node({_Name, _Node, Peer}) ->
-    catch peer:stop(Peer),
+    try
+        peer:stop(Peer)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 %% -----------------------------------------------------------------------------
@@ -866,7 +968,11 @@ restart_node({Name, Node, Peer}, Idx, ExtraEnv, Config) ->
     PrivDir = proplists:get_value(priv_dir, Config),
     PrivDir =/= undefined orelse error({missing_priv_dir, Config}),
     Cookie = atom_to_list(erlang:get_cookie()),
-    catch peer:stop(Peer),
+    try
+        peer:stop(Peer)
+    catch
+        _:_ -> ok
+    end,
     %% The replacement takes the SAME node name, so the controller's stale
     %% connection to the previous incarnation has to be gone before we start
     %% it — otherwise `peer:start/1' succeeds and the very first `erpc' into
@@ -918,7 +1024,13 @@ rejoin({_, Node, _}, Existing, Timeout) ->
 
 stop_cluster(Nodes) ->
     lists:foreach(
-        fun({_Name, _Node, Peer}) -> catch peer:stop(Peer) end,
+        fun({_Name, _Node, Peer}) ->
+            try
+                peer:stop(Peer)
+            catch
+                _:_ -> ok
+            end
+        end,
         Nodes
     ),
     ok.
@@ -1110,13 +1222,17 @@ start_disterl([Nodename | Rest]) ->
             error({nodistribution, Error})
     end.
 
-%% @private
 %% Common Test sets the current working directory to the per-run `ct_run.*'
-%% log dir, but the listener/config paths in ?ENV are relative (e.g.
-%% "./etc/ssl/server/keycert.pem"). Reproduce a release's cwd layout by
-%% symlinking `./etc' to the repository's `etc' directory so those relative
-%% paths resolve. Idempotent and best-effort: a no-op when `./etc' already
-%% exists or the repo root / its `etc' dir cannot be located.
+%% log dir, but relative certificate/config paths (e.g.
+%% "./etc/ssl/server/keycert.pem") assume a release's cwd. Reproduce that
+%% layout by symlinking `./etc' to the repository's `etc' directory so those
+%% relative paths resolve. Idempotent and best-effort: a no-op when `./etc'
+%% already exists or the repo root / its `etc' dir cannot be located.
+%%
+%% Exported (not just called from `start_bondy/0' and `start_cluster/3') so a
+%% suite that never boots Bondy through this module — one driving
+%% `bondy_listener_manager' directly against real sockets — can still resolve
+%% the same relative certificate paths.
 ensure_etc() ->
     case filelib:is_dir("etc") of
         true ->
@@ -1213,7 +1329,11 @@ start_node(Name, Idx, PrivDir, Cookie, ExtraEnv) ->
         {Name, Node, Peer}
     catch
         Class:Reason:Stacktrace ->
-            catch peer:stop(Peer),
+            try
+                peer:stop(Peer)
+            catch
+                _:_ -> ok
+            end,
             erlang:raise(Class, Reason, Stacktrace)
     end.
 
@@ -1233,28 +1353,82 @@ controller_host() ->
 %% listen port, all client listeners disabled (irrelevant to AAE and would
 %% clash across same-host nodes), and bondy_db AAE enabled with a fast tick.
 node_env(DataDir, PeerPort) ->
-    Disabled = [
-        admin_api_http,
-        admin_api_https,
-        api_gateway_http,
-        api_gateway_https,
-        wamp_tcp,
-        wamp_tls,
-        wamp_uds,
-        bridge_relay_tcp,
-        bridge_relay_tls
-    ],
     E0 = key_value:set(
         [eleveldb, data_root], filename:join(DataDir, "leveldb"), ?ENV
     ),
     E1 = key_value:set([bondy_router, platform_data_dir], DataDir, E0),
-    E2 = key_value:set([partisan, peer_port], PeerPort, E1),
-    E3 = lists:foldl(
-        fun(L, Acc) ->
-            key_value:set([bondy_router, L, enabled], false, Acc)
-        end,
-        E2,
-        Disabled
+    %% `platform_tmp_dir` per peer, not just `platform_data_dir`: it is where
+    %% `bondy_listener_manager:admin_local_spec/0` puts the internal control
+    %% socket, and that listener is injected UNCONDITIONALLY on every node. `?ENV`
+    %% derives the directory from `os:getpid()`, which is evaluated in THIS VM, so
+    %% every peer would otherwise bind `bondy_admin.sock` at the same path as the
+    %% runner and as each other — and the driver unlinks a stale socket file
+    %% before binding, so the last node to boot silently takes the path away from
+    %% the others. Verified directly: without this line
+    %% `bondy_admin_listener_SUITE:admin_local_socket_is_bound_and_serves` fails
+    %% with `econnrefused` in a full `rebar3 ct` run, when a cluster suite has
+    %% booted peers before it, while passing in isolation.
+    %%
+    %% SHORT and absolute, keyed on `PeerPort` (unique per peer) rather than
+    %% nested under `DataDir`: a Unix domain socket path has a hard length limit
+    %% of about 104 bytes on this platform, and a peer's `DataDir` sits deep
+    %% inside the Common Test log tree, so `<DataDir>/tmp/bondy_admin.sock`
+    %% overflows it and the bind fails with `{listen_error, admin_local, einval}`
+    %% — verified directly, that is what this line looked like before it was
+    %% shortened. `/tmp` with an `os:getpid()` namespace is the same shape
+    %% `bondy_listener_SUITE`'s `init_per_suite/1` already uses.
+    TmpDir = filename:join(
+        "/tmp",
+        "bondy_ct_" ++ os:getpid() ++ "_" ++ integer_to_list(PeerPort)
+    ),
+    ok = filelib:ensure_path(TmpDir),
+    E1b = key_value:set([bondy_router, platform_tmp_dir], TmpDir, E1),
+    E2 = key_value:set([partisan, peer_port], PeerPort, E1b),
+    %% No CLIENT listeners on a peer node: they are irrelevant to AAE and
+    %% would clash on every port with the primary node's, which share this
+    %% host. Setting the inventory to a non-empty list is what puts a peer on
+    %% the CONFIGURED path rather than the legacy one, and on that path
+    %% `bondy_listener_manager' always adds the reserved `admin' listener —
+    %% every peer gets one whether this list mentions it or not. `admin' is
+    %% declared explicitly here, at `port => 0', for exactly that reason:
+    %% left out, the manager's own default binds it at the fixed port 18081,
+    %% and every peer on this host then races for that one port. Verified
+    %% directly — `bondy_aae_cluster_SUITE' aborts `init_per_suite' with
+    %% `eaddrinuse' without this entry, on the second peer to reach it.
+    %%
+    %% `ordering_probe_tls' exercises the ordering `bondy_config:init/1'
+    %% depends on between `splat_listener_blocks/0' and
+    %% `bondy_listener_manager:init/0': its certificate lives nested inside this
+    %% inventory entry, so it reaches both
+    %% `bondy_listener_config:assert_tls_keys/3' and
+    %% `bondy_config:listener_transport_opts/2' — what ranch actually uses to
+    %% bind — only after the splat has copied it out. Reordering those two calls
+    %% makes every peer boot abort with `{missing, [tls, certfile]}'. Both
+    %% listeners bind `port => 0`, so peers sharing this host never collide on
+    %% either, and the certificate files are the ones every other TLS listener in
+    %% this module's `?ENV' already reads.
+    E3 = key_value:set(
+        [bondy_router, listeners],
+        [
+            {admin, #{
+                transport => tcp,
+                protocol => http,
+                port => 0,
+                start_phase => early,
+                services => [admin_api, wamp_ws, admin, metrics]
+            }},
+            {ordering_probe_tls, #{
+                transport => tls,
+                protocol => wamp_rawsocket,
+                port => 0,
+                tls => #{
+                    certfile => "./etc/ssl/server/keycert.pem",
+                    keyfile => "./etc/ssl/server/key.pem",
+                    cacertfile => "./etc/ssl/server/cacert.pem"
+                }
+            }}
+        ],
+        E2
     ),
     E4 = key_value:set([bondy_oplog, aae_enabled], true, E3),
     E5 = key_value:set([bondy_oplog, sync_interval_ms], 200, E4),
@@ -1388,5 +1562,9 @@ Undo `aae_mock_nonsolo_membership/0`.
 -spec aae_unmock_nonsolo_membership() -> ok.
 
 aae_unmock_nonsolo_membership() ->
-    catch meck:unload(partisan_peer_service),
+    try
+        meck:unload(partisan_peer_service)
+    catch
+        _:_ -> ok
+    end,
     ok.

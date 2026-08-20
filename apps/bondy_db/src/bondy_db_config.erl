@@ -243,11 +243,9 @@ leveled_opts() ->
         {stats_logfrequency, get(leveled_stats_logfrequency, 30)}
     ].
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 %% @private
 %% Leveled spells two different absences as `undefined`: "retain no waste
@@ -258,7 +256,6 @@ leveled_opts() ->
 optional(off) -> undefined;
 optional(default) -> undefined;
 optional(Value) -> Value.
-
 
 -spec will_set(Key :: key_value:key(), Value :: any()) ->
     ok | {ok, NewValue :: any()} | {error, Reason :: any()}.

@@ -303,7 +303,12 @@ handle_call({delete_anonymous, Key}, _From, St) ->
     Reply =
         case ets:lookup(?MODULE, Key) of
             [{Key, Tab}] ->
-                _ = catch ets:delete(Tab),
+                _ =
+                    try
+                        ets:delete(Tab)
+                    catch
+                        _:_ -> ok
+                    end,
                 true = ets:delete(?MODULE, Key),
                 true;
             [] ->
@@ -357,7 +362,11 @@ handle_info(_Info, St) ->
 terminate(_Reason, _State) ->
     ets:foldl(
         fun({_, Tab}, ok) ->
-            catch ets:delete(Tab),
+            try
+                ets:delete(Tab)
+            catch
+                _:_ -> ok
+            end,
             ok
         end,
         ok,

@@ -4,7 +4,7 @@
 # Build stage 1
 # ===========================================================================
 
-FROM erlang:28.5.0.3-alpine AS builder
+FROM erlang:29.0.5-alpine AS builder
 
 # Build dependencies. snappy-dev is removed with RocksDB (its only consumer);
 # build-base/cmake/git/patch stay for the surviving native NIFs — notably
@@ -46,8 +46,9 @@ RUN rebar3 as docker tar && \
 # ===========================================================================
 
 # Keep this Alpine version >= the erlang:*-alpine builder base (musl ABI must be
-# equal-or-newer, or the stage-1 NIFs fail to load). Verify on first build.
-FROM alpine:3.22 as runner
+# equal-or-newer, or the stage-1 NIFs fail to load). `erlang:29.0.5-alpine`
+# reports 3.24.1 in /etc/alpine-release, so this tracks it.
+FROM alpine:3.24 as runner
 
 # We define defaults
 # We assume you have DNS. Erlang will take the FQDN and generate

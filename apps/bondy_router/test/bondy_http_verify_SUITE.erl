@@ -101,7 +101,11 @@ init_per_suite(Config) ->
     Config.
 
 end_per_suite(Config) ->
-    catch bondy_http_gateway:delete(<<"com.example.verify.api">>),
+    try
+        bondy_http_gateway:delete(<<"com.example.verify.api">>)
+    catch
+        _:_ -> ok
+    end,
     {save_config, Config}.
 
 init_per_group(sso, Config) ->
@@ -124,7 +128,11 @@ init_per_group(_, Config) ->
 
 end_per_group(sso, Config) ->
     _ = [
-        catch bondy_http_gateway:delete(Id)
+        try
+            bondy_http_gateway:delete(Id)
+        catch
+            _:_ -> ok
+        end
      || Id <- [
             <<"com.example.verify.m1">>,
             <<"com.example.verify.m2">>,
@@ -336,7 +344,11 @@ disabled_user_is_rejected(_) ->
         {Status, _, _} = get_verify(cookie_header(?REALM, JWT)),
         ?assertEqual(401, Status)
     after
-        catch bondy_rbac_user:enable(?REALM, ?DISABLED_USER)
+        try
+            bondy_rbac_user:enable(?REALM, ?DISABLED_USER)
+        catch
+            _:_ -> ok
+        end
     end.
 
 deleted_user_is_rejected(_) ->
@@ -455,7 +467,11 @@ sso_ticket_rejected_when_user_disabled_in_target_realm(_) ->
             {200, _, _}, get_verify(?M1_VERIFY, cookie_header(?SSO, JWT))
         )
     after
-        catch bondy_rbac_user:enable(?M2, ?USER)
+        try
+            bondy_rbac_user:enable(?M2, ?USER)
+        catch
+            _:_ -> ok
+        end
     end.
 
 prototype_realm_inherits_sso_trust(_) ->
@@ -479,7 +495,11 @@ prototype_realm_inherits_sso_trust(_) ->
         ?assertEqual(200, Status),
         ?assertMatch(#{~"realm" := Child}, decode(Body))
     after
-        catch bondy_http_gateway:delete(<<"com.example.verify.child">>)
+        try
+            bondy_http_gateway:delete(<<"com.example.verify.child">>)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% =============================================================================

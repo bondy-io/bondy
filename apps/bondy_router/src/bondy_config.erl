@@ -205,6 +205,20 @@ An implementation of the `app_config` behaviour.
 
 -define(BONDY, bondy_router).
 
+%% Ranch options for a listener that declares no transport tuning. A listener is
+%% fully specified by its inventory entry — transport, protocol and a bind
+%% target — so an option block is optional, and the `listeners.$name.*` mappings
+%% carry no defaults of their own. Both values are the ones `bondy_wamp_uds` had
+%% for the same reason before every listener shared one driver: 10 acceptors and
+%% no connection ceiling, rather than ranch's own default of 1024.
+%%
+%% This is the ONLY place either value is written. `bondy_listener_ranch` reads
+%% both without a default, so neither is restated there.
+-define(DEFAULT_TRANSPORT_OPTS, #{
+    num_acceptors => 10,
+    max_connections => infinity
+}).
+
 -export([get/1]).
 -export([get/2]).
 -export([init/1]).
@@ -214,8 +228,9 @@ An implementation of the `app_config` behaviour.
 -export([nodestring/0]).
 -export([node_hash/0]).
 -export([node_spec/0]).
--export([listener_transport_opts/1]).
+-export([listener_transport_opts/2]).
 -export([listener_protocol_opts/1]).
+-export([splat_listener_blocks/1]).
 
 -compile({no_auto_import, [get/1]}).
 
@@ -241,6 +256,18 @@ init(Args) ->
 
     %% We read bondy env and cache the values
     ok = app_config:init(?BONDY, #{callback_mod => ?MODULE}),
+
+    %% Resolve the listener inventory before anything consumes it:
+    %% `bondy_cert_manager:init/0` below loads server certificates and client
+    %% auth per TLS listener, and `setup_wamp/0` normalises `dynamic_buffer` per
+    %% HTTP listener. Both ask the manager which listeners exist.
+    %%
+    %% Must run after `app_config:init/2` above, the first point at which
+    %% configuration is readable at all. It also calls
+    %% `splat_listener_blocks/1`, which is what puts a listener's option blocks
+    %% where `bondy_cert_manager:init/0` reads `[Name, tls, ...]` from for both
+    %% the server certificate and the mTLS policy.
+    ok = bondy_listener_manager:init(),
 
     ok = bondy_cert_manager:init(),
 
@@ -330,14 +357,59 @@ node_hash() ->
 node_spec() ->
     partisan:node_spec().
 
--spec listener_transport_opts(ListenerName :: atom()) -> map().
+-doc """
+Ranch transport options for `Name`, with `Ip` — the address its listener
+resolved to, or `undefined` if none was configured — folded into the socket
+options BEFORE they are normalised.
 
-listener_transport_opts(Name) ->
-    Opts = key_value:to_map(get([Name, transport_opts])),
+Before, not after, because `normalise_socket_opts/1` is the only place an
+address and an `ip_version` are reconciled: it derives the socket's family from
+whichever of the two is present and prepends the family atom. An address
+written into `socket_opts` after that runs can contradict the atom already
+there, and `gen_tcp:listen/2` answers a contradiction with `badarg` rather than
+an error tuple.
+
+`undefined` writes nothing, so a listener that configured no address keeps
+whatever `socket_opts` already holds — nothing, for a new-style listener, which
+`normalise_socket_opts/1` then reads as `any` and resolves to the wildcard of
+the configured family.
+""".
+-spec listener_transport_opts(
+    ListenerName :: atom(), Ip :: inet:ip_address() | undefined
+) ->
+    map().
+
+listener_transport_opts(Name, Ip) ->
+    %% `ip` is dropped from the transport options. It is not a ranch transport
+    %% option, and `key_value:to_map/1` is shallow, so an `ip` sitting at the top
+    %% of a listener's `transport_opts` block survives this merge into the map
+    %% handed to `ranch:start_listener/5`.
+    %% `ranch:validate_transport_opt/3`'s catch-all answers `false` for an
+    %% unknown key, so the bind fails with `{error, {bad_option, ip}}` and
+    %% aborts the boot — verified directly by
+    %% `top_level_ip_does_not_reach_ranch` in `bondy_listener_SUITE`, which fails
+    %% with that exact tuple without this line. The address reaches the socket
+    %% options through the `Ip` parameter instead, where it is reconciled with
+    %% `ip_version`, so the raw value has no remaining purpose here.
+    Opts = maps:remove(
+        ip,
+        maps:merge(
+            ?DEFAULT_TRANSPORT_OPTS,
+            key_value:to_map(get([Name, transport_opts], []))
+        )
+    ),
     NumAcceptors = key_value:get(num_acceptors, Opts),
-    SocketOpts0 = normalise_socket_opts(key_value:get(socket_opts, Opts, [])),
-    %% Inject sni_fun for TLS listeners to enable live cert rotation
-    SocketOpts = bondy_cert_manager:maybe_inject_sni_fun(Name, SocketOpts0),
+    SocketOpts0 = normalise_socket_opts(
+        with_ip(Ip, key_value:get(socket_opts, Opts, []))
+    ),
+    %% The per-listener `tls` block is where a certificate is declared; it must
+    %% reach the socket options ranch binds with, not just the validation in
+    %% `bondy_listener_config:assert_tls_keys/3`.
+    SocketOpts1 = with_tls_material(Name, SocketOpts0),
+    %% Inject sni_fun for TLS listeners to enable live cert rotation. This runs
+    %% AFTER the fold above so a rotating certificate still wins over the
+    %% static `tls` block.
+    SocketOpts = bondy_cert_manager:maybe_inject_sni_fun(Name, SocketOpts1),
 
     Opts#{
         %% connection_type => worker,
@@ -350,11 +422,89 @@ listener_transport_opts(Name) ->
 -spec listener_protocol_opts(ListenerName :: atom()) -> map().
 
 listener_protocol_opts(Name) ->
-    key_value:to_map(get([Name, protocol_opts])).
+    %% Absent block means no overrides, so the handler's own defaults (Cowboy's,
+    %% for an HTTP listener) apply. Nothing is invented here.
+    key_value:to_map(get([Name, protocol_opts], [])).
+
+%% The eight keys `bondy_listener_config:resolve_one/3' reads directly from a
+%% listener's spec: `transport' and `protocol' via `required/2'; `services' via
+%% `resolve_services/3' (`maps:find/2' for an HTTP listener, `maps:is_key/2'
+%% otherwise); `enabled' and `start_phase' via `maps:get/3' in `resolve_one/3'
+%% itself; and `port'/`path'/`ip' via `resolve_bind/3' and `resolve_ip/3'.
+%% Everything else in a spec is an option block belonging to a consumer that
+%% reads it from `bondy_router.<name>.*'.
+-define(SPEC_KEYS, [
+    transport, protocol, port, path, ip, services, enabled, start_phase
+]).
+
+-doc """
+Copies every non-structural key of each `Inventory` entry to
+`bondy_router.<name>.<key>`, where its consumer reads it.
+
+Takes the inventory rather than reading `bondy_router.listeners` itself, because
+that key holds only what the operator declared. What a node runs is the operator's
+inventory with the reserved and internal listeners added and each spec's
+transport- and protocol-implied defaults filled in, and every one of those
+listeners has consumers reading `[Name, Key]` too. Deciding what that effective
+inventory is belongs to `bondy_listener_manager:init/0`, which does it once and
+passes the result here.
+
+`bondy_router.listeners` is the only key the `listeners.$name.*` schema block
+can render into: a cuttlefish mapping's target is tokenised literally, so it
+cannot write a listener's name into one. Every option block a listener's
+consumers expect at `[Name, Key]` — `transport_opts`, `protocol_opts`, `tls`,
+`cors`, `security_headers`, `proxy_protocol`, `websocket`, `sse`, `longpoll`,
+and any key a spec carries at its own top level such as `idle_timeout` —
+therefore arrives nested inside that one inventory entry instead. This copies
+each one out.
+
+A key absent from an inventory entry stays absent here: only the keys a spec
+actually carries are written, so a listener that configured nothing gets no
+block at any of these paths and its consumer's own default applies.
+
+A leaf is written through `set/2`'s own path-based semantics rather than
+replacing the whole block at `[Name, Key]`, so writing one leaf never touches
+its siblings: `acceptors_pool_size` targets `transport_opts.num_acceptors` and
+`backlog` targets the nested `transport_opts.socket_opts.backlog`, and a
+listener setting both ends up with both. Only a map is descended into; a
+list-valued leaf (`tls.versions`, `cors.allowed_origins`) is a value, not a
+nested block to merge, and every nested block the `bondy_router.listeners`
+translation renders is a map, never a proplist, so this cannot mistake one for
+the other.
+
+Nothing here special-cases the atom `undefined`. A caller reads
+`get(listeners, undefined)` to tell a node booting on
+`bondy_listener_config:default_inventory/0` from a configured one, and resolves
+that sentinel to a list before calling — so the atom cannot reach the list
+comprehension below and raise `{bad_generator, undefined}`.
+""".
+-spec splat_listener_blocks(Inventory :: [{atom(), map()}]) -> ok.
+
+splat_listener_blocks(Inventory) ->
+    _ = [
+        splat(Name, [Key], Value)
+     || {Name, Spec} <- Inventory,
+        {Key, Value} <- maps:to_list(Spec),
+        not lists:member(Key, ?SPEC_KEYS)
+    ],
+    ok.
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% Descends through a map, writing each leaf at `[Name | Path]` via `set/2`.
+%% `set/2` reaches `app_config:do_set/3`, whose own nested-path clause reads
+%% whatever is already at each intermediate key (defaulting to `[]`, never
+%% discarding it) before re-storing it, so a leaf this writes lands beside its
+%% siblings instead of replacing the block that contains them. A value that is
+%% not a map — a scalar, a proplist a caller built directly, or a list-valued
+%% leaf — is written as-is: only a map is a nested block to descend into.
+splat(Name, Path, Value) when is_map(Value) ->
+    maps:foreach(fun(K, V) -> splat(Name, Path ++ [K], V) end, Value);
+splat(Name, Path, Value) ->
+    set([Name | Path], Value).
 
 %% @private
 %% Leading 64 bits of SHA-256(nodestring), base62-encoded: fixed-length,
@@ -449,12 +599,25 @@ setup_wamp() ->
     %% listener's dynamic_buffer (cowboy_websocket overrides any
     %% handler-supplied value), so a WS-specific setting cannot take effect.
     Keys = [
-        [api_gateway_http, protocol_opts, dynamic_buffer],
-        [api_gateway_https, protocol_opts, dynamic_buffer],
-        [admin_api_http, protocol_opts, dynamic_buffer],
-        [admin_api_https, protocol_opts, dynamic_buffer]
+        [Name, protocol_opts, dynamic_buffer]
+     || Name <- bondy_listener_manager:http_listeners()
     ],
     ok = lists:foreach(fun set_dynamic_buffer/1, Keys),
+
+    %% Pattern-based registration and subscription are not operator flags, so
+    %% they are set here rather than mapped from `bondy.conf'. The router itself
+    %% depends on them: `bondy_session_manager:register_procedures/1' registers
+    %% the `wamp.session.<hash>..get' wildcard that serves `wamp.session.get',
+    %% and with pattern-based registration off that registration was refused and
+    %% took the session open down with it.
+    %%
+    %% They are values rather than literals in `bondy_dealer:features/0' and
+    %% `bondy_broker:features/0' because both those modules also answer
+    %% `is_feature_enabled/1' straight out of configuration; seating the truth
+    %% here is what keeps the two answers from disagreeing, and is what
+    %% `bondy_router:roles/0' advertises in WELCOME.
+    ok = set([wamp, dealer, features, pattern_based_registration], true),
+    ok = set([wamp, broker, features, pattern_based_subscription], true),
 
     %% WAMP PROTOCOL LIB
     ok = bondy_wamp_config:set(extended_details, ?WAMP_EXT_DETAILS),
@@ -599,6 +762,28 @@ apply_private_config({ok, Config}) ->
     end.
 
 %% @private
+with_ip(undefined, SocketOpts) -> SocketOpts;
+with_ip(Ip, SocketOpts) -> key_value:put(ip, Ip, SocketOpts).
+
+%% @private
+%% The per-listener `tls` block is where a listener declares its certificate.
+%% It has to reach ranch's socket options, not just the validation in
+%% `bondy_listener_config:assert_tls_keys/3` — otherwise a listener passes its
+%% certificate check and then fails to bind with `no_cert`.
+%%
+%% The block wins over anything of the same name in `socket_opts`, matching the
+%% precedence `bondy_listener_config:tls_material/3` uses, so validation and
+%% binding cannot disagree about which certificate is in force. `certfile`,
+%% `keyfile`, `cacertfile`, `versions` and `verify` are already the names and
+%% value shapes ssl expects, so nothing is translated here.
+with_tls_material(Name, SocketOpts) ->
+    maps:fold(
+        fun(K, V, Acc) -> lists:keystore(K, 1, Acc, {K, V}) end,
+        SocketOpts,
+        key_value:to_map(get([Name, tls], #{}))
+    ).
+
+%% @private
 -spec normalise_socket_opts(SocketOpts :: [{atom(), any()}]) ->
     SocketOpts :: [atom() | {atom(), any()}].
 
@@ -606,9 +791,23 @@ normalise_socket_opts(SocketOpts0) ->
     %% We normlise the buffer option
     SocketOpts1 = normalise_socket_buffer(SocketOpts0),
 
-    %% We default to listen on any i.e. 0.0.0.0 or ::1 depending on IPVer
+    %% We default to listen on any i.e. 0.0.0.0 or :: depending on IPVer
     IP0 = key_value:get(ip, SocketOpts1, any),
-    {Family0, SocketOpts2} = take(ip_version, SocketOpts1, any),
+    %% `inet` rather than `any`, because `any` is not a family:
+    %% `bondy_utils:get_ipaddr/2` has clauses for `(any, inet)` and
+    %% `(any, inet6)` but none for `(any, any)`, so an absent `ip_version` used
+    %% to raise `function_clause` here — naming no listener — instead of
+    %% listening on 0.0.0.0.
+    %%
+    %% `listeners.$name.ip_version` carries no default and, being a fuzzy
+    %% mapping, cannot — so the key is absent for every listener that did not
+    %% state it, which is what this fallback covers.
+    %%
+    %% Note the precedence this establishes: `get_ipaddr_family/2` below derives
+    %% the family from the ARITY of the resolved address, so a configured
+    %% address always wins and `ip_version` decides only which wildcard an
+    %% address-less listener binds.
+    {Family0, SocketOpts2} = take(ip_version, SocketOpts1, inet),
     {IP, Family} = bondy_utils:get_ipaddr_family(IP0, Family0),
     SocketOpts3 = key_value:put(ip, IP, SocketOpts2),
 

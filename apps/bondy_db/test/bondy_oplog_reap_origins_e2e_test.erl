@@ -219,14 +219,34 @@ compacted_cells_still_reaped() ->
         ?assertEqual([Ob], maps:get(origins_reaped, Report)),
         ?assertEqual([<<"va2">>], read_mv(Ta))
     after
-        catch bondy_db:close(DbA),
-        catch bondy_db:close(DbB),
+        try
+            bondy_db:close(DbA)
+        catch
+            _:_ -> ok
+        end,
+        try
+            bondy_db:close(DbB)
+        catch
+            _:_ -> ok
+        end,
         [
-            catch bondy_oplog:stop_instance(I)
+            try
+                bondy_oplog:stop_instance(I)
+            catch
+                _:_ -> ok
+            end
          || I <- bondy_oplog:list_instances()
         ],
-        catch bondy_db_leveled_sup:stop(SupA),
-        catch bondy_db_leveled_sup:stop(SupB),
+        try
+            bondy_db_leveled_sup:stop(SupA)
+        catch
+            _:_ -> ok
+        end,
+        try
+            bondy_db_leveled_sup:stop(SupB)
+        catch
+            _:_ -> ok
+        end,
         rmrf(DirA),
         rmrf(DirB)
     end.
@@ -262,7 +282,12 @@ complement_reaps_unclaimed_origins() ->
 
     %% B departs for good.
     ok = bondy_db:close(DbB),
-    _ = catch bondy_oplog:stop_instance(Ib),
+    _ =
+        try
+            bondy_oplog:stop_instance(Ib)
+        catch
+            _:_ -> ok
+        end,
 
     {ok, Report} = bondy_oplog_origin_retirement:run(),
     ?assert(lists:member(Ob, maps:get(dead_origins, Report))),
@@ -289,7 +314,12 @@ complement_fails_closed_on_unreachable() ->
     ok = bondy_db:apply(Ta, <<"r">>, <<"k">>, {set, <<"va2">>}),
     ok = bondy_oplog:await_apply(Ia),
     ok = bondy_db:close(DbB),
-    _ = catch bondy_oplog:stop_instance(Ib),
+    _ =
+        try
+            bondy_oplog:stop_instance(Ib)
+        catch
+            _:_ -> ok
+        end,
 
     ok = meck:new(partisan_peer_service, [passthrough]),
     try

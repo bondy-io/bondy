@@ -79,7 +79,11 @@ prop_own_root_always_servable() ->
                 ),
                 Result =:= ok
             after
-                catch bondy_mst:destroy(T0)
+                try
+                    bondy_mst:destroy(T0)
+                catch
+                    _:_ -> ok
+                end
             end
         end
     ).
@@ -164,7 +168,11 @@ apply_op({merge_peer, Keys}, {T0, Model0, Roots, ok}) ->
                 {T1, Model0, Roots, {failed, {pull_incomplete, PeerRoot}}}
         end
     after
-        catch bondy_mst:destroy(PeerT)
+        try
+            bondy_mst:destroy(PeerT)
+        catch
+            _:_ -> ok
+        end
     end;
 apply_op({partial_pull, Keys, Fraction}, {T0, Model0, Roots, ok}) ->
     %% A pull abandoned mid-flight (session death, pin expiry + sweep): only
@@ -189,7 +197,11 @@ apply_op({partial_pull, Keys, Fraction}, {T0, Model0, Roots, ok}) ->
                 check(T1, Model0, [PeerRoot | Roots], {partial_refused})
         end
     after
-        catch bondy_mst:destroy(PeerT)
+        try
+            bondy_mst:destroy(PeerT)
+        catch
+            _:_ -> ok
+        end
     end;
 apply_op({compact, Frac, PinSel}, {T0, Model0, Roots, ok}) ->
     Watermark = watermark(Model0, Frac),

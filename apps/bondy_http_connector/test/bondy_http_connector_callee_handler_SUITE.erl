@@ -145,7 +145,11 @@ init_per_testcase(TC, Config) when
     TC =:= handle_call_ready_service;
     TC =:= handle_call_no_secrets_service
 ->
-    catch ets:delete(bondy_http_connector_manager),
+    try
+        ets:delete(bondy_http_connector_manager)
+    catch
+        _:_ -> ok
+    end,
     ets:new(bondy_http_connector_manager, [
         named_table, protected, set, {read_concurrency, true}
     ]),
@@ -158,7 +162,11 @@ end_per_testcase(TC, _Config) when
     TC =:= handle_call_ready_service;
     TC =:= handle_call_no_secrets_service
 ->
-    catch ets:delete(bondy_http_connector_manager),
+    try
+        ets:delete(bondy_http_connector_manager)
+    catch
+        _:_ -> ok
+    end,
     ok;
 end_per_testcase(_TC, _Config) ->
     ok.

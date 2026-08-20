@@ -47,6 +47,9 @@
 -define(BONDY_CLUSTER_BCAST_MEMBERS, <<"bondy.cluster.broadcast_members">>).
 -define(BONDY_CLUSTER_INFO, <<"bondy.cluster.info">>).
 
+-define(BONDY_LISTENER_SUSPEND, <<"bondy.listener.suspend">>).
+-define(BONDY_LISTENER_RESUME, <<"bondy.listener.resume">>).
+
 -define(BONDY_ROUTER_BRIDGE_ADD, <<"bondy.router.bridge.add">>).
 -define(BONDY_ROUTER_BRIDGE_CHECK_SPEC, <<"bondy.router.bridge.check_spec">>).
 -define(BONDY_ROUTER_BRIDGE_GET, <<"bondy.router.bridge.get">>).

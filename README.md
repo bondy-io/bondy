@@ -5,7 +5,7 @@
 ![Docker Pulls](https://img.shields.io/docker/pulls/leapsight/bondy?style=for-the-badge)
 ![Docker Build (master)](https://img.shields.io/github/actions/workflow/status/bondy-io/bondy/docker_image_build.yaml?&branch=master&label=docker-master&style=for-the-badge)
 ![Docker Build (develop)](https://img.shields.io/github/actions/workflow/status/bondy-io/bondy/docker_image_build.yaml?&branch=develop&label=docker-develop&style=for-the-badge)
-![Docker Build (latest-tag)](https://img.shields.io/github/actions/workflow/status/bondy-io/bondy/docker_image_build.yaml?&tag=version-1.0.0-rc-mustard&label=docker-1.0.0-rc-mustard&style=for-the-badge)
+![Docker Build (latest-tag)](https://img.shields.io/github/actions/workflow/status/bondy-io/bondy/docker_image_build.yaml?&tag=version-1.0.0-rc-pineapple&label=docker-1.0.0-rc-pineapple&style=for-the-badge)
 <br>![Architectures](https://img.shields.io/badge/architecture-linux%2Famd64%20%7C%20linux%2Farm64%20%7C%20macOS%2Fintel%20%7C%20macOS%2FM1-lightgrey?style=for-the-badge)
 
 
@@ -63,7 +63,7 @@ In addition Bondy provides:
           * [x] Last
 * [ ] Sharded Registration
 * [x] Payload Passthru Mode
-* [ ] Registration Revocation (WIP -- callee-side handling is implemented in `bondy_connect`; the Dealer cannot yet trigger a revocation itself)
+* [ ] Registration Revocation (WIP -- callee-side handling is implemented in `bondy_connect_sdk`; the Dealer cannot yet trigger a revocation itself)
 * [x] Registration Meta API
 * [ ] Procedure Reflection
 * [ ] Call Re-Routing
@@ -154,8 +154,11 @@ leapsight/bondy:master
 ### Building from source
 #### Requirements
 * macOS (Intel|Apple Silicon) or Linux (amd64|arm64)
-* [Erlang](https://www.erlang.org/) 26.2.5.6 (Support for OTP 27 is on its way)
-* [Rebar3](https://rebar3.readme.io/) 3.22.1 or later
+* [Erlang](https://www.erlang.org/) 29.0.5 (OTP 28 also builds; `rebar.config`
+  sets `minimum_otp_vsn` to `R28`, and the release images ship OTP 29)
+* [Rebar3](https://rebar3.readme.io/) 3.27.0 or later
+* [just](https://just.systems/) — the task runner the commands below use
+  (`brew install just`, `cargo install just`, or see the install guide)
 * openssl
 * libssl
 * libsnappy
@@ -167,10 +170,13 @@ leapsight/bondy:master
 
 Clone this repository and `cd` to the location where you cloned it.
 
+All build, test and run tasks are driven by [just](https://just.systems/); run
+`just` with no arguments to list every recipe.
+
 To generate a Bondy release to be used in production execute the following command which will generate a tarball containing the release at `$(PWD)/_build/prod/rel/`.
 
 ```shell
-make release
+just release
 ```
 
 Untar and copy the resulting tarball to the location where you want to install Bondy e.g. `~/tmp/bondy`.
@@ -217,7 +223,7 @@ We will start a node named `bondy1@127.0.0.1` which uses the following variables
 
 
 ```bash
-make node1
+just node1
 ```
 
 #### Create a Realm
@@ -259,7 +265,7 @@ We start a second node named `bondy2@127.0.0.1` which uses the following variabl
 |TLS|WAMP Raw Socket|18185|
 
 ```bash
-make node2
+just node2
 ```
 
 After a minute the two nodes will automatically connect.
@@ -269,7 +275,7 @@ One minute after joining the cluster, the Active Anti-entropy service will trigg
 ### Run a third node
 
 ```bash
-make node3
+just node3
 ```
 
 ## Resources

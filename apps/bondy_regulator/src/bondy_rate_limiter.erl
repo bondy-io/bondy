@@ -97,7 +97,11 @@ allow(Key, RateOpts, Increment) when is_map(RateOpts), is_integer(Increment) ->
 forget(Key) ->
     case ets:lookup(?TAB, Key) of
         [{Key, Bucket, _}] ->
-            catch bondy_regulator_rate_limit:delete(Bucket),
+            try
+                bondy_regulator_rate_limit:delete(Bucket)
+            catch
+                _:_ -> ok
+            end,
             true = ets:delete(?TAB, Key),
             ok;
         [] ->
@@ -173,7 +177,11 @@ allow_new(Key, RateOpts, Increment) ->
                 true ->
                     consume(Bucket, Increment);
                 false ->
-                    catch bondy_regulator_rate_limit:delete(Bucket),
+                    try
+                        bondy_regulator_rate_limit:delete(Bucket)
+                    catch
+                        _:_ -> ok
+                    end,
                     allow(Key, RateOpts, Increment)
             end;
         {error, Reason} ->
@@ -194,7 +202,11 @@ sweep(Ttl) ->
     Idle = ets:select(?TAB, MS),
     lists:foreach(
         fun({Key, Bucket}) ->
-            catch bondy_regulator_rate_limit:delete(Bucket),
+            try
+                bondy_regulator_rate_limit:delete(Bucket)
+            catch
+                _:_ -> ok
+            end,
             ets:delete(?TAB, Key)
         end,
         Idle

@@ -59,7 +59,11 @@ init_per_suite(Config) ->
 
 end_per_suite(Config) ->
     Nodes = proplists:get_value(nodes, Config, []),
-    catch bondy_ct:stop_cluster(Nodes),
+    try
+        bondy_ct:stop_cluster(Nodes)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 %% =============================================================================

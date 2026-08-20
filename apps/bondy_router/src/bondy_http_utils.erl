@@ -6,9 +6,15 @@
 -module(bondy_http_utils).
 -moduledoc """
 Utility functions for HTTP request handling, including setting meta and
-security response headers, parsing the `Authorization` header, classifying
-IP addresses as public or private, and mapping error URIs onto HTTP status
-codes.
+security response headers, parsing the `Authorization` header, reading the
+request's peer, classifying IP addresses as public or private, and mapping
+error URIs onto HTTP status codes.
+
+`peer/1` is the single source of truth for a request's peer address. Every
+handler reads it through this module rather than calling `cowboy_req:peer/1`,
+because a listener bound to a Unix domain socket has no network peer and the
+rest of the stack — logging, events, `bondy_rbac_source` — is written in terms
+of one.
 
 `http_status/1` is the single source of truth for the error URI to HTTP status
 mapping. Both the REST handler and the API Gateway spec defaults read it here,
@@ -24,11 +30,13 @@ so the two cannot disagree about what an error URI is worth.
 -export([meta_headers/0]).
 -export([parse_authorization/1]).
 -export([is_public_ip/1]).
+-export([peer/1]).
 
 %% COOKIES
 -export([csrf_cookie_name/1]).
 -export([find_ticket_cookie/1]).
 -export([find_ticket_cookie/2]).
+-export([parse_cookies/1]).
 -export([safe_bearer_token/1]).
 -export([safe_parse_cookies/1]).
 -export([ticket_cookie_name/1]).
@@ -44,6 +52,30 @@ so the two cannot disagree about what an error URI is worth.
 %% =============================================================================
 %% API
 %% =============================================================================
+
+-doc """
+The request's peer as an `{IP, Port}` pair.
+
+Every HTTP consumer of the peer wants an IP address: it is logged, embedded in
+events, rendered by `inet_utils:peername_to_binary/1` and matched against
+`bondy_rbac_source` CIDRs. A connection over a Unix domain socket has no network
+peer — `inet:peername/1` answers `{local, <<>>}` for the accepting side
+(verified directly) — so it is represented as the loopback address, the same
+convention `bondy_wamp_tcp_connection_handler:peername/2` applies to a raw
+socket over the same transport.
+
+Reading `cowboy_req:peer/1` directly instead makes an HTTP listener bound to a
+Unix domain socket fail per request: `inet_utils:peername_to_binary/1` has no
+clause for `{local, <<>>}` and raises, which `bondy_admin_listener_SUITE`
+observes as a 500 on a route that exists.
+""".
+-spec peer(cowboy_req:req()) -> {inet:ip_address(), inet:port_number()}.
+
+peer(Req) ->
+    case cowboy_req:peer(Req) of
+        {local, _} -> {{127, 0, 0, 1}, 0};
+        {_IP, _Port} = Peer -> Peer
+    end.
 
 -doc """
 Returns the HTTP status code for an error.
@@ -240,18 +272,52 @@ validate_csrf(Req) ->
     end.
 
 -doc """
+Parses the request cookies under the listener's `max_cookies` limit.
+
+The single site that decides how many cookies a request may carry, so every
+handler that reads cookies applies the same listener's limit. Cowboy's protocol
+loop does not carry this option — cowlib takes it per call
+(`cow_cookie:parse_cookie/2`) — so it has to be supplied here rather than by
+configuring the listener's protocol options.
+
+`listeners.$name.http.max_cookies` is default-free, as every `listeners.$name.*`
+mapping must be. When the operator set nothing this calls
+`cowboy_req:parse_cookies/1`, which leaves cowlib to apply its own 100, rather
+than restating that number here where nothing would keep the copy in step.
+
+Raises like `cowboy_req:parse_cookies/1` does: `exit({request_error, _, _})`,
+which Cowboy answers with a 400 — including for a request over the limit, where
+the reason is `limit_reached`. Use `safe_parse_cookies/1` where a malformed
+cookie must not fail the request.
+""".
+-spec parse_cookies(Req :: cowboy_req:req()) -> [{binary(), binary()}].
+
+parse_cookies(#{ref := Ref} = Req) ->
+    case bondy_config:get([Ref, protocol_opts, max_cookies], undefined) of
+        undefined ->
+            cowboy_req:parse_cookies(Req);
+        Max ->
+            cowboy_req:parse_cookies(Req, #{max_cookies => Max})
+    end.
+
+-doc """
 Parses the request cookies, returning `[]` when the header is malformed.
 
 `cowboy_req:parse_cookies/1` raises on input as trivial as `Cookie: =x`, and
 `cowboy_req:parse_header/4` does not guard the parser. On an endpoint reachable
 before authentication that turns any unauthenticated request into a 500 plus a
 crash report, so callers there must use this instead.
+
+Goes through `parse_cookies/1`, so a request over the listener's `max_cookies`
+is treated the same way as a malformed one: no cookies, rather than a rejected
+request. On an endpoint that falls back to another credential that is the point
+of this function; where the request should be rejected, call `parse_cookies/1`.
 """.
 -spec safe_parse_cookies(Req :: cowboy_req:req()) -> [{binary(), binary()}].
 
 safe_parse_cookies(Req) ->
     try
-        cowboy_req:parse_cookies(Req)
+        parse_cookies(Req)
     catch
         _:_ ->
             []

@@ -87,13 +87,25 @@ init_per_testcase(_TC, Config) ->
 end_per_testcase(_TC, Config) ->
     CacheReg = proplists:get_value(cache_reg, Config),
     CacheSup = proplists:get_value(cache_sup, Config),
-    catch exit(CacheReg, shutdown),
-    catch exit(CacheSup, shutdown),
+    try
+        exit(CacheReg, shutdown)
+    catch
+        _:_ -> ok
+    end,
+    try
+        exit(CacheSup, shutdown)
+    catch
+        _:_ -> ok
+    end,
     timer:sleep(50),
     %% Clean up persistent_term keys
     lists:foreach(
         fun(Key) ->
-            catch persistent_term:erase(Key)
+            try
+                persistent_term:erase(Key)
+            catch
+                _:_ -> ok
+            end
         end,
         [
             {bondy_http_connector_mock_auth, result},

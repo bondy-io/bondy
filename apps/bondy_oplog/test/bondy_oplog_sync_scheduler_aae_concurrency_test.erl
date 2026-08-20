@@ -61,7 +61,9 @@ cleanup(Prev) ->
     %% whose segment has since gone missing makes any later run that
     %% reuses the path fail in recovery.
     _ = file:del_dir_r(
-        filename:join("/tmp/" ++ os:getpid(), "bondy_oplog_aae_concurrency_test")
+        filename:join(
+            "/tmp/" ++ os:getpid(), "bondy_oplog_aae_concurrency_test"
+        )
     ),
     ok.
 
@@ -130,7 +132,11 @@ fence_backer_bypasses_cap() ->
     Started = collect_started_for(Inst, 2000),
     %% Clean the fake entry we injected (its DOWN may or may not have been
     %% routed to the scheduler depending on ownership; delete defensively).
-    catch ets:delete(?INFLIGHT_TAB, Fake),
+    try
+        ets:delete(?INFLIGHT_TAB, Fake)
+    catch
+        _:_ -> ok
+    end,
     ?assert(Started),
     bondy_oplog:stop_instance(Inst),
     wait_until_total_inflight(0, 3000).
@@ -145,7 +151,9 @@ fence_backer_bypasses_cap() ->
 live_instance(Fence) ->
     Id = mk_id(),
     Dir = filename:join([
-        "/tmp/" ++ os:getpid(), "bondy_oplog_aae_concurrency_test", binary_to_list(Id)
+        "/tmp/" ++ os:getpid(),
+        "bondy_oplog_aae_concurrency_test",
+        binary_to_list(Id)
     ]),
     ok = filelib:ensure_path(Dir),
     Opts0 = #{storage_path => list_to_binary(Dir)},

@@ -237,8 +237,18 @@ run_scenario(Cfg) ->
     ok = bondy_mst:forget_swept(),
     %% The schedulers drive their own compaction/sync on live instances; this
     %% test drives both explicitly so the phases are deterministic.
-    _ = catch bondy_oplog_gc_scheduler:set_trigger(undefined),
-    _ = catch bondy_oplog_sync_scheduler:set_dispatch(undefined),
+    _ =
+        try
+            bondy_oplog_gc_scheduler:set_trigger(undefined)
+        catch
+            _:_ -> ok
+        end,
+    _ =
+        try
+            bondy_oplog_sync_scheduler:set_dispatch(undefined)
+        catch
+            _:_ -> ok
+        end,
 
     InstId = mk_id(),
     NS = ns_of(InstId),
@@ -290,7 +300,12 @@ run_scenario(Cfg) ->
 
     ok = bondy_oplog:stop_instance(InstId),
     close_shard(C, P),
-    _ = catch bondy_oplog_core_registry:unregister(NS, primary, 0),
+    _ =
+        try
+            bondy_oplog_core_registry:unregister(NS, primary, 0)
+        catch
+            _:_ -> ok
+        end,
 
     #{
         violations => Violations,
@@ -321,9 +336,13 @@ writer_loop(Ctl, InstId) ->
         false ->
             Key = key(),
             _ =
-                catch bondy_oplog:append(
-                    InstId, {cell_apply, ?B, Key, {set, seq(), Key}}
-                ),
+                try
+                    bondy_oplog:append(
+                        InstId, {cell_apply, ?B, Key, {set, seq(), Key}}
+                    )
+                catch
+                    _:_ -> ok
+                end,
             writer_loop(Ctl, InstId)
     end.
 
@@ -334,7 +353,12 @@ compactor(Ctl, InstId) ->
         true ->
             ok;
         false ->
-            _ = catch bondy_oplog_instance:compact(InstId, []),
+            _ =
+                try
+                    bondy_oplog_instance:compact(InstId, [])
+                catch
+                    _:_ -> ok
+                end,
             timer:sleep(25),
             compactor(Ctl, InstId)
     end.
@@ -380,8 +404,13 @@ inject_peer_pages(InstId, Cfg) ->
             lists:seq(1, 12)
         ),
         PeerRoot = bondy_mst:root(PeerT),
-        maps:get(pin, Cfg) andalso
-            (catch bondy_oplog_instance:pin_peer_root(InstId, PeerRoot)),
+        _ =
+            maps:get(pin, Cfg) andalso
+                try
+                    bondy_oplog_instance:pin_peer_root(InstId, PeerRoot)
+                catch
+                    _:_ -> ok
+                end,
         case bondy_oplog_registry:mst(InstId) of
             undefined ->
                 ok;
@@ -402,7 +431,11 @@ inject_peer_pages(InstId, Cfg) ->
                 ok
         end
     after
-        catch bondy_mst:destroy(PeerT0)
+        try
+            bondy_mst:destroy(PeerT0)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% The oracle. `diagnose_root` is exactly what was run by hand on the broken
@@ -416,7 +449,7 @@ watcher(Ctl, InstId, History) ->
             ok;
         false ->
             History1 =
-                case catch bondy_oplog_instance:diagnose_root(InstId) of
+                try bondy_oplog_instance:diagnose_root(InstId) of
                     #{servable := false, root := R} = D ->
                         %% Follow the violation rather than just counting it:
                         %% the hole heals between collections, and HOW it
@@ -446,6 +479,8 @@ watcher(Ctl, InstId, History) ->
                         [R | History];
                     _ ->
                         History
+                catch
+                    _:_ -> History
                 end,
             timer:sleep(5),
             watcher(Ctl, InstId, History1)
@@ -489,7 +524,7 @@ trace_heal(_InstId, _Root0, 0) ->
     #{healed => persisted};
 trace_heal(InstId, Root0, N) ->
     timer:sleep(10),
-    case catch bondy_oplog_instance:diagnose_root(InstId) of
+    try bondy_oplog_instance:diagnose_root(InstId) of
         #{servable := true, root := Root0} ->
             #{healed => pages_returned, after_samples => 20 - N + 1};
         #{servable := true, root := Other} ->
@@ -501,6 +536,8 @@ trace_heal(InstId, Root0, N) ->
             };
         _ ->
             trace_heal(InstId, Root0, N - 1)
+    catch
+        _:_ -> trace_heal(InstId, Root0, N - 1)
     end.
 
 %% Mass close: the phase both field occurrences ended in. Models the session
@@ -509,9 +546,13 @@ close_storm(InstId) ->
     lists:foreach(
         fun(K) ->
             _ =
-                catch bondy_oplog:append(
-                    InstId, {cell_apply, ?B, K, {clear, seq()}}
-                )
+                try
+                    bondy_oplog:append(
+                        InstId, {cell_apply, ?B, K, {clear, seq()}}
+                    )
+                catch
+                    _:_ -> ok
+                end
         end,
         [integer_to_binary(I) || I <- lists:seq(1, ?KEYSPACE)]
     ).
@@ -626,6 +667,14 @@ register_shard(NS) ->
     {Cache, Proj}.
 
 close_shard(Cache, Proj) ->
-    catch bondy_oplog_projection_ets:close(Proj),
-    catch bondy_oplog_cache_ets:close(Cache),
+    try
+        bondy_oplog_projection_ets:close(Proj)
+    catch
+        _:_ -> ok
+    end,
+    try
+        bondy_oplog_cache_ets:close(Cache)
+    catch
+        _:_ -> ok
+    end,
     ok.

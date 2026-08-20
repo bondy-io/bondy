@@ -54,11 +54,28 @@ setup() ->
     {Db, Table, Sup, Dir}.
 
 cleanup({Db, Table, Sup, Dir}) ->
-    _ = catch bondy_db:close_table(Table),
-    _ = catch bondy_db:close(Db),
+    _ =
+        try
+            bondy_db:close_table(Table)
+        catch
+            _:_ -> ok
+        end,
+    _ =
+        try
+            bondy_db:close(Db)
+        catch
+            _:_ -> ok
+        end,
     case is_process_alive(Sup) of
-        true -> _ = catch bondy_db_leveled_sup:stop(Sup);
-        false -> ok
+        true ->
+            _ =
+                try
+                    bondy_db_leveled_sup:stop(Sup)
+                catch
+                    _:_ -> ok
+                end;
+        false ->
+            ok
     end,
     rmrf(Dir),
     ok.
@@ -360,8 +377,18 @@ with_db(Fn) ->
     try
         Fn(Db)
     after
-        _ = catch bondy_db:close(Db),
-        _ = catch bondy_db_leveled_sup:stop(Sup),
+        _ =
+            try
+                bondy_db:close(Db)
+            catch
+                _:_ -> ok
+            end,
+        _ =
+            try
+                bondy_db_leveled_sup:stop(Sup)
+            catch
+                _:_ -> ok
+            end,
         rmrf(Dir)
     end.
 

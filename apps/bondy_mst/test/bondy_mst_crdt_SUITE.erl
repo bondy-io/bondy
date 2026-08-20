@@ -125,7 +125,11 @@ init_per_testcase(TestCase, Config) ->
 %% Called after each test case
 end_per_testcase(_TestCase, _Config) ->
     _ = [
-        catch gen_server:stop(Peer)
+        try
+            gen_server:stop(Peer)
+        catch
+            _:_ -> ok
+        end
      || Peer <- bondy_mst_test_crdt_server:peers()
     ],
     ok.

@@ -59,7 +59,9 @@ cleanup(_) ->
     %% whose segment has since gone missing makes any later run that
     %% reuses the path fail in recovery.
     _ = file:del_dir_r(
-        filename:join("/tmp/" ++ os:getpid(), "bondy_mst_scheduler_backoff_test")
+        filename:join(
+            "/tmp/" ++ os:getpid(), "bondy_mst_scheduler_backoff_test"
+        )
     ),
     ok.
 

@@ -174,9 +174,18 @@ open(CrdtMod, Dirs) ->
 %% oplog instance (they cache now-dead Bookie handles), then stop the
 %% leveled supervisor. The on-disk leveled/pack/WAL state survives.
 close(Db, Sup) ->
-    _ = catch bondy_db:close(Db),
+    _ =
+        try
+            bondy_db:close(Db)
+        catch
+            _:_ -> ok
+        end,
     _ = [
-        catch bondy_oplog:stop_instance(I)
+        try
+            bondy_oplog:stop_instance(I)
+        catch
+            _:_ -> ok
+        end
      || I <- bondy_oplog:list_instances()
     ],
     case is_process_alive(Sup) of
@@ -187,7 +196,11 @@ close(Db, Sup) ->
 
 stop_everything() ->
     _ = [
-        catch bondy_oplog:stop_instance(I)
+        try
+            bondy_oplog:stop_instance(I)
+        catch
+            _:_ -> ok
+        end
      || I <- bondy_oplog:list_instances()
     ],
     ok.

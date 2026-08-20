@@ -226,7 +226,12 @@ wait_gone(Node, Band, Key) ->
 %% on `Node`. Per-instance errors ({unconfirmed, _} etc.) count as zero —
 %% they are the oracle refusing, which is the behaviour under test.
 reclaim_once(Node) ->
-    _ = catch erpc:call(Node, bondy_oplog_sync_scheduler, trigger, []),
+    _ =
+        try
+            erpc:call(Node, bondy_oplog_sync_scheduler, trigger, [])
+        catch
+            _:_ -> ok
+        end,
     Results = erpc:call(Node, ?MODULE, do_reclaim_all, []),
     lists:sum([
         maps:get(discarded, Stats)
@@ -273,9 +278,13 @@ churn_round(Node, Round) ->
                 <<"c_", (integer_to_binary(Round))/binary, "_",
                     (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
             _ =
-                catch erpc:call(Node, ?MODULE, do_apply, [
-                    ?USERS_TABLE, Band, Key, nudge_val(Band)
-                ])
+                try
+                    erpc:call(Node, ?MODULE, do_apply, [
+                        ?USERS_TABLE, Band, Key, nudge_val(Band)
+                    ])
+                catch
+                    _:_ -> ok
+                end
         end,
         lists:seq(1, ?BANDS)
     ).
@@ -284,8 +293,18 @@ churn_round(Node, Round) ->
 sync_rounds(N1, N2, Rounds) ->
     lists:foreach(
         fun(_) ->
-            _ = catch erpc:call(N1, bondy_oplog_sync_scheduler, trigger, []),
-            _ = catch erpc:call(N2, bondy_oplog_sync_scheduler, trigger, []),
+            _ =
+                try
+                    erpc:call(N1, bondy_oplog_sync_scheduler, trigger, [])
+                catch
+                    _:_ -> ok
+                end,
+            _ =
+                try
+                    erpc:call(N2, bondy_oplog_sync_scheduler, trigger, [])
+                catch
+                    _:_ -> ok
+                end,
             timer:sleep(300)
         end,
         lists:seq(1, Rounds)
@@ -335,7 +354,12 @@ do_read(Table, Band, Key) ->
 %% @private
 do_reclaim_all() ->
     [
-        {I, catch bondy_oplog_instance:reclaim_stable_cells(I)}
+        {I,
+            try
+                bondy_oplog_instance:reclaim_stable_cells(I)
+            catch
+                C:R -> {'EXIT', {C, R}}
+            end}
      || I <- bondy_oplog:list_instances()
     ].
 

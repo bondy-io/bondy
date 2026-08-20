@@ -49,7 +49,11 @@ leave_all_peers() ->
     Self = partisan:node(),
     {ok, Members} = Manager:members_for_orchestration(),
     _ = [
-        catch partisan_peer_service:leave(Spec)
+        try
+            partisan_peer_service:leave(Spec)
+        catch
+            _:_ -> ok
+        end
      || #{name := Name} = Spec <- Members, Name =/= Self
     ],
     ok.
@@ -174,7 +178,11 @@ sync_survives_peer_node_failure() ->
         ?assertEqual(undefined, bondy_oplog:root_hash(Inst))
     after
         %% Already dead in the success path; harmless if so.
-        catch peer:stop(Peer)
+        try
+            peer:stop(Peer)
+        catch
+            _:_ -> ok
+        end
     end,
     %% A fresh peer with the same shape of data: a subsequent sync must
     %% still converge normally -- the failed round left nothing corrupted

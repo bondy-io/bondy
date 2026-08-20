@@ -19,6 +19,7 @@
 /.vscode/launch.json
 /erlang_ls.config
 _*
+!_plans/
 _build
 _rel
 app-deps.dot
@@ -33,6 +34,7 @@ log/index
 logs
 rebar3.crashdump
 relx
+tmp
 apps/*/doc/**
 examples/st
 examples/custom_config/etc/bondy.conf

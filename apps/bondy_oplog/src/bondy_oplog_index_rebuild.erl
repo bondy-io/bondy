@@ -247,7 +247,12 @@ reset_target_shard(Entry) ->
             %% Reset only THIS index shard's stream on the (possibly shared)
             %% writer — sibling indexes on the same writer keep their buffers.
             {NS, IName, _Shard} = bondy_oplog_core_registry:entry_key(Entry),
-            _ = catch bondy_oplog_secondary_writer:reset(Pid, {NS, IName});
+            _ =
+                try
+                    bondy_oplog_secondary_writer:reset(Pid, {NS, IName})
+                catch
+                    _:_ -> ok
+                end;
         _ ->
             ok
     end,
@@ -264,7 +269,12 @@ reset_target_shard(Entry) ->
     Scope = clear_scope(Entry),
     case erlang:function_exported(Adapter, clear, 2) of
         true ->
-            _ = catch Adapter:clear(Handle, Scope);
+            _ =
+                try
+                    Adapter:clear(Handle, Scope)
+                catch
+                    _:_ -> ok
+                end;
         false ->
             %% Without a clear, the re-fold still re-puts every live term;
             %% only orphaned terms (no longer yielded) would survive. Both
@@ -330,7 +340,12 @@ refold_primary(Entry) ->
 flush_writer(Entry) ->
     case bondy_oplog_core_registry:entry_writer_pid(Entry) of
         Pid when is_pid(Pid) ->
-            _ = catch bondy_oplog_secondary_writer:flush_sync(Pid),
+            _ =
+                try
+                    bondy_oplog_secondary_writer:flush_sync(Pid)
+                catch
+                    _:_ -> ok
+                end,
             ok;
         _ ->
             ok

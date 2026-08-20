@@ -65,26 +65,41 @@ wamp.call_timeout                           = 30s
 ## --- listeners: WebSocket only (WAMP-TCP/TLS disabled) ------------------------
 ## /ws for clients on 18080 (Fly edge terminates TLS -> cleartext WS internally).
 ## Admin API (18081) carries /metrics, /ping, /ready.
-admin_api.http.enabled                      = on
-admin_api.http.ip                           = 0.0.0.0
-admin_api.http.port                         = 18081
-api_gateway.http.enabled                    = on
-api_gateway.http.ip                         = 0.0.0.0
-api_gateway.http.port                       = 18080
-wamp.tcp.enabled                            = off
-admin_api.https.enabled                     = off
-api_gateway.https.enabled                   = off
-wamp.tls.enabled                            = off
+##
+## Declared under `listeners.*`. A listener that is not declared does not exist,
+## so WAMP-TCP/TLS and the HTTPS variants are absent rather than switched off.
+## `admin` is the reserved name for the administrable listener. Every option is
+## stated here because a listener's options are read under its CURRENT name.
+##
+## `http.idle_timeout` and `http.active_n` are restated because the legacy
+## mappings supplied them as schema defaults and Cowboy's own differ: 60s rather
+## than 15s, and `active_n` 1 rather than 100 (`cowboy_http.erl:214,336`).
+listeners.admin.transport                    = tcp
+listeners.admin.protocol                     = http
+listeners.admin.port                         = 18081
+listeners.admin.ip                           = 0.0.0.0
+listeners.admin.start_phase                  = early
+listeners.admin.services                     = admin_api, wamp_ws, admin, metrics
+listeners.admin.acceptors_pool_size          = 50
+listeners.admin.http.idle_timeout            = 15s
+listeners.admin.http.active_n                = 100
+
+listeners.api_gateway_http.transport                    = tcp
+listeners.api_gateway_http.protocol                     = http
+listeners.api_gateway_http.port                         = 18080
+listeners.api_gateway_http.ip                           = 0.0.0.0
+listeners.api_gateway_http.services                     = api_gateway, wamp_ws, wamp_sse, wamp_longpoll
+listeners.api_gateway_http.acceptors_pool_size          = 500
+listeners.api_gateway_http.max_connections              = 300000
+listeners.api_gateway_http.backlog                      = 8192
+listeners.api_gateway_http.nodelay                      = on
+listeners.api_gateway_http.http.idle_timeout            = 15s
+listeners.api_gateway_http.http.active_n                = 100
 wamp.websocket.idle_timeout                 = 8h
 
-## --- acceptor pools + connection limits (the /ws listener) --------------------
-## Sized for a much larger connection target than the perf-cluster profile:
-## raised max_connections/backlog/acceptors to match the fleet-scale target.
-api_gateway.http.acceptors_pool_size        = 500
-api_gateway.http.max_connections            = 300000
-api_gateway.http.backlog                    = 8192
-api_gateway.http.nodelay                    = on
-admin_api.http.acceptors_pool_size          = 50        ## metrics/health only, low traffic
+## The acceptor pools and connection limits are stated with each listener above:
+## sized for a much larger connection target than the perf-cluster profile, and
+## `admin` kept small since it carries metrics/health only.
 
 ## --- worker pools -------------------------------------------------------------
 ## Process pools multiplex over schedulers (= vCPUs), so size ~ to cores, NOT the

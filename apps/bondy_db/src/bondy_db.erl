@@ -3313,7 +3313,12 @@ maybe_stop_index_writer(WriterKey, WriterPid, Shard, Writers) ->
 flush_and_mark_clean(NS, Name, Shard, Writers) ->
     case maps:get(Shard, Writers, undefined) of
         Pid when is_pid(Pid) ->
-            _ = catch bondy_oplog_secondary_writer:flush_sync(Pid);
+            _ =
+                try
+                    bondy_oplog_secondary_writer:flush_sync(Pid)
+                catch
+                    _:_ -> ok
+                end;
         _ ->
             ok
     end,
@@ -3430,8 +3435,18 @@ cold_start_indexes(NS, InstanceIds, IndexMap) ->
 await_primary_shards(InstanceIds) ->
     maps:foreach(
         fun(_Shard, InstanceId) ->
-            _ = catch bondy_oplog:await_drain(InstanceId),
-            _ = catch bondy_oplog:await_apply(InstanceId)
+            _ =
+                try
+                    bondy_oplog:await_drain(InstanceId)
+                catch
+                    _:_ -> ok
+                end,
+            _ =
+                try
+                    bondy_oplog:await_apply(InstanceId)
+                catch
+                    _:_ -> ok
+                end
         end,
         InstanceIds
     ).
