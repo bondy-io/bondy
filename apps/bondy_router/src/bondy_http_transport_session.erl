@@ -553,19 +553,19 @@ handle_info({?BONDY_REQ, _Pid, _RealmUri, M}, State) ->
     try bondy_wamp_protocol:handle_outbound(M, ProtoState) of
         {ok, Bin, NewProtoState} ->
             S1 = State#state{protocol_state = NewProtoState},
-            S2 = forward_or_buffer(Bin, S1),
+            S2 = forward_or_buffer([Bin], S1),
             {noreply, S2};
         {stop, NewProtoState} ->
             S1 = State#state{protocol_state = NewProtoState},
             {stop, normal, S1};
         {stop, Bin, NewProtoState} ->
             S1 = State#state{protocol_state = NewProtoState},
-            _ = forward_or_buffer(Bin, S1),
+            _ = forward_or_buffer([Bin], S1),
             signal_sse_stop([Bin], S1),
             {stop, normal, S1};
         {stop, Bin, NewProtoState, _After} ->
             S1 = State#state{protocol_state = NewProtoState},
-            _ = forward_or_buffer(Bin, S1),
+            _ = forward_or_buffer([Bin], S1),
             signal_sse_stop([Bin], S1),
             {stop, normal, S1};
         {error, _Reason, NewProtoState} ->
