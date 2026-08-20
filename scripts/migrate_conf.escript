@@ -106,8 +106,18 @@ run(["check", ConfFile | Rest]) ->
 run(["migrate", ConfFile | Rest]) ->
     {Out, SchemaDirs} = parse_migrate_args(Rest),
     ok = locate_cuttlefish(),
-    ok = migrate(ConfFile, Out, SchemaDirs),
-    halt(?EXIT_CLEAN);
+    %% The findings are the OUTPUT's, so this answers "is the file I just wrote
+    %% deployable" rather than "did the rewrite run". It halted ?EXIT_CLEAN
+    %% unconditionally before, which made `migrate && deploy' green on a file
+    %% that aborts the boot -- the same conflation the header warns about for
+    %% `check', in the mode where it does more damage.
+    {KeyFindings, ListenerFindings} = migrate(ConfFile, Out, SchemaDirs),
+    halt(
+        case KeyFindings ++ ListenerFindings of
+            [] -> ?EXIT_CLEAN;
+            _ -> ?EXIT_FINDINGS
+        end
+    );
 run(["selftest" | Rest]) ->
     SchemaDirs = parse_schema_dirs(Rest),
     ok = locate_cuttlefish(),
@@ -235,9 +245,34 @@ mapping_for(Key, Schema) ->
 %% consulted ONLY for keys already proven unknown, which is what lets some of
 %% them be broad: a suffix rule on `.ping.interval' cannot disturb a live key,
 %% because a live key never reaches here.
+%% "Unknown" is the wrong test on its own inside a legacy listener block, because
+%% a FUZZY mapping from an unrelated family can match a dead key and make it look
+%% live. `bridge.listener.tls.certfile' is the case that exists: the release this
+%% file targets dropped its explicit mapping to
+%% `bondy_router.bridge_relay_tls.transport_opts.socket_opts.certfile'
+%% (`schema/bondy_bridge_relay.schema:1026' at `9b4f0a29^'), leaving only
+%% `bridge.$name.tls.certfile', which matches it with `$name = "listener"'. So
+%% cuttlefish does read the key -- as a bridge relay CLIENT named `listener',
+%% which is not a thing the operator configured -- while the `bridge_relay_tls'
+%% listener it was written for gets no TLS material at all.
+%%
+%% Filtering on `not is_known/2' alone therefore skipped the key before its rename
+%% rule could fire, and `tls_tails()' lists those tails under the bridge block's
+%% `tls' class precisely so they WOULD be renamed. A key inside a legacy block is
+%% dead by construction on this release -- that is what makes the block legacy --
+%% so the block membership is the authority there, not the mapping table.
+%%
+%% Scoped to `legacy_block_of/1' rather than applied generally: it answers with a
+%% listener name only for a key under one of the eight prefixes in
+%% `legacy_listeners/0', so a live key that merely shares a family head
+%% (`api_gateway.config_file', `wamp.broker.*') is untouched.
 classify(Conf, Schema) ->
-    Unknown = [{K, V} || {K, V} <- Conf, not is_known(K, Schema)],
-    [{K, V, verdict(K, V, Schema, Conf)} || {K, V} <- Unknown].
+    Candidates = [
+        {K, V}
+     || {K, V} <- Conf,
+        not is_known(K, Schema) orelse legacy_block_of(K) =/= undefined
+    ],
+    [{K, V, verdict(K, V, Schema, Conf)} || {K, V} <- Candidates].
 
 verdict(Key, Value, Schema, Conf) ->
     case match_rule(Key, rules()) of
@@ -473,6 +508,89 @@ legacy_listeners() ->
         {["bridge", "listener", "tcp"], "bridge_relay_tcp", [bridge]},
         {["bridge", "listener", "tls"], "bridge_relay_tls", [bridge, tls]}
     ].
+
+%% The identity a legacy block's listener needs on THIS release, keyed by the
+%% name `legacy_listeners/0' renames it to. `undefined' for any other name.
+%%
+%% Renaming keys moves a listener's SETTINGS; it does not declare the listener.
+%% `bondy_listener_config:resolve_one/3' takes `transport' and `protocol' from
+%% every inventory entry through `required/3', and `resolve_services/3' also
+%% requires a non-empty `services' when `protocol = http'. A file whose keys are
+%% all renamed and whose listeners are all undeclared therefore aborts the boot
+%% with `{invalid_listener, <name>, {missing, transport}}' -- MEASURED, by
+%% rendering a fully migrated file with `cuttlefish_generator:map/2' and calling
+%% `bondy_listener_config:resolve/2' on the inventory. Emitting identity is part
+%% of the migration for that reason, not a convenience on top of it.
+%%
+%% Every row is READ OFF the release these blocks belonged to, at `9b4f0a29^',
+%% rather than inferred from the block's name or its tail classes:
+%%
+%%   - `bondy_http_gateway.erl:102-105' defines the four HTTP listeners
+%%     (`api_gateway_http', `api_gateway_https', `admin_api_http',
+%%     `admin_api_https'), which is where the `https' rows' `tls' comes from.
+%%   - `:945-946' hands `base_routes()' to BOTH the `http' and the `https'
+%%     listener, and `:554' hands `admin_base_routes()' to both admin listeners,
+%%     so each twin pair served an IDENTICAL route set and so takes an identical
+%%     `services' list. That is the fact that makes the `https' rows derivable
+%%     at all.
+%%   - `base_routes/0:995' mounts `/ws', `/wamp/sse/*' and `/wamp/longpoll/*' --
+%%     `wamp_ws', `wamp_sse', `wamp_longpoll' -- beside the API Gateway
+%%     specifications themselves, which is `api_gateway'.
+%%   - `admin_base_routes/0:1023' mounts `/ws', `/ping', `/ready',
+%%     `/cluster/topology' and `/metrics/[:registry]' -- `wamp_ws', `admin' and
+%%     `metrics' -- beside the built-in Admin API specification, which is
+%%     `admin_api'.
+%%
+%% The two `services' lists come out equal to `default_inventory/0''s `admin' and
+%% `api_gateway_http' entries. That agreement is a CHECK on the reading above,
+%% not its source: the default inventory describes a fresh node, and a migrated
+%% file must reproduce what the operator's own listeners served.
+%%
+%% A raw-socket or bridge-relay listener takes no `services' at all:
+%% `resolve_services/3' rejects the key outright for a non-HTTP protocol, so
+%% emitting one would turn a bootable file into `{services_not_supported, _}'.
+legacy_identity("admin") ->
+    %% `start_phase' is emitted only for `admin', and only because declaring it
+    %% LOSES it otherwise. `bondy_listener_manager:with_reserved/1' injects the
+    %% reserved spec -- which carries `start_phase => early' -- only for a name
+    %% the operator did not write, and `resolve_one/3' defaults an operator's own
+    %% entry to `normal'. Renaming `admin_api.http.*' onto `listeners.admin.*'
+    %% makes `admin' operator-written, so without this line a migrated node stops
+    %% answering `/ping' and `/ready' until every other listener is up.
+    [
+        {"transport", "tcp"},
+        {"protocol", "http"},
+        {"services", "admin_api, wamp_ws, admin, metrics"},
+        {"start_phase", "early"}
+    ];
+legacy_identity("admin_api_https") ->
+    [
+        {"transport", "tls"},
+        {"protocol", "http"},
+        {"services", "admin_api, wamp_ws, admin, metrics"}
+    ];
+legacy_identity("api_gateway_http") ->
+    [
+        {"transport", "tcp"},
+        {"protocol", "http"},
+        {"services", "api_gateway, wamp_ws, wamp_sse, wamp_longpoll"}
+    ];
+legacy_identity("api_gateway_https") ->
+    [
+        {"transport", "tls"},
+        {"protocol", "http"},
+        {"services", "api_gateway, wamp_ws, wamp_sse, wamp_longpoll"}
+    ];
+legacy_identity("wamp_tcp") ->
+    [{"transport", "tcp"}, {"protocol", "wamp_rawsocket"}];
+legacy_identity("wamp_tls") ->
+    [{"transport", "tls"}, {"protocol", "wamp_rawsocket"}];
+legacy_identity("bridge_relay_tcp") ->
+    [{"transport", "tcp"}, {"protocol", "bridge_relay"}];
+legacy_identity("bridge_relay_tls") ->
+    [{"transport", "tls"}, {"protocol", "bridge_relay"}];
+legacy_identity(_) ->
+    undefined.
 
 %% Cowboy protocol options. Under an HTTP block these move to
 %% `listeners.<name>.http.<tail>', which is where the schema routes
@@ -1036,12 +1154,31 @@ listener_analysis(Conf, _Schema) ->
             %% A declared listener that carries options but not its identity is
             %% the other half of the same hazard, and the one a key-by-key rename
             %% produces on its own: the file looks migrated and the node refuses
-            %% to boot. Reserved names are exempt -- the manager supplies the
-            %% whole spec for those, so an operator need not write any of it.
+            %% to boot.
+            %%
+            %% Only the INTERNAL reserved names are exempt, not every reserved
+            %% name. `bondy_listener_manager:with_reserved/1' injects a reserved
+            %% spec only for a name the operator did NOT write -- it guards on
+            %% `lists:keymember/3' -- so a file declaring any `listeners.admin.*'
+            %% option puts `admin' into the inventory as an operator entry, and
+            %% `resolve_one/3' then requires its identity like any other entry.
+            %% Exempting every reserved name reported 7 incomplete listeners for
+            %% a migrated file whose actual first boot failure was
+            %% `{invalid_listener,admin,{missing,transport}}': MEASURED by
+            %% rendering the inventory with `cuttlefish_generator:map/2' and
+            %% calling `bondy_listener_config:resolve/2' on the result.
+            %%
+            %% `admin_local' stays exempt for a different reason: an operator may
+            %% not declare it at all, so `assert_reserved/2' refuses the name
+            %% outright and "missing identity" would be the wrong diagnosis.
+            %% Derived as the reserved names the default inventory does not name,
+            %% rather than restated here, because `?RESERVED_INTERNAL' is not
+            %% exported.
+            Internal = Reserved -- Default,
             Incomplete = [
                 {Name, Missing}
              || Name <- Declared,
-                not lists:member(Name, Reserved),
+                not lists:member(Name, Internal),
                 Missing <- [missing_identity(Name, Conf)],
                 Missing =/= []
             ],
@@ -1254,8 +1391,16 @@ report_lost(Lost) ->
 %% starts applying -- that is the point -- but every other verdict is commented
 %% out with its reason inline. Commenting out an unknown key changes nothing at
 %% runtime, because cuttlefish was already discarding it; it only makes the
-%% discard visible. That also gives the round-trip property: check mode reports
-%% the output clean.
+%% discard visible.
+%%
+%% WHAT IT DOES DO BEYOND RENAMING: it declares each listener whose legacy block
+%% it renamed, by emitting the `transport', `protocol' and (for HTTP) `services'
+%% keys from `legacy_identity/1'. This is not an exception to the paragraph above
+%% -- those listeners were RUNNING on the release the file came from, and a
+%% rename alone would leave them declared-but-unbootable, which is a state the
+%% input was never in. Without it the output aborts the boot; with it the two
+%% together give the round-trip property: check mode reports the output clean,
+%% for keys AND for listeners.
 migrate(ConfFile, Out, SchemaDirs0) ->
     Out =/= ConfFile orelse throw({fail,
         "--out must differ from the input; this tool never rewrites in place",
@@ -1270,27 +1415,58 @@ migrate(ConfFile, Out, SchemaDirs0) ->
 
     {ok, Bin} = file:read_file(ConfFile),
     {Lines, Eol} = split_lines(binary_to_list(Bin)),
-    {NewLines0, Actions} = lists:mapfoldl(
-        fun(Line, Acc) ->
+    {NewLines0, {Actions, Undeclared}} = lists:mapfoldl(
+        fun(Line, {Acc, Todo}) ->
             case migrate_line(Line, Verdicts) of
-                unchanged -> {[Line], Acc};
-                {changed, New, Action} -> {New, [Action | Acc]}
+                unchanged ->
+                    %% An anchor even though the line itself does not change: a
+                    %% file already written against `listeners.*' but missing an
+                    %% identity needs the block too, and its lines are all
+                    %% `unchanged'.
+                    {Emitted, Todo1} = identity_before(Line, Verdicts, Todo),
+                    {Emitted ++ [Line], {acted(Emitted, Acc), Todo1}};
+                {changed, New, Action} ->
+                    {Emitted, Todo1} = identity_before(Line, Verdicts, Todo),
+                    {Emitted ++ New,
+                        {[Action | acted(Emitted, Acc)], Todo1}}
             end
         end,
-        [],
+        {[], pending_identity(Conf)},
         Lines
     ),
+    %% Anchored emission covers every listener the file mentions, so anything
+    %% left here would be a listener with an identity to write and no line to
+    %% write it against -- which `pending_identity/1' cannot produce, since it
+    %% only names listeners derived from keys the file contains. Asserted rather
+    %% than assumed: silently dropping an identity is the exact failure this
+    %% change exists to remove.
+    #{} = Undeclared,
+    map_size(Undeclared) == 0 orelse
+        throw({fail, "internal: no anchor for listener identity: ~s",
+            [string:join(maps:keys(Undeclared), ", ")]}),
     ok = file:write_file(Out, string:join(lists:append(NewLines0), Eol)),
     migrate_report(ConfFile, Out, length(Conf), lists:reverse(Actions)),
-    %% Reported here too, and not only by check mode: migrate deliberately
-    %% touches none of the three, so an operator who only ever runs migrate
-    %% would otherwise see a clean summary and never learn that listeners are
-    %% being dropped, that an advanced.config stanza is inert, or that a key it
-    %% copied through unchanged now means something else.
+    %% Reported here too, and not only by check mode: an operator who only ever
+    %% runs migrate would otherwise see a clean summary and never learn that an
+    %% advanced.config stanza is inert, that a key copied through unchanged now
+    %% means something else, or that a listener still will not start.
     ok = report_reinterpreted(reinterpretations(Conf)),
-    ok = listener_report(listener_analysis(Conf, Schema)),
-    _ = advanced_check(sibling_advanced_config(ConfFile)),
-    ok.
+
+    %% Everything below describes the OUTPUT, not the input. Reporting the
+    %% input's listeners was actively misleading once migrate began declaring
+    %% them: it printed "this file writes no listeners.* key" and named five
+    %% GONE listeners for a run that had just declared all eight. What an
+    %% operator needs from `migrate' is what the file they are about to deploy
+    %% will do, and the only way to answer that without a second implementation
+    %% is to read the file back.
+    OutConf = read_conf(Out),
+    Listeners = listener_analysis(OutConf, Schema),
+    ok = listener_report(Listeners),
+    Advanced = advanced_check(sibling_advanced_config(ConfFile)),
+    KeyFindings = classify(OutConf, Schema),
+    ListenerFindings = listener_findings(Listeners) ++ Advanced,
+    ok = verdict_line(KeyFindings, ListenerFindings, reinterpretations(OutConf)),
+    {KeyFindings, ListenerFindings}.
 
 %% Keeps the file's own line ending and whether it ended with a newline, so a
 %% migration of an unchanged region is byte-identical.
@@ -1317,6 +1493,109 @@ migrate_line(Line, Verdicts) ->
                         {disabled, Key, Verdict}}
             end
     end.
+
+%% The identity each listener still needs, keyed by name. A listener is in here
+%% only if this file will end up declaring it AND `legacy_identity/1' knows what
+%% it is AND the file does not already say so itself.
+%%
+%% Both sources are consulted. `legacy_blocks/1' names the listeners this
+%% migration is about to create by renaming; `declared_listeners/1' names those a
+%% file already written against `listeners.*' declares, which catches a file
+%% migrated by hand or by an older run of this tool. A name in neither table --
+%% an operator's own listener under a name of their choosing -- is deliberately
+%% absent: nothing here knows what it carries, so `check' reports it and the
+%% caller sees a non-zero exit rather than a guess written into their file.
+%%
+%% Per-KEY rather than per-listener, so a half-declared block is completed
+%% instead of duplicated: an operator who wrote `transport' by hand but no
+%% `protocol' gets only the `protocol' line.
+pending_identity(Conf) ->
+    Names = lists:usort(
+        [N || {N, _} <- legacy_blocks(Conf)] ++ declared_listeners(Conf)
+    ),
+    maps:from_list([
+        {Name, Missing}
+     || Name <- Names,
+        Identity <- [legacy_identity(Name)],
+        Identity =/= undefined,
+        Missing <- [[KV || {K, _} = KV <- Identity, not conf_has(Name, K, Conf)]],
+        Missing =/= []
+    ]).
+
+%% The identity lines to emit immediately above `Line', if this is the first line
+%% belonging to a listener that still needs one.
+%%
+%% "Belonging to" is decided the same way for both anchor shapes: the key's
+%% destination after `Verdicts' is applied. A legacy key that renames into
+%% `listeners.<name>.*' and a key already written as `listeners.<name>.*' both
+%% resolve to the same name, so one clause handles both and neither can emit
+%% twice -- the name is removed from `Todo' on the first hit.
+identity_before(Line, Verdicts, Todo) when map_size(Todo) > 0 ->
+    case destination_listener(Line, Verdicts) of
+        undefined ->
+            {[], Todo};
+        Name ->
+            case maps:take(Name, Todo) of
+                error ->
+                    {[], Todo};
+                {Identity, Todo1} ->
+                    {identity_lines(Name, Identity), Todo1}
+            end
+    end;
+identity_before(_Line, _Verdicts, Todo) ->
+    {[], Todo}.
+
+%% @private
+%% Which listener a line's setting ends up under, or `undefined' for a line that
+%% is not a setting, is not renamed into a listener block and is not already in
+%% one. A commented-out verdict returns `undefined' deliberately: a dropped key
+%% is not a reason to declare anything.
+destination_listener(Line, Verdicts) ->
+    case split_setting(Line) of
+        not_a_setting ->
+            undefined;
+        {_Indent, Key, _Tail} ->
+            case maps:find(Key, Verdicts) of
+                {ok, {rename, ["listeners", Name | _]}} -> Name;
+                {ok, _} -> undefined;
+                error ->
+                    case Key of
+                        ["listeners", Name | _] -> Name;
+                        _ -> undefined
+                    end
+            end
+    end.
+
+%% @private
+%% Written with the reason inline, because an operator reading the migrated file
+%% finds keys here that they never wrote and the diff does not say why.
+identity_lines(Name, Identity) ->
+    [
+        "## migrate_conf: " ++ L
+     || L <-
+            wrapped(
+                "declares the `" ++ Name ++ "' listener. Renaming its keys moves"
+                " the settings; `bondy_listener_config:resolve_one/3' also needs"
+                " the listener's identity, and aborts the boot without it.",
+                74
+            )
+    ] ++ [key_text(["listeners", Name, K]) ++ " = " ++ V || {K, V} <- Identity].
+
+%% @private
+%% One `declared' action per emitted block, so `migrate_report/4' can name what it
+%% wrote. Takes the emitted lines rather than the name so the caller cannot record
+%% a block it did not emit.
+acted([], Acc) ->
+    Acc;
+acted(Lines, Acc) ->
+    [{declared, declared_name_of(Lines)} | Acc].
+
+%% @private
+declared_name_of(Lines) ->
+    %% The first non-comment line is `listeners.<name>.<key> = <value>'.
+    [Setting | _] = [L || L <- Lines, not lists:prefix("##", L)],
+    {_Indent, ["listeners", Name | _], _Tail} = split_setting(Setting),
+    Name.
 
 %% A key that cannot be renamed is commented out, with the reason wrapped into
 %% comment lines directly above it, so the operator can see what was set, what
@@ -1441,7 +1720,11 @@ migrate_report(ConfFile, Out, Total, Actions) ->
     %% did not add up.
     Renamed = dedup_actions([A || {renamed, _, _} = A <- Actions]),
     Disabled = dedup_actions([A || {disabled, _, _} = A <- Actions]),
-    Lines = length(Actions),
+    Declared = [N || {declared, N} <- Actions],
+    %% `declared' actions are excluded from the line arithmetic: they ADD lines
+    %% rather than rewriting one, so counting them made "lines rewritten" exceed
+    %% the number of lines that changed and reported phantom duplicate keys.
+    Lines = length(Actions) - length(Declared),
     Keys = length(Renamed) + length(Disabled),
     out("migrated ~s -> ~s", [ConfFile, Out]),
     out("  ~p keys read, ~p renamed, ~p commented out, ~p left as they were",
@@ -1468,6 +1751,18 @@ migrate_report(ConfFile, Out, Total, Actions) ->
                 out("    ~s", [key_str(K)]),
                 wrap("        ", reason(V))
              end || {disabled, K, V} <- Disabled]
+    end,
+    case Declared of
+        [] -> ok;
+        _ ->
+            out("", []),
+            out("  DECLARED -- keys ADDED, which no other verdict does. Each of", []),
+            out("  these listeners ran on the release this file came from, and", []),
+            out("  a rename alone would leave it declared but unbootable:", []),
+            [out("    ~s ~s", [pad(N, 24),
+                string:join([K ++ " = " ++ V || {K, V} <- legacy_identity(N)],
+                    ", ")])
+             || N <- Declared]
     end.
 
 %% =============================================================================
@@ -1631,8 +1926,19 @@ tmp_dir() ->
 %% was LIVE when the first audit ran, so it was correctly not counted then. This
 %% number rises as mappings are retired and falls only if one comes back -- the
 %% corpus is read from a fixed git ref and cannot drift.
+%%
+%% 91, not 86, since `classify/2' stopped treating a legacy-block key as live
+%% merely because a fuzzy mapping from another family matches it. The five are
+%% `bridge.listener.tls.' + `cacertfile', `certfile', `keyfile', `verify' and
+%% `versions': each has a `bridge.$name.tls.<same>' counterpart that matches with
+%% `$name = "listener"', so each looked live while naming a bridge relay CLIENT
+%% the operator never configured. They are the whole of the difference --
+%% MEASURED by running both filters over a file holding all eight
+%% `bridge.listener.tls.*' spellings, where the other three (`idle_timeout',
+%% `ping', `max_frame_size') have no `bridge.$name.' counterpart at that depth
+%% and were already classified.
 -define(DIRTY_REF, "8dd090bf^").
--define(DIRTY_EXPECTED, 86).
+-define(DIRTY_EXPECTED, 91).
 
 selftest(SchemaDirs0) ->
     SchemaDirs = resolve_schema_dirs(SchemaDirs0),
@@ -1645,6 +1951,7 @@ selftest(SchemaDirs0) ->
         selftest_dirty(Schema),
         selftest_noop(SchemaDirs),
         selftest_roundtrip(SchemaDirs),
+        selftest_synthesis(SchemaDirs),
         selftest_listeners(Schema),
         selftest_reinterpreted(Schema)
     ],
@@ -1931,7 +2238,7 @@ migrate_to_temp(File, SchemaDirs) ->
         "migrate_conf_noop_" ++ os:getpid() ++ "_" ++ safe_name(File)),
     file:delete(Out),
     try
-        ok = quietly(fun() -> migrate(File, Out, SchemaDirs) end),
+        _ = quietly(fun() -> migrate(File, Out, SchemaDirs) end),
         {ok, A} = file:read_file(File),
         {ok, B} = file:read_file(Out),
         case A == B of
@@ -1976,6 +2283,145 @@ selftest_roundtrip(SchemaDirs) ->
             end
     end.
 
+%% The round trip above is NECESSARY but not SUFFICIENT, and this covers the
+%% difference. Every file in both corpora already writes its own
+%% `listeners.<name>.transport' -- they were converted when the listener rework
+%% landed -- so not one of them needs `migrate' to synthesise anything. MEASURED:
+%% with `pending_identity/1' stubbed to `#{}', disabling synthesis outright, the
+%% whole selftest still passed. A gate that a total removal of the mechanism does
+%% not trip is not guarding it.
+%%
+%% So the input here is built rather than read: one legacy block per row of
+%% `legacy_listeners/0', a port apiece, and NO `listeners.*' key anywhere -- the
+%% shape a file has when it is migrated from a release older than the rework,
+%% which is the only shape that needs synthesis and the one no corpus file has.
+%%
+%% Asserting `clean' alone would still pass if migrate declared the listeners
+%% with the wrong identity, so the emitted keys are compared against
+%% `legacy_identity/1' as well.
+selftest_synthesis(SchemaDirs) ->
+    Base = filename:join(tmp_dir(), "migrate_conf_syn_" ++ os:getpid()),
+    In = Base ++ ".in",
+    Out = Base ++ ".out",
+    Blocks = legacy_listeners(),
+    Body = string:join(
+        lists:append([
+            [key_str(Prefix ++ ["port"]) ++ " = " ++ integer_to_list(P)]
+         || {{Prefix, _, _}, P} <- lists:zip(
+                Blocks, lists:seq(19001, 19000 + length(Blocks)))
+        ]),
+        "\n"
+    ) ++ "\n",
+    ok = file:write_file(In, Body),
+    file:delete(Out),
+    try
+        _ = quietly(fun() -> migrate(In, Out, SchemaDirs) end),
+        OutConf = read_conf(Out),
+        Verdict = quietly(fun() -> check(Out, SchemaDirs) end),
+        Wrong = lists:append([
+            [
+                {Name, K, V}
+             || {K, V} <- Expected,
+                conf_value_of(Name, K, OutConf) =/= V
+            ]
+         || {Name, Expected} <- identity_oracle()
+        ]),
+        case {Verdict, Wrong} of
+            {{[], []}, []} ->
+                out("  synthesis: ~p legacy blocks with no listeners.* key,"
+                    " all declared and re-check clean  OK", [length(Blocks)]),
+                ok;
+            {{K, L}, _} when K =/= []; L =/= [] ->
+                err("  synthesis: migrated output is not clean:", []),
+                [err("      ~s", [key_str(Key)]) || {Key, _, _} <- K],
+                [err("      ~s", [key_str(listener_finding_key(F))]) || F <- L],
+                failed;
+            _ ->
+                err("  synthesis: identity emitted does not match"
+                    " default_inventory/0:", []),
+                [err("      listeners.~s.~s: expected ~s, got ~p",
+                    [N, K, V, conf_value_of(N, K, OutConf)])
+                 || {N, K, V} <- Wrong],
+                failed
+        end
+    after
+        file:delete(In),
+        file:delete(Out)
+    end.
+
+%% @private
+%% What the emitted identity must equal, derived from a source OTHER than
+%% `legacy_identity/1'. Comparing the output against that table is a tautology --
+%% it is the table that produced the output -- and measurably so: a mutant that
+%% declared `admin' as `tls' passed a check written that way.
+%%
+%% `bondy_listener_config:default_inventory/0' is the independent source for
+%% three rows, being the product's own statement of what those listeners are. The
+%% other rows follow from ONE stated fact about the release the blocks come from:
+%% a `https'/`tls' block was the same listener as its plaintext twin on a TLS
+%% socket -- `bondy_http_gateway.erl:945-946' hands both the same routes -- so a
+%% twin differs from its counterpart in `transport' and in nothing else.
+%%
+%% WHAT THIS DOES NOT COVER: `bridge_relay_tcp' and `bridge_relay_tls'. Neither
+%% appears in the default inventory and neither has a plaintext twin there, so
+%% there is no second source to check them against and they are absent here
+%% rather than checked against themselves. Their `protocol' is still exercised by
+%% the clean re-check beside this one -- `bridge_relay' is what makes
+%% `resolve_one/3' accept a bridge block at all -- but their values are not
+%% independently confirmed.
+identity_oracle() ->
+    case locate_bondy_router() of
+        unavailable ->
+            [];
+        ok ->
+            Inv = bondy_listener_config:default_inventory(),
+            Of = fun(Name) ->
+                {_, Spec} = lists:keyfind(list_to_atom(Name), 1, Inv),
+                Spec
+            end,
+            Plain = fun(Name) ->
+                Spec = Of(Name),
+                [
+                    {"transport", atom_to_list(maps:get(transport, Spec))},
+                    {"protocol", atom_to_list(maps:get(protocol, Spec))}
+                ] ++ services_of(Spec)
+            end,
+            %% A twin is its counterpart with `transport' replaced.
+            Twin = fun(Name) ->
+                lists:keyreplace("transport", 1, Plain(Name),
+                    {"transport", "tls"})
+            end,
+            [
+                {"admin", Plain("admin")},
+                {"api_gateway_http", Plain("api_gateway_http")},
+                {"wamp_tcp", Plain("wamp_tcp")},
+                {"admin_api_https", Twin("admin")},
+                {"api_gateway_https", Twin("api_gateway_http")},
+                {"wamp_tls", Twin("wamp_tcp")}
+            ]
+    end.
+
+%% @private
+%% Rendered the way an operator writes it, which is how it comes back out of
+%% `read_conf/1': `Split' in the translation tokenises on "," and trims.
+services_of(Spec) ->
+    case maps:get(services, Spec, []) of
+        [] -> [];
+        Ss -> [{"services", string:join([atom_to_list(S) || S <- Ss], ", ")}]
+    end.
+
+%% @private
+%% A listener finding rendered as a key path, so the round-trip failure report
+%% prints it with `key_str/1' beside the key findings instead of needing a second
+%% formatter. The three shapes are the three `listener_findings/1' and
+%% `advanced_report/3' produce.
+listener_finding_key({dropped, Name}) ->
+    ["listeners", Name, "<undeclared>"];
+listener_finding_key({incomplete, Name, Key}) ->
+    ["listeners", Name, atom_to_list(Key)];
+listener_finding_key({inert_stanza, App}) ->
+    ["advanced.config", atom_to_list(App)].
+
 roundtrip(Name, Body, SchemaDirs) ->
     Base = filename:join(tmp_dir(),
         "migrate_conf_rt_" ++ os:getpid() ++ "_" ++ safe_name(Name)),
@@ -1984,13 +2430,23 @@ roundtrip(Name, Body, SchemaDirs) ->
     ok = file:write_file(In, Body),
     file:delete(Out),
     try
-        ok = quietly(fun() -> migrate(In, Out, SchemaDirs) end),
-        %% Only the KEY findings: migrate deliberately does not synthesise
-        %% listener blocks (see migrate/3), so a half-migrated input still has
-        %% listener findings afterwards and that is the intended outcome.
-        case quietly(fun() -> element(1, check(Out, SchemaDirs)) end) of
-            [] -> clean;
-            Findings -> {dirty, [K || {K, _, _} <- Findings]}
+        _ = quietly(fun() -> migrate(In, Out, SchemaDirs) end),
+        %% BOTH halves of the verdict. This took `element(1, ...)' -- key
+        %% findings only -- on the premise that migrate does not synthesise
+        %% listener blocks, so listener findings after a migration were "the
+        %% intended outcome". That premise made the gate vacuous for exactly the
+        %% defect it should have caught: a migrated file that renames every key
+        %% and boots on none of its listeners passed, because the only evidence
+        %% of it was in the half being discarded. migrate now declares what it
+        %% renames, so the honest gate is the whole verdict -- and if a future
+        %% change stops it declaring, this fails instead of shrugging.
+        case quietly(fun() -> check(Out, SchemaDirs) end) of
+            {[], []} ->
+                clean;
+            {KeyFindings, ListenerFindings} ->
+                {dirty,
+                    [K || {K, _, _} <- KeyFindings] ++
+                        [listener_finding_key(F) || F <- ListenerFindings]}
         end
     after
         file:delete(In),
@@ -2015,14 +2471,27 @@ quietly(Fun) ->
 %% deployment and harness templates are real operator-facing files and were the
 %% last ones still on legacy listener keys, so leaving them out of the corpus is
 %% what let that go unnoticed.
+%% `examples/*/etc/bondy.conf' matched the file the example GENERATES, which is
+%% untracked, while `examples/*/etc/bondy.conf.template' -- the tracked file a
+%% change would actually be made to -- was checked by nothing. Both are globbed
+%% now: the template because it is the source, the generated file because
+%% checking it costs nothing when it is present and says the rendering still
+%% agrees.
+%%
+%% `config/test/bondy.conf' is here for a plainer reason: the dirty corpus reads
+%% it at `?DIRTY_REF' -- it is one of that ref's seven -- so the clean corpus not
+%% reading it at HEAD meant one file was asserted to be dirty before the cleanup
+%% and nothing at all after it.
 shipped_conf_files() ->
     lists:usort(
         filelib:wildcard("config/*/bondy.conf.template") ++
         filelib:wildcard("config/test/*_bondy.conf.template") ++
+        filelib:wildcard("config/test/bondy.conf") ++
         filelib:wildcard("config/bondy.conf.defaults") ++
         filelib:wildcard("deployment/*/config/bondy.conf.template") ++
         filelib:wildcard("harness/*/config/bondy.conf.template") ++
-        filelib:wildcard("examples/*/etc/bondy.conf")
+        filelib:wildcard("examples/*/etc/bondy.conf") ++
+        filelib:wildcard("examples/*/etc/bondy.conf.template")
     ).
 
 %% The pre-cleanup versions of the shipped files, read out of git rather than
