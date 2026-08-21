@@ -64,13 +64,26 @@ MACHINES=$(fly machines list --app "$APP" --json \
     | jq -r '.[]|select(.state=="started")|.id')
 [ -n "$MACHINES" ] || { echo "no started machines in $APP" >&2; exit 2; }
 
+# id -> private_ip, resolved ONCE (this script samples in a loop; one API call
+# per sample per machine would dominate the sampling interval).
+#
+# Each `bondy eval` below is prefixed with the machine's own
+# BONDY_ERL_NODENAME because relx rewrites the shared releases/<vsn>/vm.args on
+# every `bondy` subcommand, using the invoking shell's environment. Unprefixed,
+# the SSH session supplies the Dockerfile default and the rewrite bakes
+# bondy@127.0.0.1 into the file, which the node boots under on its next
+# restart. See check-tripwires.sh for the full note.
+MACHINE_IPS=$(fly machines list --app "$APP" --json \
+    | jq -r '.[]|select(.state=="started")|"\(.id) \(.private_ip)"')
+ip_of() { printf '%s\n' "$MACHINE_IPS" | awk -v m="$1" '$1==m{print $2}'; }
+
 printf 'ts\tmachine\tdropped_total\tbusy\trun_queue\tsessions\n'
 
 for _ in $(seq 1 "$SAMPLES"); do
     TS=$(date -u +%H:%M:%S)
     for M in $MACHINES; do
         RAW=$(fly ssh console --app "$APP" --machine "$M" \
-                --command "/bondy/bin/bondy eval $(printf '%s' "$READ" | tr -d '\n')" \
+                --command "env BONDY_ERL_NODENAME=bondy@$(ip_of "$M") /bondy/bin/bondy eval $(printf '%s' "$READ" | tr -d '\n')" \
                 2>/dev/null \
               | tr -d ' \r' | grep -oE '\{-?[0-9]+,-?[0-9]+,-?[0-9]+,-?[0-9]+\}' | tail -1)
         if [ -z "$RAW" ]; then

@@ -24,6 +24,15 @@ cluster.automatic_leave                     = off
 cluster.tls.allow_insecure                  = on
 cluster.peer_ip                             = ${FLY_PRIVATE_IP}
 cluster.peer_port                           = 18086
+## Disterl (kept ON for `bondy remote_console` / `eval`; Partisan does NOT use
+## it for peer traffic -- see connect_disterl=false). This MUST match
+## ERL_DIST_PORT in fly.toml: the shell variable is what relx turns into the
+## VM's `-erl_epmd_port`, while this key is what the schema emits as
+## `-env ERL_DIST_PORT` into vm.generated.args. Left unset they disagree --
+## the schema default is 27780, so the beam ran with `-erl_epmd_port 27784`
+## while its own environment claimed 27780 (observed 2026-08-21; nothing in
+## Bondy reads the variable, so it misleads a debugger rather than breaking).
+vm.distribution.port                        = 27784
 cluster.peer_discovery.enabled              = on
 cluster.peer_discovery.type                 = dns
 cluster.peer_discovery.initial_delay        = 10s

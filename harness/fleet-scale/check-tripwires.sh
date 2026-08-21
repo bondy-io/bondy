@@ -64,21 +64,71 @@ MACHINES=$(fly machines list --app "$APP" --json \
     | jq -r '.[]|select(.state=="started")|.id')
 [ -n "$MACHINES" ] || { red "no started machines in $APP"; exit 2; }
 
+# --- readiness gate --------------------------------------------------------
+# Wait until each node actually answers before probing it for real.
+#
+# Why this matters: relx's generated `bin/bondy` runs `check_replace_os_vars
+# vm.args` at the TOP of the script -- above the case statement, so for EVERY
+# subcommand including `eval`, and even when that subcommand then fails --
+# rewriting the shared releases/<vsn>/vm.args from the invoking shell's
+# environment. The booting VM does not consume `-name` at that moment; it
+# `exec`s later with `-args_file <that same path>`. MEASURED 2026-08-21: 3-5s
+# separates the two. Probing a booting node with the WRONG BONDY_ERL_NODENAME
+# therefore renames it. Every call below passes the machine's own name, which
+# makes the rewrite idempotent, so a retry here is safe.
+#
+# `env` is not decoration: `fly ssh console --command` EXECs its argument
+# directly with no shell, so a bare `VAR=value /path/cmd` prefix is parsed as
+# an executable literally named "VAR=value" and fails with
+# "executable file not found in $PATH". `env` is a real binary, so it survives
+# exec without needing `sh -c` and its quoting.
+#
+# Fly's own `checks[].status` is NOT used as the ready signal: measured
+# 2026-08-21, immediately after `fly machine start` it still reports the
+# PREVIOUS run's "passing" while every node is in fact unreachable. Waiting on
+# the answer we actually need avoids trusting a stale field.
+say "waiting for nodes to answer"
+DEADLINE=$(( $(date +%s) + ${READY_TIMEOUT:-180} ))
+while :; do
+    PENDING=0
+    for M in $MACHINES; do
+        IP=$(fly machines list --app "$APP" --json \
+            | jq -r --arg m "$M" '.[]|select(.id==$m)|.private_ip')
+        fly ssh console --app "$APP" --machine "$M" \
+            --command "env BONDY_ERL_NODENAME=bondy@$IP /bondy/bin/bondy eval ok." \
+            >/dev/null 2>&1 || PENDING=$((PENDING + 1))
+    done
+    [ "$PENDING" -eq 0 ] && { green "  all $(echo "$MACHINES" | wc -w | tr -d ' ') nodes answering"; break; }
+    [ "$(date +%s)" -ge "$DEADLINE" ] && {
+        red "  TIMEOUT — $PENDING node(s) still not answering after ${READY_TIMEOUT:-180}s."
+        red "  This is NOT a pass; the cluster is not fit to measure."
+        exit 2
+    }
+    echo "  $PENDING not ready yet..."
+    sleep 10
+done
+
 # --- cluster identity gate -------------------------------------------------
 # `partisan:node()` is the ONLY trustworthy source for a node's name. Do NOT
-# read /bondy/releases/*/vm.args or /proc/<beam>/environ: the release start
-# script runs with RELX_REPLACE_OS_VARS=true, so every `bondy eval` (including
-# the ones this harness makes) REGENERATES vm.args from vm.args.orig using the
-# SSH session's environment, where BONDY_ERL_NODENAME is the Dockerfile
-# default. After any probing those files read `bondy@127.0.0.1` on every
-# machine, correctly-named ones included.
+# read /bondy/releases/*/vm.args or /proc/<beam>/environ: they are rewritten by
+# the very probes below (see BONDY_ERL_NODENAME note), so after any probing
+# they describe the probe's environment, not how the node booted.
+#
+# Every `bondy` call here is prefixed with the machine's OWN
+# BONDY_ERL_NODENAME. Without it the SSH session supplies the Dockerfile
+# default (bondy@127.0.0.1) and the unavoidable vm.args rewrite bakes a WRONG
+# name into the file, which the node then boots under next time it restarts.
+# With it the rewrite is idempotent -- it writes the value that was already
+# there -- so probing can no longer damage the cluster, and it repairs a file a
+# previous unprefixed probe corrupted.
 say "cluster identity"
 IDENT_BAD=0; IDENT_UNREACHABLE=0
 for M in $MACHINES; do
     IP=$(fly machines list --app "$APP" --json \
         | jq -r --arg m "$M" '.[]|select(.id==$m)|.private_ip')
     NODE=$(fly ssh console --app "$APP" --machine "$M" \
-            --command "/bondy/bin/bondy eval partisan:node()." 2>/dev/null \
+            --command "env BONDY_ERL_NODENAME=bondy@$IP /bondy/bin/bondy eval partisan:node()." \
+            2>/dev/null \
           | tr -d " '\r" | grep -oE '^bondy@.+$' | tail -1)
     if [ -z "$NODE" ]; then
         red "  !! $M UNREACHABLE — no node name obtained"
@@ -105,8 +155,11 @@ TOTAL_ABORTS=0; TOTAL_REBUILDS=0; TOTAL_RING=0; UNREACHABLE=0; PROBED=0
 
 for M in $MACHINES; do
     say "machine $M"
+    IP=$(fly machines list --app "$APP" --json \
+        | jq -r --arg m "$M" '.[]|select(.id==$m)|.private_ip')
     RAW=$(fly ssh console --app "$APP" --machine "$M" \
-            --command "/bondy/bin/bondy eval $READ" 2>/dev/null \
+            --command "env BONDY_ERL_NODENAME=bondy@$IP /bondy/bin/bondy eval $READ" \
+            2>/dev/null \
           | tr -d ' \r' | grep -oE '\{-?[0-9]+,-?[0-9]+,-?[0-9]+\}' | tail -1)
 
     if [ -z "$RAW" ]; then
@@ -127,7 +180,7 @@ for M in $MACHINES; do
     if [ "$G" -gt 0 ]; then
         red "  -- in-node forensic ring --"
         fly ssh console --app "$APP" --machine "$M" \
-            --command "/bondy/bin/bondy eval bondy_mst:gc_aborts()." \
+            --command "env BONDY_ERL_NODENAME=bondy@$IP /bondy/bin/bondy eval bondy_mst:gc_aborts()." \
             2>/dev/null | sed 's/^/    /'
     fi
 done

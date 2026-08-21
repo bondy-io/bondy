@@ -99,8 +99,16 @@ MACHINES=$(fly machines list --app "$APP" --json \
 [ -n "$MACHINES" ] || { echo "no started machines in $APP" >&2; exit 2; }
 
 for M in $MACHINES; do
+    # Prefix the machine's OWN nodename. `bondy eval` unavoidably rewrites the
+    # shared releases/<vsn>/vm.args (relx substitutes it at the top of the
+    # start script, for every subcommand); without this the SSH session
+    # supplies the Dockerfile default and the rewrite bakes bondy@127.0.0.1
+    # into the file, which the node then boots under on its next restart. With
+    # it the rewrite is idempotent. See check-tripwires.sh for the full note.
+    IP=$(fly machines list --app "$APP" --json \
+        | jq -r --arg m "$M" '.[]|select(.id==$m)|.private_ip')
     RAW=$(fly ssh console --app "$APP" --machine "$M" \
-            --command "/bondy/bin/bondy eval $(printf '%s' "$READ" | tr -d '\n')" \
+            --command "env BONDY_ERL_NODENAME=bondy@$IP /bondy/bin/bondy eval $(printf '%s' "$READ" | tr -d '\n')" \
             2>/dev/null | tr -d ' \r\n' | grep -oE '\{\{.*\}$' | tail -1)
     if [ -z "$RAW" ]; then
         printf '%s\t%s\tUNREACHABLE\n' "$PHASE" "$M"
