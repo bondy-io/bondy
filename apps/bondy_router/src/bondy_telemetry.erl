@@ -41,6 +41,7 @@ Also provides trace-identifier generation.
 -export([router_flow/2]).
 -export([router_flow/3]).
 -export([router_flow_ingress/3]).
+-export([wamp_egress/3]).
 -export([rpc_latency/3]).
 -export([broker_publish/2]).
 -export([wamp_hello/1]).
@@ -305,6 +306,41 @@ router_flow_ingress(Family, ServiceUs, Depth) ->
         [bondy, router, flow],
         #{service => max(0, ServiceUs), depth => max(0, Depth)},
         #{family => Family}
+    ).
+
+-doc """
+Emits `[bondy, wamp, egress]` for ONE outbound WAMP message handled by a
+subscriber's own connection process — the last hop before the wire.
+
+`Depth` is the connection process's mailbox depth at dequeue; `ServiceUs` is
+the in-process time spent handling the message. Same shape, and the same
+reasoning, as `router_flow_ingress/3`: router deliveries arrive as a plain
+`!` into this process's mailbox and carry no dispatch timestamp, so depth is
+the local, allocation-free backlog signal. A connection process handles its
+mailbox FIFO, so `depth x service` estimates the wait every message behind
+this one pays.
+
+This closes the last unmeasured segment of the delivery path. `match` and
+`fanout` cover the publisher's connection process, `router_flow_ingress/3`
+covers relay ingress, and this covers egress; a delivery tail visible in
+none of them is the socket, the network or the client.
+
+CAVEAT — what `ServiceUs` does NOT include: for WebSocket, cowboy performs
+the socket write AFTER the handler callback returns, so this measures the
+encode, not the send. For a transport whose handler calls `Transport:send`
+itself the send IS included. Compare across transports accordingly.
+
+Total: never throws.
+""".
+-spec wamp_egress(
+    Transport :: atom(), ServiceUs :: integer(), Depth :: non_neg_integer()
+) -> ok.
+
+wamp_egress(Transport, ServiceUs, Depth) ->
+    execute(
+        [bondy, wamp, egress],
+        #{service => max(0, ServiceUs), depth => max(0, Depth)},
+        #{transport => Transport}
     ).
 
 -doc """

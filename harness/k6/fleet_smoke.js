@@ -57,6 +57,20 @@ const WELCOME_TIMEOUT_MS = parseInt(__ENV.WELCOME_TIMEOUT_MS || '30000');
 const RETRY_BACKOFF_MS = parseInt(__ENV.RETRY_BACKOFF_MS || '2000');
 const RETRY_BACKOFF_MAX_MS = parseInt(__ENV.RETRY_BACKOFF_MAX_MS || '60000');
 
+// --- delivery-tail attribution (optional; absent env => original behaviour) --
+// A delivery sample is `subscriberClock - publisherClock`, so it carries the
+// relative clock skew between two DIFFERENT LG machines. The publisher LGs are
+// statistically symmetric (equal VUs, equal rate, same region, same cluster),
+// so the TRUE distribution must be identical across them — which makes any
+// systematic gap between the per-LG trends a direct read of that skew.
+// LG_ID: stamped into each PUBLISH by the publisher; -1 = untagged.
+// LG_COUNT: subscriber-side, how many per-LG trends to open (0 = none).
+// MEASURE_AFTER_MS: ms after run start before samples count as steady state.
+const LG_ID = parseInt(__ENV.LG_ID || '-1');
+const LG_COUNT = parseInt(__ENV.LG_COUNT || '0');
+const MEASURE_AFTER_MS = parseInt(__ENV.MEASURE_AFTER_MS || '0');
+const RUN_START = Date.now();
+
 const deliveryLatency = new Trend('wamp_delivery_latency_ms', true);
 const welcomeLatency = new Trend('wamp_welcome_latency_ms', true);
 const subscribeLatency = new Trend('wamp_subscribe_latency_ms', true);
@@ -70,6 +84,22 @@ const wampParseErrors = new Counter('wamp_parse_errors');
 const wsConnectErrors = new Counter('wamp_ws_connect_errors');
 const sessionOk = new Rate('wamp_session_ok');
 const subscribedOk = new Rate('wamp_all_subscribed_ok');
+
+// Phase-split delivery. The aggregate trend cannot separate the subscribe
+// burst from steady state, which is how a ramp spike gets reported as a
+// steady-state tail (s27). These two do separate them.
+const deliveryWarmup = new Trend('wamp_delivery_warmup_ms', true);
+const deliverySteady = new Trend('wamp_delivery_steady_ms', true);
+// Per-publisher-LG steady-state delivery, for the skew read described above.
+const deliveryByLg = [];
+for (let i = 0; i < LG_COUNT; i++) {
+  deliveryByLg.push(new Trend(`wamp_delivery_lg${i}_ms`, true));
+}
+// A session admission-refused during the ramp retries later, and its 2000-sub
+// burst then lands INSIDE the steady window — load the run really sees, but a
+// contaminator of "steady state". Counted so it can never be silently assumed
+// absent.
+const lateBursts = new Counter('wamp_late_subscribe_bursts');
 
 export const options = {
   scenarios: {
@@ -176,7 +206,7 @@ function runPublisher() {
         welcomeLatency.add(Date.now() - helloTs);
         socket.setInterval(() => {
           const ts = Date.now();
-          socket.send(wamp.publish(reqId++, topic, [ts], {}, { exclude_me: false }));
+          socket.send(wamp.publish(reqId++, topic, [ts, LG_ID], {}, { exclude_me: false }));
           publishesSent.add(1);
         }, PUB_INTERVAL_MS);
 
@@ -269,12 +299,25 @@ function runSubscriber() {
         if (subscribedCount === vehicleIds.length) {
           subscribeBurstLatency.add(Date.now() - burstStartTs);
           subscribedOk.add(true);
+          if (Date.now() - RUN_START >= MEASURE_AFTER_MS) lateBursts.add(1);
         }
 
       } else if (type === wamp.T.EVENT) {
         const args = msg[4] || [];
         const sentTs = args[0];
-        if (typeof sentTs === 'number') deliveryLatency.add(Date.now() - sentTs);
+        if (typeof sentTs === 'number') {
+          const lat = Date.now() - sentTs;
+          deliveryLatency.add(lat);
+          if (Date.now() - RUN_START >= MEASURE_AFTER_MS) {
+            deliverySteady.add(lat);
+            const lg = args[1];
+            if (typeof lg === 'number' && lg >= 0 && lg < deliveryByLg.length) {
+              deliveryByLg[lg].add(lat);
+            }
+          } else {
+            deliveryWarmup.add(lat);
+          }
+        }
         eventsReceived.add(1);
 
       } else if (type === wamp.T.ABORT) {

@@ -320,12 +320,12 @@ client. See `bondy:send/2`.
 websocket_info({?BONDY_REQ, Pid, _RealmUri, M}, State) when
     Pid =:= self()
 ->
-    handle_outbound(State#state.frame_type, M, State);
+    timed_outbound(State#state.frame_type, M, State);
 websocket_info({?BONDY_REQ, _Pid, _RealmUri, M}, State) ->
     %% Here we receive the messages that either the router or another peer
     %% sent to us using bondy:send/2,3
     %% ok = bondy:ack(Pid, Ref),
-    handle_outbound(State#state.frame_type, M, State);
+    timed_outbound(State#state.frame_type, M, State);
 websocket_info(
     {timeout, Ref, ping_idle_timeout}, #state{ping_tref = Ref} = State
 ) ->
@@ -458,6 +458,33 @@ terminate(Other, _Req, State) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% Wraps `handle_outbound/3` so egress is observable: mailbox depth at
+%% dequeue plus the in-process handling time. This is the last hop before
+%% the wire, and it was the only unmeasured segment of the delivery path
+%% (`match`/`fanout` cover the publisher, `router_flow_ingress/3` covers
+%% relay ingress).
+%%
+%% Depth, not a queue wait: a router delivery arrives as a plain `!` into
+%% this mailbox with no dispatch timestamp, the same situation relay ingress
+%% is in. Reading own message_queue_len takes no lock.
+%%
+%% The service time is the ENCODE only — cowboy writes the socket after this
+%% callback returns, so the send is not in scope here (see
+%% `bondy_telemetry:wamp_egress/3`). Emitted in an `after` so a failing
+%% encode is measured too.
+timed_outbound(T, M, State) ->
+    {message_queue_len, Depth} = erlang:process_info(self(), message_queue_len),
+    Started = erlang:monotonic_time(microsecond),
+
+    try
+        handle_outbound(T, M, State)
+    after
+        ok = bondy_telemetry:wamp_egress(
+            websocket, erlang:monotonic_time(microsecond) - Started, Depth
+        )
+    end.
 
 %% @private
 handle_outbound(T, M, State) ->

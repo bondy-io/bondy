@@ -22,6 +22,7 @@ must all render on a real scrape without error.
 -export([wamp_message_metrics_via_telemetry/1]).
 -export([net_session_metrics_via_telemetry/1]).
 -export([inflight_by_procedure/1]).
+-export([egress_metrics_via_telemetry/1]).
 
 all() ->
     [
@@ -29,7 +30,8 @@ all() ->
         router_events_feed_metrics,
         wamp_message_metrics_via_telemetry,
         net_session_metrics_via_telemetry,
-        inflight_by_procedure
+        inflight_by_procedure,
+        egress_metrics_via_telemetry
     ].
 
 init_per_suite(Config) ->
@@ -263,3 +265,28 @@ gauge_value(Name, Labels) ->
         undefined -> 0;
         V -> V
     end.
+
+egress_metrics_via_telemetry(_) ->
+    %% Egress is the LAST hop before the wire — the subscriber's own connection
+    %% process. It was the only unmeasured segment of the delivery path, and
+    %% Fly runs S28-S30 are why it is measured: the delivery tail appeared in
+    %% none of the router stages and relay ingress showed no backlog.
+    %%
+    %% This drives the REAL path (emitter -> telemetry -> sink -> scrape) on a
+    %% booted node. The eunit sink tests call handle_net_event/4 directly, so
+    %% they would stay green if the event were missing from setup/0's
+    %% attach_many list; only this test would catch that.
+    ok = bondy_telemetry:wamp_egress(websocket, 250, 4),
+
+    [#{type := histogram, value := #{count := SCount}} | _] =
+        bondy_metrics:family(bondy_wamp_egress_service_microseconds),
+    true = SCount >= 1,
+
+    [#{type := histogram, value := #{count := DCount}} | _] =
+        bondy_metrics:family(bondy_wamp_egress_queue_depth),
+    true = DCount >= 1,
+
+    Output = prometheus_text_format:format(),
+    {_, _} = binary:match(Output, <<"bondy_wamp_egress_service_microseconds">>),
+    {_, _} = binary:match(Output, <<"bondy_wamp_egress_queue_depth">>),
+    ok.

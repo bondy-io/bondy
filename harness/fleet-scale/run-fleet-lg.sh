@@ -39,6 +39,12 @@ RAMP="${RAMP:-120s}"; HOLD="${HOLD:-60s}"; SESSION_MS="${SESSION_MS:-240000}"
 # delivery sample it takes is steady state. Defaults to the publisher values so
 # existing invocations are unchanged.
 SUB_DELAY_SECS="${SUB_DELAY_SECS:-0}"
+# Delivery-tail attribution. Each publisher LG stamps its index into every
+# PUBLISH; the subscriber keeps a separate trend per publisher LG. The LGs are
+# symmetric, so a systematic gap between those trends is relative clock skew,
+# not latency. MEASURE_AFTER_MS (relative to SUBSCRIBER start) splits warmup
+# from steady state so the subscribe burst cannot be read as a steady tail.
+MEASURE_AFTER_MS="${MEASURE_AFTER_MS:-0}"
 SUB_RAMP="${SUB_RAMP:-$RAMP}"; SUB_HOLD="${SUB_HOLD:-$HOLD}"
 SUB_SESSION_MS="${SUB_SESSION_MS:-$SESSION_MS}"
 ULIMIT_N="${ULIMIT_N:-1048576}"
@@ -117,7 +123,7 @@ pids=()
 echo "   SUB  $sub_machine  VUS=$SUB_VUS_TOTAL GROUP_SIZE=$GROUP_SIZE SUBS_PER_USER=$SUBS_PER_USER delay=${SUB_DELAY_SECS}s ramp=$SUB_RAMP hold=$SUB_HOLD"
 ( sleep "$SUB_DELAY_SECS"
   fly ssh console --app "$APP" --machine "$sub_machine" -C \
-    "sh -c 'ulimit -n $ULIMIT_N 2>/dev/null; k6 run -e ROLE=subscriber -e WS_URL=$WS_URL -e REALM=$REALM -e VUS=$SUB_VUS_TOTAL -e VU_OFFSET=0 -e GROUP_SIZE=$GROUP_SIZE -e SUBS_PER_USER=$SUBS_PER_USER -e VEHICLE_POOL=$VEHICLE_POOL -e RAMP=$SUB_RAMP -e HOLD=$SUB_HOLD -e SESSION_MS=$SUB_SESSION_MS /scripts/fleet_smoke.js'" \
+    "sh -c 'ulimit -n $ULIMIT_N 2>/dev/null; k6 run -e ROLE=subscriber -e WS_URL=$WS_URL -e REALM=$REALM -e VUS=$SUB_VUS_TOTAL -e VU_OFFSET=0 -e GROUP_SIZE=$GROUP_SIZE -e SUBS_PER_USER=$SUBS_PER_USER -e VEHICLE_POOL=$VEHICLE_POOL -e RAMP=$SUB_RAMP -e HOLD=$SUB_HOLD -e SESSION_MS=$SUB_SESSION_MS -e LG_COUNT=$n_pub -e MEASURE_AFTER_MS=$MEASURE_AFTER_MS /scripts/fleet_smoke.js'" \
 ) > "$OUT/sub.txt" 2>&1 &
 pids+=("$!")
 
@@ -126,7 +132,7 @@ for i in "${!pub_machines[@]}"; do
   offset=$(( i * pub_vus_per_lg ))
   echo "   PUB$i ${pub_machines[$i]}  VUS=$pub_vus_per_lg VU_OFFSET=$offset"
   fly ssh console --app "$APP" --machine "${pub_machines[$i]}" -C \
-    "sh -c 'ulimit -n $ULIMIT_N 2>/dev/null; k6 run -e ROLE=publisher -e WS_URL=$WS_URL -e REALM=$REALM -e VUS=$pub_vus_per_lg -e VU_OFFSET=$offset -e PUB_INTERVAL_MS=$PUB_INTERVAL_MS -e VEHICLE_POOL=$VEHICLE_POOL -e RAMP=$RAMP -e HOLD=$HOLD -e SESSION_MS=$SESSION_MS /scripts/fleet_smoke.js'" \
+    "sh -c 'ulimit -n $ULIMIT_N 2>/dev/null; k6 run -e ROLE=publisher -e WS_URL=$WS_URL -e REALM=$REALM -e VUS=$pub_vus_per_lg -e VU_OFFSET=$offset -e PUB_INTERVAL_MS=$PUB_INTERVAL_MS -e VEHICLE_POOL=$VEHICLE_POOL -e RAMP=$RAMP -e HOLD=$HOLD -e SESSION_MS=$SESSION_MS -e LG_ID=$i /scripts/fleet_smoke.js'" \
     > "$OUT/pub$i.txt" 2>&1 &
   pids+=("$!")
 done
@@ -138,6 +144,12 @@ line()  { { grep -E "^ *$2" "$1" || true; } | sed 's/^ *//' | head -1; }
 
 echo; echo "==================== SUBSCRIBER ===================="
 line "$OUT/sub.txt" 'wamp_delivery_latency_ms\.'
+line "$OUT/sub.txt" 'wamp_delivery_warmup_ms\.'
+line "$OUT/sub.txt" 'wamp_delivery_steady_ms\.'
+# Per-publisher-LG steady trends: symmetric LGs, so a systematic gap between
+# these is relative clock skew rather than latency.
+for ((l=0; l<n_pub; l++)); do line "$OUT/sub.txt" "wamp_delivery_lg${l}_ms\."; done
+line "$OUT/sub.txt" 'wamp_late_subscribe_bursts'
 line "$OUT/sub.txt" 'wamp_welcome_latency_ms\.'
 line "$OUT/sub.txt" 'wamp_subscribe_latency_ms\.'
 line "$OUT/sub.txt" 'wamp_subscribe_burst_ms\.'

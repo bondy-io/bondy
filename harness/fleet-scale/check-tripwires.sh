@@ -4,7 +4,21 @@
 # SPDX-License-Identifier: Apache-2.0
 # =============================================================================
 #
-# Own-root page-loss tripwire sweep across a deployed fleet cluster.
+# Pre-flight fitness gate for a deployed fleet cluster: cluster IDENTITY, then
+# the own-root page-loss tripwire sweep. Both must pass before a campaign is
+# worth running.
+#
+# IDENTITY. Each node must be named bondy@<its own Fly 6PN address>. MEASURED
+# 2026-08-21 across three cluster boots: exactly one node per boot instead came
+# up as `bondy@127.0.0.1` (the Dockerfile ENV default), and WHICH node varied
+# between boots. It is not an environment problem — `priv/hooks/pre_start`
+# echoed the CORRECT BONDY_ERL_NODENAME on all five nodes in the boot where one
+# still came up wrong, so the value is lost later, in the vm.args substitution.
+# The cluster still forms and every node still sees 4 peers, so the fault is
+# SILENT. In the two runs where it was measured, the misnamed node carried
+# publish.fanout means of 159ms and 436ms against 62-87us for its healthy peers
+# (n=2, mechanism unproven) — which is more than enough to invalidate a
+# campaign. Gate on it rather than discover it in the results.
 #
 # The fault this checks for (Fly s16/s25) is a shard whose own MST root
 # references pages that are not in its store. It is rare, it self-heals, and
@@ -27,6 +41,10 @@
 # inconclusive and exits non-zero.
 #
 #   [APP=bondy-fleet-1] ./harness/fleet-scale/check-tripwires.sh
+#
+# Exit: 0 clean, 1 a tripwire fired, 2 inconclusive (unreachable/unreadable) or
+# a node identity mismatch — in every non-zero case the fleet is not fit to
+# measure.
 # =============================================================================
 set -uo pipefail
 
@@ -45,6 +63,43 @@ READ='F=fun(N)->try lists:sum([V||{_,V}<-prometheus_counter:values(default,N)]) 
 MACHINES=$(fly machines list --app "$APP" --json \
     | jq -r '.[]|select(.state=="started")|.id')
 [ -n "$MACHINES" ] || { red "no started machines in $APP"; exit 2; }
+
+# --- cluster identity gate -------------------------------------------------
+# `partisan:node()` is the ONLY trustworthy source for a node's name. Do NOT
+# read /bondy/releases/*/vm.args or /proc/<beam>/environ: the release start
+# script runs with RELX_REPLACE_OS_VARS=true, so every `bondy eval` (including
+# the ones this harness makes) REGENERATES vm.args from vm.args.orig using the
+# SSH session's environment, where BONDY_ERL_NODENAME is the Dockerfile
+# default. After any probing those files read `bondy@127.0.0.1` on every
+# machine, correctly-named ones included.
+say "cluster identity"
+IDENT_BAD=0; IDENT_UNREACHABLE=0
+for M in $MACHINES; do
+    IP=$(fly machines list --app "$APP" --json \
+        | jq -r --arg m "$M" '.[]|select(.id==$m)|.private_ip')
+    NODE=$(fly ssh console --app "$APP" --machine "$M" \
+            --command "/bondy/bin/bondy eval partisan:node()." 2>/dev/null \
+          | tr -d " '\r" | grep -oE '^bondy@.+$' | tail -1)
+    if [ -z "$NODE" ]; then
+        red "  !! $M UNREACHABLE — no node name obtained"
+        IDENT_UNREACHABLE=$((IDENT_UNREACHABLE + 1))
+    elif [ "$NODE" = "bondy@$IP" ]; then
+        echo "  $M  $NODE"
+    else
+        red "  !! $M  is '$NODE'  expected 'bondy@$IP'"
+        IDENT_BAD=$((IDENT_BAD + 1))
+    fi
+done
+if [ "$IDENT_UNREACHABLE" -gt 0 ]; then
+    red "  INCONCLUSIVE — $IDENT_UNREACHABLE machine(s) gave no node name"
+    exit 2
+fi
+if [ "$IDENT_BAD" -gt 0 ]; then
+    red "  IDENTITY MISMATCH on $IDENT_BAD node(s) — restart the fleet and"
+    red "  re-check; do NOT spend a campaign on this cluster"
+    exit 2
+fi
+green "  identity OK — every node is bondy@<its own 6PN address>"
 
 TOTAL_ABORTS=0; TOTAL_REBUILDS=0; TOTAL_RING=0; UNREACHABLE=0; PROBED=0
 

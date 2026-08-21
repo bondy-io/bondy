@@ -161,6 +161,7 @@ setup() ->
             [bondy, session_manager, cleanup],
             [bondy, router, flow],
             [bondy, broker, publish],
+            [bondy, wamp, egress],
             [bondy, registry, ptrie, cas_retry],
             [bondy, registry, ptrie, cas_exhausted]
         ],
@@ -592,6 +593,30 @@ declare_net_session_families() ->
         >>
     }),
     ok = bondy_metrics:declare(#{
+        name => bondy_wamp_egress_queue_depth,
+        help => <<
+            "A histogram of a subscriber connection process's mailbox depth "
+            "at the moment it dequeued an outbound WAMP message, by "
+            "transport. Router deliveries arrive as a plain send carrying no "
+            "dispatch timestamp, so depth is the backlog signal here, exactly "
+            "as it is for relay ingress. A connection process is FIFO on its "
+            "mailbox, so depth x service estimates the wait every message "
+            "behind this one pays. This is the LAST hop before the wire: a "
+            "delivery tail absent from match, fanout and relay ingress but "
+            "present here is egress."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
+        name => bondy_wamp_egress_service_microseconds,
+        help => <<
+            "A histogram of the in-process time a subscriber connection "
+            "process spent handling one outbound WAMP message, by transport. "
+            "For WebSocket this is the ENCODE only — cowboy performs the "
+            "socket write after the handler callback returns. For transports "
+            "whose handler calls Transport:send itself the write is included."
+        >>
+    }),
+    ok = bondy_metrics:declare(#{
         name => bondy_broker_publish_match_microseconds,
         help => <<
             "A histogram of the time a PUBLISH spent finding matching "
@@ -813,6 +838,26 @@ handle_net_event([bondy, router, flow], Meas, Meta, _Config) ->
                 _ ->
                     ok
             end
+    catch
+        _:_ ->
+            ok
+    end;
+handle_net_event([bondy, wamp, egress], Meas, Meta, _Config) ->
+    try
+        Labels = #{
+            node => node_name(),
+            transport => maps:get(transport, Meta, undefined)
+        },
+        ok = bondy_metrics:histogram(#{
+            name => bondy_wamp_egress_service_microseconds,
+            label => Labels,
+            value => maps:get(service, Meas, 0)
+        }),
+        ok = bondy_metrics:histogram(#{
+            name => bondy_wamp_egress_queue_depth,
+            label => Labels,
+            value => maps:get(depth, Meas, 0)
+        })
     catch
         _:_ ->
             ok
