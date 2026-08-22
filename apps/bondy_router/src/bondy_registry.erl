@@ -1272,8 +1272,7 @@ do_remove_all({[{_EntryKey, Entry} | T], Cont}, SessionId, Fun, Opts, Acc) ->
 %% total.
 rib_check() ->
     Total = lists:foldl(
-        fun(Realm, Acc) ->
-            RealmUri = bondy_realm:uri(Realm),
+        fun(RealmUri, Acc) ->
             case bondy_registry_rib:check(RealmUri) of
                 [] ->
                     Acc;
@@ -1290,7 +1289,7 @@ rib_check() ->
             end
         end,
         0,
-        bondy_realm:list()
+        rib_check_realms()
     ),
     registry_metric(gauge, #{
         name => bondy_registry_rib_divergences, value => Total
@@ -1309,6 +1308,29 @@ registry_metric(Type, Spec) ->
         _:_ ->
             ok
     end.
+
+%% @private
+%% The realms the sweep must inspect: every realm this node KNOWS, plus every
+%% realm it holds RIB CELLS for.
+%%
+%% The second half is not redundancy. Realm records are replicated state in
+%% `main` and nothing orders that bootstrap before the `registry` one, so a
+%% node can hold cells for a realm it has no record of. Driving the sweep from
+%% `bondy_realm:list/0` alone made it blind in precisely the case it exists to
+%% catch — the gauge reads 0 while the stub view is missing and routing is
+%% wrong.
+%%
+%% The first half is not redundant either: a realm with local entries but no
+%% cells yet is a divergence the cell-derived set cannot see.
+rib_check_realms() ->
+    Known = [bondy_realm:uri(R) || R <- bondy_realm:list()],
+    WithCells =
+        try
+            bondy_registry_rib:realms()
+        catch
+            _:_ -> []
+        end,
+    lists:usort(Known ++ WithCells).
 
 %% @private
 %% Arms the next RIB consistency sweep. `registry.rib.check_interval`

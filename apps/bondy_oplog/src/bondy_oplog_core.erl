@@ -79,6 +79,7 @@ overlay, fold_module}` for each `(NS, Index, Shard)` they manage.
 -export([unsubscribe/1]).
 -export([publish/4]).
 -export([publish_merge/5]).
+-export([publish_bootstrap/2]).
 
 -export_type([bucket/0]).
 -export_type([read_opts/0]).
@@ -635,6 +636,15 @@ credential change or a remote write clobbering a differing local value. See
 
 publish_merge(NS, Key, Hlc, Op, Old) ->
     bondy_oplog_core_dispatcher:publish_merge(NS, Key, Hlc, Op, Old).
+
+-doc """
+Publish a bootstrap event for `NS`/`Bucket`. See
+`bondy_oplog_core_dispatcher:publish_bootstrap/2`.
+""".
+-spec publish_bootstrap(NS :: atom(), Bucket :: term()) -> ok.
+
+publish_bootstrap(NS, Bucket) ->
+    bondy_oplog_core_dispatcher:publish_bootstrap(NS, Bucket).
 
 %% =============================================================================
 %% Read path

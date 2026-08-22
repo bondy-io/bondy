@@ -114,6 +114,8 @@ they reach this node via AAE merge.
 -export([on_remote_clear/2]).
 -export([on_remote_merge/2]).
 -export([on_remote_set/3]).
+-export([rebuild/1]).
+-export([realms/0]).
 -export([stub_nodes/4]).
 -export([subscription_nodes/3]).
 
@@ -383,6 +385,134 @@ on_remote_clear(Type, Key) ->
         error ->
             ok
     end.
+
+-doc """
+Rebuilds everything this module DERIVES from `Table`'s projection, for every
+realm, after a catalogue-snapshot bootstrap installed that projection
+wholesale.
+
+Needed because the snapshot install path emits no per-cell merge event, and
+both of this module's repair paths hang off those events alone:
+
+- the stub store is in-memory ETS written only by `on_remote_set/3` and
+  `on_remote_clear/2`, and it is what `subscription_nodes/3` and
+  `match_stubs/2` — the cross-node PUBLISH forwarding set and the remote
+  callee resolution — actually read. A node that bootstraps without it does
+  not forward to its peers at all;
+- `self_heal/4` is reachable only from those same two functions, and a
+  bootstrapping node's OWN cells are the summaries of its PREVIOUS
+  incarnation's registrations and subscriptions. Those sessions and sockets
+  died with the node. Until their `count` is driven back to the (now zero)
+  local truth, every peer keeps routing to this node for URIs it no longer
+  serves — so correcting them is the load-bearing half, not a tidy-up.
+
+Implemented by replaying each installed cell through `on_remote_set/3`, which
+already routes an own-node cell to `self_heal/4` and a peer cell to
+`stub_insert`/`stub_delete` under the `count = 0`-means-removed rule. No new
+convention, and one write point stays one write point.
+
+Idempotent: a streamed snapshot notifies a table once per batch, `stub_insert`
+is an upsert, and `self_heal/4` is a no-op once the counts agree. MUST be
+total — called from the AAE reactor.
+
+Covers every realm with cells in the table, including realms this node has no
+realm record for. It folds the TABLE (`bondy_db:fold_all/4`) rather than
+enumerating `bondy_realm:list/0`: realms are themselves replicated state in
+`main`, and nothing orders the `main` bootstrap before the `registry` one, so
+deriving the realm set from the realm registry made this rebuild silently skip
+cells depending on which bootstrap won the race (MEASURED 2026-08-22: the same
+plain restart passed or failed run to run). The data is its own index.
+""".
+-spec rebuild(Table :: atom()) -> ok.
+
+rebuild(Table) ->
+    Type = table_type(Table),
+    Fun = fun(Row, ok) -> rebuild_cell(Type, Row) end,
+    try bondy_db:fold_all(db_table(Type), Fun, ok, #{}) of
+        {ok, ok} ->
+            ok;
+        {error, Reason} ->
+            ?LOG_WARNING(#{
+                description => "Registry RIB rebuild after bootstrap failed",
+                table => Table,
+                reason => Reason
+            }),
+            ok
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_WARNING(#{
+                description => "Registry RIB rebuild after bootstrap failed",
+                table => Table,
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            ok
+    end.
+
+-doc """
+Every realm that has RIB cells on this node, derived from the DATA rather than
+from `bondy_realm:list/0`.
+
+`check/1` is per-realm by contract, so its caller has to supply the realm set —
+and taking that set from the realm registry makes the consistency gate blind in
+exactly the case it exists to catch: a node holding cells for a realm whose
+realm record has not replicated yet reports no divergence, because the sweep
+never looks at that realm. The gauge then reads 0 while the stub view is
+missing and routing is wrong.
+
+Splits the storage key on the FIRST NUL, which is exact: `bondy_db` enforces
+NUL-free realm URIs (`assert_nul_free_realm/1`), while a key's own bytes are
+preserved verbatim after the separator. Cheaper than `decode_cell_key/1` here,
+which would deserialise a whole term per cell just to read its realm.
+""".
+-spec realms() -> [uri()].
+
+realms() ->
+    Fun = fun({Key, _Value, _Hlc}, Acc) ->
+        case binary:split(Key, <<0>>) of
+            [Realm, _Rest] -> sets:add_element(Realm, Acc);
+            _ -> Acc
+        end
+    end,
+    Set = lists:foldl(
+        fun(Type, Acc) ->
+            try bondy_db:fold_all(db_table(Type), Fun, Acc, #{}) of
+                {ok, Acc1} -> Acc1;
+                {error, _} -> Acc
+            catch
+                _:_ -> Acc
+            end
+        end,
+        sets:new([{version, 2}]),
+        [registration, subscription]
+    ),
+    lists:sort(sets:to_list(Set)).
+
+%% @private
+%% One cell, replayed through the same reaction a live merge would take.
+%%
+%% `fold_all/4` yields the STORAGE key (`<<Realm, 0, RawKey>>`), which
+%% `decode_cell_key/1` already accepts — it is the form a merge event
+%% delivers — so no unfolding is needed and `on_remote_set/3` stays the single
+%% write point.
+%%
+%% Total by contract: one undecodable or unreshapeable cell must not abandon
+%% the rest of the table.
+rebuild_cell(Type, {Key, RawValue, _Hlc}) ->
+    try reshape_summary(Type, RawValue) of
+        Summary when is_map(Summary) ->
+            on_remote_set(Type, Key, Summary);
+        _ ->
+            ok
+    catch
+        _:_ ->
+            ok
+    end.
+
+%% @private
+table_type(?BONDY_DB_REGISTRATION_RIB_TAB) -> registration;
+table_type(?BONDY_DB_SUBSCRIPTION_RIB_TAB) -> subscription.
 
 -doc """
 Reaction to ANY peer merge event for a RIB cell (`bondy_aae_reactor`'s only
@@ -759,36 +889,26 @@ stub_delete(StubKey) ->
 self_heal(Type, RealmUri, Policy, Uri) ->
     try
         Table = db_table(Type),
-        Key = cell_key(RealmUri, Policy, Uri),
-        LocalCount = local_count(Type, RealmUri, Policy, Uri),
-        case bondy_db:read(Table, RealmUri, Key) of
-            {error, not_found} ->
+        case local_count(Type, RealmUri, Policy, Uri) of
+            unknown ->
+                %% The partition store is not readable yet (boot, or a
+                %% realm whose partition has not been provisioned). We
+                %% cannot tell "this node owns nothing here" from "we
+                %% cannot see what this node owns", and the two demand
+                %% OPPOSITE actions: the first wants `count` driven to 0,
+                %% the second wants no write at all. Treating unknown as 0
+                %% — which this did before — writes a corrective delta of
+                %% `-ReplicatedCount` for every cell it walks, and that
+                %% delta REPLICATES: a live instance would broadcast the
+                %% erasure of its own live registrations cluster-wide.
+                %% Skipping is always safe: the next merge event, or the
+                %% next bootstrap rebuild, re-runs this with a readable
+                %% store.
                 ok;
-            {ok, {Value, _Hlc}} ->
-                #{count := ReplicatedCount} = reshape_summary(Type, Value),
-                case LocalCount - ReplicatedCount of
-                    0 ->
-                        ok;
-                    Delta ->
-                        %% registration's table is struct-based (tier_2):
-                        %% the `count` field takes a scoped
-                        %% `{apply, count, {inc, _}}` op, not the bare
-                        %% `{inc, _}` subscription's bare pn_counter table
-                        %% takes directly.
-                        Op =
-                            case Type of
-                                registration -> {apply, count, {inc, Delta}};
-                                subscription -> {inc, Delta}
-                            end,
-                        log_rib_error(
-                            bondy_db:apply(Table, RealmUri, Key, Op),
-                            self_heal,
-                            Type,
-                            RealmUri,
-                            Policy,
-                            Uri
-                        )
-                end
+            {ok, LocalCount} ->
+                do_self_heal(
+                    Type, Table, RealmUri, Policy, Uri, LocalCount
+                )
         end
     catch
         Class:Reason:Stacktrace ->
@@ -805,14 +925,63 @@ self_heal(Type, RealmUri, Policy, Uri) ->
     end.
 
 %% @private
+%% The corrective write, once the local count is KNOWN. Split out so the
+%% unknown-store case above can be read at a glance.
+do_self_heal(Type, Table, RealmUri, Policy, Uri, LocalCount) ->
+    Key = cell_key(RealmUri, Policy, Uri),
+    case bondy_db:read(Table, RealmUri, Key) of
+        {error, not_found} ->
+            ok;
+        {ok, {Value, _Hlc}} ->
+            #{count := ReplicatedCount} = reshape_summary(Type, Value),
+            case LocalCount - ReplicatedCount of
+                0 ->
+                    ok;
+                Delta ->
+                    %% registration's table is struct-based (tier_2): the
+                    %% `count` field takes a scoped
+                    %% `{apply, count, {inc, _}}` op, not the bare
+                    %% `{inc, _}` subscription's bare pn_counter table
+                    %% takes directly.
+                    Op =
+                        case Type of
+                            registration -> {apply, count, {inc, Delta}};
+                            subscription -> {inc, Delta}
+                        end,
+                    log_rib_error(
+                        bondy_db:apply(Table, RealmUri, Key, Op),
+                        self_heal,
+                        Type,
+                        RealmUri,
+                        Policy,
+                        Uri
+                    )
+            end
+    end.
+
+%% @private
 %% The count of live local rows for `(Type, RealmUri, Policy, Uri)` in the
 %% partition's members table (`check/1`'s ground truth, kept purely for
 %% that purpose since the write path stopped deriving anything from it —
 %% see the moduledoc's "Concurrency model").
+%%
+%% Returns `unknown` — NOT 0 — when the realm's partition store is not
+%% readable. `self_heal/4` turns this count into a REPLICATED corrective
+%% delta, so reporting an unreadable store as "owns nothing" is the
+%% difference between a no-op and broadcasting the erasure of every
+%% registration this node owns. The two callers must decide, so the
+%% ambiguity is returned rather than resolved here.
 local_count(Type, RealmUri, Policy, Uri) ->
-    case bondy_registry_partition:store(RealmUri) of
+    %% `store/1` resolves the realm through the registry's gproc pool, which
+    %% RAISES when the pool is not up (early boot) rather than returning
+    %% `undefined`. Both mean the same thing here — the local truth is not
+    %% readable — so both must yield `unknown`. Letting the raise escape
+    %% would reach `self_heal/4`'s catch-all and log a full exception report
+    %% PER CELL, which `rebuild/1` turns into one report per cell in the
+    %% projection.
+    case store(RealmUri) of
         undefined ->
-            0;
+            unknown;
         Store ->
             Tab = bondy_registry_store:rib_members_tab(Store),
             MS = [
@@ -822,7 +991,17 @@ local_count(Type, RealmUri, Policy, Uri) ->
                     [true]
                 }
             ],
-            ets:select_count(Tab, MS)
+            {ok, ets:select_count(Tab, MS)}
+    end.
+
+%% @private
+%% `bondy_registry_partition:store/1`, with an unreadable pool reported the
+%% same way as an unprovisioned one.
+store(RealmUri) ->
+    try
+        bondy_registry_partition:store(RealmUri)
+    catch
+        _:_ -> undefined
     end.
 
 %% @private
@@ -876,7 +1055,14 @@ match_pattern_stubs(Type, RealmUri, Uri, Policy) ->
 %% The realm's members all live in one partition slice (partitions hash on
 %% the realm).
 member_nodes(RealmUri) ->
-    case bondy_registry_partition:store(RealmUri) of
+    %% Same pool-may-raise caveat as `local_count/4`; see `store/1`.
+    %% NOTE (not changed here, deliberately): an unreadable store still
+    %% yields `#{}`, so `check/1` reports every cell as divergent rather than
+    %% reporting "cannot tell". That inflates
+    %% `bondy_registry_rib_divergences` while the pool is down. Correcting it
+    %% means deciding what the gauge should say when ground truth is
+    %% unreadable, which is a semantics call, not a bug fix.
+    case store(RealmUri) of
         undefined ->
             #{};
         Store ->

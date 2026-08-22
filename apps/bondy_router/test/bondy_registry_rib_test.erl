@@ -34,9 +34,162 @@ write_path_test_() ->
                 {"subscription summary lifecycle", fun() -> subs(Tab) end}},
             {timeout, 60, {"remote stub lifecycle", fun stubs/0}},
             {timeout, 60, {"subscriber node discovery", fun sub_nodes/0}},
-            {timeout, 60, {"reshape_summary/2", fun reshape_summary/0}}
+            {timeout, 60, {"reshape_summary/2", fun reshape_summary/0}},
+            {timeout, 60,
+                {"self_heal skips when local truth is unreadable",
+                    fun() -> self_heal_unreadable(Tab) end}},
+            {timeout, 60,
+                {"rebuild/1 restores peer stubs from the projection",
+                    fun rebuild_restores_stubs/0}},
+            {timeout, 60,
+                {"rebuild/1 is idempotent", fun rebuild_idempotent/0}},
+            {timeout, 60,
+                {"rebuild/1 ignores count = 0 cells",
+                    fun rebuild_skips_emptied/0}}
         ]
     end}.
+
+%% `rebuild/1` reconstructs the stub view from the projection alone — the
+%% catalogue-snapshot install path emits no per-cell merge event, so this is
+%% the only thing that rebuilds it after a bootstrap.
+%%
+%% Seeds a PEER cell directly in the projection, wipes the stub table to
+%% simulate the post-restart state (in-memory ETS, gone with the VM) and
+%% asserts `rebuild/1` puts the stub back. Wiping the table rather than
+%% relying on a fresh one is deliberate: the cell must be recovered from the
+%% PROJECTION, not left over from the write that seeded it.
+rebuild_restores_stubs() ->
+    ok = ensure_stubs_tab(),
+    Table = ?CAT:table(?BONDY_DB_REGISTRATION_RIB_TAB),
+    Peer = <<"peer_rebuild@127.0.0.1">>,
+    Uri = <<"com.example.rib.rebuild.restore">>,
+    Key = cell_key(?EXACT_MATCH, Uri, Peer),
+
+    ok = bondy_db:apply(Table, ?REALM, Key, {apply, count, {inc, 3}}),
+    ok = flush(Table, Key),
+    true = ets:delete_all_objects(bondy_registry_rib_stubs),
+    ?assertEqual(
+        [],
+        bondy_registry_rib:stub_nodes(
+            registration, ?REALM, ?EXACT_MATCH, Uri
+        ),
+        "precondition: the stub view must start empty"
+    ),
+
+    ok = bondy_registry_rib:rebuild(?BONDY_DB_REGISTRATION_RIB_TAB),
+    ?assertMatch(
+        [{Peer, #{count := 3}}],
+        bondy_registry_rib:stub_nodes(
+            registration, ?REALM, ?EXACT_MATCH, Uri
+        ),
+        "rebuild/1 must recover the peer stub from the projection"
+    ).
+
+%% A streamed snapshot notifies a table once PER BATCH, so `rebuild/1` runs
+%% several times per bootstrap. Its doc claims idempotence; this is the
+%% evidence for that claim rather than a restatement of it.
+rebuild_idempotent() ->
+    ok = ensure_stubs_tab(),
+    Table = ?CAT:table(?BONDY_DB_REGISTRATION_RIB_TAB),
+    Peer = <<"peer_idem@127.0.0.1">>,
+    Uri = <<"com.example.rib.rebuild.idem">>,
+    Key = cell_key(?EXACT_MATCH, Uri, Peer),
+
+    ok = bondy_db:apply(Table, ?REALM, Key, {apply, count, {inc, 2}}),
+    ok = flush(Table, Key),
+
+    ok = bondy_registry_rib:rebuild(?BONDY_DB_REGISTRATION_RIB_TAB),
+    First = bondy_registry_rib:stub_nodes(
+        registration, ?REALM, ?EXACT_MATCH, Uri
+    ),
+    ok = bondy_registry_rib:rebuild(?BONDY_DB_REGISTRATION_RIB_TAB),
+    ok = bondy_registry_rib:rebuild(?BONDY_DB_REGISTRATION_RIB_TAB),
+    Third = bondy_registry_rib:stub_nodes(
+        registration, ?REALM, ?EXACT_MATCH, Uri
+    ),
+
+    ?assertMatch([{Peer, #{count := 2}}], First),
+    ?assertEqual(
+        First,
+        Third,
+        "three rebuilds must leave the same stub view as one"
+    ).
+
+%% `count = 0` is the only signal an emptied group ever sends, and the stub
+%% store has to read it as removal. A rebuild walks cells that a live merge
+%% would have dropped, so it must apply the same rule rather than
+%% resurrecting a dead group as a routable stub.
+rebuild_skips_emptied() ->
+    ok = ensure_stubs_tab(),
+    Table = ?CAT:table(?BONDY_DB_REGISTRATION_RIB_TAB),
+    Peer = <<"peer_empty@127.0.0.1">>,
+    Uri = <<"com.example.rib.rebuild.emptied">>,
+    Key = cell_key(?EXACT_MATCH, Uri, Peer),
+
+    ok = bondy_db:apply(Table, ?REALM, Key, {apply, count, {inc, 1}}),
+    ok = flush(Table, Key),
+    ok = bondy_db:apply(Table, ?REALM, Key, {apply, count, {inc, -1}}),
+    ok = flush(Table, Key),
+
+    ok = bondy_registry_rib:rebuild(?BONDY_DB_REGISTRATION_RIB_TAB),
+    ?assertEqual(
+        [],
+        bondy_registry_rib:stub_nodes(
+            registration, ?REALM, ?EXACT_MATCH, Uri
+        ),
+        "a count = 0 cell is not routable and must not become a stub"
+    ).
+
+%% An own-node cell merged back in while the local truth is UNREADABLE must
+%% leave the cell alone.
+%%
+%% `self_heal/4` turns `local_count/4` into a corrective delta and writes it
+%% through `bondy_db:apply/4` — a REPLICATED write. `local_count/4` used to
+%% report an unreadable partition store (unprovisioned, or the registry gproc
+%% pool not up) as `0`, which is indistinguishable from "this node genuinely
+%% owns nothing". The two demand opposite actions, and guessing wrong is not
+%% a missed repair: it broadcasts `-ReplicatedCount` for every cell it walks,
+%% erasing this node's own live registrations cluster-wide.
+%%
+%% FALSIFICATION: this asserts the cell is UNCHANGED. On the pre-fix code the
+%% count is driven to 0 by a corrective delta, so this test fails there — it
+%% is not a happy-path restatement.
+%%
+%% The eunit fixture has no registry partition pool, which is exactly the
+%% unreadable case, so no mocking is needed to reach it.
+self_heal_unreadable(_Tab) ->
+    ok = ensure_stubs_tab(),
+    Table = ?CAT:table(?BONDY_DB_REGISTRATION_RIB_TAB),
+    Uri = <<"com.example.rib.self_heal_unreadable">>,
+    Key = cell_key(?EXACT_MATCH, Uri),
+
+    %% Seed an own-node cell with a non-zero count, as a bootstrap or a peer
+    %% merge would restore it after a restart.
+    ok = bondy_db:apply(
+        Table, ?REALM, Key, {apply, count, {inc, 2}}
+    ),
+    ok = flush(Table, Key),
+    ?assertMatch(
+        #{count := 2},
+        summary(Table, Key),
+        "precondition: the seeded own-cell must read back as count = 2"
+    ),
+
+    %% The local truth is unreadable here, so the reaction must not write.
+    ok = bondy_registry_rib:on_remote_set(registration, Key, #{count => 2}),
+    ok = flush(Table, Key),
+
+    ?assertMatch(
+        #{count := 2},
+        summary(Table, Key),
+        "self_heal must SKIP when the local count is unknown; treating "
+        "unknown as 0 writes a replicated erasure of this node's own cells"
+    ).
+
+%% @private
+summary(Table, Key) ->
+    {ok, {Value, _Hlc}} = bondy_db:read(Table, ?REALM, Key),
+    bondy_registry_rib:reshape_summary(registration, Value).
 
 %% `bondy_db:read/3` on a RIB table returns the RAW `bondy_oplog_crdt_
 %% struct`/`bondy_oplog_crdt_pn_counter` projection — the generic CRDT

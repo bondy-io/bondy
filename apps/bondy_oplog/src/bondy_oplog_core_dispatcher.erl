@@ -54,7 +54,20 @@ Subscribers receive one of
 ```erlang
 {bondy_oplog_core_event,       Namespace, Key, Hlc, Operation}       %% local write
 {bondy_oplog_core_merge_event, Namespace, Key, Hlc, Operation, Old}  %% remote merge
+{bondy_oplog_core_bootstrap_event, Namespace, Bucket}                %% snapshot install
 ```
+
+The third is published once per table when a catalogue-snapshot bootstrap
+installs cells into that table's projection WHOLESALE. It carries no key,
+because no individual key changed in a way a subscriber could diff: the whole
+projection was replaced. A subscriber that DERIVES state from a table (rather
+than merely invalidating on change) must rebuild that state when it arrives —
+it is the only notification a bootstrap ever sends.
+
+It is delivered to EVERY subscriber of the namespace regardless of pattern. A
+`{prefix, P}` subscriber still needs to know its table was replaced; matching
+a wholesale replace against a key pattern would silently skip exactly the
+subscribers that most need it.
 
 The first is published by the applier for a **local** `bondy_db:apply/4`
 write; the second by the replay path when **anti-entropy** merges a peer's
@@ -112,6 +125,7 @@ does not police this.
 -export([unsubscribe/1]).
 -export([publish/4]).
 -export([publish_merge/5]).
+-export([publish_bootstrap/2]).
 -export([subscription_count/0]).
 -export([subscription_count/1]).
 
@@ -187,6 +201,33 @@ the merge replaced.
 
 publish_merge(NS, Key, Hlc, Op, Old) ->
     fanout({bondy_oplog_core_merge_event, NS, Key, Hlc, Op, Old}, NS, Key).
+
+-doc """
+Publish a **bootstrap** event: a catalogue-snapshot install replaced this
+table's projection wholesale.
+
+The snapshot install path writes cell frames straight into the projection and
+emits no per-cell merge event, so a reactor that DERIVES state from the table
+would keep serving state built from the pre-bootstrap contents — or, on a
+fresh replica, no state at all. This is the one notification that path sends.
+
+Delivered to every subscriber of `NS` irrespective of pattern (see the module
+doc): a wholesale replace has no key to match against.
+""".
+-spec publish_bootstrap(NS :: atom(), Bucket :: term()) -> ok.
+
+publish_bootstrap(NS, Bucket) ->
+    fanout_all({bondy_oplog_core_bootstrap_event, NS, Bucket}, NS).
+
+%% @private
+%% Pattern-independent fanout, for events that describe the whole table rather
+%% than one key. Deliberately does NOT consult `pattern`: there is no key to
+%% match, and a pattern-filtered wholesale-replace notification would drop the
+%% subscribers it exists to reach.
+fanout_all(Msg, NS) ->
+    Subs = ets:select(?TABLE, [{#sub{ns = NS, _ = '_'}, [], ['$_']}]),
+    lists:foreach(fun(#sub{pid = Pid}) -> Pid ! Msg end, Subs),
+    ok.
 
 %% @private
 %% Shared publish hot path: select the namespace's subscriptions and send `Msg`

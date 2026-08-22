@@ -100,6 +100,9 @@ the dispatcher is configured to effectively never restart.
 %% API
 -export([start_link/0]).
 -export([apply_reaction/4]).
+%% Exposed for the same reason as `apply_reaction/4`: it lets the bootstrap
+%% dispatch be unit-tested without a running cluster.
+-export([bootstrap_reaction/2]).
 
 -ifdef(TEST).
 %% Exposed for unit testing the reaction logic without a running cluster.
@@ -164,6 +167,17 @@ handle_info(
     %% side-effects no longer serialise through this process. `Old` is the
     %% pre-merge cell value (`undefined` when the cell did not exist).
     ok = route(NS, Key, Op, Old, State),
+    {noreply, State};
+handle_info({bondy_oplog_core_bootstrap_event, NS, _Bucket}, State) ->
+    %% A catalogue-snapshot install replaced this table's projection
+    %% wholesale. It emits no per-cell merge event, so any state we DERIVE
+    %% from the table has to be rebuilt from the projection now — this is
+    %% the only notification that path sends.
+    %%
+    %% Run INLINE, not through the pool: there is no cell key to hash on, and
+    %% the rebuild must not interleave with itself (a streamed snapshot can
+    %% notify the same table several times).
+    ok = bootstrap_rebuild(NS, State),
     {noreply, State};
 handle_info({bondy_oplog_core_event, _NS, _Key, _Hlc, _Op}, State) ->
     %% Local write — its side-effects fire inline at the write chokepoint.
@@ -257,7 +271,7 @@ subscribe(#state{subs = Subs0} = State) ->
 %% it; leave it pending (ns/ref `undefined`) until then.
 ensure_subscribed(#sub{ref = Ref} = Sub) when is_reference(Ref) ->
     Sub;
-ensure_subscribed(#sub{table = Table, label = Label} = Sub) ->
+ensure_subscribed(#sub{table = Table, label = Label, kind = Kind} = Sub) ->
     case bondy_namespace_catalog:table(Table) of
         undefined ->
             Sub;
@@ -268,6 +282,26 @@ ensure_subscribed(#sub{table = Table, label = Label} = Sub) ->
                 description => "AAE merge reactor subscribed to remote changes",
                 table => Label
             }),
+            %% RECONCILE ON ATTACH, do not assume we heard the event.
+            %%
+            %% The bootstrap notification is one-shot and `fanout_all/2`
+            %% reaches only the subscribers that exist when it fires. This
+            %% reactor subscribes ASYNCHRONOUSLY — `init/1` defers to a
+            %% `{continue, subscribe}` that retries until the catalogue has
+            %% provisioned each table — so a bootstrap completing before that
+            %% wins the race and its event is lost with no replay.
+            %%
+            %% MEASURED 2026-08-22: on a PLAIN restart the surviving on-disk
+            %% peer state lets AAE bootstrap the registry within milliseconds
+            %% of the instance starting, and the restart-suite case failed
+            %% 1-in-5 with zero notifications observed on the node.
+            %%
+            %% Rebuilding here removes the dependency on having heard it: the
+            %% state this reactor maintains is DERIVED from the projection, so
+            %% deriving it once at attach time is correct regardless of what
+            %% happened before. Idempotent, and a no-op when the projection is
+            %% still empty (the bootstrap then arrives normally and rebuilds).
+            ok = bootstrap_reaction(Kind, Table),
             Sub#sub{ns = NS, ref = Ref}
     end.
 
@@ -294,6 +328,47 @@ route(NS, Key, Op, Old, #state{subs = Subs}) ->
         false ->
             ok
     end.
+
+%% @private
+%% Resolve a bootstrap event's namespace to its subscription and rebuild
+%% whatever that reaction DERIVES from the table.
+%%
+%% Only the `rib` kind derives state: `bondy_registry_rib` keeps the stub view
+%% — the cross-node routing set that `bondy_broker` and `bondy_dealer` read —
+%% in an ETS table that only these reactions ever write, and it also owns the
+%% correction of this node's OWN resurrected cells.
+%%
+%% Every other kind is an INVALIDATION (close sessions whose credentials
+%% changed, drop a cached RBAC context). A bootstrap that reaches them has by
+%% definition just replaced the projection those caches would be rebuilt
+%% from, and the node doing it either has no sessions and no caches yet (a
+%% fresh replica) or has already had its caches driven by the op-replay that
+%% `bondy_oplog_sync_session:finish_bootstrap/4` runs for a LIVE
+%% re-bootstrap. There is nothing for them to invalidate here, so they are a
+%% deliberate no-op rather than an oversight.
+bootstrap_rebuild(NS, #state{subs = Subs}) ->
+    case lists:keyfind(NS, #sub.ns, Subs) of
+        #sub{kind = Kind, table = Table} ->
+            bootstrap_reaction(Kind, Table);
+        false ->
+            %% An event for a namespace this reactor is not bound to.
+            ok
+    end.
+
+-doc """
+Rebuild whatever the reaction for `Kind` DERIVES from `Table`, after a
+catalogue-snapshot install replaced that table's projection wholesale.
+
+Only `rib` derives state. Every other kind is an invalidation and has
+nothing to invalidate at this point — see `bootstrap_rebuild/2`'s note.
+MUST be total.
+""".
+-spec bootstrap_reaction(Kind :: atom(), Table :: atom()) -> ok.
+
+bootstrap_reaction(rib, Table) ->
+    bondy_registry_rib:rebuild(Table);
+bootstrap_reaction(_Kind, _Table) ->
+    ok.
 
 -doc """
 Run the reaction for a resolved subscription `Sub` against a delivered merge

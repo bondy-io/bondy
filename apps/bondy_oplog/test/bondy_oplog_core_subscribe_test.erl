@@ -32,12 +32,96 @@ subscribe_test_() ->
         fun subscriber_down_cleans_up_subscription/0,
         fun ns_isolation_other_ns_events_not_delivered/0,
         fun multiple_subscribers_all_receive_matching/0,
-        fun unsubscribe_unknown_ref_is_idempotent/0
+        fun unsubscribe_unknown_ref_is_idempotent/0,
+        fun bootstrap_reaches_an_all_subscriber/0,
+        fun bootstrap_ignores_the_key_pattern/0,
+        fun bootstrap_respects_ns_isolation/0,
+        fun bootstrap_reaches_every_subscriber_of_the_ns/0
     ]}.
 
 %% =============================================================================
 %% Tests
 %% =============================================================================
+
+%% A catalogue-snapshot install replaced a table's projection wholesale.
+%% Unlike `publish/4` and `publish_merge/5` this event carries NO key, so it
+%% cannot be pattern-matched — see `bootstrap_ignores_the_key_pattern/0`.
+bootstrap_reaches_an_all_subscriber() ->
+    NS = some_ns(),
+    {ok, Ref} = bondy_oplog_core:subscribe(NS, all),
+    ok = bondy_oplog_core:publish_bootstrap(NS, <<"some_bucket">>),
+    ?assertEqual(
+        [{bondy_oplog_core_bootstrap_event, NS, <<"some_bucket">>}],
+        drain_bootstrap()
+    ),
+    ok = bondy_oplog_core:unsubscribe(Ref).
+
+%% THE LOAD-BEARING PROPERTY. A `{prefix, _}`/`{exact, _}` subscriber cares
+%% about a slice of the keyspace, and a wholesale replace changes that slice
+%% too — but there is no key to test the pattern against. Filtering this
+%% event by pattern would silently skip exactly the subscribers that most
+%% need to rebuild, so delivery MUST ignore the pattern. Asserted here
+%% rather than argued in a comment.
+bootstrap_ignores_the_key_pattern() ->
+    NS = some_ns(),
+    {ok, R1} = bondy_oplog_core:subscribe(NS, {prefix, <<"zzz">>}),
+    {ok, R2} = bondy_oplog_core:subscribe(NS, {exact, <<"nothing">>}),
+    {ok, R3} = bondy_oplog_core:subscribe(NS, {match, fun(_) -> false end}),
+    ok = bondy_oplog_core:publish_bootstrap(NS, <<"b">>),
+    ?assertEqual(
+        [
+            {bondy_oplog_core_bootstrap_event, NS, <<"b">>},
+            {bondy_oplog_core_bootstrap_event, NS, <<"b">>},
+            {bondy_oplog_core_bootstrap_event, NS, <<"b">>}
+        ],
+        drain_bootstrap(),
+        "a wholesale replace has no key, so no pattern may filter it out"
+    ),
+    ok = bondy_oplog_core:unsubscribe(R1),
+    ok = bondy_oplog_core:unsubscribe(R2),
+    ok = bondy_oplog_core:unsubscribe(R3).
+
+%% Ignoring the PATTERN must not mean ignoring the NAMESPACE.
+bootstrap_respects_ns_isolation() ->
+    NS = some_ns(),
+    Other = some_ns(),
+    {ok, Ref} = bondy_oplog_core:subscribe(NS, all),
+    ok = bondy_oplog_core:publish_bootstrap(Other, <<"b">>),
+    ?assertEqual([], drain_bootstrap()),
+    ok = bondy_oplog_core:unsubscribe(Ref).
+
+bootstrap_reaches_every_subscriber_of_the_ns() ->
+    NS = some_ns(),
+    Parent = self(),
+    Pids = [
+        spawn(fun() ->
+            {ok, _} = bondy_oplog_core:subscribe(NS, all),
+            Parent ! {ready, self()},
+            receive
+                {bondy_oplog_core_bootstrap_event, _, _} = M ->
+                    Parent ! {got, self(), M}
+            after 5000 -> Parent ! {timeout, self()}
+            end
+        end)
+     || _ <- lists:seq(1, 3)
+    ],
+    _ = [
+        receive
+            {ready, P} -> ok
+        after 5000 -> error({subscriber_never_ready, P})
+        end
+     || P <- Pids
+    ],
+    ok = bondy_oplog_core:publish_bootstrap(NS, <<"b">>),
+    _ = [
+        receive
+            {got, P, _} -> ok;
+            {timeout, P} -> error({subscriber_missed_bootstrap, P})
+        after 10000 -> error({no_reply, P})
+        end
+     || P <- Pids
+    ],
+    ok.
 
 subscribe_returns_a_reference() ->
     {ok, Ref} = bondy_oplog_core:subscribe(some_ns(), all),
@@ -249,6 +333,20 @@ some_ns() ->
 
 drain() ->
     drain(20).
+
+%% `drain/2` receives only the 5-tuple change event, so it is structurally
+%% blind to the 3-tuple bootstrap event. Kept separate rather than widened:
+%% the existing tests rely on `drain/0` filtering everything else out.
+drain_bootstrap() ->
+    drain_bootstrap(20, []).
+
+drain_bootstrap(TimeoutMs, Acc) ->
+    receive
+        {bondy_oplog_core_bootstrap_event, _, _} = M ->
+            drain_bootstrap(TimeoutMs, [M | Acc])
+    after TimeoutMs ->
+        lists:reverse(Acc)
+    end.
 
 drain(TimeoutMs) ->
     drain(TimeoutMs, []).

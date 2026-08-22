@@ -47,6 +47,40 @@ catalogue_provisions_api_gateway_test(_) ->
         bondy_namespace_catalog:table(api_gateway)
     ).
 
+%% A catalogue-snapshot bootstrap installs the api_gateway projection
+%% WHOLESALE and emits no per-cell event, so the gateway is told with a
+%% `bondy_oplog_core_bootstrap_event` instead. Two things must hold, and the
+%% first is the one that bites: `handle_info/2` runs in the gateway's OWN
+%% gen_server, so an exception there kills the process that owns every HTTP
+%% route on the node. A fresh replica would lose its routes entirely and have
+%% nothing to rebuild them until the next live spec change.
+%%
+%% Asserts the process SURVIVES and stays responsive, and that the rebuild it
+%% performs is itself callable. Deliberately not mecking
+%% `bondy_listener_ranch` — replacing a module under a live listener stack to
+%% observe one call would be a bigger risk than the thing under test.
+bootstrap_event_rebuilds_and_does_not_kill_the_gateway_test(_) ->
+    Pid = whereis(bondy_http_gateway),
+    ?assert(is_pid(Pid)),
+
+    %% The rebuild the clause performs must work on its own terms.
+    ?assertEqual(ok, bondy_http_gateway:rebuild_dispatch_tables()),
+
+    Pid ! {bondy_oplog_core_bootstrap_event, some_ns, api_gateway},
+
+    %% `sys:get_state/2` is a synchronous round-trip through the gen_server
+    %% loop: it returns only once the message above has been handled, so it
+    %% doubles as the barrier and the liveness check.
+    _ = sys:get_state(Pid, 10000),
+    ?assertEqual(
+        Pid,
+        whereis(bondy_http_gateway),
+        "the bootstrap clause must not take down the API Gateway"
+    ),
+
+    %% Still serving: a normal call continues to work afterwards.
+    ?assertEqual({error, not_found}, bondy_http_gateway:lookup(<<"nope">>)).
+
 %% load → lookup → list → delete, all through the bondy_db-backed store.
 crud_roundtrip_test(_) ->
     %% Absent to begin with.

@@ -429,6 +429,9 @@ instances are unaffected.
 -export([sweep_stable_cells/3]).
 -export([install_catalogue_batch/2]).
 -export([install_catalogue_cells/3]).
+%% Exposed for unit testing the bootstrap-announcement conditions without an
+%% applier, a projection or a dispatcher.
+-export([bootstrap_publish_decision/3]).
 -export([cell_context/3]).
 %% State-free drain leaves reused verbatim by the ephemeral fused-writer
 %% mode in `bondy_oplog_instance` (fused-writer rollout, Steps 3-4). Exposed
@@ -2851,7 +2854,9 @@ do_install_catalogue_batch(Id, Source, Cells) ->
                     %% rather than misroute it to the founding projection.
                     bump_n(skipped, length(BucketCells), Acc);
                 Ctx ->
-                    install_catalogue_group(Id, Ctx, BucketCells, Acc)
+                    install_catalogue_group(
+                        Id, Ctx, Bucket, BucketCells, Acc
+                    )
             end
         end,
         #{
@@ -2867,8 +2872,8 @@ do_install_catalogue_batch(Id, Source, Cells) ->
 
 %% @private
 %% Install one bucket's cells through its table's ctx, accumulating into the
-%% shared counts, then clear that ctx's old-state cache.
-install_catalogue_group(Id, Ctx, Cells, Acc0) ->
+%% shared counts, then clear that ctx's old-state cache and notify reactors.
+install_catalogue_group(Id, Ctx, Bucket, Cells, Acc0) ->
     #{
         adapter := Adapter,
         handle := Handle,
@@ -2905,7 +2910,61 @@ install_catalogue_group(Id, Ctx, Cells, Acc0) ->
     bondy_oplog_cell_apply:oldstate_cache_clear(
         maps:get(oldstate_cache, Ctx, undefined)
     ),
+    %% Honour the table's `publish => true` declaration on THIS write path
+    %% too. `install_cell_unchecked/9` writes frames directly and emits no
+    %% per-cell merge event, so without this a table whose reactor DERIVES
+    %% state from the projection (rather than merely invalidating on change)
+    %% is never told its projection exists. One event per bucket per batch,
+    %% not one per cell: a snapshot install is a wholesale replace, not N
+    %% merges, and modelling it as N merges would both cost O(cells) sends
+    %% and hand reactors an `Old` of `undefined` for every key — which a
+    %% differ like `bondy_aae_reactor:react_user/3` would read as "every
+    %% user's credentials just changed".
+    %%
+    %% Only when this batch actually installed something: a batch that
+    %% skipped every cell on the HLC guard changed nothing to rebuild from.
+    ok = maybe_publish_bootstrap(Ctx, Bucket, Acc0, Acc1),
     Acc1.
+
+%% @private
+%% Fires the bootstrap notification when `Acc1` installed more cells than
+%% `Acc0` had. Idempotent for subscribers by contract — a streamed snapshot
+%% arrives in many batches, so a table may be notified several times per
+%% bootstrap and every handler must tolerate that.
+maybe_publish_bootstrap(Ctx, Bucket, Acc0, Acc1) ->
+    case bootstrap_publish_decision(Ctx, Acc0, Acc1) of
+        {publish, NS} -> bondy_oplog_core:publish_bootstrap(NS, Bucket);
+        skip -> ok
+    end.
+
+-doc """
+Whether an install group should announce itself, and under which namespace.
+
+Split out from the side-effect so the two conditions can be unit-tested
+without an applier, a projection or a dispatcher — the same reason
+`bondy_aae_reactor:apply_reaction/4` is exposed.
+
+`skip` when the table did not opt in (`publish => true` unset, so no
+`publish_ns`), or when this group installed nothing: a batch that skipped
+every cell on the per-cell HLC guard replaced no projection and leaves
+subscribers nothing to rebuild from.
+""".
+-spec bootstrap_publish_decision(
+    Ctx :: map(), Acc0 :: map(), Acc1 :: map()
+) -> {publish, atom()} | skip.
+
+bootstrap_publish_decision(Ctx, Acc0, Acc1) ->
+    case maps:get(publish_ns, Ctx, undefined) of
+        undefined ->
+            skip;
+        NS ->
+            Before = maps:get(installed, Acc0, 0),
+            After = maps:get(installed, Acc1, 0),
+            case After > Before of
+                true -> {publish, NS};
+                false -> skip
+            end
+    end.
 
 %% @private
 install_one_cell(

@@ -153,6 +153,7 @@ it).
 -export([index_range/6]).
 -export([info/1]).
 -export([list/2]).
+-export([fold_all/4]).
 -export([map_update/4]).
 -export([namespace/1]).
 -export([open/2]).
@@ -184,6 +185,14 @@ it).
 
 -define(DEFAULT_SHARD_COUNT, 8).
 -define(INDEX, primary).
+
+%% Topologies that fold the realm into the storage KEY rather than isolating
+%% it by bucket. The full rationale, and the NUL-separator invariant it rests
+%% on, live with `cell_key/3` further down.
+-define(FOLDS_REALM(Topology),
+    (Topology =:= bondy_db_topology_shared_shards orelse
+        Topology =:= bondy_db_topology_memory)
+).
 
 %% Reserved bucket/key for the latency idle probe. A bucket no user query
 %% targets (reads/ranges scope to a realm-derived bucket via
@@ -1706,6 +1715,87 @@ list(#{namespace := NS, db_topology := Topology} = Table, Realm) when
                 {uncell_key(Topology, Realm, K), V, Hlc}
              || {K, V, Hlc} <- Rows
             ]};
+        {error, _} = Err ->
+            Err
+    end.
+
+-doc """
+Streams **every** cell of `Table`, across **every realm**, into `Fun`.
+
+The counterpart to `list/2` for callers that need the whole table and cannot
+name the realms up front. `list/2` narrows to one realm purely through
+`realm_scan_range/2`; dropping that narrowing is the entire difference.
+
+## Why this exists
+
+Without it, "every realm with data in `Table`" has to be approximated by
+`bondy_realm:list/0` — but realms are themselves replicated state in the
+`main` DB, and nothing orders one DB's anti-entropy bootstrap before
+another's. A caller rebuilding derived state on a freshly bootstrapped node
+therefore sees an empty or partial realm list and silently skips cells,
+intermittently, depending on which bootstrap won the race. Enumerating the
+data directly removes the dependency rather than sequencing it.
+
+## Contract
+
+`Fun` receives `{StorageKey, Value, Hlc}` — the **storage** key
+`<<Realm, 0, Key>>`, NOT the caller-facing key `list/2` recovers via
+`uncell_key/3`. The realm cannot be stripped here because this function does
+not know it; callers that need it split on the FIRST NUL, which is exact:
+`assert_nul_free_realm/1` guarantees a realm URI contains none, while the
+key's own bytes (which may) are preserved verbatim after the separator.
+
+Streams. Rows arrive in ascending storage-key order, one merged page at a
+time (`limit`, default 1000), so a table of millions of cells never
+materialises. This is why it is a fold and not a `list_all/1`.
+
+## Partial by construction
+
+Only realm-FOLDING topologies can be scanned this way — `?FOLDS_REALM`, i.e.
+`bondy_db_topology_memory` and `bondy_db_topology_shared_shards`, which is
+both DBs Bondy ships. The others carry the realm in the BUCKET, and nothing
+in `bondy_db`, `bondy_oplog_core` or the projection adapters enumerates
+buckets. Raises `{unsupported_topology, _}` rather than returning `{ok, Acc0}`
+— a silent empty fold would look exactly like an empty table.
+""".
+-spec fold_all(
+    Table :: table(),
+    Fun :: fun(({binary(), term(), term()}, Acc) -> Acc),
+    Acc0 :: Acc,
+    Opts :: map()
+) -> {ok, Acc} | {error, term()} when Acc :: term().
+
+fold_all(
+    #{namespace := NS, db_topology := Topology} = Table, Fun, Acc0, Opts
+) when
+    is_function(Fun, 2), is_map(Opts)
+->
+    ?FOLDS_REALM(Topology) orelse error({unsupported_topology, Topology}),
+    %% `bucket_for/3` ignores the realm under a folding topology (the realm is
+    %% in the key), so the bucket is the whole table.
+    Bucket = primary_bucket(Table, <<>>),
+    Limit = maps:get(limit, Opts, 1000),
+    fold_all_pages(NS, Bucket, <<>>, Limit, Fun, Acc0).
+
+%% @private
+%% `list_pages/5`'s loop, applying `Fun` per page instead of accumulating the
+%% rows: same paging contract (advance the inclusive lower bound to the
+%% successor of the last STORAGE key; a short page ends the scan), no upper
+%% bound, and no per-page retention of what has already been folded.
+fold_all_pages(NS, Bucket, Lo, Limit, Fun, Acc) ->
+    Opts = #{limit => Limit},
+    case bondy_oplog_core:range_all(NS, ?INDEX, Bucket, {Lo, infinity}, Opts) of
+        {ok, Rows} ->
+            Acc1 = lists:foldl(Fun, Acc, Rows),
+            case length(Rows) < Limit of
+                true ->
+                    {ok, Acc1};
+                false ->
+                    {LastKey, _, _} = lists:last(Rows),
+                    fold_all_pages(
+                        NS, Bucket, <<LastKey/binary, 0>>, Limit, Fun, Acc1
+                    )
+            end;
         {error, _} = Err ->
             Err
     end.
@@ -3936,10 +4026,10 @@ realm_prefix(Realm, _Depth) ->
 %% captures exactly that realm's keys, and the original key is recovered by
 %% stripping the known `byte_size(Realm) + 1` prefix (the key's own bytes,
 %% which MAY contain NULs, are preserved verbatim after the separator).
--define(FOLDS_REALM(Topology),
-    (Topology =:= bondy_db_topology_shared_shards orelse
-        Topology =:= bondy_db_topology_memory)
-).
+%% (`?FOLDS_REALM/1` itself is defined with the other macros at the top of
+%% this module; a macro must precede every use, and `fold_all/4` — a public
+%% export — uses it far above here. The rationale above stays with the code it
+%% explains.)
 
 cell_key(Topology, Realm, Key) when is_binary(Realm), is_binary(Key) ->
     case ?FOLDS_REALM(Topology) of

@@ -74,6 +74,10 @@ that realm (currently a placeholder).
 %% Debounce window (ms) for coalescing a burst of spec-change events (boot
 %% config load, an AE sync) into a single dispatch-table rebuild.
 -define(REBUILD_DEBOUNCE, 250).
+%% Retry cadence for the oplog subscription when the api_gateway table is not
+%% provisioned yet. Same value as `bondy_aae_reactor`'s, for one cadence
+%% across the two subscribers of a `publish => true` table.
+-define(RESUBSCRIBE_AFTER, 500).
 
 -record(state, {
     %% Use for WAMP subscriptions
@@ -305,6 +309,23 @@ handle_info(
     %% A peer's API spec change arrived via anti-entropy (the merge-side hook).
     %% Rebuild this node's dispatch table too, debounced like the local case.
     {noreply, note_spec_change(Key, State0)};
+handle_info(retry_subscribe, State0) ->
+    %% The api_gateway table was not provisioned when we last tried; try
+    %% again rather than stay deaf to spec changes. `subscribe_oplog/1`
+    %% re-arms this timer if it is still unavailable.
+    {noreply, subscribe_oplog(State0)};
+handle_info({bondy_oplog_core_bootstrap_event, _NS, _Bucket}, State0) ->
+    %% A catalogue-snapshot bootstrap installed the API-spec table's
+    %% projection wholesale. That path emits no per-cell event, so without
+    %% this clause a freshly bootstrapped node keeps serving the dispatch
+    %% tables it built at `init/1` — which, on a fresh replica, are the specs
+    %% it did not have yet, i.e. none. The routes would simply be missing,
+    %% and nothing would rebuild them until the next live spec change.
+    %%
+    %% There is no key to accumulate: every spec in the table is new to us.
+    %% Rebuild the whole dispatch table rather than a keyed subset.
+    ok = rebuild_dispatch_tables(),
+    {noreply, State0};
 handle_info(rebuild_specs, State0) ->
     %% The debounce window elapsed — rebuild once for the whole batch.
     ok = handle_spec_updates(State0),
@@ -378,17 +399,42 @@ subscribe(State0) ->
 subscribe_oplog(State) ->
     case spec_table_opt() of
         undefined ->
+            %% RETRY rather than give up. The catalogue provisions its tables
+            %% synchronously in `init/1` and `bondy_sup` starts it before this
+            %% process, so in a healthy boot this branch is unreachable — but
+            %% it IS reachable when a DB open failed, and returning here left
+            %% the spec-change reactor disabled for the LIFETIME of the node,
+            %% marked only by this warning. A later recovery of the table
+            %% would never be picked up.
             ?LOG_WARNING(#{
                 description =>
                     "API Gateway bondy_db table is not available; the "
-                    "spec-change reactor is disabled (is the namespace "
-                    "catalogue running?)"
+                    "spec-change reactor is not subscribed yet and will "
+                    "retry (is the namespace catalogue running?)",
+                retry_in_ms => ?RESUBSCRIBE_AFTER
             }),
+            _ = erlang:send_after(?RESUBSCRIBE_AFTER, self(), retry_subscribe),
             State;
         Table ->
             {ok, Ref} = bondy_oplog_core:subscribe(
                 bondy_db:namespace(Table), all
             ),
+            %% RECONCILE ON ATTACH, do not assume we heard the event.
+            %%
+            %% A catalogue-snapshot bootstrap announces itself ONCE
+            %% (`bondy_oplog_core_bootstrap_event`), and that fanout reaches
+            %% only the subscribers that exist when it fires. The catalogue
+            %% provisions — and therefore AAE can bootstrap — the
+            %% `api_gateway` table before this process is started by
+            %% `bondy_sup`, so an install completing in that window would be
+            %% missed and this node would serve the dispatch tables it had
+            %% before, which on a fresh replica is no routes at all.
+            %%
+            %% The dispatch tables are DERIVED from the projection, so
+            %% rebuilding them here is correct regardless of what happened
+            %% before, and idempotent. Same discipline as
+            %% `bondy_aae_reactor:ensure_subscribed/1`.
+            ok = rebuild_dispatch_tables(),
             State#state{oplog_sub = Ref}
     end.
 

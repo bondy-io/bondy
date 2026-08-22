@@ -507,3 +507,63 @@ reacted_tables_publish_their_merges_test() ->
     %% The table this went wrong on, named so the case cannot be weakened into
     %% vacuity by an empty `reacted_table_names/0`.
     ?assert(lists:member(?BONDY_DB_GROUP_TAB, Reacted)).
+
+
+%% =============================================================================
+%% Bootstrap dispatch (catalogue-snapshot install)
+%% =============================================================================
+
+%% The snapshot install emits no per-cell merge event, so `rib` — the only
+%% reaction that DERIVES state (the stub view routing reads, plus the
+%% correction of this node's own resurrected cells) — must rebuild from the
+%% projection when told the table arrived.
+bootstrap_reaction_rebuilds_the_rib_test() ->
+    ok = meck:new(bondy_registry_rib, [passthrough]),
+    ok = meck:expect(bondy_registry_rib, rebuild, fun(T) -> {rebuilt, T} end),
+    try
+        ?assertEqual(
+            {rebuilt, ?BONDY_DB_REGISTRATION_RIB_TAB},
+            bondy_aae_reactor:bootstrap_reaction(
+                rib, ?BONDY_DB_REGISTRATION_RIB_TAB
+            )
+        ),
+        ?assert(
+            meck:called(
+                bondy_registry_rib,
+                rebuild,
+                [?BONDY_DB_REGISTRATION_RIB_TAB]
+            )
+        )
+    after
+        meck:unload(bondy_registry_rib)
+    end.
+
+%% Every other kind is an INVALIDATION (close sessions, drop a cached RBAC
+%% context). A node taking a snapshot bootstrap has nothing cached to
+%% invalidate, so these are a deliberate no-op — and specifically must NOT
+%% reach into the RIB, which owns a different table entirely.
+bootstrap_reaction_is_a_noop_for_invalidating_kinds_test() ->
+    ok = meck:new(bondy_registry_rib, [passthrough]),
+    ok = meck:expect(bondy_registry_rib, rebuild, fun(T) -> {rebuilt, T} end),
+    try
+        _ = [
+            ?assertEqual(
+                ok,
+                bondy_aae_reactor:bootstrap_reaction(K, ?BONDY_DB_USER_TAB)
+            )
+         || K <- [user, realm, grant, member, group, source]
+        ],
+        ?assertNot(
+            meck:called(bondy_registry_rib, rebuild, '_'),
+            "an invalidating kind must not trigger a RIB rebuild"
+        )
+    after
+        meck:unload(bondy_registry_rib)
+    end.
+
+%% Totality: the reactor dispatches on whatever the subscription table says,
+%% so an unrecognised kind must return rather than crash the reactor.
+bootstrap_reaction_is_total_test() ->
+    ?assertEqual(
+        ok, bondy_aae_reactor:bootstrap_reaction(some_future_kind, some_table)
+    ).

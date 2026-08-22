@@ -28,7 +28,12 @@ publish_list_test_() ->
             {"short-form ops: term values, auto HLC, decoded reads",
                 fun short_form_ops/0},
             {"a NUL-bearing realm is refused (G-1 injectivity)",
-                fun nul_realm_refused/0}
+                fun nul_realm_refused/0},
+            {"fold_all/4 spans every realm", fun fold_all_spans_realms/0},
+            {"fold_all/4 pages past the substrate range cap",
+                fun fold_all_pages_to_completion/0},
+            {"fold_all/4 refuses a non-folding topology",
+                fun fold_all_unsupported_topology/0}
         ]
     end}.
 
@@ -179,6 +184,108 @@ open(Name, Publish) ->
 %% Keep only live (binary-valued) cells as {Key, Value}, sorted by key.
 live(Cells) ->
     lists:sort([{K, V} || {K, V, _Hlc} <- Cells, is_binary(V)]).
+
+%% `list/2` narrows to one realm; `fold_all/4` is the same scan without that
+%% narrowing, for callers that cannot name the realms up front. It yields the
+%% STORAGE key (`<<Realm, 0, Key>>`) because it does not know the realm to
+%% strip — the caller splits on the first NUL, which is exact under G-1.
+fold_all_spans_realms() ->
+    {Db, T} = open(fold_all_realms, false),
+    try
+        Cells = [
+            {<<"r1">>, <<"a">>, <<"v1a">>},
+            {<<"r1">>, <<"b">>, <<"v1b">>},
+            {<<"r2">>, <<"a">>, <<"v2a">>},
+            {<<"r3">>, <<"z">>, <<"v3z">>}
+        ],
+        _ = [
+            bondy_db:apply(T, R, K, {set, bondy_db:tick(T), V})
+         || {R, K, V} <- Cells
+        ],
+
+        %% `list/2` sees one realm...
+        {ok, R1} = bondy_db:list(T, <<"r1">>),
+        ?assertEqual([{<<"a">>, <<"v1a">>}, {<<"b">>, <<"v1b">>}], live(R1)),
+
+        %% ...`fold_all/4` sees them all, and the realm is recoverable.
+        {ok, Got} = bondy_db:fold_all(
+            T,
+            fun({StorageKey, V, _Hlc}, Acc) when is_binary(V) ->
+                    [Realm, Key] = binary:split(StorageKey, <<0>>),
+                    [{Realm, Key, V} | Acc];
+                (_, Acc) ->
+                    Acc
+            end,
+            [],
+            #{}
+        ),
+        ?assertEqual(lists:sort(Cells), lists:sort(Got))
+    after
+        try
+            bondy_db:close(Db)
+        catch
+            _:_ -> ok
+        end
+    end.
+
+%% The substrate caps a single merged page, so the fold must page to
+%% exhaustion exactly as `list/2` does — a truncated rebuild would silently
+%% skip cells, which is the failure mode this whole primitive exists to remove.
+fold_all_pages_to_completion() ->
+    {Db, T} = open(fold_all_paging, false),
+    try
+        N = 2500,
+        _ = [
+            bondy_db:apply(
+                T,
+                <<"r", (integer_to_binary(I rem 3))/binary>>,
+                integer_to_binary(I),
+                {set, bondy_db:tick(T), <<"v">>}
+            )
+         || I <- lists:seq(1, N)
+        ],
+        {ok, Count} = bondy_db:fold_all(
+            T,
+            fun({_K, V, _Hlc}, Acc) when is_binary(V) -> Acc + 1;
+               (_, Acc) -> Acc
+            end,
+            0,
+            #{}
+        ),
+        ?assertEqual(N, Count)
+    after
+        try
+            bondy_db:close(Db)
+        catch
+            _:_ -> ok
+        end
+    end.
+
+%% Only realm-FOLDING topologies can be scanned this way; the others keep the
+%% realm in the bucket and nothing enumerates buckets. It must RAISE rather
+%% than return an empty fold, which would be indistinguishable from an empty
+%% table — the silent-skip failure this primitive exists to remove.
+%%
+%% A synthetic table map is deliberate, and is the stronger assertion: the
+%% refusal has to happen on the topology alone, BEFORE any bucket resolution
+%% or substrate call, so a map carrying nothing but the namespace and the
+%% topology is sufficient to reach it. Standing up a real `per_entity` DB
+%% would also drag in its `sup` requirement, testing the fixture rather than
+%% the guard.
+fold_all_unsupported_topology() ->
+    _ = [
+        ?assertError(
+            {unsupported_topology, T},
+            bondy_db:fold_all(
+                #{namespace => fold_all_ns, db_topology => T},
+                fun(_, Acc) -> Acc end,
+                ok,
+                #{}
+            )
+        )
+     || T <- [bondy_db_topology_per_entity, bondy_db_topology_single_bookie]
+    ],
+    ok.
 
 %% G-1's injectivity precondition, enforced at the facade: a NUL inside a
 %% realm would fold realms `<<"a">>` and `<<"a",0,"b">>` onto colliding
