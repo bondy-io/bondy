@@ -447,7 +447,7 @@
 
 {mapping, "vm.distribution.listen", "vm_args.-dist_listen", [
   {datatype, flag},
-  {default, true},
+  {default, on},
   hidden
 ]}.
 

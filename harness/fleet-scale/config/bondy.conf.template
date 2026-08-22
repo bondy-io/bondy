@@ -58,10 +58,6 @@ load_regulation.router.flow_pool.capacity   = 100000
 ## --- registry RIB: write-only architecture ------------------------------------
 registry.rib.check_interval                 = 5m
 
-## --- progressive / streaming RPC ----------------------------------------------
-wamp.dealer.progressive_call_results        = on
-wamp.dealer.progressive_calls               = on
-
 ## --- AAE reactor pool ---------------------------------------------------------
 load_regulation.aae_reactor.pool.size       = 16
 

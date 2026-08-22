@@ -196,46 +196,11 @@
                 path => "/tmp/bondy_ct_wamp_uds_" ++ os:getpid() ++ ".sock"
             }}
         ]},
-        {wamp, [
-            {dealer, [
-                {features, [
-                    {testament_meta_api, false},
-                    {shared_registration, true},
-                    {sharded_registration, false},
-                    {session_meta_api, true},
-                    {registration_revocation, false},
-                    {registration_meta_api, true},
-                    {reflection, false},
-                    {progressive_calls, false},
-                    {progressive_call_results, false},
-                    {payload_passthru_mode, false},
-                    {caller_identification, true},
-                    {caller_auth_claims, true},
-                    {call_trustlevels, false},
-                    {call_timeout, true},
-                    {call_reroute, true},
-                    {call_canceling, true}
-                ]}
-            ]},
-            {broker, [
-                {features, [
-                    {subscription_revocation, false},
-                    {subscription_meta_api, false},
-                    {subscriber_blackwhite_listing, true},
-                    {sharded_subscription, false},
-                    {session_meta_api, true},
-                    {reflection, true},
-                    {publisher_identification, true},
-                    {publisher_exclusion, true},
-                    {publication_trustlevels, false},
-                    {payload_passthru_mode, false},
-                    {event_retention, true},
-                    {event_history, false},
-                    {acknowledge_subscriber_received, false},
-                    {acknowledge_event_received, false}
-                ]}
-            ]}
-        ]},
+        %% NOTE: no `wamp.{dealer,broker}.features` here. A feature is a
+        %% capability of the build, seated by `bondy_config:setup_wamp/0` from
+        %% `?DEALER_FEATURES` / `?BROKER_FEATURES`, and that runs on app start —
+        %% so a copy in this fixture is overwritten before any test reads it.
+        %% It also drifted: this one still said `call_reroute` was supported.
         {session_manager_pool, [{size, 32}]},
         {job_manager_queue, [{ttl, 60000}, {max_size, 160000}]},
         {job_manager_pool, [{size, 16}]},

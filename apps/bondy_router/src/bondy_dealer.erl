@@ -311,7 +311,7 @@ another register request second might be permissible immediately.
 -export([flush_callee_promises/2]).
 -export([forward/2]).
 -export([forward/3]).
--export([is_feature_enabled/1]).
+-export([is_feature_implemented/1]).
 -export([register/3]).
 -export([register/4]).
 -export([unregister/2]).
@@ -334,16 +334,25 @@ another register request second might be permissible immediately.
 features() ->
     maps:from_list(bondy_config:get([wamp, dealer, features])).
 
--spec is_feature_enabled(binary() | atom()) -> boolean().
+-doc """
+Returns `true` if this build implements WAMP feature `F` for the dealer.
 
-is_feature_enabled(F) when is_binary(F) ->
+This is a CAPABILITY, not a session flag. It answers "can Bondy do this at all",
+which is what `bondy_router:roles/0` announces in WELCOME and what
+`bondy_config:setup_wamp/0` seats from `?DEALER_FEATURES`. What a given peer may
+actually use is the intersection of its `HELLO` request with these values, and
+that lives on the session — see `bondy_context:is_feature_enabled/3`.
+""".
+-spec is_feature_implemented(binary() | atom()) -> boolean().
+
+is_feature_implemented(F) when is_binary(F) ->
     try
-        is_feature_enabled(binary_to_existing_atom(F))
+        is_feature_implemented(binary_to_existing_atom(F))
     catch
         _:_ ->
             false
     end;
-is_feature_enabled(F) when is_atom(F) ->
+is_feature_implemented(F) when is_atom(F) ->
     bondy_config:get([wamp, dealer, features, F], false).
 
 -doc """
@@ -567,7 +576,7 @@ forward(#call{} = Msg, _Hint, #{rib_completion := true} = Opts0) ->
     CallId = key_value:get(['$private', call_id], Msg#call.options, undefined),
 
     case
-        is_feature_enabled(progressive_calls) andalso
+        is_feature_implemented(progressive_calls) andalso
             find_input_stream(RealmUri, Caller, CallId)
     of
         {invocation_chunk, Promise} ->
@@ -1560,7 +1569,7 @@ maybe_strip_receive_progress(
     #call{options = #{receive_progress := true} = Opts} = M, Ctxt
 ) ->
     Supported =
-        is_feature_enabled(progressive_call_results) andalso
+        is_feature_implemented(progressive_call_results) andalso
             bondy_context:is_feature_enabled(
                 Ctxt, caller, progressive_call_results
             ),
@@ -2050,13 +2059,29 @@ handle_call(Msg, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     Caller = bondy_context:ref(Ctxt),
 
-    %% Progressive Calls: only when the dealer feature is enabled do we check
-    %% whether this CALL reuses the caller's request id — i.e. is a subsequent
-    %% argument chunk of an in-flight progressive-input stream. The feature is
-    %% off by default, so a normal deployment pays no per-call promise lookup.
+    %% Progressive Calls: is this CALL a subsequent argument chunk of an
+    %% in-flight progressive-input stream — i.e. does it reuse the caller's
+    %% request id? Answering costs a promise lookup, so it is asked only of a
+    %% caller that announced `progressive_calls` in HELLO.
+    %%
+    %% The SESSION flag, not `is_feature_implemented/1`. The router-wide value is a
+    %% capability — it says this build implements progressive calls, and it is
+    %% now always true — so testing it here would run the lookup on every CALL
+    %% from every caller. This caller is local (`handle_call/5` handles local
+    %% callers only), so its negotiated flags are in `Ctxt`, and a caller that
+    %% did not announce the feature cannot have an open stream to find:
+    %% `maybe_gate_progressive_caller/2' throws on the FIRST chunk from such a
+    %% caller, so none is ever opened.
+    %%
+    %% One branch narrows with it. `find_input_stream/3' also reports
+    %% `violation' — a duplicate request id live on a NON-progressive call —
+    %% and that now goes undetected for a caller that announced nothing. It is
+    %% still strictly more detection than before: this test used to be the
+    %% capability, which shipped `off', so on a default deployment the lookup
+    %% never ran and no caller was checked at all.
     case
-        is_feature_enabled(progressive_calls) andalso
-            find_input_stream(RealmUri, Caller, CallId)
+        bondy_context:is_feature_enabled(Ctxt, caller, progressive_calls)
+        andalso find_input_stream(RealmUri, Caller, CallId)
     of
         {invocation_chunk, Promise} ->
             %% Local callee (or owner node): forward another INVOCATION to the
@@ -2070,8 +2095,8 @@ handle_call(Msg, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
             %% The request id is live on a NON-progressive call.
             throw({progressive_calls_violation, CallId});
         _ ->
-            %% Feature off (short-circuit `false`) or no open stream (`none`):
-            %% a first chunk of a stream, or a plain call.
+            %% The caller announced nothing (short-circuit `false`) or it has no
+            %% open stream (`none`): a first chunk of a stream, or a plain call.
             handle_call_matched(Msg, ProcUri, Fun, Opts, Ctxt, CallId, RealmUri)
     end.
 

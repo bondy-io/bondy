@@ -1,9 +1,17 @@
-# How to check your configuration for keys Bondy no longer reads
+# How to check your configuration before an upgrade
 
-Bondy cannot fail the boot on a key it does not recognise. A stale, renamed or
-mistyped key in `bondy.conf` is dropped without a word: the node starts, and the
-subsystem you meant to configure runs on its default. `scripts/migrate_conf.escript`
-is the tool that tells you which of your settings that applies to.
+A `bondy.conf` can be wrong in two ways, and neither of them says so at boot.
+
+A key Bondy no longer recognises is dropped without a word: the node starts, and
+the subsystem you meant to configure runs on its default.
+
+A value Bondy cannot parse is worse. Config generation is all-or-nothing, so one
+unusable value discards the whole file — every other setting in it with the same
+silence — and the node starts on whatever config the last successful generation
+left behind. Nothing appears in the log.
+
+`scripts/migrate_conf.escript` is the tool that tells you which of your settings
+either applies to.
 
 Run it before every upgrade, and after every hand-edit of a `bondy.conf`.
 
@@ -77,6 +85,39 @@ read my current file", point it at that release's schemas:
     --schema-dir /path/to/new-release/releases/<version>/schema
 ```
 
+## Values the schema rejects
+
+A key can be perfectly current and still stop the node from picking up any of
+your configuration, because config generation is all-or-nothing. If one value
+cannot be parsed as its declared type, or is refused by the constraint the schema
+puts on it, generation stops and no application config is written at all.
+
+Nothing tells you. The release runs the generator silently and does not check
+whether it succeeded, and the config file it loads simply keeps whatever the
+previous successful run produced. The node comes up on stale settings — often
+weeks stale — and behaves as though your file were never edited.
+
+These are reported under `INVALID VALUE`, and they do set the exit code. Two
+kinds appear:
+
+| Reported | Meaning |
+|---|---|
+| `not a valid <type>` | The value cannot be read as the type the schema declares — for example `infinity` where a byte size is expected. |
+| `the value parses but the schema refuses it` | The type is right but the value is out of range — for example `0` where a positive integer is required. |
+
+`migrate` never repairs these. Every other thing it does is a mechanical fact
+about a key; what you meant by a value is not something it can derive, so the
+line is copied through and reported again against the file it just wrote.
+
+Two limits are worth knowing:
+
+- A value containing `${VAR}` or `$(some.other.key)` is not checked. Neither is
+  the value Bondy will see — the first is filled in from the environment when the
+  release renders `bondy.conf.template`, the second by the generator itself. To
+  cover them, run the check against the rendered `bondy.conf`.
+- A well-typed value that is simply the wrong one cannot be detected. `/data/tmpX`
+  is a valid directory; only you know it was meant to be `/data/tmp`.
+
 ## Keys whose meaning changed
 
 A key can survive an upgrade and still stop meaning what it did. That is
@@ -93,7 +134,7 @@ otherwise never exit `0`, and a gate that cannot be satisfied gets ignored. The
 verdict line names the count instead, so `clean` cannot be read as silence:
 
 ```
-RESULT  clean -- every key is read and every listener is declared; 1 key changed meaning in this release
+RESULT  clean -- every key is read, every value parses, every listener is declared; 1 key changed meaning in this release
 ```
 
 On this release there is one entry, `listeners.$name.linger.timeout`, whose unit

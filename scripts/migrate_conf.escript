@@ -13,13 +13,15 @@
 %%     migrate_conf.escript selftest [--schema-dir DIR]...
 %%
 %% `check' reports every key in a `bondy.conf' that this release no longer reads,
-%% every key it still reads but reads DIFFERENTLY, which listeners the file will
-%% actually start, and any inert `advanced.config' stanza beside it. Nothing is
-%% written. `migrate' writes a converted file. `selftest' is the gate -- see the
-%% SELFTEST section.
+%% every key it reads but whose VALUE it cannot parse, every key it still reads
+%% but reads DIFFERENTLY, which listeners the file will actually start, and any
+%% inert `advanced.config' stanza beside it. Nothing is written. `migrate' writes
+%% a converted file. `selftest' is the gate -- see the SELFTEST section.
 %%
-%% WHY THIS EXISTS: Bondy cannot fail the boot on an unknown key, and that is
-%% structural rather than an oversight. The generated pre-start hook runs
+%% WHY THIS EXISTS: neither of the two ways a bondy.conf can be wrong announces
+%% itself at boot, and in both cases that is structural rather than an oversight.
+%%
+%% An unknown KEY is dropped in silence. The generated pre-start hook runs
 %% cuttlefish three times against the SAME etc/bondy.conf
 %% (`bin/hooks/pre_start_cuttlefish', invocations at lines 10, 28 and 46), each
 %% seeing only its own schema set, so every key owned by another set looks
@@ -29,6 +31,21 @@
 %% :412-422 is never taken by the release). A stale or renamed key is dropped in
 %% silence and the subsystem runs on its default while the operator believes
 %% their setting applies.
+%%
+%% A bad VALUE is worse, and silent for a different reason. Cuttlefish generates
+%% all-or-nothing: one value that fails its datatype or a validator abandons the
+%% whole run, so no app config is written for ANY key. The same hook passes
+%% --silent and does not check the exit status, and `config/prod/sys.config' ends
+%% with the include string "etc/generated/user_defined.config" -- so the failure
+%% prints nothing and the node boots on the file the last SUCCESSFUL generation
+%% left behind. Seen in the field 2026-08-22: a migrated file carrying
+%% `wamp.websocket.max_frame_size = infinity' against a `{datatype, bytesize}'
+%% mapping brought a node up on default listeners and an earlier run's values,
+%% with no diagnostic anywhere. See the VALUES THE SCHEMA REJECTS section.
+%%
+%% WHAT IT CANNOT SEE: a value that is well-typed and wrong. The same field file
+%% set `platform_tmp_dir = /bondy/tmpXX', which is a perfectly good directory
+%% string, and no schema check can know it was meant to be `/bondy/tmp'.
 %%
 %% Note the three invocations use only TWO distinct --schema_dir values: the
 %% second and third are identical (`releases/<vsn>/schema/'), because the release
@@ -51,7 +68,8 @@
 %% keys across 258 occurrences -- 28 of them the original hand audit, the rest
 %% keys the schemas have since dropped (see ?DIRTY_EXPECTED for why the number
 %% moved). `selftest' re-runs both, plus the rule-table, no-op, round-trip,
-%% listener and changed-meaning invariants.
+%% listener, changed-meaning and value invariants. The value check is pinned
+%% against cuttlefish's own generator rather than a table of expected answers.
 %% =============================================================================
 
 -mode(compile).
@@ -96,9 +114,9 @@ main(Args) ->
 run(["check", ConfFile | Rest]) ->
     SchemaDirs = parse_schema_dirs(Rest),
     ok = locate_cuttlefish(),
-    {KeyFindings, ListenerFindings} = check(ConfFile, SchemaDirs),
+    {KeyFindings, ValueFindings, ListenerFindings} = check(ConfFile, SchemaDirs),
     halt(
-        case KeyFindings ++ ListenerFindings of
+        case KeyFindings ++ ValueFindings ++ ListenerFindings of
             [] -> ?EXIT_CLEAN;
             _ -> ?EXIT_FINDINGS
         end
@@ -111,9 +129,10 @@ run(["migrate", ConfFile | Rest]) ->
     %% unconditionally before, which made `migrate && deploy' green on a file
     %% that aborts the boot -- the same conflation the header warns about for
     %% `check', in the mode where it does more damage.
-    {KeyFindings, ListenerFindings} = migrate(ConfFile, Out, SchemaDirs),
+    {KeyFindings, ValueFindings, ListenerFindings} =
+        migrate(ConfFile, Out, SchemaDirs),
     halt(
-        case KeyFindings ++ ListenerFindings of
+        case KeyFindings ++ ValueFindings ++ ListenerFindings of
             [] -> ?EXIT_CLEAN;
             _ -> ?EXIT_FINDINGS
         end
@@ -168,21 +187,24 @@ parse_migrate_args([Other | _], _, _) ->
 %% CHECK
 %% =============================================================================
 
-%% Returns {KeyFindings, ListenerFindings}. The two are separate because they are
-%% different hazards: a key finding is a setting this release does not read at
-%% all, while a listener finding is a live key that IS read but whose listener
-%% will not start.
+%% Returns {KeyFindings, ValueFindings, ListenerFindings}. The three are separate
+%% because they are different hazards: a key finding is a setting this release
+%% does not read at all, a value finding is a key it DOES read whose value it
+%% cannot parse -- which discards the whole file, not just that key -- and a
+%% listener finding is a live key whose listener will not start.
 check(ConfFile, SchemaDirs0) ->
     SchemaDirs = resolve_schema_dirs(SchemaDirs0),
-    Schema = schema(SchemaDirs),
+    {Schema, Validators} = schema_and_validators(SchemaDirs),
     Conf = read_conf(ConfFile),
     Findings = classify(Conf, Schema),
+    Values = value_faults(Conf, Schema, Validators),
     Changed = reinterpretations(Conf),
     Listeners = listener_analysis(Conf, Schema),
     out("~s", [ConfFile]),
     out("  ~p keys, schemas: ~s",
         [length(Conf), string:join(SchemaDirs, " ")]),
     report(length(Conf), Findings),
+    ok = report_values(Values),
     ok = report_reinterpreted(Changed),
     ok = listener_report(Listeners),
     Advanced = advanced_check(sibling_advanced_config(ConfFile)),
@@ -191,24 +213,28 @@ check(ConfFile, SchemaDirs0) ->
     %% `OK' as the first line whenever the KEYS section was clean, which read as
     %% a clean bill of health on files that were exiting 1 for a listener
     %% finding.
-    ok = verdict_line(Findings, ListenerFindings, Changed),
-    {Findings, ListenerFindings}.
+    ok = verdict_line(Findings, Values, ListenerFindings, Changed),
+    {Findings, Values, ListenerFindings}.
 
 %% Changed-meaning keys are named here but do not make the verdict a finding,
 %% for the reason given at `reinterpreted/0': they are reported so `clean'
 %% cannot be read as silence, and they leave the exit code alone.
-verdict_line(Findings, ListenerFindings, Changed) ->
+verdict_line(Findings, Values, ListenerFindings, Changed) ->
     out("", []),
     out("RESULT  ~s~s", [
-        keys_verdict(Findings, ListenerFindings), changed_verdict(Changed)
+        keys_verdict(Findings, Values, ListenerFindings),
+        changed_verdict(Changed)
     ]),
     ok.
 
-keys_verdict([], []) ->
-    "clean -- every key is read and every listener is declared";
-keys_verdict(Findings, ListenerFindings) ->
-    io_lib:format("~p key~s not read, ~p listener finding~s -- see above",
+keys_verdict([], [], []) ->
+    "clean -- every key is read, every value parses, every listener is declared";
+keys_verdict(Findings, Values, ListenerFindings) ->
+    io_lib:format(
+        "~p key~s not read, ~p invalid value~s, ~p listener finding~s"
+        " -- see above",
         [length(Findings), plural(length(Findings)),
+            length(Values), plural(length(Values)),
             length(ListenerFindings), plural(length(ListenerFindings))]).
 
 changed_verdict([]) ->
@@ -343,6 +369,85 @@ rules() ->
             {drop, "pattern-based subscription is always on, for the same"
                 " reason as `wamp.dealer.pattern_based_registration' above."
                 " `on' needs no action."}},
+
+        %% Every WAMP broker/dealer feature. None of them is a setting any
+        %% more: a feature tells a client which parts of the advanced profile
+        %% this build implements, a client asks for a subset in HELLO, and
+        %% `bondy_session:parse_roles/1' intersects the two. An operator was
+        %% never in that chain, so the whole family left `bondy.conf' at once.
+        %%
+        %% A prefix rule on `wamp.broker'/`wamp.dealer' would be shorter and
+        %% wrong: `wamp.dealer.*' is not exhausted by features, and a prefix
+        %% would swallow whatever is added there next. `selftest_capabilities/1'
+        %% joins these against `bondy_config:code_defined_features/0', so a
+        %% feature that gains or loses a value fails there rather than drifting.
+        {{match, ["wamp", "broker", "acknowledge_event_received"]},
+            {drop, unimplemented_why()}},
+        {{match, ["wamp", "broker", "acknowledge_subscriber_received"]},
+            {drop, unimplemented_why()}},
+        {{match, ["wamp", "broker", "event_history"]},
+            {drop, unimplemented_why()}},
+        {{match, ["wamp", "broker", "payload_passthru_mode"]},
+            {drop, unimplemented_why()}},
+        {{match, ["wamp", "broker", "publication_trustlevels"]},
+            {drop, unimplemented_why()}},
+        {{match, ["wamp", "broker", "sharded_subscription"]},
+            {drop, unimplemented_why()}},
+        {{match, ["wamp", "broker", "subscription_meta_api"]},
+            {drop, unimplemented_why()}},
+        {{match, ["wamp", "broker", "subscription_revocation"]},
+            {drop, unimplemented_why()}},
+        {{match, ["wamp", "dealer", "call_reroute"]},
+            {drop, "call rerouting is not implemented, so it is no longer a"
+                " setting -- see `wamp.broker.event_history' above for why the"
+                " family stopped being configurable. This one is worth reading"
+                " twice: its old default made the node ADVERTISE call_reroute"
+                " in WELCOME while never performing it, and it now advertises"
+                " false. A client that branched on the announced feature will"
+                " see it disappear, which is the announcement being corrected"
+                " rather than a capability being withdrawn."}},
+        {{match, ["wamp", "dealer", "payload_passthru_mode"]},
+            {drop, unimplemented_why()}},
+        {{match, ["wamp", "dealer", "reflection"]},
+            {drop, unimplemented_why()}},
+        {{match, ["wamp", "dealer", "registration_revocation"]},
+            {drop, unimplemented_why()}},
+        {{match, ["wamp", "dealer", "sharded_registration"]},
+            {drop, unimplemented_why()}},
+        {{match, ["wamp", "dealer", "testament_meta_api"]},
+            {drop, unimplemented_why()}},
+        {{match, ["wamp", "broker", "event_retention"]},
+            {drop, capability_why()}},
+        {{match, ["wamp", "broker", "publisher_exclusion"]},
+            {drop, capability_why()}},
+        {{match, ["wamp", "broker", "publisher_identification"]},
+            {drop, capability_why()}},
+        {{match, ["wamp", "broker", "reflection"]},
+            {drop, capability_why()}},
+        {{match, ["wamp", "broker", "session_meta_api"]},
+            {drop, capability_why()}},
+        {{match, ["wamp", "broker", "subscriber_blackwhite_listing"]},
+            {drop, capability_why()}},
+        {{match, ["wamp", "dealer", "call_canceling"]},
+            {drop, capability_why()}},
+        {{match, ["wamp", "dealer", "call_timeout"]},
+            {drop, capability_why()}},
+        {{match, ["wamp", "dealer", "call_trustlevels"]},
+            {drop, capability_why()}},
+        {{match, ["wamp", "dealer", "caller_auth_claims"]},
+            {drop, capability_why()}},
+        {{match, ["wamp", "dealer", "caller_identification"]},
+            {drop, capability_why()}},
+        {{match, ["wamp", "dealer", "registration_meta_api"]},
+            {drop, capability_why()}},
+        {{match, ["wamp", "dealer", "session_meta_api"]},
+            {drop, capability_why()}},
+        {{match, ["wamp", "dealer", "shared_registration"]},
+            {drop, capability_why()}},
+        {{match, ["wamp", "dealer", "progressive_calls"]},
+            {drop, progressive_why()}},
+        {{match, ["wamp", "dealer", "progressive_call_results"]},
+            {drop, progressive_why()}},
 
         %% ---------------------------------------------------------------------
         %% oplog.* -> db.* (the rename this release shipped)
@@ -497,6 +602,31 @@ rules() ->
 %% block, so they move under `http.'; under a raw-socket or bridge block they are
 %% the listener's own and stay put. A rule table keyed only on the tail would get
 %% one of the two wrong.
+%% Shared by the fourteen feature rules above. Written once because the answer is
+%% the same for all of them and a per-key paraphrase would drift.
+capability_why() ->
+    "a WAMP feature is a capability, not a setting: it states which parts of"
+    " the advanced profile this build implements. A client asks for a subset in"
+    " HELLO and the session gets the intersection, so an operator was never in"
+    " that chain -- the key only ever let a deployment lie about the build."
+    " Bondy implements this one and still announces it; nothing to do.".
+
+progressive_why() ->
+    "progressive calls are a capability now, not a rollout switch. The key is"
+    " gone and the feature is announced, but a peer still has to ask for it"
+    " EXPLICITLY -- `bondy_session:?STRICT_OPTIN_FEATURES' refuses to infer it"
+    " from the router's advertised set, so a client that never announced it is"
+    " not treated as supporting it. If you were holding this `off' to stage a"
+    " mixed-version upgrade, that is no longer what it did.".
+
+unimplemented_why() ->
+    "this WAMP feature has no implementation in Bondy, so it is a build"
+    " capability rather than a setting and the key is gone. Nothing to do:"
+    " the node already behaved this way. It was never usable as a switch"
+    " either -- the mapping accepted only the word `off', which cuttlefish"
+    " resolved to TRUE, while `on' failed config generation silently and left"
+    " the node running on a previous generation's file.".
+
 legacy_listeners() ->
     [
         {["admin_api", "http"], "admin", [http]},
@@ -832,6 +962,162 @@ int_value(V) ->
     end.
 
 %% =============================================================================
+%% VALUES THE SCHEMA REJECTS
+%% =============================================================================
+
+%% The third hazard, and the worst of the three, because it is not confined to
+%% the key it appears on.
+%%
+%% `classify/2' asks whether a key is READ. This asks whether its value can be
+%% USED, which is a separate question with a much larger blast radius: cuttlefish
+%% generates all-or-nothing. `cuttlefish_generator:map_transform_datatypes/3'
+%% returns `{error, transform_datatypes, _}' if ANY value fails its datatype, and
+%% `map_validate/2' returns `{error, validation, _}' if any passes its datatype
+%% but fails a validator. Either one abandons the whole run, so no app config is
+%% written at all and every other setting in the file is lost with it.
+%%
+%% The operator sees none of that. `rebar3_scuttler/priv/pre_start_cuttlefish.tpl'
+%% runs cuttlefish with `--silent' and does not check its exit status, and
+%% `config/prod/sys.config' ends with the include string
+%% `"etc/generated/user_defined.config"' -- so a failed generation prints nothing
+%% and leaves the file the last SUCCESSFUL run wrote. The node boots on stale
+%% config with no diagnostic anywhere. Found in the field 2026-08-22 on a
+%% migrated file carrying `wamp.websocket.max_frame_size = infinity' against a
+%% `{datatype, bytesize}' mapping: the node came up on default listeners and an
+%% earlier run's `platform_tmp_dir', and the boot log's only trace was the values
+%% themselves being wrong.
+%%
+%% Only keys the file SETS are checked. A schema default that cannot parse is a
+%% schema bug and would break every deployment equally; it is not something an
+%% operator can act on from their own file.
+value_faults(Conf, Schema, Validators) ->
+    [
+        {Key, Value, Fault}
+     || {Key, Value} <- Conf,
+        Fault <- [value_fault(Key, Value, Schema, Validators)],
+        Fault =/= ok
+    ].
+
+value_fault(Key, Value, Schema, Validators) ->
+    case mapping_for(Key, Schema) of
+        undefined ->
+            %% Nothing reads it, so nothing parses it either. The KEYS section
+            %% owns this key; reporting it twice under two headings would read
+            %% as two problems.
+            ok;
+        M ->
+            case has_placeholder(Value) of
+                true -> ok;
+                false -> datatype_fault(Value, M, Validators)
+            end
+    end.
+
+%% A value that is not yet the value cuttlefish will see. Two forms, substituted
+%% by two different things, and neither is this tool's to resolve:
+%%
+%%   `${VAR}'    the release's own `bin/replace-env-vars', which rewrites
+%%               `etc/bondy.conf.template' into `etc/bondy.conf' in the pre-start
+%%               hook, before cuttlefish runs (`priv/tools/replace-env-vars:171',
+%%               `${name}' only -- not `$name', not nested).
+%%   `$(a.b.c)'  `cuttlefish_generator:value_sub/1', which splices another key's
+%%               value in before any datatype is applied.
+%%
+%% Skipped rather than resolved. The first cannot be resolved at all -- the
+%% environment that will hold `FLY_PRIVATE_IP' does not exist on the machine
+%% running this check -- and resolving the second means a second implementation
+%% of a resolver with its own circular-reference detection. Both would otherwise
+%% be false positives on files that are correct: four shipped templates set
+%% `cluster.peer_ip = ${FLY_PRIVATE_IP}', which no `ip' datatype can parse and
+%% which is nonetheless exactly right. The cost is a false negative on the
+%% substituted value; check the rendered `bondy.conf' to cover it.
+has_placeholder(Value) ->
+    string:find(Value, "${") =/= nomatch orelse
+        string:find(Value, "$(") =/= nomatch.
+
+datatype_fault(Value, M, Validators) ->
+    DTs = cuttlefish_mapping:datatype(M),
+    case transform_value(DTs, Value) of
+        error -> {datatype, DTs};
+        {ok, Typed} -> validator_fault(Typed, M, Validators)
+    end.
+
+%% A validator runs on the TYPED value, and only for a concrete mapping.
+%%
+%% `cuttlefish_generator:run_validations/2' looks a mapping's value up with
+%% `proplists:get_value(cuttlefish_mapping:variable(M), Conf)', and a fuzzy
+%% mapping's variable is the literal `["mail","relay","$name","port"]', which no
+%% conf ever contains -- so the lookup yields `undefined' and the clause
+%% `{undefined, _} -> true' skips it. Every validator on a `$name' mapping is
+%% therefore dead, and there are 18 of them in these schemas.
+%%
+%% PROBED, not inferred: a two-mapping schema differing only in fuzziness, both
+%% carrying the same validator, fed the same violating value -- `a.b.n = 0'
+%% mapped clean while `c.n = 0' returned `{error, validation, _}'. Enforcing them
+%% here would report a file that boots as one that does not.
+validator_fault(Typed, M, Validators) ->
+    case cuttlefish_mapping:is_fuzzy_variable(M) of
+        true ->
+            ok;
+        false ->
+            case [V || V <- cuttlefish_mapping:validators(M, Validators),
+                not passes(V, Typed)]
+            of
+                [] -> ok;
+                [V | _] -> {validator, cuttlefish_validator:description(V)}
+            end
+    end.
+
+%% `run_validations/2' matches on `{_, true}', so anything other than `true' is a
+%% failure. A validator that RAISES is the one divergence: cuttlefish does not
+%% catch it, so the generator dies where this reports a finding. Both mean the
+%% file does not boot, and a finding an operator can read beats a stack trace.
+passes(V, Typed) ->
+    Fun = cuttlefish_validator:func(V),
+    try Fun(Typed) =:= true catch _:_ -> false end.
+
+%% `cuttlefish_generator:transform_type/2' is not exported, so its dispatch is
+%% restated here: try each datatype in the mapping's list and take the first that
+%% parses, preferring `is_supported/1' over `is_extended/1' in that order. Every
+%% branch calls cuttlefish's own `from_string/2', so the accept/reject decision
+%% is still cuttlefish's; only the dispatch is local. `selftest_values/2' pins
+%% the two apart by asserting this agrees with `cuttlefish_generator:map/2' on
+%% the same input.
+transform_value([], _Value) ->
+    error;
+transform_value([DT | Rest], Value) ->
+    case transform_one(DT, Value) of
+        {ok, _} = Ok -> Ok;
+        error -> transform_value(Rest, Value)
+    end.
+
+transform_one(DT, Value) ->
+    Supported = cuttlefish_datatypes:is_supported(DT),
+    Extended = cuttlefish_datatypes:is_extended(DT),
+    if
+        Supported -> from_string(DT, Value);
+        Extended -> extended(DT, Value);
+        %% A datatype cuttlefish itself does not recognise. That is a schema
+        %% fault, not the operator's, so it is not reported as a bad value.
+        true -> {ok, Value}
+    end.
+
+from_string(DT, Value) ->
+    try cuttlefish_datatypes:from_string(Value, DT) of
+        {error, _} -> error;
+        New -> {ok, New}
+    catch
+        _:_ -> error
+    end.
+
+%% An extended datatype names the ONE value it accepts, so parsing is not enough:
+%% `transform_extended_type/2' requires the parsed value to equal it.
+extended({DT, Acceptable}, Value) ->
+    case from_string(DT, Value) of
+        {ok, Acceptable} -> {ok, Acceptable};
+        _ -> error
+    end.
+
+%% =============================================================================
 %% KEYS WHOSE MEANING CHANGED
 %% =============================================================================
 
@@ -899,6 +1185,68 @@ report(Total, Findings) ->
         [length(Findings), Total]),
     out("  is dropped in silence at boot and the setting does not apply.", []),
     lists:foreach(fun(G) -> report_group(G, Findings) end, groups()).
+
+%% Deliberately louder than the other sections, and the reason is in the second
+%% sentence: this is the only finding whose consequence is not confined to the
+%% key it names.
+report_values([]) ->
+    ok;
+report_values(Faults) ->
+    out("", []),
+    out("  INVALID VALUE (~p) -- this release reads ~s, but cannot parse the"
+        " value.",
+        [length(Faults), case length(Faults) of
+            1 -> "this key";
+            _ -> "these keys"
+        end]),
+    wrap("  ", "cuttlefish generates all or nothing: one value it cannot use"
+        " abandons the whole run, so NO setting in this file applies -- not just"
+        " the one below. The pre-start hook runs cuttlefish with --silent and"
+        " does not check its exit status, and sys.config includes the file it"
+        " would have written, so the node boots in silence on whatever the last"
+        " successful generation left in etc/generated/. Nothing appears in the"
+        " boot log. Fix these before deploying."),
+    lists:foreach(
+        fun({K, V, Fault}) ->
+            out("    ~s = ~s", [pad(key_str(K), 46), V]),
+            wrap("        ", value_fault_why(Fault))
+        end,
+        Faults
+    ),
+    ok.
+
+value_fault_why({datatype, DTs}) ->
+    "not a valid " ++ datatype_str(DTs) ++
+        ". Generation stops at phase transform_datatypes.";
+value_fault_why({validator, Description}) ->
+    "the value parses but the schema refuses it: " ++ Description ++
+        ". Generation stops at phase validation.".
+
+%% A mapping's datatype is a LIST, and most carry exactly one. Naming a
+%% single-element list as a list ("not a valid [bytesize]") reads as a typo, so
+%% the common case is unwrapped and the rare alternation is spelled out.
+datatype_str([DT]) ->
+    datatype_name(DT);
+datatype_str(DTs) ->
+    string:join([datatype_name(DT) || DT <- DTs], " or ").
+
+datatype_name({enum, Values}) ->
+    "one of " ++ string:join([to_str(V) || V <- Values], ", ");
+datatype_name({duration, _}) ->
+    "duration";
+%% A flag whose two names are the SAME accepts exactly one word. Rendering that
+%% as "off or off" reads as a bug in this formatter rather than what it is -- a
+%% mapping declared with one usable value.
+datatype_name({flag, Name, Name}) when is_atom(Name) ->
+    "value here: the only word this key accepts is " ++ to_str(Name);
+datatype_name({flag, On, Off}) when is_atom(On), is_atom(Off) ->
+    to_str(On) ++ " or " ++ to_str(Off);
+datatype_name(flag) ->
+    "on or off";
+datatype_name(DT) when is_atom(DT) ->
+    atom_to_list(DT);
+datatype_name(DT) ->
+    lists:flatten(io_lib:format("~p", [DT])).
 
 report_reinterpreted([]) ->
     ok;
@@ -1408,7 +1756,7 @@ migrate(ConfFile, Out, SchemaDirs0) ->
     not filelib:is_file(Out) orelse throw({fail,
         "~s already exists; refusing to overwrite it", [Out]}),
     SchemaDirs = resolve_schema_dirs(SchemaDirs0),
-    Schema = schema(SchemaDirs),
+    {Schema, Validators} = schema_and_validators(SchemaDirs),
     Conf = read_conf(ConfFile),
     Findings = classify(Conf, Schema),
     Verdicts = maps:from_list([{K, Verdict} || {K, _, Verdict} <- Findings]),
@@ -1464,9 +1812,21 @@ migrate(ConfFile, Out, SchemaDirs0) ->
     ok = listener_report(Listeners),
     Advanced = advanced_check(sibling_advanced_config(ConfFile)),
     KeyFindings = classify(OutConf, Schema),
+    %% Reported, never repaired. Every other verdict this tool acts on is a
+    %% mechanical fact about a KEY -- a rename has one destination, an unknown
+    %% key can only be commented out. A value the schema refuses has no such
+    %% answer: only the operator knows what they meant by it, and writing a guess
+    %% into their file would be the one edit here that changes behaviour without
+    %% being able to justify itself. So the bad value is copied through and shows
+    %% up in the output's own verdict, which is what makes `migrate && deploy'
+    %% exit non-zero on a file that cannot generate.
+    ValueFindings = value_faults(OutConf, Schema, Validators),
+    ok = report_values(ValueFindings),
     ListenerFindings = listener_findings(Listeners) ++ Advanced,
-    ok = verdict_line(KeyFindings, ListenerFindings, reinterpretations(OutConf)),
-    {KeyFindings, ListenerFindings}.
+    ok = verdict_line(
+        KeyFindings, ValueFindings, ListenerFindings, reinterpretations(OutConf)
+    ),
+    {KeyFindings, ValueFindings, ListenerFindings}.
 
 %% Keeps the file's own line ending and whether it ended with a newline, so a
 %% migration of an unchanged region is byte-identical.
@@ -1777,16 +2137,21 @@ migrate_report(ConfFile, Out, Total, Actions) ->
 %% --allow_extra exists to tolerate. Duplicates across files are harmless -- this
 %% answers "does anything map this key", and for a default only the shape of the
 %% value matters.
-schema(SchemaDirs) ->
+%% The mappings AND the validator table, from one parse. `value_faults/3' needs
+%% both: a mapping names its validators only by name, and
+%% `cuttlefish_mapping:validators/2' resolves them against this table -- the same
+%% call `cuttlefish_generator:run_validations/2' makes, so the two cannot disagree
+%% about which validator guards a key.
+schema_and_validators(SchemaDirs) ->
     Files = lists:append([filelib:wildcard(filename:join(D, "*.schema"))
         || D <- SchemaDirs]),
     Files == [] andalso throw({fail,
         "no .schema files under: ~s", [string:join(SchemaDirs, " ")]}),
     case cuttlefish_schema:files(Files) of
-        {_Translations, Mappings, _Validators} when is_list(Mappings) ->
+        {_Translations, Mappings, Validators} when is_list(Mappings) ->
             Mappings == [] andalso throw({fail,
                 "~p schema files yielded no mappings", [length(Files)]}),
-            [{cuttlefish_mapping:variable(M), M} || M <- Mappings];
+            {[{cuttlefish_mapping:variable(M), M} || M <- Mappings], Validators};
         Other ->
             throw({fail, "cannot load schemas: ~p", [Other]})
     end.
@@ -1942,7 +2307,7 @@ tmp_dir() ->
 
 selftest(SchemaDirs0) ->
     SchemaDirs = resolve_schema_dirs(SchemaDirs0),
-    Schema = schema(SchemaDirs),
+    {Schema, Validators} = schema_and_validators(SchemaDirs),
     out("selftest: ~p mappings from ~s", [length(Schema),
         string:join(SchemaDirs, " ")]),
     Results = [
@@ -1953,7 +2318,9 @@ selftest(SchemaDirs0) ->
         selftest_roundtrip(SchemaDirs),
         selftest_synthesis(SchemaDirs),
         selftest_listeners(Schema),
-        selftest_reinterpreted(Schema)
+        selftest_reinterpreted(Schema),
+        selftest_values(SchemaDirs, {Schema, Validators}),
+        selftest_capabilities(Schema)
     ],
     case [R || R <- Results, R =/= ok] of
         [] ->
@@ -2215,6 +2582,189 @@ selftest_reinterpreted(Schema) ->
             failed
     end.
 
+%% The value check, against an INDEPENDENT oracle: cuttlefish's own generator.
+%%
+%% `value_faults/3' restates a dispatch cuttlefish does not export, so asserting
+%% it against a table of expected answers would only be asserting that this file
+%% agrees with itself. Instead each case is fed to `cuttlefish_generator:map/2'
+%% over the real schemas and the PHASE it stops at is compared with the verdict
+%% here. Agreement across the three cases is the claim; the table below records
+%% which phase each one covers, because a check that only ever sees one is
+%% asserting far less than it looks.
+%%
+%% The third case is the one that fails a plausible wrong implementation. A fuzzy
+%% mapping's validators never run (see `validator_fault/3'), so enforcing them
+%% would flag a file that boots. `mail.relay.x.pool.size = 0' violates
+%% `positive_integer' and must NOT be reported -- and cuttlefish confirms it by
+%% getting as far as `apply_translations', a phase AFTER validation, which it
+%% could not reach if the validator had fired. It stops there for an unrelated
+%% reason: one key is not a whole relay definition. That is why the assertion is
+%% "reached a phase past validation" rather than "no error".
+%%
+%% The corpus is the liveness half, and it is PINNED rather than merely expected
+%% to be empty, because on its first run it found a real defect in a shipped file
+%% and suppressing that would be the vacuous outcome this file keeps warning
+%% about.
+%%
+%% The corpus is the liveness half: if a shipped file ever starts reporting a
+%% value fault, this check has become over-strict rather than the file having
+%% become wrong -- and it is the corpus that found the two defects this section
+%% exists because of.
+%%
+%% Both are now fixed at source, and the exception that held them is deleted
+%% rather than left as a permanently-satisfied assertion. For the record:
+%% `config/bondy.conf.defaults' is `cuttlefish effective -s schema/', and
+%% `cuttlefish_effective:build/3' prints each default with `~s' straight off
+%% `add_defaults/2' -- no `to_string/2' anywhere -- so sixteen `flag' defaults
+%% written as the Erlang term `true' were published as a word `flag' cannot read.
+%% Fourteen more were declared `{flag, off, off}', which cuttlefish turns into
+%% `{enum, [{off,true},{off,false}]}' and matches by name before value, so `off'
+%% resolved to `true' and `on' failed the whole generation; those are no longer
+%% settings at all (`bondy_config:unadvertised_features/0').
+
+selftest_values(SchemaDirs, {Schema, Validators}) ->
+    Cases = [
+        {"wamp.websocket.max_frame_size = infinity", datatype,
+            transform_datatypes},
+        {"load_regulation.router.pool.size = 0", validator, validation},
+        {"mail.relay.x.pool.size = 0", none, past_validation}
+    ],
+    Disagreed = [
+        {Line, Expected, Mine, Phase}
+     || {Line, Expected, ExpectedPhase} <- Cases,
+        Mine <- [value_verdict(Line, Schema, Validators)],
+        Phase <- [cuttlefish_phase(Line, SchemaDirs)],
+        Mine =/= Expected orelse not phase_agrees(ExpectedPhase, Phase)
+    ],
+    Files = shipped_conf_files(),
+    Corpus = [
+        {F, value_faults(read_conf(F), Schema, Validators)} || F <- Files
+    ],
+    Unexpected = lists:append([corpus_faults(F, Faults) || {F, Faults} <- Corpus]),
+    case {Disagreed, Unexpected} of
+        {[], []} ->
+            out("  values: ~p cases agree with cuttlefish_generator:map/2"
+                " (datatype, validation, fuzzy-validator-is-dead); ~p corpus"
+                " files report none  OK",
+                [length(Cases), length(Files)]),
+            ok;
+        _ ->
+            [err("  values: ~s -- expected ~p, got ~p; cuttlefish stopped at ~p",
+                [L, E, M, P]) || {L, E, M, P} <- Disagreed],
+            [err("  values: ~s", [W]) || W <- Unexpected],
+            failed
+    end.
+
+%% What a corpus file is allowed to report: nothing at all. There is no longer an
+%% exception, and re-introducing one should mean fixing the file instead.
+corpus_faults(File, Faults) ->
+    [
+        lists:flatten(io_lib:format("corpus file ~s reports ~s = ~s: ~s",
+            [File, key_str(K), V, value_fault_why(F)]))
+     || {K, V, F} <- Faults
+    ].
+
+
+%% What `value_faults/3' makes of a single setting, reduced to the kind of fault
+%% so a case can name an expectation without quoting a message.
+value_verdict(Line, Schema, Validators) ->
+    case value_faults(
+        conf_from_string("selftest", Line ++ "\n"), Schema, Validators
+    ) of
+        [] -> none;
+        [{_, _, {Kind, _}} | _] -> Kind
+    end.
+
+%% The phase cuttlefish itself stops at for the same setting. `map/2' fills in
+%% every default first, so a one-line conf is a complete configuration.
+cuttlefish_phase(Line, SchemaDirs) ->
+    Files = lists:append([filelib:wildcard(filename:join(D, "*.schema"))
+        || D <- SchemaDirs]),
+    Full = cuttlefish_schema:files(Files),
+    Conf = conf_from_string("selftest", Line ++ "\n"),
+    case unlogged(fun() -> cuttlefish_generator:map(Full, Conf) end) of
+        {error, Phase, _} -> Phase;
+        L when is_list(L) -> ok
+    end.
+
+%% `quietly/1' swaps the group leader, which covers `io:format' but not `logger'
+%% -- and cuttlefish reports a rejected value through `?LOG_ERROR', whose handler
+%% writes to its own device. Two of the three cases here are SUPPOSED to be
+%% rejected, so without this the selftest prints cuttlefish's error reports in
+%% the middle of its own passing output.
+unlogged(Fun) ->
+    #{level := Level} = logger:get_primary_config(),
+    ok = logger:set_primary_config(level, none),
+    try
+        quietly(Fun)
+    after
+        logger:set_primary_config(level, Level)
+    end.
+
+%% Phases run add_defaults -> substitutions -> transform_datatypes -> validation
+%% -> apply_translations, so anything at or past apply_translations proves
+%% validation was reached and passed.
+phase_agrees(past_validation, Phase) ->
+    lists:member(Phase, [apply_translations, ok]);
+phase_agrees(Expected, Phase) ->
+    Expected =:= Phase.
+
+%% The WAMP features that stopped being options are described in three places
+%% that can drift apart: `bondy_config:unadvertised_features/0' seats the value,
+%% `schema/bondy.schema' no longer maps the key, and `rules()' explains its
+%% disappearance. This joins them, in the direction where drift does damage.
+%%
+%% For every capability the node seats: the key must be mapped by NO schema --
+%% otherwise it is still an operator setting and the seated value silently
+%% overrides whatever they wrote -- and `match_rule/2' must answer `{drop, _}',
+%% otherwise an operator upgrading gets `NO RULE' for a key this release
+%% deliberately removed.
+%%
+%% Read from the loaded beam rather than restated, like `default_inventory/0'
+%% above, so the list cannot be copied wrong. An empty list is a FAILURE, not a
+%% pass: it is how this check would go vacuous.
+selftest_capabilities(Schema) ->
+    case locate_bondy_router() of
+        unavailable ->
+            err("  capabilities: NOT CHECKED -- bondy_config could not be"
+                " loaded, so the drop rules cannot be joined against the"
+                " features the node seats", []),
+            failed;
+        ok ->
+            Caps = [
+                {["wamp", atom_to_list(Role), atom_to_list(Feature)],
+                    {Role, Feature}}
+             || {Role, Feature} <- bondy_config:code_defined_features()
+            ],
+            StillMapped = [K || {K, _} <- Caps, is_known(K, Schema)],
+            Unexplained = [
+                K
+             || {K, _} <- Caps,
+                case match_rule(K, rules()) of
+                    {drop, _} -> false;
+                    _ -> true
+                end
+            ],
+            case {Caps, StillMapped, Unexplained} of
+                {[_ | _], [], []} ->
+                    out("  capabilities: ~p features seated in bondy_config,"
+                        " none still mapped by a schema, all explained by a"
+                        " drop rule  OK", [length(Caps)]),
+                    ok;
+                _ ->
+                    Caps == [] andalso
+                        err("  capabilities: bondy_config seats none, so this"
+                            " check proves nothing", []),
+                    [err("  capabilities: ~s is seated in code AND still mapped"
+                        " by a schema -- the operator's value is silently"
+                        " overridden", [key_str(K)]) || K <- StillMapped],
+                    [err("  capabilities: ~s has no drop rule -- an operator"
+                        " who sets it gets `NO RULE'", [key_str(K)])
+                     || K <- Unexplained],
+                    failed
+            end
+    end.
+
 %% Migrating a file that has nothing to migrate must return it byte for byte.
 %% This is the check that the line rewriter cannot quietly reflow, reorder, drop
 %% a comment, or move the trailing newline.
@@ -2327,13 +2877,15 @@ selftest_synthesis(SchemaDirs) ->
          || {Name, Expected} <- identity_oracle()
         ]),
         case {Verdict, Wrong} of
-            {{[], []}, []} ->
+            {{[], [], []}, []} ->
                 out("  synthesis: ~p legacy blocks with no listeners.* key,"
                     " all declared and re-check clean  OK", [length(Blocks)]),
                 ok;
-            {{K, L}, _} when K =/= []; L =/= [] ->
+            {{K, V, L}, _} when K =/= []; V =/= []; L =/= [] ->
                 err("  synthesis: migrated output is not clean:", []),
                 [err("      ~s", [key_str(Key)]) || {Key, _, _} <- K],
+                [err("      ~s (invalid value)", [key_str(Key)])
+                 || {Key, _, _} <- V],
                 [err("      ~s", [key_str(listener_finding_key(F))]) || F <- L],
                 failed;
             _ ->
@@ -2441,11 +2993,12 @@ roundtrip(Name, Body, SchemaDirs) ->
         %% renames, so the honest gate is the whole verdict -- and if a future
         %% change stops it declaring, this fails instead of shrugging.
         case quietly(fun() -> check(Out, SchemaDirs) end) of
-            {[], []} ->
+            {[], [], []} ->
                 clean;
-            {KeyFindings, ListenerFindings} ->
+            {KeyFindings, ValueFindings, ListenerFindings} ->
                 {dirty,
                     [K || {K, _, _} <- KeyFindings] ++
+                        [K || {K, _, _} <- ValueFindings] ++
                         [listener_finding_key(F) || F <- ListenerFindings]}
         end
     after

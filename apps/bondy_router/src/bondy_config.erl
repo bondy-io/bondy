@@ -231,6 +231,7 @@ An implementation of the `app_config` behaviour.
 -export([listener_transport_opts/2]).
 -export([listener_protocol_opts/1]).
 -export([splat_listener_blocks/1]).
+-export([code_defined_features/0]).
 
 -compile({no_auto_import, [get/1]}).
 
@@ -604,24 +605,57 @@ setup_wamp() ->
     ],
     ok = lists:foreach(fun set_dynamic_buffer/1, Keys),
 
-    %% Pattern-based registration and subscription are not operator flags, so
-    %% they are set here rather than mapped from `bondy.conf'. The router itself
-    %% depends on them: `bondy_session_manager:register_procedures/1' registers
-    %% the `wamp.session.<hash>..get' wildcard that serves `wamp.session.get',
-    %% and with pattern-based registration off that registration was refused and
-    %% took the session open down with it.
+    %% Every WAMP feature Bondy announces, seated from the code. A feature is a
+    %% CAPABILITY, not a setting: it tells a client which parts of the advanced
+    %% profile this build implements. A client asks for a subset in HELLO,
+    %% `bondy_session:parse_roles/1' intersects that request with these values
+    %% (`merge_feature_flags/2'), and from then on every message consults the
+    %% resulting SESSION flags. An operator has no say at any point in that
+    %% chain, which is why none of these is a `bondy.conf' key.
     %%
-    %% They are values rather than literals in `bondy_dealer:features/0' and
-    %% `bondy_broker:features/0' because both those modules also answer
-    %% `is_feature_enabled/1' straight out of configuration; seating the truth
-    %% here is what keeps the two answers from disagreeing, and is what
+    %% `?BROKER_FEATURES' and `?DEALER_FEATURES' are the value tables;
+    %% `?BROKER_FEATURES_SPEC' and `?DEALER_FEATURES_SPEC' in `bondy_wamp.hrl'
+    %% are the matching name sets, which is what makes the pair an oracle rather
+    %% than one more copy of the list.
+    %%
+    %% Seated as CONFIGURATION rather than returned as literals from
+    %% `bondy_dealer:features/0' and `bondy_broker:features/0', because both
+    %% modules also answer `is_feature_implemented/1' straight out of
+    %% configuration;
+    %% one value here is what keeps the two answers from disagreeing, and is what
     %% `bondy_router:roles/0' advertises in WELCOME.
-    ok = set([wamp, dealer, features, pattern_based_registration], true),
-    ok = set([wamp, broker, features, pattern_based_subscription], true),
+    ok = lists:foreach(
+        fun({Role, Features}) ->
+            maps:foreach(
+                fun(Feature, Supported) ->
+                    set([wamp, Role, features, Feature], Supported)
+                end,
+                Features
+            )
+        end,
+        [{broker, ?BROKER_FEATURES}, {dealer, ?DEALER_FEATURES}]
+    ),
 
     %% WAMP PROTOCOL LIB
     ok = bondy_wamp_config:set(extended_details, ?WAMP_EXT_DETAILS),
     ok = bondy_wamp_config:set(extended_options, ?WAMP_EXT_OPTIONS).
+
+-doc """
+Every WAMP feature this build defines a value for, as `{Role, Feature}` pairs.
+
+These are capabilities, not settings: none of them is a `bondy.conf` key, and
+`scripts/migrate_conf.escript` reports each one as dropped so an operator
+upgrading from a release that mapped them is told why the key is gone.
+""".
+-spec code_defined_features() -> [{broker | dealer, atom()}].
+
+code_defined_features() ->
+    [
+        {Role, Feature}
+     || {Role, Features} <-
+            [{broker, ?BROKER_FEATURES}, {dealer, ?DEALER_FEATURES}],
+        Feature <- maps:keys(Features)
+    ].
 
 %% @private
 set_dynamic_buffer(Key) ->

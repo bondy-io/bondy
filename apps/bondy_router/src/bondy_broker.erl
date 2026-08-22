@@ -98,7 +98,7 @@ another subscribe request second might be permissible immediately.
 -export([flush/2]).
 -export([forward/2]).
 -export([forward/3]).
--export([is_feature_enabled/1]).
+-export([is_feature_implemented/1]).
 -export([match_subscriptions/2]).
 -export([match_subscriptions/3]).
 -export([publish/5]).
@@ -120,17 +120,25 @@ another subscribe request second might be permissible immediately.
 features() ->
     maps:from_list(bondy_config:get([wamp, broker, features])).
 
--doc "Returns true if feature `F` is enabled by the broker.".
--spec is_feature_enabled(binary() | atom()) -> boolean().
+-doc """
+Returns `true` if this build implements WAMP feature `F` for the broker.
 
-is_feature_enabled(F) when is_binary(F) ->
+This is a CAPABILITY, not a session flag. It answers "can Bondy do this at all",
+which is what `bondy_router:roles/0` announces in WELCOME and what
+`bondy_config:setup_wamp/0` seats from `?BROKER_FEATURES`. What a given peer may
+actually use is the intersection of its `HELLO` request with these values, and
+that lives on the session — see `bondy_context:is_feature_enabled/3`.
+""".
+-spec is_feature_implemented(binary() | atom()) -> boolean().
+
+is_feature_implemented(F) when is_binary(F) ->
     try
-        is_feature_enabled(binary_to_existing_atom(F))
+        is_feature_implemented(binary_to_existing_atom(F))
     catch
         _:_ ->
             false
     end;
-is_feature_enabled(F) when is_atom(F) ->
+is_feature_implemented(F) when is_atom(F) ->
     bondy_config:get([wamp, broker, features, F], false).
 
 -doc """

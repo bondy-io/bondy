@@ -55,10 +55,7 @@ load_regulation.router.flow_pool.capacity   = 100000
 registry.rib.check_interval                 = 5m
 ## registry.rib.damping left at default (0 = write-through).
 
-## --- progressive / streaming RPC: off by default; enabled for the streaming
 ## workload (clients must also announce the features in HELLO) ------------------
-wamp.dealer.progressive_call_results        = on
-wamp.dealer.progressive_calls               = on
 
 ## --- AAE reactor pool (gproc hash pool; per-key FIFO preserved) ---------------
 load_regulation.aae_reactor.pool.size       = 16
