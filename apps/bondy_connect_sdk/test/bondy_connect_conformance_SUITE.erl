@@ -85,6 +85,7 @@ cases() ->
         pubsub_round_trip,
         unregister_stops_routing,
         disconnect_stops_routing,
+        router_closed_session_is_observed,
         handler_error_propagates,
         handler_crash_isolation,
         per_call_timeout,
@@ -365,6 +366,46 @@ disconnect_stops_routing(Config) ->
     ),
 
     ok = bondy_connect_client:disconnect(Caller).
+
+-doc """
+A session the router closes is observed by the client: it goes `down`, and the
+next request says so instead of hanging.
+
+The router's `GOODBYE` is how an administrative close, a disabled realm and a
+credential revocation all reach a client, so what a client does with one is a
+property of every transport rather than of any single one.
+
+No reconnect follows, on any transport. A `GOODBYE` is a graceful close and
+`bondy_connect_connection:is_retriable/1` does not cover it, which is why
+`reconnect_replays_registration` stages its drop with a kill instead — the two
+cases exercise opposite halves of the same lifecycle and neither substitutes
+for the other.
+
+This is the only case that reaches the in-VM transport's session-loss path.
+`reconnect_replays_registration` cannot: its drop kills the session's owner,
+which in-VM is the client itself.
+""".
+router_closed_session_is_observed(Config) ->
+    Uri = <<"com.example.conformance.closed">>,
+    Conn = bondy_connect_ct:connect(Config),
+    {ok, _} = bondy_connect_client:register(
+        Conn, Uri, bondy_connect_ct:echo_handler()
+    ),
+    {ok, Before} = bondy_connect_client:call(Conn, Uri, [<<"a">>]),
+    ?assertEqual([<<"a">>], maps:get(args, Before)),
+
+    Closed = bondy_connect_ct:close_sessions(
+        ?config(transport, Config), ?WAMP_CLOSE_NORMAL
+    ),
+    ?assert(Closed >= 1),
+
+    ok = wait_until(fun() ->
+        bondy_connect_client:status(Conn) =:= down
+    end),
+    ?assertEqual(
+        {error, #{kind => client, reason => not_connected}},
+        bondy_connect_client:call(Conn, Uri, [<<"b">>])
+    ).
 
 -doc """
 A callee's application error reaches the caller with its own URI intact.

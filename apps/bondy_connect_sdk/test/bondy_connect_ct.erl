@@ -66,6 +66,7 @@ and the case would pass.
 -export([add_auth_realms/2]).
 -export([unsupported/2]).
 -export([drop_sessions/1]).
+-export([close_sessions/2]).
 -export([user/0]).
 -export([password/0]).
 -export([issue_ticket/1]).
@@ -182,7 +183,12 @@ unsupported(local, transport_drop) ->
         "The in-VM transport's session owner IS the client's own connection "
         "process (bondy_connect_local_handler runs in it, so the session ref "
         "targets it). There is nothing to drop that is not the client, so a "
-        "drop cannot be staged independently of killing the peer under test."};
+        "drop cannot be staged independently of killing the peer under test. "
+        "Its session-loss path is NOT left uncovered: "
+        "router_closed_session_is_observed runs here and closes the session "
+        "from the router. What that case does not do is reconnect, and no "
+        "router-side event on this transport produces a failure that "
+        "bondy_connect_connection:is_retriable/1 accepts."};
 unsupported(local, credential_auth) ->
     {true,
         "The in-VM transport opens the session anonymously. Its handler "
@@ -191,6 +197,26 @@ unsupported(local, credential_auth) ->
         "not apply. Realm grants and sources are still enforced."};
 unsupported(_, _) ->
     false.
+
+-doc """
+Close every session in a transport's realm from the router, gracefully.
+
+The operational counterpart to `drop_sessions/1`: an administrator closing a
+session, a realm being disabled, a credential change revoking its holders. The
+router sends a `GOODBYE` carrying `ReasonUri`, so unlike a kill this is a close
+the client is *told* about.
+
+Returns how many were closed, for the same reason `drop_sessions/1` returns its
+count.
+
+Usable on every transport, the in-VM one included — the router reaches a local
+session exactly as it reaches a socket-backed one, through the session's owner
+ref.
+""".
+close_sessions(Transport, ReasonUri) ->
+    Ss = sessions(realm(Transport)),
+    _ = [bondy_session_manager:close(S, ReasonUri) || S <- Ss],
+    length(Ss).
 
 -doc """
 Kill the router-side owner of every session in a transport's realm, abruptly.
