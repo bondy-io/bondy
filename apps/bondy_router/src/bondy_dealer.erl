@@ -2080,8 +2080,8 @@ handle_call(Msg, ProcUri, Fun, Opts, Ctxt) when is_function(Fun, 2) ->
     %% capability, which shipped `off', so on a default deployment the lookup
     %% never ran and no caller was checked at all.
     case
-        bondy_context:is_feature_enabled(Ctxt, caller, progressive_calls)
-        andalso find_input_stream(RealmUri, Caller, CallId)
+        bondy_context:is_feature_enabled(Ctxt, caller, progressive_calls) andalso
+            find_input_stream(RealmUri, Caller, CallId)
     of
         {invocation_chunk, Promise} ->
             %% Local callee (or owner node): forward another INVOCATION to the

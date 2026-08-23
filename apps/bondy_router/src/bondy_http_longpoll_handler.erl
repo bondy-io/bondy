@@ -38,15 +38,6 @@ same identifiers as the WAMP spec. The handler determines the transport type
 %% The client sends these in the /open body; we map them to internal tuples.
 -define(SUPPORTED_PROTOCOLS, [?WAMP2_JSON]).
 
-%% Default time a `/receive` request blocks waiting for messages (30 seconds)
--define(DEFAULT_POLL_TIMEOUT, 30000).
-
-%% Default Cowboy connection idle timeout (10 minutes). MUST be strictly greater
-%% than the poll timeout; otherwise the connection can be closed by Cowboy
-%% before the longpoll reply is sent, stripping the response (including CORS
-%% headers) that clients depend on.
--define(DEFAULT_IDLE_TIMEOUT, timer:minutes(10)).
-
 %% =============================================================================
 %% COWBOY CALLBACKS
 %% =============================================================================
@@ -342,23 +333,17 @@ do_handle_receive(Req0, State) ->
                     bondy_http_transport_session:touch(Pid),
                     %% `carrier_state/2' always sets `config' in the route
                     %% state this handler was started with, so this is no
-                    %% per-connection configuration lookup. Each default
-                    %% below matches what this handler used before its
-                    %% options were wired to `bondy_listener_config'.
+                    %% per-connection configuration lookup. No defaults: a
+                    %% resolved `longpoll' carrier config carries every key of
+                    %% `bondy_listener_config:?CARRIER_DEFAULTS'.
                     Config = maps:get(config, State),
-                    PollTimeout = maps:get(
-                        poll_timeout, Config, ?DEFAULT_POLL_TIMEOUT
-                    ),
+                    PollTimeout = maps:get(poll_timeout, Config),
                     Encoding = bondy_http_transport_session:encoding(Pid),
                     ok = bondy_http_transport_session:request_poll(
                         Pid, PollTimeout
                     ),
-                    IdleTimeout = maps:get(
-                        idle_timeout, Config, ?DEFAULT_IDLE_TIMEOUT
-                    ),
-                    ResetOnSend = maps:get(
-                        reset_idle_timeout_on_send, Config, true
-                    ),
+                    IdleTimeout = maps:get(idle_timeout, Config),
+                    ResetOnSend = maps:get(reset_idle_timeout_on_send, Config),
                     ok = cowboy_req:cast(
                         {set_options, #{
                             idle_timeout => IdleTimeout,

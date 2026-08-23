@@ -56,12 +56,27 @@ Findings are grouped by what you have to do about them:
 | `CONTESTED` | A rename is available, but applying it would change behaviour — read the explanation before acting. |
 | `ALREADY SET` | The new key is set in this file too, with a different value. |
 | `DROP` | The setting has no equivalent on this release. |
-| `BY HAND` | Several live keys are plausible and the name does not decide between them. Candidates are listed. |
+| `BY HAND` | No single mechanical rewrite is right. Either several live keys are plausible and the name does not decide between them, or one old key fans out to many new ones. Candidates are listed. |
 | `NOT ON THIS RELEASE` | The new key exists in a later version than the schemas you pointed at. |
 | `NO RULE` | The tool has nothing for this key. It is still not read. |
 
 The verdict line comes last and covers every section, so a file can have every
 key recognised and still report findings — most often listener ones.
+
+A `BY HAND` finding whose value happens to equal the new key's default carries
+one extra line:
+
+```
+this line restates the default, so deleting it changes nothing
+```
+
+That is worth acting on before anything else. The global carrier keys
+(`wamp.websocket.*`, `wamp.sse.*`, `wamp.longpoll.*`) fan out to one key per
+listener, which is real work — unless the line only ever restated the value the
+listener would have taken anyway, in which case it is simply deleted. The tool
+decides this by converting the value through the key's own datatype and
+comparing against the default the code actually applies, so `8h`, `20s` and
+`4MB` are compared as durations and sizes rather than as text.
 
 `CONTESTED` exists because activating a key that was inert is not automatically
 the right migration. A key that never reached its subsystem may hold a value

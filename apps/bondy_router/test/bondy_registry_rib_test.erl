@@ -36,8 +36,9 @@ write_path_test_() ->
             {timeout, 60, {"subscriber node discovery", fun sub_nodes/0}},
             {timeout, 60, {"reshape_summary/2", fun reshape_summary/0}},
             {timeout, 60,
-                {"self_heal skips when local truth is unreadable",
-                    fun() -> self_heal_unreadable(Tab) end}},
+                {"self_heal skips when local truth is unreadable", fun() ->
+                    self_heal_unreadable(Tab)
+                end}},
             {timeout, 60,
                 {"rebuild/1 restores peer stubs from the projection",
                     fun rebuild_restores_stubs/0}},

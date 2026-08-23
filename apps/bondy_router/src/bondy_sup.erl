@@ -64,7 +64,7 @@ init([]) ->
         ?SUPERVISOR(bondy_oidc_refresh_sup, [], permanent, infinity),
         ?SUPERVISOR(bondy_session_manager_sup, [], permanent, infinity),
         ?WORKER(bondy_rpc_promise_manager, [], permanent, 5000),
-        ?WORKER(bondy_transport_queue_manager, [], permanent, 5000),
+        ?WORKER(bondy_http_transport_queue_manager, [], permanent, 5000),
         ?SUPERVISOR(bondy_http_transport_session_sup, [], permanent, infinity),
         ?SUPERVISOR(bondy_subscribers_sup, [], permanent, infinity),
         ?WORKER(bondy_retained_message_manager, [], permanent, 5000),

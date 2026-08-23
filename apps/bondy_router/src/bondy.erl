@@ -562,7 +562,7 @@ maybe_enqueue(SessionId, M, _Opts) ->
         undefined ->
             false;
         TransportId ->
-            ok = bondy_transport_queue:enqueue(TransportId, M, #{}),
+            ok = bondy_http_transport_queue:enqueue(TransportId, M, #{}),
             bondy_http_transport_session:notify_enqueue(TransportId),
             true
     catch

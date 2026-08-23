@@ -165,7 +165,10 @@ listeners.wamp_tls.tls.verify = verify_none
 
 
 
-wamp.websocket.compression_enabled=on
+listeners.admin.websocket.compression_enabled = on
+listeners.admin_api_https.websocket.compression_enabled = on
+listeners.api_gateway_http.websocket.compression_enabled = on
+listeners.api_gateway_https.websocket.compression_enabled = on
 
 listeners.bridge_relay_tcp.transport = tcp
 listeners.bridge_relay_tcp.protocol = bridge_relay

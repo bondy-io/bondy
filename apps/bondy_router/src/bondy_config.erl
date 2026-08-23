@@ -534,7 +534,7 @@ setup_mods() ->
     ok = jose:json_module(bondy_wamp_json),
     ok = configure_registry(),
     ok = configure_jobs_pool(),
-    ok = configure_transport_queue().
+    ok = configure_http_transport().
 
 setup_partisan_channels() ->
     %% FALLBACK ONLY, for boots that never render cuttlefish (tests,
@@ -595,10 +595,11 @@ setup_wamp() ->
     %% [Listener, protocol_opts, dynamic_buffer]; Cowboy requires
     %% `dynamic_buffer => {Min, Max} | false', so normalise the value in
     %% place. When unset the key is left ABSENT and Cowboy's default
-    %% ({512, 131072}, adaptive) applies. `wamp_websocket' is deliberately
-    %% not listed: since Cowboy 2.13 a WebSocket connection INHERITS the
-    %% listener's dynamic_buffer (cowboy_websocket overrides any
-    %% handler-supplied value), so a WS-specific setting cannot take effect.
+    %% ({512, 131072}, adaptive) applies. There is no WebSocket-specific
+    %% equivalent to list here: since Cowboy 2.13 a WebSocket connection
+    %% INHERITS the listener's dynamic_buffer (cowboy_websocket overrides any
+    %% handler-supplied value), so a WS-specific setting cannot take effect,
+    %% which is why `?CARRIER_DEFAULTS' has no `dynamic_buffer' entry either.
     Keys = [
         [Name, protocol_opts, dynamic_buffer]
      || Name <- bondy_listener_manager:http_listeners()
@@ -748,24 +749,30 @@ configure_jobs_pool() ->
     end.
 
 %% @private
-configure_transport_queue() ->
+%% The HTTP-transport settings the schema cannot default on its own.
+%% `partitions' has no `{default, ...}' because its default is the scheduler
+%% count, which is not knowable when the schema is written; the rest are seeded
+%% here so an embedded caller or a `sys.config' that skips cuttlefish still gets
+%% a complete block, and every one of them is read with `bondy_config:get/2'
+%% carrying the same value again at the point of use.
+%%
+%% `overflow_strategy' is NOT here any more. It was seeded and never read: the
+%% eviction it named is unconditional in
+%% `bondy_http_transport_queue:do_enqueue/3', and its enum admitted one value.
+configure_http_transport() ->
     Defaults = [
-        {max_messages, 1000},
-        {max_bytes, 10485760},
-        {message_ttl, 300000},
-        {transport_ttl, 3600000},
-        {overflow_strategy, drop_oldest},
-        {eviction_interval, 5000},
-        {partitions, erlang:system_info(schedulers)}
+        {[http_transport, idle_timeout], 3600000},
+        {[http_transport, queue, max_messages], 1000},
+        {[http_transport, queue, max_bytes], 10485760},
+        {[http_transport, queue, message_ttl], 300000},
+        {[http_transport, queue, eviction_interval], 5000},
+        {[http_transport, queue, partitions], erlang:system_info(schedulers)}
     ],
     lists:foreach(
-        fun({Key, Default}) ->
-            KeyPath = [transport_queue, Key],
+        fun({KeyPath, Default}) ->
             case bondy_config:get(KeyPath, undefined) of
-                undefined ->
-                    bondy_config:set(KeyPath, Default);
-                _ ->
-                    ok
+                undefined -> bondy_config:set(KeyPath, Default);
+                _ -> ok
             end
         end,
         Defaults

@@ -40,10 +40,10 @@ end_per_suite(Config) ->
     {save_config, Config}.
 
 init_per_testcase(_TestCase, Config) ->
-    bondy_config:set([transport_queue, max_messages], 1000),
-    bondy_config:set([transport_queue, max_bytes], 10485760),
-    bondy_config:set([transport_queue, message_ttl], 300000),
-    bondy_config:set([transport_queue, transport_ttl], 3600000),
+    bondy_config:set([http_transport, queue, max_messages], 1000),
+    bondy_config:set([http_transport, queue, max_bytes], 10485760),
+    bondy_config:set([http_transport, queue, message_ttl], 300000),
+    bondy_config:set([http_transport, idle_timeout], 3600000),
     Config.
 
 end_per_testcase(_TestCase, _Config) ->
@@ -137,7 +137,7 @@ register_sse_stream(_Config) ->
 
     %% Enqueue a message and verify drain_queue notification arrives
     Msg = make_event(1),
-    ok = bondy_transport_queue:enqueue(TransportId, Msg, #{}),
+    ok = bondy_http_transport_queue:enqueue(TransportId, Msg, #{}),
     bondy_http_transport_session:notify_enqueue(TransportId),
 
     receive

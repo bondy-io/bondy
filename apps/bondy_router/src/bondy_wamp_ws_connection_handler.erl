@@ -383,12 +383,11 @@ terminate(stop, _Req, State) ->
     do_terminate(State);
 terminate(timeout, _Req, State) ->
     %% The deadline is Cowboy's: `set_idle_timeout/2' reads `idle_timeout' from
-    %% the options map `do_init/4' builds out of this same `config'. Where the
-    %% listener configured none, Cowboy's own default is in force and that number
-    %% is deliberately NOT restated here — a constant copied out of a third-party
-    %% module goes stale silently, and the reader needs to know which of the two
-    %% applied rather than a figure this module cannot keep true.
-    Timeout = maps:get(idle_timeout, State#state.config, cowboy_default),
+    %% the options map `do_init/4' builds out of this same `config'. Always
+    %% present — `bondy_listener_config:resolve_carrier_config/3' merges
+    %% `?CARRIER_DEFAULTS' under every carrier key — so the number logged is
+    %% always the one in force, and Cowboy's own default is never reached.
+    Timeout = maps:get(idle_timeout, State#state.config),
     ?LOG_ERROR(#{
         description => "Connection closed",
         reason => idle_timeout,
@@ -537,19 +536,17 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State0) ->
             %% This works only on HTTP1, we will change this for a stratgy
             %% based on {active, boolean()} and bondy_regulator.
             Opts0 = maps:put(active_n, 1, State0#state.config),
-            %% `ping' is the one carrier key this handler's own code (below,
-            %% and `maybe_enable_ping/2') requires to be present. A listener
-            %% for which no `ping.*' key was set anywhere — neither on the
-            %% listener nor on the global `wamp.websocket.*' block — resolves
-            %% to a config with no `ping' key at all
-            %% (`bondy_listener_config:resolve_carrier_config/3' leaves an
-            %% unset key absent rather than inventing a default), so the
-            %% default here is "ping off", not a reconstruction of the
-            %% schema's own `wamp.websocket.ping.enabled' default.
-            PingOpts = maps:get(ping, Opts0, #{enabled => false}),
+            %% Both read with no default: a resolved `websocket' carrier
+            %% config carries every key of
+            %% `bondy_listener_config:?CARRIER_DEFAULTS', `ping' and
+            %% `hibernate' included, whatever the operator wrote. A default
+            %% here would be a second, divergent statement of what they are
+            %% worth — which is how this handler and the schema came to
+            %% disagree about `ping.enabled' and `idle_timeout' before.
+            PingOpts = maps:get(ping, Opts0),
             Opts1 = maps:remove(ping, Opts0),
             %% Ours, not Cowboy's: see maybe_hibernate/3.
-            Hibernate = maps:get(hibernate, Opts1, idle),
+            Hibernate = maps:get(hibernate, Opts1),
             Opts = maps:remove(hibernate, Opts1),
 
             State1 = State0#state{

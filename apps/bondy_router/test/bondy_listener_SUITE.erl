@@ -588,15 +588,13 @@ ws_listener_restricted_to_one_protocol(_Config) ->
     %% whose services do not include it. This is the operator requirement:
     %% offering BAMP over WebSocket without offering WAMP.
     %%
-    %% This also exercises the ping-ABSENT path in `do_init/4' — but only
-    %% because `wamp_websocket' (global) is unset when this case runs and
-    %% neither listener below sets `websocket.ping.*' either, so the
-    %% resolved carrier config carries no `ping' key at all. That is an
-    %% ordering dependency, not an assertion: a later case that sets
-    %% `wamp_websocket' earlier in the suite run (`bondy_config' state
-    %% persists for the whole run — see
-    %% the same caveat applied to the removed dual-path test)
-    %% would silently retire this coverage without failing anything here.
+    %% It no longer exercises the ping-ABSENT path in `do_init/4'. It did while
+    %% an unset `wamp_websocket' left the resolved carrier config with no
+    %% `ping' key, which made the coverage an ordering dependency rather than
+    %% an assertion. `bondy_listener_config:resolve_carrier_config/3' now
+    %% merges `carrier_defaults/1' under every carrier key, so a resolved
+    %% `websocket' config always carries a complete `ping' block and
+    %% `do_init/4''s `#{enabled => false}' fallback is unreachable from here.
     Inventory = [
         {ct_wamp_only, #{
             transport => tcp,

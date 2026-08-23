@@ -102,7 +102,7 @@ listeners.api_gateway_http.backlog           = 4096
 listeners.api_gateway_http.nodelay           = on
 listeners.api_gateway_http.http.idle_timeout = 15s
 listeners.api_gateway_http.http.active_n     = 100
-wamp.websocket.idle_timeout                 = 8h
+listeners.api_gateway_http.websocket.idle_timeout = 8h
 
 ## --- data (durable core DB; ephemeral machine storage for M0) -----------------
 platform_data_dir                           = ${BONDY_DATA_DIR}

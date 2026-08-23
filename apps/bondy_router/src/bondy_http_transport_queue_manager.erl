@@ -3,14 +3,14 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
--module(bondy_transport_queue_manager).
+-module(bondy_http_transport_queue_manager).
 -moduledoc """
-A gen_server that manages the `bondy_transport_queue` lifecycle and runs
+A gen_server that manages the `bondy_http_transport_queue` lifecycle and runs
 periodic TTL-based expiry sweeps.
 
-On init, it calls `bondy_transport_queue:init/0` to create the sharded ETS
+On init, it calls `bondy_http_transport_queue:init/0` to create the sharded ETS
 tables and metadata table. It then schedules a periodic eviction timer that
-calls `bondy_transport_queue:evict_expired_all/0` to remove messages whose
+calls `bondy_http_transport_queue:evict_expired_all/0` to remove messages whose
 TTL has elapsed.
 """.
 -behaviour(gen_server).
@@ -54,10 +54,10 @@ init(_) ->
     process_flag(trap_exit, true),
 
     %% Initialise the sharded queue tables
-    ok = bondy_transport_queue:init(),
+    ok = bondy_http_transport_queue:init(),
 
     Interval = bondy_config:get(
-        [transport_queue, eviction_interval],
+        [http_transport, queue, eviction_interval],
         ?DEFAULT_EVICTION_INTERVAL
     ),
 
@@ -84,7 +84,7 @@ handle_cast(Event, State) ->
 
 handle_info(evict, State) ->
     try
-        ok = bondy_transport_queue:evict_expired_all()
+        ok = bondy_http_transport_queue:evict_expired_all()
     catch
         Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{

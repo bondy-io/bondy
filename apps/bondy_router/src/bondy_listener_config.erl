@@ -82,6 +82,7 @@ rather than a silently bound phantom listener.
     service_spec/0
 ]).
 
+-export([carrier_defaults/1]).
 -export([default_inventory/0]).
 -export([option_defaults/2]).
 -export([reserved_names/0]).
@@ -119,53 +120,86 @@ rather than a silently bound phantom listener.
     certfile, keyfile, cacertfile, versions, verify, fail_if_no_peer_cert
 ]).
 
-%% The carrier settings an operator may override per listener, as key PATHS
-%% relative to the carrier's block.
+%% The carrier settings an operator may override per listener, with the value
+%% each takes when the operator names it nowhere.
 %%
-%% Each path is the TARGET of the corresponding global `wamp.<carrier>.*'
-%% mapping in schema/bondy.schema, which is NOT always the mapping's conf key
-%% name: `wamp.websocket.compression_enabled' targets `compress', and
-%% `wamp.websocket.buffer.min' targets `protocol_opts.dynamic_buffer.min'. The
-%% target is what reaches application env, so the target is what belongs here.
+%% Keys are the paths a `listeners.$name.<carrier>.*' mapping renders into the
+%% listener's option block, which is NOT always the conf key's own name:
+%% `websocket.compression_enabled' lands on `compress' and
+%% `websocket.deflate.level' on `deflate_opts.level'. The rendered path is what
+%% a consumer reads, so the rendered path is what belongs here.
 %%
-%% `wamp.websocket.buffer.{min,max}' are deliberately EXCLUDED. Since Cowboy
+%% Values are the ones the deleted `wamp.{websocket,sse,longpoll}.*' mappings
+%% carried, in the form cuttlefish converted them to (`20s' as 20000, `4MB' as
+%% 4194304). They were read out of the generated
+%% `bondy_router.wamp_{websocket,sse,longpoll}' blocks rather than transcribed
+%% from the `{default, ...}' terms, so no duration or bytesize is off by a unit,
+%% and while both existed a suite case asserted the two agreed key for key.
+%%
+%% This is now the ONLY statement of what a carrier setting defaults to. It is
+%% not rendered into a release's `etc/bondy.conf' the way a non-fuzzy schema
+%% default is, so an operator reading a generated conf sees no carrier default
+%% at all; `doc/guides/configuration/listeners.md' carries the table for them.
+%%
+%% ONE table rather than a path list beside a value map: the paths
+%% `resolve_carrier_config/3' reads are DERIVED from this map by `leaf_paths/1',
+%% so a carrier key with no default cannot be expressed and the two cannot
+%% drift. What it cannot express is a setting whose value is itself a map —
+%% `leaf_paths/1' descends into a map and would treat its members as separate
+%% keys. No carrier setting has one; a LIST-valued setting is fine, since only
+%% maps are descended.
+%%
+%% Only the three carriers that HAVE settings appear. `carrier_defaults/1'
+%% answers `#{}' for any other, so a row of `api_gateway => #{}' would state
+%% what its own absence already states, and would read as a carrier whose
+%% settings had been forgotten. Which carriers those are is not a list to keep
+%% in step with `service_spec/1' either: across that table, the carriers with
+%% settings are exactly the ones whose services name a `protocol', because a
+%% protocol is what has framing, timeouts and a keepalive to configure.
+%% `api_gateway', `admin_api', `admin' and `metrics' all carry
+%% `protocol => undefined' — they are route sets on a listener's HTTP, not
+%% connection styles — and have nothing to default. An EXTENSION's carrier
+%% (`external_services/0') is outside that correspondence: it can name a
+%% protocol and still answer `#{}' here, which is correct, since the schema
+%% declares no `listeners.$name.<carrier>.*' mapping for it either.
+%%
+%% `wamp.websocket.buffer.{min,max}' are deliberately ABSENT. Since Cowboy
 %% 2.13 a WebSocket connection inherits the listener's `dynamic_buffer' and
 %% `cowboy_websocket' overrides any handler-supplied value, so a WS-specific
 %% setting cannot take effect (see the comment at bondy_config:setup_wamp/0).
 %% Exposing them per listener would ship two knobs that do nothing.
--define(CARRIER_KEYS, #{
-    websocket => [
-        [compress],
-        [hibernate],
-        [idle_timeout],
-        [max_frame_size],
-        [ping, enabled],
-        [ping, idle_timeout],
-        [ping, max_attempts],
-        [ping, timeout],
-        [deflate_opts, level],
-        [deflate_opts, mem_level],
-        [deflate_opts, strategy],
-        [deflate_opts, server_context_takeover],
-        [deflate_opts, client_context_takeover],
-        [deflate_opts, server_max_window_bits],
-        [deflate_opts, client_max_window_bits]
-    ],
-    sse => [
-        [idle_timeout],
-        [reset_idle_timeout_on_send],
-        [ping, enabled],
-        [ping, interval]
-    ],
-    longpoll => [
-        [idle_timeout],
-        [poll_timeout],
-        [reset_idle_timeout_on_send]
-    ],
-    api_gateway => [],
-    admin_api => [],
-    admin => [],
-    metrics => []
+-define(CARRIER_DEFAULTS, #{
+    websocket => #{
+        compress => false,
+        hibernate => idle,
+        idle_timeout => 28800000,
+        max_frame_size => 4194304,
+        ping => #{
+            enabled => true,
+            idle_timeout => 20000,
+            max_attempts => 3,
+            timeout => 10000
+        },
+        deflate_opts => #{
+            level => 5,
+            mem_level => 8,
+            strategy => default,
+            server_context_takeover => takeover,
+            client_context_takeover => takeover,
+            server_max_window_bits => 11,
+            client_max_window_bits => 11
+        }
+    },
+    sse => #{
+        idle_timeout => 600000,
+        reset_idle_timeout_on_send => true,
+        ping => #{enabled => true, interval => 20000}
+    },
+    longpoll => #{
+        idle_timeout => 600000,
+        poll_timeout => 30000,
+        reset_idle_timeout_on_send => true
+    }
 }).
 
 %% =============================================================================
@@ -249,6 +283,27 @@ not removed or disabled, `admin_local` is internal.
 reserved_names() -> ?RESERVED_NAMES.
 
 -doc """
+The value each of `Carrier`'s settings takes when the operator names it nowhere.
+
+The map is nested exactly as a resolved carrier config is, so a caller can
+compare the two directly.
+
+Only `websocket`, `sse` and `longpoll` have settings — they are the carriers
+that name a `protocol` in `service_spec/1`, and a protocol is what has framing,
+timeouts and a keepalive. Every other carrier (`api_gateway`, `admin_api`,
+`admin`, `metrics`) is a route set rather than a connection style, and answers
+`#{}`, as does a carrier this module does not know.
+
+These are the values the global `wamp.<carrier>.*` mappings used to render.
+Those mappings are gone, so this is the only place a carrier default comes from
+and every listener that does not state a key gets its value from here.
+""".
+-spec carrier_defaults(Carrier :: atom()) -> map().
+
+carrier_defaults(Carrier) ->
+    maps:get(Carrier, ?CARRIER_DEFAULTS, #{}).
+
+-doc """
 The option defaults a listener's transport and protocol imply.
 
 The legacy `wamp.{tcp,tls}.*`, `api_gateway.*`, `admin_api.*` and
@@ -262,10 +317,10 @@ fuzzy mapping's default for every name mentioned anywhere under the `listeners`
 prefix (see the note above those mappings in `schema/bondy.schema`). The values
 whose consumer has no equivalent fallback of its own therefore live here.
 
-This is NOT a third tier of defaults for the carrier settings
-`resolve_carrier_config/3` reads. Those still fall back to the global
-`wamp.<carrier>.*` mappings, which keep their own defaults. These are the
-settings whose global mapping no longer exists.
+These are the listener's OWN settings, not a carrier's:
+`resolve_carrier_config/3` has its own defaults in `carrier_defaults/1`, and the
+two blocks do not overlap. What both have in common is the reason they are in
+code at all — a `listeners.$name.*` mapping cannot carry a `{default, ...}`.
 
 Keyed on the transport as well as the protocol because one of them belongs to
 neither alone — see `transport_option_defaults/2`.
@@ -762,13 +817,6 @@ external_carriers() ->
     application:get_env(bondy_router, http_carriers, []).
 
 %% @private
-%% Global block each carrier falls back to. These are today's keys.
-carrier_global(websocket) -> wamp_websocket;
-carrier_global(sse) -> wamp_sse;
-carrier_global(longpoll) -> wamp_longpoll;
-carrier_global(_) -> undefined.
-
-%% @private
 %% Groups `Services` by carrier, UNIONING the protocols of every service that
 %% shares one: HTTP multiplexes on path, so `wamp_ws` and `bamp_ws` both mount
 %% `/ws` and must resolve to a single `websocket` carrier entry carrying both
@@ -826,61 +874,44 @@ add_protocol(Protocol, Protos) ->
     end.
 
 %% @private
-%% Precedence has exactly two levels: the per-listener value if the operator
-%% set one, otherwise the global `wamp.<carrier>.*' value. There is
-%% deliberately no third tier of defaults for a CARRIER key — every global
-%% mapping in schema/bondy.schema carries its own `{default, ...}', so the
-%% schema is the single source of truth for what a setting defaults to. A key
-%% set in neither place is left ABSENT from the resolved map, so the handler's
-%% own default (or Cowboy's) applies rather than a value invented here.
+%% Precedence has exactly two levels: the value the operator set on THIS
+%% listener, otherwise `?CARRIER_DEFAULTS'. There is no global tier — the
+%% `wamp.{websocket,sse,longpoll}.*' block that used to sit between them is
+%% gone, and `?CARRIER_DEFAULTS' holds the values it rendered.
 %%
-%% `option_defaults/2' is not a third tier here either: it supplies the values
-%% whose global mapping was DELETED, and every carrier key still has one.
+%% The result is TOTAL over the carrier's keys — every one of them is present,
+%% whether or not the operator named it — because the paths read are the leaves
+%% of the default map itself.
 %%
 %% Resolved ONCE per listener rather than per connection, so the connection
 %% handler performs no configuration lookup on the accept path.
 resolve_carrier_config(Name, Carrier, GetFun) ->
-    Paths = maps:get(Carrier, ?CARRIER_KEYS, []),
-    Global = carrier_global(Carrier),
+    Defaults = carrier_defaults(Carrier),
     Config = lists:foldl(
         fun(Path, Acc) ->
-            case resolve_carrier_key(Name, Carrier, Global, Path, GetFun) of
+            case GetFun([Name, Carrier | Path], undefined) of
                 undefined -> Acc;
                 Value -> put_path(Path, Value, Acc)
             end
         end,
         #{},
-        Paths
+        leaf_paths(Defaults)
     ),
-    ok = assert_ping_complete(Name, Carrier, Config),
-    Config.
+    Resolved = deep_merge(Defaults, Config),
+    ok = assert_carrier_ping(Name, Carrier, Resolved),
+    Resolved.
 
 %% @private
-resolve_carrier_key(Name, Carrier, Global, Path, GetFun) ->
-    case GetFun([Name, Carrier | Path], undefined) of
-        undefined when Global =:= undefined -> undefined;
-        undefined -> GetFun([Global | Path], undefined);
-        Value -> Value
-    end.
-
-%% @private
-%% Every `ping.*' path is one more entry in `?CARRIER_KEYS' and resolves
-%% INDEPENDENTLY through `resolve_carrier_key/5', so a listener can end up
-%% with some `ping' keys and not others: e.g. `ping.idle_timeout' set on the
-%% listener while `ping.enabled' falls back to a global that happens to carry
-%% no value for it. An absent `enabled' is not a gap — every
-%% `maybe_enable_ping/2' falls through to "ping off" — but a carrier whose
-%% `ping.enabled' IS `true' reads every sibling with `maps:get/2' and no
-%% default, so a missing sibling would crash the first connection rather than
-%% fail to boot.
-%%
-%% Checked once per listener, per carrier, right after resolution — a static
-%% error here is reported the same way every other one in this module is,
-%% rather than guarded again at the point each key is read.
-assert_ping_complete(Name, Carrier, Config) ->
+%% A carrier's `ping' block cannot be INCOMPLETE: `resolve_carrier_config/3'
+%% merges `?CARRIER_DEFAULTS' under the resolved values at the leaf, so every
+%% sibling `maybe_enable_ping/2' reads is there whatever the operator wrote.
+%% Only the type of `enabled' is still worth checking — `bondy.conf' cannot
+%% render a non-boolean, but `sys.config' and an embedded caller can.
+assert_carrier_ping(Name, Carrier, Config) ->
     case maps:find(ping, Config) of
         {ok, Ping} ->
-            assert_ping_keys(Name, Carrier, ping_siblings(Carrier), Ping);
+            _ = assert_ping_enabled(Name, Carrier, Ping),
+            ok;
         error ->
             ok
     end.
@@ -889,7 +920,7 @@ assert_ping_complete(Name, Carrier, Config) ->
 %% The listener's OWN `ping' block, at `[Name, ping]' — a different thing from
 %% a carrier's, and invisible to `resolve_carrier_config/3': it belongs to the
 %% connection handler of a raw-socket or bridge-relay listener, so
-%% `?CARRIER_KEYS' does not describe it.
+%% `?CARRIER_DEFAULTS' does not describe it.
 %%
 %% Both handlers have the same shape as the carrier ones —
 %% `bondy_wamp_tcp_connection_handler:maybe_enable_ping/2' and
@@ -945,10 +976,9 @@ assert_listener_ping(_Name, _Protocol, _GetFun) ->
 %% datatype is `{flag, on, off}' — but `sys.config' and an embedded caller can.
 assert_ping_keys(Name, Label, Siblings, Ping) ->
     Required =
-        case maps:get(enabled, Ping, false) of
+        case assert_ping_enabled(Name, Label, Ping) of
             true -> Siblings;
-            false -> [];
-            Invalid -> invalid(Name, {invalid_ping_enabled, Label, Invalid})
+            false -> []
         end,
     Missing = [K || K <- Required, not maps:is_key(K, Ping)],
     case Missing of
@@ -957,10 +987,31 @@ assert_ping_keys(Name, Label, Siblings, Ping) ->
     end.
 
 %% @private
-%% The `ping' keys `?CARRIER_KEYS' declares for `Carrier', other than
-%% `enabled' — the ones a handler reads only once `ping.enabled' is `true'.
-ping_siblings(Carrier) ->
-    [K || [ping, K] <- maps:get(Carrier, ?CARRIER_KEYS, []), K =/= enabled].
+%% Split out because a CARRIER needs this half and not the other: its block is
+%% complete by construction, so `assert_carrier_ping/3' asks only whether
+%% `enabled' is a boolean.
+assert_ping_enabled(Name, Label, Ping) ->
+    case maps:get(enabled, Ping, false) of
+        true -> true;
+        false -> false;
+        Invalid -> invalid(Name, {invalid_ping_enabled, Label, Invalid})
+    end.
+
+%% @private
+%% Every root-to-leaf path through a nested option map, in the form `put_path/3'
+%% and a `get_fun()' take. Only a map is descended into, so a list-valued
+%% setting is a leaf and not a block.
+leaf_paths(Map) ->
+    maps:fold(
+        fun
+            (Key, Value, Acc) when is_map(Value) ->
+                Acc ++ [[Key | Path] || Path <- leaf_paths(Value)];
+            (Key, _, Acc) ->
+                Acc ++ [[Key]]
+        end,
+        [],
+        Map
+    ).
 
 %% @private
 %% Carrier keys are nested (`ping.enabled', `deflate_opts.level'), so the

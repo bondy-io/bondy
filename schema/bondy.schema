@@ -2593,8 +2593,8 @@ end}.
 %% `cowboy_websocket' overrides any handler-supplied value, so a WebSocket-
 %% specific setting cannot take effect; the listener-level
 %% `listeners.$name.http.buffer.min'/`.max' are the ones that do.
-%% `bondy_listener_config:?CARRIER_KEYS' excludes them for the same reason, so
-%% adding them here would ship two knobs that do nothing.
+%% `bondy_listener_config:?CARRIER_DEFAULTS' excludes them for the same
+%% reason, so adding them here would ship two knobs that do nothing.
 %% --------------------------------------------------------------------------
 
 %% @doc Defines if server-initiated Websocket PING control messages are
@@ -3450,118 +3450,6 @@ end}.
 % end}.
 
 
-%% =============================================================================
-%% WAMP WEBSOCKET
-%% =============================================================================
-
-%% @doc Defines if Websockets PING control message functionality is
-%% enabled or not.
-%% This option affects server (Bondy) initiated pings only. Some clients
-%% might also initiate ping requests and Bondy will always respond to those
-%% even if this option is turned off.
-%% This feature is useful to keep a connection alive and validate the
-%% connection is healthy.
-%% Enabling this feature implies having an additional timer per connection and
-%% this can be a considerable cost for servers that need to handle large
-%% numbers of connections. A better solution in most cases is to let the client
-%% handle pings. However, notice web browsers will typically kill websocket
-%% connections after 60s and will not initiate PINGs.
-{mapping, "wamp.websocket.ping.enabled",
-"bondy_router.wamp_websocket.ping.enabled", [
-  {default, on},
-  {datatype, {flag, on, off}}
-]}.
-
-%% @doc If wamp.websocket.ping.enabled is 'on', this parameter controls the
-%% maximum time interval that is permitted to elapse between the point at which
-%% the Client finishes transmitting a message and the point it starts sending
-%% the next.
-%% Notice this is not the same as wamp.websocket.idle_timeout.
-{mapping, "wamp.websocket.ping.idle_timeout",
-"bondy_router.wamp_websocket.ping.idle_timeout", [
-  {default, "20s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% @doc If wamp.websocket.ping.enabled is 'on', this parameter controls the
-%% amount of time Bondy waits for a ping response from the client.
-%% Once that time has passed this counts as a fail attempt
-%% (see wamp.websocket.ping.max_attempts).
-{mapping, "wamp.websocket.ping.timeout",
-"bondy_router.wamp_websocket.ping.timeout", [
-  {default, "10s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% @doc If wamp.websocket.ping.enabled is 'on', this parameter controls how many
-%% missed pings are allowed to timeout before Bondy closes the connection.
-{mapping, "wamp.websocket.ping.max_attempts",
-"bondy_router.wamp_websocket.ping.max_attempts",
-  [
-    {default, 3},
-    {datatype, integer},
-    {validators, ["pos_integer"]}
-  ]
-}.
-
-%% @doc Drops the connection after a period of inactivity. This option does not
-%% take effect when wamp.websocket.ping.enabled is 'on' and wamp.websocket.ping.
-%% interval times wamp.websocket.ping.max_attempts results in a value higher
-%% than this option.
-%% Notice that for some clients using this option alone is not enough to keep
-%% a connection alive as the client will drop the connection due to inactivity.
-%% If the client supports Websocket PING control messages, enabled them,
-%% otherwise e.g. web browsers set wamp.websocket.ping.enabled to on.
-{mapping, "wamp.websocket.idle_timeout",
-"bondy_router.wamp_websocket.idle_timeout", [
-  {default, "8h"},
-  {datatype, [{duration, ms}, {atom, infinity}]}
-]}.
-
-
-%% Maximum frame size allowed by this Websocket handler. Cowboy will close the
-%% connection when a client attempts to send a frame that goes over this limit.
-%% For fragmented frames this applies to the size of the reconstituted frame.
-%%
-%% The value reaches Cowboy as written. There is no unbounded spelling: the
-%% translation that would have turned 0 into 'infinity' is not live (it is
-%% commented out below), so 0 configures a limit of zero bytes.
-{mapping, "wamp.websocket.max_frame_size",
-"bondy_router.wamp_websocket.max_frame_size", [
-  {default, "4MB"},
-  {datatype, bytesize}
-]}.
-
-
-%% Has NO effect since Cowboy 2.13: a WebSocket connection always inherits
-%% the dynamic buffer of the LISTENER it arrived on (Cowboy overrides any
-%% handler-supplied value), so configure the listener's buffer options
-%% instead (listeners.$name.http.buffer.min/max). These two mappings are kept
-%% only so an existing configuration file that sets them still parses.
-{mapping, "wamp.websocket.buffer.min",
-"bondy_router.wamp_websocket.protocol_opts.dynamic_buffer.min", [
-  {datatype, bytesize}
-]}.
-
-{mapping, "wamp.websocket.buffer.max",
-"bondy_router.wamp_websocket.protocol_opts.dynamic_buffer.max", [
-  {datatype, bytesize}
-]}.
-
-
-
-% {translation, "bondy_router.wamp_websocket.max_frame_size",
-%  fun(Conf) ->
-%   TheLimit = cuttlefish:conf_get("wamp.websocket.max_frame_size", Conf),
-%   case TheLimit of
-%       0 -> infinite;
-%       Int when is_integer(Int) andalso Int > 0 -> Int;
-%       _ ->
-%           %% This would have been caught earlier in datatype validation
-%           cuttlefish:invalid("should be a non negative integer")
-%   end
-%  end
-% }.
 
 
 %% @doc Where WAMP connection processes (Websocket and raw TCP/TLS) keep
@@ -3576,259 +3464,79 @@ end}.
 ]}.
 
 
-%% @doc Controls when a Websocket connection process hibernates (a
-%% hibernation forces a full-sweep garbage collection and shrinks the
-%% process heap).
-%% * idle (default) hibernates only on control events (pings, timeouts),
-%%   so a connection under sustained message traffic never pays a GC per
-%%   message while quiet connections still shrink.
-%% * always hibernates after every message (lowest memory, highest CPU).
-%% * never disables hibernation.
-{mapping, "wamp.websocket.hibernate",
-"bondy_router.wamp_websocket.hibernate", [
-  {default, idle},
-  {datatype, {enum, [never, idle, always]}}
-]}.
 
-
-%% Defines if Websocket compression (permessage-deflate extension) is enabled
-%% or not. If enabled it will be negotiated with supporting clients.
-{mapping, "wamp.websocket.compression_enabled",
-"bondy_router.wamp_websocket.compress", [
-  {default, off},
-  {datatype, {flag, on, off}}
-]}.
-
-
-%% Compression level to use. A value between 0 and 9
-%% * 0 (none), gives no compression
-%% * 1 (best_speed) gives best speed
-%% * 9 (best_compression) gives best compression
-{mapping, "wamp.websocket.deflate.level",
-"bondy_router.wamp_websocket.deflate_opts.level", [
-  {default, 5},
-  {datatype, integer}
-]}.
-
-{translation, "bondy_router.wamp_websocket.deflate_opts.level",
- fun(Conf) ->
-  case cuttlefish:conf_get("wamp.websocket.deflate.level", Conf) of
-      Int when is_integer(Int) andalso Int >= 0 andalso Int =< 9 -> Int;
-      _ ->
-          %% This would have been caught earlier in datatype validation
-          cuttlefish:invalid(
-            "should be an integer between 0 and 9")
-  end
- end
-}.
-
-%% Specifies how much memory is to be allocated for the internal compression
-%% state. An integer between 1 and 9, where 1 uses minimum memory but is slow
-%% and reduces compression ratio while 9 uses maximum memory for optimal speed.
-{mapping, "wamp.websocket.deflate.mem_level",
-"bondy_router.wamp_websocket.deflate_opts.mem_level", [
-  {default, 8},
-  {datatype, integer}
-]}.
-
-{translation, "bondy_router.wamp_websocket.deflate_opts.mem_level",
- fun(Conf) ->
-  case cuttlefish:conf_get("wamp.websocket.deflate.mem_level", Conf) of
-      Int when is_integer(Int) andalso Int >= 1 andalso Int =< 9 -> Int;
-      _ ->
-          %% This would have been caught earlier in datatype validation
-          cuttlefish:invalid(
-            "should be an integer between 1 and 9")
-  end
- end
-}.
-
-%% Tunes the compression algorithm. Use the following values:
-%%  -   default for normal data
-%%  -   filtered for data produced by a filter (or predictor)
-%%  -   huffman_only to force Huffman encoding only (no string match)
-%%  -   rle to limit match distances to one (run-length encoding)
+%% =============================================================================
+%% WAMP OVER HTTP (long-poll and SSE)
+%% =============================================================================
 %%
-%% Filtered data consists mostly of small values with a somewhat random
-%% distribution. In this case, the compression algorithm is tuned to compress
-%% them better. The effect of filtered is to force more Huffman coding and less
-%% string matching; it is somewhat intermediate between default and
-%% huffman_only. rle is designed to be almost as fast as huffman_only, but
-%% gives better compression for PNG image data.
+%% These settings apply ONLY to the two WAMP transports carried over HTTP:
+%% long-poll and Server-Sent Events. A WebSocket or raw-socket session never
+%% reaches any of them.
 %%
-%% Strategy affects only the compression ratio, but not the correctness of the
-%% compressed output even if it is not set appropriately.
-{mapping, "wamp.websocket.deflate.strategy",
-"bondy_router.wamp_websocket.deflate_opts.strategy", [
-  {default, default},
-  {datatype, {enum, [default, filtered, huffman_only, rle]}}
+%% They exist because those two transports have no process holding a socket for
+%% the session's lifetime. A long-poll client is not connected at all between
+%% `/receive' calls, so a message routed to it in that gap has nowhere to go
+%% unless something parks it; `bondy_http_transport_queue' is that parking
+%% place, and these are its bounds. See that module for the full rationale.
+%%
+%% Node-wide rather than per listener: one ETS partition ring and one eviction
+%% sweeper serve every HTTP transport on the node, whichever listener the
+%% request arrived on.
+
+%% @doc How long a WAMP-over-HTTP session survives with no HTTP request
+%% touching it. This is the SESSION's deadline, not the queue's — it closes the
+%% `bondy_http_transport_session' process and discards whatever it still holds.
+{mapping, "wamp.http_transport.idle_timeout",
+"bondy_router.http_transport.idle_timeout", [
+  {default, "1h"},
+  {datatype, {duration, ms}}
 ]}.
 
-%%  Using no_takeover can severely limit the usefulness of compression.
-{mapping, "wamp.websocket.deflate.server_context_takeover",
-"bondy_router.wamp_websocket.deflate_opts.server_context_takeover", [
-  {default, takeover},
-  {datatype, {enum, [takeover, no_takeover]}}
-]}.
-
-%%  Using no_takeover can severely limit the usefulness of compression.
-{mapping, "wamp.websocket.deflate.client_context_takeover",
-"bondy_router.wamp_websocket.deflate_opts.client_context_takeover", [
-  {default, takeover},
-  {datatype, {enum, [takeover, no_takeover]}}
-]}.
-
-%% The base two logarithm of the window size (the size of the history buffer).
-%% It is to be in the range 8 through 15. Larger values result in better
-%% compression at the expense of memory usage.
-{mapping, "wamp.websocket.deflate.server_max_window_bits",
-"bondy_router.wamp_websocket.deflate_opts.server_max_window_bits", [
-  {default, 11},
-  {datatype, integer}
-]}.
-
-{translation, "bondy_router.wamp_websocket.deflate_opts.server_max_window_bits",
- fun(Conf) ->
-  case cuttlefish:conf_get("wamp.websocket.deflate.server_max_window_bits", Conf) of
-      Int when is_integer(Int) andalso Int >= 8 andalso Int =< 15 -> Int;
-      _ ->
-          cuttlefish:invalid(
-            "should be an integer between 8 and 15")
-  end
- end
-}.
-
-%% The base two logarithm of the window size (the size of the history buffer).
-%% It is to be in the range 8 through 15. Larger values result in better
-%% compression at the expense of memory usage.
-{mapping, "wamp.websocket.deflate.client_max_window_bits",
-"bondy_router.wamp_websocket.deflate_opts.client_max_window_bits", [
-  {default, 11},
-  {datatype, integer}
-]}.
-
-{translation, "bondy_router.wamp_websocket.deflate_opts.client_max_window_bits",
- fun(Conf) ->
-  case cuttlefish:conf_get("wamp.websocket.deflate.client_max_window_bits", Conf) of
-      Int when is_integer(Int) andalso Int >= 8 andalso Int =< 15 -> Int;
-      _ ->
-          cuttlefish:invalid(
-            "should be an integer between 8 and 15")
-  end
- end
-}.
-
-%% Max queued messages per transport
-{mapping, "wamp.transport_queue.max_messages",
-"bondy_router.transport_queue.max_messages", [
+%% @doc Most messages held for one disconnected transport before the oldest is
+%% evicted to make room.
+{mapping, "wamp.http_transport.queue.max_messages",
+"bondy_router.http_transport.queue.max_messages", [
     {default, 1000},
     {datatype, integer},
     {validators, ["pos_integer"]}
 ]}.
 
-%% Max queued bytes per transport
-{mapping, "wamp.transport_queue.max_bytes",
-"bondy_router.transport_queue.max_bytes", [
+%% @doc Most bytes held for one disconnected transport before the oldest
+%% message is evicted to make room. Enforced alongside `max_messages': whichever
+%% bound is reached first evicts.
+{mapping, "wamp.http_transport.queue.max_bytes",
+"bondy_router.http_transport.queue.max_bytes", [
     {default, "10MB"},
     {datatype, bytesize}
 ]}.
 
-%% TTL for individual messages
-{mapping, "wamp.transport_queue.message_ttl",
-"bondy_router.transport_queue.message_ttl", [
+%% @doc How long a queued message stays deliverable. A message older than this
+%% is dropped by the eviction sweep, and is skipped if a client polls for it
+%% first, on the assumption that a client absent this long no longer wants it.
+{mapping, "wamp.http_transport.queue.message_ttl",
+"bondy_router.http_transport.queue.message_ttl", [
   {default, "5m"},
   {datatype, {duration, ms}}
 ]}.
 
-%% Session idle timeout — auto-closes the transport session if no HTTP request
-%% touches it within this window
-{mapping, "wamp.transport_queue.transport_ttl",
-"bondy_router.transport_queue.transport_ttl", [
-  {default, "1h"},
-  {datatype, {duration, ms}}
-]}.
-
-%% How often the TTL eviction sweep runs
-{mapping, "wamp.transport_queue.eviction_interval",
-"bondy_router.transport_queue.eviction_interval", [
+%% @doc How often the TTL eviction sweep runs across every partition.
+{mapping, "wamp.http_transport.queue.eviction_interval",
+"bondy_router.http_transport.queue.eviction_interval", [
   {default, "5s"},
   {datatype, {duration, ms}}
 ]}.
 
-%% How often the TTL eviction sweep runs
-{mapping, "wamp.transport_queue.partitions",
-"bondy_router.transport_queue.partitions", [
+%% @doc How many ETS partitions the queue is sharded across. Every entry for one
+%% transport lives in a single partition, so this trades table contention across
+%% transports against the cost of a sweep. Defaults to the scheduler count,
+%% which is why this mapping carries no `{default, ...}': that number is not
+%% knowable when the schema is written, so `bondy_config:configure_http_
+%% transport/0' supplies it at boot instead.
+{mapping, "wamp.http_transport.queue.partitions",
+"bondy_router.http_transport.queue.partitions", [
     {datatype, integer},
     {validators, ["pos_integer"]}
 ]}.
-
-%% What to do when queue limits are exceeded
-{mapping, "wamp.transport_queue.overflow_strategy",
-"bondy_router.transport_queue.overflow_strategy", [
-  {default, drop_oldest},
-  {datatype, {enum, [drop_oldest]}}
-]}.
-
-%% =============================================================================
-%% WAMP LONGPOLL
-%% =============================================================================
-
-%% How long a `/wamp/longpoll/:transport_id/receive` request blocks waiting for
-%% messages before returning an empty 204. This MUST be strictly less than
-%% `wamp.longpoll.idle_timeout`, otherwise Cowboy may close the connection
-%% before the longpoll reply is sent, stripping the response (including CORS
-%% headers) that browser clients depend on.
-{mapping, "wamp.longpoll.poll_timeout",
-"bondy_router.wamp_longpoll.poll_timeout", [
-  {default, "30s"},
-  {datatype, {duration, ms}}
-]}.
-
-%% Cowboy HTTP connection idle timeout for `/wamp/longpoll/\*` endpoints. It
-%% MUST be strictly greater than `wamp.longpoll.poll_timeout` so the server has
-%% time to reply before the connection is torn down for inactivity.
-{mapping, "wamp.longpoll.idle_timeout",
-"bondy_router.wamp_longpoll.idle_timeout", [
-  {default, "10m"},
-  {datatype, {duration, ms}}
-]}.
-
-{mapping, "wamp.longpoll.reset_idle_timeout_on_send",
-"bondy_router.wamp_longpoll.reset_idle_timeout_on_send", [
-  {default, on},
-  {datatype, {flag, on, off}}
-]}.
-
-%% =============================================================================
-%% WAMP SSE
-%% =============================================================================
-
-{mapping, "wamp.sse.ping.enabled",
-"bondy_router.wamp_sse.ping.enabled", [
-  {default, on},
-  {datatype, {flag, on, off}}
-]}.
-
-%% Interval between SSE keepalive comments (`:keepalive\n\n`) sent to prevent
-%% intermediary timeouts
-{mapping, "wamp.sse.ping.interval",
-"bondy_router.wamp_sse.ping.interval", [
-  {default, "20s"},
-  {datatype, {duration, ms}}
-]}.
-
-{mapping, "wamp.sse.idle_timeout",
-"bondy_router.wamp_sse.idle_timeout", [
-  {default, "10m"},
-  {datatype, {duration, ms}}
-]}.
-
-{mapping, "wamp.sse.reset_idle_timeout_on_send",
-"bondy_router.wamp_sse.reset_idle_timeout_on_send", [
-  {default, on},
-  {datatype, {flag, on, off}}
-]}.
-
 
 %% =============================================================================
 %% CLUSTERING
@@ -4129,6 +3837,7 @@ end}.
   {default, off},
   {datatype, flag}
 ]}.
+
 
 %% The time the agent will wait to initiate the lookup.
 {mapping,

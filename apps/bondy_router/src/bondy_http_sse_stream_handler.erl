@@ -37,7 +37,6 @@ closing the connection, unless the listener's resolved `sse.ping.enabled` is
     keepalive_ref :: optional(reference())
 }).
 
--define(DEFAULT_KEEPALIVE_INTERVAL, 15000).
 -define(DRAIN_BATCH_SIZE, 50).
 
 -export([init/2]).
@@ -106,16 +105,10 @@ init(Req0, Opts) ->
                     },
                     Req = cowboy_req:stream_reply(200, Headers, Req1),
 
-                    %% Absent from the resolved config on both the listener
-                    %% and the global sides, so this default matches what
-                    %% this handler always used before its idle timeout was
-                    %% wired to `bondy_listener_config'.
-                    IdleTimeout = maps:get(
-                        idle_timeout, Config, timer:minutes(10)
-                    ),
-                    ResetOnSend = maps:get(
-                        reset_idle_timeout_on_send, Config, true
-                    ),
+                    %% No defaults: a resolved `sse' carrier config carries
+                    %% every key of `bondy_listener_config:?CARRIER_DEFAULTS'.
+                    IdleTimeout = maps:get(idle_timeout, Config),
+                    ResetOnSend = maps:get(reset_idle_timeout_on_send, Config),
                     ok = cowboy_req:cast(
                         {set_options, #{
                             idle_timeout => IdleTimeout,
@@ -149,7 +142,7 @@ info({sync_reply, Bin}, Req, State) ->
     ),
     {ok, Req, State};
 info(drain_queue, Req, #state{transport_id = TransportId} = State) ->
-    Messages = bondy_transport_queue:dequeue_batch(
+    Messages = bondy_http_transport_queue:dequeue_batch(
         TransportId, ?DRAIN_BATCH_SIZE
     ),
     ok = send_wamp_events(Messages, Req, State),
@@ -238,23 +231,13 @@ validate_sse_auth(SessionPid, Req) ->
     end.
 
 %% @private
-%% `ping.enabled'/`ping.interval' resolve as a pair: `assert_ping_complete/3'
-%% (`bondy_listener_config.erl') aborts boot on a listener whose resolved
-%% config has `ping.enabled =:= true' without `ping.interval', so the only
-%% shapes reaching here are `#{enabled := false}' or a map carrying both. The
-%% one case that map cannot produce is total absence of the `ping' key
-%% itself — nothing anywhere ever set `sse.ping.*' for this listener — which
-%% this default treats as "on", at the interval this module always used
-%% before that key existed: the keepalive was previously unconditional, so
-%% this is the one case where preserving that behaviour, rather than the
-%% narrower "off", keeps a deployment that upgrades without touching
-%% `bondy.conf' from losing its keepalive. Production never reaches this
-%% default: `wamp.sse.ping.enabled' carries its own schema default
-%% (`schema/bondy.schema:6091', `{default, on}'), so the global always
-%% supplies the key when a listener does not.
+%% `ping.enabled' and `ping.interval' both come from
+%% `bondy_listener_config:?CARRIER_DEFAULTS' when the operator states neither,
+%% and the merge is at the leaf, so a listener stating one still gets the other.
+%% The two shapes below are therefore the only two, and there is no third for a
+%% `ping' key that is absent altogether.
 keepalive_interval(Config) ->
-    Default = #{enabled => true, interval => ?DEFAULT_KEEPALIVE_INTERVAL},
-    case maps:get(ping, Config, Default) of
+    case maps:get(ping, Config) of
         #{enabled := true, interval := Interval} -> Interval;
         #{enabled := false} -> undefined
     end.

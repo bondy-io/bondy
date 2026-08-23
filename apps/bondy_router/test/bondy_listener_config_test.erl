@@ -513,43 +513,54 @@ unknown_service_is_rejected_test() ->
         bondy_listener_config:resolve(Inventory, empty_get())
     ).
 
-carrier_config_falls_back_to_global_test() ->
-    %% A listener that sets NOTHING must receive the global value. This is the
-    %% regression guard for the default-free rule: if anyone gives
-    %% `listeners.$name.websocket.idle_timeout` a cuttlefish default, the key
-    %% becomes always-present for every listener and this fallback dies
-    %% silently.
+listener_value_overrides_only_the_key_it_names_test() ->
+    %% One key stated on the listener, and the default block must survive
+    %% around it. A merge at the BLOCK rather than the leaf would leave this
+    %% listener with `idle_timeout' and nothing else, which the second
+    %% assertion is what catches.
     Inventory = [
         {pub, #{
+            transport => tcp, protocol => http, port => 1, services => [wamp_ws]
+        }}
+    ],
+    Get = get_with([{[pub, websocket, idle_timeout], 90000}]),
+    {ok, [L]} = bondy_listener_config:resolve(Inventory, Get),
+    #{websocket := #{config := Cfg}} = maps:get(carriers, L),
+    ?assertEqual(90000, maps:get(idle_timeout, Cfg)),
+    ?assertEqual(
+        maps:remove(
+            idle_timeout, bondy_listener_config:carrier_defaults(websocket)
+        ),
+        maps:remove(idle_timeout, Cfg)
+    ).
+
+stale_global_carrier_key_is_ignored_test() ->
+    %% `wamp.websocket.*' was the tier a listener fell back to before
+    %% `carrier_defaults/1' existed. The mapping is gone, but the application
+    %% environment it wrote is still reachable — a `sys.config' carried over
+    %% from an older release, or an embedded caller, can still set
+    %% `[wamp_websocket, idle_timeout]'. It must have no effect: this listener
+    %% states nothing, so it gets the code default and not the 90000 seeded
+    %% here. Written against the fallback rather than for it — reinstating
+    %% `resolve_carrier_key/5''s second read is what this fails on.
+    Inventory = [
+        {iot, #{
             transport => tcp, protocol => http, port => 1, services => [wamp_ws]
         }}
     ],
     Get = get_with([{[wamp_websocket, idle_timeout], 90000}]),
     {ok, [L]} = bondy_listener_config:resolve(Inventory, Get),
     #{websocket := #{config := Cfg}} = maps:get(carriers, L),
-    ?assertEqual(90000, maps:get(idle_timeout, Cfg)).
+    ?assertEqual(
+        bondy_listener_config:carrier_defaults(websocket), Cfg
+    ).
 
-per_listener_carrier_value_beats_global_test() ->
-    Inventory = [
-        {iot, #{
-            transport => tcp, protocol => http, port => 1, services => [wamp_ws]
-        }}
-    ],
-    Get = get_with([
-        {[wamp_websocket, idle_timeout], 90000},
-        {[iot, websocket, idle_timeout], 600000}
-    ]),
-    {ok, [L]} = bondy_listener_config:resolve(Inventory, Get),
-    #{websocket := #{config := Cfg}} = maps:get(carriers, L),
-    ?assertEqual(600000, maps:get(idle_timeout, Cfg)).
-
-sse_carrier_config_falls_back_to_global_test() ->
-    %% The same fallback as `carrier_config_falls_back_to_global_test', for
-    %% the carrier `bondy_http_sse_stream_handler' reads. The resolver code
-    %% path is carrier-generic, but this is the connection between that and
-    %% the actual global namespace (`wamp_sse') the SSE carrier falls back
-    %% to — a wrong `carrier_global/1' entry would pass the websocket case
-    %% and fail only here.
+sse_carrier_gets_its_own_defaults_test() ->
+    %% The resolver is carrier-generic, so a table keyed on the wrong carrier
+    %% would pass a websocket-only case and fail only here. Asserted as
+    %% equality with `carrier_defaults(sse)' AND as difference from the
+    %% websocket block, because equality alone would still hold if both
+    %% carriers had been given the same entry by mistake.
     Inventory = [
         {pub, #{
             transport => tcp,
@@ -558,14 +569,13 @@ sse_carrier_config_falls_back_to_global_test() ->
             services => [wamp_sse]
         }}
     ],
-    Get = get_with([{[wamp_sse, idle_timeout], 90000}]),
-    {ok, [L]} = bondy_listener_config:resolve(Inventory, Get),
+    {ok, [L]} = bondy_listener_config:resolve(Inventory, empty_get()),
     #{sse := #{config := Cfg}} = maps:get(carriers, L),
-    ?assertEqual(90000, maps:get(idle_timeout, Cfg)).
+    ?assertEqual(bondy_listener_config:carrier_defaults(sse), Cfg),
+    ?assertNotEqual(bondy_listener_config:carrier_defaults(websocket), Cfg).
 
-longpoll_carrier_config_falls_back_to_global_test() ->
-    %% Same property, for the carrier `bondy_http_longpoll_handler' reads,
-    %% falling back to `wamp_longpoll'.
+longpoll_carrier_gets_its_own_defaults_test() ->
+    %% Same property, for the carrier `bondy_http_longpoll_handler' reads.
     Inventory = [
         {pub, #{
             transport => tcp,
@@ -574,10 +584,10 @@ longpoll_carrier_config_falls_back_to_global_test() ->
             services => [wamp_longpoll]
         }}
     ],
-    Get = get_with([{[wamp_longpoll, poll_timeout], 45000}]),
-    {ok, [L]} = bondy_listener_config:resolve(Inventory, Get),
+    {ok, [L]} = bondy_listener_config:resolve(Inventory, empty_get()),
     #{longpoll := #{config := Cfg}} = maps:get(carriers, L),
-    ?assertEqual(45000, maps:get(poll_timeout, Cfg)).
+    ?assertEqual(bondy_listener_config:carrier_defaults(longpoll), Cfg),
+    ?assertNotEqual(bondy_listener_config:carrier_defaults(sse), Cfg).
 
 nested_carrier_key_resolves_test() ->
     %% Carrier settings are not flat: `ping.enabled' and `deflate_opts.level'
@@ -589,15 +599,9 @@ nested_carrier_key_resolves_test() ->
             transport => tcp, protocol => http, port => 1, services => [wamp_ws]
         }}
     ],
-    %% `ping.enabled = true' requires its three siblings to be resolvable too
-    %% (`assert_ping_complete/3'), so they are set here even though this case
-    %% is not about ping completeness — see
-    %% `partial_ping_with_enabled_true_is_rejected_test' for that property.
     Get = get_with([
-        {[wamp_websocket, ping, enabled], true},
-        {[wamp_websocket, ping, idle_timeout], 20000},
-        {[wamp_websocket, ping, timeout], 10000},
-        {[wamp_websocket, ping, max_attempts], 2},
+        {[pub, websocket, ping, enabled], true},
+        {[pub, websocket, ping, max_attempts], 2},
         {[pub, websocket, deflate_opts, level], 9}
     ]),
     {ok, [L]} = bondy_listener_config:resolve(Inventory, Get),
@@ -605,28 +609,36 @@ nested_carrier_key_resolves_test() ->
     ?assertEqual(true, maps:get(enabled, maps:get(ping, Cfg))),
     ?assertEqual(9, maps:get(level, maps:get(deflate_opts, Cfg))).
 
-partial_ping_with_enabled_true_is_rejected_test() ->
-    %% The structural guard for the ping subsystem: `ping.enabled' resolves
-    %% independently of its siblings (`idle_timeout', `timeout',
-    %% `max_attempts'), so an operator — or a global block missing a key —
-    %% can produce `enabled => true' with a sibling absent. The connection
-    %% handler reads every sibling with no default once `enabled' is true, so
-    %% this must abort boot rather than reach a live connection.
+partial_ping_is_completed_from_the_defaults_test() ->
+    %% `ping.enabled' resolves independently of its siblings, so a partial
+    %% block is what an operator naturally writes. The merge is at the LEAF,
+    %% not the block: the two keys stated here survive and the two left
+    %% unresolved arrive from `carrier_defaults/1', which is what makes an
+    %% enabled `ping' complete by construction.
+    %%
+    %% `idle_timeout' is 45000 rather than the default 20000 on purpose — with
+    %% the default value the assertion would hold even if the operator's value
+    %% had been discarded and the whole block replaced.
     Inventory = [
         {pub, #{
             transport => tcp, protocol => http, port => 1, services => [wamp_ws]
         }}
     ],
     Get = get_with([
-        {[wamp_websocket, ping, enabled], true},
-        {[wamp_websocket, ping, idle_timeout], 20000}
+        {[pub, websocket, ping, enabled], true},
+        {[pub, websocket, ping, idle_timeout], 45000}
         %% `timeout' and `max_attempts' deliberately left unresolved.
     ]),
-    ?assertMatch(
-        {error,
-            {invalid_listener, pub,
-                {incomplete_ping, websocket, [max_attempts, timeout]}}},
-        bondy_listener_config:resolve(Inventory, Get)
+    {ok, [L]} = bondy_listener_config:resolve(Inventory, Get),
+    #{websocket := #{config := Cfg}} = maps:get(carriers, L),
+    ?assertEqual(
+        #{
+            enabled => true,
+            idle_timeout => 45000,
+            timeout => 10000,
+            max_attempts => 3
+        },
+        maps:get(ping, Cfg)
     ).
 
 partial_ping_with_enabled_absent_is_accepted_test() ->
@@ -641,7 +653,7 @@ partial_ping_with_enabled_absent_is_accepted_test() ->
             transport => tcp, protocol => http, port => 1, services => [wamp_ws]
         }}
     ],
-    Get = get_with([{[wamp_websocket, ping, idle_timeout], 20000}]),
+    Get = get_with([{[pub, websocket, ping, idle_timeout], 20000}]),
     ?assertMatch(
         {ok, [#{name := pub}]},
         bondy_listener_config:resolve(Inventory, Get)
@@ -708,7 +720,7 @@ malformed_ping_enabled_is_rejected_at_boot_test() ->
             transport => tcp, protocol => http, port => 1, services => [wamp_ws]
         }}
     ],
-    BadWs = get_with([{[wamp_websocket, ping, enabled], <<"yes">>}]),
+    BadWs = get_with([{[pub, websocket, ping, enabled], <<"yes">>}]),
     ?assertMatch(
         {error,
             {invalid_listener, pub,
@@ -717,7 +729,7 @@ malformed_ping_enabled_is_rejected_at_boot_test() ->
     ).
 
 ping_enabled_false_needs_no_siblings_test() ->
-    %% The other half of `assert_ping_complete/3': `enabled => false' is a
+    %% The other half of `assert_carrier_ping/3': `enabled => false' is a
     %% complete configuration on its own, because no handler reads a sibling
     %% once ping is off. Written to break the guard from the other side: a
     %% version that required every sibling unconditionally would reject this.
@@ -726,16 +738,22 @@ ping_enabled_false_needs_no_siblings_test() ->
             transport => tcp, protocol => http, port => 1, services => [wamp_ws]
         }}
     ],
-    Get = get_with([{[wamp_websocket, ping, enabled], false}]),
+    Get = get_with([{[pub, websocket, ping, enabled], false}]),
     {ok, [L]} = bondy_listener_config:resolve(Inventory, Get),
     #{websocket := #{config := Cfg}} = maps:get(carriers, L),
     ?assertEqual(false, maps:get(enabled, maps:get(ping, Cfg))).
 
-carrier_key_set_nowhere_is_absent_test() ->
-    %% Neither listener nor global set anything, so the resolved config is
-    %% EMPTY rather than populated with values invented in this module. The
-    %% schema owns defaults; a value fabricated here would silently override
-    %% the handler's own default.
+carrier_key_set_nowhere_gets_the_code_default_test() ->
+    %% Neither listener nor global sets anything, so every carrier key comes
+    %% from `carrier_defaults/1' and the resolved config is TOTAL over them.
+    %% This used to assert `#{}' — the values reached the handler from the
+    %% global `wamp.websocket.*' block instead, and an absent key fell through
+    %% to Cowboy's own default rather than Bondy's.
+    %%
+    %% Equality with the whole table, not a spot check: the failure this is for
+    %% is a key missing from one side, and asserting a handful of keys would
+    %% miss it. That the table holds the values the schema renders is asserted
+    %% where cuttlefish is available, in `bondy_listener_schema_SUITE'.
     Inventory = [
         {pub, #{
             transport => tcp, protocol => http, port => 1, services => [wamp_ws]
@@ -743,7 +761,7 @@ carrier_key_set_nowhere_is_absent_test() ->
     ],
     {ok, [L]} = bondy_listener_config:resolve(Inventory, empty_get()),
     #{websocket := #{config := Cfg}} = maps:get(carriers, L),
-    ?assertEqual(#{}, Cfg).
+    ?assertEqual(bondy_listener_config:carrier_defaults(websocket), Cfg).
 
 websocket_dynamic_buffer_is_not_overridable_test() ->
     %% `wamp.websocket.buffer.{min,max}' cannot take effect: since Cowboy 2.13 a
@@ -1513,3 +1531,28 @@ an_explicit_undefined_hsts_still_disables_it_test() ->
     #{security_headers := Headers} =
         bondy_listener_config:with_option_defaults(Spec),
     ?assertEqual(undefined, maps:get(hsts, Headers)).
+
+websocket_and_stream_ping_attempts_agree_test() ->
+    %% A WebSocket connection and a raw-socket one must judge a dead peer after
+    %% the same number of unanswered probes: the transport does not change what
+    %% "the peer is gone" means. The two numbers come from different tables —
+    %% `carrier_defaults/1' for the carrier, `option_defaults/2' for the
+    %% listener's own ping block — so nothing but this makes them agree.
+    %%
+    %% Asserted both ways on purpose: against each other, so raising one and
+    %% forgetting the other fails here rather than shipping a split that nothing
+    %% explains; and against the literal, so they cannot agree on a value nobody
+    %% chose. This is the pair that was already out of step once — `wamp.tls'
+    %% shipped 3 where `wamp.tcp' shipped 2.
+    Websocket = maps:get(
+        max_attempts,
+        maps:get(ping, bondy_listener_config:carrier_defaults(websocket))
+    ),
+    Stream = maps:get(
+        max_attempts,
+        maps:get(
+            ping, bondy_listener_config:option_defaults(tcp, wamp_rawsocket)
+        )
+    ),
+    ?assertEqual(3, Websocket),
+    ?assertEqual(Websocket, Stream).

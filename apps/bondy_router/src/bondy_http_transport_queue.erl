@@ -3,13 +3,72 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
--module(bondy_transport_queue).
+-module(bondy_http_transport_queue).
 -moduledoc """
-A bounded, ETS-based message queue for HTTP-longpoll and SSE transports.
+A bounded, ETS-based parking place for messages routed to a WAMP session whose
+transport is HTTP long-poll or SSE.
 
-Implements sharded ETS `ordered_set` tables with a transport-aware key design
-that co-locates all operations for a given transport in a single, deterministic
-shard and enables efficient per-transport bounding.
+## Why this exists
+
+Every WAMP egress passes through one fork in `bondy:do_send/3`:
+
+```
+case maybe_enqueue(SessionKey, M, Opts) of
+    true  -> ok;                                  % parked here
+    false -> Pid ! request(self(), RealmUri, M)   % straight to the connection
+end
+```
+
+`bondy:maybe_enqueue/3` takes the first branch only when
+`bondy_session:transport_id/1` returns a binary, and that field is set in
+exactly two places — `bondy_http_longpoll_handler` and `bondy_http_sse_handler`.
+A WebSocket or raw-socket session leaves it `undefined` and never reaches this
+module.
+
+The asymmetry is structural, not incidental. A WebSocket or raw-socket session
+has one process owning its socket from HELLO to GOODBYE, so "deliver" means
+"send to that process" and the queue is that process's mailbox. The two HTTP
+transports have no such process:
+
+- **long-poll** — between `/receive` requests the client is not connected at
+  all. A message routed to it in that gap has nowhere to go. Without somewhere
+  to park it, it is dropped, and neither the router nor the client learns that
+  it was.
+- **SSE** — a stream process exists while the stream is open, but it can drop
+  and reconnect while the SESSION survives. What the reconnected stream drains
+  is this queue.
+
+So this is what decouples session lifetime from connection lifetime. It is the
+mechanism that lets a WAMP session outlive the HTTP request that is carrying it,
+which is the whole premise of running WAMP over long-poll.
+
+The second reason is bounding. A process mailbox has no bound, which is
+tolerable when a live socket applies back-pressure — and is not tolerable for a
+client that may simply never come back. A disconnected transport's backlog needs
+a ceiling and a shelf life, which is what `max_messages`, `max_bytes` and
+`message_ttl` are.
+
+## Who wakes it
+
+Enqueuing does not deliver anything by itself. `bondy:maybe_enqueue/3` calls
+`bondy_http_transport_session:notify_enqueue/1` immediately afterwards, which
+sends `queue_ready` to the session process. That process then either replies to
+a parked `/receive`, or sends `drain_queue` to an attached SSE stream, or does
+nothing at all — leaving the messages here until a client next asks. The third
+case is the one this module exists for.
+
+## What it is NOT
+
+- Not the queue for WebSocket or raw-socket sessions. Those use the connection
+  process mailbox, bounded by nothing this module configures.
+- Not the router's ingress queue. `bondy_router_flow_sup`'s flow pool orders
+  work coming IN, per WAMP flow, and sheds under its own capacity bound. A
+  message passes through that pool once on ingress and arrives here only if its
+  DESTINATION is an HTTP transport.
+- Not the only thing a `bondy_http_transport_session` holds. That process also
+  keeps a `reply_buffer` of already-ENCODED synchronous replies — the answers to
+  the client's own POSTs — which is a separate structure that none of the bounds
+  below apply to, and which `poll_receive` drains before this queue.
 
 ## Sharding
 
@@ -18,7 +77,7 @@ Transports are distributed across ETS partitions using
 given `TransportId` reside in the same ETS table, so per-transport operations
 (`count`, `evict_oldest`, `dequeue_batch`) are partition-local.
 
-## Key Design
+## Key design
 
 The ETS key is `{TransportId, Seq}` where `Seq` is generated via
 `erlang:unique_integer([monotonic])`. Because ETS `ordered_set` sorts tuples
@@ -27,10 +86,15 @@ by insertion time.
 
 ## Bounding
 
-Three layers enforce bounds:
+Three layers, all configured under `wamp.http_transport.queue.*`:
+
 1. **Message count** — on enqueue when `count >= max_messages`
 2. **Byte size** — on enqueue when `bytes + msg_size > max_bytes`
 3. **TTL expiry** — background sweep every `eviction_interval`
+
+The first two evict the OLDEST entry for that transport to make room; there is
+no configurable policy, because there is only one that makes sense for a stream
+a client will read in order.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -49,23 +113,23 @@ Three layers enforce bounds:
 -define(RING_KEY, {?MODULE, ring}).
 
 %% persistent_term key for the meta table name
--define(META_TAB, bondy_transport_queue_meta).
+-define(META_TAB, bondy_http_transport_queue_meta).
 
--record(bondy_transport_queue_entry, {
-    key :: bondy_transport_queue_key(),
+-record(bondy_http_transport_queue_entry, {
+    key :: bondy_http_transport_queue_key(),
     message :: wamp_message(),
     enqueued_at :: pos_integer(),
     size_bytes :: non_neg_integer()
 }).
 
--record(bondy_transport_queue_meta, {
+-record(bondy_http_transport_queue_meta, {
     transport_id :: binary(),
     atomics :: atomics:atomics_ref(),
     realm_uri :: uri(),
     session_id :: bondy_session_id:t()
 }).
 
--type bondy_transport_queue_key() :: {
+-type bondy_http_transport_queue_key() :: {
     TransportId :: binary(), Seq :: integer()
 }.
 -type enqueue_opts() :: #{}.
@@ -93,7 +157,7 @@ Initialises the sharded queue tables and the metadata table.
 Creates `NumPartitions` anonymous ETS tables registered with
 `bondy_table_manager` under `{?MODULE, partition, Bucket}` keys. The
 tables are owned by `bondy_table_manager` so they survive the caller
-(typically `bondy_transport_queue_manager`) crashing and being restarted
+(typically `bondy_http_transport_queue_manager`) crashing and being restarted
 by its supervisor — in-flight queued messages are not lost.
 
 The partition ring maps `Bucket -> ets:tid()` and is stored in
@@ -105,13 +169,13 @@ is idempotent: re-running it on a manager restart finds the existing
 tables rather than recreating them.
 
 This function must be called once at startup, typically from
-`bondy_transport_queue_manager:init/1`.
+`bondy_http_transport_queue_manager:init/1`.
 """.
 -spec init() -> ok.
 
 init() ->
     NumPartitions = bondy_config:get(
-        [transport_queue, partitions],
+        [http_transport, queue, partitions],
         erlang:system_info(schedulers)
     ),
 
@@ -121,7 +185,7 @@ init() ->
     %% returned as-is on re-init.
     PartitionOpts = [
         ordered_set,
-        {keypos, #bondy_transport_queue_entry.key},
+        {keypos, #bondy_http_transport_queue_entry.key},
         public,
         {read_concurrency, true},
         {write_concurrency, true},
@@ -146,7 +210,7 @@ init() ->
     %% and also owned by bondy_table_manager. Idempotent.
     MetaOpts = [
         set,
-        {keypos, #bondy_transport_queue_meta.transport_id},
+        {keypos, #bondy_http_transport_queue_meta.transport_id},
         named_table,
         public,
         {read_concurrency, true},
@@ -174,7 +238,7 @@ init_transport(TransportId, RealmUri, SessionId) when
     is_binary(TransportId) andalso is_binary(RealmUri)
 ->
     AtomicsRef = atomics:new(3, [{signed, true}]),
-    Meta = #bondy_transport_queue_meta{
+    Meta = #bondy_http_transport_queue_meta{
         transport_id = TransportId,
         atomics = AtomicsRef,
         realm_uri = RealmUri,
@@ -198,7 +262,7 @@ delete_transport(TransportId) when is_binary(TransportId) ->
     %% Delete all entries for this transport using a match spec
     MS = [
         {
-            #bondy_transport_queue_entry{
+            #bondy_http_transport_queue_entry{
                 key = {TransportId, '_'},
                 _ = '_'
             },
@@ -260,7 +324,7 @@ dequeue_batch(TransportId, MaxN) when
 -doc """
 Removes expired messages across all partitions.
 
-Called periodically by `bondy_transport_queue_manager`. Iterates over all
+Called periodically by `bondy_http_transport_queue_manager`. Iterates over all
 sharded tables and removes entries whose `enqueued_at + message_ttl` has
 elapsed.
 """.
@@ -281,7 +345,7 @@ Returns the current message count for a transport.
 
 count(TransportId) when is_binary(TransportId) ->
     case lookup_meta(TransportId) of
-        {ok, #bondy_transport_queue_meta{atomics = Ref}} ->
+        {ok, #bondy_http_transport_queue_meta{atomics = Ref}} ->
             max(0, atomics:get(Ref, ?COUNT_SLOT));
         error ->
             0
@@ -294,7 +358,7 @@ Returns the current cumulative byte size for a transport.
 
 byte_size(TransportId) when is_binary(TransportId) ->
     case lookup_meta(TransportId) of
-        {ok, #bondy_transport_queue_meta{atomics = Ref}} ->
+        {ok, #bondy_http_transport_queue_meta{atomics = Ref}} ->
             max(0, atomics:get(Ref, ?BYTES_SLOT));
         error ->
             0
@@ -315,7 +379,7 @@ tables() ->
 
 %% @private
 do_enqueue(TransportId, Message, Meta) ->
-    #bondy_transport_queue_meta{atomics = AtomicsRef} = Meta,
+    #bondy_http_transport_queue_meta{atomics = AtomicsRef} = Meta,
 
     %% Compute message size
     MsgSize = erlang:external_size(Message),
@@ -324,8 +388,8 @@ do_enqueue(TransportId, Message, Meta) ->
     Seq = erlang:unique_integer([monotonic]),
 
     %% Check bounds BEFORE inserting
-    MaxMessages = bondy_config:get([transport_queue, max_messages], 1000),
-    MaxBytes = bondy_config:get([transport_queue, max_bytes], 10485760),
+    MaxMessages = bondy_config:get([http_transport, queue, max_messages], 1000),
+    MaxBytes = bondy_config:get([http_transport, queue, max_bytes], 10485760),
 
     CurrentCount = atomics:get(AtomicsRef, ?COUNT_SLOT),
     CurrentBytes = atomics:get(AtomicsRef, ?BYTES_SLOT),
@@ -340,7 +404,7 @@ do_enqueue(TransportId, Message, Meta) ->
 
     %% Insert the entry
     Tab = locate_table(TransportId),
-    Entry = #bondy_transport_queue_entry{
+    Entry = #bondy_http_transport_queue_entry{
         key = {TransportId, Seq},
         message = Message,
         enqueued_at = erlang:system_time(millisecond),
@@ -362,7 +426,9 @@ evict_oldest(TransportId, AtomicsRef, _NeededBytes) ->
     %% smallest Seq values (oldest) appear first in iteration order.
     MS = [
         {
-            #bondy_transport_queue_entry{key = {TransportId, '_'}, _ = '_'},
+            #bondy_http_transport_queue_entry{
+                key = {TransportId, '_'}, _ = '_'
+            },
             [],
             ['$_']
         }
@@ -374,7 +440,11 @@ evict_oldest(TransportId, AtomicsRef, _NeededBytes) ->
             ok;
         {Entries, _Cont} ->
             lists:foreach(
-                fun(#bondy_transport_queue_entry{key = Key, size_bytes = Sz}) ->
+                fun(
+                    #bondy_http_transport_queue_entry{
+                        key = Key, size_bytes = Sz
+                    }
+                ) ->
                     case ets:take(Tab, Key) of
                         [_] ->
                             atomics:sub(AtomicsRef, ?COUNT_SLOT, 1),
@@ -391,15 +461,15 @@ evict_oldest(TransportId, AtomicsRef, _NeededBytes) ->
 %% @private
 do_dequeue_batch(TransportId, MaxN, Meta) ->
     Tab = locate_table(TransportId),
-    #bondy_transport_queue_meta{atomics = AtomicsRef} = Meta,
+    #bondy_http_transport_queue_meta{atomics = AtomicsRef} = Meta,
 
     %% Select up to MaxN non-expired entries for this transport
     Now = erlang:system_time(millisecond),
-    MessageTTL = bondy_config:get([transport_queue, message_ttl], 300000),
+    MessageTTL = bondy_config:get([http_transport, queue, message_ttl], 300000),
 
     MS = [
         {
-            #bondy_transport_queue_entry{
+            #bondy_http_transport_queue_entry{
                 key = {TransportId, '$1'},
                 enqueued_at = '$2',
                 message = '$3',
@@ -430,12 +500,12 @@ do_dequeue_batch(TransportId, MaxN, Meta) ->
 
 %% @private
 evict_expired_partition(Tab, Now) ->
-    MessageTTL = bondy_config:get([transport_queue, message_ttl], 300000),
+    MessageTTL = bondy_config:get([http_transport, queue, message_ttl], 300000),
 
     %% Match all entries where enqueued_at + TTL <= Now
     MS = [
         {
-            #bondy_transport_queue_entry{
+            #bondy_http_transport_queue_entry{
                 key = '$1',
                 enqueued_at = '$2',
                 size_bytes = '$3',
@@ -469,8 +539,8 @@ do_evict_expired_entries(Expired) ->
             case ets:take(Tab, Key) of
                 [_] ->
                     case lookup_meta(TransportId) of
-                        {ok, #bondy_transport_queue_meta{} = Meta} ->
-                            Ref = Meta#bondy_transport_queue_meta.atomics,
+                        {ok, #bondy_http_transport_queue_meta{} = Meta} ->
+                            Ref = Meta#bondy_http_transport_queue_meta.atomics,
                             atomics:sub(Ref, ?COUNT_SLOT, 1),
                             atomics:sub(Ref, ?BYTES_SLOT, Sz);
                         error ->
@@ -493,7 +563,7 @@ locate_table(TransportId) ->
 %% @private
 lookup_meta(TransportId) ->
     case ets:lookup(?META_TAB, TransportId) of
-        [#bondy_transport_queue_meta{} = Meta] ->
+        [#bondy_http_transport_queue_meta{} = Meta] ->
             {ok, Meta};
         [] ->
             error

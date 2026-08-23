@@ -508,7 +508,6 @@ reacted_tables_publish_their_merges_test() ->
     %% vacuity by an empty `reacted_table_names/0`.
     ?assert(lists:member(?BONDY_DB_GROUP_TAB, Reacted)).
 
-
 %% =============================================================================
 %% Bootstrap dispatch (catalogue-snapshot install)
 %% =============================================================================

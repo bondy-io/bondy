@@ -33,10 +33,10 @@ end_per_suite(Config) ->
 
 init_per_testcase(_TestCase, Config) ->
     %% Set test defaults
-    bondy_config:set([transport_queue, max_messages], 1000),
-    bondy_config:set([transport_queue, max_bytes], 10485760),
-    bondy_config:set([transport_queue, message_ttl], 300000),
-    bondy_config:set([transport_queue, transport_ttl], 3600000),
+    bondy_config:set([http_transport, queue, max_messages], 1000),
+    bondy_config:set([http_transport, queue, max_bytes], 10485760),
+    bondy_config:set([http_transport, queue, message_ttl], 300000),
+    bondy_config:set([http_transport, idle_timeout], 3600000),
     Config.
 
 end_per_testcase(_TestCase, _Config) ->
@@ -62,7 +62,7 @@ start_and_stop(_Config) ->
     ?assertEqual(Pid, bondy_http_transport_session:whereis(TransportId)),
 
     %% Verify queue was initialised (count returns 0, not from error path)
-    ?assertEqual(0, bondy_transport_queue:count(TransportId)),
+    ?assertEqual(0, bondy_http_transport_queue:count(TransportId)),
 
     %% Stop the transport session
     ok = bondy_http_transport_session:close(Pid),
@@ -79,7 +79,7 @@ start_and_stop(_Config) ->
     %% Verify queue was cleaned up (enqueue should fail)
     ?assertEqual(
         {error, transport_not_found},
-        bondy_transport_queue:enqueue(TransportId, make_event(1), #{})
+        bondy_http_transport_queue:enqueue(TransportId, make_event(1), #{})
     ).
 
 whereis_lookup(_Config) ->
@@ -111,7 +111,7 @@ inactivity_timeout(_Config) ->
     SessionId = bondy_session_id:new(),
 
     %% Set a very short TTL (100ms)
-    bondy_config:set([transport_queue, transport_ttl], 100),
+    bondy_config:set([http_transport, idle_timeout], 100),
 
     {ok, Pid} = bondy_http_transport_session_sup:start_child(
         TransportId, RealmUri, SessionId
@@ -141,7 +141,7 @@ touch_extends_lifetime(_Config) ->
     SessionId = bondy_session_id:new(),
 
     %% Set a short TTL (200ms) — the check interval will be 5000ms minimum
-    bondy_config:set([transport_queue, transport_ttl], 200),
+    bondy_config:set([http_transport, idle_timeout], 200),
 
     {ok, Pid} = bondy_http_transport_session_sup:start_child(
         TransportId, RealmUri, SessionId
@@ -185,21 +185,21 @@ queue_integration(_Config) ->
     Msgs = [make_event(I) || I <- lists:seq(1, 5)],
     lists:foreach(
         fun(Msg) ->
-            ok = bondy_transport_queue:enqueue(TransportId, Msg, #{})
+            ok = bondy_http_transport_queue:enqueue(TransportId, Msg, #{})
         end,
         Msgs
     ),
 
     %% Verify count
-    ?assertEqual(5, bondy_transport_queue:count(TransportId)),
+    ?assertEqual(5, bondy_http_transport_queue:count(TransportId)),
 
     %% Dequeue and verify ordering
-    Dequeued = bondy_transport_queue:dequeue_batch(TransportId, 100),
+    Dequeued = bondy_http_transport_queue:dequeue_batch(TransportId, 100),
     ?assertEqual(5, length(Dequeued)),
     ?assertEqual(Msgs, Dequeued),
 
     %% Queue should be empty now
-    ?assertEqual(0, bondy_transport_queue:count(TransportId)),
+    ?assertEqual(0, bondy_http_transport_queue:count(TransportId)),
 
     %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
@@ -246,10 +246,10 @@ maybe_enqueue_http_transport(_Config) ->
         undefined ->
             ct:fail("Expected transport_id to be set");
         TId ->
-            ok = bondy_transport_queue:enqueue(TId, Msg, #{}),
+            ok = bondy_http_transport_queue:enqueue(TId, Msg, #{}),
             %% Verify message is in queue
-            ?assertEqual(1, bondy_transport_queue:count(TId)),
-            Dequeued = bondy_transport_queue:dequeue_batch(TId, 10),
+            ?assertEqual(1, bondy_http_transport_queue:count(TId)),
+            Dequeued = bondy_http_transport_queue:dequeue_batch(TId, 10),
             ?assertEqual([Msg], Dequeued)
     end,
 

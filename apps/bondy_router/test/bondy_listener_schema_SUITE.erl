@@ -75,7 +75,6 @@ all() ->
         linger_timeout_rejects_below_minus_one,
         linger_timeout_is_in_seconds,
         a_security_header_can_be_switched_off_on_its_own,
-        websocket_and_stream_ping_attempts_agree,
         all_93_keys_reach_their_documented_paths
     ].
 
@@ -392,7 +391,7 @@ an_empty_security_header_value_is_a_syntax_error(Config) ->
     ).
 
 carrier_and_deflate_keys_reach_their_legacy_paths(Config) ->
-    %% The carrier paths are the ones `bondy_listener_config:?CARRIER_KEYS'
+    %% The carrier paths are the ones `bondy_listener_config:?CARRIER_DEFAULTS'
     %% enumerates, and two of them are NOT the conf key's own name:
     %% `compression_enabled' targets `compress', and `deflate.level' targets
     %% `deflate_opts.level'.
@@ -898,37 +897,6 @@ all_93_keys_reach_their_documented_paths(Config) ->
         }
     },
     ?assertEqual(Expected, Spec).
-
-websocket_and_stream_ping_attempts_agree(Config) ->
-    %% "How many unanswered probes mean a dead peer" has ONE answer, but it
-    %% reaches a listener by two unrelated routes: a `wamp_rawsocket' or
-    %% `bridge_relay' listener takes `ping.max_attempts' from
-    %% `bondy_listener_config:option_defaults/2', while a WebSocket connection
-    %% takes it from the global `wamp.websocket.ping.*' block that a listener's
-    %% own `websocket.ping.*' keys fall back to (`carrier_global/1') — a SCHEMA
-    %% default, and the only path that produces it.
-    %%
-    %% Asserted both ways on purpose: against each other, so raising one and
-    %% forgetting the other fails here rather than shipping a split that nothing
-    %% explains; and against the literal, so they cannot agree on a value nobody
-    %% chose. This is the pair that was already out of step once — `wamp.tls'
-    %% shipped 3 where `wamp.tcp' shipped 2.
-    %%
-    %% No listener is declared: the global block renders from its schema defaults
-    %% alone, which is what a file that says nothing about WebSocket ping gets.
-    AppEnv = render(Config, ["log.level = info\n"]),
-    Router = proplists:get_value(bondy_router, AppEnv, []),
-    Global = proplists:get_value(wamp_websocket, Router, []),
-    Ping = proplists:get_value(ping, Global, []),
-    Websocket = proplists:get_value(max_attempts, Ping),
-    Stream = maps:get(
-        max_attempts,
-        maps:get(
-            ping, bondy_listener_config:option_defaults(tcp, wamp_rawsocket)
-        )
-    ),
-    ?assertEqual(3, Websocket),
-    ?assertEqual(Websocket, Stream).
 
 %% =============================================================================
 %% HELPERS

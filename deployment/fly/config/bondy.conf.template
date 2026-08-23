@@ -106,4 +106,5 @@ listeners.wamp_tcp.ping.enabled = off
 
 ## Global carrier fallback, still a global key: it applies to every listener
 ## offering WebSocket that does not override it.
-wamp.websocket.ping.enabled = off
+listeners.admin.websocket.ping.enabled = off
+listeners.api_gateway_http.websocket.ping.enabled = off

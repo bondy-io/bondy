@@ -409,8 +409,10 @@ publish_hook_fires_for_bootstrap_installed_cells(Config) ->
         %% is created here rather than a realm alone.
         ok = erpc:call(N1, ?MODULE, do_create_realm, [?BOOT_REALM]),
         ok = wait_realm(N2, ?BOOT_REALM),
-        ok = erpc:call(N1, ?MODULE, do_create_group, [?BOOT_REALM,
-                                                      ?BOOT_GROUP]),
+        ok = erpc:call(N1, ?MODULE, do_create_group, [
+            ?BOOT_REALM,
+            ?BOOT_GROUP
+        ]),
         ok = wait_group(N2, ?BOOT_REALM, ?BOOT_GROUP),
         ok = erpc:call(N1, ?MODULE, do_register, [?BOOT_REALM, ?PROC_1]),
         ok = erpc:call(N1, ?MODULE, do_subscribe, [?BOOT_REALM, ?TOPIC_1]),

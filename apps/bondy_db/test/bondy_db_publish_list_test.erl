@@ -210,7 +210,8 @@ fold_all_spans_realms() ->
         %% ...`fold_all/4` sees them all, and the realm is recoverable.
         {ok, Got} = bondy_db:fold_all(
             T,
-            fun({StorageKey, V, _Hlc}, Acc) when is_binary(V) ->
+            fun
+                ({StorageKey, V, _Hlc}, Acc) when is_binary(V) ->
                     [Realm, Key] = binary:split(StorageKey, <<0>>),
                     [{Realm, Key, V} | Acc];
                 (_, Acc) ->
@@ -246,8 +247,9 @@ fold_all_pages_to_completion() ->
         ],
         {ok, Count} = bondy_db:fold_all(
             T,
-            fun({_K, V, _Hlc}, Acc) when is_binary(V) -> Acc + 1;
-               (_, Acc) -> Acc
+            fun
+                ({_K, V, _Hlc}, Acc) when is_binary(V) -> Acc + 1;
+                (_, Acc) -> Acc
             end,
             0,
             #{}

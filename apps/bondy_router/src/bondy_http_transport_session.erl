@@ -71,7 +71,7 @@ if no HTTP request touches it within the configured `transport_ttl' window.
 
 This gen_server holds the `bondy_wamp_protocol' state and routes inbound
 client messages via `handle_client_message/2'. Outbound messages are delivered
-through `bondy_transport_queue'.
+through `bondy_http_transport_queue'.
 
 For SSE transports, the gen_server additionally manages:
 <ul>
@@ -145,7 +145,7 @@ For Longpoll transports, the gen_server additionally manages:
 Starts a transport session gen_server.
 
 Registers with gproc as `{http_transport, TransportId}` and initialises the
-transport queue via `bondy_transport_queue:init_transport/3`.
+transport queue via `bondy_http_transport_queue:init_transport/3`.
 """.
 -spec start_link(
     TransportId :: binary(),
@@ -348,10 +348,12 @@ init([TransportId, RealmUri, SessionId]) ->
 
     %% Initialise the transport queue
     case
-        bondy_transport_queue:init_transport(TransportId, RealmUri, SessionId)
+        bondy_http_transport_queue:init_transport(
+            TransportId, RealmUri, SessionId
+        )
     of
         ok ->
-            TTL = bondy_config:get([transport_queue, transport_ttl], 3600000),
+            TTL = bondy_config:get([http_transport, idle_timeout], 3600000),
             Now = erlang:system_time(millisecond),
 
             State = #state{
@@ -456,7 +458,7 @@ handle_call({poll_receive, Timeout}, From, State) ->
         [] ->
             %% Check queue for pending messages — dequeue one at a time
             TransportId = State#state.transport_id,
-            case bondy_transport_queue:dequeue_batch(TransportId, 1) of
+            case bondy_http_transport_queue:dequeue_batch(TransportId, 1) of
                 [Msg] ->
                     {reply, {ok, {messages, [Msg]}}, State};
                 [] ->
@@ -497,7 +499,7 @@ handle_cast({request_poll, Timeout, ReplyTo}, State) ->
             {noreply, S1};
         [] ->
             TransportId = State#state.transport_id,
-            case bondy_transport_queue:dequeue_batch(TransportId, 1) of
+            case bondy_http_transport_queue:dequeue_batch(TransportId, 1) of
                 [Msg] ->
                     ReplyTo ! {poll_result, {ok, {messages, [Msg]}}},
                     {noreply, State};
@@ -524,7 +526,7 @@ handle_info(queue_ready, #state{poll_from = {async, ReplyTo}} = State) when
 ->
     %% An async longpoll caller is waiting — dequeue and send message.
     TransportId = State#state.transport_id,
-    Msgs = bondy_transport_queue:dequeue_batch(TransportId, 1),
+    Msgs = bondy_http_transport_queue:dequeue_batch(TransportId, 1),
     ReplyTo ! {poll_result, {ok, {messages, Msgs}}},
     _ = erlang:cancel_timer(State#state.poll_timer),
     S1 = State#state{poll_from = undefined, poll_timer = undefined},
@@ -535,7 +537,7 @@ handle_info(queue_ready, #state{poll_from = PollFrom} = State) when
     %% A sync longpoll caller is waiting — dequeue one message and reply.
     %% Remaining messages stay in the queue for subsequent poll_receive calls.
     TransportId = State#state.transport_id,
-    Msgs = bondy_transport_queue:dequeue_batch(TransportId, 1),
+    Msgs = bondy_http_transport_queue:dequeue_batch(TransportId, 1),
     gen_server:reply(PollFrom, {ok, {messages, Msgs}}),
     _ = erlang:cancel_timer(State#state.poll_timer),
     S1 = State#state{poll_from = undefined, poll_timer = undefined},
@@ -649,7 +651,7 @@ terminate(_Reason, #state{transport_id = TransportId} = State) ->
     %% (without it, queue entries and the meta row leak until the eviction
     %% sweep ages them out). Running it first guarantees it happens even if
     %% a subsequent cleanup step raises unexpectedly.
-    ok = bondy_transport_queue:delete_transport(TransportId),
+    ok = bondy_http_transport_queue:delete_transport(TransportId),
 
     %% Reply to any pending longpoll caller
     case State#state.poll_from of

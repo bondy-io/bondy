@@ -506,130 +506,27 @@ listeners.wamp_tls.max_connections = 100000
 listeners.wamp_tls.nodelay = off
 listeners.wamp_tls.tls.versions = 1.3
 
-## Defines if Websockets PING control message functionality is enabled or
-## not. This option affects server (Bondy) initiated pings only. Some clients
-## might also initiate ping requests and Bondy will always respond to those
-## even if this option is turned off.
-## This feature is useful to keep a connection alive and validate the
-## connection is healthy. For example, Browsers will typically kill websocket
-## connections after 60s and will not initiate PINGs.
+## WebSocket settings are per listener. Only the two values this deployment
+## wants DIFFERENTLY from the default are stated; everything else — ping on at
+## 20s with 3 attempts, an 8h idle timeout, compression off and the deflate
+## block — is what a listener gets when it says nothing.
 ##
-## Default: on
-##
-## Acceptable values:
-##   - on or off
-wamp.websocket.ping.enabled = on
+## Both are set on every listener that serves `wamp_ws', because a WebSocket
+## setting belongs to the listener the connection arrived on and there is no
+## longer a global block covering all of them at once.
 
-## If wamp.websocket.ping.enabled is 'on', this value controls how long a
-## connection may sit idle before Bondy sends a WebSockets PING control
-## message.
-##
-## Default: 20s
-##
-## Acceptable values:
-##   - a time duration with units, e.g. '10s' for 10 seconds
-wamp.websocket.ping.idle_timeout = 30s
+## How long a connection may sit idle before Bondy sends a PING. Default: 20s.
+listeners.admin.websocket.ping.idle_timeout = 30s
+listeners.admin_api_https.websocket.ping.idle_timeout = 30s
+listeners.api_gateway_http.websocket.ping.idle_timeout = 30s
+listeners.api_gateway_https.websocket.ping.idle_timeout = 30s
 
-## If wamp.websocket.ping.enabled is 'on', this value controls how many
-## missed pings are considered a timeout. Thus, after this number of attempts
-## Bondy will drop the connection.
-## If the value is 'infinity' Bondy will never timeout based on missed pings.
-##
-## Default: 3
-##
-## Acceptable values:
-##   - an integer
-##   - the text "infinity"
-wamp.websocket.ping.max_attempts = 3
-
-## Drops the connection after a period of inactivity. This option does not
-## take effect when wamp.websocket.ping.enabled is 'on' and wamp.websocket.ping.
-## interval times wamp.websocket.ping.max_attempts results in a value higher
-## than this option.
-## Notice that for some clients using this option alone is not enough to keep
-## a connection alive as the client will drop the connection due to inactivity.
-## If the client supports Websocket PING control messages, enabled them,
-## otherwise e.g. web browsers set wamp.websocket.ping.enabled to on.
-##
-## Default: 8h
-##
-## Acceptable values:
-##   - a time duration with units, e.g. '10s' for 10 seconds
-##   - the text "infinity"
-wamp.websocket.idle_timeout = 8h
-
-
-
-##
-## Default: 4MB
-##
-## Acceptable values:
-##   - a byte size with units, e.g. 10GB
-##
-## Neither the bare word "infinity" nor `0` means unbounded here, despite
-## what an older comment in this schema mapping claims: `0` is handed
-## straight to Cowboy's `max_frame_size` websocket option, and Cowboy closes
-## a connection on any frame whose length exceeds it — checked directly
-## against `cowboy_websocket:parse_header/3`, `Len > MaxFrameSize` with
-## `MaxFrameSize = 0` closes on the first non-empty frame. There is no valid
-## encoding of "no limit" for this key; this is a generous ceiling instead.
-wamp.websocket.max_frame_size = 64MB
-
-##
-## Default: off
-##
-## Acceptable values:
-##   - on or off
-wamp.websocket.compression_enabled = off
-
-##
-## Default: 5
-##
-## Acceptable values:
-##   - an integer
-wamp.websocket.deflate.level = 5
-
-##
-## Default: 8
-##
-## Acceptable values:
-##   - an integer
-wamp.websocket.deflate.mem_level = 8
-
-##
-## Default: default
-##
-## Acceptable values:
-##   - one of: default, filtered, huffman_only, rle
-wamp.websocket.deflate.strategy = default
-
-##
-## Default: takeover
-##
-## Acceptable values:
-##   - one of: takeover, no_takeover
-wamp.websocket.deflate.server_context_takeover = takeover
-
-##
-## Default: takeover
-##
-## Acceptable values:
-##   - one of: takeover, no_takeover
-wamp.websocket.deflate.client_context_takeover = takeover
-
-##
-## Default: 11
-##
-## Acceptable values:
-##   - an integer
-wamp.websocket.deflate.server_max_window_bits = 11
-
-##
-## Default: 11
-##
-## Acceptable values:
-##   - an integer
-wamp.websocket.deflate.client_max_window_bits = 11
+## Largest frame this deployment accepts, reconstituted size for a fragmented
+## frame. Default: 4MB.
+listeners.admin.websocket.max_frame_size = 64MB
+listeners.admin_api_https.websocket.max_frame_size = 64MB
+listeners.api_gateway_http.websocket.max_frame_size = 64MB
+listeners.api_gateway_https.websocket.max_frame_size = 64MB
 
 
 ## =============================================================================

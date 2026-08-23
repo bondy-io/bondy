@@ -345,28 +345,84 @@ sends `office`.
 Note there is no "empty value" spelling: `security_headers.hsts =` with nothing
 after it is a *syntax error* in `bondy.conf`, not an empty setting.
 
-What is actually missing, compared with the carrier overrides below, is a
-*global conf block* to inherit a deliberate choice from: `websocket.*` falls
-back to `wamp.websocket.*` if you set nothing, but there is no
-`wamp.cors.*`/`wamp.security_headers.*` to fall back to — the only
-fallback is the module's own default above. So an HTTPS listener whose CORS
-previously restricted origins to an allowlist needs that allowlist restated under
-`listeners.<name>.cors.allowed_origins` — without it, the listener is not
-"closed by default", it is open to any origin.
+There is no global block to inherit a deliberate choice from — no
+`wamp.cors.*`/`wamp.security_headers.*` — so the only fallback is the module's
+own default above. An HTTPS listener whose CORS previously restricted origins to
+an allowlist needs that allowlist restated under
+`listeners.<name>.cors.allowed_origins`; without it the listener is not "closed
+by default", it is open to any origin.
 
-## Carrier overrides
+## Carrier settings
 
-`websocket.*`, `sse.*` and `longpoll.*` override the global `wamp.websocket.*`,
-`wamp.sse.*` and `wamp.longpoll.*` blocks for one listener only. Unlike CORS
-and security headers, a key left unset here **does** fall back — to the
-global block of the same name — so declaring a listener changes nothing
-about its WebSocket/SSE/long-poll behaviour unless a carrier key is set
-explicitly.
+`websocket.*`, `sse.*` and `longpoll.*` configure the WebSocket, SSE and
+long-poll connections a listener serves. They belong to the listener the
+connection arrived on: setting one on `listeners.public_http` says nothing about
+`listeners.admin`, and there is **no global block** covering all listeners at
+once. The `wamp.websocket.*`, `wamp.sse.*` and `wamp.longpoll.*` keys that used
+to serve that purpose are gone; see *Migrating from the pre-1.0 keys*.
 
 ```
 listeners.public_http.websocket.compression_enabled = on
 listeners.public_http.websocket.max_frame_size      = 4MB
 ```
+
+A key you do not set takes the default below. These defaults are **not** written
+into the generated `etc/bondy.conf` the way most settings are — they come from
+`bondy_listener_config`, so this table is where they are documented.
+
+### `websocket.*`
+
+| Key | Default |
+| --- | --- |
+| `ping.enabled` | `on` |
+| `ping.idle_timeout` | `20s` |
+| `ping.timeout` | `10s` |
+| `ping.max_attempts` | `3` |
+| `idle_timeout` | `8h` |
+| `max_frame_size` | `4MB` |
+| `hibernate` | `idle` |
+| `compression_enabled` | `off` |
+| `deflate.level` | `5` |
+| `deflate.mem_level` | `8` |
+| `deflate.strategy` | `default` |
+| `deflate.server_context_takeover` | `takeover` |
+| `deflate.client_context_takeover` | `takeover` |
+| `deflate.server_max_window_bits` | `11` |
+| `deflate.client_max_window_bits` | `11` |
+
+The `deflate.*` block only takes effect when `compression_enabled` is `on`.
+
+### `sse.*`
+
+| Key | Default |
+| --- | --- |
+| `ping.enabled` | `on` |
+| `ping.interval` | `20s` |
+| `idle_timeout` | `10m` |
+| `reset_idle_timeout_on_send` | `on` |
+
+### `longpoll.*`
+
+| Key | Default |
+| --- | --- |
+| `poll_timeout` | `30s` |
+| `idle_timeout` | `10m` |
+| `reset_idle_timeout_on_send` | `on` |
+
+`poll_timeout` must stay strictly below `idle_timeout`, or the connection can be
+torn down for inactivity before the long-poll reply is sent.
+
+A setting stated on the listener wins **key by key**, not block by block: a
+listener that sets only `websocket.ping.idle_timeout` keeps the defaults for
+`ping.enabled`, `ping.timeout` and `ping.max_attempts`.
+
+### These are not HTTP settings
+
+`websocket.*`, `sse.*` and `longpoll.*` describe one connection style each. The
+listener's HTTP itself — keep-alive, header limits, request and idle timeouts —
+is configured under `listeners.<name>.http.*` and applies to everything the
+listener serves, whichever services are mounted on it. See *Connection and
+socket tuning* above.
 
 ## TLS material
 
@@ -418,6 +474,14 @@ The per-scheme keys that configured Bondy's fixed listeners —
 and `bridge.listener.{tcp,tls}.*` — **have been removed**. Nothing reads them.
 A file that still sets them loses every one of those settings silently, because
 cuttlefish drops an unknown key rather than refusing the file.
+
+The global carrier keys `wamp.websocket.*`, `wamp.sse.*` and `wamp.longpoll.*`
+are removed for the same reason and behave the same way when left in a file.
+These need one extra decision the others do not: a single global key covered
+every listener at once, so moving it means choosing **which** listeners it
+applies to. Restate it under `listeners.<name>.<carrier>.*` for each listener
+that serves the carrier, or drop it if it only restated the default in the table
+above — the defaults are unchanged, so a line that matched one can go.
 
 Two consequences worth stating separately, because a file can hit the second
 while looking like it survived the first:

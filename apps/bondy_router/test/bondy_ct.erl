@@ -391,26 +391,6 @@
             ]},
             {enabled, true}
         ]},
-        {wamp_websocket, [
-            {deflate_opts, [
-                {client_context_takeover, takeover},
-                {server_context_takeover, takeover},
-                {strategy, default},
-                {level, 5},
-                {mem_level, 8},
-                {server_max_window_bits, 11},
-                {client_max_window_bits, 11}
-            ]},
-            {compress, true},
-            {max_frame_size, infinity},
-            {idle_timeout, 28800000},
-            {ping, [
-                {max_attempts, 2},
-                {timeout, 10000},
-                {idle_timeout, 20000},
-                {enabled, true}
-            ]}
-        ]},
         {wamp_serializers, [{bert, 4}, {erl, 15}]},
         {api_gateway_https, [
             {tls, [

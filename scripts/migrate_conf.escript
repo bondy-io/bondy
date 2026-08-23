@@ -325,12 +325,96 @@ verdict(Key, Value, Schema, Conf) ->
     end.
 
 %% A candidate for a key that needs a human. Annotated when the operator's value
-%% equals the candidate's own schema default, which is the evidence that resolved
+%% equals the candidate's own default, which is the evidence that resolved
 %% `bridge.edge.timeout' to `connect_timeout' rather than to its two siblings.
+%% For a carrier key it decides something larger: a line that only restated the
+%% default needs no fan-out at all, it needs deleting.
 candidate(Key, Rewrite, Value, Schema) ->
     New = rewrite(Key, Rewrite),
     Known = is_known(New, Schema),
-    {New, Known, Known andalso default_of(New, Schema) == {ok, Value}}.
+    {New, Known, Known andalso is_default(New, Value, Schema)}.
+
+%% @private
+%% Two ways a value can turn out to be its key's default, and a `listeners.$name'
+%% key can only be the second: `cuttlefish_generator:add_fuzzy_default/4'
+%% materialises a fuzzy default for every name under the `listeners' prefix, so
+%% no mapping there may declare one and `default_of/2' always answers
+%% `undefined'. Those defaults live in `bondy_listener_config:carrier_defaults/1'
+%% instead.
+is_default(New, Value, Schema) ->
+    case default_of(New, Schema) of
+        {ok, Value} -> true;
+        {ok, _} -> false;
+        undefined -> is_carrier_default(New, Value, Schema)
+    end.
+
+%% @private
+%% Compares through the DATATYPE, not as text: the conf carries `8h', `4MB' and
+%% `on' where the code table holds 28800000, 4194304 and `true'. The mapping's
+%% own datatype is what converts them, so this asks the question cuttlefish
+%% would -- `is this line's value what the key would have been anyway?'
+%%
+%% Answers `false' rather than raising when `bondy_listener_config' is not
+%% loadable (`locate_bondy_router/0' reports that separately), so a checkout
+%% without a built tree loses the annotation and nothing else.
+is_carrier_default(["listeners", _Name, Carrier | Tail] = New, Value, Schema) ->
+    case carrier_default(list_to_atom(Carrier), carrier_path(Tail)) of
+        undefined ->
+            false;
+        {ok, Default} ->
+            case mapping_for(New, Schema) of
+                undefined ->
+                    false;
+                M ->
+                    transform_value(cuttlefish_mapping:datatype(M), Value) ==
+                        {ok, Default}
+            end
+    end;
+is_carrier_default(_New, _Value, _Schema) ->
+    false.
+
+%% @private
+%% Where a `listeners.$name.<carrier>.<tail>' key LANDS inside the carrier's
+%% option block, which is what `bondy_listener_config:carrier_defaults/1' is
+%% keyed on. Two tails do not render under their own name, and both are the
+%% schema translation's doing rather than this tool's:
+%% `websocket.compression_enabled' lands on `compress' and `websocket.deflate.*'
+%% on `deflate_opts.*'.
+%%
+%% This is a second statement of a fact the schema owns, so it is CHECKED rather
+%% than trusted: `selftest_carrier_paths/2' resolves every carrier key in the
+%% schema through here and fails if one does not land on a real default.
+carrier_path(["compression_enabled"]) ->
+    [compress];
+carrier_path(["deflate", Key]) ->
+    [deflate_opts, list_to_atom(Key)];
+carrier_path(Tail) ->
+    [list_to_atom(Key) || Key <- Tail].
+
+%% @private
+%% `locate_bondy_router/0' rather than `function_exported/3' alone: the module is
+%% not on the escript's path until something loads it, and that check answers
+%% `false' for a module that merely has not been loaded yet -- which made every
+%% carrier line look like a deviation. Idempotent, so calling it per candidate
+%% costs one `code:ensure_loaded/1' after the first.
+carrier_default(Carrier, Path) ->
+    case locate_bondy_router() of
+        unavailable ->
+            undefined;
+        ok ->
+            walk(bondy_listener_config:carrier_defaults(Carrier), Path)
+    end.
+
+%% @private
+walk(Value, []) ->
+    {ok, Value};
+walk(Map, [Key | Rest]) when is_map(Map) ->
+    case maps:find(Key, Map) of
+        {ok, Inner} -> walk(Inner, Rest);
+        error -> undefined
+    end;
+walk(_, _) ->
+    undefined.
 
 %% =============================================================================
 %% RULES
@@ -564,6 +648,74 @@ rules() ->
             {rewrite, {tail, 2, ["buffer", "min"]}}},
         {{suffix, ["dynamic_buffer", "max"]},
             {rewrite, {tail, 2, ["buffer", "max"]}}},
+        %% ---------------------------------------------------------------------
+        %% The global carrier blocks. A WebSocket, SSE or long-poll setting is
+        %% now written on the LISTENER that serves it, and one global key used
+        %% to cover every listener at once -- so this is a fan-out, not a
+        %% rename, and only the operator knows which listeners they meant. The
+        %% candidate names the shape; the LISTENERS section of the same report
+        %% names the listeners this file declares.
+        %%
+        %% Ahead of the generic `ping.interval' and `ping.max_retries' renames
+        %% below, which would otherwise rewrite the tail and leave `wamp.' at
+        %% the head, producing a destination nothing maps.
+        %% ---------------------------------------------------------------------
+
+        %% Two knobs that never did anything, so there is nothing to fan out.
+        {{match, ["wamp", "websocket", "buffer", "min"]},
+            {drop, websocket_buffer_why()}},
+        {{match, ["wamp", "websocket", "buffer", "max"]},
+            {drop, websocket_buffer_why()}},
+
+        %% The two legacy spellings, which move AND get renamed.
+        {{match, ["wamp", "websocket", "ping", "interval"]},
+            {manual,
+                [{all, 0, ["listeners", "$name", "websocket", "ping",
+                    "idle_timeout"]}],
+                carrier_why("websocket") ++
+                " The key is also renamed: `interval' became `idle_timeout'."}},
+        {{match, ["wamp", "websocket", "ping", "max_retries"]},
+            {manual,
+                [{all, 0, ["listeners", "$name", "websocket", "ping",
+                    "max_attempts"]}],
+                carrier_why("websocket") ++
+                " The key is also renamed: `max_retries' became"
+                " `max_attempts'."}},
+
+        {{prefix, ["wamp", "websocket"]},
+            {manual, [{head, 2, ["listeners", "$name", "websocket"]}],
+                carrier_why("websocket")}},
+        {{prefix, ["wamp", "sse"]},
+            {manual, [{head, 2, ["listeners", "$name", "sse"]}],
+                carrier_why("sse")}},
+        {{prefix, ["wamp", "longpoll"]},
+            {manual, [{head, 2, ["listeners", "$name", "longpoll"]}],
+                carrier_why("longpoll")}},
+
+        %% ---------------------------------------------------------------------
+        %% The HTTP long-poll / SSE transport block, renamed to say what it
+        %% covers. `wamp.transport_queue.*' read as a queue for every transport
+        %% and was never that: a WebSocket or raw-socket session reaches none of
+        %% it. Straight renames -- the settings, their units and their defaults
+        %% are unchanged.
+        %% ---------------------------------------------------------------------
+
+        %% Never a queue setting. It is the SESSION's inactivity deadline, read
+        %% once by `bondy_http_transport_session:init/1', and it was filed under
+        %% the queue only because it shared the block.
+        {{match, ["wamp", "transport_queue", "transport_ttl"]},
+            {rewrite, {all, 0, ["wamp", "http_transport", "idle_timeout"]}}},
+
+        {{match, ["wamp", "transport_queue", "overflow_strategy"]},
+            {drop, "it was seeded and never read: the eviction it named is"
+                " unconditional in bondy_http_transport_queue:do_enqueue/3, and"
+                " the enum admitted one value. Evicting the oldest entry is the"
+                " only policy that makes sense for a stream a client reads in"
+                " order, so there is nothing to choose"}},
+
+        {{prefix, ["wamp", "transport_queue"]},
+            {rewrite, {head, 2, ["wamp", "http_transport", "queue"]}}},
+
         {{suffix, ["ping", "interval"]},
             {rewrite, {tail, 2, ["ping", "idle_timeout"]}}},
         {{suffix, ["ping", "max_retries"]},
@@ -603,6 +755,24 @@ rules() ->
 %% the listener's own and stay put. A rule table keyed only on the tail would get
 %% one of the two wrong.
 %% Shared by the fourteen feature rules above. Written once because the answer is
+%% @private
+%% Shared by the three carrier-block rules. One sentence per fact: what moved,
+%% why it cannot be rewritten mechanically, and what happens if the line is just
+%% deleted.
+carrier_why(Carrier) ->
+    "wamp." ++ Carrier ++ ".* was the value a listener fell back to when it set"
+    " nothing, so one key covered every listener at once. Restate it as"
+    " listeners.<name>." ++ Carrier ++ ".<tail> on each listener that serves"
+    " the carrier. The defaults did not change, so a line that only restated"
+    " one can be deleted instead.".
+
+%% @private
+websocket_buffer_why() ->
+    "since Cowboy 2.13 a WebSocket connection inherits its listener's dynamic"
+    " buffer and cowboy_websocket overrides any handler-supplied value, so"
+    " neither key could ever take effect; listeners.$name.http.buffer.min/.max"
+    " are the ones that do".
+
 %% the same for all of them and a per-key paraphrase would drift.
 capability_why() ->
     "a WAMP feature is a capability, not a setting: it states which parts of"
@@ -1317,8 +1487,9 @@ report_finding({K, V, {manual, Candidates, Why}}) ->
     lists:foreach(
         fun
             ({New, true, true}) ->
-                out("        candidate ~s  <- its schema default is this value",
-                    [key_str(New)]);
+                out("        candidate ~s", [key_str(New)]),
+                out("        this line restates the default, so deleting it"
+                    " changes nothing", []);
             ({New, true, false}) ->
                 out("        candidate ~s", [key_str(New)]);
             ({New, false, _}) ->
@@ -1976,6 +2147,14 @@ reason({manual, Candidates, Why}) ->
         case Cs of
             [] -> "";
             _ -> " (candidates: " ++ string:join(Cs, ", ") ++ ")"
+        end ++
+        %% The same note the check report carries. It belongs here too: the
+        %% migrated file is what the operator edits, and a commented-out line
+        %% that only restated the default needs no decision at all.
+        case [K || {K, true, true} <- Candidates] of
+            [] -> "";
+            _ -> " This line restates the default, so deleting it changes"
+                " nothing."
         end;
 reason({collides, New, _Value, Existing}) ->
     "not renamed -- " ++ key_str(New) ++ " is already set to " ++ Existing ++
@@ -2302,8 +2481,13 @@ tmp_dir() ->
 %% `bridge.listener.tls.*' spellings, where the other three (`idle_timeout',
 %% `ping', `max_frame_size') have no `bridge.$name.' counterpart at that depth
 %% and were already classified.
+%%
+%% 103, not 91, since the twelve `wamp.websocket.*' spellings the corpus sets
+%% stopped being read with the global carrier blocks. The corpus holds no
+%% `wamp.sse.*' or `wamp.longpoll.*' key, so those blocks' removal moves this
+%% number not at all -- their rules are covered by the rule table check instead.
 -define(DIRTY_REF, "8dd090bf^").
--define(DIRTY_EXPECTED, 91).
+-define(DIRTY_EXPECTED, 103).
 
 selftest(SchemaDirs0) ->
     SchemaDirs = resolve_schema_dirs(SchemaDirs0),
@@ -2320,7 +2504,8 @@ selftest(SchemaDirs0) ->
         selftest_listeners(Schema),
         selftest_reinterpreted(Schema),
         selftest_values(SchemaDirs, {Schema, Validators}),
-        selftest_capabilities(Schema)
+        selftest_capabilities(Schema),
+        selftest_carrier_paths(Schema)
     ],
     case [R || R <- Results, R =/= ok] of
         [] ->
@@ -2330,6 +2515,48 @@ selftest(SchemaDirs0) ->
             err("~nselftest FAILED (~p of ~p)", [length(Failures),
                 length(Results)]),
             ?EXIT_FINDINGS
+    end.
+
+%% `carrier_path/1' is this tool's copy of where a `listeners.$name.<carrier>.*'
+%% key lands inside the carrier's option block, and the schema translation is
+%% what actually decides that. A copy nothing checks is how the two drift, so
+%% every carrier key in the schema is resolved through it here and must land on
+%% a real entry of `bondy_listener_config:carrier_defaults/1'.
+%%
+%% Two ways this fails, and both are the point: a carrier key added to the
+%% schema with no default behind it, and a key whose rendered name differs from
+%% its conf name without `carrier_path/1' being told. Either would silently stop
+%% the "this line restates the default" annotation firing for that key -- the
+%% annotation would just never appear, which is the failure mode a report cannot
+%% show you.
+%%
+%% Vacuous if it ever matched nothing, so the count is asserted too.
+selftest_carrier_paths(Schema) ->
+    Keys = [
+        {Carrier, Tail}
+     || {["listeners", "$name", Carrier | Tail], _} <- Schema,
+        Tail =/= [],
+        lists:member(Carrier, ["websocket", "sse", "longpoll"])
+    ],
+    Bad = [
+        key_str(["listeners", "$name", C | T])
+     || {C, T} <- Keys,
+        carrier_default(list_to_atom(C), carrier_path(T)) == undefined
+    ],
+    case {Keys, Bad} of
+        {[], _} ->
+            err("  carrier paths: no carrier key found in the schema -- this"
+                " check has gone vacuous", []),
+            failed;
+        {_, []} ->
+            out("  carrier paths: ~p carrier keys, every one lands on a"
+                " default  OK", [length(Keys)]),
+            ok;
+        _ ->
+            err("  carrier paths: ~p of ~p land on no default:",
+                [length(Bad), length(Keys)]),
+            [err("      ~s", [B]) || B <- Bad],
+            failed
     end.
 
 %% Every rule must name a live destination. A `{rewrite, {all, ...}}' names a
@@ -2624,7 +2851,7 @@ selftest_reinterpreted(Schema) ->
 
 selftest_values(SchemaDirs, {Schema, Validators}) ->
     Cases = [
-        {"wamp.websocket.max_frame_size = infinity", datatype,
+        {"listeners.pub.websocket.max_frame_size = infinity", datatype,
             transform_datatypes},
         {"load_regulation.router.pool.size = 0", validator, validation},
         {"mail.relay.x.pool.size = 0", none, past_validation}

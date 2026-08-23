@@ -154,7 +154,7 @@ anonymous_table_survives_caller_death(_Config) ->
     %% Anonymous tables are owned by bondy_table_manager, not the caller.
     %% Killing the caller must leave the table alive and the registry
     %% entry intact. This is the property that lets
-    %% bondy_transport_queue_manager crash without losing queues.
+    %% bondy_http_transport_queue_manager crash without losing queues.
     Parent = self(),
     Key = {?MODULE, survival, erlang:unique_integer([positive])},
 
