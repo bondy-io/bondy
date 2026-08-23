@@ -102,10 +102,21 @@
 }).
 
 -define(COMMON_RPC_FEATURES, #{
-    %% Session-level capability (feeds HELLO feature negotiation in
-    %% bondy_session:parse_roles/1). Runtime activation is still gated by
-    %% the wamp.dealer.progressive_call_results / wamp.dealer.progressive_calls
-    %% config flags, both default off.
+    %% Build capabilities, not settings: this table states what this build
+    %% implements, and there is no `bondy.conf' key for any of it. It reaches
+    %% two places -- the role tables below, and `[wamp, dealer, features, _]'
+    %% via `bondy_config:setup_wamp/0' -- so `is_feature_implemented/1' and
+    %% what WELCOME advertises cannot disagree. Both progressive entries are
+    %% therefore `true' at boot; they are not gated off by configuration.
+    %%
+    %% What a peer may actually use is the per-session intersection of its
+    %% HELLO with these values (`bondy_session:parse_roles/1'). Both
+    %% progressive features are in `bondy_session:?STRICT_OPTIN_FEATURES', so a
+    %% client that OMITS one is given `false' instead of inheriting the `true'
+    %% here -- the router offers them, but only a client that asks receives
+    %% them. A remote callee is gated on its own node
+    %% (`bondy_dealer:maybe_gate_progressive_callee/2'), which is what makes a
+    %% mixed cluster safe rather than any global switch.
     progressive_call_results => true,
     progressive_calls => true,
     call_timeout => true,

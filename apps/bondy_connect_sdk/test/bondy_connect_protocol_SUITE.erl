@@ -20,6 +20,7 @@ all() ->
         config_defaults_to_anonymous,
         config_missing_realm,
         config_bad_authmethod,
+        local_rejects_unsupported_endpoint,
 
         %% HELLO / handshake start
         start_builds_hello,
@@ -99,6 +100,18 @@ config_bad_authmethod(_) ->
         bondy_connect_config:validate(#{
             realm => ?REALM, auth => #{method => <<"kerberos">>}
         })
+    ).
+
+%% The in-VM transport dials nothing, so the only endpoints it accepts are the
+%% ones that name no address: `local', `undefined', or a `{router, _}' tuple.
+%% A host/port pair is a spec that asked for `transport => local' and then gave
+%% it somewhere to connect to, which is a contradiction rather than a default
+%% to paper over.
+local_rejects_unsupported_endpoint(_) ->
+    Endpoint = {"127.0.0.1", 18082},
+    ?assertEqual(
+        {error, {unsupported_endpoint, Endpoint}},
+        bondy_connect_local:connect(Endpoint, #{realm => ?REALM})
     ).
 
 %% =============================================================================

@@ -6,19 +6,17 @@
 -module(bondy_connect_transport_ws_SUITE).
 
 -moduledoc """
-M5 — **WAMP over WebSocket** integration tests against the live Bondy
+What is specific to **WAMP over WebSocket**, against the live Bondy
 `api_gateway_http` cowboy `/ws` endpoint (port 18080, enabled in `bondy_ct`).
 
-- **Round trip (json/text)**: register→call and publish→event over `ws://`, with
-  the `wamp.2.json` subprotocol carried in WebSocket **text** frames.
-- **Round trip (msgpack/binary)**: a call negotiating `wamp.2.msgpack`, proving
-  subprotocol negotiation and the **binary**-frame path (not just json/text).
-- **wss (TLS)**: a verify_peer round trip over `wss://` against the
-  `api_gateway_https` `/ws` endpoint (port 18083), validating the server cert
-  chain against the test CA bundle, then carrying a full WAMP call over the
-  encrypted WebSocket.
-- **Clean failure**: upgrading at a path with no WebSocket handler fails with
-  `{error, _}`, never a hang.
+Carrying WAMP over this transport is not tested here: every WAMP use case runs
+on `ws` and `wss` in `bondy_connect_conformance_SUITE`, which also covers the
+json/text and msgpack/binary frame paths through its serializer cases.
+
+What is left belongs to the **upgrade** and to **framing**, neither of which
+exists on any other transport: an upgrade at a path with no WebSocket handler
+must fail cleanly rather than hang, and an inbound message over the negotiated
+limit must be rejected.
 """.
 
 -include_lib("common_test/include/ct.hrl").
@@ -35,10 +33,6 @@ M5 — **WAMP over WebSocket** integration tests against the live Bondy
 
 all() ->
     [
-        ws_call_round_trip,
-        ws_pubsub_round_trip,
-        ws_msgpack_round_trip,
-        wss_verify_peer_round_trip,
         ws_upgrade_bad_path_fails,
         ws_inbound_message_too_large_rejected
     ].
@@ -61,81 +55,6 @@ end_per_suite(_) ->
 %% =============================================================================
 
 %% A full register→call works over ws:// with the json (text-frame) subprotocol.
-ws_call_round_trip(_) ->
-    Conn = connect([json]),
-    ?assertEqual(established, bondy_connect_client:status(Conn)),
-    {ok, _} = bondy_connect_client:register(
-        Conn, <<"com.example.res.ws">>, echo_handler()
-    ),
-    {ok, R} = bondy_connect_client:call(Conn, <<"com.example.res.ws">>, [
-        <<"hi">>
-    ]),
-    ?assertEqual([<<"hi">>], maps:get(args, R)),
-    ok = bondy_connect_client:disconnect(Conn).
-
-%% A subscribe→publish→event round trip works over the WebSocket transport.
-ws_pubsub_round_trip(_) ->
-    Topic = <<"com.example.res.ws.topic">>,
-    Self = self(),
-    Sub = connect([json]),
-    {ok, _} = bondy_connect_client:subscribe(Sub, Topic, event_handler(Self)),
-
-    Pub = connect([json]),
-    ok = bondy_connect_client:publish(Pub, Topic, [<<"ping">>]),
-
-    receive
-        {event, [<<"ping">>]} -> ok
-    after 5000 ->
-        ct:fail(no_event)
-    end,
-
-    ok = bondy_connect_client:disconnect(Sub),
-    ok = bondy_connect_client:disconnect(Pub).
-
-%% A call negotiating `wamp.2.msgpack` exercises subprotocol negotiation and the
-%% binary-frame path.
-ws_msgpack_round_trip(_) ->
-    Conn = connect([msgpack]),
-    ?assertEqual(established, bondy_connect_client:status(Conn)),
-    {ok, _} = bondy_connect_client:register(
-        Conn, <<"com.example.res.ws.mp">>, echo_handler()
-    ),
-    {ok, R} = bondy_connect_client:call(Conn, <<"com.example.res.ws.mp">>, [
-        <<"hi">>
-    ]),
-    ?assertEqual([<<"hi">>], maps:get(args, R)),
-    ok = bondy_connect_client:disconnect(Conn).
-
-%% A verify_peer round trip over wss:// proves the gun-over-TLS path: the server
-%% certificate chain is validated against the test CA bundle and a full call
-%% succeeds over the encrypted WebSocket. (Hostname checking is disabled because
-%% the server cert's SAN is `host.example.com`, not the dialed loopback IP.)
-wss_verify_peer_round_trip(Config) ->
-    CACertFile = ?config(cacertfile, Config),
-    {ok, Conn} = bondy_connect_client:connect(#{
-        transport => wss,
-        endpoint => {?HOST, ?PORT_WSS},
-        realm => ?REALM,
-        auth => #{method => ?WAMP_ANON_AUTH},
-        serializers => [json],
-        tls => #{
-            verify => verify_peer,
-            cacertfile => CACertFile,
-            server_name_indication => disable
-        }
-    }),
-    ?assertEqual(established, bondy_connect_client:status(Conn)),
-    {ok, _} = bondy_connect_client:register(
-        Conn, <<"com.example.res.wss">>, echo_handler()
-    ),
-    {ok, R} = bondy_connect_client:call(Conn, <<"com.example.res.wss">>, [
-        <<"hi">>
-    ]),
-    ?assertEqual([<<"hi">>], maps:get(args, R)),
-    ok = bondy_connect_client:disconnect(Conn).
-
-%% Upgrading at a path with no WebSocket handler fails cleanly (the server
-%% answers the GET with a normal HTTP response instead of a 101 switch).
 ws_upgrade_bad_path_fails(_) ->
     Result = bondy_connect_client:connect(#{
         transport => ws,
@@ -191,17 +110,6 @@ ws_inbound_message_too_large_rejected(_) ->
 %% =============================================================================
 
 %% @private
-echo_handler() ->
-    fun(Args, _, _) -> {ok, #{args => Args}} end.
-
-%% @private An event handler that forwards each event's args to `Pid`.
-event_handler(Pid) ->
-    fun(Args, _, _) ->
-        Pid ! {event, Args},
-        ok
-    end.
-
-%% @private Connect over ws:// offering the given serializer preference.
 connect(Serializers) ->
     {ok, Conn} = bondy_connect_client:connect(#{
         transport => ws,

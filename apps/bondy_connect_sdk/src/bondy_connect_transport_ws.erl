@@ -129,8 +129,9 @@ handshake(
                         encoding = Enc,
                         frame_kind = Kind
                     },
-                    %% The negotiated value is discarded by the connection; we
-                    %% conform to the behaviour's `subprotocol()' type.
+                    %% `Enc' is the router's pick out of the list offered
+                    %% above, which need not be the first one — the connection
+                    %% keeps this as its negotiated subprotocol.
                     {ok, {raw, binary, Enc}, St1};
                 {error, _} = Error ->
                     Error

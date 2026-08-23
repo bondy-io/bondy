@@ -30,7 +30,8 @@ all() ->
         poll_receive_wakeup_on_enqueue,
         poll_receive_sync_reply_wakeup,
         close_transport,
-        send_unknown_transport
+        send_unknown_transport,
+        queued_message_precedes_later_synchronous_reply
     ].
 
 init_per_suite(Config) ->
@@ -363,3 +364,91 @@ make_event(N) ->
         args = [<<"payload-", (integer_to_binary(N))/binary>>],
         kwargs = undefined
     }.
+
+%% Two messages leave the router for one client: an EVENT the router delivered
+%% into `bondy_http_transport_queue' while nobody was polling, and — LATER — a
+%% reply the protocol produced synchronously while handling the client's own
+%% POST. A transport is a FIFO pipe, so the first poll must return the first
+%% one.
+%%
+%% Reachable in an established session, not a synthetic ordering: an inbound
+%% whose `bondy_router:forward/2' answers `{reply, M, _}' is answered inline
+%% (`bondy_wamp_protocol.erl:504') — an ERROR for an unroutable call, a
+%% throttle rejection — while EVENTs for the same session arrive through the
+%% queue.
+queued_message_precedes_later_synchronous_reply(_Config) ->
+    RealmUri = <<"com.leapsight.test.longpoll_ordering">>,
+    _ = bondy_realm:create(RealmUri),
+    ok = bondy_realm:disable_security(RealmUri),
+
+    TransportId = make_transport_id(),
+    SessionId = bondy_session_id:new(),
+
+    {ok, Pid} = bondy_http_transport_session_sup:start_child(
+        TransportId, <<>>, SessionId
+    ),
+    ok = bondy_http_transport_session:init_protocol(
+        Pid, {http_longpoll, text, json}, {{127, 0, 0, 1}, 12345}
+    ),
+
+    %% Establish, and take the WELCOME out of the way so the assertion below is
+    %% about the two messages this case is comparing and nothing else.
+    ok = bondy_http_transport_session:handle_client_message(
+        Pid, encode(hello(RealmUri))
+    ),
+    {ok, {replies, [_Welcome]}} =
+        bondy_http_transport_session:poll_receive(Pid, 5000),
+
+    %% FIRST: the router delivers an EVENT while no poll is in flight.
+    Event = #event{
+        subscription_id = 1,
+        publication_id = 1,
+        details = #{},
+        args = [<<"first">>],
+        kwargs = undefined
+    },
+    ok = bondy_http_transport_queue:enqueue(TransportId, Event, #{}),
+
+    %% SECOND: the client POSTs a CALL to a procedure nobody has registered.
+    %% The dealer answers ERROR inline, so the reply is produced here, after the
+    %% EVENT was queued.
+    ok = bondy_http_transport_session:handle_client_message(
+        Pid, encode(call(<<"com.example.no.such.procedure">>))
+    ),
+
+    First = bondy_http_transport_session:poll_receive(Pid, 5000),
+    Second = bondy_http_transport_session:poll_receive(Pid, 5000),
+
+    ?assertEqual(
+        [event, error],
+        [shape(First), shape(Second)],
+        "the EVENT was queued before the ERROR was produced"
+    ),
+
+    ok = bondy_http_transport_session:close(Pid).
+
+%% @private The record name behind whichever of the two result shapes came back.
+shape({ok, {messages, [M | _]}}) ->
+    element(1, M);
+shape({ok, {replies, [Bin | _]}}) ->
+    {[M], <<>>} = bondy_wamp_encoding:decode(
+        {http_longpoll, text, json}, Bin
+    ),
+    element(1, M).
+
+%% @private
+encode(M) ->
+    bondy_wamp_encoding:encode(M, json).
+
+%% @private
+hello(RealmUri) ->
+    #hello{
+        realm_uri = RealmUri,
+        details = #{
+            <<"roles">> => #{<<"caller">> => #{}, <<"subscriber">> => #{}}
+        }
+    }.
+
+%% @private
+call(Uri) ->
+    #call{request_id = 1, options = #{}, procedure_uri = Uri}.

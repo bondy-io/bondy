@@ -105,7 +105,6 @@ For Longpoll transports, the gen_server additionally manages:
     encoding :: optional(encoding()),
     sse_pid :: optional(pid()),
     sse_monitor :: optional(reference()),
-    reply_buffer = [] :: [binary()],
     poll_from :: optional(gen_server:from()),
     poll_timer :: optional(reference()),
     auth_claims :: optional(map())
@@ -402,7 +401,7 @@ handle_call({client_message, Data}, _From, State) ->
     try bondy_wamp_protocol:handle_inbound(Data, ProtoState) of
         {reply, Bins, NewProtoState} ->
             S1 = State#state{protocol_state = NewProtoState},
-            S2 = forward_or_buffer(Bins, S1),
+            S2 = enqueue_replies(Bins, S1),
             {reply, ok, S2};
         {noreply, NewProtoState} ->
             S1 = State#state{protocol_state = NewProtoState},
@@ -412,14 +411,14 @@ handle_call({client_message, Data}, _From, State) ->
             {stop, normal, ok, S1};
         {stop, Bins, NewProtoState} ->
             S1 = State#state{protocol_state = NewProtoState},
-            _ = forward_or_buffer(Bins, S1),
-            signal_sse_stop(Bins, S1),
-            {stop, normal, ok, S1};
+            S2 = enqueue_replies(Bins, S1),
+            signal_sse_stop(Bins, S2),
+            {stop, normal, ok, deliver_to_poller(S2)};
         {stop, _Reason, Bins, NewProtoState} ->
             S1 = State#state{protocol_state = NewProtoState},
-            _ = forward_or_buffer(Bins, S1),
-            signal_sse_stop(Bins, S1),
-            {stop, normal, ok, S1}
+            S2 = enqueue_replies(Bins, S1),
+            signal_sse_stop(Bins, S2),
+            {stop, normal, ok, deliver_to_poller(S2)}
     catch
         Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
@@ -433,45 +432,27 @@ handle_call({client_message, Data}, _From, State) ->
     end;
 handle_call({register_sse_stream, StreamPid}, _From, State) ->
     MonRef = erlang:monitor(process, StreamPid),
-    %% Flush any buffered sync replies
-    Buf = lists:reverse(State#state.reply_buffer),
-    lists:foreach(
-        fun(Bin) -> StreamPid ! {sync_reply, Bin} end,
-        Buf
-    ),
-    S1 = State#state{
-        sse_pid = StreamPid,
-        sse_monitor = MonRef,
-        reply_buffer = []
-    },
+    S1 = State#state{sse_pid = StreamPid, sse_monitor = MonRef},
+    %% Anything produced before the stream attached is in the queue, in order,
+    %% so the stream drains it like everything else instead of being handed a
+    %% separate buffer first.
+    ok = notify_enqueue(State#state.transport_id),
     {reply, ok, S1};
 handle_call({poll_receive, Timeout}, From, State) ->
-    %% Check for buffered sync replies first.
-    %% Return one reply at a time; the longpoll handler operates in unbatched
-    %% mode and only consumes the first item, so we must keep the rest.
-    case State#state.reply_buffer of
-        [_ | _] ->
-            %% Buffer is in LIFO order; reverse to get FIFO, pop the oldest
-            [Reply | Rest] = lists:reverse(State#state.reply_buffer),
-            S1 = State#state{reply_buffer = lists:reverse(Rest)},
-            {reply, {ok, {replies, [Reply]}}, S1};
+    %% One queue, so one read. Return one item at a time: the longpoll handler
+    %% is unbatched and consumes only the first, so the rest must stay queued.
+    TransportId = State#state.transport_id,
+
+    case bondy_http_transport_queue:dequeue_batch(TransportId, 1) of
+        [Item] ->
+            {reply, {ok, poll_result(Item)}, State};
         [] ->
-            %% Check queue for pending messages — dequeue one at a time
-            TransportId = State#state.transport_id,
-            case bondy_http_transport_queue:dequeue_batch(TransportId, 1) of
-                [Msg] ->
-                    {reply, {ok, {messages, [Msg]}}, State};
-                [] ->
-                    %% Nothing available, block until messages arrive or timeout
-                    TimerRef = erlang:send_after(
-                        Timeout, self(), {poll_timeout, From}
-                    ),
-                    S1 = State#state{
-                        poll_from = From,
-                        poll_timer = TimerRef
-                    },
-                    {noreply, S1}
-            end
+            %% Nothing available, block until messages arrive or timeout
+            TimerRef = erlang:send_after(
+                Timeout, self(), {poll_timeout, From}
+            ),
+            S1 = State#state{poll_from = From, poll_timer = TimerRef},
+            {noreply, S1}
     end;
 handle_call(encoding, _From, State) ->
     {reply, State#state.encoding, State};
@@ -491,28 +472,20 @@ handle_cast(touch, State) ->
 handle_cast({set_auth_claims, Claims}, State) ->
     {noreply, State#state{auth_claims = Claims}};
 handle_cast({request_poll, Timeout, ReplyTo}, State) ->
-    case State#state.reply_buffer of
-        [_ | _] ->
-            [Reply | Rest] = lists:reverse(State#state.reply_buffer),
-            ReplyTo ! {poll_result, {ok, {replies, [Reply]}}},
-            S1 = State#state{reply_buffer = lists:reverse(Rest)},
-            {noreply, S1};
+    TransportId = State#state.transport_id,
+
+    case bondy_http_transport_queue:dequeue_batch(TransportId, 1) of
+        [Item] ->
+            ReplyTo ! {poll_result, {ok, poll_result(Item)}},
+            {noreply, State};
         [] ->
-            TransportId = State#state.transport_id,
-            case bondy_http_transport_queue:dequeue_batch(TransportId, 1) of
-                [Msg] ->
-                    ReplyTo ! {poll_result, {ok, {messages, [Msg]}}},
-                    {noreply, State};
-                [] ->
-                    TimerRef = erlang:send_after(
-                        Timeout, self(), {poll_timeout, {async, ReplyTo}}
-                    ),
-                    S1 = State#state{
-                        poll_from = {async, ReplyTo},
-                        poll_timer = TimerRef
-                    },
-                    {noreply, S1}
-            end
+            TimerRef = erlang:send_after(
+                Timeout, self(), {poll_timeout, {async, ReplyTo}}
+            ),
+            S1 = State#state{
+                poll_from = {async, ReplyTo}, poll_timer = TimerRef
+            },
+            {noreply, S1}
     end;
 handle_cast(Event, State) ->
     ?LOG_WARNING(#{
@@ -521,27 +494,10 @@ handle_cast(Event, State) ->
     }),
     {noreply, State}.
 
-handle_info(queue_ready, #state{poll_from = {async, ReplyTo}} = State) when
-    is_pid(ReplyTo)
-->
-    %% An async longpoll caller is waiting — dequeue and send message.
-    TransportId = State#state.transport_id,
-    Msgs = bondy_http_transport_queue:dequeue_batch(TransportId, 1),
-    ReplyTo ! {poll_result, {ok, {messages, Msgs}}},
-    _ = erlang:cancel_timer(State#state.poll_timer),
-    S1 = State#state{poll_from = undefined, poll_timer = undefined},
-    {noreply, S1};
 handle_info(queue_ready, #state{poll_from = PollFrom} = State) when
     PollFrom =/= undefined
 ->
-    %% A sync longpoll caller is waiting — dequeue one message and reply.
-    %% Remaining messages stay in the queue for subsequent poll_receive calls.
-    TransportId = State#state.transport_id,
-    Msgs = bondy_http_transport_queue:dequeue_batch(TransportId, 1),
-    gen_server:reply(PollFrom, {ok, {messages, Msgs}}),
-    _ = erlang:cancel_timer(State#state.poll_timer),
-    S1 = State#state{poll_from = undefined, poll_timer = undefined},
-    {noreply, S1};
+    {noreply, deliver_to_poller(State)};
 handle_info(queue_ready, #state{sse_pid = SsePid} = State) when
     is_pid(SsePid)
 ->
@@ -555,21 +511,21 @@ handle_info({?BONDY_REQ, _Pid, _RealmUri, M}, State) ->
     try bondy_wamp_protocol:handle_outbound(M, ProtoState) of
         {ok, Bin, NewProtoState} ->
             S1 = State#state{protocol_state = NewProtoState},
-            S2 = forward_or_buffer([Bin], S1),
+            S2 = enqueue_replies([Bin], S1),
             {noreply, S2};
         {stop, NewProtoState} ->
             S1 = State#state{protocol_state = NewProtoState},
             {stop, normal, S1};
         {stop, Bin, NewProtoState} ->
             S1 = State#state{protocol_state = NewProtoState},
-            _ = forward_or_buffer([Bin], S1),
-            signal_sse_stop([Bin], S1),
-            {stop, normal, S1};
+            S2 = enqueue_replies([Bin], S1),
+            signal_sse_stop([Bin], S2),
+            {stop, normal, deliver_to_poller(S2)};
         {stop, Bin, NewProtoState, _After} ->
             S1 = State#state{protocol_state = NewProtoState},
-            _ = forward_or_buffer([Bin], S1),
-            signal_sse_stop([Bin], S1),
-            {stop, normal, S1};
+            S2 = enqueue_replies([Bin], S1),
+            signal_sse_stop([Bin], S2),
+            {stop, normal, deliver_to_poller(S2)};
         {error, _Reason, NewProtoState} ->
             S1 = State#state{protocol_state = NewProtoState},
             {noreply, S1}
@@ -711,6 +667,59 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 
 %% @private
+%% One queue, two result shapes, decided per ITEM rather than per source: an
+%% entry the protocol already encoded answers `replies', a record the router
+%% delivered answers `messages' for the caller to encode. The handlers read both
+%% and always did; what has changed is that the ORDER between them is now the
+%% queue's, not a priority rule.
+%% @private Hand one queued message to a parked longpoll poll, if one is parked.
+%%
+%% Shared by the `queue_ready' notification and by the terminal-stop paths. The
+%% stop paths need it because `enqueue_replies/2' delivers by sending
+%% `queue_ready' to self(), and a gen_server returning `{stop, ...}' never
+%% handles its own mailbox again — so the ABORT or GOODBYE just queued was
+%% deleted unread by `terminate/2', and the client's next request answered
+%% `404 transport_not_found'. A failed credential reached the client as a
+%% missing transport. SSE never had the bug because `signal_sse_stop/2' hands
+%% the bins straight to the stream process; this is longpoll's counterpart.
+%%
+%% One message, because the longpoll handler is unbatched. On the stop path the
+%% rest go with the queue, which is the terminal reply itself and nothing else.
+%%
+%% This does not close the window: a client whose poller is between cycles has
+%% nothing parked here, and still learns of the close from the next request's
+%% 404. What it removes is the case where the client IS waiting and the router
+%% has the answer in hand.
+deliver_to_poller(#state{poll_from = undefined} = State) ->
+    State;
+deliver_to_poller(#state{poll_from = {async, ReplyTo}} = State) ->
+    Msgs = bondy_http_transport_queue:dequeue_batch(
+        State#state.transport_id, 1
+    ),
+    ReplyTo ! {poll_result, {ok, poll_result(Msgs)}},
+    clear_poll(State);
+deliver_to_poller(#state{poll_from = PollFrom} = State) ->
+    Msgs = bondy_http_transport_queue:dequeue_batch(
+        State#state.transport_id, 1
+    ),
+    gen_server:reply(PollFrom, {ok, poll_result(Msgs)}),
+    clear_poll(State).
+
+%% @private
+clear_poll(State) ->
+    _ = erlang:cancel_timer(State#state.poll_timer),
+    State#state{poll_from = undefined, poll_timer = undefined}.
+
+poll_result([]) ->
+    {messages, []};
+poll_result([Item]) ->
+    poll_result(Item);
+poll_result({encoded, Bin}) ->
+    {replies, [Bin]};
+poll_result(Msg) ->
+    {messages, [Msg]}.
+
+%% @private
 schedule_inactivity_check(#state{transport_ttl = TTL}) ->
     %% Check at half the TTL interval, but at least every MIN_CHECK_INTERVAL ms
     Interval = max(?MIN_CHECK_INTERVAL, TTL div 2),
@@ -718,30 +727,27 @@ schedule_inactivity_check(#state{transport_ttl = TTL}) ->
     ok.
 
 %% @private
-forward_or_buffer(Bins, #state{sse_pid = SsePid} = State) when
-    is_pid(SsePid)
-->
-    lists:foreach(
-        fun(Bin) -> SsePid ! {sync_reply, Bin} end,
+%% A synchronous reply goes into the SAME queue the router's deliveries go into,
+%% and then wakes whoever is waiting, exactly as `bondy:maybe_enqueue/3' does.
+%%
+%% Every clause, not only the "nobody is waiting" one. A direct
+%% `gen_server:reply/2' here would still let a reply produced now overtake a
+%% message queued a moment ago, which is the whole defect: this used to keep
+%% replies in a `reply_buffer' that `poll_receive' drained FIRST, so a client
+%% received them out of order. Pinned by
+%% `bondy_http_longpoll_SUITE:queued_message_precedes_later_synchronous_reply'.
+enqueue_replies(Bins, #state{transport_id = TransportId} = State) ->
+    ok = lists:foreach(
+        fun(Bin) ->
+            _ = bondy_http_transport_queue:enqueue(
+                TransportId, {encoded, iolist_to_binary(Bin)}, #{}
+            ),
+            ok
+        end,
         Bins
     ),
-    State;
-forward_or_buffer(Bins, #state{poll_from = {async, ReplyTo}} = State) when
-    is_pid(ReplyTo)
-->
-    %% An async longpoll caller is waiting — send sync replies via message
-    ReplyTo ! {poll_result, {ok, {replies, Bins}}},
-    _ = erlang:cancel_timer(State#state.poll_timer),
-    State#state{poll_from = undefined, poll_timer = undefined};
-forward_or_buffer(Bins, #state{poll_from = PollFrom} = State) when
-    PollFrom =/= undefined
-->
-    %% A sync longpoll caller is waiting — reply with sync replies directly
-    gen_server:reply(PollFrom, {ok, {replies, Bins}}),
-    _ = erlang:cancel_timer(State#state.poll_timer),
-    State#state{poll_from = undefined, poll_timer = undefined};
-forward_or_buffer(Bins, #state{reply_buffer = Buf} = State) ->
-    State#state{reply_buffer = lists:reverse(Bins) ++ Buf}.
+    ok = notify_enqueue(TransportId),
+    State.
 
 %% @private
 signal_sse_stop(FinalBins, #state{sse_pid = SsePid}) when is_pid(SsePid) ->

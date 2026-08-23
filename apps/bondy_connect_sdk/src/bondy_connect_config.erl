@@ -125,6 +125,17 @@ validate(Spec) when is_map(Spec) ->
             transport => maps:get(transport, Spec, tcp),
             endpoint => maps:get(endpoint, Spec, undefined),
             ws_path => maps:get(ws_path, Spec, <<"/ws">>),
+            %% `validate/1' builds a CLOSED map, so a key absent from here
+            %% never reaches the transport at all — silently, with the
+            %% transport's own default applying instead. That is how
+            %% `longpoll_path` was ignored while a case believed it was
+            %% dialling a bad path, and the connection established normally
+            %% against the real endpoint.
+            longpoll_path =>
+                maps:get(longpoll_path, Spec, <<"/wamp/longpoll">>),
+            longpoll_poll_timeout =>
+                maps:get(longpoll_poll_timeout, Spec, 60000),
+            sse_path => maps:get(sse_path, Spec, <<"/wamp/sse">>),
             max_message_length =>
                 maps:get(max_message_length, Spec, ?DEFAULT_MAX_MESSAGE_LENGTH),
             handler => validate_handler(Spec),

@@ -25,7 +25,7 @@ all() ->
         encoding_roundtrip,
         open_and_init_protocol,
         register_sse_stream,
-        reply_buffering,
+        synchronous_reply_waits_in_the_queue,
         queue_notification_forwarding,
         sse_stream_down_cleanup,
         close_transport,
@@ -150,7 +150,7 @@ register_sse_stream(_Config) ->
     %% Cleanup
     ok = bondy_http_transport_session:close(Pid).
 
-reply_buffering(_Config) ->
+synchronous_reply_waits_in_the_queue(_Config) ->
     TransportId = make_transport_id(),
     RealmUri = <<>>,
     SessionId = bondy_session_id:new(),
@@ -184,17 +184,23 @@ reply_buffering(_Config) ->
     _ = bondy_realm:create(RealmTestUri),
     ok = bondy_realm:disable_security(RealmTestUri),
 
-    %% Handle client message — this should produce a reply (WELCOME or ABORT)
-    %% which gets buffered since no SSE stream is connected
+    %% Handle client message — this produces a reply (WELCOME or ABORT) with no
+    %% SSE stream attached to take it, so it waits in the transport queue.
     ok = bondy_http_transport_session:handle_client_message(Pid, HelloBin),
 
-    %% Now register as SSE stream — buffered replies should be flushed
+    %% It is IN THE QUEUE, not in a buffer beside it. That is the property this
+    %% case now pins: a synchronous reply and a router delivery share one
+    %% structure, so they share one order.
+    ?assertEqual(1, bondy_http_transport_queue:count(TransportId)),
+
+    %% Attaching the stream wakes it; the reply drains like anything else,
+    %% rather than being flushed from a separate buffer first.
     ok = bondy_http_transport_session:register_sse_stream(Pid, self()),
 
-    %% We should receive the buffered sync_reply
     receive
-        {sync_reply, ReplyBin} when is_binary(ReplyBin) ->
-            %% The reply should be a valid WAMP message (WELCOME or ABORT)
+        drain_queue ->
+            [{encoded, ReplyBin}] =
+                bondy_http_transport_queue:dequeue_batch(TransportId, 10),
             {[Decoded], <<>>} = bondy_wamp_encoding:decode(
                 {http_sse, text, json}, ReplyBin
             ),
@@ -202,7 +208,7 @@ reply_buffering(_Config) ->
                 is_record(Decoded, welcome) orelse is_record(Decoded, abort)
             )
     after 2000 ->
-        ct:fail("Expected buffered sync_reply to be flushed")
+        ct:fail("Expected the attached stream to be told to drain")
     end,
 
     %% Cleanup

@@ -6,18 +6,18 @@
 -module(bondy_connect_transport_tls_SUITE).
 
 -moduledoc """
-M5 — **raw WAMP socket over TLS** integration tests against a live Bondy
-`wamp_tls` listener (port 18085, enabled in `bondy_ct`).
+What is specific to **raw WAMP over TLS**, against the live `wamp_tls` listener
+(port 18085, enabled in `bondy_ct`).
 
-- **Round trip**: a full register→call and a publish→event over TLS
-  (`verify_none`) prove the encrypted transport carries WAMP end to end — same
-  4-octet handshake and frames as TCP, over `ssl`.
-- **Secure by default is real**: with `verify_peer` and the test CA bundle
-  (`etc/ssl/server/cacert.pem`, regenerated via `just certs`) the handshake
-  performs genuine certificate-chain validation and a full WAMP round trip
-  succeeds over the verified link. Hostname checking is disabled
-  (`server_name_indication => disable`) because the server certificate's SAN is
-  `host.example.com`, not the dialed loopback IP.
+Carrying WAMP over this transport is not tested here — every WAMP use case runs
+on `tls` in `bondy_connect_conformance_SUITE`, and its specs already dial with
+`verify => verify_peer` and the test CA bundle, so the verified happy path is
+exercised by all of them rather than by one case here.
+
+What no other suite can assert is the **negative**: that verification refuses a
+chain it cannot anchor. A `verify_peer` that accepted anything would leave every
+one of those conformance runs green while providing no security at all, which is
+exactly the failure a positive round-trip cannot see.
 """.
 
 -include_lib("common_test/include/ct.hrl").
@@ -33,9 +33,7 @@ M5 — **raw WAMP socket over TLS** integration tests against a live Bondy
 
 all() ->
     [
-        tls_call_round_trip,
-        tls_pubsub_round_trip,
-        verify_peer_round_trip
+        verify_peer_rejects_untrusted_ca
     ].
 
 init_per_suite(Config) ->
@@ -56,95 +54,6 @@ end_per_suite(_) ->
 %% =============================================================================
 
 %% A full register→call works over the TLS transport.
-tls_call_round_trip(_) ->
-    Conn = connect(#{verify => verify_none}),
-    ?assertEqual(established, bondy_connect_client:status(Conn)),
-    {ok, _} = bondy_connect_client:register(
-        Conn, <<"com.example.res.tls">>, echo_handler()
-    ),
-    {ok, R} = bondy_connect_client:call(Conn, <<"com.example.res.tls">>, [
-        <<"hi">>
-    ]),
-    ?assertEqual([<<"hi">>], maps:get(args, R)),
-    ok = bondy_connect_client:disconnect(Conn).
-
-%% A subscribe→publish→event round trip works over the TLS transport, proving the
-%% EVENT path (not just request/response) survives the encrypted link.
-tls_pubsub_round_trip(_) ->
-    Topic = <<"com.example.res.tls.topic">>,
-    Self = self(),
-    Sub = connect(#{verify => verify_none}),
-    {ok, _} = bondy_connect_client:subscribe(Sub, Topic, event_handler(Self)),
-
-    Pub = connect(#{verify => verify_none}),
-    ok = bondy_connect_client:publish(Pub, Topic, [<<"ping">>]),
-
-    receive
-        {event, [<<"ping">>]} -> ok
-    after 5000 ->
-        ct:fail(no_event)
-    end,
-
-    ok = bondy_connect_client:disconnect(Sub),
-    ok = bondy_connect_client:disconnect(Pub).
-
-%% Secure-by-default verification is real: with `verify_peer` and the test CA
-%% bundle the TLS handshake validates the server's certificate chain and a full
-%% register→call round trip succeeds over the verified link. (Hostname checking
-%% is disabled because the server cert's SAN is `host.example.com`, not the
-%% dialed loopback IP.)
-verify_peer_round_trip(Config) ->
-    CACertFile = ?config(cacertfile, Config),
-    {ok, Conn} = bondy_connect_client:connect(#{
-        transport => tls,
-        endpoint => {?HOST, ?PORT},
-        realm => ?REALM,
-        auth => #{method => ?WAMP_ANON_AUTH},
-        serializers => [json],
-        tls => #{
-            verify => verify_peer,
-            cacertfile => CACertFile,
-            server_name_indication => disable
-        }
-    }),
-    ?assertEqual(established, bondy_connect_client:status(Conn)),
-    {ok, _} = bondy_connect_client:register(
-        Conn, <<"com.example.res.tls.vp">>, echo_handler()
-    ),
-    {ok, R} = bondy_connect_client:call(Conn, <<"com.example.res.tls.vp">>, [
-        <<"hi">>
-    ]),
-    ?assertEqual([<<"hi">>], maps:get(args, R)),
-    ok = bondy_connect_client:disconnect(Conn).
-
-%% =============================================================================
-%% HELPERS
-%% =============================================================================
-
-%% @private
-echo_handler() ->
-    fun(Args, _, _) -> {ok, #{args => Args}} end.
-
-%% @private An event handler that forwards each event's args to `Pid`.
-event_handler(Pid) ->
-    fun(Args, _, _) ->
-        Pid ! {event, Args},
-        ok
-    end.
-
-%% @private Connect over TLS with the given `tls` options merged in.
-connect(TLS) ->
-    {ok, Conn} = bondy_connect_client:connect(#{
-        transport => tls,
-        endpoint => {?HOST, ?PORT},
-        realm => ?REALM,
-        auth => #{method => ?WAMP_ANON_AUTH},
-        serializers => [json],
-        tls => TLS
-    }),
-    Conn.
-
-%% @private
 add_anon_realm(RealmUri) ->
     Cfg = #{
         uri => RealmUri,
@@ -174,3 +83,27 @@ add_anon_realm(RealmUri) ->
     },
     _ = bondy_realm:create(Cfg),
     ok.
+
+-doc """
+`verify_peer` without a CA that can anchor the server's chain fails, and fails
+in the TLS handshake rather than later.
+
+The server certificate is signed by the repo's test CA (`etc/ssl/server`,
+regenerated by `just certs`), which no system trust store holds — so omitting
+`cacertfile` leaves the client unable to build a chain. The alert is matched,
+not merely `{error, _}`: a connection that failed for a wrong port or a missing
+realm would satisfy a loose assertion just as well and prove nothing about
+verification.
+""".
+verify_peer_rejects_untrusted_ca(_) ->
+    ?assertMatch(
+        {error, {shutdown, {connect_error, {tls_alert, {unknown_ca, _}}}}},
+        bondy_connect_client:connect(#{
+            transport => tls,
+            endpoint => {?HOST, ?PORT},
+            realm => ?REALM,
+            auth => #{method => ?WAMP_ANON_AUTH},
+            serializers => [json],
+            tls => #{verify => verify_peer, server_name_indication => disable}
+        })
+    ).

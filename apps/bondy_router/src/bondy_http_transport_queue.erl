@@ -65,10 +65,22 @@ case is the one this module exists for.
   work coming IN, per WAMP flow, and sheds under its own capacity bound. A
   message passes through that pool once on ingress and arrives here only if its
   DESTINATION is an HTTP transport.
-- Not the only thing a `bondy_http_transport_session` holds. That process also
-  keeps a `reply_buffer` of already-ENCODED synchronous replies — the answers to
-  the client's own POSTs — which is a separate structure that none of the bounds
-  below apply to, and which `poll_receive` drains before this queue.
+- Not one of two queues per session any more. `bondy_http_transport_session`
+  used to keep the synchronous replies separately and drain them first; they
+  come here now, so there is one order and one set of bounds.
+
+## One queue
+
+A transport's output has two producers: the router, through `bondy:do_send/3`,
+and the protocol itself, which answers some inbound messages synchronously
+(`bondy_wamp_protocol:handle_inbound/2` returning `{reply, Bins, _}` — an
+inline ERROR, a throttle rejection). Both are output for the same client on
+the same transport, so both come here.
+
+They used to be separate: `bondy_http_transport_session` kept the synchronous
+replies in a `reply_buffer` field and drained it BEFORE this queue. That made
+the transport not a FIFO pipe — a reply produced later was delivered first —
+and left that half unbounded, outside every limit below.
 
 ## Sharding
 
@@ -117,7 +129,7 @@ a client will read in order.
 
 -record(bondy_http_transport_queue_entry, {
     key :: bondy_http_transport_queue_key(),
-    message :: wamp_message(),
+    message :: queued(),
     enqueued_at :: pos_integer(),
     size_bytes :: non_neg_integer()
 }).
@@ -134,7 +146,18 @@ a client will read in order.
 }.
 -type enqueue_opts() :: #{}.
 
+-doc """
+What a transport can hold for a client: a WAMP record the router delivered,
+or a reply the protocol already encoded.
+
+Both, because both are output for the same client on the same transport, and
+splitting them across two structures is what let a reply produced LATER be
+delivered FIRST. See the `One queue` section above.
+""".
+-type queued() :: wamp_message() | {encoded, binary()}.
+
 -export_type([enqueue_opts/0]).
+-export_type([queued/0]).
 
 %% API
 -export([init/0]).
@@ -284,7 +307,7 @@ Checks bounds before inserting and evicts oldest entries if the queue exceeds
 """.
 -spec enqueue(
     TransportId :: binary(),
-    Message :: wamp_message(),
+    Message :: queued(),
     Opts :: enqueue_opts()
 ) -> ok | {error, Reason :: term()}.
 
@@ -378,11 +401,23 @@ tables() ->
 %% =============================================================================
 
 %% @private
+%% `max_bytes' is a byte bound, so an already-encoded reply is measured as the
+%% bytes it is. `erlang:external_size/1' on the same binary reports the size of
+%% its EXTERNAL TERM encoding, larger and for no purpose here; it stays for a
+%% record, where there is nothing better to measure until a consumer encodes it.
+size_of({encoded, Bin}) ->
+    %% `erlang:' qualified: this module exports its own `byte_size/1', so the
+    %% bare call is an ambiguous auto-import.
+    erlang:byte_size(Bin);
+size_of(Message) ->
+    erlang:external_size(Message).
+
+%% @private
 do_enqueue(TransportId, Message, Meta) ->
     #bondy_http_transport_queue_meta{atomics = AtomicsRef} = Meta,
 
     %% Compute message size
-    MsgSize = erlang:external_size(Message),
+    MsgSize = size_of(Message),
 
     %% Allocate a sequence number (scheduler-local, zero contention)
     Seq = erlang:unique_integer([monotonic]),

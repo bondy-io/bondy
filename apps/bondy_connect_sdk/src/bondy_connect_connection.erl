@@ -84,7 +84,12 @@ authenticating and cleared on `established`. Progressive calls
     conn_sup :: pid(),
     transport_mod :: module(),
     transport :: term() | undefined,
-    subprotocol :: {raw, binary, atom()},
+    %% What the transport actually NEGOTIATED, set from `Mod:handshake/2`'s
+    %% reply; `undefined` until then. Not what was asked for — the request is
+    %% rebuilt from `config` by `subprotocol/1` on every handshake attempt, so
+    %% a reconnect always re-offers what the user configured rather than
+    %% whatever the previous attempt settled on.
+    subprotocol :: {raw, binary, atom()} | undefined,
     protocol :: bondy_connect_protocol:state(),
     session :: bondy_connect_session:t() | undefined,
     ready_waiters = [] :: [gen_statem:from()],
@@ -340,7 +345,6 @@ callback_mode() ->
 init({Config, ConnSup}) ->
     process_flag(trap_exit, true),
     Mod = transport_mod(maps:get(transport, Config, tcp)),
-    Sub = subprotocol(Config),
     {ok, Protocol} = bondy_connect_protocol:init(Config),
     Reconnect = maps:get(reconnect, Config, #{}),
     Ping = maps:get(ping, Config, #{}),
@@ -348,7 +352,6 @@ init({Config, ConnSup}) ->
         config = Config,
         conn_sup = ConnSup,
         transport_mod = Mod,
-        subprotocol = Sub,
         protocol = Protocol,
         registry = bondy_connect_registry:new(),
         dispatch = bondy_connect_dispatch:new(
@@ -423,12 +426,18 @@ waiting_for_network(EventType, Event, Data) ->
 handshaking(enter, _Old, Data) ->
     {keep_state, Data, [{state_timeout, 0, handshake}]};
 handshaking(state_timeout, handshake, Data) ->
-    #data{transport_mod = Mod, transport = T0, subprotocol = Sub} = Data,
-    case Mod:handshake(Sub, T0) of
-        {ok, _Negotiated, T1} ->
+    #data{transport_mod = Mod, transport = T0, config = Config} = Data,
+    %% The request comes from `config`, not from `subprotocol` — see the record
+    %% field. What comes back is what was negotiated, which for WebSocket is
+    %% the router's pick out of the offered list and need not be the first one
+    %% asked for; keeping it is what lets the field name mean what it says.
+    case Mod:handshake(subprotocol(Config), T0) of
+        {ok, Negotiated, T1} ->
             ok = Mod:setopts([{active, once}], T1),
             {ok, Hello, P1} = bondy_connect_protocol:start(Data#data.protocol),
-            Data1 = Data#data{transport = T1, protocol = P1},
+            Data1 = Data#data{
+                transport = T1, protocol = P1, subprotocol = Negotiated
+            },
             case Mod:send(Hello, T1) of
                 ok ->
                     {next_state, establishing, Data1};
@@ -2018,16 +2027,30 @@ transport_mod(tls) -> bondy_connect_transport_tls;
 transport_mod(uds) -> bondy_connect_transport_uds;
 transport_mod(ws) -> bondy_connect_transport_ws;
 transport_mod(wss) -> bondy_connect_transport_ws;
+transport_mod(longpoll) -> bondy_connect_transport_longpoll;
+transport_mod(longpolls) -> bondy_connect_transport_longpoll;
+transport_mod(sse) -> bondy_connect_transport_sse;
+transport_mod(sses) -> bondy_connect_transport_sse;
 transport_mod(local) -> bondy_connect_local;
 transport_mod(Other) -> error({unsupported_transport, Other}).
 
-%% @private
+%% @private The subprotocol to REQUEST, built fresh from the user's spec on
+%% every handshake attempt.
+%%
+%% Only the first serializer reaches the raw transports, which offer exactly
+%% one; the WebSocket transport ignores this and offers the whole list from its
+%% own options, so for it this value is only a floor.
 subprotocol(Config) ->
     Serializers = maps:get(serializers, Config, [json]),
     Enc = hd(Serializers),
     {raw, binary, Enc}.
 
 %% @private
+%% A CLOSED map, and the second of two: `bondy_connect_config:validate/1' builds
+%% one from the user's spec and this builds another from that. A transport
+%% option has to be named in BOTH or it never arrives, and nothing reports the
+%% gap — the transport simply applies its own default. Adding a transport option
+%% means adding it here as well as there.
 endpoint(Config) ->
     Endpoint = maps:get(endpoint, Config),
     Opts = #{
@@ -2038,6 +2061,14 @@ endpoint(Config) ->
         scheme => maps:get(transport, Config, tcp),
         serializers => maps:get(serializers, Config, [json]),
         ws_path => maps:get(ws_path, Config, <<"/ws">>),
+        %% Consumed by the long-poll transport (ignored by the others).
+        longpoll_path =>
+            maps:get(longpoll_path, Config, <<"/wamp/longpoll">>),
+        longpoll_poll_timeout =>
+            maps:get(longpoll_poll_timeout, Config, 60000),
+        %% Consumed by the SSE transport (ignored by the others).
+        sse_path => maps:get(sse_path, Config, <<"/wamp/sse">>),
+        network_timeout => maps:get(network_timeout, Config, 15000),
         %% Consumed by the local (in-VM) transport, which opens the session
         %% itself; ignored by the socket transports.
         realm => maps:get(realm, Config, undefined),

@@ -10,11 +10,15 @@ A `cowboy_loop` handler for SSE (Server-Sent Events) streams.
 Handles GET /wamp/sse/:transport_id/receive. Opens a long-lived SSE connection
 that delivers WAMP messages to the client as SSE events.
 
-Messages arrive via two paths:
-1. Sync replies (WELCOME, CHALLENGE, ABORT) from `handle_inbound` — delivered
-   as `{sync_reply, Bin}` messages directly from the transport session
-2. Async messages (EVENT, INVOCATION, etc.) — drained from the transport queue
-   on `drain_queue` notifications
+Messages arrive by ONE path: `drain_queue` notifications, drained from
+`bondy_http_transport_queue`. That queue holds both what the router delivered
+(EVENT, INVOCATION) and what the protocol answered synchronously (WELCOME,
+CHALLENGE, ABORT, an inline ERROR), so the order the client sees is the order
+they were produced.
+
+They used to arrive by two paths, the synchronous replies bypassing the queue as
+`{sync_reply, Bin}` — which is how a reply produced later reached the client
+first.
 
 Keepalive SSE comments are sent periodically to prevent intermediaries from
 closing the connection, unless the listener's resolved `sse.ping.enabled` is
@@ -133,14 +137,6 @@ init(Req0, Opts) ->
             end
     end.
 
-info({sync_reply, Bin}, Req, State) ->
-    %% Bin may be iodata; cow_sse scans `data` for newlines, so flatten.
-    ok = cowboy_req:stream_events(
-        #{event => <<"wamp">>, data => iolist_to_binary(Bin)},
-        nofin,
-        Req
-    ),
-    {ok, Req, State};
 info(drain_queue, Req, #state{transport_id = TransportId} = State) ->
     Messages = bondy_http_transport_queue:dequeue_batch(
         TransportId, ?DRAIN_BATCH_SIZE
@@ -257,9 +253,19 @@ send_wamp_events(Messages, Req, #state{encoding = Encoding}) ->
         fun(Msg) ->
             %% cow_sse scans `data` for newlines, so flatten here (SSE is
             %% not a hot path).
-            Bin = iolist_to_binary(bondy_wamp_encoding:encode(Msg, Encoding)),
-            #{event => <<"wamp">>, data => Bin}
+            #{
+                event => <<"wamp">>,
+                data => iolist_to_binary(data(Msg, Encoding))
+            }
         end,
         Messages
     ),
     cowboy_req:stream_events(Events, nofin, Req).
+
+%% @private
+%% The queue carries both shapes: a reply the protocol already encoded, and a
+%% record the router delivered for this side to encode.
+data({encoded, Bin}, _Encoding) ->
+    Bin;
+data(Msg, Encoding) ->
+    bondy_wamp_encoding:encode(Msg, Encoding).

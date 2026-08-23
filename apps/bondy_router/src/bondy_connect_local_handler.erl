@@ -86,10 +86,32 @@ handle_info(_Info, #local_session{}) ->
 
 -spec close(term()) -> ok.
 
-close(#local_session{session = Session}) ->
+%% Two cleanups, not one, and in this order — the same pair
+%% `bondy_wamp_protocol:terminate/1' performs for every socket transport.
+%%
+%% `bondy_session_manager:close/1' retires the session record. It does NOT
+%% touch the registry: it demonitors the owner with `[flush]' and then calls
+%% `bondy_session:close/2', which deletes the session rows, purges counters and
+%% revokes tickets. Removing the session's registrations and subscriptions is
+%% `bondy_context:close/1''s job, via `bondy_router:flush/2'.
+%%
+%% Calling only the first left every registration an in-VM callee had made
+%% routable after it disconnected, so a later CALL was dispatched to a dead
+%% process and the caller waited out its timeout with no error to explain it.
+%% Demonitoring with `[flush]' is what makes it permanent: it removes the
+%% `DOWN' whose handler would otherwise have flushed the registry.
+%%
+%% They run independently so that one raising cannot skip the other.
+close(#local_session{session = Session, context = Ctxt}) ->
     _ =
         try
             bondy_session_manager:close(Session)
+        catch
+            _:_ -> ok
+        end,
+    _ =
+        try
+            bondy_context:close(Ctxt)
         catch
             _:_ -> ok
         end,
