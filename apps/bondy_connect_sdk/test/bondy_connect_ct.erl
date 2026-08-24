@@ -245,7 +245,8 @@ drop_sessions(Transport) ->
     Pids = [
         P
      || S <- sessions(realm(Transport)),
-        is_pid(P = bondy_session:pid(S))
+        P <- [bondy_session:pid(S)],
+        is_pid(P)
     ],
     _ = [exit(P, kill) || P <- Pids],
     length(Pids).

@@ -1448,21 +1448,21 @@ external_carrier_module_is_resolved_test() ->
     %% which module serves it. Two env keys rather than one is the price of the
     %% dependency being expressible only once.
     ok = application:set_env(bondy_router, http_services, [
-        {mcp, #{carrier => mcp, protocol => mcp}}
+        {acme, #{carrier => acme, protocol => acme}}
     ]),
-    ok = application:set_env(bondy_router, http_carriers, [{mcp, bondy_mcp}]),
+    ok = application:set_env(bondy_router, http_carriers, [{acme, bondy_acme}]),
     try
         Inventory = [
             {pub, #{
                 transport => tcp,
                 protocol => http,
                 port => 18080,
-                services => [mcp]
+                services => [acme]
             }}
         ],
         {ok, [L]} = bondy_listener_config:resolve(Inventory, empty_get()),
         ?assertMatch(
-            #{mcp := #{module := bondy_mcp, protocols := [mcp]}},
+            #{acme := #{module := bondy_acme, protocols := [acme]}},
             maps:get(carriers, L)
         )
     after
