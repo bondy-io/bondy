@@ -465,8 +465,12 @@ service_spec(admin) ->
 service_spec(metrics) ->
     #{carrier => metrics, protocol => undefined};
 service_spec(Other) ->
-    %% Extension point: an app outside bondy_router (e.g. bondy_mcp) registers
-    %% its services here rather than in this table.
+    %% Extension point for an application shipped OUTSIDE the Bondy release.
+    %% A service that ships inside the release belongs in the literal clauses
+    %% above: this env is readable only before the inventory resolves (a
+    %% dependent app's start/2 is too late), and an external carrier gets no
+    %% ?CARRIER_DEFAULTS row and no schema mappings, so its per-listener
+    %% config always resolves to `#{}'.
     case lists:keyfind(Other, 1, external_services()) of
         {Other, Spec} -> Spec;
         false -> error
