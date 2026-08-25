@@ -210,7 +210,7 @@ open_session(Protocol, Req0, State) ->
                     ),
                     {ok, Req1, State};
                 {error, Reason} ->
-                    bondy_http_transport_session:close(Pid),
+                    bondy_http_transport_session:close(Pid, init_failed),
                     ?LOG_ERROR(#{
                         description => "Failed to init protocol",
                         transport_id => TransportId,

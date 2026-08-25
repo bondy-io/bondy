@@ -85,6 +85,22 @@ For Longpoll transports, the gen_server additionally manages:
 <li>Blocking `poll_receive' calls with configurable timeout</li>
 <li>Reply buffering for sync replies before a poll_receive call arrives</li>
 </ul>
+
+== Lifecycle telemetry ==
+
+`terminate/2' emits `[bondy, http_transport, session, closed]'
+unconditionally (the node's telemetry discipline), carrying the transport
+facts, the session lifetime, and the stop reason classified to an atom:
+a `{shutdown, Tag}' stop answers `Tag' — so `close/2' callers and the
+inactivity check name their reason (`client_close', `idle_timeout', ...) —
+`normal'/`shutdown' pass through, and anything else is `crash'. The event
+also carries the opaque `metadata' map a transport handler registered via
+`set_telemetry_metadata/2' (or `undefined'): a consumer such as the MCP
+gateway matches on its own metadata key to account only its sessions.
+
+Because `init/1' traps exits, `terminate/2' — and therefore the event —
+runs for every stop return, `close/2' call, and parent shutdown; only a
+brutal `kill' skips it.
 """.
 
 -behaviour(gen_server).
@@ -107,13 +123,32 @@ For Longpoll transports, the gen_server additionally manages:
     sse_monitor :: optional(reference()),
     poll_from :: optional(gen_server:from()),
     poll_timer :: optional(reference()),
-    auth_claims :: optional(map())
+    auth_claims :: optional(map()),
+    %% Whether a connected SSE stream exempts the session from the
+    %% inactivity check (the WAMP SSE transport's semantics, and the
+    %% default). A transport whose held stream is an accessory rather
+    %% than the client's whole connection — MCP's handshake-era GET
+    %% stream — sets `sse_counts_as_activity => false` so that only
+    %% explicit `touch/1` calls keep the session alive.
+    sse_activity = true :: boolean(),
+    %% Opaque map a transport handler registers via
+    %% `set_telemetry_metadata/2`; carried verbatim on the lifecycle
+    %% telemetry event. This module never reads it.
+    telemetry_metadata :: optional(map()),
+    %% Opaque state a transport handler attaches via `with_state/2`.
+    %% This module never reads it.
+    handler_state :: any()
 }).
+
+-type opts() :: #{sse_counts_as_activity => boolean()}.
+-export_type([opts/0]).
 
 %% API
 -export([auth_claims/1]).
--export([start_link/3]).
+-export([start_link/4]).
 -export([close/1]).
+-export([close/2]).
+-export([set_telemetry_metadata/2]).
 -export([encoding/1]).
 -export([handle_client_message/2]).
 -export([init_protocol/3]).
@@ -121,8 +156,10 @@ For Longpoll transports, the gen_server additionally manages:
 -export([poll_receive/2]).
 -export([request_poll/2]).
 -export([register_sse_stream/2]).
+-export([register_sse_stream/3]).
 -export([set_auth_claims/2]).
 -export([whereis/1]).
+-export([with_state/2]).
 -export([touch/1]).
 
 %% GEN_SERVER CALLBACKS
@@ -145,46 +182,86 @@ Starts a transport session gen_server.
 
 Registers with gproc as `{http_transport, TransportId}` and initialises the
 transport queue via `bondy_http_transport_queue:init_transport/3`.
+
+`Opts` may carry `sse_counts_as_activity` (default `true`): whether a
+connected SSE stream by itself exempts the session from the inactivity
+check — see the state field's comment.
 """.
 -spec start_link(
     TransportId :: binary(),
     RealmUri :: uri(),
-    SessionId :: bondy_session_id:t()
+    SessionId :: bondy_session_id:t(),
+    Opts :: opts()
 ) -> {ok, pid()} | {error, term()}.
 
-start_link(TransportId, RealmUri, SessionId) when
-    is_binary(TransportId)
+start_link(TransportId, RealmUri, SessionId, Opts) when
+    is_binary(TransportId), is_map(Opts)
 ->
     gen_server:start_link(
         ?MODULE,
-        [TransportId, RealmUri, SessionId],
+        [TransportId, RealmUri, SessionId, Opts],
         []
     ).
 
 -doc """
-Gracefully closes a transport session.
-
-Accepts either a pid or a `TransportId` binary. Unregisters gproc, deletes
-the transport queue, and stops the gen_server.
+Gracefully closes a transport session with reason `client_close`.
+Equivalent to `close(PidOrId, client_close)`.
 """.
 -spec close(pid() | binary()) -> ok.
 
-close(Pid) when is_pid(Pid) ->
+close(PidOrId) ->
+    close(PidOrId, client_close).
+
+-doc """
+Gracefully closes a transport session. Accepts either a pid or a
+`TransportId` binary. Unregisters gproc, deletes the transport queue,
+and stops the gen_server with `{shutdown, Reason}`, so `Reason` names
+the close on the lifecycle telemetry event (see the moduledoc). The
+supervisor's restart strategy is `temporary`, so no stop reason triggers
+a restart.
+""".
+-spec close(pid() | binary(), Reason :: atom()) -> ok.
+
+close(Pid, Reason) when is_pid(Pid), is_atom(Reason) ->
     try
-        gen_server:stop(Pid, normal, 5000)
+        gen_server:stop(Pid, {shutdown, Reason}, 5000)
     catch
+        %% `gen:stop/3` on a dead pid exits the caller with a BARE
+        %% `noproc`; when the server terminates with a different reason
+        %% while the request is in flight (e.g. a racing close or the
+        %% inactivity check) the caller exits with
+        %% `{ActualReason, {sys, terminate, _}}`. Either way the goal —
+        %% the session is down — is met.
+        exit:noproc ->
+            ok;
         exit:{noproc, _} ->
             ok;
         exit:{normal, _} ->
+            ok;
+        exit:{shutdown, _} ->
+            ok;
+        exit:{{shutdown, _}, _} ->
             ok
     end;
-close(TransportId) when is_binary(TransportId) ->
+close(TransportId, Reason) when is_binary(TransportId) ->
     case ?MODULE:whereis(TransportId) of
         undefined ->
             ok;
         Pid ->
-            close(Pid)
+            close(Pid, Reason)
     end.
+
+-doc """
+Registers the opaque metadata map carried on this session's lifecycle
+telemetry event (see the moduledoc). A synchronous call by design: a
+handler that announces "session opened" only after this returns knows
+that any later stop event for this session carries the metadata — so an
+open it accounted is never missed by its close accounting.
+""".
+-spec set_telemetry_metadata(pid(), map()) -> ok.
+
+set_telemetry_metadata(Pid, Metadata) when is_pid(Pid), is_map(Metadata) ->
+    gen_server:call(Pid, {set_telemetry_metadata, Metadata}).
 
 -doc """
 Looks up the pid of the transport session registered for `TransportId`.
@@ -243,20 +320,66 @@ handle_client_message(Pid, Data) when is_pid(Pid) andalso is_binary(Data) ->
     gen_server:call(Pid, {client_message, Data}).
 
 -doc """
-Registers the SSE stream pid with the transport session.
-
-The SSE stream handler calls this after connecting. Any buffered sync replies
-are flushed to the stream pid immediately.
+Registers the SSE stream pid with the transport session, replacing any
+previously registered stream. Equivalent to `register_sse_stream/3` with
+`mode => replace`.
 """.
 -spec register_sse_stream(
     SessionPid :: pid(),
     StreamPid :: pid()
 ) -> ok.
 
-register_sse_stream(SessionPid, StreamPid) when
-    is_pid(SessionPid) andalso is_pid(StreamPid)
+register_sse_stream(SessionPid, StreamPid) ->
+    ok = register_sse_stream(SessionPid, StreamPid, #{mode => replace}).
+
+-doc """
+Registers the SSE stream pid with the transport session.
+
+The SSE stream handler calls this after connecting; the session then
+notifies the stream (`drain_queue`) whenever the transport queue has
+content.
+
+`mode => replace` (the default) replaces a previously registered stream —
+the WAMP SSE transport's reconnect semantics. `mode => exclusive` refuses
+with `{error, already_registered}` while a previously registered stream
+is still alive — for transports that allow one held stream per session
+(MCP's handshake-era GET stream answers it with `409 Conflict`). A dead
+predecessor never blocks: liveness is checked here because the `DOWN`
+that clears the registration may still be queued behind this call.
+""".
+-spec register_sse_stream(
+    SessionPid :: pid(),
+    StreamPid :: pid(),
+    Opts :: #{mode => replace | exclusive}
+) -> ok | {error, already_registered}.
+
+register_sse_stream(SessionPid, StreamPid, Opts) when
+    is_pid(SessionPid) andalso is_pid(StreamPid) andalso is_map(Opts)
 ->
-    gen_server:call(SessionPid, {register_sse_stream, StreamPid}).
+    Mode = maps:get(mode, Opts, replace),
+    gen_server:call(SessionPid, {register_sse_stream, StreamPid, Mode}).
+
+-doc """
+Runs `Fun(HandlerState)` inside the session process and stores the new
+handler state it returns. The handler state is opaque to this module: a
+transport handler (e.g. the MCP handshake era) keeps its per-session
+state here so that updates from concurrent HTTP request processes are
+serialized by this gen_server, and so that code needing to run in the
+session process — such as `bondy_session_manager:open/3`, whose monitor
+must target this process — has a place to run.
+
+A raising closure answers `{error, {Class, Reason}}` and leaves the
+handler state unchanged; it never terminates the session.
+""".
+-spec with_state(
+    Pid :: pid(),
+    Fun :: fun((HandlerState :: any()) -> {Reply :: any(), any()})
+) -> {ok, Reply :: any()} | {error, {atom(), any()}}.
+
+with_state(Pid, Fun) when is_pid(Pid), is_function(Fun, 1) ->
+    %% The closure may itself make a 15s-bounded call
+    %% (`bondy_session_manager:open/3`), so the outer timeout exceeds it.
+    gen_server:call(Pid, {with_state, Fun}, 30000).
 
 -doc """
 Notifies the transport session that a message was enqueued.
@@ -339,7 +462,7 @@ auth_claims(Pid) when is_pid(Pid) ->
 %% GEN_SERVER CALLBACKS
 %% =============================================================================
 
-init([TransportId, RealmUri, SessionId]) ->
+init([TransportId, RealmUri, SessionId, Opts]) ->
     process_flag(trap_exit, true),
 
     %% Register with gproc
@@ -361,7 +484,8 @@ init([TransportId, RealmUri, SessionId]) ->
                 session_id = SessionId,
                 created_at = Now,
                 last_activity = Now,
-                transport_ttl = TTL
+                transport_ttl = TTL,
+                sse_activity = maps:get(sse_counts_as_activity, Opts, true)
             },
 
             ok = schedule_inactivity_check(State),
@@ -430,14 +554,49 @@ handle_call({client_message, Data}, _From, State) ->
             }),
             {reply, {error, Reason}, State}
     end;
-handle_call({register_sse_stream, StreamPid}, _From, State) ->
-    MonRef = erlang:monitor(process, StreamPid),
-    S1 = State#state{sse_pid = StreamPid, sse_monitor = MonRef},
-    %% Anything produced before the stream attached is in the queue, in order,
-    %% so the stream drains it like everything else instead of being handed a
-    %% separate buffer first.
-    ok = notify_enqueue(State#state.transport_id),
-    {reply, ok, S1};
+handle_call({register_sse_stream, StreamPid, Mode}, _From, State) ->
+    Prev = State#state.sse_pid,
+    case
+        Mode == exclusive andalso is_pid(Prev) andalso is_process_alive(Prev)
+    of
+        true ->
+            {reply, {error, already_registered}, State};
+        false ->
+            %% Replacing (or succeeding a dead stream): release the old
+            %% monitor, or its eventual DOWN would clear the NEW
+            %% registration.
+            case State#state.sse_monitor of
+                undefined -> ok;
+                OldRef -> erlang:demonitor(OldRef, [flush])
+            end,
+            MonRef = erlang:monitor(process, StreamPid),
+            S1 = State#state{sse_pid = StreamPid, sse_monitor = MonRef},
+            %% Anything produced before the stream attached is in the queue,
+            %% in order, so the stream drains it like everything else instead
+            %% of being handed a separate buffer first.
+            ok = notify_enqueue(State#state.transport_id),
+            {reply, ok, S1}
+    end;
+handle_call({with_state, Fun}, _From, State) ->
+    try Fun(State#state.handler_state) of
+        {Reply, HandlerState} ->
+            {reply, {ok, Reply}, State#state{handler_state = HandlerState}};
+        Other ->
+            %% A non-matching `of` pattern raises OUTSIDE this try's own
+            %% catch, so the contract violation is answered explicitly
+            %% rather than crashing the session.
+            {reply, {error, {bad_return, Other}}, State}
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Transport handler closure raised",
+                transport_id => State#state.transport_id,
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            {reply, {error, {Class, Reason}}, State}
+    end;
 handle_call({poll_receive, Timeout}, From, State) ->
     %% One queue, so one read. Return one item at a time: the longpoll handler
     %% is unbatched and consumes only the first, so the rest must stay queued.
@@ -454,6 +613,8 @@ handle_call({poll_receive, Timeout}, From, State) ->
             S1 = State#state{poll_from = From, poll_timer = TimerRef},
             {noreply, S1}
     end;
+handle_call({set_telemetry_metadata, Metadata}, _From, State) ->
+    {reply, ok, State#state{telemetry_metadata = Metadata}};
 handle_call(encoding, _From, State) ->
     {reply, State#state.encoding, State};
 handle_call(auth_claims, _From, State) ->
@@ -565,11 +726,15 @@ handle_info(
         sse_monitor = undefined
     },
     {noreply, S1};
-handle_info(check_inactivity, #state{sse_pid = SsePid} = State) when
-    is_pid(SsePid)
-->
-    %% An SSE stream is connected — the session is actively serving events,
-    %% so skip the inactivity check and reschedule.
+handle_info(
+    check_inactivity,
+    #state{sse_pid = SsePid, sse_activity = true} = State
+) when is_pid(SsePid) ->
+    %% An SSE stream is connected and this transport counts it as
+    %% activity (the default — the WAMP SSE transport's semantics), so
+    %% skip the inactivity check and reschedule. A transport started with
+    %% `sse_counts_as_activity => false` falls through to the normal
+    %% check: its held stream does not keep the session alive.
     ok = schedule_inactivity_check(State),
     {noreply, State};
 handle_info(check_inactivity, State) ->
@@ -590,7 +755,7 @@ handle_info(check_inactivity, State) ->
                 elapsed_ms => Elapsed,
                 transport_ttl => TTL
             }),
-            {stop, normal, State};
+            {stop, {shutdown, idle_timeout}, State};
         false ->
             ok = schedule_inactivity_check(State),
             {noreply, State}
@@ -602,7 +767,12 @@ handle_info(Info, State) ->
     }),
     {noreply, State}.
 
-terminate(_Reason, #state{transport_id = TransportId} = State) ->
+terminate(Reason, #state{transport_id = TransportId} = State) ->
+    %% Lifecycle event before any cleanup step. `emit_closed/2` is total
+    %% (its try/catch swallows everything), so it cannot endanger the
+    %% queue-cleanup guarantee below.
+    ok = emit_closed(Reason, State),
+
     %% Cleanup transport queue FIRST — this is the most important cleanup
     %% (without it, queue entries and the meta row leak until the eviction
     %% sweep ages them out). Running it first guarantees it happens even if
@@ -754,3 +924,33 @@ signal_sse_stop(FinalBins, #state{sse_pid = SsePid}) when is_pid(SsePid) ->
     SsePid ! {stop_stream, FinalBins};
 signal_sse_stop(_FinalBins, _State) ->
     ok.
+
+%% @private
+%% Total: the lifecycle event must never fail `terminate/2`.
+emit_closed(Reason, State) ->
+    try
+        Now = erlang:system_time(millisecond),
+        telemetry:execute(
+            [bondy, http_transport, session, closed],
+            #{count => 1, duration => Now - State#state.created_at},
+            #{
+                transport_id => State#state.transport_id,
+                realm => State#state.realm_uri,
+                session_id => State#state.session_id,
+                reason => close_reason(Reason),
+                metadata => State#state.telemetry_metadata
+            }
+        )
+    catch
+        _:_ ->
+            ok
+    end.
+
+%% @private
+%% A `{shutdown, Tag}` stop names its close reason; plain graceful stops
+%% pass through; anything else is a crash.
+close_reason(normal) -> normal;
+close_reason(shutdown) -> shutdown;
+close_reason({shutdown, Tag}) when is_atom(Tag) -> Tag;
+close_reason({shutdown, _}) -> shutdown;
+close_reason(_) -> crash.

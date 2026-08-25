@@ -30,7 +30,8 @@ parser_test_() ->
         fun wamp_procedure_must_be_a_valid_exact_uri/0,
         fun duplicate_names_reject_the_document/0,
         fun one_invalid_entry_rejects_the_document/0,
-        fun template_consistency/0
+        fun template_consistency/0,
+        fun redaction_policy/0
     ]}.
 
 %% =============================================================================
@@ -265,3 +266,45 @@ template_consistency() ->
         {error, missing_result_schema},
         parse(doc([maps:remove(<<"result_kwargs_schema">>, template())]))
     ).
+
+redaction_policy() ->
+    %% §14.3: the audit redaction policy normalizes to a canonical
+    %% (deduplicated, sorted) field list.
+    {ok, #{entries := [E]}} = parse(
+        doc([
+            tool(#{
+                <<"redaction">> => #{
+                    <<"fields">> => [<<"ssn">>, <<"card">>, <<"ssn">>]
+                }
+            })
+        ])
+    ),
+    ?assertEqual(
+        #{fields => [<<"card">>, <<"ssn">>]}, maps:get(redaction, E)
+    ),
+    %% An entry without one carries no key at all.
+    {ok, #{entries := [Plain]}} = parse(doc([tool()])),
+    ?assertNot(maps:is_key(redaction, Plain)),
+    %% Anything but a one-key object with a non-empty list of non-empty
+    %% binaries rejects the document.
+    Invalid = [
+        [<<"ssn">>],
+        #{<<"fields">> => []},
+        #{<<"fields">> => [<<>>]},
+        #{<<"fields">> => [ssn]},
+        #{<<"fields">> => [<<"ssn">>], <<"mode">> => <<"hash">>}
+    ],
+    _ = [
+        ?assertMatch(
+            {error, {invalid_value, {<<"redaction">>, _}}},
+            parse(doc([tool(#{<<"redaction">> => R})]))
+        )
+     || R <- Invalid
+    ],
+    %% Templates carry it too.
+    {ok, #{entries := [T]}} = parse(
+        doc([
+            template(#{<<"redaction">> => #{<<"fields">> => [<<"id">>]}})
+        ])
+    ),
+    ?assertEqual(#{fields => [<<"id">>]}, maps:get(redaction, T)).

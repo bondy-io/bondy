@@ -20,6 +20,7 @@ automatically restarted.
 %% API
 -export([start_link/0]).
 -export([start_child/3]).
+-export([start_child/4]).
 
 %% SUPERVISOR CALLBACKS
 -export([init/1]).
@@ -46,7 +47,21 @@ Starts a new transport session under this supervisor.
 ) -> {ok, pid()} | {error, term()}.
 
 start_child(TransportId, RealmUri, SessionId) ->
-    supervisor:start_child(?MODULE, [TransportId, RealmUri, SessionId]).
+    start_child(TransportId, RealmUri, SessionId, #{}).
+
+-doc """
+Starts a new transport session with options — see
+`bondy_http_transport_session:start_link/4` for the accepted keys.
+""".
+-spec start_child(
+    TransportId :: binary(),
+    RealmUri :: uri(),
+    SessionId :: bondy_session_id:t(),
+    Opts :: bondy_http_transport_session:opts()
+) -> {ok, pid()} | {error, term()}.
+
+start_child(TransportId, RealmUri, SessionId, Opts) ->
+    supervisor:start_child(?MODULE, [TransportId, RealmUri, SessionId, Opts]).
 
 %% =============================================================================
 %% SUPERVISOR CALLBACKS

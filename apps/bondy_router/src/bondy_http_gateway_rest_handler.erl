@@ -280,11 +280,18 @@ expires(Req, St) ->
     %% TODO add feature to spec
     {false, Req, St}.
 
--doc "Always returns `false`; rate limiting is not yet implemented.".
+-doc """
+`cowboy_rest` rate-limiting hook: consumes one `http`-class token for the
+request's source IP (`security.rate_limit`, off by default) — the same
+inbound throttle the WS and raw-socket handlers apply per connection,
+applied here per request. Throttled requests answer `429` with a
+`retry-after` of one second, the class's refill granularity.
+""".
 rate_limited(Req, St) ->
-    %% TODO implement this callback
-    %% Result :: false | {true, RetryAfter}
-    {false, Req, St}.
+    case bondy_http_utils:throttle(http, Req) of
+        ok -> {false, Req, St};
+        throttled -> {{true, 1}, Req, St}
+    end.
 
 -doc """
 Determines whether the resource exists.

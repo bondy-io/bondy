@@ -221,6 +221,12 @@
     <<"bondy.error.http_gateway.invalid_expression">>
 ).
 -define(BONDY_ERROR_INTERNAL, <<"bondy.error.internal_error">>).
+%% A callee's MRTR signal (bondy_mcp design §11.1): "I need more input
+%% before I can complete" — the MCP gateway turns it into an
+%% `InputRequiredResult` rather than an error. Kwargs: `input_requests`
+%% (map of key => ElicitRequest | CreateMessageRequest | ListRootsRequest)
+%% and/or `state` (the callee's opaque continuation), at least one present.
+-define(BONDY_ERROR_MCP_INPUT_REQUIRED, <<"bondy.error.mcp.input_required">>).
 -define(BONDY_ERROR_NOT_FOUND, <<"bondy.error.not_found">>).
 -define(BONDY_ERROR_NOT_IN_SESSION, <<"bondy.error.not_in_session">>).
 -define(BONDY_ERROR_TIMEOUT, <<"bondy.error.timeout">>).

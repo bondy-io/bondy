@@ -35,6 +35,10 @@ serves every realm the principal can authenticate into.
 routes(mcp, #{config := Config}, Listener) ->
     St = #{
         listener => maps:get(name, Listener),
+        %% Descriptive only, for the §14.1 audit record: the listener a
+        %% request arrived on and its transport are a control an auditor
+        %% evidences; §6 forbids them from affecting authorization.
+        transport => maps:get(transport, Listener),
         %% The public origin, for documents that must publish one. The
         %% operator's `public_base_uri' wins outright; `undefined' means
         %% derive it per request — host from the request, scheme below.

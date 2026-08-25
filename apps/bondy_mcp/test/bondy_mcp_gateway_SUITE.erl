@@ -38,7 +38,8 @@ all() ->
         name_collision_exposes_neither_and_alarms,
         manifest_rebuilds_on_interface_change,
         ttl_is_the_rebuild_backstop,
-        unknown_realm_never_grows_the_cache
+        unknown_realm_never_grows_the_cache,
+        metrics_manifest_series
     ].
 
 init_per_suite(Config) ->
@@ -308,11 +309,18 @@ name_collision_exposes_neither_and_alarms(_) ->
     }),
     ok = bondy_mcp_gateway:load(doc(<<"gw_col_overlay">>, [tool(P2, P1)])),
 
+    Col0 = mval(bondy_mcp_manifest_collisions_total, collision_label()),
     #{entries := Entries} = fresh_manifest(?REALM),
     %% Neither the base P2 tool nor the overlay's P2-named tool survives;
     %% P1's base entry was replaced by the overlay claim on P1.
     ?assertNot(maps:is_key(P2, Entries)),
     ?assertNot(maps:is_key(P1, Entries)),
+    %% The rebuild counted its collision (§15.1); `>=` because a
+    %% debounced rebuild racing this read counts it again.
+    ?assert(
+        mval(bondy_mcp_manifest_collisions_total, collision_label()) >=
+            Col0 + 1
+    ),
     AlarmId = {bondy_mcp_name_collision, ?REALM, P2},
     ?assert(
         lists:keymember(AlarmId, 1, bondy_alarm_handler:get_alarms())
@@ -412,6 +420,75 @@ template(Name, Procedure) ->
 
 %% A manifest guaranteed to reflect the CURRENT store content: suites and
 %% earlier cases share the cache, so force a rebuild by expiring the cell.
+%% =============================================================================
+%% CASES — §15 manifest metrics (delta-based: the node is shared)
+%% =============================================================================
+
+metrics_manifest_series(_) ->
+    Node = bondy_config:node(),
+    Demand = #{node => Node, realm => ?REALM, trigger => demand},
+    DbEvent = #{node => Node, realm => ?REALM, trigger => db_event},
+    DurLabel = #{node => Node, realm => ?REALM},
+    ToolGauge = #{node => Node, realm => ?REALM, kind => tool},
+    D0 = mval(bondy_mcp_manifest_rebuilds_total, Demand),
+    E0 = mval(bondy_mcp_manifest_rebuilds_total, DbEvent),
+    H0 = hcount(bondy_mcp_manifest_rebuild_duration_microseconds, DurLabel),
+
+    %% Demand: an expired read rebuilds through the serialization point
+    %% (a swapped trigger label increments db_event instead and fails).
+    #{entries := Entries0} = fresh_manifest(?REALM),
+    ?assertEqual(D0 + 1, mval(bondy_mcp_manifest_rebuilds_total, Demand)),
+    ?assertEqual(
+        H0 + 1,
+        hcount(bondy_mcp_manifest_rebuild_duration_microseconds, DurLabel)
+    ),
+    Tools0 = census(Entries0, tool),
+    ?assertEqual(Tools0, mval(bondy_mcp_manifest_entries, ToolGauge)),
+
+    %% db_event: an overlay load reaches the rebuild via the debounced
+    %% change event, and the gauge follows the new census ABSOLUTELY —
+    %% a delta-writing gauge double-counts on this second rebuild.
+    Id = <<"gw_metrics_doc">>,
+    ok = bondy_mcp_gateway:load(
+        doc(Id, [tool(<<"metrics_tool">>, <<"com.bondy.mcp.gw.met.p1">>)])
+    ),
+    ok = wait_until(fun() ->
+        mval(bondy_mcp_manifest_rebuilds_total, DbEvent) >= E0 + 1
+    end),
+    ?assertEqual(Tools0 + 1, mval(bondy_mcp_manifest_entries, ToolGauge)),
+    ok = bondy_mcp_gateway:delete(Id),
+    ok = wait_until(fun() ->
+        mval(bondy_mcp_manifest_entries, ToolGauge) == Tools0
+    end).
+
+%% =============================================================================
+%% HELPERS — metrics
+%% =============================================================================
+
+collision_label() ->
+    #{
+        node => bondy_config:node(),
+        realm => ?REALM,
+        kind => name_collision
+    }.
+
+census(Entries, Kind) ->
+    length([K || #{kind := K} <- maps:values(Entries), K == Kind]).
+
+%% Current value of a counter/gauge cell, 0 when never touched.
+mval(Name, Label) ->
+    case bondy_metrics:value(#{name => Name, label => Label}) of
+        undefined -> 0;
+        V when is_integer(V) -> V
+    end.
+
+%% Observation count of a histogram cell, 0 when never touched.
+hcount(Name, Label) ->
+    case bondy_metrics:histogram_snapshot(#{name => Name, label => Label}) of
+        {ok, #{count := C}} -> C;
+        not_found -> 0
+    end.
+
 fresh_manifest(RealmUri) ->
     ok = expire(RealmUri),
     cached_manifest(RealmUri).

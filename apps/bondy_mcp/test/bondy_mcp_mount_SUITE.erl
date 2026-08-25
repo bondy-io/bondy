@@ -11,10 +11,13 @@ host the listener serves), a listener declaring `mcp` and `admin_api`
 together refuses to boot, and a per-listener `mcp.*` option reaches the
 route state through the manager's own configuration path.
 
-Deliberately the same lean environment as `bondy_listener_SUITE`: ranch and
-cowboy only, no `bondy_config:init/1` and no booted node — the subject is
-the listener machinery serving the `mcp` carrier, not MCP semantics, of
-which the stub has none.
+Runs on a booted node (`bondy_ct:start_bondy/0`): although the subject is
+the listener machinery, not MCP semantics, the mounting proof rides the
+real handler's realm check and the manager mounts the metrics stream
+handler — both need what a booted node seats (measured: the previously
+declared lean ranch+cowboy environment fails when the suite runs first
+in a fresh VM and was green in batteries only via an earlier suite's
+booted node).
 """.
 
 -include_lib("common_test/include/ct.hrl").
@@ -43,6 +46,15 @@ all() ->
     ].
 
 init_per_suite(Config) ->
+    %% A booted node, not the leaner ranch+cowboy environment this suite
+    %% originally declared: the mounting proof rides the real handler's
+    %% realm check (`no_such_realm`), and the manager mounts the cowboy
+    %% metrics stream handler whose per-request emission reads prometheus
+    %% families a booted node declares — measured 2026-08-26: standalone
+    %% (suite first in a fresh VM) both crash, and every green battery
+    %% run had ridden a previous suite's booted node. The case comments
+    %% below were already written for the shared-node reality.
+    bondy_ct:start_bondy(),
     {ok, _} = application:ensure_all_started(ranch),
     {ok, _} = application:ensure_all_started(cowboy),
     %% `bondy_listener_manager:init/0` appends the internal `admin_local`
@@ -94,14 +106,19 @@ mcp_listener_answers_the_stub_on_both_paths(_Config) ->
     ok = bondy_listener_manager:start(normal),
     Port = ranch:get_port(ct_mcp),
 
+    %% A GET on the JSON-RPC path reaches the real handler — since §21.8
+    %% GET is a real method (the handshake era's held stream), so the
+    %% mounting proof is the handler's own realm check: only OUR handler
+    %% answers `no_such_realm` for the URL's realm binding.
     Rpc = http_get(Port, "localhost", "/mcp/realm/com.example.test"),
-    ?assertMatch({501, _}, Rpc),
+    ?assertMatch({404, _}, Rpc),
     {_, RpcBody} = Rpc,
-    ?assertEqual(
-        {match, [<<"mcp_not_implemented">>]},
-        re:run(RpcBody, <<"mcp_not_implemented">>, [{capture, all, binary}])
+    ?assertMatch(
+        {match, _},
+        re:run(RpcBody, <<"no_such_realm">>, [{capture, all, binary}])
     ),
 
+    %% The OAuth metadata document is still the 501 stub.
     ?assertMatch(
         {501, _},
         http_get(
@@ -194,10 +211,15 @@ stub_answers_on_a_host_another_route_set_names(_Config) ->
         ?assertMatch(
             {204, _}, http_get(Port, "api.example.com", "/only-here")
         ),
-        %% ...and the MCP stub answers on that same named host.
+        %% ...and the MCP handler answers on that same named host (the
+        %% `no_such_realm` 404 for the URL's realm binding is OUR
+        %% handler's answer — see the stub case above).
+        {404, VhostBody} = http_get(
+            Port, "api.example.com", "/mcp/realm/com.example.test"
+        ),
         ?assertMatch(
-            {501, _},
-            http_get(Port, "api.example.com", "/mcp/realm/com.example.test")
+            {match, _},
+            re:run(VhostBody, <<"no_such_realm">>, [{capture, all, binary}])
         ),
 
         ok = bondy_listener_manager:stop(normal)

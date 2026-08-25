@@ -791,6 +791,7 @@ connected to any realm.
 -export([get_encryption_key/2]).
 -export([get_private_key/2]).
 -export([get_public_key/2]).
+-export([get_random_encryption_key/1]).
 -export([get_random_encryption_kid/1]).
 -export([get_random_kid/1]).
 -export([get_random_private_key/1]).
@@ -1313,8 +1314,11 @@ get_encryption_key(Uri, Kid) when is_binary(Uri) ->
 
 -doc """
 Returns the key id of one of the realm's encryption keys, chosen at random.
+
+See `get_random_encryption_key/1` for the stale-record trap this pairing
+has with `get_encryption_key/2`.
 """.
--spec get_random_encryption_kid(t() | uri()) -> map().
+-spec get_random_encryption_kid(t() | uri()) -> binary().
 
 get_random_encryption_kid(#realm{encryption_keys = Keys} = Realm0) when
     map_size(Keys) == 0
@@ -1329,6 +1333,30 @@ get_random_encryption_kid(#realm{encryption_keys = Keys}) ->
     lists:nth(rand:uniform(length(Kids)), Kids);
 get_random_encryption_kid(Uri) when is_binary(Uri) ->
     get_random_encryption_kid(fetch(Uri)).
+
+-doc """
+Returns a random encryption key as `{Kid, Key}`, generating (and
+persisting) the realm's encryption keys on first use if it has none yet.
+
+Use this in preference to the `get_random_encryption_kid/1` +
+`get_encryption_key/2` pair on the same realm record, for the reason
+`get_random_private_key/1` states: lazy generation means the picked kid may
+not be present in the in-hand stale `#realm{}` record.
+""".
+-spec get_random_encryption_key(t() | uri()) -> {binary(), map()}.
+
+get_random_encryption_key(#realm{encryption_keys = Keys} = Realm0) when
+    map_size(Keys) == 0
+->
+    Data = #{encryption_keys => gen_encryption_keys()},
+    Realm = merge_and_store(Realm0, Data, #{}),
+    get_random_encryption_key(Realm);
+get_random_encryption_key(#realm{encryption_keys = Keys}) ->
+    Kids = maps:keys(Keys),
+    Kid = lists:nth(rand:uniform(length(Kids)), Kids),
+    {Kid, jose_jwk:to_map(maps:get(Kid, Keys))};
+get_random_encryption_key(Uri) when is_binary(Uri) ->
+    get_random_encryption_key(fetch(Uri)).
 
 -doc """
 Returns the realm's properties as a map, with private key material stripped.

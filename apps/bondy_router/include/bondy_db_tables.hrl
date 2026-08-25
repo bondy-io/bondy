@@ -36,6 +36,11 @@
 %% flat bucket, source-map values — the MCP-facing naming/annotation layer
 %% joined with `bondy_interface` at manifest compile time.
 -define(BONDY_DB_MCP_GATEWAY_TAB, mcp_gateway).
+%% Upstream MCP tool pins (`bondy_mcp_upstream`): one key per
+%% {UpstreamName, ToolName} banded by realm, the value the pinned tool
+%% definition and its canonical-JSON content hash. Read on every
+%% projection pass to gate registration on drift.
+-define(BONDY_DB_MCP_UPSTREAM_TAB, mcp_upstream).
 -define(BONDY_DB_REGISTRY_ACTOR, '$bondy_registry').
 
 %% REGISTRY

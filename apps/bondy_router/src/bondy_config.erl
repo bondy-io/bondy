@@ -47,7 +47,12 @@ An implementation of the `app_config` behaviour.
         %% `_limit` bounds the page size, `_cursor` is the opaque wire cursor
         %% returned as a prior page's `cursor`.
         '_limit',
-        '_cursor'
+        '_cursor',
+        %% W3C Trace Context (`traceparent`/`tracestate`) and Baggage,
+        %% copied verbatim into INVOCATION.Details (see ?WAMP_TRACE_ATTRS).
+        '_traceparent',
+        '_tracestate',
+        '_baggage'
     ]},
     {cancel, [
         '_routing_key'
@@ -75,7 +80,12 @@ An implementation of the `app_config` behaviour.
     {publish, [
         %% The ttl for retained events
         '_retained_ttl',
-        '_routing_key'
+        '_routing_key',
+        %% W3C Trace Context (`traceparent`/`tracestate`) and Baggage,
+        %% copied verbatim into EVENT.Details (see ?WAMP_TRACE_ATTRS).
+        '_traceparent',
+        '_tracestate',
+        '_baggage'
     ]},
     {subscribe, [
         'x_disclose_session_info', '_disclose_session_info'
@@ -93,11 +103,19 @@ An implementation of the `app_config` behaviour.
     {goodbye, []},
     {error, []},
     {event, [
-        'x_session_info', '_session_info'
+        'x_session_info',
+        '_session_info',
+        '_traceparent',
+        '_tracestate',
+        '_baggage'
     ]},
     {call, []},
     {invocation, [
-        'x_session_info', '_session_info'
+        'x_session_info',
+        '_session_info',
+        '_traceparent',
+        '_tracestate',
+        '_baggage'
     ]},
     {result, []}
 ]).

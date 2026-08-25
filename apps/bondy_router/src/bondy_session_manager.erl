@@ -452,8 +452,21 @@ cleanup(Session) ->
         node => bondy_session:node(Session),
         ref => bondy_session:ref(Session)
     },
-    %% We close the session too
+    %% Flushes the session's registry entries (subscriptions and
+    %% registrations) via bondy_router:flush/2.
     bondy_context:close(FakeCtxt, crash),
+    %% And deletes the stored session itself — `bondy_context:close/2`
+    %% only flushes, so without this a connection that died WITHOUT the
+    %% graceful `close` cast (a crash, a kill, a dropped transport whose
+    %% handler never ran) leaked its session rows in ETS forever.
+    %% Guarded like `do_close/3`'s call: this path must never crash the
+    %% manager, which acts as a session supervisor.
+    _ =
+        try
+            bondy_session:close(Session, undefined)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 %% @private

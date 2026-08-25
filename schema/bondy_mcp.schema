@@ -40,3 +40,166 @@
   {datatype, {duration, ms}},
   {default, "1s"}
 ]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How long a `requestState` continuation (design §11, the spec's
+%% multi-round-trip mechanism) stays valid: an input-required tool call
+%% must be retried with its request state within this window or the retry
+%% is rejected. The bound on the specification's replay window — keep it
+%% short.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mcp.request_state.ttl", "bondy_mcp.request_state_ttl", [
+  {datatype, {duration, ms}},
+  {default, "5m"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The size bound on a `requestState` envelope, in both directions: a
+%% callee continuation that seals beyond it fails the tool call, and an
+%% inbound request state beyond it is rejected before any cryptography is
+%% attempted.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mcp.request_state.max_size", "bondy_mcp.request_state_max_size", [
+  {datatype, bytesize},
+  {default, "64KB"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Whether the per-tool `name` label rides the MCP call/read duration
+%% histograms (design §15.2). Off by default: durations aggregate to realm
+%% level, keeping the histogram series count independent of the manifest
+%% size. The call/read COUNTERS always carry the name.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mcp.metrics.label_by_name", "bondy_mcp.metrics_label_by_name", [
+  {datatype, flag},
+  {default, off}
+]}.
+
+%% =============================================================================
+%% UPSTREAM MCP SERVERS (design §13 — Bondy as MCP client)
+%% =============================================================================
+
+%% -----------------------------------------------------------------------------
+%% @doc The `http_connector` service this upstream rides: its `base_url`,
+%% TLS verification, connection pool, timeouts and token-acquisition auth
+%% all come from `http_connector.services.<name>.*`. The service's
+%% credential is a shared service account applied to every projected call,
+%% which is why `identity` below must be declared explicitly.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mcp.upstreams.$upstream.service", "bondy_mcp.upstreams", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The realm the upstream's tools are projected into: each upstream
+%% tool becomes a WAMP procedure registered in this realm.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mcp.upstreams.$upstream.realm", "bondy_mcp.upstreams", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The WAMP URI prefix projected procedures are registered under:
+%% tool `t` becomes `<prefix>.<t>` (tool names are lowercased and
+%% characters outside [a-z0-9_] replaced with `_`). Must be unique per
+%% realm across upstreams — startup refuses a duplicate — so no upstream
+%% can shadow another's tool names (design §13.3).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mcp.upstreams.$upstream.prefix", "bondy_mcp.upstreams", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The MCP endpoint path, appended to the service's `base_url`.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mcp.upstreams.$upstream.path", "bondy_mcp.upstreams", [
+  {datatype, string},
+  {default, ""}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The identity every projected call carries upstream. The only
+%% supported value is `service`: the shared service account configured on
+%% the `http_connector` service, applied regardless of which WAMP caller
+%% invoked the projected procedure. Design §13.1 permits that only where
+%% explicitly declared, which is what this key is — there is no default,
+%% and an upstream without it refuses to start. Per-caller identities
+%% (token exchange) are a planned extension, not a configuration today.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mcp.upstreams.$upstream.identity", "bondy_mcp.upstreams", [
+  {datatype, {enum, [service]}}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Whether this upstream is projected. Off parks the declaration
+%% without deleting it (pins are kept).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mcp.upstreams.$upstream.enabled", "bondy_mcp.upstreams", [
+  {datatype, flag},
+  {default, on}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Per-call timeout for upstream MCP requests. Defaults to the
+%% `http_connector` service's own `timeout`.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mcp.upstreams.$upstream.timeout", "bondy_mcp.upstreams", [
+  {datatype, {duration, ms}}
+]}.
+
+{translation, "bondy_mcp.upstreams",
+fun(Conf0) ->
+    Conf = cuttlefish_variable:filter_by_prefix("mcp.upstreams", Conf0),
+
+    Names = lists:usort(
+        lists:filtermap(
+            fun({[_, _, Name | _], _}) -> {true, Name};
+               (_) -> false
+            end,
+            Conf
+        )
+    ),
+
+    Get = fun(Key, Default) -> cuttlefish:conf_get(Key, Conf, Default) end,
+
+    Req = fun(Key) ->
+        case Get(Key, undefined) of
+            undefined -> cuttlefish:invalid(Key ++ " is required");
+            Value -> Value
+        end
+    end,
+
+    lists:map(
+        fun(Name) ->
+            Pfx = "mcp.upstreams." ++ Name,
+            Timeout = Get(Pfx ++ ".timeout", undefined),
+            #{
+                name => list_to_binary(Name),
+                service => list_to_binary(Req(Pfx ++ ".service")),
+                realm => list_to_binary(Req(Pfx ++ ".realm")),
+                prefix => list_to_binary(Req(Pfx ++ ".prefix")),
+                path => list_to_binary(Get(Pfx ++ ".path", "")),
+                identity => Req(Pfx ++ ".identity"),
+                enabled => Get(Pfx ++ ".enabled", true) =:= true,
+                timeout => Timeout
+            }
+        end,
+        Names
+    )
+end}.
+
+%% The same duplicate-tolerated spelling `bondy_mail.schema` and
+%% `bondy_http_connector.schema` already ship.
+{validator, "positive_integer", "must be a positive integer",
+  fun(V) -> is_integer(V) andalso V > 0 end
+}.

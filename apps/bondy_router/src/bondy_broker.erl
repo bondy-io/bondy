@@ -850,8 +850,9 @@ make_match_opts(SessionId, Opts) ->
 
 %% @private
 make_event_details(TopicUri, Opts, Ctxt) ->
-    %5 We forward PPT attributes
-    Details0 = maps:with(?WAMP_PPT_ATTRS, Opts),
+    %% Forward PPT and trace-context attributes to EVENT.Details.
+    %% Trace context is a verbatim pass-through (see ?WAMP_TRACE_ATTRS).
+    Details0 = maps:with(?WAMP_PPT_ATTRS ++ ?WAMP_TRACE_ATTRS, Opts),
 
     Details = Details0#{
         %% This is mandatory only for pattern-based subscriptions

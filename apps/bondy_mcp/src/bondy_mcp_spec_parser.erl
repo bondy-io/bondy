@@ -44,6 +44,7 @@ Validated here, per entry:
     result_args_schema => map(),
     result_kwargs_schema => map(),
     version => binary(),
+    redaction => #{fields := [binary()]},
     %% resource_template only
     uri_template => binary(),
     uri_vars_schema => map(),
@@ -124,7 +125,7 @@ entry(Data) when is_map(Data) ->
         kind => Kind,
         wamp_procedure => Procedure
     },
-    E1 = optional_fields(E0, Data),
+    E1 = redaction(optional_fields(E0, Data), Data),
     case Kind of
         tool -> E1;
         resource_template -> template_fields(E1, Data)
@@ -158,6 +159,27 @@ optional_fields(E, Data) ->
         E,
         Fields
     ).
+
+%% @private
+%% §14.3: the entry's audit redaction policy — the top-level argument and
+%% result fields excluded from digest computation at capture. Field names
+%% are deduplicated and sorted so the policy recorded in an audit record
+%% is canonical.
+redaction(E, Data) ->
+    case maps:get(<<"redaction">>, Data, undefined) of
+        undefined ->
+            E;
+        #{<<"fields">> := Fields} = R when
+            map_size(R) == 1, is_list(Fields), Fields =/= []
+        ->
+            lists:all(
+                fun(F) -> is_binary(F) andalso F =/= <<>> end, Fields
+            ) orelse
+                throw({invalid_value, {<<"redaction">>, R}}),
+            E#{redaction => #{fields => lists:usort(Fields)}};
+        Other ->
+            throw({invalid_value, {<<"redaction">>, Other}})
+    end.
 
 %% @private
 %% The §16.3 resource-template consistency checks.

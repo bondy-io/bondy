@@ -31,6 +31,7 @@ so the two cannot disagree about what an error URI is worth.
 -export([parse_authorization/1]).
 -export([is_public_ip/1]).
 -export([peer/1]).
+-export([throttle/2]).
 
 %% COOKIES
 -export([csrf_cookie_name/1]).
@@ -76,6 +77,25 @@ peer(Req) ->
         {local, _} -> {{127, 0, 0, 1}, 0};
         {_IP, _Port} = Peer -> Peer
     end.
+
+-doc """
+Consumes one token from the `Class` bucket keyed by the request's
+proxy-aware source IP (`bondy_http_proxy_protocol`, the same derivation
+the WS handler throttles on). When the proxy protocol cannot resolve a
+source IP the throttle keys on the socket peer instead — a real fact, so
+a malformed forwarding header can neither bypass the limit nor take the
+endpoint down. `ok` whenever the feature or class is off (the default).
+""".
+-spec throttle(bondy_rate_limit:class(), cowboy_req:req()) -> ok | throttled.
+
+throttle(Class, Req) ->
+    ProxyProtocol = bondy_http_proxy_protocol:init(Req),
+    IP =
+        case bondy_http_proxy_protocol:source_ip(ProxyProtocol) of
+            {ok, SourceIP} -> SourceIP;
+            {error, _} -> element(1, peer(Req))
+        end,
+    bondy_rate_limit:throttle(Class, IP).
 
 -doc """
 Returns the HTTP status code for an error.

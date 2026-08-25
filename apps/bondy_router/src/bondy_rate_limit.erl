@@ -11,10 +11,19 @@ over `bondy_rate_limiter`.
 
 The whole feature is OFF by default (`security.rate_limit.enabled`), so
 `throttle/2` is a single map read returning `ok` on the common path. When on,
-each class (`handshake`, `auth`, `connection`, `message`) has its own token
-bucket keyed by the caller-supplied dimension (a source IP, or a session id for
-`message`). Config `rate` is tokens/SECOND (operator-friendly); the bucket wants
-tokens/millisecond.
+each class (`handshake`, `auth`, `connection`, `http`, `message`) has its own
+token bucket keyed by the caller-supplied dimension (a source IP, or a session
+id for `message`). `http` is per-source-IP HTTP request admission — the API
+Gateway and admin API resources (via the `cowboy_rest` `rate_limited` hook)
+and the MCP endpoints; requests, not connections, so it is a separate class
+from `connection`. Config `rate` is tokens/SECOND (operator-friendly); the
+bucket wants tokens/millisecond.
+
+`opts/1` requires the `[security, rate_limit]` config value to be a MAP —
+the shape `schema/bondy.schema`'s `bondy_router.security.rate_limit`
+translation builds (verified by generation probe, 2026-08-26; the earlier
+per-key schema targets generated nested proplists, which this reader
+rejected, so conf-file enablement was a no-op).
 
 It never raises — the underlying limiter fails open — so a limiter problem
 degrades to "no limit", never to a wedged inbound path.
@@ -22,7 +31,7 @@ degrades to "no limit", never to a wedged inbound path.
 
 -include_lib("kernel/include/logger.hrl").
 
--type class() :: handshake | auth | connection | message.
+-type class() :: handshake | auth | connection | http | message.
 
 -export_type([class/0]).
 
@@ -214,11 +223,13 @@ sub(Class, Cfg) ->
 %% @private
 default_rate_per_sec(handshake) -> 10;
 default_rate_per_sec(connection) -> 20;
+default_rate_per_sec(http) -> 100;
 default_rate_per_sec(message) -> 1000;
 default_rate_per_sec(_Auth) -> 5.
 
 %% @private
 default_capacity(handshake) -> 50;
 default_capacity(connection) -> 100;
+default_capacity(http) -> 500;
 default_capacity(message) -> 2000;
 default_capacity(_Auth) -> 20.

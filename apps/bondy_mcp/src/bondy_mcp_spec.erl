@@ -86,7 +86,13 @@ properties.
     description => binary(),
     version => binary(),
     input_schema => map(),
-    output_schema => map()
+    output_schema => map(),
+    %% §14.3 audit redaction policy. Deliberately OUTSIDE ?NORMATIVE_KEYS:
+    %% §7.5 enumerates the hash's coverage and does not name it, so a
+    %% capture-policy change does not re-key the tool. Whether it SHOULD —
+    %% a security review arguably approves the redaction posture too — is
+    %% an open design ruling, recorded in the design doc.
+    redaction => #{fields := [binary()]}
 }.
 -type collision() :: #{
     realm := uri(),
@@ -237,12 +243,13 @@ overlay_entry(RealmUri, O, Procedures) ->
             #{overlay => maps:get(overlay_source, O)}
         )
     },
+    E01 = maybe_put(redaction, maps:get(redaction, O, undefined), E0),
     E1 =
         case maps:get(kind, O) of
             tool ->
-                E0;
+                E01;
             resource_template ->
-                E2 = E0#{
+                E2 = E01#{
                     uri_template => maps:get(uri_template, O),
                     uri_vars_schema => maps:get(uri_vars_schema, O),
                     wamp_args => maps:get(wamp_args, O),

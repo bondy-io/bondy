@@ -86,6 +86,13 @@
 
 -define(WAMP_PPT_ATTRS, [ppt_cipher, ppt_keyid, ppt_scheme, ppt_serializer]).
 
+%% W3C Trace Context / Baggage carried as Bondy extension options
+%% (declared in bondy_config's WAMP extended_options and extended_details).
+%% The router is a pass-through: values are copied verbatim from
+%% CALL.Options to INVOCATION.Details and from PUBLISH.Options to
+%% EVENT.Details, never parsed or modified.
+-define(WAMP_TRACE_ATTRS, ['_traceparent', '_tracestate', '_baggage']).
+
 %% =============================================================================
 %% FEATURES
 %% =============================================================================

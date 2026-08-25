@@ -75,7 +75,16 @@ non_normative_fields_do_not_move_the_hash_test() ->
     ?assertEqual(
         H, bondy_mcp_spec:hash((entry())#{realm => <<"com.acme.app2">>})
     ),
-    ?assertEqual(H, bondy_mcp_spec:hash(maps:remove(description, entry()))).
+    ?assertEqual(H, bondy_mcp_spec:hash(maps:remove(description, entry()))),
+    %% The §14.3 audit redaction policy is capture policy, not tool
+    %% content — outside the hash (an open ruling, recorded in the spec
+    %% module and the design doc).
+    ?assertEqual(
+        H,
+        bondy_mcp_spec:hash((entry())#{
+            redaction => #{fields => [<<"ssn">>]}
+        })
+    ).
 
 normative_fields_move_the_hash_test() ->
     H = bondy_mcp_spec:hash(entry()),

@@ -21,7 +21,8 @@ all() ->
         queue_integration,
         maybe_enqueue_http_transport,
         maybe_enqueue_websocket,
-        session_record_transport_fields
+        session_record_transport_fields,
+        lifecycle_event_contract
     ].
 
 init_per_suite(Config) ->
@@ -123,7 +124,7 @@ inactivity_timeout(_Config) ->
     %% Since MIN_CHECK_INTERVAL is 5000ms, we need to wait at least that long.
     MonRef = monitor(process, Pid),
     receive
-        {'DOWN', MonRef, process, Pid, normal} ->
+        {'DOWN', MonRef, process, Pid, {shutdown, idle_timeout}} ->
             ok
     after 10000 ->
         demonitor(MonRef, [flush]),
@@ -164,7 +165,7 @@ touch_extends_lifetime(_Config) ->
     %% Now stop touching and wait for auto-close
     MonRef = monitor(process, Pid),
     receive
-        {'DOWN', MonRef, process, Pid, normal} ->
+        {'DOWN', MonRef, process, Pid, {shutdown, idle_timeout}} ->
             ok
     after 10000 ->
         demonitor(MonRef, [flush]),
@@ -367,6 +368,95 @@ session_record_transport_fields(_Config) ->
     }),
     ?assertEqual(undefined, bondy_session:transport_type(Session5)),
     ?assertEqual(undefined, bondy_session:transport_id(Session5)).
+
+%% The `[bondy, http_transport, session, closed]` lifecycle event fires
+%% for every termination, with the stop reason classified and any
+%% registered metadata carried verbatim. Covers: a `close/2` reason tag,
+%% the metadata round-trip through `set_telemetry_metadata/2`, the
+%% `metadata => undefined` shape when none was registered, and crash
+%% classification. Does NOT cover the idle-timeout tag (the MCP
+%% handshake suite pins it through the full stack).
+lifecycle_event_contract(_Config) ->
+    HandlerId = {?MODULE, self()},
+    Self = self(),
+    ok = telemetry:attach(
+        HandlerId,
+        [bondy, http_transport, session, closed],
+        fun(_Event, Meas, Meta, _) -> Self ! {closed, Meas, Meta} end,
+        undefined
+    ),
+    try
+        RealmUri = <<"com.test.realm">>,
+
+        %% With metadata: the map rides the event; the close/2 tag is
+        %% the reason.
+        T1 = make_transport_id(),
+        {ok, P1} = bondy_http_transport_session_sup:start_child(
+            T1, RealmUri, bondy_session_id:new()
+        ),
+        Metadata = #{mcp => #{realm => RealmUri, listener => test}},
+        ok = bondy_http_transport_session:set_telemetry_metadata(
+            P1, Metadata
+        ),
+        ok = bondy_http_transport_session:close(P1, stored_session_closed),
+        receive
+            {closed, #{count := 1, duration := D1}, Meta1} ->
+                ?assert(is_integer(D1) andalso D1 >= 0),
+                ?assertMatch(
+                    #{
+                        transport_id := T1,
+                        realm := RealmUri,
+                        reason := stored_session_closed,
+                        metadata := Metadata
+                    },
+                    Meta1
+                )
+        after 5000 ->
+            ct:fail(no_closed_event_with_metadata)
+        end,
+
+        %% Without metadata: default close/1 reason is client_close and
+        %% `metadata` is undefined.
+        T2 = make_transport_id(),
+        {ok, P2} = bondy_http_transport_session_sup:start_child(
+            T2, RealmUri, bondy_session_id:new()
+        ),
+        ok = bondy_http_transport_session:close(P2),
+        receive
+            {closed, _, Meta2} ->
+                ?assertMatch(
+                    #{
+                        transport_id := T2,
+                        reason := client_close,
+                        metadata := undefined
+                    },
+                    Meta2
+                )
+        after 5000 ->
+            ct:fail(no_closed_event_default_reason)
+        end,
+
+        %% A non-shutdown termination reason is classified `crash`.
+        T3 = make_transport_id(),
+        {ok, P3} = bondy_http_transport_session_sup:start_child(
+            T3, RealmUri, bondy_session_id:new()
+        ),
+        MRef3 = erlang:monitor(process, P3),
+        ok = sys:terminate(P3, boom),
+        receive
+            {'DOWN', MRef3, process, P3, boom} -> ok
+        after 5000 ->
+            ct:fail(no_crash_exit)
+        end,
+        receive
+            {closed, _, Meta3} ->
+                ?assertMatch(#{transport_id := T3, reason := crash}, Meta3)
+        after 5000 ->
+            ct:fail(no_closed_event_crash)
+        end
+    after
+        telemetry:detach(HandlerId)
+    end.
 
 %% =============================================================================
 %% PRIVATE

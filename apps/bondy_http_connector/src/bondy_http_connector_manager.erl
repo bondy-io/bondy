@@ -56,6 +56,7 @@ until the callee is recycled by the supervisor for an unrelated reason.
 
 %% API
 -export([start_link/0]).
+-export([pool_name/1]).
 -export([services/0]).
 -export([service_readiness/1]).
 
@@ -348,6 +349,15 @@ start_http_pools(Services) ->
         Services
     ),
     {ok, Map}.
+
+-doc """
+The deterministic pool name for a service, usable with
+`bondy_http_connector_http_pool:request/5,6` by any caller that shares a
+service's connection pool (e.g. `bondy_mcp_upstream`). The pool exists
+once this manager has started the service's pools; before that, requests
+against the name fail fast with `{error, pool_down}`.
+""".
+-spec pool_name(binary()) -> atom().
 
 pool_name(ServiceName) ->
     binary_to_atom(<<"bondy_http_connector_http_pool_", ServiceName/binary>>).

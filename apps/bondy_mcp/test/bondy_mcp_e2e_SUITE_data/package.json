@@ -1,0 +1,11 @@
+{
+  "name": "bondy-mcp-e2e",
+  "private": true,
+  "description": "Official MCP SDK clients and conformance suite driven against a Bondy MCP listener by bondy_mcp_e2e_SUITE.",
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/conformance": "0.1.16",
+    "@modelcontextprotocol/sdk": "1.30.0"
+  }
+}

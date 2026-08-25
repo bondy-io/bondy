@@ -25,6 +25,7 @@ and unsubscription.
 all() ->
     [
         subscribe_and_receive,
+        trace_context_round_trip,
         acknowledged_publish,
         publish_with_acknowledge_rejected,
         ordered_events,
@@ -61,6 +62,52 @@ subscribe_and_receive(_) ->
         {event, Args} -> ?assertEqual([<<"hi">>], Args)
     after 5000 ->
         ct:fail(no_event)
+    end,
+
+    ok = bondy_connect_client:disconnect(Pub),
+    ok = bondy_connect_client:disconnect(Sub).
+
+%% W3C trace context, SDK end to end: a context attached to a PUBLISH's
+%% options (`bondy_connect_trace:attach/2`) reaches the subscriber
+%% handler's Details and extracts verbatim — through the SDK's outbound
+%% allowlist, the wire, the router's PUBLISH→EVENT carry and the SDK's
+%% inbound decode. An untraced publish extracts `undefined` (no
+%% defaults, no leakage from the previous event).
+trace_context_round_trip(_) ->
+    Self = self(),
+    Sub = connect(),
+    Handler = fun(_Args, _KWArgs, Details) ->
+        Self ! {event_trace, bondy_connect_trace:extract(Details)}
+    end,
+    {ok, _} = bondy_connect_client:subscribe(
+        Sub, <<"com.example.trace.topic">>, Handler
+    ),
+
+    Pub = connect(),
+    Ctx = #{
+        traceparent =>
+            <<"00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01">>,
+        tracestate => <<"congo=t61rcWkgMzE">>,
+        baggage => <<"userId=alice">>
+    },
+    ok = bondy_connect_client:publish(
+        Pub,
+        <<"com.example.trace.topic">>,
+        [1],
+        #{},
+        bondy_connect_trace:attach(#{}, Ctx)
+    ),
+    receive
+        {event_trace, Got} -> ?assertEqual(Ctx, Got)
+    after 5000 -> error(traced_event_missing)
+    end,
+
+    ok = bondy_connect_client:publish(
+        Pub, <<"com.example.trace.topic">>, [2]
+    ),
+    receive
+        {event_trace, Got2} -> ?assertEqual(undefined, Got2)
+    after 5000 -> error(untraced_event_missing)
     end,
 
     ok = bondy_connect_client:disconnect(Pub),

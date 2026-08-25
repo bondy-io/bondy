@@ -1075,7 +1075,11 @@ do_publish(From, Topic, Args, KWArgs, Opts, Data) ->
             eligible_authid,
             eligible_authrole,
             disclose_me,
-            retain
+            retain,
+            %% W3C trace context, pass-through (see bondy_connect_trace).
+            '_traceparent',
+            '_tracestate',
+            '_baggage'
         ],
         Opts
     ),
@@ -1941,7 +1945,11 @@ call_msg(Uri, Args, KWArgs, Opts) ->
             runmode,
             rkey,
             retries,
-            '_deadline'
+            '_deadline',
+            %% W3C trace context, pass-through (see bondy_connect_trace).
+            '_traceparent',
+            '_tracestate',
+            '_baggage'
         ],
         Opts
     ),

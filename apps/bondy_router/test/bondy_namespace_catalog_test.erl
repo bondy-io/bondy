@@ -23,10 +23,20 @@ declarations_test_() ->
     Main = [S || S <- Tables, maps:get(db, S) =:= main],
     Registry = [S || S <- Tables, maps:get(db, S) =:= registry],
     [
-        {"seventeen tables declared", ?_assertEqual(17, length(Tables))},
-        {"fifteen main, two registry", fun() ->
-            ?assertEqual(15, length(Main)),
+        {"eighteen tables declared", ?_assertEqual(18, length(Tables))},
+        {"sixteen main, two registry", fun() ->
+            ?assertEqual(16, length(Main)),
             ?assertEqual(2, length(Registry))
+        end},
+        {"mcp_upstream is a durable main lww table, no publish", fun() ->
+            %% Pinned upstream MCP tool definitions (design §13.3):
+            %% whole-entry replacement on approval, and pins gate the
+            %% projection only — they never feed the manifest cache.
+            Spec = maps:get(mcp_upstream, ByName),
+            ?assertEqual(main, maps:get(db, Spec)),
+            ?assertEqual(durable, maps:get(durability, Spec)),
+            ?assertEqual(lww, maps:get(fold, Spec)),
+            ?assertNot(maps:get(publish, Spec, false))
         end},
         {"realm_keys is a durable main aw table", fun() ->
             %% Realm key material, split out of the realm identity cell so the
@@ -226,7 +236,7 @@ provisions_all() ->
         Info = ?CAT:info(),
         ?assertMatch(#{main := #{kind := db}}, Info),
         %% info/0's tables map covers the main DB tables only.
-        ?assertEqual(15, map_size(maps:get(tables, Info)))
+        ?assertEqual(16, map_size(maps:get(tables, Info)))
     after
         ok = stop_catalog(Pid),
         reset_env(),

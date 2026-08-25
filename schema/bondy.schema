@@ -1282,61 +1282,102 @@ end}.
 %% -----------------------------------------------------------------------------
 %% @doc Inbound application-level rate limiting. OFF by default — enabling
 %% it applies per-source-IP token buckets to the pre-auth handshake and
-%% credential-verification path, and (opt-in) per-session message rate limits.
+%% credential-verification path, HTTP request admission (API Gateway, admin
+%% API, MCP), and (opt-in) per-session message rate limits.
 %% Each `rate` is tokens per SECOND (steady-state); `capacity` is the burst size.
 %% Tune to your topology: source IPs behind a shared NAT/proxy are throttled
 %% collectively, so keep limits generous unless clients are per-IP.
+%%
+%% All keys target the ONE env key `bondy_router.security.rate_limit`, whose
+%% translation below builds the nested MAP `bondy_rate_limit` reads. The map
+%% shape is load-bearing: the previous per-key targets generated nested
+%% proplists, which that reader rejects — so enabling the feature from this
+%% file was a no-op (measured by generation probe, 2026-08-26).
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "security.rate_limit.enabled",
-"bondy_router.security.rate_limit.enabled", [
+"bondy_router.security.rate_limit", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
 
 %% Pre-auth handshake (HELLO) per source IP.
 {mapping, "security.rate_limit.handshake.rate",
-"bondy_router.security.rate_limit.handshake.rate", [
+"bondy_router.security.rate_limit", [
   {default, 10}, {datatype, integer}
 ]}.
 {mapping, "security.rate_limit.handshake.capacity",
-"bondy_router.security.rate_limit.handshake.capacity", [
+"bondy_router.security.rate_limit", [
   {default, 50}, {datatype, integer}
 ]}.
 
-%% Credential-verification attempts (AUTHENTICATE) per source IP.
+%% Credential-verification attempts per source IP: WAMP AUTHENTICATE and the
+%% OAuth2 HTTP endpoints share this budget — a per-IP credential-guessing
+%% allowance regardless of which door the attempt uses.
 {mapping, "security.rate_limit.auth.rate",
-"bondy_router.security.rate_limit.auth.rate", [
+"bondy_router.security.rate_limit", [
   {default, 5}, {datatype, integer}
 ]}.
 {mapping, "security.rate_limit.auth.capacity",
-"bondy_router.security.rate_limit.auth.capacity", [
+"bondy_router.security.rate_limit", [
   {default, 20}, {datatype, integer}
 ]}.
 
 %% New connections per source IP (pre-auth, at the transport handler).
 {mapping, "security.rate_limit.connection.rate",
-"bondy_router.security.rate_limit.connection.rate", [
+"bondy_router.security.rate_limit", [
   {default, 20}, {datatype, integer}
 ]}.
 {mapping, "security.rate_limit.connection.capacity",
-"bondy_router.security.rate_limit.connection.capacity", [
+"bondy_router.security.rate_limit", [
   {default, 100}, {datatype, integer}
+]}.
+
+%% HTTP requests per source IP: API Gateway and admin API resources (the
+%% cowboy_rest `rate_limited` hook) and the MCP endpoints. Requests, not
+%% connections — an HTTP client reuses connections, so this class is
+%% deliberately separate from (and defaults higher than) `connection`.
+{mapping, "security.rate_limit.http.rate",
+"bondy_router.security.rate_limit", [
+  {default, 100}, {datatype, integer}
+]}.
+{mapping, "security.rate_limit.http.capacity",
+"bondy_router.security.rate_limit", [
+  {default, 500}, {datatype, integer}
 ]}.
 
 %% Per-session CALL/PUBLISH/SUBSCRIBE/REGISTER message rate (opt-in; hot path).
 {mapping, "security.rate_limit.message.enabled",
-"bondy_router.security.rate_limit.message.enabled", [
+"bondy_router.security.rate_limit", [
   {default, off}, {datatype, {flag, on, off}}
 ]}.
 {mapping, "security.rate_limit.message.rate",
-"bondy_router.security.rate_limit.message.rate", [
+"bondy_router.security.rate_limit", [
   {default, 1000}, {datatype, integer}
 ]}.
 {mapping, "security.rate_limit.message.capacity",
-"bondy_router.security.rate_limit.message.capacity", [
+"bondy_router.security.rate_limit", [
   {default, 2000}, {datatype, integer}
 ]}.
+
+{translation, "bondy_router.security.rate_limit",
+  fun(Conf) ->
+    Get = fun(K) ->
+        cuttlefish:conf_get("security.rate_limit." ++ K, Conf)
+    end,
+    Class = fun(C) ->
+        #{rate => Get(C ++ ".rate"), capacity => Get(C ++ ".capacity")}
+    end,
+    #{
+        enabled => Get("enabled"),
+        handshake => Class("handshake"),
+        auth => Class("auth"),
+        connection => Class("connection"),
+        http => Class("http"),
+        message => (Class("message"))#{enabled => Get("message.enabled")}
+    }
+  end
+}.
 
 %% -----------------------------------------------------------------------------
 %% @doc Defines the default password protocol to be used for new user password
@@ -2796,6 +2837,18 @@ end}.
   {datatype, string}
 ]}.
 
+%% @doc DNS-rebinding protection for this MCP endpoint: the `Origin' request
+%% header values this listener serves, as a comma separated list. Each entry
+%% is either the word `local' — any localhost origin (`localhost',
+%% `127.0.0.1' or `[::1]', any scheme and port) — or an explicit origin such
+%% as `https://app.example.com'. A request whose `Origin' falls outside the
+%% list is refused with 403. Requests WITHOUT an `Origin' header are always
+%% served: only browsers send it, and the browser is the rebinding vector.
+%% The single word `any' disables the check.
+{mapping, "listeners.$name.mcp.allowed_origins", "bondy_router.listeners", [
+  {datatype, string}
+]}.
+
 %% @doc Maximum size in bytes of an MCP request body on this listener.
 {mapping, "listeners.$name.mcp.max_body_size", "bondy_router.listeners", [
   {datatype, bytesize}
@@ -3015,6 +3068,7 @@ end}.
         {["longpoll", "poll_timeout"], [longpoll, poll_timeout]},
         {["longpoll", "idle_timeout"], [longpoll, idle_timeout]},
         {["mcp", "protocol_versions"], [mcp, protocol_versions]},
+        {["mcp", "allowed_origins"], [mcp, allowed_origins]},
         {["mcp", "public_base_uri"], [mcp, public_base_uri]},
         {["mcp", "max_body_size"], [mcp, max_body_size]},
         {["mcp", "max_inflight"], [mcp, max_inflight]},
@@ -3278,6 +3332,34 @@ end}.
                     );
                 Parsed ->
                     Parsed
+            end;
+        %% `any` disables the check; otherwise a list of rules, each the
+        %% atom `local` or an explicit origin lowercased here — origin
+        %% comparison is case-insensitive and the handler lowercases the
+        %% request header before matching
+        %% (`bondy_mcp_http_handler:origin_allowed/2`).
+        (["mcp", "allowed_origins"] = Tail, V, Name) ->
+            case Split(V) of
+                [] ->
+                    cuttlefish:invalid(
+                        FullKey(Name, Tail) ++
+                            " must be `any' or list at least one origin"
+                    );
+                ["any"] ->
+                    any;
+                Entries ->
+                    lists:member("any", Entries) andalso
+                        cuttlefish:invalid(
+                            FullKey(Name, Tail) ++
+                                " admits `any' only as the sole entry"
+                        ),
+                    [
+                        case E of
+                            "local" -> local;
+                            _ -> list_to_binary(string:lowercase(E))
+                        end
+                     || E <- Entries
+                    ]
             end;
         (["mcp", "public_base_uri"], V, _Name) ->
             Bin(V);

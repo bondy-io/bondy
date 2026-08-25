@@ -219,9 +219,14 @@ is_authorized(Req0, St0) ->
 forbidden(Req, St) ->
     {false, Req, St}.
 
+%% These endpoints verify credentials, so they draw from the `auth`
+%% class — the same per-source-IP credential-guessing budget WAMP
+%% AUTHENTICATE consumes (`security.rate_limit.auth.*`, off by default).
 rate_limited(Req, St) ->
-    %% Result :: false | {true, RetryAfter}
-    {false, Req, St}.
+    case bondy_http_utils:throttle(auth, Req) of
+        ok -> {false, Req, St};
+        throttled -> {{true, 1}, Req, St}
+    end.
 
 resource_exists(Req, St) ->
     {true, Req, St}.

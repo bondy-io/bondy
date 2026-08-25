@@ -208,6 +208,13 @@ rather than a silently bound phantom listener.
         protocol_versions => [
             <<"2026-07-28">>, <<"2025-11-25">>, <<"2025-06-18">>
         ],
+        %% DNS-rebinding protection (the transport spec's security
+        %% requirement): rules for the `Origin` request header. `local`
+        %% admits any localhost origin; explicit origins may be listed
+        %% alongside or instead; the atom `any` disables the check.
+        %% Requests without an `Origin` header are always served — see
+        %% `bondy_mcp_http_handler:check_origin/2`.
+        allowed_origins => [local],
         public_base_uri => undefined,
         max_body_size => 4194304,
         max_inflight => 64,

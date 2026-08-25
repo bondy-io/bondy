@@ -19,7 +19,27 @@ application that answers it is down.
 -export([stop/1]).
 
 start(_Type, _Args) ->
-    bondy_mcp_sup:start_link().
+    %% Declare the §15 metric families and attach the Prometheus sink
+    %% before any emitter can run. `bondy_metrics` is up: its gen_server
+    %% is a `bondy_oplog_sup` child and `bondy_oplog` precedes
+    %% `bondy_router`, which starts this application mid-boot.
+    ok = bondy_mcp_metrics:setup(),
+    case bondy_mcp_sup:start_link() of
+        {ok, _} = OK ->
+            case application:get_env(bondy_mcp, upstreams, []) of
+                [] ->
+                    OK;
+                [_ | _] ->
+                    %% The client direction (§13). An invalid declaration
+                    %% set fails the application start deliberately.
+                    case bondy_mcp_sup:start_upstreams() of
+                        {ok, _} -> OK;
+                        {error, _} = Error -> Error
+                    end
+            end;
+        Other ->
+            Other
+    end.
 
 stop(_State) ->
     ok.

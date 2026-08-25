@@ -51,7 +51,9 @@ all() ->
         admin_api_is_absent_from_the_public_listener,
         stored_specs_are_absent_from_the_admin_listeners,
         admin_local_is_injected_without_configuration,
-        admin_local_socket_is_bound_and_serves
+        admin_local_socket_is_bound_and_serves,
+        http_requests_are_rate_limited,
+        oauth2_draws_from_the_auth_class
     ].
 
 init_per_suite(Config) ->
@@ -194,6 +196,62 @@ admin_local_socket_is_bound_and_serves(_Config) ->
     %% The Admin API is mounted here too, which is the point of the safety net:
     %% a node whose every TCP listener failed to bind is still administrable.
     assert_routed(uds_get(Path, ?ADMIN_API_PATH)).
+
+%% The gateway REST handler's `rate_limited` hook draws from the `http`
+%% class per source IP. Enabling ONLY that class both trips it and PINS
+%% it — a hook drawing from any other class would never see a 429 here.
+%% Statuses are not asserted before exhaustion: the `{http, 127.0.0.1}`
+%% bucket is shared with any other suite in a run, so only "rapid
+%% requests trip 429" and "off means served" are contract.
+http_requests_are_rate_limited(_) ->
+    {ok, Before, _, _} = get_path(?ADMIN, ?ADMIN_API_PATH),
+    ?assertNotEqual(429, Before),
+    ok = bondy_config:set([security, rate_limit], #{
+        enabled => true,
+        http => #{rate => 1, capacity => 2}
+    }),
+    try
+        Results = [
+            get_path(?ADMIN, ?ADMIN_API_PATH)
+         || _ <- lists:seq(1, 6)
+        ],
+        {ok, Last, Headers, _} = lists:last(Results),
+        ?assertEqual(429, Last),
+        ?assertMatch({_, _}, lists:keyfind(<<"retry-after">>, 1, Headers))
+    after
+        ok = bondy_config:set([security, rate_limit], undefined)
+    end,
+    %% Off again: the same source IP serves immediately — the verdict is
+    %% config-driven, no depleted bucket outlives the feature.
+    {ok, After, _, _} = get_path(?ADMIN, ?ADMIN_API_PATH),
+    ?assertNotEqual(429, After).
+
+%% The OAuth2 endpoints draw from the `auth` class — the shared per-IP
+%% credential-guessing budget WAMP AUTHENTICATE consumes — while the
+%% gateway hook does NOT: with only `auth` enabled, the OAuth2 callback
+%% throttles and the gateway callback stays open. A distinct loopback
+%% peer keys buckets no other suite touches.
+oauth2_draws_from_the_auth_class(_) ->
+    Req = #{ref => ?ADMIN, peer => {{127, 0, 0, 88}, 5000}, headers => #{}},
+    ok = bondy_config:set([security, rate_limit], #{
+        enabled => true,
+        auth => #{rate => 1, capacity => 1}
+    }),
+    try
+        ?assertMatch(
+            {false, _, _}, bondy_oauth2_rest_handler:rate_limited(Req, #{})
+        ),
+        ?assertMatch(
+            {{true, _}, _, _},
+            bondy_oauth2_rest_handler:rate_limited(Req, #{})
+        ),
+        ?assertMatch(
+            {false, _, _},
+            bondy_http_gateway_rest_handler:rate_limited(Req, #{})
+        )
+    after
+        ok = bondy_config:set([security, rate_limit], undefined)
+    end.
 
 %% =============================================================================
 %% HELPERS

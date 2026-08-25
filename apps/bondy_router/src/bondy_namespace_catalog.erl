@@ -390,6 +390,20 @@ tables() ->
             fold => lww,
             publish => true
         },
+        %% mcp_upstream — pinned upstream MCP tool definitions (design
+        %% §13.3): banded by realm, keyed {UpstreamName, ToolName}, the
+        %% value the pinned definition plus its canonical-JSON hash.
+        %% Whole-entry replacement on approval, so `lww`. No `publish`:
+        %% pins gate the projection of upstream tools into the registry
+        %% and never feed the manifest cache. Rides the manifest
+        %% additive-extension path on upgraded data dirs, like every
+        %% table added post-freeze.
+        #{
+            name => ?BONDY_DB_MCP_UPSTREAM_TAB,
+            db => main,
+            durability => durable,
+            fold => lww
+        },
 
         %% registry RIB — ephemeral (ETS projection, mem WAL, memory topology —
         %% NO durable or disk-backed storage), the replicated routing summary

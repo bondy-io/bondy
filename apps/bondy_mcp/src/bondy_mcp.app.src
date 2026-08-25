@@ -20,14 +20,20 @@
     {applications, [
         kernel,
         stdlib,
-        cowboy
+        cowboy,
+        telemetry,
+        bondy_metrics,
+        bondy_json_rpc
     ]},
     %% Defaults mirror `schema/bondy_mcp.schema` — in a released node the
     %% schema default is authoritative and these are dead; keep the two
     %% equal so a schema-less boot (tests, `rebar3 shell`) behaves the same.
     {env, [
         {manifest_cache_ttl, 60000},
-        {manifest_rebuild_debounce, 1000}
+        {manifest_rebuild_debounce, 1000},
+        {request_state_ttl, 300000},
+        {request_state_max_size, 65536},
+        {metrics_label_by_name, false}
     ]},
     {modules, []},
     {licenses, ["Apache-2.0"]},

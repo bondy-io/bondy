@@ -1,0 +1,21 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+{application, bondy_json_rpc, [
+    {description,
+        "JSON-RPC 2.0 codec: message decoding and validation, "
+        "response and error construction. No transport, no knowledge "
+        "of MCP or WAMP."},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {applications, [
+        kernel,
+        stdlib
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

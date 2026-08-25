@@ -1,0 +1,44 @@
+# Conformance baseline for the Bondy MCP gateway — the ACTIVE server
+# suite of @modelcontextprotocol/conformance (version pinned by
+# package-lock.json). Every entry is a KNOWN deviation with its reason;
+# bondy_mcp_e2e_SUITE asserts the run matches this file exactly in both
+# directions, so a scenario that starts passing must be removed here
+# (stale entry) and any new failure fails the suite.
+server:
+  # No `logging` capability: Bondy's observability is the audit log and
+  # telemetry, not MCP client-facing log notifications.
+  - logging-set-level
+  # No `completions` capability.
+  - completion-complete
+  # §16.2: the output mapping is structuredContent + a JSON text content
+  # block, deliberately — WAMP results carry no media content types.
+  - tools-call-image
+  - tools-call-audio
+  - tools-call-embedded-resource
+  - tools-call-mixed-content
+  # No server-initiated notifications during a call: logging and
+  # progress are not forwarded from the WAMP leg.
+  - tools-call-with-logging
+  - tools-call-with-progress
+  # No server->client requests: input acquisition is the 2026-07-28
+  # `input_required` MRTR contract (§11), not sampling/elicitation
+  # reverse requests.
+  - tools-call-sampling
+  - tools-call-elicitation
+  - elicitation-sep1034-defaults
+  - elicitation-sep1330-enums
+  # The scenario POSTs with `MCP-Protocol-Version: 2025-03-26`, a
+  # revision this endpoint does not serve; refusing it with 400 is the
+  # transport specification's sanctioned response (the header check is a
+  # server MAY). Concurrent POST streams themselves work.
+  - server-sse-multiple-streams
+  # §16.2 again: resource reads return one JSON text content; there is
+  # no binary (`blob`) resource mapping.
+  - resources-read-binary
+  # No `prompts` capability: the manifest projects tools and resources
+  # only (§7).
+  - prompts-list
+  - prompts-get-simple
+  - prompts-get-with-args
+  - prompts-get-embedded-resource
+  - prompts-get-with-image

@@ -26,6 +26,7 @@ per-call timeouts, and unregistration.
 all() ->
     [
         register_and_call,
+        trace_context_round_trip,
         call_async_token_reply,
         unregister_stops_routing,
         handler_error_propagates,
@@ -91,6 +92,53 @@ register_and_call(_) ->
         Caller, <<"com.example.echo">>, [<<"hello">>, 42]
     ),
     ?assertEqual([<<"hello">>, 42], maps:get(args, Result)),
+
+    ok = bondy_connect_client:disconnect(Caller),
+    ok = bondy_connect_client:disconnect(Callee).
+
+%% W3C trace context, SDK end to end: a context attached to a CALL's
+%% options (`bondy_connect_trace:attach/2`) reaches the callee handler's
+%% Details and extracts verbatim — through the SDK's outbound allowlist,
+%% the wire, the router's CALL→INVOCATION carry and the SDK's inbound
+%% decode. An untraced call extracts `undefined` (no defaults, no
+%% leakage from the previous call).
+trace_context_round_trip(_) ->
+    Callee = connect(),
+    Self = self(),
+    Probe = fun(_Args, _KWArgs, Details) ->
+        Self ! {invocation_trace, bondy_connect_trace:extract(Details)},
+        {ok, #{}}
+    end,
+    {ok, _} = bondy_connect_client:register(
+        Callee, <<"com.example.trace.probe">>, Probe
+    ),
+
+    Caller = connect(),
+    Ctx = #{
+        traceparent =>
+            <<"00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01">>,
+        tracestate => <<"congo=t61rcWkgMzE">>,
+        baggage => <<"userId=alice">>
+    },
+    {ok, _} = bondy_connect_client:call(
+        Caller,
+        <<"com.example.trace.probe">>,
+        [],
+        #{},
+        bondy_connect_trace:attach(#{}, Ctx)
+    ),
+    receive
+        {invocation_trace, Got} -> ?assertEqual(Ctx, Got)
+    after 5000 -> error(traced_invocation_missing)
+    end,
+
+    {ok, _} = bondy_connect_client:call(
+        Caller, <<"com.example.trace.probe">>, []
+    ),
+    receive
+        {invocation_trace, Got2} -> ?assertEqual(undefined, Got2)
+    after 5000 -> error(untraced_invocation_missing)
+    end,
 
     ok = bondy_connect_client:disconnect(Caller),
     ok = bondy_connect_client:disconnect(Callee).

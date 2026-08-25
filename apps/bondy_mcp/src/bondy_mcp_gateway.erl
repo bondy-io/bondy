@@ -136,9 +136,7 @@ load(Document) when is_map(Document) ->
             try
                 ok = assert_realms_exist(Entries),
                 ok = assert_names_unclaimed(Id, Entries),
-                bondy_db:apply(
-                    spec_table(), ?BUCKET, Id, {set, Document}
-                )
+                bondy_db:apply(spec_table(), ?BUCKET, Id, {set, Document})
             catch
                 throw:Reason -> {error, Reason}
             end;
@@ -227,7 +225,7 @@ handle_call({build, RealmUri}, _From, State0) ->
         [{_, BuiltAt, Manifest}] when Now - BuiltAt < Ttl ->
             {reply, {ok, Manifest}, State0};
         _ ->
-            {Manifest, State} = rebuild(RealmUri, State0),
+            {Manifest, State} = rebuild(RealmUri, demand, State0),
             {reply, {ok, Manifest}, State}
     end;
 handle_call(Event, From, State) ->
@@ -261,7 +259,7 @@ handle_info(rebuild, State0) ->
     Realms = ets:foldl(fun({R, _, _}, Acc) -> [R | Acc] end, [], ?TAB),
     State1 = lists:foldl(
         fun(R, Acc0) ->
-            {_, Acc1} = rebuild(R, Acc0),
+            {_, Acc1} = rebuild(R, db_event, Acc0),
             Acc1
         end,
         State0#state{rebuild_timer = undefined},
@@ -426,7 +424,13 @@ note_change(State) ->
 %% @private
 %% Compile `RealmUri`'s manifest, publish it as ONE cell (the atomic
 %% snapshot), and reconcile the §17 collision alarms.
-rebuild(RealmUri, State) ->
+rebuild(RealmUri, Trigger, State) ->
+    T0 = erlang:monotonic_time(microsecond),
+    Previous =
+        case ets:lookup(?TAB, RealmUri) of
+            [{_, _, #{entries := Prev}}] -> Prev;
+            [] -> undefined
+        end,
     #{entries := Entries, collisions := Collisions} =
         bondy_mcp_spec:compile(RealmUri, overlay_entries(RealmUri)),
     Manifest = #{
@@ -437,7 +441,63 @@ rebuild(RealmUri, State) ->
     true = ets:insert(
         ?TAB, {RealmUri, erlang:monotonic_time(millisecond), Manifest}
     ),
+    %% §7.10: after a rebuild that CHANGED the manifest, tell the realm's
+    %% `subscriptions/listen` streams which kinds changed — each stream
+    %% forwards only what its own filter requested (§9.1). A first build
+    %% and a no-op rebuild (the TTL backstop, a burst that compiled to
+    %% the same result) notify nobody: nothing a client saw has changed.
+    Changed = changed_kinds(Previous, Entries),
+    ok = bondy_mcp_stream:notify_manifest_changed(RealmUri, Changed),
+    %% The handshake era's sessions (§12) get the same signal as
+    %% pre-encoded `notifications/*/list_changed` in their transport
+    %% queues — buffered while no GET stream is connected.
+    ok = bondy_mcp_handshake:notify_manifest_changed(RealmUri, Changed),
+    ok = bondy_mcp_metrics:manifest_rebuild(
+        RealmUri,
+        Trigger,
+        erlang:monotonic_time(microsecond) - T0,
+        entry_census(Entries)
+    ),
+    Collisions == [] orelse
+        bondy_mcp_metrics:manifest_conflict(
+            RealmUri, name_collision, length(Collisions)
+        ),
     {Manifest, reconcile_alarms(RealmUri, Collisions, State)}.
+
+%% @private
+%% The compiled entry count per kind, written as the absolute
+%% `bondy_mcp_manifest_entries` gauge value by the metrics sink.
+entry_census(Entries) ->
+    maps:fold(
+        fun(_, #{kind := Kind}, Acc) ->
+            maps:update_with(Kind, fun(N) -> N + 1 end, 1, Acc)
+        end,
+        #{tool => 0, resource => 0, resource_template => 0},
+        Entries
+    ).
+
+%% @private
+%% Which §9.1 list-changed kinds a rebuild changed, compared as
+%% `Name => hash` projections — the §7.5 hash covers exactly the content
+%% a client can observe through a descriptor.
+changed_kinds(undefined, _) ->
+    [];
+changed_kinds(Prev, New) ->
+    [
+        Kind
+     || {Kind, Kinds} <- [
+            {tools, [tool]}, {resources, [resource, resource_template]}
+        ],
+        kind_hashes(Prev, Kinds) =/= kind_hashes(New, Kinds)
+    ].
+
+%% @private
+kind_hashes(Entries, Kinds) ->
+    maps:from_list([
+        {Name, maps:get(hash, E)}
+     || {Name, #{kind := K} = E} <- maps:to_list(Entries),
+        lists:member(K, Kinds)
+    ]).
 
 %% @private
 %% The parsed entries of every loaded overlay document that name

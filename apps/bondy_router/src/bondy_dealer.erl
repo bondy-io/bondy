@@ -493,9 +493,10 @@ register(Procedure, Opts0, RealmUri, Ref) ->
 unregister(RegId, Ctxt) when is_map(Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     unregister(RegId, RealmUri);
-unregister(RegId, Ctxt) ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
-
+unregister(RegId, RealmUri) when is_binary(RealmUri) ->
+    %% The uri() form of the contract. This clause used to pass the
+    %% binary through `bondy_context:realm_uri/1`, whose catch-all
+    %% answers `undefined` — so it could never have worked.
     case bondy_registry:lookup(registration, RealmUri, RegId) of
         {error, not_found} = Error ->
             Error;
@@ -2432,8 +2433,9 @@ prepare_call_options(Opts, CallId, Uri, Entry, Ctxt) ->
 
     EOpts = bondy_registry_entry:options(Entry),
 
-    %% Forward PPT attributes to INVOCATION.Details
-    Details0 = maps:with(?WAMP_PPT_ATTRS, Opts),
+    %% Forward PPT and trace-context attributes to INVOCATION.Details.
+    %% Trace context is a verbatim pass-through (see ?WAMP_TRACE_ATTRS).
+    Details0 = maps:with(?WAMP_PPT_ATTRS ++ ?WAMP_TRACE_ATTRS, Opts),
     Details1 = Details0#{procedure => Uri, trust_level => 0},
     Details2 = maybe_receive_progress(Details1, Opts),
     Details2b = maybe_progress(Details2, Opts),
@@ -2936,7 +2938,9 @@ strip_rib_details(M) ->
 %% defaults and entry-opted session disclosure is not available.
 prepare_call_rib(M, Uri, Ctxt) ->
     Opts = M#call.options,
-    Details0 = maps:with(?WAMP_PPT_ATTRS, Opts),
+    %% PPT and trace-context attributes carry over exactly as in
+    %% `prepare_call_options/5` (the entry-addressed builder).
+    Details0 = maps:with(?WAMP_PPT_ATTRS ++ ?WAMP_TRACE_ATTRS, Opts),
     Details1 = Details0#{procedure => Uri, trust_level => 0},
     Details2 = maybe_receive_progress(Details1, Opts),
     Details3 = maybe_progress(Details2, Opts),
