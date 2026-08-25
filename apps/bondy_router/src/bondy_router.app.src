@@ -12,10 +12,10 @@
         "Procedure Calls (RPC), additional protocols and secure multi-tenancy. "
         "Bondy implements the open Web Application Messaging Protocol (WAMP) "
         "and is written in Erlang."},
-    {vsn, "1.0.0-rc-straw"},
+    {vsn, "1.0.0-rc-sunlight"},
     {registered, []},
     %% We pass the version number in the bondy_app:start/2 arguments
-    {mod, {bondy_app, [{vsn, "1.0.0-rc-straw"}]}},
+    {mod, {bondy_app, [{vsn, "1.0.0-rc-sunlight"}]}},
     {applications, [
         %% Erlang/OTP
         stdlib,
