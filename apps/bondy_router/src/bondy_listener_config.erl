@@ -357,9 +357,68 @@ only from `sys.config` or a direct call.
 -spec with_option_defaults(Spec :: map()) -> map().
 
 with_option_defaults(#{transport := Transport, protocol := Protocol} = Spec) ->
-    deep_merge(option_defaults(Transport, Protocol), Spec);
+    Defaults = deep_merge(
+        option_defaults(Transport, Protocol), held_stream_defaults(Spec)
+    ),
+    deep_merge(Defaults, Spec);
 with_option_defaults(Spec) ->
     Spec.
+
+%% @private
+%% Connection-level defaults for a listener whose services hold streams open
+%% (SSE, long-poll). A held response sends for minutes on a connection that
+%% may receive nothing, and Cowboy's connection idle timer is the ONLY timer
+%% that governs it over HTTP/2 — `cowboy_http2:commands/3' discards the whole
+%% per-stream `set_options' cast (`cowboy_http2.erl:988'), so the per-stream
+%% override the handlers once cast worked over HTTP/1.1 alone. Seating the
+%% carriers' `idle_timeout' as the CONNECTION default instead gives both
+%% versions the same behaviour from the same timer. `reset_idle_timeout_on_send'
+%% rides along because both protocol modules honour it at connection level
+%% (`cowboy_http.erl:356', `cowboy_http2.erl:383') and a held stream's
+%% traffic is nearly all sends: without it, an SSE stream that only pings
+%% would die at the floor even mid-conversation. Both are DEFAULTS: an
+%% operator's explicit `http.idle_timeout' or `http.reset_idle_timeout_on_send'
+%% wins in `with_option_defaults/1''s final merge.
+held_stream_defaults(#{protocol := http} = Spec) ->
+    Services = maps:get(services, Spec, []),
+    Floors = [
+        held_stream_floor(Carrier, Spec)
+     || Service <- Services,
+        Carrier <- [held_stream_carrier(Service)],
+        Carrier =/= undefined
+    ],
+    case Floors of
+        [] ->
+            #{};
+        _ ->
+            #{
+                protocol_opts => #{
+                    idle_timeout => lists:max(Floors),
+                    reset_idle_timeout_on_send => true
+                }
+            }
+    end;
+held_stream_defaults(_) ->
+    #{}.
+
+%% @private
+held_stream_carrier(Service) ->
+    case service_spec(Service) of
+        #{carrier := sse} -> sse;
+        #{carrier := longpoll} -> longpoll;
+        _ -> undefined
+    end.
+
+%% @private
+%% The operator's per-carrier `idle_timeout' if the spec states one, else the
+%% carrier's own default: the same value the handlers used to cast per
+%% stream, so at defaults the connection behaves as the HTTP/1.1 path
+%% always had.
+held_stream_floor(Carrier, Spec) ->
+    Block = maps:get(Carrier, Spec, #{}),
+    maps:get(
+        idle_timeout, Block, maps:get(idle_timeout, carrier_defaults(Carrier))
+    ).
 
 -doc """
 Resolves `Inventory` into validated listener maps.
@@ -532,13 +591,14 @@ protocol_option_defaults(http) ->
         %% Priority-ordered HTTP versions the listener offers
         %% (`listeners.$name.http.versions'). On a TLS listener the order is
         %% the server's ALPN preference; on a clear listener membership gates
-        %% the HTTP/2 prior-knowledge and Upgrade paths. HTTP/1.1 first:
-        %% Cowboy honours a held stream's per-stream `idle_timeout' override
-        %% over HTTP/1.1 only — its HTTP/2 module discards the whole
-        %% `set_options' cast (`cowboy_http2.erl:988') — so a listener
-        %% serving SSE or long-poll must prefer HTTP/1.1 or hold streams
-        %% that die at the connection-level idle timeout.
-        http_versions => [http, http2]
+        %% the HTTP/2 prior-knowledge and Upgrade paths. HTTP/2 first — the
+        %% same preference `cowboy:start_tls/3' ships — is safe for held
+        %% streams because their lifetime is connection-level on BOTH
+        %% versions: `held_stream_defaults/1' seats the connection timer, and
+        %% nothing per-stream remains for the versions to disagree on
+        %% (`bondy_http_sse_SUITE:held_stream_outlives_http_default_on_both_versions'
+        %% holds a quiet stream past the plain HTTP default on each).
+        http_versions => [http2, http]
     };
 protocol_option_defaults(_Unknown) ->
     #{}.

@@ -240,24 +240,34 @@ a longer one.
 ### HTTP versions
 
 ```
-listeners.public_http.http.versions = 1.1, 2
+listeners.public_http.http.versions = 2, 1.1
 ```
 
 A comma separated, priority ordered list of the HTTP protocol versions the
-listener offers; the default is `1.1, 2`. On a TLS listener the order is the
-server's ALPN preference — with the default, an h2-capable browser is served
-HTTP/1.1, while a client that only offers `h2` still gets HTTP/2 — and a
-client that sends no ALPN is served the first listed version. On a plaintext
-listener, listing `2` enables the HTTP/2 prior-knowledge and Upgrade paths.
+listener offers; the default is `2, 1.1`. On a TLS listener the order is the
+server's ALPN preference, and a client that sends no ALPN is served the
+first listed version. On a plaintext listener, listing `2` enables the
+HTTP/2 prior-knowledge and Upgrade paths. Set `1.1` alone to switch HTTP/2
+off for a listener.
 
-The default prefers HTTP/1.1 deliberately. Over HTTP/2, Cowboy applies its
-idle timeout per **connection**, and the per-stream override that keeps an
-SSE or long-poll response alive through quiet periods only exists on
-HTTP/1.1 — so on a listener that serves `wamp_sse` or `wamp_longpoll`, a
-held stream negotiated over HTTP/2 is closed at the connection's
-`http.idle_timeout` (15s if unset) regardless of the `sse.*` and
-`longpoll.*` settings. List `2` first only on a listener that holds no
-streams.
+SSE and long-poll behave identically on both versions: a held stream's
+lifetime is governed by the listener's **connection** idle timeout, which a
+listener serving `wamp_sse` or `wamp_longpoll` derives from the carriers'
+`idle_timeout` (below) rather than the plain 15s HTTP default — see the next
+section.
+
+### Held streams and the connection idle timeout
+
+On a listener whose services include `wamp_sse` or `wamp_longpoll`, the
+defaults for `http.idle_timeout` and `http.reset_idle_timeout_on_send`
+change: the idle timeout is taken from the largest `sse.idle_timeout` /
+`longpoll.idle_timeout` in play (10m if unstated) and reset-on-send is
+switched on, so a stream that is sending — events, keepalives, poll replies
+— keeps its connection alive, and a fully quiet one is closed after the
+carrier's idle timeout. This applies to every service sharing that
+listener: idle keep-alive API connections on a mixed listener are retained
+for the same window. An explicit `http.idle_timeout` or
+`http.reset_idle_timeout_on_send` on the listener overrides both.
 
 ### Keepalive and idle timeouts
 
@@ -431,6 +441,11 @@ The `deflate.*` block only takes effect when `compression_enabled` is `on`.
 
 `poll_timeout` must stay strictly below `idle_timeout`, or the connection can be
 torn down for inactivity before the long-poll reply is sent.
+
+The two `idle_timeout` values are how long a fully quiet stream (SSE) or an
+idle connection between polls (long-poll) is kept. They take effect as the
+listener's **connection** idle timeout default — see "Held streams and the
+connection idle timeout" above — identically over HTTP/1.1 and HTTP/2.
 
 A setting stated on the listener wins **key by key**, not block by block: a
 listener that sets only `websocket.ping.idle_timeout` keeps the defaults for

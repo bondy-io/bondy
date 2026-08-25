@@ -109,17 +109,15 @@ init(Req0, Opts) ->
                     },
                     Req = cowboy_req:stream_reply(200, Headers, Req1),
 
-                    %% No defaults: a resolved `sse' carrier config carries
-                    %% every key of `bondy_listener_config:?CARRIER_DEFAULTS'.
-                    %% Only `idle_timeout' (and `chunked') can be set per
-                    %% stream: cowboy_http's `set_options' fold drops every
-                    %% other key. Idle-timeout reset on send is the
-                    %% listener-wide `http.reset_idle_timeout_on_send'.
-                    IdleTimeout = maps:get(idle_timeout, Config),
-                    ok = cowboy_req:cast(
-                        {set_options, #{idle_timeout => IdleTimeout}},
-                        Req
-                    ),
+                    %% No timeout cast: stream lifetime is governed by the
+                    %% CONNECTION timer, which
+                    %% `bondy_listener_config:held_stream_defaults/1' seats
+                    %% from `sse.idle_timeout' with
+                    %% `reset_idle_timeout_on_send' on — identically over
+                    %% HTTP/1.1 and HTTP/2 (a per-stream cast only ever
+                    %% worked over HTTP/1.1; `cowboy_http2.erl:988' discards
+                    %% it), so the keepalives below are also what keeps the
+                    %% connection alive through quiet periods.
 
                     %% Schedule initial drain and keepalive
                     self() ! drain_queue,

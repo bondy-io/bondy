@@ -342,15 +342,13 @@ do_handle_receive(Req0, State) ->
                     ok = bondy_http_transport_session:request_poll(
                         Pid, PollTimeout
                     ),
-                    %% Only `idle_timeout' (and `chunked') can be set per
-                    %% stream: cowboy_http's `set_options' fold drops every
-                    %% other key. Idle-timeout reset on send is the
-                    %% listener-wide `http.reset_idle_timeout_on_send'.
-                    IdleTimeout = maps:get(idle_timeout, Config),
-                    ok = cowboy_req:cast(
-                        {set_options, #{idle_timeout => IdleTimeout}},
-                        Req0
-                    ),
+                    %% No timeout cast: the hold survives because
+                    %% `bondy_listener_config:held_stream_defaults/1' seats
+                    %% the listener's CONNECTION idle timeout from
+                    %% `longpoll.idle_timeout' (> `poll_timeout'), which
+                    %% covers HTTP/1.1 and HTTP/2 alike — a per-stream cast
+                    %% only ever worked over HTTP/1.1
+                    %% (`cowboy_http2.erl:988' discards it).
                     {cowboy_loop, Req0, State#{encoding => Encoding}}
             end
     end.

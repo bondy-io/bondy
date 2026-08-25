@@ -29,7 +29,8 @@ all() ->
         queue_notification_forwarding,
         sse_stream_down_cleanup,
         close_transport,
-        send_unknown_transport
+        send_unknown_transport,
+        held_stream_outlives_http_default_on_both_versions
     ].
 
 init_per_suite(Config) ->
@@ -317,6 +318,71 @@ send_unknown_transport(_Config) ->
         ok,
         bondy_http_transport_session:notify_enqueue(FakeTransportId)
     ).
+
+held_stream_outlives_http_default_on_both_versions(_Config) ->
+    %% The behavioural parity claim, probed on the wire: a quiet SSE stream
+    %% must survive past the 15s `http.idle_timeout' default on HTTP/1.1 AND
+    %% HTTP/2, because `held_stream_defaults/1' seats the connection timer
+    %% from `sse.idle_timeout' (600s) with reset-on-send for a listener that
+    %% serves `wamp_sse' — the handlers cast nothing per stream any more.
+    %% The proof of life is the first 20s keepalive: it arrives AFTER the
+    %% old kill point, so before the fix the HTTP/2 connection died ~15s in,
+    %% before ever sending it (`cowboy_http2' discards the per-stream cast
+    %% the HTTP/1.1 path used to rely on). Both streams are held
+    %% concurrently, so the case costs one ~20s wait, not two.
+    {ok, _} = application:ensure_all_started(gun),
+    H1 = open_wire_stream(#{transport => tcp, protocols => [http]}),
+    H2 = open_wire_stream(#{transport => tcp, protocols => [http2]}),
+    ok = assert_keepalive(H1, "HTTP/1.1"),
+    ok = assert_keepalive(H2, "HTTP/2"),
+    ok = gun:close(element(1, H1)),
+    ok = gun:close(element(1, H2)).
+
+%% @private
+%% Opens an SSE transport and holds its receive stream on one gun connection
+%% (multiplexed on h2, sequential on h1): POST /open for a transport id, then
+%% GET /receive as text/event-stream.
+open_wire_stream(GunOpts) ->
+    {ok, Conn} = gun:open("127.0.0.1", 18080, GunOpts),
+    {ok, _} = gun:await_up(Conn, 5000),
+    OpenRef = gun:post(
+        Conn,
+        "/wamp/sse/open",
+        [{<<"content-type">>, <<"application/json">>}],
+        json:encode(#{protocols => [<<"wamp.2.json.sse">>]})
+    ),
+    {response, nofin, 200, _} = gun:await(Conn, OpenRef, 5000),
+    {ok, Body} = gun:await_body(Conn, OpenRef, 5000),
+    #{<<"transport">> := Id} = json:decode(Body),
+    StreamRef = gun:get(
+        Conn,
+        <<"/wamp/sse/", Id/binary, "/receive">>,
+        [{<<"accept">>, <<"text/event-stream">>}]
+    ),
+    {response, nofin, 200, _} = gun:await(Conn, StreamRef, 5000),
+    {Conn, StreamRef}.
+
+%% @private
+%% The stream sends nothing until its first keepalive at ~20s. Anything else
+%% before then — `gun_down', `gun_error', a response fin — is the connection
+%% dying, which is exactly the pre-fix HTTP/2 behaviour at ~15s.
+assert_keepalive({Conn, StreamRef}, Label) ->
+    receive
+        {gun_data, Conn, StreamRef, nofin, Data} ->
+            ?assertEqual(
+                {Label, match},
+                {Label,
+                    binary:match(Data, <<"keepalive">>) =/= nomatch andalso
+                        match}
+            ),
+            ok;
+        {gun_down, Conn, _, Reason, _} ->
+            error({connection_died_before_keepalive, Label, Reason});
+        {gun_error, Conn, StreamRef, Reason} ->
+            error({stream_error_before_keepalive, Label, Reason})
+    after 30000 ->
+        error({no_keepalive_within_30s, Label})
+    end.
 
 %% =============================================================================
 %% PRIVATE

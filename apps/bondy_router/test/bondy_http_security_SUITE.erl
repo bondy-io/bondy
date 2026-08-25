@@ -77,9 +77,11 @@ longpoll_options_cors(_Config) ->
     ?assertEqual(<<"false">>, Credentials).
 
 %% HTTP/2 is served on clear listeners via prior knowledge (and h2c
-%% upgrade) now that `protocols` is left to Cowboy's default. This drives
-%% a real h2c connection with gun and proves the listener speaks HTTP/2
-%% end-to-end; resource use is bounded by `max_concurrent_streams`.
+%% upgrade) because the `http.versions` default lists `2` — Cowboy's
+%% `protocols` option is now derived from that key per listener
+%% (`bondy_listener_ranch:start_http/1`). This drives a real h2c connection
+%% with gun and proves the listener speaks HTTP/2 end-to-end; resource use
+%% is bounded by `max_concurrent_streams`.
 http2_prior_knowledge(_Config) ->
     {ok, ConnPid} = gun:open(
         "127.0.0.1", ?ADMIN_PORT, #{

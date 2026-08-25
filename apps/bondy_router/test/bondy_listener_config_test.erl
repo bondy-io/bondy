@@ -1215,15 +1215,18 @@ http_protocol_opts_defaults_are_restored_test() ->
     ?assertMatch(#{protocol_opts := #{active_n := 100}}, Defaults),
     ?assertMatch(#{protocol_opts := #{idle_timeout := 15000}}, Defaults).
 
-http_versions_default_prefers_http1_test() ->
-    %% HTTP/1.1 FIRST, and the order asserted as a value: over HTTP/2 the
-    %% per-stream `idle_timeout' override the SSE/long-poll handlers rely on
-    %% is discarded (`cowboy_http2.erl:988'), so a default that preferred h2
-    %% would kill their held streams at the 15s connection idle timeout. The
-    %% order is the server's ALPN preference, so it, not membership, is the
-    %% invariant.
+http_versions_default_offers_both_test() ->
+    %% HTTP/2 first — the preference Cowboy itself ships — with HTTP/1.1
+    %% offered, and the order asserted as a value since it is the server's
+    %% ALPN preference. h2-first is safe for held streams only because their
+    %% lifetime is connection-level on both versions now
+    %% (`held_stream_defaults/1'; the wire proof is
+    %% `bondy_http_sse_SUITE:held_stream_outlives_http_default_on_both_versions'):
+    %% before that, h2 discarded the per-stream `idle_timeout' override
+    %% (`cowboy_http2.erl:988') and this default would have killed SSE and
+    %% long-poll at the 15s connection timeout.
     ?assertMatch(
-        #{http_versions := [http, http2]},
+        #{http_versions := [http2, http]},
         bondy_listener_config:option_defaults(tcp, http)
     ),
     %% The key belongs to the HTTP shape only: a stream listener negotiates
@@ -1236,18 +1239,100 @@ http_versions_default_prefers_http1_test() ->
         )
     ).
 
+held_stream_services_raise_the_connection_floor_test() ->
+    %% A listener serving SSE or long-poll gets its CONNECTION idle timeout
+    %% seated from the carriers' `idle_timeout' (their default: 600000), with
+    %% `reset_idle_timeout_on_send' on — because over HTTP/2 the connection
+    %% timer is the only one that exists (`cowboy_http2.erl:988' discards the
+    %% per-stream cast), and without the reset flag a stream whose traffic is
+    %% all sends dies at the floor even mid-conversation. Without a
+    %% held-stream service, the plain 15s HTTP default stands and no reset
+    %% flag is seated.
+    Held = bondy_listener_config:with_option_defaults(#{
+        transport => tcp,
+        protocol => http,
+        port => 0,
+        services => [api_gateway, wamp_ws, wamp_sse, wamp_longpoll]
+    }),
+    ?assertMatch(
+        #{
+            protocol_opts := #{
+                idle_timeout := 600000,
+                reset_idle_timeout_on_send := true
+            }
+        },
+        Held
+    ),
+    Plain = bondy_listener_config:with_option_defaults(#{
+        transport => tcp,
+        protocol => http,
+        port => 0,
+        services => [api_gateway, wamp_ws]
+    }),
+    ?assertMatch(#{protocol_opts := #{idle_timeout := 15000}}, Plain),
+    ?assertNot(
+        maps:is_key(
+            reset_idle_timeout_on_send, maps:get(protocol_opts, Plain)
+        )
+    ).
+
+held_stream_floor_follows_the_operator_carrier_value_test() ->
+    %% The floor is MAX over the held-stream carriers' effective values, the
+    %% operator's own where stated: the same numbers the handlers used to
+    %% cast per stream, so at any config the connection behaves as the
+    %% HTTP/1.1 path always had. The larger carrier must win — a floor from
+    %% the smaller one would kill the other carrier's holds.
+    Spec = #{
+        transport => tcp,
+        protocol => http,
+        port => 0,
+        services => [wamp_sse, wamp_longpoll],
+        sse => #{idle_timeout => 120000},
+        longpoll => #{idle_timeout => 900000}
+    },
+    ?assertMatch(
+        #{protocol_opts := #{idle_timeout := 900000}},
+        bondy_listener_config:with_option_defaults(Spec)
+    ).
+
+operator_protocol_opts_beat_the_held_stream_floor_test() ->
+    %% The floor is a DEFAULT. An operator who states `http.idle_timeout'
+    %% (or turns the reset flag off) on a held-stream listener gets exactly
+    %% what they wrote — even a value that re-creates the h2 held-stream
+    %% problem is theirs to state.
+    Spec = #{
+        transport => tcp,
+        protocol => http,
+        port => 0,
+        services => [wamp_sse],
+        protocol_opts => #{
+            idle_timeout => 30000,
+            reset_idle_timeout_on_send => false
+        }
+    },
+    ?assertMatch(
+        #{
+            protocol_opts := #{
+                idle_timeout := 30000,
+                reset_idle_timeout_on_send := false
+            }
+        },
+        bondy_listener_config:with_option_defaults(Spec)
+    ).
+
 http_versions_operator_order_survives_defaults_test() ->
     %% `with_option_defaults/1' merges `deep_merge(Defaults, Spec)' — the
-    %% spec side wins. An operator's h2-first order must come through intact,
-    %% not be unioned or re-sorted against the default.
+    %% spec side wins. An operator's h1-only list (a value the default never
+    %% produces) must come through intact, not be unioned with the default's
+    %% members.
     Spec = #{
         transport => tls,
         protocol => http,
         port => 0,
-        http_versions => [http2, http]
+        http_versions => [http]
     },
     ?assertMatch(
-        #{http_versions := [http2, http]},
+        #{http_versions := [http]},
         bondy_listener_config:with_option_defaults(Spec)
     ).
 
