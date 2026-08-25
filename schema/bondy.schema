@@ -2515,13 +2515,11 @@ end}.
 ]}.
 
 %% @doc A comma separated, priority ordered list of the HTTP protocol versions
-%% the listener offers. Bondy supports versions 1.1 and 2. On a TLS listener
+%% the listener offers; the default is `2, 1.1'. Bondy supports versions 1.1
+%% and 2 and serves SSE and long-poll identically on both. On a TLS listener
 %% the order is the server's ALPN preference, and a client that sends no ALPN
 %% is served the first listed version. On a plaintext listener listing 2
 %% enables the HTTP/2 prior-knowledge and Upgrade paths.
-%% NOTE: over HTTP/2 the SSE and long-poll stream timeouts
-%% (`listeners.$name.{sse,longpoll}.idle_timeout') cannot be applied per
-%% stream; a listener serving those should list 1.1 first (the default).
 {mapping, "listeners.$name.http.versions", "bondy_router.listeners", [
   {datatype, string}
 ]}.
@@ -2739,7 +2737,11 @@ end}.
   {datatype, {duration, ms}}
 ]}.
 
-%% @doc Cowboy HTTP connection idle timeout for SSE endpoints.
+%% @doc How long a fully quiet SSE stream is kept before its connection is
+%% closed. Becomes the listener's connection idle timeout default (the
+%% largest held-stream carrier value wins), applied identically over
+%% HTTP/1.1 and HTTP/2; a stream that is sending is not quiet, so with
+%% keepalives on it never expires.
 {mapping, "listeners.$name.sse.idle_timeout", "bondy_router.listeners", [
   {datatype, {duration, ms}}
 ]}.
@@ -2758,9 +2760,12 @@ end}.
   {datatype, {duration, ms}}
 ]}.
 
-%% @doc Cowboy HTTP connection idle timeout for longpoll endpoints. It MUST
-%% be strictly greater than longpoll.poll_timeout so the server has time to
-%% reply before the connection is torn down for inactivity.
+%% @doc How long an idle longpoll connection is retained between polls.
+%% Becomes the listener's connection idle timeout default (the largest
+%% held-stream carrier value wins), applied identically over HTTP/1.1 and
+%% HTTP/2. It MUST be strictly greater than longpoll.poll_timeout so the
+%% server has time to reply before the connection is torn down for
+%% inactivity.
 {mapping, "listeners.$name.longpoll.idle_timeout", "bondy_router.listeners", [
   {datatype, {duration, ms}}
 ]}.
