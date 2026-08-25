@@ -121,7 +121,14 @@ start_http(#{name := Name, transport := Transport} = L) ->
     %% so the bind path has to be prepared here as well, not only on the
     %% stream path.
     ok = maybe_prepare_socket(L),
-    TransportOpts = transport_opts(L),
+    %% `[Name, http_versions]' is total for an HTTP listener:
+    %% `bondy_listener_config:protocol_option_defaults(http)' seats it and
+    %% `with_option_defaults/1' runs on every inventory entry, so a bare read
+    %% raising `badkey' is the wanted failure if that stops being true.
+    Versions = bondy_config:get([Name, http_versions]),
+    TransportOpts = with_http_versions(
+        Transport, Versions, transport_opts(L)
+    ),
     %% Both write a `persistent_term` the running listener reads on every
     %% request, and both must be in place before it can accept one.
     %% `protocol_opts/1` only points Cowboy at the dispatch key, so these are
@@ -129,7 +136,14 @@ start_http(#{name := Name, transport := Transport} = L) ->
     %% than hidden inside an options builder.
     ok = recompile_dispatch(L),
     ok = bondy_http_security_headers:init(Name),
-    ProtoOpts = protocol_opts(L),
+    ProtoOpts = (protocol_opts(L))#{
+        %% Gates Cowboy's HTTP/2 prior-knowledge and Upgrade paths on a
+        %% plaintext socket (`cowboy_http.erl:531', `:985'); harmless on TLS,
+        %% where ALPN decides first.
+        protocols => Versions,
+        %% What `cowboy_tls' serves a TLS client that sent no ALPN.
+        alpn_default_protocol => hd(Versions)
+    },
     LogMeta = #{
         listener => Name,
         transport => Transport,
@@ -273,6 +287,26 @@ alarms(MaxConnections) ->
         }}
      || {Alarm, Percent, Level} <- ?CONNECTION_ALARMS
     ]).
+
+%% @private
+%% Server ALPN preference from the listener's `http.versions', in the
+%% operator's order. APPENDED to `socket_opts': `cowboy:start_tls/3' PREPENDS
+%% its own `{alpn_preferred_protocols, [<<"h2">>, <<"http/1.1">>]}'
+%% (`cowboy.erl:161'), and OTP ssl takes the LAST occurrence of a duplicate
+%% option (`ssl_config:process_options/3' reverses the list precisely so
+%% "we get the last set option if set twice, users depend on it") — so the
+%% appended entry is the one that binds. Only a TLS socket negotiates ALPN;
+%% a clear listener's HTTP/2 gate is the `protocols' Cowboy option instead.
+with_http_versions(tls, Versions, Opts) ->
+    SocketOpts = key_value:get(socket_opts, Opts),
+    Alpn = {alpn_preferred_protocols, [alpn_name(V) || V <- Versions]},
+    key_value:put(socket_opts, SocketOpts ++ [Alpn], Opts);
+with_http_versions(_, _, Opts) ->
+    Opts.
+
+%% @private
+alpn_name(http) -> <<"http/1.1">>;
+alpn_name(http2) -> <<"h2">>.
 
 %% @private
 maybe_reuseport(Opts) ->

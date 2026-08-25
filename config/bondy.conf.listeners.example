@@ -347,6 +347,16 @@
 ##   - on or off
 # listeners.$name.http.reset_idle_timeout_on_send = off
 
+## A comma separated, priority ordered list of the HTTP protocol versions the
+## listener offers. On a TLS listener the order is the server's ALPN
+## preference; on a plaintext listener listing 2 enables the HTTP/2
+## prior-knowledge and Upgrade paths. Keep 1.1 first on a listener serving
+## wamp_sse or wamp_longpoll: their per-stream idle timeouts only apply over
+## HTTP/1.1.
+## Acceptable values:
+##   - a comma separated list drawn from: 1.1, 2
+# listeners.$name.http.versions = 1.1, 2
+
 ## Whether Cowboy uses sendfile to serve static files.
 ## Acceptable values:
 ##   - on or off
@@ -526,12 +536,6 @@
 ##   - a time duration with units, e.g. '10s' for 10 seconds
 # listeners.$name.sse.idle_timeout = 10m
 
-## Whether the SSE idle timeout is reset when sending data. Overrides
-## wamp.sse.reset_idle_timeout_on_send.
-## Acceptable values:
-##   - on or off
-# listeners.$name.sse.reset_idle_timeout_on_send = on
-
 ## How long a longpoll receive request blocks before returning an empty
 ## 204. MUST be strictly less than longpoll.idle_timeout. Overrides
 ## wamp.longpoll.poll_timeout.
@@ -545,9 +549,3 @@
 ## Acceptable values:
 ##   - a time duration with units, e.g. '10s' for 10 seconds
 # listeners.$name.longpoll.idle_timeout = 10m
-
-## Whether the longpoll idle timeout is reset when sending data. Overrides
-## wamp.longpoll.reset_idle_timeout_on_send.
-## Acceptable values:
-##   - on or off
-# listeners.$name.longpoll.reset_idle_timeout_on_send = on

@@ -237,6 +237,28 @@ because the bare name already means something different on a raw socket and a
 setting whose meaning depended on a sibling `protocol` value would be worse than
 a longer one.
 
+### HTTP versions
+
+```
+listeners.public_http.http.versions = 1.1, 2
+```
+
+A comma separated, priority ordered list of the HTTP protocol versions the
+listener offers; the default is `1.1, 2`. On a TLS listener the order is the
+server's ALPN preference — with the default, an h2-capable browser is served
+HTTP/1.1, while a client that only offers `h2` still gets HTTP/2 — and a
+client that sends no ALPN is served the first listed version. On a plaintext
+listener, listing `2` enables the HTTP/2 prior-knowledge and Upgrade paths.
+
+The default prefers HTTP/1.1 deliberately. Over HTTP/2, Cowboy applies its
+idle timeout per **connection**, and the per-stream override that keeps an
+SSE or long-poll response alive through quiet periods only exists on
+HTTP/1.1 — so on a listener that serves `wamp_sse` or `wamp_longpoll`, a
+held stream negotiated over HTTP/2 is closed at the connection's
+`http.idle_timeout` (15s if unset) regardless of the `sse.*` and
+`longpoll.*` settings. List `2` first only on a listener that holds no
+streams.
+
 ### Keepalive and idle timeouts
 
 A `wamp_rawsocket` or `bridge_relay` listener that states none of these gets:
@@ -399,7 +421,6 @@ The `deflate.*` block only takes effect when `compression_enabled` is `on`.
 | `ping.enabled` | `on` |
 | `ping.interval` | `20s` |
 | `idle_timeout` | `10m` |
-| `reset_idle_timeout_on_send` | `on` |
 
 ### `longpoll.*`
 
@@ -407,7 +428,6 @@ The `deflate.*` block only takes effect when `compression_enabled` is `on`.
 | --- | --- |
 | `poll_timeout` | `30s` |
 | `idle_timeout` | `10m` |
-| `reset_idle_timeout_on_send` | `on` |
 
 `poll_timeout` must stay strictly below `idle_timeout`, or the connection can be
 torn down for inactivity before the long-poll reply is sent.

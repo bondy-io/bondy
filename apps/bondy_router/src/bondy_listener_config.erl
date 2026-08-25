@@ -192,13 +192,11 @@ rather than a silently bound phantom listener.
     },
     sse => #{
         idle_timeout => 600000,
-        reset_idle_timeout_on_send => true,
         ping => #{enabled => true, interval => 20000}
     },
     longpoll => #{
         idle_timeout => 600000,
-        poll_timeout => 30000,
-        reset_idle_timeout_on_send => true
+        poll_timeout => 30000
     }
 }).
 
@@ -530,7 +528,17 @@ protocol_option_defaults(http) ->
         %% where Cowboy's is 60000 (`:337'). The shipped templates restate both
         %% for `listeners.admin' only, so every other HTTP listener took
         %% Cowboy's.
-        protocol_opts => #{active_n => 100, idle_timeout => 15000}
+        protocol_opts => #{active_n => 100, idle_timeout => 15000},
+        %% Priority-ordered HTTP versions the listener offers
+        %% (`listeners.$name.http.versions'). On a TLS listener the order is
+        %% the server's ALPN preference; on a clear listener membership gates
+        %% the HTTP/2 prior-knowledge and Upgrade paths. HTTP/1.1 first:
+        %% Cowboy honours a held stream's per-stream `idle_timeout' override
+        %% over HTTP/1.1 only — its HTTP/2 module discards the whole
+        %% `set_options' cast (`cowboy_http2.erl:988') — so a listener
+        %% serving SSE or long-poll must prefer HTTP/1.1 or hold streams
+        %% that die at the connection-level idle timeout.
+        http_versions => [http, http2]
     };
 protocol_option_defaults(_Unknown) ->
     #{}.

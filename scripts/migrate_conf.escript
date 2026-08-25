@@ -685,6 +685,17 @@ rules() ->
         {{prefix, ["wamp", "websocket"]},
             {manual, [{head, 2, ["listeners", "$name", "websocket"]}],
                 carrier_why("websocket")}},
+        %% Before the sse/longpoll prefix rules: these two keys have no
+        %% per-listener successor. The handlers passed the flag to Cowboy per
+        %% stream via `{set_options, ...}', which folds in exactly `chunked'
+        %% and `idle_timeout' and silently discards everything else -- so the
+        %% key never configured anything. The working control is the
+        %% listener-wide `listeners.$name.http.reset_idle_timeout_on_send'.
+        {{match, ["wamp", "sse", "reset_idle_timeout_on_send"]},
+            {drop, reset_on_send_why()}},
+        {{match, ["wamp", "longpoll", "reset_idle_timeout_on_send"]},
+            {drop, reset_on_send_why()}},
+
         {{prefix, ["wamp", "sse"]},
             {manual, [{head, 2, ["listeners", "$name", "sse"]}],
                 carrier_why("sse")}},
@@ -765,6 +776,15 @@ carrier_why(Carrier) ->
     " listeners.<name>." ++ Carrier ++ ".<tail> on each listener that serves"
     " the carrier. The defaults did not change, so a line that only restated"
     " one can be deleted instead.".
+
+%% @private
+reset_on_send_why() ->
+    "the key never had an effect: the handler passed it to Cowboy per stream"
+    " through the `set_options' command, which accepts only `chunked' and"
+    " `idle_timeout' and silently discards every other option. Idle-timeout"
+    " reset on send is a connection-level protocol option, so its working"
+    " spelling is listeners.<name>.http.reset_idle_timeout_on_send, which"
+    " applies to every service on that listener.".
 
 %% @private
 websocket_buffer_why() ->

@@ -30,6 +30,7 @@
 -export([ws_listener_restricted_to_one_protocol/1]).
 -export([ws_max_frame_size_is_enforced_per_listener/1]).
 -export([new_style_tls_listener_binds/1]).
+-export([http_versions_decide_alpn/1]).
 -export([splat_merges_into_an_existing_transport_block/1]).
 -export([new_style_tls_material_is_visible_to_rotation/1]).
 -export([new_style_mtls_material_is_visible_to_rotation/1]).
@@ -75,6 +76,7 @@ all() ->
         ws_listener_restricted_to_one_protocol,
         ws_max_frame_size_is_enforced_per_listener,
         new_style_tls_listener_binds,
+        http_versions_decide_alpn,
         splat_merges_into_an_existing_transport_block,
         new_style_tls_material_is_visible_to_rotation,
         new_style_mtls_material_is_visible_to_rotation,
@@ -761,6 +763,65 @@ new_style_tls_listener_binds(_Config) ->
     ?assertMatch(#{transport := tls}, L),
     %% Bound, not merely resolved: ask ranch for the port it actually got.
     ?assert(is_integer(ranch:get_port(ct_new_tls))),
+
+    ok = bondy_listener_manager:stop(all).
+
+http_versions_decide_alpn(_Config) ->
+    %% The property an operator depends on, probed with a REAL handshake: the
+    %% `http.versions' order decides what an h2-capable client is served,
+    %% DESPITE `cowboy:start_tls/3' prepending its own h2-first
+    %% `alpn_preferred_protocols' entry (`cowboy.erl:161'). It holds because
+    %% ssl resolves a duplicate option to its LAST occurrence
+    %% (`ssl_config:process_options/3') and `with_http_versions/3' appends.
+    %% This test is what fails if that chain breaks — e.g. a cowboy upgrade
+    %% that appends its entry instead of prepending it.
+    {ok, _} = application:ensure_all_started(ssl),
+    Tls = #{
+        certfile => "./etc/ssl/server/keycert.pem",
+        keyfile => "./etc/ssl/server/key.pem",
+        cacertfile => "./etc/ssl/server/cacert.pem"
+    },
+    ok = bondy_config:set(listeners, [
+        {ct_alpn_h1, #{
+            transport => tls,
+            protocol => http,
+            port => 0,
+            services => [wamp_ws],
+            http_versions => [http],
+            tls => Tls
+        }},
+        {ct_alpn_h2, #{
+            transport => tls,
+            protocol => http,
+            port => 0,
+            services => [wamp_ws],
+            http_versions => [http2, http],
+            tls => Tls
+        }}
+    ]),
+    ok = bondy_listener_manager:init(),
+    ok = bondy_listener_manager:start(normal),
+
+    Negotiated = fun(Name) ->
+        {ok, Sock} = ssl:connect(
+            "127.0.0.1",
+            ranch:get_port(Name),
+            [
+                binary,
+                {verify, verify_none},
+                {alpn_advertised_protocols, [<<"h2">>, <<"http/1.1">>]}
+            ],
+            5000
+        ),
+        Result = ssl:negotiated_protocol(Sock),
+        ok = ssl:close(Sock),
+        Result
+    end,
+
+    %% h1-only listener: the client offered h2 first and did not get it.
+    ?assertEqual({ok, <<"http/1.1">>}, Negotiated(ct_alpn_h1)),
+    %% h2-first listener: HTTP/2 is genuinely offered, not just accepted.
+    ?assertEqual({ok, <<"h2">>}, Negotiated(ct_alpn_h2)),
 
     ok = bondy_listener_manager:stop(all).
 

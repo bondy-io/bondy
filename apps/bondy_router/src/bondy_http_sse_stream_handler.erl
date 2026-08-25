@@ -111,13 +111,13 @@ init(Req0, Opts) ->
 
                     %% No defaults: a resolved `sse' carrier config carries
                     %% every key of `bondy_listener_config:?CARRIER_DEFAULTS'.
+                    %% Only `idle_timeout' (and `chunked') can be set per
+                    %% stream: cowboy_http's `set_options' fold drops every
+                    %% other key. Idle-timeout reset on send is the
+                    %% listener-wide `http.reset_idle_timeout_on_send'.
                     IdleTimeout = maps:get(idle_timeout, Config),
-                    ResetOnSend = maps:get(reset_idle_timeout_on_send, Config),
                     ok = cowboy_req:cast(
-                        {set_options, #{
-                            idle_timeout => IdleTimeout,
-                            reset_idle_timeout_on_send => ResetOnSend
-                        }},
+                        {set_options, #{idle_timeout => IdleTimeout}},
                         Req
                     ),
 
