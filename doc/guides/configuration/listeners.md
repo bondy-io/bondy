@@ -245,10 +245,11 @@ listeners.public_http.http.versions = 2, 1.1
 
 A comma separated, priority ordered list of the HTTP protocol versions the
 listener offers; the default is `2, 1.1`. On a TLS listener the order is the
-server's ALPN preference, and a client that sends no ALPN is served the
-first listed version. On a plaintext listener, listing `2` enables the
-HTTP/2 prior-knowledge and Upgrade paths. Set `1.1` alone to switch HTTP/2
-off for a listener.
+server's ALPN preference; HTTP/2 is served only to a client that negotiates
+`h2` via ALPN (RFC 7540 requires that), so a client that negotiates `http/1.1`
+or sends no ALPN is served HTTP/1.1 whenever `1.1` is listed. On a plaintext
+listener, listing `2` enables the HTTP/2 prior-knowledge and Upgrade paths.
+Set `1.1` alone to switch HTTP/2 off for a listener.
 
 SSE and long-poll behave identically on both versions: a held stream's
 lifetime is governed by the listener's **connection** idle timeout, which a

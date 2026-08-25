@@ -141,8 +141,20 @@ start_http(#{name := Name, transport := Transport} = L) ->
         %% plaintext socket (`cowboy_http.erl:531', `:985'); harmless on TLS,
         %% where ALPN decides first.
         protocols => Versions,
-        %% What `cowboy_tls' serves a TLS client that sent no ALPN.
-        alpn_default_protocol => hd(Versions)
+        %% `cowboy_tls' routes EVERY non-`h2' ALPN outcome through this —
+        %% a negotiated `http/1.1' included, not just an absent ALPN
+        %% extension (`cowboy_tls.erl:38-46'). So this must be the HTTP/1.1
+        %% codec whenever the listener offers 1.1 at all; `hd(Versions)'
+        %% here put h2-first listeners' 1.1 clients into `cowboy_http2'
+        %% (caught live by `bondy_connect_conformance_SUITE''s wss group).
+        %% An h2-only listener keeps `http2': RFC 7540 §3.3 requires ALPN
+        %% for h2 over TLS, so a client landing here is not an h2 client
+        %% and refusing it is that configuration's meaning.
+        alpn_default_protocol =>
+            case lists:member(http, Versions) of
+                true -> http;
+                false -> http2
+            end
     },
     LogMeta = #{
         listener => Name,
