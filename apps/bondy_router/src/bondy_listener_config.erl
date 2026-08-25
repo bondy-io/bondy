@@ -149,7 +149,7 @@ rather than a silently bound phantom listener.
 %% keys. No carrier setting has one; a LIST-valued setting is fine, since only
 %% maps are descended.
 %%
-%% Only the three carriers that HAVE settings appear. `carrier_defaults/1'
+%% Only the carriers that HAVE settings appear. `carrier_defaults/1'
 %% answers `#{}' for any other, so a row of `api_gateway => #{}' would state
 %% what its own absence already states, and would read as a carrier whose
 %% settings had been forgotten. Which carriers those are is not a list to keep
@@ -197,6 +197,23 @@ rather than a silently bound phantom listener.
     longpoll => #{
         idle_timeout => 600000,
         poll_timeout => 30000
+    },
+    %% `public_base_uri' is a PRESENT key with a sentinel, not an absent key:
+    %% it has no meaningful default (it exists for deployments behind a
+    %% TLS-terminating proxy, where the public origin is not one this node
+    %% ever sees), and a key without a leaf here could not be expressed per
+    %% listener at all — the paths `resolve_carrier_config/3' reads are the
+    %% leaves of this row.
+    mcp => #{
+        protocol_versions => [
+            <<"2026-07-28">>, <<"2025-11-25">>, <<"2025-06-18">>
+        ],
+        public_base_uri => undefined,
+        max_body_size => 4194304,
+        max_inflight => 64,
+        idle_timeout => 600000,
+        list => #{default_page_size => 200},
+        schema => #{max_depth => 32, max_validation_ms => 50}
     }
 }).
 
@@ -366,7 +383,7 @@ with_option_defaults(Spec) ->
 
 %% @private
 %% Connection-level defaults for a listener whose services hold streams open
-%% (SSE, long-poll). A held response sends for minutes on a connection that
+%% (SSE, long-poll, MCP). A held response sends for minutes on a connection that
 %% may receive nothing, and Cowboy's connection idle timer is the ONLY timer
 %% that governs it over HTTP/2 — `cowboy_http2:commands/3' discards the whole
 %% per-stream `set_options' cast (`cowboy_http2.erl:988'), so the per-stream
@@ -406,6 +423,9 @@ held_stream_carrier(Service) ->
     case service_spec(Service) of
         #{carrier := sse} -> sse;
         #{carrier := longpoll} -> longpoll;
+        %% MCP holds SSE response streams open the same way, and its carrier
+        %% row carries the same `idle_timeout' key.
+        #{carrier := mcp} -> mcp;
         _ -> undefined
     end.
 
@@ -517,6 +537,14 @@ service_spec(wamp_sse) ->
     #{carrier => sse, protocol => wamp};
 service_spec(wamp_longpoll) ->
     #{carrier => longpoll, protocol => wamp};
+%% `protocol => mcp' rather than `undefined' because MCP genuinely frames a
+%% wire protocol, unlike `api_gateway' or `admin'. Nothing dispatches on the
+%% value today — the carrier has one service, so the union is always
+%% `[mcp]' — but it keeps this table's rule intact: the carriers with
+%% settings in `?CARRIER_DEFAULTS' are exactly the ones whose services name
+%% a protocol.
+service_spec(mcp) ->
+    #{carrier => mcp, protocol => mcp};
 service_spec(admin) ->
     #{carrier => admin, protocol => undefined};
 service_spec(metrics) ->
@@ -704,6 +732,7 @@ resolve_one(Name, Spec, GetFun) ->
     ok = assert_transport_protocol(Name, Transport, Protocol),
 
     Services = resolve_services(Name, Protocol, Spec),
+    ok = assert_services_compatible(Name, Services),
 
     Enabled = maps:get(enabled, Spec, true),
 
@@ -827,6 +856,29 @@ assert_tls_keys(Name, Transport, true, GetFun) ->
     end.
 
 %% @private
+%% A listener declaring both `mcp' and `admin_api' is refused: mounting an
+%% agent-driven surface on the socket that administers realms, users and
+%% grants puts it one misconfiguration away from the wrong audience — the
+%% same reasoning that keeps `admin_api' and `api_gateway' apart in Bondy's
+%% own defaults, and MCP is its strongest case, since its whole purpose is to
+%% let an autonomous agent choose which of the exposed operations to invoke.
+%% Refusing the boot eliminates the failure mode rather than warning about
+%% it; this is not a configuration an operator arrives at deliberately.
+%% `mcp' alongside `api_gateway' is allowed: both are tenant-facing, and a
+%% small deployment sharing one port is a legitimate choice.
+%%
+%% Runs on the service list, so it reports before `assert_tls_keys/4': a case
+%% that declares both services in order to pin some LATER error will report
+%% `{incompatible_services, mcp, admin_api}' instead.
+assert_services_compatible(Name, Services) ->
+    case
+        lists:member(mcp, Services) andalso lists:member(admin_api, Services)
+    of
+        true -> invalid(Name, {incompatible_services, mcp, admin_api});
+        false -> ok
+    end.
+
+%% @private
 %% `services` is meaningful only for HTTP: it is HTTP's path multiplexing that
 %% makes a LIST of reachable things possible. A raw socket carries exactly one
 %% protocol, named by the `protocol` key, so a service list there is an error
@@ -863,6 +915,11 @@ carrier_module(sse) ->
     bondy_http_services;
 carrier_module(longpoll) ->
     bondy_http_services;
+%% Served by an application other than `bondy_router'. Only the atom is held
+%% here: the call is resolved when a listener's dispatch table is assembled,
+%% so no compile-time dependency on `bondy_mcp' exists.
+carrier_module(mcp) ->
+    bondy_mcp_http_service;
 carrier_module(admin) ->
     bondy_http_services;
 carrier_module(metrics) ->

@@ -66,6 +66,11 @@
 -define(BONDY_HTTP_GATEWAY_LOAD, <<"bondy.http_gateway.api.load">>).
 -define(BONDY_HTTP_GATEWAY_DELETE, <<"bondy.http_gateway.api.delete">>).
 
+-define(BONDY_INTERFACE_DELETE, <<"bondy.interface.delete">>).
+-define(BONDY_INTERFACE_GET, <<"bondy.interface.get">>).
+-define(BONDY_INTERFACE_LIST, <<"bondy.interface.list">>).
+-define(BONDY_INTERFACE_LOAD, <<"bondy.interface.load">>).
+
 -define(BONDY_OAUTH2_CLIENT_ADD, <<"bondy.oauth2.client.add">>).
 -define(BONDY_OAUTH2_CLIENT_DELETE, <<"bondy.oauth2.client.delete">>).
 -define(BONDY_OAUTH2_CLIENT_GET, <<"bondy.oauth2.client.get">>).

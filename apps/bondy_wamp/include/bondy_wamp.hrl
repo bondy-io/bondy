@@ -1610,6 +1610,18 @@ end).
     <<"wamp.error.procedure_exists_with_different_invocation_policy">>
 ).
 -define(WAMP_PROTOCOL_VIOLATION, <<"wamp.error.protocol_violation">>).
+%% Interface Reflection (spec §16.3, status `sketch`): Bondy adopts the six
+%% procedure names, not the FlatBuffers IDL.
+-define(WAMP_REFLECTION_ERROR_DESCRIBE, <<"wamp.reflection.error.describe">>).
+-define(WAMP_REFLECTION_ERROR_LIST, <<"wamp.reflection.error.list">>).
+-define(WAMP_REFLECTION_PROC_DESCRIBE,
+    <<"wamp.reflection.procedure.describe">>
+).
+-define(WAMP_REFLECTION_PROC_LIST, <<"wamp.reflection.procedure.list">>).
+-define(WAMP_REFLECTION_TOPIC_DESCRIBE,
+    <<"wamp.reflection.topic.describe">>
+).
+-define(WAMP_REFLECTION_TOPIC_LIST, <<"wamp.reflection.topic.list">>).
 -define(WAMP_REGISTRATION_ON_CREATE, <<"wamp.registration.on_create">>).
 -define(WAMP_REGISTRATION_ON_DELETE, <<"wamp.registration.on_delete">>).
 -define(WAMP_REGISTRATION_ON_REGISTER, <<"wamp.registration.on_register">>).

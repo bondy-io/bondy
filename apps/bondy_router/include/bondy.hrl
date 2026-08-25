@@ -137,7 +137,9 @@ end#{
     testament_meta_api => false,
     session_meta_api => true,
     registration_meta_api => true,
-    reflection => false,
+    %% The six wamp.reflection.* procedures over bondy_interface
+    %% (bondy_wamp_meta_api); announced and implemented together.
+    reflection => true,
     %% BONDY only
     caller_auth_claims => true
 }).
@@ -176,7 +178,8 @@ end#{
     subscription_revocation => false,
     session_meta_api => true,
     subscription_meta_api => false,
-    reflection => false,
+    %% wamp.reflection.topic.* read the same bondy_interface store.
+    reflection => true,
     %% Non-standard
     acknowledge_event_received => false,
     acknowledge_subscriber_received => false

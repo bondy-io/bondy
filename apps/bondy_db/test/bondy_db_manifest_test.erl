@@ -284,3 +284,91 @@ file_delete_recursive(Path) ->
         false ->
             file:delete(Path)
     end.
+
+%% =============================================================================
+%% Manifest extension (additive table evolution)
+%% =============================================================================
+
+extension_test_() ->
+    {foreach, fun setup/0, fun cleanup/1, [
+        fun diff_manifest_extension_is_adopted/1,
+        fun diff_extension_mixed_with_divergence_is_not/1,
+        fun table_removal_is_never_adopted/1
+    ]}.
+
+diff_manifest_extension_is_adopted(Dir) ->
+    fun() ->
+        {ok, genesis, _} = bondy_db_manifest:reconcile(Dir, configured(), warn),
+        %% A release adds a table; nothing else changes. The addition moves no
+        %% existing bytes, so it must be ADOPTED: manifest rewritten, new
+        %% config effective, and — decisively — the next boot is a `match`,
+        %% not a mismatch warning forever.
+        Extended = (configured())#{
+            tables => maps:put(
+                bondy_interface,
+                #{aggregate_root => identity},
+                maps:get(tables, configured())
+            )
+        },
+        Res = bondy_db_manifest:reconcile(Dir, Extended, warn),
+        ?assertMatch({ok, {extended, [bondy_interface]}, _}, Res),
+        {ok, _, Effective} = Res,
+        ?assert(maps:is_key(bondy_interface, maps:get(tables, Effective))),
+        %% The manifest on disk now freezes the added table...
+        {ok, #{frozen := Frozen}} = bondy_db_manifest:read(Dir),
+        ?assert(maps:is_key(bondy_interface, maps:get(tables, Frozen))),
+        %% ...so the same boot tomorrow is a match, under both policies.
+        ?assertMatch(
+            {ok, match, _}, bondy_db_manifest:reconcile(Dir, Extended, warn)
+        ),
+        ?assertMatch(
+            {ok, match, _}, bondy_db_manifest:reconcile(Dir, Extended, stop)
+        ),
+        %% And the fingerprint now equals a fresh node's genesis fingerprint
+        %% for the same config — the property the adoption exists for: two
+        %% nodes that key data identically must be able to AAE-sync.
+        ?assertEqual(
+            bondy_db_manifest:fingerprint(Extended),
+            bondy_db_manifest:fingerprint(Frozen)
+        )
+    end.
+
+diff_extension_mixed_with_divergence_is_not(Dir) ->
+    fun() ->
+        {ok, genesis, _} = bondy_db_manifest:reconcile(Dir, configured(), warn),
+        %% An added table riding along with a REAL divergence (a changed
+        %% shard_count) must not be adopted: the whole set falls through to
+        %% the mismatch policy and the manifest stays untouched.
+        Changed = (configured())#{
+            shard_count => 32,
+            tables => maps:put(
+                bondy_interface,
+                #{aggregate_root => identity},
+                maps:get(tables, configured())
+            )
+        },
+        ?assertMatch(
+            {ok, {mismatch, _}, _},
+            bondy_db_manifest:reconcile(Dir, Changed, warn)
+        ),
+        {ok, #{frozen := Frozen}} = bondy_db_manifest:read(Dir),
+        ?assertNot(maps:is_key(bondy_interface, maps:get(tables, Frozen))),
+        ?assertEqual(16, maps:get(shard_count, Frozen))
+    end.
+
+table_removal_is_never_adopted(Dir) ->
+    fun() ->
+        {ok, genesis, _} = bondy_db_manifest:reconcile(Dir, configured(), warn),
+        %% A table on disk and absent from config is a DOWNGRADE, not an
+        %% extension: the on-disk data must stay frozen (dormant), so this is
+        %% a mismatch, and the manifest keeps the table.
+        Removed = (configured())#{
+            tables => maps:remove(bondy_realm, maps:get(tables, configured()))
+        },
+        ?assertMatch(
+            {ok, {mismatch, [{{table, bondy_realm}, '$absent', _}]}, _},
+            bondy_db_manifest:reconcile(Dir, Removed, warn)
+        ),
+        {ok, #{frozen := Frozen}} = bondy_db_manifest:read(Dir),
+        ?assert(maps:is_key(bondy_realm, maps:get(tables, Frozen)))
+    end.

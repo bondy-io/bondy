@@ -228,6 +228,23 @@ handle_call(
             E = bondy_wamp_api_utils:error(Reason, M),
             {reply, E}
     end;
+%% Interface Reflection: the read side of `bondy_interface`. A LIST is the
+%% RBAC-projected set of described URIs — the specification's own wording is
+%% a list of what the peer "is authorized to access or provide" — and a
+%% DESCRIBE of an entry the caller may not see answers exactly as an absent
+%% one, so the reply is not an existence oracle.
+handle_call(#call{procedure_uri = ?WAMP_REFLECTION_PROC_LIST} = M, Ctxt) ->
+    reflection_list(procedure, M, Ctxt);
+handle_call(#call{procedure_uri = ?WAMP_REFLECTION_PROC_DESCRIBE} = M, Ctxt) ->
+    reflection_describe(procedure, M, Ctxt);
+handle_call(#call{procedure_uri = ?WAMP_REFLECTION_TOPIC_LIST} = M, Ctxt) ->
+    reflection_list(topic, M, Ctxt);
+handle_call(#call{procedure_uri = ?WAMP_REFLECTION_TOPIC_DESCRIBE} = M, Ctxt) ->
+    reflection_describe(topic, M, Ctxt);
+handle_call(#call{procedure_uri = ?WAMP_REFLECTION_ERROR_LIST} = M, Ctxt) ->
+    reflection_list(error, M, Ctxt);
+handle_call(#call{procedure_uri = ?WAMP_REFLECTION_ERROR_DESCRIBE} = M, Ctxt) ->
+    reflection_describe(error, M, Ctxt);
 handle_call(#call{} = M, _) ->
     E = bondy_wamp_api_utils:no_such_procedure_error(M),
     {reply, E}.
@@ -235,6 +252,107 @@ handle_call(#call{} = M, _) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+reflection_list(Kind, M, Ctxt) ->
+    [RealmUri] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
+    Entries = bondy_interface:list(RealmUri, Kind),
+    Uris = visible_uris(Kind, Entries, rbac_filter(RealmUri, Ctxt)),
+    R = bondy_wamp_message:result(M#call.request_id, #{}, [Uris]),
+    {reply, R}.
+
+%% @private
+reflection_describe(Kind, M, Ctxt) ->
+    case bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2) of
+        [RealmUri, Uri] when is_binary(Uri) ->
+            Visible =
+                case rbac_filter(RealmUri, Ctxt) of
+                    none ->
+                        true;
+                    {filter, RBACCtxt} ->
+                        {V, _} = permitted(Kind, Uri, RBACCtxt),
+                        V
+                end,
+            case
+                Visible andalso bondy_interface:describe(RealmUri, Kind, Uri)
+            of
+                {ok, Entry} ->
+                    External = bondy_interface:to_external(Entry),
+                    R = bondy_wamp_message:result(
+                        M#call.request_id, #{}, [External]
+                    ),
+                    {reply, R};
+                _ ->
+                    {reply, bondy_wamp_api_utils:error(not_found, M)}
+            end;
+        _ ->
+            {reply, bondy_wamp_api_utils:error(badarg, M)}
+    end.
+
+%% @private
+%% Whether — and with which RBAC context — a reflection result must be
+%% projected. Mirrors `bondy_rbac:authorize/3`'s own gates: no filter on a
+%% security-disabled realm, and none for a master-realm caller operating on
+%% another realm (`validate_call_args/3` only admits that caller from the
+%% master realm, where they are an administrator).
+rbac_filter(RealmUri, Ctxt) ->
+    case bondy_context:realm_uri(Ctxt) of
+        RealmUri ->
+            case bondy_context:is_security_enabled(Ctxt) of
+                true ->
+                    {filter,
+                        bondy_session:rbac_context(
+                            bondy_context:session(Ctxt)
+                        )};
+                false ->
+                    none
+            end;
+        _Master ->
+            none
+    end.
+
+%% @private
+%% The RBAC projection of a list result, threading the refreshed context
+%% through the fold (`check_permission/2` returns it precisely so a caller
+%% does not rebuild it per entry once the epoch lapses).
+visible_uris(_Kind, Entries, none) ->
+    lists:usort([maps:get(uri, E) || E <- Entries]);
+visible_uris(Kind, Entries, {filter, RBACCtxt0}) ->
+    {Uris, _} = lists:foldl(
+        fun(E, {Acc, RC0}) ->
+            Uri = maps:get(uri, E),
+            case permitted(Kind, Uri, RC0) of
+                {true, RC} -> {[Uri | Acc], RC};
+                {false, RC} -> {Acc, RC}
+            end
+        end,
+        {[], RBACCtxt0},
+        Entries
+    ),
+    lists:usort(Uris).
+
+%% @private
+%% "Authorized to access or provide": a procedure is visible to a caller who
+%% may call OR register it, a topic to one who may subscribe OR publish.
+%% Error URIs have no permission space — they ride on the operations that
+%% raise them — so they are always visible.
+permitted(error, _Uri, RBACCtxt) ->
+    {true, RBACCtxt};
+permitted(Kind, Uri, RBACCtxt) ->
+    any_permitted(actions(Kind), Uri, RBACCtxt).
+
+%% @private
+actions(procedure) -> [<<"wamp.call">>, <<"wamp.register">>];
+actions(topic) -> [<<"wamp.subscribe">>, <<"wamp.publish">>].
+
+%% @private
+any_permitted([], _Uri, RBACCtxt) ->
+    {false, RBACCtxt};
+any_permitted([Action | Rest], Uri, RBACCtxt0) ->
+    case bondy_rbac:check_permission({Action, Uri}, RBACCtxt0) of
+        {true, RBACCtxt} -> {true, RBACCtxt};
+        {false, _, RBACCtxt} -> any_permitted(Rest, Uri, RBACCtxt)
+    end.
 
 no_such_session_error(Type, ReqId) when Type == ?CALL; Type == ?INVOCATION ->
     bondy_wamp_message:error(

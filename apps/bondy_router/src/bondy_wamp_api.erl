@@ -96,6 +96,8 @@ do_handle_call(<<"bondy.group.", _/binary>> = Proc, M, Ctxt) ->
     bondy_rbac_api:handle_call(Proc, M, Ctxt);
 do_handle_call(<<"bondy.http_gateway.", _/binary>> = Proc, M, Ctxt) ->
     bondy_http_gateway_api:handle_call(Proc, M, Ctxt);
+do_handle_call(<<"bondy.interface.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_interface_api:handle_call(Proc, M, Ctxt);
 do_handle_call(<<"bondy.listener.", _/binary>> = Proc, M, Ctxt) ->
     bondy_listener_wamp_api:handle_call(Proc, M, Ctxt);
 do_handle_call(<<"bondy.mail.", _/binary>> = Proc, M, Ctxt) ->

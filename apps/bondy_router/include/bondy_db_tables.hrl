@@ -28,6 +28,10 @@
 -define(BONDY_DB_SOURCE_TAB, security_sources).
 -define(BONDY_DB_TICKET_TAB, bondy_ticket).
 -define(BONDY_DB_OAUTH_TOKEN_TAB, bondy_oauth_token).
+%% Interface metadata (procedure/topic/error descriptions and schemas), read
+%% through WAMP Interface Reflection. Keyed per realm by {Kind, MatchPolicy,
+%% Uri} — a URI, never a registration; the registry does not know it exists.
+-define(BONDY_DB_INTERFACE_TAB, bondy_interface).
 -define(BONDY_DB_REGISTRY_ACTOR, '$bondy_registry').
 
 %% REGISTRY

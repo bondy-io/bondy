@@ -244,10 +244,11 @@ static_carriers_are_assembled_before_specification_carriers_test() ->
         api_gateway => ignored,
         admin => ignored,
         admin_api => ignored,
-        metrics => ignored
+        metrics => ignored,
+        mcp => ignored
     },
     ?assertEqual(
-        [admin, metrics, websocket, admin_api, api_gateway],
+        [admin, mcp, metrics, websocket, admin_api, api_gateway],
         bondy_http_services:carrier_order(Carriers)
     ).
 
@@ -322,3 +323,57 @@ routes(vhost, _Spec, _Listener) ->
             {"/only-here", bondy_admin_ping_http_handler, #{}}
         ]}
     ].
+
+%% =============================================================================
+%% MCP CARRIER
+%% =============================================================================
+
+mcp_service_mounts_its_two_paths_test() ->
+    %% The `mcp' carrier's whole route surface: the JSON-RPC endpoint and the
+    %% OAuth protected-resource metadata document, both under `'_'' so they
+    %% answer on every virtual host the listener serves.
+    Expected = lists:sort([
+        "/mcp/realm/:realm",
+        "/.well-known/oauth-protected-resource/realm/:realm"
+    ]),
+    ?assertEqual(Expected, paths(listener([mcp]))).
+
+mcp_route_state_carries_the_resolved_carrier_config_test() ->
+    %% One handler module for both paths, selected by `action' — and the
+    %% listener's resolved `mcp' config rides in the route state, so the
+    %% handler performs no configuration lookup per request.
+    [{'_', Routes}] = bondy_http_services:dispatch(listener([mcp])),
+    States =
+        #{
+            Path => {Mod, St}
+         || {Path, Mod, St} <- Routes
+        },
+    {bondy_mcp_http_handler, Rpc} = maps:get("/mcp/realm/:realm", States),
+    {bondy_mcp_http_handler, Meta} = maps:get(
+        "/.well-known/oauth-protected-resource/realm/:realm", States
+    ),
+    ?assertEqual(rpc, maps:get(action, Rpc)),
+    ?assertEqual(oauth_metadata, maps:get(action, Meta)),
+    ?assertEqual(test, maps:get(listener, Rpc)),
+    ?assertEqual(
+        bondy_listener_config:carrier_defaults(mcp), maps:get(config, Rpc)
+    ).
+
+a_specification_cannot_take_the_mcp_paths_test() ->
+    %% A stored API Gateway specification claiming `/mcp/realm/:realm' is
+    %% operator data arriving by anti-entropy, so it is tolerated and LOGGED,
+    %% never raised — and it loses: statics are assembled first
+    %% (`carrier_order/1'), so the incumbent is the MCP route and the
+    %% specification's own route is unreachable on that listener.
+    L = listener([mcp]),
+    Spec = maps:get(mcp, maps:get(carriers, L)),
+    Contributed = bondy_mcp_http_service:routes(mcp, Spec, L),
+    Claims = bondy_http_services:merge_routes(Contributed, mcp, []),
+    ?assertEqual(
+        Claims,
+        bondy_http_services:merge_routes(
+            [{'_', [{"/mcp/realm/:realm", spec_handler, #{}}]}],
+            api_gateway,
+            Claims
+        )
+    ).

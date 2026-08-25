@@ -1677,3 +1677,119 @@ websocket_and_stream_ping_attempts_agree_test() ->
     ),
     ?assertEqual(3, Websocket),
     ?assertEqual(Websocket, Stream).
+
+%% =============================================================================
+%% MCP SERVICE
+%% =============================================================================
+
+mcp_resolves_to_its_own_carrier_test() ->
+    %% `mcp' is IN-TREE data in this module, not an `http_services' env
+    %% registration: the inventory resolves inside `bondy_config:init/1',
+    %% before any dependent application's `start/2' could register anything,
+    %% and the per-listener half — the `?CARRIER_DEFAULTS' row and the schema
+    %% mappings — lives here regardless.
+    Inventory = [
+        {pub, #{
+            transport => tcp,
+            protocol => http,
+            port => 18080,
+            services => [mcp]
+        }}
+    ],
+    {ok, [L]} = bondy_listener_config:resolve(Inventory, empty_get()),
+    ?assertMatch(
+        #{mcp := #{module := bondy_mcp_http_service, protocols := [mcp]}},
+        maps:get(carriers, L)
+    ).
+
+mcp_carrier_config_is_total_over_its_defaults_test() ->
+    %% An operator who names no `listeners.$name.mcp.*' key gets exactly the
+    %% defaults row — every key present, `public_base_uri' as a PRESENT key
+    %% with an `undefined' sentinel — so the handler reads with bare
+    %% `maps:get/2' and a missing key raises rather than drifting.
+    Inventory = [
+        {pub, #{
+            transport => tcp,
+            protocol => http,
+            port => 18080,
+            services => [mcp]
+        }}
+    ],
+    {ok, [L]} = bondy_listener_config:resolve(Inventory, empty_get()),
+    #{mcp := #{config := Config}} = maps:get(carriers, L),
+    ?assertEqual(bondy_listener_config:carrier_defaults(mcp), Config),
+    ?assert(maps:is_key(public_base_uri, Config)),
+    ?assertEqual(undefined, maps:get(public_base_uri, Config)).
+
+operator_mcp_value_wins_and_siblings_keep_their_defaults_test() ->
+    %% Two-tier resolution, same as every other carrier: the operator's value
+    %% at its leaf, the `?CARRIER_DEFAULTS' row for every leaf not named —
+    %% including the siblings inside a nested block the operator touched.
+    Get = fun
+        ([pub, mcp, max_body_size], _) -> 1024;
+        ([pub, mcp, schema, max_depth], _) -> 8;
+        (_, Default) -> Default
+    end,
+    Inventory = [
+        {pub, #{
+            transport => tcp,
+            protocol => http,
+            port => 18080,
+            services => [mcp]
+        }}
+    ],
+    {ok, [L]} = bondy_listener_config:resolve(Inventory, Get),
+    #{mcp := #{config := Config}} = maps:get(carriers, L),
+    ?assertEqual(1024, maps:get(max_body_size, Config)),
+    ?assertEqual(64, maps:get(max_inflight, Config)),
+    ?assertEqual(
+        #{max_depth => 8, max_validation_ms => 50}, maps:get(schema, Config)
+    ).
+
+mcp_and_admin_api_are_incompatible_test() ->
+    %% A boot ERROR, not a warning: mounting an agent-driven surface on the
+    %% socket that administers realms, users and grants is not a
+    %% configuration an operator arrives at deliberately, and refusing it
+    %% eliminates the failure mode. Reported off the service list, before
+    %% the TLS check, in either declaration order.
+    Declare = fun(Services) ->
+        bondy_listener_config:resolve(
+            [
+                {pub, #{
+                    transport => tcp,
+                    protocol => http,
+                    port => 18080,
+                    services => Services
+                }}
+            ],
+            empty_get()
+        )
+    end,
+    Expected =
+        {error,
+            {invalid_listener, pub, {incompatible_services, mcp, admin_api}}},
+    ?assertEqual(Expected, Declare([mcp, admin_api])),
+    ?assertEqual(Expected, Declare([admin_api, wamp_ws, mcp])),
+    %% `mcp' + `api_gateway' is ALLOWED: both are tenant-facing, and a small
+    %% deployment sharing one port is a legitimate choice.
+    ?assertMatch({ok, [_]}, Declare([mcp, api_gateway])).
+
+mcp_service_raises_the_held_stream_floor_test() ->
+    %% MCP holds SSE response streams open, so a listener serving it gets the
+    %% same connection-level defaults as one serving `wamp_sse': the
+    %% carrier's `idle_timeout' as the connection floor, with
+    %% `reset_idle_timeout_on_send' on, identical over HTTP/1.1 and HTTP/2.
+    ?assertMatch(
+        #{
+            protocol_opts := #{
+                idle_timeout := 600000,
+                reset_idle_timeout_on_send := true
+            }
+        },
+        bondy_listener_config:with_option_defaults(#{
+            transport => tcp,
+            protocol => http,
+            port => 0,
+            services => [mcp]
+        })
+    ).

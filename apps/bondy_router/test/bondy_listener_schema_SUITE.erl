@@ -49,7 +49,7 @@
 -export([linger_timeout_rejects_below_minus_one/1]).
 -export([linger_timeout_is_in_seconds/1]).
 -export([a_security_header_can_be_switched_off_on_its_own/1]).
--export([all_93_keys_reach_their_documented_paths/1]).
+-export([all_101_keys_reach_their_documented_paths/1]).
 
 all() ->
     [
@@ -75,7 +75,7 @@ all() ->
         linger_timeout_rejects_below_minus_one,
         linger_timeout_is_in_seconds,
         a_security_header_can_be_switched_off_on_its_own,
-        all_93_keys_reach_their_documented_paths
+        all_101_keys_reach_their_documented_paths
     ].
 
 init_per_suite(Config) ->
@@ -667,8 +667,8 @@ a_security_header_can_be_switched_off_on_its_own(Config) ->
         key_value:get([security_headers, frame_options], Spec2, missing)
     ).
 
-all_93_keys_reach_their_documented_paths(Config) ->
-    %% Pins the hand-written route table: renders every one of the 93
+all_101_keys_reach_their_documented_paths(Config) ->
+    %% Pins the hand-written route table: renders every one of the 101
     %% `listeners.$name.*' keys in a single listener and asserts the whole
     %% resulting spec, so a wrong path silently relocating an operator's
     %% setting shows up as a map mismatch rather than passing unnoticed.
@@ -761,6 +761,14 @@ all_93_keys_reach_their_documented_paths(Config) ->
         "listeners.pub.sse.idle_timeout = 90s\n",
         "listeners.pub.longpoll.poll_timeout = 25s\n",
         "listeners.pub.longpoll.idle_timeout = 30s\n",
+        "listeners.pub.mcp.protocol_versions = 2026-07-28, 2025-11-25\n",
+        "listeners.pub.mcp.public_base_uri = https://mcp.example.com\n",
+        "listeners.pub.mcp.max_body_size = 2MB\n",
+        "listeners.pub.mcp.max_inflight = 32\n",
+        "listeners.pub.mcp.idle_timeout = 5m\n",
+        "listeners.pub.mcp.list.default_page_size = 100\n",
+        "listeners.pub.mcp.schema.max_depth = 16\n",
+        "listeners.pub.mcp.schema.max_validation_ms = 100ms\n",
         "listeners.pub.tls.certfile = /tmp/certs/cert.pem\n",
         "listeners.pub.tls.keyfile = /tmp/certs/key.pem\n",
         "listeners.pub.tls.cacertfile = /tmp/certs/ca.pem\n",
@@ -888,6 +896,15 @@ all_93_keys_reach_their_documented_paths(Config) ->
         longpoll => #{
             poll_timeout => 25000,
             idle_timeout => 30000
+        },
+        mcp => #{
+            protocol_versions => [<<"2026-07-28">>, <<"2025-11-25">>],
+            public_base_uri => <<"https://mcp.example.com">>,
+            max_body_size => 2097152,
+            max_inflight => 32,
+            idle_timeout => 300000,
+            list => #{default_page_size => 100},
+            schema => #{max_depth => 16, max_validation_ms => 100}
         },
         tls => #{
             certfile => "/tmp/certs/cert.pem",

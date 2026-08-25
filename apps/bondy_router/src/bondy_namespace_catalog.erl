@@ -12,8 +12,8 @@ the owner process for the durable `main` database.
 Two databases are declared:
 
 - **`main`** — durable (`bondy_db_topology_shared_shards` over leveled),
-  holding the thirteen security / realm / realm-keys / gateway / token / bridge /
-  retention tables.
+  holding the fourteen security / realm / realm-keys / gateway / token /
+  bridge / retention / interface tables.
 - **`registry`** — ephemeral (`bondy_db_topology_memory`, ETS), holding the
   RIB (Routing Information Base) summary tables — the replicated routing
   cells for registrations / subscriptions. Full `#entry{}` records never
@@ -148,7 +148,7 @@ start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 -doc """
-Returns the declarative specs for all fifteen tables (both DBs), mirroring the
+Returns the declarative specs for all sixteen tables (both DBs), mirroring the
 `bondy_db_tables.hrl` prefixes. The single source of truth for the catalogue.
 """.
 -spec tables() -> [table_spec()].
@@ -351,6 +351,22 @@ tables() ->
         %% key-ordered `range_all/5` prefix / wildcard scans (no secondary index).
         #{
             name => retained_messages,
+            db => main,
+            durability => durable,
+            fold => lww
+        },
+        %% bondy_interface — interface metadata (procedure/topic/error
+        %% descriptions and schemas), the store WAMP Interface Reflection
+        %% reads and the MCP manifest projects from. Keyed per realm by
+        %% {Kind, MatchPolicy, Uri} — release-cadence data, whole-entry
+        %% replacement, so storage-only `lww` with the identity routing
+        %% default. NOTE for readers of `bondy_db_manifest`: this was the
+        %% first table added AFTER the topology freeze existed — an upgraded
+        %% data dir adopts it through the manifest's additive-extension path
+        %% (`{extended, [bondy_interface]}`), which is what keeps its AAE
+        %% fingerprint equal to a freshly provisioned node's.
+        #{
+            name => ?BONDY_DB_INTERFACE_TAB,
             db => main,
             durability => durable,
             fold => lww

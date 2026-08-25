@@ -106,6 +106,12 @@ start(_Type, Args) ->
                 ok ?= init_registry_indices(),
                 ok ?= setup_wamp_subscriptions(),
                 ok ?= start_early_listeners(),
+                %% Started BEFORE the normal-phase listeners bind: a listener
+                %% declaring the `mcp' service must not accept a request
+                %% while the application that answers it is down. And not in
+                %% the early phase either — an MCP endpoint has nothing to
+                %% say before the router is ready.
+                {ok, _} = application:ensure_all_started(bondy_mcp, permanent),
                 %% Finally we allow clients to connect
                 ok ?= start_normal_listeners(),
                 {ok, _} = application:ensure_all_started(

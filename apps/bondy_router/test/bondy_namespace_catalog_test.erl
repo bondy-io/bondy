@@ -23,9 +23,9 @@ declarations_test_() ->
     Main = [S || S <- Tables, maps:get(db, S) =:= main],
     Registry = [S || S <- Tables, maps:get(db, S) =:= registry],
     [
-        {"fifteen tables declared", ?_assertEqual(15, length(Tables))},
-        {"thirteen main, two registry", fun() ->
-            ?assertEqual(13, length(Main)),
+        {"sixteen tables declared", ?_assertEqual(16, length(Tables))},
+        {"fourteen main, two registry", fun() ->
+            ?assertEqual(14, length(Main)),
             ?assertEqual(2, length(Registry))
         end},
         {"realm_keys is a durable main aw table", fun() ->
@@ -226,7 +226,7 @@ provisions_all() ->
         Info = ?CAT:info(),
         ?assertMatch(#{main := #{kind := db}}, Info),
         %% info/0's tables map covers the main DB tables only.
-        ?assertEqual(13, map_size(maps:get(tables, Info)))
+        ?assertEqual(14, map_size(maps:get(tables, Info)))
     after
         ok = stop_catalog(Pid),
         reset_env(),

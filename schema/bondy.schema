@@ -2773,6 +2773,69 @@ end}.
 ]}.
 
 %% --------------------------------------------------------------------------
+%% MCP carrier. Read by listeners whose `services' name `mcp'. Like every
+%% per-listener carrier key these are default-free: the defaults live in
+%% bondy_listener_config's carrier defaults, and a default here would
+%% materialise MCP keys on listeners that do not serve MCP at all.
+%% --------------------------------------------------------------------------
+
+%% @doc A comma separated, priority ordered list of the MCP protocol versions
+%% this endpoint accepts (for example `2026-07-28, 2025-11-25').
+{mapping, "listeners.$name.mcp.protocol_versions", "bondy_router.listeners", [
+  {datatype, string}
+]}.
+
+%% @doc The public origin (scheme and host, for example
+%% `https://mcp.example.com') this endpoint publishes in documents that must
+%% carry one, such as the OAuth protected-resource metadata document. Set it
+%% when the listener sits behind a TLS-terminating proxy, where neither the
+%% listener's transport nor the request reflects the public URL; when unset,
+%% the scheme is derived from the listener's transport and the host from the
+%% request.
+{mapping, "listeners.$name.mcp.public_base_uri", "bondy_router.listeners", [
+  {datatype, string}
+]}.
+
+%% @doc Maximum size in bytes of an MCP request body on this listener.
+{mapping, "listeners.$name.mcp.max_body_size", "bondy_router.listeners", [
+  {datatype, bytesize}
+]}.
+
+%% @doc Maximum number of concurrent in-flight MCP calls per session on this
+%% listener.
+{mapping, "listeners.$name.mcp.max_inflight", "bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc How long a fully quiet held MCP response stream is kept before its
+%% connection is closed. Becomes the listener's connection idle timeout
+%% default (the largest held-stream carrier value wins), applied identically
+%% over HTTP/1.1 and HTTP/2.
+{mapping, "listeners.$name.mcp.idle_timeout", "bondy_router.listeners", [
+  {datatype, {duration, ms}}
+]}.
+
+%% @doc Page size used for MCP list results when the client does not name
+%% one.
+{mapping, "listeners.$name.mcp.list.default_page_size",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Maximum nesting depth accepted when validating a JSON Schema carried
+%% by an MCP request on this listener.
+{mapping, "listeners.$name.mcp.schema.max_depth", "bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Time bound on validating a single JSON Schema carried by an MCP
+%% request on this listener.
+{mapping, "listeners.$name.mcp.schema.max_validation_ms",
+"bondy_router.listeners", [
+  {datatype, {duration, ms}}
+]}.
+
+%% --------------------------------------------------------------------------
 %% TLS material. bondy_listener_config:tls_material/3 is the single reader of
 %% these, for both the boot-time validation and live certificate rotation.
 %% --------------------------------------------------------------------------
@@ -2951,6 +3014,16 @@ end}.
         {["sse", "idle_timeout"], [sse, idle_timeout]},
         {["longpoll", "poll_timeout"], [longpoll, poll_timeout]},
         {["longpoll", "idle_timeout"], [longpoll, idle_timeout]},
+        {["mcp", "protocol_versions"], [mcp, protocol_versions]},
+        {["mcp", "public_base_uri"], [mcp, public_base_uri]},
+        {["mcp", "max_body_size"], [mcp, max_body_size]},
+        {["mcp", "max_inflight"], [mcp, max_inflight]},
+        {["mcp", "idle_timeout"], [mcp, idle_timeout]},
+        {["mcp", "list", "default_page_size"],
+            [mcp, list, default_page_size]},
+        {["mcp", "schema", "max_depth"], [mcp, schema, max_depth]},
+        {["mcp", "schema", "max_validation_ms"],
+            [mcp, schema, max_validation_ms]},
         {["tls", "certfile"], [tls, certfile]},
         {["tls", "keyfile"], [tls, keyfile]},
         {["tls", "cacertfile"], [tls, cacertfile]},
@@ -3125,7 +3198,10 @@ end}.
         ["http", "max_keepalive"],
         ["http", "max_method_length"],
         ["http", "max_request_line_length"],
-        ["http", "max_skip_body_length"]
+        ["http", "max_skip_body_length"],
+        ["mcp", "max_inflight"],
+        ["mcp", "list", "default_page_size"],
+        ["mcp", "schema", "max_depth"]
     ],
 
     %% The three conversions the `cors' and `security_headers' members need.
@@ -3190,6 +3266,21 @@ end}.
             Versions(FullKey(Name, Tail), V);
         (["http", "versions"] = Tail, V, Name) ->
             HttpVersions(FullKey(Name, Tail), V);
+        %% Version strings are carried opaquely: which versions the endpoint
+        %% can actually speak is the MCP service's own knowledge, and a copy
+        %% of that list here would drift from it.
+        (["mcp", "protocol_versions"] = Tail, V, Name) ->
+            case [list_to_binary(S) || S <- Split(V)] of
+                [] ->
+                    cuttlefish:invalid(
+                        FullKey(Name, Tail) ++
+                            " must list at least one MCP protocol version"
+                    );
+                Parsed ->
+                    Parsed
+            end;
+        (["mcp", "public_base_uri"], V, _Name) ->
+            Bin(V);
         (["port"] = Tail, V, Name) ->
             PortNumber(FullKey(Name, Tail), V);
         %% A max-age is a non-negative number of seconds. Rendered as a BINARY:

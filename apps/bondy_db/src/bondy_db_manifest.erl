@@ -106,7 +106,11 @@ Precedent: RocksDB `OPTIONS`, Kafka `meta.properties`, Riak's ring file.
 
 -type divergence() :: {Key :: term(), Configured :: term(), OnDisk :: term()}.
 
--type decision() :: genesis | match | {mismatch, [divergence()]}.
+-type decision() ::
+    genesis
+    | match
+    | {extended, [TableName :: atom()]}
+    | {mismatch, [divergence()]}.
 
 -type mismatch_policy() :: warn | stop.
 
@@ -138,6 +142,19 @@ manifest exists, since that is how the data is physically laid out:
 
 - `{ok, genesis, Configured}` — no manifest existed; one was written from
   `Configured`, which is therefore the effective topology.
+- `{ok, {extended, TableNames}, Configured}` — the ONLY divergences were
+  tables present in `Configured` and absent on disk. A table absent from the
+  on-disk manifest has no bytes keyed under it (the freeze and the
+  provisioned set are built from one list, so every table ever opened here
+  was recorded), and adding one moves no existing data — so the addition is
+  adopted: the manifest is REWRITTEN from `Configured`, which becomes
+  effective, and a later boot is a `match`. A removal, or an addition mixed
+  with any real divergence, is never adopted and falls through to the
+  mismatch policy below — under `warn` the on-disk topology stays effective
+  and the manifest is untouched, so a downgraded node leaves a newer
+  manifest's tables dormant rather than deleting them.
+  `diff_manifest_extension_is_adopted` pins the adopt case,
+  `diff_extension_mixed_with_divergence_is_not` the refusal.
 - `{ok, match, Configured}` — the on-disk manifest equals `Configured`.
 - `{ok, {mismatch, Divergences}, OnDisk}` — they differ and the policy is
   `warn`; a warning was logged and the **on-disk** topology is returned as
@@ -189,7 +206,16 @@ reconcile(Dir, Configured0, OnMismatch) when
                 [] ->
                     {ok, match, Configured};
                 Divergences ->
-                    handle_mismatch(Dir, Divergences, OnDisk, OnMismatch)
+                    case
+                        lists:partition(fun is_table_addition/1, Divergences)
+                    of
+                        {[_ | _] = Added, []} ->
+                            adopt_added_tables(Dir, Configured, Added);
+                        _ ->
+                            handle_mismatch(
+                                Dir, Divergences, OnDisk, OnMismatch
+                            )
+                    end
             end;
         {error, Reason} = Err ->
             ?LOG_ERROR(#{
@@ -416,6 +442,45 @@ diff_table(Name, Configured, OnDisk) ->
         end,
         [aggregate_root]
     ).
+
+%% @private
+%% A table present in the configured topology and absent from the on-disk
+%% manifest — the one divergence shape that moves no existing bytes.
+is_table_addition({{table, _}, Configured, '$absent'}) when
+    Configured =/= '$absent'
+->
+    true;
+is_table_addition(_) ->
+    false.
+
+%% @private
+%% Rewrite the manifest from `Configured` so the added tables are frozen and
+%% the next boot reconciles as `match` — and so this node's AAE topology
+%% fingerprint agrees with a freshly-provisioned peer's, instead of the two
+%% refusing to sync forever.
+adopt_added_tables(Dir, Configured, Added) ->
+    Names = [Name || {{table, Name}, _, '$absent'} <- Added],
+    case write(Dir, build(Configured)) of
+        ok ->
+            ?LOG_NOTICE(#{
+                description =>
+                    "Topology manifest extended with newly declared tables; "
+                    "no existing data is re-keyed",
+                path => path(Dir),
+                tables => Names
+            }),
+            {ok, {extended, Names}, Configured};
+        {error, Reason} = Err ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Failed to rewrite the topology manifest while adopting "
+                    "newly declared tables",
+                path => path(Dir),
+                tables => Names,
+                reason => Reason
+            }),
+            Err
+    end.
 
 %% @private
 handle_mismatch(Dir, Divergences, OnDisk, warn) ->
