@@ -129,6 +129,9 @@ authenticating and cleared on `established`. Progressive calls
 %% inner CALL timeout fires first (returning a proper WAMP error) before the
 %% outer `gen_statem:call` would time out and exit the caller.
 -define(CALL_TIMEOUT_SLACK, 5000).
+%% Self-notification tag for a transport-level send failure — see
+%% `notify_send_failure/1`.
+-define(SEND_FAILURE, '$bondy_connect_send_failure').
 
 -export([start_link/2]).
 -export([await_ready/2]).
@@ -610,6 +613,11 @@ established(info, {event_done, SubId, _Pid}, Data) ->
         )};
 established(info, {timeout, TRef, {req_timeout, ReqId}}, Data) ->
     {keep_state, handle_req_timeout(ReqId, TRef, Data)};
+established(info, {?SEND_FAILURE, Reason}, Data) ->
+    %% A transport send failed (see `notify_send_failure/1`): treat it as the
+    %% link failure it is. Further failed sends queued behind this one land in
+    %% `connecting` and fall through the catch-alls.
+    on_transport_failure({send_error, Reason}, Data);
 established(info, {'DOWN', MonRef, process, _Pid, Reason}, Data) ->
     {keep_state,
         run_dispatch(
@@ -926,8 +934,11 @@ do_cancel(From, Token, Mode, Data) ->
                     Msg = bondy_wamp_message:cancel(ReqId, #{mode => ModeBin}),
                     Reply =
                         case send_msg(Msg, Data) of
-                            ok -> ok;
-                            {error, R} -> {error, R}
+                            ok ->
+                                ok;
+                            {error, R} ->
+                                ok = notify_send_failure(R),
+                                {error, R}
                         end,
                     {keep_state, Data, [{reply, From, Reply}]};
                 error ->
@@ -1089,8 +1100,11 @@ do_publish(From, Topic, Args, KWArgs, Opts, Data) ->
             ),
             Reply =
                 case send_msg(Msg, Data) of
-                    ok -> ok;
-                    {error, R} -> {error, R}
+                    ok ->
+                        ok;
+                    {error, R} ->
+                        ok = notify_send_failure(R),
+                        {error, R}
                 end,
             Data1 = Data#data{next_request_id = next_id(ReqId)},
             {keep_state, Data1, [{reply, From, Reply}]}
@@ -1112,6 +1126,7 @@ send_request(Type, From, MsgFun, Timeout, Meta, Data) ->
             ),
             {keep_state, Data1};
         {error, Reason} ->
+            ok = notify_send_failure(Reason),
             {keep_state, Data, [{reply, From, {error, Reason}}]}
     end.
 
@@ -1129,6 +1144,7 @@ do_request(Type, ReplyTo, Msg, Timeout, Meta, Data) ->
                 Data#data{next_request_id = next_id(ReqId)}
             );
         {error, Reason} ->
+            ok = notify_send_failure(Reason),
             _ = dispatch_reply(ReplyTo, {error, Reason}),
             Data
     end.
@@ -1759,8 +1775,12 @@ send_internal_request(Type, MsgFun, Meta, Data) ->
                 ?DEFAULT_ADMIN_TIMEOUT,
                 Data#data{next_request_id = next_id(ReqId)}
             );
-        {error, _Reason} ->
-            %% The link dropped again mid-replay; the next reconnect replays anew.
+        {error, Reason} ->
+            %% The link dropped again mid-replay; the notification below is
+            %% what guarantees that next reconnect (and with it a fresh
+            %% replay) actually happens — the inbound path alone cannot be
+            %% relied on to notice (see `notify_send_failure/1`).
+            ok = notify_send_failure(Reason),
             Data
     end.
 
@@ -1949,6 +1969,23 @@ call_deadline(Opts) ->
 %% @private
 send_msg(Msg, #data{transport_mod = Mod, transport = T}) ->
     Mod:send(Msg, T).
+
+%% @private
+%% A failed transport send is evidence the link is dead, and the inbound path
+%% cannot be relied on to duplicate that evidence — a long-poll transport has
+%% no socket close to observe, so a connection that only reports the failure
+%% to the one caller stays `established` on a dead link, failing every
+%% subsequent request. Each request-sending site therefore notifies the statem
+%% with a `?SEND_FAILURE` info event, which `established` turns into
+%% `on_transport_failure/2` (any other state drops it through its catch-all —
+%% there the failure is already being handled by other means). The transport's
+%% own pre-flight refusal of a single message is the one exception: the link
+%% is fine, only that message is not.
+notify_send_failure({message_too_large, _, _}) ->
+    ok;
+notify_send_failure(Reason) ->
+    self() ! {?SEND_FAILURE, Reason},
+    ok.
 
 %% @private
 send_all([], _Data) ->
