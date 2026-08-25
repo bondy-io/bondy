@@ -345,45 +345,48 @@ rib_consistent_after_plain_restart(Config) ->
 %% present). Without that, "no merge events" would be vacuously true on a node
 %% that simply received nothing.
 %%
-%% WHICH HALF ACTUALLY GUARDS THE FIX (MEASURED 2026-08-22).
-%% The EPHEMERAL half does. With the fix in place it reads
-%% `#{merge => 0, bootstrap => 1}`; remove `maybe_publish_bootstrap/4` and it
-%% goes to zero of both and this case fails. That is why the assertion below
-%% demands `ephemeral_via_bootstrap` specifically.
+%% WHAT THE ASSERTION DEMANDS, AND WHY (RE-MEASURED 2026-08-25, n=9).
+%% This case used to demand `ephemeral_via_bootstrap` specifically, on a
+%% 2026-08-22 measurement (n=3) that the wiped registry instance "reliably"
+%% took the snapshot-bootstrap path. 2026-08-25 falsified that premise and
+%% then the two premises behind its first two repairs:
 %%
-%% The DURABLE half does NOT, and cannot be made to here. `security_groups`
-%% reads `#{merge => 2, bootstrap => 0}`: the wiped node acquires `main`
-%% through the PRE-EXISTING op-based path, which published before this fix
-%% existed, so that assertion would pass on unfixed code. Compacting the
-%% survivor before the rejoin — the lever `bondy_aae_cluster_SUITE` uses to
-%% strand a returning node — was tried and did NOT move it onto the snapshot
-%% path, so it was removed rather than left in as machinery that does
-%% nothing. The durable half is therefore an obligation check, not a guard.
+%% 1. PATH IS TIMING-DEPENDENT. The same scenario delivered the registration
+%%    cell via the snapshot path in some runs (`#{merge => 0,
+%%    bootstrap => 1}`) and op-based in others (`#{merge => 1,
+%%    bootstrap => 0}`, after regular sync sessions first failed with
+%%    `frontier_gap` and gap recovery caught up). Demanding a path asserts
+%%    the race, not the contract.
 %%
-%% That the fix nonetheless covers durable tables rests on two things, both
-%% established: `maybe_publish_bootstrap/4` has no per-table logic (it reads
+%% 2. ATTACH IS A RACE THE TESTCASE CANNOT WIN. The survivor auto-dials the
+%%    restarted node the moment its Partisan listener binds — during boot,
+%%    before erpc can attach anything — and shards sync independently. A
+%%    traced failing run showed it directly: the registration shard's cells
+%%    present with ZERO post-attach publishes on its namespace, while the
+%%    subscription shard announced (`publish_bootstrap`) after attach, and
+%%    the durable tables merged after attach. A 90s settle does not help:
+%%    events delivered before the subscribe do not replay.
+%%
+%% So the assertion states the contract a `publish => true` subscriber
+%% actually has — the RULE the 2026-08-22 fix itself established ("a
+%% one-shot notification needs a reconcile-on-attach"): whatever landed
+%% before you attached is visible in the projection and yours to reconcile;
+%% whatever lands after must be announced, by either path. The probe
+%% subscribes, the testcase then reads its attach baseline, and each half
+%% passes on baseline OR notification. `bondy_aae_reactor` survives the
+%% same race the same way (`ensure_subscribed/1` → `bootstrap_reaction`),
+%% which is why the consequence cases above stay green in every variant.
+%%
+%% The install-path mutation guard — delete `maybe_publish_bootstrap/4` and
+%% something must fail — lives in `bondy_oplog_applier_bootstrap_test`,
+%% which drives `install_catalogue_batch/2` end-to-end into a live
+%% subscriber and needs no race to be won. This case still fails on that
+%% deletion whenever the install lands post-attach (empty baseline, no
+%% event). The guard is table-agnostic by construction:
+%% `maybe_publish_bootstrap/4` has no per-table logic (it reads
 %% `publish_ns` off the ctx), and a traced run showed `security_groups`
-%% reaching that emission point with `publish_ns = main_security_groups`,
-%% skipped only because that batch installed 0 cells.
-%%
-%% MEASURED ASYMMETRY (2026-08-22, n=3) — READ BEFORE TRUSTING A GREEN RUN.
-%% The EPHEMERAL half is deterministic: `bondy_registration_rib' saw ZERO merge
-%% events in every run. The DURABLE half is NOT: `bondy_realm' saw 0 events
-%% in one run and 2 in the next two. A wiped node can still catch up OP-BASED
-%% when
-%% the peer retains enough MST history to serve it — and the op-based path DOES
-%% publish — whereas the ephemeral registry instance, whose history is
-%% memory-backed and retention-bounded, reliably falls back to the snapshot
-%% bootstrap that skips the hook.
-%%
-%% CONSEQUENCE: a durable PASS is not evidence of a fix — it may just be the
-%% op-based path. Only the ephemeral half is a dependable guard today, so a
-%% RIB-only patch could turn this case green WITHOUT the fix being universal.
-%% To make the durable half dependable it must be forced onto the snapshot
-%% path, by compacting the peer's `main' oplog after the wipe and before the
-%% rejoin (the trick `bondy_aae_cluster_SUITE:do_compact_all/0' uses to
-%% truncate history a returning node never saw). Not done here — flagged
-%% rather than silently relied upon.
+%% reaching that emission point, skipped only because that batch installed
+%% 0 cells.
 %% -----------------------------------------------------------------------------
 publish_hook_fires_for_bootstrap_installed_cells(Config) ->
     N2Env = [{[partisan, peer_port], ?B2_PEER_PORT}],
@@ -430,6 +433,22 @@ publish_hook_fires_for_bootstrap_installed_cells(Config) ->
             ok = erpc:call(N2b, ?MODULE, do_probe_start, [
                 [?BONDY_DB_GROUP_TAB, ?BONDY_DB_REGISTRATION_RIB_TAB]
             ]),
+            %% ATTACH BASELINE, read AFTER the probe's subscriptions are
+            %% placed (`do_probe_start` returns only then). The survivor
+            %% auto-dials the restarted node the moment its listener binds —
+            %% during boot, before this testcase can attach anything — so an
+            %% individual shard MAY have synced already (measured 2026-08-25:
+            %% a traced failing run showed the registration shard installed
+            %% with no post-attach publish while the subscription shard
+            %% announced post-attach). Whatever is visible now is the
+            %% reconcile half of the contract; everything that lands later
+            %% must be announced.
+            BaselineCells = erpc:call(N2b, ?MODULE, do_rib_cell_count, [
+                ?BOOT_REALM
+            ]),
+            BaselineGroup = erpc:call(N2b, ?MODULE, do_group_exists, [
+                ?BOOT_REALM, ?BOOT_GROUP
+            ]),
             ok = bondy_ct:rejoin(S2b, [S1, S2b], 60000),
 
             %% Proof the bootstrap installed something, so a zero count below
@@ -438,32 +457,45 @@ publish_hook_fires_for_bootstrap_installed_cells(Config) ->
             ok = wait_group(N2b, ?BOOT_REALM, ?BOOT_GROUP),
             ok = wait_rib_cells(N2b, ?BOOT_REALM),
 
-            Counts = erpc:call(N2b, ?MODULE, do_probe_counts, []),
+            %% The cells being VISIBLE does not mean the announcement has
+            %% been DELIVERED: the dispatcher fans events out asynchronously,
+            %% so a counts read taken the instant `wait_rib_cells/2` returns
+            %% can beat an already-emitted event to the probe's mailbox.
+            %% Settle until both tables are covered, or a deadline elapses
+            %% and the assertion below reports what did (not) arrive.
+            Counts = wait_probe_counts(
+                N2b,
+                [
+                    {?BONDY_DB_GROUP_TAB, BaselineGroup},
+                    {?BONDY_DB_REGISTRATION_RIB_TAB, BaselineCells > 0}
+                ],
+                ?SETTLE_MS
+            ),
             ct:pal(
-                "notifications on the bootstrapped node, by table/path: ~p",
-                [Counts]
+                "attach baseline: group=~p rib_cells=~p; notifications on "
+                "the bootstrapped node, by table/path: ~p",
+                [BaselineGroup, BaselineCells, Counts]
             ),
             Durable = notified(?BONDY_DB_GROUP_TAB, Counts),
             Ephemeral = notified(?BONDY_DB_REGISTRATION_RIB_TAB, Counts),
-            EphemeralBoot = notified_by(
-                ?BONDY_DB_REGISTRATION_RIB_TAB, bootstrap, Counts
-            ),
-            %% `*_notified` is the OBLIGATION (`publish => true` means
-            %% subscribers get told), satisfied by either path.
-            %% `ephemeral_via_bootstrap` is the GUARD on the install-path fix
-            %% specifically: delete `maybe_publish_bootstrap/4` and only that
-            %% one goes false. See the header note on why the durable half
-            %% cannot carry that guard.
+            %% Both halves assert the CONTRACT a `publish => true` subscriber
+            %% actually has — the RULE the 2026-08-22 fix established: state
+            %% that arrived before you attached is yours to RECONCILE from
+            %% the projection at attach; everything that lands after must be
+            %% ANNOUNCED (either path — see the header note). Deleting
+            %% `maybe_publish_bootstrap/4` still fails this case whenever
+            %% the install lands post-attach (empty baseline, no event);
+            %% the deterministic guard on that deletion lives in
+            %% `bondy_oplog_applier_bootstrap_test`.
             ?assertEqual(
                 #{
-                    durable_notified => true,
-                    ephemeral_notified => true,
-                    ephemeral_via_bootstrap => true
+                    durable_covered => true,
+                    ephemeral_covered => true
                 },
                 #{
-                    durable_notified => Durable > 0,
-                    ephemeral_notified => Ephemeral > 0,
-                    ephemeral_via_bootstrap => EphemeralBoot > 0
+                    durable_covered => Durable > 0 orelse BaselineGroup,
+                    ephemeral_covered =>
+                        Ephemeral > 0 orelse BaselineCells > 0
                 }
             )
         after
@@ -739,7 +771,16 @@ do_probe_start(Tables) ->
         end,
     Deadline = erlang:monotonic_time(millisecond) + 30000,
     NsMap = probe_namespaces(Tables, Deadline),
-    Pid = spawn(?MODULE, probe_loop_init, [NsMap]),
+    Caller = self(),
+    Pid = spawn(?MODULE, probe_loop_init, [NsMap, Caller]),
+    %% Return only once the subscriptions are PLACED: the caller reads its
+    %% attach baseline right after this, and that read is sound only if no
+    %% event can slip between it and the subscribe.
+    receive
+        {probe_ready, Pid} -> ok
+    after 10000 ->
+        error(probe_subscribe_timeout)
+    end,
     true = register(?PROBE, Pid),
     ok.
 
@@ -772,11 +813,12 @@ probe_namespaces(Tables, Deadline) ->
     end.
 
 %% @private
-probe_loop_init(NsMap) ->
+probe_loop_init(NsMap, Caller) ->
     _ = [
         {ok, _} = bondy_oplog_core:subscribe(NS, all)
      || NS <- maps:keys(NsMap)
     ],
+    Caller ! {probe_ready, self()},
     probe_loop(NsMap, #{}).
 
 %% @private
@@ -813,15 +855,35 @@ bump(NsMap, NS, Kind, Counts) ->
     maps:put(Table, Inner, Counts).
 
 %% @private
-%% Notifications for `Table' delivered by one specific path.
-notified_by(Table, Kind, Counts) ->
-    maps:get(Kind, maps:get(Table, Counts, #{}), 0).
-
-%% @private
 %% Total notifications for `Table', whichever path delivered them.
 notified(Table, Counts) ->
     Inner = maps:get(Table, Counts, #{}),
     maps:get(merge, Inner, 0) + maps:get(bootstrap, Inner, 0).
+
+%% @private
+%% Polls the probe until every `{Table, BaselineCovered}' is covered — by its
+%% attach baseline or by a notification — or the deadline lapses, in which
+%% case the LAST counts read are returned and the caller's assertion reports
+%% what did (not) arrive.
+wait_probe_counts(Node, Tables, TimeoutMs) ->
+    Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
+    wait_probe_counts_loop(Node, Tables, Deadline).
+
+%% @private
+wait_probe_counts_loop(Node, Tables, Deadline) ->
+    Counts = erpc:call(Node, ?MODULE, do_probe_counts, []),
+    AllCovered = lists:all(
+        fun({T, Baseline}) -> Baseline orelse notified(T, Counts) > 0 end,
+        Tables
+    ),
+    Expired = erlang:monotonic_time(millisecond) > Deadline,
+    case AllCovered orelse Expired of
+        true ->
+            Counts;
+        false ->
+            timer:sleep(500),
+            wait_probe_counts_loop(Node, Tables, Deadline)
+    end.
 
 %% @private
 do_probe_counts() ->

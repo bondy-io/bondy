@@ -802,17 +802,19 @@ http_versions_decide_alpn(_Config) ->
     ok = bondy_listener_manager:init(),
     ok = bondy_listener_manager:start(normal),
 
-    Negotiated = fun(Name) ->
+    Connect = fun(Name, AlpnOpts) ->
         {ok, Sock} = ssl:connect(
             "127.0.0.1",
             ranch:get_port(Name),
-            [
-                binary,
-                {verify, verify_none},
-                {alpn_advertised_protocols, [<<"h2">>, <<"http/1.1">>]}
-            ],
+            [binary, {active, false}, {verify, verify_none} | AlpnOpts],
             5000
         ),
+        Sock
+    end,
+    Negotiated = fun(Name) ->
+        Sock = Connect(Name, [
+            {alpn_advertised_protocols, [<<"h2">>, <<"http/1.1">>]}
+        ]),
         Result = ssl:negotiated_protocol(Sock),
         ok = ssl:close(Sock),
         Result
@@ -822,6 +824,31 @@ http_versions_decide_alpn(_Config) ->
     ?assertEqual({ok, <<"http/1.1">>}, Negotiated(ct_alpn_h1)),
     %% h2-first listener: HTTP/2 is genuinely offered, not just accepted.
     ?assertEqual({ok, <<"h2">>}, Negotiated(ct_alpn_h2)),
+
+    %% Negotiating is not being served: `cowboy_tls' routes every non-`h2'
+    %% ALPN outcome — a negotiated `http/1.1' included — through
+    %% `alpn_default_protocol' (`cowboy_tls.erl:38-46'), so an h2-first
+    %% listener must still name the h1 codec there. When it instead named
+    %% `hd(Versions)', both requests below were answered by `cowboy_http2'
+    %% with a SETTINGS frame (first bytes `<<0,0,6,4>>'), which is how the
+    %% whole `bondy_connect_conformance_SUITE' wss group died.
+    ServedH1 = fun(AlpnOpts) ->
+        Sock = Connect(ct_alpn_h2, AlpnOpts),
+        ok = ssl:send(Sock, <<"GET / HTTP/1.1\r\nHost: a\r\n\r\n">>),
+        {ok, Reply} = ssl:recv(Sock, 0, 5000),
+        ok = ssl:close(Sock),
+        binary:part(Reply, 0, 8)
+    end,
+    ?assertEqual(
+        <<"HTTP/1.1">>,
+        ServedH1([{alpn_advertised_protocols, [<<"http/1.1">>]}]),
+        "an h1-negotiating client must reach the h1 codec"
+    ),
+    ?assertEqual(
+        <<"HTTP/1.1">>,
+        ServedH1([]),
+        "a no-ALPN client is an h1 client (RFC 7540 requires ALPN for h2)"
+    ),
 
     ok = bondy_listener_manager:stop(all).
 
