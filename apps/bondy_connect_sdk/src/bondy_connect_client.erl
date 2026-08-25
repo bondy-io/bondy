@@ -85,11 +85,6 @@ raw `args` and `kwargs` of the WAMP message. Prefer `uri` to identify it and
 %% from the connection's per-attempt socket `?CONNECT_TIMEOUT` (5s).
 -define(AWAIT_READY_TIMEOUT, 30000).
 
--export([connect/1]).
--export([connect/2]).
--export([named/1]).
--export([disconnect/1]).
--export([status/1]).
 -export([call/2]).
 -export([call/3]).
 -export([call/4]).
@@ -98,22 +93,27 @@ raw `args` and `kwargs` of the WAMP message. Prefer `uri` to identify it and
 -export([call_async/4]).
 -export([call_async/5]).
 -export([call_stream/5]).
--export([send_input/4]).
--export([finish_input/4]).
 -export([cancel/2]).
 -export([cancel/3]).
--export([register/3]).
--export([register/4]).
--export([unregister/2]).
--export([subscribe/3]).
--export([subscribe/4]).
--export([unsubscribe/2]).
+-export([connect/1]).
+-export([connect/2]).
+-export([disconnect/1]).
+-export([finish_input/4]).
+-export([named/1]).
 -export([publish/3]).
 -export([publish/4]).
 -export([publish/5]).
 -export([publish_ack/3]).
 -export([publish_ack/4]).
 -export([publish_ack/5]).
+-export([register/3]).
+-export([register/4]).
+-export([send_input/4]).
+-export([status/1]).
+-export([subscribe/3]).
+-export([subscribe/4]).
+-export([unregister/2]).
+-export([unsubscribe/2]).
 
 %% =============================================================================
 %% API
@@ -128,19 +128,10 @@ connect(Spec) ->
 -spec connect(Name :: atom() | undefined, Spec :: map()) ->
     {ok, conn()} | {error, term()}.
 connect(Name, Spec) ->
-    case bondy_connect_manager:connect(Name, Spec) of
-        {ok, Pid} ->
-            case
-                bondy_connect_connection:await_ready(Pid, ?AWAIT_READY_TIMEOUT)
-            of
-                ok ->
-                    {ok, {bondy_connect_client, Pid}};
-                {error, Reason} ->
-                    _ = bondy_connect_manager:disconnect(Pid),
-                    {error, Reason}
-            end;
-        {error, _} = Error ->
-            Error
+    maybe
+        {ok, Pid} ?= bondy_connect_manager:connect(Name, Spec),
+        ok ?= await_ready(Pid),
+        {ok, {bondy_connect_client, Pid}}
     end.
 
 -doc """
@@ -386,6 +377,16 @@ publish_ack(Conn, Topic, Args, KWArgs, Opts) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+await_ready(Pid) ->
+    case bondy_connect_connection:await_ready(Pid, ?AWAIT_READY_TIMEOUT) of
+        ok ->
+            ok;
+        {error, _} = Error ->
+            _ = bondy_connect_manager:disconnect(Pid),
+            Error
+    end.
 
 %% @private
 with_conn(Conn, Fun) ->

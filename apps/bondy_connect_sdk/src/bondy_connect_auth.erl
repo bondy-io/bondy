@@ -81,19 +81,16 @@ threads through the handshake.
 -spec init(Config :: map()) -> {ok, t()} | {error, term()}.
 
 init(#{method := Method} = Config) ->
-    case module_for(Method) of
-        {ok, Mod} ->
-            case Mod:init(Config) of
-                {ok, State} ->
-                    {ok, #{
-                        method => Method,
-                        module => Mod,
-                        authid => maps:get(authid, Config, undefined),
-                        state => State
-                    }};
-                {error, _} = Error ->
-                    Error
-            end;
+    maybe
+        {ok, Mod} ?= module_for(Method),
+        {ok, State} ?= Mod:init(Config),
+        {ok, #{
+            method => Method,
+            module => Mod,
+            authid => maps:get(authid, Config, undefined),
+            state => State
+        }}
+    else
         {error, _} = Error ->
             Error
     end;
