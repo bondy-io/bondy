@@ -10,7 +10,7 @@
         "into WAMP routing."
     },
     {vsn, "0.1.0"},
-    {registered, [bondy_mcp_sup]},
+    {registered, [bondy_mcp_sup, bondy_mcp_gateway]},
     {mod, {bondy_mcp_app, []}},
     %% `bondy_router' is a runtime dependency but is deliberately NOT listed:
     %% `bondy_app:start/2' starts this application mid-boot, before its own
@@ -22,7 +22,13 @@
         stdlib,
         cowboy
     ]},
-    {env, []},
+    %% Defaults mirror `schema/bondy_mcp.schema` — in a released node the
+    %% schema default is authoritative and these are dead; keep the two
+    %% equal so a schema-less boot (tests, `rebar3 shell`) behaves the same.
+    {env, [
+        {manifest_cache_ttl, 60000},
+        {manifest_rebuild_debounce, 1000}
+    ]},
     {modules, []},
     {licenses, ["Apache-2.0"]},
     {links, []}

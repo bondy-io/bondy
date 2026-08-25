@@ -359,17 +359,36 @@ tables() ->
         %% descriptions and schemas), the store WAMP Interface Reflection
         %% reads and the MCP manifest projects from. Keyed per realm by
         %% {Kind, MatchPolicy, Uri} — release-cadence data, whole-entry
-        %% replacement, so storage-only `lww` with the identity routing
-        %% default. NOTE for readers of `bondy_db_manifest`: this was the
-        %% first table added AFTER the topology freeze existed — an upgraded
-        %% data dir adopts it through the manifest's additive-extension path
+        %% replacement, so `lww` with the identity routing default.
+        %% `publish => true` feeds the MCP manifest cache
+        %% (`bondy_mcp_gateway`), which invalidates its compiled per-realm
+        %% manifests on local + AE-replicated interface writes. (`publish`
+        %% is a runtime knob, not part of the frozen topology, so wiring it
+        %% here is not a manifest divergence.) NOTE for readers of
+        %% `bondy_db_manifest`: this was the first table added AFTER the
+        %% topology freeze existed — an upgraded data dir adopts it through
+        %% the manifest's additive-extension path
         %% (`{extended, [bondy_interface]}`), which is what keeps its AAE
         %% fingerprint equal to a freshly provisioned node's.
         #{
             name => ?BONDY_DB_INTERFACE_TAB,
             db => main,
             durability => durable,
-            fold => lww
+            fold => lww,
+            publish => true
+        },
+        %% mcp_gateway — the MCP overlay documents (design §18.3): one key
+        %% per loaded document in a single flat bucket, the stored value the
+        %% SOURCE map (never a parsed form), same posture as `api_gateway`.
+        %% `publish => true` feeds the same manifest-cache reactor as
+        %% `bondy_interface` above. Rides the manifest additive-extension
+        %% path on upgraded data dirs, like every table added post-freeze.
+        #{
+            name => ?BONDY_DB_MCP_GATEWAY_TAB,
+            db => main,
+            durability => durable,
+            fold => lww,
+            publish => true
         },
 
         %% registry RIB — ephemeral (ETS projection, mem WAL, memory topology —

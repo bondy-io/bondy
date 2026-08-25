@@ -1,0 +1,42 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+%% =============================================================================
+%% MCP GATEWAY — NODE-GLOBAL KEYS
+%%
+%% Only genuinely node-scoped keys live here. The per-listener MCP edge keys
+%% (`listeners.$name.mcp.*`) are routed by `schema/bondy.schema`'s single
+%% `bondy_router.listeners` translation, and their defaults live in
+%% `bondy_listener_config`'s ?CARRIER_DEFAULTS — never in a schema file.
+%%
+%% The manifest cache is per REALM and node-level: two MCP listeners serving
+%% the same realm serve the same catalogue, so a per-listener spelling of
+%% these keys would be a scope error.
+%% =============================================================================
+
+%% -----------------------------------------------------------------------------
+%% @doc How long a compiled per-realm MCP manifest may be served before it is
+%% rebuilt on the next read. This is a backstop: manifest rebuilds are driven
+%% by change events from the interface and MCP-overlay stores (local writes
+%% and anti-entropy–replicated peer writes alike), so under normal operation
+%% a manifest is rebuilt within the debounce window of the change and this
+%% bound never triggers.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mcp.manifest.cache_ttl", "bondy_mcp.manifest_cache_ttl", [
+  {datatype, {duration, ms}},
+  {default, "60s"}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc How long the manifest cache waits after a change event before
+%% rebuilding, so a burst of writes (a document load, an anti-entropy sync)
+%% collapses into a single rebuild per realm.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mcp.manifest.rebuild_debounce", "bondy_mcp.manifest_rebuild_debounce", [
+  {datatype, {duration, ms}},
+  {default, "1s"}
+]}.

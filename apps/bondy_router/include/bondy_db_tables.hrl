@@ -32,6 +32,10 @@
 %% through WAMP Interface Reflection. Keyed per realm by {Kind, MatchPolicy,
 %% Uri} — a URI, never a registration; the registry does not know it exists.
 -define(BONDY_DB_INTERFACE_TAB, bondy_interface).
+%% MCP overlay documents (`bondy_mcp_gateway`): one key per loaded document,
+%% flat bucket, source-map values — the MCP-facing naming/annotation layer
+%% joined with `bondy_interface` at manifest compile time.
+-define(BONDY_DB_MCP_GATEWAY_TAB, mcp_gateway).
 -define(BONDY_DB_REGISTRY_ACTOR, '$bondy_registry').
 
 %% REGISTRY
