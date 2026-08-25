@@ -81,7 +81,7 @@ resume frame is an idempotent no-op.
 | `commit_every`      | `64`    | Apply this many events between `consumer.offset` flushes. |
 | `poll_interval_ms`  | `5`     | Backstop sleep when `await_durable/3` returns sooner than expected. The hot path long-polls rather than sleeping; this only affects the rare error fallback. |
 | `ae_targets`        | `[]`    | List of `{Namespace, Index, Shard}` tuples whose AE-freshness counters are bumped via `bondy_oplog_core_registry:bump_ae/4` after every successful commit. Empty list disables the wiring. |
-| `publish_ns`        | `undefined` | Namespace under which post-apply events are published via `bondy_oplog_core:publish/4`. `undefined` disables publishing. Requires `publish_fun`. |
+| `publish_ns`        | `undefined` | Namespace under which post-apply events are published via `bondy_oplog_core:publish/4`. `undefined` disables publishing. Requires `publish_fun`. A multiplexing (`per_shard`) instance ignores both and resolves the namespace per event from the bucket's own ctx — see `publish_batch_dir/2`. |
 | `publish_fun`       | `undefined` | `fun((bondy_oplog_event:t()) -> {Key, Op} \| skip)` invoked per verified event to derive the `(Key, Op)` pair forwarded to subscribers. `skip` suppresses publish for that event. Required when `publish_ns` is set. |
 
 ## Substrate read-side wiring
@@ -1275,14 +1275,15 @@ resolve_cell_apply_ctx(Opts) ->
                         bondy_oplog_core_registry:entry_causal_tier(Entry),
                     {ok, #{
                         shard_key => Key,
-                        %% Namespace to publish remote-merge events under
-                        %% (`undefined` unless the table opted in via
-                        %% `publish => true`). The replay path in
+                        %% The table's event namespace (`undefined` unless it
+                        %% opted in via `publish => true`). The replay path in
                         %% `bondy_oplog_cell_apply:apply_cell_pairs/4` gates
-                        %% merge-event emission on this being set. Read from the
-                        %% registry ENTRY (the durable source of truth) so a
-                        %% restart-rebuilt ctx keeps emitting; falls back to the
-                        %% opts for a raw, non-`bondy_db` registration.
+                        %% merge-event emission on it, and a multiplexing
+                        %% instance's LOCAL publish resolves it per bucket
+                        %% (`publish_batch_dir/2`). Read from the registry
+                        %% ENTRY (the restart-surviving source) so a
+                        %% restart-rebuilt ctx keeps emitting; falls back to
+                        %% the opts for a raw, non-`bondy_db` registration.
                         publish_ns => entry_or_opt(
                             bondy_oplog_core_registry:entry_publish_ns(Entry),
                             publish_ns,
@@ -3512,24 +3513,15 @@ cancel_idle_waiter(#state{idle_waiter = MRef} = State) ->
 %% supervisor child-spec surfaces as a startup failure instead of a
 %% silent no-op at the first publish call.
 validate_substrate_opts(Opts) ->
-    case validate_ae_targets(maps:get(ae_targets, Opts, [])) of
-        ok ->
-            case validate_publish_opts(Opts) of
-                ok ->
-                    case validate_cell_apply_target(Opts) of
-                        ok ->
-                            case validate_apply_batch_max_events(Opts) of
-                                ok -> validate_oldstate_cache_opts(Opts);
-                                {error, _} = Err -> Err
-                            end;
-                        {error, _} = Err ->
-                            Err
-                    end;
-                {error, _} = Err ->
-                    Err
-            end;
-        {error, _} = Err ->
-            Err
+    maybe
+        ok ?= validate_ae_targets(maps:get(ae_targets, Opts, [])),
+        ok ?= validate_publish_opts(Opts),
+        ok ?= validate_cell_apply_target(Opts),
+        ok ?= validate_apply_batch_max_events(Opts),
+        validate_oldstate_cache_opts(Opts)
+    else
+        {error, _} = Error ->
+            Error
     end.
 
 %% @private
@@ -3606,6 +3598,17 @@ validate_publish_opts(Opts) ->
 %% delivery for that event; a raise is logged and treated as `skip` so
 %% a misbehaving derivation cannot wedge the applier. Best-effort
 %% delivery; the dispatcher walks subscribers in this process.
+%%
+%% A MULTIPLEXING (`per_shard`) instance resolves the namespace PER EVENT
+%% from the bucket's own cell-apply ctx (`publish_batch_dir/2`): the
+%% instance-level `publish_ns` is the FOUNDING table's, and publishing every
+%% sibling's local writes under the founder's namespace both misroutes them
+%% and leaves a `publish => true` sibling's subscribers deaf to local
+%% writes — which is exactly how the merge path already resolves it
+%% (`bondy_oplog_cell_apply` reads the ctx). Pinned by
+%% `bondy_db_publish_list_test`'s shared-instance cases.
+publish_batch(#state{cell_apply_source = {dir, _}} = State, Verified) ->
+    publish_batch_dir(State, Verified);
 publish_batch(#state{publish_ns = undefined}, _Verified) ->
     ok;
 publish_batch(#state{publish_fun = undefined}, _Verified) ->
@@ -3640,6 +3643,54 @@ publish_batch(
         #{instance_id => Id, namespace => NS}
     ),
     ok.
+
+%% @private
+%% The multiplexing-instance publish path: each `cell_apply` event is
+%% published under ITS bucket's registered namespace, taken from the
+%% per-bucket ctx (`resolve_cell_apply_ctx/1` seats `publish_ns` there from
+%% the registry entry, i.e. from the table's own `publish => true`). A
+%% bucket whose table did not opt in — or is mid-teardown and absent from
+%% the directory — is skipped, as is any non-`cell_apply` event (a dir-mode
+%% instance applies nothing else on the local path).
+publish_batch_dir(
+    #state{instance_id = Id, cell_apply_source = Source}, Verified
+) ->
+    {Count, Skipped} = lists:foldl(
+        fun(Event, {C, S}) ->
+            case bondy_oplog_event:op(Event) of
+                {cell_apply, Bucket, Key, FoldOp} ->
+                    case bucket_publish_ns(Source, Bucket) of
+                        undefined ->
+                            {C, S + 1};
+                        NS ->
+                            Hlc = bondy_oplog_event:key_hlc(
+                                bondy_oplog_event:key(Event)
+                            ),
+                            ok = bondy_oplog_core:publish(
+                                NS, Key, Hlc, FoldOp
+                            ),
+                            {C + 1, S}
+                    end;
+                _ ->
+                    {C, S + 1}
+            end
+        end,
+        {0, 0},
+        Verified
+    ),
+    telemetry:execute(
+        [bondy_oplog, applier, published],
+        #{count => Count, skipped => Skipped},
+        #{instance_id => Id, namespace => shared}
+    ),
+    ok.
+
+%% @private
+bucket_publish_ns(Source, Bucket) ->
+    case bondy_oplog_mux:resolve(Source, Bucket) of
+        #{publish_ns := NS} -> NS;
+        _ -> undefined
+    end.
 
 derive_publish(Fun, Event, InstanceId) ->
     try Fun(Event) of

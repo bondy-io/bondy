@@ -20,6 +20,16 @@ publish_list_test_() ->
             {"publish => true delivers cell_apply events to a subscriber",
                 fun publish_delivers/0},
             {"publish off by default — no events", fun publish_off/0},
+            {
+                "a shared (per_shard) instance publishes each table's local "
+                "writes under ITS OWN namespace, not the founder's",
+                fun publish_shared_instance_routes_per_table/0
+            },
+            {
+                "a publish sibling on a non-publish founder still publishes; "
+                "the founder still does not",
+                fun publish_shared_instance_sibling_opt_in/0
+            },
             {"list/2 enumerates all cells; clear removes from the scan",
                 fun list_scans/0},
             {timeout, 120,
@@ -65,6 +75,81 @@ publish_delivers() ->
                 ?assertEqual({set, H, <<"v1">>}, Op)
         after 5000 ->
             ?assert(false)
+        end
+    after
+        ok = bondy_db:close(Db)
+    end.
+
+%% On a `per_shard` topology (memory; `shard_count => 1` so every table
+%% shares ONE instance) the instance-level publish opts are the FOUNDING
+%% table's. Local events must still be published under the WRITING table's
+%% own namespace, resolved per bucket — the same resolution the merge path
+%% uses — or a sibling's subscribers hear the founder's namespace (or
+%% nothing). Falsifier for `bondy_oplog_applier:publish_batch_dir/2`.
+publish_shared_instance_routes_per_table() ->
+    {Db, Founder, Sibling} = open_shared(pub_shared, true, true),
+    try
+        FounderNS = bondy_db:namespace(Founder),
+        SiblingNS = bondy_db:namespace(Sibling),
+        {ok, _} = bondy_oplog_core:subscribe(FounderNS, all),
+        {ok, _} = bondy_oplog_core:subscribe(SiblingNS, all),
+        H = bondy_db:tick(Sibling),
+        ok = bondy_db:apply(Sibling, <<"r">>, <<"k1">>, {set, H, <<"v1">>}),
+        CellKey = <<"r", 0, "k1">>,
+        receive
+            {bondy_oplog_core_event, NS, CellKey, _Hlc, Op} ->
+                ?assertEqual(SiblingNS, NS),
+                ?assertEqual({set, H, <<"v1">>}, Op)
+        after 5000 ->
+            ?assert(false)
+        end,
+        %% And the founder's own writes still arrive under the founder's.
+        H2 = bondy_db:tick(Founder),
+        ok = bondy_db:apply(Founder, <<"r">>, <<"k2">>, {set, H2, <<"v2">>}),
+        CellKey2 = <<"r", 0, "k2">>,
+        receive
+            {bondy_oplog_core_event, NS2, CellKey2, _Hlc2, Op2} ->
+                ?assertEqual(FounderNS, NS2),
+                ?assertEqual({set, H2, <<"v2">>}, Op2)
+        after 5000 ->
+            ?assert(false)
+        end
+    after
+        ok = bondy_db:close(Db)
+    end.
+
+%% The founder did not opt in, the sibling did: before the per-bucket
+%% resolution the instance had NO publish wiring at all and the sibling's
+%% subscribers stayed deaf; the sibling must publish and the founder must
+%% stay silent.
+publish_shared_instance_sibling_opt_in() ->
+    {Db, Founder, Sibling} = open_shared(pub_shared_optin, false, true),
+    try
+        {ok, _} = bondy_oplog_core:subscribe(
+            bondy_db:namespace(Founder), all
+        ),
+        SiblingNS = bondy_db:namespace(Sibling),
+        {ok, _} = bondy_oplog_core:subscribe(SiblingNS, all),
+        ok = bondy_db:apply(
+            Founder, <<"r">>, <<"kf">>, {set, bondy_db:tick(Founder), <<"v">>}
+        ),
+        H = bondy_db:tick(Sibling),
+        ok = bondy_db:apply(Sibling, <<"r">>, <<"ks">>, {set, H, <<"vs">>}),
+        CellKey = <<"r", 0, "ks">>,
+        receive
+            {bondy_oplog_core_event, NS, Key, _Hlc, Op} ->
+                ?assertEqual(SiblingNS, NS),
+                ?assertEqual(CellKey, Key),
+                ?assertEqual({set, H, <<"vs">>}, Op)
+        after 5000 ->
+            ?assert(false)
+        end,
+        %% Nothing further: the founder's write must not have published.
+        receive
+            {bondy_oplog_core_event, _, _, _, _} = Extra ->
+                error({unexpected_event, Extra})
+        after 300 ->
+            ok
         end
     after
         ok = bondy_db:close(Db)
@@ -180,6 +265,27 @@ open(Name, Publish) ->
         publish => Publish
     }),
     {Db, T}.
+
+%% One DB with `shard_count => 1`, so the memory topology's `per_shard`
+%% collapse puts BOTH tables on one shared oplog instance: `items` founds
+%% it, `widgets` joins as a sibling.
+open_shared(Name, FounderPublish, SiblingPublish) ->
+    {ok, Db} = bondy_db:open(Name, #{
+        topology => bondy_db_topology_memory,
+        shard_count => 1,
+        fold_module => lww_register
+    }),
+    {ok, Founder} = bondy_db:open_table(Db, items, #{
+        fold_module => lww_register,
+        crdt_module => ?CRDT,
+        publish => FounderPublish
+    }),
+    {ok, Sibling} = bondy_db:open_table(Db, widgets, #{
+        fold_module => lww_register,
+        crdt_module => ?CRDT,
+        publish => SiblingPublish
+    }),
+    {Db, Founder, Sibling}.
 
 %% Keep only live (binary-valued) cells as {Key, Value}, sorted by key.
 live(Cells) ->
