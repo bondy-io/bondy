@@ -727,6 +727,7 @@ all_93_keys_reach_their_documented_paths(Config) ->
         "listeners.pub.http.request_timeout = 5s\n",
         "listeners.pub.http.reset_idle_timeout_on_send = on\n",
         "listeners.pub.http.sendfile = on\n",
+        "listeners.pub.http.versions = 2, 1.1\n",
         "listeners.pub.cors.enabled = on\n",
         "listeners.pub.cors.allowed_origins = https://a.example.com\n",
         "listeners.pub.cors.allowed_methods = GET,POST\n",
@@ -758,10 +759,8 @@ all_93_keys_reach_their_documented_paths(Config) ->
         "listeners.pub.sse.ping.enabled = on\n",
         "listeners.pub.sse.ping.interval = 20s\n",
         "listeners.pub.sse.idle_timeout = 90s\n",
-        "listeners.pub.sse.reset_idle_timeout_on_send = on\n",
         "listeners.pub.longpoll.poll_timeout = 25s\n",
         "listeners.pub.longpoll.idle_timeout = 30s\n",
-        "listeners.pub.longpoll.reset_idle_timeout_on_send = on\n",
         "listeners.pub.tls.certfile = /tmp/certs/cert.pem\n",
         "listeners.pub.tls.keyfile = /tmp/certs/key.pem\n",
         "listeners.pub.tls.cacertfile = /tmp/certs/ca.pem\n",
@@ -842,6 +841,11 @@ all_93_keys_reach_their_documented_paths(Config) ->
             reset_idle_timeout_on_send => true,
             sendfile => true
         },
+        %% NOT inside `protocol_opts': `bondy_listener_ranch' consumes it to
+        %% derive ALPN and Cowboy's `protocols'; Cowboy itself never reads a
+        %% `versions' key. The h2-first order also proves rendering preserves
+        %% the operator's order rather than normalising it.
+        http_versions => [http2, http],
         cors => #{
             enabled => true,
             allowed_origins => [<<"https://a.example.com">>],
@@ -879,13 +883,11 @@ all_93_keys_reach_their_documented_paths(Config) ->
         },
         sse => #{
             ping => #{enabled => true, interval => 20000},
-            idle_timeout => 90000,
-            reset_idle_timeout_on_send => true
+            idle_timeout => 90000
         },
         longpoll => #{
             poll_timeout => 25000,
-            idle_timeout => 30000,
-            reset_idle_timeout_on_send => true
+            idle_timeout => 30000
         },
         tls => #{
             certfile => "/tmp/certs/cert.pem",

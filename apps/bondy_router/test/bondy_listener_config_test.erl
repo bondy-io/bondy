@@ -1215,6 +1215,42 @@ http_protocol_opts_defaults_are_restored_test() ->
     ?assertMatch(#{protocol_opts := #{active_n := 100}}, Defaults),
     ?assertMatch(#{protocol_opts := #{idle_timeout := 15000}}, Defaults).
 
+http_versions_default_prefers_http1_test() ->
+    %% HTTP/1.1 FIRST, and the order asserted as a value: over HTTP/2 the
+    %% per-stream `idle_timeout' override the SSE/long-poll handlers rely on
+    %% is discarded (`cowboy_http2.erl:988'), so a default that preferred h2
+    %% would kill their held streams at the 15s connection idle timeout. The
+    %% order is the server's ALPN preference, so it, not membership, is the
+    %% invariant.
+    ?assertMatch(
+        #{http_versions := [http, http2]},
+        bondy_listener_config:option_defaults(tcp, http)
+    ),
+    %% The key belongs to the HTTP shape only: a stream listener negotiates
+    %% no HTTP version, and a stray default here would be splatted to
+    %% `[Name, http_versions]' for consumers that never read it.
+    ?assertNot(
+        maps:is_key(
+            http_versions,
+            bondy_listener_config:option_defaults(tcp, wamp_rawsocket)
+        )
+    ).
+
+http_versions_operator_order_survives_defaults_test() ->
+    %% `with_option_defaults/1' merges `deep_merge(Defaults, Spec)' — the
+    %% spec side wins. An operator's h2-first order must come through intact,
+    %% not be unioned or re-sorted against the default.
+    Spec = #{
+        transport => tls,
+        protocol => http,
+        port => 0,
+        http_versions => [http2, http]
+    },
+    ?assertMatch(
+        #{http_versions := [http2, http]},
+        bondy_listener_config:with_option_defaults(Spec)
+    ).
+
 rawsocket_linger_default_is_one_second_test() ->
     %% `wamp.{tcp,tls}.linger.timeout' defaulted to `1s'. It was withheld until
     %% the key's unit was corrected, because the datatype was `{duration, ms}'

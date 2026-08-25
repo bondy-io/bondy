@@ -2514,6 +2514,18 @@ end}.
   {datatype, {flag, on, off}}
 ]}.
 
+%% @doc A comma separated, priority ordered list of the HTTP protocol versions
+%% the listener offers. Bondy supports versions 1.1 and 2. On a TLS listener
+%% the order is the server's ALPN preference, and a client that sends no ALPN
+%% is served the first listed version. On a plaintext listener listing 2
+%% enables the HTTP/2 prior-knowledge and Upgrade paths.
+%% NOTE: over HTTP/2 the SSE and long-poll stream timeouts
+%% (`listeners.$name.{sse,longpoll}.idle_timeout') cannot be applied per
+%% stream; a listener serving those should list 1.1 first (the default).
+{mapping, "listeners.$name.http.versions", "bondy_router.listeners", [
+  {datatype, string}
+]}.
+
 %% --------------------------------------------------------------------------
 %% HTTP response-header policy.
 %% --------------------------------------------------------------------------
@@ -2732,12 +2744,6 @@ end}.
   {datatype, {duration, ms}}
 ]}.
 
-%% @doc Whether the SSE idle timeout is reset when sending data.
-{mapping, "listeners.$name.sse.reset_idle_timeout_on_send",
-"bondy_router.listeners", [
-  {datatype, {flag, on, off}}
-]}.
-
 %% --------------------------------------------------------------------------
 %% Long-poll carrier. Overrides the global `wamp.longpoll.*' block for this
 %% listener only.
@@ -2757,12 +2763,6 @@ end}.
 %% reply before the connection is torn down for inactivity.
 {mapping, "listeners.$name.longpoll.idle_timeout", "bondy_router.listeners", [
   {datatype, {duration, ms}}
-]}.
-
-%% @doc Whether the longpoll idle timeout is reset when sending data.
-{mapping, "listeners.$name.longpoll.reset_idle_timeout_on_send",
-"bondy_router.listeners", [
-  {datatype, {flag, on, off}}
 ]}.
 
 %% --------------------------------------------------------------------------
@@ -2897,6 +2897,11 @@ end}.
         {["http", "reset_idle_timeout_on_send"],
             [protocol_opts, reset_idle_timeout_on_send]},
         {["http", "sendfile"], [protocol_opts, sendfile]},
+        %% NOT under `protocol_opts': the value is consumed by
+        %% `bondy_listener_ranch', which derives the ALPN socket option and
+        %% Cowboy's `protocols'/`alpn_default_protocol' from it — it is not
+        %% itself a Cowboy option.
+        {["http", "versions"], [http_versions]},
         {["cors", "enabled"], [cors, enabled]},
         {["cors", "allowed_origins"], [cors, allowed_origins]},
         {["cors", "allowed_methods"], [cors, allowed_methods]},
@@ -2937,12 +2942,8 @@ end}.
         {["sse", "ping", "enabled"], [sse, ping, enabled]},
         {["sse", "ping", "interval"], [sse, ping, interval]},
         {["sse", "idle_timeout"], [sse, idle_timeout]},
-        {["sse", "reset_idle_timeout_on_send"],
-            [sse, reset_idle_timeout_on_send]},
         {["longpoll", "poll_timeout"], [longpoll, poll_timeout]},
         {["longpoll", "idle_timeout"], [longpoll, idle_timeout]},
-        {["longpoll", "reset_idle_timeout_on_send"],
-            [longpoll, reset_idle_timeout_on_send]},
         {["tls", "certfile"], [tls, certfile]},
         {["tls", "keyfile"], [tls, keyfile]},
         {["tls", "cacertfile"], [tls, cacertfile]},
@@ -3033,6 +3034,33 @@ end}.
             end
          || S <- Split(V)
         ]
+    end,
+
+    %% Rendered to Cowboy's own protocol names (`http' = HTTP/1.1,
+    %% `http2' = HTTP/2), order preserved: the first is the preferred version.
+    HttpVersions = fun(Key, V) ->
+        case
+            [
+                case S of
+                    "1.1" ->
+                        http;
+                    "2" ->
+                        http2;
+                    Bad ->
+                        cuttlefish:invalid(
+                            Key ++ " invalid HTTP version " ++ Bad
+                        )
+                end
+             || S <- Split(V)
+            ]
+        of
+            [] ->
+                cuttlefish:invalid(
+                    Key ++ " must list at least one HTTP version"
+                );
+            Parsed ->
+                Parsed
+        end
     end,
 
     %% Parsed HERE, at render time, rather than left to
@@ -3153,6 +3181,8 @@ end}.
             Family(FullKey(Name, Tail), V);
         (["tls", "versions"] = Tail, V, Name) ->
             Versions(FullKey(Name, Tail), V);
+        (["http", "versions"] = Tail, V, Name) ->
+            HttpVersions(FullKey(Name, Tail), V);
         (["port"] = Tail, V, Name) ->
             PortNumber(FullKey(Name, Tail), V);
         %% A max-age is a non-negative number of seconds. Rendered as a BINARY:
