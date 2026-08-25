@@ -379,7 +379,7 @@ Pattern for looking up promises on the promise table.
 
 call_key_pattern(RealmUri, Caller, CallId) when is_binary(RealmUri) ->
     CallId == '_' orelse is_integer(CallId) orelse
-        error({badarg, {invocation_id, CallId}}),
+        error({badarg, {call_id, CallId}}),
 
     CallerSessionId =
         case Caller of
@@ -421,7 +421,7 @@ invocation_key_pattern(RealmUri, Caller, CallId, Callee, InvocationId) when
         error({badarg, {invocation_id, InvocationId}}),
 
     CallId == '_' orelse is_integer(CallId) orelse
-        error({badarg, {invocation_id, CallId}}),
+        error({badarg, {call_id, CallId}}),
 
     CalleeSessionId =
         case Callee of

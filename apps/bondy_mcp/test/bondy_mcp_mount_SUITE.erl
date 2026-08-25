@@ -50,6 +50,12 @@ init_per_suite(Config) ->
     %% without a default. This suite does not boot `bondy_config:init/1`, so
     %% it supplies the key itself; the OS pid keeps parallel CT runs from
     %% sharing the directory.
+    %% Node-global like `listeners` below: an already-running bondy resolved
+    %% its `admin_local` socket path from the value at ITS boot, and a later
+    %% suite recomputes the same path from this key — leaving ours in place
+    %% points them at a socket that does not exist. Restored in
+    %% `end_per_suite/1`.
+    OriginalTmpDir = bondy_config:get(platform_tmp_dir, undefined),
     ok = bondy_config:set(
         platform_tmp_dir, filename:join("/tmp", "bondy_ct_" ++ os:getpid())
     ),
@@ -57,10 +63,17 @@ init_per_suite(Config) ->
     %% in `persistent_term` are node-global and outlive this suite in a
     %% `rebar3 ct` run; `end_per_suite/1` restores what was here.
     Original = bondy_config:get(listeners, undefined),
-    [{original_listeners, Original} | Config].
+    [
+        {original_listeners, Original},
+        {original_tmp_dir, OriginalTmpDir}
+        | Config
+    ].
 
 end_per_suite(Config) ->
     ok = bondy_config:set(listeners, ?config(original_listeners, Config)),
+    ok = bondy_config:set(
+        platform_tmp_dir, ?config(original_tmp_dir, Config)
+    ),
     ok = bondy_listener_manager:init(),
     Config.
 
@@ -101,7 +114,13 @@ mcp_listener_answers_the_stub_on_both_paths(_Config) ->
     %% And a path neither route claims is untouched by the carrier.
     ?assertMatch({404, _}, http_get(Port, "localhost", "/mcp")),
 
-    ok = bondy_listener_manager:stop(all).
+    %% `stop(normal)` mirrors the `start(normal)` above: it stops exactly the
+    %% listeners this case declared. `stop(all)` also sweeps the early phase —
+    %% the injected `admin`/`admin_local` — and ranch listeners are node-global
+    %% by name, so on a shared `rebar3 ct` node where an earlier suite left
+    %% bondy running it kills THAT node's admin listeners for every later
+    %% suite (bondy_admin_listener_SUITE failed exactly this way).
+    ok = bondy_listener_manager:stop(normal).
 
 mcp_and_admin_api_do_not_boot_together(_Config) ->
     %% The manager-level spelling of the co-tenancy rule: the boot aborts
@@ -146,7 +165,7 @@ per_listener_mcp_option_reaches_route_state(_Config) ->
     ),
     _ = [?assertEqual(Expected, maps:get(config, St)) || St <- States],
 
-    ok = bondy_listener_manager:stop(all).
+    ok = bondy_listener_manager:stop(normal).
 
 stub_answers_on_a_host_another_route_set_names(_Config) ->
     %% MCP's routes are contributed under `'_'`, and
@@ -181,7 +200,7 @@ stub_answers_on_a_host_another_route_set_names(_Config) ->
             http_get(Port, "api.example.com", "/mcp/realm/com.example.test")
         ),
 
-        ok = bondy_listener_manager:stop(all)
+        ok = bondy_listener_manager:stop(normal)
     after
         ok = application:unset_env(bondy_router, http_services),
         ok = application:unset_env(bondy_router, http_carriers)

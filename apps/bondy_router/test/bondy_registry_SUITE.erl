@@ -777,7 +777,7 @@ rib_completion_selects_local(Config) ->
     Caller = bondy_ref:new(internal),
     %% A deliberately bogus hint: completion must not trust it.
     Hint = bondy_ref:new(internal),
-    Call = bondy_wamp_message:call(1, #{}, Uri),
+    Call = rib_call(1, #{}, Uri),
 
     ok = bondy_dealer:forward(Call, Hint, #{
         realm_uri => RealmUri,
@@ -802,7 +802,7 @@ rib_completion_no_local_fails_fast(Config) ->
     Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
 
     Caller = bondy_ref:new(internal),
-    Call = bondy_wamp_message:call(1, #{}, Uri),
+    Call = rib_call(1, #{}, Uri),
 
     ok = bondy_dealer:forward(Call, bondy_ref:new(internal), #{
         realm_uri => RealmUri,
@@ -1104,7 +1104,7 @@ rib_metrics_surface(Config) ->
     Ok0 = V(bondy_rpc_rib_completions_total, #{outcome => ok}),
     Miss0 = V(bondy_rpc_rib_completions_total, #{outcome => miss}),
     ok = bondy_dealer:forward(
-        bondy_wamp_message:call(92, #{}, Uri),
+        rib_call(92, #{}, Uri),
         bondy_ref:new(internal),
         #{realm_uri => RealmUri, from => Caller, rib_completion => true}
     ),
@@ -1115,7 +1115,7 @@ rib_metrics_surface(Config) ->
     end,
     NoProc = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
     ok = bondy_dealer:forward(
-        bondy_wamp_message:call(93, #{}, NoProc),
+        rib_call(93, #{}, NoProc),
         bondy_ref:new(internal),
         #{realm_uri => RealmUri, from => Caller, rib_completion => true}
     ),
@@ -1189,6 +1189,24 @@ completion_miss_error(CallId, Details) ->
         [<<"There are no eligible callees for the procedure.">>]
     ),
     Error#error{details = maps:merge(Error#error.details, Details)}.
+
+%% @private
+%% A node-addressed forwarded CALL (`rib_completion`) carries the caller
+%% node's prepared envelope: every wire producer stamps
+%% `Options.'$private'.call_id` (bondy_dealer:prepare_call_rib/3), and the
+%% owner-side clause reads it to match an open progressive-input stream. A
+%% hand-built test CALL must carry the same envelope.
+rib_call(ReqId, Opts, Uri) ->
+    Call = bondy_wamp_message:call(ReqId, Opts, Uri),
+    Call#call{
+        options = (Call#call.options)#{
+            '$private' => #{
+                call_id => ReqId,
+                registration_id => undefined,
+                invocation_details => #{procedure => Uri, trust_level => 0}
+            }
+        }
+    }.
 
 %% The callback target for rib_completion_selects_local. The dynamic
 %% callback convention: return {ok, Details, Args, KWArgs} -> RESULT.
