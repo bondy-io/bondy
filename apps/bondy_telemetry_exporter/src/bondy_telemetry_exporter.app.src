@@ -1,0 +1,47 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+{application, bondy_telemetry_exporter, [
+    {description,
+        "Exports Bondy's telemetry events to external observability "
+        "backends: Prometheus (metric families, collectors and the "
+        "telemetry sinks feeding them) and OpenTelemetry/OTLP span "
+        "export. Owns the OpenTelemetry SDK/OTLP-exporter dependencies "
+        "and their bondy.conf surface (tracing.*); consumes telemetry "
+        "events by name. The Prometheus collectors additionally read "
+        "producer-app state at scrape time (never at boot). Start "
+        "requirement: the bondy_metrics REGISTRY PROCESS must be running "
+        "(bondy_metrics is a library app whose gen_server is hosted by "
+        "the consumer's supervision tree — bondy_oplog_sup in a full "
+        "node, started by bondy_app before this app)."},
+    {vsn, "0.1.0"},
+    {registered, [bondy_telemetry_exporter_sup]},
+    {mod, {bondy_telemetry_exporter_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        telemetry,
+        prometheus,
+        bondy_metrics,
+        opentelemetry_api,
+        %% inets and ssl BEFORE opentelemetry: the SDK's batch processor
+        %% initializes the OTLP exporter module (an httpc profile) at ITS
+        %% OWN start, and on `{error, inets_not_started}` it DISABLES span
+        %% recording until its next 5s tick (otel_batch_processor.erl:
+        %% init_exporter -> clear_table_and_disable) — silently dropping
+        %% every span in the window. `ensure_all_started/1` starts this
+        %% list left-to-right, and the release lists inets near the top,
+        %% so both paths start inets first (measured: the Tempo landing
+        %% probe's first span was dropped without this ordering).
+        inets,
+        ssl,
+        opentelemetry,
+        opentelemetry_exporter
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

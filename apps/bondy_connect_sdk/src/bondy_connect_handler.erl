@@ -58,7 +58,7 @@ run(#{kind := invocation, conn := Conn, req_id := ReqId} = Job) ->
     %% After the reply so the emission seat cannot delay or break the
     %% data path (this worker's own DOWN after handler_done is a no-op
     %% in the dispatch).
-    ok = notify_span(Job, Started),
+    ok = notify_span(Job, Started, Reply),
     ok;
 run(#{kind := event, conn := Conn, sub_id := SubId} = Job) ->
     #{handler := H, args := Args, kwargs := KWArgs, details := Details} = Job,
@@ -121,13 +121,23 @@ pull_input() ->
 %% discloses the concrete procedure in `INVOCATION.Details.procedure`;
 %% the WAMP spec only guarantees it for pattern-based registrations, so
 %% the registration's own URI is the fallback.
-notify_span(#{details := Details, uri := Uri}, Started) ->
+notify_span(#{details := Details, uri := Uri}, Started, Reply) ->
     Duration = erlang:monotonic_time(millisecond) - Started,
+    %% `Reply` is the normalized internal reply this worker just sent to
+    %% the connection: `{error, Uri, Args, KWArgs}` (a business error, an
+    %% invalid return or a caught handler crash — all of which the caller
+    %% receives as a WAMP ERROR) or `{yield, Args, KWArgs}`.
+    Outcome =
+        case Reply of
+            {error, _, _, _} -> error;
+            _ -> success
+        end,
     bondy_connect_telemetry:rpc_latency(
         invocation,
         maps:get(procedure, Details, Uri),
         Duration,
-        bondy_connect_telemetry:trace_meta(Details)
+        bondy_connect_telemetry:trace_meta(Details),
+        Outcome
     ).
 
 %% @private

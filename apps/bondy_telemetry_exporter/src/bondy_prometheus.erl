@@ -10,15 +10,14 @@ We follow the Prometheus metric and label naming practices described at
 """.
 -include_lib("kernel/include/logger.hrl").
 -include_lib("prometheus/include/prometheus.hrl").
--include_lib("bondy_wamp/include/bondy_wamp.hrl").
--include("bondy.hrl").
 
 %% API
 -export([report/0]).
--export([report_dropped/2]).
 
 %% TELEMETRY HANDLERS
 -export([handle_wamp_message/4]).
+-export([handle_wamp_dropped/4]).
+-export([handle_http_request/4]).
 -export([handle_net_event/4]).
 -export([handle_registry_event/4]).
 -export([handle_rpc_latency/4]).
@@ -39,24 +38,6 @@ We follow the Prometheus metric and label naming practices described at
 
 report() ->
     prometheus_text_format:format().
-
--doc """
-Records a message or event Bondy declined to deliver.
-
-`Reason` is the cause (e.g. `shed` when dropped by load shedding) and
-`Family` the class of dropped work (e.g. `subscription` for a dropped
-subscription meta event). Safe to call before the metric is declared;
-errors are swallowed so callers stay total.
-""".
--spec report_dropped(Reason :: atom(), Family :: atom()) -> ok.
-
-report_dropped(Reason, Family) when is_atom(Reason) andalso is_atom(Family) ->
-    try
-        prometheus_counter:inc(bondy_wamp_dropped_total, [Reason, Family])
-    catch
-        _:_ ->
-            ok
-    end.
 
 days_duration_buckets() ->
     [0, 1, 2, 3, 4, 5, 10, 15, 30].
@@ -147,6 +128,18 @@ setup() ->
         fun ?MODULE:handle_wamp_message/4,
         undefined
     ),
+    _ = telemetry:attach(
+        {?MODULE, wamp_dropped},
+        [bondy, wamp, dropped],
+        fun ?MODULE:handle_wamp_dropped/4,
+        undefined
+    ),
+    _ = telemetry:attach(
+        {?MODULE, http_request},
+        [bondy, http, request],
+        fun ?MODULE:handle_http_request/4,
+        undefined
+    ),
     _ = telemetry:attach_many(
         {?MODULE, net_events},
         [
@@ -210,6 +203,12 @@ setup() ->
     ),
     ok = bondy_prometheus_cowboy_collector:setup(),
     ok = bondy_prometheus_db:setup(),
+    %% Declares the telemetry_scrape_* summaries that
+    %% prometheus_cowboy2_handler (the `/metrics` endpoint) observes on
+    %% every scrape. Without this every HTTP scrape 500s on the
+    %% undeclared-metric error (caught by
+    %% bondy_prometheus_SUITE:dropped_and_http_metrics_via_telemetry).
+    _ = prometheus_http_impl:setup(),
     %% Required for prometheus_vm_msacc_collector to report anything.
     _ = erlang:system_flag(microstate_accounting, true),
     Collectors = [
@@ -1130,6 +1129,33 @@ handle_wamp_message(_EventName, Measurements, Meta, _Config) ->
                     label => Labels#{UriLabel => maps:get(uri, Meta, undefined)}
                 })
         end
+    catch
+        _:_ ->
+            ok
+    end.
+
+%% @private
+%% Telemetry sink for `[bondy, wamp, dropped]` (emitted by
+%% `bondy_telemetry:wamp_dropped/2`): bumps
+%% `bondy_wamp_dropped_total{reason, family}`. Total — a failure here
+%% would permanently detach the handler.
+handle_wamp_dropped(_EventName, _Meas, Meta, _Config) ->
+    try
+        #{reason := Reason, family := Family} = Meta,
+        prometheus_counter:inc(bondy_wamp_dropped_total, [Reason, Family])
+    catch
+        _:_ ->
+            ok
+    end.
+
+%% @private
+%% Telemetry sink for `[bondy, http, request]` (emitted by
+%% `bondy_telemetry:http_request/1`, the Cowboy `metrics_callback`):
+%% forwards the Cowboy metrics map to the collector. Total — a failure
+%% here would permanently detach the handler.
+handle_http_request(_EventName, _Meas, Metrics, _Config) ->
+    try
+        bondy_prometheus_cowboy_collector:observe(Metrics)
     catch
         _:_ ->
             ok

@@ -42,7 +42,7 @@ Also provides trace-identifier generation.
 -export([router_flow/3]).
 -export([router_flow_ingress/3]).
 -export([wamp_egress/3]).
--export([rpc_latency/4]).
+-export([rpc_latency/5]).
 -export([trace_meta/1]).
 -export([broker_publish/2]).
 -export([wamp_hello/1]).
@@ -51,6 +51,9 @@ Also provides trace-identifier generation.
 -export([ping_rtt/3]).
 -export([realm_event/2]).
 -export([user_event/3]).
+-export([wamp_dropped/2]).
+-export([http_request/1]).
+-export([maybe_mint_trace/1]).
 
 %% =============================================================================
 %% API
@@ -345,6 +348,37 @@ wamp_egress(Transport, ServiceUs, Depth) ->
     ).
 
 -doc """
+Emits `[bondy, wamp, dropped]` for a message or event Bondy declined to
+deliver. `Reason` is the cause (e.g. `shed` when dropped by load
+shedding, `admission` when refused by the session admission gate) and
+`Family` the class of dropped work (e.g. `subscription` for a dropped
+subscription meta event). Total: never throws.
+""".
+-spec wamp_dropped(Reason :: atom(), Family :: atom()) -> ok.
+
+wamp_dropped(Reason, Family) ->
+    execute(
+        [bondy, wamp, dropped],
+        #{count => 1},
+        #{reason => Reason, family => Family}
+    ).
+
+-doc """
+Cowboy [metrics stream handler](https://github.com/ninenines/cowboy/blob/master/src/cowboy_metrics_h.erl)
+callback: emits `[bondy, http, request]` once per HTTP request/stream,
+with the complete Cowboy metrics map as the event metadata. Passed as
+`metrics_callback` by `bondy_listener_ranch`, so listeners carry no
+reference to any metrics sink. The map is an exception to the
+extracted-scalars rule above: it already exists in the emitting process
+(cowboy_metrics_h built it), so forwarding it allocates nothing. Total:
+never throws.
+""".
+-spec http_request(Metrics :: map()) -> ok.
+
+http_request(Metrics) ->
+    execute([bondy, http, request], #{count => 1}, Metrics).
+
+-doc """
 As `router_flow/3` but with the service time only. Total: never throws.
 """.
 -spec router_flow(Family :: atom(), ServiceUs :: integer()) -> ok.
@@ -394,21 +428,86 @@ can attribute latency to the router or the application.
 returns (`#{}` when the call was untraced), so a handler can export
 this observation as a span: handlers run synchronously in the settling
 process, so the handler's own clock at handle time is the observation's
-end and `duration` locates its start. Total: never throws.
+end and `duration` locates its start.
+
+`Outcome` is how the leg settled: `success` for a RESULT/YIELD,
+`error` for a WAMP ERROR — a promise evicted on timeout emits no
+latency event at all, so those are the only two values. Total: never
+throws.
 """.
 -spec rpc_latency(
     Kind :: call | invocation,
     ProcedureUri :: binary(),
     DurationMs :: integer(),
-    Trace :: #{binary() => binary()}
+    Trace :: #{binary() => binary()},
+    Outcome :: success | error
 ) -> ok.
 
-rpc_latency(Kind, ProcedureUri, DurationMs, Trace) ->
+rpc_latency(Kind, ProcedureUri, DurationMs, Trace, Outcome) ->
     execute(
         [bondy, rpc, latency],
         #{duration => max(0, DurationMs)},
-        #{kind => Kind, procedure_uri => ProcedureUri, trace => Trace}
+        #{
+            kind => Kind,
+            procedure_uri => ProcedureUri,
+            trace => Trace,
+            outcome => Outcome
+        }
     ).
+
+-doc """
+Injects a freshly minted W3C trace context into a validated CALL
+options map that carries none — the router-as-trace-boundary behaviour
+API gateways implement, gated on `tracing.mint.enabled` (default off)
+and its head-sampling companion `tracing.mint.ratio`.
+
+A map already carrying a **binary** `'_traceparent'` is returned
+unchanged: the router only ever joins a caller's context, and a
+malformed binary stays carried verbatim (extraction downstream treats
+it as untraced). A non-binary `'_traceparent'` counts as absent — per
+W3C, a participant receiving an invalid `traceparent` may restart the
+trace. When minting is off, or the sampling coin toss rejects the
+call, the map is returned unchanged and the call stays untraced end to
+end — an unsampled call costs one config read and at most one
+`rand:uniform/0`. A minted context has the sampled flag set (`-01`);
+its trace id is `trace_id/0`'s, which is never all-zero (UUIDv7
+version bits), and the all-zero span id W3C forbids is regenerated.
+
+A minted context also carries the W3C tracestate vendor entry
+`bondy=<span-id>`, naming the traceparent's parent span id: the span-id
+seat in a minted traceparent is not (as in a carried context) an
+already-emitted upstream span but a PRE-ALLOCATED id that the
+router-leg span bridge realizes as the trace's ROOT span when the call
+leg completes (`bondy_telemetry_exporter_otel`). Binding the marker to
+the specific span id keeps it inert everywhere else: propagated
+downstream per W3C, it no longer matches once any participant starts
+its own spans. Any `'_tracestate'` present alongside an absent or
+non-binary traceparent is not a valid context (W3C) and is overwritten.
+Total: never throws.
+""".
+-spec maybe_mint_trace(map()) -> map().
+
+maybe_mint_trace(#{'_traceparent' := TP} = Opts) when is_binary(TP) ->
+    Opts;
+maybe_mint_trace(Opts) when is_map(Opts) ->
+    case bondy_config:get([tracing_mint, enabled], false) of
+        true ->
+            Ratio = bondy_config:get([tracing_mint, ratio], 1.0),
+            case Ratio >= 1.0 orelse rand:uniform() =< Ratio of
+                true ->
+                    SpanId = binary:encode_hex(mint_span_id(), lowercase),
+                    Opts#{
+                        '_traceparent' =>
+                            <<"00-", (trace_id())/binary, "-", SpanId/binary,
+                                "-01">>,
+                        '_tracestate' => <<"bondy=", SpanId/binary>>
+                    };
+                false ->
+                    Opts
+            end;
+        _ ->
+            Opts
+    end.
 
 -doc """
 Maps a validated CALL options (or INVOCATION details) map to the
@@ -548,6 +647,14 @@ realm_type(Ctxt) ->
     catch
         _:_ ->
             undefined
+    end.
+
+%% @private
+%% W3C forbids the all-zero span id (probability 2^-64 — regenerate).
+mint_span_id() ->
+    case crypto:strong_rand_bytes(8) of
+        <<0:64>> -> mint_span_id();
+        Bytes -> Bytes
     end.
 
 %% @private

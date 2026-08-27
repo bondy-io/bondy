@@ -31,7 +31,7 @@ and `duration` locates its start — enough to reconstruct a retroactive
 span.
 """.
 
--export([rpc_latency/4]).
+-export([rpc_latency/5]).
 -export([trace_meta/1]).
 
 %% =============================================================================
@@ -40,20 +40,29 @@ span.
 
 -doc """
 Emit the `[bondy_connect, rpc, latency]` event for a settled RPC leg.
-See the module doc for the event contract.
+`Outcome` is how the leg settled: `success` for a RESULT/YIELD,
+`error` for a WAMP ERROR (a callee handler crash is turned into an
+error reply, so it settles as `error` too). See the module doc for the
+event contract.
 """.
 -spec rpc_latency(
     Kind :: call | invocation,
     ProcedureUri :: binary(),
     DurationMs :: integer(),
-    Trace :: #{binary() => binary()}
+    Trace :: #{binary() => binary()},
+    Outcome :: success | error
 ) -> ok.
 
-rpc_latency(Kind, ProcedureUri, DurationMs, Trace) ->
+rpc_latency(Kind, ProcedureUri, DurationMs, Trace, Outcome) ->
     telemetry:execute(
         [bondy_connect, rpc, latency],
         #{duration => max(0, DurationMs)},
-        #{kind => Kind, procedure_uri => ProcedureUri, trace => Trace}
+        #{
+            kind => Kind,
+            procedure_uri => ProcedureUri,
+            trace => Trace,
+            outcome => Outcome
+        }
     ).
 
 -doc """

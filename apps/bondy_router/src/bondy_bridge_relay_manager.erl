@@ -172,6 +172,29 @@ init([]) ->
     {ok, #state{}, {continue, {add_bridges, Config}}}.
 
 handle_continue({add_bridges, Config}, State0) ->
+    try
+        {noreply, add_bridges(Config, State0)}
+    catch
+        error:bridge_relay_table_unavailable ->
+            %% The durable main DB failed to open, so the catalogue stood up
+            %% degraded (see `bondy_namespace_catalog:open_main_into/1`). A
+            %% raise here would crash-loop this manager into
+            %% `reached_max_restart_intensity` and take bondy_bridge_relay_sup
+            %% — and with it bondy_sup — down, bricking the very node the
+            %% catalogue deliberately left standing for inspection. Exercised
+            %% by `bondy_degraded_boot_SUITE`.
+            ?LOG_ERROR(#{
+                description =>
+                    "Skipping bridge-relay configuration; the durable "
+                    "store is unavailable. No bridges will run on this "
+                    "node until it is restarted with a working main "
+                    "database."
+            }),
+            {noreply, State0}
+    end.
+
+%% @private
+add_bridges(Config, State0) ->
     %% Initialize all Bridges which have been configured via bondy.conf file
     %% This is a map where the bridge name is the key and the value has an
     %% almost valid structure but we calidate it again to set some defaults.
@@ -213,9 +236,7 @@ handle_continue({add_bridges, Config}, State0) ->
     %% We merge overriding the common keys
     Bridges = maps:merge(Permanent, Transient),
 
-    State = State0#state{bridges = Bridges},
-
-    {noreply, State}.
+    State0#state{bridges = Bridges}.
 
 handle_call({add_bridge, Data, Opts}, _From, State0) ->
     {Reply, State} = do_add_bridge(Data, Opts, State0),

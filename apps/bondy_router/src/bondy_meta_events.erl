@@ -202,7 +202,7 @@ enqueue(Topic, Action, Entry) ->
 %% cell (a process-dictionary window would warn once per process and
 %% flood under a storm).
 on_shed(Family) ->
-    ok = bondy_prometheus:report_dropped(shed, Family),
+    ok = bondy_telemetry:wamp_dropped(shed, Family),
 
     Now = erlang:monotonic_time(second),
 

@@ -313,29 +313,67 @@ partisan_peer_ip() ->
 
 %% @private
 configure_services() ->
-    ?LOG_NOTICE(#{
-        description =>
-            "Configuring master and user realms from configuration file"
-    }),
-
     ok = bondy_message_id:init(),
 
-    %% We use bondy_realm:get/1 to force the creation of the bondy admin realm
-    %% if it does not exist.
-    _ = bondy_realm:get(?MASTER_REALM_URI),
-    %% Idempotent one-shot hardening for installs provisioned before the
-    %% master-realm hardening (D-1/D-2). No-op on fresh installs.
-    ok = bondy_realm:harden_master_realm(),
-    ok = bondy_realm:apply_config(),
-    ok = bondy_http_gateway:apply_config().
+    %% Every step below reads and writes the durable realm tables, so it is
+    %% gated on the `main` DB actually being open. When the catalogue stood
+    %% up with main idle after a storage-open failure (see
+    %% `bondy_namespace_catalog:open_main_into/1`) a raise here would return
+    %% `{error, _}` from `bondy_app:start/2` and HALT THE VM — turning the
+    %% catalogue's documented degraded posture (alarm raised, readiness
+    %% probe NOT READY, ephemeral registry alive for inspection) into a
+    %% crash loop. Exercised by `bondy_degraded_boot_SUITE`.
+    case bondy_namespace_catalog:main_status() of
+        open ->
+            ?LOG_NOTICE(#{
+                description =>
+                    "Configuring master and user realms from configuration "
+                    "file"
+            }),
+            %% We use bondy_realm:get/1 to force the creation of the bondy
+            %% admin realm if it does not exist.
+            _ = bondy_realm:get(?MASTER_REALM_URI),
+            %% Idempotent one-shot hardening for installs provisioned before
+            %% the master-realm hardening (D-1/D-2). No-op on fresh installs.
+            ok = bondy_realm:harden_master_realm(),
+            ok = bondy_realm:apply_config(),
+            ok = bondy_http_gateway:apply_config();
+        Status ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Skipping realm, security and API gateway "
+                    "configuration; the durable main database is not open. "
+                    "The node is running DEGRADED: durable operations will "
+                    "fail and the readiness probe reports NOT READY.",
+                main_status => Status
+            }),
+            ok
+    end.
 
 %% @private
 init_registry_indices() ->
-    case bondy_registry:init_indices() of
-        ok ->
-            ok;
-        {error, Reason} ->
-            exit(Reason)
+    %% The rebuild sweeps stale per-realm entries out of the EPHEMERAL
+    %% registry store and needs the durable realm table to enumerate the
+    %% realms. With `main` not open there is nothing durable to reconcile —
+    %% the ephemeral store is fresh on this boot — and the exit below would
+    %% halt the VM, so the degraded node skips it (same posture as
+    %% `configure_services/0`; exercised by `bondy_degraded_boot_SUITE`).
+    case bondy_namespace_catalog:main_status() of
+        open ->
+            case bondy_registry:init_indices() of
+                ok ->
+                    ok;
+                {error, Reason} ->
+                    exit(Reason)
+            end;
+        Status ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Skipping registry index initialisation; the durable "
+                    "main database is not open.",
+                main_status => Status
+            }),
+            ok
     end.
 
 %% @private
@@ -375,9 +413,13 @@ setup_event_handlers() ->
         {bondy_signal_handler, []}
     ),
 
-    %% We replace the default OTP alarm handler with ours
+    %% We replace the default OTP alarm handler with ours. The old handler's
+    %% terminate arg must be `swap` — that is the clause that returns
+    %% `{alarm_handler, Alarms}` for the new handler's init to adopt
+    %% (sasl/alarm_handler.erl); `normal` made it return `ok`, silently
+    %% dropping every alarm raised before this point in the boot.
     _ = bondy_event_manager:swap_watched_handler(
-        alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}
+        alarm_handler, {alarm_handler, swap}, {bondy_alarm_handler, []}
     ),
 
     %% An event handler that republishes some internal events to WAMP
@@ -385,10 +427,17 @@ setup_event_handlers() ->
         bondy_event_wamp_publisher, []
     ),
 
-    %% Metrics no longer ride the gen_event bus: bondy_prometheus only
-    %% declares families, attaches telemetry sinks and registers the
-    %% Prometheus collectors.
-    ok = bondy_prometheus:setup(),
+    %% Metrics no longer ride the gen_event bus: bondy_prometheus (in
+    %% bondy_telemetry_exporter, whose start runs its setup) declares
+    %% families, attaches telemetry sinks and registers the Prometheus
+    %% collectors. Started HERE — like bondy_mcp below, also by the
+    %% release boot script so it runs under CT and `rebar3 shell` too —
+    %% because the sinks must attach before any listener binds: the
+    %% socket/session gauges pair open/close deltas, so an open missed
+    %% while a later close is counted would drift them negative.
+    {ok, _} = application:ensure_all_started(
+        bondy_telemetry_exporter, permanent
+    ),
 
     %% Eagerly allocate the meta-event shed-warning cell off the shed path.
     ok = bondy_meta_events:setup(),

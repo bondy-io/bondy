@@ -3,7 +3,8 @@
 Prometheus + Grafana for the `bondy_db` / `bondy_oplog` / `bondy_mst`
 storage and replication stack, plus Partisan cluster state — the same
 signals the `bondy_observer_cli` Cluster (`C`) and Sync (`Y`) panes show,
-as time series.
+as time series — and Grafana Tempo for the distributed traces Bondy
+exports over OTLP.
 
 ## Quick start
 
@@ -56,11 +57,65 @@ let a red/amber stat lead you to Cluster Sync / AAE, find the offending
 inspector, then jump to the node-detail dashboards for the mechanism.
 Prometheus itself is at <http://localhost:9090>.
 
+## Distributed tracing (Tempo)
+
+Tempo receives the spans Bondy exports over OTLP/HTTP. Turn it on in
+`bondy.conf`:
+
+```
+tracing.otlp.enabled = on
+```
+
+The schema's default endpoint (`http://localhost:4318`) matches the port
+this stack publishes, so no further configuration is needed on the same
+host; `tracing.service_name` (default `bondy`) is the `service.name`
+every span carries. Bondy emits **retroactive spans** for router and SDK
+RPC legs and the MCP edge, parented to the W3C `traceparent` the calling
+system attached — by default an untraced request produces no span, and a
+failed leg carries OTel error status.
+
+To trace calls from clients that attach no context, make Bondy the trace
+boundary (the behaviour API gateways implement):
+
+```
+tracing.mint.enabled = on
+tracing.mint.ratio = 1.0
+```
+
+An untraced CALL then gets a context minted at the caller's node, which
+rides Bondy's own propagation (both RPC legs, cross-node, the MCP
+upstream `_meta`) and reaches callees; `ratio` head-samples the minting.
+The call leg at the minting node is exported as the trace's **root**
+span — Tempo's root-scoped TraceQL (all of Grafana **Traces
+Drilldown**) only counts rooted traces, and the Drilldown app
+additionally needs the Tempo metrics-generator this stack's
+`tempo/tempo.yml` enables. A context the caller attached is always
+honoured and never re-minted, and pub/sub is deliberately excluded —
+like a message broker, Bondy carries publisher context verbatim and
+mints nothing on that plane.
+
+Explore the traces in Grafana (Explore → **Tempo** datasource): search
+by service name, or paste a trace id — Bondy carries trace context
+verbatim, so the id is the one the caller minted. Tempo's own query API
+is at <http://localhost:3200> (`/api/traces/<trace-id>`); OTLP ingest is
+on `:4318`.
+
+Tempo's metrics-generator also runs the `service-graphs` and
+`span-metrics` processors, remote-writing `traces_service_graph_*` and
+`traces_spanmetrics_*` series into Prometheus — they back the
+**Service graph** tab of the Tempo datasource in Explore and are
+ordinary Prometheus series for dashboard panels (span-derived RED per
+`service.name` / span name). The dev node configs set a per-node
+`tracing.service_name` (`bondy-node1` …) so the graph can distinguish
+nodes; service-graph *edges* are built from client→server span pairs
+across services, so how much the graph shows depends on which legs are
+instrumented on both sides.
+
 ## How it works
 
 - Bondy exports Prometheus metrics on the **Admin API** HTTP listener at
   `/metrics` (node1: `18081`, node2: `18181`, node3: `18281`).
-- `bondy_prometheus_db` (in `bondy_router`) bridges the storage stack to
+- `bondy_prometheus_db` (in `bondy_telemetry_exporter`) bridges the storage stack to
   that endpoint:
   - attaches to the `telemetry` events emitted by `bondy_oplog` and
     `bondy_mst` (WAL, applier, sync/AAE, schedulers, page store,

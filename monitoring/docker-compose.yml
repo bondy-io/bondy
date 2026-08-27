@@ -1,13 +1,18 @@
 # =============================================================================
-# Bondy monitoring stack: Prometheus + Grafana.
+# Bondy monitoring stack: Prometheus + Grafana + Tempo.
 #
 # Scrapes the local 3-node dev cluster (just node1 / node2 / node3) through
 # the Admin API /metrics endpoint on ports 18081 / 18181 / 18281 of the
 # Docker host. See prometheus/prometheus.yml to add or change targets.
 #
+# Tempo receives the traces Bondy exports over OTLP/HTTP when
+# `tracing.otlp.enabled = on` in bondy.conf — the schema's default endpoint
+# (http://localhost:4318) matches the port published here.
+#
 #   docker compose up -d
 #   Grafana:    http://localhost:3000   (anonymous admin, no login)
 #   Prometheus: http://localhost:9090
+#   Tempo:      http://localhost:3200   (query API; OTLP ingest on :4318)
 # =============================================================================
 
 services:
@@ -18,6 +23,9 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=7d
       - --web.enable-lifecycle
+      # Tempo's metrics-generator remote-writes the service-graph and
+      # span-metrics series here (see tempo/tempo.yml).
+      - --web.enable-remote-write-receiver
     ports:
       - "9090:9090"
     volumes:
@@ -28,6 +36,20 @@ services:
       # (already implicit on Docker Desktop for macOS/Windows; required on
       # Linux).
       - host.docker.internal:host-gateway
+
+  tempo:
+    image: grafana/tempo:2.8.1
+    container_name: bondy-tempo
+    command:
+      - -config.file=/etc/tempo.yml
+    ports:
+      # Query API (Grafana's Tempo datasource, /api/traces/<id>).
+      - "3200:3200"
+      # OTLP/HTTP ingest — where Bondy's `tracing.otlp.endpoint` points.
+      - "4318:4318"
+    volumes:
+      - ./tempo/tempo.yml:/etc/tempo.yml:ro
+      - tempo-data:/var/tempo
 
   grafana:
     image: grafana/grafana:11.6.0
@@ -43,8 +65,9 @@ services:
       GF_USERS_DEFAULT_THEME: system
       # The Infinity datasource shapes JSON/an API into Grafana Node Graph
       # frames — used for the cluster topology graph (see
-      # _design/OBSERVABILITY_GAPS.md).
-      GF_INSTALL_PLUGINS: yesoreyeram-infinity-datasource
+      # _design/OBSERVABILITY_GAPS.md). grafana-exploretraces-app adds the
+      # Drilldown → Traces queryless browser over the Tempo datasource.
+      GF_INSTALL_PLUGINS: yesoreyeram-infinity-datasource,grafana-exploretraces-app
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
@@ -55,3 +78,4 @@ services:
 volumes:
   prometheus-data:
   grafana-data:
+  tempo-data:

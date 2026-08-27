@@ -235,7 +235,7 @@ line otherwise.
 -spec report_shed(Family :: atom()) -> ok.
 
 report_shed(Family) ->
-    ok = bondy_prometheus:report_dropped(shed, Family),
+    ok = bondy_telemetry:wamp_dropped(shed, Family),
 
     case bondy_config:get(router_flow_pool, undefined) of
         undefined ->

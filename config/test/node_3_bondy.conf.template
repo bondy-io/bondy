@@ -149,3 +149,11 @@ listeners.wamp_tls.tls.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
 listeners.wamp_tls.keepalive = on
 listeners.wamp_tls.max_connections = 100000
 listeners.wamp_tls.nodelay = on
+
+## Distributed tracing: export spans to the monitoring stack Tempo
+## (monitoring/docker-compose.yml, OTLP/HTTP on the schema default
+## endpoint http://localhost:4318) and mint a W3C trace context at the
+## router boundary for CALLs whose caller attached none.
+tracing.otlp.enabled = on
+tracing.mint.enabled = on
+tracing.service_name = bondy-node3

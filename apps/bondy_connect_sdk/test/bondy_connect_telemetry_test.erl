@@ -88,7 +88,7 @@ rpc_latency_carries_trace_test() ->
     try
         Trace = #{<<"traceparent">> => ?TP},
         ok = bondy_connect_telemetry:rpc_latency(
-            invocation, <<"com.example.p">>, 7, Trace
+            invocation, <<"com.example.p">>, 7, Trace, success
         ),
         receive
             {latency, Meas, Meta} ->
@@ -97,7 +97,8 @@ rpc_latency_carries_trace_test() ->
                     #{
                         kind => invocation,
                         procedure_uri => <<"com.example.p">>,
-                        trace => Trace
+                        trace => Trace,
+                        outcome => success
                     },
                     Meta
                 )

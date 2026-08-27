@@ -190,12 +190,14 @@ call_latency_trace(_) ->
             Caller, Proc, [], #{}, bondy_connect_trace:attach(#{}, Ctx)
         ),
         ?assertEqual(
-            [{call, Trace}, {invocation, Trace}], collect_latency(Proc, 2)
+            [{call, Trace, success}, {invocation, Trace, success}],
+            collect_latency(Proc, 2)
         ),
 
         {ok, _} = bondy_connect_client:call(Caller, Proc, []),
         ?assertEqual(
-            [{call, #{}}, {invocation, #{}}], collect_latency(Proc, 2)
+            [{call, #{}, success}, {invocation, #{}, success}],
+            collect_latency(Proc, 2)
         ),
 
         ?assertMatch(
@@ -204,8 +206,12 @@ call_latency_trace(_) ->
                 Caller, ErrProc, [], #{}, bondy_connect_trace:attach(#{}, Ctx)
             )
         ),
+        %% An ERROR settlement marks BOTH legs' outcome: the callee's
+        %% worker emitted the error reply, the caller's connection
+        %% dispatched it.
         ?assertEqual(
-            [{call, Trace}, {invocation, Trace}], collect_latency(ErrProc, 2)
+            [{call, Trace, error}, {invocation, Trace, error}],
+            collect_latency(ErrProc, 2)
         ),
 
         ok = bondy_connect_client:disconnect(Caller),
@@ -748,8 +754,10 @@ next_reply(Token) ->
 collect_latency(Proc, N) ->
     lists:sort([
         receive
-            {rpc_latency, #{procedure_uri := Proc, kind := K, trace := T}} ->
-                {K, T}
+            {rpc_latency, #{
+                procedure_uri := Proc, kind := K, trace := T, outcome := O
+            }} ->
+                {K, T, O}
         after 5000 ->
             ct:fail(latency_event_missing)
         end

@@ -1217,7 +1217,7 @@ handle_missing_realms(Rules, skip) ->
     {Keep, Drop} = lists:partition(
         fun(Rule) ->
             Realm = element(3, Rule),
-            Realm =:= undefined orelse bondy_realm:exists(Realm)
+            Realm =:= undefined orelse realm_exists_for_skip(Realm)
         end,
         Rules
     ),
@@ -1236,6 +1236,22 @@ handle_missing_realms(Rules, skip) ->
                 })
         end,
     Keep.
+
+%% @private
+%% `skip` must stay lenient when the realm TABLE itself is unavailable — a
+%% degraded boot whose durable main DB failed to open (see
+%% `bondy_namespace_catalog:open_main_into/1`): every realm-targeted route is
+%% treated as absent, exactly like a realm that has not replicated yet, and
+%% loads on the next rebuild once the store is back. A raise here during the
+%% early listeners' dispatch build would halt the node
+%% (`bondy_degraded_boot_SUITE` boots through this path).
+realm_exists_for_skip(Realm) ->
+    try
+        bondy_realm:exists(Realm)
+    catch
+        error:bondy_realm_table_unavailable ->
+            false
+    end.
 
 %% =============================================================================
 %% PRIVATE: PARSING THE API SPECIFICATION

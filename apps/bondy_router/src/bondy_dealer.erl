@@ -845,7 +845,7 @@ forward(#result{} = M, Caller, #{from := _Callee} = Opts) ->
                             },
                             case bondy_rpc_promise:take(Key) of
                                 {ok, P} ->
-                                    ok = notify_call_latency(P),
+                                    ok = notify_call_latency(P, success),
                                     bondy:send(RealmUri, Caller, M1);
                                 error ->
                                     no_matching_promise(M1)
@@ -859,7 +859,7 @@ forward(#result{} = M, Caller, #{from := _Callee} = Opts) ->
                 {ok, Promise} ->
                     %% Even if promise has timeout but
                     %% bondy_rpc_promise_manager has not evicted it yet.
-                    ok = notify_call_latency(Promise),
+                    ok = notify_call_latency(Promise, success),
                     bondy:send(RealmUri, Caller, M);
                 error ->
                     no_matching_promise(M)
@@ -891,7 +891,7 @@ forward(#error{request_type = ?CALL} = M, Caller, Opts) ->
 
     case bondy_rpc_promise:take(Key, Status) of
         {ok, Promise} ->
-            ok = notify_call_latency(Promise),
+            ok = notify_call_latency(Promise, error),
             case maybe_rib_retry(M, Promise, RealmUri, Caller) of
                 true ->
                     %% Re-routed to another candidate node (or completed
@@ -980,8 +980,18 @@ do_forward(#call{procedure_uri = Uri} = M0, Ctxt) ->
         <<"wamp.", _/binary>> ->
             apply_static_callback(M, Ctxt, bondy_wamp_meta_api);
         _ ->
+            %% The trace boundary: an untraced call from a local caller
+            %% gets a minted W3C context HERE (when `tracing.mint.enabled`
+            %% is on) — before the promise and invocation-details carry
+            %% seats read the options, so one injection point serves the
+            %% local, cross-node and MCP-upstream legs alike. Remote
+            %% callers' calls arrive through forward/3 with whatever their
+            %% ORIGIN node decided and are never re-minted here.
+            M1 = M#call{
+                options = bondy_telemetry:maybe_mint_trace(M#call.options)
+            },
             Opts = #{error_formatter => undefined},
-            handle_call(M, Ctxt, Uri, Opts)
+            handle_call(M1, Ctxt, Uri, Opts)
     end;
 do_forward(#cancel{} = M, Ctxt0) ->
     %% A local Caller is cancelling a previous call.
@@ -1026,7 +1036,7 @@ do_forward(#yield{} = M, Ctxt0) ->
                     %% so it is the local-call latency observation point; for
                     %% a remote Caller its own node observes latency on the
                     %% call promise instead.
-                    ok = notify_call_latency(Promise),
+                    ok = notify_call_latency(Promise, success),
                     send_yield_result(M, Promise, RealmUri, Callee);
                 error ->
                     no_matching_promise(M)
@@ -1066,7 +1076,7 @@ do_forward(#error{request_type = Type} = M, Ctxt0) when
 
     case Result of
         {ok, Promise} ->
-            _ = (NewType == ?CALL andalso notify_call_latency(Promise)),
+            _ = (NewType == ?CALL andalso notify_call_latency(Promise, error)),
             CallId = bondy_rpc_promise:call_id(Promise),
             %% Caller can be local or remote.
             Caller = bondy_rpc_promise:caller(Promise),
@@ -1923,7 +1933,7 @@ handle_progressive_violation(M0, Key, RealmUri, Callee) ->
             },
             case bondy_rpc_promise:take(Key) of
                 {ok, P} ->
-                    ok = notify_call_latency(P),
+                    ok = notify_call_latency(P, success),
                     send_yield_result(M, P, RealmUri, Callee);
                 error ->
                     no_matching_promise(M)
@@ -1967,7 +1977,11 @@ send_yield_result(M, Promise, RealmUri, Callee) ->
 %% transport) — and when its caller is LOCAL it is also the only promise
 %% for the call, so it doubles as the call round-trip observation (a
 %% remote caller's node observes call latency on its own call promise).
-notify_call_latency(Promise) ->
+%%
+%% `Outcome` is how the settling message classifies: `success` for a
+%% RESULT/YIELD, `error` for a WAMP ERROR. One promise settles on one
+%% message, so both legs of a doubled emission share it.
+notify_call_latency(Promise, Outcome) ->
     case bondy_rpc_promise:procedure_uri(Promise) of
         Uri when is_binary(Uri) ->
             Elapsed =
@@ -1976,16 +1990,18 @@ notify_call_latency(Promise) ->
             Trace = bondy_rpc_promise:get(trace, Promise, #{}),
             case bondy_rpc_promise:type(Promise) of
                 call ->
-                    bondy_telemetry:rpc_latency(call, Uri, Elapsed, Trace);
+                    bondy_telemetry:rpc_latency(
+                        call, Uri, Elapsed, Trace, Outcome
+                    );
                 invocation ->
                     ok = bondy_telemetry:rpc_latency(
-                        invocation, Uri, Elapsed, Trace
+                        invocation, Uri, Elapsed, Trace, Outcome
                     ),
                     Caller = bondy_rpc_promise:caller(Promise),
                     case bondy_ref:is_local(Caller) of
                         true ->
                             bondy_telemetry:rpc_latency(
-                                call, Uri, Elapsed, Trace
+                                call, Uri, Elapsed, Trace, Outcome
                             );
                         false ->
                             ok

@@ -436,7 +436,7 @@ handle_inbound_messages(
     %% overload with everyone.
     case admit_hello() of
         false ->
-            ok = bondy_prometheus:report_dropped(admission, hello),
+            ok = bondy_telemetry:wamp_dropped(admission, hello),
             stop(overload, St0);
         true ->
             handle_hello(M, St0)

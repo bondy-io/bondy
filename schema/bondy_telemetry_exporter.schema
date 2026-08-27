@@ -1,0 +1,134 @@
+%% =============================================================================
+%% SPDX-FileCopyrightText: 2016 - 2026 Leapsight
+%% SPDX-License-Identifier: Apache-2.0
+%% =============================================================================
+
+%% =============================================================================
+%% DISTRIBUTED TRACING — OpenTelemetry span export (OTLP)
+%%
+%% These keys configure the OpenTelemetry SDK (the `opentelemetry` and
+%% `opentelemetry_exporter` applications) that `bondy_telemetry_exporter`
+%% owns. Grafana Tempo, Jaeger and every other OTLP-native backend consume
+%% the export directly.
+%%
+%% The `tracing.otlp.enabled` mapping is load-bearing even when off: the
+%% SDK's OWN default is to export to a localhost OTLP endpoint, so the
+%% translation always writes `traces_exporter` explicitly (`none` when
+%% disabled) rather than leaving the SDK default in force.
+%% =============================================================================
+
+%% -----------------------------------------------------------------------------
+%% @doc Whether Bondy exports trace spans over OTLP. When off (the
+%% default) the OpenTelemetry SDK runs inert: no spans are recorded or
+%% exported and no connections are attempted.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "tracing.otlp.enabled", "opentelemetry.traces_exporter", [
+  {default, off},
+  {datatype, {flag, on, off}}
+]}.
+
+{translation, "opentelemetry.traces_exporter",
+  fun(Conf) ->
+    case cuttlefish:conf_get("tracing.otlp.enabled", Conf) of
+        true -> {opentelemetry_exporter, #{}};
+        false -> none
+    end
+  end
+}.
+
+%% NOTE: `traces_exporter` is deliberately the ONLY switch — the
+%% event→span bridge gates itself on it (`=/= none`). A second mapping
+%% of the same conf key to a bondy_telemetry_exporter env was tried and
+%% is UNSOUND: cuttlefish binds a user-set value to one mapping only,
+%% so the twin key silently kept its default whenever the operator set
+%% the flag.
+
+%% -----------------------------------------------------------------------------
+%% @doc The OTLP endpoint spans are exported to, over OTLP/HTTP
+%% (protobuf). The signal path (`/v1/traces`) is appended by the
+%% exporter; give the base URL only, e.g. `http://tempo:4318`.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "tracing.otlp.endpoint", "opentelemetry_exporter.otlp_endpoint", [
+  {default, "http://localhost:4318"},
+  {datatype, string}
+]}.
+
+%% The transport is fixed to OTLP/HTTP: the grpc alternative needs
+%% grpcbox, which is excluded from the release (its acceptor_pool
+%% dependency collides with modules partisan vendors — see rebar.config).
+%% Hidden rather than user-facing; the value is forced.
+{mapping, "tracing.otlp.protocol", "opentelemetry_exporter.otlp_protocol", [
+  {default, http_protobuf},
+  {datatype, {enum, [http_protobuf]}},
+  hidden
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Whether Bondy MINTS a W3C trace context for a CALL that arrives
+%% without one — the trace-boundary behaviour API gateways implement.
+%% Off (the default) Bondy only ever joins a caller's context: an
+%% untraced call produces no spans anywhere. On, an untraced call gets a
+%% fresh sampled context at the caller's node, which then rides Bondy's
+%% own propagation (call and invocation legs, cross-node, the MCP
+%% upstream `_meta`) and reaches callees, so their instrumentation can
+%% join too. Calls that already carry a context are never re-minted.
+%% Pub/sub is deliberately excluded: like a message broker, Bondy
+%% carries publisher context verbatim and mints nothing on that plane.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "tracing.mint.enabled", "bondy_router.tracing_mint.enabled", [
+  {default, off},
+  {datatype, {flag, on, off}}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Head-sampling ratio for minted contexts: the fraction of
+%% untraced calls that get one (1.0 = all of them). An unsampled call
+%% stays untraced end to end — no context is minted at all, so nothing
+%% downstream pays for it. Only applies to minting; a context the
+%% caller attached is always honoured regardless of this setting.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "tracing.mint.ratio", "bondy_router.tracing_mint.ratio", [
+  {default, 1.0},
+  {datatype, float},
+  {validators, ["tracing_mint_ratio_range"]}
+]}.
+
+{validator, "tracing_mint_ratio_range", "must be between 0.0 and 1.0",
+  fun(X) -> X >= 0.0 andalso X =< 1.0 end
+}.
+
+%% The SDK's id generator, needed by minting: a minted traceparent
+%% pre-allocates the ids of the trace's root span, and the bridge can
+%% only realize that span under those exact ids through the generator
+%% seam (`otel_tracer:start_span` offers no per-span id). The module
+%% delegates to the SDK default outside that one forced span. Hidden
+%% rather than user-facing; the value is forced.
+{mapping, "tracing.id_generator", "opentelemetry.id_generator", [
+  {default, bondy_telemetry_exporter_otel_ids},
+  {datatype, atom},
+  hidden
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The `service.name` resource attribute stamped on every exported
+%% span — how this node's spans are labelled in the tracing backend.
+%% Additional resource attributes can be supplied through the standard
+%% `OTEL_RESOURCE_ATTRIBUTES` environment variable, which the SDK reads
+%% natively.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "tracing.service_name", "opentelemetry.resource", [
+  {default, "bondy"},
+  {datatype, string}
+]}.
+
+{translation, "opentelemetry.resource",
+  fun(Conf) ->
+    Name = cuttlefish:conf_get("tracing.service_name", Conf),
+    [{service, #{name => Name}}]
+  end
+}.

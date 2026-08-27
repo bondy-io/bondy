@@ -71,7 +71,68 @@ trace_meta_untraced_test() ->
 
 %% The emitted event's metadata carries kind, procedure_uri and the
 %% trace map verbatim.
+%% maybe_mint_trace/1: off (the default) and the sampled-out case leave
+%% the map untouched; on, an absent (or non-binary — W3C invalid, may
+%% restart) traceparent is replaced by a freshly minted sampled context
+%% while a binary one is ALWAYS honoured, ratio or no ratio.
+maybe_mint_trace_test() ->
+    Opts = #{timeout => 5000},
+    MintRx = "^00-[0-9a-f]{32}-[0-9a-f]{16}-01$",
+
+    %% Default off (no config seeded): untouched. NOTE: bondy_config
+    %% reads app_config's persistent_term snapshot, NOT the live app
+    %% env — writes below go through bondy_config:set/2.
+    ?assertEqual(Opts, bondy_telemetry:maybe_mint_trace(Opts)),
+
+    try
+        %% On, ratio 1.0: minted, other keys preserved, W3C shape, sampled,
+        %% and the tracestate marker names EXACTLY the traceparent's
+        %% span id (the bridge realizes the root span only on that
+        %% match).
+        ok = bondy_config:set(
+            tracing_mint, [{enabled, true}, {ratio, 1.0}]
+        ),
+        Minted = bondy_telemetry:maybe_mint_trace(Opts),
+        ?assertEqual(5000, maps:get(timeout, Minted)),
+        TP1 = maps:get('_traceparent', Minted),
+        ?assertMatch({match, _}, re:run(TP1, MintRx)),
+        <<"00-", _:32/binary, "-", SpanHex:16/binary, "-01">> = TP1,
+        ?assertEqual(
+            <<"bondy=", SpanHex/binary>>, maps:get('_tracestate', Minted)
+        ),
+        %% Fresh ids per mint.
+        TP2 = maps:get(
+            '_traceparent', bondy_telemetry:maybe_mint_trace(Opts)
+        ),
+        ?assertNotEqual(TP1, TP2),
+
+        %% A carried binary context is never re-minted.
+        Carried = Opts#{'_traceparent' => ?TP},
+        ?assertEqual(Carried, bondy_telemetry:maybe_mint_trace(Carried)),
+
+        %% A non-binary traceparent counts as absent (restart the trace).
+        Junk = Opts#{'_traceparent' => 42},
+        ?assertMatch(
+            {match, _},
+            re:run(
+                maps:get(
+                    '_traceparent', bondy_telemetry:maybe_mint_trace(Junk)
+                ),
+                MintRx
+            )
+        ),
+
+        %% Ratio 0.0 samples everything out: untouched.
+        ok = bondy_config:set(
+            tracing_mint, [{enabled, true}, {ratio, 0.0}]
+        ),
+        ?assertEqual(Opts, bondy_telemetry:maybe_mint_trace(Opts))
+    after
+        bondy_config:set(tracing_mint, [{enabled, false}])
+    end.
+
 rpc_latency_carries_trace_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
     Self = self(),
     Id = {?MODULE, rpc_latency_carries_trace_test},
     ok = telemetry:attach(
@@ -82,7 +143,9 @@ rpc_latency_carries_trace_test() ->
     ),
     try
         Trace = #{<<"traceparent">> => ?TP},
-        ok = bondy_telemetry:rpc_latency(call, <<"com.example.p">>, 7, Trace),
+        ok = bondy_telemetry:rpc_latency(
+            call, <<"com.example.p">>, 7, Trace, error
+        ),
         receive
             {latency, Meas, Meta} ->
                 ?assertEqual(#{duration => 7}, Meas),
@@ -90,7 +153,8 @@ rpc_latency_carries_trace_test() ->
                     #{
                         kind => call,
                         procedure_uri => <<"com.example.p">>,
-                        trace => Trace
+                        trace => Trace,
+                        outcome => error
                     },
                     Meta
                 )

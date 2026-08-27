@@ -211,3 +211,12 @@ security.oidc.providers.oidc-mock.client_id=${OIDC_CLIENT_ID}
 security.oidc.providers.oidc-mock.client_secret=${OIDC_CLIENT_SECRET}
 security.oidc.providers.oidc-mock.redirect_path=/oidc/oidc-mock/callback
 security.oidc.providers.oidc-mock.login_path=/oidc/login
+
+
+## Distributed tracing: export spans to the monitoring stack Tempo
+## (monitoring/docker-compose.yml, OTLP/HTTP on the schema default
+## endpoint http://localhost:4318) and mint a W3C trace context at the
+## router boundary for CALLs whose caller attached none.
+tracing.otlp.enabled = on
+tracing.mint.enabled = on
+tracing.service_name = bondy-node2

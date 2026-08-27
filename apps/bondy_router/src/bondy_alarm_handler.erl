@@ -48,8 +48,18 @@ get_alarms() ->
 init([]) ->
     State = #state{},
     {ok, State};
+init({[], {alarm_handler, Alarms}}) ->
+    %% gen_event swap from the OTP default handler, invoked with
+    %% `{alarm_handler, swap}` so its `terminate(swap, Alarms)` hands its
+    %% alarm list over (sasl/alarm_handler.erl). Adopt it: alarms raised
+    %% BEFORE the swap — e.g. `bondy_db_main_unavailable`, set by the
+    %% namespace catalogue while bondy_sup is still starting — must survive
+    %% into `get_alarms/0` (asserted by `bondy_degraded_boot_SUITE`).
+    {ok, #state{alarms = Alarms}};
 init({[], _}) ->
-    %% In case of a swap
+    %% A swap with nothing to adopt: the old handler was absent (gen_event
+    %% hands `error`) — e.g. the watcher re-installing this handler after a
+    %% crash, when the OTP default is no longer registered.
     State = #state{},
     {ok, State}.
 

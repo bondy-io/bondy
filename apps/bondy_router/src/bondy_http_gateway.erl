@@ -744,6 +744,29 @@ scheme(_) -> ~"http".
 %% `dispatch_table/2` returns `[{'_', Routes}]` groups; a carrier contributes a
 %% flat route list, so unwrap.
 maybe_init_groups(RealmUri) ->
+    %% A durable provisioning write. On a degraded boot (`main` failed to
+    %% open) it must be skipped rather than raise: this runs from
+    %% `admin_api_routes/1` while the EARLY listeners build their dispatch
+    %% tables, and those listeners are exactly the ones that must come up to
+    %% serve `/ready` and `/metrics` on a degraded node (see
+    %% `bondy_degraded_boot_SUITE`). On the runtime `load_spec/2` path the
+    %% subsequent durable store write fails with its own error anyway.
+    case bondy_namespace_catalog:main_status() of
+        open ->
+            init_groups(RealmUri);
+        Status ->
+            ?LOG_WARNING(#{
+                description =>
+                    "Skipping API Gateway group provisioning; the durable "
+                    "main database is not open.",
+                main_status => Status,
+                realm_uri => RealmUri
+            }),
+            ok
+    end.
+
+%% @private
+init_groups(RealmUri) ->
     Gs = [
         #{
             ~"name" => <<"resource_owners">>,

@@ -344,7 +344,7 @@ protocol_opts(#{name := Name}) ->
             bondy => #{auth => #{schemes => [basic, bearer]}},
             dispatch => {persistent_term, dispatch_key(Name)}
         },
-        metrics_callback => fun bondy_prometheus_cowboy_collector:observe/1,
+        metrics_callback => fun bondy_telemetry:http_request/1,
         %% cowboy_metrics_h must be first on the list
         stream_handlers => [
             cowboy_metrics_h, cowboy_compress_h, cowboy_stream_h

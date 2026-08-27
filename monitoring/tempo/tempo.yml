@@ -1,0 +1,65 @@
+# =============================================================================
+# Grafana Tempo (trace backend) for the Bondy dev monitoring stack.
+#
+# Receives spans over OTLP/HTTP on :4318 — the protocol Bondy's
+# `bondy_telemetry_exporter` speaks (`tracing.otlp.protocol` is pinned to
+# http_protobuf; the schema's default endpoint `http://localhost:4318`
+# matches the port published by docker-compose.yml). No gRPC receiver is
+# configured: nothing in this stack sends gRPC.
+#
+# Storage is a local named volume; dev retention only.
+# =============================================================================
+
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+          endpoint: 0.0.0.0:4318
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
+
+# Grafana Traces Drilldown computes its RED panels with TraceQL metrics
+# queries; those are served by the metrics-generator's local-blocks
+# processor, so without this block the Drilldown app shows "No Data"
+# even while trace search works. Only spans ingested AFTER enablement
+# are counted. `filter_server_spans: false` because Bondy's retroactive
+# spans carry no OTel span kind.
+#
+# service-graphs + span-metrics feed Grafana's Service Graph view
+# (Explore → Tempo → Service graph) and the Tempo datasource's
+# `serviceMap`: they remote-write `traces_service_graph_*` and
+# `traces_spanmetrics_*` series into Prometheus (whose remote-write
+# receiver the compose file enables). Service-graph EDGES come from
+# client→server span pairs across `service.name`s, so they need the
+# per-node `tracing.service_name` the dev node configs set.
+metrics_generator:
+  processor:
+    local_blocks:
+      filter_server_spans: false
+      flush_to_storage: true
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://prometheus:9090/api/v1/write
+        send_exemplars: true
+  traces_storage:
+    path: /var/tempo/generator/traces
+
+overrides:
+  defaults:
+    metrics_generator:
+      processors: [local-blocks, service-graphs, span-metrics]
+
+compactor:
+  compaction:
+    block_retention: 168h

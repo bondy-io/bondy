@@ -97,6 +97,14 @@
 
 %% ENV IN DESIRED LOAD ORDER
 -define(ENV, [
+    %% Mirrors the production posture: the bondy_telemetry_exporter
+    %% schema ALWAYS writes `traces_exporter` explicitly (`none` when
+    %% `tracing.otlp.enabled` is off) because the OpenTelemetry SDK's own
+    %% default is to export to a localhost OTLP endpoint. Without this a
+    %% CT node would boot the SDK with that default.
+    {opentelemetry, [
+        {traces_exporter, none}
+    ]},
     {eleveldb, [
         {whole_file_expiry, true},
         {expiry_minutes, unlimited},

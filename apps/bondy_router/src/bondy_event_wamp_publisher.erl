@@ -95,7 +95,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% manager process, so the process dictionary is a safe window store).
 on_shed(Event) ->
     Family = event_family(Event),
-    ok = bondy_prometheus:report_dropped(shed, Family),
+    ok = bondy_telemetry:wamp_dropped(shed, Family),
     Now = erlang:monotonic_time(second),
     Key = {?MODULE, last_shed_warning},
 

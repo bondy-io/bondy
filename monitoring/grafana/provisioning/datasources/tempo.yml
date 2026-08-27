@@ -1,0 +1,24 @@
+apiVersion: 1
+
+# Tempo serves the traces Bondy exports over OTLP when `tracing.otlp.enabled`
+# is on (see schema/bondy_telemetry_exporter.schema). Explore → Tempo, then
+# search by service name (`tracing.service_name`, default "bondy") or paste a
+# trace id (Bondy carries W3C trace context verbatim, so the id is the one the
+# calling system minted). The Service Graph tab reads the
+# `traces_service_graph_*` series Tempo's metrics-generator remote-writes
+# into Prometheus (serviceMap below).
+datasources:
+  - name: Tempo
+    uid: bondy-tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    isDefault: false
+    editable: true
+    jsonData:
+      tracesToMetrics:
+        datasourceUid: bondy-prometheus
+      serviceMap:
+        datasourceUid: bondy-prometheus
+      nodeGraph:
+        enabled: true

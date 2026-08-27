@@ -23,6 +23,7 @@ must all render on a real scrape without error.
 -export([net_session_metrics_via_telemetry/1]).
 -export([inflight_by_procedure/1]).
 -export([egress_metrics_via_telemetry/1]).
+-export([dropped_and_http_metrics_via_telemetry/1]).
 
 all() ->
     [
@@ -31,7 +32,8 @@ all() ->
         wamp_message_metrics_via_telemetry,
         net_session_metrics_via_telemetry,
         inflight_by_procedure,
-        egress_metrics_via_telemetry
+        egress_metrics_via_telemetry,
+        dropped_and_http_metrics_via_telemetry
     ].
 
 init_per_suite(Config) ->
@@ -112,8 +114,8 @@ router_events_feed_metrics(_) ->
     {InvCount0, InvSum0} = histogram_value(
         bondy_wamp_invocation_latency_milliseconds, RpcLabels
     ),
-    ok = bondy_telemetry:rpc_latency(call, Proc, 42, #{}),
-    ok = bondy_telemetry:rpc_latency(invocation, Proc, 30, #{}),
+    ok = bondy_telemetry:rpc_latency(call, Proc, 42, #{}, success),
+    ok = bondy_telemetry:rpc_latency(invocation, Proc, 30, #{}, success),
 
     {CallCount1, CallSum1} = histogram_value(
         bondy_wamp_call_latency_milliseconds, RpcLabels
@@ -290,3 +292,65 @@ egress_metrics_via_telemetry(_) ->
     {_, _} = binary:match(Output, <<"bondy_wamp_egress_service_microseconds">>),
     {_, _} = binary:match(Output, <<"bondy_wamp_egress_queue_depth">>),
     ok.
+
+%% Router code publishes drops and Cowboy request metrics as telemetry
+%% events; the Prometheus counters must move when the events fire. The
+%% HTTP leg goes through a real listener so it also proves the
+%% `metrics_callback` wiring in bondy_listener_ranch.
+dropped_and_http_metrics_via_telemetry(_) ->
+    %% [bondy, wamp, dropped] -> bondy_wamp_dropped_total{reason, family}.
+    %% Label order matters: reason first, family second.
+    S0 = counter_value(bondy_wamp_dropped_total, [shed, subscription]),
+    ok = bondy_telemetry:wamp_dropped(shed, subscription),
+    S1 = counter_value(bondy_wamp_dropped_total, [shed, subscription]),
+    1 = S1 - S0,
+    %% A swapped label order would create the [subscription, shed] series
+    %% instead; assert it stayed untouched.
+    Swapped = counter_value(bondy_wamp_dropped_total, [subscription, shed]),
+    0 = Swapped,
+
+    A0 = counter_value(bondy_wamp_dropped_total, [admission, hello]),
+    ok = bondy_telemetry:wamp_dropped(admission, hello),
+    A1 = counter_value(bondy_wamp_dropped_total, [admission, hello]),
+    1 = A1 - A0,
+
+    %% [bondy, http, request] end-to-end: a real scrape over HTTP must
+    %% move bondy_http_requests_total. cowboy_metrics_h invokes the
+    %% callback at stream terminate — after the response reaches the
+    %% client — so the counter is polled rather than read immediately.
+    {ok, _} = application:ensure_all_started(inets),
+    H0 = http_requests_sum(),
+    {ok, {{_, 200, _}, _, _}} = httpc:request(
+        get, {"http://127.0.0.1:18081/metrics", []}, [], []
+    ),
+    ok = wait_for_http_requests_above(H0, 100).
+
+%% @private
+%% Prometheus counter value for a labelset, zero when untouched.
+counter_value(Name, LabelValues) ->
+    case prometheus_counter:value(Name, LabelValues) of
+        undefined -> 0;
+        V -> V
+    end.
+
+%% @private
+%% Sum of bondy_http_requests_total across all labelsets (the label
+%% values a request produces are the collector's concern, not this
+%% seam's).
+http_requests_sum() ->
+    lists:sum([
+        V
+     || {_, V} <- prometheus_counter:values(default, bondy_http_requests_total)
+    ]).
+
+%% @private
+wait_for_http_requests_above(_, 0) ->
+    ct:fail(http_requests_total_did_not_move);
+wait_for_http_requests_above(H0, Retries) ->
+    case http_requests_sum() > H0 of
+        true ->
+            ok;
+        false ->
+            timer:sleep(20),
+            wait_for_http_requests_above(H0, Retries - 1)
+    end.
