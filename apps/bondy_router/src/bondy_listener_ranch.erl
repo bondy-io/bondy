@@ -369,16 +369,21 @@ maybe_prepare_socket(L) ->
 %% parent directory is missing — verified with
 %% `gen_tcp:listen(0, [{ip, {local, "./nosuchdir/x.sock"}}])`. Creating the
 %% directory removes that failure instead of reporting it, which is what a
-%% listener whose path comes from `platform_tmp_dir` needs: the directory is
+%% listener whose path comes from `platform_runtime_dir` needs: the directory is
 %% part of the release layout, not something an operator hands over per
 %% listener. `filelib:ensure_dir/1` creates the PARENT of the path it is given,
 %% hence the socket path itself.
 %%
+%% It does NOT cover the container case. `deployment/Dockerfile` creates and
+%% chowns `/bondy/run` in the image because `/bondy` is root:root 0755 and the
+%% unprivileged `bondy` uid cannot create a child of it — this call would fail
+%% there, and the bind after it reports `eacces`.
+%%
 %% The 0700 applies ONLY to a directory this call created, and only to the
 %% innermost one (`ensure_dir/1` may create several). A directory that already
-%% existed is left alone: `platform_tmp_dir` may legitimately be a shared
-%% location such as `/tmp`, and narrowing that would break every other user of
-%% it.
+%% existed is left alone: an operator may point `platform_runtime_dir` at a
+%% shared location such as `/tmp`, and narrowing that would break every other
+%% user of it.
 %%
 %% Neither result is asserted. A directory that cannot be created or tightened
 %% makes the bind fail, and `log_result/2` turns that into the `{error, Reason}`
@@ -441,6 +446,19 @@ maybe_protect_socket(_) ->
     ok.
 
 %% @private
+%% Deleting before binding assumes nothing else owns this path, and that holds
+%% only WITHIN one node. Two listeners on this node cannot share a bind —
+%% `bondy_listener_config:assert_bind_free/2` — but two NODES pointed at one
+%% `platform_runtime_dir` do share `admin_local`'s path, and the one that boots
+%% second unlinks the first's LIVE socket, leaving it serving an inode nothing
+%% can reach. See the comment on the path in
+%% `bondy_listener_manager:admin_local_spec/0` for why the filename cannot carry
+%% the node and what closing it would take.
+%%
+%% A failure here is reported and then ignored, because the bind that follows
+%% fails on the same condition and carries the diagnosis. It is still worth
+%% reading: `enotsup` from `unlink/2` says the filesystem has no AF_UNIX socket
+%% inodes, and arrives before the less specific `{listen_error, _, enotsup}`.
 maybe_unlink_socket(#{name := Name, bind := {path, Path}}) ->
     case file:delete(Path) of
         ok ->

@@ -109,6 +109,12 @@ ENV HOME "/bondy"
 # `bondy_namespace_catalog` as `{badmatch,{error,enoent}}`; ensure_path/1 reports
 # the underlying EACCES as `enoent`). When the mountpoint DOES exist, Docker
 # seeds the anonymous volume from it and carries its ownership over.
+#
+# `/bondy/run` is created here for the opposite reason: it holds the internal
+# admin listener's Unix domain socket and must stay on the container's own
+# filesystem, so it is deliberately NOT a VOLUME (see the VOLUME line below).
+# It still has to be created and chowned here — `/bondy` itself is root:root
+# 0755, so the `bondy` uid cannot create a child of it at runtime.
 RUN apt-get update && \
     apt-get -y upgrade && \
     apt-get -y install --no-install-recommends \
@@ -117,8 +123,8 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 -r bondy \
     && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "bondy" bondy \
-    && mkdir -p /bondy/etc /bondy/data /bondy/log /bondy/tmp \
-    && chown bondy:bondy /bondy/etc /bondy/data /bondy/log /bondy/tmp
+    && mkdir -p /bondy/etc /bondy/data /bondy/log /bondy/tmp /bondy/run \
+    && chown bondy:bondy /bondy/etc /bondy/data /bondy/log /bondy/tmp /bondy/run
 
 WORKDIR /bondy
 
@@ -147,6 +153,14 @@ EXPOSE 18086/tcp
 
 # The pre_start script will hardcode the following paths i.e. ignoring the
 # user-defined environment variables (BONDY_*_DIR)
+#
+# `/bondy/run` is NOT in this list and must not be added to it. It holds the
+# internal admin listener's Unix domain socket, and several filesystems an
+# operator can legitimately mount reject an AF_UNIX bind with ENOTSUP (NFS,
+# SMB/CIFS, 9p, some FUSE CSI drivers, gVisor's gofer). Declaring it a VOLUME
+# invites exactly the mount that breaks the node's control endpoint. With a
+# read-only root filesystem, mount an emptyDir/tmpfs there instead — both
+# accept the bind.
 VOLUME ["/bondy/etc", "/bondy/data", "/bondy/log", "/bondy/tmp"]
 
 ENTRYPOINT ["bondy", "foreground"]

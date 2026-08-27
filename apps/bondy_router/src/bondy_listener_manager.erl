@@ -257,34 +257,78 @@ http_listeners() ->
 %% is no operator block to merge and nothing to override.
 %%
 %% It is NOT true that no configuration can stop it binding. Its path derives
-%% from `platform_tmp_dir`, an ordinary cuttlefish mapping, and two values of
-%% that key make the bind fail — both measured on Darwin with a listen on
-%% `{ip, {local, Path}}`:
+%% from `platform_runtime_dir`, an ordinary cuttlefish mapping, and three values
+%% of that key make the bind fail:
 %%
 %%   * a directory long enough to push the path past `sun_path` (104 bytes,
-%%     measured here; 108 per the Linux headers, not measured) yields
+%%     measured on Darwin; 108 per the Linux headers, not measured) yields
 %%     `{error, einval}`
-%%   * a directory this process cannot write yields `{error, eacces}`
+%%   * a directory this process cannot write yields `{error, eacces}` (measured
+%%     on Darwin with a listen on `{ip, {local, Path}}`)
+%%   * a directory on a filesystem with no AF_UNIX socket inodes yields
+%%     `{error, enotsup}`, from `bind/2` and from the `file:delete/1` that
+%%     precedes it. Observed in a user's Kubernetes and local Docker boot logs
+%%     on a mounted directory; the specific filesystem was not identified.
+%%     Candidates are NFS, SMB/CIFS, 9p (a Windows drive under WSL2), some
+%%     FUSE-backed CSI drivers and gVisor's gofer. NOT every mount: a macOS
+%%     VirtioFS bind mount, overlay2, tmpfs and an anonymous Docker volume all
+%%     accepted the bind, measured on Docker 29.7.2.
 %%
-%% Either aborts boot, because `admin_local` is `early` and `bondy_app`'s
-%% `ok ?= start_early_listeners()` propagates the error. That is deliberate: a
-%% node that refuses to boot is loud and fixable, whereas one that boots without
-%% its administrable endpoint is discovered when someone is already locked out.
-%% `start_one/1` reports the diagnosis those two errors need.
+%% Any of the three aborts boot, because `admin_local` is `early` and
+%% `bondy_app`'s `ok ?= start_early_listeners()` propagates the error. That is
+%% deliberate: a node that refuses to boot is loud and fixable, whereas one that
+%% boots without its administrable endpoint is discovered when someone is
+%% already locked out. `start_one/1` reports the diagnosis those errors need.
 %%
 %% Built here rather than in the resolver because the socket path comes from
 %% configuration and the resolver is pure.
 admin_local_spec() ->
-    %% `platform_tmp_dir` (`schema/bondy.schema:6160`), not `platform_data_dir`:
-    %% a socket file is ephemeral, is recreated on every boot, and must not sit
-    %% among the durable stores. It is also where the listener this replaces put
-    %% its socket — `bondy_wamp_uds`'s default path was `/tmp/bondy_wamp.sock`.
+    %% `platform_runtime_dir`, not `platform_tmp_dir` and not
+    %% `platform_data_dir`. A socket file is ephemeral, is recreated on every
+    %% boot, and must not sit among the durable stores — but it must also not
+    %% sit anywhere an operator is invited to mount. `platform_tmp_dir` is
+    %% scratch space, is a Docker VOLUME, and is routinely backed by a
+    %% PersistentVolume; a mount there that has no AF_UNIX socket inodes takes
+    %% the node's control endpoint down with it, which is the `enotsup` case
+    %% above. `platform_runtime_dir` exists to be the one directory nobody has a
+    %% reason to mount, and `deployment/Dockerfile` deliberately leaves it out
+    %% of `VOLUME`.
     %%
     %% Read without a default on purpose: the key carries a `{default, ...}` in
     %% the schema, so an absent value means the release was rendered wrong, and
     %% inventing a directory here would put the node's control socket somewhere
     %% the operator is not looking.
-    Dir = bondy_config:get(platform_tmp_dir),
+    Dir = bondy_config:get(platform_runtime_dir),
+    %% The filename is NOT scoped to this node, and cannot be from here.
+    %%
+    %% Scoping it would close a real hazard: two nodes pointed at one
+    %% `platform_runtime_dir` collide on this path, silently and in one
+    %% direction, because `bondy_listener_ranch:maybe_unlink_socket/1` deletes
+    %% whatever it finds before binding — so the node that boots second takes
+    %% the path from the node that boots first, which goes on serving an
+    %% unlinked inode nothing can reach. `bondy_ct:node_env/2` records that as a
+    %% directly measured `econnrefused` in
+    %% `bondy_admin_listener_SUITE:admin_local_socket_is_bound_and_serves`, and
+    %% works around it with a per-peer directory.
+    %%
+    %% What blocks it is boot order, not effort. Any node identity comes from
+    %% `partisan_config:get(name)`, which `partisan_config:init/0` sets in
+    %% `maybe_set_node_name/0`. Partisan is `{partisan, load}` in the release and
+    %% `bondy_app:start/2` starts it only AFTER `bondy_config:init/1` returns —
+    %% deliberately, because `init/1` spends its whole body editing Partisan's
+    %% application environment by hand, and `partisan_config:init/0` is what
+    %% caches that. This function runs inside `bondy_listener_manager:init/0`,
+    %% which `bondy_config:init/1` calls partway through, so there is no node
+    %% name yet. Reading `bondy_config:node_hash/0` here would not just yield a
+    %% wrong path: `nodestring/0` and `node_hash/0` CACHE, so it would pin a
+    %% wrong node identity into session ids for the lifetime of the node.
+    %%
+    %% Closing it therefore means resolving the path where the identity exists —
+    %% `bondy_listener_manager:start/1`, since `bondy_app` starts Partisan long
+    %% before `start_early_listeners/0` — which also means republishing the
+    %% `[admin_local, path]` block that `bondy_config:splat_listener_blocks/1`
+    %% has already emitted from the value below. That is a change to the
+    %% write-once inventory, not a rename, and is not made here.
     #{
         transport => uds,
         protocol => http,
@@ -295,11 +339,17 @@ admin_local_spec() ->
 
 %% @private
 %% `admin_local`'s bind failures are the only ones an operator cannot diagnose
-%% from the error alone. `einval` from a listen on `{ip, {local, Path}}` means
-%% the path exceeded `sun_path`, and neither the length nor the setting it came
-%% from appears anywhere in that atom, so both are reported here. Every other
-%% listener names its own bind target in `bondy.conf`; this one does not exist
-%% there at all.
+%% from the error alone. The POSIX reason arrives wrapped in the supervisor's
+%% start error — `{{shutdown, {failed_to_start_child, ranch_acceptors_sup,
+%% {listen_error, admin_local, Posix}}}, _}` — and none of `einval`, `eacces`
+%% or `enotsup` names the setting it came from. Every other listener names its
+%% own bind target in `bondy.conf`; this one does not exist there at all.
+%%
+%% Every candidate cause is reported rather than the one matching `Posix`:
+%% reaching `Posix` means parsing that nested tuple, and a parser that stops
+%% matching after a Ranch or OTP change would silently drop the diagnosis at
+%% the moment it is needed. `path_byte_size` is enough to rule the first one in
+%% or out at a glance.
 %%
 %% The error is returned unchanged, so the node still fails to boot.
 start_one(#{name := admin_local, bind := {path, Path}} = Listener) ->
@@ -312,16 +362,27 @@ start_one(#{name := admin_local, bind := {path, Path}} = Listener) ->
                     "The internal admin listener could not bind its socket, "
                     "so the node will not start. This socket is the endpoint "
                     "that stays reachable when no other listener binds; its "
-                    "path is derived from the platform_tmp_dir setting.",
+                    "path is derived from the platform_runtime_dir setting.",
                 listener => admin_local,
                 reason => Reason,
                 path => Path,
                 path_byte_size => path_byte_size(Path),
-                sun_path_limit =>
-                    "104 bytes on Darwin, 108 on Linux "
-                    "(sockaddr_un.sun_path)",
-                setting => platform_tmp_dir,
-                platform_tmp_dir => bondy_config:get(platform_tmp_dir)
+                setting => platform_runtime_dir,
+                platform_runtime_dir =>
+                    bondy_config:get(platform_runtime_dir),
+                bind_failure_causes => #{
+                    einval =>
+                        "path longer than sun_path — 104 bytes on Darwin, "
+                        "108 on Linux; compare path_byte_size above",
+                    eacces =>
+                        "platform_runtime_dir is not writable by this process",
+                    enotsup =>
+                        "the filesystem at platform_runtime_dir has no "
+                        "AF_UNIX socket inodes. Do not mount a volume there: "
+                        "NFS, SMB/CIFS, 9p, some FUSE CSI drivers and gVisor "
+                        "reject the bind. Under a read-only root filesystem "
+                        "mount an emptyDir or tmpfs there instead"
+                }
             }),
             Error
     end;

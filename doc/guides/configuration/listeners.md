@@ -155,7 +155,7 @@ lose its only administrable listener to a configuration mistake would be
 harder to recover than one that refuses that mistake outright.
 
 A second, internal listener — a Unix domain socket at
-`<platform_tmp_dir>/bondy_admin.sock` — is injected unconditionally and is
+`<platform_runtime_dir>/bondy_admin.sock` — is injected unconditionally and is
 not configurable through `bondy.conf` at all. It exists so the node stays
 administrable even if every TCP listener fails to bind. Its socket file is the
 only access control it has — there is no peer address to filter on — so Bondy
@@ -163,6 +163,23 @@ narrows that one file to mode `0600` after binding it, and refuses to serve on
 it if that fails. This applies to the internal socket alone: a `uds` listener
 an operator declares keeps the mode the process umask gives it, so a sidecar
 running under a different uid can reach it.
+
+Give every node its own `platform_runtime_dir`. The filename is a constant, so
+two nodes sharing that directory share this path — and the node that starts
+second removes any socket file already there before binding, which means it
+removes the first node's live socket. The first node goes on serving a socket
+nothing can reach. Nothing detects this; the defaults avoid it by giving each
+release and each container its own directory.
+
+`platform_runtime_dir` is not `platform_tmp_dir`, and the distinction matters
+when you deploy. It must be on a filesystem that supports Unix domain sockets,
+which rules out NFS, SMB/CIFS, 9p (a Windows drive seen from WSL2), some
+FUSE-backed CSI drivers, and gVisor's gofer — on those, binding fails with
+`enotsup` and the node refuses to start. The container images provide
+`/bondy/run` on the container's own filesystem and deliberately do not declare
+it a volume, so the default needs nothing from you. If you run with a read-only
+root filesystem, mount an `emptyDir` (Kubernetes) or a tmpfs (Docker) there;
+both support the bind. Do not point it at a PersistentVolume.
 
 ## UDS listeners
 
