@@ -50,10 +50,15 @@ start_link(Job) when is_map(Job) ->
 -spec run(map()) -> ok.
 run(#{kind := invocation, conn := Conn, req_id := ReqId} = Job) ->
     #{handler := H, args := Args, kwargs := KWArgs, details := Details0} = Job,
+    Started = erlang:monotonic_time(millisecond),
     Details1 = maybe_progress_fun(Details0, Conn, ReqId),
     Details = maybe_input_fun(Details1),
     Reply = invoke_call(H, Args, KWArgs, Details),
     Conn ! {handler_done, ReqId, Reply},
+    %% After the reply so the emission seat cannot delay or break the
+    %% data path (this worker's own DOWN after handler_done is a no-op
+    %% in the dispatch).
+    ok = notify_span(Job, Started),
     ok;
 run(#{kind := event, conn := Conn, sub_id := SubId} = Job) ->
     #{handler := H, args := Args, kwargs := KWArgs, details := Details} = Job,
@@ -108,6 +113,22 @@ pull_input() ->
         {handler_input, Args, KWArgs, false} ->
             {more, Args, KWArgs}
     end.
+
+%% @private Emit the `[bondy_connect, rpc, latency]` event (kind
+%% `invocation`) for a finished handler run — including a caught handler
+%% crash (invoke_call/4 turns it into an error reply). A worker killed
+%% by an INTERRUPT never reaches this and emits nothing. Bondy always
+%% discloses the concrete procedure in `INVOCATION.Details.procedure`;
+%% the WAMP spec only guarantees it for pattern-based registrations, so
+%% the registration's own URI is the fallback.
+notify_span(#{details := Details, uri := Uri}, Started) ->
+    Duration = erlang:monotonic_time(millisecond) - Started,
+    bondy_connect_telemetry:rpc_latency(
+        invocation,
+        maps:get(procedure, Details, Uri),
+        Duration,
+        bondy_connect_telemetry:trace_meta(Details)
+    ).
 
 %% @private
 invoke_call(H, Args, KWArgs, Details) ->

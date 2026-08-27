@@ -73,7 +73,11 @@ back to the origin `wamp_call()` and Caller
     timeout => timeout(),
     %% Absolute expiry cap in milliseconds (system time). Progressive
     %% results slide the expiry (see refresh/1) but never past this.
-    deadline => pos_integer() | infinity
+    deadline => pos_integer() | infinity,
+    %% The call's W3C trace context (`bondy_telemetry:trace_meta/1`
+    %% shape, `#{}` untraced), stored in `info` and emitted with the
+    %% `[bondy, rpc, latency]` event at settlement.
+    trace => #{binary() => binary()}
 }.
 
 -export_type([t/0]).

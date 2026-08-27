@@ -42,7 +42,8 @@ Also provides trace-identifier generation.
 -export([router_flow/3]).
 -export([router_flow_ingress/3]).
 -export([wamp_egress/3]).
--export([rpc_latency/3]).
+-export([rpc_latency/4]).
+-export([trace_meta/1]).
 -export([broker_publish/2]).
 -export([wamp_hello/1]).
 -export([session_manager_open/2]).
@@ -387,21 +388,56 @@ Emits `[bondy, rpc, latency]` for a settled RPC promise.
 `Kind` distinguishes the two observation points: `call` is the full
 CALL→first-response round trip (router + callee time); `invocation` is
 the INVOCATION→YIELD leg (callee execution + transport), so operators
-can attribute latency to the router or the application. Total: never
-throws.
+can attribute latency to the router or the application.
+
+`Trace` is the call's W3C trace context in the shape `trace_meta/1`
+returns (`#{}` when the call was untraced), so a handler can export
+this observation as a span: handlers run synchronously in the settling
+process, so the handler's own clock at handle time is the observation's
+end and `duration` locates its start. Total: never throws.
 """.
 -spec rpc_latency(
     Kind :: call | invocation,
     ProcedureUri :: binary(),
-    DurationMs :: integer()
+    DurationMs :: integer(),
+    Trace :: #{binary() => binary()}
 ) -> ok.
 
-rpc_latency(Kind, ProcedureUri, DurationMs) ->
+rpc_latency(Kind, ProcedureUri, DurationMs, Trace) ->
     execute(
         [bondy, rpc, latency],
         #{duration => max(0, DurationMs)},
-        #{kind => Kind, procedure_uri => ProcedureUri}
+        #{kind => Kind, procedure_uri => ProcedureUri, trace => Trace}
     ).
+
+-doc """
+Maps a validated CALL options (or INVOCATION details) map to the
+`trace` telemetry-metadata value: the W3C header-named binary map
+(`traceparent`, `tracestate`, `baggage`), or `#{}` when the message
+carries no usable context. Values are carried verbatim, never parsed.
+W3C Trace Context rule: `tracestate` (and a Baggage entry) without a
+`traceparent` is not a context, so a lone or non-binary
+`'_traceparent'` voids all three while a non-binary sibling is dropped
+alone. Total over any map.
+""".
+-spec trace_meta(map()) -> #{binary() => binary()}.
+
+trace_meta(#{'_traceparent' := TP} = Opts) when is_binary(TP) ->
+    Meta =
+        case Opts of
+            #{'_tracestate' := TS} when is_binary(TS) ->
+                #{<<"traceparent">> => TP, <<"tracestate">> => TS};
+            _ ->
+                #{<<"traceparent">> => TP}
+        end,
+    case Opts of
+        #{'_baggage' := BG} when is_binary(BG) ->
+            Meta#{<<"baggage">> => BG};
+        _ ->
+            Meta
+    end;
+trace_meta(Opts) when is_map(Opts) ->
+    #{}.
 
 -doc """
 Emits `[bondy, realm, event]` for a realm lifecycle action

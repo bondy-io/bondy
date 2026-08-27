@@ -27,6 +27,7 @@ all() ->
     [
         register_and_call,
         trace_context_round_trip,
+        call_latency_trace,
         call_async_token_reply,
         unregister_stops_routing,
         handler_error_propagates,
@@ -142,6 +143,76 @@ trace_context_round_trip(_) ->
 
     ok = bondy_connect_client:disconnect(Caller),
     ok = bondy_connect_client:disconnect(Callee).
+
+%% The SDK's own span seats: every router-settled CALL emits
+%% `[bondy_connect, rpc, latency]` twice — kind `call` from the caller's
+%% connection (send to terminal RESULT/ERROR) and kind `invocation` from
+%% the callee's worker (handler run) — each carrying the call's W3C
+%% trace context as binary-keyed metadata (`#{}` untraced), the same
+%% shape as the router's `[bondy, rpc, latency]` event. An ERROR
+%% settlement (the handler returns a business error) emits both events
+%% too.
+call_latency_trace(_) ->
+    Proc = <<"com.example.trace.latency">>,
+    ErrProc = <<"com.example.trace.latency.err">>,
+    Self = self(),
+    Id = {?MODULE, call_latency_trace},
+    ok = telemetry:attach(
+        Id,
+        [bondy_connect, rpc, latency],
+        fun(_, _, Meta, _) -> Self ! {rpc_latency, Meta} end,
+        undefined
+    ),
+    try
+        Callee = connect(),
+        Echo = fun(Args, _, _) -> {ok, #{args => Args}} end,
+        Failing = fun(_, _, _) ->
+            {error, #{uri => <<"com.example.business_error">>}}
+        end,
+        {ok, _} = bondy_connect_client:register(Callee, Proc, Echo),
+        {ok, _} = bondy_connect_client:register(Callee, ErrProc, Failing),
+
+        Caller = connect(),
+        Ctx = #{
+            traceparent =>
+                <<"00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01">>,
+            tracestate => <<"congo=t61rcWkgMzE">>,
+            baggage => <<"userId=alice">>
+        },
+        Trace = #{
+            <<"traceparent">> =>
+                <<"00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01">>,
+            <<"tracestate">> => <<"congo=t61rcWkgMzE">>,
+            <<"baggage">> => <<"userId=alice">>
+        },
+
+        {ok, _} = bondy_connect_client:call(
+            Caller, Proc, [], #{}, bondy_connect_trace:attach(#{}, Ctx)
+        ),
+        ?assertEqual(
+            [{call, Trace}, {invocation, Trace}], collect_latency(Proc, 2)
+        ),
+
+        {ok, _} = bondy_connect_client:call(Caller, Proc, []),
+        ?assertEqual(
+            [{call, #{}}, {invocation, #{}}], collect_latency(Proc, 2)
+        ),
+
+        ?assertMatch(
+            {error, #{kind := wamp, uri := <<"com.example.business_error">>}},
+            bondy_connect_client:call(
+                Caller, ErrProc, [], #{}, bondy_connect_trace:attach(#{}, Ctx)
+            )
+        ),
+        ?assertEqual(
+            [{call, Trace}, {invocation, Trace}], collect_latency(ErrProc, 2)
+        ),
+
+        ok = bondy_connect_client:disconnect(Caller),
+        ok = bondy_connect_client:disconnect(Callee)
+    after
+        telemetry:detach(Id)
+    end.
 
 call_async_token_reply(_) ->
     Callee = connect(),
@@ -670,6 +741,20 @@ next_reply(Token) ->
     after 5000 ->
         ct:fail(no_reply)
     end.
+
+%% @private Collect N latency events for Proc — ignoring other
+%% procedures' events — returned sorted by kind ({call, _} before
+%% {invocation, _}), so the sorted list asserts exactly one of each.
+collect_latency(Proc, N) ->
+    lists:sort([
+        receive
+            {rpc_latency, #{procedure_uri := Proc, kind := K, trace := T}} ->
+                {K, T}
+        after 5000 ->
+            ct:fail(latency_event_missing)
+        end
+     || _ <- lists:seq(1, N)
+    ]).
 
 %% @private Collect progress replies until the terminal one arrives.
 drain_replies(Token, N, Timeout) ->

@@ -711,7 +711,8 @@ forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
                         procedure_uri => Msg#call.procedure_uri,
                         via => Via,
                         timeout => Timeout,
-                        deadline => promise_deadline(Msg#call.options)
+                        deadline => promise_deadline(Msg#call.options),
+                        trace => promise_trace(Invocation)
                     },
                     maps:get(
                         receive_progress, Invocation#invocation.details, false
@@ -1972,17 +1973,20 @@ notify_call_latency(Promise) ->
             Elapsed =
                 erlang:system_time(millisecond) -
                     bondy_rpc_promise:timestamp(Promise),
+            Trace = bondy_rpc_promise:get(trace, Promise, #{}),
             case bondy_rpc_promise:type(Promise) of
                 call ->
-                    bondy_telemetry:rpc_latency(call, Uri, Elapsed);
+                    bondy_telemetry:rpc_latency(call, Uri, Elapsed, Trace);
                 invocation ->
                     ok = bondy_telemetry:rpc_latency(
-                        invocation, Uri, Elapsed
+                        invocation, Uri, Elapsed, Trace
                     ),
                     Caller = bondy_rpc_promise:caller(Promise),
                     case bondy_ref:is_local(Caller) of
                         true ->
-                            bondy_telemetry:rpc_latency(call, Uri, Elapsed);
+                            bondy_telemetry:rpc_latency(
+                                call, Uri, Elapsed, Trace
+                            );
                         false ->
                             ok
                     end
@@ -1990,6 +1994,18 @@ notify_call_latency(Promise) ->
         _ ->
             ok
     end.
+
+%% @private
+%% The call's trace context for the promise being created, so the
+%% `[bondy, rpc, latency]` settlement event can carry it (see
+%% notify_call_latency/1). A call promise reads the CALL's validated
+%% options; an invocation promise reads the INVOCATION details the
+%% router built from them (the trace attrs are copied verbatim across —
+%% see ?WAMP_TRACE_ATTRS carry seats).
+promise_trace(#call{options = Opts}) ->
+    bondy_telemetry:trace_meta(Opts);
+promise_trace(#invocation{details = Details}) ->
+    bondy_telemetry:trace_meta(Details).
 
 %% =============================================================================
 %% PRIVATE - CALLS AND INVOCATION STRATEGIES (LOAD BALANCING, FAIL OVER, ETC)
@@ -2193,7 +2209,8 @@ do_call(CallId, ProcUri, UserFun, Opts, Ctxt0, Entry) ->
             PromiseOpts = #{
                 procedure_uri => ProcUri,
                 timeout => Timeout,
-                deadline => promise_deadline(call_opts(SendOpts))
+                deadline => promise_deadline(call_opts(SendOpts)),
+                trace => promise_trace(Msg)
             },
 
             {Promise, SendOpts1} =
@@ -2775,6 +2792,7 @@ send_rib_call(
                     procedure_uri => ProcUri,
                     timeout => Timeout,
                     deadline => promise_deadline(Call#call.options),
+                    trace => promise_trace(Call),
                     rib_retry => Retry,
                     %% Node-addressed: the callee is whichever local
                     %% registration the owner node completes to. Address the

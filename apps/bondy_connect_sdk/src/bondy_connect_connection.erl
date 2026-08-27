@@ -1135,7 +1135,9 @@ send_request(Type, From, MsgFun, Timeout, Meta, Data) ->
     end.
 
 %% @private Lower-level: send an already-built CALL and store pending (used by
-%% sync + async calls, where the reply target differs).
+%% sync + async calls, where the reply target differs). The entry also stashes
+%% the call's span data (`call_span/1`) for the latency event its settlement
+%% emits.
 do_request(Type, ReplyTo, Msg, Timeout, Meta, Data) ->
     #data{next_request_id = ReqId} = Data,
     Msg1 = set_request_id(Msg, ReqId),
@@ -1143,7 +1145,12 @@ do_request(Type, ReplyTo, Msg, Timeout, Meta, Data) ->
         ok ->
             store_pending(
                 ReqId,
-                #{type => Type, from => ReplyTo, meta => Meta},
+                #{
+                    type => Type,
+                    from => ReplyTo,
+                    meta => Meta,
+                    span => call_span(Msg1)
+                },
                 Timeout,
                 Data#data{next_request_id = next_id(ReqId)}
             );
@@ -1269,12 +1276,16 @@ handle_invocation(#invocation{} = Msg, Data) ->
             case
                 bondy_connect_registry:registration(RegId, Data#data.registry)
             of
-                {ok, #{handler := Handler}} ->
+                {ok, #{handler := Handler, uri := Uri}} ->
                     Job = #{
                         kind => invocation,
                         conn => self(),
                         req_id => ReqId,
                         handler => Handler,
+                        %% The registration's own URI — the worker's
+                        %% latency event falls back to it when the
+                        %% router does not disclose Details.procedure.
+                        uri => Uri,
                         args => undefined_to(Args, []),
                         kwargs => undefined_to(KWArgs, #{}),
                         details => Details
@@ -1429,6 +1440,7 @@ resolve_pending(ReqId, Reply, #data{pending = Pending} = Data) ->
     case maps:take(ReqId, Pending) of
         {#{from := From, timer := TRef} = Entry, Pending1} ->
             _ = cancel_timer(TRef),
+            ok = notify_span(Entry),
             _ = dispatch_reply(From, Reply),
             Data#data{
                 pending = Pending1,
@@ -1437,6 +1449,27 @@ resolve_pending(ReqId, Reply, #data{pending = Pending} = Data) ->
         error ->
             Data
     end.
+
+%% @private Span data stashed on a pending CALL entry at send time and
+%% emitted by notify_span/1 when the entry settles: the procedure, the
+%% call's W3C trace context (`#{}` untraced) and the send timestamp.
+call_span(#call{procedure_uri = Uri, options = Opts}) ->
+    #{
+        uri => Uri,
+        trace => bondy_connect_telemetry:trace_meta(Opts),
+        start => erlang:monotonic_time(millisecond)
+    }.
+
+%% @private Emit the `[bondy_connect, rpc, latency]` event (kind `call`)
+%% for a settled CALL entry. Entries without a span stash (the admin
+%% register/subscribe/... acks and publish acks) emit nothing. The
+%% timeout and teardown paths bypass resolve_pending/3 and therefore
+%% emit nothing — the event measures a router-answered round trip.
+notify_span(#{span := #{uri := Uri, trace := Trace, start := T0}}) ->
+    Duration = erlang:monotonic_time(millisecond) - T0,
+    bondy_connect_telemetry:rpc_latency(call, Uri, Duration, Trace);
+notify_span(_) ->
+    ok.
 
 %% @private A progressive RESULT for a pending CALL: deliver a
 %% `{progress, Payload}` notification to the async owner and re-arm the

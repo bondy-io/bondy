@@ -112,8 +112,8 @@ router_events_feed_metrics(_) ->
     {InvCount0, InvSum0} = histogram_value(
         bondy_wamp_invocation_latency_milliseconds, RpcLabels
     ),
-    ok = bondy_telemetry:rpc_latency(call, Proc, 42),
-    ok = bondy_telemetry:rpc_latency(invocation, Proc, 30),
+    ok = bondy_telemetry:rpc_latency(call, Proc, 42, #{}),
+    ok = bondy_telemetry:rpc_latency(invocation, Proc, 30, #{}),
 
     {CallCount1, CallSum1} = histogram_value(
         bondy_wamp_call_latency_milliseconds, RpcLabels

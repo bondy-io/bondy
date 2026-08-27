@@ -40,7 +40,9 @@ all() ->
         same_node_call_trace_context,
         cross_node_call_trace_context,
         same_node_publish_trace_context,
-        cross_node_publish_trace_context
+        cross_node_publish_trace_context,
+        same_node_call_latency_trace,
+        cross_node_call_latency_trace
     ].
 
 init_per_suite(Config) ->
@@ -120,6 +122,73 @@ cross_node_publish_trace_context(Config) ->
 
     assert_trace_pair(N2).
 
+%% The router-hop span seat: settling a call emits `[bondy, rpc,
+%% latency]` whose `trace` metadata is the call's W3C context (header-
+%% named binary keys, verbatim), `#{}` for an untraced call. A local
+%% caller and local callee share one invocation promise, so one settle
+%% emits BOTH kinds — each must carry the context.
+same_node_call_latency_trace(Config) ->
+    [N1, _] = nodes_of(Config),
+    Uri = <<"com.bondy.trace_lat_local">>,
+    Proc = <<"com.trace.lat.local.echo">>,
+
+    ok = erpc:call(N1, ?MODULE, do_create_open_realm, [Uri]),
+    ok = erpc:call(N1, ?MODULE, do_start_yielding_callee, [Uri, [Proc]]),
+    ok = erpc:call(N1, ?MODULE, do_attach_latency_capture, [self()]),
+    try
+        ok = erpc:call(N1, ?MODULE, do_call_await, [Uri, Proc, traced]),
+        Traced = collect_latency(Proc, 2),
+        ?assertEqual(
+            [call, invocation],
+            lists:sort([maps:get(kind, M) || {_, M} <- Traced])
+        ),
+        ?assertEqual(
+            [wire_trace(), wire_trace()],
+            [maps:get(trace, M) || {_, M} <- Traced]
+        ),
+
+        ok = erpc:call(N1, ?MODULE, do_call_await, [Uri, Proc, plain]),
+        Plain = collect_latency(Proc, 2),
+        ?assertEqual([#{}, #{}], [maps:get(trace, M) || {_, M} <- Plain])
+    after
+        detach_latency_capture([N1])
+    end.
+
+%% Cross-node: the caller's node observes the `call` leg (its call
+%% promise settles on the returned RESULT), the callee's node the
+%% `invocation` leg — each with the full context of its own message
+%% (CALL options on the caller's node, INVOCATION details on the
+%% callee's), so a handler on either node can export its leg's span.
+cross_node_call_latency_trace(Config) ->
+    [N1, N2] = nodes_of(Config),
+    Uri = <<"com.bondy.trace_lat_remote">>,
+    Proc = <<"com.trace.lat.remote.echo">>,
+
+    ok = erpc:call(N1, ?MODULE, do_create_open_realm, [Uri]),
+    ok = wait_realm(N2, Uri),
+    ok = erpc:call(N2, ?MODULE, do_start_yielding_callee, [Uri, [Proc]]),
+    ok = wait_remote_registration(N1, Uri, Proc),
+    ok = erpc:call(N1, ?MODULE, do_attach_latency_capture, [self()]),
+    ok = erpc:call(N2, ?MODULE, do_attach_latency_capture, [self()]),
+    try
+        ok = erpc:call(N1, ?MODULE, do_call_await, [Uri, Proc, traced]),
+        Traced = collect_latency(Proc, 2),
+        ?assertEqual(
+            lists:sort([{N1, call}, {N2, invocation}]),
+            lists:sort([{Node, maps:get(kind, M)} || {Node, M} <- Traced])
+        ),
+        ?assertEqual(
+            [wire_trace(), wire_trace()],
+            [maps:get(trace, M) || {_, M} <- Traced]
+        ),
+
+        ok = erpc:call(N1, ?MODULE, do_call_await, [Uri, Proc, plain]),
+        Plain = collect_latency(Proc, 2),
+        ?assertEqual([#{}, #{}], [maps:get(trace, M) || {_, M} <- Plain])
+    after
+        detach_latency_capture([N1, N2])
+    end.
+
 %% =============================================================================
 %% ASSERTIONS
 %% =============================================================================
@@ -139,6 +208,28 @@ assert_trace_pair(Node) ->
     ?assertNot(maps:is_key('_traceparent', Second)),
     ?assertNot(maps:is_key('_tracestate', Second)),
     ?assertNot(maps:is_key('_baggage', Second)).
+
+%% @private
+%% Collects N `[bondy, rpc, latency]` captures for `Proc` (each is
+%% `{Node, Metadata}`), ignoring events for other procedures (internal
+%% traffic on the shared cluster). Both legs are emitted before the
+%% caller receives its RESULT, so after do_call_await returns the
+%% events are in flight at worst.
+collect_latency(Proc, N) ->
+    collect_latency(Proc, N, []).
+
+%% @private
+collect_latency(_, 0, Acc) ->
+    lists:reverse(Acc);
+collect_latency(Proc, N, Acc) ->
+    receive
+        {rpc_latency, Node, #{procedure_uri := Proc} = Meta} ->
+            collect_latency(Proc, N - 1, [{Node, Meta} | Acc]);
+        {rpc_latency, _, _} ->
+            collect_latency(Proc, N, Acc)
+    after 30000 ->
+        error({latency_capture_timeout, Proc, N, Acc})
+    end.
 
 %% @private
 await_probe(Node, N, Deadline) ->
@@ -194,11 +285,64 @@ do_assert_wire_declaration() ->
 
 %% @private
 do_start_probe(RealmUri, Subscriptions) ->
-    start_probe(RealmUri, Subscriptions, []).
+    start_probe(RealmUri, Subscriptions, [], false).
 
 %% @private
 do_start_callee(RealmUri, Procedures) ->
-    start_probe(RealmUri, [], Procedures).
+    start_probe(RealmUri, [], Procedures, false).
+
+%% @private
+do_start_yielding_callee(RealmUri, Procedures) ->
+    start_probe(RealmUri, [], Procedures, true).
+
+%% @private
+%% Forwards every `[bondy, rpc, latency]` event's metadata to `To`
+%% (the ct process on the master node) tagged with the emitting node.
+do_attach_latency_capture(To) ->
+    telemetry:attach(
+        {?MODULE, latency_capture},
+        [bondy, rpc, latency],
+        fun(_, _, Meta, _) -> To ! {rpc_latency, node(), Meta} end,
+        undefined
+    ).
+
+%% @private
+do_detach_latency_capture() ->
+    telemetry:detach({?MODULE, latency_capture}).
+
+%% @private
+detach_latency_capture(Nodes) ->
+    lists:foreach(
+        fun(N) ->
+            try
+                erpc:call(N, ?MODULE, do_detach_latency_capture, [])
+            catch
+                _:_ -> ok
+            end
+        end,
+        Nodes
+    ).
+
+%% @private
+%% Sends one CALL and blocks until its RESULT arrives, so the promise
+%% has settled (and its latency events were emitted) when this returns.
+do_call_await(RealmUri, Proc, Mode) ->
+    Ctxt = caller_context(RealmUri),
+    Opts =
+        case Mode of
+            traced -> trace_opts();
+            plain -> #{}
+        end,
+    M = bondy_wamp_message:call(1, Opts, Proc, [1]),
+    {ok, _} = bondy_router:forward(M, Ctxt),
+    receive
+        {'$bondy_request', _, _, #result{}} ->
+            ok;
+        {'$bondy_request', _, _, #error{} = E} ->
+            error({call_failed, E})
+    after 30000 ->
+        error(call_result_timeout)
+    end.
 
 %% @private
 %% Sends one message WITH the trace options and one WITHOUT, from the
@@ -238,15 +382,26 @@ trace_opts() ->
         <<"_baggage">> => ?BG
     }.
 
+%% @private
+%% The `trace' telemetry-metadata shape (see
+%% bondy_telemetry:trace_meta/1) the latency events must carry for a
+%% call traced with trace_opts/0.
+wire_trace() ->
+    #{
+        <<"traceparent">> => ?TP,
+        <<"tracestate">> => ?TS,
+        <<"baggage">> => ?BG
+    }.
+
 %% =============================================================================
 %% PROBE
 %% =============================================================================
 
 %% @private
-start_probe(RealmUri, Subscriptions, Procedures) ->
+start_probe(RealmUri, Subscriptions, Procedures, Yield) ->
     Parent = self(),
     Pid = spawn(fun() ->
-        probe_init(RealmUri, Subscriptions, Procedures, Parent)
+        probe_init(RealmUri, Subscriptions, Procedures, Yield, Parent)
     end),
     receive
         {Pid, ready} -> ok
@@ -266,8 +421,11 @@ start_probe(RealmUri, Subscriptions, Procedures) ->
 %% and the owner self-clean sweep reaps entries whose session cannot be
 %% looked up); a client-type ref delivers EVENT and INVOCATION straight to
 %% this process. Same shape as bondy_router_ordering_SUITE's probe, but
-%% recording each delivery's DETAILS map.
-probe_init(RealmUri, Subscriptions, Procedures, Parent) ->
+%% recording each delivery's DETAILS map. When `Yield' is true the
+%% probe answers each INVOCATION with an empty YIELD through the
+%% router, as a callee client would — that settlement is what the
+%% latency cases observe.
+probe_init(RealmUri, Subscriptions, Procedures, Yield, Parent) ->
     Roles =
         case Procedures of
             [] -> #{subscriber => #{}};
@@ -304,21 +462,40 @@ probe_init(RealmUri, Subscriptions, Procedures, Parent) ->
      || Proc <- Procedures
     ],
 
+    %% The yield context's ref carries this session (and this process),
+    %% matching the registrations' callee session id — the key the
+    %% dealer resolves the YIELD against.
+    Ctxt =
+        case Yield of
+            true ->
+                bondy_context:new(
+                    bondy_session:peer(Session),
+                    {ws, text, json},
+                    #{session => Session}
+                );
+            false ->
+                undefined
+        end,
+
     Parent ! {self(), ready},
-    probe_loop([]).
+    probe_loop([], Ctxt).
 
 %% @private
-probe_loop(Acc) ->
+probe_loop(Acc, Ctxt) ->
     receive
         {get, From} ->
             From ! {trace_ctx_probe_details, lists:reverse(Acc)},
-            probe_loop(Acc);
+            probe_loop(Acc, Ctxt);
         {'$bondy_request', _, _, #event{details = Details}} ->
-            probe_loop([Details | Acc]);
+            probe_loop([Details | Acc], Ctxt);
+        {'$bondy_request', _, _, #invocation{} = I} when Ctxt =/= undefined ->
+            Yield = bondy_wamp_message:yield(I#invocation.request_id, #{}),
+            {ok, _} = bondy_router:forward(Yield, Ctxt),
+            probe_loop([I#invocation.details | Acc], Ctxt);
         {'$bondy_request', _, _, #invocation{details = Details}} ->
-            probe_loop([Details | Acc]);
+            probe_loop([Details | Acc], Ctxt);
         _Other ->
-            probe_loop(Acc)
+            probe_loop(Acc, Ctxt)
     end.
 
 %% =============================================================================

@@ -16,6 +16,7 @@
         stdlib,
         ssl,
         gun,
+        telemetry,
         bondy_stdlib,
         bondy_wamp,
         bondy_regulator
