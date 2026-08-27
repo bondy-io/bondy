@@ -294,13 +294,17 @@
         ]},
         {platform_log_dir, "./log"},
         {platform_etc_dir, "./etc"},
+        {platform_tmp_dir, "./tmp/" ++ os:getpid()},
         %% Per-OS-pid: `admin_local` puts its socket here, and two concurrent CT
         %% runs sharing one path would collide —
         %% `bondy_listener_ranch:maybe_unlink_socket/1` deletes the node before
         %% binding, so the second run would silently take the first run's socket
         %% away. `bondy_listener_SUITE:init_per_suite/1` does the same for the
-        %% same reason.
-        {platform_tmp_dir, "./tmp/" ++ os:getpid()},
+        %% same reason. The directory is the only thing that separates them: the
+        %% socket filename is a constant, and cannot carry the node — see the
+        %% comment on the path in
+        %% `bondy_listener_manager:admin_local_spec/0`.
+        {platform_runtime_dir, "./run/" ++ os:getpid()},
         {platform_data_dir, "./data"},
         {platform_lib_dir, "./lib"},
         {platform_bin_dir, "./bin"},
@@ -1310,14 +1314,17 @@ node_env(DataDir, PeerPort) ->
         [eleveldb, data_root], filename:join(DataDir, "leveldb"), ?ENV
     ),
     E1 = key_value:set([bondy_router, platform_data_dir], DataDir, E0),
-    %% `platform_tmp_dir` per peer, not just `platform_data_dir`: it is where
+    %% `platform_runtime_dir` per peer, not just `platform_data_dir`: it is where
     %% `bondy_listener_manager:admin_local_spec/0` puts the internal control
     %% socket, and that listener is injected UNCONDITIONALLY on every node. `?ENV`
     %% derives the directory from `os:getpid()`, which is evaluated in THIS VM, so
     %% every peer would otherwise bind `bondy_admin.sock` at the same path as the
-    %% runner and as each other — and the driver unlinks a stale socket file
-    %% before binding, so the last node to boot silently takes the path away from
-    %% the others. Verified directly: without this line
+    %% runner and as each other — the filename is a constant and cannot carry the
+    %% node (see the comment on the path in
+    %% `bondy_listener_manager:admin_local_spec/0`), so the directory is the only
+    %% thing separating them — and the driver unlinks a stale socket file before
+    %% binding, so the last node to boot silently takes the path away from the
+    %% others. Verified directly: without this line
     %% `bondy_admin_listener_SUITE:admin_local_socket_is_bound_and_serves` fails
     %% with `econnrefused` in a full `rebar3 ct` run, when a cluster suite has
     %% booted peers before it, while passing in isolation.
@@ -1330,12 +1337,14 @@ node_env(DataDir, PeerPort) ->
     %% — verified directly, that is what this line looked like before it was
     %% shortened. `/tmp` with an `os:getpid()` namespace is the same shape
     %% `bondy_listener_SUITE`'s `init_per_suite/1` already uses.
-    TmpDir = filename:join(
+    RuntimeDir = filename:join(
         "/tmp",
         "bondy_ct_" ++ os:getpid() ++ "_" ++ integer_to_list(PeerPort)
     ),
-    ok = filelib:ensure_path(TmpDir),
-    E1b = key_value:set([bondy_router, platform_tmp_dir], TmpDir, E1),
+    ok = filelib:ensure_path(RuntimeDir),
+    E1b = key_value:set(
+        [bondy_router, platform_runtime_dir], RuntimeDir, E1
+    ),
     E2 = key_value:set([partisan, peer_port], PeerPort, E1b),
     %% No CLIENT listeners on a peer node: they are irrelevant to AAE and
     %% would clash on every port with the primary node's, which share this

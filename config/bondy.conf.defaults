@@ -153,6 +153,7 @@ oauth2.refresh_token.limit = 25
 platform_data_dir = {{platform_data_dir}}
 platform_lib_dir = {{platform_lib_dir}}
 platform_log_dir = {{platform_log_dir}}
+platform_runtime_dir = {{platform_runtime_dir}}
 platform_tmp_dir = {{platform_tmp_dir}}
 registry.partition_spawn_opts.message_queue_data = off_heap
 registry.partitions = 32

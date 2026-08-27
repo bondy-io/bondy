@@ -116,14 +116,15 @@ init_per_suite(Config) ->
     %% full `partisan` application would.
     ok = partisan_config:init(),
     %% `bondy_listener_manager:init/0` appends the internal `admin_local`
-    %% listener, whose socket path is `platform_tmp_dir`-relative and read
+    %% listener, whose socket path is `platform_runtime_dir`-relative and read
     %% without a default (the schema always supplies the key; an absent one
     %% means a mis-rendered release). This suite does not boot
     %% `bondy_config:init/1`,
     %% so it supplies the key itself. The OS pid keeps parallel CT runs from
-    %% sharing the directory.
+    %% sharing the directory, which is the only thing that separates them: the
+    %% socket filename is a constant.
     ok = bondy_config:set(
-        platform_tmp_dir, filename:join("/tmp", "bondy_ct_" ++ os:getpid())
+        platform_runtime_dir, filename:join("/tmp", "bondy_ct_" ++ os:getpid())
     ),
     %% `bondy_router.listeners` and the resolved inventory
     %% `bondy_listener_manager:init/0` caches in `persistent_term` are

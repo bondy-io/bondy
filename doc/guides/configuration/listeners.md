@@ -155,7 +155,7 @@ lose its only administrable listener to a configuration mistake would be
 harder to recover than one that refuses that mistake outright.
 
 A second, internal listener — a Unix domain socket at
-`<platform_tmp_dir>/bondy_admin.sock` — is injected unconditionally and is
+`<platform_runtime_dir>/bondy_admin.sock` — is injected unconditionally and is
 not configurable through `bondy.conf` at all. It exists so the node stays
 administrable even if every TCP listener fails to bind. Its socket file is the
 only access control it has — there is no peer address to filter on — so Bondy
@@ -163,6 +163,13 @@ narrows that one file to mode `0600` after binding it, and refuses to serve on
 it if that fails. This applies to the internal socket alone: a `uds` listener
 an operator declares keeps the mode the process umask gives it, so a sidecar
 running under a different uid can reach it.
+
+The socket lives under `platform_runtime_dir`, which is deliberately not
+`platform_tmp_dir`: it has to be on a filesystem that supports Unix domain
+sockets, and it must not be shared with another node. The defaults satisfy both
+and need nothing from you. See
+[Platform directories](../deployment/platform_directories.md) for the
+requirement, the deployment rules, and what a failed bind reports.
 
 ## UDS listeners
 

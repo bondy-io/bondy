@@ -4396,6 +4396,25 @@ end}.
   {default, "{{platform_tmp_dir}}"}
 ]}.
 
+%% @doc Directory for ephemeral runtime objects that require a filesystem
+%% supporting Unix domain sockets. Currently that is the internal admin
+%% listener's socket, and nothing else.
+%%
+%% This is deliberately not `platform_tmp_dir`. Scratch space is something you
+%% are invited to relocate, and several filesystems you might relocate it onto
+%% reject an AF_UNIX bind with ENOTSUP — NFS, SMB/CIFS, 9p, some FUSE-backed CSI
+%% drivers and gVisor — which stops the node from starting. This directory is
+%% the one that must not move onto them.
+%%
+%% Keep it on the container's own filesystem; the images provide it and it is
+%% not a volume. Under a read-only root filesystem, mount an emptyDir
+%% (Kubernetes) or a tmpfs (Docker) here. Give every node its own.
+{mapping, "platform_runtime_dir",
+"bondy_router.platform_runtime_dir", [
+  {datatype, directory},
+  {default, "{{platform_runtime_dir}}"}
+]}.
+
 
 %% @see platform_log_dir
 {mapping, "platform_log_dir",
