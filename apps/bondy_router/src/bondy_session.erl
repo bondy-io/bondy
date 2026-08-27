@@ -164,6 +164,7 @@ stays opaque.
 
 %% API
 -export([agent/1]).
+-export([agent/2]).
 -export([authid/1]).
 -export([authrealm/1]).
 -export([authmethod/1]).
@@ -506,6 +507,18 @@ created(Session) ->
 
 agent(Session) ->
     lookup_field(Session, #session.agent).
+
+-doc """
+Like `agent/1` for a stored session id, but total: returns `Default`
+when no session with `Id` exists (a caller observing a session — e.g.
+an RPC settling — can outlive it).
+""".
+-spec agent(Id :: bondy_session_id:t(), Default) ->
+    binary() | undefined | Default.
+
+agent(Id, Default) when is_binary(Id) ->
+    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
+    ets:lookup_element(Tab, Id, #session.agent, Default).
 
 -spec peer(t_or_id()) -> peer().
 

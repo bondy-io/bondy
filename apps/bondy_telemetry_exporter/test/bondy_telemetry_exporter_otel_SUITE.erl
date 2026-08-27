@@ -40,6 +40,7 @@ all() ->
         router_call_span,
         rpc_kind_mapping,
         rpc_error_status,
+        client_span_peer_service,
         untraced_and_malformed_no_span,
         unsampled_parent_no_span,
         minted_root_span,
@@ -108,7 +109,12 @@ end_per_suite(Config) ->
 %% end − start and the tracestate carried through.
 router_call_span(_) ->
     ok = bondy_telemetry:rpc_latency(
-        call, <<"com.example.p">>, 250, trace(), success
+        call,
+        <<"com.example.p">>,
+        250,
+        trace(),
+        success,
+        undefined
     ),
     [Span] = flush_spans(),
     ?assertEqual(?TRACE_ID, Span#span.trace_id),
@@ -131,13 +137,20 @@ router_call_span(_) ->
     ?assertEqual(<<"com.example.p">>, maps:get(<<"bondy.procedure">>, Attrs)),
     ?assertEqual(
         atom_to_binary(node(), utf8), maps:get(<<"bondy.node">>, Attrs)
-    ).
+    ),
+    %% A call leg names no peer, so its span carries no `peer.service`.
+    ?assertNot(maps:is_key(<<"peer.service">>, Attrs)).
 
 %% The four RPC legs map to span kinds as mirror images: the router
 %% serves a CALL and calls out an INVOCATION; the SDK is the inverse.
 rpc_kind_mapping(_) ->
     ok = bondy_telemetry:rpc_latency(
-        invocation, <<"com.example.a">>, 5, trace(), success
+        invocation,
+        <<"com.example.a">>,
+        5,
+        trace(),
+        success,
+        undefined
     ),
     ok = bondy_connect_telemetry:rpc_latency(
         call, <<"com.example.b">>, 5, trace(), success
@@ -160,7 +173,12 @@ rpc_kind_mapping(_) ->
 %% router_call_span).
 rpc_error_status(_) ->
     ok = bondy_telemetry:rpc_latency(
-        call, <<"com.example.err">>, 5, trace(), error
+        call,
+        <<"com.example.err">>,
+        5,
+        trace(),
+        error,
+        undefined
     ),
     ok = bondy_connect_telemetry:rpc_latency(
         invocation, <<"com.example.err.sdk">>, 5, trace(), error
@@ -171,22 +189,58 @@ rpc_error_status(_) ->
     ?assertEqual(<<"com.example.err.sdk">>, Sdk#span.name),
     ?assertMatch(#status{code = error}, Sdk#span.status).
 
+%% An invocation leg naming its peer (the callee's HELLO agent) exports
+%% a client span carrying it as `peer.service` — the attribute Tempo's
+%% service-graphs processor completes a virtual-node edge from when the
+%% (uninstrumented) callee never sends the matching server span. An
+%% unnamed peer leaves the attribute off entirely.
+client_span_peer_service(_) ->
+    ok = bondy_telemetry:rpc_latency(
+        invocation, <<"com.example.peer">>, 5, trace(), success, <<"cb/1.0">>
+    ),
+    ok = bondy_telemetry:rpc_latency(
+        invocation, <<"com.example.nopeer">>, 5, trace(), success, undefined
+    ),
+    [Named, Unnamed] = flush_spans(),
+    ?assertEqual(<<"com.example.peer">>, Named#span.name),
+    ?assertEqual(client, Named#span.kind),
+    ?assertEqual(
+        <<"cb/1.0">>,
+        maps:get(<<"peer.service">>, otel_attributes:map(Named#span.attributes))
+    ),
+    ?assertNot(
+        maps:is_key(
+            <<"peer.service">>, otel_attributes:map(Unnamed#span.attributes)
+        )
+    ).
+
 %% No trace context ⇒ no span; a garbage traceparent (the wire carries
 %% these verbatim and unvalidated) ⇒ no span. The trailing traced
 %% sentinel proves the negatives by FIFO order through the processor.
 untraced_and_malformed_no_span(_) ->
     ok = bondy_telemetry:rpc_latency(
-        call, <<"com.example.untraced">>, 5, #{}, success
+        call,
+        <<"com.example.untraced">>,
+        5,
+        #{},
+        success,
+        undefined
     ),
     ok = bondy_telemetry:rpc_latency(
         call,
         <<"com.example.malformed">>,
         5,
         #{<<"traceparent">> => <<"garbage">>},
-        success
+        success,
+        undefined
     ),
     ok = bondy_telemetry:rpc_latency(
-        call, <<"com.example.sentinel">>, 5, trace(), success
+        call,
+        <<"com.example.sentinel">>,
+        5,
+        trace(),
+        success,
+        undefined
     ),
     [Span] = flush_spans(),
     ?assertEqual(<<"com.example.sentinel">>, Span#span.name).
@@ -199,10 +253,16 @@ unsampled_parent_no_span(_) ->
         <<"com.example.unsampled">>,
         5,
         #{<<"traceparent">> => ?TP_UNSAMPLED},
-        success
+        success,
+        undefined
     ),
     ok = bondy_telemetry:rpc_latency(
-        call, <<"com.example.sentinel2">>, 5, trace(), success
+        call,
+        <<"com.example.sentinel2">>,
+        5,
+        trace(),
+        success,
+        undefined
     ),
     [Span] = flush_spans(),
     ?assertEqual(<<"com.example.sentinel2">>, Span#span.name).
@@ -228,10 +288,20 @@ minted_root_span(_) ->
     SpanId = binary_to_integer(SpanHex, 16),
 
     ok = bondy_telemetry:rpc_latency(
-        call, <<"com.example.mint">>, 30, Minted, success
+        call,
+        <<"com.example.mint">>,
+        30,
+        Minted,
+        success,
+        undefined
     ),
     ok = bondy_telemetry:rpc_latency(
-        invocation, <<"com.example.mint">>, 20, Minted, success
+        invocation,
+        <<"com.example.mint">>,
+        20,
+        Minted,
+        success,
+        undefined
     ),
     [Root, Child] = flush_spans(),
 
@@ -260,7 +330,12 @@ minted_root_span(_) ->
             <<"00-", TraceHex/binary, "-c3d4e5f60718293a-01">>
     },
     ok = bondy_telemetry:rpc_latency(
-        call, <<"com.example.mint.stale">>, 5, Stale, success
+        call,
+        <<"com.example.mint.stale">>,
+        5,
+        Stale,
+        success,
+        undefined
     ),
     [StaleSpan] = flush_spans(),
     ?assertEqual(
@@ -294,7 +369,8 @@ minted_root_span(_) ->
                 <<"00-", TraceHex/binary, "-", UpperHex/binary, "-01">>,
             <<"tracestate">> => <<"bondy=", UpperHex/binary>>
         },
-        success
+        success,
+        undefined
     ),
     ZeroTrace = binary:copy(<<"0">>, 32),
     ok = bondy_telemetry:rpc_latency(
@@ -306,10 +382,16 @@ minted_root_span(_) ->
                 <<"00-", ZeroTrace/binary, "-", SpanHex/binary, "-01">>,
             <<"tracestate">> => <<"bondy=", SpanHex/binary>>
         },
-        success
+        success,
+        undefined
     ),
     ok = bondy_telemetry:rpc_latency(
-        call, <<"com.example.mint.sentinel">>, 5, trace(), success
+        call,
+        <<"com.example.mint.sentinel">>,
+        5,
+        trace(),
+        success,
+        undefined
     ),
     [UpperSpan, Sentinel] = flush_spans(),
     ?assertEqual(<<"com.example.mint.upper">>, UpperSpan#span.name),
@@ -360,7 +442,11 @@ mcp_spans(_) ->
     UpAttrs = otel_attributes:map(Upstream#span.attributes),
     ?assertEqual(
         <<"internal_error">>, maps:get(<<"bondy.mcp.status">>, UpAttrs)
-    ).
+    ),
+    %% The upstream leg is a client span calling out to a configured
+    %% upstream: its id doubles as the `peer.service` a service graph
+    %% draws the virtual-node edge to.
+    ?assertEqual(<<"up1">>, maps:get(<<"peer.service">>, UpAttrs)).
 
 %% Stopping the app detaches the handlers (traced traffic exports
 %% nothing), and a restart with `traces_exporter = none` — the disabled
@@ -369,7 +455,12 @@ disabled_gate_and_detach(Config) ->
     ok = application:stop(bondy_telemetry_exporter),
     ?assertNot(bridge_attached()),
     ok = bondy_telemetry:rpc_latency(
-        call, <<"com.example.gone">>, 5, trace(), success
+        call,
+        <<"com.example.gone">>,
+        5,
+        trace(),
+        success,
+        undefined
     ),
     ?assertEqual([], flush_spans()),
 

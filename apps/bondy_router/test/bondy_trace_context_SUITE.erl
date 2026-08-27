@@ -154,6 +154,16 @@ same_node_call_latency_trace(Config) ->
             [success, success],
             [maps:get(outcome, M) || {_, M} <- Traced]
         ),
+        %% The invocation leg names its peer — the callee session's
+        %% agent, resolved from the settled promise's callee ref; the
+        %% call leg names none.
+        ?assertEqual(
+            [{call, undefined}, {invocation, <<"trace-probe/1">>}],
+            lists:sort([
+                {maps:get(kind, M), maps:get(peer_service, M)}
+             || {_, M} <- Traced
+            ])
+        ),
 
         ok = erpc:call(N1, ?MODULE, do_call_await, [Uri, Proc, plain]),
         Plain = collect_latency(Proc, 2),
@@ -222,6 +232,15 @@ cross_node_call_latency_trace(Config) ->
         ?assertEqual(
             [success, success],
             [maps:get(outcome, M) || {_, M} <- Traced]
+        ),
+        %% The peer is resolved on the CALLEE's node (its invocation
+        %% promise holds the callee ref; the session is local there).
+        ?assertEqual(
+            lists:sort([{N1, undefined}, {N2, <<"trace-probe/1">>}]),
+            lists:sort([
+                {Node, maps:get(peer_service, M)}
+             || {Node, M} <- Traced
+            ])
         ),
 
         ok = erpc:call(N1, ?MODULE, do_call_await, [Uri, Proc, plain]),
@@ -601,6 +620,9 @@ probe_init(RealmUri, Subscriptions, Procedures, ReplyMode, Parent) ->
     Session0 = bondy_session:new(RealmUri, #{
         peer => {{127, 0, 0, 1}, 10993},
         authid => <<"traceprobe">>,
+        %% The agent is what the invocation leg's latency event reports
+        %% as `peer_service` (the latency cases assert it).
+        agent => <<"trace-probe/1">>,
         authmethod => ?WAMP_ANON_AUTH,
         is_anonymous => true,
         security_enabled => false,

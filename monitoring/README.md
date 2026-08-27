@@ -107,9 +107,15 @@ Tempo's metrics-generator also runs the `service-graphs` and
 ordinary Prometheus series for dashboard panels (span-derived RED per
 `service.name` / span name). The dev node configs set a per-node
 `tracing.service_name` (`bondy-node1` …) so the graph can distinguish
-nodes; service-graph *edges* are built from client→server span pairs
-across services, so how much the graph shows depends on which legs are
-instrumented on both sides.
+nodes. Edges: Tempo pairs a client span with its server child across
+services, and completes an unpaired client span that carries a
+`peer.service` attribute into an edge to a *virtual* node — Bondy sets
+that attribute on its client-kind spans (the invocation leg carries
+the callee's HELLO agent, the MCP upstream leg its upstream id), so
+each node shows edges to the callees and upstreams it talks to, and an
+unpaired root span yields the `user →` ingress edge. There is no
+node-to-node edge: that would need a client span for the inter-node
+forward itself, which Bondy does not emit.
 
 ## How it works
 

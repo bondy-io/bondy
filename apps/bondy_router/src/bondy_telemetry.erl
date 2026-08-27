@@ -42,7 +42,7 @@ Also provides trace-identifier generation.
 -export([router_flow/3]).
 -export([router_flow_ingress/3]).
 -export([wamp_egress/3]).
--export([rpc_latency/5]).
+-export([rpc_latency/6]).
 -export([trace_meta/1]).
 -export([broker_publish/2]).
 -export([wamp_hello/1]).
@@ -434,16 +434,25 @@ end and `duration` locates its start.
 `error` for a WAMP ERROR — a promise evicted on timeout emits no
 latency event at all, so those are the only two values. Total: never
 throws.
+
+`PeerService` names the leg's remote party when the emitter knows one —
+the callee's HELLO agent for an `invocation` leg — and is `undefined`
+otherwise (`call` legs always pass `undefined`: their remote party is
+the caller, which the trace context already identifies). A span
+consumer maps it to the OTel `peer.service` attribute on client-kind
+spans, which is what lets a service graph draw an edge to an
+uninstrumented callee.
 """.
 -spec rpc_latency(
     Kind :: call | invocation,
     ProcedureUri :: binary(),
     DurationMs :: integer(),
     Trace :: #{binary() => binary()},
-    Outcome :: success | error
+    Outcome :: success | error,
+    PeerService :: binary() | undefined
 ) -> ok.
 
-rpc_latency(Kind, ProcedureUri, DurationMs, Trace, Outcome) ->
+rpc_latency(Kind, ProcedureUri, DurationMs, Trace, Outcome, PeerService) ->
     execute(
         [bondy, rpc, latency],
         #{duration => max(0, DurationMs)},
@@ -451,7 +460,8 @@ rpc_latency(Kind, ProcedureUri, DurationMs, Trace, Outcome) ->
             kind => Kind,
             procedure_uri => ProcedureUri,
             trace => Trace,
-            outcome => Outcome
+            outcome => Outcome,
+            peer_service => PeerService
         }
     ).
 

@@ -139,13 +139,20 @@ terminate(_Reason, _State) ->
 %% unit and attributes differ; the emission mechanics are emit/7.
 span([bondy, rpc, latency], #{duration := Ms}, Meta) ->
     #{
-        kind := Kind, procedure_uri := Uri, trace := Trace, outcome := Outcome
+        kind := Kind,
+        procedure_uri := Uri,
+        trace := Trace,
+        outcome := Outcome,
+        peer_service := Peer
     } = Meta,
-    Attrs = #{
-        <<"bondy.emitter">> => <<"router">>,
-        <<"bondy.procedure">> => Uri,
-        <<"bondy.node">> => atom_to_binary(node(), utf8)
-    },
+    Attrs = maybe_peer(
+        #{
+            <<"bondy.emitter">> => <<"router">>,
+            <<"bondy.procedure">> => Uri,
+            <<"bondy.node">> => atom_to_binary(node(), utf8)
+        },
+        Peer
+    ),
     case minted_root_ids(Kind, Trace) of
         {TraceId, SpanId} ->
             emit_root(
@@ -231,9 +238,24 @@ span([bondy, mcp, upstream, call, stop], #{duration := Us}, Meta) ->
             <<"bondy.emitter">> => <<"mcp">>,
             <<"bondy.mcp.upstream">> => Upstream,
             <<"bondy.mcp.status">> => atom_to_binary(Status, utf8),
-            <<"bondy.node">> => atom_to_binary(node(), utf8)
+            <<"bondy.node">> => atom_to_binary(node(), utf8),
+            <<"peer.service">> => Upstream
         }
     ).
+
+%% @private `peer.service` on a CLIENT-kind span is what lets a trace
+%% backend's service graph draw an edge to an uninstrumented remote
+%% party: Tempo's service-graphs processor (read from 2.8.1
+%% servicegraphs.go, consume/onExpire) records the peer attribute off
+%% client spans and, when no matching server span arrives before the
+%% edge expires, completes the edge to a virtual node named by it.
+%% Producers only name a peer on their client legs (the router's
+%% invocation leg, the MCP upstream leg), so no kind gate is needed
+%% here; peer attributes on server-span edges are inert in Tempo.
+maybe_peer(Attrs, Peer) when is_binary(Peer) ->
+    Attrs#{<<"peer.service">> => Peer};
+maybe_peer(Attrs, _) ->
+    Attrs.
 
 %% @private The router observes a CALL as its server leg and an
 %% INVOCATION as its client leg (it is calling out to the callee); the

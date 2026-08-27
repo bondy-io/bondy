@@ -1037,7 +1037,7 @@ pint(_) -> 0.
 
 %% @private
 %% Telemetry sink for `[bondy, rpc, latency]` (emitted by
-%% `bondy_telemetry:rpc_latency/4` at the dealer's promise-settlement
+%% `bondy_telemetry:rpc_latency/6` at the dealer's promise-settlement
 %% sites). `kind` selects the family: `call` = full round trip,
 %% `invocation` = INVOCATION→YIELD leg. Same discipline as the other
 %% sinks: wait-free `bondy_metrics` writes only, total.

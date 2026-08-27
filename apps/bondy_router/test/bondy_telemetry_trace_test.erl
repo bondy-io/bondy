@@ -144,7 +144,7 @@ rpc_latency_carries_trace_test() ->
     try
         Trace = #{<<"traceparent">> => ?TP},
         ok = bondy_telemetry:rpc_latency(
-            call, <<"com.example.p">>, 7, Trace, error
+            call, <<"com.example.p">>, 7, Trace, error, undefined
         ),
         receive
             {latency, Meas, Meta} ->
@@ -154,9 +154,31 @@ rpc_latency_carries_trace_test() ->
                         kind => call,
                         procedure_uri => <<"com.example.p">>,
                         trace => Trace,
-                        outcome => error
+                        outcome => error,
+                        peer_service => undefined
                     },
                     Meta
+                )
+        after 1000 ->
+            error(latency_event_missing)
+        end,
+
+        %% A named peer (the callee's agent on an invocation leg)
+        %% crosses the boundary verbatim.
+        ok = bondy_telemetry:rpc_latency(
+            invocation, <<"com.example.p">>, 7, Trace, success, <<"probe/1">>
+        ),
+        receive
+            {latency, _, PeerMeta} ->
+                ?assertEqual(
+                    #{
+                        kind => invocation,
+                        procedure_uri => <<"com.example.p">>,
+                        trace => Trace,
+                        outcome => success,
+                        peer_service => <<"probe/1">>
+                    },
+                    PeerMeta
                 )
         after 1000 ->
             error(latency_event_missing)

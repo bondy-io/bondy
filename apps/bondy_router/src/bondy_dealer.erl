@@ -1991,17 +1991,22 @@ notify_call_latency(Promise, Outcome) ->
             case bondy_rpc_promise:type(Promise) of
                 call ->
                     bondy_telemetry:rpc_latency(
-                        call, Uri, Elapsed, Trace, Outcome
+                        call, Uri, Elapsed, Trace, Outcome, undefined
                     );
                 invocation ->
                     ok = bondy_telemetry:rpc_latency(
-                        invocation, Uri, Elapsed, Trace, Outcome
+                        invocation,
+                        Uri,
+                        Elapsed,
+                        Trace,
+                        Outcome,
+                        callee_agent(Promise)
                     ),
                     Caller = bondy_rpc_promise:caller(Promise),
                     case bondy_ref:is_local(Caller) of
                         true ->
                             bondy_telemetry:rpc_latency(
-                                call, Uri, Elapsed, Trace, Outcome
+                                call, Uri, Elapsed, Trace, Outcome, undefined
                             );
                         false ->
                             ok
@@ -2009,6 +2014,25 @@ notify_call_latency(Promise, Outcome) ->
             end;
         _ ->
             ok
+    end.
+
+%% @private
+%% The invocation leg's `peer_service` metadata: the callee's HELLO
+%% agent, read through the total `bondy_session:agent/2` — `undefined`
+%% for a callback callee (no session behind the ref) or when the callee
+%% session is already gone (an ERROR can settle the promise precisely
+%% because the callee died).
+callee_agent(Promise) ->
+    case bondy_rpc_promise:callee(Promise) of
+        undefined ->
+            undefined;
+        Ref ->
+            case bondy_ref:session_id(Ref) of
+                undefined ->
+                    undefined;
+                SessionId ->
+                    bondy_session:agent(SessionId, undefined)
+            end
     end.
 
 %% @private
