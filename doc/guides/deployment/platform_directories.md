@@ -1,28 +1,33 @@
 # Platform directories
 
-Bondy resolves five directories from `bondy.conf`. Each one has a different
-relationship to persistence and to container volumes, and the differences are
-not interchangeable: one of them holds durable state that must survive a
+A node writes into four directories you can configure and one you cannot. Each
+has a different relationship to persistence and to container volumes, and the
+differences are not interchangeable: one holds durable state that must survive a
 restart, and another holds a socket that must not be placed on network storage
 at all. Choosing the wrong backing store for a directory is a boot failure, not
 a degradation.
 
-## The five directories
+## The directories
 
 | Key | Holds | Must persist | Mount a volume? |
 | --- | --- | --- | --- |
-| `platform_etc_dir` | `bondy.conf`, templates, TLS material | No | Yes — this is how you supply configuration |
 | `platform_data_dir` | The durable stores: `bondy_db`, the write-ahead log, Merkle search trees | Yes | Yes — a volume or PersistentVolume |
 | `platform_log_dir` | Log files, when a file handler is configured | No | Optional — only if you collect logs from disk |
 | `platform_tmp_dir` | Scratch space | No | Optional |
 | `platform_runtime_dir` | The internal admin listener's Unix domain socket | No | **No — see below** |
 
-In a release the defaults are relative to the release root (`./etc`, `./data`,
+The configuration directory is not in that list because it is not a
+`bondy.conf` key: the release has to know where to read `bondy.conf` from before
+it can read any key out of it, so the location is fixed by the release layout
+and exported as `BONDY_ETC_DIR`. It is still a mount point — mounting
+`/bondy/etc` is how you supply configuration and TLS material to a container.
+
+In a release the four defaults are relative to the release root (`./data`,
 `./log`, `./tmp`, `./run`). In the container images they are absolute:
-`/bondy/etc`, `/bondy/data`, `/bondy/log`, `/bondy/tmp`, `/bondy/run`. Inside a
-container the start hook fixes all of them and ignores the corresponding
-`BONDY_*_DIR` environment variables, so a container relocates a directory
-through `bondy.conf`, not through the environment.
+`/bondy/data`, `/bondy/log`, `/bondy/tmp`, `/bondy/run`. Inside a container the
+start hook fixes all of them and ignores the corresponding `BONDY_*_DIR`
+environment variables, so a container relocates a directory through
+`bondy.conf`, not through the environment.
 
 ## `platform_runtime_dir`
 
