@@ -164,22 +164,12 @@ it if that fails. This applies to the internal socket alone: a `uds` listener
 an operator declares keeps the mode the process umask gives it, so a sidecar
 running under a different uid can reach it.
 
-Give every node its own `platform_runtime_dir`. The filename is a constant, so
-two nodes sharing that directory share this path — and the node that starts
-second removes any socket file already there before binding, which means it
-removes the first node's live socket. The first node goes on serving a socket
-nothing can reach. Nothing detects this; the defaults avoid it by giving each
-release and each container its own directory.
-
-`platform_runtime_dir` is not `platform_tmp_dir`, and the distinction matters
-when you deploy. It must be on a filesystem that supports Unix domain sockets,
-which rules out NFS, SMB/CIFS, 9p (a Windows drive seen from WSL2), some
-FUSE-backed CSI drivers, and gVisor's gofer — on those, binding fails with
-`enotsup` and the node refuses to start. The container images provide
-`/bondy/run` on the container's own filesystem and deliberately do not declare
-it a volume, so the default needs nothing from you. If you run with a read-only
-root filesystem, mount an `emptyDir` (Kubernetes) or a tmpfs (Docker) there;
-both support the bind. Do not point it at a PersistentVolume.
+The socket lives under `platform_runtime_dir`, which is deliberately not
+`platform_tmp_dir`: it has to be on a filesystem that supports Unix domain
+sockets, and it must not be shared with another node. The defaults satisfy both
+and need nothing from you. See
+[Platform directories](../deployment/platform_directories.md) for the
+requirement, the deployment rules, and what a failed bind reports.
 
 ## UDS listeners
 

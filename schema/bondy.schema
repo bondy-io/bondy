@@ -4223,21 +4223,19 @@ end}.
   {default, "{{platform_tmp_dir}}"}
 ]}.
 
-%% @doc Directory for ephemeral runtime objects that must live on a filesystem
+%% @doc Directory for ephemeral runtime objects that require a filesystem
 %% supporting Unix domain sockets. Currently that is the internal admin
 %% listener's socket, and nothing else.
 %%
-%% This is deliberately NOT `platform_tmp_dir`. That directory is scratch space
-%% an operator is expected to mount — it is a Docker VOLUME, and a Kubernetes
-%% deployment routinely backs it with a PersistentVolume. Several filesystems
-%% reject an AF_UNIX bind with ENOTSUP: NFS, SMB/CIFS, 9p (a Windows drive seen
-%% from WSL2), some FUSE-backed CSI drivers, and gVisor's gofer. A control
-%% socket on operator-supplied storage is a boot failure waiting for the wrong
-%% mount, so it gets a directory nobody has a reason to mount.
+%% This is deliberately not `platform_tmp_dir`. Scratch space is something you
+%% are invited to relocate, and several filesystems you might relocate it onto
+%% reject an AF_UNIX bind with ENOTSUP — NFS, SMB/CIFS, 9p, some FUSE-backed CSI
+%% drivers and gVisor — which stops the node from starting. This directory is
+%% the one that must not move onto them.
 %%
-%% Keep this on the container's own filesystem. If you run with a read-only
-%% root filesystem, mount an `emptyDir` (Kubernetes) or a tmpfs (Docker) here —
-%% both accept an AF_UNIX bind, measured on Docker 29.7.2.
+%% Keep it on the container's own filesystem; the images provide it and it is
+%% not a volume. Under a read-only root filesystem, mount an emptyDir
+%% (Kubernetes) or a tmpfs (Docker) here. Give every node its own.
 {mapping, "platform_runtime_dir",
 "bondy_router.platform_runtime_dir", [
   {datatype, directory},
