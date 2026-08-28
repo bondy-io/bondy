@@ -129,10 +129,6 @@ init({Ref, Transport, Opts}) ->
         transport => Transport
     }),
 
-    %% Before the first `[safe]` wire decode — see
-    %% `bondy_bridge_relay:ensure_wire_atoms/0`.
-    ok = bondy_bridge_relay:ensure_wire_atoms(),
-
     AuthTimeout = key_value:get(auth_timeout, Opts, 5000),
     IdleTimeout = key_value:get(idle_timeout, Opts, infinity),
     %% Shall we hibernate when we are idle?

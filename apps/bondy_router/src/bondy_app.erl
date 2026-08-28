@@ -92,6 +92,22 @@ start(_Type, Args) ->
         }
     }),
 
+    %% Load every module of every application loaded so far, BEFORE the
+    %% supervisor can start anything that decodes wire bytes with
+    %% `binary_to_term/2` `[safe]' (the bridge relay, both ends — a
+    %% configured bridge dials from bondy_bridge_relay_manager's
+    %% handle_continue, i.e. during bondy_sup startup). `[safe]' refuses
+    %% atoms absent from the atom table, and the interactive code loader
+    %% interns a module's atoms only when the module loads: measured on
+    %% a fresh edge node, the bridge server's own cryptosign CHALLENGE
+    %% bounced on `channel_binding', and since the decode failure
+    %% precedes any interning, every reconnect bounced identically. In a
+    %% release this covers every release app: the generated start.script
+    %% runs all `application:load' instructions before the first
+    %% `start_boot' (verified on 1.0.0-rc-sunlight). Falsifier:
+    %% `bondy_bridge_relay_rpc_SUITE:boot_loads_every_app_module'.
+    ok = ensure_app_modules_loaded(),
+
     %% Finally we start the supervisor
     case bondy_sup:start_link() of
         {ok, Pid} ->
@@ -196,6 +212,33 @@ stop(_State) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% See the call site in start/2 for why. A module that fails to load
+%% keeps its atoms out of the atom table, silently reinstating the
+%% `[safe]'-refusal hazard for terms naming them — logged rather than
+%% fatal, because an unloadable module in an otherwise working node is
+%% not worth refusing to boot over.
+ensure_app_modules_loaded() ->
+    Modules = lists:append([
+        Mods
+     || {App, _, _} <- application:loaded_applications(),
+        {ok, Mods} <- [application:get_key(App, modules)]
+    ]),
+    case code:ensure_modules_loaded(Modules) of
+        ok ->
+            ok;
+        {error, Errors} ->
+            ?LOG_WARNING(#{
+                description =>
+                    "Some application modules failed to load. Atoms "
+                    "named only by those modules are not interned, so "
+                    "peer messages carrying them will be refused by "
+                    "[safe] wire decodes (e.g. the bridge relay).",
+                errors => Errors
+            }),
+            ok
+    end.
 
 %% @private
 setup_commons() ->

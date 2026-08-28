@@ -142,8 +142,6 @@ callback_mode() ->
 
 init(Config0) ->
     % erlang:process_flag(sensitive, true),
-    %% Before the first `[safe]` wire decode — see the doc there.
-    ok = bondy_bridge_relay:ensure_wire_atoms(),
     #{
         transport := Transport,
         endpoint := Endpoint,

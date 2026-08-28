@@ -36,6 +36,7 @@
 
 all() ->
     [
+        boot_loads_every_app_module,
         bridged_call_hop_trace,
         crashing_server_redials_with_backoff
     ].
@@ -75,6 +76,37 @@ end_per_suite(Config) ->
 %% =============================================================================
 %% CASES
 %% =============================================================================
+
+%% Every module of every application present at boot is LOADED on a
+%% freshly booted node, so every atom those modules name is in the atom
+%% table before the first `[safe]` wire decode (the bridge relay wire,
+%% both ends). The apps listed are the ones loaded before
+%% `bondy_app:start/2` reaches its supervisor in every context: a
+%% release boot script loads ALL release apps before starting any (all
+%% `application:load` instructions precede the first `start_boot` in the
+%% generated start.script — verified on 1.0.0-rc-sunlight), and under CT
+%% these are pulled in by the `ensure_all_started` calls that precede
+%% `bondy_sup:start_link/0`. This case does NOT cover apps loaded later
+%% under CT/shell (bondy_mcp, bondy_mail, ...) — in a release the sweep
+%% covers them too, but no fresh-node harness here boots from a release.
+boot_loads_every_app_module(Config) ->
+    Apps = [
+        tuplespace,
+        partisan,
+        bondy_db,
+        bondy_oplog,
+        bondy_mst,
+        bondy_wamp,
+        bondy_router
+    ],
+    [
+        begin
+            Missing = erpc:call(N, ?MODULE, do_unloaded_modules, [Apps]),
+            ?assertEqual({N, []}, {N, Missing})
+        end
+     || {_, N, _} <- proplists:get_value(nodes, Config)
+    ],
+    ok.
 
 bridged_call_hop_trace(Config) ->
     [{_, Core, _}, {_, Edge, _}] = proplists:get_value(nodes, Config),
@@ -240,6 +272,17 @@ crashing_server_redials_with_backoff(Config) ->
 %% =============================================================================
 %% REMOTE FUNCTIONS (run on the peer nodes via erpc)
 %% =============================================================================
+
+%% @private Every `{App, Module}` of `Apps` whose module is not loaded
+%% on this node. Empty on a node whose boot interned every app atom.
+do_unloaded_modules(Apps) ->
+    [
+        {App, M}
+     || App <- Apps,
+        {ok, Mods} <- [application:get_key(App, modules)],
+        M <- Mods,
+        code:is_loaded(M) =:= false
+    ].
 
 %% @private Relay error-level log events on this node to `To` (the CT
 %% process). This module doubles as the logger handler (`log/2`).
