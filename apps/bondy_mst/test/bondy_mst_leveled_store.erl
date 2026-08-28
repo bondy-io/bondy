@@ -157,7 +157,7 @@ free(#?MODULE{pid = Pid, name = Name} = T, Hash, _Page) ->
     ok = leveled_bookie:book_delete(Pid, Name, Hash, []),
     T.
 
--spec gc(T :: t(), KeepRoots :: [list()] | epoch()) ->
+-spec gc(T :: t(), KeepRoots :: [binary()]) ->
     {T :: t(), Metadata :: map()}.
 
 gc(#?MODULE{} = T, _) ->

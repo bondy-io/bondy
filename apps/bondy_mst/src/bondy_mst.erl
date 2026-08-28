@@ -895,51 +895,45 @@ gc(#?MODULE{} = T) ->
     gc(T, []).
 
 ?DOC("""
-Reclaims pages, either by reachability (a list of keep-roots) or by epoch (an
-integer).
+Reclaims pages by reachability from `KeepRoots` (plus the current root,
+which is always protected).
+
+Reachability is the ONLY collection mode. Structural sharing makes any
+reachability-blind sweep unsound: `free/3` tombstones a page whose
+content-addressed hash may still be referenced — by an older root, a
+pinned peer root, a merge accumulator, or a content-identical twin the
+tree keeps by reference — and no timestamp on the tombstone can say
+that those references are gone. Only a mark from the live roots can.
 
 ## Precondition — the caller must establish liveness
 
 `gc/2` MUST be serialized with the tree's writers, OR be given a keep-root
-list / epoch that already covers every root any writer may publish. This is
-not a `concurrent_writes` matter: that capability governs `put`/`get`, and
-`bondy_mst_ets_store` declares it `true`. Collection is different, because
-BOTH modes require knowing what is live:
-
-- reachability: marks from `KeepRoots` (plus the current root). A writer that
-  publishes a NEW root after the mark has its root page swept — the mark
-  never saw it. There is no ordering that fixes this: with unsynchronized
-  writers the live-root set is not knowable.
-- epoch: prunes pages tombstoned at or before `Epoch`, which is only sound if
-  no root older than `Epoch` is still in use.
+list that already covers every root any writer may publish. This is not a
+`concurrent_writes` matter: that capability governs `put`/`get`, and
+`bondy_mst_ets_store` declares it `true`. Collection is different: a writer
+that publishes a NEW root after the mark has its root page swept — the mark
+never saw it. There is no ordering that fixes this: with unsynchronized
+writers the live-root set is not knowable.
 
 `bondy_oplog` satisfies the precondition by construction: compaction is a
 `gen_server:call` into the instance, and every tree mutation runs in that same
 process, so the root marked from IS the only live root.
 
-Reachability mode additionally refuses to sweep when the current root is
+The collector additionally refuses to sweep when the current root is
 already unservable — see the abort below; a hole would otherwise be amplified
 into subtree loss, because the mark walk skips missing pages silently.
 """).
--spec gc(t(), KeepRoots :: [hash()] | Epoch :: integer()) -> t().
+-spec gc(t(), KeepRoots :: [hash()]) -> t().
 
-gc(#?MODULE{store = Store0} = T, Arg0) when
-    is_list(Arg0) orelse is_integer(Arg0)
-->
+gc(#?MODULE{store = Store0} = T, KeepRoots) when is_list(KeepRoots) ->
     telemetry:span(
         [bondy_mst, gc],
         #{},
         fun() ->
             Fun = fun() ->
-                %% Protect the current version when receiving a list of roots
-                Arg =
-                    case is_list(Arg0) of
-                        true ->
-                            [root(T) | Arg0];
-                        false ->
-                            Arg0
-                    end,
-                case is_list(Arg) andalso unservable_current_root(T) of
+                %% Protect the current version.
+                Arg = [root(T) | KeepRoots],
+                case unservable_current_root(T) of
                     false ->
                         {Store, Meta} = bondy_mst_store:gc(Store0, Arg),
                         T1 = T#?MODULE{store = Store},

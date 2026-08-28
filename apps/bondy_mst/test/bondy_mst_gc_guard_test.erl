@@ -219,6 +219,26 @@ sweep_spares_pages_inserted_after_snapshot_test() ->
         end
     end.
 
+%% `gc/2` collects by reachability only: an integer "epoch" argument is
+%% not a mode. A reachability-blind sweep is unsound under structural
+%% sharing (see the doc on `bondy_mst:gc/2`), so the call must be
+%% refused outright — never accepted by some backend as a
+%% tombstone-stamp prune.
+gc_refuses_non_list_argument_test() ->
+    T0 = new_tree(),
+    T = bondy_mst:put(T0, 1, 1),
+    try
+        ?assertError(
+            function_clause, bondy_mst:gc(T, erlang:monotonic_time())
+        )
+    after
+        try
+            bondy_mst:destroy(T)
+        catch
+            _:_ -> ok
+        end
+    end.
+
 %% =============================================================================
 %% HELPERS
 %% =============================================================================

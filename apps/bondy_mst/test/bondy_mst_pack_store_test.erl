@@ -849,25 +849,6 @@ gc_no_op_when_no_sealed_packs_test() ->
         end
     end).
 
-gc_epoch_rejected_with_typed_meta_test() ->
-    with_tmp_dir(fun(Dir) ->
-        S = open_store(Dir),
-        try
-            {S1, Meta} = bondy_mst_store:gc(S, 12345),
-            ?assertMatch(
-                #{
-                    compacted := false,
-                    reason := epoch_unsupported
-                },
-                Meta
-            ),
-            %% State must be unchanged.
-            ?assertEqual([], pack_ids(S1))
-        after
-            _ = bondy_mst_store:close(S)
-        end
-    end).
-
 gc_no_op_when_single_pack_and_no_drops_test() ->
     with_tmp_dir(fun(Dir) ->
         S0 = open_store(Dir),

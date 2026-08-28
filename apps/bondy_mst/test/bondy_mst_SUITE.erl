@@ -282,6 +282,10 @@ first_last_test(Config) ->
     ?assertEqual({1, true}, bondy_mst:first(A)),
     ?assertEqual({10, true}, bondy_mst:last(A)).
 
+%% Persistence (multi-version reads) with keep-root reclamation: every
+%% published root stays readable until a collection runs WITHOUT it in
+%% the keep-root set — retaining a version IS pinning its root
+%% (`bondy_mst_crdt`'s history does exactly this).
 persistent_test(Config) ->
     Mod = ?config(store, Config),
 
@@ -294,11 +298,9 @@ persistent_test(Config) ->
     R1 = bondy_mst:root(T1),
 
     T2 = bondy_mst:put(T1, 2),
-    E2 = erlang:monotonic_time(),
     R2 = bondy_mst:root(T2),
 
     T3 = bondy_mst:put(T2, 3),
-    E3 = erlang:monotonic_time(),
     R3 = bondy_mst:root(T3),
 
     ?assertEqual([{1, true}], bondy_mst:to_list(T1, R1)),
@@ -306,12 +308,14 @@ persistent_test(Config) ->
     ?assertEqual([{1, true}, {2, true}, {3, true}], bondy_mst:to_list(T3, R3)),
     ?assertEqual(bondy_mst:to_list(T3, R3), bondy_mst:to_list(T3)),
 
-    %% GC
-    T4 = bondy_mst:gc(T3, E2),
+    %% GC keeping R2 (the current root is always kept): R1's exclusive
+    %% pages are reclaimed, R2 stays whole.
+    T4 = bondy_mst:gc(T3, [R2]),
     ?assertEqual([], bondy_mst:to_list(T4, R1)),
     ?assertEqual([{1, true}, {2, true}], bondy_mst:to_list(T4, R2)),
 
-    T5 = bondy_mst:gc(T4, E3),
+    %% Dropping the R2 pin reclaims its exclusive pages too.
+    T5 = bondy_mst:gc(T4, []),
     ?assertEqual([], bondy_mst:to_list(T5, R2)),
 
     ?assertEqual([{1, true}, {2, true}, {3, true}], bondy_mst:to_list(T5, R3)),

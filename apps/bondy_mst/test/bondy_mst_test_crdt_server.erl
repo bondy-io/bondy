@@ -123,10 +123,6 @@ handle_call(gc, _From, Grove0) ->
     ct:pal("Triggering GC on peer"),
     Grove = bondy_mst_crdt:gc(Grove0, [bondy_mst_crdt:root(Grove0)]),
     {reply, ok, Grove};
-handle_call({gc, Epoch}, _From, Grove0) ->
-    ct:pal("Triggering GC for Epoch on peer"),
-    Grove = bondy_mst_crdt:gc(Grove0, Epoch),
-    {reply, ok, Grove};
 handle_call(list, _From, Grove) ->
     ct:pal("handling list"),
     Reply = bondy_mst:to_list(bondy_mst_crdt:tree(Grove)),

@@ -61,8 +61,8 @@ real disk and treats unrecoverable I/O failures (manifest write
 refused, sealed pack read error, file system gone) as raised
 errors of the form `error({Op, Reason})` — e.g. `{set_root, _}`,
 `{put, _}`, `{get, _}`, `{gc_open_view, _, _}`. Recoverable
-conditions (missing hash, no-op seal, GC epoch unsupported)
-return ordinary tagged results.
+conditions (missing hash, no-op seal) return ordinary tagged
+results.
 
 The `{gc_open_view, _, _}` failure mode is special: it can only
 occur *after* the manifest swap has been durably committed, so the
@@ -571,9 +571,6 @@ transitively reachable hash set, intersects it with the set of
 non-tombstoned hashes, and rewrites every sealed pack into a single
 new sealed pack containing only those entries.
 
-* Integer `Epoch` is currently rejected with a no-op (pages carry no
-  epoch on this backend); the metadata reports `reason =>
-  epoch_unsupported`.
 * If there are no sealed packs to compact, the call is a no-op.
 * If no entries would be dropped and there is exactly one sealed
   pack, the call is a no-op (coalescing multiple packs into one is
@@ -597,12 +594,8 @@ error in metadata. The single non-recoverable case — failing to
 open a sealed view *after* the manifest swap — raises; the next
 reopen recovers via the on-disk manifest.
 """).
--spec gc(t(), [binary()] | epoch()) -> {t(), map()}.
+-spec gc(t(), KeepRoots :: [binary()]) -> {t(), map()}.
 
-gc(#?MODULE{} = T, Epoch) when is_integer(Epoch) ->
-    Meta = #{compacted => false, reason => epoch_unsupported},
-    emit_gc(T, Meta, 0),
-    {T, Meta};
 gc(#?MODULE{sealed_views = []} = T, KeepRoots) when is_list(KeepRoots) ->
     Meta = gc_noop_meta(),
     emit_gc(T, Meta, 0),
@@ -1774,7 +1767,8 @@ emit_seal_roll(T, RecordCount, PackBytes, DurationUs, NewPackId) ->
 %% element, post `bytes_freed` enrichment). Converts to telemetry
 %% measurements + metadata. The `reason` metadata carries the
 %% compaction outcome: `compacted` (rewrote packs), `noop` (nothing
-%% to do), or `epoch_unsupported` (integer epoch passed).
+%% to do), or `below_threshold` (drops under the configured dead
+%% fraction).
 emit_gc(T, Meta, DurationUs) ->
     PacksRetired = length(maps:get(retired, Meta, [])),
     PacksCreated =

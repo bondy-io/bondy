@@ -51,12 +51,14 @@ Read-concurrent, MST backend using `ets`.
 -type opts_map() :: #{name := binary()}.
 -type page() :: bondy_mst_page:t().
 
-%% NOTE: the collection strategy is NOT a store-open option. `gc/2` selects it
-%% from the shape of its argument — an integer is an epoch (prune every page
-%% tombstoned at or before it), a list is a keep-root set (mark from those
-%% roots and sweep the rest). The caller is the only party that knows which is
-%% sound for its root lifetime, and it must decide per call, so an option here
-%% would be a second, weaker way to say the same thing.
+%% NOTE: `gc/2` collects by reachability only — mark from the keep-root set,
+%% sweep the rest. The `FreedAt` tombstone stamp never licenses a deletion by
+%% itself: under content addressing a tombstoned hash may still be referenced
+%% (an older root, a pinned peer root, a content-identical twin a merge keeps
+%% by reference), and no stamp comparison can prove those references gone —
+%% only a mark from the live roots can. The stamp's remaining jobs are
+%% excluding freed pages from `list/1` enumeration and classifying misses in
+%% `page_state/2`.
 
 -export_type([t/0]).
 -export_type([page/0]).
@@ -262,13 +264,9 @@ free(#?MODULE{tab = Tab} = T, Hash, _Page0) ->
     _ = ets:update_element(Tab, Hash, {?FREED_AT_POS, erlang:monotonic_time()}),
     T.
 
--spec gc(T :: t(), KeepRoots :: [list()] | epoch()) ->
+-spec gc(T :: t(), KeepRoots :: [hash()]) ->
     {T :: t(), Metadata :: map()}.
 
-gc(#?MODULE{} = T, Epoch) when is_integer(Epoch) ->
-    %% Epoch mode: pages tombstoned at or before `Epoch` are unreachable from
-    %% any root the caller still admits, so prune them.
-    prune_freed(T, Epoch);
 gc(#?MODULE{} = T, KeepRoots) when
     is_list(KeepRoots)
 ->
@@ -437,29 +435,4 @@ prune_unreachable(#?MODULE{} = T, KeepRoots) ->
         freed_bytes => Bytes,
         swept => Swept
     },
-    {T, Meta}.
-
-%% @private
-prune_freed(#?MODULE{} = T, Epoch) ->
-    Tab = T#?MODULE.tab,
-    %% Delete every page row whose FreedAt column (3rd element) is an
-    %% integer epoch `=< Epoch`. Live pages carry `undefined` and the
-    %% `is_integer` guard excludes them; the 2-tuple root row has no 3rd
-    %% element and never matches this 3-tuple pattern.
-    MatchSpec = [
-        {
-            {'_', '_', '$1'},
-            [{is_integer, '$1'}, {'=<', '$1', {const, Epoch}}],
-            [true]
-        }
-    ],
-    W0 = ets:info(Tab, memory),
-    Num = ets:select_delete(Tab, MatchSpec),
-    W1 = ets:info(Tab, memory),
-    %% `ets:info(_, memory)` reports words; convert the freed delta to
-    %% bytes. (Was `memory:words/1`, which the resolved `memory` dep no
-    %% longer exports — undef in this GC telemetry path.)
-    Bytes = (W0 - W1) * erlang:system_info(wordsize),
-
-    Meta = #{name => T#?MODULE.name, freed_count => Num, freed_bytes => Bytes},
     {T, Meta}.

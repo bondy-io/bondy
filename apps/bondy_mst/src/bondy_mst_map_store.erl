@@ -163,11 +163,8 @@ free(#?MODULE{pages = Pages0} = T, Hash, _Page) ->
     Pages = maps:remove(Hash, Pages0),
     T#?MODULE{pages = Pages}.
 
--spec gc(t(), KeepRoots :: [list()] | epoch()) -> {T :: t(), Metadata :: map()}.
+-spec gc(t(), KeepRoots :: [hash()]) -> {T :: t(), Metadata :: map()}.
 
-gc(#?MODULE{} = T, Epoch) when is_integer(Epoch) ->
-    %% Epoch-based GC not implemented by this store
-    {T, #{}};
 gc(#?MODULE{pages = Pages0} = T, KeepRoots) when is_list(KeepRoots) ->
     %% Folds the roots we want to keep and create a new map containing only
     %% those roots and its descendants.

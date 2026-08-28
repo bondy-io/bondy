@@ -270,11 +270,6 @@ set_online_sync(Config) ->
     ),
 
     %%  GC
-    %% Epoch = erlang:monotonic_time(),
-    %% ok = gen_server:call(Peer1, {gc, Epoch}, ?TIMEOUT_XXL),
-    %% ok = gen_server:call(Peer2, {gc, Epoch}, ?TIMEOUT_XXL),
-    %% ok = gen_server:call(Peer3, {gc, Epoch}, ?TIMEOUT_XXL),
-
     ok = gen_server:call(Peer1, gc, ?TIMEOUT_XXL),
     ok = gen_server:call(Peer2, gc, ?TIMEOUT_XXL),
     ok = gen_server:call(Peer3, gc, ?TIMEOUT_XXL),

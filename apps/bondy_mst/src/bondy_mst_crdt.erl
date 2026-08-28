@@ -488,13 +488,11 @@ Triggers a garbage collection overriding the versions to keep.
 Garbage collection removes all pages that are not descendants of either the
 current root or the roots in `KeepRoots`.
 """).
--spec gc
-    (t(), KeepRoots :: [binary()]) -> t();
-    (t(), Epoch :: integer()) -> t().
+-spec gc(t(), KeepRoots :: [binary()]) -> t().
 
-gc(#?MODULE{} = CRDT, Arg) when is_list(Arg) orelse is_integer(Arg) ->
-    %% bondy_mst:gc will add the current root when is_list(Arg)
-    Tree = bondy_mst:gc(CRDT#?MODULE.tree, Arg),
+gc(#?MODULE{} = CRDT, KeepRoots) when is_list(KeepRoots) ->
+    %% bondy_mst:gc adds the current root itself.
+    Tree = bondy_mst:gc(CRDT#?MODULE.tree, KeepRoots),
     CRDT#?MODULE{tree = Tree}.
 
 ?DOC("""

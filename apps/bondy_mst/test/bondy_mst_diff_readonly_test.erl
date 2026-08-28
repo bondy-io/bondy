@@ -16,10 +16,10 @@
 %%      value is absent-or-different in `B`, in key order (an independent
 %%      oracle over `fold/2`).
 %%   2. Read-only: diffing leaves both input trees byte-for-byte intact on the
-%%      mutable backends, where the old `free`-based descent corrupted them —
-%%      at the next collection on an ETS store (free tombstones `freed_at`),
-%%      observable after a `gc(Epoch)` (which
-%%      `prune_freed` then reclaims regardless of reachability).
+%%      mutable backends, where a `free`-based descent would corrupt them —
+%%      on an ETS store `free` tombstones `freed_at`, observable here by
+%%      reclaiming every tombstoned row (a test-local, reachability-blind
+%%      sweep) and asserting the tree is whole.
 %% =============================================================================
 
 -module(bondy_mst_diff_readonly_test).
@@ -37,8 +37,6 @@ map_tree(Name) ->
         merger => fun(_K, _V1, V2) -> V2 end
     }).
 
-%% The collection strategy is chosen per `bondy_mst:gc/2` CALL (integer epoch
-%% vs keep-root list), not at open time, so the store takes no mode here.
 ets_tree(Name) ->
     bondy_mst:new(#{
         store => bondy_mst_ets_store,
@@ -57,6 +55,24 @@ to_kv(T) ->
 %% different value in two trees (exercises the value-differs branch).
 val(K, Salt) ->
     integer_to_binary(K * 7 + Salt).
+
+%% The store's page table is owned by this (the test) process; identified
+%% by its `<<"$root">>` row carrying THIS tree's root hash, so tables from
+%% sibling tests in the same runner process cannot be confused with it.
+page_tab(RootHash) ->
+    Self = self(),
+    [Tab | _] = [
+        T
+     || T <- ets:all(),
+        ets:info(T, owner) =:= Self,
+        ets:info(T, type) =:= set,
+        try
+            ets:lookup(T, <<"$root">>) =:= [{<<"$root">>, RootHash}]
+        catch
+            _:_ -> false
+        end
+    ],
+    Tab.
 
 kvs(Keys, Salt) ->
     [{K, val(K, Salt)} || K <- Keys].
@@ -183,11 +199,14 @@ diff_readonly_ets_two_tree_test() ->
     ?assertEqual(D1, D2),
     ?assertEqual(D1, bondy_mst:diff_to_list(B, A)).
 
-%% Epoch-collected ETS + root form: `free` marks `freed_at`; a `gc(Epoch)` then
-%% reclaims every freed-marked page regardless of reachability. If the diff
-%% had `free`d any page reachable from the current root, the post-GC tree would
-%% lose entries. Assert the current tree survives a full epoch GC after a diff.
-diff_readonly_ets_epoch_gc_test() ->
+%% ETS + root form: `free` marks `freed_at` tombstones; deleting every
+%% tombstoned row afterwards is the harshest oracle for the read-only
+%% property — if the diff had `free`d any page reachable from the current
+%% root, the reclaim would lose entries. The sweep lives HERE, in the
+%% test: production collection is reachability-only (`bondy_mst:gc/2`),
+%% precisely because a reachability-blind reclaim like this one deletes
+%% any still-referenced page it finds tombstoned.
+diff_readonly_ets_tombstone_reclaim_test() ->
     A = build(ets_tree("p_A"), kvs(lists:seq(1, 200), 0)),
     RA = bondy_mst:root(A),
     B0 = build(A, kvs(lists:seq(201, 320), 0)),
@@ -200,11 +219,15 @@ diff_readonly_ets_epoch_gc_test() ->
     assert_valid_diff(BList, APriorList, bondy_mst:diff_to_list(B, RA)),
     ?assertEqual(BList, to_kv(B)),
 
-    %% Reclaim everything ever marked freed_at; the current root must keep all
-    %% its pages (the diff must not have marked any of them freed).
-    Epoch = erlang:monotonic_time(),
-    B2 = bondy_mst:gc(B, Epoch),
-    ?assertEqual(BList, to_kv(B2)).
+    %% Delete every row `free/3` ever stamped (page rows are
+    %% `{Hash, Page, FreedAt}`; live pages carry `undefined`, the 2-tuple
+    %% root row never matches); the current root must keep all its pages
+    %% (the diff must not have marked any of them freed).
+    Tab = page_tab(bondy_mst:root(B)),
+    _ = ets:select_delete(
+        Tab, [{{'_', '_', '$1'}, [{is_integer, '$1'}], [true]}]
+    ),
+    ?assertEqual(BList, to_kv(B)).
 
 %% Two-tree diff across *different* backends (map vs ets) still read-only and
 %% correct — guards against an asymmetry between the Store1 / Store2 paths.

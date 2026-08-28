@@ -144,7 +144,7 @@ that surfaces far from its cause, as an unservable root.
 """).
 -callback free(backend(), hash(), page()) -> backend().
 
--callback gc(backend(), KeepRoots :: [hash()] | Epoch :: epoch()) ->
+-callback gc(backend(), KeepRoots :: [hash()]) ->
     {backend(), Metadata :: map()}.
 
 -callback missing_set(backend(), Root :: binary()) -> sets:set(hash()).
@@ -393,7 +393,7 @@ free(#?MODULE{mod = Mod, state = State0} = T0, Hash, Page) ->
             T
     end.
 
--spec gc(Store :: t(), KeepRoots :: [hash()] | Epoch :: integer()) ->
+-spec gc(Store :: t(), KeepRoots :: [hash()]) ->
     {Store :: t(), Metadata :: map()}.
 
 gc(#?MODULE{mod = Mod, state = State0} = T, KeepRoots) ->
