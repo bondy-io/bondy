@@ -69,8 +69,9 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 -r bondy \
     && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "bondy" bondy \
-    && mkdir -p /bondy/etc /bondy/data /bondy/log /bondy/tmp \
-    && chown -R bondy:bondy /bondy/etc /bondy/data /bondy/log /bondy/tmp
+    && mkdir -p /bondy/etc /bondy/data /bondy/log /bondy/tmp /bondy/run \
+    && chown -R bondy:bondy /bondy/etc /bondy/data /bondy/log /bondy/tmp \
+        /bondy/run
 
 WORKDIR /bondy
 
