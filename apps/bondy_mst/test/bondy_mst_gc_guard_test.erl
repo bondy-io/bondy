@@ -150,6 +150,75 @@ gc_aborts_on_unservable_root_test() ->
         end
     end.
 
+%% The reachability sweep's candidate snapshot precedes the mark walk —
+%% `prune_unreachable/2`'s order is load-bearing. A page inserted while
+%% the collection runs but after the snapshot must survive the cycle
+%% regardless of reachability: with the inverse order (mark, then
+%% select) such a page is swept ON ARRIVAL — absent while the
+%% keep-roots are walked so not in the filter, yet present for the
+%% select. In production the concurrent inserter is the sync session's
+%% `put_page` (the `concurrent_writes` capability), and the writer that
+%% then publishes a root referencing the swept page holds a permanently
+%% unservable root.
+%%
+%% `bloomfi:new/1` is called exactly once per reachability collection,
+%% at the start of the mark walk, so an insert injected there lands
+%% after the snapshot under the correct order and inside the
+%% mark-before-select window under the inverse — a deterministic probe
+%% of the ordering contract, no timing involved.
+sweep_spares_pages_inserted_after_snapshot_test() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    T0 = new_tree(),
+    T = lists:foldl(
+        fun(K, Acc) -> bondy_mst:put(Acc, K, K) end,
+        T0,
+        lists:seq(1, ?N)
+    ),
+
+    %% A page that is NOT reachable from T's root, built in a private
+    %% store — the shape of a sync-session page arriving mid-pull.
+    Foreign0 = bondy_mst:new(#{
+        store => bondy_mst_ets_store,
+        store_opts => #{name => <<"gc_guard_foreign">>},
+        merger => fun(_K, V, V) -> V end
+    }),
+    Foreign = bondy_mst:put(bondy_mst:put(Foreign0, -1, 1), -2, 1),
+    ForeignRoot = bondy_mst:root(Foreign),
+    ForeignPage = bondy_mst_store:get(bondy_mst:store(Foreign), ForeignRoot),
+
+    Key = {?MODULE, injected},
+    meck:new(bloomfi, [passthrough]),
+    meck:expect(bloomfi, new, fun(Size) ->
+        %% Runs inside gc/2's mark phase, in the collecting process.
+        {H, _} = bondy_mst:put_page(T, ForeignPage),
+        undefined = erlang:put(Key, H),
+        meck:passthrough([Size])
+    end),
+
+    try
+        T1 = bondy_mst:gc(T, []),
+        H = erlang:erase(Key),
+        ?assertEqual(ForeignRoot, H),
+        Store = bondy_mst:store(T1),
+        %% The injected page postdates the snapshot: it must be live,
+        %% not swept — it survives to the NEXT cycle, which may then
+        %% legitimately collect it as garbage.
+        ?assertEqual(live, bondy_mst_store:page_state(Store, H))
+    after
+        meck:unload(bloomfi),
+        _ = erlang:erase(Key),
+        try
+            bondy_mst:destroy(Foreign)
+        catch
+            _:_ -> ok
+        end,
+        try
+            bondy_mst:destroy(T)
+        catch
+            _:_ -> ok
+        end
+    end.
+
 %% =============================================================================
 %% HELPERS
 %% =============================================================================

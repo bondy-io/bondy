@@ -17,12 +17,13 @@
 %% the merge keeps by reference, the free wrongly drops a page that is
 %% still live:
 %%
-%% - on `bondy_mst_map_store` / `bondy_mst_ets_store`, `free/3` physically
-%%   removes the page, so it is gone;
-%% - on `bondy_mst_pack_store`, `free/3` adds the hash to the `free_set`
-%%   tombstone and `get/2`/`has/2`/`missing_set/2` then report the page as
-%%   absent *even though its bytes are still on disk* — exactly the
-%%   `peer_returned_empty_pages` signature.
+%% - on `bondy_mst_map_store`, `free/3` physically removes the page, so
+%%   it is gone (sound only there: single consumer, no old roots);
+%% - on `bondy_mst_ets_store` and `bondy_mst_pack_store`, `free/3` only
+%%   tombstones and reads serve tombstoned pages (the tombstone gates
+%%   reclamation and enumeration, never a read), so a wrong free is
+%%   latent until a collection acts on it — the pack rewrite keeps
+%%   `reachable ∩ non-tombstoned` and drops the page outright.
 %%
 %% The store-level invariant that must hold after every committed write is
 %% therefore: every page reachable from the current root is present, i.e.
@@ -55,8 +56,129 @@ free_reachable_test_() ->
         end,
         fun(_) -> ok end, [
             {timeout, 60, fun map_store_invariant/0},
-            {timeout, 120, fun pack_store_invariant/0}
+            {timeout, 120, fun pack_store_invariant/0},
+            {timeout, 60, fun foreign_split_frees_nothing/0}
         ]}.
+
+%% The FOREIGN owner rule in `bondy_mst:split/5`: decomposing the DONOR
+%% tree's pages while merging must never `free/3` them — the receiver's
+%% store holds them (the AAE adopt-then-integrate path `put_page`s the
+%% peer's pages into the local store and then merges the peer root), and
+%% until the merge commits they are reachable only from the pinned peer
+%% root. Freeing them there tombstones pulled pages mid-integrate; on
+%% the pack store a later collection (`reachable ∩ non-tombstoned`)
+%% would then drop them outright.
+%%
+%% This drives the exact production shape — adopt a fully-interleaved
+%% peer tree, merge its root — and asserts NO page of either the merged
+%% root's tree or the peer's tree carries a tombstone afterwards. The
+%% merge only ever frees pages it path-copied AWAY (owned rewrites of
+%% the receiver's old spine, unreachable from the new root), so a
+%% tombstone on anything still reachable is an over-free. Reverting
+%% `foreign` to free (one word in `split_page/6`) trips this on the
+%% peer-root walk.
+foreign_split_frees_nothing() ->
+    N = 200,
+    %% DISJOINT, fully interleaved key sets, deliberately — both halves
+    %% of the trap:
+    %%
+    %% - Every receiver key is absent from the donor, so the merge must
+    %%   `split/5` the donor's pages at every receiver entry — the
+    %%   foreign path runs down the donor's spine over and over.
+    %%   (Overlapping key sets short-circuit the aligned regions and
+    %%   barely exercise the foreign path.)
+    %% - Disjoint keys mean no page of A can alias a page of P, so
+    %%   "zero tombstones on either walk" is an exact invariant — an
+    %%   OWNED free of A's replaced spine cannot legitimately tombstone
+    %%   a row some kept twin still references.
+    %%
+    %% `put_batch/2` cannot catch this rule even though it merges a
+    %% foreign (map-store) batch tree: the batch pages are absent from
+    %% the receiver's store, so a wrong free there is a no-op. The
+    %% adopt step below is what arms it.
+    A0 = new_ets_tree(<<"foreign_recv">>),
+    A = bondy_mst:put_batch(A0, [{2 * I, <<"a">>} || I <- lists:seq(1, N)]),
+
+    P0 = new_ets_tree(<<"foreign_peer">>),
+    P = bondy_mst:put_batch(
+        P0, [{2 * I + 1, <<"p">>} || I <- lists:seq(0, N - 1)]
+    ),
+    PeerRoot = bondy_mst:root(P),
+
+    %% Adopt: the sync session's `put_page` stream.
+    A1 = lists:foldl(
+        fun(Page, Acc) ->
+            {_, Acc1} = bondy_mst:put_page(Acc, Page),
+            Acc1
+        end,
+        A,
+        [
+            Pg
+         || {_H, Pg} <- bondy_mst:fold_pages(
+                P,
+                fun(HP, Acc) -> [HP | Acc] end,
+                [],
+                #{root => PeerRoot}
+            )
+        ]
+    ),
+    %% The production integrate guard: the peer root is fully servable
+    %% from the receiver's store before the merge.
+    ?assertEqual(
+        [], sets:to_list(sets_from(bondy_mst:missing_set(A1, PeerRoot)))
+    ),
+
+    A2 = bondy_mst:merge(A1, A1, PeerRoot),
+    Store = bondy_mst:store(A2),
+
+    ?assertEqual([], tombstoned_reachable(A2, Store, bondy_mst:root(A2))),
+    ?assertEqual([], tombstoned_reachable(A2, Store, PeerRoot)),
+    %% And the merge produced the union.
+    ?assertEqual(
+        lists:seq(1, 2 * N),
+        lists:sort([K || {K, _} <- bondy_mst:to_list(A2)])
+    ),
+    %% The adopted peer root stays fully servable: until its pin is
+    %% consumed, the next compaction marks from it.
+    ?assertEqual(
+        [], sets:to_list(sets_from(bondy_mst:missing_set(A2, PeerRoot)))
+    ),
+
+    ok = destroy_quiet(P),
+    ok = destroy_quiet(A2).
+
+%% @private
+%% Every page reachable from `Root` that is not `live` in the store —
+%% `fold_pages/4` reads THROUGH tombstones, so the walk itself cannot
+%% distinguish them; `page_state/2` can.
+tombstoned_reachable(T, Store, Root) ->
+    lists:filtermap(
+        fun({H, _}) ->
+            case bondy_mst_store:page_state(Store, H) of
+                live -> false;
+                S -> {true, {H, S}}
+            end
+        end,
+        bondy_mst:fold_pages(
+            T, fun(HP, Acc) -> [HP | Acc] end, [], #{root => Root}
+        )
+    ).
+
+%% @private
+new_ets_tree(Name) ->
+    bondy_mst:new(#{
+        store => bondy_mst_ets_store,
+        store_opts => #{name => Name},
+        merger => fun(_K, _A, B) -> B end
+    }).
+
+%% @private
+destroy_quiet(T) ->
+    try
+        bondy_mst:destroy(T)
+    catch
+        _:_ -> ok
+    end.
 
 %% The merge/split free path must never drop a page still reachable from
 %% the root. On the map store an over-free physically loses the page.

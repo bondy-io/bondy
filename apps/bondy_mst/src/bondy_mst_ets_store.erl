@@ -368,18 +368,22 @@ prune_unreachable(#?MODULE{} = T, KeepRoots) ->
     %% CANDIDATE SET FIRST, then mark. The order is load-bearing.
     %%
     %% The sweep may only delete pages that were already present when the mark
-    %% walk observed the keep-roots. Taking the candidate set AFTER marking
-    %% (the previous order) let a page inserted in between be swept: it was
-    %% absent during the mark, so it is not in the filter, yet present for the
-    %% select — deleted on arrival. Its writer then publishes a root that
-    %% references it, and the tree has an unservable root: the s16/s25 fault,
-    %% reproducible in seconds with a concurrent writer
-    %% (`bondy_mst_ets_concurrent_stress_test`).
+    %% walk observed the keep-roots. With the inverse order a page inserted
+    %% between mark and select is swept ON ARRIVAL — absent for the filter,
+    %% present for the select — and its writer (the sync session's concurrent
+    %% `put_page`) then publishes a root that references it: an unservable
+    %% root. Snapshotting first makes the race harmless: a page inserted
+    %% after the snapshot is not a candidate, survives this cycle, and is
+    %% collected by the next one if it really is garbage. Deleting late is a
+    %% bounded memory cost; deleting early is data loss.
     %%
-    %% Snapshotting first inverts the race harmlessly: a page inserted after
-    %% the snapshot is simply not a candidate, so it survives this cycle and
-    %% is collected by the next one if it really is garbage. Deleting late is
-    %% a bounded memory cost; deleting early is data loss.
+    %% The lock is `bondy_mst_gc_guard_test:
+    %% sweep_spares_pages_inserted_after_snapshot_test` — deterministic: it
+    %% injects the insert inside the collection at `bloomfi:new/1`, which
+    %% lands after the snapshot under this order and inside the mark window
+    %% under the inverse. It is the ONLY lock: the concurrent stress suite's
+    %% servability oracle walks the mutator's own root, and an
+    %% arrival-swept page is an inserter page not yet reachable from it.
     MS = [{{'$1', '_', '_'}, [{'=/=', '$1', ?ROOT_KEY}], ['$1']}],
     All = ets:select(Tab, MS),
 

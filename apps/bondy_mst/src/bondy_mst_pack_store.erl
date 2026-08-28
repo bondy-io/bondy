@@ -427,10 +427,11 @@ has(#?MODULE{} = T, Hash) when is_binary(Hash) ->
 
 -doc """
 Diagnostic: is the page's content PHYSICALLY present (in pending or a
-sealed pack), ignoring the `free_set` tombstone that `has/2` honours? Used
-to classify a "missing" page (per `missing_set/2`) as either
-tombstone-masked-but-present (data on disk) or genuinely absent (never
-written) when diagnosing a dangling root.
+sealed pack)? Same answer as `has/2` (neither consults the `free_set` —
+see `get/2`); kept as a separate name so diagnostic call sites read as
+asking about physical bytes, and paired with `is_tombstoned/2` to
+classify a "missing" page as tombstoned-but-present (data on disk) or
+genuinely absent (never written) when diagnosing a dangling root.
 """.
 -spec is_present(t(), binary()) -> boolean().
 

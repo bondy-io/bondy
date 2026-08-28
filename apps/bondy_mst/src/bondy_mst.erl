@@ -1719,24 +1719,30 @@ put_sub_after_first(T, Key, Value, Store0, Level, [First, Second | Rest0]) ->
 %% Dangling-page recovery
 %% ----------------------
 %%
-%% `merge_aux/5` and `split/4` look pages up by content hash. In the
-%% steady state every hash they're handed resolves in either Store0
-%% (the merge accumulator), A's store, or B's store. Under sustained
-%% high write throughput against a `bondy_oplog_instance` (observed
-%% in the e2e benchmark at ≥8 shards × ≥16-event batches with batched
-%% fsync) we have occasionally hit a state where a referenced hash
-%% resolves in NEITHER store. The pre-existing behaviour was to crash
-%% the gen_server (`FunctionClauseError` on `bondy_mst_page:level/1`
-%% with `undefined`), which in turn killed the supervisor subtree.
+%% `merge_aux/5` and `split/5` look pages up by content hash; the
+%% invariant is that every hash they are handed resolves in Store0
+%% (the merge accumulator), A's store, or B's store. Each way a store
+%% or collector can break that invariant is a contract with its own
+%% falsifier:
 %%
-%% The handlers below recover from this by treating the dangling
-%% subtree as empty: log once with diagnostic context and continue.
-%% The result is a tree that has lost some content, not a crashed
-%% subtree. This is a stop-gap — the root cause (some path that
-%% references a hash without inserting its page) is still under
-%% investigation. A focused, fully-deterministic repro has not yet
-%% been isolated despite multi-million-event stress runs against
-%% `put_batch` and the live oplog instance pipeline.
+%% - `free/3` never hard-deletes a page that older roots, pins, or
+%%   accumulators may still reference — the ETS backend always
+%%   tombstones (`bondy_mst_free_reachable_test`);
+%% - the reachability sweep takes its candidate snapshot before the
+%%   mark walk, so a concurrently inserted page cannot be swept on
+%%   arrival (`bondy_mst_gc_guard_test:
+%%   sweep_spares_pages_inserted_after_snapshot_test`);
+%% - a FOREIGN split — decomposing the donor's pages while merging an
+%%   adopted (sync-pulled) root — frees nothing in the receiver's
+%%   store (`bondy_mst_free_reachable_test:foreign_split_frees_nothing/0`).
+%%
+%% A hole that arises anyway does not amplify — `gc/2` refuses to
+%% sweep under an unservable current root and retains a classified
+%% report (`gc_aborts/0`) naming the layer at fault — and does not
+%% crash: the handlers below treat a dangling subtree as empty and
+%% log with diagnostic context, so the cost is bounded content loss,
+%% never a dead supervisor subtree (an unhandled miss raises
+%% `FunctionClauseError` on `bondy_mst_page:level/1`).
 log_dangling_page(Tag, T, Store0, Hash, Key) ->
     ?LOG_WARNING(#{
         description => Tag,
@@ -1789,10 +1795,10 @@ split(T, Store0, Hash, Key, Owner) ->
         undefined ->
             %% Dangling Hash: a parent page referenced a child by hash
             %% but the child is in no store we can see. Treat the
-            %% subtree as empty rather than crashing the gen_server.
-            %% This shouldn't happen in steady-state — see the
-            %% "Dangling-page recovery" note at the top of merge_aux
-            %% for the open root-cause investigation.
+            %% subtree as empty rather than crashing the gen_server —
+            %% see the "Dangling-page recovery" note at the top of
+            %% merge_aux for the contracts that make this unreachable
+            %% and the guards behind it.
             log_dangling_page("split: page missing", T, Store0, Hash, Key),
             {undefined, undefined, Store0};
         _ ->
@@ -2212,9 +2218,9 @@ do_diff(T, Store1, ARoot, Store2, BRoot, Acc) ->
             %% Dangling-page recovery (see the note above `merge_aux/5`):
             %% a hash resolved to no page in either store. Treat both
             %% subtrees as empty rather than crashing on
-            %% `bondy_mst_page:list(undefined)`. With the pack store now
-            %% serving physically-present pages this should not happen for a
-            %% live tree; the guard remains for genuinely-absent pages.
+            %% `bondy_mst_page:list(undefined)`. The pack store serves any
+            %% physically-present page, so for a live tree this branch means
+            %% a genuinely-absent page.
             log_dangling_diff(ARoot, BRoot),
             {[], Acc};
         {undefined, _} ->
