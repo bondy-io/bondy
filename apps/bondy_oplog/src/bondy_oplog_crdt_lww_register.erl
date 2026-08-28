@@ -276,7 +276,9 @@ encode_state({cleared, H}) when is_integer(H) ->
 decode_state(<<0>>) ->
     undefined;
 decode_state(<<1, H:64/big-unsigned, VBin/binary>>) ->
-    %% C-2: `[safe]` — decodes peer-shipped CRDT state on the AAE merge path.
-    {set, binary_to_term(VBin, [safe]), H};
+    %% Own-persisted projection bytes — plain decode per the C-2
+    %% own-bytes rule (rationale:
+    %% `bondy_oplog_cell_kernel:decode_value_bytes/2`).
+    {set, binary_to_term(VBin), H};
 decode_state(<<2, H:64/big-unsigned>>) ->
     {cleared, H}.

@@ -393,12 +393,12 @@ encode_state({_Schema, _Fields, _CC, _Hlc} = State) ->
 -spec decode_state(binary()) -> state().
 
 decode_state(<<?ENC_V1, Bin/binary>>) ->
-    %% C-2: `[safe]` — this decodes peer-shipped CRDT state on the AAE merge
-    %% path. Schema values are module atoms of already-loaded CRDT modules
-    %% (optionally paired with a policy map whose keys/values are also
-    %% already-loaded atoms), so `[safe]` (no new atom creation) round-trips
-    %% them without risk.
-    uncanon(binary_to_term(Bin, [safe])).
+    %% Own-persisted projection bytes — plain decode per the C-2
+    %% own-bytes rule (rationale:
+    %% `bondy_oplog_cell_kernel:decode_value_bytes/2`). Under `[safe]`
+    %% the schema's CRDT-module atoms were also a cold-read hazard: a
+    %% restart decodes frames before those modules are loaded.
+    uncanon(binary_to_term(Bin)).
 
 %% =============================================================================
 %% INTERNAL

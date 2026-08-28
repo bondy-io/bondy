@@ -446,8 +446,10 @@ encode_state({_Entries, _CC, _Hlc} = State) ->
 -spec decode_state(binary()) -> state().
 
 decode_state(<<?ENC_V1, Bin/binary>>) ->
-    %% C-2: `[safe]` — decodes peer-shipped CRDT state on the AAE merge path.
-    uncanon(binary_to_term(Bin, [safe])).
+    %% Own-persisted projection bytes — plain decode per the C-2
+    %% own-bytes rule (rationale:
+    %% `bondy_oplog_cell_kernel:decode_value_bytes/2`).
+    uncanon(binary_to_term(Bin)).
 
 %% =============================================================================
 %% INTERNAL

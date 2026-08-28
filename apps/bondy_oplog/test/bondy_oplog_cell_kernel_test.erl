@@ -63,19 +63,26 @@ decode_state_dispatch_test() ->
     Bytes = ?LWW:encode_state({set, <<"v">>, 5}),
     ?assertEqual({set, <<"v">>, 5}, ?K:decode_state({crdt, ?LWW}, Bytes)).
 
-%% C-2: a peer-crafted CRDT state whose value encodes an atom that was never
-%% interned must be REJECTED by the `[safe]` decoder on the merge path — not
-%% silently interned (unsafe-term / atom-table-exhaustion class). A legit value
-%% at the same envelope still decodes.
-c2_decode_state_rejects_uninterned_atom_test() ->
-    %% Hand-built ETF for a small UTF-8 atom (tag 119 = SMALL_ATOM_UTF8_EXT). The
-    %% name appears here only as binary bytes, so loading this test never
-    %% interns it — `[safe]` must refuse to create it.
-    Name = <<"bondy_c2_uninterned_atom_qwertyz">>,
+%% State bytes reaching decode_state are this node's own projection frames —
+%% peer state arrives as terms via the sync transport, never as bytes here
+%% (measured: `bondy_aae_cluster_SUITE` runtime-atom cases). So the decode is
+%% PLAIN per the C-2 own-bytes rule: an atom present only as ETF bytes — the
+%% post-restart state, when no loaded module names it and its event was
+%% compacted out of the log — must decode (re-interning it), not be refused.
+own_bytes_decode_state_interns_own_atom_test() ->
+    %% Hand-built ETF for a small UTF-8 atom (tag 119 = SMALL_ATOM_UTF8_EXT).
+    %% The name appears here only as binary bytes, so loading this test never
+    %% interns it — proven by the existing_atom probe below.
+    Name = <<"bondy_f4_uninterned_atom_qwertyz">>,
+    ?assertError(badarg, binary_to_existing_atom(Name, utf8)),
     ValueBytes = <<131, 119, (byte_size(Name)):8, Name/binary>>,
     %% Wrap it in an LWW `set` state envelope (<<1, Hlc:64, ValueBytes>>).
     Crafted = <<1, 5:64/big-unsigned, ValueBytes/binary>>,
-    ?assertError(badarg, ?K:decode_state({crdt, ?LWW}, Crafted)),
+    ?assertMatch(
+        {set, V, 5} when is_atom(V), ?K:decode_state({crdt, ?LWW}, Crafted)
+    ),
+    {set, Atom, 5} = ?K:decode_state({crdt, ?LWW}, Crafted),
+    ?assertEqual(Name, atom_to_binary(Atom, utf8)),
 
     Legit = ?LWW:encode_state({set, <<"v">>, 5}),
     ?assertEqual({set, <<"v">>, 5}, ?K:decode_state({crdt, ?LWW}, Legit)).

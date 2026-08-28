@@ -310,9 +310,14 @@ decode_value_bytes({crdt, Mod}, ValueBytes) when is_binary(ValueBytes) ->
             State = Mod:decode_state(ValueBytes),
             Mod:to_value(State);
         false ->
-            %% C-2: `[safe]` — decodes peer-shipped cell value bytes on the AAE
-            %% merge path; untrusted bytes must not create atoms/funs.
-            binary_to_term(ValueBytes, [safe])
+            %% Plain decode — these bytes are this node's own projection
+            %% frames (written by its applier/instance); peer state reaches
+            %% this node as terms already decoded by the sync transport,
+            %% never as bytes here. `[safe]` would refuse the frame's own
+            %% atoms after a restart whose log replay no longer interns
+            %% them (falsifier: `bondy_aae_cluster_SUITE:
+            %% runtime_atom_cell_read_after_restart_measured`).
+            binary_to_term(ValueBytes)
     end.
 
 -doc """
