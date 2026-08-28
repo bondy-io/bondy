@@ -42,7 +42,8 @@ Signature, expiry and revocation, via `bondy_ticket:verify/1` or
 - the credential's scope covers this realm, and its issuer is trusted by this
   realm (`bondy_realm:is_trusted_issuer/2`) — the scope check alone is not
   enough, since an SSO-scoped credential matches every realm
-- the user still exists and is enabled
+- the user is enabled, and — unless the identity is externally managed, see
+  below — still exists
 - the realm still allows connections
 - for access tokens, the `token_version` gate in `bondy_auth_oauth2`
 
@@ -51,6 +52,43 @@ disabled or removed, until it expired.
 
 Authorization is out of scope: this answers who the caller is, not what they
 may do.
+
+## Externally managed identities
+
+A ticket carrying `authmethod = oidcrp` was issued by the OIDC authorization
+code flow (`bondy_oidc_ticket:issue/5`) against an external Identity Provider,
+which is the authority on whether that subject exists. Bondy holds a local user
+record for such a subject only when the provider is configured with
+`auto_provision`; without it there is no record to find, and the roles travel in
+the ticket's own claims.
+
+So for `oidcrp` tickets a missing local record is not a failure here. That
+mirrors the session path: the cookie transport hands the same ticket's claims to
+`bondy_auth:init/6`, which routes to `init_from_claims/8` and swallows
+`{no_such_user, _}` (`user => undefined`, roles from the claims). Requiring the
+record here rejected a cookie that opens a WAMP session perfectly well.
+
+The carve-out is deliberately narrower than the session path, which tolerates a
+missing record for *any* ticket presented as a cookie. It is scoped to `oidcrp`
+because that is the only credential whose subject Bondy does not own; a ticket
+issued by `bondy.ticket.issue` names a user who existed at issue time and is
+locally managed, so the record check stays a real revocation control there — as
+does WAMP `ticket` authentication, which goes through `init_from_user/8`.
+
+Two consequences worth stating plainly:
+
+- an `oidcrp` identity cannot be locked out by deleting the local user; use the
+  IdP, or revoke the ticket (with `security.ticket.allow_not_found = off`)
+- realm membership for an `oidcrp` ticket is pinned by its scope, not by a
+  record — `bondy_oidc_ticket:issue/5` hardcodes `scope.realm` to the issuing
+  realm, so `bondy_auth_scope:matches_realm/2` already confines it
+
+Evidence: `bondy_http_verify_SUITE` cases
+`oidc_ticket_accepted_when_user_is_externally_managed`,
+`deleted_user_still_verifies_for_oidc_ticket`,
+`deleted_user_is_rejected_for_locally_issued_ticket`,
+`disabled_user_is_rejected` (an `oidcrp` ticket, so it pins disabled ahead of
+the carve-out) and `sso_ticket_rejected_when_not_a_member_of_target_realm`.
 
 ## Not CORS-enabled
 
@@ -63,6 +101,7 @@ a proxy has none to send.
 
 -include_lib("kernel/include/logger.hrl").
 -include("http_api.hrl").
+-include("bondy_security.hrl").
 
 -type state() :: #{realm_uri := binary()}.
 
@@ -123,7 +162,7 @@ do_verify(RealmUri, Req) ->
                     throw(invalid)
             end,
 
-        ok = check_principal(RealmUri, maps:get(authid, Identity)),
+        ok = check_principal(RealmUri, Identity),
         ok = check_realm(RealmUri),
 
         {ok, Identity}
@@ -260,10 +299,20 @@ verify_access_token(RealmUri, JWT) ->
 %% Neither verifier reads the user, so without this a ticket would keep
 %% authenticating a user who has since been disabled or removed. Resolution is
 %% shared with `bondy_auth:get_user/3` so that this endpoint and the WAMP
-%% session path cannot disagree on who counts as a valid principal — notably,
-%% an SSO realm naming a user does not by itself make them a member of the
-%% realm being accessed.
-check_principal(RealmUri, Authid) ->
+%% session path cannot disagree on how a name resolves — notably, an SSO realm
+%% naming a user does not by itself make them a member of the realm being
+%% accessed.
+%%
+%% The `oidcrp` clause is where the verdicts legitimately differ from the
+%% strict WAMP paths, and it matches what the cookie transport already does via
+%% `bondy_auth:init_from_claims/8`. See the EXTERNALLY MANAGED IDENTITIES
+%% section of the moduledoc for why it is scoped to that authmethod.
+%%
+%% It matches `not_found` and nothing else. Widening it to `{error, _}` — the
+%% obvious simplification — would swallow `user_disabled` and hand the gate back
+%% to a subject an operator had locked out with a local record
+%% (`disabled_user_is_rejected` fails if it does).
+check_principal(RealmUri, #{authid := Authid, authmethod := Authmethod}) ->
     SSORealmUri = bondy_realm:sso_realm_uri(RealmUri),
 
     case bondy_rbac_user:lookup(RealmUri, SSORealmUri, Authid) of
@@ -271,6 +320,8 @@ check_principal(RealmUri, Authid) ->
             ok;
         {error, user_disabled} ->
             throw(user_disabled);
+        {error, not_found} when Authmethod == ?OIDCRP_AUTH ->
+            ok;
         {error, not_found} ->
             throw(no_such_user)
     end.

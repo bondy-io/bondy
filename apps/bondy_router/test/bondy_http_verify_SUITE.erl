@@ -74,7 +74,9 @@ groups() ->
             revoked_ticket_is_rejected,
             cross_realm_ticket_is_rejected,
             disabled_user_is_rejected,
-            deleted_user_is_rejected,
+            oidc_ticket_accepted_when_user_is_externally_managed,
+            deleted_user_still_verifies_for_oidc_ticket,
+            deleted_user_is_rejected_for_locally_issued_ticket,
             malformed_credentials_never_500,
             deleted_realm_never_500,
             post_is_not_allowed
@@ -336,6 +338,10 @@ cross_realm_ticket_is_rejected(_) ->
     ?assertEqual(401, Status).
 
 disabled_user_is_rejected(_) ->
+    %% Also pins the boundary of the `oidcrp` carve-out below: this ticket is
+    %% an OIDC one, so ordering the principal check the other way round —
+    %% tolerating a missing record before asking whether the record found is
+    %% enabled — would let a disabled user back in.
     {ok, JWT, _} = issue_ticket(?REALM, ?DISABLED_USER),
     {200, _, _} = get_verify(cookie_header(?REALM, JWT)),
     %% Signature and expiry are untouched by this; only the user changed.
@@ -351,14 +357,64 @@ disabled_user_is_rejected(_) ->
         end
     end.
 
-deleted_user_is_rejected(_) ->
+oidc_ticket_accepted_when_user_is_externally_managed(_) ->
+    %% The provider is configured without `auto_provision`, so the subject the
+    %% IdP authenticated has no local record and never will. The cookie opens a
+    %% WAMP session (`bondy_auth:init_from_claims/8` tolerates the missing
+    %% user), so it must verify here too.
+    Username = <<"dave">>,
+    ?assertEqual({error, not_found}, bondy_rbac_user:lookup(?REALM, Username)),
+
+    {ok, JWT, _} = bondy_oidc_ticket:issue(
+        ?REALM,
+        Username,
+        ?PROVIDER,
+        #{},
+        #{authroles => [<<"viewer">>], expiry_time_secs => 3600}
+    ),
+    {Status, _, Body} = get_verify(cookie_header(?REALM, JWT)),
+    ?assertEqual(200, Status),
+    %% With no record to read them from, the identity is wholly the claims'.
+    ?assertMatch(
+        #{
+            ~"active" := true,
+            ~"authid" := Username,
+            ~"authmethod" := ~"oidcrp",
+            ~"authroles" := [~"viewer"]
+        },
+        decode(Body)
+    ).
+
+deleted_user_still_verifies_for_oidc_ticket(_) ->
+    %% The cost of the carve-out, asserted so it cannot change silently:
+    %% removing the local record of an externally managed subject does not
+    %% revoke their ticket. Locking them out means the IdP, or revoking the
+    %% ticket with `security.ticket.allow_not_found = off`.
     Username = <<"carol">>,
     ok = ensure_user(?REALM, Username),
     {ok, JWT, _} = issue_ticket(?REALM, Username),
     {200, _, _} = get_verify(cookie_header(?REALM, JWT)),
+
     ok = bondy_rbac_user:remove(?REALM, Username),
-    {Status, _, _} = get_verify(cookie_header(?REALM, JWT)),
-    ?assertEqual(401, Status).
+    ?assertMatch({200, _, _}, get_verify(cookie_header(?REALM, JWT))).
+
+deleted_user_is_rejected_for_locally_issued_ticket(_) ->
+    %% And the other half: the carve-out is scoped to `oidcrp`. A ticket from
+    %% `bondy.ticket.issue` names a locally managed user, so the record check
+    %% remains a real revocation control — as it does for WAMP `ticket` auth,
+    %% which resolves the user through `bondy_auth:init_from_user/8`.
+    Username = <<"erin">>,
+    ok = ensure_user(?REALM, Username),
+    {JWT, Claims} = issue_wamp_ticket(?REALM, Username),
+    ?assertNotEqual(~"oidcrp", maps:get(authmethod, Claims)),
+    {200, _, _} = get_verify(cookie_header(?REALM, JWT)),
+
+    ok = bondy_rbac_user:remove(?REALM, Username),
+    {Status, _, Body} = get_verify(cookie_header(?REALM, JWT)),
+    ?assertEqual(401, Status),
+    ?assertEqual(
+        ~"bondy.error.invalid_credentials", maps:get(~"uri", decode(Body))
+    ).
 
 malformed_credentials_never_500(_) ->
     %% cow_http_hd:parse_authorization/1 and cow_cookie:parse_cookie/1 raise on
@@ -564,12 +620,43 @@ issue_ticket(RealmUri, Authid, ExpirySecs) ->
         #{authroles => [], expiry_time_secs => ExpirySecs}
     ).
 
+%% A ticket that did NOT come from the OIDC flow: `bondy_ticket:issue/2` stamps
+%% the session's authmethod into the claims, so this is the counterpart to
+%% `issue_ticket/2` for asserting that the `oidcrp` carve-out is scoped.
+issue_wamp_ticket(RealmUri, Authid) ->
+    Session = bondy_session:new(RealmUri, #{
+        peer => {{127, 0, 0, 1}, 0},
+        authrealm => RealmUri,
+        authid => Authid,
+        authmethod => ?WAMP_CRA_AUTH,
+        security_enabled => true,
+        authroles => [],
+        roles => #{caller => #{}}
+    }),
+    ets:insert(
+        bondy_session:table(bondy_session:external_id(Session)), Session
+    ),
+    {ok, Ticket, Claims} = bondy_ticket:issue(Session, #{}),
+    {Ticket, Claims}.
+
 ensure_realm(RealmUri) ->
     Config = #{
         uri => RealmUri,
         description => <<"Verify endpoint test realm">>,
         authmethods => [<<"ticket">>, <<"anonymous">>],
-        security_enabled => true
+        security_enabled => true,
+        %% `bondy_ticket:do_issue/2` authorizes the caller, so without this
+        %% `issue_wamp_ticket/2` cannot mint the non-OIDC ticket it needs. The
+        %% endpoint itself performs no authorization, so this is invisible to
+        %% every other case. Mirrors `add_member_realm/3`.
+        grants => [
+            #{
+                permissions => [<<"bondy.issue">>],
+                uri => <<"">>,
+                match => <<"prefix">>,
+                roles => <<"all">>
+            }
+        ]
     },
     _ =
         case bondy_realm:exists(RealmUri) of
