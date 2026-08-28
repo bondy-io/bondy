@@ -727,9 +727,11 @@ get_user(RealmUri, SSORealmUri, UsernameOrAlias0) ->
     UsernameOrAlias = casefold(UsernameOrAlias0),
 
     %% Resolution lives in bondy_rbac_user so that credential verification
-    %% outside a handshake (`bondy_http_verify_handler`) decides who is a valid
-    %% principal exactly the way this path does. Only the error convention
-    %% differs: callers here expect a throw.
+    %% outside a handshake (`bondy_http_verify_handler`) resolves a name to a
+    %% user exactly the way this path does. Two things differ downstream of it:
+    %% callers here expect a throw, and `no_such_user` is fatal on this path but
+    %% tolerated by both the handler and `init_from_claims/8` below when the
+    %% identity is externally managed.
     case bondy_rbac_user:lookup(RealmUri, SSORealmUri, UsernameOrAlias) of
         {ok, User} ->
             User;

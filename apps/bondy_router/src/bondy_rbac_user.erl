@@ -781,7 +781,9 @@ and every record consulted must be enabled.
 This is the single definition of "which user is this name, in this realm",
 shared by the WAMP session path (`bondy_auth`) and by credential verification
 outside a handshake (`bondy_http_verify_handler`), so that the two cannot drift
-apart on who they consider a valid principal.
+apart on how a name resolves. What each caller makes of `not_found` is its own
+business: both reject it for a locally managed credential, and both accept it
+for an externally managed (OIDC) one, which may legitimately have no record.
 """.
 -spec lookup(
     RealmUri :: uri(),
