@@ -222,6 +222,52 @@ translate_skips_test_() ->
     ].
 
 %% =============================================================================
+%% decode_key/1 — own-persisted key bytes decode plain (C-2 own-bytes rule)
+%% =============================================================================
+
+%% The grant key's resource suffix is this node's own persisted bytes
+%% (`bondy_rbac:encode_key/1` writes it via `bondy_db:apply`), so its decode
+%% must intern the bytes' own atoms rather than refuse them (rationale:
+%% `bondy_oplog_cell_kernel:decode_value_bytes/2`). The atom below exists
+%% only as bytes (SMALL_ATOM_UTF8_EXT) until the decode interns it.
+grant_key_own_bytes_decode_interns_own_atom_test() ->
+    Name = <<"bondy_c2_grant_atom_qz3">>,
+    ?assertError(badarg, binary_to_existing_atom(Name, utf8)),
+    ResBin = <<131, 119, (byte_size(Name)):8, Name/binary>>,
+    Key = <<
+        (bondy_oplog_index_key:encode_col(<<"r">>))/binary, 0, ResBin/binary
+    >>,
+    ?assertMatch({<<"r">>, A} when is_atom(A), bondy_rbac:decode_key(Key)),
+    {_, Atom} = bondy_rbac:decode_key(Key),
+    ?assertEqual(Name, atom_to_binary(Atom, utf8)).
+
+%% Same contract for the source key's `{AMask, Authmethod}` suffix
+%% (`bondy_rbac_source:encode_key/1` is the writer).
+source_key_own_bytes_decode_interns_own_atom_test() ->
+    Name = <<"bondy_c2_source_atom_qz2">>,
+    ?assertError(badarg, binary_to_existing_atom(Name, utf8)),
+    Suffix = <<
+        131,
+        104,
+        2,
+        119,
+        (byte_size(Name)):8,
+        Name/binary,
+        109,
+        1:32/big-unsigned,
+        "x"
+    >>,
+    Key = <<
+        (bondy_oplog_index_key:encode_col(<<"u">>))/binary, 0, Suffix/binary
+    >>,
+    ?assertMatch(
+        {<<"u">>, A, <<"x">>} when is_atom(A),
+        bondy_rbac_source:decode_key(Key)
+    ),
+    {_, Atom, _} = bondy_rbac_source:decode_key(Key),
+    ?assertEqual(Name, atom_to_binary(Atom, utf8)).
+
+%% =============================================================================
 %% Helpers
 %% =============================================================================
 

@@ -105,6 +105,17 @@ and never call the process. Declarations (`tables/0`, `main_db_spec/0`,
     fold := fold_class(),
     %% `true` to wire the table's appliers to publish change events.
     publish => boolean(),
+    %% The contract a `publish => true` assumes of its consumer.
+    %% `must_not_miss` (the default): events are the only mechanism that
+    %% corrects the consumer's derived state — or the event's side effect
+    %% is itself the deliverable (an alarm) — so a live subscriber for the
+    %% table's whole life is a correctness invariant, asserted by
+    %% `bondy_rbac_SUITE:every_publishing_table_has_a_live_subscriber`.
+    %% `recovered_on_attach`: the consumer rebuilds its derived state from
+    %% current table contents whenever it subscribes (reconcile-on-attach),
+    %% so it may start on demand and a missed-event window is harmless;
+    %% the assertion exempts these.
+    missed_events => must_not_miss | recovered_on_attach,
     %% Declared secondary indexes (substrate-maintained reverse access
     %% paths), passed verbatim to `bondy_db:open_table/3`.
     indexes => [bondy_oplog_index_spec:spec()]
@@ -362,7 +373,10 @@ tables() ->
         %% replacement, so `lww` with the identity routing default.
         %% `publish => true` feeds the MCP manifest cache
         %% (`bondy_mcp_gateway`), which invalidates its compiled per-realm
-        %% manifests on local + AE-replicated interface writes. (`publish`
+        %% manifests on local + AE-replicated interface writes. That
+        %% consumer is started ON DEMAND (first `manifest/1` call —
+        %% `bondy_mcp_sup` runs nothing by default) and reconciles on
+        %% attach, so `missed_events => recovered_on_attach`. (`publish`
         %% is a runtime knob, not part of the frozen topology, so wiring it
         %% here is not a manifest divergence.) NOTE for readers of
         %% `bondy_db_manifest`: this was the first table added AFTER the
@@ -375,20 +389,23 @@ tables() ->
             db => main,
             durability => durable,
             fold => lww,
-            publish => true
+            publish => true,
+            missed_events => recovered_on_attach
         },
         %% mcp_gateway — the MCP overlay documents (design §18.3): one key
         %% per loaded document in a single flat bucket, the stored value the
         %% SOURCE map (never a parsed form), same posture as `api_gateway`.
-        %% `publish => true` feeds the same manifest-cache reactor as
-        %% `bondy_interface` above. Rides the manifest additive-extension
+        %% `publish => true` feeds the same on-demand manifest-cache
+        %% reactor as `bondy_interface` above (hence the same
+        %% `missed_events` class). Rides the manifest additive-extension
         %% path on upgraded data dirs, like every table added post-freeze.
         #{
             name => ?BONDY_DB_MCP_GATEWAY_TAB,
             db => main,
             durability => durable,
             fold => lww,
-            publish => true
+            publish => true,
+            missed_events => recovered_on_attach
         },
         %% mcp_upstream — pinned upstream MCP tool definitions (design
         %% §13.3): banded by realm, keyed {UpstreamName, ToolName}, the

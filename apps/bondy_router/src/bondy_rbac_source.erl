@@ -135,6 +135,10 @@ and CIDR matching is containment rather than equality.
 %% Exported for the legacy-backup import translator (bondy_export): the source
 %% key must be encoded byte-identically to the live write path.
 -export([encode_key/1]).
+
+-ifdef(TEST).
+-export([decode_key/1]).
+-endif.
 -export([cidr/1]).
 -export([list/1]).
 -export([list/2]).
@@ -601,11 +605,14 @@ encode_key({Username, AMask, Authmethod}) ->
 
 %% @private
 %% Inverse of `encode_key/1`: split at the single `0x00` separator (the username
-%% column is `0x00`-free), decode the username column, then `[safe]`-decode
-%% `{AMask, Authmethod}` (their atoms already exist).
+%% column is `0x00`-free), decode the username column, then plain-decode
+%% `{AMask, Authmethod}` — own-persisted bytes per the C-2 own-bytes rule
+%% (rationale: `bondy_oplog_cell_kernel:decode_value_bytes/2`). The suffix
+%% carries no atoms anyway: `AMask` is `{IntTuple, Int}` and `Authmethod` a
+%% binary; the reserved atoms ride the username column.
 decode_key(Bin) when is_binary(Bin) ->
     {ColBin, Rest} = split_key(Bin),
-    {AMask, Authmethod} = binary_to_term(Rest, [safe]),
+    {AMask, Authmethod} = binary_to_term(Rest),
     {bondy_oplog_index_key:decode_col(ColBin), AMask, Authmethod}.
 
 %% @private

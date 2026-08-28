@@ -249,13 +249,11 @@ normalize_term(Spec, Term) ->
 Build the denormalised columns binary for a value. `<<>>` for a
 pointer-only index.
 
-Projected column values must be `[safe]`-decodable on every node that
-reads the index — binaries, numbers, lists, maps, and atoms already
-present on the reading node. `decode_projection/1` uses
-`binary_to_term(_, [safe])`, so projecting a column whose value is an
-atom not loaded on a fresh replica would fail that decode. In practice
-projected columns are binaries/numbers; the constraint only bites
-exotic atom-valued projections.
+The columns binary is always the reading node's own bytes: every node's
+applier re-runs `project/2` on the in-memory value when it applies a
+cell, so projection bytes never arrive from a peer. `decode_projection/1`
+therefore plain-decodes them per the C-2 own-bytes rule (rationale:
+`bondy_oplog_cell_kernel:decode_value_bytes/2`).
 """.
 -spec project(spec(), term()) -> binary().
 
@@ -282,7 +280,9 @@ project(Spec, Value) ->
 -spec decode_projection(binary()) -> map().
 
 decode_projection(<<>>) -> #{};
-decode_projection(Bin) when is_binary(Bin) -> binary_to_term(Bin, [safe]).
+%% Own-persisted projection bytes — plain decode per the C-2 own-bytes
+%% rule (rationale: `bondy_oplog_cell_kernel:decode_value_bytes/2`).
+decode_projection(Bin) when is_binary(Bin) -> binary_to_term(Bin).
 
 %% =============================================================================
 %% INTERNAL — validation

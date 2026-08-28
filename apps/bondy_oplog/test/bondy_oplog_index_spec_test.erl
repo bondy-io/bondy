@@ -262,3 +262,26 @@ project_is_deterministic_test() ->
 
 decode_empty_projection_test() ->
     ?assertEqual(#{}, ?MOD:decode_projection(<<>>)).
+
+%% Projection bytes are written by the reading node's own applier from
+%% in-memory terms (`bondy_oplog_cell_apply` calls `project/2` locally on
+%% apply), so their decode must intern the columns' own atoms rather than
+%% refuse them (rationale: `bondy_oplog_cell_kernel:decode_value_bytes/2`).
+%% The atom below exists only as bytes (a hand-built MAP_EXT with a
+%% SMALL_ATOM_UTF8_EXT value) until the decode interns it.
+own_bytes_decode_projection_interns_own_atom_test() ->
+    Name = <<"bondy_c2_projection_atom_qz1">>,
+    ?assertError(badarg, binary_to_existing_atom(Name, utf8)),
+    Bin = <<
+        131,
+        116,
+        1:32/big-unsigned,
+        97,
+        1,
+        119,
+        (byte_size(Name)):8,
+        Name/binary
+    >>,
+    ?assertMatch(#{1 := A} when is_atom(A), ?MOD:decode_projection(Bin)),
+    #{1 := Atom} = ?MOD:decode_projection(Bin),
+    ?assertEqual(Name, atom_to_binary(Atom, utf8)).

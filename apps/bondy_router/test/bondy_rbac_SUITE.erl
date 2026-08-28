@@ -1936,10 +1936,19 @@ every_publishing_table_has_a_live_subscriber(_) ->
     %% one permission edge with no cache invalidation). Asserted against the
     %% live dispatcher rather than a list of module names, so it holds whoever
     %% the consumer is.
+    %%
+    %% Only `missed_events => must_not_miss` tables (the default) carry the
+    %% live-subscriber invariant: events are the only thing correcting their
+    %% consumer's derived state, so an unattached window is a correctness
+    %% hole. A `recovered_on_attach` table's consumer rebuilds from current
+    %% table contents whenever it subscribes (e.g. `bondy_mcp_gateway`,
+    %% started on demand), so subscriber liveness is deliberately NOT an
+    %% invariant there and asserting it would fail on a healthy node.
     Publishing = [
         Name
      || #{name := Name} = Spec <- bondy_namespace_catalog:tables(),
-        maps:get(publish, Spec, false)
+        maps:get(publish, Spec, false),
+        maps:get(missed_events, Spec, must_not_miss) =:= must_not_miss
     ],
     ?assertNotEqual([], Publishing),
 

@@ -206,6 +206,10 @@ end#{
 %% Exported for the legacy-backup import translator (bondy_export): the grant
 %% key must be encoded byte-identically to the live write path.
 -export([encode_key/1]).
+
+-ifdef(TEST).
+-export([decode_key/1]).
+-endif.
 -export([authorize/3]).
 -export([externalize_grant/1]).
 -export([get_anonymous_context/1]).
@@ -1639,11 +1643,12 @@ encode_key({Rolename, Resource}) ->
 
 %% @private
 %% Inverse of `encode_key/1`: split at the single `0x00` separator (the role
-%% column is `0x00`-free), decode the role column, then `[safe]`-decode the
-%% resource (its atoms — `any` — already exist).
+%% column is `0x00`-free), decode the role column, then plain-decode the
+%% resource — own-persisted bytes per the C-2 own-bytes rule (rationale:
+%% `bondy_oplog_cell_kernel:decode_value_bytes/2`).
 decode_key(Bin) when is_binary(Bin) ->
     {ColBin, ResBin} = split_key(Bin),
-    {bondy_oplog_index_key:decode_col(ColBin), binary_to_term(ResBin, [safe])}.
+    {bondy_oplog_index_key:decode_col(ColBin), binary_to_term(ResBin)}.
 
 %% @private
 split_key(Bin) ->

@@ -53,6 +53,19 @@ session's peak memory is bounded regardless of how divergent the trees are — a
 small divergence still converges in a round or two; a bulk initial sync simply
 takes more rounds rather than materialising the whole tree at once.
 
+## Trust domain
+
+A cluster is a **single atom trust domain**. Sync pages carry cell
+events as Erlang *terms* (`bondy_oplog_event`'s `op` is opaque to this
+layer) over `partisan_gen_server:call`, so the transport's message
+decode interns any atom a peer's cells carry on the reading node before
+any oplog code runs (measured: `bondy_aae_cluster_SUITE:
+runtime_atom_value_sync_measured`). This is deliberate and matches the
+posture of Erlang distribution itself: a node admitted to the cluster is
+trusted, and admission control belongs at the membership boundary, not
+per-message. Wire paths that cross the cluster boundary (e.g. the bridge
+relay) enforce their own atom admission on their own decode seats.
+
 ## API shapes
 
 - `run/3` — synchronous; returns `{ok, FinalRoot}` or `{error, Reason}`.

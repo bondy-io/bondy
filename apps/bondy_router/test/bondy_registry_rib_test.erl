@@ -556,3 +556,38 @@ ensure_named_tab(Name, Type) ->
         _ ->
             ok
     end.
+
+%% A cell key is `term_to_binary`'d on the WRITING node (`cell_key/1`) and
+%% the bytes travel verbatim, so a merge event hands this node PEER-encoded
+%% bytes — `[safe]`-decode per the C-2 peer-bytes rule. Legitimate keys are
+%% all-binary 4-tuples, so `[safe]` refuses nothing legitimate; a
+%% non-conforming key carrying an unknown atom must be rejected WITHOUT
+%% interning it. The atom below exists only as bytes (a hand-built ETF
+%% 4-tuple with a SMALL_ATOM_UTF8_EXT seat) unless the decode interns it.
+peer_key_with_unknown_atom_rejected_without_interning_test() ->
+    Name = <<"bondy_c2_stub_key_atom_qz4">>,
+    ?assertError(badarg, binary_to_existing_atom(Name, utf8)),
+    Key = <<
+        131,
+        104,
+        4,
+        109,
+        1:32/big-unsigned,
+        "r",
+        109,
+        1:32/big-unsigned,
+        "p",
+        109,
+        1:32/big-unsigned,
+        "u",
+        119,
+        (byte_size(Name)):8,
+        Name/binary
+    >>,
+    ?assertEqual(error, bondy_registry_rib:decode_cell_key(Key)),
+    ?assertError(badarg, binary_to_existing_atom(Name, utf8)),
+    Legit = term_to_binary({<<"r">>, <<"p">>, <<"u">>, <<"n">>}),
+    ?assertEqual(
+        {ok, {<<"r">>, <<"p">>, <<"u">>, <<"n">>}},
+        bondy_registry_rib:decode_cell_key(Legit)
+    ).

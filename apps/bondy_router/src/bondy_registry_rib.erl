@@ -124,6 +124,10 @@ they reach this node via AAE merge.
 %% shaping logic, decoupled from constructing real CRDT state via the
 %% full write path.
 -export([reshape_summary/2]).
+
+-ifdef(TEST).
+-export([decode_cell_key/1]).
+-endif.
 -endif.
 
 %% =============================================================================
@@ -816,8 +820,14 @@ decode_cell_key(_) ->
     error.
 
 %% @private
+%% `[safe]` decode: the raw key was `term_to_binary`'d on the WRITING node
+%% (`cell_key/1`) and travels verbatim, so a merge event hands us
+%% peer-encoded bytes — the C-2 peer-bytes rule applies. Legitimate keys
+%% are all-binary 4-tuples, so `[safe]` refuses nothing legitimate; it
+%% keeps a malformed peer key from interning arbitrary atoms (falsifier:
+%% `peer_key_with_unknown_atom_rejected_without_interning_test`).
 decode_raw_cell_key(Raw) ->
-    try binary_to_term(Raw) of
+    try binary_to_term(Raw, [safe]) of
         {RealmUri, Policy, Uri, Node} = Decoded when
             is_binary(RealmUri) andalso
                 is_binary(Policy) andalso
