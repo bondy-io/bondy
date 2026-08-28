@@ -9,13 +9,16 @@
 The OpenTelemetry SDK's `id_generator` for Bondy (configured via the
 `opentelemetry.id_generator` env the schema writes): the default random
 generator, plus a per-process override that lets the span bridge give
-one span the EXACT ids a minted W3C traceparent pre-allocated for it
-(`bondy_telemetry:maybe_mint_trace/1` mints the id, the bridge realizes
-the root span under it — the SDK offers no per-span id in
-`start_span`'s opts, but threads this module into every id decision:
-`otel_tracer_server` embeds the configured module in each tracer and
-`otel_span_utils:root_span_ctx/1` calls it for a parentless span, read
-from those sources).
+one span the EXACT ids the W3C context pre-allocated for it: a minted
+traceparent's root ids (`bondy_telemetry:maybe_mint_trace/1` mints,
+the bridge realizes the root span under them) and a `bondyhop`
+tracestate marker's forward-span id (`bondy_telemetry:maybe_hop_trace/1`
+mints, the bridge realizes the CLIENT half of the hop pair under it).
+The SDK offers no per-span id in `start_span`'s opts, but threads this
+module into every id decision: `otel_tracer_server` embeds the
+configured module in each tracer, and `otel_span_utils:new_span_ctx/2`
+calls it for a parentless span's both ids and a child span's span id
+(read from those sources).
 
 The override lives in the process dictionary: `with_forced/3` sets it
 for exactly the synchronous extent of its fun and erases it on any

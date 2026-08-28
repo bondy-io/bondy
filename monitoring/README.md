@@ -106,7 +106,7 @@ Tempo's metrics-generator also runs the `service-graphs` and
 **Service graph** tab of the Tempo datasource in Explore and are
 ordinary Prometheus series for dashboard panels (span-derived RED per
 `service.name` / span name). The dev node configs set a per-node
-`tracing.service_name` (`bondy-node1` …) so the graph can distinguish
+`tracing.service_name` (`bondy-connect-node1` …) so the graph can distinguish
 nodes. Edges: Tempo pairs a client span with its server child across
 services, and completes an unpaired client span that carries a
 `peer.service` attribute into an edge to a *virtual* node — Bondy sets

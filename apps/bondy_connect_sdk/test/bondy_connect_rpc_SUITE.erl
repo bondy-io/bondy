@@ -149,9 +149,10 @@ trace_context_round_trip(_) ->
 %% connection (send to terminal RESULT/ERROR) and kind `invocation` from
 %% the callee's worker (handler run) — each carrying the call's W3C
 %% trace context as binary-keyed metadata (`#{}` untraced), the same
-%% shape as the router's `[bondy, rpc, latency]` event. An ERROR
-%% settlement (the handler returns a business error) emits both events
-%% too.
+%% shape as the router's `[bondy, rpc, latency]` event. The call leg
+%% names the configured `peer_service` (default `<<"bondy-connect">>`), the
+%% invocation leg names none. An ERROR settlement (the handler returns
+%% a business error) emits both events too.
 call_latency_trace(_) ->
     Proc = <<"com.example.trace.latency">>,
     ErrProc = <<"com.example.trace.latency.err">>,
@@ -190,13 +191,19 @@ call_latency_trace(_) ->
             Caller, Proc, [], #{}, bondy_connect_trace:attach(#{}, Ctx)
         ),
         ?assertEqual(
-            [{call, Trace, success}, {invocation, Trace, success}],
+            [
+                {call, Trace, success, <<"bondy-connect">>},
+                {invocation, Trace, success, undefined}
+            ],
             collect_latency(Proc, 2)
         ),
 
         {ok, _} = bondy_connect_client:call(Caller, Proc, []),
         ?assertEqual(
-            [{call, #{}, success}, {invocation, #{}, success}],
+            [
+                {call, #{}, success, <<"bondy-connect">>},
+                {invocation, #{}, success, undefined}
+            ],
             collect_latency(Proc, 2)
         ),
 
@@ -210,7 +217,10 @@ call_latency_trace(_) ->
         %% worker emitted the error reply, the caller's connection
         %% dispatched it.
         ?assertEqual(
-            [{call, Trace, error}, {invocation, Trace, error}],
+            [
+                {call, Trace, error, <<"bondy-connect">>},
+                {invocation, Trace, error, undefined}
+            ],
             collect_latency(ErrProc, 2)
         ),
 
@@ -749,15 +759,23 @@ next_reply(Token) ->
     end.
 
 %% @private Collect N latency events for Proc — ignoring other
-%% procedures' events — returned sorted by kind ({call, _} before
-%% {invocation, _}), so the sorted list asserts exactly one of each.
+%% procedures' events — returned sorted by kind ({call, ...} before
+%% {invocation, ...}), so the sorted list asserts exactly one of each.
+%% The bound `peer_service` pins the producer seats end to end: the
+%% caller's connection names its configured router peer on the call
+%% leg (`<<"bondy-connect">>` — the default, since connect() sets none), the
+%% callee's worker names none on the invocation leg.
 collect_latency(Proc, N) ->
     lists:sort([
         receive
             {rpc_latency, #{
-                procedure_uri := Proc, kind := K, trace := T, outcome := O
+                procedure_uri := Proc,
+                kind := K,
+                trace := T,
+                outcome := O,
+                peer_service := P
             }} ->
-                {K, T, O}
+                {K, T, O, P}
         after 5000 ->
             ct:fail(latency_event_missing)
         end

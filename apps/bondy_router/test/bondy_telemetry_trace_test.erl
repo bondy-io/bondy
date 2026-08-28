@@ -45,6 +45,44 @@ trace_meta_w3c_gate_test() ->
         })
     ).
 
+%% The cluster-forward hop marker: a traced options map gains a fresh
+%% `bondyhop=<span-id>` tracestate vendor entry (front, per the W3C
+%% update rule), replacing any it already carries — a re-forward is a
+%% new hop. An untraced map is untouched: no trace, no hop span.
+maybe_hop_trace_test() ->
+    %% No traceparent, non-binary traceparent: untouched.
+    ?assertEqual(#{}, bondy_telemetry:maybe_hop_trace(#{})),
+    Invalid = #{'_traceparent' => 42, '_tracestate' => ?TS},
+    ?assertEqual(Invalid, bondy_telemetry:maybe_hop_trace(Invalid)),
+
+    %% Traced, no tracestate: the marker is the whole tracestate; every
+    %% other key is preserved.
+    Bare = #{'_traceparent' => ?TP, timeout => 5000},
+    #{'_tracestate' := TS1} = Stamped1 = bondy_telemetry:maybe_hop_trace(Bare),
+    <<"bondyhop=", Hop1:16/binary>> = TS1,
+    ?assertMatch({match, _}, re:run(Hop1, "^[0-9a-f]{16}$")),
+    ?assertEqual(Bare, maps:remove('_tracestate', Stamped1)),
+
+    %% Traced with a caller tracestate: prepended, caller entry intact.
+    Carried = #{'_traceparent' => ?TP, '_tracestate' => ?TS},
+    #{'_tracestate' := TS2} = bondy_telemetry:maybe_hop_trace(Carried),
+    <<"bondyhop=", _:16/binary, ",", Rest2/binary>> = TS2,
+    ?assertEqual(?TS, Rest2),
+
+    %% An existing hop entry is REPLACED, never accumulated.
+    Rehop = #{
+        '_traceparent' => ?TP,
+        '_tracestate' => <<"bondyhop=deadbeefdeadbeef,", ?TS/binary>>
+    },
+    #{'_tracestate' := TS3} = bondy_telemetry:maybe_hop_trace(Rehop),
+    <<"bondyhop=", Hop3:16/binary, ",", Rest3/binary>> = TS3,
+    ?assertNotEqual(<<"deadbeefdeadbeef">>, Hop3),
+    ?assertEqual(?TS, Rest3),
+
+    %% Fresh id per stamp.
+    #{'_tracestate' := TS4} = bondy_telemetry:maybe_hop_trace(Bare),
+    ?assertNotEqual(TS1, TS4).
+
 trace_meta_non_binary_test() ->
     %% A non-binary traceparent voids the whole context...
     ?assertEqual(

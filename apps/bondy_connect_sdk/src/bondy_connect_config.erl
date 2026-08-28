@@ -15,6 +15,12 @@ This phase validates the **protocol-relevant** fields strictly — `realm`
 the transport-related fields (`transport`, `serializers`, `reconnect`, `ping`,
 `max_message_length`, `handler`, `tls`) which are exercised in later phases. TLS
 defaults are secure-by-default (`verify_peer`).
+
+`peer_service` (binary, default `<<"bondy-connect">>`) is the logical name this
+client reports for the router on its outbound-call telemetry — the
+`peer.service` attribute of the exported client span, which a trace
+backend's service graph draws the edge to when the router's own spans
+are not exported.
 """.
 
 -include("bondy_connect.hrl").
@@ -142,7 +148,8 @@ validate(Spec) when is_map(Spec) ->
             reconnect => validate_reconnect(Spec),
             ping => validate_ping(Spec),
             network_timeout => validate_network_timeout(Spec),
-            tls => validate_tls(Spec)
+            tls => validate_tls(Spec),
+            peer_service => validate_peer_service(Spec)
         },
         {ok, Config}
     catch
@@ -239,6 +246,19 @@ validate_handler(#{handler := Other}) ->
     throw({invalid_option, handler, Other});
 validate_handler(_) ->
     #{}.
+
+%% @private The logical name this client reports for the router on its
+%% outbound-call telemetry (`peer.service` on the exported client span —
+%% OTel semconv: the remote service's logical name). The client cannot
+%% know the router's per-node `service.name`, so this is configured;
+%% the default names the router product, Bondy Connect (this client is
+%% the Bondy Connect SDK).
+validate_peer_service(#{peer_service := P}) when is_binary(P), P =/= <<>> ->
+    P;
+validate_peer_service(#{peer_service := P}) ->
+    throw({invalid_peer_service, P});
+validate_peer_service(_) ->
+    <<"bondy-connect">>.
 
 %% @private
 validate_network_timeout(#{network_timeout := T}) when is_integer(T), T > 0 ->

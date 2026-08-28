@@ -2088,7 +2088,20 @@ handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
                 %% bridged node where the Callee is located, so we need to
                 %% gather all local context and create a new Call. This new
                 %% Call will include a '$private' field under 'options'.
-                Call = prepare_call(Msg, Uri, Entry, Ctxt),
+                %% A traced call gets the cluster-forward hop marker stamped
+                %% FIRST — the same one-seat contract as
+                %% `prepare_call_rib/3`: the marker rides the forwarded
+                %% options (this node's call promise, `promise_trace(Msg)`
+                %% at the send site) and the invocation details
+                %% `prepare_call_options/5` builds from them (the target
+                %% node's invocation promise). The local branch below stays
+                %% unstamped: no forward, no hop span.
+                Msg1 = Msg#call{
+                    options = bondy_telemetry:maybe_hop_trace(
+                        Msg#call.options
+                    )
+                },
+                Call = prepare_call(Msg1, Uri, Entry, Ctxt),
                 {ok, Call, Ctxt};
             _ ->
                 %% A local Callee. We create an invocation.
@@ -2995,7 +3008,13 @@ strip_rib_details(M) ->
 %% entry there are no entry options, so caller disclosure follows the
 %% defaults and entry-opted session disclosure is not available.
 prepare_call_rib(M, Uri, Ctxt) ->
-    Opts = M#call.options,
+    %% A traced call gets the cluster-forward hop marker stamped into its
+    %% `'_tracestate'` FIRST, so the marker rides both legs from one seat:
+    %% the forwarded options (this node's RIB call promise reads them) and
+    %% the invocation details built from them below (the owner node's
+    %% invocation promise reads those). Traceparent and baggage still carry
+    %% verbatim; see `bondy_telemetry:maybe_hop_trace/1`.
+    Opts = bondy_telemetry:maybe_hop_trace(M#call.options),
     %% PPT and trace-context attributes carry over exactly as in
     %% `prepare_call_options/5` (the entry-addressed builder).
     Details0 = maps:with(?WAMP_PPT_ATTRS ++ ?WAMP_TRACE_ATTRS, Opts),

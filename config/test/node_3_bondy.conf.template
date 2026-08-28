@@ -156,4 +156,4 @@ listeners.wamp_tls.nodelay = on
 ## router boundary for CALLs whose caller attached none.
 tracing.otlp.enabled = on
 tracing.mint.enabled = on
-tracing.service_name = bondy-node3
+tracing.service_name = bondy-connect-node3

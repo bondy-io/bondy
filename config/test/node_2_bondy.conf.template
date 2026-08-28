@@ -219,4 +219,4 @@ security.oidc.providers.oidc-mock.login_path=/oidc/login
 ## router boundary for CALLs whose caller attached none.
 tracing.otlp.enabled = on
 tracing.mint.enabled = on
-tracing.service_name = bondy-node2
+tracing.service_name = bondy-connect-node2

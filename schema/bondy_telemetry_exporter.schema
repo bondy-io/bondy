@@ -122,7 +122,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "tracing.service_name", "opentelemetry.resource", [
-  {default, "bondy"},
+  {default, "bondy-connect"},
   {datatype, string}
 ]}.
 

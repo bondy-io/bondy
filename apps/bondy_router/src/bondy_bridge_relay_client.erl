@@ -59,6 +59,11 @@ stateDiagram-v2
     socket :: gen_tcp:socket() | ssl:sslsocket(),
     network_timeout :: pos_integer(),
     reconnect_retry :: optional(bondy_retry:t()),
+    %% The delay the next `connecting` enter applies before dialing,
+    %% decided by redial/2 when the previous connection died: 0 after a
+    %% connection that had opened a session, the advancing retry
+    %% backoff after a session-less one.
+    redial_delay = 0 :: non_neg_integer(),
     ping_retry :: optional(bondy_retry:t()),
     ping_payload :: optional(binary()),
     ping_idle_timeout :: optional(non_neg_integer()),
@@ -137,6 +142,8 @@ callback_mode() ->
 
 init(Config0) ->
     % erlang:process_flag(sensitive, true),
+    %% Before the first `[safe]` wire decode — see the doc there.
+    ok = bondy_bridge_relay:ensure_wire_atoms(),
     #{
         transport := Transport,
         endpoint := Endpoint,
@@ -281,11 +288,16 @@ connecting(enter, connecting, State) ->
     Actions = [{state_timeout, 0, connect}],
     {keep_state_and_data, Actions};
 connecting(enter, _, State0) ->
-    %% We reset the retry state, as we re-entered this state
-    State = reset_reconnect_retry_state(State0),
-
-    %% We use a timeout to immediately connect
-    Actions = [{state_timeout, 0, connect}],
+    %% Re-entry after a lost connection. The retry budget is NOT reset
+    %% here — it resets only when a connection proves itself by opening
+    %% a session (redial/2) — and the dial delay was decided by
+    %% redial/2 when the previous connection died. Resetting on
+    %% re-entry made the budget unconsumable: a router that accepts and
+    %% then dies on every connection was redialed in a tight loop
+    %% forever (caught by bondy_bridge_relay_rpc_SUITE).
+    Delay = State0#state.redial_delay,
+    State = State0#state{redial_delay = 0},
+    Actions = [{state_timeout, Delay, connect}],
     {keep_state, State, Actions};
 connecting(state_timeout, connect, State0) ->
     case connect(State0) of
@@ -356,12 +368,13 @@ Next states: `idle`, `connecting` or termination.
 active(enter, connecting, #state{} = State0) ->
     ok = on_connect(State0),
 
-    %% We rest the retry state as we've been successful
-    State1 = reset_reconnect_retry_state(State0),
-
+    %% NO retry reset here: a TCP establishment is not success — the
+    %% budget resets only when a session opens (redial/2 decides, on
+    %% the connection's death). Resetting here made an
+    %% accept-then-crash router unconsumably fresh on every cycle.
     try
         %% We join any realms defined by the config
-        State = open_sessions(State1),
+        State = open_sessions(State0),
         %% We start the idle timeout, if triggered we will transition to
         %% idle state
         Actions = [
@@ -371,10 +384,18 @@ active(enter, connecting, #state{} = State0) ->
         {keep_state, State, Actions}
     catch
         throw:socket_closed ->
-            {next_state, connecting, State1};
+            %% The socket died between connect and the HELLO send. A
+            %% state ENTER call cannot change state (gen_statem refuses
+            %% `next_state` here — the previous return was an illegal
+            %% crasher on this narrow race), so the exit to
+            %% `connecting` goes through a zero state timeout into
+            %% redial/2.
+            {keep_state, State0, [{state_timeout, 0, socket_closed}]};
         throw:Reason ->
             {stop, Reason}
     end;
+active(state_timeout, socket_closed, State) ->
+    redial(socket_closed, State);
 active(enter, idle, State) ->
     Actions = [
         ping_idle_timeout(State),
@@ -664,15 +685,13 @@ handle_event(info, {Tag, _Socket}, _, State0) when ?CLOSED_TAG(Tag) ->
         description => "Socket closed.",
         reason => closed_by_remote
     }),
-    State = cleanup(State0),
-    {next_state, connecting, State};
+    redial(closed_by_remote, State0);
 handle_event(info, {Tag, _, Reason}, _, State0) when ?SOCKET_ERROR(Tag) ->
     ?LOG_ERROR(#{
         description => "Socket error",
         reason => Reason
     }),
-    State = cleanup(State0),
-    {next_state, connecting, State};
+    redial(Reason, State0);
 handle_event(info, {network_connected, _}, _, _) ->
     %% We do nothing here, this must be handled by the state functions when
     %% necessary e.g. waiting_for_network state does it.
@@ -772,6 +791,63 @@ reset_reconnect_retry_state(State) ->
     {_, R1} = bondy_retry:succeed(State#state.reconnect_retry),
     State#state{reconnect_retry = R1}.
 
+%% @private A connection died: re-enter `connecting`. Whether the retry
+%% episode CONTINUES or starts fresh is decided by whether this
+%% connection ever OPENED a session: one that did proved the router
+%% healthy — fresh budget, immediate redial. One that died session-less
+%% — refused, crashed after accept, torn down mid-auth — consumes the
+%% budget exactly like a failed connect, so a router that dies on every
+%% inbound connection is redialed with the configured backoff and given
+%% up on at the retry limit, never hammered in a tight loop. With
+%% reconnect disabled, a session-less death stops the client, matching
+%% maybe_reconnect/2's contract for failed connects.
+redial(Reason, State0) ->
+    SessionOpened = map_size(State0#state.sessions) > 0,
+    State = cleanup(State0),
+    case SessionOpened of
+        true ->
+            {next_state, connecting,
+                reset_reconnect_retry_state(State#state{redial_delay = 0})};
+        false ->
+            redial_failed(Reason, State)
+    end.
+
+%% @private
+redial_failed(Reason, #state{reconnect_retry = R0} = State0) when
+    R0 =/= undefined
+->
+    case bondy_retry:fail(R0) of
+        {Delay, R1} when is_integer(Delay) ->
+            ?LOG_NOTICE(#{
+                description =>
+                    "Connection lost before a session was established. "
+                    "Will retry after delay.",
+                delay => Delay,
+                reason => Reason
+            }),
+            State = State0#state{reconnect_retry = R1, redial_delay = Delay},
+            {next_state, connecting, State};
+        {Limit, R1} when Limit == deadline orelse Limit == max_retries ->
+            Info = #{
+                description =>
+                    "Bridge relay retry budget exhausted without "
+                    "establishing a session. Shutting down; the supervisor "
+                    "restarts the bridge on a fresh budget.",
+                limit => Limit,
+                reason => Reason
+            },
+            ?LOG_WARNING(Info),
+            {stop, {shutdown, Info}, State0#state{reconnect_retry = R1}}
+    end;
+redial_failed(Reason, _) ->
+    ?LOG_WARNING(#{
+        description =>
+            "Connection lost before a session was established and "
+            "reconnect is disabled. Shutting down.",
+        reason => Reason
+    }),
+    {stop, normal}.
+
 %% @private
 maybe_reconnect(Reason, #state{reconnect_retry = R0} = State0) when
     R0 =/= undefined andalso
@@ -820,7 +896,16 @@ connect(State) ->
 connect(Transport, {Host, PortNumber}, Config) ->
     Timeout = key_value:get(connect_timeout, Config, timer:seconds(5)),
     SocketOpts = maps:to_list(key_value:get(socket_opts, Config, [])),
-    TLSOpts = maps:to_list(key_value:get(tls_opts, Config, [])),
+    %% TLS options go to ssl only: the config spec DEFAULTS `tls_opts`
+    %% to `#{verify => verify_none}` for every bridge, and `gen_tcp`
+    %% raises badarg on any ssl-only option — appended unconditionally,
+    %% that default made every plain-TCP bridge crash on connect
+    %% (caught by bondy_bridge_relay_rpc_SUITE).
+    TLSOpts =
+        case Transport of
+            ssl -> maps:to_list(key_value:get(tls_opts, Config, []));
+            gen_tcp -> []
+        end,
 
     %% We use Erlang packet mode i.e. {packet, 4}
     %% So erlang first reads 4 bytes to get length of our data, allocates a
@@ -1328,16 +1413,19 @@ proxy_existing(Session, State0) ->
     AnySessionId = '_',
     Limit = 100,
 
-    %% We proxy all existing registrations
+    %% We proxy all existing registrations and subscriptions. Paging is
+    %% `bondy_registry:entries/1` on the returned continuation — the
+    %% previous `entries(registration, Cont)` called the
+    %% `(Type, Context)` API with a continuation, which crashed the
+    %% client on any first page that carried one (caught by
+    %% bondy_bridge_relay_rpc_SUITE).
+    Get = fun(Cont) -> bondy_registry:entries(Cont) end,
+
     Regs = bondy_registry:entries(registration, RealmUri, AnySessionId, Limit),
-    GetRegs = fun(Cont) -> bondy_registry:entries(registration, Cont) end,
-    State1 = proxy_existing(Session, State0, GetRegs, Regs),
+    State1 = proxy_existing(Session, State0, Get, Regs),
 
-    %% We proxy all existing subscriptions
     Subs = bondy_broker:subscriptions(RealmUri, AnySessionId, Limit),
-    GetSubs = fun(Cont) -> bondy_registry:entries(registration, Cont) end,
-
-    proxy_existing(Session, State1, GetSubs, Subs).
+    proxy_existing(Session, State1, Get, Subs).
 
 %% @private
 proxy_existing(_, State, _, '$end_of_table') ->

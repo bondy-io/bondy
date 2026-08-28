@@ -52,7 +52,11 @@ all() ->
         rib_retry_reroutes_to_live_node,
         meta_event_demand_visible_cross_node,
         remote_user_delete_closes_peer_sessions,
-        token_version_rejected_cross_node
+        token_version_rejected_cross_node,
+        %% Last: they plant cells carrying a runtime-minted atom, and
+        %% nothing may depend on suite state after them.
+        runtime_atom_value_sync_measured,
+        runtime_atom_cell_read_after_restart_measured
     ].
 
 suite() ->
@@ -648,6 +652,216 @@ stale_peer_rejoin_durable_converges(Config) ->
         end
     end.
 
+%% V1 of _plans/2026-08-28-safe-decode-atom-interning-review.md — MEASURED
+%% 2026-08-28. A peer cell whose VALUE carries an atom absent from the
+%% reader's atom table syncs CLEANLY: the sync protocol ships events as
+%% Erlang TERMS (`bondy_oplog_event` op is `term()`, pages ride
+%% `partisan_gen_server:call`), so Partisan's plain message decode interns
+%% the atom on the reader BEFORE any bondy_oplog code runs. The CRDT
+%% decode seats sit downstream of that interning and never see wire
+%% bytes — their input is local projection frames (the restart case
+%% below pins that half).
+%%
+%% The probe atom is minted at runtime ON the writer only
+%% (`list_to_atom/1` over a string), so no module literal pool — including
+%% this pushed suite module's — can have interned it on the reader; the
+%% controller ships only the string, and Bondy replication is
+%% Partisan-only (`connect_disterl => false`), so the only route to the
+%% reader's atom table is the AAE sync itself.
+runtime_atom_value_sync_measured(Config) ->
+    [N1, N2, _N3] = nodes_of(Config),
+    ProbeStr =
+        "ct_probe_" ++ integer_to_list(erlang:unique_integer([positive])),
+    ?assertEqual(false, erpc:call(N2, ?MODULE, do_atom_exists, [ProbeStr])),
+
+    %% Relay the reader's error-level logs to the controller (capped — a
+    %% runaway merge-retry loop must fill a counter, not our mailbox).
+    ok = erpc:call(N2, ?MODULE, do_attach_error_relay, [self()]),
+    try
+        Key = <<"atom_probe">>,
+        ok = erpc:call(
+            N1,
+            ?MODULE,
+            do_apply_runtime_atom_value,
+            [?USERS_TABLE, ?REALM, Key, ProbeStr]
+        ),
+        %% The writer's own projection holds it — its applier decodes the
+        %% op after the mint, so the atom exists locally.
+        ?assertMatch(
+            {ok, {#{marker := _}, _}}, read_on(N1, ?USERS_TABLE, ?REALM, Key)
+        ),
+
+        %% Control written AFTER the probe, same table/band.
+        CKey = <<"atom_probe_control">>,
+        CVal = #{username => CKey, marker => <<"control">>},
+        ok = apply_on(N1, ?USERS_TABLE, ?REALM, CKey, CVal),
+        ControlOutcome =
+            try wait_converge(N2, ?USERS_TABLE, ?REALM, CKey, CVal) of
+                ok -> converged
+            catch
+                error:{converge_timeout, _, _, _, _, Last} ->
+                    {timeout, Last}
+            end,
+
+        %% Extra forced pull rounds on the reader so per-round re-ship /
+        %% re-fail behaviour becomes visible in the log record.
+        ok = lists:foreach(
+            fun(_) ->
+                _ =
+                    try
+                        erpc:call(N2, bondy_oplog_sync_scheduler, trigger, [])
+                    catch
+                        _:_ -> ok
+                    end,
+                timer:sleep(500)
+            end,
+            lists:seq(1, 6)
+        ),
+
+        ProbeRead =
+            try
+                read_on(N2, ?USERS_TABLE, ?REALM, Key)
+            catch
+                C:R -> {'EXIT', {C, R}}
+            end,
+        AtomOnReader = erpc:call(N2, ?MODULE, do_atom_exists, [ProbeStr]),
+        Logs = drain_peer_logs([]),
+        ct:pal(
+            "V1 MEASUREMENT~n"
+            "  control cell: ~p~n"
+            "  probe cell read on reader: ~p~n"
+            "  probe atom interned on reader: ~p~n"
+            "  reader error logs (~b, capped at 30):~n~p",
+            [ControlOutcome, ProbeRead, AtomOnReader, length(Logs), Logs]
+        ),
+
+        %% The measured behaviour, pinned: the probe cell converged and is
+        %% readable on the reader, the transport interned the peer's
+        %% runtime atom, and no cell was skipped by the applier (the
+        %% cell_apply catch never fired — its log says "skipped").
+        ?assertEqual(converged, ControlOutcome),
+        ?assertMatch({ok, {#{marker := M}, _}} when is_atom(M), ProbeRead),
+        ?assertEqual(true, AtomOnReader),
+        SkipLogs = [
+            E
+         || E <- Logs,
+            string:find(lists:flatten(io_lib:format("~p", [E])), "skipped") =/=
+                nomatch
+        ],
+        ?assertEqual([], SkipLogs),
+        ok
+    after
+        ok = erpc:call(N2, ?MODULE, do_detach_error_relay, [])
+    end.
+
+%% V1b — the persisted half of the V1 measurement, on a dedicated 2-node
+%% cluster. After the probe cell (runtime atom in its value) converges to
+%% the reader and the reader COMPACTS — removing the probe EVENT from the
+%% durable log, so boot replay cannot re-intern its atom — the reader
+%% restarts on its own data directory with a fresh atom table. The only
+%% remaining copy of the value is the projection frame; the pinned
+%% contract is that its plain own-bytes decode
+%% (`bondy_oplog_cell_kernel:decode_value_bytes/2`) returns the value and
+%% re-interns the atom. The restarted reader deliberately does NOT rejoin
+%% — a live sync round would re-ship the event as a term and the
+%% transport would re-intern the atom, masking what the frame decode does
+%% on its own.
+runtime_atom_cell_read_after_restart_measured(Config) ->
+    Names = [
+        {bondy_v1, [{[partisan, peer_port], 18197}]},
+        {bondy_v2, [{[partisan, peer_port], 18198}]}
+    ],
+    Nodes = bondy_ct:start_cluster(Names, Config),
+    [S1, S2] = Nodes,
+    {_, W, _} = S1,
+    {_, R0, _} = S2,
+    try
+        _ = [push_module(N, ?MODULE) || N <- [W, R0]],
+        ProbeStr =
+            "ct_probe_" ++ integer_to_list(erlang:unique_integer([positive])),
+        Key = <<"atom_probe_restart">>,
+        ok = erpc:call(
+            W,
+            ?MODULE,
+            do_apply_runtime_atom_value,
+            [?USERS_TABLE, ?REALM, Key, ProbeStr]
+        ),
+        %% Live sync interns + applies on the reader (the V1 measurement).
+        ok = wait_until(
+            fun() ->
+                _ =
+                    try
+                        erpc:call(R0, bondy_oplog_sync_scheduler, trigger, [])
+                    catch
+                        _:_ -> ok
+                    end,
+                case read_on(R0, ?USERS_TABLE, ?REALM, Key) of
+                    {ok, {#{marker := M}, _}} -> atom_to_list(M) =:= ProbeStr;
+                    _ -> false
+                end
+            end,
+            ?CONVERGE_MS
+        ),
+
+        %% Compact the reader so the probe event leaves the durable log.
+        _ = [
+            erpc:call(N, application, set_env, [
+                bondy_oplog, peer_timeout_ms, 2000
+            ])
+         || N <- [W, R0]
+        ],
+        timer:sleep(3000),
+        _ = erpc:call(R0, ?MODULE, do_compact_all, []),
+
+        ok = bondy_ct:stop_node(S2),
+        S2b = bondy_ct:restart_node(
+            S2, 2, [{[partisan, peer_port], 18198}], Config
+        ),
+        try
+            {_, Rb, _} = S2b,
+            ok = push_module(Rb, ?MODULE),
+            AtomAfterBoot = erpc:call(Rb, ?MODULE, do_atom_exists, [ProbeStr]),
+            ColdRead =
+                try
+                    read_on(Rb, ?USERS_TABLE, ?REALM, Key)
+                catch
+                    C:R -> {'EXIT', {C, R}}
+                end,
+            AtomAfterRead = erpc:call(Rb, ?MODULE, do_atom_exists, [ProbeStr]),
+            ct:pal(
+                "V1b (post-restart)~n"
+                "  atom interned after boot: ~p~n"
+                "  cold read: ~p~n"
+                "  atom interned after read: ~p",
+                [AtomAfterBoot, ColdRead, AtomAfterRead]
+            ),
+            %% The F-4 contract, pinned: boot replay did not re-intern
+            %% (the event was compacted away), yet the cold read of the
+            %% node's own projection frame DECODES — plainly, per the C-2
+            %% own-bytes rule — returning the value and re-interning its
+            %% atom. Before F-4 this read raised `badarg` out of
+            %% `binary_to_term(_, [safe])` at
+            %% `bondy_oplog_cell_kernel:decode_value_bytes/2` (measured
+            %% 2026-08-28; this case is the fix's falsifier).
+            ?assertEqual(false, AtomAfterBoot),
+            ?assertMatch({ok, {#{marker := M}, _}} when is_atom(M), ColdRead),
+            ?assertEqual(true, AtomAfterRead),
+            ok
+        after
+            try
+                bondy_ct:stop_node(S2b)
+            catch
+                _:_ -> ok
+            end
+        end
+    after
+        try
+            bondy_ct:stop_cluster(Nodes)
+        catch
+            _:_ -> ok
+        end
+    end.
+
 %% =============================================================================
 %% CONTROLLER-SIDE HELPERS
 %% =============================================================================
@@ -981,6 +1195,15 @@ wait_for_merge_event_loop(Node, Username, Deadline) ->
                     timer:sleep(250),
                     wait_for_merge_event_loop(Node, Username, Deadline)
             end
+    end.
+
+%% @private
+%% Drains relayed peer log events until the mailbox stays quiet for 1s.
+drain_peer_logs(Acc) ->
+    receive
+        {peer_log, _Node, E} -> drain_peer_logs([E | Acc])
+    after 1000 ->
+        lists:reverse(Acc)
     end.
 
 %% @private
@@ -1481,6 +1704,45 @@ collector_drain() ->
     after 5000 ->
         error(collector_drain_timeout)
     end.
+
+%% @private
+%% Builds the probe value ON this node: the atom is minted here and nowhere
+%% else, so it exists only in this VM's atom table when the write happens.
+do_apply_runtime_atom_value(Table, Band, Key, ProbeStr) ->
+    Atom = list_to_atom(ProbeStr),
+    do_apply(Table, Band, Key, #{username => Key, marker => Atom}).
+
+%% @private
+%% `list_to_existing_atom/1` probes the atom table without interning.
+do_atom_exists(Str) ->
+    try
+        _ = list_to_existing_atom(Str),
+        true
+    catch
+        error:badarg -> false
+    end.
+
+%% @private
+%% Attaches this module as a logger handler relaying error-level events to
+%% `To`, capped at 30 (the budget atomics counter lives on THIS node).
+do_attach_error_relay(To) ->
+    Counter = atomics:new(1, []),
+    logger:add_handler(aae_atom_probe_relay, ?MODULE, #{
+        level => error,
+        config => #{to => To, budget => Counter}
+    }).
+
+%% @private
+do_detach_error_relay() ->
+    logger:remove_handler(aae_atom_probe_relay).
+
+%% Logger handler callback (see `do_attach_error_relay/1`).
+log(LogEvent, #{config := #{to := To, budget := Counter}}) ->
+    case atomics:add_get(Counter, 1, 1) =< 30 of
+        true -> To ! {peer_log, node(), LogEvent};
+        false -> ok
+    end,
+    ok.
 
 %% @private
 %% Runs a compaction cycle on every oplog instance of this node, so durable

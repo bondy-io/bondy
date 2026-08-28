@@ -321,18 +321,27 @@ edge1:
       ERL_DIST_PORT=27784 \
       _build/edge1/rel/bondy/bin/bondy console
 
-# Reopen a console on an already-built node release (no rebuild).
-run-node1:
-    _build/node1/rel/bondy/bin/bondy console
-
-run-node2:
-    _build/node2/rel/bondy/bin/bondy console
-
-run-node3:
-    _build/node3/rel/bondy/bin/bondy console
-
 run-edge1:
-    _build/edge1/rel/bondy/bin/bondy console
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -f .env ]; then set -a; . ./.env; set +a; fi
+    EDGE1_DEVICE1_PRIVKEY=4ffddd896a530ce5ee8c86b83b0d31835490a97a9cd718cb2f09c9fd31c4a7d71766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd \
+      ERL_DIST_PORT=27784 \
+      _build/edge1/rel/bondy/bin/bondy console
+
+_run-node prof port:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -f .env ]; then set -a; . ./.env; set +a; fi
+    ERL_DIST_PORT={{port}} _build/{{prof}}/rel/bondy/bin/bondy console
+
+# Reopen a console on an already-built node release (no rebuild).
+run-node1: (_run-node "node1" "27781")
+
+run-node2: (_run-node "node2" "27782")
+
+run-node3: (_run-node "node3" "27783")
+
 
 # Clean a single dev-cluster node's build tree.
 node1-clean:

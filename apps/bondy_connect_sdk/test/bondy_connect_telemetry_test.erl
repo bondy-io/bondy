@@ -88,7 +88,7 @@ rpc_latency_carries_trace_test() ->
     try
         Trace = #{<<"traceparent">> => ?TP},
         ok = bondy_connect_telemetry:rpc_latency(
-            invocation, <<"com.example.p">>, 7, Trace, success
+            invocation, <<"com.example.p">>, 7, Trace, success, undefined
         ),
         receive
             {latency, Meas, Meta} ->
@@ -98,9 +98,30 @@ rpc_latency_carries_trace_test() ->
                         kind => invocation,
                         procedure_uri => <<"com.example.p">>,
                         trace => Trace,
-                        outcome => success
+                        outcome => success,
+                        peer_service => undefined
                     },
                     Meta
+                )
+        after 1000 ->
+            error(latency_event_missing)
+        end,
+
+        %% A call leg names its configured router peer verbatim.
+        ok = bondy_connect_telemetry:rpc_latency(
+            call, <<"com.example.p">>, 7, Trace, error, <<"bondy-eu">>
+        ),
+        receive
+            {latency, _, PeerMeta} ->
+                ?assertEqual(
+                    #{
+                        kind => call,
+                        procedure_uri => <<"com.example.p">>,
+                        trace => Trace,
+                        outcome => error,
+                        peer_service => <<"bondy-eu">>
+                    },
+                    PeerMeta
                 )
         after 1000 ->
             error(latency_event_missing)
@@ -108,3 +129,29 @@ rpc_latency_carries_trace_test() ->
     after
         telemetry:detach(Id)
     end.
+
+%% The `peer_service` connection option: the router's logical name on
+%% this client's outbound-call telemetry. Optional with a product
+%% default; a non-binary or empty value is rejected, never silently
+%% defaulted.
+peer_service_config_test() ->
+    %% Realm validation goes through `bondy_wamp_uri:validate/1`, which
+    %% reads bondy_wamp's app_config — initialized by the app's start,
+    %% not by this process. Without this the test's outcome depends on
+    %% which other eunit modules ran (and left the app up) before it.
+    {ok, _} = application:ensure_all_started(bondy_wamp),
+    Spec = #{realm => <<"com.example.realm">>},
+    {ok, Default} = bondy_connect_config:validate(Spec),
+    ?assertEqual(<<"bondy-connect">>, maps:get(peer_service, Default)),
+    {ok, Named} = bondy_connect_config:validate(
+        Spec#{peer_service => <<"bondy-eu">>}
+    ),
+    ?assertEqual(<<"bondy-eu">>, maps:get(peer_service, Named)),
+    ?assertEqual(
+        {error, {invalid_peer_service, <<>>}},
+        bondy_connect_config:validate(Spec#{peer_service => <<>>})
+    ),
+    ?assertEqual(
+        {error, {invalid_peer_service, bondy}},
+        bondy_connect_config:validate(Spec#{peer_service => bondy})
+    ).

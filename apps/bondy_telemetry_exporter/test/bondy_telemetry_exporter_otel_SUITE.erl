@@ -44,6 +44,8 @@ all() ->
         untraced_and_malformed_no_span,
         unsampled_parent_no_span,
         minted_root_span,
+        hop_pair_spans,
+        hop_marker_inert,
         mcp_spans,
         disabled_gate_and_detach
     ].
@@ -153,10 +155,10 @@ rpc_kind_mapping(_) ->
         undefined
     ),
     ok = bondy_connect_telemetry:rpc_latency(
-        call, <<"com.example.b">>, 5, trace(), success
+        call, <<"com.example.b">>, 5, trace(), success, undefined
     ),
     ok = bondy_connect_telemetry:rpc_latency(
-        invocation, <<"com.example.c">>, 5, trace(), success
+        invocation, <<"com.example.c">>, 5, trace(), success, undefined
     ),
     Spans = flush_spans(),
     ?assertEqual(
@@ -181,7 +183,7 @@ rpc_error_status(_) ->
         undefined
     ),
     ok = bondy_connect_telemetry:rpc_latency(
-        invocation, <<"com.example.err.sdk">>, 5, trace(), error
+        invocation, <<"com.example.err.sdk">>, 5, trace(), error, undefined
     ),
     [Router, Sdk] = flush_spans(),
     ?assertEqual(<<"com.example.err">>, Router#span.name),
@@ -211,6 +213,34 @@ client_span_peer_service(_) ->
     ?assertNot(
         maps:is_key(
             <<"peer.service">>, otel_attributes:map(Unnamed#span.attributes)
+        )
+    ),
+
+    %% The SDK's call leg is the mirror image: a CLIENT span carrying
+    %% the configured router name (its invocation leg — a SERVER span —
+    %% names none).
+    ok = bondy_connect_telemetry:rpc_latency(
+        call,
+        <<"com.example.sdkpeer">>,
+        5,
+        trace(),
+        success,
+        <<"bondy-connect">>
+    ),
+    ok = bondy_connect_telemetry:rpc_latency(
+        invocation, <<"com.example.sdknopeer">>, 5, trace(), success, undefined
+    ),
+    [SdkNamed, SdkUnnamed] = flush_spans(),
+    ?assertEqual(client, SdkNamed#span.kind),
+    ?assertEqual(
+        <<"bondy-connect">>,
+        maps:get(
+            <<"peer.service">>, otel_attributes:map(SdkNamed#span.attributes)
+        )
+    ),
+    ?assertNot(
+        maps:is_key(
+            <<"peer.service">>, otel_attributes:map(SdkUnnamed#span.attributes)
         )
     ).
 
@@ -345,7 +375,7 @@ minted_root_span(_) ->
 
     %% The SDK client leg with an exact marker match still joins.
     ok = bondy_connect_telemetry:rpc_latency(
-        call, <<"com.example.mint.sdk">>, 5, Minted, success
+        call, <<"com.example.mint.sdk">>, 5, Minted, success, undefined
     ),
     [SdkSpan] = flush_spans(),
     ?assertEqual(SpanId, SdkSpan#span.parent_span_id),
@@ -399,6 +429,167 @@ minted_root_span(_) ->
     ?assertEqual(SpanId, UpperSpan#span.parent_span_id),
     ?assertNotEqual(SpanId, UpperSpan#span.span_id),
     ?assertEqual(<<"com.example.mint.sentinel">>, Sentinel#span.name).
+
+%% A `bondyhop=<span-id>` tracestate marker (stamped at the RIB forward,
+%% carried by both legs) is realized as the forward's span PAIR: the
+%% call leg additionally exports a CLIENT `forward` span under the call
+%% span carrying EXACTLY the marker's id, and the invocation leg exports
+%% a SERVER `receive` span parented to that id sight unseen — with the
+%% invocation span re-parented under the receive span. Tempo's
+%% service-graphs processor pairs the two by (trace id, that span id)
+%% into the real node-to-node edge.
+hop_pair_spans(_) ->
+    HopHex = <<"1a2b3c4d5e6f7081">>,
+    Hop = 16#1a2b3c4d5e6f7081,
+    HopTrace = (trace())#{
+        <<"tracestate">> := <<"bondyhop=", HopHex/binary, ",", ?TS/binary>>
+    },
+
+    %% The forwarding node's call leg: call span + forward child.
+    ok = bondy_telemetry:rpc_latency(
+        call, <<"com.example.hop">>, 40, HopTrace, success, undefined
+    ),
+    [Call, Fwd] = flush_spans(),
+    ?assertEqual(<<"com.example.hop">>, Call#span.name),
+    ?assertEqual(server, Call#span.kind),
+    ?assertEqual(?PARENT_SPAN_ID, Call#span.parent_span_id),
+
+    ?assertEqual(<<"forward com.example.hop">>, Fwd#span.name),
+    ?assertEqual(client, Fwd#span.kind),
+    ?assertEqual(?TRACE_ID, Fwd#span.trace_id),
+    ?assertEqual(Hop, Fwd#span.span_id),
+    ?assertEqual(Call#span.span_id, Fwd#span.parent_span_id),
+    ?assertEqual(
+        erlang:convert_time_unit(40, millisecond, native),
+        Fwd#span.end_time - Fwd#span.start_time
+    ),
+    ?assertEqual(undefined, Fwd#span.status),
+    FwdAttrs = otel_attributes:map(Fwd#span.attributes),
+    ?assertEqual(<<"router">>, maps:get(<<"bondy.emitter">>, FwdAttrs)),
+    ?assertNot(maps:is_key(<<"peer.service">>, FwdAttrs)),
+
+    %% The owning node's invocation leg: receive span (fresh id, parent
+    %% = the marker's id) + the invocation span as ITS child, both
+    %% mirroring the outcome; the peer stays on the invocation span
+    %% only.
+    ok = bondy_telemetry:rpc_latency(
+        invocation, <<"com.example.hop">>, 25, HopTrace, error, <<"cb/1">>
+    ),
+    [Inv, Recv] = flush_spans(),
+    ?assertEqual(<<"receive com.example.hop">>, Recv#span.name),
+    ?assertEqual(server, Recv#span.kind),
+    ?assertEqual(?TRACE_ID, Recv#span.trace_id),
+    ?assertEqual(Hop, Recv#span.parent_span_id),
+    ?assertNotEqual(Hop, Recv#span.span_id),
+    ?assertMatch(#status{code = error}, Recv#span.status),
+    ?assertNot(
+        maps:is_key(
+            <<"peer.service">>, otel_attributes:map(Recv#span.attributes)
+        )
+    ),
+
+    ?assertEqual(<<"com.example.hop">>, Inv#span.name),
+    ?assertEqual(client, Inv#span.kind),
+    ?assertEqual(Recv#span.span_id, Inv#span.parent_span_id),
+    ?assertMatch(#status{code = error}, Inv#span.status),
+    ?assertEqual(
+        erlang:convert_time_unit(25, millisecond, native),
+        Inv#span.end_time - Inv#span.start_time
+    ),
+    ?assertEqual(
+        <<"cb/1">>,
+        maps:get(<<"peer.service">>, otel_attributes:map(Inv#span.attributes))
+    ),
+
+    %% Minted AND forwarded: the call leg roots under the minted ids
+    %% and the forward span hangs off that root.
+    TraceHex = <<"4bf92f3577b34da6a3ce929d0e0e4736">>,
+    SpanHex = <<"00f067aa0ba902b7">>,
+    MintedHop = #{
+        <<"traceparent">> =>
+            <<"00-", TraceHex/binary, "-", SpanHex/binary, "-01">>,
+        <<"tracestate">> =>
+            <<"bondyhop=", HopHex/binary, ",bondy=", SpanHex/binary>>
+    },
+    ok = bondy_telemetry:rpc_latency(
+        call, <<"com.example.hop.mint">>, 10, MintedHop, success, undefined
+    ),
+    [Root, MintFwd] = flush_spans(),
+    ?assertEqual(binary_to_integer(SpanHex, 16), Root#span.span_id),
+    ?assertEqual(undefined, Root#span.parent_span_id),
+    ?assertEqual(Hop, MintFwd#span.span_id),
+    ?assertEqual(Root#span.span_id, MintFwd#span.parent_span_id),
+    ?assertEqual(binary_to_integer(TraceHex, 16), MintFwd#span.trace_id).
+
+%% The hop marker is a router-boundary behaviour realized only from
+%% VALID markers: the SDK legs ignore it, an invalid id (uppercase,
+%% zero, wrong length — tracestate arrives off the wire unvalidated)
+%% produces no pair, and an unsampled parent still exports nothing.
+hop_marker_inert(_) ->
+    HopHex = <<"1a2b3c4d5e6f7081">>,
+    HopTS = <<"bondyhop=", HopHex/binary, ",", ?TS/binary>>,
+
+    %% SDK legs: single plain span each, no pair.
+    ok = bondy_connect_telemetry:rpc_latency(
+        call,
+        <<"com.example.sdk">>,
+        5,
+        (trace())#{<<"tracestate">> := HopTS},
+        success,
+        undefined
+    ),
+    [SdkSpan] = flush_spans(),
+    ?assertEqual(<<"com.example.sdk">>, SdkSpan#span.name),
+
+    %% Invalid marker ids: the leg exports its plain span only.
+    Invalid = [
+        <<"bondyhop=", (string:uppercase(HopHex))/binary>>,
+        <<"bondyhop=0000000000000000">>,
+        <<"bondyhop=abc">>
+    ],
+    lists:foreach(
+        fun(TS) ->
+            ok = bondy_telemetry:rpc_latency(
+                call,
+                <<"com.example.badhop">>,
+                5,
+                (trace())#{<<"tracestate">> := TS},
+                success,
+                undefined
+            ),
+            ok = bondy_telemetry:rpc_latency(
+                invocation,
+                <<"com.example.badhop">>,
+                5,
+                (trace())#{<<"tracestate">> := TS},
+                success,
+                undefined
+            ),
+            [CallSpan, InvSpan] = flush_spans(),
+            ?assertEqual(<<"com.example.badhop">>, CallSpan#span.name),
+            ?assertEqual(?PARENT_SPAN_ID, CallSpan#span.parent_span_id),
+            ?assertEqual(<<"com.example.badhop">>, InvSpan#span.name),
+            ?assertEqual(?PARENT_SPAN_ID, InvSpan#span.parent_span_id)
+        end,
+        Invalid
+    ),
+
+    %% An unsampled parent: the receive path honours the carried flags
+    %% like every other — nothing exported from either leg.
+    Unsampled = #{
+        <<"traceparent">> => ?TP_UNSAMPLED, <<"tracestate">> => HopTS
+    },
+    ok = bondy_telemetry:rpc_latency(
+        call, <<"com.example.hop.uns">>, 5, Unsampled, success, undefined
+    ),
+    ok = bondy_telemetry:rpc_latency(
+        invocation, <<"com.example.hop.uns">>, 5, Unsampled, success, undefined
+    ),
+    ok = bondy_telemetry:rpc_latency(
+        call, <<"com.example.hop.sentinel">>, 5, trace(), success, undefined
+    ),
+    [Sentinel] = flush_spans(),
+    ?assertEqual(<<"com.example.hop.sentinel">>, Sentinel#span.name).
 
 %% The three MCP completion events (µs durations): tool/resource are
 %% SERVER spans, upstream a CLIENT span; `success` leaves OTel status

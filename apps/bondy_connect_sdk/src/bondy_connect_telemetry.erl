@@ -15,7 +15,15 @@ Emitted once per settled RPC leg, in the same shape as the router's
 
 - Measurements: `#{duration => non_neg_integer()}` (milliseconds).
 - Metadata: `#{kind => call | invocation, procedure_uri => binary(),
-  trace => #{binary() => binary()}}`.
+  trace => #{binary() => binary()},
+  outcome => success | error,
+  peer_service => binary() | undefined}`.
+
+`peer_service` names the remote party of the leg's CLIENT span — the
+configured logical name of the router (`peer_service` connection
+option, default `<<"bondy-connect">>`) on `call` legs; `undefined` on
+`invocation` legs (a SERVER span's peer attribute is inert in trace
+backends, mirroring the router's call leg).
 
 `kind => call` is the client-observed round trip of an outbound CALL —
 from the send to the terminal RESULT/ERROR the router answers with
@@ -31,7 +39,7 @@ and `duration` locates its start — enough to reconstruct a retroactive
 span.
 """.
 
--export([rpc_latency/5]).
+-export([rpc_latency/6]).
 -export([trace_meta/1]).
 
 %% =============================================================================
@@ -50,10 +58,11 @@ event contract.
     ProcedureUri :: binary(),
     DurationMs :: integer(),
     Trace :: #{binary() => binary()},
-    Outcome :: success | error
+    Outcome :: success | error,
+    PeerService :: binary() | undefined
 ) -> ok.
 
-rpc_latency(Kind, ProcedureUri, DurationMs, Trace, Outcome) ->
+rpc_latency(Kind, ProcedureUri, DurationMs, Trace, Outcome, PeerService) ->
     telemetry:execute(
         [bondy_connect, rpc, latency],
         #{duration => max(0, DurationMs)},
@@ -61,7 +70,8 @@ rpc_latency(Kind, ProcedureUri, DurationMs, Trace, Outcome) ->
             kind => Kind,
             procedure_uri => ProcedureUri,
             trace => Trace,
-            outcome => Outcome
+            outcome => Outcome,
+            peer_service => PeerService
         }
     ).
 

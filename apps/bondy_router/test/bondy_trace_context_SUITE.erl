@@ -95,7 +95,7 @@ cross_node_call_trace_context(Config) ->
     ok = wait_remote_registration(N1, Uri, Proc),
     ok = erpc:call(N1, ?MODULE, do_call_pair, [Uri, Proc]),
 
-    assert_trace_pair(N2).
+    assert_cross_call_trace_pair(N2).
 
 same_node_publish_trace_context(Config) ->
     [N1, _] = nodes_of(Config),
@@ -225,10 +225,14 @@ cross_node_call_latency_trace(Config) ->
             lists:sort([{N1, call}, {N2, invocation}]),
             lists:sort([{Node, maps:get(kind, M)} || {Node, M} <- Traced])
         ),
-        ?assertEqual(
-            [wire_trace(), wire_trace()],
-            [maps:get(trace, M) || {_, M} <- Traced]
-        ),
+        %% Both legs carry the SAME hop id: minted once at the RIB
+        %% forward seat, ridden by the caller-node call promise and the
+        %% callee-node invocation promise alike.
+        [HopA, HopB] = [
+            assert_hop_trace(maps:get(trace, M))
+         || {_, M} <- Traced
+        ],
+        ?assertEqual(HopA, HopB),
         ?assertEqual(
             [success, success],
             [maps:get(outcome, M) || {_, M} <- Traced]
@@ -277,10 +281,11 @@ cross_node_call_error_outcome(Config) ->
             [error, error],
             [maps:get(outcome, M) || {_, M} <- Events]
         ),
-        ?assertEqual(
-            [wire_trace(), wire_trace()],
-            [maps:get(trace, M) || {_, M} <- Events]
-        )
+        [HopA, HopB] = [
+            assert_hop_trace(maps:get(trace, M))
+         || {_, M} <- Events
+        ],
+        ?assertEqual(HopA, HopB)
     after
         detach_latency_capture([N1, N2])
     end.
@@ -323,22 +328,29 @@ minted_root_context(Config) ->
         ?assertMatch(
             {match, _}, re:run(TPa, "^00-[0-9a-f]{32}-[0-9a-f]{16}-01$")
         ),
-        %% The span-id-bound mint marker rides BOTH legs: it is what
+        %% The span-id-bound mint marker rides BOTH legs — it is what
         %% lets the bridge realize the pre-allocated span id as the
-        %% trace's root span at the minting node.
+        %% trace's root span at the minting node — with the RIB
+        %% forward's hop entry prepended in front of it.
         <<"00-", _:32/binary, "-", SpanHex:16/binary, "-01">> = TPa,
-        ?assertEqual(
-            [<<"bondy=", SpanHex/binary>>, <<"bondy=", SpanHex/binary>>],
-            [maps:get(<<"tracestate">>, maps:get(trace, M)) || {_, M} <- Events]
-        ),
+        [TSa, TSb] = [
+            maps:get(<<"tracestate">>, maps:get(trace, M))
+         || {_, M} <- Events
+        ],
+        ?assertEqual(TSa, TSb),
+        <<"bondyhop=", MintHop:16/binary, ",bondy=", SpanHex2/binary>> = TSa,
+        ?assertMatch({match, _}, re:run(MintHop, "^[0-9a-f]{16}$")),
+        ?assertEqual(SpanHex, SpanHex2),
 
-        %% A caller-supplied context is honoured, never re-minted.
+        %% A caller-supplied context is honoured, never re-minted (its
+        %% tracestate still gains the hop entry at the forward).
         ok = erpc:call(N1, ?MODULE, do_call_await, [Uri, Proc, traced]),
         Traced = collect_latency(Proc, 2),
-        ?assertEqual(
-            [wire_trace(), wire_trace()],
-            [maps:get(trace, M) || {_, M} <- Traced]
-        )
+        [HopA, HopB] = [
+            assert_hop_trace(maps:get(trace, M))
+         || {_, M} <- Traced
+        ],
+        ?assertEqual(HopA, HopB)
     after
         _ = erpc:call(N1, bondy_config, set, [
             tracing_mint, [{enabled, false}]
@@ -365,6 +377,24 @@ assert_trace_pair(Node) ->
     ?assertEqual(?TS, maps:get('_tracestate', First)),
     ?assertEqual(?BG, maps:get('_baggage', First)),
     %% No defaults, no leakage from the previous message.
+    ?assertNot(maps:is_key('_traceparent', Second)),
+    ?assertNot(maps:is_key('_tracestate', Second)),
+    ?assertNot(maps:is_key('_baggage', Second)).
+
+%% @private
+%% The cross-node CALL variant of `assert_trace_pair/1`: the delivered
+%% INVOCATION details carry traceparent and baggage verbatim, while
+%% `'_tracestate'` gained the cluster-forward hop marker in front of the
+%% caller's entries. An untraced call still carries nothing.
+assert_cross_call_trace_pair(Node) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CONVERGE_MS,
+    [First, Second] = await_probe(Node, 2, Deadline),
+    ?assertEqual(?TP, maps:get('_traceparent', First)),
+    <<"bondyhop=", Hop:16/binary, ",", Rest/binary>> =
+        maps:get('_tracestate', First),
+    ?assertMatch({match, _}, re:run(Hop, "^[0-9a-f]{16}$")),
+    ?assertEqual(?TS, Rest),
+    ?assertEqual(?BG, maps:get('_baggage', First)),
     ?assertNot(maps:is_key('_traceparent', Second)),
     ?assertNot(maps:is_key('_tracestate', Second)),
     ?assertNot(maps:is_key('_baggage', Second)).
@@ -577,6 +607,23 @@ wire_trace() ->
         <<"tracestate">> => ?TS,
         <<"baggage">> => ?BG
     }.
+
+%% @private
+%% The cross-node expectation for one latency-event `trace` map:
+%% traceparent and baggage verbatim; `tracestate` = the cluster-forward
+%% hop marker prepended to the caller's entries (the one deliberate
+%% exception to verbatim carry — `bondy_telemetry:maybe_hop_trace/1`,
+%% stamped at the RIB forward seat). Returns the hop id so callers can
+%% assert BOTH legs carry the SAME one: the marker is minted once and
+%% rides the forwarded options into both promises.
+assert_hop_trace(#{} = Trace) ->
+    ?assertEqual(?TP, maps:get(<<"traceparent">>, Trace)),
+    ?assertEqual(?BG, maps:get(<<"baggage">>, Trace)),
+    <<"bondyhop=", Hop:16/binary, ",", Rest/binary>> =
+        maps:get(<<"tracestate">>, Trace),
+    ?assertMatch({match, _}, re:run(Hop, "^[0-9a-f]{16}$")),
+    ?assertEqual(?TS, Rest),
+    Hop.
 
 %% =============================================================================
 %% PROBE

@@ -129,6 +129,10 @@ init({Ref, Transport, Opts}) ->
         transport => Transport
     }),
 
+    %% Before the first `[safe]` wire decode — see
+    %% `bondy_bridge_relay:ensure_wire_atoms/0`.
+    ok = bondy_bridge_relay:ensure_wire_atoms(),
+
     AuthTimeout = key_value:get(auth_timeout, Opts, 5000),
     IdleTimeout = key_value:get(idle_timeout, Opts, infinity),
     %% Shall we hibernate when we are idle?
@@ -215,7 +219,14 @@ connecting(enter, connecting, State0) ->
                 peername = Peername,
                 socket = Socket
             },
-            {keep_state, State, [{next_event, internal, connection_setup}]};
+            %% A state ENTER call may not inject events
+            %% (gen_statem refuses `next_event` with
+            %% `bad_state_enter_action_from_state_function`, killing the
+            %% acceptor on EVERY inbound bridge connection — caught by
+            %% bondy_bridge_relay_rpc_SUITE). A zero state timeout is
+            %% the legal immediate continuation, the same pattern as the
+            %% client's connecting enter.
+            {keep_state, State, [{state_timeout, 0, connection_setup}]};
         {error, {socket_error, Message}} ->
             ?LOG_INFO(#{
                 description =>
@@ -237,7 +248,7 @@ connecting(enter, connecting, State0) ->
             }),
             {stop, normal, State0}
     end;
-connecting(internal, connection_setup, State) ->
+connecting(state_timeout, connection_setup, State) ->
     Transport = State#state.transport,
     Socket = State#state.socket,
     %% Listener-level socket opts (nodelay, buffers, keepalive) are
@@ -693,7 +704,11 @@ authenticate(AuthMethod, Signature, Extra, State0) ->
             SessionId = bondy_auth:session_id(AuthCtxt0),
             Session = session(SessionId, State0),
 
-            ok = resulto:throw_or(bondy_session_manager:open(Session)),
+            %% `throw_or` passes a success through UNCHANGED — `{ok, _}`
+            %% here, never bare `ok` (matching `ok` crashed the server
+            %% on every SUCCESSFUL authentication; caught by
+            %% bondy_bridge_relay_rpc_SUITE).
+            {ok, _} = resulto:throw_or(bondy_session_manager:open(Session)),
 
             AuthExtra = AuthExtra0#{node => bondy_config:nodestring()},
             M = {welcome, SessionId, #{authextra => AuthExtra}},

@@ -41,6 +41,18 @@ those pre-allocated ids (via `bondy_telemetry_exporter_otel_ids`),
 giving a minted trace the natural `call → invocation` nesting instead
 of siblings under a phantom parent no backend can root.
 
+A cross-node forward (`bondy_telemetry:maybe_hop_trace/1`'s
+`bondyhop=<span-id>` tracestate entry, stamped at the RIB forward and
+carried by BOTH legs of the forwarded call) is realized as a span PAIR
+bridging the nodes: the forwarding node's call leg additionally emits
+a CLIENT `forward` span under its call span carrying the marker's
+pre-allocated id, and the owning node's invocation leg emits a SERVER
+`receive` span parented to that id — with the invocation span emitted
+as the receive span's child rather than the carried parent's. A trace
+backend that pairs client/server spans by id (Tempo's service-graphs
+processor) then draws the real node-to-node edge. The marker is a
+router-boundary behaviour: the SDK legs ignore it.
+
 `telemetry` permanently detaches a handler that raises (verified in
 `telemetry:execute`), so one malformed event would silently end all
 span export for the node's lifetime — `handle_event/4` therefore
@@ -95,7 +107,8 @@ start_link() ->
 
 handle_event(Event, Measurements, Metadata, _Config) ->
     try
-        span(Event, Measurements, Metadata)
+        _ = span(Event, Measurements, Metadata),
+        ok
     catch
         Class:Reason:Stacktrace ->
             ?LOG_WARNING(#{
@@ -145,40 +158,55 @@ span([bondy, rpc, latency], #{duration := Ms}, Meta) ->
         outcome := Outcome,
         peer_service := Peer
     } = Meta,
-    Attrs = maybe_peer(
-        #{
-            <<"bondy.emitter">> => <<"router">>,
-            <<"bondy.procedure">> => Uri,
-            <<"bondy.node">> => atom_to_binary(node(), utf8)
-        },
-        Peer
-    ),
-    case minted_root_ids(Kind, Trace) of
-        {TraceId, SpanId} ->
-            emit_root(
-                TraceId,
-                SpanId,
-                Uri,
-                router_span_kind(Kind),
-                Ms,
-                millisecond,
-                span_status(Outcome),
-                Attrs#{<<"bondy.trace.minted">> => true}
-            );
-        false ->
-            emit(
-                Trace,
-                Uri,
-                router_span_kind(Kind),
-                Ms,
-                millisecond,
-                span_status(Outcome),
-                Attrs
-            )
+    Base = #{
+        <<"bondy.emitter">> => <<"router">>,
+        <<"bondy.procedure">> => Uri,
+        <<"bondy.node">> => atom_to_binary(node(), utf8)
+    },
+    Attrs = maybe_peer(Base, Peer),
+    Status = span_status(Outcome),
+    case {Kind, hop_hex(Trace)} of
+        {invocation, HopHex} when is_binary(HopHex) ->
+            emit_hop_receive(Trace, Uri, HopHex, Ms, Status, Attrs, Base);
+        {_, HopHex} ->
+            SpanCtx =
+                case minted_root_ids(Kind, Trace) of
+                    {TraceId, SpanId} ->
+                        emit_root(
+                            TraceId,
+                            SpanId,
+                            Uri,
+                            router_span_kind(Kind),
+                            Ms,
+                            millisecond,
+                            Status,
+                            Attrs#{<<"bondy.trace.minted">> => true}
+                        );
+                    false ->
+                        emit(
+                            Trace,
+                            Uri,
+                            router_span_kind(Kind),
+                            Ms,
+                            millisecond,
+                            Status,
+                            Attrs
+                        )
+                end,
+            case is_binary(HopHex) andalso SpanCtx =/= undefined of
+                true ->
+                    emit_hop_forward(SpanCtx, Uri, HopHex, Ms, Status, Base);
+                false ->
+                    ok
+            end
     end;
 span([bondy_connect, rpc, latency], #{duration := Ms}, Meta) ->
     #{
-        kind := Kind, procedure_uri := Uri, trace := Trace, outcome := Outcome
+        kind := Kind,
+        procedure_uri := Uri,
+        trace := Trace,
+        outcome := Outcome,
+        peer_service := Peer
     } = Meta,
     emit(
         Trace,
@@ -187,11 +215,14 @@ span([bondy_connect, rpc, latency], #{duration := Ms}, Meta) ->
         Ms,
         millisecond,
         span_status(Outcome),
-        #{
-            <<"bondy.emitter">> => <<"sdk">>,
-            <<"bondy.procedure">> => Uri,
-            <<"bondy.node">> => atom_to_binary(node(), utf8)
-        }
+        maybe_peer(
+            #{
+                <<"bondy.emitter">> => <<"sdk">>,
+                <<"bondy.procedure">> => Uri,
+                <<"bondy.node">> => atom_to_binary(node(), utf8)
+            },
+            Peer
+        )
     );
 span([bondy, mcp, tool, call, stop], #{duration := Us}, Meta) ->
     #{realm := Realm, name := Name, status := Status, trace := Trace} = Meta,
@@ -250,8 +281,9 @@ span([bondy, mcp, upstream, call, stop], #{duration := Us}, Meta) ->
 %% client spans and, when no matching server span arrives before the
 %% edge expires, completes the edge to a virtual node named by it.
 %% Producers only name a peer on their client legs (the router's
-%% invocation leg, the MCP upstream leg), so no kind gate is needed
-%% here; peer attributes on server-span edges are inert in Tempo.
+%% invocation leg, the SDK's call leg, the MCP upstream leg), so no
+%% kind gate is needed here; peer attributes on server-span edges are
+%% inert in Tempo.
 maybe_peer(Attrs, Peer) when is_binary(Peer) ->
     Attrs#{<<"peer.service">> => Peer};
 maybe_peer(Attrs, _) ->
@@ -321,6 +353,124 @@ is_lower_hex(<<C, Rest/binary>>) when
 is_lower_hex(_) ->
     false.
 
+%% @private The cluster-forward hop marker: `bondyhop=<span-id>`,
+%% stamped by `bondy_telemetry:maybe_hop_trace/1` at the RIB forward,
+%% naming the span id PRE-ALLOCATED for the forward's CLIENT/SERVER
+%% pair. Validated as minted_root_ids validates its ids — exactly 16
+%% lowercase hex (the size in the comprehension's pattern drops
+%% wrong-length entries), non-zero — since tracestate arrives off the
+%% wire unvalidated. The residual a forged-but-valid entry buys is a
+%% fictitious hop pair on whichever node emits the legs (a same-node
+%% self-edge in the service graph); nothing local can distinguish it
+%% from a real forward, and it breaks no trace.
+hop_hex(#{<<"tracestate">> := TS}) when is_binary(TS) ->
+    Entries = binary:split(TS, <<",">>, [global]),
+    case [H || <<"bondyhop=", H:16/binary>> <- Entries] of
+        [Hex | _] ->
+            case is_lower_hex(Hex) andalso binary_to_integer(Hex, 16) =/= 0 of
+                true -> Hex;
+                false -> undefined
+            end;
+        [] ->
+            undefined
+    end;
+hop_hex(_) ->
+    undefined.
+
+%% @private The CLIENT half of the forward pair, on the forwarding
+%% node: a child of the just-emitted call span carrying the marker's
+%% pre-allocated id, which the owner node's receive span parents to
+%% sight unseen. The forced-id mechanics and the took-assertion are
+%% emit_root's — the SDK offers no per-span id, and
+%% `otel_span_utils:new_span_ctx/2` consults the configured generator
+%% for a child's span id (read from that source). Extent and status
+%% mirror the call span: the forward IS the call's remote leg, and the
+%% forwarding node cannot time the network hop separately.
+emit_hop_forward(ParentCtx, Uri, HopHex, Ms, Status, Attrs) ->
+    End = opentelemetry:timestamp(),
+    Start = End - erlang:convert_time_unit(Ms, millisecond, native),
+    Tracer = opentelemetry:get_application_tracer(?MODULE),
+    Ctx = otel_tracer:set_current_span(otel_ctx:new(), ParentCtx),
+    Hop = binary_to_integer(HopHex, 16),
+    SpanCtx = bondy_telemetry_exporter_otel_ids:with_forced(
+        ParentCtx#span_ctx.trace_id, Hop, fun() ->
+            otel_tracer:start_span(Ctx, Tracer, <<"forward ", Uri/binary>>, #{
+                kind => ?SPAN_KIND_CLIENT,
+                start_time => Start,
+                attributes => Attrs
+            })
+        end
+    ),
+    #span_ctx{span_id = Hop} = SpanCtx,
+    _ = Status =:= error andalso otel_span:set_status(SpanCtx, error),
+    _ = otel_span:end_span(SpanCtx, End),
+    ok.
+
+%% @private The SERVER half plus the re-parented invocation leg, on the
+%% owning node. The carried traceparent's span-id field is replaced by
+%% the hop id and re-extracted, so the propagator builds the receive
+%% span's parent exactly as it builds any remote parent — consistent
+%% hex ids, sampling decision from the carried flags — and the
+%% invocation span is emitted as the receive span's child instead of
+%% the carried parent's. Both spans share the invocation leg's extent:
+%% the owner cannot time pre-invocation queueing separately. An
+%% undecodable traceparent emits nothing, exactly as emit/7.
+emit_hop_receive(Trace, Uri, HopHex, Ms, Status, InvAttrs, RecvAttrs) ->
+    case Trace of
+        #{
+            <<"traceparent">> :=
+                <<V:2/binary, "-", T:32/binary, "-", _:16/binary, "-",
+                    F/binary>>
+        } ->
+            HopTrace = Trace#{
+                <<"traceparent">> :=
+                    <<V/binary, "-", T/binary, "-", HopHex/binary, "-",
+                        F/binary>>
+            },
+            Ctx = otel_propagator_text_map:extract_to(
+                otel_ctx:new(),
+                otel_propagator_trace_context,
+                maps:to_list(HopTrace)
+            ),
+            case otel_tracer:current_span_ctx(Ctx) of
+                undefined ->
+                    ok;
+                #span_ctx{} ->
+                    End = opentelemetry:timestamp(),
+                    Start =
+                        End - erlang:convert_time_unit(Ms, millisecond, native),
+                    Tracer = opentelemetry:get_application_tracer(?MODULE),
+                    RecvCtx = otel_tracer:start_span(
+                        Ctx, Tracer, <<"receive ", Uri/binary>>, #{
+                            kind => ?SPAN_KIND_SERVER,
+                            start_time => Start,
+                            attributes => RecvAttrs
+                        }
+                    ),
+                    InvCtx = otel_tracer:start_span(
+                        otel_tracer:set_current_span(Ctx, RecvCtx),
+                        Tracer,
+                        Uri,
+                        #{
+                            kind => ?SPAN_KIND_CLIENT,
+                            start_time => Start,
+                            attributes => InvAttrs
+                        }
+                    ),
+                    _ =
+                        Status =:= error andalso
+                            otel_span:set_status(InvCtx, error),
+                    _ = otel_span:end_span(InvCtx, End),
+                    _ =
+                        Status =:= error andalso
+                            otel_span:set_status(RecvCtx, error),
+                    _ = otel_span:end_span(RecvCtx, End),
+                    ok
+            end;
+        _ ->
+            ok
+    end.
+
 %% @private Build and end the retroactive ROOT span of a minted trace:
 %% parentless, carrying exactly the pre-allocated ids the minted
 %% traceparent named — every other leg of the trace references them as
@@ -351,7 +501,7 @@ emit_root(TraceId, SpanId, Name, Kind, Duration, Unit, Status, Attrs) ->
     #span_ctx{trace_id = TraceId, span_id = SpanId} = SpanCtx,
     _ = Status =:= error andalso otel_span:set_status(SpanCtx, error),
     _ = otel_span:end_span(SpanCtx, End),
-    ok.
+    SpanCtx.
 
 %% @private `success` leaves the OTel status UNSET (the convention for
 %% "nothing went wrong"); every other outcome/status atom marks the
@@ -361,12 +511,14 @@ emit_root(TraceId, SpanId, Name, Kind, Duration, Unit, Status, Attrs) ->
 span_status(success) -> unset;
 span_status(_) -> error.
 
-%% @private Build and end the retroactive span. The `trace` map's keys
-%% are already the W3C header names, so `maps:to_list/1` of it is a
-%% valid default text-map carrier; extraction is total — an
-%% undecodable `traceparent` leaves the context without a span context
-%% and no span is emitted (the wire carries these values verbatim and
-%% unvalidated, so this is the validation point).
+%% @private Build and end the retroactive span; returns its span ctx
+%% (`undefined` when nothing was emitted — the rpc clause hangs the
+%% forward span off it). The `trace` map's keys are already the W3C
+%% header names, so `maps:to_list/1` of it is a valid default text-map
+%% carrier; extraction is total — an undecodable `traceparent` leaves
+%% the context without a span context and no span is emitted (the wire
+%% carries these values verbatim and unvalidated, so this is the
+%% validation point).
 emit(Trace, Name, Kind, Duration, Unit, Status, Attrs) when
     map_size(Trace) > 0
 ->
@@ -375,7 +527,7 @@ emit(Trace, Name, Kind, Duration, Unit, Status, Attrs) when
     ),
     case otel_tracer:current_span_ctx(Ctx) of
         undefined ->
-            ok;
+            undefined;
         _Parent ->
             End = opentelemetry:timestamp(),
             Start = End - erlang:convert_time_unit(Duration, Unit, native),
@@ -387,7 +539,7 @@ emit(Trace, Name, Kind, Duration, Unit, Status, Attrs) when
             }),
             _ = Status =:= error andalso otel_span:set_status(SpanCtx, error),
             _ = otel_span:end_span(SpanCtx, End),
-            ok
+            SpanCtx
     end;
 emit(_, _, _, _, _, _, _) ->
-    ok.
+    undefined.

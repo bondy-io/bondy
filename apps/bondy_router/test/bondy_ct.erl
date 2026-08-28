@@ -703,6 +703,7 @@
     stop_bondy/0,
     start_cluster/2,
     start_cluster/3,
+    start_nodes/2,
     stop_cluster/1,
     freeze_gc/1,
     stop_nodes/1,
@@ -851,6 +852,32 @@ start_cluster(Names, Config) when is_list(Names) ->
             ok = stop_cluster(Nodes),
             erlang:raise(Class, Reason, Stacktrace)
     end.
+
+-doc """
+As `start_cluster/2` but WITHOUT joining the nodes: each boots as an
+independent single-node router. This is the topology a bridge relay
+connects — two sovereign routers, no Partisan membership, no replicated
+registry — so a suite that clusters its nodes instead would never
+exercise the bridge path. Stop with `stop_cluster/1` (the peers are the
+same shape).
+""".
+-spec start_nodes([atom() | {atom(), list()}], proplists:proplist()) ->
+    [{atom(), node(), pid()}].
+
+start_nodes(Names, Config) when is_list(Names) ->
+    ok = start_disterl(),
+    PrivDir = proplists:get_value(priv_dir, Config),
+    PrivDir =/= undefined orelse error({missing_priv_dir, Config}),
+    Cookie = atom_to_list(erlang:get_cookie()),
+    Specs = [
+        case N of
+            {Name, Extra} when is_atom(Name), is_list(Extra) -> {Name, Extra};
+            Name when is_atom(Name) -> {Name, []}
+        end
+     || N <- Names
+    ],
+    Indexed = lists:zip(Specs, lists:seq(1, length(Specs))),
+    start_nodes_or_unwind(Indexed, PrivDir, Cookie, []).
 
 %% @private
 %% Peer ports are derived from a node's index within its cluster, so every

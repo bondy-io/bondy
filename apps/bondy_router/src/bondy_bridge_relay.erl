@@ -614,6 +614,7 @@ end#{
 % -export([fetch/1]).
 % -export([update/1]).
 -export([add/1]).
+-export([ensure_wire_atoms/0]).
 -export([exists/1]).
 -export([forward/2]).
 -export([list/0]).
@@ -643,6 +644,39 @@ forward([H | T], Msg) ->
     forward(T, Msg);
 forward(Ref, Msg) ->
     bondy_bridge_relay_client:forward(Ref, Msg).
+
+-doc """
+Interns every atom the bridge wire can legitimately carry, by loading
+the modules of the apps whose terms ride it.
+
+Both ends decode the wire with `binary_to_term/2` `[safe]` (the
+atom-exhaustion defence): an atom absent from the receiving node's atom
+table makes the WHOLE message undecodable — and the code loader is
+lazy, so a node that never exercised a code path has never interned its
+atoms. Measured on a fresh edge node
+(`bondy_bridge_relay_rpc_SUITE`): the server's own cryptosign CHALLENGE
+bounced on `channel_binding`, and since the decode failure precedes any
+interning, every reconnect bounced identically — a permanently bricked
+bridge. Loading these apps' modules interns every atom their code can
+put on the wire: protocol control messages, the auth exchange,
+realm/RBAC sync cells, registry entries and forwarded WAMP messages.
+Call before the first decode on either end.
+""".
+-spec ensure_wire_atoms() -> ok.
+
+ensure_wire_atoms() ->
+    lists:foreach(
+        fun(App) ->
+            case application:get_key(App, modules) of
+                {ok, Mods} ->
+                    _ = code:ensure_modules_loaded(Mods),
+                    ok;
+                undefined ->
+                    ok
+            end
+        end,
+        [bondy_router, bondy_wamp, bondy_db]
+    ).
 
 -doc """
 Returns a validated bridge relay configuration built from `Data`.

@@ -1440,7 +1440,7 @@ resolve_pending(ReqId, Reply, #data{pending = Pending} = Data) ->
     case maps:take(ReqId, Pending) of
         {#{from := From, timer := TRef} = Entry, Pending1} ->
             _ = cancel_timer(TRef),
-            ok = notify_span(Entry, Reply),
+            ok = notify_span(Entry, Reply, Data#data.config),
             _ = dispatch_reply(From, Reply),
             Data#data{
                 pending = Pending1,
@@ -1467,16 +1467,22 @@ call_span(#call{procedure_uri = Uri, options = Opts}) ->
 %% emit nothing — the event measures a router-answered round trip.
 %% `Reply` is the reply being dispatched to the owner, so the outcome
 %% is exactly what the caller observes: a WAMP ERROR settles as
-%% `error`, everything else as `success`.
-notify_span(#{span := #{uri := Uri, trace := Trace, start := T0}}, Reply) ->
+%% `error`, everything else as `success`. The configured `peer_service`
+%% names the router on this CLIENT leg (the config map is validated,
+%% so the key is always present).
+notify_span(
+    #{span := #{uri := Uri, trace := Trace, start := T0}}, Reply, Config
+) ->
     Duration = erlang:monotonic_time(millisecond) - T0,
     Outcome =
         case Reply of
             {error, _} -> error;
             _ -> success
         end,
-    bondy_connect_telemetry:rpc_latency(call, Uri, Duration, Trace, Outcome);
-notify_span(_, _) ->
+    bondy_connect_telemetry:rpc_latency(
+        call, Uri, Duration, Trace, Outcome, maps:get(peer_service, Config)
+    );
+notify_span(_, _, _) ->
     ok.
 
 %% @private A progressive RESULT for a pending CALL: deliver a

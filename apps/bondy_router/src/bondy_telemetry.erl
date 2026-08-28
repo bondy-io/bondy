@@ -54,6 +54,7 @@ Also provides trace-identifier generation.
 -export([wamp_dropped/2]).
 -export([http_request/1]).
 -export([maybe_mint_trace/1]).
+-export([maybe_hop_trace/1]).
 
 %% =============================================================================
 %% API
@@ -518,6 +519,57 @@ maybe_mint_trace(Opts) when is_map(Opts) ->
         _ ->
             Opts
     end.
+
+-doc """
+Stamps the cluster-forward hop marker into a TRACED call's options: a
+fresh pre-allocated span id as the W3C tracestate vendor entry
+`bondyhop=<span-id>`, replacing any entry already carried under that
+key (a re-forward is a new hop) and prepending the rest of the
+caller's `tracestate` per the W3C update rule. The span bridge
+realizes the id as the inter-node forward's CLIENT/SERVER span pair —
+the pairing a trace backend's service graph draws a node-to-node edge
+from. An options map without a binary `'_traceparent'` is returned
+unchanged: no trace, no hop span. `'_traceparent'` and `'_baggage'`
+are never touched — updating our own `tracestate` entry at a
+propagation seat is exactly what that field exists for, and is the
+one deliberate exception to Bondy's carry-verbatim rule.
+
+Not gated on any local tracing flag: the spans the id serves are
+emitted by whichever nodes have an exporter enabled, which the
+forwarding node cannot know. Total: never throws.
+""".
+-spec maybe_hop_trace(map()) -> map().
+
+maybe_hop_trace(#{'_traceparent' := TP} = Opts) when is_binary(TP) ->
+    Hop = binary:encode_hex(mint_span_id(), lowercase),
+    Entry = <<"bondyhop=", Hop/binary>>,
+    TS =
+        case Opts of
+            #{'_tracestate' := TS0} when is_binary(TS0), TS0 =/= <<>> ->
+                case
+                    [
+                        E
+                     || E <- binary:split(TS0, <<",">>, [global]),
+                        not is_hop_entry(E)
+                    ]
+                of
+                    [] ->
+                        Entry;
+                    Rest ->
+                        iolist_to_binary(
+                            lists:join(<<",">>, [Entry | Rest])
+                        )
+                end;
+            _ ->
+                Entry
+        end,
+    Opts#{'_tracestate' => TS};
+maybe_hop_trace(Opts) when is_map(Opts) ->
+    Opts.
+
+%% @private
+is_hop_entry(<<"bondyhop=", _/binary>>) -> true;
+is_hop_entry(_) -> false.
 
 -doc """
 Maps a validated CALL options (or INVOCATION details) map to the

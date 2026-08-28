@@ -132,12 +132,15 @@ notify_span(#{details := Details, uri := Uri}, Started, Reply) ->
             {error, _, _, _} -> error;
             _ -> success
         end,
+    %% An invocation leg is a SERVER span: no peer — a server span's
+    %% peer attribute is inert in trace backends.
     bondy_connect_telemetry:rpc_latency(
         invocation,
         maps:get(procedure, Details, Uri),
         Duration,
         bondy_connect_telemetry:trace_meta(Details),
-        Outcome
+        Outcome,
+        undefined
     ).
 
 %% @private
