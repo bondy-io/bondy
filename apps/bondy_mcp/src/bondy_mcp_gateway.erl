@@ -431,8 +431,9 @@ rebuild(RealmUri, Trigger, State) ->
             [{_, _, #{entries := Prev}}] -> Prev;
             [] -> undefined
         end,
+    Mode = application:get_env(bondy_mcp, manifest_mode, curated),
     #{entries := Entries, collisions := Collisions} =
-        bondy_mcp_spec:compile(RealmUri, overlay_entries(RealmUri)),
+        bondy_mcp_spec:compile(RealmUri, overlay_entries(RealmUri), Mode),
     Manifest = #{
         realm => RealmUri,
         entries => Entries,

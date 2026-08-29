@@ -21,6 +21,9 @@ only cause harmless extra rebuilds.
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
+-include_lib("bondy_wamp/include/bondy_wamp.hrl").
+
+-define(MASTER_REALM, <<"com.leapsight.bondy">>).
 
 -define(REALM, <<"com.bondy.mcp.gw">>).
 -define(REALM2, <<"com.bondy.mcp.gw2">>).
@@ -39,7 +42,11 @@ all() ->
         manifest_rebuilds_on_interface_change,
         ttl_is_the_rebuild_backstop,
         unknown_realm_never_grows_the_cache,
-        metrics_manifest_series
+        metrics_manifest_series,
+        overlay_wamp_api_lifecycle,
+        overlay_wamp_api_requires_master_realm,
+        curated_mode_exposes_only_overlay_entries,
+        overlay_resource_kind_names_a_topic
     ].
 
 init_per_suite(Config) ->
@@ -57,10 +64,15 @@ init_per_suite(Config) ->
         {manifest_rebuild_debounce,
             application:get_env(bondy_mcp, manifest_rebuild_debounce, 1000)},
         {manifest_cache_ttl,
-            application:get_env(bondy_mcp, manifest_cache_ttl, 60000)}
+            application:get_env(bondy_mcp, manifest_cache_ttl, 60000)},
+        {manifest_mode, application:get_env(bondy_mcp, manifest_mode, curated)}
     ],
     ok = application:set_env(bondy_mcp, manifest_rebuild_debounce, 100),
     ok = application:set_env(bondy_mcp, manifest_cache_ttl, 3_600_000),
+    %% The join/derivation cases below pin DERIVED semantics — base
+    %% entries for every described procedure and topic. The default is
+    %% `curated`; `curated_mode_exposes_only_overlay_entries` pins it.
+    ok = application:set_env(bondy_mcp, manifest_mode, derived),
     [{saved_env, Env} | Config].
 
 end_per_suite(Config) ->
@@ -394,6 +406,219 @@ unknown_realm_never_grows_the_cache(_) ->
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
+
+%% =============================================================================
+%% CASES — the bondy.mcp.overlay.* WAMP API
+%% =============================================================================
+
+%% The overlay's ONLY management surface is WAMP (there is no console step
+%% in any operator flow): the four procedures reach
+%% `bondy_mcp_wamp_api` through `bondy_wamp_api`'s registered-handler
+%% seam — the dispatcher's static clause table cannot name a bondy_mcp
+%% module without a router→mcp static edge. Calls go through
+%% `bondy_wamp_api:handle_call/2` so every case covers the seam, not just
+%% the handler (the listener API suite's pattern).
+overlay_wamp_api_lifecycle(_) ->
+    Id = <<"gw_wamp_api">>,
+    Doc = doc(Id, [tool(<<"wa_tool">>, <<"com.bondy.mcp.gw.wa.p1">>)]),
+
+    {ok, _} = api_call(?MASTER_REALM, <<"bondy.mcp.overlay.load">>, [Doc]),
+
+    {ok, #result{args = [Doc]}} =
+        api_call(?MASTER_REALM, <<"bondy.mcp.overlay.get">>, [Id]),
+
+    {ok, #result{args = [Listed]}} =
+        api_call(?MASTER_REALM, <<"bondy.mcp.overlay.list">>, []),
+    ?assert(lists:member(Doc, Listed)),
+
+    %% An invalid document is refused with an error reply, not a crash.
+    #error{} =
+        api_call_error(?MASTER_REALM, <<"bondy.mcp.overlay.load">>, [
+            #{<<"id">> => <<>>}
+        ]),
+
+    {ok, _} = api_call(?MASTER_REALM, <<"bondy.mcp.overlay.delete">>, [Id]),
+    #error{} =
+        api_call_error(?MASTER_REALM, <<"bondy.mcp.overlay.get">>, [Id]).
+
+%% Admin authority: the same call from an ordinary realm's context is
+%% refused — overlay documents can target ANY realm, so managing them is
+%% an operator act, exactly like `bondy.interface.*`.
+overlay_wamp_api_requires_master_realm(_) ->
+    Doc = doc(<<"gw_wamp_authz">>, [
+        tool(<<"wa_authz_tool">>, <<"com.bondy.mcp.gw.wa.p2">>)
+    ]),
+    E = api_call_error(?REALM, <<"bondy.mcp.overlay.load">>, [Doc]),
+    ?assertEqual(?WAMP_NOT_AUTHORIZED, E#error.error_uri),
+    #error{} = api_call_error(?REALM, <<"bondy.mcp.overlay.list">>, []).
+
+%% Curated mode (`mcp.manifest.mode = curated`, THE DEFAULT): only
+%% overlay-named entries exist — describing a procedure or topic for
+%% reflection is not consenting to agent exposure. The interface layer
+%% still contributes fields to the join, exactly as in derived mode; it
+%% just creates nothing by itself. Extends the posture upstream tools
+%% already have (projection onto a served manifest is an explicit
+%% overlay act) to local procedures.
+curated_mode_exposes_only_overlay_entries(_) ->
+    PNamed = <<"com.bondy.mcp.gw.cur.named">>,
+    PUnnamed = <<"com.bondy.mcp.gw.cur.unnamed">>,
+    T = <<"com.bondy.mcp.gw.cur.topic">>,
+    ok = bondy_interface:load(#{
+        <<"id">> => <<"gw_cur_iface">>,
+        <<"entries">> => [
+            #{
+                <<"realm">> => ?REALM,
+                <<"kind">> => <<"procedure">>,
+                <<"uri">> => PNamed,
+                <<"description">> => <<"Named">>,
+                <<"kwargs_schema">> => #{
+                    <<"type">> => <<"object">>,
+                    <<"properties">> => #{
+                        <<"who">> => #{<<"type">> => <<"string">>}
+                    }
+                }
+            },
+            #{
+                <<"realm">> => ?REALM,
+                <<"kind">> => <<"procedure">>,
+                <<"uri">> => PUnnamed
+            },
+            #{<<"realm">> => ?REALM, <<"kind">> => <<"topic">>, <<"uri">> => T}
+        ]
+    }),
+    ok = bondy_mcp_gateway:load(
+        doc(<<"gw_cur_overlay">>, [tool(<<"cur_tool">>, PNamed)])
+    ),
+    ok = application:set_env(bondy_mcp, manifest_mode, curated),
+    try
+        #{entries := Entries} = fresh_manifest(?REALM),
+
+        %% The named tool exists AND joined its interface entry.
+        ?assertMatch(
+            #{
+                <<"cur_tool">> := #{
+                    kind := tool,
+                    procedure := PNamed,
+                    description := <<"Named">>,
+                    input_schema := #{<<"properties">> := #{<<"who">> := _}}
+                }
+            },
+            Entries
+        ),
+        %% Described-but-unnamed procedures and topics create NOTHING.
+        ?assertNot(maps:is_key(PNamed, Entries)),
+        ?assertNot(maps:is_key(PUnnamed, Entries)),
+        ?assertNot(maps:is_key(T, Entries)),
+        ExpectedUri = <<"wamp:", ?REALM/binary, ":", T/binary>>,
+        ?assertNot(maps:is_key(ExpectedUri, Entries)),
+
+        %% The SAME state under derived mode exposes all of them.
+        ok = application:set_env(bondy_mcp, manifest_mode, derived),
+        #{entries := Derived} = fresh_manifest(?REALM),
+        ?assert(maps:is_key(PUnnamed, Derived)),
+        ?assert(maps:is_key(T, Derived)),
+        ?assert(maps:is_key(<<"cur_tool">>, Derived))
+    after
+        %% The suite's baseline (init_per_suite) is derived.
+        ok = application:set_env(bondy_mcp, manifest_mode, derived),
+        _ = bondy_interface:delete(<<"gw_cur_iface">>),
+        _ = bondy_mcp_gateway:delete(<<"gw_cur_overlay">>)
+    end.
+
+%% The overlay `resource` kind (MCP-D31's curated companion): a plain
+%% topic-backed resource is exposable by NAMING its topic — without it, a
+%% described topic could never surface under curated mode. The entry
+%% joins the topic's interface entry (description; payload schemas
+%% flatten into the OUTPUT shape, what a subscriber receives), and in
+%% derived mode it REPLACES the topic's URI-named base resource.
+overlay_resource_kind_names_a_topic(_) ->
+    T = <<"com.bondy.mcp.gw.res.changed">>,
+    ok = bondy_interface:load(#{
+        <<"id">> => <<"gw_res_iface">>,
+        <<"entries">> => [
+            #{
+                <<"realm">> => ?REALM,
+                <<"kind">> => <<"topic">>,
+                <<"uri">> => T,
+                <<"description">> => <<"Changed">>,
+                <<"kwargs_schema">> => #{
+                    <<"type">> => <<"object">>,
+                    <<"properties">> => #{
+                        <<"state">> => #{<<"type">> => <<"string">>}
+                    }
+                }
+            }
+        ]
+    }),
+    ok = bondy_mcp_gateway:load(
+        doc(<<"gw_res_overlay">>, [
+            #{
+                <<"realm">> => ?REALM,
+                <<"name">> => <<"changes">>,
+                <<"kind">> => <<"resource">>,
+                <<"wamp_topic">> => T
+            }
+        ])
+    ),
+    ok = application:set_env(bondy_mcp, manifest_mode, curated),
+    try
+        #{entries := Entries} = fresh_manifest(?REALM),
+        ExpectedUri = <<"wamp:", ?REALM/binary, ":", T/binary>>,
+        ?assertMatch(
+            #{
+                <<"changes">> := #{
+                    kind := resource,
+                    topic := T,
+                    uri := ExpectedUri,
+                    description := <<"Changed">>,
+                    output_schema := #{
+                        <<"properties">> := #{<<"state">> := _}
+                    }
+                }
+            },
+            Entries
+        ),
+        %% The topic's URI-named form does not exist beside it.
+        ?assertNot(maps:is_key(T, Entries)),
+
+        %% Derived mode: the named resource REPLACES the base one — one
+        %% entry per topic, never both spellings.
+        ok = application:set_env(bondy_mcp, manifest_mode, derived),
+        #{entries := Derived} = fresh_manifest(?REALM),
+        ?assert(maps:is_key(<<"changes">>, Derived)),
+        ?assertNot(maps:is_key(T, Derived))
+    after
+        ok = application:set_env(bondy_mcp, manifest_mode, derived),
+        _ = bondy_interface:delete(<<"gw_res_iface">>),
+        _ = bondy_mcp_gateway:delete(<<"gw_res_overlay">>)
+    end.
+
+%% @private
+%% Through the dispatcher, so the registered-handler seam is exercised by
+%% every call — a direct bondy_mcp_wamp_api call would pass with the seam
+%% unwired.
+api_handle(RealmUri, Proc, Args) ->
+    Ctxt = bondy_context:local_context(RealmUri),
+    M = bondy_wamp_message:call(1, #{}, Proc, Args),
+    bondy_wamp_api:handle_call(M, Ctxt).
+
+%% @private
+api_call(RealmUri, Proc, Args) ->
+    case api_handle(RealmUri, Proc, Args) of
+        {reply, #result{} = R} -> {ok, R};
+        Other -> ct:fail({expected_result, Proc, Other})
+    end.
+
+%% @private
+%% Authorization and arity failures RAISE in bondy_wamp_api_utils; plain
+%% failures come back as an error reply. Accept both shapes.
+api_call_error(RealmUri, Proc, Args) ->
+    try api_handle(RealmUri, Proc, Args) of
+        {reply, #error{} = E} -> E;
+        Other -> ct:fail({expected_error, Proc, Other})
+    catch
+        error:#error{} = E -> E
+    end.
 
 doc(Id, Entries) ->
     #{<<"id">> => Id, <<"entries">> => Entries}.

@@ -66,6 +66,7 @@ all() ->
         header_body_agreement,
         param_headers_are_cross_checked,
         basic_auth_and_the_rbac_projection,
+        delegated_ticket_caps_the_projection,
         unauthenticated_request_starts_nothing,
         requests_leave_zero_footprint,
         notification_is_accepted,
@@ -90,6 +91,11 @@ all() ->
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
+    %% These cases pin the edge protocol machinery, not the exposure
+    %% policy: run under `derived` so URI-named fixture tools exist
+    %% without an overlay entry each. The shipped default (`curated`)
+    %% is pinned by bondy_mcp_gateway_SUITE.
+    ok = application:set_env(bondy_mcp, manifest_mode, derived),
     {ok, _} = application:ensure_all_started(inets),
     {ok, _} = application:ensure_all_started(gun),
 
@@ -131,9 +137,15 @@ init_per_suite(Config) ->
     _ = bondy_realm:create(#{
         uri => ?RBAC_REALM,
         description => <<"MCP modern-edge RBAC">>,
-        authmethods => [?PASSWORD_AUTH],
+        authmethods => [?PASSWORD_AUTH, ?WAMP_TICKET_AUTH],
         security_enabled => true,
-        groups => [#{name => <<"mcp_users">>}],
+        groups => [
+            #{name => <<"mcp_users">>},
+            %% The delegation case's SECOND capability tier: its user
+            %% holds both groups, so a role-restricted ticket has
+            %% something real to take away.
+            #{name => <<"mcp_extra">>}
+        ],
         grants => [
             #{
                 permissions => [<<"wamp.call">>],
@@ -142,9 +154,25 @@ init_per_suite(Config) ->
                 roles => [<<"mcp_users">>]
             },
             #{
+                permissions => [<<"wamp.call">>],
+                uri => ?DENIED,
+                match => <<"exact">>,
+                roles => [<<"mcp_extra">>]
+            },
+            #{
                 permissions => [<<"wamp.subscribe">>],
                 uri => ?SUB_OK_TOPIC,
                 match => <<"exact">>,
+                roles => [<<"mcp_users">>]
+            },
+            #{
+                permissions => [<<"bondy.issue">>],
+                resources => [
+                    #{
+                        uri => <<"bondy.ticket.scope.local">>,
+                        match => <<"exact">>
+                    }
+                ],
                 roles => [<<"mcp_users">>]
             }
         ],
@@ -158,12 +186,25 @@ init_per_suite(Config) ->
                 meta => #{}
             }
          || U <- [?USER, ?USER2]
-        ],
+        ] ++
+            [
+                #{
+                    username => <<"deleg">>,
+                    password => ?PASSWORD,
+                    groups => [<<"mcp_users">>, <<"mcp_extra">>],
+                    meta => #{}
+                }
+            ],
         %% A user authenticates only through a matching source assignment.
         sources => [
             #{
                 usernames => [?USER, ?USER2],
                 authmethod => ?PASSWORD_AUTH,
+                cidr => <<"0.0.0.0/0">>
+            },
+            #{
+                usernames => [<<"deleg">>],
+                authmethod => ?WAMP_TICKET_AUTH,
                 cidr => <<"0.0.0.0/0">>
             }
         ]
@@ -314,6 +355,7 @@ init_per_suite(Config) ->
     ].
 
 end_per_suite(Config) ->
+    ok = application:set_env(bondy_mcp, manifest_mode, curated),
     ok = telemetry:detach({?MODULE, audit_capture}),
     ?config(audit_tab_owner, Config) ! stop,
     ?config(callee_owner, Config) ! stop,
@@ -785,6 +827,59 @@ basic_auth_and_the_rbac_projection(Config) ->
             req(14, <<"tools/list">>, #{}),
             #{auth => basic_auth(?USER, <<"wrong">>)}
         )
+    ).
+
+%% The MCP-D31 delegation flow end to end on the wire: a user's own
+%% session (full roles) issues a ticket restricted to one of its groups
+%% via `authroles`; an agent presenting that ticket as a Bearer
+%% credential gets a projection bounded by the RESTRICTED roles — the
+%% cap applied in `bondy_auth:authenticate/4` reaches `tools/list` and
+%% call enforcement with no MCP-specific code. Killed by the same
+%% cap-application mutant as the auth-suite falsifier, but through the
+%% HTTP edge.
+delegated_ticket_caps_the_projection(Config) ->
+    %% The delegating user's own (web-app) session, in-VM: both groups.
+    Session = bondy_session:new(?RBAC_REALM, #{
+        peer => {{127, 0, 0, 1}, 0},
+        authrealm => ?RBAC_REALM,
+        authid => <<"deleg">>,
+        authmethod => ?PASSWORD_AUTH,
+        security_enabled => true,
+        authroles => [<<"mcp_users">>, <<"mcp_extra">>],
+        roles => #{caller => #{}}
+    }),
+    true = ets:insert(
+        bondy_session:table(bondy_session:external_id(Session)), Session
+    ),
+
+    %% One live ticket per (authid, scope): the restricted ticket is
+    %% exercised fully before the unrestricted one is issued, which
+    %% replaces it.
+    {ok, Restricted, _} =
+        bondy_ticket:issue(Session, #{authroles => [<<"mcp_users">>]}),
+    RAuth = bearer_auth(Restricted),
+    RTools = all_tools(Config, ?RBAC_REALM, #{auth => RAuth}),
+    ?assertEqual([?ALLOWED], [maps:get(<<"name">>, T) || T <- RTools]),
+    %% An out-of-cap tool called directly answers like an absent one.
+    ?assertMatch(
+        {404, _},
+        post(
+            Config,
+            ?RBAC_REALM,
+            req(61, <<"tools/call">>, #{
+                <<"name">> => ?DENIED, <<"arguments">> => #{}
+            }),
+            #{auth => RAuth}
+        )
+    ),
+
+    %% An unrestricted ticket from the same session sees both tiers.
+    {ok, Unrestricted, _} = bondy_ticket:issue(Session, #{}),
+    UAuth = bearer_auth(Unrestricted),
+    UTools = all_tools(Config, ?RBAC_REALM, #{auth => UAuth}),
+    ?assertEqual(
+        lists:sort([?ALLOWED, ?DENIED]),
+        lists:sort([maps:get(<<"name">>, T) || T <- UTools])
     ).
 
 unauthenticated_request_starts_nothing(Config) ->
@@ -1915,6 +2010,9 @@ basic_auth(User, Password) ->
     {"authorization",
         "Basic " ++
             base64:encode_to_string(<<User/binary, ":", Password/binary>>)}.
+
+bearer_auth(Token) ->
+    {"authorization", "Bearer " ++ binary_to_list(Token)}.
 
 %% Walk the cursor chain and return every tool.
 all_tools(Config, Realm, Opts) ->

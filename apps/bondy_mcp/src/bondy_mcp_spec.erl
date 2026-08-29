@@ -11,7 +11,10 @@ metadata (`bondy_interface`, the base layer) joined with the MCP overlay
 documents (`bondy_mcp_spec_parser`, the naming/annotation layer) — design
 §7.2's "one way out".
 
-`compile/2` derives the manifest of one realm:
+`compile/3` derives the manifest of one realm. What the interface layer
+CREATES depends on the mode (`mcp.manifest.mode`; see `compile/3`'s doc):
+under `curated` — the shipped default — nothing, only overlay-named
+entries exist; under `derived`:
 
 - every EXACT-match `procedure` interface entry becomes a `tool` named by
   its WAMP URI (§17's default), unless an overlay tool entry claims that
@@ -19,6 +22,8 @@ documents (`bondy_mcp_spec_parser`, the naming/annotation layer) — design
   makes an overlay rename a rename rather than an added alias;
 - every exact-match `topic` interface entry becomes a `resource` at the
   default URI `wamp:<realm>:<topic>` (§17);
+
+In both modes:
 - overlay entries stand on their own, joining the interface entry of their
   `wamp_procedure` (when one exists) field by field: an overlay field wins,
   an absent one falls through to the interface layer;
@@ -103,7 +108,7 @@ properties.
 -export_type([t/0]).
 -export_type([collision/0]).
 
--export([compile/2]).
+-export([compile/3]).
 -export([hash/1]).
 
 %% =============================================================================
@@ -115,31 +120,57 @@ Compiles the manifest of `RealmUri` from the interface store joined with
 `OverlayEntries` — the parsed entries of every loaded overlay document that
 name this realm, each annotated by the caller with `overlay_source` (its
 document id). Reads `bondy_db` only; contacts no peer (§7.10).
+
+`Mode` decides what the interface layer CREATES (it always contributes
+fields to the join):
+
+- `curated` (the shipped default, MCP-D31): only overlay-named entries
+  exist. Describing a procedure or topic for reflection is not consent to
+  agent exposure — the overlay is the explicit act, the same posture
+  upstream tool projection has always had.
+- `derived`: every exact-match `procedure` interface entry additionally
+  becomes a tool named by its URI, and every exact-match `topic` a
+  resource at the §17 default URI.
+
+Falsifier:
+`bondy_mcp_gateway_SUITE:curated_mode_exposes_only_overlay_entries`.
 """.
--spec compile(RealmUri :: uri(), OverlayEntries :: [map()]) ->
+-spec compile(
+    RealmUri :: uri(),
+    OverlayEntries :: [map()],
+    Mode :: curated | derived
+) ->
     #{entries := #{binary() => t()}, collisions := [collision()]}.
 
-compile(RealmUri, OverlayEntries) ->
+compile(RealmUri, OverlayEntries, Mode) ->
     Procedures = interface_entries(RealmUri, procedure),
     Topics = interface_entries(RealmUri, topic),
 
-    %% An overlay tool entry claiming a procedure replaces the URI-named
-    %% base entry compiled from that procedure's interface entry.
+    %% An overlay tool entry claiming a procedure — or a resource entry
+    %% claiming a topic — replaces the URI-named base entry compiled
+    %% from that binding's interface entry.
     Claimed = [
         maps:get(wamp_procedure, O)
      || O <- OverlayEntries, maps:get(kind, O) == tool
     ],
+    ClaimedTopics = [
+        maps:get(wamp_topic, O)
+     || O <- OverlayEntries, maps:get(kind, O) == resource
+    ],
     BaseTools = [
         base_tool(RealmUri, E)
-     || {Uri, E} <- maps:to_list(Procedures),
+     || Mode == derived,
+        {Uri, E} <- maps:to_list(Procedures),
         not lists:member(Uri, Claimed)
     ],
     BaseResources = [
         base_resource(RealmUri, E)
-     || {_, E} <- maps:to_list(Topics)
+     || Mode == derived,
+        {Uri, E} <- maps:to_list(Topics),
+        not lists:member(Uri, ClaimedTopics)
     ],
     Overlaid = [
-        overlay_entry(RealmUri, O, Procedures)
+        overlay_entry(RealmUri, O, Procedures, Topics)
      || O <- OverlayEntries
     ],
     {Entries, Collisions} = resolve_names(
@@ -226,9 +257,43 @@ base_resource(RealmUri, Iface) ->
     E3.
 
 %% @private
-%% One overlay entry joined with the interface entry of its procedure:
-%% overlay fields win, absent ones fall through (§7.2 layering).
-overlay_entry(RealmUri, O, Procedures) ->
+%% One overlay entry joined with the interface entry of its WAMP binding
+%% (a procedure, or for `resource` a topic): overlay fields win, absent
+%% ones fall through (§7.2 layering).
+overlay_entry(RealmUri, #{kind := resource} = O, _Procedures, Topics) ->
+    Topic = maps:get(wamp_topic, O),
+    Iface = maps:get(Topic, Topics, #{}),
+    E0 = #{
+        name => maps:get(name, O),
+        kind => resource,
+        topic => Topic,
+        uri => <<"wamp:", RealmUri/binary, ":", Topic/binary>>,
+        annotations => maps:get(annotations, O, #{}),
+        wamp_options => maps:get(wamp_options, O, #{}),
+        source => maybe_put(
+            interface,
+            maps:get(source, Iface, undefined),
+            #{overlay => maps:get(overlay_source, O)}
+        )
+    },
+    E1 = maybe_put(redaction, maps:get(redaction, O, undefined), E0),
+    Layered = fun(Key) ->
+        case maps:get(Key, O, undefined) of
+            undefined -> maps:get(Key, Iface, undefined);
+            Value -> Value
+        end
+    end,
+    E2 = maybe_put(description, Layered(description), E1),
+    E3 = maybe_put(version, Layered(version), E2),
+    %% As in `base_resource/2`: a topic's payload schemas describe what a
+    %% subscriber RECEIVES, so they flatten into the OUTPUT shape.
+    E4 = maybe_put(
+        output_schema,
+        flatten(Layered(args_schema), Layered(kwargs_schema)),
+        E3
+    ),
+    E4#{realm => RealmUri};
+overlay_entry(RealmUri, O, Procedures, _Topics) ->
     Procedure = maps:get(wamp_procedure, O),
     Iface = maps:get(Procedure, Procedures, #{}),
     E0 = #{

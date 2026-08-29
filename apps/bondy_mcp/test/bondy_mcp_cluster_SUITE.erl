@@ -77,6 +77,17 @@ init_per_suite(Config) ->
 
     [{_, Node1, _}, {_, Node2, _}] = Nodes,
 
+    %% These cases pin cross-node forwarding, not the exposure policy:
+    %% run both peers under `derived` so the URI-named fixture tools
+    %% exist without an overlay entry each. The shipped default
+    %% (`curated`) is pinned by bondy_mcp_gateway_SUITE.
+    _ = [
+        ok = erpc:call(N, application, set_env, [
+            bondy_mcp, manifest_mode, derived
+        ])
+     || N <- [Node1, Node2]
+    ],
+
     Open = erpc:call(Node1, bondy_realm, create, [?OPEN_REALM]),
     ok = erpc:call(Node1, bondy_realm, disable_security, [Open]),
     _ = erpc:call(Node1, bondy_realm, create, [rbac_realm_config()]),

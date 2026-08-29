@@ -35,6 +35,14 @@ method that is neither `ticket` nor `anonymous` authentication.
   be used to determine the age of the ticket. Its value is a timestamp in
   seconds.
 - `issued_on`: the bondy nodename in which the ticket was issued.
+- `authroles` (optional): a role RESTRICTION — present only when the ticket was
+  issued with the `authroles` option, whose value must be a non-empty subset of
+  the issuing session's own roles. A session authenticated with such a ticket
+  gets exactly these roles, applied non-negotiably by `bondy_auth` (the bearer
+  may narrow further at establishment, never widen; an empty intersection
+  refuses the authentication). Absent means unrestricted. This is the
+  delegation mechanism: a user hands an agent a role-restricted, short-lived
+  ticket rather than their own credential.
 - `scope`: the scope of the ticket, consisting of
 - `realm`: If `all` the ticket grants access to all realms the user has access to
   by the authrealm (an SSO realm). Otherwise, the value is the realm this ticket
@@ -188,6 +196,12 @@ WAMP permission required to call the procedures.
         key => client_ticket,
         required => false,
         datatype => binary
+    },
+    authroles => #{
+        alias => ~"authroles",
+        key => authroles,
+        required => false,
+        datatype => {list, binary}
     }
 }).
 
@@ -195,7 +209,12 @@ WAMP permission required to call the procedures.
     id := ticket_id(),
     authrealm := uri(),
     authid := authid(),
-    authroles := [binary()],
+    %% Present only on a role-RESTRICTED ticket (MCP-D31 delegation):
+    %% `issue/2` writes it only when the `authroles` option was given, so
+    %% every ticket issued before the option existed — and every
+    %% unrestricted one since — verifies without it, meaning
+    %% unrestricted.
+    authroles => [binary()],
     authmethod := binary(),
     issued_by := authid(),
     issued_on := node(),
@@ -682,6 +701,14 @@ do_issue(Session, Opts) ->
 
     ok = authorize(ScopeType, AuthCtxt),
 
+    %% MCP-D31 delegation: an `authroles` restriction must be a subset of
+    %% the ISSUING SESSION's roles — not the user's groups — so a
+    %% restricted session can never mint a wider ticket than itself
+    %% (falsifier:
+    %% `bondy_auth_ticket_SUITE:issue_with_authroles_superset_refused`).
+    Authroles = maps:get(authroles, Opts, undefined),
+    ok = assert_authroles(Authroles, Session),
+
     AuthRealm = bondy_realm:fetch(AuthRealmUri),
     %% Pick the signing key atomically: keys are generated lazily, so the kid
     %% and its private key must come from the same (post-generation) realm.
@@ -690,7 +717,7 @@ do_issue(Session, Opts) ->
     IssuedAt = ?NOW,
     ExpiresAt = IssuedAt + expiry_time_secs(Opts),
 
-    Claims = #{
+    Claims0 = #{
         id => bondy_utils:uuid(),
         authrealm => AuthRealmUri,
         authid => Authid,
@@ -702,6 +729,14 @@ do_issue(Session, Opts) ->
         scope => Scope,
         kid => Kid
     },
+    %% Written only when restricting: an absent claim means unrestricted,
+    %% which is also what every ticket issued before this field existed
+    %% verifies as.
+    Claims =
+        case Authroles of
+            undefined -> Claims0;
+            _ -> Claims0#{authroles => Authroles}
+        end,
 
     JWT = jose_jwt:from(Claims),
 
@@ -764,6 +799,34 @@ scope(Session, Opts, Uri) ->
     Authid =/= ClientId orelse throw(invalid_request),
 
     bondy_auth_scope:new(Uri, ClientId, InstanceId).
+
+%% @private
+%% A role restriction must be a NON-EMPTY subset of the issuing session's
+%% own roles: the session's roles are already the user's groups
+%% intersected with whatever the session requested at establishment, so
+%% subsetting THEM (never the user's groups) is what makes re-widening
+%% through a chain of issues impossible.
+assert_authroles(undefined, _) ->
+    ok;
+assert_authroles([], _) ->
+    throw(
+        {invalid_request,
+            ~"The value for 'authroles' must be a non-empty list of the session's roles (groups)."}
+    );
+assert_authroles(Authroles, Session) ->
+    SessionRoles = bondy_session:authroles(Session),
+    case [R || R <- Authroles, not lists:member(R, SessionRoles)] of
+        [] ->
+            ok;
+        Unknown ->
+            throw(
+                {not_authorized, <<
+                    "The 'authroles' requested for the ticket are not a "
+                    "subset of the roles of the session issuing it: ",
+                    (iolist_to_binary(lists:join(<<", ">>, Unknown)))/binary
+                >>}
+            )
+    end.
 
 %% @private
 authorize(ScopeType, AuthCtxt) ->

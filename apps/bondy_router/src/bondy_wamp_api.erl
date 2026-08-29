@@ -15,6 +15,7 @@ legacy procedure URIs to their current equivalents.
 -include("bondy_uris.hrl").
 
 -export([handle_call/2]).
+-export([register_handler/2]).
 -export([resolve/1]).
 
 %% =============================================================================
@@ -37,6 +38,37 @@ legacy procedure URIs to their current equivalents.
 %% =============================================================================
 %% API
 %% =============================================================================
+
+-doc """
+Registers `Mod` as the handler for every `bondy.*` procedure under
+`Prefix` — the extension seam for applications that sit ABOVE
+`bondy_router` in the dependency graph (`bondy_mcp` today), whose handler
+modules the static clause table in `do_handle_call/3` therefore cannot
+name. The static clauses are matched first, so a registration can extend
+the API but never shadow a built-in family.
+
+`Prefix` must be a two-segment prefix of the shape `bondy.<word>.` —
+the same grain as the static table — or the call raises `badarg`.
+
+Call it from the registering application's `start/2`. Every registrant is
+started by `bondy_app` BEFORE `start_normal_listeners/0` runs, so a
+registration is in place before any client can be admitted — the ordering
+is by construction, not by luck (falsifier:
+`bondy_mcp_gateway_SUITE:overlay_wamp_api_lifecycle` goes through this
+seam). Registration is idempotent; there is no unregister — a handler
+lives as long as the node.
+""".
+-spec register_handler(Prefix :: binary(), Mod :: module()) -> ok.
+
+register_handler(<<"bondy.", Sub/binary>> = Prefix, Mod) when is_atom(Mod) ->
+    case binary:split(Sub, ~".") of
+        [Seg, <<>>] when Seg =/= <<>> ->
+            persistent_term:put({?MODULE, Prefix}, Mod);
+        _ ->
+            error(badarg, [Prefix, Mod])
+    end;
+register_handler(Prefix, Mod) ->
+    error(badarg, [Prefix, Mod]).
 
 -spec handle_call(M :: bondy_wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok
@@ -124,9 +156,29 @@ do_handle_call(<<"bondy.ticket.", _/binary>> = Proc, M, Ctxt) ->
     bondy_ticket_api:handle_call(Proc, M, Ctxt);
 do_handle_call(<<"bondy.user.", _/binary>> = Proc, M, Ctxt) ->
     bondy_rbac_api:handle_call(Proc, M, Ctxt);
-do_handle_call(<<"bondy.", _/binary>>, M, _) ->
-    E = bondy_wamp_api_utils:no_such_procedure_error(M),
-    {reply, E}.
+do_handle_call(<<"bondy.", _/binary>> = Proc, M, Ctxt) ->
+    %% Registered extension handlers (`register_handler/2`) — currently
+    %% bondy_mcp's `bondy.mcp.*`.
+    case registered_handler(Proc) of
+        undefined ->
+            E = bondy_wamp_api_utils:no_such_procedure_error(M),
+            {reply, E};
+        Mod ->
+            Mod:handle_call(Proc, M, Ctxt)
+    end.
+
+%% @private
+%% The registered handler for `Proc`, or `undefined`. Registrations are
+%% keyed by the two-segment prefix `register_handler/2` enforces, so the
+%% lookup is one `persistent_term` read, not a table walk.
+registered_handler(<<"bondy.", Rest/binary>>) ->
+    case binary:split(Rest, ~".") of
+        [Seg, _] ->
+            Prefix = <<"bondy.", Seg/binary, ".">>,
+            persistent_term:get({?MODULE, Prefix}, undefined);
+        _ ->
+            undefined
+    end.
 
 %% @private
 -doc """

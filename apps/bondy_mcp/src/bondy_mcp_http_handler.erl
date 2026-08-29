@@ -595,16 +595,27 @@ authenticate(Req, RealmUri) ->
     end.
 
 %% @private
-%% A Bearer credential is a JWT (OAuth2) or a Bondy ticket; which one is
-%% decided by shape — a ticket does not decode as a realm JWT.
+%% A Bearer credential is a JWT (OAuth2) or a Bondy ticket, decided by
+%% the claims: `bondy_oauth_jwt:decode/1` is an unverified `peek` and
+%% decodes ANY compact JWS — a Bondy ticket included — so "does it
+%% decode" cannot be the dispatch. An OAuth2 JWT carries `sub`; anything
+%% else (a ticket's claims carry `authid`, not `sub`; garbage peeks to
+%% nothing) goes to ticket verification, which is what actually
+%% validates it. The previous shape threw `invalid_token` for every
+%% Bondy ticket — measured by
+%% `bondy_mcp_modern_SUITE:delegated_ticket_caps_the_projection`, the
+%% first thing to exercise this path.
 bearer(Token, RealmUri, SourceIP, Req) ->
-    try bondy_oauth_jwt:decode(Token) of
+    Peeked =
+        try bondy_oauth_jwt:decode(Token) of
+            Map when is_map(Map) -> Map
+        catch
+            _:_ -> undefined
+        end,
+    case Peeked of
         #{<<"sub">> := Sub} ->
             credential(RealmUri, Sub, ?OAUTH2_AUTH, Token, SourceIP, Req);
         _ ->
-            throw({unauthorized, invalid_token, Req})
-    catch
-        _:_ ->
             case bondy_ticket:verify(Token) of
                 {ok, #{authid := Authid}} ->
                     credential(

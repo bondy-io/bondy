@@ -465,7 +465,7 @@ authenticate(Method, Signature, DataIn, #{method := Method} = Ctxt0) ->
                 of
                     {ok, DataOut, CBModState1} ->
                         Ctxt = maps:put(callback_mod_state, CBModState1, Ctxt0),
-                        {ok, DataOut, Ctxt};
+                        apply_authroles_cap(DataOut, Ctxt);
                     {error, Reason, _} ->
                         {error, Reason}
                 end;
@@ -841,4 +841,41 @@ maybe_set_method(Method, Ctxt) ->
             };
         {error, Reason} ->
             throw(Reason)
+    end.
+
+%% @private
+%% MCP-D31 delegation: a method whose credential carries a role
+%% restriction (today `bondy_auth_ticket`, via `authroles_cap` in its
+%% result) has the restriction applied HERE — the one seam both the WAMP
+%% session open and the MCP edge read their roles from — so the bearer
+%% may narrow the roles it requested at establishment but never widen
+%% past the credential. An empty intersection refuses the authentication
+%% rather than falling back to anything wider. A context whose `roles`
+%% is not a list (a security-disabled realm) is passed through: nothing
+%% authorizes there, so there is nothing to cap. Falsifier:
+%% `bondy_auth_ticket_SUITE:restricted_ticket_caps_session_roles`.
+apply_authroles_cap(DataOut0, Ctxt0) ->
+    case maps:take(authroles_cap, DataOut0) of
+        error ->
+            {ok, DataOut0, Ctxt0};
+        {Cap, DataOut} when is_list(Cap) ->
+            case maps:get(roles, Ctxt0) of
+                Roles0 when is_list(Roles0) ->
+                    case [R || R <- Roles0, lists:member(R, Cap)] of
+                        [] ->
+                            {error, no_authorized_role};
+                        Roles ->
+                            Role =
+                                case
+                                    lists:member(maps:get(role, Ctxt0), Roles)
+                                of
+                                    true -> maps:get(role, Ctxt0);
+                                    false -> hd(Roles)
+                                end,
+                            Ctxt = Ctxt0#{role => Role, roles => Roles},
+                            {ok, DataOut, Ctxt}
+                    end;
+                _ ->
+                    {ok, DataOut, Ctxt0}
+            end
     end.

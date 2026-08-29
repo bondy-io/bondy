@@ -20,8 +20,9 @@ atom-keyed form. It does not touch storage and does not check the world
 Validated here, per entry:
 
 - `name` — the §17 rules: 1..256 bytes, printable ASCII, no whitespace.
-- `kind` — the closed set `tool` | `resource_template`.
-- `wamp_procedure` — a valid exact-match WAMP URI.
+- `kind` — the closed set `tool` | `resource` | `resource_template`.
+- the WAMP binding, a valid exact-match URI: `wamp_procedure` for a
+  `tool` or `resource_template`, `wamp_topic` for a `resource`.
 - For a `resource_template` (§16.3): the RFC 6570 `uri_template`'s variable
   set must equal `uri_vars_schema`'s key set; every `{{var}}` reference in
   `wamp_args` / `wamp_kwargs` / `update_topic` must be a template variable;
@@ -30,12 +31,15 @@ Validated here, per entry:
 - Two entries claiming one `(realm, name)` reject the document (§17).
 """.
 
--type kind() :: tool | resource_template.
+-type kind() :: tool | resource | resource_template.
 -type entry() :: #{
     realm := binary(),
     name := binary(),
     kind := kind(),
-    wamp_procedure := binary(),
+    %% `wamp_procedure` for `tool` and `resource_template`; `wamp_topic`
+    %% for `resource`.
+    wamp_procedure => binary(),
+    wamp_topic => binary(),
     description => binary(),
     annotations => map(),
     wamp_options => map(),
@@ -118,20 +122,26 @@ entry(Data) when is_map(Data) ->
     Realm = required_binary(<<"realm">>, Data),
     Name = name(required_binary(<<"name">>, Data)),
     Kind = kind(required_binary(<<"kind">>, Data)),
-    Procedure = procedure_uri(required_binary(<<"wamp_procedure">>, Data)),
-    E0 = #{
-        realm => Realm,
-        name => Name,
-        kind => Kind,
-        wamp_procedure => Procedure
-    },
+    E0 = binding(Kind, #{realm => Realm, name => Name, kind => Kind}, Data),
     E1 = redaction(optional_fields(E0, Data), Data),
     case Kind of
         tool -> E1;
+        resource -> E1;
         resource_template -> template_fields(E1, Data)
     end;
 entry(Data) ->
     throw({invalid_entry, Data}).
+
+%% @private
+%% The entry's WAMP binding: a `resource` names a topic, every other kind
+%% a procedure. Both are exact-match URIs.
+binding(resource, E, Data) ->
+    E#{wamp_topic => procedure_uri(required_binary(<<"wamp_topic">>, Data))};
+binding(_, E, Data) ->
+    E#{
+        wamp_procedure =>
+            procedure_uri(required_binary(<<"wamp_procedure">>, Data))
+    }.
 
 %% @private
 optional_fields(E, Data) ->
@@ -270,6 +280,7 @@ name(Name) ->
 
 %% @private
 kind(<<"tool">>) -> tool;
+kind(<<"resource">>) -> resource;
 kind(<<"resource_template">>) -> resource_template;
 kind(Kind) -> throw({invalid_kind, Kind}).
 

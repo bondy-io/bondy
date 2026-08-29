@@ -44,7 +44,7 @@ handle_call(?BONDY_TICKET_ISSUE, #call{} = M, Ctxt) ->
     case bondy_ticket:issue(Session, Opts) of
         {ok, Ticket, Claims} ->
             Resp0 = maps:with(
-                [id, expires_at, issued_at, scope], Claims
+                [id, expires_at, issued_at, scope, authroles], Claims
             ),
             Resp = maps:put(ticket, Ticket, Resp0),
             R = bondy_wamp_message:result(M#call.request_id, #{}, [Resp]),

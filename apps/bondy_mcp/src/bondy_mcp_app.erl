@@ -24,6 +24,11 @@ start(_Type, _Args) ->
     %% is a `bondy_oplog_sup` child and `bondy_oplog` precedes
     %% `bondy_router`, which starts this application mid-boot.
     ok = bondy_mcp_metrics:setup(),
+    %% The bondy.mcp.* Meta API. Registered here — not a static clause in
+    %% bondy_wamp_api's table — because this application sits above
+    %% bondy_router; bondy_app completes this start before the normal
+    %% listeners bind, so the registration precedes any client call.
+    ok = bondy_wamp_api:register_handler(~"bondy.mcp.", bondy_mcp_wamp_api),
     case bondy_mcp_sup:start_link() of
         {ok, _} = OK ->
             case application:get_env(bondy_mcp, upstreams, []) of

@@ -90,13 +90,27 @@ authenticate(Ticket, _, Ctxt, State) ->
             %% any realm against its own issuer's key.
             case bondy_realm:is_trusted_issuer(RealmUri, AuthRealmUri) of
                 true ->
-                    Extra = #{
+                    Extra0 = #{
                         authmethod_details => #{
                             id => maps:get(id, Claims),
                             authrealm => AuthRealmUri,
                             scope => maps:get(scope, Claims)
                         }
                     },
+                    %% MCP-D31 delegation: a role-restricted ticket caps
+                    %% the session's roles. The cap is applied by
+                    %% `bondy_auth:authenticate/4` — non-negotiably, so
+                    %% the bearer may narrow but never widen (falsifier:
+                    %% `bondy_auth_ticket_SUITE:
+                    %% restricted_ticket_caps_session_roles`). An absent
+                    %% claim (every pre-restriction ticket) caps nothing.
+                    Extra =
+                        case maps:find(authroles, Claims) of
+                            {ok, Cap} when is_list(Cap) ->
+                                Extra0#{authroles_cap => Cap};
+                            error ->
+                                Extra0
+                        end,
                     {ok, Extra, State};
                 false ->
                     ?LOG_WARNING(#{

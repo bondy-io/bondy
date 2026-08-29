@@ -69,6 +69,11 @@ all() ->
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),
+    %% These cases pin the edge protocol machinery, not the exposure
+    %% policy: run under `derived` so URI-named fixture tools exist
+    %% without an overlay entry each. The shipped default (`curated`)
+    %% is pinned by bondy_mcp_gateway_SUITE.
+    ok = application:set_env(bondy_mcp, manifest_mode, derived),
     {ok, _} = application:ensure_all_started(inets),
 
     Realm = bondy_realm:create(?REALM),
@@ -190,6 +195,7 @@ init_per_suite(Config) ->
     ].
 
 end_per_suite(Config) ->
+    ok = application:set_env(bondy_mcp, manifest_mode, curated),
     ?config(callee_owner, Config) ! stop,
     ok = cowboy:stop_listener(?LISTENER),
     ok = bondy_interface:delete(<<"mcp_e2e_iface">>),

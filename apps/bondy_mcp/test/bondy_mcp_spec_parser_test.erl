@@ -23,6 +23,7 @@ setup() ->
 parser_test_() ->
     {setup, fun setup/0, [
         fun valid_tool_document/0,
+        fun valid_resource_document/0,
         fun valid_resource_template_document/0,
         fun document_shape_is_enforced/0,
         fun name_rules/0,
@@ -169,6 +170,37 @@ kind_is_a_closed_set() ->
     ?assertMatch(
         {error, {invalid_kind, <<"prompt">>}},
         parse(doc([tool(#{<<"kind">> => <<"prompt">>})]))
+    ).
+
+%% A `resource` names a TOPIC (its binding is `wamp_topic`, not
+%% `wamp_procedure`) — the curated companion of MCP-D31, without which a
+%% topic-backed resource could never surface under curated mode.
+valid_resource_document() ->
+    Entry = #{
+        <<"realm">> => <<"com.acme.app1">>,
+        <<"name">> => <<"invoice_changes">>,
+        <<"kind">> => <<"resource">>,
+        <<"wamp_topic">> => <<"com.acme.billing.invoice.changed">>
+    },
+    ?assertMatch(
+        {ok, #{
+            entries := [
+                #{
+                    kind := resource,
+                    wamp_topic := <<"com.acme.billing.invoice.changed">>
+                }
+            ]
+        }},
+        parse(doc([Entry]))
+    ),
+    %% The binding is required and validated as an exact URI.
+    ?assertMatch(
+        {error, {missing_required_value, <<"wamp_topic">>}},
+        parse(doc([maps:remove(<<"wamp_topic">>, Entry)]))
+    ),
+    ?assertMatch(
+        {error, {invalid_uri, _}},
+        parse(doc([Entry#{<<"wamp_topic">> => <<"com..broken">>}]))
     ).
 
 wamp_procedure_must_be_a_valid_exact_uri() ->

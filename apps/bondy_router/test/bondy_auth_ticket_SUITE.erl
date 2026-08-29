@@ -38,6 +38,11 @@ all() ->
         ticket_auth_full_flow,
         wrong_user_ticket_rejected,
 
+        %% Role-restricted tickets (delegation, MCP-D31 part 3)
+        issue_with_authroles_writes_the_claim,
+        issue_with_authroles_superset_refused,
+        restricted_ticket_caps_session_roles,
+
         %% Error cases
         invalid_method_rejected,
         nonexistent_user_error
@@ -109,13 +114,45 @@ add_realm(RealmUri, KeyPairs) ->
                     }
                 ],
                 roles => [?U1]
+            },
+            %% The delegation cases run under sessions restricted to
+            %% g1/g2, which do NOT carry the user-keyed grants above —
+            %% without this grant a restricted session cannot issue at
+            %% all and the superset case passes VACUOUSLY (measured: the
+            %% refusal came from scope authorization, not the subset
+            %% check).
+            #{
+                permissions => [
+                    <<"bondy.issue">>
+                ],
+                resources => [
+                    #{
+                        uri => <<"bondy.ticket.scope.local">>,
+                        match => <<"exact">>
+                    }
+                ],
+                roles => [<<"g1">>, <<"g2">>]
             }
+        ],
+        groups => [
+            #{name => <<"g1">>},
+            #{name => <<"g2">>}
         ],
         users => [
             #{
                 username => ?U1,
                 password => ?P1,
                 groups => []
+            },
+            %% The delegation cases' user: session `authroles => []`
+            %% builds the RBAC context from the USER's groups (measured:
+            %% giving ?U1 groups changed `local_scope`'s authorization
+            %% outcome), so the role-restricted cases get their own user
+            %% rather than leaking grants into every ?U1 expectation.
+            #{
+                username => <<"deleg_user">>,
+                password => ?P1,
+                groups => [<<"g1">>, <<"g2">>]
             },
             #{
                 username => ?U2,
@@ -131,6 +168,11 @@ add_realm(RealmUri, KeyPairs) ->
         sources => [
             #{
                 usernames => [?U1],
+                authmethod => ?WAMP_TICKET_AUTH,
+                cidr => <<"0.0.0.0/0">>
+            },
+            #{
+                usernames => [<<"deleg_user">>],
                 authmethod => ?WAMP_TICKET_AUTH,
                 cidr => <<"0.0.0.0/0">>
             },
@@ -159,13 +201,17 @@ make_session(RealmUri, Username, AuthMethod) ->
 
 %% @private
 make_session(RealmUri, Username, AuthMethod, SourceIP) ->
+    make_session(RealmUri, Username, AuthMethod, SourceIP, []).
+
+%% @private
+make_session(RealmUri, Username, AuthMethod, SourceIP, Authroles) ->
     Session = bondy_session:new(RealmUri, #{
         peer => {SourceIP, 0},
         authrealm => RealmUri,
         authid => Username,
         authmethod => AuthMethod,
         security_enabled => true,
-        authroles => [],
+        authroles => Authroles,
         roles => #{
             caller => #{}
         }
@@ -591,6 +637,113 @@ wrong_user_ticket_rejected(Config) ->
         bondy_auth:authenticate(
             ?WAMP_TICKET_AUTH, Ticket, undefined, Ctxt
         )
+    ).
+
+%% =============================================================================
+%% ROLE-RESTRICTED TICKETS (delegation)
+%% =============================================================================
+
+%% The delegation credential: `bondy.ticket.issue` with `authroles` binds
+%% a role RESTRICTION into the signed claims, so a user can hand an agent
+%% a ticket scoped to a subset of their own roles — never their session
+%% credential.
+issue_with_authroles_writes_the_claim(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    Session = make_session(
+        RealmUri,
+        <<"deleg_user">>,
+        ?WAMP_CRA_AUTH,
+        {127, 0, 0, 1},
+        [<<"g1">>, <<"g2">>]
+    ),
+    {ok, _Ticket, Claims} =
+        bondy_ticket:issue(Session, #{authroles => [<<"g1">>]}),
+    ?assertEqual([<<"g1">>], maps:get(authroles, Claims)),
+
+    %% An unrestricted issue writes NO claim — absent means unrestricted,
+    %% which is also what every ticket issued before this field verifies
+    %% as.
+    {ok, _T2, Claims2} = bondy_ticket:issue(Session, #{}),
+    ?assertNot(maps:is_key(authroles, Claims2)).
+
+%% The restriction must be a subset of the ISSUING SESSION's roles — not
+%% the user's groups — so a restricted session cannot mint a wider ticket
+%% than itself (no re-widening chain).
+issue_with_authroles_superset_refused(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    Session = make_session(
+        RealmUri,
+        <<"deleg_user">>,
+        ?WAMP_CRA_AUTH,
+        {127, 0, 0, 1},
+        [<<"g1">>]
+    ),
+    ?assertMatch(
+        {error, {not_authorized, _}},
+        bondy_ticket:issue(Session, #{authroles => [<<"g1">>, <<"g2">>]})
+    ).
+
+%% Authenticating with a restricted ticket caps the session's roles
+%% NON-NEGOTIABLY: the bearer may narrow further, never widen, and a
+%% request entirely outside the cap is refused. The cap is applied in
+%% `bondy_auth:authenticate/4`, which is what both the WAMP session open
+%% and the MCP edge read their roles from — one seam serves both.
+restricted_ticket_caps_session_roles(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    SourceIP = {127, 0, 0, 1},
+    Session = make_session(
+        RealmUri,
+        <<"deleg_user">>,
+        ?WAMP_CRA_AUTH,
+        SourceIP,
+        [<<"g1">>, <<"g2">>]
+    ),
+    %% One live ticket per (authid, scope): a second issue on the same
+    %% scope REPLACES the stored claims and revokes the first ticket
+    %% (`no_match`) — measured — so each ticket is exercised fully
+    %% before the next is issued.
+    {ok, Restricted, _} =
+        bondy_ticket:issue(Session, #{authroles => [<<"g1">>]}),
+
+    %% The bearer asks for everything (`all`): the cap decides.
+    {ok, Ctxt0} = bondy_auth:init(
+        bondy_session_id:new(), RealmUri, <<"deleg_user">>, all, SourceIP
+    ),
+    {ok, _, Ctxt1} = bondy_auth:authenticate(
+        ?WAMP_TICKET_AUTH, Restricted, undefined, Ctxt0
+    ),
+    ?assertEqual([<<"g1">>], bondy_auth:roles(Ctxt1)),
+    ?assertEqual(<<"g1">>, bondy_auth:role(Ctxt1)),
+
+    %% A bearer requesting ONLY a role outside the cap is refused — the
+    %% intersection is empty, and an empty cap must never fall back to
+    %% something wider.
+    {ok, CtxtW0} = bondy_auth:init(
+        bondy_session_id:new(),
+        RealmUri,
+        <<"deleg_user">>,
+        [<<"g2">>],
+        SourceIP
+    ),
+    ?assertMatch(
+        {error, no_authorized_role},
+        bondy_auth:authenticate(
+            ?WAMP_TICKET_AUTH, Restricted, undefined, CtxtW0
+        )
+    ),
+
+    %% The same `all` request with an unrestricted ticket keeps every
+    %% role.
+    {ok, Unrestricted, _} = bondy_ticket:issue(Session, #{}),
+    {ok, CtxtU0} = bondy_auth:init(
+        bondy_session_id:new(), RealmUri, <<"deleg_user">>, all, SourceIP
+    ),
+    {ok, _, CtxtU1} = bondy_auth:authenticate(
+        ?WAMP_TICKET_AUTH, Unrestricted, undefined, CtxtU0
+    ),
+    ?assertEqual(
+        lists:sort([<<"g1">>, <<"g2">>]),
+        lists:sort(bondy_auth:roles(CtxtU1))
     ).
 
 %% =============================================================================

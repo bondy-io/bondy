@@ -29,6 +29,7 @@
     %% schema default is authoritative and these are dead; keep the two
     %% equal so a schema-less boot (tests, `rebar3 shell`) behaves the same.
     {env, [
+        {manifest_mode, curated},
         {manifest_cache_ttl, 60000},
         {manifest_rebuild_debounce, 1000},
         {request_state_ttl, 300000},

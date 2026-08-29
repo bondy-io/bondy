@@ -17,6 +17,22 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
+%% @doc What a realm's MCP manifest is derived from. `curated` (the
+%% default): only tools and resources NAMED BY AN OVERLAY DOCUMENT exist —
+%% interface metadata contributes descriptions and schemas to those entries
+%% but creates nothing by itself, so describing a procedure for reflection
+%% is not consent to agent exposure. `derived`: every exact-match described
+%% procedure additionally becomes a tool named by its WAMP URI, and every
+%% exact-match described topic a resource — the development-loop
+%% convenience.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "mcp.manifest.mode", "bondy_mcp.manifest_mode", [
+  {datatype, {enum, [curated, derived]}},
+  {default, curated}
+]}.
+
+%% -----------------------------------------------------------------------------
 %% @doc How long a compiled per-realm MCP manifest may be served before it is
 %% rebuilt on the next read. This is a backstop: manifest rebuilds are driven
 %% by change events from the interface and MCP-overlay stores (local writes
