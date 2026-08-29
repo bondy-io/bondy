@@ -49,7 +49,7 @@
 -export([linger_timeout_rejects_below_minus_one/1]).
 -export([linger_timeout_is_in_seconds/1]).
 -export([a_security_header_can_be_switched_off_on_its_own/1]).
--export([all_101_keys_reach_their_documented_paths/1]).
+-export([all_116_keys_reach_their_documented_paths/1]).
 
 all() ->
     [
@@ -75,7 +75,7 @@ all() ->
         linger_timeout_rejects_below_minus_one,
         linger_timeout_is_in_seconds,
         a_security_header_can_be_switched_off_on_its_own,
-        all_101_keys_reach_their_documented_paths
+        all_116_keys_reach_their_documented_paths
     ].
 
 init_per_suite(Config) ->
@@ -667,8 +667,8 @@ a_security_header_can_be_switched_off_on_its_own(Config) ->
         key_value:get([security_headers, frame_options], Spec2, missing)
     ).
 
-all_101_keys_reach_their_documented_paths(Config) ->
-    %% Pins the hand-written route table: renders every one of the 101
+all_116_keys_reach_their_documented_paths(Config) ->
+    %% Pins the hand-written route table: renders every one of the 116
     %% `listeners.$name.*' keys in a single listener and asserts the whole
     %% resulting spec, so a wrong path silently relocating an operator's
     %% setting shows up as a map mismatch rather than passing unnoticed.
@@ -769,6 +769,21 @@ all_101_keys_reach_their_documented_paths(Config) ->
         "listeners.pub.mcp.list.default_page_size = 100\n",
         "listeners.pub.mcp.schema.max_depth = 16\n",
         "listeners.pub.mcp.schema.max_validation_ms = 100ms\n",
+        "listeners.pub.rate_limit.connection.enabled = on\n",
+        "listeners.pub.rate_limit.connection.rate = 30\n",
+        "listeners.pub.rate_limit.connection.capacity = 60\n",
+        "listeners.pub.rate_limit.handshake.enabled = on\n",
+        "listeners.pub.rate_limit.handshake.rate = 10\n",
+        "listeners.pub.rate_limit.handshake.capacity = 20\n",
+        "listeners.pub.rate_limit.auth.enabled = on\n",
+        "listeners.pub.rate_limit.auth.rate = 5\n",
+        "listeners.pub.rate_limit.auth.capacity = 10\n",
+        "listeners.pub.rate_limit.http.enabled = on\n",
+        "listeners.pub.rate_limit.http.rate = 50\n",
+        "listeners.pub.rate_limit.http.capacity = 100\n",
+        "listeners.pub.rate_limit.message.enabled = on\n",
+        "listeners.pub.rate_limit.message.rate = 500\n",
+        "listeners.pub.rate_limit.message.capacity = 1000\n",
         "listeners.pub.tls.certfile = /tmp/certs/cert.pem\n",
         "listeners.pub.tls.keyfile = /tmp/certs/key.pem\n",
         "listeners.pub.tls.cacertfile = /tmp/certs/ca.pem\n",
@@ -819,6 +834,13 @@ all_101_keys_reach_their_documented_paths(Config) ->
             idle_timeout => 10000,
             timeout => 5000,
             max_attempts => 3
+        },
+        rate_limit => #{
+            connection => #{enabled => true, rate => 30, capacity => 60},
+            handshake => #{enabled => true, rate => 10, capacity => 20},
+            auth => #{enabled => true, rate => 5, capacity => 10},
+            http => #{enabled => true, rate => 50, capacity => 100},
+            message => #{enabled => true, rate => 500, capacity => 1000}
         },
         protocol_opts => #{
             active_n => 5,

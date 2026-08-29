@@ -32,6 +32,7 @@ so the two cannot disagree about what an error URI is worth.
 -export([is_public_ip/1]).
 -export([peer/1]).
 -export([throttle/2]).
+-export([throttle/3]).
 
 %% COOKIES
 -export([csrf_cookie_name/1]).
@@ -89,13 +90,29 @@ endpoint down. `ok` whenever the feature or class is off (the default).
 -spec throttle(bondy_rate_limit:class(), cowboy_req:req()) -> ok | throttled.
 
 throttle(Class, Req) ->
+    throttle(Class, Req, #{}).
+
+-doc """
+Like `throttle/2` with extra rate-limit dimensions from the caller —
+in practice `realm`, for the handlers whose request addresses one (the
+listener dimension is derived here from the request itself).
+""".
+-spec throttle(
+    bondy_rate_limit:class(), cowboy_req:req(), bondy_rate_limit:dims()
+) -> ok | throttled.
+
+throttle(Class, Req, Dims) ->
     ProxyProtocol = bondy_http_proxy_protocol:init(Req),
     IP =
         case bondy_http_proxy_protocol:source_ip(ProxyProtocol) of
             {ok, SourceIP} -> SourceIP;
             {error, _} -> element(1, peer(Req))
         end,
-    bondy_rate_limit:throttle(Class, IP).
+    %% The cowboy `ref` is the listener name — the listener-scope
+    %% dimension of the rate-limit chain.
+    bondy_rate_limit:throttle(Class, IP, Dims#{
+        listener => maps:get(ref, Req, undefined)
+    }).
 
 -doc """
 Returns the HTTP status code for an error.

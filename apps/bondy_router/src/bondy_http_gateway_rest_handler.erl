@@ -288,7 +288,8 @@ applied here per request. Throttled requests answer `429` with a
 `retry-after` of one second, the class's refill granularity.
 """.
 rate_limited(Req, St) ->
-    case bondy_http_utils:throttle(http, Req) of
+    Dims = #{realm => maps:get(realm_uri, St, undefined)},
+    case bondy_http_utils:throttle(http, Req, Dims) of
         ok -> {false, Req, St};
         throttled -> {{true, 1}, Req, St}
     end.

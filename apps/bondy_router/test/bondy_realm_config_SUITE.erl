@@ -48,8 +48,41 @@ all() ->
         undeclared_entities_survive,
         realm_prototype_out_of_order,
         sso_realm_out_of_order,
-        group_declared_after_its_parent
+        group_declared_after_its_parent,
+        rate_limit_property_from_config_file
     ].
+
+%% A declared realm's `rate_limit` lands as the realm property and is
+%% enforced — the JSON file round-trip (binary keys, encode/decode) is
+%% the shape under test; the chain mechanics have their own falsifiers
+%% (`bondy_rate_limit_SUITE`).
+rate_limit_property_from_config_file(Config) ->
+    Uri = uri(<<"ratelimit">>),
+    ok = apply_config(Config, [
+        realm(Uri, #{
+            <<"rate_limit">> => #{
+                <<"http">> => #{
+                    <<"per_caller">> => #{
+                        <<"rate">> => 1, <<"capacity">> => 1
+                    }
+                }
+            }
+        })
+    ]),
+    ?assertEqual(
+        #{http => #{per_caller => #{rate => 1, capacity => 1}}},
+        bondy_realm:rate_limit(Uri)
+    ),
+    SavedNode = bondy_config:get([security, rate_limit], undefined),
+    ok = bondy_config:set([security, rate_limit], #{enabled => false}),
+    try
+        K = {test_ip, erlang:unique_integer([positive])},
+        Dims = #{realm => Uri},
+        ?assertEqual(ok, bondy_rate_limit:throttle(http, K, Dims)),
+        ?assertEqual(throttled, bondy_rate_limit:throttle(http, K, Dims))
+    after
+        ok = bondy_config:set([security, rate_limit], SavedNode)
+    end.
 
 init_per_suite(Config) ->
     bondy_ct:start_bondy(),

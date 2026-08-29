@@ -52,16 +52,16 @@ format_status(_Config) ->
     lists:foreach(
         fun(
             {SubProtocol, AuthMethod, AuthClaims, AuthContext, AuthTime, Name,
-                Context, Reason, MsgLimiter}
+                Context, Reason, MsgLimiter, Listener}
         ) ->
             State =
                 {wamp_state, SubProtocol, AuthMethod, AuthClaims, AuthContext,
-                    AuthTime, Name, Context, Reason, MsgLimiter},
+                    AuthTime, Name, Context, Reason, MsgLimiter, Listener},
             NewState = bondy_wamp_protocol:format_status(State),
             ?assertEqual(State, NewState)
         end,
         [
-            {SP, AM, ACl, AC, AT, SN, Co, Re, ML}
+            {SP, AM, ACl, AC, AT, SN, Co, Re, ML, LS}
          || SP <- [undefined, {raw, binary, json}],
             AM <- [undefined, cryptosign],
             ACl <- [undefined, #{}],
@@ -70,7 +70,8 @@ format_status(_Config) ->
             SN <- [closed, establishing],
             Co <- [undefined, #{}],
             Re <- [normal, logout],
-            ML <- [undefined]
+            ML <- [undefined],
+            LS <- [undefined, admin_api]
         ]
     ).
 
@@ -366,7 +367,7 @@ terminate(_Config) ->
     % undefined context
     StateNoContext =
         {wamp_state, SubProtocol, cryptosign, undefined, #{}, 123, failed,
-            undefined, normal, undefined},
+            undefined, normal, undefined, undefined},
     ?assertEqual(undefined, bondy_wamp_protocol:context(StateNoContext)),
     ?assertEqual(ok, bondy_wamp_protocol:terminate(StateNoContext)),
 
@@ -387,7 +388,7 @@ handle_inbound(_Config) ->
     SubProtocolInvalid = {ws, text, EncodingUnsupported},
     StateInvalidSP =
         {wamp_state, SubProtocolInvalid, wampcra, undefined, #{}, 123,
-            establishing, undefined, normal, undefined},
+            establishing, undefined, normal, undefined, undefined},
     Error = {unsupported_encoding, EncodingUnsupported},
     ?assertError(
         Error, bondy_wamp_protocol:handle_inbound(<<>>, StateInvalidSP)

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Generate the Bondy load-regulation / rate-limiting diagrams.
 
-Emits three focused SVGs rather than one dense map:
+Emits two focused SVGs rather than one dense map:
 
   1. <out>/load_regulation_ingress.svg  — per-transport ingress and admission
   2. <out>/load_regulation_pools.svg    — pools, worker queues and overflow
-  3. <out>/load_regulation_signals.svg  — regulators, load signals, what to watch
+
+(The former third diagram, "regulators and signals", was replaced by markdown
+tables in the guides — its at-a-glance content reads better as tables.)
 
 Every fact encoded here was verified against the tree at HEAD: schema/bondy.schema,
 schema/bondy_bridge_relay.schema, and the modules named in each box.
@@ -135,8 +137,8 @@ def diagram_ingress():
     cen = [x + LANE_W / 2 for x in lanes]
 
     titles = [
-        ("HTTP / HTTPS", "API Gateway + Admin API"),
-        ("WAMP WebSocket", "upgrade on the API Gateway listener"),
+        ("HTTP / HTTPS", "API Gateway · Admin API · MCP · SSE · long-poll"),
+        ("WAMP WebSocket", "upgrade on any listener declaring wamp_ws"),
         ("WAMP TCP / TLS", "raw socket"),
         ("Partisan", "cluster peer plane"),
         ("Bondy Bridge Relay", "edge / bridge peers"),
@@ -152,51 +154,61 @@ def diagram_ingress():
     limits = (["handshake 10/s·50 — on HELLO, after the gate",
                "auth 5/s·20 — on AUTHENTICATE, BEFORE any",
                "   credential verification",
-               "message 1000/s·2000 — per session, opt-in"],
-              ["-> bondy_rate_limited_total{class}"])
+               "message 1000/s·2000 — per session, opt-in",
+               "Each class also budgets at listener and",
+               "realm scope; the realm adds a shared",
+               "total — a per-node tenant quota."],
+              ["-> bondy_rate_limited_total{class, scope}"])
 
     bands = [
-        [("external", "REST · long-poll · SSE · /metrics", [], [], False),
+        [("external", "REST · MCP · long-poll · SSE · /metrics", [], [], False),
          ("external", "WAMP WS / WSS clients", [], [], False),
          ("external", "WAMP raw-socket clients", [], [], False),
          ("external", "Other Bondy nodes", [], [], False),
          ("external", "Edge routers / bridge peers", [], [], False)],
 
-        [("transport", "Cowboy on Ranch — 4 listeners",
-          ["api_gateway :18080 / :18083", "admin_api :18081 / :18084"],
-          ["acceptors_pool_size 200 gw · 100 admin",
-           "max_connections 100,000 · 10,000 admin",
-           "num_conns_sups = acceptors_pool_size"], False),
-         ("transport", "Shares the API Gateway listener",
-          ["/ws upgrade — no listener of its own, so",
-           "the acceptor pool and max_connections",
-           "are the API Gateway's."],
-          ["wamp.websocket.* — ping, idle, compression"], False),
-         ("transport", "Ranch — wamp_tcp / wamp_tls",
-          [":18082 / :18085"],
-          ["wamp.tcp.acceptors_pool_size 200",
-           "wamp.tcp.max_connections 100,000",
-           "wamp.tls.* — same shape, own pool"], False),
+        [("transport", "Cowboy on Ranch — operator inventory",
+          ["Any listener declaring HTTP services.",
+           "Defaults: admin :18081 (early phase),",
+           "api_gateway_http :18080."],
+          ["listeners.$name.services = api_gateway, ...",
+           "listeners.$name.acceptors_pool_size 10",
+           "listeners.$name.max_connections infinity"], False),
+         ("transport", "Shares its listener's socket",
+          ["/ws mounts on every listener declaring",
+           "wamp_ws — the acceptor pool and",
+           "max_connections are that listener's."],
+          ["listeners.$name.websocket.* — ping, idle,",
+           "  compression"], False),
+         ("transport", "Ranch — protocol wamp_rawsocket",
+          ["Default: wamp_tcp :18082. TLS is the",
+           "same protocol over transport = tls."],
+          ["listeners.$name.acceptors_pool_size 10",
+           "listeners.$name.max_connections infinity"], False),
          ("transport", "Partisan peer listener :18086",
           ["N connections per peer per channel:",
            "data · rpc · membership · wamp_relay"],
           ["cluster.channels.$c.parallelism",
            "cluster.max_message_size 64MB cap"], False),
-         ("transport", "Ranch — bridge.listener.tcp / .tls",
+         ("transport", "Ranch — protocol bridge_relay",
           ["inbound bondy_bridge_relay_server;",
-           "outbound bondy_bridge_relay_client."],
-          ["acceptors_pool_size 200",
-           "max_connections 100,000 · backlog"], False)],
+           "outbound bondy_bridge_relay_client.",
+           "None in the default inventory."],
+          ["listeners.$name.auth_timeout 5s",
+           "listeners.$name.max_connections infinity"], False)],
 
-        [("gap", "No connection rate limit",
-          ["security.rate_limit is never consulted",
-           "anywhere on the HTTP path."], [], True),
+        [("gap", "No connection-class limit",
+          ["Nothing gates the TCP connection itself;",
+           "admission is per REQUEST — the http",
+           "class, two boxes down."], [], True),
          ("limiter", "connection — per source IP",
           ["over limit → HTTP 429, upgrade refused"],
-          ["rate 20/s · capacity 100"], False),
+          ["node 20/s·100 · + listener scope",
+           "-> bondy_rate_limited_total{class, scope}"], False),
          ("limiter", "connection — per source IP",
           ["over limit → socket closed immediately"],
-          ["rate 20/s · capacity 100"], False),
+          ["node 20/s·100 · + listener scope",
+           "-> bondy_rate_limited_total{class, scope}"], False),
          ("gap", "No admission gate, no rate limit",
           ["Peer plane is trusted; back-pressure",
            "happens at the flow pool instead."], [], True),
@@ -204,7 +216,9 @@ def diagram_ingress():
           ["Back-pressure happens at the flow",
            "pool instead."], [], True)],
 
-        [("transport", "bondy_http_gateway_rest_handler", [], [], False),
+        [("transport", "bondy_http_gateway_rest_handler",
+          ["also bondy_mcp_http_handler and the",
+           "SSE / long-poll transport handlers"], [], False),
          ("transport", "bondy_wamp_ws_connection_handler",
           ["one process per connection"], [], False),
          ("transport", "bondy_wamp_tcp_connection_handler",
@@ -214,10 +228,15 @@ def diagram_ingress():
          ("transport", "bondy_bridge_relay_server / _client",
           ["one gen_statem per connection"], [], False)],
 
-        [("gap", "rate_limited/2 is a stub",
-          ["The Cowboy callback exists and always",
-           "returns false — REST requests are never",
-           "throttled and no Retry-After is produced."], [], True),
+        [("limiter", "http — per source IP, per request",
+          ["Every API Gateway, Admin API and MCP",
+           "request consumes the node, listener and",
+           "realm budgets in that order — the first",
+           "refusal answers 429 with retry-after."],
+          ["node 100/s·500 (higher than connection)",
+           "listeners.$name.rate_limit.http.*",
+           "realm rate_limit property (+ total quota)",
+           "-> bondy_rate_limited_total{class, scope}"], False),
          ("regulator", "HELLO admission gate", hello[0], hello[1], False),
          ("regulator", "HELLO admission gate", hello[0], hello[1], False),
          ("core", "Direct-to-worker ingress",
@@ -231,7 +250,11 @@ def diagram_ingress():
            "pair, so each flow stays in arrival order."],
           ["bondy_router_worker:cast/3"], False)],
 
-        [None,
+        [("core", "WAMP over SSE / long-poll",
+          ["An open creates a WAMP session on this",
+           "listener: the HELLO admission gate and",
+           "the handshake, auth and message limits",
+           "apply exactly as in the WebSocket lane."], [], False),
          ("limiter", "Per-source-IP and per-session limits", limits[0], limits[1], False),
          ("limiter", "Per-source-IP and per-session limits", limits[0], limits[1], False),
          None, None],
@@ -270,9 +293,9 @@ def diagram_ingress():
             if bi > 0 and bands[bi - 1][i]:
                 s.arrow(cen[i], ys[bi - 1] + heights[bi - 1], ys[bi] - 4)
 
-    s.footer("Verified against schema/bondy.schema, schema/bondy_bridge_relay.schema and the modules "
-             "named above. Dashed boxes mark where no regulator exists today.   "
-             "Continues in: Pools & worker queues · Regulators and signals.")
+    s.footer("Verified against schema/bondy.schema, bondy_rate_limit and the modules named above. "
+             "Dashed boxes mark where no regulator exists today.   "
+             "Continues in: Pools & worker queues.")
     return "load_regulation_ingress.svg", s.render()
 
 
@@ -325,11 +348,15 @@ def diagram_pools():
         ("pool", "Registry partitions",
          ["Fed by: SUBSCRIBE / REGISTER and removals.",
           "",
-          "Serialises registry writes. The partition is",
-          "hashed from the realm URI, so ONE busy realm",
-          "always lands on ONE partition — raising this",
-          "only helps when many realms are in use."],
+          "Writes run in the CALLER's process — no",
+          "serialisation point: exact indices via",
+          "concurrent ETS, prefix/wildcard via the",
+          "persistent ptrie's path-copy + root CAS,",
+          "retrying on CAS loss. The partition process",
+          "owns the tables and the reclamation janitors.",
+          "Entries hash by realm URI to a partition."],
          ["registry.partitions       32",
+          "-> bondy_registry_ptrie_cas_retries_total",
           "db.registry.shard_count   (storage, separate)"]),
         ("pool", "Transport queue",
          ["Fed by: HTTP long-poll and SSE transports,",
@@ -355,7 +382,7 @@ def diagram_pools():
           "flow pool        drops (shed), counted",
           "job queue        evicts oldest, then TTL",
           "transport queue  per overflow_strategy",
-          "registry parts   no bound; writes serialise",
+          "registry parts   no queue; writers CAS-retry",
           "session manager  no bound; work queues",
           "aae reactor      no bound; work queues"]),
     ]
@@ -379,159 +406,15 @@ def diagram_pools():
         y += row_h[ri] + 34
 
     s.footer("Verified against schema/bondy.schema and the modules named above.   "
-             "Continues in: Ingress and admission · Regulators and signals.")
+             "Continues in: Ingress and admission.")
     return "load_regulation_pools.svg", s.render()
-
-
-# =============================================================================
-# 3 — REGULATORS & SIGNALS
-# =============================================================================
-def diagram_signals():
-    W, X0 = 1900, 42
-    r1 = [
-        (600, "regulator", "Node load monitor",
-         ["Samples the runtime's TOTAL run queue length",
-          "and exposes one binary status: busy or normal.",
-          "",
-          "Thresholds are a FACTOR of the online scheduler",
-          "count, not an absolute queue length, so one",
-          "setting is portable across machine sizes.",
-          "",
-          "The gap between the two watermarks is the",
-          "hysteresis that stops the status flapping at",
-          "the boundary. Reading it is one lock-free",
-          "atomics read.",
-          "",
-          "Consumer: the HELLO admission gate."],
-         ["run_queue_high_watermark  8x schedulers",
-          "run_queue_low_watermark   4x schedulers",
-          "sample_interval           100ms",
-          "bondy_regulator_load"]),
-        (600, "core", "Two load signals, not one",
-         ["The node monitor and anti-entropy each sample",
-          "the run queue — differently, and independently.",
-          "",
-          "Node monitor — total_run_queue_lengths_all, raw,",
-          "compared as an absolute count against",
-          "watermark x schedulers. Binary output.",
-          "",
-          "Anti-entropy — run_queue / schedulers_online,",
-          "EWMA-smoothed across ticks, compared against a",
-          "ratio. A healthy node sits near 0-1; a sustained",
-          "2 or more means work is queuing faster than the",
-          "schedulers drain it.",
-          "",
-          "Neither feeds the other."],
-         []),
-        (568, "gap", "Everything here fails open",
-         ["If the load monitor is not running the node",
-          "reads as normal and admits. If the rate limiter",
-          "table is unavailable, requests pass. If a",
-          "per-session bucket cannot be created, that",
-          "session runs unthrottled and logs a warning.",
-          "",
-          "A regulator that failed closed would turn its",
-          "own bug or a startup race into a total outage.",
-          "Failing open degrades to the behaviour Bondy",
-          "had before the regulator existed.",
-          "",
-          "So: absence of denials is NOT proof that a",
-          "limit is active. Check the counters."],
-         []),
-    ]
-    r2 = [
-        (1090, "regulator", "Anti-entropy — four regulators, four different bounds",
-         ["concurrency   max_concurrency 3 — how many sync sessions run at once. Governs speed and",
-          "              fairness, NOT memory: the per-round batch is pages / concurrency, so raising",
-          "              it shrinks each batch and leaves the node-wide budget unchanged.",
-          "",
-          "memory        max_pages_in_flight 2048 — the node-wide page budget. This is the lever that",
-          "              bounds peak RAM, and it holds regardless of dataset size or concurrency.",
-          "",
-          "steady state  live_sync on — a quiescent shard backs off geometrically to live_sync.max 5s",
-          "              and resets the moment its data moves. Because propagation is pull-only, that",
-          "              cap is also the convergence latency for a quiescent shard — treat it as an SLA.",
-          "",
-          "spike         load_adaptive off — while the smoothed ratio is at or above",
-          "              load_run_queue_threshold 2.0, throttleable dispatches are skipped for that",
-          "              tick. In-flight sessions are never aborted, so this can only affect",
-          "              convergence latency, never correctness.",
-          "",
-          "Shards backing the authentication freshness fence are exempt from every one of these, so no",
-          "amount of throttling can turn into an authentication outage."],
-         []),
-        (702, "core", "What to watch",
-         ["bondy_wamp_dropped_total{reason=admission}",
-          "   Sessions refused because the node was busy. A",
-          "   sustained rate means more nodes or a higher",
-          "   watermark — not a longer client timeout.",
-          "",
-          "bondy_wamp_dropped_total{reason=shed}",
-          "   Messages dropped to preserve flow ordering.",
-          "   Data loss by design: a flow is producing faster",
-          "   than its destination consumes.",
-          "",
-          "bondy_rate_limited_total{class}",
-          "   Denials per class. On a healthy node this points",
-          "   at one misbehaving source; across every class at",
-          "   once it usually means the limits are too tight",
-          "   for your topology.",
-          "",
-          "Run queue length — the input to all of the above,",
-          "and the leading indicator: it rises first."],
-         []),
-    ]
-    r3 = (1816, "limiter", "Outbound and callee-side admission",
-          ["bondy_http_connector — one HTTP connection pool per service, with checkout, connect and receive timeouts, plus",
-           "a periodic liveness probe that raises an alarm after repeated failures and clears it on recovery.",
-           "",
-           "bondy_connect — per-connection invocation admission, so a burst overwhelms neither the callee's handler pool nor",
-           "the router. Two independent limits: a hard in-flight cap (max_concurrency, 0 = unlimited) counting invocations",
-           "currently being serviced, and an optional token bucket for the rate. A denied invocation gets a back-pressure",
-           "ERROR instead of running the handler — this governs whether an invocation STARTS; the handler supervisor",
-           "governs how it RUNS.",
-           "",
-           "Both live in the connection's handler configuration, not bondy.conf, because they belong to the client, not the node."],
-          ["http_connector.services.$service.pool.size · .pool.checkout_timeout · .liveness.interval · .liveness.failure_threshold",
-           "handler.max_concurrency · handler.rate"])
-
-    h1 = max(measure(i[3], i[4]) for i in r1)
-    h2 = max(measure(i[3], i[4]) for i in r2)
-    h3 = measure(r3[3], r3[4])
-    y0 = 168
-    H = y0 + h1 + 30 + h2 + 30 + h3 + 76
-
-    s = Svg(W, H)
-    s.header("Bondy — load regulators, the signals they read, and what to watch",
-             "The node load signal and its consumer, the four anti-entropy regulators, callee-side "
-             "admission, and the counters that tell you any of it is engaging.",
-             [("regulator", "Load regulator"), ("limiter", "Rate limiter"),
-              ("core", "Reference"), ("gap", "Design principle")])
-    s.panel(36, 146, W - 72, H - 146 - 56, "REGULATORS & SIGNALS")
-
-    x = X0
-    for wd, kind, t, lines, keys in r1:
-        s.box(x, y0, wd, kind, t, lines, keys, h=h1)
-        x += wd + 24
-    y = y0 + h1 + 30
-    x = X0
-    for wd, kind, t, lines, keys in r2:
-        s.box(x, y, wd, kind, t, lines, keys, h=h2)
-        x += wd + 24
-    y += h2 + 30
-    s.box(X0, y, r3[0], r3[1], r3[2], r3[3], r3[4], h=h3)
-
-    s.footer("Verified against schema/bondy.schema, bondy_regulator_load, bondy_oplog_sync_scheduler, "
-             "bondy_connect_load and bondy_prometheus at HEAD.   "
-             "Continues in: Ingress and admission · Pools & worker queues.")
-    return "load_regulation_signals.svg", s.render()
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     for out_dir in sys.argv[1:]:
-        for fn in (diagram_ingress, diagram_pools, diagram_signals):
+        for fn in (diagram_ingress, diagram_pools):
             name, body = fn()
             p = os.path.join(out_dir, name)
             open(p, "w", encoding="utf-8").write(body)

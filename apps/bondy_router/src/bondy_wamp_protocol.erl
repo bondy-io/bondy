@@ -34,7 +34,12 @@ outbound WAMP messages.
     %% per-session message-throttle bucket, created at session open when
     %% message throttling is enabled (else `undefined`). Held here so the
     %% per-message path never reads config.
-    msg_limiter :: bondy_rate_limit:session_limiter()
+    msg_limiter :: bondy_rate_limit:session_limiter(),
+    %% The listener this connection arrived on (the ranch/cowboy ref),
+    %% handed in through the init opts by the connection handlers — the
+    %% listener-scope dimension of the rate-limit chain. `undefined` for
+    %% transports that do not thread it (the HTTP transport session).
+    listener :: atom() | binary() | undefined
 }).
 
 -type state() :: #wamp_state{} | undefined.
@@ -651,11 +656,15 @@ open_session(Extra, St0) when is_map(Extra) ->
 
         ok = bondy:set_process_metadata(Meta, LogKeys),
 
-        %% resolve the per-session message-throttle bucket ONCE, now that
-        %% the session is open (or `undefined` if message throttling is off).
+        %% resolve the per-session message-throttle bucket chain ONCE,
+        %% now that the session is open (or `undefined` if message
+        %% throttling is off at every scope).
         {reply, [Bin], St1#wamp_state{
             state_name = established,
-            msg_limiter = bondy_rate_limit:new_session_limiter()
+            msg_limiter = bondy_rate_limit:new_session_limiter(#{
+                listener => St1#wamp_state.listener,
+                realm => RealmUri
+            })
         }}
     catch
         throw:Reason ->
@@ -893,9 +902,16 @@ handle_hello(#hello{realm_uri = Uri} = M, St0) ->
 %% @private
 %% Per-source-IP inbound throttle for the handshake / auth classes. Delegates to
 %% the shared `bondy_rate_limit` policy (off by default; never raises).
+%% The realm dimension is the context's realm where one has been named
+%% (`auth` fires after HELLO, so it carries one; `handshake` fires
+%% before, so it is `undefined` and the realm scope stays out of its
+%% chain — ruling R3).
 throttle(Class, #wamp_state{} = St) ->
     {IP, _Port} = peer(St),
-    bondy_rate_limit:throttle(Class, IP).
+    bondy_rate_limit:throttle(Class, IP, #{
+        listener => St#wamp_state.listener,
+        realm => bondy_context:realm_uri(St#wamp_state.context)
+    }).
 
 %% @private
 %% opt-in per-session throttle for the flood-prone verbs
@@ -1218,7 +1234,8 @@ do_init({_, _, _} = Subprotocol, Peer, Opts) ->
     State = #wamp_state{
         state_name = closed,
         subprotocol = Subprotocol,
-        context = Ctxt
+        context = Ctxt,
+        listener = maps:get(listener, Opts, undefined)
     },
 
     ok = update_process_metadata(State),

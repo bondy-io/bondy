@@ -26,14 +26,15 @@ If you want the per-key types and defaults rather than the model, read the
 [schema](../../../schema/bondy.schema) or the configuration reference; this
 guide names keys but does not tabulate them.
 
-Three diagrams accompany it, one per section: the ingress lanes below, the pools
-and queues further down, and the regulators and their signals at the end.
+Two diagrams accompany it — the ingress lanes below and the pools and queues
+further down; the closing regulators-at-a-glance section collects every
+regulator into two tables.
 
 Start with ingress. Each transport gets its own lane because the gates genuinely
-differ per lane — and the dashed boxes are worth noting early, since they mark
-where nothing regulates anything today.
+differ per lane — and the dashed boxes are worth noting early: they mark the
+spots where no regulator sits, which on the cluster peer planes is deliberate.
 
-[![Bondy ingress and admission per transport: five lanes — HTTP/HTTPS, WAMP WebSocket, WAMP TCP/TLS, Partisan and Bondy Bridge Relay — each running from client through listener and acceptor pool, connection admission, connection process, session admission and per-session limits.](assets/load_regulation_ingress.svg)](assets/load_regulation_ingress.svg)
+[![Bondy ingress and admission per transport: five lanes — HTTP/HTTPS (API Gateway, Admin API, MCP, SSE, long-poll), WAMP WebSocket, WAMP TCP/TLS, Partisan and Bondy Bridge Relay — each running from client through listener and acceptors, connection admission, connection process, the per-request or HELLO admission gate, and the per-source-IP and per-session rate limits with their node, listener and realm scopes.](assets/load_regulation_ingress.svg)](assets/load_regulation_ingress.svg)
 
 ## Two questions, two mechanisms
 
@@ -241,58 +242,139 @@ at once.
 
 ### The regulators at a glance
 
-That completes the set. The diagram below collects every regulator with the
-signal it reads: the node load monitor and its single consumer, the four
-anti-entropy bounds, callee-side admission, and the counters that tell you any
-of it is engaging. It also makes explicit something easy to miss — the node
-monitor and anti-entropy sample the run queue **separately**, in different
-shapes, and neither feeds the other.
+That completes the set. Two tables collect it: the run-queue signal in its two
+shapes, and then every regulator with what it reads, what it does, and the
+counter that tells you it is engaging.
 
-[![Bondy load regulators and their signals: the node load monitor and its watermarks, a comparison of the two independent run-queue signals, the fail-open principle, the four anti-entropy regulators, outbound and callee-side admission, and the metrics to watch.](assets/load_regulation_signals.svg)](assets/load_regulation_signals.svg)
+The first makes explicit something easy to miss — the node monitor and
+anti-entropy sample the run queue **separately**, in different shapes, and
+neither feeds the other:
+
+| | Node load monitor | Anti-entropy scheduler |
+|---|---|---|
+| Reads | Total run queue length, raw, every 100ms | Run queue ÷ online schedulers |
+| Compared against | `run_queue_high_watermark` (8) × schedulers; back to normal at `run_queue_low_watermark` (4) × schedulers | `db.aae.load_run_queue_threshold` (2.0), as an EWMA-smoothed ratio across ticks |
+| Output | One binary status: busy / normal | Throttle this tick, or not |
+| Consumer | The `HELLO` admission gate | The anti-entropy scheduler, when `db.aae.load_adaptive` is on |
+
+The hard threshold answers an admission question that must not flap; the
+smoothed ratio answers a "good moment for background work?" question that must
+not overreact to one sample.
+
+| Regulator | Protects | Signal it reads | When it acts | Configuration (default) | Watch |
+|---|---|---|---|---|---|
+| `HELLO` admission gate | latency of admitted sessions | node monitor busy state | immediate retryable `ABORT` (`wamp.error.unavailable`); established sessions unaffected | `load_regulation.hello.enabled` (`on`) | `bondy_wamp_dropped_total{reason="admission"}` |
+| Flow-pool bound | memory and ordering on cluster ingress | a worker's queue vs its share of the budget | the message is shed (at-most-once delivery) | `load_regulation.router.flow_pool.capacity` (100,000) | `bondy_wamp_dropped_total{reason="shed"}` |
+| Anti-entropy concurrency cap | routing fairness | count of running sync sessions | further syncs wait; per-round batch = pages ÷ concurrency | `db.aae.max_concurrency` (3) | — |
+| Anti-entropy page budget | peak memory | reconciliation pages in flight | batches shrink; the node-wide budget holds regardless of dataset size | `db.aae.max_pages_in_flight` (2048) | — |
+| Live-sync backoff | steady-state background cost | whether the shard's data moved | poll interval backs off geometrically to `db.aae.live_sync.max` (5s), resets on change | `db.aae.live_sync` (`on`) | — |
+| Load-adaptive throttle | routing during a spike | the smoothed run-queue ratio | that tick's throttleable dispatches are skipped; in-flight syncs never aborted | `db.aae.load_adaptive` (`off`) | — |
+| Rate limiting — five classes, three scopes | fair share per source IP / session / tenant | token buckets, consumed node → listener → realm | `429` / `ABORT` / `ERROR` / silent drop, per class — next section | `security.rate_limit.*` · `listeners.$name.rate_limit.*` · the realm `rate_limit` property | `bondy_rate_limited_total{class, scope}` |
+| Callee admission (`bondy_connect_sdk`) | the callee's handler pool | in-flight invocation count, plus an optional token bucket | backpressure `ERROR` instead of running the handler | `handler.max_concurrency` · `handler.rate` (client-side, not `bondy.conf`) | — |
+
+Every row fails open (see [Failing open](#failing-open) below), so a missing
+denial counter is not proof the regulator is configured — it may simply never
+have been needed, or never have been on.
 
 ## Rate limiting inbound traffic
 
-Rate limiting is off by default. `security.rate_limit.enabled` is the master
-switch, and with it off the check is a single map read on the common path.
+Out of the box nothing is throttled. Budgets exist at three scopes — node,
+listener and realm, covered below — and none ships enabled: the node scope's
+master switch, `security.rate_limit.enabled`, is off (leaving the check a
+single map read on the common path), and a listener or realm budget exists
+only where an operator configures one.
 
-When on, four classes apply token buckets at four points in a connection's
-life. Each class has a `rate` in tokens per second (the steady-state
-allowance) and a `capacity` (the burst a client may spend at once before
-being held to the rate).
+Five classes apply token buckets at five points in a connection's life. Each
+class has a `rate` in tokens per second (the steady-state allowance) and a
+`capacity` (the burst a client may spend at once before being held to the
+rate).
 
-**Connection**, keyed by source IP, applied at the transport handler before
-any per-connection work. A TCP connection over the limit has its socket closed
-immediately; a WebSocket upgrade over the limit is answered with HTTP 429.
-Defaults: 20/s, burst 100.
+| Class | Keyed by | Applied at | Node defaults | Client sees |
+|---|---|---|---|---|
+| `connection` | source IP | transport handler, before any per-connection work | 20/s, burst 100 | TCP: socket closed. WebSocket: HTTP `429` |
+| `handshake` | source IP | `HELLO`, after the load admission gate | 10/s, burst 50 | `ABORT` with `wamp.error.unavailable` |
+| `auth` | source IP | `AUTHENTICATE`, before credential verification | 5/s, burst 20 | `ABORT` with `wamp.error.unavailable` |
+| `http` | source IP | every HTTP request — API Gateway, Admin API and MCP endpoints | 100/s, burst 500 | HTTP `429` with a `retry-after` header |
+| `message` | session | `CALL` / `PUBLISH` / `SUBSCRIBE` / `REGISTER` | 1000/s, burst 2000 | `ERROR` with `wamp.error.unavailable`, or a silent drop |
 
-**Handshake**, keyed by source IP, applied to `HELLO` after the load
-admission gate. Over the limit, the connection is aborted with
-`wamp.error.unavailable`. Defaults: 10/s, burst 50.
+The `auth` limit applies *before* verification, which is the point:
+verification is the expensive step a credential-stuffing run is trying to
+make you perform.
 
-**Auth**, keyed by source IP, applied to `AUTHENTICATE` *before* credential
-verification — which is the point, since verification is the expensive step a
-credential-stuffing run is trying to make you perform. Over the limit, the
-connection is aborted. Defaults: 5/s, burst 20.
-
-**Message**, keyed by session, applied to `CALL`, `PUBLISH`, `SUBSCRIBE` and
-`REGISTER`. This one has its own opt-in flag,
-`security.rate_limit.message.enabled`, on top of the master switch, because it
-sits on the per-message hot path. The bucket is resolved once at session open
-and held in the connection's state, so the per-message cost is a field read
-plus an atomics operation — never a configuration lookup. Defaults: 1000/s,
-burst 2000.
-
-A throttled message that expects a reply gets a WAMP `ERROR` with
-`wamp.error.unavailable`. An unacknowledged `PUBLISH` expects no reply, so it
-is dropped silently — sending an error for a message whose sender is not
-listening would be a protocol violation.
+The `message` class sits on the per-message hot path, so its node-scope
+budget has its own opt-in flag, `security.rate_limit.message.enabled`, on top
+of the master switch. Its bucket chain — one bucket per scope configured for
+the class — is resolved once at session open and held in the connection's
+state, so the per-message cost is a field read plus an atomics operation per
+configured scope, never a configuration lookup. This applies on every
+transport that carries a WAMP session: WebSocket, raw socket, SSE and
+long-poll alike. A throttled message that expects a reply gets a WAMP `ERROR`;
+an unacknowledged `PUBLISH` expects no reply, so it is dropped silently —
+sending an error for a message whose sender is not listening would be a
+protocol violation.
 
 The abort and error messages are deliberately generic: they say the client
 should slow down and retry, and nothing about which limit tripped or whether
 the credentials were valid. A pre-authentication signal that varied by cause
 would be an enumeration oracle.
 
-Denials increment `bondy_rate_limited_total`, labelled by class.
+Denials increment `bondy_rate_limited_total`, labelled by class and scope.
+
+### Scopes: node, listener, realm
+
+Every class can be budgeted at up to three scopes, and a request is admitted
+only when **all** of them admit it:
+
+- **Node** — the `security.rate_limit.*` keys: budgets shared by every
+  listener and realm on the node. This is where the master switch lives.
+- **Listener** — the `listeners.$name.rate_limit.*` keys: the same classes,
+  budgeted per listener, so an Internet-facing listener can be held to a
+  tighter budget than an internal one.
+- **Realm** — the realm's own `rate_limit` property, set through the realm
+  admin APIs or the security configuration file and replicated with the
+  realm. It covers the classes a realm-addressed request reaches — `auth`,
+  `http` and `message` (`connection` and `handshake` fire before any realm is
+  named) — and is the only scope with two budget *kinds*: `per_caller` (a
+  bucket per source IP or session, like the other scopes) and `total`, one
+  bucket shared by **all** of the realm's callers — a tenant quota.
+
+The scopes are consumed coarse to fine — node, then listener, then the
+realm's `per_caller`, then its `total` — and each configured scope consumes
+one token per request; the first refusal answers, and tokens already consumed
+at outer scopes are not returned. The composition can therefore only
+*narrow*: no listener or realm setting can grant traffic the node's own
+budget refuses.
+
+Each scope is enabled independently. The node scope has its master switch; a
+listener or realm class budget is in force simply by being configured,
+whether or not node-scope limiting is on.
+
+**The realm `total` is a per-node quota.** Buckets are node-local, so a realm
+`total` of N tokens per second bounds each node separately: a cluster of
+three nodes admits up to 3×N per second for that realm. Size it per node, or
+use `per_caller` budgets when you need a bound that does not scale with the
+cluster.
+
+The denial metric's `scope` label says which scope refused: `node`,
+`listener`, `realm` (a caller over its own realm budget) or `realm_total`
+(the realm's shared quota exhausted) — so a hot caller and an exhausted
+tenant quota are distinguishable at a glance.
+
+> #### Checking is cheap — refusing is not {: .tip}
+>
+> Do not size budgets down out of concern for the cost of the checks
+> themselves. With nothing configured the per-message check is a single
+> field read; each configured scope adds one lock-free atomic operation per
+> message, and the realm `total` one shared-table consult — all of it
+> orders of magnitude below the cost of routing the message, with no
+> measurable effect on message throughput or latency at any scope
+> combination. The `connection`, `handshake` and `auth` classes cost one
+> keyed-table consult per scope per *attempt*, a similarly negligible
+> fraction of establishing a session. The expensive outcome of rate
+> limiting is a budget sized too tight for legitimate traffic: refusals,
+> retries and reconnect storms cost far more than the checks ever will.
+> Size budgets for abuse, leave them enabled, and watch
+> `bondy_rate_limited_total` rather than pre-emptively loosening.
 
 ### Buckets and keyspace
 
@@ -303,7 +385,9 @@ buckets idle beyond a TTL, so the keyspace cannot grow without bound. The hot
 path stays a lockless table lookup plus an atomics check.
 
 Per-session message buckets have a definite owner and are freed at session
-teardown instead.
+teardown instead — except the realm `total`, which is shared by every session
+on the realm and therefore lives in the keyed table with the per-IP buckets,
+swept by idleness like them.
 
 ### Source IP behind a proxy
 
@@ -361,16 +445,19 @@ things.
 - `bondy_wamp_dropped_total{reason="shed"}` — messages dropped to preserve
   flow ordering, labelled by family. This is data loss by design, and it is
   the signal that a flow is producing faster than its destination consumes.
-- `bondy_rate_limited_total{class}` — denials per class. Read alongside the
-  node's load: denials on a healthy node point at one misbehaving source,
+- `bondy_rate_limited_total{class, scope}` — denials per class and scope. The
+  `scope` label names the budget that refused — `node`, `listener`, `realm`
+  (one hot caller) or `realm_total` (a tenant quota exhausted). Read alongside
+  the node's load: denials on a healthy node point at one misbehaving source,
   while denials across every class at once usually mean the limits are simply
   too tight for your topology.
 - Run queue length, from the load monitor. This is the input to everything
   above, and the leading indicator — it rises before the refusals start.
 
 A node that never refuses anything is not necessarily healthy; it may simply
-have every regulator switched off. Rate limiting in particular is off by
-default, and the message class needs a second opt-in.
+have every regulator switched off. Rate limiting in particular ships with no
+budget enabled at any scope, and the node-scope message class needs a second
+opt-in.
 
 ## Choosing values
 

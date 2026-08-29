@@ -107,7 +107,8 @@ init({Ref, Transport, Opts}) ->
 
     %% throttle new connections per source IP (no-op unless enabled).
     %% Reject early by closing the just-accepted socket and terminating.
-    case bondy_rate_limit:throttle(connection, SourceIP) of
+    %% `Ref` is the listener name — the listener-scope dimension.
+    case bondy_rate_limit:throttle(connection, SourceIP, #{listener => Ref}) of
         throttled ->
             ?LOG_NOTICE(#{
                 description => "TCP connection rejected (rate limit)",
@@ -583,7 +584,10 @@ init_wamp(Len, Enc, State0) ->
     {FrameType, EncName} = validate_encoding(Enc),
     Proto = {raw, FrameType, EncName},
     Peer = State0#state.peername,
-    Opts = #{source_ip => State0#state.source_ip},
+    Opts = #{
+        source_ip => State0#state.source_ip,
+        listener => State0#state.listener
+    },
 
     case bondy_wamp_protocol:init(Proto, Peer, Opts) of
         {ok, ProtoState} ->

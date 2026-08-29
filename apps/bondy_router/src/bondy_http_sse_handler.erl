@@ -142,7 +142,9 @@ open_session(Protocol, Req0, State) ->
             ),
             case
                 bondy_http_transport_session:init_protocol(
-                    Pid, Subprotocol, Peer
+                    Pid, Subprotocol, Peer, #{
+                        listener => maps:get(listener, State, undefined)
+                    }
                 )
             of
                 ok ->

@@ -192,7 +192,9 @@ open_session(Protocol, Req0, State) ->
             {ok, _} = bondy_wamp_protocol:validate_subprotocol(Subprotocol),
             case
                 bondy_http_transport_session:init_protocol(
-                    Pid, Subprotocol, Peer
+                    Pid, Subprotocol, Peer, #{
+                        listener => maps:get(listener, State, undefined)
+                    }
                 )
             of
                 ok ->

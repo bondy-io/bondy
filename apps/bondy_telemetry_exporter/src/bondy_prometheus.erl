@@ -229,8 +229,8 @@ declare_wamp_metrics() ->
     _ = prometheus_counter:declare([
         {name, bondy_rate_limited_total},
         {help,
-            <<"The total number of inbound requests denied by the inbound rate limiter, by class (handshake | auth | connection | message).">>},
-        {labels, [class]}
+            <<"The total number of inbound requests denied by the inbound rate limiter, by class (handshake | auth | connection | http | message) and scope (node | listener | realm).">>},
+        {labels, [class, scope]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_rpc_promise_timeouts_total},

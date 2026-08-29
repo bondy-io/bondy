@@ -78,6 +78,12 @@ restore_env(Key, {ok, Value}) ->
     application:set_env(bondy_regulator, Key, Value).
 
 do_lifecycle() ->
+    %% This test owns the server's LIFECYCLE (start, restart, stop), so a
+    %% registered instance owned by the running app — sibling fixtures
+    %% start the whole app now — must go first. Stopping the app is the
+    %% supervised way to do that; every sibling `ensure_all_started`s and
+    %% is indifferent to finding it stopped.
+    _ = application:stop(bondy_regulator),
     {ok, Pid} = bondy_regulator_load:start_link(),
 
     %% A node below the high watermark samples as normal within a few

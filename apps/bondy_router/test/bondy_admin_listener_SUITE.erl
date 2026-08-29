@@ -53,6 +53,8 @@ all() ->
         admin_local_is_injected_without_configuration,
         admin_local_socket_is_bound_and_serves,
         http_requests_are_rate_limited,
+        listener_scope_http_budget_is_enforced,
+        realm_scope_http_budget_is_enforced,
         oauth2_draws_from_the_auth_class
     ].
 
@@ -226,6 +228,61 @@ http_requests_are_rate_limited(_) ->
     {ok, After, _, _} = get_path(?ADMIN, ?ADMIN_API_PATH),
     ?assertNotEqual(429, After).
 
+%% The LISTENER scope of the rate-limit chain, on the wire: with the
+%% NODE scope entirely off, a budget on this listener's own
+%% `rate_limit.http` block throttles requests arriving through it — the
+%% seat passes the cowboy `ref` (the listener name) as the listener
+%% dimension. Same contract discipline as the node-scope case above:
+%% only "rapid requests trip 429" and "off means served" are asserted.
+listener_scope_http_budget_is_enforced(_) ->
+    ok = bondy_config:set([security, rate_limit], #{enabled => false}),
+    ok = bondy_config:set(
+        [?ADMIN, rate_limit], #{http => #{rate => 1, capacity => 2}}
+    ),
+    try
+        Results = [
+            get_path(?ADMIN, ?ADMIN_API_PATH)
+         || _ <- lists:seq(1, 6)
+        ],
+        {ok, Last, Headers, _} = lists:last(Results),
+        ?assertEqual(429, Last),
+        ?assertMatch({_, _}, lists:keyfind(<<"retry-after">>, 1, Headers))
+    after
+        ok = bondy_config:set([?ADMIN, rate_limit], undefined),
+        ok = bondy_config:set([security, rate_limit], undefined)
+    end,
+    {ok, After, _, _} = get_path(?ADMIN, ?ADMIN_API_PATH),
+    ?assertNotEqual(429, After).
+
+%% NODE and LISTENER scopes entirely off, a budget in the REALM's own
+%% `rate_limit` property throttles requests the gateway serves on that
+%% realm — the seat passes the API specification's realm as the realm
+%% dimension. The Admin API runs on the master realm, so its property is
+%% the one under test; clearing it must restore service (the chain no
+%% longer consults the bucket).
+realm_scope_http_budget_is_enforced(_) ->
+    ok = bondy_config:set([security, rate_limit], #{enabled => false}),
+    Master = <<"com.leapsight.bondy">>,
+    _ = bondy_realm:update(Master, #{
+        rate_limit => #{
+            http => #{per_caller => #{rate => 1, capacity => 2}}
+        }
+    }),
+    try
+        Results = [
+            get_path(?ADMIN, ?ADMIN_API_PATH)
+         || _ <- lists:seq(1, 6)
+        ],
+        {ok, Last, Headers, _} = lists:last(Results),
+        ?assertEqual(429, Last),
+        ?assertMatch({_, _}, lists:keyfind(<<"retry-after">>, 1, Headers))
+    after
+        _ = bondy_realm:update(Master, #{rate_limit => undefined}),
+        ok = bondy_config:set([security, rate_limit], undefined)
+    end,
+    {ok, After, _, _} = get_path(?ADMIN, ?ADMIN_API_PATH),
+    ?assertNotEqual(429, After).
+
 %% The OAuth2 endpoints draw from the `auth` class — the shared per-IP
 %% credential-guessing budget WAMP AUTHENTICATE consumes — while the
 %% gateway hook does NOT: with only `auth` enabled, the OAuth2 callback
@@ -233,17 +290,26 @@ http_requests_are_rate_limited(_) ->
 %% peer keys buckets no other suite touches.
 oauth2_draws_from_the_auth_class(_) ->
     Req = #{ref => ?ADMIN, peer => {{127, 0, 0, 88}, 5000}, headers => #{}},
+    %% The handler state is built by the handler itself — its
+    %% `rate_limited` reads the realm dimension from it, so a hand-rolled
+    %% stand-in would not exercise the real seat.
+    {cowboy_rest, _, OauthSt} = bondy_oauth2_rest_handler:init(Req, #{
+        realm_uri => <<"com.leapsight.bondy">>,
+        token_path => <<"/token">>,
+        revoke_path => <<"/revoke">>
+    }),
     ok = bondy_config:set([security, rate_limit], #{
         enabled => true,
         auth => #{rate => 1, capacity => 1}
     }),
     try
         ?assertMatch(
-            {false, _, _}, bondy_oauth2_rest_handler:rate_limited(Req, #{})
+            {false, _, _},
+            bondy_oauth2_rest_handler:rate_limited(Req, OauthSt)
         ),
         ?assertMatch(
             {{true, _}, _, _},
-            bondy_oauth2_rest_handler:rate_limited(Req, #{})
+            bondy_oauth2_rest_handler:rate_limited(Req, OauthSt)
         ),
         ?assertMatch(
             {false, _, _},

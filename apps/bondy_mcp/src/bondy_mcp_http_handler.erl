@@ -220,7 +220,11 @@ do_handle_rpc(Req0, #{config := Config} = St) ->
     %% it carries no session meaning, so it is safe in both eras (unlike
     %% 404, which is reserved for the session — §12).
     ok =
-        case bondy_http_utils:throttle(http, Req0) of
+        case
+            bondy_http_utils:throttle(http, Req0, #{
+                realm => cowboy_req:binding(realm, Req0)
+            })
+        of
             ok ->
                 ok;
             throttled ->

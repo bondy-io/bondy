@@ -152,6 +152,7 @@ brutal `kill' skips it.
 -export([encoding/1]).
 -export([handle_client_message/2]).
 -export([init_protocol/3]).
+-export([init_protocol/4]).
 -export([notify_enqueue/1]).
 -export([poll_receive/2]).
 -export([request_poll/2]).
@@ -300,8 +301,25 @@ that will be used for all subsequent message handling.
     Peer :: bondy_session:peer()
 ) -> ok | {error, term()}.
 
-init_protocol(Pid, Subprotocol, Peer) when is_pid(Pid) ->
-    gen_server:call(Pid, {init_protocol, Subprotocol, Peer}).
+init_protocol(Pid, Subprotocol, Peer) ->
+    init_protocol(Pid, Subprotocol, Peer, #{}).
+
+-doc """
+Like `init_protocol/3`, with extra options for the protocol state.
+`listener` names the listener the connection arrived on — the opening
+HTTP handler passes its route's listener so the session's rate-limit
+chain carries the listener dimension, exactly as the WS and rawsocket
+handlers do on their transports.
+""".
+-spec init_protocol(
+    Pid :: pid(),
+    Subprotocol :: subprotocol(),
+    Peer :: bondy_session:peer(),
+    Opts :: #{listener => atom() | undefined}
+) -> ok | {error, term()}.
+
+init_protocol(Pid, Subprotocol, Peer, Opts) when is_pid(Pid), is_map(Opts) ->
+    gen_server:call(Pid, {init_protocol, Subprotocol, Peer, Opts}).
 
 -doc """
 Processes an inbound WAMP message from the client.
@@ -496,9 +514,9 @@ init([TransportId, RealmUri, SessionId, Opts]) ->
             {stop, {error, already_exists}}
     end.
 
-handle_call({init_protocol, Subprotocol, Peer}, _From, State) ->
+handle_call({init_protocol, Subprotocol, Peer, ExtraOpts}, _From, State) ->
     {TransportType, _, Enc} = Subprotocol,
-    Opts = #{
+    Opts = ExtraOpts#{
         transport_id => State#state.transport_id,
         transport_type => TransportType
     },

@@ -138,8 +138,14 @@ init(Req0, RouteState) ->
         case bondy_http_proxy_protocol:source_ip(ProxyProtocol) of
             {ok, SourceIP} ->
                 %% throttle new connections per source IP (no-op unless
-                %% enabled) before doing any per-connection work.
-                case bondy_rate_limit:throttle(connection, SourceIP) of
+                %% enabled) before doing any per-connection work. The
+                %% cowboy `ref` is the listener name — the listener-scope
+                %% dimension.
+                case
+                    bondy_rate_limit:throttle(connection, SourceIP, #{
+                        listener => maps:get(ref, Req0)
+                    })
+                of
                     throttled ->
                         ?LOG_NOTICE(#{
                             description =>
@@ -522,7 +528,11 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State0) ->
     Peer = bondy_http_utils:peer(Req0),
     SourceIP = State0#state.source_ip,
     AuthToken = State0#state.auth_token,
-    ProtoOpts = #{auth_token => AuthToken, source_ip => SourceIP},
+    ProtoOpts = #{
+        auth_token => AuthToken,
+        source_ip => SourceIP,
+        listener => State0#state.listener
+    },
 
     ok = logger:update_process_metadata(#{
         transport => websockets,

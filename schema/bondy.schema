@@ -2889,6 +2889,113 @@ end}.
 ]}.
 
 %% --------------------------------------------------------------------------
+%% Per-listener rate limiting (LISTENER scope of the three-scope model;
+%% design: _plans/2026-08-29-rate-limit-scopes-design.md). Composed AND
+%% with the node scope (`security.rate_limit.*`) and, where the request
+%% addresses one, the realm's own budgets — a listener budget can only
+%% NARROW what the node admits. A class block's PRESENCE enables it
+%% (per-listener keys are default-free by rule); `enabled = off` inside
+%% the block parks it without deleting the numbers. `rate` is tokens per
+%% SECOND; `capacity` the burst size.
+%% --------------------------------------------------------------------------
+
+%% @doc Whether this listener's `connection` budget is in force. The block's
+%% presence enables it; this key exists to park a configured budget.
+{mapping, "listeners.$name.rate_limit.connection.enabled",
+"bondy_router.listeners", [
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc Maximum sustained NEW-CONNECTION rate per source IP on this
+%% listener, in connections per second.
+{mapping, "listeners.$name.rate_limit.connection.rate",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Burst size for the `connection` budget.
+{mapping, "listeners.$name.rate_limit.connection.capacity",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Whether this listener's `handshake` budget is in force.
+{mapping, "listeners.$name.rate_limit.handshake.enabled",
+"bondy_router.listeners", [
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc Maximum sustained WAMP-handshake rate per source IP on this
+%% listener, per second.
+{mapping, "listeners.$name.rate_limit.handshake.rate",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Burst size for the `handshake` budget.
+{mapping, "listeners.$name.rate_limit.handshake.capacity",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Whether this listener's `auth` budget is in force.
+{mapping, "listeners.$name.rate_limit.auth.enabled",
+"bondy_router.listeners", [
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc Maximum sustained authentication-attempt rate per source IP on
+%% this listener, per second.
+{mapping, "listeners.$name.rate_limit.auth.rate",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Burst size for the `auth` budget.
+{mapping, "listeners.$name.rate_limit.auth.capacity",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Whether this listener's `http` budget is in force.
+{mapping, "listeners.$name.rate_limit.http.enabled",
+"bondy_router.listeners", [
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc Maximum sustained HTTP request rate per source IP on this
+%% listener, in requests per second (requests, not connections).
+{mapping, "listeners.$name.rate_limit.http.rate",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Burst size for the `http` budget.
+{mapping, "listeners.$name.rate_limit.http.capacity",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Whether this listener's `message` budget is in force.
+{mapping, "listeners.$name.rate_limit.message.enabled",
+"bondy_router.listeners", [
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc Maximum sustained WAMP message rate per session established
+%% through this listener, in messages per second.
+{mapping, "listeners.$name.rate_limit.message.rate",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% @doc Burst size for the `message` budget.
+{mapping, "listeners.$name.rate_limit.message.capacity",
+"bondy_router.listeners", [
+  {datatype, integer}
+]}.
+
+%% --------------------------------------------------------------------------
 %% TLS material. bondy_listener_config:tls_material/3 is the single reader of
 %% these, for both the boot-time validation and live certificate rotation.
 %% --------------------------------------------------------------------------
@@ -3078,6 +3185,29 @@ end}.
         {["mcp", "schema", "max_depth"], [mcp, schema, max_depth]},
         {["mcp", "schema", "max_validation_ms"],
             [mcp, schema, max_validation_ms]},
+        {["rate_limit", "connection", "enabled"],
+            [rate_limit, connection, enabled]},
+        {["rate_limit", "connection", "rate"],
+            [rate_limit, connection, rate]},
+        {["rate_limit", "connection", "capacity"],
+            [rate_limit, connection, capacity]},
+        {["rate_limit", "handshake", "enabled"],
+            [rate_limit, handshake, enabled]},
+        {["rate_limit", "handshake", "rate"],
+            [rate_limit, handshake, rate]},
+        {["rate_limit", "handshake", "capacity"],
+            [rate_limit, handshake, capacity]},
+        {["rate_limit", "auth", "enabled"], [rate_limit, auth, enabled]},
+        {["rate_limit", "auth", "rate"], [rate_limit, auth, rate]},
+        {["rate_limit", "auth", "capacity"], [rate_limit, auth, capacity]},
+        {["rate_limit", "http", "enabled"], [rate_limit, http, enabled]},
+        {["rate_limit", "http", "rate"], [rate_limit, http, rate]},
+        {["rate_limit", "http", "capacity"], [rate_limit, http, capacity]},
+        {["rate_limit", "message", "enabled"],
+            [rate_limit, message, enabled]},
+        {["rate_limit", "message", "rate"], [rate_limit, message, rate]},
+        {["rate_limit", "message", "capacity"],
+            [rate_limit, message, capacity]},
         {["tls", "certfile"], [tls, certfile]},
         {["tls", "keyfile"], [tls, keyfile]},
         {["tls", "cacertfile"], [tls, cacertfile]},

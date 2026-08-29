@@ -320,6 +320,14 @@ connected to any realm.
         required => false,
         default => #{},
         validator => ?INFO_VALIDATOR
+    },
+    %% The realm-scope rate-limit budgets. See ?RATE_LIMIT_VALIDATOR.
+    <<"rate_limit">> => #{
+        alias => rate_limit,
+        key => rate_limit,
+        required => false,
+        allow_undefined => true,
+        validator => ?RATE_LIMIT_VALIDATOR
     }
 }).
 
@@ -329,6 +337,72 @@ connected to any realm.
         key => oidc_providers,
         required => false,
         validator => {map, {binary, ?OIDC_PROVIDER}}
+    }
+}).
+
+%% The realm-scope rate-limit budgets (design:
+%% `_plans/2026-08-29-rate-limit-scopes-design.md`). Only the classes a
+%% realm-addressed request reaches (`auth`, `http`, `message`) — the
+%% `connection`/`handshake` classes fire before any realm is named. Each
+%% class block carries up to two budget KINDS: `per_caller` (a bucket per
+%% source IP / session, like the node and listener scopes) and `total`
+%% (ONE shared bucket for the whole realm — the tenant quota, bounded
+%% PER NODE in v1). A class block's presence enables it; `enabled: false`
+%% parks it without deleting the numbers.
+-define(RATE_LIMIT_BUDGET_VALIDATOR, #{
+    <<"rate">> => #{
+        alias => rate,
+        key => rate,
+        required => true,
+        datatype => pos_integer
+    },
+    <<"capacity">> => #{
+        alias => capacity,
+        key => capacity,
+        required => true,
+        datatype => pos_integer
+    }
+}).
+
+-define(RATE_LIMIT_CLASS_VALIDATOR, #{
+    <<"enabled">> => #{
+        alias => enabled,
+        key => enabled,
+        required => false,
+        datatype => boolean
+    },
+    <<"per_caller">> => #{
+        alias => per_caller,
+        key => per_caller,
+        required => false,
+        validator => ?RATE_LIMIT_BUDGET_VALIDATOR
+    },
+    <<"total">> => #{
+        alias => total,
+        key => total,
+        required => false,
+        validator => ?RATE_LIMIT_BUDGET_VALIDATOR
+    }
+}).
+
+-define(RATE_LIMIT_VALIDATOR, #{
+    <<"auth">> => #{
+        alias => auth,
+        key => auth,
+        required => false,
+        validator => ?RATE_LIMIT_CLASS_VALIDATOR
+    },
+    <<"http">> => #{
+        alias => http,
+        key => http,
+        required => false,
+        validator => ?RATE_LIMIT_CLASS_VALIDATOR
+    },
+    <<"message">> => #{
+        alias => message,
+        key => message,
+        required => false,
+        validator => ?RATE_LIMIT_CLASS_VALIDATOR
     }
 }).
 
@@ -541,6 +615,15 @@ connected to any realm.
         required => false,
         default => #{},
         validator => ?INFO_VALIDATOR
+    },
+    %% Updatable at any time; `undefined` clears the property (the realm
+    %% falls back to the node and listener scopes alone).
+    <<"rate_limit">> => #{
+        alias => rate_limit,
+        key => rate_limit,
+        required => false,
+        allow_undefined => true,
+        validator => ?RATE_LIMIT_VALIDATOR
     }
 }).
 
@@ -748,7 +831,11 @@ connected to any realm.
     private_keys = #{} :: optional(keymap()),
     public_keys = #{} :: keymap(),
     encryption_keys = #{} :: keymap(),
-    info = #{} :: map()
+    info = #{} :: map(),
+    %% The realm-scope rate-limit budgets (?RATE_LIMIT_VALIDATOR shape,
+    %% atom keys) or `undefined` (no realm budgets). Read by
+    %% `bondy_rate_limit` through `rate_limit/1`.
+    rate_limit :: optional(map())
 }).
 
 -opaque t() :: #realm{}.
@@ -765,7 +852,8 @@ connected to any realm.
     is_sso_realm := boolean(),
     allow_connections := boolean(),
     public_keys := keyset(),
-    security_status := enabled | disabled
+    security_status := enabled | disabled,
+    rate_limit => map()
 }.
 
 -export_type([t/0]).
@@ -797,6 +885,7 @@ connected to any realm.
 -export([get_random_private_key/1]).
 -export([get_oidc_provider/2]).
 -export([info/1]).
+-export([rate_limit/1]).
 -export([is_allowed_authmethod/2]).
 -export([is_allowed_sso_realm/2]).
 -export([is_prototype/1]).
@@ -1370,6 +1459,19 @@ info(Uri) when is_binary(Uri) ->
     info(fetch(Uri)).
 
 -doc """
+Returns the realm's rate-limit budgets (the `rate_limit` property,
+?RATE_LIMIT_VALIDATOR shape with atom keys) or `undefined` when the
+realm sets none. The realm SCOPE of the rate-limiting chain
+(`bondy_rate_limit`) reads it here.
+""".
+-spec rate_limit(t() | uri()) -> optional(map()).
+
+rate_limit(#realm{rate_limit = Val}) ->
+    Val;
+rate_limit(Uri) when is_binary(Uri) ->
+    rate_limit(fetch(Uri)).
+
+-doc """
 Returns the OIDC providers configuration map for the given realm.
 Returns an empty map if no providers are configured.
 """.
@@ -1773,6 +1875,7 @@ to_external(#realm{} = R) ->
         authmethods => R#realm.authmethods,
         password_opts => R#realm.password_opts,
         security_status => security_status(R),
+        rate_limit => R#realm.rate_limit,
         public_keys => [
             begin
                 {_, Map} = jose_jwk:to_map(K),
@@ -2780,6 +2883,8 @@ fold_props(encryption_keys, V, Realm) ->
     set_encryption_keys(Realm, V);
 fold_props(info, V, Realm) ->
     Realm#realm{info = V};
+fold_props(rate_limit, V, Realm) ->
+    Realm#realm{rate_limit = V};
 fold_props(_, _, Realm) ->
     %% We ignote the rest of the properties.
     %% They will be handled separately.
@@ -3135,6 +3240,28 @@ check_realm_type(Uri, Type) ->
 from_term(#realm{} = Realm) ->
     Realm;
 from_term(Term) when
+    is_tuple(Term), element(1, Term) == realm, tuple_size(Term) == 15
+->
+    %% The pre-`rate_limit` record (same field order as today's, one
+    %% field shorter) — realms persisted before the field was added.
+    #realm{
+        uri = element(2, Term),
+        description = element(3, Term),
+        is_prototype = element(4, Term),
+        prototype_uri = element(5, Term),
+        is_sso_realm = element(6, Term),
+        sso_realm_uri = element(7, Term),
+        allow_connections = element(8, Term),
+        authmethods = element(9, Term),
+        security_enabled = element(10, Term),
+        password_opts = element(11, Term),
+        private_keys = element(12, Term),
+        public_keys = element(13, Term),
+        encryption_keys = element(14, Term),
+        info = element(15, Term),
+        rate_limit = undefined
+    };
+from_term(Term) when
     is_tuple(Term), element(1, Term) == realm, tuple_size(Term) == 13
 ->
     %% 0.9.SNAPSHOT-SSO
@@ -3167,7 +3294,8 @@ from_term(Term) when
         private_keys = element(9, Term),
         public_keys = element(10, Term),
         encryption_keys = element(12, Term),
-        info = element(13, Term)
+        info = element(13, Term),
+        rate_limit = undefined
     };
 from_term({realm, Uri, Desc, Authmethods, PrivKeys, PubKeys, PassOpts}) ->
     %% Legacy 7-tuple realm format; effectively dead (current realms

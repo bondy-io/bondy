@@ -340,13 +340,24 @@ purge() ->
 -ifdef(TEST).
 
 token_bucket_test() ->
-    {ok, _Pid} = start_link(),
-    %% 1 req/sec without bursting
-    {ok, T} = new(token_bucket, foo, #{capacity => 1, rate => 1 / 1000}),
-    ?assertMatch({true, #{}}, allow(T, 1)),
-    ?assertMatch({false, #{}}, allow(T, 1)),
-    ?assertMatch({true, #{}}, wait(T, 1)),
-    {false, Info} = allow(T, 1),
-    ?assertEqual(Info, peek(T)).
+    {ok, Pid} = start_link(),
+    try
+        %% 1 req/sec without bursting
+        {ok, T} = new(token_bucket, foo, #{capacity => 1, rate => 1 / 1000}),
+        ?assertMatch({true, #{}}, allow(T, 1)),
+        ?assertMatch({false, #{}}, allow(T, 1)),
+        ?assertMatch({true, #{}}, wait(T, 1)),
+        {false, Info} = allow(T, 1),
+        ?assertEqual(Info, peek(T))
+    after
+        %% The server is REGISTERED: leaving it running orphans the name
+        %% outside any supervision tree, and every later fixture's
+        %% `application:ensure_all_started(bondy_regulator)` then fails
+        %% with `{already_started, _}` on the sup child (measured — it
+        %% cancelled bondy_rate_limit_test's whole fixture in full-eunit
+        %% runs while both were green standalone).
+        unlink(Pid),
+        gen_server:stop(Pid)
+    end.
 
 -endif.

@@ -24,25 +24,22 @@ rate_limiter_test_() ->
     ]}.
 
 setup() ->
-    %% Ensure the two gen_servers are alive WITHOUT taking ownership of the
-    %% shared `bondy_regulator` app: a sibling test (or `bondy_ct:start_bondy`)
-    %% may already have started it, and stopping it here would break others.
-    ensure(bondy_regulator_rate_limit),
-    ensure(bondy_rate_limiter),
+    %% Start the shared `bondy_regulator` APP rather than its registered
+    %% gen_servers directly: `ensure_all_started/1` is idempotent, the
+    %% supervisor owns the children, and the app staying up serves every
+    %% sibling. The previous shape (`whereis` + direct `start_link/0`)
+    %% left UNSUPERVISED registered orphans behind — a later fixture's
+    %% `application:start(bondy_regulator)` then failed with
+    %% `{already_started, _}` on the sup child (measured: it cancelled
+    %% bondy_rate_limit_test's whole fixture in full-eunit runs).
+    {ok, _} = application:ensure_all_started(bondy_regulator),
     ok.
 
 cleanup(_) ->
-    %% Deliberately NOT stopping the shared app / its gen_servers.
+    %% Deliberately NOT stopping the shared app: siblings and later
+    %% fixtures keep using it, and `ensure_all_started/1` makes every
+    %% setup idempotent against it running.
     ok.
-
-ensure(Mod) ->
-    case whereis(Mod) of
-        undefined ->
-            {ok, _} = Mod:start_link(),
-            ok;
-        _Pid ->
-            ok
-    end.
 
 key(Name) ->
     {test, Name, erlang:unique_integer([positive])}.
