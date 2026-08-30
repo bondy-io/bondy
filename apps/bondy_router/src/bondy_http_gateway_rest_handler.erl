@@ -90,6 +90,10 @@ mapping; an API spec's `status_codes` map overrides it. Examples:
     source_ip => inet:ip_address()
 }.
 
+%% Exported for `bondy_gateway_error_exposure_test`: it is the ONE seam every
+%% upstream error reaches, and driving it end to end would need a live upstream
+%% that fails on demand.
+-export([update_context/2]).
 -export([accept/2]).
 -export([allowed_methods/2]).
 -export([content_types_accepted/2]).
@@ -666,8 +670,15 @@ Creates a context object based on the passed Request
 """.
 -spec update_context(tuple(), map()) -> map().
 
-update_context({error, Map}, #{<<"request">> := _} = Ctxt) when is_map(Map) ->
-    maps_utils:put_path([<<"action">>, <<"error">>], Map, Ctxt);
+update_context({error, Map}, #{<<"request">> := Req} = Ctxt) when is_map(Map) ->
+    %% The one place every upstream error reaches the API context — the WAMP
+    %% call, the WAMP publish and the HTTP forward paths all come through here
+    %% — which is why the correlation happens here rather than three times.
+    Id = maps:get(<<"id">>, Req, undefined),
+    ok = log_action_error(Id, Req, Map),
+    maps_utils:put_path(
+        [<<"action">>, <<"error">>], Map#{<<"id">> => Id}, Ctxt
+    );
 update_context({result, Result}, #{<<"request">> := _} = Ctxt) ->
     maps_utils:put_path([<<"action">>, <<"result">>], Result, Ctxt);
 update_context({security, Claims}, #{<<"request">> := Req} = Ctxt) ->
@@ -691,6 +702,40 @@ update_context({body, Body}, #{<<"request">> := _} = Ctxt0) ->
     maps_utils:put_path(
         [<<"request">>, <<"body_length">>], byte_size(Body), Ctxt1
     ).
+
+%% @private
+%% Records the WHOLE upstream error against the request id, so a spec author
+%% has something to render that support can trace — `{{action.error.id}}` —
+%% instead of the error map itself.
+%%
+%% Before this, nothing on the error path logged: the only way to see why an
+%% endpoint was failing was to interpolate `{{action.error}}` into the response,
+%% which is exactly how internal detail reaches a client and stays there. The
+%% detail an author needs is real; what was missing was somewhere else to put
+%% it.
+%%
+%% The id is `request.id`, already a trace id minted by `init_context/1`, not a
+%% second identifier: a response, this log record and the request's trace name
+%% the same thing.
+%%
+%% Level follows the status: at or above 500 this node or something it depends
+%% on is at fault, below it the caller usually is. Both are logged — an id in a
+%% response body that names no record is worse than no id.
+log_action_error(Id, Req, Error) ->
+    Record = #{
+        description => "API Gateway action returned an error",
+        request_id => Id,
+        method => maps:get(<<"method">>, Req, undefined),
+        path => maps:get(<<"path">>, Req, undefined),
+        peername => maps:get(<<"peername">>, Req, undefined),
+        error => Error
+    },
+    case maps:get(<<"status_code">>, Error, 500) of
+        Code when is_integer(Code), Code >= 500 ->
+            ?LOG_ERROR(Record);
+        _ ->
+            ?LOG_INFO(Record)
+    end.
 
 %% @private
 init_context(Req) ->

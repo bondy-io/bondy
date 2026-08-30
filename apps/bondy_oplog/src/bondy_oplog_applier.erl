@@ -2084,15 +2084,27 @@ check_drain_stall(Now, #state{drain_progress_at = At} = State) ->
                 stalled_for_ms => Now - At,
                 committed_position => State#state.drain_max_pos
             },
-            ?LOG_WARNING(Info#{
-                description =>
+            Desc =
+                <<
                     "WAL drain is processing frames without committing any "
                     "new position - the log consumer is stalled. Applied "
                     "state on this node is falling behind its own WAL even "
                     "if anti-entropy reports the node converged."
-            }),
+                >>,
+            ?LOG_WARNING(Info#{description => Desc}),
+            %% `Info` goes in `details`, NOT as the description: its keys are
+            %% what `bondy_alarm_catalogue` declares as this alarm's
+            %% `detail_keys`, checked by
+            %% `bondy_alarm_catalogue_test:declared_detail_keys_are_delivered`.
+            %% `alarm_handler:set_alarm/1` passes the 3-tuple through unchanged
+            %% (sasl-4.4 `alarm_handler.erl:103`), so `bondy_oplog` keeps its
+            %% OTP-only call and gains no dependency on `bondy_router`.
             alarm_handler:set_alarm(
-                {{bondy_oplog_drain_stalled, State#state.instance_id}, Info}
+                {
+                    {bondy_oplog_drain_stalled, State#state.instance_id},
+                    Desc,
+                    #{details => Info}
+                }
             ),
             State#state{drain_stalled = true}
     end.

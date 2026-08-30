@@ -39,7 +39,7 @@ Reflection (`wamp.reflection.*`, in `bondy_wamp_meta_api`).
     | {reply, wamp_result() | wamp_error()}.
 
 handle_call(?BONDY_INTERFACE_LOAD, #call{} = M, Ctxt) ->
-    [Document] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
+    [Document] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
 
     case bondy_interface:load(Document) of
         ok ->
@@ -50,7 +50,7 @@ handle_call(?BONDY_INTERFACE_LOAD, #call{} = M, Ctxt) ->
             {reply, E}
     end;
 handle_call(?BONDY_INTERFACE_GET, #call{} = M, Ctxt) ->
-    [Id] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
+    [Id] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
 
     case bondy_interface:get(Id) of
         {ok, Document} ->
@@ -61,13 +61,13 @@ handle_call(?BONDY_INTERFACE_GET, #call{} = M, Ctxt) ->
             {reply, E}
     end;
 handle_call(?BONDY_INTERFACE_LIST, #call{} = M, Ctxt) ->
-    [] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 0),
+    [] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 0),
 
     Result = bondy_interface:list(),
     R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
     {reply, R};
 handle_call(?BONDY_INTERFACE_DELETE, #call{} = M, Ctxt) ->
-    [Id] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
+    [Id] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
 
     case bondy_interface:delete(Id) of
         ok ->

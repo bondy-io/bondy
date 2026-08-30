@@ -161,6 +161,38 @@ init_per_suite(Config) ->
 
     Owner = spawn_callee_owner(),
 
+    %% The callee's REGISTRATIONS must be visible on both members before any
+    %% case runs, and that is a separate fact from the manifest above: the
+    %% manifest comes from the replicated interface/overlay, the registration
+    %% from the callee's live WAMP session. `spawn_callee_owner/0` returns as
+    %% soon as the OWNING node accepts each register, so without this the
+    %% first case races the registry's replication of them.
+    %%
+    %% It races it in both directions — `?ECHO` and `?GET_USER` join node 1
+    %% and are called through node 2, `?SLOW` joins node 2 and is called
+    %% through node 1 — so every procedure is required on every member rather
+    %% than only where each case happens to need it.
+    %%
+    %% Measured 2026-08-31: `session_ops_forward_to_the_owner` failed with
+    %% `no_such_procedure` for `?ECHO` whenever ANY suite that boots Bondy on
+    %% the CT node ran first, and passed when this suite ran alone. Only the
+    %% first case failed — by the second the replication had caught up, which
+    %% is what a missing wait looks like rather than a leak from the
+    %% preceding suite.
+    _ = [
+        ok = wait_until(
+            fun() ->
+                erpc:call(N, bondy_registry, has_matches, [
+                    registration, ?OPEN_REALM, Uri
+                ])
+            end,
+            30000,
+            {registration_not_replicated, N, Uri}
+        )
+     || N <- [Node1, Node2],
+        Uri <- [?ECHO, ?GET_USER, ?SLOW]
+    ],
+
     [{nodes, Nodes}, {callee_owner, Owner} | Config].
 
 end_per_suite(Config) ->

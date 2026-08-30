@@ -50,6 +50,7 @@ a configured inventory, so it cannot be redefined, disabled or removed.
 -export([init/0]).
 -export([listener/1]).
 -export([listeners/0]).
+-export([names_in_phase/1]).
 -export([resume/1]).
 -export([start/1]).
 -export([stop/1]).
@@ -437,6 +438,20 @@ reserved_spec(Name) ->
         Name, 1, bondy_listener_config:default_inventory()
     ),
     Spec.
+
+-doc """
+The names of the listeners a `suspend/1` or `resume/1` of `Phase` would touch.
+
+Exists for the `dry_run` convention (`bondy.listener.{suspend,resume}`): it
+reads the SAME `in_phase/1` those two do, so it cannot report a set they would
+not act on. A phase with no listeners answers `[]`, which is the answer worth
+having — it is what tells an operator the phase name they typed matches
+nothing.
+""".
+-spec names_in_phase(phase()) -> [atom()].
+
+names_in_phase(Phase) ->
+    [Name || #{name := Name} <- in_phase(Phase)].
 
 %% @private
 in_phase(all) ->

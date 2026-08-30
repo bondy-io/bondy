@@ -7,6 +7,10 @@
 -moduledoc """
 An event handler that generates WAMP Meta Events based on internal
 Bondy events.
+
+Every clause returns a closure that `handle_event/2` enqueues into
+`bondy_jobs`: the publish itself must not run in the event manager process,
+which every emitter in the node shares.
 """.
 -behaviour(gen_event).
 
@@ -123,10 +127,35 @@ on_shed(Event) ->
     ok.
 
 %% @private
+%% Demand, and demand alone. NOT `bondy_meta_events:demanded/2`, which also
+%% consults `wamp.meta_events` — a knob `schema/bondy.schema` documents as
+%% governing the `wamp.session.*`, `wamp.subscription.*` and
+%% `wamp.registration.*` topics. An operator turning registry meta-event
+%% volume off must not thereby silence alarm notifications.
+%%
+%% Fails CLOSED, where `bondy_meta_events:demanded/2` fails open. The probe
+%% can only fail when the registry cannot answer, and a publish it could not
+%% route is not worth attempting while the node is already reporting a fault.
+%% Nothing is lost that is not held elsewhere: the alarm is on
+%% `bondy.alarm.list`, in the log, and in Prometheus either way.
+alarm_demanded(Topic) ->
+    try
+        bondy_registry:has_matches(subscription, ?MASTER_REALM_URI, Topic)
+    catch
+        _:_ -> false
+    end.
+
+%% @private
+alarm_topic(raised) -> ?BONDY_ALARM_RAISED;
+alarm_topic(updated) -> ?BONDY_ALARM_UPDATED;
+alarm_topic(cleared) -> ?BONDY_ALARM_CLEARED.
+
+%% @private
 %% Events are tuples of varying arity whose first element is the event
 %% path, e.g. `{[bondy, broker, subscription, added], Entry}`.
 event_family(Event) when is_tuple(Event) andalso tuple_size(Event) >= 1 ->
     case element(1, Event) of
+        [bondy, alarm | _] -> alarm;
         [bondy, broker, subscription | _] -> subscription;
         [bondy, dealer, registration | _] -> registration;
         [bondy, session | _] -> session;
@@ -143,6 +172,39 @@ event_family(_) ->
 -spec async_handle_event(event(), term()) ->
     ok | {ok, {function(), partition_key()}}.
 
+%% Alarm transitions, emitted by `bondy_alarm_handler`. Demand-gated: an
+%% alarm is rare, but the gate is what lets the topics exist at all without
+%% adding an unconditional publish to a path that runs while the node is
+%% already in trouble.
+%%
+%% Master realm only (D4). A `class = realm` alarm carries its `realm_uri` as
+%% a LABEL naming the affected tenant; whether it should additionally publish
+%% into that tenant's own realm is open (D8), and is a disclosure decision
+%% rather than an omission — the `details` map is operator-oriented and is
+%% exactly where an internal error string would leak.
+async_handle_event({[bondy, alarm, Action], Alarm}, Ref) when
+    Action == raised; Action == updated; Action == cleared
+->
+    Topic = alarm_topic(Action),
+
+    case alarm_demanded(Topic) of
+        true ->
+            Fun = fun() ->
+                %% We use a global ID as this is not a publishers request
+                ReqId = bondy_message_id:global(),
+                Ctxt = bondy_context:local_context(?MASTER_REALM_URI, Ref),
+                Args = [bondy_alarm_api:to_external(Alarm)],
+                bondy_broker:publish(ReqId, #{}, Topic, Args, #{}, Ctxt)
+            end,
+            %% Partitioned by alarm id, so one alarm's transitions cannot be
+            %% reordered against each other. A `cleared` overtaking its
+            %% `raised` would leave a subscriber holding the opposite of the
+            %% truth, and it would never be corrected — the next event only
+            %% comes if the condition recurs.
+            {ok, {Fun, maps:get(id, Alarm)}};
+        false ->
+            ok
+    end;
 async_handle_event({[bondy, cluster, connection, Type], Node}, Ref) when
     Type == up; Type == down
 ->

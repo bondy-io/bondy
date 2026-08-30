@@ -1153,6 +1153,16 @@ the verify call begins.
 append_remote(Target, Event) ->
     Key = bondy_oplog_event:key(Event),
     PeerOrigin = bondy_oplog_event:key_origin(Key),
+
+    %% Observation only -- see `bondy_oplog_clock_skew`. The event is routed
+    %% and applied unchanged whatever this reports: clamping the merge would
+    %% negate `peer_next_gt_peer` in `proofs/isabelle/Hlc.thy` and with it
+    %% hypothesis H3, and rejecting the event against a LOCAL wall clock is
+    %% not a decision every replica makes identically, so it would diverge.
+    %% This is the single ingress for remote events, so one seat covers both
+    %% the fused and applier routes.
+    ok = report_clock_skew(Key, PeerOrigin),
+
     case lookup_origin(Target) of
         {ok, PeerOrigin} ->
             error({remote_event_with_local_origin, PeerOrigin});
@@ -4984,6 +4994,23 @@ terminate(_Reason, #state{
             _:_ -> ok
         end,
     ok.
+
+%% @private
+%% Telemetry rather than `alarm_handler:set_alarm/1`: a peer with a bad clock
+%% trips this on EVERY event it sends, and a per-event `gen_event:notify/2`
+%% is the flood this exists to report. A counter is wait-free; an alerting
+%% rule or a periodic sweep owns the alarm lifecycle.
+report_clock_skew(Key, PeerOrigin) ->
+    case bondy_oplog_clock_skew:check(bondy_oplog_event:key_hlc(Key)) of
+        ok ->
+            ok;
+        {ahead, Millis} ->
+            telemetry:execute(
+                [bondy_oplog, instance, peer_clock_ahead],
+                #{count => 1, milliseconds => Millis},
+                #{origin => PeerOrigin}
+            )
+    end.
 
 %% =============================================================================
 %% PRIVATE

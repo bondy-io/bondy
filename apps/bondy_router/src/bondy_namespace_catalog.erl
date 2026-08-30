@@ -774,7 +774,7 @@ set_main_failed(Reason) ->
     _ = persistent_term:put(?PT_MAIN_FAILED, Reason),
     _ =
         try
-            bondy_alarm_handler:set_alarm(
+            alarm_handler:set_alarm(
                 {
                     bondy_db_main_unavailable,
                     <<

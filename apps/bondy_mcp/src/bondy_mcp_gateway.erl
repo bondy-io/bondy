@@ -59,7 +59,7 @@ see.
 
 A compile reporting §17 name collisions (one name, different underlying
 WAMP bindings, e.g. from two overlay documents converged via AE) raises
-one critical alarm per `(realm, name)` through `bondy_alarm_handler` and
+one `major` alarm per `(realm, name)` through OTP's `alarm_handler` and
 exposes NEITHER entry; the alarm clears on the first rebuild where the
 collision is gone.
 """.
@@ -102,6 +102,7 @@ collision is gone.
 %% API
 -export([delete/1]).
 -export([list/0]).
+-export([check/1]).
 -export([load/1]).
 -export([lookup/1]).
 -export([manifest/1]).
@@ -131,19 +132,40 @@ nothing written. The SOURCE map is stored, keyed by the document's id.
 -spec load(Document :: map()) -> ok | {error, any()}.
 
 load(Document) when is_map(Document) ->
+    case check(Document) of
+        {ok, #{id := Id}} ->
+            bondy_db:apply(spec_table(), ?BUCKET, Id, {set, Document});
+        {error, _} = Error ->
+            Error
+    end;
+load(_) ->
+    {error, invalid_document}.
+
+-doc """
+Every check `load/1` performs, and nothing else: the parser's checks plus realm
+existence and cross-document name exclusivity. Writes nothing.
+
+This is `load/1` minus its single `bondy_db:apply/4`, which is what makes the
+`dry_run` convention honest here rather than a second implementation that could
+answer `ok` where the real one fails.
+""".
+-spec check(Document :: map()) ->
+    {ok, #{id := binary(), entries := [map()]}} | {error, any()}.
+
+check(Document) when is_map(Document) ->
     case bondy_mcp_spec_parser:parse(Document) of
-        {ok, #{id := Id, entries := Entries}} ->
+        {ok, #{id := _, entries := Entries} = Parsed} ->
             try
                 ok = assert_realms_exist(Entries),
-                ok = assert_names_unclaimed(Id, Entries),
-                bondy_db:apply(spec_table(), ?BUCKET, Id, {set, Document})
+                ok = assert_names_unclaimed(maps:get(id, Parsed), Entries),
+                {ok, Parsed}
             catch
                 throw:Reason -> {error, Reason}
             end;
         {error, _} = Error ->
             Error
     end;
-load(_) ->
+check(_) ->
     {error, invalid_document}.
 
 -doc "Deletes the overlay document `Id`.".
@@ -530,7 +552,7 @@ overlay_entries(RealmUri) ->
     ).
 
 %% @private
-%% One critical alarm per colliding `(realm, name)`; cleared on the first
+%% One alarm per colliding `(realm, name)`; cleared on the first
 %% rebuild of that realm where the collision is gone.
 reconcile_alarms(RealmUri, Collisions, #state{alarms = Alarms} = State) ->
     New = lists:usort([
@@ -538,7 +560,7 @@ reconcile_alarms(RealmUri, Collisions, #state{alarms = Alarms} = State) ->
      || C <- Collisions
     ]),
     Old = maps:get(RealmUri, Alarms, []),
-    _ = [bondy_alarm_handler:clear_alarm(Id) || Id <- Old -- New],
+    _ = [alarm_handler:clear_alarm(Id) || Id <- Old -- New],
     _ = [
         begin
             {_, _, Name} = Id,
@@ -550,7 +572,7 @@ reconcile_alarms(RealmUri, Collisions, #state{alarms = Alarms} = State) ->
                 realm => RealmUri,
                 name => Name
             }),
-            bondy_alarm_handler:set_alarm(
+            alarm_handler:set_alarm(
                 {
                     Id,
                     <<

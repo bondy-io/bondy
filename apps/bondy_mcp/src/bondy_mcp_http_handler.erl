@@ -83,20 +83,6 @@ native-unit `duration` measurement.
 -include_lib("bondy_router/include/bondy_security.hrl").
 -include_lib("bondy_router/include/bondy_uris.hrl").
 
-%% Streamable HTTP error codes beyond JSON-RPC's reserved set.
--define(MCP_HEADER_MISMATCH, -32020).
--define(MCP_UNSUPPORTED_PROTOCOL_VERSION, -32022).
-
-%% The protocol revisions THIS implementation carries, per era. The
-%% effective supported set of an endpoint is the intersection with its
-%% configured `protocol_versions`. A modern request is validated against
-%% the modern set (§10.1); an `initialize` negotiates against the
-%% handshake set (§12), latest first — date-form revisions sort
-%% lexicographically in chronological order.
--define(MODERN_VERSIONS, [<<"2026-07-28">>]).
--define(HANDSHAKE_VERSIONS, [<<"2025-11-25">>, <<"2025-06-18">>]).
-
--define(PROTOCOL_VERSION_META, <<"io.modelcontextprotocol/protocolVersion">>).
 -define(JSON_CT, #{<<"content-type">> => <<"application/json">>}).
 
 -export([init/2]).
@@ -242,7 +228,7 @@ do_handle_rpc(Req0, #{config := Config} = St) ->
     %% DNS-rebinding protection: refuse a disallowed `Origin` before any
     %% realm or body work (transport spec security requirement; measured
     %% against the conformance `dns-rebinding-protection` scenario).
-    ok = check_origin(Req0, Config),
+    ok = bondy_mcp_http_headers:check_origin(Req0, Config),
 
     RealmUri = cowboy_req:binding(realm, Req0),
     bondy_realm:exists(RealmUri) orelse
@@ -258,7 +244,8 @@ do_handle_rpc(Req0, #{config := Config} = St) ->
     %% notification stream and explicit session termination. On a
     %% modern-only endpoint they are 405 — for GET exactly the answer the
     %% transport specification prescribes for "no SSE stream offered".
-    HandshakeEnabled = handshake_versions(Config) =/= [],
+    HandshakeEnabled =
+        bondy_mcp_http_headers:handshake_versions(Config) =/= [],
     case {cowboy_req:method(Req0), HandshakeEnabled} of
         {<<"POST">>, _} ->
             handle_post(Req0, RealmUri, St);
@@ -295,9 +282,11 @@ handle_post(Req0, RealmUri, #{config := Config} = St) ->
             handshake_established(Req1, Message, RealmUri, SessionHeader, St);
         {ok, {request, #{id := Id, method := Method, params := Params}}} ->
             ok = require_session_for_handshake_version(Req1, Id, Config),
-            ok = check_version(Req1, Id, Params, St),
-            ok = check_standard_headers(Req1, Id, Method, Params),
-            AuthSt = authenticate(Req1, RealmUri),
+            ok = bondy_mcp_http_headers:check_version(Req1, Id, Params, St),
+            ok = bondy_mcp_http_headers:check_standard_headers(
+                Req1, Id, Method, Params
+            ),
+            AuthSt = bondy_mcp_http_auth:authenticate(Req1, RealmUri),
             T0 = erlang:monotonic_time(microsecond),
             Outcome =
                 try
@@ -346,7 +335,9 @@ require_session_for_handshake_version(Req, Id, Config) ->
     Header = cowboy_req:header(<<"mcp-protocol-version">>, Req),
     case
         is_binary(Header) andalso
-            lists:member(Header, handshake_versions(Config))
+            lists:member(
+                Header, bondy_mcp_http_headers:handshake_versions(Config)
+            )
     of
         true ->
             throw(
@@ -378,309 +369,6 @@ read_body(Req0, MaxBytes) ->
                     Req}
             )
     end.
-
-%% @private
-%% A request whose `Origin` header falls outside this listener's
-%% `mcp.allowed_origins` is refused with 403. A request WITHOUT the
-%% header is always served: only browsers send `Origin`, and the browser
-%% is the DNS-rebinding vector — a non-browser client can forge any
-%% header, so refusing the absent case would break every SDK client
-%% (none sends one; measured on the v1 and v2 official clients) while
-%% stopping no attacker. A present-but-unparseable value matches no rule
-%% and is refused — explicit garbage fails closed.
-check_origin(Req, Config) ->
-    case cowboy_req:header(<<"origin">>, Req) of
-        undefined ->
-            ok;
-        Origin ->
-            case origin_allowed(Origin, maps:get(allowed_origins, Config)) of
-                true ->
-                    ok;
-                false ->
-                    throw(
-                        {reply, 403,
-                            bondy_json_rpc:error_response(
-                                undefined,
-                                ?JSONRPC_INVALID_REQUEST,
-                                <<"Origin not allowed">>
-                            ),
-                            Req}
-                    )
-            end
-    end.
-
-%% @private
-%% Origins compare case-insensitively: the schema lowercased the
-%% configured entries, this lowercases the header.
-origin_allowed(_, any) ->
-    true;
-origin_allowed(Origin, Rules) when is_list(Rules) ->
-    Normalized = string:lowercase(Origin),
-    lists:any(fun(Rule) -> origin_matches(Rule, Normalized) end, Rules).
-
-%% @private
-%% The `local` rule admits the transport spec's localhost set —
-%% `localhost`, `127.0.0.1`, `[::1]` — on any scheme and port.
-origin_matches(local, Origin) ->
-    case uri_string:parse(Origin) of
-        #{host := Host} ->
-            lists:member(Host, [<<"localhost">>, <<"127.0.0.1">>, <<"::1">>]);
-        _ ->
-            false
-    end;
-origin_matches(Rule, Origin) when is_binary(Rule) ->
-    Rule == Origin.
-
-%% @private
-%% §10.1: `MCP-Protocol-Version` is required and must equal the body's
-%% `_meta` value; a version outside this endpoint's supported set is
-%% refused naming that set (the -32022 shape's `supported`/`requested`).
-check_version(Req, Id, Params, #{config := Config} = St) ->
-    Header = cowboy_req:header(<<"mcp-protocol-version">>, Req),
-    Meta = maps:get(<<"_meta">>, Params, #{}),
-    BodyVersion =
-        case is_map(Meta) of
-            true -> maps:get(?PROTOCOL_VERSION_META, Meta, undefined);
-            false -> undefined
-        end,
-    (is_binary(Header) andalso Header == BodyVersion) orelse
-        throw(
-            {reply, 400,
-                bondy_json_rpc:error_response(
-                    Id,
-                    ?MCP_HEADER_MISMATCH,
-                    <<
-                        "MCP-Protocol-Version header missing or disagreeing "
-                        "with the request body"
-                    >>
-                ),
-                Req}
-        ),
-    Supported = supported_versions(Config),
-    lists:member(Header, Supported) orelse
-        begin
-            ok = bondy_mcp_metrics:version_refused(
-                maps:get(listener, St, undefined), sanitize_version(Header)
-            ),
-            throw(
-                {reply, 400,
-                    bondy_json_rpc:error_response(
-                        Id,
-                        ?MCP_UNSUPPORTED_PROTOCOL_VERSION,
-                        <<"Unsupported protocol version">>,
-                        #{
-                            <<"supported">> => Supported,
-                            <<"requested">> => Header
-                        }
-                    ),
-                    Req}
-            )
-        end,
-    ok.
-
-%% @private
-%% §15.2: `version` is client-controlled, so only a revision Bondy knows
-%% may become a label value — anything else is `other`, and an attacker
-%% cannot mint Prometheus series by cycling version strings.
-sanitize_version(V) ->
-    case lists:member(V, ?MODERN_VERSIONS ++ ?HANDSHAKE_VERSIONS) of
-        true -> V;
-        false -> <<"other">>
-    end.
-
-%% @private
-supported_versions(Config) ->
-    [
-        V
-     || V <- maps:get(protocol_versions, Config),
-        lists:member(V, ?MODERN_VERSIONS)
-    ].
-
-%% @private
-%% The endpoint's effective handshake-era set, latest first (the order
-%% version negotiation picks from).
-handshake_versions(Config) ->
-    Configured = maps:get(protocol_versions, Config),
-    [V || V <- ?HANDSHAKE_VERSIONS, lists:member(V, Configured)].
-
-%% @private
-%% §10.1: `Mcp-Method` on every request; `Mcp-Name` on the methods that
-%% carry a name (`params.name`) or a URI (`params.uri`), Base64-sentinel
-%% decoded before comparison. A request whose body lacks the named field
-%% is not a header problem — dispatch answers it with `-32602`.
-check_standard_headers(Req, Id, Method, Params) ->
-    ok = require_header_equals(
-        Req, Id, <<"mcp-method">>, Method, no_sentinel
-    ),
-    case name_field(Method) of
-        undefined ->
-            ok;
-        Field ->
-            case maps:get(Field, Params, undefined) of
-                Value when is_binary(Value) ->
-                    require_header_equals(
-                        Req, Id, <<"mcp-name">>, Value, sentinel
-                    );
-                _ ->
-                    ok
-            end
-    end.
-
-%% @private
-name_field(<<"tools/call">>) -> <<"name">>;
-name_field(<<"prompts/get">>) -> <<"name">>;
-name_field(<<"resources/read">>) -> <<"uri">>;
-name_field(_) -> undefined.
-
-%% @private
-require_header_equals(Req, Id, Header, Expected, Sentinel) ->
-    Decoded =
-        case cowboy_req:header(Header, Req) of
-            undefined ->
-                undefined;
-            Raw when Sentinel == sentinel ->
-                case bondy_mcp_wamp:decode_header_value(Raw) of
-                    {ok, V} -> V;
-                    {error, badarg} -> undefined
-                end;
-            Raw ->
-                Raw
-        end,
-    Decoded == Expected orelse
-        throw(
-            {reply, 400,
-                bondy_json_rpc:error_response(
-                    Id,
-                    ?MCP_HEADER_MISMATCH,
-                    <<
-                        "A required Mcp-* header is missing or disagrees "
-                        "with the request body"
-                    >>
-                ),
-                Req}
-        ),
-    ok.
-
-%% =============================================================================
-%% PRIVATE — authentication (§6, modern era)
-%% =============================================================================
-
-%% @private
-%% Returns `#{authid, authroles, is_anonymous}`. Anything failing throws
-%% `{unauthorized, _, Req}` with NOTHING started — no process, no stored
-%% session, no auth state outlives the throw.
-authenticate(Req, RealmUri) ->
-    case bondy_realm:is_security_enabled(RealmUri) of
-        false ->
-            #{
-                authid => bondy_utils:uuid(),
-                authroles => [],
-                is_anonymous => true
-            };
-        true ->
-            SourceIP = source_ip(Req),
-            case cowboy_req:parse_header(<<"authorization">>, Req) of
-                {bearer, Token} ->
-                    bearer(Token, RealmUri, SourceIP, Req);
-                {basic, Username, Password} ->
-                    credential(
-                        RealmUri,
-                        Username,
-                        ?PASSWORD_AUTH,
-                        Password,
-                        SourceIP,
-                        Req
-                    );
-                undefined ->
-                    anonymous(RealmUri, SourceIP, Req);
-                _ ->
-                    throw({unauthorized, invalid_authorization_header, Req})
-            end
-    end.
-
-%% @private
-%% A Bearer credential is a JWT (OAuth2) or a Bondy ticket, decided by
-%% the claims: `bondy_oauth_jwt:decode/1` is an unverified `peek` and
-%% decodes ANY compact JWS — a Bondy ticket included — so "does it
-%% decode" cannot be the dispatch. An OAuth2 JWT carries `sub`; anything
-%% else (a ticket's claims carry `authid`, not `sub`; garbage peeks to
-%% nothing) goes to ticket verification, which is what actually
-%% validates it. The previous shape threw `invalid_token` for every
-%% Bondy ticket — measured by
-%% `bondy_mcp_modern_SUITE:delegated_ticket_caps_the_projection`, the
-%% first thing to exercise this path.
-bearer(Token, RealmUri, SourceIP, Req) ->
-    Peeked =
-        try bondy_oauth_jwt:decode(Token) of
-            Map when is_map(Map) -> Map
-        catch
-            _:_ -> undefined
-        end,
-    case Peeked of
-        #{<<"sub">> := Sub} ->
-            credential(RealmUri, Sub, ?OAUTH2_AUTH, Token, SourceIP, Req);
-        _ ->
-            case bondy_ticket:verify(Token) of
-                {ok, #{authid := Authid}} ->
-                    credential(
-                        RealmUri,
-                        Authid,
-                        ?WAMP_TICKET_AUTH,
-                        Token,
-                        SourceIP,
-                        Req
-                    );
-                {error, _} ->
-                    throw({unauthorized, invalid_token, Req})
-            end
-    end.
-
-%% @private
-anonymous(RealmUri, SourceIP, Req) ->
-    SessionId = bondy_session_id:new(),
-    case
-        bondy_auth:init(
-            SessionId, RealmUri, anonymous, [<<"anonymous">>], SourceIP
-        )
-    of
-        {ok, Ctxt} ->
-            case bondy_auth:authenticate(?WAMP_ANON_AUTH, <<>>, #{}, Ctxt) of
-                {ok, _, _} ->
-                    #{
-                        authid => bondy_utils:uuid(),
-                        authroles => [<<"anonymous">>],
-                        is_anonymous => true
-                    };
-                {error, Reason} ->
-                    throw({unauthorized, Reason, Req})
-            end;
-        {error, Reason} ->
-            throw({unauthorized, Reason, Req})
-    end.
-
-%% @private
-credential(RealmUri, UserId, Method, Credential, SourceIP, Req) ->
-    SessionId = bondy_session_id:new(),
-    case bondy_auth:init(SessionId, RealmUri, UserId, all, SourceIP) of
-        {ok, Ctxt} ->
-            case bondy_auth:authenticate(Method, Credential, #{}, Ctxt) of
-                {ok, _, Ctxt1} ->
-                    #{
-                        authid => UserId,
-                        authroles => bondy_auth:roles(Ctxt1),
-                        is_anonymous => false
-                    };
-                {error, Reason} ->
-                    throw({unauthorized, Reason, Req})
-            end;
-        {error, Reason} ->
-            throw({unauthorized, Reason, Req})
-    end.
-
-%% @private
-source_ip(Req) ->
-    {IP, _} = cowboy_req:peer(Req),
-    IP.
 
 %% =============================================================================
 %% PRIVATE — dispatch
@@ -720,7 +408,9 @@ dispatch(Method, Id, _, _, _, _, _) ->
 %% cannot claim an era the endpoint does not serve.
 server_discover(Id, #{config := Config}) ->
     Result = #{
-        <<"supportedVersions">> => supported_versions(Config),
+        <<"supportedVersions">> => bondy_mcp_http_headers:supported_versions(
+            Config
+        ),
         <<"capabilities">> => #{
             <<"tools">> => #{<<"listChanged">> => true},
             <<"resources">> => #{
@@ -803,8 +493,12 @@ tools_call(Id, Params, RealmUri, AuthSt, Req, St) ->
     %% (`2026-07-28`) mechanisms; the handshake era has neither.
     ok =
         case Era of
-            modern -> check_param_headers(Req, Id, Entry, Arguments);
-            handshake -> ok
+            modern ->
+                bondy_mcp_http_headers:check_param_headers(
+                    Req, Id, Entry, Arguments
+                );
+            handshake ->
+                ok
         end,
     {Args, KwArgs0} =
         case bondy_mcp_wamp:call_args(Arguments) of
@@ -1055,13 +749,13 @@ handshake_initialize(
                 ),
                 Req}
         ),
-    Versions = handshake_versions(Config),
+    Versions = bondy_mcp_http_headers:handshake_versions(Config),
     Requested = requested_version(Params),
     Versions =/= [] orelse
         begin
             ok = bondy_mcp_metrics:version_refused(
                 maps:get(listener, St, undefined),
-                sanitize_version(Requested)
+                bondy_mcp_http_headers:sanitize_version(Requested)
             ),
             throw(
                 {reply, 200,
@@ -1070,14 +764,17 @@ handshake_initialize(
                         ?JSONRPC_INVALID_PARAMS,
                         <<"Unsupported protocol version">>,
                         #{
-                            <<"supported">> => supported_versions(Config),
+                            <<"supported">> =>
+                                bondy_mcp_http_headers:supported_versions(
+                                    Config
+                                ),
                             <<"requested">> => Requested
                         }
                     ),
                     Req}
             )
         end,
-    AuthSt = authenticate(Req, RealmUri),
+    AuthSt = bondy_mcp_http_auth:authenticate(Req, RealmUri),
     Version =
         case lists:member(Requested, Versions) of
             true -> Requested;
@@ -1149,7 +846,7 @@ server_version() ->
 %% session is never a credential), then resolve and bind-check the
 %% session, then dispatch. Only POSTs reset the idle timer (§12.8).
 handshake_established(Req, Message, RealmUri, WireId, St) ->
-    AuthSt = authenticate(Req, RealmUri),
+    AuthSt = bondy_mcp_http_auth:authenticate(Req, RealmUri),
     ok = check_hs_version_header(Req, rpc_id(Message), St),
     case bondy_mcp_handshake:fetch(WireId, RealmUri, AuthSt) of
         {ok, Handle, Meta} ->
@@ -1191,11 +888,13 @@ check_hs_version_header(Req, Id, #{config := Config} = St) ->
         undefined ->
             ok;
         Header ->
-            lists:member(Header, handshake_versions(Config)) orelse
+            lists:member(
+                Header, bondy_mcp_http_headers:handshake_versions(Config)
+            ) orelse
                 begin
                     ok = bondy_mcp_metrics:version_refused(
                         maps:get(listener, St, undefined),
-                        sanitize_version(Header)
+                        bondy_mcp_http_headers:sanitize_version(Header)
                     ),
                     throw(
                         {reply, 400,
@@ -1510,7 +1209,7 @@ hs_unknown_resource(Id) ->
 %% connected. Deliberately NOT `touch`ed: a held stream is not activity
 %% (§12.8).
 handshake_get(Req0, RealmUri, St) ->
-    AuthSt = authenticate(Req0, RealmUri),
+    AuthSt = bondy_mcp_http_auth:authenticate(Req0, RealmUri),
     WireId = require_session_header(Req0),
     ok = check_hs_version_header(Req0, undefined, St),
     case bondy_mcp_handshake:fetch(WireId, RealmUri, AuthSt) of
@@ -1564,7 +1263,7 @@ handshake_get(Req0, RealmUri, St) ->
 %% ride the transport session's lifecycle event (emitted on the OWNING
 %% node, where the open was counted) — not this handler.
 handshake_delete(Req, RealmUri, _St) ->
-    AuthSt = authenticate(Req, RealmUri),
+    AuthSt = bondy_mcp_http_auth:authenticate(Req, RealmUri),
     WireId = require_session_header(Req),
     case bondy_mcp_handshake:fetch(WireId, RealmUri, AuthSt) of
         {ok, Handle, _Meta} ->
@@ -1972,81 +1671,6 @@ unstored_session(RealmUri, AuthSt, Peer) ->
             }
         }
     }).
-
-%% =============================================================================
-%% PRIVATE — Mcp-Param-{Name} headers (x-mcp-header)
-%% =============================================================================
-
-%% @private
-%% For every `inputSchema` property annotated `x-mcp-header` whose value is
-%% present in `arguments`, the corresponding `Mcp-Param-{Name}` header must
-%% be present and — after sentinel decoding — equal the value's string
-%% form; a header for an ABSENT value must itself be absent. Runs after
-%% the visibility check so a hidden tool's schema leaks nothing.
-check_param_headers(Req, Id, Entry, Arguments) ->
-    Props = maps:get(
-        <<"properties">>, maps:get(input_schema, Entry, #{}), #{}
-    ),
-    maps:foreach(
-        fun(Prop, Schema) ->
-            case
-                is_map(Schema) andalso
-                    maps:get(<<"x-mcp-header">>, Schema, undefined)
-            of
-                HeaderName when is_binary(HeaderName) ->
-                    check_param_header(
-                        Req,
-                        Id,
-                        HeaderName,
-                        maps:get(Prop, Arguments, undefined)
-                    );
-                _ ->
-                    ok
-            end
-        end,
-        Props
-    ).
-
-%% @private
-check_param_header(Req, Id, HeaderName, BodyValue) ->
-    Header = cowboy_req:header(
-        <<"mcp-param-", (string:lowercase(HeaderName))/binary>>, Req
-    ),
-    Expected =
-        case BodyValue of
-            undefined ->
-                undefined;
-            _ ->
-                case bondy_mcp_wamp:encode_header_value(BodyValue) of
-                    {ok, V} -> V;
-                    {error, badarg} -> mismatch
-                end
-        end,
-    Decoded =
-        case Header of
-            undefined ->
-                undefined;
-            _ ->
-                case bondy_mcp_wamp:decode_header_value(Header) of
-                    {ok, D} -> D;
-                    {error, badarg} -> mismatch
-                end
-        end,
-    Decoded == Expected orelse
-        throw(
-            {reply, 400,
-                bondy_json_rpc:error_response(
-                    Id,
-                    ?MCP_HEADER_MISMATCH,
-                    <<
-                        "Mcp-Param-",
-                        HeaderName/binary,
-                        " is missing or disagrees with the request body"
-                    >>
-                ),
-                Req}
-        ),
-    ok.
 
 %% =============================================================================
 %% PRIVATE — pagination and replies

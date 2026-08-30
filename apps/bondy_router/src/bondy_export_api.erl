@@ -36,28 +36,28 @@ deprecated aliases that map onto the same operations.
     | {reply, wamp_result() | wamp_error()}.
 
 handle_call(?BONDY_EXPORT_CREATE, #call{} = M, Ctxt) ->
-    [Info] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
+    [Info] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     E = bondy_wamp_api_utils:maybe_error(bondy_export:export(Info), M),
     {reply, E};
 handle_call(?BONDY_EXPORT_STATUS, #call{} = M, Ctxt) ->
-    [Info] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
+    [Info] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     E = bondy_wamp_api_utils:maybe_error(bondy_export:status(Info), M),
     {reply, E};
 handle_call(?BONDY_EXPORT_IMPORT, #call{} = M, Ctxt) ->
-    [Info] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
+    [Info] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     E = bondy_wamp_api_utils:maybe_error(bondy_export:import(Info), M),
     {reply, E};
 %% Deprecated bondy.backup.* aliases.
 handle_call(?BONDY_BACKUP_CREATE, #call{} = M, Ctxt) ->
-    [Info] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
+    [Info] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     E = bondy_wamp_api_utils:maybe_error(bondy_export:export(Info), M),
     {reply, E};
 handle_call(?BONDY_BACKUP_STATUS, #call{} = M, Ctxt) ->
-    [Info] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
+    [Info] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     E = bondy_wamp_api_utils:maybe_error(bondy_export:status(Info), M),
     {reply, E};
 handle_call(?BONDY_BACKUP_RESTORE, #call{} = M, Ctxt) ->
-    [Info] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
+    [Info] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     E = bondy_wamp_api_utils:maybe_error(bondy_export:import(Info), M),
     {reply, E};
 handle_call(_, #call{} = M, _) ->

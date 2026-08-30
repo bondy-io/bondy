@@ -1143,8 +1143,8 @@ families() ->
         {bondy_alarm_active, "1 per active alarm, labelled by alarm id.", gauge,
             fun alarm_rows/0},
         {bondy_node_ready,
-            "1 when the node reports ready (same flag the /ready probe "
-            "serves).", gauge, fun node_ready/0}
+            "1 when the node reports ready (the same bondy_app:is_ready/0 "
+            "oracle the /ready probe serves).", gauge, fun node_ready/0}
     ].
 
 %% @private
@@ -1165,10 +1165,15 @@ alarms() ->
     end.
 
 %% @private
+%% Reads the same oracle the `/ready` probe serves. It used to read
+%% `bondy_config:get(status)` alone, which is only the first of that oracle's
+%% three conditions — a node whose durable `main` DB failed to open exported
+%% `bondy_node_ready 1` while `/ready` answered 503.
 node_ready() ->
-    try bondy_config:get(status, undefined) of
-        ready -> [{[], 1}];
-        _ -> [{[], 0}]
+    try bondy_app:is_ready() of
+        true -> [{[], 1}];
+        false -> [{[], 0}];
+        _ -> []
     catch
         _:_ -> []
     end.
@@ -1830,7 +1835,10 @@ instance_id(Meta) ->
     end.
 
 %% @private
-%% Renders an arbitrary term as a bounded, printable label value.
+%% Renders an arbitrary term as a printable label value of bounded LENGTH.
+%% Bounded length is not bounded cardinality: a tuple alarm id renders whole,
+%% discriminator included, so `bondy_alarm_active` carries one series per
+%% affected service, relay or instance rather than one per alarm family.
 label(V) when is_atom(V) ->
     atom_to_binary(V);
 label(V) when is_binary(V) ->

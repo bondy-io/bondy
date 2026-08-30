@@ -32,7 +32,12 @@ as well as managing their security status and grants.
     | {reply, wamp_result() | wamp_error()}.
 
 handle_call(?BONDY_REALM_CREATE, M, Ctxt) ->
-    [Data] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
+    %% `admin_call_args/3`, unlike every other clause here: `Data` is a realm
+    %% CONFIGURATION, not the realm being operated on, so the realm-first
+    %% validator would complete a zero-argument call with the caller's realm
+    %% URI and hand `bondy_realm:create/1` the master realm's URI as its
+    %% specification.
+    [Data] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     Realm = bondy_realm:create(Data),
     Ext = bondy_realm:to_external(Realm),
     R = bondy_wamp_message:result(M#call.request_id, #{}, [Ext]),

@@ -29,7 +29,7 @@ In both modes:
   an absent one falls through to the interface layer;
 - two surviving entries claiming one name with DIFFERENT underlying WAMP
   bindings are BOTH skipped and reported in `collisions` (§17) — the
-  caller raises the critical alarm; identical bindings from two documents
+  caller raises the alarm; identical bindings from two documents
   keep the entry from the lexicographically first document, so the result
   is deterministic.
 
@@ -149,25 +149,36 @@ compile(RealmUri, OverlayEntries, Mode) ->
     %% An overlay tool entry claiming a procedure — or a resource entry
     %% claiming a topic — replaces the URI-named base entry compiled
     %% from that binding's interface entry.
-    Claimed = [
-        maps:get(wamp_procedure, O)
-     || O <- OverlayEntries, maps:get(kind, O) == tool
-    ],
-    ClaimedTopics = [
-        maps:get(wamp_topic, O)
-     || O <- OverlayEntries, maps:get(kind, O) == resource
-    ],
+    %%
+    %% Both claim sets are MAPS, not lists: under `derived` the two
+    %% comprehensions below run once per interface entry, so a membership
+    %% test that scans would make the rebuild O(entries x overlay) —
+    %% quadratic in the two things an operator grows.
+    Claimed = maps:from_keys(
+        [
+            maps:get(wamp_procedure, O)
+         || O <- OverlayEntries, maps:get(kind, O) == tool
+        ],
+        []
+    ),
+    ClaimedTopics = maps:from_keys(
+        [
+            maps:get(wamp_topic, O)
+         || O <- OverlayEntries, maps:get(kind, O) == resource
+        ],
+        []
+    ),
     BaseTools = [
         base_tool(RealmUri, E)
      || Mode == derived,
         {Uri, E} <- maps:to_list(Procedures),
-        not lists:member(Uri, Claimed)
+        not is_map_key(Uri, Claimed)
     ],
     BaseResources = [
         base_resource(RealmUri, E)
      || Mode == derived,
         {Uri, E} <- maps:to_list(Topics),
-        not lists:member(Uri, ClaimedTopics)
+        not is_map_key(Uri, ClaimedTopics)
     ],
     Overlaid = [
         overlay_entry(RealmUri, O, Procedures, Topics)

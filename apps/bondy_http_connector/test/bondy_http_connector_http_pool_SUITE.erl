@@ -163,11 +163,58 @@ liveness_probe_duration_count(ServiceName) ->
 %% `bondy_alarm_handler` (a different id), which breaks it with
 %% `{error, bad_module}`. Ask the event manager which handler is actually
 %% installed instead — both implementations answer `get_alarms`.
+%% The two handlers do not return the same SHAPE, either: Bondy's projects
+%% `{Id, Description}` pairs, while OTP's returns the raw term the producer
+%% raised — which for this alarm is the `{Id, Description, Opts}` triple that
+%% carries `details`. Normalise to the pair here so the cases below filter on
+%% the id without every one of them encoding a tuple size; an arity-bound
+%% comprehension pattern would SKIP the triple silently rather than fail.
 current_alarms() ->
     case gen_event:which_handlers(alarm_handler) of
-        [Handler | _] -> gen_event:call(alarm_handler, Handler, get_alarms);
-        [] -> []
+        [Handler | _] ->
+            [
+                {element(1, A), element(2, A)}
+             || A <- gen_event:call(alarm_handler, Handler, get_alarms),
+                is_tuple(A),
+                tuple_size(A) >= 2
+            ];
+        [] ->
+            []
     end.
+
+%% @private
+%% The `details` an alarm carries, whichever handler is installed: Bondy's
+%% holds it on the alarm record, OTP's stores the raw `{Id, Desc, Opts}` triple
+%% the producer raised. `undefined` when the alarm is not set — distinguishable
+%% from an alarm raised with empty details.
+alarm_details(AlarmId) ->
+    Handlers = gen_event:which_handlers(alarm_handler),
+    Found =
+        case lists:member(bondy_alarm_handler, Handlers) of
+            true ->
+                [
+                    D
+                 || #{id := Id, details := D} <- bondy_alarm_handler:list(),
+                    Id =:= AlarmId
+                ];
+            false ->
+                [
+                    maps:get(details, Opts, #{})
+                 || {Id, _, Opts} <- raw_alarms(Handlers),
+                    Id =:= AlarmId,
+                    is_map(Opts)
+                ]
+        end,
+    case Found of
+        [D | _] -> D;
+        [] -> undefined
+    end.
+
+%% @private
+raw_alarms([Handler | _]) ->
+    gen_event:call(alarm_handler, Handler, get_alarms);
+raw_alarms([]) ->
+    [].
 
 wait_until(Fun, Retries) when Retries > 0 ->
     case Fun() of
@@ -231,8 +278,16 @@ pool_marked_down_after_failure_threshold_and_alarm_set(Config) ->
     ),
     ?assertEqual(0, pool_up_gauge(ServiceName)),
     ?assertMatch(
-        [{_, #{service := ServiceName}}],
+        [_],
         [A || {Id, _} = A <- current_alarms(), Id =:= ?ALARM_ID(ServiceName)]
+    ),
+    %% The service, endpoint and reason are the `detail_keys` the catalogue
+    %% declares for this alarm, so they must arrive under `details` — carrying
+    %% them as the description instead is what
+    %% `bondy_alarm_catalogue_test:declared_detail_keys_are_delivered` fails on.
+    ?assertMatch(
+        #{service := ServiceName, endpoint := _, reason := _},
+        alarm_details(?ALARM_ID(ServiceName))
     ),
     ?assertEqual(
         {error, pool_down},

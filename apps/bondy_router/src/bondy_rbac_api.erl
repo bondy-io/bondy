@@ -385,9 +385,26 @@ handle_call(?BONDY_SOURCE_MATCH, #call{} = M, Ctxt) ->
 %% -----------------------------------------------------------------------------
 
 handle_call(?BONDY_RBAC_AUTHORIZE, #call{} = M, Ctxt) ->
-    [AuthId, Permission, Resource] =
-        bondy_wamp_api_utils:validate_call_args(M, Ctxt, 3),
-    RealmUri = bondy_context:realm_uri(Ctxt),
+    %% Realm-FIRST, like every other procedure in this module, which is what
+    %% gives the documented two-tier rule for free: a session in an ordinary
+    %% realm may only name its own (`validate_call_args/3`'s realm comparison
+    %% refuses any other), and a master-realm session may name any. Both still
+    %% need `wamp.call` on this URI, which is the only permission the reference
+    %% page says a check requires.
+    %%
+    %% The realm argument is OPTIONAL, so the documented three-argument call
+    %% keeps working: with one argument missing the validator prepends the
+    %% caller's own realm, which for a tenant session is the only realm it
+    %% could have named anyway.
+    %%
+    %% It used to take three arguments with the realm read from the context,
+    %% and `AuthId` therefore sat in the slot the validator reads as a realm
+    %% URI. A username never equals a realm URI, so every tenant session was
+    %% refused and only a master session got through — able to ask solely about
+    %% master-realm principals. The procedure could not do the job its own
+    %% reference page describes, for anybody.
+    [RealmUri, AuthId, Permission, Resource] =
+        bondy_wamp_api_utils:validate_call_args(M, Ctxt, 4),
     RBACCtxt = bondy_rbac:get_context(RealmUri, AuthId),
     R =
         try bondy_rbac:authorize(Permission, Resource, RBACCtxt) of

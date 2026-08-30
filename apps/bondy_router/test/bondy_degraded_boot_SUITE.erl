@@ -10,8 +10,9 @@ squats on the directory path `bondy_namespace_catalog:main_dir/0` resolves —
 and asserts the degraded posture `open_main_into/1` documents actually holds:
 
   1. the node STANDS UP: `bondy_router` is running, `main_status/0` is
-     `failed`, and the `bondy_db_main_unavailable` alarm is raised (the
-     readiness probe reads `main_status/0`, so NOT READY follows from it);
+     `failed`, the `bondy_db_main_unavailable` alarm is raised, and
+     `bondy_app:is_ready/0` — the oracle the `/ready` probe and the
+     `bondy_node_ready` gauge both answer from — is `false`;
   2. the supervision tree HOLDS over a window: the catalogue and the
      bridge-relay manager keep their pids — the pre-fix failure modes were a
      VM halt (`configure_services/0` raising through `bondy_app:start/2`) and
@@ -88,7 +89,15 @@ node_stands_up_degraded(Config) ->
     ],
     ?assert(lists:member(bondy_router, Running)),
     Alarms = erpc:call(Node, bondy_alarm_handler, get_alarms, []),
-    ?assert(lists:keymember(bondy_db_main_unavailable, 1, Alarms)).
+    ?assert(lists:keymember(bondy_db_main_unavailable, 1, Alarms)),
+    %% Boot reached its end — `bondy_config:get(status)` is `ready` — so this
+    %% is NOT READY on the strength of `main_status/0` alone. That condition
+    %% is read from `persistent_term`, not from the alarm above, which is why
+    %% it also holds after an `alarm_handler` crash empties the alarm set.
+    ?assertEqual(
+        ready, erpc:call(Node, bondy_config, get, [status, undefined])
+    ),
+    ?assertNot(erpc:call(Node, bondy_app, is_ready, [])).
 
 supervision_tree_holds(Config) ->
     Node = degraded_node(Config),
@@ -129,7 +138,11 @@ healthy_control_still_configures_services(Config) ->
         {ok, _}, erpc:call(Node, bondy_realm, lookup, [?MASTER_REALM_URI])
     ),
     Alarms = erpc:call(Node, bondy_alarm_handler, get_alarms, []),
-    ?assertNot(lists:keymember(bondy_db_main_unavailable, 1, Alarms)).
+    ?assertNot(lists:keymember(bondy_db_main_unavailable, 1, Alarms)),
+    %% The other half of the readiness contract: a healthy node IS ready. An
+    %% oracle that disqualified on any alarm, or on `main_status =/= open`,
+    %% would pass the degraded case above and fail here.
+    ?assert(erpc:call(Node, bondy_app, is_ready, [])).
 
 %% =============================================================================
 %% HELPERS

@@ -8,6 +8,23 @@
 `bondy_wamp_api` implementation exposing `bondy_cert_manager` operations
 (reloading CA certs, rotating listener certificates and managing mTLS client
 authentication) as WAMP procedures.
+
+## Master realm only
+
+Every procedure here goes through `bondy_wamp_api_utils:admin_call_args/3`.
+None of them takes a realm argument — a listener reference is not a realm — and
+none of them is a per-realm decision: the CA trust store and a listener's
+certificate are NODE state, shared by every realm the node serves.
+
+That asymmetry is why the check is written rather than inherited. FOUND
+2026-08-31: `reload_cacerts` and `rotate_all` validated nothing at all — they
+ignored the context and ran for any caller the dealer let through. The dealer's
+`bondy_rbac:authorize(<<"wamp.call">>, Uri, Ctxt)` is the primary gate and holds
+in an ordinary realm, but it returns `ok` unconditionally for a realm with
+security DISABLED (`bondy_rbac.erl:268-275`), and that is precisely the
+configuration in which a tenant session could have reloaded the CA store and
+swapped every listener's certificate on the node. Local authority, node-wide
+effect, across the tenant boundary.
 """.
 -behaviour(bondy_wamp_api).
 
@@ -31,16 +48,22 @@ authentication) as WAMP procedures.
     )}
     | {reply, wamp_result() | wamp_error()}.
 
-handle_call(?BONDY_CERT_RELOAD_CACERTS, #call{} = M, _Ctxt) ->
+handle_call(?BONDY_CERT_RELOAD_CACERTS, #call{} = M, Ctxt) ->
+    [] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 0),
     ok = bondy_cert_manager:reload_cacerts(),
     R = bondy_wamp_message:result(M#call.request_id, #{}, []),
     {reply, R};
-handle_call(?BONDY_CERT_ROTATE_ALL, #call{} = M, _Ctxt) ->
+handle_call(?BONDY_CERT_ROTATE_ALL, #call{} = M, Ctxt) ->
+    %% FOUND 2026-08-31: this clause validated NOTHING — it ignored the
+    %% context and rotated every listener's certificate for any caller the
+    %% dealer let through, while its four siblings below were master-realm
+    %% only. The check is the same one they make.
+    [] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 0),
     ok = bondy_cert_manager:rotate_all_listeners(),
     R = bondy_wamp_message:result(M#call.request_id, #{}, []),
     {reply, R};
 handle_call(?BONDY_CERT_ROTATE_LISTENER, #call{} = M, Ctxt) ->
-    [Args] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
+    [Args] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     ListenerRef = binary_to_existing_atom(Args),
     case bondy_cert_manager:rotate_listener(ListenerRef) of
         ok ->
@@ -51,14 +74,14 @@ handle_call(?BONDY_CERT_ROTATE_LISTENER, #call{} = M, Ctxt) ->
             {reply, E}
     end;
 handle_call(?BONDY_CERT_GET_SERVER_CERT_INFO, #call{} = M, Ctxt) ->
-    [Args] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
+    [Args] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     ListenerRef = binary_to_existing_atom(Args),
     E = bondy_wamp_api_utils:maybe_error(
         bondy_cert_manager:get_server_cert_info(ListenerRef), M
     ),
     {reply, E};
 handle_call(?BONDY_CERT_SET_CLIENT_AUTH, #call{} = M, Ctxt) ->
-    [ListenerBin, Opts] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 2),
+    [ListenerBin, Opts] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 2),
     ListenerRef = binary_to_existing_atom(ListenerBin),
     MtlsOpts = decode_mtls_opts(Opts),
     case bondy_cert_manager:set_client_auth(ListenerRef, MtlsOpts) of
@@ -70,7 +93,7 @@ handle_call(?BONDY_CERT_SET_CLIENT_AUTH, #call{} = M, Ctxt) ->
             {reply, E}
     end;
 handle_call(?BONDY_CERT_GET_CLIENT_AUTH, #call{} = M, Ctxt) ->
-    [Args] = bondy_wamp_api_utils:validate_call_args(M, Ctxt, 1),
+    [Args] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     ListenerRef = binary_to_existing_atom(Args),
     E = bondy_wamp_api_utils:maybe_error(
         bondy_cert_manager:get_client_auth(ListenerRef), M

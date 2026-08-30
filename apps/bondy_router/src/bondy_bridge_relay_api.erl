@@ -28,19 +28,49 @@ report the status of router bridges.
     | {reply, wamp_result() | wamp_error()}.
 
 handle_call(?BONDY_ROUTER_BRIDGE_ADD, #call{} = M, Ctxt) ->
-    [Data] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
+    [Data] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     KWArgs = to_map(M#call.kwargs),
+
+    %% A dry run runs `check_bridge/2` — `add_bridge/2` minus its mutations,
+    %% sharing the option spec, the specification parse and the name rule with
+    %% it — and stops before the manager holds anything. `dry_run` is also
+    %% removed from the options the real call validates, since it is this
+    %% convention's KWArg and not one of `?OPTS_SPEC`'s.
+    Opts = maps:remove(~"dry_run", maps:remove(dry_run, KWArgs)),
     Reply =
-        case bondy_bridge_relay_manager:add_bridge(Data, KWArgs) of
-            {ok, Bridge} ->
-                Ext = bondy_bridge_relay:to_external(Bridge),
-                bondy_wamp_message:result(M#call.request_id, #{}, [Ext]);
-            {error, Reason} ->
-                bondy_wamp_api_utils:error(Reason, M)
+        case bondy_wamp_api_utils:dry_run(M) of
+            true ->
+                case bondy_bridge_relay_manager:check_bridge(Data, Opts) of
+                    {ok, Bridge} ->
+                        bondy_wamp_api_utils:dry_run_result(
+                            M,
+                            <<
+                                "Add this bridge relay to the manager. The "
+                                "specification parses and the name is free."
+                            >>,
+                            #{
+                                ~"bridge" => bondy_bridge_relay:to_external(
+                                    Bridge
+                                )
+                            }
+                        );
+                    {error, Reason} ->
+                        bondy_wamp_api_utils:error(Reason, M)
+                end;
+            false ->
+                case bondy_bridge_relay_manager:add_bridge(Data, Opts) of
+                    {ok, Bridge} ->
+                        Ext = bondy_bridge_relay:to_external(Bridge),
+                        bondy_wamp_message:result(
+                            M#call.request_id, #{}, [Ext]
+                        );
+                    {error, Reason} ->
+                        bondy_wamp_api_utils:error(Reason, M)
+                end
         end,
     {reply, Reply};
 handle_call(?BONDY_ROUTER_BRIDGE_CHECK_SPEC, #call{} = M, Ctxt) ->
-    [Data] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
+    [Data] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     Reply =
         try bondy_bridge_relay:new(Data) of
             Bridge ->
@@ -52,7 +82,7 @@ handle_call(?BONDY_ROUTER_BRIDGE_CHECK_SPEC, #call{} = M, Ctxt) ->
         end,
     {reply, Reply};
 handle_call(?BONDY_ROUTER_BRIDGE_REMOVE, #call{} = M, Ctxt) ->
-    [Name] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
+    [Name] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     Reply =
         case bondy_bridge_relay_manager:remove_bridge(Name) of
             ok ->
@@ -62,7 +92,7 @@ handle_call(?BONDY_ROUTER_BRIDGE_REMOVE, #call{} = M, Ctxt) ->
         end,
     {reply, Reply};
 handle_call(?BONDY_ROUTER_BRIDGE_START, #call{} = M, Ctxt) ->
-    [Name] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
+    [Name] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     Reply =
         case bondy_bridge_relay_manager:start_bridge(Name) of
             ok ->
@@ -72,7 +102,7 @@ handle_call(?BONDY_ROUTER_BRIDGE_START, #call{} = M, Ctxt) ->
         end,
     {reply, Reply};
 handle_call(?BONDY_ROUTER_BRIDGE_STOP, #call{} = M, Ctxt) ->
-    [Name] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
+    [Name] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     Reply =
         case bondy_bridge_relay_manager:stop_bridge(Name) of
             ok ->
@@ -82,7 +112,7 @@ handle_call(?BONDY_ROUTER_BRIDGE_STOP, #call{} = M, Ctxt) ->
         end,
     {reply, Reply};
 handle_call(?BONDY_ROUTER_BRIDGE_GET, #call{} = M, Ctxt) ->
-    [Name] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
+    [Name] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     Reply =
         case bondy_bridge_relay_manager:get_bridge(Name) of
             {ok, Bridge} ->
@@ -93,13 +123,13 @@ handle_call(?BONDY_ROUTER_BRIDGE_GET, #call{} = M, Ctxt) ->
         end,
     {reply, Reply};
 handle_call(?BONDY_ROUTER_BRIDGE_LIST, #call{} = M, Ctxt) ->
-    [] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 0),
+    [] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 0),
     List = bondy_bridge_relay_manager:list_bridges(),
     Ext = [bondy_bridge_relay:to_external(B) || B <- List],
     Reply = bondy_wamp_message:result(M#call.request_id, #{}, [Ext]),
     {reply, Reply};
 handle_call(?BONDY_ROUTER_BRIDGE_STATUS, #call{} = M, Ctxt) ->
-    [] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 0),
+    [] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 0),
     Status = bondy_bridge_relay_manager:status(),
     Reply = bondy_wamp_message:result(M#call.request_id, #{}, [Status]),
     {reply, Reply};

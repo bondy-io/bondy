@@ -7,7 +7,7 @@
 -moduledoc """
 An HTTP handler for the Admin API readiness (`/ready`) probe.
 
-Replies with `204 No Content` once the node status is `ready`, otherwise with
+Replies with `204 No Content` when `bondy_app:is_ready/0` holds, otherwise with
 `503 Service Unavailable`.
 """.
 -include("http_api.hrl").
@@ -34,22 +34,12 @@ ready(_, Req) ->
 %% =============================================================================
 
 %% @private
-%% Boot reaching its end is necessary but NOT sufficient. `bondy_app:start/2`
-%% sets the status unconditionally once the listeners are up, and the
-%% catalogue deliberately survives a failure to open the durable `main` DB
-%% (see `bondy_namespace_catalog:open_main_into/1`) — so without the second
-%% check a node that will raise `*_not_provisioned` on every durable operation
-%% answers 204 and a load balancer sends it traffic it cannot serve.
-%%
-%% Only `failed` is disqualifying: `idle` means there was nothing to
-%% provision, which is a legitimate configuration.
+%% The decision itself lives in `bondy_app:is_ready/0`, which documents the
+%% conditions and is also what the `bondy_node_ready` Prometheus gauge reads —
+%% one oracle, so the load balancer and the dashboard cannot disagree about
+%% the same node.
 status_code() ->
-    case bondy_config:get(status, undefined) of
-        ready ->
-            case bondy_namespace_catalog:main_status() of
-                failed -> ?HTTP_SERVICE_UNAVAILABLE;
-                _ -> ?HTTP_NO_CONTENT
-            end;
-        _ ->
-            ?HTTP_SERVICE_UNAVAILABLE
+    case bondy_app:is_ready() of
+        true -> ?HTTP_NO_CONTENT;
+        false -> ?HTTP_SERVICE_UNAVAILABLE
     end.

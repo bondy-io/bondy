@@ -49,6 +49,7 @@ Bridges created through the API will only start on the receiving node.
 
 %% API
 -export([add_bridge/2]).
+-export([check_bridge/2]).
 -export([disable_bridge/1]).
 -export([enable_bridge/1]).
 -export([get_bridge/1]).
@@ -95,6 +96,32 @@ add_bridge(Data, Opts0) ->
         Opts ->
             Timeout = timer:seconds(10),
             gen_server:call(?MODULE, {add_bridge, Data, Opts}, Timeout)
+    catch
+        _:Reason ->
+            {error, Reason}
+    end.
+
+-doc """
+Everything `add_bridge/2` checks before it changes anything: the options
+against `?OPTS_SPEC`, the specification through `new_bridge/1`, and the name
+against the bridges this manager already holds. Writes nothing and starts
+nothing.
+
+It is `add_bridge/2` minus its mutations, not a second validator — the spec
+parse and the name rule are the SAME functions the real path runs, so this
+cannot pass where the real call would fail on either. What it cannot cover is
+what only happens after the mutation: `bondy_bridge_relay:add/1`'s store
+write, and `maybe_start_bridge/3` actually connecting.
+""".
+-spec check_bridge(Data :: map(), Opts :: map()) ->
+    {ok, bondy_bridge_relay:t()} | {error, any()}.
+
+check_bridge(Data, Opts0) ->
+    try maps_utils:validate(Opts0, ?OPTS_SPEC) of
+        _ ->
+            gen_server:call(
+                ?MODULE, {check_bridge, Data}, timer:seconds(10)
+            )
     catch
         _:Reason ->
             {error, Reason}
@@ -241,6 +268,18 @@ add_bridges(Config, State0) ->
 handle_call({add_bridge, Data, Opts}, _From, State0) ->
     {Reply, State} = do_add_bridge(Data, Opts, State0),
     {reply, Reply, State};
+handle_call({check_bridge, Data}, _From, State) ->
+    %% Exactly what `do_add_bridge/3` does before it mutates anything, and
+    %% nothing after. The state is returned untouched.
+    Reply =
+        try
+            Bridge = new_bridge(Data),
+            ok = assert_absent(maps:get(name, Bridge), State),
+            {ok, Bridge}
+        catch
+            throw:Reason -> {error, Reason}
+        end,
+    {reply, Reply, State};
 handle_call({enable_bridge, _Name}, _From, State) ->
     Reply = {error, not_implemented},
     {reply, Reply, State};
@@ -355,9 +394,7 @@ new_bridge(Data) ->
 
 add_bridge_to_state(#{restart := permanent} = Bridge, State) ->
     Name = maps:get(name, Bridge),
-
-    maps:is_key(Name, State#state.bridges) andalso
-        throw(already_exists),
+    ok = assert_absent(Name, State),
 
     Bridges = State#state.bridges,
 
@@ -369,12 +406,18 @@ add_bridge_to_state(#{restart := permanent} = Bridge, State) ->
     end;
 add_bridge_to_state(#{restart := transient} = Bridge, State) ->
     Name = maps:get(name, Bridge),
-
-    maps:is_key(Name, State#state.bridges) andalso
-        throw(already_exists),
+    ok = assert_absent(Name, State),
 
     Bridges = State#state.bridges,
     State#state{bridges = maps:put(Name, Bridge, Bridges)}.
+
+%% @private
+%% One definition of "this name is taken", shared by both restart kinds and by
+%% the `check_bridge/2` dry run — which is what makes the dry run's answer the
+%% same answer `add_bridge/2` would give, rather than a second opinion.
+assert_absent(Name, #state{bridges = Bridges}) ->
+    maps:is_key(Name, Bridges) andalso throw(already_exists),
+    ok.
 
 do_add_bridge(Data, Opts, State0) ->
     try

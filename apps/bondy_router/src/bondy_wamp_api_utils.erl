@@ -7,6 +7,40 @@
 -moduledoc """
 Utility functions for the Bondy WAMP API, including validation of
 administrative call arguments and the construction of WAMP error messages.
+
+## Two families of argument validator, and which one a procedure wants
+
+`bondy.*` procedures come in two shapes, and reading the wrong validator onto
+a procedure is a silent defect rather than a compile error.
+
+**A realm-first procedure** takes the realm it operates on as its FIRST
+positional argument — `bondy.rbac.user.add(RealmUri, Data)`. Use
+`validate_call_args/3,4` or `validate_admin_call_args/3,4`. They do three
+things: check the arity, DEFAULT a missing realm argument to the session's own
+realm, and refuse a session asking to operate on a realm that is not its own
+unless it is the master realm. The defaulting is the point — a session already
+in a realm should not have to name it.
+
+**A procedure with no realm argument** takes something else first — an id, a
+name, a document, or nothing at all. Use `call_args/3,4` or
+`admin_call_args/3,4`. They check the arity EXACTLY and do nothing else.
+
+Handing a realm-first validator to a procedure of the second kind is what the
+second family exists to prevent, and it goes wrong in two ways. It pads: a call
+one argument short is completed with the caller's realm URI, so
+`bondy.realm.create()` with no arguments reaches `bondy_realm:create/1` with
+the master realm's URI as its argument instead of being refused for arity. And
+it authorises by accident: the realm-matching clause compares the first
+argument against the session's realm, so a procedure whose first argument is
+an id is refused for every non-master session — a real refusal, but not the
+one anyone wrote, and it disappears the moment the argument happens to equal a
+realm URI.
+
+`admin_call_args/3,4` is the master-realm check written as itself. The two
+families are otherwise interchangeable at the call site, so migrating a
+procedure is a one-line change; `bondy_wamp_api_arity_test` reads which family
+each dispatch clause reaches out of the compiled abstract code and drives the
+short call against every procedure in the second family.
 """.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
@@ -18,6 +52,12 @@ administrative call arguments and the construction of WAMP error messages.
 -export([no_such_procedure_error/3]).
 -export([no_such_registration_error/1]).
 -export([node_spec/0]).
+-export([dry_run/1]).
+-export([dry_run_result/3]).
+-export([admin_call_args/3]).
+-export([admin_call_args/4]).
+-export([call_args/3]).
+-export([call_args/4]).
 -export([validate_admin_call_args/3]).
 -export([validate_admin_call_args/4]).
 -export([validate_call_args/3]).
@@ -41,6 +81,130 @@ node_spec() ->
          || #{ip := IP} = Addr <- Addrs0
         ]
     }.
+
+-doc """
+Whether this CALL asks for a DRY RUN: `dry_run` in its `KWArgs`.
+
+A dry run performs every check the real call performs and then stops before
+the first act that changes anything, replying with what it WOULD have done.
+It is opt-in per procedure — `bondy_task_catalogue` says which ones — and a
+procedure that does not read this simply acts, which is why the marker on the
+reply (`dry_run_result/3`) matters as much as this does.
+
+KWArgs rather than a CALL option: this is an argument to the procedure, and
+for a `bondy.*` procedure Bondy is the callee. A `_`-prefixed option would say
+the opposite — that the router should treat the call differently — which is
+not what happens.
+
+**An unrecognised value THROWS rather than defaulting.** Both defaults are
+wrong: reading it as `false` runs for real a call that asked not to, and
+reading it as `true` refuses to do work that was asked for. Only `true`,
+`false` and their string spellings are accepted, and absence is `false`.
+""".
+-spec dry_run(bondy_wamp_message:call()) -> boolean() | no_return().
+
+dry_run(#call{kwargs = KWArgs} = M) when is_map(KWArgs) ->
+    case maps:get(dry_run, KWArgs, maps:get(~"dry_run", KWArgs, false)) of
+        V when V == true; V == ~"true" ->
+            true;
+        V when V == false; V == ~"false" ->
+            false;
+        Other ->
+            error(bad_dry_run_error(M, Other))
+    end;
+dry_run(#call{}) ->
+    false.
+
+-doc """
+The reply to a dry run: `Would`, a sentence naming what the real call would
+have done, and `Detail`, whatever the procedure can say about it.
+
+`dry_run => true` is on every such reply and is the load-bearing part. A
+caller that sent `dry_run` and got back a plain success has no way to tell
+"validated, nothing written" from "done" — and the caller most likely to make
+that mistake is the one this convention exists for.
+""".
+-spec dry_run_result(
+    bondy_wamp_message:call(), binary(), map()
+) -> bondy_wamp_message:result().
+
+dry_run_result(#call{request_id = ReqId}, Would, Detail) when
+    is_binary(Would), is_map(Detail)
+->
+    bondy_wamp_message:result(ReqId, #{}, [
+        Detail#{~"dry_run" => true, ~"would" => Would}
+    ]).
+
+-doc """
+The `N` positional arguments of a call that takes NO realm argument.
+
+Exactly `N`: neither fewer nor more. Nothing is defaulted and nothing is
+prepended, so argument `1` is the argument the caller sent — which is the whole
+difference from `validate_call_args/3`, and the reason a procedure whose first
+argument is an id must use this one.
+
+No authorisation of its own. The operation is on the session's own realm, so
+the `wamp.call` permission the dealer already applies is the authority; use
+`admin_call_args/3` where the procedure is master-realm-only.
+
+Throws a `bondy_wamp_message:error()`.
+""".
+-spec call_args(wamp_call(), bondy_context:t(), non_neg_integer()) ->
+    Args :: list() | no_return().
+
+call_args(Msg, Ctxt, N) ->
+    call_args(Msg, Ctxt, N, N).
+
+-doc """
+As `call_args/3`, for a procedure accepting between `Min` and `Max` positional
+arguments.
+
+Throws a `bondy_wamp_message:error()`.
+""".
+-spec call_args(
+    wamp_call(), bondy_context:t(), non_neg_integer(), non_neg_integer()
+) -> Args :: list() | no_return().
+
+call_args(Msg, _Ctxt, Min, Max) ->
+    exact_args(Msg, Min, Max).
+
+-doc """
+The `N` positional arguments of a master-realm-only call that takes NO realm
+argument.
+
+As `call_args/3`, plus the check `validate_admin_call_args/3` only reaches when
+the call arrives with no arguments at all: the session must be in the master
+realm. Written as itself rather than falling out of a realm comparison, so the
+refusal does not depend on how many arguments the caller happened to send.
+
+Throws a `bondy_wamp_message:error()`.
+""".
+-spec admin_call_args(wamp_call(), bondy_context:t(), non_neg_integer()) ->
+    Args :: list() | no_return().
+
+admin_call_args(Msg, Ctxt, N) ->
+    admin_call_args(Msg, Ctxt, N, N).
+
+-doc """
+As `admin_call_args/3`, for a procedure accepting between `Min` and `Max`
+positional arguments.
+
+Throws a `bondy_wamp_message:error()`.
+""".
+-spec admin_call_args(
+    wamp_call(), bondy_context:t(), non_neg_integer(), non_neg_integer()
+) -> Args :: list() | no_return().
+
+admin_call_args(Msg, Ctxt, Min, Max) ->
+    %% Arity BEFORE authority, matching `do_validate_call_args/6`: a caller in
+    %% the wrong realm sending the wrong number of arguments has always been
+    %% told about the arity, and a suite asserting the refusal has to send the
+    %% right count to reach it.
+    Args = exact_args(Msg, Min, Max),
+    case bondy_context:realm_uri(Ctxt) of
+        ?MASTER_REALM_URI -> Args;
+        _ -> error(unauthorized(Msg, Ctxt))
+    end.
 
 -doc """
 Throws a `bondy_wamp_message:error()`.
@@ -132,6 +296,33 @@ no_such_registration_error(RegId) when is_integer(RegId) ->
 %% =============================================================================
 
 %% @private
+%% The arity half of `do_validate_call_args/6`, with neither the realm
+%% defaulting nor the realm matching — and comparing `Len` against `Min`
+%% directly rather than `Len + 1`, which is where the padding comes from.
+exact_args(Msg, Min, Max) ->
+    Args = to_list(args(Msg)),
+    Len = length(Args),
+    Len >= Min orelse
+        error(
+            arity_error(
+                Msg,
+                <<"The procedure requires at least ",
+                    (integer_to_binary(Min))/binary, " positional arguments.">>,
+                #{minimum_arity => Min}
+            )
+        ),
+    Len =< Max orelse
+        error(
+            arity_error(
+                Msg,
+                <<"The procedure accepts at most ",
+                    (integer_to_binary(Max))/binary, " positional arguments.">>,
+                #{maximum_arity => Max}
+            )
+        ),
+    Args.
+
+%% @private
 -doc """
 Validates that the first argument of the call is a RealmUri, defaulting to
 use the session Realm's uri if one is not provided. It uses the MinArity
@@ -142,9 +333,12 @@ session's Realm or any other in case the session's realm is the root realm.
 -spec do_validate_call_args(
     wamp_call(),
     bondy_context:t(),
-    MinArity :: pos_integer(),
-    MaxArity :: pos_integer(),
-    Len :: pos_integer(),
+    %% `0` is a real value for all three: `bondy.alarm.list` and its siblings
+    %% take no arguments, and the `Min == 0` / `Len == 0` clauses below are
+    %% what admit a master-realm caller with an empty argument list.
+    MinArity :: non_neg_integer(),
+    MaxArity :: non_neg_integer(),
+    Len :: non_neg_integer(),
     AdminOnly :: boolean()
 ) -> Args :: list() | no_return().
 
@@ -265,6 +459,24 @@ arity_error(Msg, Description, Details) ->
         message => ~"Invalid number of positional arguments.",
         description => Description,
         details => Details
+    }),
+    bondy_wamp_error:to_wamp(
+        Error, ?CALL, bondy_wamp_message:request_id(Msg), #{}
+    ).
+
+%% @private
+bad_dry_run_error(Msg, Value) ->
+    Error = bondy_error:new(invalid_argument, #{
+        message => ~"Invalid value for `dry_run`.",
+        description =>
+            <<
+                "`dry_run` must be a boolean. The call was neither performed "
+                "nor simulated, because either reading would have been a "
+                "guess about which one was meant."
+            >>,
+        details => #{
+            value => iolist_to_binary(io_lib:format("~p", [Value]))
+        }
     }),
     bondy_wamp_error:to_wamp(
         Error, ?CALL, bondy_wamp_message:request_id(Msg), #{}

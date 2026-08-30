@@ -265,13 +265,24 @@ fail(#state{relay = Relay} = State0) ->
 %% @private
 %% A `{Tag, Name}` alarm id, following the convention the rest of Bondy uses,
 %% so `bondy_alarm_active{alarm_id}` carries the relay without a second
-%% dimension. The description names the relay and how it failed -- never the
-%% host, and never the credential.
+%% dimension. Neither the description nor the details name the host, and
+%% neither ever names the credential.
+%%
+%% The structured fields go in `details`, NOT in the description: they are the
+%% keys `bondy_alarm_catalogue` declares for this alarm as `detail_keys`, and
+%% `bondy_alarm_catalogue_test:declared_detail_keys_are_delivered` fails if
+%% the two disagree. `alarm_handler:set_alarm/1` passes the 3-tuple through
+%% unchanged — it is `gen_event:notify(alarm_handler, {set_alarm, Alarm})` for
+%% any term (sasl-4.4 `alarm_handler.erl:103`) — so this stays an OTP call and
+%% `bondy_mail` gains no dependency on `bondy_router`.
 set_alarm(Name, Failures) ->
-    Desc = #{relay => Name, consecutive_failures => Failures},
+    Desc = <<"The mail relay is failing its health check.">>,
+    Details = #{relay => Name, consecutive_failures => Failures},
     _ =
         try
-            alarm_handler:set_alarm({{mail_relay_down, Name}, Desc})
+            alarm_handler:set_alarm(
+                {{mail_relay_down, Name}, Desc, #{details => Details}}
+            )
         catch
             _:_ -> ok
         end,

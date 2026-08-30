@@ -37,7 +37,8 @@ setup() ->
         _ ->
             ok
     end,
-    ok.
+    %% Clean slate, in case a previous run's cleanup was skipped.
+    drop_stub_rows().
 
 %% Register a stub instance row so that the WAL writer's init-time
 %% `set_wal_pid/2` (which uses `update_element_safe/2`) actually finds
@@ -57,8 +58,42 @@ register_stub(InstanceId) ->
         live_size => 0
     }).
 
+%% The stub rows MUST NOT outlive this module.
+%%
+%% `bondy_oplog_registry` is node-global and eunit shares one VM, so a row left
+%% behind is seen by every later test in the run. It was left behind, and it
+%% made `bondy_oplog_frontier_reap_test:retire_dead_retires_the_complement`
+%% fail with `{instances_down, [<<"scrubber-test-...">>]}` and
+%% `retire_dead_refuses_while_an_instance_is_down` time out waiting for
+%% `down/0` to empty — whole-suite-only, with the victim moving between runs.
+%%
+%% Deleting the row is the only fix; no sentinel pid hides it. MEASURED: with
+%% `instance_pid = self()` the row is dead by cleanup and `down/0` reports it
+%% (registry.erl:454); with `undefined` it is excluded from `down/0` but
+%% `list/0` counts it as PRESENT (registry.erl:431), and the schedulers then
+%% dispatch to a phantom instance — that attempt turned 2 failures into 7,
+%% across `bondy_oplog_gc_scheduler_test` and
+%% `bondy_oplog_sync_scheduler_test`.
+%%
+%% Swept by id prefix rather than by threading ids out of the test bodies: a
+%% body that fails never reaches its own cleanup line, which is how this family
+%% of leak recurs.
 cleanup(_) ->
-    ok.
+    drop_stub_rows().
+
+%% `list/0` and `down/0` partition the rows between them — `list/0` takes the
+%% live and the `undefined`, `down/0` takes the dead — so together they see
+%% every row whatever state its pid is in, and this needs no assumption about
+%% when the test processes died.
+drop_stub_rows() ->
+    Ids = bondy_oplog_registry:list() ++ bondy_oplog_registry:down(),
+    lists:foreach(
+        fun(Id) -> ok = bondy_oplog_registry:unregister(Id) end,
+        [Id || Id <- Ids, is_stub_id(Id)]
+    ).
+
+is_stub_id(<<"scrubber-test-", _/binary>>) -> true;
+is_stub_id(_) -> false.
 
 scrubber_test_() ->
     {setup, fun setup/0, fun cleanup/1, [

@@ -91,11 +91,59 @@ handle_call(#call{options = #{ppt_scheme := _}} = Msg, _) ->
 handle_call(#call{procedure_uri = Proc} = M0, Ctxt) ->
     %% We make sure the partial payload is decoded (if any)
     M = bondy_wamp_message:decode_partial(M0),
-    do_handle_call(resolve(Proc), M, Ctxt).
+    Resolved = resolve(Proc),
+    %% The `dry_run` convention is opt-in per procedure, and this is what makes
+    %% opting out SAFE. Without this gate a procedure that does not read the
+    %% KWArg would simply act, so a caller that believed it was simulating
+    %% would have performed the thing — the one failure this convention exists
+    %% to remove. Refusing here means the caller learns the procedure cannot
+    %% simulate, at the only moment the answer is still useful.
+    %%
+    %% `bondy_task_catalogue` is the declaration, so support is discoverable
+    %% through `bondy.task.describe` before the call rather than by trying it.
+    %%
+    %% Scope: this is reached for `bondy.*` and its two aliases only — the
+    %% dealer sends `wamp.*` to `bondy_wamp_meta_api`, which has no such gate.
+    %% Those are read-only reflection procedures, so a stray `dry_run` KWArg
+    %% there is ignored rather than acted on; if a `wamp.*` procedure ever
+    %% mutates, it needs this gate too.
+    case dry_run_refusal(Resolved, M) of
+        undefined -> do_handle_call(Resolved, M, Ctxt);
+        Error -> {reply, Error}
+    end.
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% `undefined` when the call may proceed. A malformed `dry_run` value is
+%% refused by `dry_run/1` itself and reaches the caller as that error.
+dry_run_refusal(Proc, M) ->
+    case bondy_wamp_api_utils:dry_run(M) of
+        false ->
+            undefined;
+        true ->
+            case bondy_task_catalogue:supports_dry_run(Proc) of
+                true -> undefined;
+                false -> unsupported_dry_run_error(Proc, M)
+            end
+    end.
+
+%% @private
+unsupported_dry_run_error(Proc, M) ->
+    Error = bondy_error:new(invalid_argument, #{
+        message => ~"This procedure does not support `dry_run`.",
+        description =>
+            <<
+                "Nothing was performed. `bondy.task.describe` reports which "
+                "procedures accept `dry_run`."
+            >>,
+        details => #{procedure => Proc}
+    }),
+    bondy_wamp_error:to_wamp(
+        Error, ?CALL, bondy_wamp_message:request_id(M), #{}
+    ).
 
 %% @private
 -spec do_handle_call(
@@ -113,6 +161,10 @@ do_handle_call(<<"bondy.ping">>, M, _Ctxt) ->
     %% Always authorized
     R = bondy_wamp_message:result(M#call.request_id, #{}, [~"pong"]),
     {reply, R};
+do_handle_call(<<"bondy.alarm.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_alarm_api:handle_call(Proc, M, Ctxt);
+do_handle_call(<<"bondy.task.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_task_api:handle_call(Proc, M, Ctxt);
 do_handle_call(<<"bondy.export.", _/binary>> = Proc, M, Ctxt) ->
     bondy_export_api:handle_call(Proc, M, Ctxt);
 do_handle_call(<<"bondy.backup.", _/binary>> = Proc, M, Ctxt) ->

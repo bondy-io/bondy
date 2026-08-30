@@ -122,14 +122,16 @@ too_many_arguments_is_reported(Config) ->
     ?assertEqual(?WAMP_INVALID_ARGUMENT, E#error.error_uri).
 
 -doc """
-A call with no arguments is refused, and NOT by an arity check.
+A call with no arguments is refused on ARITY.
 
-`bondy_wamp_api_utils:validate_admin_call_args/3` reads the first positional
-argument as a realm URI and SUBSTITUTES the master realm's URI when it is
-missing, so a no-argument call arrives at `phase/1` carrying
-`com.leapsight.bondy` rather than failing on arity. What refuses it is `phase/1`
-being total — measured: a `binary_to_existing_atom/1` decode raises `badarg`
-here, which reports to the caller as an internal error.
+It did not used to be. `bondy_wamp_api_utils:validate_admin_call_args/3` reads
+the first positional argument as a realm URI and SUBSTITUTES the caller's realm
+when it is missing, so a no-argument call reached `phase/1` carrying
+`com.leapsight.bondy` and was refused only because `phase/1` is total. The
+procedure now uses `admin_call_args/3`, which checks the count and nothing
+else, so the refusal names the real fault. Both refusals report
+`?WAMP_INVALID_ARGUMENT`, which is why this assertion did not change and why
+the comment had to.
 """.
 no_arguments_is_refused_rather_than_defaulted(Config) ->
     E = call_error(?BONDY_LISTENER_SUSPEND, [], Config),
@@ -143,12 +145,13 @@ no_arguments_is_refused_rather_than_defaulted(Config) ->
 A caller in an ordinary realm cannot suspend the node's listeners.
 
 Load-bearing, and it is why the module uses
-`bondy_wamp_api_utils:validate_admin_call_args/3` rather than the
-`validate_call_args/3` its neighbours use. Both read the first positional
-argument as a realm URI; the non-admin one additionally lets a caller through
-when its OWN realm URI equals that argument, so a realm named
-`com.example.normal` would have been able to suspend every listener on the node.
-The phase argument occupying the realm-URI slot is what makes that reachable.
+`bondy_wamp_api_utils:admin_call_args/3`. The realm-first validators read the
+first positional argument as a realm URI, and the non-admin one lets a caller
+through when its OWN realm URI equals that argument — so under
+`validate_call_args/3` a realm named `com.example.normal` could have suspended
+every listener on the node, the phase argument occupying the realm-URI slot
+being what made that reachable. `admin_call_args/3` removes the coincidence
+rather than relying on the phase never colliding with a realm name.
 """.
 a_non_master_realm_is_refused(Config) ->
     Ctxt = ?config(realm_ctxt, Config),

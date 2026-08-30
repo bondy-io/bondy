@@ -20,6 +20,14 @@
 %% PROCEDURE URIS
 %% =============================================================================
 
+-define(BONDY_ALARM_LIST, <<"bondy.alarm.list">>).
+-define(BONDY_ALARM_GET, <<"bondy.alarm.get">>).
+-define(BONDY_ALARM_HISTORY, <<"bondy.alarm.history">>).
+-define(BONDY_ALARM_CATALOGUE, <<"bondy.alarm.catalogue">>).
+
+-define(BONDY_TASK_CATALOGUE, <<"bondy.task.catalogue">>).
+-define(BONDY_TASK_DESCRIBE, <<"bondy.task.describe">>).
+
 -define(BONDY_CERT_RELOAD_CACERTS, <<"bondy.cert_manager.reload_cacerts">>).
 -define(BONDY_CERT_ROTATE_LISTENER, <<"bondy.cert_manager.rotate_listener">>).
 -define(BONDY_CERT_ROTATE_ALL, <<"bondy.cert_manager.rotate_all">>).
@@ -167,6 +175,14 @@
 %% =============================================================================
 %% TOPIC URIS
 %% =============================================================================
+
+%% Alarm transitions. Published in the MASTER REALM ONLY, and only while a
+%% subscriber matches (bondy_meta_events:demanded/2). The payload is the same
+%% rendering `bondy.alarm.get` returns, so a subscriber and a poller parse one
+%% shape.
+-define(BONDY_ALARM_RAISED, <<"bondy.alarm.raised">>).
+-define(BONDY_ALARM_UPDATED, <<"bondy.alarm.updated">>).
+-define(BONDY_ALARM_CLEARED, <<"bondy.alarm.cleared">>).
 
 -define(BONDY_EXPORT_FAILED, <<"bondy.export.failed">>).
 -define(BONDY_EXPORT_FINISHED, <<"bondy.export.finished">>).

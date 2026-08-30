@@ -545,16 +545,29 @@ cancel_liveness_timer(#state{liveness_timer = Timer}) ->
 %% `bondy_alarm_handler` id convention — see e.g. the reclamation/AAE
 %% alarms) so `bondy_alarm_active{alarm_id}` (bondy_prometheus_db) carries
 %% the service in its label without a second dimension.
+%%
+%% The structured fields go in `details`, NOT in the description: they are the
+%% keys `bondy_alarm_catalogue` declares for this alarm as `detail_keys`, and
+%% `bondy_alarm_catalogue_test:declared_detail_keys_are_delivered` fails if the
+%% two disagree. `alarm_handler:set_alarm/1` passes the 3-tuple through
+%% unchanged (sasl-4.4 `alarm_handler.erl:103`).
 set_service_down_alarm(#state{
     service_name = ServiceName, endpoint = Endpoint, last_error = LastError
 }) ->
-    Desc = #{service => ServiceName, endpoint => Endpoint, reason => LastError},
-    alarm_handler:set_alarm({{http_connector_service_down, ServiceName}, Desc}).
+    Desc = <<"An HTTP connector service is failing its liveness probe.">>,
+    Details = #{
+        service => ServiceName, endpoint => Endpoint, reason => LastError
+    },
+    alarm_handler:set_alarm(
+        {{http_connector_service_down, ServiceName}, Desc, #{
+            details => Details
+        }}
+    ).
 
 %% @private
 %% Clears the alarm once `liveness.success_threshold` consecutive
 %% probes have succeeded (default 1 — clears on the spot). Idempotent:
-%% `bondy_alarm_handler:clear_alarm/1` on an id that isn't currently
+%% `alarm_handler:clear_alarm/1` on an id that isn't currently
 %% set is a harmless no-op, so calling this on every post-recovery
 %% probe until the threshold is reached is safe.
 maybe_clear_alarm(#state{

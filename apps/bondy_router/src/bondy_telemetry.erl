@@ -30,6 +30,7 @@ Also provides trace-identifier generation.
 -include("bondy.hrl").
 
 -export([trace_id/0]).
+-export([trace_id_of/1]).
 -export([wamp_message/2]).
 -export([wamp_message/3]).
 -export([socket_open/2]).
@@ -71,6 +72,33 @@ value and can be propagated to an OpenTelemetry collector unchanged.
 
 trace_id() ->
     bondy_uuidv7:format(bondy_uuidv7:new(), #{mode => compact_hex}).
+
+-doc """
+The trace id carried by a WAMP options or EVENT.Details map, or `undefined`.
+
+Reads the `'_traceparent'` this node passes through verbatim
+(`?WAMP_TRACE_ATTRS`), per W3C Trace Context: `version-traceid-spanid-flags`,
+with a 32-lowercase-hex trace id.
+
+Returns `undefined` rather than minting one. A caller wanting to correlate has
+nothing to correlate WITH when the request carried no trace, and a fresh id
+would point at nothing while looking like evidence.
+
+An all-zero trace id is invalid per the specification and is rejected here, as
+is any non-hex or mis-sized field — a malformed header must not become a
+plausible-looking correlation handle.
+""".
+-spec trace_id_of(map()) -> binary() | undefined.
+
+trace_id_of(#{'_traceparent' := <<_:2/binary, "-", Rest/binary>>}) ->
+    case Rest of
+        <<TraceId:32/binary, "-", _/binary>> ->
+            valid_trace_id(TraceId);
+        _ ->
+            undefined
+    end;
+trace_id_of(_) ->
+    undefined.
 
 -doc """
 Emits the `[bondy, wamp, message]` telemetry event for a routed WAMP
@@ -649,6 +677,25 @@ ping_rtt(Protocol, Transport, DurationMs) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+valid_trace_id(<<"00000000000000000000000000000000">>) ->
+    undefined;
+valid_trace_id(TraceId) ->
+    case is_lower_hex(TraceId) of
+        true -> TraceId;
+        false -> undefined
+    end.
+
+%% @private
+is_lower_hex(<<C, Rest/binary>>) when
+    (C >= $0 andalso C =< $9) orelse (C >= $a andalso C =< $f)
+->
+    is_lower_hex(Rest);
+is_lower_hex(<<>>) ->
+    true;
+is_lower_hex(_) ->
+    false.
 
 %% @private
 do_wamp_message(M, Measurements, Ctxt) ->

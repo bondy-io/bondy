@@ -73,6 +73,12 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
 """.
 
 -include_lib("kernel/include/logger.hrl").
+
+%% Exported for `bondy_gateway_error_exposure_test`: the lint's rule is the
+%% part worth pinning, and reaching it through the log record would test the
+%% logger instead. Both are pure.
+-export([mops_expressions/1]).
+-export([exposing_refs/2]).
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("http_api.hrl").
 -include("bondy.hrl").
@@ -1479,9 +1485,15 @@ parse_action(<<"options">>, Spec, _) ->
 parse_action(_, _, _) ->
     error(action_type_missing).
 
-parse_response(_, Spec0, Ctxt) ->
+parse_response(Method, Spec0, Ctxt) ->
     OR0 = maps:get(<<"on_result">>, Spec0, ?DEFAULT_RESPONSE),
     OE0 = maps:get(<<"on_error">>, Spec0, ?DEFAULT_RESPONSE),
+    %% Linted BEFORE `mops_eval/2`: an expression that cannot be resolved at
+    %% spec time — which every `action.*` and `security.*` reference is — comes
+    %% back a proxy fun, and a fun cannot be read. This is the author's own
+    %% text.
+    ok = lint_response_exposure(Method, <<"on_result">>, OR0),
+    ok = lint_response_exposure(Method, <<"on_error">>, OE0),
     [OR1, OE1] = [
         maps_utils:validate(
             mops_eval(maps:merge(?DEFAULT_RESPONSE, X), Ctxt),
@@ -1493,6 +1505,79 @@ parse_response(_, Spec0, Ctxt) ->
         <<"on_result">> => OR1,
         <<"on_error">> => OE1
     }.
+
+%% @private
+%% Warns when a response body would hand an HTTP client something written for
+%% an operator.
+%%
+%% Two references do that. `{{action.error}}` renders the WHOLE upstream error
+%% — its URI, args and kwargs, or an upstream service's response body — and is
+%% the obvious thing to write while debugging an endpoint, works, and survives
+%% into production because nothing objects. `{{security.*}}` renders the
+%% caller's `authid`, `groups` and `meta`.
+%%
+%% A WARNING, not a refusal. Publishing a specification is control-plane
+%% authority — someone who can do it can do worse than leak an error string —
+%% so this is not a privilege boundary; the gap it closes is that the safe
+%% thing and the easy thing were not the same thing, and it closes it at the
+%% moment the author can still act. `{{action.error.id}}` is the alternative,
+%% and it names a log record carrying the whole error (see
+%% `bondy_http_gateway_rest_handler:log_action_error/3`).
+%%
+%% NARROWED references pass: `{{action.error.message}}` names one leaf the
+%% author chose. `{{action.error}}` alone does not.
+%%
+%% `security` is linted on BOTH responses; `action.error` only where it
+%% resolves. The default response body is `<<>>`, so a specification that says
+%% nothing about errors exposes nothing and is never warned about.
+lint_response_exposure(Method, Which, Spec) ->
+    Refs = lists:usort(
+        [
+            R
+         || Expr <- mops_expressions(Spec),
+            R <- exposing_refs(Which, Expr)
+        ]
+    ),
+    Refs == [] orelse
+        ?LOG_WARNING(#{
+            description =>
+                "API Gateway response body exposes internal detail to HTTP "
+                "clients; render `{{action.error.id}}` and read the logged "
+                "record instead",
+            method => Method,
+            response => Which,
+            references => Refs
+        }),
+    ok.
+
+%% @private
+%% Every `{{ ... }}` in the term, wherever it is nested. Matching the whole
+%% binary instead would fire on the word "security" in a literal message.
+mops_expressions(Term) when is_binary(Term) ->
+    case
+        re:run(Term, "\\{\\{(.*?)\\}\\}", [
+            global, dotall, {capture, all_but_first, binary}
+        ])
+    of
+        {match, Groups} -> lists:append(Groups);
+        nomatch -> []
+    end;
+mops_expressions(Term) when is_map(Term) ->
+    mops_expressions(maps:values(Term));
+mops_expressions(Term) when is_list(Term) ->
+    lists:append([mops_expressions(E) || E <- Term]);
+mops_expressions(_) ->
+    [].
+
+%% @private
+exposing_refs(Which, Expr) ->
+    Whole =
+        Which == <<"on_error">> andalso
+            re:run(Expr, "\\baction\\.error\\b(?!\\.)", [
+                {capture, none}
+            ]) == match,
+    Security = re:run(Expr, "\\bsecurity\\b", [{capture, none}]) == match,
+    [~"action.error" || Whole] ++ [~"security" || Security].
 
 %% @private
 -doc "Lower level variables and defaults override previous ones.".

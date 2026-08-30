@@ -47,8 +47,8 @@ node that has not made it must still boot.
 -include_lib("kernel/include/logger.hrl").
 -include("bondy_mail.hrl").
 
-%% How much longer than the request's own budget a routed call may take. Covers
-%% the hop itself, not the delivery attempt.
+%% How much longer than the request's own budget a routed call may take.
+%% Covers the hop itself, not the delivery attempt.
 -define(ROUTE_OVERHEAD, 5000).
 
 %% API
@@ -78,8 +78,7 @@ node that has not made it must still boot.
 -doc """
 Send a message and wait for the relay to accept it.
 
-`RealmUri` is the calling realm, taken from the session. It is an argument
-rather than a field so a caller has nowhere to claim another realm.
+`RealmUri` is the calling realm.
 
 Answers `{ok, #{id, status, receipt, attempts}}` once the relay has taken
 responsibility for the message, or `{error, Reason}`. Blocking ends at the
@@ -191,12 +190,12 @@ detail. A failure Bondy cannot describe safely is one it does not describe.
 
 to_error(not_configured) ->
     bondy_error:new(mail_not_configured);
-%% Declared but unusable. Same audience, same remedy, same absence of anything
-%% a caller can do -- but saying "not configured" of a relay that is plainly
-%% configured would send an operator looking in the wrong place.
 to_error({permanent, Class, _}) when
     Class == configuration orelse Class == missing_requirement
 ->
+    %% Declared but unusable. Same audience, same remedy, same absence of
+    %% anything a caller can do -- but saying "not configured" of a relay that
+    %% is plainly configured would send an operator looking in the wrong place.
     bondy_error:new(mail_not_configured, #{
         message =>
             ~"The mail relay is declared but cannot be used as configured."
@@ -228,9 +227,7 @@ to_error({unknown_keys, Keys}) ->
 to_error({header_injection, Name}) ->
     bondy_error:new(invalid_request, #{
         message =>
-            <<
-                "The header '%{key}' contains a line break and was refused."
-            >>,
+            ~"The header '%{key}' contains a line break and was refused.",
         description =>
             <<
                 "A line break in a header would let a value become further "
@@ -266,12 +263,12 @@ to_error({too_many_recipients, Count, Max}) ->
             ~"The message names %{value} recipients; at most %{limit} are allowed.",
         details => #{value => Count, limit => Max}
     });
-%% The worker wraps the same failure once it has encoded the message. Unwrapped
-%% rather than answered bare, so a caller is told the limit whichever of the two
-%% checks refused them -- being told only "too large" by one of them and the
-%% actual number by the other is the kind of difference that sends someone
-%% looking for a second bug.
 to_error({permanent, too_large_payload, {too_large_payload, Size, Max}}) ->
+    %% The worker wraps the same failure once it has encoded the message.
+    %% Unwrapped rather than answered bare, so a caller is told the limit
+    %% whichever of the two checks refused them -- being told only "too large"
+    %% by one of them and the actual number by the other is the kind of
+    %% difference that sends someone looking for a second bug.
     to_error({too_large_payload, Size, Max});
 to_error({permanent, too_large_payload, _}) ->
     bondy_error:new(too_large_payload);
@@ -283,9 +280,9 @@ to_error({transient, queue_full, Name}) ->
     relay_error(mail_queue_full, Name);
 to_error({transient, queue_unavailable, _}) ->
     bondy_error:new(relay_unavailable);
-%% The owner is a Bondy node, not a relay: S004 says exactly this, and saying
-%% the relay is unavailable would send an operator to inspect a healthy one.
 to_error({transient, owner_unavailable, _}) ->
+    %% The owner is a Bondy node, not a relay: S004 says exactly this, and saying
+    %% the relay is unavailable would send an operator to inspect a healthy one.
     bondy_error:new(unavailable);
 to_error({transient, status_unavailable, _}) ->
     bondy_error:new(unavailable);
@@ -299,9 +296,9 @@ to_error({permanent, rejected, Code}) ->
     bondy_error:new(mail_rejected, #{details => reply_code(Code)});
 to_error({transient, deferred, Code}) ->
     bondy_error:new(mail_delivery_failed, #{details => reply_code(Code)});
-%% A message Bondy could not encode is Bondy's defect, not the caller's, and
-%% the catalogue's contract for those is a trace id and nothing else.
 to_error({permanent, encoding_failed, _} = Reason) ->
+    %% A message Bondy could not encode is Bondy's defect, not the caller's, and
+    %% the catalogue's contract for those is a trace id and nothing else.
     bondy_error:internal(Reason);
 to_error({permanent, _, _}) ->
     bondy_error:new(mail_rejected);

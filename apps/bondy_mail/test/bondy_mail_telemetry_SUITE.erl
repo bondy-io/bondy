@@ -602,6 +602,16 @@ clear_alarms() ->
 %% outlives the suite that caused it. Asking `alarm_handler` by name returns
 %% `{error, bad_module}` in a run where any earlier suite started the router.
 %% Both handlers answer `get_alarms`, so address whichever one is installed.
+%% The two handlers do not return the same SHAPE either: Bondy's projects
+%% `{Id, Description}` pairs, while OTP's returns the raw term the producer
+%% raised — the `{Id, Description, Opts}` triple carrying `details`. Normalise
+%% to the pair, so `clear_alarms/0` cannot silently skip an alarm it was meant
+%% to clear.
 get_alarms() ->
     [Handler | _] = gen_event:which_handlers(alarm_handler),
-    gen_event:call(alarm_handler, Handler, get_alarms).
+    [
+        {element(1, A), element(2, A)}
+     || A <- gen_event:call(alarm_handler, Handler, get_alarms),
+        is_tuple(A),
+        tuple_size(A) >= 2
+    ].

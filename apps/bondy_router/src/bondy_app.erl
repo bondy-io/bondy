@@ -15,6 +15,7 @@ network listeners, and tearing them down gracefully on stop.
 -include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
 
+-export([is_ready/0]).
 -export([prep_stop/1]).
 -export([start/2]).
 -export([status/0]).
@@ -41,6 +42,35 @@ status() ->
         vsn => vsn(),
         status => bondy_config:get(status)
     }.
+
+-doc """
+Whether this node should be sent traffic.
+
+The single readiness oracle: `bondy_admin_ready_http_handler` (`/ready`) and
+the `bondy_node_ready` Prometheus gauge both answer from here, so a load
+balancer and a dashboard cannot disagree about the same node.
+
+Three independent conditions, each read from exactly one source:
+
+1. **Boot finished.** `start/2` sets the status once the listeners are up.
+   Necessary but not sufficient — it is set unconditionally.
+2. **The durable `main` DB opened.** Read from
+   `bondy_namespace_catalog:main_status/0`, NOT from the alarm that mirrors it.
+   The status is `persistent_term`-backed and survives an
+   `alarm_handler` crash; the alarm does not, because
+   `bondy_event_handler_watcher` re-installs the handler with `[]` and
+   `bondy_alarm_handler:init/1` then starts empty. Only `failed` disqualifies:
+   `idle` means there was nothing to provision, a legitimate configuration.
+3. **No alarm asks for the node to be drained.** Any active alarm carrying
+   `affects_ready => true`. This is a per-alarm declaration and not a severity
+   threshold — see `bondy_alarm_handler`.
+""".
+-spec is_ready() -> boolean().
+
+is_ready() ->
+    bondy_config:get(status, undefined) == ready andalso
+        bondy_namespace_catalog:main_status() =/= failed andalso
+        not bondy_alarm_handler:affects_ready().
 
 -spec vsn() -> list().
 vsn() ->

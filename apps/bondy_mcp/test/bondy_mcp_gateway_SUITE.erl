@@ -46,7 +46,12 @@ all() ->
         overlay_wamp_api_lifecycle,
         overlay_wamp_api_requires_master_realm,
         curated_mode_exposes_only_overlay_entries,
-        overlay_resource_kind_names_a_topic
+        overlay_resource_kind_names_a_topic,
+        sre_overlay_is_not_loaded_by_default,
+        sre_overlay_ships_no_task_tool,
+        sre_overlay_is_reachable_over_wamp,
+        sre_overlay_documents_load_and_compile,
+        sre_read_entries_call_their_procedures
     ].
 
 init_per_suite(Config) ->
@@ -685,6 +690,180 @@ metrics_manifest_series(_) ->
     ok = wait_until(fun() ->
         mval(bondy_mcp_manifest_entries, ToolGauge) == Tools0
     end).
+
+%% =============================================================================
+%% CASES — the shipped SRE overlay
+%% =============================================================================
+
+%% The posture the curated model rests on: Bondy SHIPS the SRE overlay
+%% documents and does not load them, so a node exposes no `bondy.*` procedure
+%% over MCP until an operator loads one. An auto-load would widen every
+%% agent's surface on upgrade with nobody deciding anything.
+%%
+%% Ordered before the case below, which is the only thing in this suite that
+%% loads them and which restores this state in its `after` clause.
+sre_overlay_is_not_loaded_by_default(_) ->
+    Loaded = [maps:get(<<"id">>, D) || D <- bondy_mcp_gateway:list()],
+    ?assertNot(lists:member(<<"bondy_sre_read">>, Loaded)),
+    ?assertEqual(
+        {error, not_found}, bondy_mcp_gateway:lookup(<<"bondy_sre_read">>)
+    ).
+
+%% The MCP-D32 ratchet. Bondy ships a READ surface and no action surface: a
+%% tool description is prompt, and an action tool reachable over MCP would
+%% put an administrative procedure on the agent surface by the route MCP-D14
+%% does not watch (the realm is a path segment, not a listener property), with
+%% RBAC as its only control.
+%%
+%% Checked against the task catalogue rather than against a list of URIs, so
+%% cataloguing a NEW task cannot quietly widen the shipped surface either.
+sre_overlay_ships_no_task_tool(_) ->
+    Bound = [
+        Uri
+     || D <- bondy_mcp_sre_overlay:documents(),
+        E <- maps:get(<<"entries">>, D),
+        Uri <- [
+            maps:get(
+                <<"wamp_procedure">>,
+                E,
+                maps:get(<<"wamp_topic">>, E, undefined)
+            )
+        ]
+    ],
+    ?assertNot(lists:member(undefined, Bound)),
+    Tasks = [
+        Uri
+     || Uri <- Bound, bondy_task_catalogue:lookup(Uri) =/= error
+    ],
+    ?assertEqual([], Tasks),
+    %% Vacuity guard: the check is only meaningful while tasks exist to catch.
+    ?assert(length(bondy_task_catalogue:list()) >= 8).
+
+%% An operator adopting the SRE surface gets the documents over the same API
+%% they will load them with, so no console step and no copy of the documents
+%% outside the build. It takes the admin authority the rest of the family
+%% takes: what an agent may SEE is the same decision whether or not this call
+%% is the one that performs it.
+sre_overlay_is_reachable_over_wamp(_) ->
+    {ok, #result{args = [Result]}} =
+        api_call(?MASTER_REALM, <<"bondy.mcp.overlay.suggested">>, []),
+    ?assertEqual(
+        #{<<"documents">> => bondy_mcp_sre_overlay:documents()}, Result
+    ),
+    %% Returning them is not loading them.
+    ?assertEqual(
+        {error, not_found}, bondy_mcp_gateway:lookup(<<"bondy_sre_read">>)
+    ),
+    E = api_call_error(?REALM, <<"bondy.mcp.overlay.suggested">>, []),
+    ?assertEqual(?WAMP_NOT_AUTHORIZED, E#error.error_uri).
+
+%% The shipped document passes the REAL load path — the parser plus the two
+%% checks it cannot run pure (every named realm exists, no name belongs to
+%% another document) — and compiles under `curated`, the shipped mode, into
+%% exactly the entries it names and nothing else. Set equality is also the
+%% collision check: a §17 collision exposes NEITHER side, so a colliding name
+%% goes missing here.
+sre_overlay_documents_load_and_compile(_) ->
+    Read = bondy_mcp_sre_overlay:read_document(),
+    ok = bondy_mcp_gateway:load(Read),
+    ok = application:set_env(bondy_mcp, manifest_mode, curated),
+    try
+        #{entries := Entries} = fresh_manifest(?MASTER_REALM),
+        ?assertEqual(lists:sort(names(Read)), lists:sort(maps:keys(Entries))),
+
+        %% Six procedures as tools and three topics as resources. A
+        %% `resource` entry binds a TOPIC, which is why the read API's
+        %% procedures are tools however read-only they are.
+        ?assertEqual(6, census(Entries, tool)),
+        ?assertEqual(3, census(Entries, resource)),
+
+        %% Read-only is CLAIMED on every tool, and nothing here may claim
+        %% otherwise: the annotations are what an agent's own policy reads.
+        lists:foreach(
+            fun(#{kind := tool} = E) ->
+                ?assertMatch(
+                    #{
+                        <<"read_only_hint">> := true,
+                        <<"destructive_hint">> := false
+                    },
+                    maps:get(annotations, E)
+                )
+            end,
+            [E || #{kind := tool} = E <- maps:values(Entries)]
+        )
+    after
+        ok = application:set_env(bondy_mcp, manifest_mode, derived),
+        _ = bondy_mcp_gateway:delete(<<"bondy_sre_read">>),
+        _ = fresh_manifest(?MASTER_REALM)
+    end.
+
+%% Each read entry declares one `@args` schema per positional argument its
+%% procedure takes, and NOTHING in Bondy validates that claim — no code reads
+%% `inputSchema`. So it is checked by CALLING, in both directions:
+%%
+%%   * the declared count must reach the handler and answer;
+%%   * one MORE than the declared count must be refused.
+%%
+%% The second assertion is what catches a count that is too LOW, and it is
+%% needed because too few arguments does not refuse:
+%% `bondy_wamp_api_utils:do_validate_call_args/6` pads a missing first
+%% positional argument with the session's realm URI, so `bondy.alarm.get`
+%% called with nothing at all answers an EMPTY ENVELOPE rather than an error
+%% (§7.5, found not fixed). Requiring the declared count to be the maximum
+%% accepted sidesteps that: an entry declaring one argument too few is caught
+%% by its "one more" call succeeding. Mutation-killed in both directions.
+sre_read_entries_call_their_procedures(_) ->
+    Ctxt = bondy_context:local_context(?MASTER_REALM),
+    Tools = [
+        E
+     || E <- maps:get(<<"entries">>, bondy_mcp_sre_overlay:read_document()),
+        maps:get(<<"kind">>, E) == <<"tool">>
+    ],
+    ?assertEqual(6, length(Tools)),
+    Bad = lists:filtermap(
+        fun(Entry) ->
+            Uri = maps:get(<<"wamp_procedure">>, Entry),
+            N = declared_arity(Entry),
+            case dispatch(call_with(Uri, N), Ctxt) of
+                {reply, #result{}} ->
+                    case dispatch(call_with(Uri, N + 1), Ctxt) of
+                        {reply, #result{}} ->
+                            {true, {Uri, accepts_more_than_declared, N}};
+                        _ ->
+                            false
+                    end;
+                Other ->
+                    {true, {Uri, refused_the_declared_count, N, Other}}
+            end
+        end,
+        Tools
+    ),
+    ?assertEqual([], Bad).
+
+%% =============================================================================
+%% HELPERS — the shipped SRE overlay
+%% =============================================================================
+
+names(Doc) ->
+    [maps:get(<<"name">>, E) || E <- maps:get(<<"entries">>, Doc)].
+
+call_with(Uri, N) ->
+    bondy_wamp_message:call(1, #{}, Uri, lists:duplicate(N, <<"x">>)).
+
+declared_arity(Entry) ->
+    case maps:get(<<"args_schema">>, Entry, undefined) of
+        undefined -> 0;
+        Schema -> maps:get(<<"minItems">>, Schema)
+    end.
+
+%% The refusal path THROWS rather than replying, which is how
+%% `validate_admin_call_args/3` reports a wrong argument count.
+dispatch(M, Ctxt) ->
+    try
+        bondy_wamp_api:handle_call(M, Ctxt)
+    catch
+        Class:Reason -> {Class, Reason}
+    end.
 
 %% =============================================================================
 %% HELPERS — metrics

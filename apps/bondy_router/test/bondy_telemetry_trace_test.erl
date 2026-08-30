@@ -224,3 +224,72 @@ rpc_latency_carries_trace_test() ->
     after
         telemetry:detach(Id)
     end.
+
+%% =============================================================================
+%% `trace_id_of/1` — the CORRELATION handle, as opposed to `trace_meta/1`,
+%% which carries the header onward for PROPAGATION. An alarm stores this one.
+%% =============================================================================
+
+trace_id_of_extracts_the_trace_id_test() ->
+    ?assertEqual(
+        <<"0af7651916cd43dd8448eb211c80319c">>,
+        bondy_telemetry:trace_id_of(#{'_traceparent' => ?TP})
+    ).
+
+%% EVENT.Details is the shape the retained-message producer actually reads:
+%% `bondy_broker:make_event_details/3` passes `?WAMP_TRACE_ATTRS` through
+%% verbatim, so the same parser serves both.
+trace_id_of_reads_event_details_test() ->
+    Details = #{
+        '_traceparent' => ?TP,
+        '_tracestate' => <<"bondy=b7ad6b7169203331">>,
+        topic => <<"com.example.t">>
+    },
+    ?assertEqual(
+        <<"0af7651916cd43dd8448eb211c80319c">>,
+        bondy_telemetry:trace_id_of(Details)
+    ).
+
+no_traceparent_is_undefined_test() ->
+    ?assertEqual(undefined, bondy_telemetry:trace_id_of(#{})),
+    ?assertEqual(
+        undefined, bondy_telemetry:trace_id_of(#{topic => <<"com.example.t">>})
+    ).
+
+%% W3C: an all-zero trace id is invalid. Accepting it would hand an operator a
+%% correlation handle that resolves to nothing while looking real.
+all_zero_trace_id_is_rejected_test() ->
+    TP = <<"00-00000000000000000000000000000000-00f067aa0ba902b7-01">>,
+    ?assertEqual(
+        undefined, bondy_telemetry:trace_id_of(#{'_traceparent' => TP})
+    ).
+
+%% A malformed header must not become a plausible-looking handle. Uppercase is
+%% rejected too: W3C fixes lowercase hex, and a case-varying id would not match
+%% the same trace in Tempo.
+malformed_traceparent_is_undefined_test() ->
+    Bad = [
+        <<"00-tooshort-00f067aa0ba902b7-01">>,
+        <<"00-0AF7651916CD43DD8448EB211C80319C-b7ad6b7169203331-01">>,
+        <<"00-0af7651916cd43dd8448eb211c80319c">>,
+        <<"garbage">>,
+        <<>>
+    ],
+    lists:foreach(
+        fun(TP) ->
+            ?assertEqual(
+                undefined,
+                bondy_telemetry:trace_id_of(#{'_traceparent' => TP}),
+                TP
+            )
+        end,
+        Bad
+    ).
+
+%% A non-binary value cannot be parsed and must not crash the caller — this is
+%% read on a path that is already reporting a fault.
+non_binary_traceparent_is_undefined_test() ->
+    ?assertEqual(
+        undefined,
+        bondy_telemetry:trace_id_of(#{'_traceparent' => not_a_binary})
+    ).

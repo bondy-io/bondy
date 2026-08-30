@@ -62,29 +62,59 @@ handle_call(_, #call{} = M, _) ->
 %% decoding, the error reply and the log record are shared rather than written
 %% twice.
 apply_to_phase(#call{} = M, Ctxt, Op) ->
-    %% `validate_admin_call_args/3`, not `validate_call_args/3`: both read the
-    %% first positional argument as a realm URI and both let a master-realm
-    %% caller through with the arguments untouched, but the non-admin one ALSO
-    %% admits a caller whose own realm URI equals that argument. Whether this
-    %% node accepts connections is not a per-realm decision, so the master realm
-    %% is the only place it can be made.
-    [Arg] = bondy_wamp_api_utils:validate_admin_call_args(M, Ctxt, 1),
+    %% `admin_call_args/3`: the argument is a listener PHASE, not a realm, so
+    %% neither realm-first validator fits — one would complete a zero-argument
+    %% call with the caller's realm URI and read it as a phase name. Whether
+    %% this node accepts connections is not a per-realm decision either, so the
+    %% master realm is the only place it can be made.
+    [Arg] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 1),
     case phase(Arg) of
         error ->
             {reply, invalid_phase_error(M, Arg)};
         Phase ->
-            ok = bondy_listener_manager:Op(Phase),
-            %% An operator changing whether this node accepts connections leaves
-            %% no other trace: the manager does not log, and a suspended
-            %% listener looks identical to one that was never started.
-            ?LOG_NOTICE(#{
-                description =>
-                    "Listener phase suspended or resumed through the admin API",
-                operation => Op,
-                phase => Phase
-            }),
-            {reply, bondy_wamp_message:result(M#call.request_id, #{}, [])}
+            case bondy_wamp_api_utils:dry_run(M) of
+                true -> {reply, phase_dry_run(M, Op, Phase)};
+                false -> {reply, do_apply_to_phase(M, Op, Phase)}
+            end
     end.
+
+%% @private
+%% Whether this node accepts connections is invisible from the WAMP API — no
+%% procedure reports listener state — so the dry run is the ONLY way to see
+%% which listeners a phase names before acting on it. That is also why the
+%% phase decode above matters: `bondy_listener_manager:in_phase/1` answers the
+%% empty list for a name it does not know, and reporting success for having
+%% suspended nothing is the failure this pair guards against.
+phase_dry_run(#call{} = M, Op, Phase) ->
+    Names = bondy_listener_manager:names_in_phase(Phase),
+    Would =
+        case Op of
+            suspend ->
+                <<
+                    "Stop accepting new connections on these listeners. "
+                    "Established connections would be unaffected."
+                >>;
+            resume ->
+                ~"Resume accepting new connections on these listeners."
+        end,
+    bondy_wamp_api_utils:dry_run_result(M, Would, #{
+        ~"phase" => atom_to_binary(Phase, utf8),
+        ~"listeners" => [atom_to_binary(N, utf8) || N <- Names]
+    }).
+
+%% @private
+do_apply_to_phase(#call{} = M, Op, Phase) ->
+    ok = bondy_listener_manager:Op(Phase),
+    %% An operator changing whether this node accepts connections leaves
+    %% no other trace: the manager does not log, and a suspended
+    %% listener looks identical to one that was never started.
+    ?LOG_NOTICE(#{
+        description =>
+            "Listener phase suspended or resumed through the admin API",
+        operation => Op,
+        phase => Phase
+    }),
+    bondy_wamp_message:result(M#call.request_id, #{}, []).
 
 %% @private
 %% Total, and the only binary-to-phase decode there is.
