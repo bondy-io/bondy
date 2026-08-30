@@ -36,6 +36,7 @@ Salted Challenge-Reponse Mechanism data structures.
 -export([auth_message/5]).
 -export([auth_message/7]).
 -export([check_proof/4]).
+-export([compare/2]).
 -export([client_key/1]).
 -export([client_proof/2]).
 -export([client_signature/2]).
@@ -97,7 +98,7 @@ verify_string(String, Data, Params) ->
     SPassword = salted_password(String, Salt, Params),
     ClientKey = client_key(SPassword),
     CStoredKey = stored_key(ClientKey),
-    CStoredKey =:= StoredKey.
+    compare(CStoredKey, StoredKey).
 
 -spec validate_params(Params :: params()) ->
     Validated :: params() | no_return().
@@ -184,6 +185,24 @@ client_signature(StoredKey, AuthMessage) when
     crypto:mac(hmac, hash_function(), StoredKey, AuthMessage).
 
 -doc """
+Constant-time comparison of two binaries.
+
+Mirrors `bondy_wamp_cra:compare/2`. The length check is required because
+`crypto:hash_equals/2` raises `badarg` on operands of different sizes, and a
+SCRAM proof arrives from the wire at whatever length the client chose. A
+length difference is already known to the sender, so answering `false` early
+reveals nothing; equal-length operands take the constant-time path, which is
+what stops the comparison leaking where two same-length values first differ.
+""".
+-spec compare(binary(), binary()) -> boolean().
+
+compare(A, B) when is_binary(A), is_binary(B), byte_size(A) =:= byte_size(B) ->
+    crypto:hash_equals(A, B);
+
+compare(A, B) when is_binary(A), is_binary(B) ->
+    false.
+
+-doc """
 Computes the client proof out of the client key `Key` and the client signature
 `Signature`. See `client_key/2` and `client_signature/2` respectively.
 """.
@@ -228,12 +247,18 @@ server_signature(ServerKey, AuthMessage) ->
 ) ->
     boolean().
 
-check_proof(ProvidedProof, ClientProof, _, _) when
-    ProvidedProof =:= ClientProof
-->
-    true;
-check_proof(ProvidedProof, _, ClientSignature, StoredKey) ->
-    stored_key(client_proof(ProvidedProof, ClientSignature)) =:= StoredKey.
+check_proof(ProvidedProof, ClientProof, ClientSignature, StoredKey) ->
+    %% SECURITY: both comparisons are constant time. The first short-circuits
+    %% the common case; the second recovers the stored key from the proof.
+    %% `client_proof/2` is `crypto:exor/2`, which raises on operands of
+    %% different sizes, so a proof of the wrong length is rejected here rather
+    %% than crashing the caller.
+    compare(ProvidedProof, ClientProof) orelse
+        byte_size(ProvidedProof) =:= byte_size(ClientSignature) andalso
+            compare(
+                stored_key(client_proof(ProvidedProof, ClientSignature)),
+                StoredKey
+            ).
 
 auth_message(AuthId, ClientNonce, ServerNonce, Salt, Iterations) ->
     auth_message(AuthId, ClientNonce, ServerNonce, Salt, Iterations, "", "").

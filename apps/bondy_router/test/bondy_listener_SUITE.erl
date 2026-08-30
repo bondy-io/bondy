@@ -1085,13 +1085,17 @@ wamp_handshake_on_a_listener_with_no_option_block(_Config) ->
     {ok, Sock} = gen_tcp:connect(
         {127, 0, 0, 1}, Port, [binary, {active, false}], 5000
     ),
-    %% `MaxLen' nibble 15 (2^24) and encoding 1 (JSON), both accepted by
-    %% `validate_max_len/1' and `validate_encoding/1'. The server echoes the
-    %% same two nibbles on success, so a correct reply is 4 octets and cannot
-    %% be confused with an error frame (whose second octet's low nibble is 0).
+    %% `MaxLen' nibble 15 (2^24 = 16 MiB) and encoding 1 (JSON). The client
+    %% may ASK for 15, but the server answers with the maximum it will
+    %% actually accept, and that is capped at nibble 13 (2^22 = 4 MiB) by
+    %% `?RAW_MAX_LEN_CODE' so RawSocket agrees with every other carrier.
+    %% Asserting the echoed nibble is 13 rather than 15 is what pins the
+    %% clamp: without it the server would advertise 16 MiB and then drop
+    %% anything over 4 MiB. A correct reply is still 4 octets and cannot be
+    %% confused with an error frame (whose second octet's low nibble is 0).
     ok = gen_tcp:send(Sock, <<16#7F, 15:4, 1:4, 0:8, 0:8>>),
     ?assertEqual(
-        {ok, <<16#7F, 15:4, 1:4, 0:8, 0:8>>}, gen_tcp:recv(Sock, 4, 5000)
+        {ok, <<16#7F, 13:4, 1:4, 0:8, 0:8>>}, gen_tcp:recv(Sock, 4, 5000)
     ),
     ok = gen_tcp:close(Sock),
     ok = bondy_listener:stop(L).
@@ -1133,7 +1137,7 @@ rawsocket_ping_interval_comes_from_the_ping_block(_Config) ->
     %% handshake has to complete before the probe is on its way.
     ok = gen_tcp:send(Sock, <<16#7F, 15:4, 1:4, 0:8, 0:8>>),
     ?assertEqual(
-        {ok, <<16#7F, 15:4, 1:4, 0:8, 0:8>>}, gen_tcp:recv(Sock, 4, 5000)
+        {ok, <<16#7F, 13:4, 1:4, 0:8, 0:8>>}, gen_tcp:recv(Sock, 4, 5000)
     ),
     %% The RawSocket PING frame: 5 reserved bits, frame type 1, then a 24-bit
     %% length — `bondy_wamp_tcp_connection_handler.erl:883`.
@@ -1383,7 +1387,7 @@ partial_proxy_protocol_survives_a_real_connection(_Config) ->
     %% The server echoes the two nibbles it accepted, so a correct reply is 4
     %% octets. Reaching it means the handler got past `source_ip/2`.
     ?assertEqual(
-        {ok, <<16#7F, 15:4, 1:4, 0:8, 0:8>>}, gen_tcp:recv(Sock, 4, 5000)
+        {ok, <<16#7F, 13:4, 1:4, 0:8, 0:8>>}, gen_tcp:recv(Sock, 4, 5000)
     ),
     ok = gen_tcp:close(Sock),
     ok = bondy_listener:stop(L).

@@ -196,7 +196,13 @@ rather than a silently bound phantom listener.
     },
     longpoll => #{
         idle_timeout => 600000,
-        poll_timeout => 30000
+        poll_timeout => 30000,
+        %% Harmonised with `websocket.max_frame_size` and `mcp.max_body_size`,
+        %% both 4194304. Long-poll was the one WAMP carrier with no inbound
+        %% size limit at all: `cowboy_req:read_body/1` returns `{more, ...}`
+        %% for a body it could not read in one pass, which the handler's
+        %% `{ok, Body, Req}` match turned into a badmatch rather than a reply.
+        max_body_size => 4194304
     },
     %% `public_base_uri' is a PRESENT key with a sentinel, not an absent key:
     %% it has no meaningful default (it exists for deployments behind a

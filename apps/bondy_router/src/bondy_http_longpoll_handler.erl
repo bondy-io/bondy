@@ -135,7 +135,16 @@ do_handle_open(Req0, State) ->
 
 %% @private
 do_handle_open_body(Req0, State) ->
-    {ok, Body, Req1} = cowboy_req:read_body(Req0),
+    case read_body(Req0, State) of
+        {error, too_large, ReqTL} ->
+            {ok, ReqTL, State};
+
+        {ok, Body, Req1} ->
+            do_handle_open_body(Body, Req1, State)
+    end.
+
+%% @private
+do_handle_open_body(Body, Req1, State) ->
 
     try json:decode(Body) of
         Decoded ->
@@ -281,34 +290,35 @@ do_handle_send_body(Req0, State) ->
                     ),
                     {ok, Req1, State};
                 ok ->
-                    {ok, Body, Req1} = cowboy_req:read_body(Req0),
-                    bondy_http_transport_session:touch(Pid),
+                    case read_body(Req0, State) of
+                        {error, too_large, ReqTL} ->
+                            {ok, ReqTL, State};
 
-                    case
-                        bondy_http_transport_session:handle_client_message(
-                            Pid, Body
-                        )
-                    of
-                        ok ->
-                            Req2 = cowboy_req:reply(
-                                ?HTTP_ACCEPTED, #{}, <<>>, Req1
-                            ),
-                            {ok, Req2, State};
-                        {error, Reason} ->
-                            ?LOG_WARNING(#{
-                                description =>
-                                    "Error handling client message",
-                                transport_id => TransportId,
-                                reason => Reason
-                            }),
-                            Req2 = reply_error(
-                                ?HTTP_BAD_REQUEST,
-                                <<"message_error">>,
-                                Req1
-                            ),
-                            {ok, Req2, State}
+                        {ok, Body, Req1} ->
+                            do_handle_send_message(Body, Req1, Pid, TransportId, State)
                     end
             end
+    end.
+
+%% @private
+do_handle_send_message(Body, Req1, Pid, TransportId, State) ->
+    bondy_http_transport_session:touch(Pid),
+
+    case bondy_http_transport_session:handle_client_message(Pid, Body) of
+        ok ->
+            Req2 = cowboy_req:reply(?HTTP_ACCEPTED, #{}, <<>>, Req1),
+            {ok, Req2, State};
+
+        {error, Reason} ->
+            ?LOG_WARNING(#{
+                description => "Error handling client message",
+                transport_id => TransportId,
+                reason => Reason
+            }),
+            Req2 = reply_error(
+                ?HTTP_BAD_REQUEST, <<"message_error">>, Req1
+            ),
+            {ok, Req2, State}
     end.
 
 %% @private
@@ -499,6 +509,29 @@ validate_auth_ticket(Pid, Req) ->
                             {error, unauthorized}
                     end
             end
+    end.
+
+%% @private
+%% @private
+%% Bounded body read, harmonised with the MCP endpoint's `read_body/2`. The
+%% cap is the resolved `longpoll.max_body_size`. Passing `length` to
+%% `cowboy_req:read_body/2` bounds a single pass; the size re-check then
+%% rejects a body that filled it exactly, and the non-`ok` clause catches
+%% `{more, _, _}` -- which the previous `{ok, Body, Req} = ...` match turned
+%% into a badmatch instead of a reply.
+read_body(Req0, State) ->
+    Config = maps:get(config, State),
+    MaxBytes = maps:get(max_body_size, Config),
+
+    case cowboy_req:read_body(Req0, #{length => MaxBytes}) of
+        {ok, Body, Req} when byte_size(Body) =< MaxBytes ->
+            {ok, Body, Req};
+
+        {_, _, Req} ->
+            {error, too_large,
+                reply_error(
+                    ?HTTP_PAYLOAD_TOO_LARGE, <<"payload_too_large">>, Req
+                )}
     end.
 
 %% @private

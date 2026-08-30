@@ -198,11 +198,27 @@ response(Challenge, Password, #{salt := Salt} = Params) ->
 response(Challenge, Password, _Params) ->
     response(Challenge, Password).
 
--doc "Constant-time comparison of two binaries.".
+-doc """
+Constant-time comparison of two binaries.
+
+The length check is deliberate and is not a timing leak: `crypto:hash_equals/2`
+raises `badarg` on operands of different sizes, so without it this function
+cannot be used on a wire-supplied value at all — which is why every caller
+comparing an attacker-supplied secret needs it. A length difference is already
+observable to whoever sent the value, so returning `false` early reveals
+nothing the sender did not know.
+
+Equal-length operands take the constant-time path, so the comparison does not
+leak *where* two same-length values first differ, which is the property that
+matters for a secret.
+""".
 -spec compare(binary(), binary()) -> boolean().
 
-compare(A, B) ->
-    crypto:hash_equals(A, B).
+compare(A, B) when is_binary(A), is_binary(B), byte_size(A) =:= byte_size(B) ->
+    crypto:hash_equals(A, B);
+
+compare(A, B) when is_binary(A), is_binary(B) ->
+    false.
 
 -doc """
 Verifies `String` against stored CRA `Data` (salt + salted_password) using

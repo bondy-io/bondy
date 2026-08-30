@@ -237,7 +237,16 @@ name creates it afresh rather than reviving what was there.
     max_frame_size => #{
         alias => <<"max_frame_size">>,
         required => true,
-        default => infinity,
+        %% Harmonised with the other carriers, all 4194304
+        %% (`websocket.max_frame_size`, `mcp.max_body_size`,
+        %% `longpoll.max_body_size`, and the RawSocket handshake ceiling).
+        %% This was `infinity`, which made a bridged peer the only ingress on
+        %% the node with no frame bound at all. A bridge relay is
+        %% cryptosign-authenticated, so this is not a pre-auth surface -- but
+        %% "authenticated" is not "trusted to size its own frames", and an
+        %% operator who genuinely relays larger payloads can raise it per
+        %% bridge.
+        default => 4194304,
         datatype => [integer, {in, [infinity, <<"infinity">>]}],
         validator => fun
             (X) when is_integer(X) -> X > 0;

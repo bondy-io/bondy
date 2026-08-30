@@ -127,7 +127,19 @@ challenge(_, Ctxt, #{password := PWD} = State) ->
     {ok, DataOut :: map(), CBState :: state()}
     | {error, Reason :: any(), CBState :: state()}.
 
-authenticate(Signature, _, _, #{signature := Signature} = State) ->
-    {ok, #{}, State};
+authenticate(Signature, _, _, #{signature := Expected} = State) when
+    is_binary(Signature)
+->
+    %% SECURITY: compare in constant time. Matching `Signature` in the function
+    %% head instead would compare byte-by-byte and stop at the first
+    %% difference, so response time would reveal how much of the expected
+    %% signature a guess got right.
+    case bondy_wamp_cra:compare(Signature, Expected) of
+        true ->
+            {ok, #{}, State};
+        false ->
+            {error, bad_signature, State}
+    end;
+
 authenticate(_, _, _, State) ->
     {error, bad_signature, State}.

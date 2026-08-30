@@ -13,6 +13,21 @@ A ranch handler for the wamp protocol over either tcp or tls transports.
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
 -include("bondy.hrl").
 
+%% Harmonised transport ceiling. The RawSocket handshake lets the CLIENT pick
+%% its maximum message length as `2^(9+N)` for N in [0,15] -- up to 16 MiB --
+%% whereas every other carrier caps at 4 MiB (`websocket.max_frame_size` and
+%% `mcp.max_body_size`, both 4194304, in `bondy_listener_config`). Without a
+%% ceiling the same node accepts a 16 MiB message on one transport and refuses
+%% it on another.
+%%
+%% 4 MiB is 2^22, so the code is N = 22 - 9 = 13. The clamp is applied to the
+%% 4-bit code rather than to the resulting byte count, because the handshake
+%% REPLY echoes the code back: the RawSocket spec has the server answer with
+%% the maximum it will accept, so clamping the byte count alone would leave the
+%% client believing it may send 16 MiB while this handler drops anything over
+%% 4 MiB.
+-define(RAW_MAX_LEN_CODE, 13).
+
 -define(TIMEOUT(S), S#state.idle_timeout).
 
 -record(state, {
@@ -579,7 +594,10 @@ handle_handshake(Len, Enc, State) ->
     end.
 
 %% @private
-init_wamp(Len, Enc, State0) ->
+init_wamp(Len0, Enc, State0) ->
+    %% Clamp before validating, so the stored limit and the handshake reply
+    %% below agree on one value.
+    Len = min(Len0, ?RAW_MAX_LEN_CODE),
     MaxLen = validate_max_len(Len),
     {FrameType, EncName} = validate_encoding(Enc),
     Proto = {raw, FrameType, EncName},

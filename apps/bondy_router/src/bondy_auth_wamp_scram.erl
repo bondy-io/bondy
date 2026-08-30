@@ -227,22 +227,42 @@ do_authenticate(ClientProof, Ctxt, State) ->
     ClientSignature = bondy_password_scram:client_signature(
         StoredKey, AuthMessage
     ),
-    RecClientKey = bondy_password_scram:recovered_client_key(
-        ClientProof, ClientSignature
-    ),
 
-    %% We finally compare the values
-    case bondy_password_scram:recovered_stored_key(RecClientKey) of
-        StoredKey ->
-            ServerSignature = bondy_password_scram:server_signature(
-                ServerKey, AuthMessage
+    %% `recovered_client_key/2` is `crypto:exor/2`, which raises on operands of
+    %% different sizes. `ClientProof` is whatever the client sent, so without
+    %% this check a proof of the wrong length aborts the connection with a
+    %% crash instead of an authentication failure -- reachable pre-auth by
+    %% anyone who can reach the listener.
+    case byte_size(ClientProof) =:= byte_size(ClientSignature) of
+        false ->
+            {error, authentication_failed, State};
+
+        true ->
+            RecClientKey = bondy_password_scram:recovered_client_key(
+                ClientProof, ClientSignature
             ),
-            AuthExtra = #{
-                verifier => <<"v=", (base64:encode(ServerSignature))/binary>>
-            },
-            {ok, AuthExtra, State};
-        _ ->
-            {error, authentication_failed, State}
+            RecStoredKey = bondy_password_scram:recovered_stored_key(
+                RecClientKey
+            ),
+
+            %% SECURITY: constant-time. Matching `StoredKey` as a case pattern
+            %% instead would compare byte-by-byte and stop at the first
+            %% difference, so response time would reveal how much of the
+            %% stored key a guess recovered.
+            case bondy_password_scram:compare(RecStoredKey, StoredKey) of
+                true ->
+                    ServerSignature = bondy_password_scram:server_signature(
+                        ServerKey, AuthMessage
+                    ),
+                    AuthExtra = #{
+                        verifier =>
+                            <<"v=", (base64:encode(ServerSignature))/binary>>
+                    },
+                    {ok, AuthExtra, State};
+
+                false ->
+                    {error, authentication_failed, State}
+            end
     end.
 
 %% TODO

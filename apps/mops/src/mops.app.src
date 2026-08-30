@@ -1,0 +1,16 @@
+{application, mops,
+ [{description, "A mustache-like expression language used by the Bondy API Gateway and Broker Bridge specifications. Vendored into the Bondy umbrella."},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {applications,
+   [kernel,
+    stdlib,
+    utils
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {maintainers, []},
+  {licenses, ["Apache 2.0"]},
+  {links, []}
+ ]}.

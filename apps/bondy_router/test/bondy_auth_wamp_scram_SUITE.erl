@@ -33,6 +33,8 @@ all() ->
 
         %% Wrong signatures
         wrong_signature_fails,
+        short_proof_is_rejected_not_crash,
+        long_proof_is_rejected_not_crash,
 
         %% CIDR filtering
         user1_allowed_from_any_ip,
@@ -377,6 +379,50 @@ wrong_signature_fails(Config) ->
         {error, authentication_failed},
         bondy_auth:authenticate(
             ?WAMP_SCRAM_AUTH, WrongSig, AuthExtra, Ctxt1
+        )
+    ).
+
+short_proof_is_rejected_not_crash(Config) ->
+    %% A SCRAM proof arrives base64-encoded from the wire at whatever length
+    %% the client chose. `recovered_client_key/2` is `crypto:exor/2`, which
+    %% raises on operands of different sizes, so before the length check this
+    %% aborted the connection with a crash rather than an auth failure --
+    %% reachable pre-auth by anyone who can open a socket.
+    RealmUri = ?config(realm_uri, Config),
+    {_, Ctxt1, ChallengeExtra, _} = do_challenge(RealmUri, ?U1),
+
+    AuthExtra = #{
+        <<"nonce">> => maps:get(nonce, ChallengeExtra),
+        <<"channel_binding">> => undefined
+    },
+
+    %% 16 bytes where the signature is 32
+    ShortProof = base64:encode(binary:copy(<<0>>, 16)),
+
+    ?assertMatch(
+        {error, authentication_failed},
+        bondy_auth:authenticate(
+            ?WAMP_SCRAM_AUTH, ShortProof, AuthExtra, Ctxt1
+        )
+    ).
+
+long_proof_is_rejected_not_crash(Config) ->
+    %% The same in the other direction: an over-long proof must also answer
+    %% `authentication_failed` rather than raising.
+    RealmUri = ?config(realm_uri, Config),
+    {_, Ctxt1, ChallengeExtra, _} = do_challenge(RealmUri, ?U1),
+
+    AuthExtra = #{
+        <<"nonce">> => maps:get(nonce, ChallengeExtra),
+        <<"channel_binding">> => undefined
+    },
+
+    LongProof = base64:encode(binary:copy(<<0>>, 64)),
+
+    ?assertMatch(
+        {error, authentication_failed},
+        bondy_auth:authenticate(
+            ?WAMP_SCRAM_AUTH, LongProof, AuthExtra, Ctxt1
         )
     ).
 
