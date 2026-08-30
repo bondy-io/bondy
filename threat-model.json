@@ -1,0 +1,1108 @@
+{
+  "spec_version": 1,
+  "repository": "https://github.com/bondy-io/bondy",
+  "commit": "72f6003e5fa8537dcaa2c4e4db5788142b138a64",
+  "date": "2026-08-29",
+  "scope_subpath": null,
+  "description": "Bondy is an always-on, clustered router for the Web Application Messaging Protocol (WAMP).\nApplications connect over WebSocket, raw TCP, HTTP long-poll, or server-sent events and use it\nto call remote procedures and to publish and subscribe to events. It embeds an HTTP API gateway\nthat translates REST calls into WAMP operations, per-tenant identity and role-based access\ncontrol, and a cluster layer that replicates that security state across nodes. It is deployed as\na network daemon, usually as the front door between untrusted clients and internal services.\n\nNOTE: this export describes an UNPUBLISHED ref (feature/mcp, 168 commits ahead of develop, on no\nremote) plus uncommitted working-tree edits. It is not the contract for any released Bondy.\nAuthority order is prose > yaml > json; this file cannot be used to triage on its own.",
+  "components": [
+    {
+      "name": "f1-session-protocol",
+      "entry_points": [
+        "wamp-call-publish",
+        "wamp-register-subscribe"
+      ],
+      "touches": [
+        "network",
+        "signals"
+      ],
+      "in_scope": true,
+      "provenance": "documented",
+      "source": "threat-model.md s1.2 component-family table"
+    },
+    {
+      "name": "f2-transports",
+      "entry_points": [
+        "wamp-ws-handshake",
+        "wamp-rawsocket-handshake",
+        "wamp-longpoll-sse",
+        "connection-source-ip"
+      ],
+      "touches": [
+        "network",
+        "signals"
+      ],
+      "in_scope": true,
+      "provenance": "documented",
+      "source": "threat-model.md s1.2 component-family table"
+    },
+    {
+      "name": "f3-serialization",
+      "entry_points": [
+        "wamp-decode-message"
+      ],
+      "touches": [
+        "network",
+        "signals"
+      ],
+      "in_scope": true,
+      "provenance": "documented",
+      "source": "threat-model.md s1.2 component-family table"
+    },
+    {
+      "name": "f4-authentication",
+      "entry_points": [
+        "wamp-hello",
+        "wamp-authenticate",
+        "oauth2-oidc-endpoint"
+      ],
+      "touches": [
+        "network",
+        "child_processes",
+        "signals"
+      ],
+      "in_scope": true,
+      "provenance": "documented",
+      "source": "threat-model.md s1.2 component-family table"
+    },
+    {
+      "name": "f5-authorization",
+      "entry_points": [
+
+      ],
+      "touches": [
+        "signals"
+      ],
+      "in_scope": true,
+      "provenance": "documented",
+      "source": "threat-model.md s1.2 component-family table"
+    },
+    {
+      "name": "f6-http-gateway",
+      "entry_points": [
+        "http-gateway-route"
+      ],
+      "touches": [
+        "network",
+        "signals"
+      ],
+      "in_scope": true,
+      "provenance": "documented",
+      "source": "threat-model.md s1.2 component-family table"
+    },
+    {
+      "name": "f7-cluster-replication",
+      "entry_points": [
+        "partisan-peer-message",
+        "bridge-relay-link"
+      ],
+      "touches": [
+        "network",
+        "child_processes",
+        "signals"
+      ],
+      "in_scope": true,
+      "provenance": "documented",
+      "source": "threat-model.md s1.2 component-family table"
+    },
+    {
+      "name": "f8-storage-at-rest",
+      "entry_points": [
+        "own-persisted-bytes"
+      ],
+      "touches": [
+        "filesystem",
+        "env",
+        "signals"
+      ],
+      "in_scope": true,
+      "provenance": "documented",
+      "source": "threat-model.md s1.2 component-family table"
+    },
+    {
+      "name": "f9-egress-connectors",
+      "entry_points": [
+        "mcp-jsonrpc-endpoint"
+      ],
+      "touches": [
+        "network",
+        "signals"
+      ],
+      "in_scope": true,
+      "provenance": "documented",
+      "source": "threat-model.md s1.2 component-family table"
+    },
+    {
+      "name": "f10-admin-control-plane",
+      "entry_points": [
+        "admin-surface"
+      ],
+      "touches": [
+        "network",
+        "filesystem",
+        "signals"
+      ],
+      "in_scope": true,
+      "provenance": "documented",
+      "source": "threat-model.md s1.2 component-family table"
+    }
+  ],
+  "out_of_scope": [
+    {
+      "item": "bench-harness-jepsen",
+      "reason": "test and benchmark harnesses; not in any release artifact",
+      "provenance": "inferred",
+      "source": "open question Q1"
+    },
+    {
+      "item": "examples",
+      "reason": "illustrative configuration; an operator copying it owns the result",
+      "provenance": "inferred",
+      "source": "open question Q1"
+    }
+  ],
+  "trust_boundaries": [
+    {
+      "component": "f1-session-protocol",
+      "boundary": "B1 client boundary: untrusted client to router, crossed by authentication then RBAC on every routed operation",
+      "reachability_precondition": "reachable from bytes a client can send on an established connection",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_rbac.erl:866-870"
+    },
+    {
+      "component": "f2-transports",
+      "boundary": "B1 client boundary: raw bytes from an unauthenticated peer",
+      "reachability_precondition": "reachable from bytes a client can send before authentication",
+      "provenance": "documented",
+      "source": "apps/bondy_wamp/src/bondy_wamp_encoding.erl:573-585"
+    },
+    {
+      "component": "f3-serialization",
+      "boundary": "B1 client boundary: wire bytes decoded before any session exists",
+      "reachability_precondition": "reachable from bytes a client can send on an established connection",
+      "provenance": "documented",
+      "source": "apps/bondy_wamp/src/bondy_wamp_encoding.erl:584"
+    },
+    {
+      "component": "f4-authentication",
+      "boundary": "B1 client boundary: credential material crossing into a session",
+      "reachability_precondition": "reachable from credential material or handshake fields a client controls",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_wamp_protocol.erl:467-472"
+    },
+    {
+      "component": "f5-authorization",
+      "boundary": "B2 realm boundary: tenant to tenant; a session is bound to one realm at authentication",
+      "reachability_precondition": "reachable from an authenticated session's requested URI and permission pair",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_rbac.erl:866-870"
+    },
+    {
+      "component": "f6-http-gateway",
+      "boundary": "B1 client boundary: HTTP request to routed WAMP operation",
+      "reachability_precondition": "reachable from an HTTP request to a route an operator published",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_http_gateway_rest_handler.erl:439-468"
+    },
+    {
+      "component": "f7-cluster-replication",
+      "boundary": "B3 peer plane: node to node, enforced by NOTHING by default",
+      "reachability_precondition": "reachable from bytes a host on the peer plane can send, or from a bridge-relay peer after cryptosign auth",
+      "provenance": "documented",
+      "source": "schema/bondy.schema:4334-4343"
+    },
+    {
+      "component": "f8-storage-at-rest",
+      "boundary": "B4 disk boundary: process to filesystem, enforced by OS permissions",
+      "reachability_precondition": "reachable from data already written by this node, or a local filesystem read",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_keyring.erl moduledoc"
+    },
+    {
+      "component": "f9-egress-connectors",
+      "boundary": "B5 egress boundary: router to external system, initiated by Bondy",
+      "reachability_precondition": "reachable from a payload that reaches a configured connector, or an MCP request",
+      "provenance": "documented",
+      "source": "apps/bondy_mcp/src/bondy_mcp_http_handler.erl moduledoc"
+    },
+    {
+      "component": "f10-admin-control-plane",
+      "boundary": "B1 client boundary: operator control plane on a separate listener and unix socket",
+      "reachability_precondition": "reachable from the admin listener or the admin unix socket",
+      "provenance": "inferred",
+      "source": "open question Q19"
+    }
+  ],
+  "entry_points": [
+    {
+      "entry_point": "wamp-ws-handshake",
+      "parameter": "subprotocol-header",
+      "attacker_controllable": "yes",
+      "component": "f2-transports",
+      "provenance": "documented",
+      "source": "apps/bondy_wamp/src/bondy_wamp_subprotocol.erl:31-32",
+      "caller_must_enforce": "none - wire-atom-safety"
+    },
+    {
+      "entry_point": "wamp-ws-handshake",
+      "parameter": "frame-bytes",
+      "attacker_controllable": "yes",
+      "component": "f2-transports",
+      "provenance": "inferred",
+      "source": "open question Q8",
+      "caller_must_enforce": "the transport enforces a frame, length, or body size cap before the payload is decoded"
+    },
+    {
+      "entry_point": "wamp-rawsocket-handshake",
+      "parameter": "magic-and-serializer-id",
+      "attacker_controllable": "yes",
+      "component": "f2-transports",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_wamp_tcp_connection_handler.erl:713-714",
+      "caller_must_enforce": "none - wire-atom-safety"
+    },
+    {
+      "entry_point": "wamp-rawsocket-handshake",
+      "parameter": "maxlength-negotiation",
+      "attacker_controllable": "yes",
+      "component": "f2-transports",
+      "provenance": "inferred",
+      "source": "open question Q8",
+      "caller_must_enforce": "the transport enforces a frame, length, or body size cap before the payload is decoded"
+    },
+    {
+      "entry_point": "wamp-longpoll-sse",
+      "parameter": "request-body",
+      "attacker_controllable": "yes",
+      "component": "f2-transports",
+      "provenance": "inferred",
+      "source": "open question Q8",
+      "caller_must_enforce": "the transport enforces a frame, length, or body size cap before the payload is decoded"
+    },
+    {
+      "entry_point": "wamp-longpoll-sse",
+      "parameter": "session-token",
+      "attacker_controllable": "yes",
+      "component": "f2-transports",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_session_id.erl:51-75",
+      "caller_must_enforce": "none - session-id-entropy"
+    },
+    {
+      "entry_point": "wamp-decode-message",
+      "parameter": "wire-bytes-json-msgpack-cbor",
+      "attacker_controllable": "yes",
+      "component": "f3-serialization",
+      "provenance": "documented",
+      "source": "apps/bondy_wamp/src/bondy_wamp_encoding.erl:573-585",
+      "caller_must_enforce": "none - wire-atom-safety"
+    },
+    {
+      "entry_point": "wamp-decode-message",
+      "parameter": "wire-bytes-erl",
+      "attacker_controllable": "yes",
+      "component": "f3-serialization",
+      "provenance": "documented",
+      "source": "apps/bondy_wamp/src/bondy_wamp_encoding.erl:584",
+      "caller_must_enforce": "none - wire-atom-safety"
+    },
+    {
+      "entry_point": "wamp-hello",
+      "parameter": "realm-uri",
+      "attacker_controllable": "yes",
+      "component": "f4-authentication",
+      "provenance": "inferred",
+      "source": "open question Q8",
+      "caller_must_enforce": "request an existing realm"
+    },
+    {
+      "entry_point": "wamp-hello",
+      "parameter": "authid-authmethods-authextra",
+      "attacker_controllable": "yes",
+      "component": "f4-authentication",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_auth.erl",
+      "caller_must_enforce": "none - generic-auth-failure"
+    },
+    {
+      "entry_point": "wamp-authenticate",
+      "parameter": "signature-or-credential",
+      "attacker_controllable": "yes",
+      "component": "f4-authentication",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_wamp_protocol.erl:467-472",
+      "caller_must_enforce": "none - auth-rate-limited"
+    },
+    {
+      "entry_point": "connection-source-ip",
+      "parameter": "peer-address",
+      "attacker_controllable": "no",
+      "component": "f2-transports",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_http_proxy_protocol.erl:80-95",
+      "caller_must_enforce": "set trusted_proxies to the balancer CIDRs so per-source attribution is correct"
+    },
+    {
+      "entry_point": "wamp-call-publish",
+      "parameter": "procedure-or-topic-uri",
+      "attacker_controllable": "yes",
+      "component": "f1-session-protocol",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_rbac.erl:866-870",
+      "caller_must_enforce": "none - authz-default-deny"
+    },
+    {
+      "entry_point": "wamp-call-publish",
+      "parameter": "arguments-and-kwargs",
+      "attacker_controllable": "yes",
+      "component": "f1-session-protocol",
+      "provenance": "documented",
+      "source": "threat-model.md s1.3 non-goal",
+      "caller_must_enforce": "the callee validates its own arguments; Bondy does not inspect payloads"
+    },
+    {
+      "entry_point": "wamp-call-publish",
+      "parameter": "options-map",
+      "attacker_controllable": "yes",
+      "component": "f1-session-protocol",
+      "provenance": "inferred",
+      "source": "open question Q8",
+      "caller_must_enforce": "non-standard options are underscore-prefixed and declared"
+    },
+    {
+      "entry_point": "wamp-register-subscribe",
+      "parameter": "uri-and-match-policy",
+      "attacker_controllable": "yes",
+      "component": "f1-session-protocol",
+      "provenance": "inferred",
+      "source": "open question Q8",
+      "caller_must_enforce": "none - authz-default-deny"
+    },
+    {
+      "entry_point": "http-gateway-route",
+      "parameter": "path-query-headers-body",
+      "attacker_controllable": "yes",
+      "component": "f6-http-gateway",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_http_gateway_rest_handler.erl:439-468",
+      "caller_must_enforce": "none - gateway-fail-closed"
+    },
+    {
+      "entry_point": "http-gateway-route",
+      "parameter": "api-specification",
+      "attacker_controllable": "no",
+      "component": "f6-http-gateway",
+      "provenance": "inferred",
+      "source": "open question Q9",
+      "caller_must_enforce": "the operator controls who may publish API specifications and what forward targets they name"
+    },
+    {
+      "entry_point": "oauth2-oidc-endpoint",
+      "parameter": "token-code-state",
+      "attacker_controllable": "yes",
+      "component": "f4-authentication",
+      "provenance": "documented",
+      "source": "?ALLOWED_JWT_ALGS in apps/bondy_router/include/bondy_security.hrl",
+      "caller_must_enforce": "none - jwt-alg-pinned"
+    },
+    {
+      "entry_point": "mcp-jsonrpc-endpoint",
+      "parameter": "authorization-header",
+      "attacker_controllable": "yes",
+      "component": "f9-egress-connectors",
+      "provenance": "documented",
+      "source": "apps/bondy_mcp/src/bondy_mcp_http_handler.erl moduledoc s6",
+      "caller_must_enforce": "none - generic-auth-failure"
+    },
+    {
+      "entry_point": "mcp-jsonrpc-endpoint",
+      "parameter": "mcp-protocol-headers",
+      "attacker_controllable": "yes",
+      "component": "f9-egress-connectors",
+      "provenance": "documented",
+      "source": "apps/bondy_mcp/src/bondy_mcp_http_handler.erl moduledoc s10.1",
+      "caller_must_enforce": "none - the handler refuses a header that disagrees with the body"
+    },
+    {
+      "entry_point": "mcp-jsonrpc-endpoint",
+      "parameter": "mcp-namespace-kwargs",
+      "attacker_controllable": "yes",
+      "component": "f9-egress-connectors",
+      "provenance": "documented",
+      "source": "apps/bondy_mcp/src/bondy_mcp_http_handler.erl moduledoc s11.1",
+      "caller_must_enforce": "none - mcp-state-sealed"
+    },
+    {
+      "entry_point": "partisan-peer-message",
+      "parameter": "replicated-crdt-bytes",
+      "attacker_controllable": "yes",
+      "component": "f7-cluster-replication",
+      "provenance": "documented",
+      "source": "deployment/CLUSTER_MTLS.md Securing the Bondy cluster peer plane; schema/bondy.schema:4334-4343",
+      "caller_must_enforce": "isolate the peer network, or enable TLS with verify_peer and a private CA"
+    },
+    {
+      "entry_point": "bridge-relay-link",
+      "parameter": "cryptosign-handshake",
+      "attacker_controllable": "yes",
+      "component": "f7-cluster-replication",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_bridge_relay_server.erl:360-381",
+      "caller_must_enforce": "none - the link is cryptosign-authenticated"
+    },
+    {
+      "entry_point": "own-persisted-bytes",
+      "parameter": "projection-and-checkpoint-values",
+      "attacker_controllable": "no",
+      "component": "f8-storage-at-rest",
+      "provenance": "documented",
+      "source": "apps/bondy_oplog/src/bondy_oplog_compaction_checkpoint_file.erl:170-176",
+      "caller_must_enforce": "none - own-bytes-rule"
+    },
+    {
+      "entry_point": "admin-surface",
+      "parameter": "admin-request",
+      "attacker_controllable": "yes",
+      "component": "f10-admin-control-plane",
+      "provenance": "inferred",
+      "source": "open question Q19",
+      "caller_must_enforce": "restrict the admin listener and unix socket to trusted operators"
+    }
+  ],
+  "environment": {
+    "assumes": [
+      "Erlang/OTP 28 or 29; releases ship OTP 29",
+      "BEAM process isolation: per-session state lives in a process, not shared mutable memory",
+      "the cluster peer plane sits on a private, operator-controlled network (load-bearing)",
+      "the data directory is private to the Bondy user; the release image runs non-root",
+      "clocks are roughly synchronized; hybrid logical clocks tolerate bounded skew"
+    ],
+    "does_not": [
+      "spawn OS child processes on any request path (scan not exhaustive; a dependency could)",
+      "inspect, validate, or sanitize application call arguments or event payloads",
+      "authenticate cluster peers by default",
+      "encrypt realm signing keys at rest by default"
+    ],
+    "provenance": "inferred",
+    "source": "open question Q4"
+  },
+  "adversaries": {
+    "in_scope": [
+      "anonymous-network-client",
+      "authenticated-low-privilege-client",
+      "malicious-callee",
+      "llm-agent-via-mcp",
+      "bridge-relay-peer"
+    ],
+    "out_of_scope": [
+      "peer-plane-on-path-attacker",
+      "operator-master-realm-admin",
+      "host-or-container-compromise"
+    ],
+    "threshold": "none. Replication is CRDT-based with no quorum, no voting, and no Byzantine tolerance; a single rogue peer with peer-plane access can inject security state.",
+    "provenance": "documented",
+    "source": "schema/bondy.schema:4334-4343"
+  },
+  "properties_provided": [
+    {
+      "property": "wire-atom-safety",
+      "conditions": "any serializer reachable from an untrusted connection; wire path only, not own persisted bytes",
+      "violation_symptom": "crash",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_wamp/src/bondy_wamp_encoding.erl:573-585"
+    },
+    {
+      "property": "authz-default-deny",
+      "conditions": "sessions in a realm with security_enabled true",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_rbac.erl:866-870"
+    },
+    {
+      "property": "gateway-fail-closed",
+      "conditions": "only an explicitly empty security map is served anonymously",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_http_gateway_rest_handler.erl:439-468"
+    },
+    {
+      "property": "jwt-alg-pinned",
+      "conditions": "verify_strict against a static asymmetric-only allow-list",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "?ALLOWED_JWT_ALGS in apps/bondy_router/include/bondy_security.hrl"
+    },
+    {
+      "property": "password-kdf",
+      "conditions": "default 600000 iterations; the translation accepts 4096 to 10000000",
+      "violation_symptom": "info-leak",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "schema/bondy.schema:1492-1503"
+    },
+    {
+      "property": "keyring-fail-closed",
+      "conditions": "master_key configured but unresolvable fails closed rather than writing plaintext",
+      "violation_symptom": "info-leak",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_keyring.erl moduledoc"
+    },
+    {
+      "property": "at-rest-aead",
+      "conditions": "at-rest encryption enabled; seal and open variants bind realm URI and kid as AAD",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_keyring.erl moduledoc Envelope format"
+    },
+    {
+      "property": "own-bytes-rule",
+      "conditions": "own persisted bytes decode plain; peer-shipped bytes decode with [safe]",
+      "violation_symptom": "crash",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_oplog/src/bondy_oplog_compaction_checkpoint_file.erl:170-176"
+    },
+    {
+      "property": "generic-auth-failure",
+      "conditions": "covers the returned ABORT reason only, not timing",
+      "violation_symptom": "info-leak",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "bondy_wamp_protocol:abort_message/1 genericization"
+    },
+    {
+      "property": "session-id-entropy",
+      "conditions": "the full session id only; the 56-bit external id is a public protocol identifier, not a secret",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_session_id.erl:51-75"
+    },
+    {
+      "property": "identity-authoritative",
+      "conditions": "caller identity is taken from the router session context, never from the client message",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_dealer.erl:2551-2558"
+    },
+    {
+      "property": "mcp-indistinguishable",
+      "conditions": "hidden and absent manifest entries answer identically; the denial audit record is off-wire",
+      "violation_symptom": "info-leak",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_mcp/src/bondy_mcp_http_handler.erl moduledoc"
+    },
+    {
+      "property": "mcp-state-sealed",
+      "conditions": "requestState is sealed and client _mcp-namespace kwargs are refused",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_mcp/src/bondy_mcp_http_handler.erl moduledoc s11.1"
+    },
+    {
+      "property": "mcp-stateless",
+      "conditions": "the modern per-request edge only; the handshake era keeps session state",
+      "violation_symptom": "info-leak",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_mcp/src/bondy_mcp_http_handler.erl moduledoc s5.2"
+    },
+    {
+      "property": "cluster-insecure-refusal",
+      "conditions": "fires only when cluster.peer_discovery.enabled is on",
+      "violation_symptom": "bad-data-accepted",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "deployment/CLUSTER_MTLS.md Securing the Bondy cluster peer plane; schema/bondy.schema:4334-4343"
+    },
+    {
+      "property": "proxy-trust-bounded",
+      "conditions": "forwarding headers move source_ip only from a peer inside a configured trusted_proxies CIDR; with the list unset no peer is trusted",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_http_proxy_protocol.erl:80-95"
+    },
+    {
+      "property": "auth-rate-limited",
+      "conditions": "the auth class limiter is consulted before the credential is checked; this claims consultation, not that it always answers",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_wamp_protocol.erl:467-472"
+    },
+    {
+      "property": "safe-defaults",
+      "conditions": "the default configuration of a fresh install only; not a deployment the operator has opened up",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "schema/bondy.schema:1195-1215"
+    },
+    {
+      "property": "realm-isolation",
+      "conditions": "exact matches an identical URI only; prefix matches on a component boundary; wildcard is component-wise with equal component count. The EMPTY prefix matches every URI by design.",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_wamp/src/bondy_wamp_uri.erl:79-113, pinned by bondy_wamp_uri_SUITE:237-273 and bondy_rbac_SUITE:893-898"
+    },
+    {
+      "property": "issuer-trust",
+      "conditions": "a ticket authrealm is accepted only when it equals the target realm or that realm's configured SSO realm",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_realm.erl:1085-1091"
+    },
+    {
+      "property": "control-plane-boundary",
+      "conditions": "admin-only procedures require a master-realm session; other meta-API calls bind the realm argument to the session realm unless the session is on the master realm",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_wamp_api_utils.erl:151-190"
+    },
+    {
+      "property": "admin-socket-perms",
+      "conditions": "the admin_local socket only; mode 0600 in a 0700 directory, and the listener refuses to start if the mode cannot be set. Other UDS listeners are NOT narrowed.",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_listener_ranch.erl:425-445"
+    },
+    {
+      "property": "revocation-invalidation",
+      "conditions": "node-local: every grant and revoke invalidates this node's cached contexts and the session re-resolves on its next authorization. The 300s epoch is a backstop. The cross-node window is disclaimed separately.",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_rbac.erl:72 and :1179-1180"
+    },
+    {
+      "property": "complexity-bound",
+      "conditions": "THRESHOLD: super-linear work in message size, subscription count, registry size or session count on a routing/registry/decode path is a bug; a constant factor is not. Does not cover AAE work under divergence, absolute traffic volume, or work caused in a downstream system.",
+      "violation_symptom": "hang, unbounded-allocation",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-08"
+    },
+    {
+      "property": "mail-header-integrity",
+      "conditions": "header NAMES and VALUES on the mail path only; not message bodies and not the other connectors. CR/LF/NUL are REJECTED, never stripped or folded. Routing and identity headers are set from the request and relay config; caller copies are refused.",
+      "violation_symptom": "bad-data-accepted",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-08"
+    },
+    {
+      "property": "token-lifetime",
+      "conditions": "Bondy-issued credentials only. JWT: rejected once iat + exp + 120s has passed, where exp is a DURATION not an RFC 7519 NumericDate, and the leeway EXTENDS validity. Ticket: rejected once expires_at is within 120s of now, where the leeway SHORTENS validity. No nbf is issued or checked.",
+      "violation_symptom": "bad-data-accepted",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-08"
+    },
+    {
+      "property": "constant-time-compare",
+      "conditions": "covers every credential comparison. CRA and SCRAM call compare/2; stored passwords use crypto:hash_equals/2 directly; cryptosign and tokens delegate to Ed25519 and jose verify_strict. compare/2 answers false on unequal lengths rather than raising. Fixed 2026-08-30 - both CRA and SCRAM previously hand-compared.",
+      "violation_symptom": "info-leak",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-08"
+    },
+    {
+      "property": "convergence",
+      "conditions": "GIVEN HONEST REPLICAS. Merge is commutative, idempotent under redelivery, and convergent for the supported cell types. Does not cover the reclamation-versus-in-flight-read interaction (Q17), nor a Byzantine participant.",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-08"
+    },
+    {
+      "property": "session-teardown",
+      "conditions": "registrations and subscriptions keyed by the ref session id; registrations are removed BEFORE promises are flushed so a concurrent CALL cannot pick a departing callee. Cluster broadcast is suppressed; other nodes learn by replication.",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_dealer.erl:366-376 and bondy_broker.erl:150-160"
+    },
+    {
+      "property": "hlc-monotonic",
+      "conditions": "PER-REPLICA only. Strictly increasing 64-bit value that never regresses across backwards system-clock jumps, repeated same-millisecond calls, or peer events from clocks ahead. Logical overflow clamps and advances physical rather than wrapping. Says nothing about agreement BETWEEN replicas - see clock-skew.",
+      "violation_symptom": "wrong-output",
+      "severity_tier": "correctness",
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-08"
+    },
+    {
+      "property": "no-partial-session",
+      "conditions": "a session is created only on the success branch; the error clause never reaches bondy_session_manager:open/3. Out-of-order messages stop the connection rather than mutating state.",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_wamp_protocol.erl:547-569 and :617"
+    },
+    {
+      "property": "mops-bounded",
+      "conditions": "mops is the umbrella app apps/mops as of 2026-08-30, no longer an external git dep tracked on {branch, master}. Verified: 34 apply_op clauses, no erlang:apply / list_to_atom / binary_to_atom, one binary_to_existing_atom that cannot mint atoms, unknown operators raise invalid_expression.",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-08"
+    },
+    {
+      "property": "reclaim-safe-read",
+      "conditions": "reclamation runs inside the applier, the sole writer, so a discard cannot interleave with an apply to the same cell; the overlay fence discards a cell only when nothing is pending for its key. The strict boundary keeps a tombstone whose HLC equals the stability point.",
+      "violation_symptom": "wrong-output",
+      "severity_tier": "correctness",
+      "provenance": "documented",
+      "source": "doc/guides/database/deletion_and_reclamation.md, The sweep"
+    },
+    {
+      "property": "session-confinement",
+      "conditions": "per-session state is process-local. Bondy is NOT share-nothing: the projection (single writer), the HLC (atomics + compare_exchange), the registry (ETS) and the rate-limit buckets (ETS) are deliberately shared and are OUTSIDE this property. A race inside one of those is a real finding.",
+      "violation_symptom": "data-race, info-leak",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-08"
+    }
+  ],
+  "properties_not_provided": [
+    {
+      "property": "peer-plane",
+      "reason": "Partisan node-to-node traffic only; not client listeners and not the cryptosign-authenticated bridge relay. Rests on a STATED limit.",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "deployment/CLUSTER_MTLS.md Securing the Bondy cluster peer plane; schema/bondy.schema:4334-4343"
+    },
+    {
+      "property": "byzantine-tolerance",
+      "reason": "no quorum or voting; a single rogue peer with peer-plane access can inject security state",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "deployment/CLUSTER_MTLS.md Securing the Bondy cluster peer plane; schema/bondy.schema:4334-4343"
+    },
+    {
+      "property": "at-rest-plaintext",
+      "reason": "covers only the claim that the shipped DEFAULT is plaintext; plaintext despite master_key being set, or absence of any mechanism, routes VALID via keyring-fail-closed. Rests on a STATED limit.",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_keyring.erl moduledoc"
+    },
+    {
+      "property": "rate-limit-failopen",
+      "reason": "the node, listener, and realm scopes of bondy_rate_limit; does not cover the frame-size caps, which are hard limits. Rests on a STATED limit.",
+      "false_friend": true,
+      "provenance": "documented",
+      "source": "_plans/2026-08-29-rate-limit-scopes-design.md Fail-open at every scope"
+    },
+    {
+      "property": "rate-limit-not-authz",
+      "reason": "all rate-limit classes; a refusal is a transient signal, never a permission verdict",
+      "false_friend": true,
+      "provenance": "documented",
+      "source": "_plans/2026-08-29-rate-limit-scopes-design.md R2"
+    },
+    {
+      "property": "realm-quota-per-node",
+      "reason": "the realm total budget kind in v1; buckets are node-local",
+      "false_friend": true,
+      "provenance": "documented",
+      "source": "_plans/2026-08-29-rate-limit-scopes-design.md R4"
+    },
+    {
+      "property": "audit-failopen",
+      "reason": "bondy_mcp_audit:record/2 only",
+      "false_friend": true,
+      "provenance": "documented",
+      "source": "apps/bondy_mcp/src/bondy_mcp_audit.erl:43-45"
+    },
+    {
+      "property": "trust-levels",
+      "reason": "INVOCATION.Details and EVENT.Details trust_level fields",
+      "false_friend": true,
+      "provenance": "documented",
+      "source": "README.md Call Trust Levels WIP always 0"
+    },
+    {
+      "property": "payload-inspection",
+      "reason": "all routed call arguments and event payloads, including Payload Passthru Mode which the router cannot read",
+      "false_friend": true,
+      "provenance": "documented",
+      "source": "README.md Payload Passthru Mode"
+    },
+    {
+      "property": "gateway-egress",
+      "reason": "the forward action; the target comes from the operator spec, not the request, unless a spec templates request data into it",
+      "false_friend": false,
+      "provenance": "inferred",
+      "source": "open question Q9"
+    },
+    {
+      "property": "egress-taint",
+      "reason": "Kafka, AWS SNS, Mailgun, SendGrid, SMTP, and HTTP connector payloads",
+      "false_friend": false,
+      "provenance": "inferred",
+      "source": "open question Q18"
+    },
+    {
+      "property": "dos-beyond-limits",
+      "reason": "does not cover the frame caps or the KDF cost, which are stated limits",
+      "false_friend": false,
+      "provenance": "inferred",
+      "source": "open question Q12"
+    },
+    {
+      "property": "client-mtls-request-only",
+      "reason": "covers listeners.$name.tls.verify; requiring a certificate needs fail_if_no_peer_cert on as well. Distinct from the cluster peer plane. Rests on a STATED limit.",
+      "false_friend": true,
+      "provenance": "documented",
+      "source": "schema/bondy.schema:3024-3040"
+    },
+    {
+      "property": "clock-skew",
+      "reason": "no bound on skew BETWEEN replicas and no rejection of a far-future peer timestamp. A far-future stamp wins last-writer-wins indefinitely, so on a security cell a later honest write cannot overwrite it. Reaching that needs peer-plane access, already excluded by the adversary model. Per-replica monotonicity is claimed as hlc-monotonic. Rests on a STATED limit.",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-08"
+    },
+    {
+      "property": "token-nbf",
+      "reason": "issued JWTs and tickets; Bondy neither issues nor checks nbf, so a token is usable from the moment it is signed. Rests on a STATED limit.",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-08"
+    },
+    {
+      "property": "delivery-durability",
+      "reason": "covers pub/sub delivery; Event Retention (a retained last value per topic) is a different feature that does exist",
+      "false_friend": true,
+      "provenance": "documented",
+      "source": "README.md Advanced Pub/Sub feature list, Event History and Testament unchecked"
+    },
+    {
+      "property": "revocation-immediacy",
+      "reason": "covers ONLY the cross-node window: another node honours the old grant until replication reaches it, bounded by the 300s context epoch. Invalidation on the writing node is immediate and is claimed as revocation-invalidation. A revocation unhonoured on the writing node, or still honoured after the epoch, routes VALID. Rests on a STATED limit.",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_rbac.erl:72 and :151"
+    }
+  ],
+  "downstream_responsibilities": [
+    "bind the peer port to a private interface, or enable cluster TLS with verify_peer and a private cluster CA; TLS without verify_peer does not discharge this",
+    "set security.admin_user.password before first boot, and the same value on every node of a cluster",
+    "leave security.allow_anonymous_user at local unless anonymous access from the network is intended",
+    "never run a production realm with security_enabled false; it disables authentication and RBAC for that realm",
+    "when proxy_protocol is enabled set trusted_proxies to the balancer CIDRs, so per-source attribution and IP-scoped credential sources remain meaningful",
+    "if client mTLS is relied on, set fail_if_no_peer_cert on; verify_peer alone only requests a certificate",
+    "a subscriber that was disconnected does not receive what it missed; use a broker bridge or an application store for durability",
+    "configure security.master_key if realm signing keys must be encrypted at rest",
+    "put a hard limiter in front of Bondy if a real request ceiling is required; the built-in limiter fails open",
+    "multiply a realm total budget by node count to get the cluster-wide ceiling",
+    "validate call arguments in the callee; Bondy does not inspect payloads",
+    "escape routed payloads for the consuming sink before rendering, logging, or querying",
+    "treat API-specification authorship as control-plane authority; a spec author chooses each endpoint's security scheme and any forward target",
+    "the transport enforces a frame or length cap; a deployment needing a smaller bound sets it at the listener",
+    "clients must name an existing realm in HELLO",
+    "non-standard WAMP options are underscore-prefixed and declared",
+    "restrict the admin listener and the admin unix socket to trusted operators"
+  ],
+  "known_misuse": [
+    {
+      "pattern": "following the README quick-start's DELETE /realms/{uri}/security_enabled step on a realm that then carries real traffic",
+      "why_unsafe": "It short-circuits authorization entirely: bondy_rbac:authorize/3 returns ok without checking any grant, so every default-deny guarantee is void for that realm.",
+      "instead": "create users, groups, and grants and leave security enabled; treat the quick-start realm as disposable"
+    },
+    {
+      "pattern": "binding the Partisan peer port to 0.0.0.0 or routing it over a shared network to join distant nodes",
+      "why_unsafe": "The peer plane is unauthenticated and plaintext by default. It carries replicated credentials and realm signing keys, and there is no quorum to outvote a rogue peer.",
+      "instead": "use a bridge relay, which is cryptosign-authenticated and per-realm, and keep the peer plane on one private network"
+    },
+    {
+      "pattern": "enabling proxy_protocol while leaving trusted_proxies empty, collapsing every request onto the balancer's address",
+      "why_unsafe": "Not a spoofing hole, since Bondy ignores forwarding headers from untrusted peers. The failure is quieter: every request is attributed to the balancer, collapsing per-source rate limiting and IP-scoped credential sources onto one address.",
+      "instead": "set trusted_proxies to the balancer CIDRs, and mode strict if requests without proxy information should be dropped"
+    },
+    {
+      "pattern": "setting a realm total rate limit expecting it to bound the whole cluster",
+      "why_unsafe": "Buckets are node-local, so the real ceiling is the configured total multiplied by node count, and the limiter fails open on top of that.",
+      "instead": "divide the intended cluster ceiling by node count, and enforce hard ceilings upstream"
+    },
+    {
+      "pattern": "branching or alerting on rate-limit refusals as though they were permission denials",
+      "why_unsafe": "Rate limiting is capacity policy, not authorization. A refusal means later, not no.",
+      "instead": "branch on the WAMP not_authorized error for permission; treat 429 as transient backpressure"
+    },
+    {
+      "pattern": "one prototype realm supplying groups and grants to realms belonging to different tenants",
+      "why_unsafe": "Inherited grants cross the realm boundary by design, weakening tenant isolation for every realm that inherits.",
+      "instead": "keep a prototype realm within a single trust domain"
+    },
+    {
+      "pattern": "setting tls.verify to verify_peer on a client listener and leaving fail_if_no_peer_cert off, believing client certificates are required",
+      "why_unsafe": "verify_peer alone only requests a client certificate. A client presenting none still completes the handshake, so an authentication control the operator believes is mandatory is in fact optional.",
+      "instead": "set fail_if_no_peer_cert on alongside verify_peer, and confirm a certificate-less client is refused"
+    },
+    {
+      "pattern": "an API specification whose forward action builds its target URL from request-supplied values",
+      "why_unsafe": "Bondy issues the outbound request. The target is meant to carry operator authority, not request data.",
+      "instead": "keep forward targets static in the specification"
+    }
+  ],
+  "known_non_findings": [
+    {
+      "reported_as": "binary_to_term/1 called without [safe] in bondy_oplog_crdt_* decode_state/1 or the compaction checkpoint decode/1",
+      "why_safe": "Covers only the f8-storage-at-rest component(s), and only the unsafe-deserialization-atom-exhaustion symptom. Discharged by own-bytes-rule. Outside those components or that symptom this entry does not apply and the report must be triaged normally.",
+      "cites": "properties_provided[7]",
+      "suppression": "the sink is a decode_state/1 or checkpoint decode/1 in those modules; the bytes decoded were written by this node; and the report does not demonstrate a path by which peer-shipped or client-shipped bytes reach that call. If that last condition fails it is a real finding and routes VALID."
+    },
+    {
+      "reported_as": "rand:uniform/1 used to generate a session identifier at bondy_session_id.erl:54",
+      "why_safe": "Covers only the f1-session-protocol component(s), and only the weak-prng-predictable-identifier symptom. Discharged by session-id-entropy. Outside those components or that symptom this entry does not apply and the report must be triaged normally.",
+      "cites": "properties_provided[9]",
+      "suppression": "the sink is bondy_session_id:new/0 at line 54; the claim is that the FULL session id is guessable; and the report does not identify a mechanism treating the 56-bit external id alone as a secret or capability. If that last condition fails it is a real finding, because the external id is public by construction."
+    }
+  ],
+  "dispositions": [
+    "valid",
+    "valid_hardening",
+    "out_of_model_trusted_input",
+    "out_of_model_adversary",
+    "out_of_model_unsupported_component",
+    "out_of_model_non_default_build",
+    "by_design_disclaimed",
+    "known_non_finding",
+    "model_gap"
+  ],
+  "open_questions": [
+
+  ],
+  "confidence": {
+    "documented": 179,
+    "inferred": 0
+  },
+  "build_variants": [
+    {
+      "name": "cluster.tls.enabled",
+      "default": "off",
+      "effect": "voids peer-plane",
+      "discouraged": false,
+      "provenance": "documented",
+      "source": "schema/bondy.schema:4319-4323"
+    },
+    {
+      "name": "cluster.tls.server.verify",
+      "default": "verify_none",
+      "effect": "voids peer-plane",
+      "discouraged": false,
+      "provenance": "documented",
+      "source": "schema/bondy.schema:4366-4370"
+    },
+    {
+      "name": "cluster.tls.client.verify",
+      "default": "verify_none",
+      "effect": "voids peer-plane",
+      "discouraged": false,
+      "provenance": "documented",
+      "source": "schema/bondy.schema:4401-4404"
+    },
+    {
+      "name": "cluster.tls.allow_insecure",
+      "default": "off",
+      "effect": "voids cluster-insecure-refusal",
+      "discouraged": false,
+      "provenance": "documented",
+      "source": "deployment/CLUSTER_MTLS.md Securing the Bondy cluster peer plane; schema/bondy.schema:4334-4343"
+    },
+    {
+      "name": "security.allow_anonymous_user",
+      "default": "local",
+      "effect": "voids safe-defaults",
+      "discouraged": false,
+      "provenance": "documented",
+      "source": "schema/bondy.schema:1195-1207"
+    },
+    {
+      "name": "security.admin_user.password",
+      "default": "unset",
+      "effect": "preserves safe-defaults",
+      "discouraged": false,
+      "provenance": "documented",
+      "source": "schema/bondy.schema:1208-1215"
+    },
+    {
+      "name": "security.password.pbkdf2.iterations",
+      "default": "600000",
+      "effect": "narrows password-kdf",
+      "discouraged": false,
+      "provenance": "documented",
+      "source": "schema/bondy.schema:1492-1503"
+    },
+    {
+      "name": "security.master_key",
+      "default": "unset",
+      "effect": "narrows keyring-fail-closed; narrows at-rest-aead",
+      "discouraged": false,
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_keyring.erl moduledoc"
+    },
+    {
+      "name": "listeners.$name.proxy_protocol",
+      "default": "off",
+      "effect": "preserves proxy-trust-bounded",
+      "discouraged": false,
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_http_proxy_protocol.erl:80-95"
+    },
+    {
+      "name": "listeners.$name.proxy_protocol.trusted_proxies",
+      "default": "unset",
+      "effect": "preserves proxy-trust-bounded",
+      "discouraged": false,
+      "provenance": "documented",
+      "source": "apps/bondy_router/src/bondy_http_proxy_protocol.erl:266-272"
+    },
+    {
+      "name": "mcp.manifest.mode",
+      "default": "curated",
+      "effect": "preserves mcp-indistinguishable",
+      "discouraged": false,
+      "provenance": "documented",
+      "source": "schema/bondy_mcp.schema:30-33"
+    },
+    {
+      "name": "serialization.erl.decode",
+      "default": "[]",
+      "effect": "no security property affected",
+      "discouraged": false,
+      "provenance": "documented",
+      "source": "apps/bondy_wamp/src/bondy_wamp_encoding.erl:581-585"
+    },
+    {
+      "name": "cryptosign.exec",
+      "default": "unset",
+      "effect": "preserves issuer-trust",
+      "discouraged": false,
+      "provenance": "documented",
+      "source": "apps/bondy_wamp/src/bondy_wamp_cryptosign.erl:302-313"
+    },
+    {
+      "name": "realm.security_enabled",
+      "default": "on",
+      "effect": "voids authz-default-deny; voids safe-defaults",
+      "discouraged": true,
+      "provenance": "inferred",
+      "source": "open question Q6"
+    }
+  ]
+}
