@@ -254,8 +254,10 @@ step_6_the_history_holds_the_transitions(Config) ->
     ?assertMatch({reply, #result{}}, mail_test_raw()),
     ok = await_no_alarm(),
 
-    #{~"node" := Node, ~"events" := Events} = call(?BONDY_ALARM_HISTORY, []),
-    ?assertEqual(atom_to_binary(partisan:node(), utf8), Node),
+    %% A PAGE, in the shape every paginated `bondy.*` procedure answers.
+    Page = call(?BONDY_ALARM_HISTORY, []),
+    Events = maps:get(~"values", Page),
+    ?assertEqual(false, maps:get(~"has_more", Page)),
 
     %% The ring is per NODE and survives every case in this suite, so only
     %% THIS case's transitions are examined — the two newest for our id.
@@ -266,6 +268,11 @@ step_6_the_history_holds_the_transitions(Config) ->
      || E <- Events, maps:get(~"id", E) == [~"mail_relay_down", ?RELAY]
     ],
     [Newest, Previous | _] = Ours,
+
+    %% Every event names the ring that recorded it, because a page mixes rings.
+    ?assertEqual(
+        atom_to_binary(partisan:node(), utf8), maps:get(~"node", Newest)
+    ),
 
     %% Newest first: the clear precedes the raise in the list.
     ?assertEqual(~"cleared", maps:get(~"action", Newest)),

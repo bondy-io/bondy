@@ -166,7 +166,10 @@ Emission never fails and never blocks: see `emit/2`.
 -record(state, {
     alarms = #{} :: #{id() => alarm()},
     %% Newest first, paired with its length so a push never walks the list.
-    history = {0, []} :: {non_neg_integer(), [event()]}
+    history = {0, []} :: {non_neg_integer(), [event()]},
+    %% The next `seq` to stamp. Strictly increasing for the life of the
+    %% handler, so the ring has a stable keyset key — see `push/2`.
+    seq = 1 :: pos_integer()
 }).
 
 -type id() :: term().
@@ -190,7 +193,12 @@ Emission never fails and never blocks: see `emit/2`.
     action := raised | updated | cleared,
     id := id(),
     severity := severity(),
-    at := integer()
+    at := integer(),
+    %% Strictly increasing per node, newest = highest. `at` is a millisecond
+    %% timestamp and is neither unique nor monotonic, so it cannot be a
+    %% pagination key; this can. Assigned by `push/2`, the one place an event
+    %% enters the ring.
+    seq := pos_integer()
 }.
 
 -export_type([alarm/0, event/0, severity/0, class/0]).
@@ -302,6 +310,21 @@ handle_event({set_alarm, {Id, Desc}}, State) ->
     do_set(Id, Desc, #{}, State);
 handle_event({set_alarm, {Id, Desc, Opts}}, State) when is_map(Opts) ->
     do_set(Id, Desc, Opts, State);
+handle_event({set_alarm, Other}, State) ->
+    %% A raise this handler cannot key. It is DROPPED rather than allowed to
+    %% crash the manager — a `function_clause` here costs the node EVERY alarm
+    %% it holds, and the raise that ends the alarm subsystem should not be a
+    %% misspelled one — but it is LOGGED, because silently dropping it leaves a
+    %% producer reporting a fault that appears nowhere at all, with no evidence
+    %% it ever tried. That is the failure this whole subsystem exists to
+    %% prevent, one level down.
+    ?LOG_WARNING(#{
+        description =>
+            "Ignored an alarm whose shape this handler cannot key. Expected "
+            "`{Id, Description}` or `{Id, Description, Options :: map()}`.",
+        alarm => Other
+    }),
+    {ok, State};
 handle_event({clear_alarm, AlarmId}, State) ->
     do_clear(AlarmId, State);
 handle_event(_Event, State) ->
@@ -419,10 +442,19 @@ adopt({Id, Desc}, State) ->
 adopt({Id, Desc, Opts}, State) when is_map(Opts) ->
     {ok, NewState} = do_set(Id, Desc, Opts, State),
     NewState;
-adopt(_Other, State) ->
+adopt(Other, State) ->
     %% Anything that cannot be keyed is dropped rather than crashing the
     %% handler mid-swap — a swap that fails leaves the node with NO alarm
-    %% handler at all.
+    %% handler at all. Logged for the reason `handle_event/2`'s own clause
+    %% gives, and it matters more here: an alarm raised before the swap and
+    %% dropped at it is lost on EVERY boot where the condition fires early,
+    %% which is exactly when a boot-time fault would be raising one.
+    ?LOG_WARNING(#{
+        description =>
+            "Dropped an alarm with an unrecognised shape while adopting the "
+            "previous handler's alarms.",
+        alarm => Other
+    }),
     State.
 
 %% @private
@@ -613,12 +645,30 @@ emit(Action, Alarm) ->
 %% @private
 %% Newest first. The length is carried so the common push is O(1); the trim
 %% runs only once the ring is full and is bounded by ?HISTORY_MAX.
-push(Event, #state{history = {N, L}} = State) when N < ?HISTORY_MAX ->
-    State#state{history = {N + 1, [Event | L]}};
-push(Event, #state{history = {_, L}} = State) ->
-    State#state{
-        history = {?HISTORY_MAX, lists:sublist([Event | L], ?HISTORY_MAX)}
-    }.
+%%
+%% The `seq` is stamped HERE, and this is the only place an event enters the
+%% ring, so no transition can be missing one. It exists to make the ring
+%% pageable: `bondy.alarm.history` walks the cluster node-at-a-time and resumes
+%% from "the events of this node with a seq below the last one I sent". An
+%% offset would shift under a concurrent push and repeat an event; a `seq`
+%% cannot, because a new event always takes a HIGHER one and so falls outside a
+%% page already being walked downwards.
+%%
+%% Per node and per handler incarnation, never a cluster-wide sequence: it is a
+%% position in THIS ring, and a handler restart legitimately starts from a
+%% re-detected present (see the moduledoc on the ring not being persisted).
+push(Event0, #state{seq = Seq} = State0) ->
+    Event = Event0#{seq => Seq},
+    State = State0#state{seq = Seq + 1},
+    case State#state.history of
+        {N, L} when N < ?HISTORY_MAX ->
+            State#state{history = {N + 1, [Event | L]}};
+        {_, L} ->
+            State#state{
+                history =
+                    {?HISTORY_MAX, lists:sublist([Event | L], ?HISTORY_MAX)}
+            }
+    end.
 
 %% @private
 %% Newest raise first, ties broken by id so the order is total and the same on

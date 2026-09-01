@@ -16,8 +16,14 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+%% The `logger` handler callback `logged/1` installs.
+-export([log/2]).
+
 -define(ID, test_alarm).
 -define(OTHER, other_alarm).
+
+%% A raise this handler cannot key: neither `{Id, Desc}` nor `{Id, Desc, Opts}`.
+-define(UNKEYABLE, {?ID, <<"desc">>, not_a_map}).
 
 %% =============================================================================
 %% TESTS
@@ -560,8 +566,84 @@ clearing_an_unraised_alarm_emits_nothing_test() ->
     end).
 
 %% =============================================================================
+%% TESTS — a raise this handler cannot key
+%% =============================================================================
+
+%% Dropping it is right: a `function_clause` in `handle_event/2` takes the
+%% gen_event handler down and the node loses EVERY alarm it holds, so a
+%% misspelled raise must not be able to end the alarm subsystem.
+%%
+%% Dropping it SILENTLY is not. A producer would be reporting a fault that
+%% appears nowhere at all, with nothing to say it tried — the failure this
+%% whole subsystem exists to prevent, one level down. So the falsifier is the
+%% LOG RECORD and not the surviving state: the state survives either way, and a
+%% case that only checked it would pass against the catch-all this replaced.
+an_unkeyable_raise_is_logged_test() ->
+    ?assertMatch(
+        #{level := warning, alarm := ?UNKEYABLE},
+        logged(fun() ->
+            bondy_alarm_handler:handle_event({set_alarm, ?UNKEYABLE}, state())
+        end)
+    ).
+
+%% ...and the handler is still standing with nothing recorded on either side.
+%% A dropped raise that left a half-written alarm behind would be worse than a
+%% crash, because nothing would ever report it.
+an_unkeyable_raise_records_nothing_test() ->
+    S0 = set({?ID, <<"desc">>}, state()),
+    {ok, S} = bondy_alarm_handler:handle_event({set_alarm, ?UNKEYABLE}, S0),
+    ?assertEqual(alarms(S0), alarms(S)),
+    ?assertEqual(history_(S0), history_(S)).
+
+%% The same shape arriving through the SWAP rather than through a raise. It
+%% matters more here: an alarm raised before `bondy_app` swaps this handler in,
+%% and dropped at the swap, is lost on every boot where the condition fires
+%% early — which is exactly when a boot-time fault would be raising one.
+an_unkeyable_alarm_dropped_while_adopting_is_logged_test() ->
+    ?assertMatch(
+        #{level := warning, alarm := ?UNKEYABLE},
+        logged(fun() ->
+            bondy_alarm_handler:init({[], {alarm_handler, [?UNKEYABLE]}})
+        end)
+    ).
+
+%% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+%% Runs `Fun` with a `logger` handler attached and answers the first report it
+%% logged, or `no_log_record`.
+%%
+%% The primary level is FORCED: a `warning` is filtered before any handler runs
+%% on a node configured at `error`, so without this the cases above would pass
+%% or fail on how the harness happened to configure logging.
+logged(Fun) ->
+    #{level := Primary} = logger:get_primary_config(),
+    ok = logger:set_primary_config(level, all),
+    ok = logger:add_handler(?MODULE, ?MODULE, #{config => #{pid => self()}}),
+    try
+        _ = Fun(),
+        receive
+            {log_record, Record} -> Record
+        after 1000 ->
+            no_log_record
+        end
+    after
+        ok = logger:remove_handler(?MODULE),
+        ok = logger:set_primary_config(level, Primary)
+    end.
+
+%% @private
+%% `logger` handler callback. Matches on the `alarm` key rather than taking
+%% every report, because this handler is attached while the code under test is
+%% also logging ordinary "Alarm set" records.
+log(#{level := Level, msg := {report, #{alarm := Alarm}}}, Config) ->
+    #{config := #{pid := Pid}} = Config,
+    Pid ! {log_record, #{level => Level, alarm => Alarm}},
+    ok;
+log(_Event, _Config) ->
+    ok.
 
 %% @private
 %% Runs `Fun` with a real `bondy_event_manager` registered, whose universal

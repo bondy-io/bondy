@@ -31,7 +31,7 @@ values it happens to see in today's rows — a catalogue that never lists a
 
 -export([handle_call/3]).
 
-%% Rendering is exported for the eunit module, which pins the encodability
+%% Rendering is exported for `bondy_task_api_test`, which pins the encodability
 %% contract without standing up a session.
 -export([render/1]).
 
@@ -71,7 +71,7 @@ A catalogue entry as a WAMP-encodable map.
 -spec render(bondy_task_catalogue:entry()) -> map().
 
 render(Entry) ->
-    maps:fold(fun(K, V, Acc) -> Acc#{key(K) => encodable(V)} end, #{}, Entry).
+    bondy_wamp_api_utils:encodable(Entry).
 
 %% =============================================================================
 %% PRIVATE
@@ -106,22 +106,3 @@ tasks_for(_) ->
 %% @private
 result(#call{request_id = ReqId}, Args) ->
     bondy_wamp_message:result(ReqId, #{}, Args).
-
-%% @private
-key(K) when is_atom(K) -> atom_to_binary(K, utf8);
-key(K) when is_binary(K) -> K.
-
-%% @private
-%% The catalogue is a literal table in this build, so every value is already
-%% encodable. This is here so that stays true by construction rather than by
-%% inspection: a value shape nobody anticipated renders rather than raising in
-%% the encoder and killing the session of whoever asked what they may do.
-encodable(V) when is_binary(V) -> V;
-encodable(V) when is_boolean(V) -> V;
-encodable(V) when is_number(V) -> V;
-encodable(V) when is_atom(V) -> atom_to_binary(V, utf8);
-encodable(V) when is_list(V) -> [encodable(E) || E <- V];
-encodable(V) when is_map(V) ->
-    maps:fold(fun(K, X, Acc) -> Acc#{key(K) => encodable(X)} end, #{}, V);
-encodable(V) ->
-    iolist_to_binary(io_lib:format("~p", [V])).

@@ -47,6 +47,21 @@ judgement for the operator rather than something this module infers: a cluster
 may be heterogeneous by design, and refusing on a count difference would be a
 guess. Run the dry run first and read the counts.
 
+## Master realm only
+
+Every procedure here goes through `bondy_wamp_api_utils:admin_call_args/3`.
+`members` and `info` did not until 2026-09-02: `bondy.*` is dispatched
+statically, so those two URIs resolved in ANY realm and only the absence of an
+RBAC grant stood between a tenant session and them. `connections` — node names
+and channels — was gated while `info`, which answers `node_spec()` and so
+carries listen ADDRESSES and PORTS, was not; that asymmetry was an oversight
+rather than a design, since `info` discloses strictly more.
+
+The set is pinned by `bondy_cluster_api_SUITE:procedures/0`, which DECLARES
+each procedure's authority and is checked against the URIs `handle_call/3`
+actually dispatches. A procedure added without an entry fails the suite rather
+than shipping ungated.
+
 `bondy.cluster.join` remains unimplemented. Partisan needs a full
 `node_spec()` — name, listen addresses and channels — which is more than a
 procedure argument conveys well, and the peer-discovery configuration already
@@ -72,6 +87,7 @@ covers forming and growing a cluster.
 %% interesting outcomes need peers that are silent or not ready, which a
 %% single-node suite cannot produce through `handle_call/3`.
 -export([survey/1]).
+-export([survey/2]).
 
 %% =============================================================================
 %% API
@@ -110,11 +126,12 @@ handle_call(?BONDY_CLUSTER_CONNECTIONS, #call{} = M, Ctxt) ->
     },
     R = bondy_wamp_message:result(M#call.request_id, #{}, [Result]),
     {reply, R};
-handle_call(?BONDY_CLUSTER_MEMBERS, #call{} = M, _Ctxt) ->
-    {ok, Members} = partisan_peer_service:members(),
-    R = bondy_wamp_message:result(M#call.request_id, #{}, [Members]),
+handle_call(?BONDY_CLUSTER_MEMBERS, #call{} = M, Ctxt) ->
+    [] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 0),
+    R = bondy_wamp_message:result(M#call.request_id, #{}, [members()]),
     {reply, R};
-handle_call(?BONDY_CLUSTER_INFO, #call{} = M, _Ctxt) ->
+handle_call(?BONDY_CLUSTER_INFO, #call{} = M, Ctxt) ->
+    [] = bondy_wamp_api_utils:admin_call_args(M, Ctxt, 0),
     Info = #{
         <<"node_spec">> => bondy_wamp_api_utils:node_spec(),
         <<"nodes">> => partisan:nodes()
@@ -157,7 +174,14 @@ leave(#call{} = M, Name) when is_binary(Name) ->
             );
         {ok, Spec} ->
             Remaining = remaining_members(Name),
-            Survey = survey(Remaining),
+            %% The survey is the only wait on this path, so the caller's
+            %% `_deadline` bounds it and nothing else. Shortening it cannot
+            %% make a leave WRONGLY safe: an unanswered member is silent, and
+            %% a silent member is unsafe.
+            Budget = bondy_wamp_api_utils:budget(
+                bondy_wamp_api_utils:deadline(M#call.options), ?SURVEY_TIMEOUT
+            ),
+            Survey = survey(Remaining, Budget),
             do_leave(M, Name, Spec, Survey)
     end;
 leave(#call{} = M, _) ->
@@ -190,6 +214,25 @@ do_leave(#call{} = M, Name, Spec, Survey) ->
                     )
             end
     end.
+
+%% @private
+%% The member names, read LOCK-FREE.
+%%
+%% `partisan_peer_service:members/0` answers the same names — the manager
+%% replies with `[Node || #{name := Node} <- State#state.members]` — but as a
+%% `gen_server:call(..., infinity)`: an unbounded wait on the very process a
+%% cluster fault would block, and the one procedure in this module that could
+%% not honour a caller's `_deadline` AT ALL, because there was no timeout to
+%% shorten. `partisan_membership` mirrors that same list into ETS on every
+%% membership change (`partisan_membership:set/1`, called from the manager
+%% wherever `State#state.members` moves), so this is the same answer without
+%% the wait — the same reading `bondy_alarm_api` gives for its fan-out target.
+%%
+%% It is an ordset, so the reply is now SORTED where the manager's list came
+%% back in whatever order the membership strategy left it. That is a change to
+%% what the wire carries, and a stable order is the better of the two.
+members() ->
+    partisan_membership:node_names().
 
 %% @private
 %% Every member that will remain once `Name` is gone. The leaving node is
@@ -225,13 +268,29 @@ a count difference would be a guess.
 %% runs after the removal is fail-closed on a member it cannot ask, and a
 %% member that is up but not fully started is the under-advertising case the
 %% moduledoc names.
-survey([]) ->
-    #{safe => true, answered => [], silent => [], not_ready => []};
 survey(Peers) ->
+    survey(Peers, ?SURVEY_TIMEOUT).
+
+-doc """
+The survey, bounded by `Budget` milliseconds rather than by `?SURVEY_TIMEOUT`.
+
+`0` means the caller's `_deadline` is already spent. Nobody is asked, and every
+member is reported SILENT — which makes the leave unsafe. That is the only
+answer a spent budget can honestly give: the reaper that follows a removal is
+fail-closed on a member it could not ask, so a survey that ran out of time and
+said `safe` would be asserting exactly what it failed to check.
+""".
+-spec survey([node()], non_neg_integer()) -> map().
+
+survey([], _Budget) ->
+    #{safe => true, answered => [], silent => [], not_ready => []};
+survey(Peers, 0) ->
+    #{safe => false, answered => [], silent => Peers, not_ready => []};
+survey(Peers, Budget) ->
     Replies =
         try
             {R, _BadNodes} = partisan_rpc:multicall(
-                Peers, ?MODULE, local_readiness, [], ?SURVEY_TIMEOUT
+                Peers, ?MODULE, local_readiness, [], Budget
             ),
             R
         catch
@@ -292,12 +351,18 @@ unsafe_reason(#{not_ready := [_ | _] = NotReady}) ->
     {members_not_ready, [nodestring(N) || N <- NotReady]}.
 
 %% @private
-%% The `node_spec()` Partisan needs to remove another node — `members/0`
-%% answers names, `members_for_orchestration/0` answers specs.
+%% The `node_spec()` Partisan needs to remove another node.
+%%
+%% `partisan_membership:members/0` is the lock-free ETS mirror of the manager's
+%% own member list — the same list `members_for_orchestration/0` answers with,
+%% and for the same reason `members/0` above no longer goes through the
+%% manager: that call is `gen_server:call(..., infinity)`, so a wedged peer
+%% service made `bondy.cluster.leave` wait forever BEFORE it reached the survey
+%% the caller's `_deadline` bounds.
 member_spec(Name) ->
     try binary_to_existing_atom(Name, utf8) of
         Node ->
-            {ok, Specs} = partisan_peer_service:members_for_orchestration(),
+            Specs = partisan_membership:members(),
             case [S || #{name := N} = S <- Specs, N == Node] of
                 [Spec | _] -> {ok, Spec};
                 [] -> error

@@ -22,6 +22,7 @@ only cause harmless extra rebuilds.
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
 -include_lib("bondy_wamp/include/bondy_wamp.hrl").
+-include_lib("bondy_router/include/bondy_uris.hrl").
 
 -define(MASTER_REALM, <<"com.leapsight.bondy">>).
 
@@ -51,7 +52,8 @@ all() ->
         sre_overlay_ships_no_task_tool,
         sre_overlay_is_reachable_over_wamp,
         sre_overlay_documents_load_and_compile,
-        sre_read_entries_call_their_procedures
+        sre_read_entries_call_their_procedures,
+        sre_history_kwargs_are_honoured
     ].
 
 init_per_suite(Config) ->
@@ -840,12 +842,72 @@ sre_read_entries_call_their_procedures(_) ->
     ),
     ?assertEqual([], Bad).
 
+%% The declared KWArgs of the one paginated read entry, checked the way the
+%% positional counts above are — by CALLING. Nothing in Bondy reads
+%% `inputSchema`, so a schema is only ever a claim; this one claims an agent
+%% can page, and an agent that believed a short page was the whole history
+%% would draw the wrong conclusion from it.
+%%
+%% The call is built the way `bondy_mcp_wamp:call_args/1` builds one, so this
+%% exercises the actual MCP route from `arguments` to CALL.KWArgs rather than
+%% a hand-written KWArgs map.
+sre_history_kwargs_are_honoured(_) ->
+    Entry = history_entry(),
+    Props = maps:get(
+        <<"properties">>, maps:get(<<"kwargs_schema">>, Entry)
+    ),
+    ?assertEqual(
+        [<<"cursor">>, <<"limit">>], lists:sort(maps:keys(Props))
+    ),
+
+    %% Two transitions, so a page of one cannot be the whole ring.
+    Ids = [{mcp_kwargs_probe, <<"a">>}, {mcp_kwargs_probe, <<"b">>}],
+    _ = [alarm_handler:set_alarm({I, <<"probe">>}) || I <- Ids],
+    try
+        Ctxt = bondy_context:local_context(?MASTER_REALM),
+        Page1 = mcp_call(Entry, #{<<"limit">> => 1}, Ctxt),
+        ?assertEqual(1, length(maps:get(<<"values">>, Page1))),
+        ?assertEqual(true, maps:get(<<"has_more">>, Page1)),
+
+        %% `cursor` resumes rather than restarts: the second page must not
+        %% open on the transition the first one ended with.
+        Page2 = mcp_call(
+            Entry,
+            #{<<"limit">> => 1, <<"cursor">> => maps:get(<<"cursor">>, Page1)},
+            Ctxt
+        ),
+        ?assertEqual(1, length(maps:get(<<"values">>, Page2))),
+        ?assertNotEqual(
+            maps:get(<<"values">>, Page1), maps:get(<<"values">>, Page2)
+        )
+    after
+        _ = [alarm_handler:clear_alarm(I) || I <- Ids]
+    end.
+
 %% =============================================================================
 %% HELPERS — the shipped SRE overlay
 %% =============================================================================
 
 names(Doc) ->
     [maps:get(<<"name">>, E) || E <- maps:get(<<"entries">>, Doc)].
+
+history_entry() ->
+    [E] = [
+        E
+     || E <- maps:get(<<"entries">>, bondy_mcp_sre_overlay:read_document()),
+        maps:get(<<"wamp_procedure">>, E, undefined) == ?BONDY_ALARM_HISTORY
+    ],
+    E.
+
+%% An MCP `tools/call` argument object, taken through the same split the
+%% gateway uses, then dispatched as the CALL it becomes.
+mcp_call(Entry, Arguments, Ctxt) ->
+    {ok, {Args, KWArgs}} = bondy_mcp_wamp:call_args(Arguments),
+    M = bondy_wamp_message:call(
+        1, #{}, maps:get(<<"wamp_procedure">>, Entry), Args, KWArgs
+    ),
+    {reply, #result{args = [Page]}} = bondy_wamp_api:handle_call(M, Ctxt),
+    Page.
 
 call_with(Uri, N) ->
     bondy_wamp_message:call(1, #{}, Uri, lists:duplicate(N, <<"x">>)).

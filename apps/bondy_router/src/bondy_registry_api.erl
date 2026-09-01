@@ -9,8 +9,8 @@ The `bondy.*` registry introspection procedures — the **paginated** family
 (`bondy.registration.list|match`, `bondy.subscription.list|match`,
 `bondy.registration.callee.list`).
 
-A thin adapter over `bondy_registry_meta`: it reads the `_limit` / `_cursor`
-extension options (bounded by `bondy_registry_meta:{default,max}_page_size/0`),
+A thin adapter over `bondy_registry_meta`: it reads the `limit` / `cursor`
+KWArgs (bounded by `bondy_registry_meta:{default,max}_page_size/0`),
 runs the distributed keyset page, and externalises it with
 `bondy_pagination:to_external/1`. The spec-frozen, bounded `wamp.*` equivalents
 live in `bondy_wamp_meta_api`.
@@ -131,25 +131,14 @@ externalise(Fun) ->
     end.
 
 %% @private
-%% Keyset pagination options from the CALL.Options extension keys `_limit` and
-%% `_cursor`. Both are untyped extensions, so read defensively.
-page_opts(#call{options = Options}) ->
+%% Keyset pagination from the `limit` and `cursor` KWArgs. The bounds are the
+%% engine's, not this module's.
+page_opts(M) ->
     #{
-        limit => read_limit(Options),
-        cursor => maps:get('_cursor', Options, undefined)
+        limit => bondy_wamp_api_utils:page_limit(
+            M,
+            bondy_registry_meta:default_page_size(),
+            bondy_registry_meta:max_page_size()
+        ),
+        cursor => bondy_wamp_api_utils:page_cursor(M)
     }.
-
-%% @private
-%% A non-integer or out-of-range `_limit` falls back to the default rather than
-%% erroring — the extension option is untyped, so the reader is deliberately
-%% tolerant (unlike `_cursor`, whose malformed value is a hard error, since a
-%% junk resume position cannot be guessed). Limits are owned by the engine.
-read_limit(Options) ->
-    Default = bondy_registry_meta:default_page_size(),
-    Max = bondy_registry_meta:max_page_size(),
-    case maps:get('_limit', Options, Default) of
-        Limit when is_integer(Limit), Limit > 0, Limit =< Max ->
-            Limit;
-        _ ->
-            Default
-    end.

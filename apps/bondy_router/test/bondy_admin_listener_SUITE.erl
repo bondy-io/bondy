@@ -55,7 +55,8 @@ all() ->
         http_requests_are_rate_limited,
         listener_scope_http_budget_is_enforced,
         realm_scope_http_budget_is_enforced,
-        oauth2_draws_from_the_auth_class
+        oauth2_draws_from_the_auth_class,
+        the_ready_probe_follows_a_blocking_alarm
     ].
 
 init_per_suite(Config) ->
@@ -396,6 +397,56 @@ assert_routed(Status) ->
     ct:pal("status ~p", [Status]),
     ?assertNotEqual(404, Status),
     ?assert(Status < 500).
+
+-doc """
+`/ready` answers 503 while an alarm declaring `affects_ready` is raised, and
+204 once it clears.
+
+This is the only hop between `bondy_app:is_ready/0` and a load balancer, and it
+was the one leg of the readiness path with no coverage: `bondy_app_readiness_test`
+drives the real `alarm_handler` manager and the published `atomics` cell, but
+stops at the boolean. The mapping below it — true to 204, false to 503 — is
+four lines with one branch, and inverting them would take every node out of
+rotation permanently or keep every failed node in it.
+
+The alarm carries an EXPLICIT `affects_ready => true` because no catalogue
+entry declares one. That is the residual gap and it is structural: the
+catalogue is a literal table, so the "the entry declared it" resolution can
+only be exercised by shipping an entry that does. See
+`bondy_alarm_catalogue:list/0`'s own note.
+""".
+the_ready_probe_follows_a_blocking_alarm(_) ->
+    Id = {test_ready_probe_alarm, ~"drain this node"},
+    Saved = bondy_config:get(status, undefined),
+    ok = bondy_config:set(status, ready),
+    try
+        %% The baseline matters as much as the 503: without it a handler that
+        %% answered 503 unconditionally would pass the interesting assertion.
+        ?assertEqual(204, element(2, get_path(?ADMIN, "/ready"))),
+
+        ok = bondy_alarm_handler:set_alarm(
+            {Id, ~"raised by bondy_admin_listener_SUITE"},
+            #{affects_ready => true}
+        ),
+        ok = await_ready_flag(false),
+        ?assertEqual(503, element(2, get_path(?ADMIN, "/ready"))),
+
+        ok = alarm_handler:clear_alarm(Id),
+        ok = await_ready_flag(true),
+        ?assertEqual(204, element(2, get_path(?ADMIN, "/ready")))
+    after
+        ok = alarm_handler:clear_alarm(Id),
+        ok = bondy_config:set(status, Saved)
+    end.
+
+%% @private
+%% Raising and clearing are CASTS to the shared `alarm_handler` manager, so a
+%% probe taken the instant `set_alarm/2` returns is racing the mailbox. Any
+%% `gen_event:call` to the handler is the barrier; `list/0` is the cheapest.
+await_ready_flag(Expected) ->
+    _ = bondy_alarm_handler:list(),
+    ?assertEqual(Expected, bondy_app:is_ready()),
+    ok.
 
 %% The port comes from the resolved inventory rather than a literal, so the case
 %% follows a listener whose configured port changes.

@@ -47,6 +47,12 @@ catalogue_test_() ->
                 ?_test(declared_detail_keys_are_delivered(Scan))},
             {"every task in a runbook is a catalogued task",
                 ?_test(runbook_tasks_are_catalogued())},
+            {"every realm-class alarm carries realm_uri",
+                ?_test(realm_class_alarms_carry_realm_uri(Scan))},
+            {"every config_keys entry names a real setting",
+                ?_test(config_keys_resolve())},
+            {"every readiness_via names a real function",
+                ?_test(readiness_via_resolves())},
             {"every observe_with reference resolves",
                 ?_test(observe_refs_resolve(Scan))},
             {"no observe_with reference is a task",
@@ -83,7 +89,7 @@ unresolvable_sites() ->
 %% `{Head, Discriminator}` pair) are present.
 scan_is_sound(#{errors := Errors, sites := Sites}) ->
     ?assertEqual([], Errors),
-    Found = [{M, F, A} || {M, F, A, _Kind, _Id, _Keys} <- Sites],
+    Found = [{M, F, A} || {M, F, A, _Kind, _Id, _Keys, _Opts} <- Sites],
     ?assert(lists:member({bondy_namespace_catalog, set_main_failed, 1}, Found)),
     ?assert(
         lists:member({bondy_oplog_responder, set_oversized_alarm, 0}, Found)
@@ -100,7 +106,7 @@ scan_is_sound(#{errors := Errors, sites := Sites}) ->
 sites_are_declared(#{sites := Sites}) ->
     Undeclared = [
         {M, F, A, Id}
-     || {M, F, A, _Kind, {ok, Id}, _Keys} <- Sites,
+     || {M, F, A, _Kind, {ok, Id}, _Keys, _Opts} <- Sites,
         bondy_alarm_catalogue:lookup(Id) == error
     ],
     ?assertEqual([], Undeclared).
@@ -108,7 +114,7 @@ sites_are_declared(#{sites := Sites}) ->
 unresolvable_are_declared(#{sites := Sites}) ->
     Found = lists:usort([
         {M, F, A}
-     || {M, F, A, _Kind, unresolved, _Keys} <- Sites
+     || {M, F, A, _Kind, unresolved, _Keys, _Opts} <- Sites
     ]),
     ?assertEqual(lists:sort(maps:keys(unresolvable_sites())), Found).
 
@@ -116,7 +122,7 @@ unresolvable_are_declared(#{sites := Sites}) ->
 %% documentation, and the catalogue is meant to be the opposite of that.
 entries_have_producers(#{sites := Sites}) ->
     Raised =
-        [Id || {_, _, _, _, {ok, Id}, _} <- Sites] ++
+        [Id || {_, _, _, _, {ok, Id}, _, _} <- Sites] ++
             maps:values(unresolvable_sites()),
     Orphans = [
         Pattern
@@ -141,7 +147,7 @@ entries_have_producers(#{sites := Sites}) ->
 declared_detail_keys_are_delivered(#{sites := Sites}) ->
     Checked = [
         {M, F, A, Id, Declared, Delivered}
-     || {M, F, A, set, {ok, Id}, Delivered} <- Sites,
+     || {M, F, A, set, {ok, Id}, Delivered, _Opts} <- Sites,
         {ok, #{detail_keys := Declared}} <- [bondy_alarm_catalogue:lookup(Id)],
         Declared =/= []
     ],
@@ -182,6 +188,156 @@ runbook_tasks_are_catalogued() ->
          || #{tasks := [_ | _]} <- bondy_alarm_catalogue:list()
         ]) >= 2
     ).
+
+%% `bondy_docs`' alarm reference states that `realm_uri` is "present on
+%% `class = realm` alarms; names the affected tenant". Nothing checked it, and
+%% one of the three realm-class entries did not deliver it: the MCP name
+%% collision raised through the bare OTP 2-tuple, so a consumer following that
+%% rule got nothing and had to parse the id instead (found 2026-09-01).
+%%
+%% Checks the RAISE sites only. A `clear` carries no options and needs none.
+realm_class_alarms_carry_realm_uri(#{sites := Sites}) ->
+    Realm = [
+        Pattern
+     || #{id_pattern := Pattern, class := realm} <- bondy_alarm_catalogue:list()
+    ],
+    %% Vacuity guard: this checks nothing if no entry is realm-class.
+    ?assert(length(Realm) >= 3),
+    %% An id built from variables reads as `unresolved`, so the site is
+    %% resolved through `unresolvable_sites/0` instead. This is not a corner:
+    %% the MCP name collision is the alarm this check was written for, and it
+    %% is the one site whose id cannot be read statically — checking only the
+    %% resolvable ones would have passed while the defect stood.
+    Sets = [
+        {M, F, A, resolve_id({M, F, A}, Id), Opts}
+     || {M, F, A, set, Id, _Keys, Opts} <- Sites
+    ],
+    Checked = [
+        S
+     || {_, _, _, Id, _} = S <- Sets,
+        Id =/= unresolved,
+        lists:any(fun(P) -> bondy_alarm_catalogue:matches(P, Id) end, Realm)
+    ],
+    Missing = [S || {_, _, _, _, Opts} = S <- Checked, not delivers(Opts)],
+    ?assertEqual([], Missing),
+    %% The other half: the check is worthless if the scan stopped resolving
+    %% the realm-class raise sites at all. One per realm-class entry.
+    ?assertEqual(3, length(Checked)).
+
+%% @private
+resolve_id(MFA, unresolved) -> maps:get(MFA, unresolvable_sites(), unresolved);
+resolve_id(_, {ok, Id}) -> Id.
+
+%% @private
+delivers({ok, Keys}) -> lists:member(realm_uri, Keys);
+delivers(_) -> false.
+
+%% Every `config_keys` entry must name a setting the schema actually declares.
+%% `observe_with` and `tasks` were resolved from the start and this was not, so
+%% a renamed or removed key would have sent an operator to a knob that no
+%% longer exists — at the one moment they are least able to absorb it. Key rot
+%% is not hypothetical in this tree.
+%%
+%% A `$name` / `$service` segment is cuttlefish's variable, matched as a
+%% wildcard against the mapping's own declaration, which carries the same
+%% spelling.
+config_keys_resolve() ->
+    Declared = schema_mappings(),
+    ?assert(length(Declared) >= 200),
+    Keys = lists:usort(
+        lists:append([
+            K
+         || #{config_keys := K} <- bondy_alarm_catalogue:list()
+        ])
+    ),
+    ?assert(length(Keys) >= 8),
+    Dangling = [K || K <- Keys, not lists:member(K, Declared)],
+    ?assertEqual([], Dangling).
+
+%% The same discipline for `readiness_via`, which names the mechanism that
+%% reports readiness when the alarm does not. A dangling one tells an operator
+%% to look at a function that is not there.
+readiness_via_resolves() ->
+    Refs = [
+        R
+     || #{readiness_via := R} <- bondy_alarm_catalogue:list()
+    ],
+    ?assert(length(Refs) >= 1),
+    Bad = [R || R <- Refs, not is_exported_mfa(R)],
+    ?assertEqual([], Bad).
+
+%% @private
+%% `<<"mod:fun/arity">>` resolved against the module's own export list.
+is_exported_mfa(Ref) ->
+    case binary:split(Ref, [~":", ~"/"], [global]) of
+        [M, F, A] ->
+            try
+                Mod = binary_to_existing_atom(M, utf8),
+                Fun = binary_to_existing_atom(F, utf8),
+                _ = code:ensure_loaded(Mod),
+                erlang:function_exported(
+                    Mod, Fun, binary_to_integer(A)
+                )
+            catch
+                _:_ -> false
+            end;
+        _ ->
+            false
+    end.
+
+%% @private
+%% Every `{mapping, Key, _, _}` in the schema files, read as text rather than
+%% through cuttlefish: the schemas are not compiled into this VM and parsing
+%% them here would be a second implementation of something only this check
+%% needs.
+schema_mappings() ->
+    Files = schema_files(),
+    %% A missing schema directory must FAIL rather than report every key
+    %% dangling or, worse, none — `code:lib_dir/1` answers a RELATIVE path
+    %% under `rebar3 eunit`, which is what made the first version of this
+    %% resolve to nothing.
+    ?assert(Files =/= []),
+    lists:usort(lists:append([mappings_of(F) || F <- Files])).
+
+%% @private
+%% Walks UP from the application's own ebin rather than trusting the working
+%% directory eunit happens to run in — the same reason `bondy_apps/0` derives
+%% its paths from `code:get_path/0`.
+schema_files() ->
+    walk_up(filename:absname(code:lib_dir(bondy_router)), 8).
+
+%% @private
+walk_up(_, 0) ->
+    [];
+walk_up(Dir, N) ->
+    case filelib:wildcard(filename:join([Dir, "schema", "*.schema"])) of
+        [] ->
+            Parent = filename:dirname(Dir),
+            case Parent == Dir of
+                true -> [];
+                false -> walk_up(Parent, N - 1)
+            end;
+        Files ->
+            Files
+    end.
+
+%% @private
+mappings_of(File) ->
+    case file:read_file(File) of
+        {ok, Bin} ->
+            case
+                re:run(
+                    Bin,
+                    "\\{mapping,\\s*\"([^\"]+)\"",
+                    [global, {capture, all_but_first, binary}]
+                )
+            of
+                {match, Groups} -> lists:append(Groups);
+                nomatch -> []
+            end;
+        _ ->
+            []
+    end.
 
 %% A `procedure` reference must be a live procedure, not one of the seven that
 %% reply `no_such_procedure`; a `metric` reference must be a name something
@@ -346,7 +502,7 @@ scan_module(Mod, Ebin, #{sites := Sites, errors := Errors} = Acc) ->
 sites(Mod, {function, _, Name, Arity, Clauses}) ->
     Env = map_bindings(Clauses, #{}),
     [
-        {Mod, Name, Arity, Kind, Id, detail_keys(Opts, Env)}
+        {Mod, Name, Arity, Kind, Id, detail_keys(Opts, Env), opt_keys(Opts)}
      || {Kind, Id, Opts} <- calls(Clauses, [])
     ];
 sites(_, _) ->
@@ -395,6 +551,16 @@ id_of_alarm(_) -> unresolved.
 %% @private
 opts_of_alarm({tuple, _, [_Id, _Desc, Opts]}) -> Opts;
 opts_of_alarm(_) -> none.
+
+%% @private
+%% The literal TOP-LEVEL keys of the options map a raise site passes, or
+%% `none` when it passes no options map at all. Unlike `detail_keys/2` this
+%% does not follow a variable binding: every producer that passes options
+%% writes the map inline at the call, and a site that stopped doing so should
+%% fail the check below rather than be resolved through a guess.
+opt_keys(none) -> none;
+opt_keys({map, _, Fields}) -> {ok, literal_keys(Fields)};
+opt_keys(_) -> unknown.
 
 %% @private
 %% The literal keys of the `details` map a raise site passes, or `unknown` when

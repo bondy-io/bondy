@@ -43,11 +43,6 @@ An implementation of the `app_config` behaviour.
         %% inactivity window that each progressive result restarts; the
         %% deadline caps the total duration regardless of progress.
         '_deadline',
-        %% Keyset pagination for the `bondy.*` meta list/match procedures:
-        %% `_limit` bounds the page size, `_cursor` is the opaque wire cursor
-        %% returned as a prior page's `cursor`.
-        '_limit',
-        '_cursor',
         %% W3C Trace Context (`traceparent`/`tracestate`) and Baggage,
         %% copied verbatim into INVOCATION.Details (see ?WAMP_TRACE_ATTRS).
         '_traceparent',

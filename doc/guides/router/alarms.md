@@ -121,6 +121,30 @@ probe fills it in five minutes. It is a convenience for an operator who is
 already looking, never the audit record — every transition is also logged, and
 Prometheus holds the durable series.
 
+`bondy.alarm.history` walks those rings NODE AT A TIME, taking the serving
+node's first and reaching its peers only when that node does not fill the page.
+The common case therefore contacts no peer at all. Each transition carries a
+`seq`, strictly increasing within its own ring, which is what the page resumes
+from — `at` is a millisecond timestamp and is neither unique nor monotonic. A
+caller that asked for progressive results gets the whole walk streamed instead,
+one result per page.
+
+The walk names what it missed. Every page carries `not_reached`, the members it
+ASKED for history and did not hear from, and the set accumulates across the
+pages of one walk, so the last page states the whole truth about it. That is
+the same distinction `list` draws with `silent`: a node that could not be asked
+is not a node that answered "nothing". A node the walk has not yet reached
+appears in neither the page nor the set — it is asked on a later page.
+
+A page is bounded in TIME as well as in size. The whole page shares one budget
+and the caller's `CALL.Options._deadline` caps it, so a walk over several
+unreachable peers costs one budget rather than one each. A page that runs out
+stops early and its cursor resumes at the nodes it did not get to; the first
+node of a page is always contacted, so a page can be cut short but never
+emptied. A stream that runs out of deadline settles with `wamp.error.timeout`
+rather than a final result — a truncated stream reporting `has_more` false
+would claim to be complete.
+
 ## Correlation
 
 An alarm raised on a request path carries `onset_trace_id`, the W3C trace id of
@@ -142,7 +166,7 @@ transition.
 
 | Surface | What it gives you |
 | --- | --- |
-| `bondy.alarm.{list,get,history,catalogue}` | The cluster view, one alarm by id, this node's history, and the catalogue. See `m:bondy_alarm_api`. |
+| `bondy.alarm.{list,get,history,catalogue}` | The cluster view, one alarm by id, a page of the cluster's transition history, and the catalogue. See `m:bondy_alarm_api`. |
 | `bondy.alarm.{raised,updated,cleared}` | The same alarm shape, pushed on transition, in the master realm, demand-gated. |
 | `bondy.task.{catalogue,describe}` | What may be done, with impact and blast radius. See `m:bondy_task_api`. |
 | Prometheus | `bondy_alarms`, `bondy_alarm_active` (one series per alarm id, discriminator included) and `bondy_node_ready`. |

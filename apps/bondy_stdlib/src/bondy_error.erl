@@ -1357,7 +1357,7 @@ entry(too_many_results) ->
             "This spec-compliant 'wamp.*' meta procedure returns a bounded "
             "result, and the set exceeds that bound on this cluster. Use the "
             "paginated 'bondy.*' equivalent (e.g. 'bondy.registration.list') with "
-            "the '_limit' and '_cursor' options."
+            "the 'limit' and 'cursor' keyword arguments."
         >>
     );
 entry(body_max_bytes_exceeded) ->

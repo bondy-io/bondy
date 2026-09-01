@@ -1860,19 +1860,16 @@ reply_progressive_calls_error(#call{} = Msg, Kind, #{from := Caller} = Opts) ->
     bondy:send(RealmUri, To, Error, SendOpts).
 
 %% @private
-%% Absolute expiry cap from the CALL.Options._deadline extension (ms from
-%% now). For a progressive call the WAMP timeout is an inter-result
-%% inactivity window that each progressive result restarts, so without a
-%% deadline a slowly-dripping stream is unbounded; the deadline bounds the
-%% whole call. Extension options pass validation untyped, so anything but
-%% a usable integer means no deadline.
+%% Absolute expiry cap from the CALL.Options._deadline extension. For a
+%% progressive call the WAMP timeout is an inter-result inactivity window that
+%% each progressive result restarts, so without a deadline a slowly-dripping
+%% stream is unbounded; the deadline bounds the whole call.
+%%
+%% The READING of the option is `bondy_wamp_api_utils:deadline/1`, shared with
+%% the static `bondy.*` handlers that honour it themselves — a routed call and
+%% `bondy.alarm.history` must not read one option two ways.
 promise_deadline(CallOpts) ->
-    case maps:get('_deadline', CallOpts, undefined) of
-        D when is_integer(D) andalso D > 0 ->
-            erlang:system_time(millisecond) + D;
-        _ ->
-            infinity
-    end.
+    bondy_wamp_api_utils:deadline(CallOpts).
 
 %% @private
 %% A YIELD marked progressive settles nothing: the invocation promise

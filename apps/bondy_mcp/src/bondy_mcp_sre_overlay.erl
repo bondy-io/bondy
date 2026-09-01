@@ -101,35 +101,67 @@ read_document() ->
 %% =============================================================================
 
 %% @private
-%% `{Uri, Args, Description}` — `Args` is one schema per positional argument,
-%% so `[]` is a procedure taking none.
+%% `{Uri, Args, Kwargs, Description}` — `Args` is one schema per POSITIONAL
+%% argument, so `[]` is a procedure taking none; `Kwargs` is the whole KWArgs
+%% object schema, or `undefined` for a procedure that takes none.
+%%
+%% The two are separate because MCP's `arguments` object is not: an agent's
+%% `@args` key becomes the positional list and everything else becomes the
+%% CALL's KWArgs (`bondy_mcp_wamp:call_args/1`), so a procedure's KWArgs are
+%% reachable over MCP with no translation — but only if they are DECLARED,
+%% because `tools/list` is the whole of what the agent knows.
 read_tools() ->
     [
-        {?BONDY_ALARM_LIST, [], <<
+        {?BONDY_ALARM_LIST, [], undefined, <<
             "List the alarms raised across the cluster. The reply names which "
             "nodes answered and which were silent, so an empty list with a "
             "silent node is not the same answer as an empty list with none."
         >>},
-        {?BONDY_ALARM_GET, [wire_alarm_id()], <<
+        {?BONDY_ALARM_GET, [wire_alarm_id()], undefined, <<
             "Read one alarm by its wire id, with the trace of the occurrence "
             "that raised it when the raising path carried one."
         >>},
-        {?BONDY_ALARM_HISTORY, [], <<
-            "The most recent alarm transitions recorded on each node. A "
-            "restatement of an alarm already raised is not a transition."
+        %% FOUND 2026-09-01: this said "recorded on each node", which was
+        %% false — the procedure answered for the serving node only. A tool
+        %% description is prompt, so an agent believed it had a cluster-wide
+        %% view and would have read a short history as "nothing happened
+        %% elsewhere". The procedure is now a cluster-wide paginated walk, and
+        %% the description says what a page actually is.
+        {?BONDY_ALARM_HISTORY, [], history_kwargs(), <<
+            "The most recent alarm transitions, newest first. A restatement "
+            "of an alarm already raised is not a transition, so a condition "
+            "that has been true for hours appears once. Each transition names "
+            "the node that recorded it.\n\n"
+            "This is ONE PAGE of a cluster-wide walk that takes the serving "
+            "node's transitions first and reaches its peers only if that "
+            "node's ring does not fill the page. So a busy node can crowd a "
+            "quiet peer out of the page: the absence of a node here is not "
+            "evidence that nothing happened on it — the walk may not have "
+            "got to that node yet. Use bondy.alarm.list for a cluster-wide "
+            "answer in a single reply.\n\n"
+            "Every page carries `not_reached`: the nodes this walk ASKED for "
+            "history and did not hear from. Read it before you read "
+            "`values`, because a page that is short because a node was "
+            "unreachable is not the same answer as a page that is short. It "
+            "accumulates across pages, so the last page of a walk names "
+            "every node the walk missed.\n\n"
+            "Page with `limit` and `cursor`: a reply carrying `has_more` true "
+            "has a `cursor` to send back for the next page. A page is bounded "
+            "in time as well as in size, so a page that stops early is "
+            "resumed with its `cursor` rather than retried."
         >>},
-        {?BONDY_ALARM_CATALOGUE, [], <<
+        {?BONDY_ALARM_CATALOGUE, [], undefined, <<
             "Every alarm condition this build can raise, with its severity, "
             "whether it affects readiness, what to observe and the "
             "tasks sanctioned against it."
         >>},
-        {?BONDY_TASK_CATALOGUE, [], <<
+        {?BONDY_TASK_CATALOGUE, [], undefined, <<
             "Every procedure sanctioned as an operational task, with its "
             "impact, blast radius and arguments, and the ordered "
             "vocabularies those grade against. Read this to RECOMMEND a "
             "remediation; running one is not part of this surface."
         >>},
-        {?BONDY_TASK_DESCRIBE, [task_uri()], <<
+        {?BONDY_TASK_DESCRIBE, [task_uri()], undefined, <<
             "Whether one procedure is a sanctioned task, and its catalogue "
             "entry if so. An uncatalogued procedure answers with an empty "
             "list rather than an error."
@@ -161,7 +193,7 @@ read_resources() ->
 %%
 %% Every entry here is read-only, so the three derivable `ToolAnnotations`
 %% hints are constant across the set rather than derived from anything.
-read_tool({Uri, Args, Description}) ->
+read_tool({Uri, Args, Kwargs, Description}) ->
     Entry = #{
         ~"realm" => ?MASTER_REALM_URI,
         ~"name" => Uri,
@@ -174,7 +206,7 @@ read_tool({Uri, Args, Description}) ->
             ~"idempotent_hint" => true
         }
     },
-    maybe_args(Entry, Args).
+    maybe_kwargs(maybe_args(Entry, Args), Kwargs).
 
 %% @private
 read_resource({Topic, Description}) ->
@@ -206,6 +238,50 @@ maybe_args(Entry, Items) ->
             ~"prefixItems" => Items,
             ~"minItems" => N,
             ~"maxItems" => N
+        }
+    }.
+
+%% @private
+maybe_kwargs(Entry, undefined) ->
+    Entry;
+maybe_kwargs(Entry, Schema) ->
+    Entry#{~"kwargs_schema" => Schema}.
+
+%% @private
+%% `bondy.alarm.history` is paginated, and its knobs are KWARGS rather than
+%% CALL options: the option form was removed on 2026-09-01 because it never
+%% reached a callee at all (`bondy_wamp_api_utils:page_limit/3`). That change
+%% is what makes them declarable here — an agent cannot set a CALL option, but
+%% every non-`@args` key of its `arguments` object lands in KWArgs.
+%%
+%% The bounds are READ from the procedure rather than restated, so a schema
+%% that disagrees with the clamp is not expressible.
+history_kwargs() ->
+    #{
+        ~"type" => ~"object",
+        ~"properties" => #{
+            ~"limit" => #{
+                ~"type" => ~"integer",
+                ~"minimum" => 1,
+                ~"maximum" => bondy_alarm_api:history_page_max(),
+                ~"description" => <<
+                    "How many transitions to return. Out of range or absent "
+                    "means ",
+                    (integer_to_binary(
+                        bondy_alarm_api:history_page_default()
+                    ))/binary,
+                    "."
+                >>
+            },
+            ~"cursor" => #{
+                ~"type" => ~"string",
+                ~"description" => <<
+                    "The `cursor` of the page before this one. Absent starts "
+                    "a new walk. A cursor minted by anything else, or by an "
+                    "older release, is REFUSED rather than resumed from the "
+                    "wrong position."
+                >>
+            }
         }
     }.
 

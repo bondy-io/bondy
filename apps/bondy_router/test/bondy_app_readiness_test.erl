@@ -43,6 +43,109 @@ is_ready_test_() ->
         fun an_uninstalled_alarm_handler_reads_as_not_blocking/0
     ]}.
 
+%% =============================================================================
+%% THE DECLARED SET
+%% =============================================================================
+
+%% Every `Mod:Fun/Arity` `bondy_app:is_ready/0` consults, DECLARED here.
+%%
+%% Declared rather than derived, deliberately. A set discovered by scanning
+%% grows silently the moment a fourth condition is added, which is the one
+%% event this ratchet exists to catch: adding a readiness condition is a change
+%% to what `/ready` and `bondy_node_ready` MEAN, and it should not be possible
+%% to make it without a test failing and someone deciding whether the alarm
+%% catalogue needs to say so.
+readiness_conjuncts() ->
+    [
+        {bondy_config, get, 2},
+        {bondy_namespace_catalog, main_status, 0},
+        {bondy_alarm_handler, affects_ready, 0}
+    ].
+
+%% The falsifier for the declaration above: read back what `is_ready/0` really
+%% calls, out of its compiled abstract code, and require the two to agree
+%% EXACTLY. A conjunct added, removed or repointed fails here.
+the_declared_conjuncts_are_the_ones_is_ready_consults_test() ->
+    ?assertEqual(
+        lists:sort(readiness_conjuncts()),
+        remote_calls(bondy_app, is_ready, 0)
+    ).
+
+%% `readiness_via` says "this condition affects readiness through a mechanism
+%% OTHER than this alarm", and names it. Nothing in the running system reads
+%% that string, so left alone it is a comment that can rot into a lie — an
+%% operator following it would go and look at a function readiness no longer
+%% consults. This is what makes it a claim with evidence.
+every_readiness_via_names_a_live_conjunct_test() ->
+    Live = [mfa_string(MFA) || MFA <- readiness_conjuncts()],
+    Declared = [
+        V
+     || #{readiness_via := V} <- bondy_alarm_catalogue:list()
+    ],
+    %% Non-empty, or the case above is the only thing being tested and this one
+    %% passes by having nothing to check.
+    ?assertMatch([_ | _], Declared),
+    ?assertEqual([], Declared -- Live, {unknown_readiness_via, Declared, Live}).
+
+%% The two fields are alternatives, not companions: `readiness_via` exists
+%% precisely for a condition whose readiness signal does NOT run through the
+%% alarm. An entry claiming both would say readiness arrives twice, and the
+%% catalogue would no longer answer "how does this reach `/ready`".
+readiness_via_and_affects_ready_are_exclusive_test() ->
+    ?assertEqual(
+        [],
+        [
+            Id
+         || #{id_pattern := Id, affects_ready := true} = E <-
+                bondy_alarm_catalogue:list(),
+            maps:is_key(readiness_via, E)
+        ]
+    ).
+
+%% =============================================================================
+%% HELPERS
+%% =============================================================================
+
+%% @private
+mfa_string({M, F, A}) ->
+    iolist_to_binary([
+        atom_to_list(M), ":", atom_to_list(F), "/", integer_to_list(A)
+    ]).
+
+%% @private
+%% Every remote call one function makes, from the beam's `debug_info`.
+%%
+%% The beam is found by searching the code path rather than asked for with
+%% `code:which/1`, which answers `cover_compiled` under `rebar3 eunit`. The
+%% file ON DISK is the one carrying the abstract code — the same reason
+%% `bondy_alarm_catalogue_test` resolves its paths that way.
+remote_calls(Mod, Name, Arity) ->
+    File = atom_to_list(Mod) ++ ".beam",
+    [Beam | _] = [
+        P
+     || D <- code:get_path(),
+        P <- [filename:join(D, File)],
+        filelib:is_regular(P)
+    ],
+    {ok, {Mod, [{abstract_code, {raw_abstract_v1, Forms}}]}} =
+        beam_lib:chunks(Beam, [abstract_code]),
+    [Clauses] = [C || {function, _, N, A, C} <- Forms, N == Name, A == Arity],
+    lists:usort(calls(Clauses)).
+
+%% @private
+calls({call, _, {remote, _, {atom, _, M}, {atom, _, F}}, Args} = T) ->
+    [{M, F, length(Args)} | calls(tuple_to_list(T))];
+calls(T) when is_tuple(T) ->
+    calls(tuple_to_list(T));
+calls([H | T]) ->
+    calls(H) ++ calls(T);
+calls(_) ->
+    [].
+
+%% =============================================================================
+%% FIXTURE
+%% =============================================================================
+
 setup() ->
     _ = persistent_term:erase(?PT_STATUS),
     _ = persistent_term:erase(?PT_MAIN_FAILED),
