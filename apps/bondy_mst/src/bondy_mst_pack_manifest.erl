@@ -250,8 +250,23 @@ encode(#?MODULE{} = M) ->
         {last_compacted_at, M#?MODULE.last_compacted_at}
     ],
     iolist_to_binary(
-        [io_lib:format("~p.~n", [T]) || T <- Terms]
+        [format_term(T) || T <- Terms]
     ).
+
+%% @private
+%% `~tw` writes the term as a single-line, unicode-safe representation
+%% that round-trips through `file:consult/1`. `~p` must NOT be used
+%% here: it renders a binary whose bytes form a printable latin-1 run
+%% as `<<"...">>`, emitting bytes 160..255 verbatim into a file that
+%% `file:consult/1` then decodes as UTF-8 and rejects with
+%% `{Line, file_io_server, invalid_unicode}`. `current_root` is a raw
+%% sha256, so ~0.04% of roots hit this (measured, 21/50000) and brick
+%% every replica of the shard at once. Pinned by
+%% `encode_survives_high_byte_roots_test_` and
+%% `prop_encode_decode_roundtrip`, both of which go through disk.
+%% Mirrors `bondy_oplog_wal_manifest:format_term/1`.
+format_term(T) ->
+    io_lib:format("~tw.~n", [T]).
 
 ?DOC("""
 Decodes a list of `file:consult/1`-style terms into a manifest
