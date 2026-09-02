@@ -937,8 +937,19 @@ load_or_create_manifest(Dir, InstanceId, HashAlgo) ->
                 ok -> {ok, M};
                 {error, _} = E -> E
             end;
-        {error, _} = E ->
-            E
+        {error, R} ->
+            %% The manifest file exists but is unusable — an I/O error, or it
+            %% failed `decode/1`. Kept distinct from `enoent`, which is the
+            %% legitimate fresh-instance case handled above: an unreadable
+            %% manifest must NOT be replaced with a new one, because the
+            %% directory may still hold sealed packs that the replacement
+            %% would orphan.
+            %%
+            %% Named with its path because the raise this becomes in
+            %% `bondy_mst_pack_store:open_writer/4` is all an operator sees,
+            %% and a bare reason like `{4, file_io_server, invalid_unicode}`
+            %% identifies neither the instance nor the file to act on.
+            {error, {unreadable, bondy_mst_pack_manifest:path(Dir), R}}
     end.
 
 %% @private

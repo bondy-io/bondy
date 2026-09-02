@@ -24,6 +24,10 @@ network listeners, and tearing them down gracefully on stop.
 
 -ifdef(TEST).
 -export([peer_plane_gate/1]).
+%% The degraded-boot branch cannot be reached through `start/2` without a
+%% real storage substrate and a poisoned data directory; exposing the
+%% dispatch lets the branch be pinned directly.
+-export([start_services/1]).
 -endif.
 
 %% =============================================================================
@@ -102,38 +106,7 @@ start(_Type, Args) ->
                 ok ?= bondy_sysmon_handler:add_handler(),
                 ok ?= bondy_router_worker:start_pool(),
                 ok ?= setup_event_handlers(),
-                ok ?= configure_services(),
-                ok ?= init_registry_indices(),
-                ok ?= setup_wamp_subscriptions(),
-                ok ?= start_early_listeners(),
-                %% Finally we allow clients to connect
-                ok ?= start_normal_listeners(),
-                {ok, _} = application:ensure_all_started(
-                    bondy_http_connector, permanent
-                ),
-                %% Realm inheritance is a router concept and bondy_mail sits
-                %% below the router in the dependency graph, so it is told
-                %% which module resolves a realm's prototype rather than
-                %% calling into one directly.
-                ok = application:set_env(
-                    bondy_mail, realm_module, bondy_realm
-                ),
-                ok = application:set_env(
-                    bondy_mail, master_realm_uri, ?MASTER_REALM_URI
-                ),
-                %% Dormant unless a `mail.relay.*` is configured: it starts,
-                %% supervises nothing, and the bondy.mail.* procedures report
-                %% that mail is not configured.
-                {ok, _} = application:ensure_all_started(
-                    bondy_mail, permanent
-                ),
-                %% Started here as well as by the release boot script, so that
-                %% it also runs under CT and `rebar3 shell`. Every bridge
-                %% defaults to disabled, so this starts a manager with no
-                %% subscribers unless one is configured.
-                {ok, _} = application:ensure_all_started(
-                    bondy_broker_bridge, permanent
-                ),
+                ok ?= start_services(bondy_namespace_catalog:main_status()),
                 {ok, Pid}
             else
                 {error, _} = Error ->
@@ -304,6 +277,68 @@ opt(_Key, _Opts, Default) ->
 %% @private
 partisan_peer_ip() ->
     application:get_env(partisan, peer_ip, undefined).
+
+%% @private
+%% Brings up everything above the storage substrate, in one of two shapes
+%% depending on whether the durable `main` DB opened.
+%%
+%% `failed` is the degraded boot. `bondy_namespace_catalog:open_main_into/1`
+%% deliberately keeps the catalogue alive on a main-DB open failure so an
+%% operator can inspect the node, and `bondy_admin_ready_http_handler` already
+%% answers 503 for as long as `main_status/0` is `failed`. Terminating the
+%% application here would take that whole diagnostic surface down with it —
+%% which is what used to happen: every step below needs durable tables, and
+%% `configure_services/0` raises `bondy_realm_table_unavailable` on its first
+%% `bondy_realm:get/1`, escaping `start/2` and killing the VM.
+%%
+%% So the degraded path starts the early listeners and stops. Those serve
+%% `/ping` and `/ready`, and `bondy_config:get(status)` is left at
+%% `initialising` because only `start_normal_listeners/0` promotes it to
+%% `ready` — so the readiness probe reports NOT READY on both of its
+%% conditions, and no client listener ever opens.
+start_services(failed) ->
+    ?LOG_ERROR(#{
+        description =>
+            "The durable main store is unavailable, so the node is booting "
+            "in a degraded state: no realms are configured and no client "
+            "listeners are started. Only the early-phase listeners come up, "
+            "so the node stays inspectable and reports NOT READY. Resolve "
+            "the main-store failure and restart.",
+        main_status => failed
+    }),
+    start_early_listeners();
+start_services(_) ->
+    maybe
+        ok ?= configure_services(),
+        ok ?= init_registry_indices(),
+        ok ?= setup_wamp_subscriptions(),
+        ok ?= start_early_listeners(),
+        %% Finally we allow clients to connect
+        ok ?= start_normal_listeners(),
+        {ok, _} = application:ensure_all_started(
+            bondy_http_connector, permanent
+        ),
+        %% Realm inheritance is a router concept and bondy_mail sits
+        %% below the router in the dependency graph, so it is told
+        %% which module resolves a realm's prototype rather than
+        %% calling into one directly.
+        ok = application:set_env(bondy_mail, realm_module, bondy_realm),
+        ok = application:set_env(
+            bondy_mail, master_realm_uri, ?MASTER_REALM_URI
+        ),
+        %% Dormant unless a `mail.relay.*` is configured: it starts,
+        %% supervises nothing, and the bondy.mail.* procedures report
+        %% that mail is not configured.
+        {ok, _} = application:ensure_all_started(bondy_mail, permanent),
+        %% Started here as well as by the release boot script, so that
+        %% it also runs under CT and `rebar3 shell`. Every bridge
+        %% defaults to disabled, so this starts a manager with no
+        %% subscribers unless one is configured.
+        {ok, _} = application:ensure_all_started(
+            bondy_broker_bridge, permanent
+        ),
+        ok
+    end.
 
 %% @private
 configure_services() ->
