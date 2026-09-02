@@ -1076,6 +1076,12 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
 -export([dispatch_table/1]).
 -export([dispatch_table/2]).
 
+-ifdef(TEST).
+%% Exposed so the error body it builds can be driven directly, without
+%% standing up a whole API spec whose evaluation fails.
+-export([mops_eval/2]).
+-endif.
+
 %% =============================================================================
 %% API
 %% =============================================================================
@@ -1904,11 +1910,20 @@ mops_eval(Expr, Ctxt) ->
         error:{invalid_expression, [Expr, Term]} ->
             throw(#{
                 <<"code">> => ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR,
+                %% Both interpolated fragments are untrusted: `Term` is
+                %% whatever the action returned and `Expr` is echoed back
+                %% by `mops` as handed. Each is made UTF-8 on its own —
+                %% `format_term/1` renders and bounds the value,
+                %% `to_binary/1` passes a valid-UTF-8 expression through and
+                %% renders one that is not — so the frame around them stays
+                %% readable text rather than the whole message being
+                %% rendered as a term when one fragment is bad. Pinned by
+                %% `bondy_gateway_error_utf8_test`.
                 <<"message">> => iolist_to_binary([
                     <<"There was an error evaluating the MOPS expression '">>,
-                    Expr,
+                    bondy_error:to_binary(Expr),
                     "' with value '",
-                    io_lib:format("~p", [Term]),
+                    bondy_error:format_term(Term),
                     "'"
                 ]),
                 <<"description">> =>

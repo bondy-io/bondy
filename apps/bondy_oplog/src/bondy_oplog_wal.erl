@@ -1380,6 +1380,13 @@ open_or_recover(
     end.
 
 %% @private
+%% An instance id names ONE directory component: every instance passed
+%% `bondy_oplog_path:validate_instance_id/1` at admission
+%% (`bondy_oplog_instance_dyn_sup:start_instance/2`), which refuses `/`, so
+%% this join cannot turn the id into path structure. That check is what
+%% covers this call — `BaseDir` here is an explicit `wal_dir` or the `/tmp`
+%% default as often as it is a storage path, and only the latter goes
+%% through `bondy_oplog_path:storage_path/3`.
 per_instance_dir(BaseDir, InstanceId) ->
     filename:join(BaseDir, InstanceId).
 

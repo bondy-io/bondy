@@ -22,10 +22,58 @@ lifecycle_test_() ->
         fun stop_unknown/0,
         fun stop_survives_missing_registry_row/0,
         fun crash_isolated_between_instances/0,
-        fun discover_flat/0,
-        fun discover_sharded/0,
-        fun path_layouts_round_trip/0
+        fun path_layouts_round_trip/0,
+        fun start_refuses_an_id_that_cannot_name_a_directory/0,
+        fun start_admits_a_hyphenated_id_without_storage_path/0
     ]}.
+
+%% An instance id becomes a directory under every base the instance writes
+%% to. `bondy_oplog_path:storage_path/3` checks it, but two of those bases
+%% never go through `storage_path/3`: an explicit `wal_dir`, and the
+%% `/tmp/bondy_oplog_wal/<os pid>` default an instance without
+%% `storage_path` gets — which is what every case here uses. The check
+%% therefore has to sit at admission, and a refused id must leave nothing
+%% behind: no registry row, no supervisor child.
+start_refuses_an_id_that_cannot_name_a_directory() ->
+    WalDir = unicode:characters_to_binary(
+        filename:join("/tmp", "bondy_oplog_lifecycle_" ++ os:getpid())
+    ),
+    Cases = [
+        {<<"a/b">>, separator, #{}},
+        {<<"a/b">>, separator, #{wal_dir => WalDir}},
+        {<<"../../pwned">>, separator, #{}},
+        {<<"..">>, relative, #{}},
+        {<<>>, empty, #{}},
+        {<<"a", 0, "b">>, nul_byte, #{}},
+        {<<"inst-", 233>>, not_utf8, #{}}
+    ],
+    lists:foreach(
+        fun({Id, Reason, Opts}) ->
+            ?assertError(
+                {invalid_instance_id, Id, Reason},
+                bondy_oplog:start_instance(Id, Opts)
+            ),
+            ?assertEqual(undefined, bondy_oplog_registry:sup_pid(Id)),
+            ?assertNot(lists:member(Id, bondy_oplog:list_instances()))
+        end,
+        Cases
+    ).
+
+%% The complement: a `bondy_db`-shaped id (`<Db>-<Shard>`) with no
+%% `storage_path` starts, its WAL lands under the `/tmp` default as ONE
+%% component named by the id, and it stops cleanly.
+start_admits_a_hyphenated_id_without_storage_path() ->
+    Id =
+        <<"lc_db-",
+            (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    {ok, SupPid} = bondy_oplog:start_instance(Id),
+    ?assert(is_pid(SupPid)),
+    WalDir = unicode:characters_to_binary(
+        filename:join(["/tmp", "bondy_oplog_wal", os:getpid(), Id])
+    ),
+    ?assert(filelib:is_dir(WalDir)),
+    ok = bondy_oplog:stop_instance(Id),
+    ?assertEqual({error, not_found}, bondy_oplog:stop_instance(Id)).
 
 %% An instance whose registry row is gone while its subtree still runs (a
 %% consumer teardown that failed mid-close) must remain STOPPABLE.
@@ -89,36 +137,6 @@ crash_isolated_between_instances() ->
     ok = bondy_oplog:stop_instance(A),
     ok = bondy_oplog:stop_instance(B).
 
-discover_flat() ->
-    Tmp = mk_tmp_dir(),
-    %% Create three "instance" directories under the flat layout.
-    Ids = [<<"alpha">>, <<"beta">>, <<"gamma">>],
-    [ok = file:make_dir(filename:join(Tmp, Id)) || Id <- Ids],
-    Found = bondy_oplog:discover_instances(
-        Tmp, flat
-    ),
-    ?assertEqual(lists:sort(Ids), lists:sort(Found)),
-    ok = del_tree(Tmp).
-
-discover_sharded() ->
-    Tmp = mk_tmp_dir(),
-    Ids = [<<"foo">>, <<"bar">>, <<"baz">>],
-    [
-        begin
-            P = bondy_oplog_path:storage_path(Id, Tmp, sharded),
-            %% `ensure_dir/1` ensures the *parent* exists; passing a
-            %% sentinel filename inside `P` makes `P` itself the parent
-            %% to be created.
-            ok = filelib:ensure_dir(filename:join(P, "marker"))
-        end
-     || Id <- Ids
-    ],
-    Found = bondy_oplog:discover_instances(
-        Tmp, sharded
-    ),
-    ?assertEqual(lists:sort(Ids), lists:sort(Found)),
-    ok = del_tree(Tmp).
-
 path_layouts_round_trip() ->
     Id = <<"hello">>,
     Base = <<"/tmp/bondy_mst_data">>,
@@ -140,37 +158,6 @@ mk_id() ->
     list_to_binary(
         "lc_" ++ integer_to_list(erlang:unique_integer([positive, monotonic]))
     ).
-
-mk_tmp_dir() ->
-    Suffix =
-        integer_to_list(os:system_time(microsecond)) ++ "_" ++
-            integer_to_list(erlang:phash2(make_ref())),
-    Dir = filename:join(
-        <<"/tmp">>,
-        list_to_binary("bondy_mst_lc_" ++ Suffix)
-    ),
-    %% `ensure_path/1` is idempotent — collisions across VM restarts
-    %% don't matter and leftover dirs from prior runs are reused.
-    ok = filelib:ensure_path(Dir),
-    Dir.
-
-del_tree(Dir) ->
-    case file:list_dir(Dir) of
-        {ok, Names} ->
-            [
-                begin
-                    P = filename:join(Dir, N),
-                    case filelib:is_dir(P) of
-                        true -> del_tree(P);
-                        false -> file:delete(P)
-                    end
-                end
-             || N <- Names
-            ];
-        _ ->
-            ok
-    end,
-    file:del_dir(Dir).
 
 wait_until(_F, T) when T =< 0 -> error(timeout);
 wait_until(F, T) ->

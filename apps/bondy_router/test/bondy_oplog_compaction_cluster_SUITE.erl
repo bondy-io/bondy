@@ -225,7 +225,7 @@ sustained_writes_registry_history_stays_bounded(Config) ->
         S
      || {_Ts, _Node, InstId, Size} = S <- Samples,
         is_integer(Size),
-        binary:match(InstId, <<"registry/">>) =/= nomatch
+        binary:match(InstId, <<"registry-">>) =/= nomatch
     ],
 
     %% (a) During-load ceiling: history trails the confirmed frontier by
@@ -1256,7 +1256,7 @@ do_stale_sync_main_from(Peer) ->
                 C:R -> {'EXIT', {C, R}}
             end}
      || I <- bondy_oplog:list_instances(),
-        binary:match(I, <<"main/">>) =/= nomatch
+        binary:match(I, <<"main-">>) =/= nomatch
     ].
 
 %% @private
@@ -1286,7 +1286,7 @@ do_stale_sync_and_compact_main(Peer) ->
                 )}
         end
      || I <- bondy_oplog:list_instances(),
-        binary:match(I, <<"main/">>) =/= nomatch
+        binary:match(I, <<"main-">>) =/= nomatch
     ].
 
 %% @private
@@ -1320,7 +1320,7 @@ do_stale_watermarks_main() ->
                 C:R -> {'EXIT', {C, R}}
             end}
      || I <- bondy_oplog:list_instances(),
-        binary:match(I, <<"main/">>) =/= nomatch
+        binary:match(I, <<"main-">>) =/= nomatch
     ].
 
 %% @private
@@ -1335,7 +1335,7 @@ do_hole_frontiers_main() ->
                 C:R -> {'EXIT', {C, R}}
             end}
      || I <- bondy_oplog:list_instances(),
-        binary:match(I, <<"main/">>) =/= nomatch
+        binary:match(I, <<"main-">>) =/= nomatch
     ].
 
 %% @private
@@ -1350,7 +1350,7 @@ do_hole_origins_main() ->
                 C:R -> {'EXIT', {C, R}}
             end}
      || I <- bondy_oplog:list_instances(),
-        binary:match(I, <<"main/">>) =/= nomatch
+        binary:match(I, <<"main-">>) =/= nomatch
     ].
 
 %% @private
@@ -1665,7 +1665,7 @@ do_recovery_diagnostics() ->
             catch
                 _:_ -> []
             end,
-        binary:match(I, <<"registry/">>) =/= nomatch
+        binary:match(I, <<"registry-">>) =/= nomatch
     ],
     #{
         retention_truncations => Count([retention]),

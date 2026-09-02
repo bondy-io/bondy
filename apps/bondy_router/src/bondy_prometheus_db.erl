@@ -1166,9 +1166,9 @@ alarms() ->
 
 %% @private
 node_ready() ->
-    try bondy_config:get(status, undefined) of
-        ready -> [{[], 1}];
-        _ -> [{[], 0}]
+    try bondy_app:is_ready() of
+        true -> [{[], 1}];
+        false -> [{[], 0}]
     catch
         _:_ -> []
     end.

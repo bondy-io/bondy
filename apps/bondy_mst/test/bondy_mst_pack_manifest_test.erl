@@ -264,6 +264,42 @@ write_then_read_round_trip_test() ->
         ?assertEqual(M1, M2)
     end).
 
+%% A manifest that exists but cannot be used is reported with its path.
+%% `read/1` is the single door every caller goes through
+%% (`bondy_mst_pack_writer`, `bondy_mst_pack_recovery`,
+%% `bondy_mst_pack_reader`), so classifying here is what stops the three of
+%% them reporting the same condition three different ways — the raise an
+%% operator sees is otherwise a bare `{4, file_io_server, invalid_unicode}`
+%% naming neither the instance nor the file.
+read_unreadable_file_names_the_path_test() ->
+    with_tmp_dir(fun(Dir) ->
+        Path = bondy_mst_pack_manifest:path(Dir),
+        %% invalid UTF-8: exactly what the `~p` encoder used to write
+        ok = file:write_file(
+            Path, <<"{manifest_version, 1}.\n{x, \"", 233, "\"}.\n">>
+        ),
+        ?assertMatch(
+            {error, {unreadable, Path, _}},
+            bondy_mst_pack_manifest:read(Dir)
+        )
+    end).
+
+%% A file that consults cleanly but fails `decode/1` is equally unusable and
+%% must be classified the same way, not leak a bare parse error.
+read_undecodable_file_names_the_path_test() ->
+    with_tmp_dir(fun(Dir) ->
+        Path = bondy_mst_pack_manifest:path(Dir),
+        ok = file:write_file(Path, <<"{manifest_version, 1}.\n">>),
+        ?assertMatch(
+            {error, {unreadable, Path, _}},
+            bondy_mst_pack_manifest:read(Dir)
+        )
+    end).
+
+%% The control that keeps the classification from swallowing the one error
+%% callers branch on: `enoent` means a FRESH instance, and
+%% `bondy_mst_pack_writer:load_or_create_manifest/3` creates a manifest on it.
+%% Wrapping it would turn every first open into a hard failure.
 read_missing_file_returns_error_test() ->
     with_tmp_dir(fun(Dir) ->
         ?assertMatch({error, enoent}, bondy_mst_pack_manifest:read(Dir))

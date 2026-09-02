@@ -486,7 +486,11 @@ open_table_provision(
     ok = assert_mst_retention_requires_fused(
         maps:get(mst_retention, OplogOpts0, undefined), Fused
     ),
-    OplogOpts1 = OplogOpts0#{fused => Fused},
+    %% The DB every shard instance belongs to, carried in the instance opts
+    %% so `bondy_oplog:db_of/1` can answer it from the registry row instead
+    %% of parsing it back out of the instance id — which would make
+    %% `bondy_oplog` depend on this module's id-composition convention.
+    OplogOpts1 = OplogOpts0#{fused => Fused, db => DbName},
     %% Opt-in change-notification (`publish => true`): wire every shard's
     %% applier to publish each verified apply (local OR AE-replicated) to the
     %% table namespace via `bondy_oplog_core:publish/4`, so a reactor can
@@ -4276,31 +4280,49 @@ composite_row(false, _Realm, Arity, SecKey, Columns) ->
     {Cols, bondy_oplog_index_spec:decode_projection(Columns)}.
 
 %% @private
-%% Per-table-shard instance id (`DbName/EntityType/Shard`): one oplog instance
+%% Per-table-shard instance id (`DbName-EntityType-Shard`): one oplog instance
 %% (WAL + MST + applier) per table per shard. Used by the `per_table_shard`
 %% topologies.
+%% `-` and not `/`: an instance id names ONE directory, and `bondy_oplog`
+%% refuses an id containing `/` when the instance is started
+%% (`bondy_oplog_path:validate_instance_id/1`) — a `/` would turn the id into
+%% path structure, so the id could no longer be recovered from the path and
+%% every consumer doing path arithmetic on it would mis-parse the result. No
+%% catalogue db or entity-type atom contains `-`, and they are snake_case, so
+%% `-` separates visibly where `_` would not.
 encode_instance_id(DbName, EntityType, Shard) ->
     iolist_to_binary([
-        atom_to_binary(DbName, utf8),
-        $/,
-        atom_to_binary(EntityType, utf8),
-        $/,
+        id_part(DbName),
+        $-,
+        id_part(EntityType),
+        $-,
         integer_to_binary(Shard)
     ]).
 
 %% @private
-%% Per-shard instance id (`DbName/Shard`): one oplog instance shared by every
+%% A component may not contain the separator, because the encoding has to be
+%% INJECTIVE: an instance id names one storage directory, so two distinct
+%% instances sharing an id would share a WAL and an MST. Without this check the two arities collide —
+%% `encode_instance_id('a-b', 1)` and `encode_instance_id(a, b, 1)` both give
+%% `<<"a-b-1">>` — and the differing arity no longer separates them. Refused
+%% here, where the id is built, rather than discovered as two tables writing
+%% the same files.
+id_part(Atom) when is_atom(Atom) ->
+    Bin = atom_to_binary(Atom, utf8),
+    case binary:match(Bin, <<"-">>) of
+        nomatch -> Bin;
+        _ -> error({invalid_instance_id_component, Atom})
+    end.
+
+%% @private
+%% Per-shard instance id (`DbName-Shard`): one oplog instance shared by every
 %% table on the shard, routed by the entity-type bucket. Used by the `per_shard`
 %% topology (`shared_shards`). Dropping the entity type collapses the WAL/MST
 %% paths to `wal/<DbName>/<Shard>` and `mst/.../<DbName>/<Shard>` — the instance
 %% appends `/<InstanceId>` to the shared base path, so the shard owns one WAL and
 %% one MST regardless of how many tables it carries.
 encode_instance_id(DbName, Shard) ->
-    iolist_to_binary([
-        atom_to_binary(DbName, utf8),
-        $/,
-        integer_to_binary(Shard)
-    ]).
+    iolist_to_binary([id_part(DbName), $-, integer_to_binary(Shard)]).
 
 %% @private
 %% The grouping key of the `bondy_oplog_secondary_writer` that drives an index

@@ -15,6 +15,7 @@ network listeners, and tearing them down gracefully on stop.
 -include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
 
+-export([is_ready/0]).
 -export([prep_stop/1]).
 -export([start/2]).
 -export([status/0]).
@@ -45,6 +46,37 @@ status() ->
         vsn => vsn(),
         status => bondy_config:get(status)
     }.
+
+-doc """
+Whether this node should be sent traffic.
+
+The single readiness oracle: `bondy_admin_ready_http_handler` (`/ready`) and
+the `bondy_node_ready` Prometheus gauge both answer from here, so a load
+balancer and a dashboard cannot disagree about the same node.
+
+Two independent conditions, each read from exactly one source:
+
+1. **Boot finished.** `start_normal_listeners/0` sets the status to `ready`
+   once the client listeners are up. On a degraded boot
+   (`start_services(failed)`) that step never runs, so the status stays
+   `initialising`.
+2. **The durable `main` DB opened.** Read from
+   `bondy_namespace_catalog:main_status/0`, NOT from the alarm that mirrors
+   it: the status is `persistent_term`-backed and survives an
+   `alarm_handler` crash, the alarm set does not. Only `failed`
+   disqualifies; `idle` means there was nothing to provision, a legitimate
+   configuration.
+
+On this branch a degraded boot fails BOTH conditions; the second is what
+keeps the answer right should boot ever be allowed to complete on a failed
+store. Pinned end-to-end by `bondy_degraded_boot_SUITE` (a poisoned `main`
+directory and a healthy control node).
+""".
+-spec is_ready() -> boolean().
+
+is_ready() ->
+    bondy_config:get(status, undefined) == ready andalso
+        bondy_namespace_catalog:main_status() =/= failed.
 
 -spec vsn() -> list().
 vsn() ->
@@ -287,9 +319,17 @@ partisan_peer_ip() ->
 %% operator can inspect the node, and `bondy_admin_ready_http_handler` already
 %% answers 503 for as long as `main_status/0` is `failed`. Terminating the
 %% application here would take that whole diagnostic surface down with it —
-%% which is what used to happen: every step below needs durable tables, and
-%% `configure_services/0` raises `bondy_realm_table_unavailable` on its first
-%% `bondy_realm:get/1`, escaping `start/2` and killing the VM.
+%% which is what used to happen: `configure_services/0` raises
+%% `bondy_realm_table_unavailable` on its first `bondy_realm:get/1`, escaping
+%% `start/2` and killing the VM.
+%%
+%% The degraded path therefore starts exactly what serves the liveness and
+%% readiness probes, and nothing else. That is the rule for where a new boot
+%% step belongs — NOT "does it touch durable tables", which is not true of
+%% every step skipped here: `init_registry_indices/0` rebuilds from the
+%% registry tables, which are provisioned independently of `main` and can be
+%% healthy while it is not. A node serving no traffic simply has no use for
+%% them.
 %%
 %% So the degraded path starts the early listeners and stops. Those serve
 %% `/ping` and `/ready`, and `bondy_config:get(status)` is left at
@@ -404,9 +444,15 @@ setup_event_handlers() ->
         {bondy_signal_handler, []}
     ),
 
-    %% We replace the default OTP alarm handler with ours
+    %% We replace the default OTP alarm handler with ours. The old handler's
+    %% terminate argument must be `swap`: that is the clause of
+    %% `sasl/src/alarm_handler.erl:terminate/2` that returns
+    %% `{alarm_handler, Alarms}` for the new handler's `init/1` to adopt.
+    %% `normal` returns `ok`, silently dropping every alarm raised before
+    %% this point in the boot — `bondy_db_main_unavailable` among them, which
+    %% the namespace catalogue raises from its own `init/1` under `bondy_sup`.
     _ = bondy_event_manager:swap_watched_handler(
-        alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}
+        alarm_handler, {alarm_handler, swap}, {bondy_alarm_handler, []}
     ),
 
     %% An event handler that republishes some internal events to WAMP

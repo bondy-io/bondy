@@ -48,10 +48,21 @@ get_alarms() ->
 init([]) ->
     State = #state{},
     {ok, State};
+init({[], {alarm_handler, Alarms}}) when is_list(Alarms) ->
+    %% A gen_event swap from OTP's default handler, performed with
+    %% `{alarm_handler, swap}` so that its `terminate(swap, Alarms)` hands its
+    %% alarm list over (`sasl/src/alarm_handler.erl`). Adopt it: alarms
+    %% raised BEFORE the swap — `bondy_db_main_unavailable`, set by
+    %% `bondy_namespace_catalog:init/1` while `bondy_sup` is still starting,
+    %% before `bondy_app:setup_event_handlers/0` runs — must survive into
+    %% `get_alarms/0`. Asserted by `bondy_degraded_boot_SUITE`. The OTP list
+    %% has the same `[{Id, Description}]` shape as ours, newest first.
+    {ok, #state{alarms = Alarms}};
 init({[], _}) ->
-    %% In case of a swap
-    State = #state{},
-    {ok, State}.
+    %% A swap with nothing to adopt: the old handler was absent (gen_event
+    %% hands `error`), e.g. the watcher re-installing this handler after a
+    %% crash, when the OTP default is no longer registered.
+    {ok, #state{}}.
 
 %% An alarm is identified by its id: raising one that is already raised is a
 %% RESTATEMENT, not a second alarm. Callers restate freely — e.g.

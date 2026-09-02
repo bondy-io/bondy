@@ -319,12 +319,12 @@ format_consumer_offset(#consumer_offset{
     commit_count = Count,
     schema_version = Version
 }) ->
-    iolist_to_binary([
-        format_term({committed_segment, Seg}),
-        format_term({committed_frame_offset, Off}),
-        format_term({committed_hlc, Hlc}),
-        format_term({commit_count, Count}),
-        format_term({schema_version, Version})
+    bondy_consult:encode([
+        {committed_segment, Seg},
+        {committed_frame_offset, Off},
+        {committed_hlc, Hlc},
+        {commit_count, Count},
+        {schema_version, Version}
     ]).
 
 %% =============================================================================
@@ -355,12 +355,10 @@ validate_snapshot_watermark_version(V) ->
 
 %% @private
 format_snapshot_watermark(Hlc) ->
-    iolist_to_binary([
-        format_term({
-            snapshot_watermark_version,
-            ?BONDY_OPLOG_WAL_SNAPSHOT_WATERMARK_VERSION
-        }),
-        format_term({hlc, Hlc})
+    bondy_consult:encode([
+        {snapshot_watermark_version,
+            ?BONDY_OPLOG_WAL_SNAPSHOT_WATERMARK_VERSION},
+        {hlc, Hlc}
     ]).
 
 %% =============================================================================
@@ -399,10 +397,6 @@ validate_hlc_or_undefined(V) ->
 %% @private
 validate_hlc(H) when is_integer(H), H >= 0 -> ok;
 validate_hlc(V) -> throw({invalid, {invalid_hlc, V}}).
-
-%% @private
-format_term(T) ->
-    io_lib:format("~tw.~n", [T]).
 
 %% @private
 %% Shared atomic-write helper: tmp → datasync → rename → fsync dir.

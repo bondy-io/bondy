@@ -58,7 +58,29 @@ register_stub(InstanceId) ->
     }).
 
 cleanup(_) ->
+    %% The stub rows carry `instance_pid => self()` — the test process, which
+    %% is gone once this module finishes. The registry deliberately does NOT
+    %% monitor (a row lives from registration until `terminate/2`), so a row
+    %% left behind here stays in `bondy_oplog_registry:down/0` for the rest of
+    %% the BEAM. That is node-global state: every later suite sees an instance
+    %% that is permanently down, and
+    %% `bondy_oplog_origin_retirement:retire_dead/0` refuses while any is —
+    %% which is what made `bondy_oplog_frontier_reap_test` fail in a full-dir
+    %% run while passing in isolation.
+    %%
+    %% The row must be DELETED. Registering a long-lived sentinel pid instead
+    %% would only move it from `down/0` to `list/0` — the two partition the
+    %% same rows — and it would then be advertised to peers as a live origin.
+    _ = [
+        bondy_oplog_registry:unregister(Id)
+     || Id <- bondy_oplog_registry:list() ++ bondy_oplog_registry:down(),
+        is_stub_id(Id)
+    ],
     ok.
+
+%% @private
+is_stub_id(<<"scrubber-test-", _/binary>>) -> true;
+is_stub_id(_) -> false.
 
 scrubber_test_() ->
     {setup, fun setup/0, fun cleanup/1, [

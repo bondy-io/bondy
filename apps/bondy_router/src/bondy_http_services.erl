@@ -144,14 +144,47 @@ routes(metrics, _Spec, _Listener) ->
 %% not by protocol: both declare `undefined` for protocol, so a shared carrier's
 %% protocol union could not tell them apart and this function had to read
 %% `services` to decide which of the two route sets to fetch.
+%%
+%% Both are backed by the durable store — `api_gateway` reads its
+%% specifications from it, and compiling either table consults the realm
+%% table to drop routes whose realm is absent — so on a degraded boot
+%% (`main` failed to open; `bondy_namespace_catalog:main_status/0`) neither
+%% can be built, and neither could serve a request if it were. The dispatch
+%% is made HERE, once per carrier, rather than by catching
+%% `*_table_unavailable` per route inside the compiler: the listener still
+%% mounts every static carrier, so `/ping`, `/ready` and `/metrics` answer on
+%% a degraded node. This is the same mode dispatch `bondy_app:start_services/1`
+%% boots by. Exercised by `bondy_degraded_boot_SUITE`.
 routes(api_gateway, _Spec, Listener) ->
-    bondy_http_gateway:routes(Listener);
+    specification_routes(
+        api_gateway, fun bondy_http_gateway:routes/1, Listener
+    );
 routes(admin_api, _Spec, Listener) ->
-    bondy_http_gateway:admin_api_routes(Listener).
+    specification_routes(
+        admin_api, fun bondy_http_gateway:admin_api_routes/1, Listener
+    ).
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+%% @private
+specification_routes(Carrier, Compile, Listener) ->
+    case bondy_namespace_catalog:main_status() of
+        failed ->
+            ?LOG_WARNING(#{
+                description =>
+                    "Mounting no specification-derived routes on this "
+                    "listener; the durable main database is not open. The "
+                    "listener's static routes are unaffected.",
+                carrier => Carrier,
+                listener => maps:get(name, Listener),
+                main_status => failed
+            }),
+            [];
+        _ ->
+            Compile(Listener)
+    end.
 
 %% @private
 %% The handler receives its listener's name and resolved carrier configuration

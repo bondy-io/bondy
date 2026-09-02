@@ -319,7 +319,7 @@ read(Dir) ->
 
 -doc """
 Atomically write `Manifest` under `Dir` (temp file + rename), as a single
-human-readable Erlang term preceded by a do-not-edit banner.
+Erlang term on one line, preceded by a do-not-edit banner.
 """.
 -spec write(Dir :: file:filename_all(), Manifest :: manifest()) ->
     ok | {error, term()}.
@@ -327,12 +327,19 @@ human-readable Erlang term preceded by a do-not-edit banner.
 write(Dir, Manifest) when is_map(Manifest) ->
     Path = path(Dir),
     Tmp = unicode:characters_to_list([Path, ".tmp"]),
-    IOData = unicode:characters_to_binary([
+    %% `bondy_consult:encode/1` owns the byte encoding of the term (UTF-8,
+    %% one line), which is what `file:consult/1` in `read/1` decodes. The
+    %% frozen map carries caller-supplied atoms (`db`, `topology_module`,
+    %% `partition_strategy`), so an atom with a non-ASCII character reaches
+    %% the file; pinned through the real write/read pair by
+    %% `bondy_db_manifest_test:write_read_survives_non_ascii_atoms_test_`.
+    %% The banner is ASCII and is prepended as bytes.
+    IOData = [
         "%% bondy_db topology manifest -- DO NOT EDIT.\n"
         "%% Frozen keying configuration; changing it re-keys on-disk data.\n"
         "%% Migration: export -> wipe data dir -> reimport (bondy_export).\n",
-        io_lib:format("~p.~n", [Manifest])
-    ]),
+        bondy_consult:encode([Manifest])
+    ],
     case file:write_file(Tmp, IOData) of
         ok ->
             case file:rename(Tmp, Path) of

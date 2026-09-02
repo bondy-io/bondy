@@ -78,6 +78,16 @@ info({poll_result, {ok, {messages, []}}}, Req0, State) ->
 info({poll_result, {ok, {replies, []}}}, Req0, State) ->
     Req1 = cowboy_req:reply(?HTTP_NO_CONTENT, #{}, <<>>, Req0),
     {stop, Req1, State};
+info(
+    {'DOWN', MRef, process, _Pid, _Reason},
+    Req0,
+    #{session_mref := MRef} = State
+) ->
+    %% The transport session died while this poll held (see the monitor in
+    %% `do_handle_receive/2'). A non-2xx makes the client's poller report a
+    %% connection error, which is what a dead transport is.
+    Req1 = reply_error(?HTTP_NOT_FOUND, <<"transport_not_found">>, Req0),
+    {stop, Req1, State};
 info(_Msg, Req, State) ->
     {ok, Req, State}.
 
@@ -339,6 +349,17 @@ do_handle_receive(Req0, State) ->
                     Config = maps:get(config, State),
                     PollTimeout = maps:get(poll_timeout, Config),
                     Encoding = bondy_http_transport_session:encoding(Pid),
+                    %% The hold's only reply comes from the session, so its
+                    %% death must produce one too: without this monitor a
+                    %% session killed mid-hold leaves the poll hanging until
+                    %% the connection idle timeout, and a long-poll client —
+                    %% which has no socket to see close — learns nothing
+                    %% until then. The `'DOWN'` clause of `info/3` answers
+                    %% `transport_not_found` at once, the same reply a poll
+                    %% arriving after the death would get from the `whereis`
+                    %% above. Monitoring before `request_poll/2` closes the
+                    %% window: a death between the two still delivers `'DOWN'`.
+                    MRef = erlang:monitor(process, Pid),
                     ok = bondy_http_transport_session:request_poll(
                         Pid, PollTimeout
                     ),
@@ -349,7 +370,9 @@ do_handle_receive(Req0, State) ->
                     %% covers HTTP/1.1 and HTTP/2 alike — a per-stream cast
                     %% only ever worked over HTTP/1.1
                     %% (`cowboy_http2.erl:988' discards it).
-                    {cowboy_loop, Req0, State#{encoding => Encoding}}
+                    {cowboy_loop, Req0, State#{
+                        encoding => Encoding, session_mref => MRef
+                    }}
             end
     end.
 

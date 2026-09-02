@@ -301,23 +301,35 @@ incoming_root_restart(Dir) ->
     ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
     ok.
 
-%% Regression for the LIVE symptom: the main shards use SLASH-bearing instance
-%% ids (`main/13`). Under the sharded path layout the instance dir ends in TWO
-%% components (`.../main/13`), and a path helper that strips one component to find
-%% the "base" double-nests the id (`.../main/main/13`), so the persisted root is
-%% read/written on a different path than the data — the tree never restores on
-%% reopen and the WAL replays in full every boot. This reproduces it with a
-%% slashed id; slash-free ids (every other test here) do not exercise it.
-slash_instance_id_root_survives_restart_test_() ->
+%% This began as a regression for the LIVE symptom: the main shards used
+%% SLASH-bearing instance ids (`main/13`), so the instance directory ended in
+%% TWO components and a path helper that strips one to find the "base"
+%% double-nested the id (`.../main/main/13`) — the persisted root was
+%% read/written on a different path than the data, the tree never restored on
+%% reopen, and the WAL replayed in full every boot.
+%%
+%% That whole class is now unreachable rather than fixed:
+%% `bondy_oplog_path:storage_path/3` REFUSES an id containing `/`, and
+%% `bondy_db:encode_instance_id/2,3` joins with `-`, so an id always names one
+%% directory and `filename:dirname/1` strips exactly the instance. The two
+%% cases below keep the coverage honest — the first pins the refusal, the
+%% second keeps the multi-part-id restart path exercised in its real shape.
+slash_instance_id_is_refused_test() ->
+    ?assertError(
+        {invalid_instance_id, <<"slashcore/13">>, separator},
+        bondy_oplog_path:storage_path(<<"slashcore/13">>, <<"/data">>, sharded)
+    ).
+
+multi_part_instance_id_root_survives_restart_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(Dir) ->
         {timeout, 60, fun() -> slash_id_restart(Dir) end}
     end}.
 
 slash_id_restart(Dir) ->
-    %% A `main/13`-shaped id (DB name + shard), unique per run to avoid registry
-    %% collisions, with a slash like the real main shards.
+    %% A `main-13`-shaped id (DB name + shard), unique per run to avoid
+    %% registry collisions — the real shape a node uses.
     U = integer_to_binary(erlang:unique_integer([positive, monotonic])),
-    InstId = <<"slashcore", U/binary, "/13">>,
+    InstId = <<"slashcore", U/binary, "-13">>,
     NS = binary_to_atom(<<"ns_slash_", U/binary>>, utf8),
     Origin = bondy_oplog_origin:new(),
     {C, P} = register_shard(NS),

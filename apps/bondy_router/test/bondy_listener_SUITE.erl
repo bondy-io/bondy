@@ -123,6 +123,7 @@ init_per_suite(Config) ->
     %% so it supplies the key itself. The OS pid keeps parallel CT runs from
     %% sharing the directory, which is the only thing that separates them: the
     %% socket filename is a constant.
+    OriginalRuntimeDir = bondy_config:get(platform_runtime_dir, undefined),
     ok = bondy_config:set(
         platform_runtime_dir, filename:join("/tmp", "bondy_ct_" ++ os:getpid())
     ),
@@ -137,7 +138,26 @@ init_per_suite(Config) ->
     %% not restored is the value the LAST case in `all/0` happens to leave
     %% behind, which is what `end_per_suite/1` puts back.
     Original = bondy_config:get(listeners, undefined),
-    [{original_listeners, Original} | Config].
+    %% The listeners ranch has bound when this suite begins. Every inventory
+    %% `bondy_listener_manager:init/0` resolves — this suite's private ones
+    %% included — carries the reserved `admin` and the injected `admin_local`
+    %% (`with_reserved/1`), and those names are NODE-GLOBAL in ranch. So when
+    %% `bondy_router` is already running in this VM (an earlier suite's
+    %% one-shot `bondy_ct:start_bondy/0`), each case's
+    %% `bondy_listener_manager:stop(all)` also stops the node's REAL `admin`
+    %% and `admin_local` sockets, and a later suite — whose `start_bondy/0`
+    %% is then a no-op — finds `econnrefused` on 18081. Measured:
+    %% `--suite=bondy_listener_api_SUITE,bondy_listener_SUITE,
+    %% bondy_admin_listener_SUITE` failed three `bondy_admin_listener_SUITE`
+    %% cases that pass in any order where this suite runs first. Recorded
+    %% here so `end_per_suite/1` can put back exactly what was bound.
+    Bound = maps:keys(ranch:info()),
+    [
+        {original_listeners, Original},
+        {original_runtime_dir, OriginalRuntimeDir},
+        {bound_listeners, Bound}
+        | Config
+    ].
 
 end_per_suite(Config) ->
     %% Restoring `bondy_config`'s value is not enough on its own: if
@@ -153,8 +173,27 @@ end_per_suite(Config) ->
     %% only thing that will refresh the cache before that later suite reads
     %% it).
     ok = bondy_config:set(listeners, ?config(original_listeners, Config)),
+    ok = restore_runtime_dir(?config(original_runtime_dir, Config)),
     ok = bondy_listener_manager:init(),
+    %% And the sockets, not only the inventory: every listener that was bound
+    %% when the suite began and is not bound now was stopped by a case here
+    %% (see `init_per_suite/1`), so start it again from the restored
+    %% inventory. A listener this suite never touched is left alone.
+    Missing = ?config(bound_listeners, Config) -- maps:keys(ranch:info()),
+    _ = [
+        ok = bondy_listener:start(L)
+     || #{name := Name} = L <- bondy_listener_manager:listeners(),
+        lists:member(Name, Missing)
+    ],
     Config.
+
+%% `bondy_config:set/2` has no unset; an absent original stays as this suite
+%% set it, which is the pre-existing behaviour for a VM where nothing else
+%% had configured it.
+restore_runtime_dir(undefined) ->
+    ok;
+restore_runtime_dir(Dir) ->
+    bondy_config:set(platform_runtime_dir, Dir).
 
 %% A raw-socket listener on an ephemeral port. `port => 0` makes the OS choose,
 %% which keeps parallel CT runs from colliding.

@@ -41,7 +41,9 @@ all() ->
         longpoll_push_while_idle_is_queued,
         longpoll_survives_server_poll_timeout,
         longpoll_outbound_too_large_rejected,
-        longpoll_bad_path_fails
+        longpoll_bad_path_fails,
+        longpoll_session_death_ends_the_held_poll,
+        longpoll_send_failure_fails_the_connection
     ].
 
 init_per_suite(Config) ->
@@ -171,6 +173,74 @@ longpoll_bad_path_fails(_) ->
             ok
     end.
 
+%% The held `/receive` monitors the transport session
+%% (`bondy_http_longpoll_handler:do_handle_receive/2`): killing the session
+%% mid-hold must answer the poll at once, so the client's INBOUND path — the
+%% only one exercised here, since no send happens between the kill and the
+%% final call — detects the death, reconnects and replays. Without the
+%% monitor the poll hangs to the idle timeout and this case's single call,
+%% issued 3s after the kill (far above reconnect+replay on localhost, far
+%% below the 30-60s poll horizons a hang would take), would be the FIRST
+%% detection and would fail.
+longpoll_session_death_ends_the_held_poll(_) ->
+    Before = http_session_pids(),
+    Conn = connect(),
+    Proc = <<"com.example.res.longpoll.heldpoll">>,
+    {ok, _} = bondy_connect_client:register(Conn, Proc, echo_handler()),
+    [SessionPid] = http_session_pids() -- Before,
+
+    %% Let the poller settle into its held `/receive` so the kill lands
+    %% mid-hold — the exact window the monitor exists for.
+    timer:sleep(200),
+    exit(SessionPid, kill),
+    timer:sleep(3000),
+
+    {ok, R} = bondy_connect_client:call(Conn, Proc, [<<"replayed">>]),
+    ?assertEqual([<<"replayed">>], maps:get(args, R)),
+    ok = bondy_connect_client:disconnect(Conn).
+
+%% A failed transport send must fail the CONNECTION, not only the request
+%% (`bondy_connect_connection:notify_send_failure/1`). The inbound path is
+%% made deliberately deaf — the poller suspended, so the held poll's reply
+%% to the kill sits unread — leaving the send path as the only possible
+%% detector. The first call's send hits `transport_not_found` and errors;
+%% that same failure must reconnect and replay, so a later call succeeds.
+%% Before the fix the connection stayed `established` on the dead link and
+%% every call failed forever.
+longpoll_send_failure_fails_the_connection(_) ->
+    Before = http_session_pids(),
+    Conn = connect(),
+    Proc = <<"com.example.res.longpoll.sendfail">>,
+    {ok, _} = bondy_connect_client:register(Conn, Proc, echo_handler()),
+    [SessionPid] = http_session_pids() -- Before,
+
+    [Poller] = pollers(1),
+    ok = suspend_poller(Poller),
+    exit(SessionPid, kill),
+
+    ?assertMatch(
+        {error, _},
+        bondy_connect_client:call(Conn, Proc, [<<"x">>], #{}, #{
+            timeout => 2000
+        })
+    ),
+
+    %% The failed send above is the only death signal the connection got;
+    %% recovery within this horizon proves it acted on it. (The suspended
+    %% poller is torn down with the old transport; the reconnected one
+    %% starts fresh.)
+    ok = wait_until(fun() ->
+        case
+            bondy_connect_client:call(Conn, Proc, [<<"y">>], #{}, #{
+                timeout => 2000
+            })
+        of
+            {ok, #{args := [<<"y">>]}} -> true;
+            _ -> false
+        end
+    end),
+    ok = bondy_connect_client:disconnect(Conn).
+
 %% =============================================================================
 %% HELPERS
 %% =============================================================================
@@ -240,6 +310,35 @@ pollers(Expected) ->
     Expected == length(Pids) orelse
         ct:fail({expected_pollers, Expected, found, length(Pids)}),
     Pids.
+
+%% @private
+%% The transport session processes alive right now. A case snapshots this
+%% before connecting and diffs after, so it kills exactly its own session —
+%% never a leftover from another suite sharing the node.
+http_session_pids() ->
+    [
+        P
+     || {_, P, _, _} <- supervisor:which_children(
+            bondy_http_transport_session_sup
+        ),
+        is_pid(P)
+    ].
+
+%% @private Poll `Fun` until true, up to ~10s.
+wait_until(Fun) ->
+    wait_until(Fun, 100).
+
+%% @private
+wait_until(_Fun, 0) ->
+    {error, timeout};
+wait_until(Fun, N) ->
+    case Fun() of
+        true ->
+            ok;
+        _ ->
+            timer:sleep(100),
+            wait_until(Fun, N - 1)
+    end.
 
 %% @private
 suspend_poller(Poller) ->

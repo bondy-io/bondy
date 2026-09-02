@@ -435,6 +435,12 @@ without protocol changes.
     %% behaviour yet — the durable two-process pipeline is unaffected.
     %% The `fused ⇒ ephemeral` invariant is enforced at `open_table`.
     fused = false :: boolean(),
+    %% The `bondy_db` DB this instance belongs to (opt `db`), or `undefined`
+    %% for an instance started outside `bondy_db`. Set once at `init/1` and
+    %% published to the registry, where `bondy_oplog:db_of/1` reads it. Held
+    %% rather than derived from `instance_id`: the id is an opaque name, and
+    %% `bondy_oplog` must not depend on how `bondy_db` composes it.
+    db = undefined :: atom() | undefined,
     %% MST retention policy for ephemeral catalogue (fused) instances
     %% (opt `mst_retention` — distinct from the WAL's segment-retention
     %% `retention` proplist): `#{max_age_ms => A, max_events => N}` (`0`
@@ -546,7 +552,12 @@ without protocol changes.
     %% completes against a live peer. Ephemeral instances (no
     %% `storage_path`) default to `live` regardless of `seed` —
     %% there is no persistent state to bootstrap from.
-    seed => boolean()
+    seed => boolean(),
+    %% The `bondy_db` DB this instance belongs to. Recorded in the registry
+    %% row at `init/1` and answered by `bondy_oplog:db_of/1`, which the
+    %% anti-entropy path uses to select this node's keying-topology
+    %% fingerprint. Absent for an instance started outside `bondy_db`.
+    db => atom()
 }.
 
 -export_type([opts/0]).
@@ -644,6 +655,10 @@ without protocol changes.
 -ifdef(TEST).
 %% Exposed for the stability-frontier equivalence test.
 -export([compute_frontier_for/2]).
+%% Exposed so the checkpoint-directory arithmetic can be driven together
+%% with `bondy_oplog_compaction_checkpoint_file:init/2`, the function it
+%% composes with (`bondy_oplog_path_test`).
+-export([resolve_checkpoint_backend/3]).
 %% Exposed for the non-event-frontier outcome test (Step 3, reclamation).
 -export([frontier_stability_point/1]).
 %% Exposed for the catch-up remote-origin filter test.
@@ -2628,6 +2643,7 @@ init({InstanceId, Opts}) ->
         %% where the projection backend is authoritatively known;
         %% the instance only records and republishes the flag.
         fused = maps:get(fused, Opts, false),
+        db = maps:get(db, Opts, undefined),
         %% NOTE the opt is `mst_retention`, NOT `retention` — the latter
         %% is the WAL's segment-retention proplist, forwarded verbatim to
         %% `bondy_oplog_wal` (see `bondy_oplog_wal_manifest:new/3`).
@@ -7736,7 +7752,8 @@ publish(#state{} = State) ->
         fold_opts => State#state.fold_opts,
         live_size => State#state.live_size,
         fused => State#state.fused,
-        mst_retention => State#state.retention =/= undefined
+        mst_retention => State#state.retention =/= undefined,
+        db => State#state.db
     }).
 
 %% @private

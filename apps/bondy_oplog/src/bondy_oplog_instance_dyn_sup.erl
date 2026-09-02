@@ -42,6 +42,14 @@ start_link() ->
 Spawns a per-instance subtree. Idempotent: if a subtree for
 `InstanceId` is already running, returns its existing supervisor pid
 without starting a duplicate.
+
+Raises `{invalid_instance_id, InstanceId, Reason}` for an id that cannot
+name one directory (`bondy_oplog_path:validate_instance_id/1`). This is
+the ONE place the library admits an instance, so the check here is what
+makes the id well-formed for every directory the subtree will derive from
+it — the WAL's `filename:join(BaseDir, InstanceId)` included, which with an
+explicit `wal_dir` or the `/tmp` default never goes through
+`bondy_oplog_path:storage_path/3`.
 """).
 -spec start_instance(instance_id(), bondy_oplog_instance:opts()) ->
     {ok, pid()} | {error, term()}.
@@ -49,6 +57,7 @@ without starting a duplicate.
 start_instance(InstanceId, Opts) when
     is_binary(InstanceId), is_map(Opts)
 ->
+    ok = bondy_oplog_path:validate_instance_id(InstanceId),
     case bondy_oplog_registry:sup_pid(InstanceId) of
         Pid when is_pid(Pid) ->
             case is_process_alive(Pid) of

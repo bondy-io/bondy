@@ -164,6 +164,11 @@ reopen_with_missing_manifest_starts_fresh_test() ->
 %% unreadable one it returns the same error rather than repairing anything.
 %% If this ever stops being true, the routing decision in
 %% `bondy_mst_pack_store:open_writer/4` should be revisited.
+%%
+%% It also pins the SECOND of the three doors into
+%% `bondy_mst_pack_manifest:read/1`. Classifying at one caller left this one
+%% (reachable from `bondy_mst_pack_store:recover_and_retry/4`) still emitting
+%% the bare reason for an identical file and cause.
 recovery_cannot_repair_an_unreadable_manifest_test() ->
     with_tmp_dir(fun(Dir) ->
         S = open_store(Dir),
@@ -173,8 +178,24 @@ recovery_cannot_repair_an_unreadable_manifest_test() ->
             Path, <<"{manifest_version, 1}.\n{x, \"", 233, "\"}.\n">>
         ),
         ?assertMatch(
-            {error, {manifest, _}},
+            {error, {manifest, {unreadable, Path, _}}},
             bondy_mst_pack_recovery:recover(Dir, <<"pack-store-test">>, sha256)
+        )
+    end).
+
+%% The third door. It has no `src` caller today, which is exactly why it would
+%% have drifted unnoticed.
+reader_reports_an_unreadable_manifest_with_its_path_test() ->
+    with_tmp_dir(fun(Dir) ->
+        S = open_store(Dir),
+        ok = bondy_mst_store:close(S),
+        Path = bondy_mst_pack_manifest:path(Dir),
+        ok = file:write_file(
+            Path, <<"{manifest_version, 1}.\n{x, \"", 233, "\"}.\n">>
+        ),
+        ?assertMatch(
+            {error, {manifest, {unreadable, Path, _}}},
+            bondy_mst_pack_reader:open(Dir)
         )
     end).
 

@@ -179,7 +179,13 @@ table's lifecycle tied to a supervisor child.
     %% present). Set at `init` (immutable thereafter), read by the sync
     %% scheduler (join-time catalogue bootstrap seeding) and the sync
     %% session (frontier-gap detection gates peer-frontier adoption).
-    mst_retention = false :: boolean()
+    mst_retention = false :: boolean(),
+    %% The `bondy_db` DB this instance belongs to. Carried in the instance
+    %% opts by the provisioning path (`bondy_db:open_table_provision/7`) and
+    %% published once at instance `init/1`; immutable thereafter.
+    %% `undefined` for an instance started outside `bondy_db` (the library
+    %% API, tests) — such an instance belongs to no DB.
+    db :: atom() | undefined
 }).
 
 -record(state, {}).
@@ -215,7 +221,8 @@ table's lifecycle tied to a supervisor child.
     fast_path => undefined | fast_path(),
     ae_targets => [{atom(), atom(), non_neg_integer()}],
     fused => boolean(),
-    mst_retention => boolean()
+    mst_retention => boolean(),
+    db => atom() | undefined
 }.
 
 -export_type([entry/0]).
@@ -252,6 +259,7 @@ table's lifecycle tied to a supervisor child.
 -export([frontier/1]).
 -export([fused/1]).
 -export([mst_retention/1]).
+-export([db/1]).
 -export([install_in_flight/1]).
 -export([remote_gen/1]).
 -export([max_install_in_flight/1]).
@@ -662,6 +670,18 @@ retention window).
 
 mst_retention(InstanceId) ->
     field(InstanceId, #entry.mst_retention).
+
+?DOC("""
+Returns the `bondy_db` DB the instance belongs to, or `undefined` when the
+row is absent or the instance was not started by `bondy_db`.
+
+Recorded once at instance `init/1` from the `db` instance opt. Read by
+`bondy_oplog:db_of/1` on the anti-entropy path.
+""").
+-spec db(instance_id()) -> atom() | undefined.
+
+db(InstanceId) ->
+    field(InstanceId, #entry.db).
 
 ?DOC("""
 Returns `{OverlayTab, MST}` for an instance in **one** ETS lookup,
@@ -1119,7 +1139,8 @@ to_record(#{instance_id := Id} = M) ->
         fast_path = maps:get(fast_path, M, undefined),
         ae_targets = maps:get(ae_targets, M, []),
         fused = maps:get(fused, M, false),
-        mst_retention = maps:get(mst_retention, M, false)
+        mst_retention = maps:get(mst_retention, M, false),
+        db = maps:get(db, M, undefined)
     }.
 
 %% @private
@@ -1141,7 +1162,8 @@ to_map(#entry{
     fast_path = FastPath,
     ae_targets = AeTargets,
     fused = Fused,
-    mst_retention = MstRetention
+    mst_retention = MstRetention,
+    db = Db
 }) ->
     #{
         instance_id => Id,
@@ -1161,5 +1183,6 @@ to_map(#entry{
         fast_path => FastPath,
         ae_targets => AeTargets,
         fused => Fused,
-        mst_retention => MstRetention
+        mst_retention => MstRetention,
+        db => Db
     }.

@@ -407,27 +407,24 @@ format(#?MODULE{
     created_at = CreatedAt,
     last_rotated_at = LastRotatedAt
 }) ->
-    iolist_to_binary([
-        format_term({manifest_version, MV}),
-        format_term({instance_id, InstanceId}),
-        format_term({current_segment, CurrentSegment}),
-        format_term({live_segments, LiveSegments}),
-        format_term({deleted_through, DeletedThrough}),
-        format_term({retention, Retention}),
-        format_term({scrubber_alerts, ScrubberAlerts}),
-        format_term({schema_version, SchemaVersion}),
-        format_term({created_at, CreatedAt}),
-        format_term({last_rotated_at, LastRotatedAt})
+    %% `bondy_consult:encode/1` owns the byte encoding: one term per line,
+    %% UTF-8. `instance_id` is a caller-supplied binary and `retention` a
+    %% caller-supplied term, so both can carry bytes or characters that an
+    %% `iolist_to_binary/1` of the rendering would write as invalid UTF-8
+    %% and `file:consult/1` would then refuse. Pinned through disk by
+    %% `bondy_oplog_wal_manifest_test:write_read_survives_high_bytes_test_`.
+    bondy_consult:encode([
+        {manifest_version, MV},
+        {instance_id, InstanceId},
+        {current_segment, CurrentSegment},
+        {live_segments, LiveSegments},
+        {deleted_through, DeletedThrough},
+        {retention, Retention},
+        {scrubber_alerts, ScrubberAlerts},
+        {schema_version, SchemaVersion},
+        {created_at, CreatedAt},
+        {last_rotated_at, LastRotatedAt}
     ]).
-
-%% @private
-%% `~tw` writes the term as a single-line, deterministic, unicode-safe
-%% representation that round-trips cleanly through `file:consult/1`. We
-%% deliberately avoid `~p`'s pretty-printer — at max_live_segments the
-%% live_segments list wraps onto many lines, which complicates diffing
-%% manifests across versions.
-format_term(T) ->
-    io_lib:format("~tw.~n", [T]).
 
 %% @private
 write_and_sync(TmpPath, Bin) ->

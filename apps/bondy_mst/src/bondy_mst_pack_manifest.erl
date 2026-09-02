@@ -191,10 +191,34 @@ read(Dir) ->
     Path = path(Dir),
     case file:consult(Path) of
         {ok, Terms} ->
-            decode(Terms);
-        {error, _} = E ->
-            E
+            case decode(Terms) of
+                {ok, _} = OK -> OK;
+                {error, R} -> unreadable(Path, R)
+            end;
+        {error, enoent} = E ->
+            %% NOT wrapped: `enoent` is the fresh-instance case and
+            %% `bondy_mst_pack_writer:load_or_create_manifest/3` branches on
+            %% it to create the first manifest. Classifying it would turn
+            %% every first open into a hard failure.
+            E;
+        {error, R} ->
+            unreadable(Path, R)
     end.
+
+%% @private
+%% A manifest that exists but cannot be used — an I/O error, or terms that
+%% fail `decode/1`. Named with its path because this error becomes the raise
+%% from `bondy_mst_pack_store:open_writer/4`, which is the whole of what an
+%% operator sees when a node will not boot; a bare
+%% `{4, file_io_server, invalid_unicode}` identifies neither the instance nor
+%% the file to act on.
+%%
+%% Classified HERE rather than at a caller: `read/1` has three of them
+%% (`bondy_mst_pack_writer`, `bondy_mst_pack_recovery`,
+%% `bondy_mst_pack_reader`), and classifying at one left the other two
+%% reporting the same condition in the original bare shape.
+unreadable(Path, Reason) ->
+    {error, {unreadable, Path, Reason}}.
 
 ?DOC("""
 Atomically writes `Manifest` to `Dir`.
@@ -249,24 +273,38 @@ encode(#?MODULE{} = M) ->
         {created_at, M#?MODULE.created_at},
         {last_compacted_at, M#?MODULE.last_compacted_at}
     ],
-    iolist_to_binary(
-        [format_term(T) || T <- Terms]
-    ).
+    consult_encode(Terms).
 
 %% @private
-%% `~tw` writes the term as a single-line, unicode-safe representation
-%% that round-trips through `file:consult/1`. `~p` must NOT be used
-%% here: it renders a binary whose bytes form a printable latin-1 run
-%% as `<<"...">>`, emitting bytes 160..255 verbatim into a file that
-%% `file:consult/1` then decodes as UTF-8 and rejects with
-%% `{Line, file_io_server, invalid_unicode}`. `current_root` is a raw
-%% sha256, so ~0.04% of roots hit this (measured, 21/50000) and brick
-%% every replica of the shard at once. Pinned by
-%% `encode_survives_high_byte_roots_test_` and
-%% `prop_encode_decode_roundtrip`, both of which go through disk.
-%% Mirrors `bondy_oplog_wal_manifest:format_term/1`.
-format_term(T) ->
-    io_lib:format("~tw.~n", [T]).
+%% The bytes of a `file:consult/1` file, one term per line.
+%%
+%% `io_lib:format/2` yields CHARACTERS (code points), and `file:consult/1`
+%% decodes the file as UTF-8, so the characters must be UTF-8 encoded —
+%% `unicode:characters_to_binary/1`, never `iolist_to_binary/1`, which
+%% writes each code point as one byte: a character in 160..255 then lands
+%% as a byte that is not valid UTF-8 and `file:consult/1` rejects the file
+%% with `{Line, file_io_server, invalid_unicode}`. Which terms produce such
+%% characters depends on the directive. `~p` string-renders a binary of
+%% printable latin-1 bytes as `<<"...">>`; `current_root` is a raw sha256,
+%% so ~0.04% of roots did (measured 21/50000) and bricked every replica of
+%% the shard at once — pinned by `encode_survives_high_byte_roots_test_`,
+%% `write_read_survives_high_byte_root_test_` and
+%% `prop_encode_decode_roundtrip`, all through the real `file:consult/1`.
+%% `~tw` never string-renders a binary, but it does write an atom such as
+%% `'café'` verbatim, so the directive alone was not the fix (measured
+%% against `io_lib` + `file:consult/1`, 2026-09-03). With this manifest's
+%% schema no atom field is free (`hash_algo` must be `sha256`), so that
+%% class is not reachable through `t()` and is NOT pinned here; the byte
+%% encoding is what keeps it unreachable as the schema grows.
+%%
+%% `~tw` rather than `~p` for layout: one line per term, so manifests diff
+%% across versions.
+%%
+%% This is the same two-step as `bondy_consult:encode/1` in the umbrella's
+%% `bondy_stdlib`, which this library cannot depend on (it builds standalone
+%% from its own `rebar.config`); that module's tests pin every term class.
+consult_encode(Terms) ->
+    unicode:characters_to_binary([io_lib:format("~tw.~n", [T]) || T <- Terms]).
 
 ?DOC("""
 Decodes a list of `file:consult/1`-style terms into a manifest

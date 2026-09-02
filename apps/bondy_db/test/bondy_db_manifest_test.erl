@@ -73,6 +73,38 @@ cleanup(Dir) ->
 %% Tests
 %% =============================================================================
 
+%% `write/2` produces a `file:consult/1` file, which `read/1` decodes as
+%% UTF-8. The frozen map's `db`, `topology_module` and `partition_strategy`
+%% are caller-supplied atoms, and a table name is any atom, so a non-ASCII
+%% character can reach the rendering; a byte-per-character conversion of that
+%% rendering (`iolist_to_binary/1`) writes bytes that are not valid UTF-8 and
+%% `read/1` fails with `{unreadable_manifest, {_, file_io_server,
+%% invalid_unicode}}`. Through the real write/read pair, byte-for-byte.
+write_read_survives_non_ascii_atoms_test_() ->
+    Cases = [
+        {"latin-1 db name", #{db => 'café'}},
+        {"wide db name", #{db => '日本'}},
+        {"latin-1 partition strategy", #{partition_strategy => 'agrégat'}},
+        {"latin-1 table name", #{
+            tables => #{'usuários' => #{aggregate_root => identity}}
+        }}
+    ],
+    [
+        {Label, fun() ->
+            Dir = setup(),
+            try
+                Manifest = bondy_db_manifest:build(
+                    maps:merge(configured(), Override)
+                ),
+                ?assertEqual(ok, bondy_db_manifest:write(Dir, Manifest)),
+                ?assertEqual({ok, Manifest}, bondy_db_manifest:read(Dir))
+            after
+                cleanup(Dir)
+            end
+        end}
+     || {Label, Override} <- Cases
+    ].
+
 genesis_writes_and_freezes(Dir) ->
     fun() ->
         Cfg = configured(),
