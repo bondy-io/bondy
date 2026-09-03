@@ -414,18 +414,21 @@ unquiesce(N1, N2) ->
 %% the same frontier + a binary root on the peer's snapshot. These are the
 %% meaningful compaction targets.
 %%
-%% MAIN instances only, deliberately. The ephemeral REGISTRY instances can
-%% transiently qualify (both nodes hold internal registrations) but their
-%% cross-node MST contents are not required to equalise — entries are
-%% node-local and session-scoped (owner self-cleanup removes them without a
-%% cross-node contract) — so a registry bystander in the target set makes the
-%% baseline root assertions flake on state this suite does not test. Both
-%% tests here assert the DURABLE main DB's compaction/frontier semantics.
+%% MAIN instances only, deliberately — `do_instance_sigs/0` filters them ON
+%% THE NODE (`bondy_oplog:db_of/1` is a registry lookup, so it answers
+%% `undefined` for every cluster instance when called here on the CT
+%% controller; asking it locally made both tests select zero targets). The
+%% ephemeral REGISTRY instances can transiently qualify (both nodes hold
+%% internal registrations) but their cross-node MST contents are not required
+%% to equalise — entries are node-local and session-scoped (owner
+%% self-cleanup removes them without a cross-node contract) — so a registry
+%% bystander in the target set makes the baseline root assertions flake on
+%% state this suite does not test. Both tests here assert the DURABLE main
+%% DB's compaction/frontier semantics.
 converged_data_targets(Sigs1, Sigs2) ->
     [
         I
      || {I, {F1, R1}} <- maps:to_list(Sigs1),
-        bondy_oplog:db_of(I) =:= bondy_namespace_catalog:main_db_name(),
         map_size(F1) >= 1,
         is_binary(R1),
         case maps:get(I, Sigs2, undefined) of
@@ -1045,7 +1048,14 @@ do_band_on_target(Table, Bands, Targets) ->
 %% The value read is the SAME live `root_hash` snapshot (via the instance
 %% gen_server, for AAE consistency); only the patience differs.
 do_instance_sigs() ->
-    do_instance_sigs(bondy_oplog:list_instances()).
+    %% The main DB's instances only; see `converged_data_targets/2`. Runs on
+    %% the node, where the registry can answer `db_of/1`.
+    Main = bondy_namespace_catalog:main_db_name(),
+    do_instance_sigs([
+        I
+     || I <- bondy_oplog:list_instances(),
+        bondy_oplog:db_of(I) =:= Main
+    ]).
 
 %% @private
 %% Signatures for a SPECIFIC set of instances. `await_instance_sigs/4` passes

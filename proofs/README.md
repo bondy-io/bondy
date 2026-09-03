@@ -34,6 +34,7 @@ java -cp tla2tools.jar tlc2.TLC -workers 4 -config <cfg> <module>.tla
 | `Hlc.thy` | The hybrid logical clock; discharges hypothesis H3 |
 | `Dot_Exactness.thy` | Exactness of the compact `Ctx[O] >= S` test **under** per-origin FIFO |
 | `Dot_Exactness_Gapped.thy` | Exactness of a gapped context **without** any FIFO hypothesis, and its join |
+| `Seq_Seed.thy` | Discharges the per-origin half of H1 across restarts: the counter seed `max(checkpoint, tree, WAL)` under watermark-keyed WAL retention keeps dots unique and gap-free |
 
 | TLA+ module | Question |
 | --- | --- |
@@ -42,6 +43,7 @@ java -cp tla2tools.jar tlc2.TLC -workers 4 -config <cfg> <module>.tla
 | `OriginReaping.tla` | May a replica drop a dead origin's applied-frontier entry without agreement? |
 | `OriginWatermarkReap.tla` | Can the meet be recorded as a scalar watermark, with origins born over time? |
 | `OriginRetirementSet.tla` | Does a replicated grow-only retirement set license the reap across rejoins? |
+| `SeqSeed.tla` | Does the per-origin sequence counter survive a restart? Which durable sources must seed it, in what compaction order? |
 
 ## Scope
 
@@ -67,7 +69,7 @@ every irreversible act (`discard`, `stabilize_fold`, page GC).
 
 | Model | Code |
 | --- | --- |
-| `origin_unique` (H1) | Operator obligation; `bondy_oplog_crdt_aw_map.erl` precondition 1 |
+| `origin_unique` (H1) | Two halves. Distinct origin ids: operator obligation, `bondy_oplog_crdt_aw_map.erl` precondition 1. Distinct seqs under one origin across the minter's restarts: **NOT supplied by the shipped code** — `bondy_oplog_instance:init/1` seeds the counter from the live tree only, which is empty once compaction has run (Jepsen, 2026-09-03). `Seq_Seed.thy` **proves** the seed rule `max(checkpoint frontier, tree, retained WAL)` under watermark-keyed WAL retention discharges it; `SeqSeed.tla` refutes the shipped rule and the checkpoint-only fix — see [Results — TLA+](#seqseedtla--the-sequence-counter-across-restarts). **BUILT** 2026-09-03: `init/1` seeds from the restored frontier; the WAL writer records `max_seq` in its manifest, recovers it on open and seeds the instance before publishing its pid; the fast paths resolve the WAL before reserving. Pinned by `bondy_oplog_seq_seed_restart_test` (both cases red against the shipped code) |
 | `causal_delivery` (H2) | **Per-origin** half enforced by `bondy_oplog_cell_apply:partition_contiguous/3`; **cross-origin** half NOT supplied by anything — see [Open obligations](#open-obligations) |
 | `hlc_respects_hb` (H3) | **Proved** in `Hlc.thy` from `bondy_oplog_hlc:update/2` |
 | `prepare_after_deliver` (I1) | `bondy_oplog_applier:ensure_remote_caught_up/1` |
@@ -192,9 +194,73 @@ and never from `tree`, so compaction cannot lower it and peer-claim adoption
 becomes unnecessary. Same wire type — one integer per origin — but sound by
 construction.
 
+**`seed_exact` / `dot_unique` / `log_distinct` / `h1_for_origin`**
+(`Seq_Seed.thy`) — the minter's persistence protocol as an unbounded state
+machine (one replica, one origin; reserve, WAL append + ack, apply + install,
+root flush, watermark-keyed WAL retention, frontier persist, two-step
+compaction in the shipped order, stop, crash, restart), over-approximating
+`SeqSeed.tla` (no read cursor, any interleaving, every crash point). Under
+the seed rule `max(checkpoint frontier, durable tree, retained WAL)` *read at
+init*, the inductive invariant gives: whenever the instance is up, `acked ∪ inflight = 1..seqRef` — the
+counter is the acknowledged maximum plus its live reservations, gap-free and
+never behind, including in the first state after a restart before any WAL
+replay. `log_distinct` is the history form: the sequence of acknowledged
+writes never repeats a seq, across any number of stops, crashes and
+restarts; `h1_for_origin` restates it as `origin_unique` over the events
+those writes produced, for arbitrary payloads. The load-bearing conjuncts are
+COVER — the acknowledged maximum is in the checkpoint, the tree or the WAL at
+all times — and RETAINED — everything installed is still in the WAL or at or
+below the durable watermark, which is what watermark-keyed retention buys and
+what commit-keyed retention breaks.
+
+What it does not establish: that `init/1` implements the rule. That is the
+falsifier's job.
+
 ## Results — TLA+
 
 Verdicts only; `tla/README.md` carries the traces and the reasoning.
+
+### `SeqSeed.tla` — the sequence counter across restarts
+
+One replica, one origin, `MaxSeq = 3`; invariants `SeedExact` (counter =
+acknowledged max + reservations, evaluated wherever a mint is possible),
+`DotUnique`, `DurableSound`, `TypeOK`.
+
+| Config | Seed rule | WAL retention keyed on | Mint may precede replay | Result |
+| --- | --- | --- | --- | --- |
+| `_Shipped` | live tree (+ WAL replay top-up) | durable checkpoint watermark (as shipped) | no (granted) | **`SeedExact` violated in 7 steps** — mint, ack, apply, compact, clean stop, restart: tree empty, checkpoint carries the seq, counter 0. The Jepsen finding. |
+| `_Ckpt` | + checkpoint frontier | durable checkpoint watermark | no (granted) | clean (624 distinct states; 6,081 at `MaxSeq = 5`) — **fix part 1** |
+| `_CkptCommitKeyedRetention` | + checkpoint frontier | committed offset only (differential) | no (granted) | **violated in 8 steps** — crash between the durable truncated root and the checkpoint write, after the WAL dropped the segment. The obligation retention must keep. |
+| `_CkptBeforeCommitKeyedRetention` | + checkpoint frontier, frontier checkpointed before the truncated root | committed offset only | no (granted) | clean — the alternative not taken |
+| `_CkptEarlyMint` | + checkpoint frontier | durable checkpoint watermark | **yes (what ships)** | **violated in 4 steps** — the WAL tail is durable but unreplayed when the fast path mints; nothing gates minting on the boot drain. |
+| `_CkptWal` | + checkpoint + **retained WAL, read at open** | durable checkpoint watermark | yes | clean (548 distinct states; 5,304 at `MaxSeq = 5`) — **fix part 2** |
+
+Two things the model taught before any Erlang changed:
+
+- The one-line fix ("seed from the restored frontier") is sound **only
+  because** WAL retention is keyed on the durable checkpoint watermark
+  (`bondy_oplog_wal:compute_deletable/1`: a segment goes only below the
+  committed offset AND below the snapshot watermark). Everything above the
+  last durable checkpoint is still in the WAL and replays after a restart,
+  which is what closes the crash window between a truncated root's flush and
+  its checkpoint write. A first version of this model dropped WAL segments on
+  commit alone and reported that window as reachable; the differential config
+  keeps that result as the statement of the obligation. (Found on the way:
+  nothing in production called `advance_snapshot_watermark/2`, so the sweep
+  never dropped a segment and the WAL grew to `max_total_wal_size`, after
+  which appends failed with `wal_full`. **FIXED 2026-09-03**: compaction now
+  advances the watermark *after* its checkpoint is durable
+  (`bondy_oplog_instance:advance_wal_snapshot_watermark/2`); the sweep is
+  pinned by `bondy_oplog_compaction_durable_test:compaction_advances_wal_watermark_and_sweeps`
+  and the order by `…:wal_watermark_advances_only_after_the_checkpoint`,
+  which observes the WAL's watermark at every checkpoint write — the order
+  has no black-box consequence, since the WAL head always retains the latest
+  own append.)
+- The seed must also read the retained WAL's maximum at open, not wait for
+  the applier's replay to bump it: the fast path is published in `init/1`
+  and nothing awaits the boot drain.
+
+`Seq_Seed.thy` proves the `_CkptWal` rule for unbounded runs.
 
 ### `AaeCausalClosure.tla` — per-origin prefix closure
 
@@ -392,6 +458,7 @@ Verified by reading `apps/bondy_oplog/src` at the time of writing.
 | `ContigClaim` frontier bound | modelled; **result unrecorded** | **NOT BUILT** |
 | Vector stability | `vector_stable` defined; **not certified by the substrate** | **NOT BUILT** |
 | Cross-origin causal delivery | absence **refutes `Convergence`** (`CellContextReap`) | **NOT BUILT** — no mechanism exists |
+| **Counter seed across restarts** | **PROVED** (`Seq_Seed.thy`); shipped rule **refuted** (`SeqSeed_Shipped.cfg`) | **BUILT** 2026-09-03 — `init/1` seeds from the restored frontier; `bondy_oplog_wal` records/recovers `max_seq` and calls `bondy_oplog_instance:seed_seq/2` before `set_wal_pid/2`; `fast_wal_target/1` resolves the WAL before the seq is reserved |
 
 ## The precise grade of the frontier
 

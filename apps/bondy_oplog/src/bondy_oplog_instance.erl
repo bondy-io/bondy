@@ -634,6 +634,7 @@ without protocol changes.
 -export([finalize_catalogue_bootstrap/4]).
 -export([finalize_catalogue_bootstrap/5]).
 -export([persist_frontier/1]).
+-export([seed_seq/2]).
 -export([reclamation_members/0]).
 -export([reclaim_stable_cells/1]).
 -export([stability_point/1]).
@@ -758,61 +759,57 @@ do_append_fast(InstanceId, FastPath, Op, Meta) ->
         max_overlay_bytes := MaxBytes,
         max_working_set := MaxWorkingSet
     } = FastPath,
-    case fast_admit(InstanceId, Ctrs, MaxEvents, MaxBytes, MaxWorkingSet, 1) of
-        ok ->
-            %% Build the event in the caller's process. The HLC + seq
-            %% atomics give us a unique, monotonic key without holding
-            %% the instance gen_server.
-            Hlc = bondy_oplog_hlc:now(HLC),
-            Seq = atomics:add_get(SeqRef, 1, 1),
-            Key = bondy_oplog_event:key(Hlc, Origin, Seq),
-            Event0 = bondy_oplog_event:new(Key, Op, Meta),
-            %% Stateless validator: discard the returned state — by
-            %% contract it equals the cached one.
-            {Event, _} = ValidatorMod:sign_event(Event0, ValidatorState),
-            %% Resolve the overlay tid up-front. It can briefly be
-            %% `undefined` after a one_for_all restart before the new
-            %% instance's init/1 republishes it; in that window we fall
-            %% back to the gen_server path which builds its own event.
-            case bondy_oplog_registry:overlay_tab(InstanceId) of
-                undefined ->
-                    append(InstanceId, Op, Meta);
-                Tab ->
-                    %% Stage the overlay row BEFORE the WAL append. See
-                    %% the matching comment in `do_append_local/3` —
-                    %% the applier reads from the WAL the instant it
-                    %% becomes durable, and an in-flight overlay insert
-                    %% races with `evict_overlay_batch/2`.
-                    case stage_overlay_rows(Tab, [overlay_row(Event, local)]) of
-                        stale ->
-                            append(InstanceId, Op, Meta);
-                        ok ->
-                            overlay_counters_add(Ctrs, [Event]),
-                            case fast_wal_append_batch(InstanceId, [Event]) of
-                                ok ->
-                                    telemetry:execute(
-                                        [bondy_oplog, instance, append],
-                                        #{count => 1},
-                                        #{instance_id => InstanceId}
-                                    ),
-                                    Key;
-                                {error, _} = Err ->
-                                    %% WAL rejected the batch — drop the
-                                    %% staged row so no phantom write is
-                                    %% observable, and return the seq so the
-                                    %% origin's sequence stays gap-free.
-                                    ok = unstage_overlay_rows(
-                                        Tab, Ctrs, [Event]
-                                    ),
-                                    ok = release_seq_range(
-                                        SeqRef, InstanceId, [Key]
-                                    ),
-                                    Err
-                            end
-                    end
-            end;
-        {error, _} = Err ->
-            Err
+    maybe
+        ok ?=
+            fast_admit(
+                InstanceId, Ctrs, MaxEvents, MaxBytes, MaxWorkingSet, 1
+            ),
+        %% The WAL is resolved BEFORE the seq is reserved — see
+        %% `fast_wal_target/1`.
+        {ok, Wal} ?= fast_wal_target(InstanceId),
+        %% Build the event in the caller's process. The HLC + seq
+        %% atomics give us a unique, monotonic key without holding
+        %% the instance gen_server.
+        Hlc = bondy_oplog_hlc:now(HLC),
+        Seq = atomics:add_get(SeqRef, 1, 1),
+        Key = bondy_oplog_event:key(Hlc, Origin, Seq),
+        Event0 = bondy_oplog_event:new(Key, Op, Meta),
+        %% Stateless validator: discard the returned state — by
+        %% contract it equals the cached one.
+        {Event, _} = ValidatorMod:sign_event(Event0, ValidatorState),
+        %% Stage the overlay row BEFORE the WAL append. See the matching
+        %% comment in `do_append_local/3` — the applier reads from the WAL
+        %% the instant it becomes durable, and an in-flight overlay insert
+        %% races with `evict_overlay_batch/2`. The overlay tid can briefly
+        %% be `undefined` (or dead) after a one_for_all restart before the
+        %% new instance's init/1 republishes it; both cases fall through to
+        %% the gen_server path, which mints its own key.
+        {ok, Tab} ?= fast_stage_overlay(InstanceId, [Event]),
+        overlay_counters_add(Ctrs, [Event]),
+        case fast_wal_append_batch_to(Wal, [Event]) of
+            ok ->
+                telemetry:execute(
+                    [bondy_oplog, instance, append],
+                    #{count => 1},
+                    #{instance_id => InstanceId}
+                ),
+                Key;
+            {error, _} = Err ->
+                %% WAL rejected the batch — drop the staged row so no
+                %% phantom write is observable, and return the seq so the
+                %% origin's sequence stays gap-free.
+                ok = unstage_overlay_rows(Tab, Ctrs, [Event]),
+                ok = release_seq_range(SeqRef, InstanceId, [Key]),
+                Err
+        end
+    else
+        {error, _} = Refused ->
+            Refused;
+        {no_overlay, Keys} ->
+            %% The reservation would otherwise be a silent hole: return it
+            %% (or have it filled) before the gen_server mints afresh.
+            ok = release_seq_range(SeqRef, InstanceId, Keys),
+            append(InstanceId, Op, Meta)
     end.
 
 ?DOC("""
@@ -877,54 +874,65 @@ do_append_many_fast(InstanceId, FastPath, Items) ->
         max_working_set := MaxWorkingSet
     } = FastPath,
     Delta = length(Items),
-    case
-        fast_admit(InstanceId, Ctrs, MaxEvents, MaxBytes, MaxWorkingSet, Delta)
-    of
-        ok ->
-            %% Stateless validator by fast-path contract: discard the
-            %% returned validator state.
-            {Events, Keys, _} = do_build_events(
-                HLC, SeqRef, Origin, ValidatorMod, ValidatorState, Items
+    maybe
+        ok ?=
+            fast_admit(
+                InstanceId, Ctrs, MaxEvents, MaxBytes, MaxWorkingSet, Delta
             ),
-            %% Resolve the overlay tid up-front; the rare `undefined`
-            %% window after a one_for_all restart routes through the
-            %% gen_server which mints its own keys.
-            case bondy_oplog_registry:overlay_tab(InstanceId) of
-                undefined ->
-                    append_many(InstanceId, Items);
-                Tab ->
-                    %% Stage overlay rows BEFORE the WAL append (see
-                    %% the matching comment on `do_append_local/3`).
-                    Rows = [overlay_row(E, local) || E <- Events],
-                    case stage_overlay_rows(Tab, Rows) of
-                        stale ->
-                            append_many(InstanceId, Items);
-                        ok ->
-                            overlay_counters_add(Ctrs, Events),
-                            case fast_wal_append_batch(InstanceId, Events) of
-                                ok ->
-                                    telemetry:execute(
-                                        [bondy_oplog, instance, append],
-                                        #{count => Delta},
-                                        #{instance_id => InstanceId}
-                                    ),
-                                    Keys;
-                                {error, _} = Err ->
-                                    %% Roll back the staged rows and return the
-                                    %% seq range so the origin's sequence stays
-                                    %% gap-free.
-                                    ok = unstage_overlay_rows(
-                                        Tab, Ctrs, Events
-                                    ),
-                                    ok = release_seq_range(
-                                        SeqRef, InstanceId, Keys
-                                    ),
-                                    Err
-                            end
-                    end
-            end;
-        {error, _} = Err ->
-            Err
+        %% The WAL is resolved BEFORE the seq range is reserved — see
+        %% `fast_wal_target/1`.
+        {ok, Wal} ?= fast_wal_target(InstanceId),
+        %% Stateless validator by fast-path contract: discard the
+        %% returned validator state.
+        {Events, Keys, _} = do_build_events(
+            HLC, SeqRef, Origin, ValidatorMod, ValidatorState, Items
+        ),
+        %% Stage overlay rows BEFORE the WAL append (see the matching
+        %% comment on `do_append_local/3`); a missing or dead overlay tid
+        %% falls through to the gen_server path, which mints its own keys.
+        {ok, Tab} ?= fast_stage_overlay(InstanceId, Events),
+        overlay_counters_add(Ctrs, Events),
+        case fast_wal_append_batch_to(Wal, Events) of
+            ok ->
+                telemetry:execute(
+                    [bondy_oplog, instance, append],
+                    #{count => Delta},
+                    #{instance_id => InstanceId}
+                ),
+                Keys;
+            {error, _} = Err ->
+                %% Roll back the staged rows and return the seq range so
+                %% the origin's sequence stays gap-free.
+                ok = unstage_overlay_rows(Tab, Ctrs, Events),
+                ok = release_seq_range(SeqRef, InstanceId, Keys),
+                Err
+        end
+    else
+        {error, _} = Refused ->
+            Refused;
+        {no_overlay, Keys1} ->
+            %% The reservation would otherwise be a silent hole: return it
+            %% (or have it filled) before the gen_server mints afresh.
+            ok = release_seq_range(SeqRef, InstanceId, Keys1),
+            append_many(InstanceId, Items)
+    end.
+
+%% @private
+%% Resolves the overlay tid and stages `Events` on it. `{no_overlay, Keys}`
+%% when the tid is unpublished (`undefined`) or names a dead table
+%% (`stale`) — the one_for_all-restart window — carrying the events' keys so
+%% the caller can return the seq range it reserved for them.
+fast_stage_overlay(InstanceId, Events) ->
+    case bondy_oplog_registry:overlay_tab(InstanceId) of
+        undefined ->
+            {no_overlay, [bondy_oplog_event:key(E) || E <- Events]};
+        Tab ->
+            case
+                stage_overlay_rows(Tab, [overlay_row(E, local) || E <- Events])
+            of
+                ok -> {ok, Tab};
+                stale -> {no_overlay, [bondy_oplog_event:key(E) || E <- Events]}
+            end
     end.
 
 %% @private
@@ -1080,30 +1088,46 @@ fast_working_set_admit(InstanceId, OverlaySize, Cap, Delta) ->
 %% `{error, wal_unavailable}` so the caller can fall back to the
 %% instance gen_server path (which has `ensure_wal_pid/1` retry).
 fast_wal_append_batch(InstanceId, Events) ->
-    case bondy_oplog_registry:wal_handle(InstanceId) of
-        #{backend := mem} = Handle ->
-            %% Ephemeral mem WAL: append lock-free, caller-side — no
-            %% `gen_server:call`. `badarg` means the table vanished (WAL died);
-            %% treat it as unavailable so the caller drops the staged overlay
-            %% row, exactly as a disk `{error, _}` would.
-            try bondy_oplog_wal_mem:append_local(Handle, Events) of
-                {ok, _Entries} -> ok;
-                {error, _} = Err -> Err
-            catch
-                error:badarg -> {error, wal_unavailable}
-            end;
-        _ ->
-            fast_wal_append_batch_disk(InstanceId, Events)
+    case fast_wal_target(InstanceId) of
+        {ok, Target} -> fast_wal_append_batch_to(Target, Events);
+        {error, _} = Err -> Err
     end.
 
 %% @private
-fast_wal_append_batch_disk(InstanceId, Events) ->
-    case bondy_oplog_registry:wal_pid(InstanceId) of
-        undefined ->
-            {error, wal_unavailable};
-        WalPid ->
-            wal_append_batch(WalPid, Events)
+%% Resolves the WAL a caller-side append will hit. Called BEFORE the seq
+%% range is reserved: the WAL writer seeds the seq counter from its
+%% retained maximum and only then publishes its pid
+%% (`bondy_oplog_wal:init/1`), so a reservation that follows a successful
+%% resolution has already absorbed that maximum. Reserving first and
+%% resolving later would let a reservation run against the stale counter,
+%% fail its append, and then — the bump having landed in between — fail
+%% the CAS in `release_seq_range/3` and request a `seq_fill` over a range
+%% the WAL already holds.
+fast_wal_target(InstanceId) ->
+    case bondy_oplog_registry:wal_handle(InstanceId) of
+        #{backend := mem} = Handle ->
+            {ok, {mem, Handle}};
+        _ ->
+            case bondy_oplog_registry:wal_pid(InstanceId) of
+                undefined -> {error, wal_unavailable};
+                WalPid -> {ok, {disk, WalPid}}
+            end
     end.
+
+%% @private
+fast_wal_append_batch_to({mem, Handle}, Events) ->
+    %% Ephemeral mem WAL: append lock-free, caller-side — no
+    %% `gen_server:call`. `badarg` means the table vanished (WAL died);
+    %% treat it as unavailable so the caller drops the staged overlay
+    %% row, exactly as a disk `{error, _}` would.
+    try bondy_oplog_wal_mem:append_local(Handle, Events) of
+        {ok, _Entries} -> ok;
+        {error, _} = Err -> Err
+    catch
+        error:badarg -> {error, wal_unavailable}
+    end;
+fast_wal_append_batch_to({disk, WalPid}, Events) ->
+    wal_append_batch(WalPid, Events).
 
 %% @private
 %% One disk-WAL batch append with the writer-death exits normalised to
@@ -2399,6 +2423,19 @@ ephemeral backend (no checkpoint).
 persist_frontier(Target) ->
     gen_server:call(target(Target), persist_frontier, infinity).
 
+?DOC("""
+Raises this instance's per-origin seq counter to at least `MaxSeq`.
+
+Called by the instance's WAL writer at its own `init/1` with the retained
+WAL's own-origin maximum, before the writer publishes its pid — the third
+durable seed source next to the compaction checkpoint's frontier entry and
+the live MST (`init/1`). Never lowers the counter.
+""").
+-spec seed_seq(instance_id() | pid(), non_neg_integer()) -> ok.
+
+seed_seq(Target, MaxSeq) when is_integer(MaxSeq), MaxSeq >= 0 ->
+    gen_server:call(target(Target), {seed_seq, MaxSeq}, infinity).
+
 %% @private
 %% As `persist_frontier/1`, absorbing `AbsorbHlc` into the local clock first —
 %% see `finalize_catalogue_bootstrap/5` (A3). `0` skips the absorb.
@@ -2686,6 +2723,22 @@ init({InstanceId, Opts}) ->
     ok = restore_frontier(InstanceId, CachedCheckpoint),
     ok = bondy_oplog_registry:merge_frontier(
         InstanceId, frontier_from_mst(MST)
+    ),
+    %% Seed the per-origin seq counter from the restored frontier's own
+    %% entry. The live-MST seed above (`max_local_seq/2`) covers only what
+    %% compaction has not yet truncated; the checkpoint's frontier is the
+    %% durable record of the compacted prefix's maximum, and in steady state
+    %% the live MST holds NO own-origin event (compaction empties it), so
+    %% without a durable seed every restart came back at 0 and re-minted
+    %% dots every peer had already applied — invisible to the frontier-gap
+    %% oracle (`proofs/tla/SeqSeed_Shipped.cfg`; pinned by
+    %% `bondy_oplog_seq_seed_restart_test`). The third source, the retained
+    %% WAL's maximum, arrives from the WAL writer (`seed_seq/2`) before the
+    %% writer publishes its pid. Runs BEFORE the fast path is published, so
+    %% no caller can reserve against the stale value.
+    ok = maybe_bump_seq_atomic(
+        SeqRef,
+        maps:get(Origin, bondy_oplog_registry:frontier(InstanceId), 0)
     ),
     %% Publish the lock-free `append_fast` bundle iff the validator
     %% advertises `is_stateless/0 -> true`. The bundle lets callers
@@ -3463,6 +3516,9 @@ do_handle_call(persist_frontier, _From, State) ->
         State#state.compaction_checkpoint,
         State#state.compaction_checkpoint_state
     ),
+    {reply, ok, State};
+do_handle_call({seed_seq, MaxSeq}, _From, State) ->
+    ok = maybe_bump_seq_atomic(State#state.seq, MaxSeq),
     {reply, ok, State};
 do_handle_call(reclamation_stability_point, _From, State) ->
     {reply, reclamation_stability_point(State), State};
@@ -7018,6 +7074,9 @@ commit_compaction(
     %% step avoids the durable checkpoint outrunning the durable root (see
     %% `finalize_catalogue_compaction/3` for the projection-backed path).
     StateF = flush_mst_root(State#state{mst = MST1}),
+    %% The checkpoint (`do_compact_sync/2`) and the truncated root are both
+    %% durable: the WAL may drop segments below `Frontier`.
+    ok = advance_wal_snapshot_watermark(StateF#state.instance_id, Frontier),
     _ = bondy_oplog_hlc:update(
         StateF#state.hlc, bondy_oplog_event:key_hlc(Frontier)
     ),
@@ -7216,6 +7275,9 @@ finalize_catalogue_compaction_commit(
             Checkpoint
         )
     end),
+    %% Only now — the checkpoint is durable — may the WAL drop segments
+    %% below `Frontier`. See `advance_wal_snapshot_watermark/2`.
+    ok = advance_wal_snapshot_watermark(StateF#state.instance_id, Frontier),
     NewRoot = bondy_mst:root(MST1),
     %% Re-anchor the projection replay cursor on the post-truncate (live)
     %% root so the next replay diff stays incremental (the pre-truncate
@@ -7263,6 +7325,59 @@ finalize_catalogue_compaction_commit(
     },
     emit_compaction_telemetry(StateF, Started, Frontier, EventCount),
     {{ok, {compacted, Frontier, EventCount}}, State1}.
+
+%% @private
+%% Feeds the WAL's retention sweep with the compaction watermark. The sweep
+%% (`bondy_oplog_wal:compute_deletable/1`) drops a segment only below the
+%% committed offset AND below this watermark, and keys sort HLC-first, so
+%% every event on a dropped segment is strictly below `Frontier`: truncated
+%% from the MST, applied to the projection, its own-origin seq carried by the
+%% checkpoint's frontier entry. That last property is why this runs ONLY
+%% after the checkpoint is durable — a segment dropped before its checkpoint
+%% is the crash window `proofs/tla/SeqSeed_CkptCommitKeyedRetention.cfg`
+%% refutes; `proofs/isabelle/Seq_Seed.thy` (RETAINED) proves the order kept
+%% here. Before this call existed nothing advanced the watermark and the
+%% sweep never dropped a segment (found 2026-09-03; pinned by
+%% `bondy_oplog_compaction_durable_test:compaction_advances_wal_watermark_and_sweeps`).
+%%
+%% Ephemeral (mem) WALs keep no segments. A writer that is mid-restart
+%% (`wal_pid` unset) or dies under the call is left to the next compaction
+%% cycle, which carries a watermark at least as high. The watermark itself is
+%% monotone (the compaction frontier only advances), so the writer's
+%% regression check cannot fire; if it ever does, the sweep merely lags and
+%% the warning says so.
+advance_wal_snapshot_watermark(InstanceId, Frontier) ->
+    case bondy_oplog_registry:wal_handle(InstanceId) of
+        #{backend := mem} ->
+            ok;
+        _ ->
+            case bondy_oplog_registry:wal_pid(InstanceId) of
+                undefined ->
+                    ok;
+                WalPid ->
+                    Hlc = bondy_oplog_event:key_hlc(Frontier),
+                    try
+                        bondy_oplog_wal:advance_snapshot_watermark(WalPid, Hlc)
+                    of
+                        ok ->
+                            ok;
+                        {error, Reason} ->
+                            ?LOG_WARNING(#{
+                                description =>
+                                    "WAL refused the compaction watermark; "
+                                    "the retention sweep lags until the "
+                                    "next compaction",
+                                instance_id => InstanceId,
+                                watermark_hlc => Hlc,
+                                reason => Reason
+                            }),
+                            ok
+                    catch
+                        exit:_ ->
+                            ok
+                    end
+            end
+    end.
 
 %% @private
 %% Re-anchors the fused replay cursor on the post-truncate root. No-op for a

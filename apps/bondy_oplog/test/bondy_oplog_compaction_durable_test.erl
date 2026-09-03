@@ -31,7 +31,13 @@ durable_compaction_test_() ->
         [
             {timeout, 60, fun() -> durable_compaction_no_seal(Dir) end},
             {timeout, 60, fun() -> durable_compaction_with_seal(Dir) end},
-            {timeout, 120, fun() -> durable_gc_reclaims_sealed_bytes(Dir) end}
+            {timeout, 120, fun() -> durable_gc_reclaims_sealed_bytes(Dir) end},
+            {timeout, 60, fun() ->
+                compaction_advances_wal_watermark_and_sweeps(Dir)
+            end},
+            {timeout, 60, fun() ->
+                wal_watermark_advances_only_after_the_checkpoint(Dir)
+            end}
         ]
     end}.
 
@@ -132,6 +138,144 @@ durable_compaction_with_seal(Dir) ->
         ok = bondy_oplog:stop_instance(InstId),
         ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
         close_shard(Cache, Proj)
+    end.
+
+%% Compaction is the only producer of the WAL's snapshot watermark: the
+%% retention sweep drops a segment only below the committed offset AND below
+%% that watermark (`bondy_oplog_wal:compute_deletable/1`), and until
+%% compaction fed it nothing ever advanced it, so no production WAL ever
+%% dropped a segment — it grew to `max_total_wal_size` and then refused
+%% appends with `wal_full`. Found 2026-09-03 while modelling the seq-counter
+%% seed (`proofs/tla/SeqSeed.tla`); the model's RETAINED invariant is exactly
+%% "a segment goes only below the DURABLE checkpoint watermark", which is why
+%% the advance must follow the checkpoint write, never precede it.
+%%
+%% Tiny segments so a handful of writes span several; `commit_every => 1` so
+%% the committed offset is past them; `min_live_segments => 1` so the floor
+%% does not mask the sweep. After compaction the WAL's watermark is the
+%% truncation key's HLC, at least one sealed segment is gone, the head
+%% survives, and — the WAL having genuinely forgotten those writes — a
+%% restart still mints past every acknowledged seq.
+compaction_advances_wal_watermark_and_sweeps(Dir) ->
+    InstId = mk_id(),
+    NS = ns_of(InstId),
+    Origin = bondy_oplog_origin:new(),
+    {Cache, Proj} = register_shard(NS, primary, 0, lww_register),
+    Open = fun() ->
+        bondy_oplog:start_instance(InstId, #{
+            origin => Origin,
+            fold_module => lww_register,
+            backend => bondy_mst_pack_store,
+            storage_path => unicode:characters_to_binary(Dir),
+            backend_options => #{auto_seal_records => ?SEAL_EVERY},
+            seed => true,
+            max_segment_bytes => 512,
+            min_live_segments => 1,
+            applier => #{
+                cell_apply_target => {NS, primary, 0}, commit_every => 1
+            }
+        })
+    end,
+    try
+        {ok, _} = Open(),
+        N = 20,
+        append_batch(InstId, 1, N),
+        _ = bondy_oplog_instance:await_apply(InstId),
+        WalPid = bondy_oplog_registry:wal_pid(InstId),
+        Info0 = bondy_oplog_wal:info(WalPid),
+        ?assertEqual(undefined, maps:get(snapshot_watermark, Info0)),
+        ?assert(length(maps:get(live_segments, Info0)) > 1),
+
+        Root = bondy_oplog_instance:root_hash(InstId),
+        ?assertMatch(
+            {ok, {compacted, _, _}},
+            bondy_oplog_instance:compact(InstId, [Root])
+        ),
+        Watermark = bondy_oplog:current_watermark(InstId),
+        ?assertNotEqual(undefined, Watermark),
+
+        Info1 = bondy_oplog_wal:info(WalPid),
+        ?assertEqual(
+            bondy_oplog_event:key_hlc(Watermark),
+            maps:get(snapshot_watermark, Info1)
+        ),
+        ?assert(maps:get(deleted_through, Info1) > 0),
+        ?assert(
+            lists:member(
+                maps:get(current_segment, Info1),
+                maps:get(live_segments, Info1)
+            )
+        ),
+
+        ok = bondy_oplog:stop_instance(InstId),
+        {ok, _} = Open(),
+        Key = bondy_oplog:append(
+            InstId, {cell_apply, ?B, <<"after">>, {set, 99_000, <<"after">>}}
+        ),
+        ?assertEqual(N + 1, bondy_oplog_event:key_seq(Key))
+    after
+        ok = bondy_oplog:stop_instance(InstId),
+        ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
+        close_shard(Cache, Proj)
+    end.
+
+%% The durability ORDER behind the sweep: the WAL's snapshot watermark
+%% advances only after the compaction checkpoint is durable. A segment dropped
+%% before its checkpoint is the crash window
+%% `proofs/tla/SeqSeed_CkptCommitKeyedRetention.cfg` refutes. It has no
+%% consequence a black-box test can reach — the WAL head always retains the
+%% latest own append, so the counter seed survives either order — so it is
+%% pinned by observation: at every checkpoint write the WAL still reports the
+%% PREVIOUS watermark, and only afterwards the new one.
+wal_watermark_advances_only_after_the_checkpoint(Dir) ->
+    InstId = mk_id(),
+    NS = ns_of(InstId),
+    Obs = ets:new(obs, [ordered_set, public]),
+    {Cache, Proj} = register_shard(NS, primary, 0, lww_register),
+    try
+        {ok, _} = bondy_oplog:start_instance(InstId, #{
+            origin => bondy_oplog_origin:new(),
+            fold_module => lww_register,
+            backend => bondy_mst_pack_store,
+            storage_path => unicode:characters_to_binary(Dir),
+            backend_options => #{auto_seal_records => ?SEAL_EVERY},
+            seed => true,
+            compaction_checkpoint => bondy_oplog_test_observing_checkpoint,
+            compaction_checkpoint_opts => #{
+                path => unicode:characters_to_binary(Dir),
+                observations => Obs
+            },
+            applier => #{cell_apply_target => {NS, primary, 0}}
+        }),
+        Compact = fun(I) ->
+            append_batch(InstId, I, 10),
+            _ = bondy_oplog_instance:await_apply(InstId),
+            Root = bondy_oplog_instance:root_hash(InstId),
+            ?assertMatch(
+                {ok, {compacted, _, _}},
+                bondy_oplog_instance:compact(InstId, [Root])
+            ),
+            bondy_oplog:current_watermark(InstId)
+        end,
+        W1 = Compact(1),
+        W2 = Compact(2),
+        ?assert(W2 > W1),
+        %% Each compaction wrote its checkpoint while the WAL still held the
+        %% previous watermark; the WAL now holds the latest.
+        ?assertEqual(
+            [{W1, undefined}, {W2, bondy_oplog_event:key_hlc(W1)}],
+            bondy_oplog_test_observing_checkpoint:observations(Obs)
+        ),
+        WalPid = bondy_oplog_registry:wal_pid(InstId),
+        ?assertEqual(
+            bondy_oplog_event:key_hlc(W2),
+            maps:get(snapshot_watermark, bondy_oplog_wal:info(WalPid))
+        )
+    after
+        ok = bondy_oplog:stop_instance(InstId),
+        ok = bondy_oplog_core_registry:unregister(NS, primary, 0),
+        close_shard(Cache, Proj),
+        ets:delete(Obs)
     end.
 
 %% =============================================================================

@@ -92,12 +92,22 @@ their reads). Both checkers must be green.
 
 Measured on the compose cluster (2026-09-03): partition alone and kill alone
 converge within 15 s; a node killed *while* partitioned (`combined`) left two
-replicas short at 30 s and at 60 s and converged by 120 s — the lagging
-replica detects a frontier gap against the restarted node, the scheduler
-flags a catalogue re-bootstrap only after that repeats across two complete
-sync rounds plus a settle, and the re-bootstrap then completes in under
-30 s. Hence the 120 s default; a shorter `--recovery-wait` measures that
-tail rather than judging it.
+replicas short at 30 s and at 60 s and converged by 120 s. Tracing that run
+(`store/users-combined/20260903T124055.236Z`) showed the residue is not a
+slow anti-entropy path: every acknowledged write still missing at the end
+was one a node accepted in the seconds after its own restart, and the
+missing writes were never detected as a deficit by any peer. The cause is
+in the router, not the harness — the per-origin sequence counter is
+re-seeded from the live MST/WAL on restart and both are empty once
+compaction has run, so post-restart writes carry sequence numbers below
+every replica's restored applied frontier; the frontier-gap oracle cannot
+see them, and a peer that compacts them before a partitioned replica pulls
+them loses them silently. The 120 s "convergence" was incidental catalogue
+re-bootstraps (triggered by honest gaps on other origins of the same
+shard) copying those cells along. Until that is fixed, `combined` runs
+that stay red at any `--recovery-wait` are reporting this defect, not
+harness noise; the 120 s default is kept only so honest gaps have time to
+re-bootstrap.
 
 Op outcome mapping (the correctness-relevant decision, in `add-type`):
 2xx and `bondy.error.already_exists` are `:ok` (the element is in the set);

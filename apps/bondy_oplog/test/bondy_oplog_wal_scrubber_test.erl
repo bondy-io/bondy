@@ -44,11 +44,17 @@ setup() ->
 %% a row to update. Without this the scrubber's registry lookup
 %% returns `undefined` and the run is a no-op. The instance gen_server
 %% would populate these fields in a full subtree start; the scrubber
-%% only reads `wal_pid`, so the other slots can carry sentinel values.
+%% only reads `wal_pid`, so the other slots can carry sentinel values —
+%% except `instance_pid`, which the WAL writer CALLS at its own `init/1`
+%% (`bondy_oplog_instance:seed_seq/2`, before it publishes `wal_pid`). The
+%% test process cannot stand in for it: it is blocked in `start_link/2`
+%% while the writer initialises, so the call would deadlock until the
+%% `proc_lib` timeout. The stub is therefore a process that answers every
+%% `gen_server:call` with `ok`.
 register_stub(InstanceId) ->
     bondy_oplog_registry:register(#{
         instance_id => InstanceId,
-        instance_pid => self(),
+        instance_pid => spawn(fun instance_stub/0),
         origin => origin(),
         mst => undefined,
         watermark => undefined,
@@ -72,11 +78,28 @@ cleanup(_) ->
     %% would only move it from `down/0` to `list/0` — the two partition the
     %% same rows — and it would then be advertised to peers as a live origin.
     _ = [
-        bondy_oplog_registry:unregister(Id)
+        begin
+            _ =
+                case bondy_oplog_registry:instance_pid(Id) of
+                    Pid when is_pid(Pid) -> exit(Pid, kill);
+                    _ -> ok
+                end,
+            bondy_oplog_registry:unregister(Id)
+        end
      || Id <- bondy_oplog_registry:list() ++ bondy_oplog_registry:down(),
         is_stub_id(Id)
     ],
     ok.
+
+%% The stand-in for the instance gen_server: acknowledges every call.
+instance_stub() ->
+    receive
+        {'$gen_call', From, _} ->
+            gen_server:reply(From, ok),
+            instance_stub();
+        _ ->
+            instance_stub()
+    end.
 
 %% @private
 is_stub_id(<<"scrubber-test-", _/binary>>) -> true;

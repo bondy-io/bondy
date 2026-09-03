@@ -729,3 +729,80 @@ once the cluster has converged on its events.** The implementation reports the
 violation rather than preventing it, on
 `[bondy_oplog, retirement, reaped_unconverged]`, because refusing to reap over
 unequal claims is exactly the meet rule and inherits its deadlock.
+
+## `SeqSeed.tla` — the per-origin sequence counter across restarts
+
+```
+for c in Shipped Ckpt CkptCommitKeyedRetention CkptBeforeCommitKeyedRetention \
+         CkptEarlyMint CkptWal; do
+  java -cp tla2tools.jar tlc2.TLC -workers 4 -config SeqSeed_$c.cfg SeqSeed.tla
+done
+```
+
+Found by Jepsen (`jepsen/jepsen.bondy`, `combined` nemesis, 2026-09-03): after
+a restart a node's post-restart writes carried sequence numbers already held
+by every replica, so no peer ever saw a frontier deficit for them and a peer
+that compacted them before a partitioned replica pulled lost them silently.
+`AaeCausalClosure.tla` cannot exhibit this — its `minted[o]` is a global
+counter that never regresses and it has no restart action — so this module
+models the minter's own persistence protocol: reserve, WAL append + ack,
+apply + install, root flush, WAL retention, two-step compaction, clean stop,
+`kill -9`, restart. One replica, one origin. `SeedExact` is the invariant
+`acked ∪ inflight = 1..seqRef` wherever a mint is possible; `DotUnique` is
+`inflight ∩ acked = {}`.
+
+Six configurations, `MaxSeq = 3`:
+
+**`_Shipped`** — the code as read. Violated in 7 steps:
+
+```
+Reserve, Append(1), Apply(1), TruncateFlush(w=1), TruncateCheckpoint,
+Stop, Restart
+```
+
+Final state: `tree = {}`, `wal = {1}` but `cursor = wm = 1` so it will not
+replay, `ckpt = 1`, `acked = {1}`, `seqRef = 0`. The next mint is seq 1
+again. A clean stop suffices; `Crash` gives the same.
+
+**`_Ckpt`** — "seed from the restored frontier", everything else as shipped.
+Clean: 624 distinct states; 6,081 at `MaxSeq = 5`.
+
+**`_CkptCommitKeyedRetention`** — the same seed, but the WAL drops whatever
+the durable root holds (retention keyed on the committed offset alone).
+Violated in 8 steps:
+
+```
+Reserve, Append(1), Apply(1), FlushRoot, DropWal, TruncateFlush(w=1),
+Crash, Restart
+```
+
+The truncated root is durable, the checkpoint was never written, the WAL
+segment is gone: seq 1 is in no durable source. What ships does not do this:
+`compute_deletable/1` drops a segment only below the committed offset AND
+below the snapshot watermark — the durable compaction checkpoint's
+watermark — so the event would still be in the WAL and would replay from
+the resume position. A first version of this model had commit-keyed
+retention and reported the window as reachable; this config keeps the
+result as the statement of what retention must never do. Found on the way:
+nothing in production called `advance_snapshot_watermark/2`, so the sweep
+dropped nothing at all — fixed the same day: compaction advances the
+watermark after its checkpoint is durable, and a test observes that order.
+
+**`_CkptBeforeCommitKeyedRetention`** — commit-keyed retention made safe by
+checkpointing the frontier before the truncated root is flushed. Clean. Not
+taken: the shipped retention rule already carries the obligation, and the
+checkpoint-after-root order is what `resume_position/2` relies on.
+
+**`_CkptEarlyMint`** — `_Ckpt`, dropping the grant that no mint precedes the
+WAL replay (the fast path is published in `init/1`; nothing awaits the boot
+drain). Violated in 4 steps: `Reserve, Append(1), Stop, Restart` — the WAL
+holds seq 1, the applier has not replayed it, the counter is 0.
+
+**`_CkptWal`** — the retained WAL's maximum read at open as a third seed
+source. Clean: 548 distinct states; 5,304 at `MaxSeq = 5`. This is the rule
+`../isabelle/Seq_Seed.thy` proves for unbounded runs, and the one built.
+
+Not modelled: `fsync_mode` other than `per_write` (the applier can then read
+frames before they are durable; the model's `Append` makes ack and
+durability one step), concurrent minters (WAL order = seq order here), and
+the seq-range CAS rollback in `release_seq_range/3`.
