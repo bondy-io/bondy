@@ -949,6 +949,37 @@ rel-jepsen-local:
     cd jepsen/bondy_mst_jepsen && {{rebar}} release tar
     cp jepsen/bondy_mst_jepsen/_build/default/rel/{{jepsen_release_name}}/{{jepsen_release_name}}-{{jepsen_release_vsn}}.tar.gz jepsen/jepsen.bondymst/
 
+# Package the Bondy release out of the `bondy-prod` image (`just docker-build`)
+# as the tarball `jepsen/jepsen.bondy`'s db installs onto n1/n2/n3. The image
+# is the release: same architecture as the Debian node containers, native deps
+# already compiled, and exactly the bytes a deployment would run — there is no
+# second build path to drift from. The archive holds the release root's
+# contents (bin/, erts-*/, lib/, releases/, ...) with no top-level directory,
+# the shape `rebar3 tar` produces and `cu/install-archive!` expects.
+rel-jepsen-bondy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    docker image inspect bondy-prod:latest >/dev/null 2>&1 || \
+      { echo "bondy-prod:latest not found; run 'just docker-build' first" >&2; exit 1; }
+    vsn=$(docker run --rm --entrypoint sh bondy-prod:latest -c 'ls /bondy/releases | grep -v RELEASES | head -1')
+    out="{{justfile_directory()}}/jepsen/jepsen.bondy/bondy-${vsn}.tar.gz"
+    cid=$(docker create bondy-prod:latest)
+    trap 'docker rm -f "$cid" >/dev/null' EXIT
+    # `docker cp` streams the directory as a tar with a `bondy/` top level;
+    # re-pack from inside it so the archive root is the release root.
+    tmp=$(mktemp -d)
+    docker cp "$cid:/bondy" - | tar -xf - -C "$tmp"
+    mkdir -p "$(dirname "$out")"
+    # macOS bsdtar adds AppleDouble `._*` entries and xattr headers unless
+    # told not to (measured: with 2 per file, without 0). A `._vm_args.schema`
+    # next to the real one made the release's cuttlefish fail to parse the
+    # schema dir; the xattr headers are only warnings from GNU tar but there
+    # is one per entry. `tar -tzf` on macOS HIDES `._*` entries — verify a
+    # tarball with GNU tar (a Linux container), not with the host's tar.
+    COPYFILE_DISABLE=1 tar --no-xattrs -C "$tmp/bondy" -czf "$out" .
+    rm -rf "$tmp"
+    echo "wrote $out"
+
 # Bring up the 3-node docker compose cluster + provision.
 jepsen-up:
     cd jepsen/docker && \
@@ -971,6 +1002,8 @@ jepsen-clean:
     rm -rf {{justfile_directory()}}/jepsen/jepsen.bondymst/target
     rm -rf {{justfile_directory()}}/jepsen/jepsen.bondymst/store
     rm -rf {{justfile_directory()}}/jepsen/bondy_mst_jepsen/_build
+    rm -rf {{justfile_directory()}}/jepsen/jepsen.bondy/target
+    rm -rf {{justfile_directory()}}/jepsen/jepsen.bondy/store
 
 # =============================================================================
 # Test harness — M0 Fly fault-injection spike (harness/m0-fly-spike)

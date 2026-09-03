@@ -2,7 +2,10 @@
 # Per-node init: minimal apt deps + sshd + the Jepsen control's public
 # key in authorized_keys so SSH-based db/setup hooks can install the
 # Erlang release archive. iptables is needed for the partition nemeses
-# (`tc qdisc` / `iptables -A INPUT -j DROP`).
+# (`tc qdisc` / `iptables -A INPUT -j DROP`). openssl + libstdc++6 are the
+# runtime libraries the Bondy release needs (the same two
+# deployment/Dockerfile's runner installs): erts' crypto links libcrypto, and
+# the crc32cer NIF links libstdc++ — jepsen.bondy installs that release here.
 
 set -e
 
@@ -18,7 +21,9 @@ apt install -y -V --fix-missing --no-install-recommends \
     iproute2 \
     iptables \
     procps \
-    less
+    less \
+    openssl \
+    libstdc++6
 
 apt install -y openssh-server sudo
 /etc/init.d/ssh start
