@@ -805,8 +805,11 @@ runtime_atom_cell_read_after_restart_measured(Config) ->
 
         %% Compact the reader so the probe event leaves the durable log.
         %% Compaction needs the writer to have confirmed the reader's
-        %% root, which a fixed sleep does not guarantee; so the PREMISE is
-        %% waited for: the reader's main-DB instances hold no live event.
+        %% root, which a fixed sleep does not guarantee — and an event still
+        %% in the live tree is decoded by the boot itself (measured: the
+        %% failing runs were exactly those whose main-DB instances held live
+        %% events after boot). So the PREMISE is waited for: the reader's
+        %% main-DB instances hold no live event.
         _ = [
             erpc:call(N, application, set_env, [
                 bondy_oplog, peer_timeout_ms, 2000
@@ -827,6 +830,16 @@ runtime_atom_cell_read_after_restart_measured(Config) ->
             ?CONVERGE_MS
         ),
 
+        %% The writer never compacted, so its live tree still holds the
+        %% probe event, and the restarted reader keeps its persisted
+        %% membership: a sync round right after its boot ships the event
+        %% back as a term (measured: the reader's tree held it again, size 1,
+        %% before the probe ran) and the transport interns the atom. The
+        %% writer goes down first, so there is no round to race.
+        %%
+        %% Each mechanism alone failed this case ~1 run in 3 (2026-09-04);
+        %% with both closed, 8/8.
+        ok = bondy_ct:stop_node(S1),
         ok = bondy_ct:stop_node(S2),
         S2b = bondy_ct:restart_node(
             S2, 2, [{[partisan, peer_port], 18198}], Config
