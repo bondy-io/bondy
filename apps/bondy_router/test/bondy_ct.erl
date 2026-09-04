@@ -708,7 +708,9 @@
     freeze_gc/1,
     stop_nodes/1,
     stop_node/1,
+    stop_node/2,
     restart_node/4,
+    restart_node/5,
     rejoin/3,
     peer_boot/1,
     aae_reset_all_stale/0,
@@ -906,18 +908,52 @@ start_nodes_or_unwind([{{Name, Extra}, Idx} | T], PrivDir, Cookie, Acc) ->
 start_cluster(_Case, Config, #{names := Names}) ->
     start_cluster(Names, Config).
 
+-type stop_mode() :: halt | graceful.
+
+%% -----------------------------------------------------------------------------
+%% @doc `stop_node(Node, halt)'. Kept so a caller that does not care how the
+%% node goes down keeps the crash-stop it always had; a restart case picks
+%% the mode explicitly with {@link stop_node/2}.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec stop_node({atom(), node(), pid()}) -> ok.
+
+stop_node(Node) ->
+    stop_node(Node, halt).
+
 %% -----------------------------------------------------------------------------
 %% @doc Stops ONE node of a cluster started by {@link start_cluster/2}, leaving
 %% the rest running and its data directory intact.
+%%
+%% `halt' is a crash-stop: `peer:stop/1' runs `erlang:halt()' on the node (the
+%% `peer' default), so no application shuts down and nothing a `terminate/2'
+%% would write reaches disk — the kill -9 path. `graceful' is `init:stop()':
+%% applications stop in reverse start order and every terminate runs — the
+%% operator-restart path (SIGTERM, `bondy stop'). The two leave different
+%% on-disk states behind (an instance's terminate rewrites its checkpoint), so
+%% a restart case must say which one it exercises.
 %%
 %% Note this is `peer:stop/1', NOT {@link stop_nodes/1}: `start_cluster/2'
 %% brings nodes up with `peer:start/1', and `stop_nodes/1' belongs to the
 %% other (test_server) start path — calling it on a peer-started node fails.
 %% @end
 %% -----------------------------------------------------------------------------
--spec stop_node({atom(), node(), pid()}) -> ok.
+-spec stop_node({atom(), node(), pid()}, stop_mode()) -> ok.
 
-stop_node({_Name, _Node, Peer}) ->
+stop_node({_Name, _Node, Peer}, halt) ->
+    try
+        peer:stop(Peer)
+    catch
+        _:_ -> ok
+    end,
+    ok;
+stop_node({_Name, Node, Peer}, graceful) ->
+    %% `init:stop/0' returns at once and shuts the node down behind it; the
+    %% node is gone when distribution drops it. The peer control process
+    %% follows its node down, so the final `peer:stop/1' is only there for
+    %% the case where it has not exited yet.
+    ok = erpc:call(Node, init, stop, [], 30000),
+    ok = wait_node_down(Node, 60000),
     try
         peer:stop(Peer)
     catch
@@ -927,7 +963,10 @@ stop_node({_Name, _Node, Peer}) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Stops one node of a running cluster and starts it again ON ITS OWN
-%% DATA DIRECTORY, then re-forms the cluster and waits for membership.
+%% DATA DIRECTORY. It does NOT rejoin: the node comes back on the membership
+%% it persisted and reconnects to whichever peers are up on its own; a test
+%% that needs full membership before going on calls {@link rejoin/3}, and a
+%% test that must keep the node isolated stops the peers first.
 %%
 %% `Idx' and `ExtraEnv' MUST be the node's ORIGINALS from `start_cluster/2':
 %% the index selects the port block and `ExtraEnv' carries boot-time overrides
@@ -948,15 +987,22 @@ stop_node({_Name, _Node, Peer}) ->
     {atom(), node(), pid()}, pos_integer(), list(), list()
 ) -> {atom(), node(), pid()}.
 
-restart_node({Name, Node, Peer}, Idx, ExtraEnv, Config) ->
+restart_node(Node, Idx, ExtraEnv, Config) ->
+    restart_node(Node, Idx, ExtraEnv, Config, halt).
+
+%% -----------------------------------------------------------------------------
+%% @doc {@link restart_node/4} with the stop mode of {@link stop_node/2}.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec restart_node(
+    {atom(), node(), pid()}, pos_integer(), list(), list(), stop_mode()
+) -> {atom(), node(), pid()}.
+
+restart_node({Name, Node, _Peer} = S, Idx, ExtraEnv, Config, Mode) ->
     PrivDir = proplists:get_value(priv_dir, Config),
     PrivDir =/= undefined orelse error({missing_priv_dir, Config}),
     Cookie = atom_to_list(erlang:get_cookie()),
-    try
-        peer:stop(Peer)
-    catch
-        _:_ -> ok
-    end,
+    ok = stop_node(S, Mode),
     %% The replacement takes the SAME node name, so the controller's stale
     %% connection to the previous incarnation has to be gone before we start
     %% it — otherwise `peer:start/1' succeeds and the very first `erpc' into

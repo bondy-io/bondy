@@ -281,8 +281,11 @@ rib_consistent_after_plain_restart(Config) ->
         ok = wait_rib_clean(N1, ?PLAIN_REALM, ?CONVERGE_MS, true),
         ok = wait_rib_clean(N2, ?PLAIN_REALM, ?CONVERGE_MS, true),
 
-        %% Plain restart: data directory INTACT, unlike the rebuild case.
-        ok = bondy_ct:stop_node(S2),
+        %% Plain restart: data directory INTACT, unlike the rebuild case. A
+        %% crash-stop: the stale-echo the self-heal must correct is the one
+        %% an UNGRACEFUL restart leaves behind (`bondy_registry_rib`
+        %% moduledoc).
+        ok = bondy_ct:stop_node(S2, halt),
         S2b = bondy_ct:restart_node(S2, ?P2_IDX, N2Env, Config),
 
         try

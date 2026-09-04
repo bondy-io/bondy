@@ -130,8 +130,32 @@ test: eunit ct proper
 # below. Between the two gates all 200 properties in the tree are executed —
 # audited 2026-08-07, with zero defined-but-never-invoked.
 
+# rebar3 SYMLINKS each app's `src` into `_build/test/lib/<app>/` but COPIES
+# its `test` dir (the test beams are compiled next to the copies), and never
+# prunes that copy: a test module moved or deleted under `apps/*/test` keeps
+# running from its stale copy, on every gate, until someone notices (a suite
+# ran twice from two apps for weeks after `bondy_prometheus_SUITE` moved). So
+# every gate first deletes any copied test source or beam whose original is
+# gone. Exact and cheap: one `stat` per copied file.
+_prune-stale-tests:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for dir in _build/test/lib/*/test; do
+        [ -d "$dir" ] || continue
+        app=$(basename "$(dirname "$dir")")
+        [ -d "apps/$app/test" ] || continue
+        for f in "$dir"/*.erl; do
+            [ -e "$f" ] || continue
+            name=$(basename "$f" .erl)
+            if [ ! -e "apps/$app/test/$name.erl" ]; then
+                echo "pruning stale test copy $f"
+                rm -f "$f" "$dir/$name.beam"
+            fi
+        done
+    done
+
 # EUnit across every app (also runs the *_proper_test property modules).
-eunit:
+eunit: _prune-stale-tests
     {{rebar}} as test eunit
 
 # Common Test. Bondy must be running for these, which is why suites that need
@@ -145,7 +169,7 @@ eunit:
 # single string and forwards it unsplit.
 
 # Common Test suites. Optionally scoped: `just ct path/to/x_SUITE.erl`.
-ct suite="":
+ct suite="": _prune-stale-tests
     {{rebar}} as test ct {{ if suite == "" { "" } else { "--suite=" + suite } }}
 
 # `rebar3_proper` discovers `prop_*`-NAMED modules only, so this gate covers
@@ -153,7 +177,7 @@ ct suite="":
 # see the note on `eunit` above before concluding a property did not run.
 
 # PropEr gate: the prop_*-NAMED modules only (see note above).
-proper:
+proper: _prune-stale-tests
     {{rebar}} as test proper
 
 # Run a gate first — this only renders the accumulated coverdata, it does not

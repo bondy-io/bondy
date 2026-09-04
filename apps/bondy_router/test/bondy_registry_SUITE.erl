@@ -638,9 +638,9 @@ pattern_based_registration_is_not_optional(Config) ->
     ?assertEqual(true, maps:get(pattern_based_subscription, BF, false)).
 
 %% Proves the RIB dual-write path end-to-end: local register/unregister
-%% drives this node's replicated summary cell via the partition hooks + the
-%% serialised recompute. The recompute is async (a cast to the partition
-%% server), so cell assertions poll.
+%% drives this node's replicated summary cell via the partition hooks. The
+%% delta is appended inline; only its apply is asynchronous, which
+%% `await_cell/4`'s barrier covers.
 registry_rib_dual_write(Config) ->
     RealmUri = key_value:get(realm_uri, Config),
     Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
@@ -1278,18 +1278,20 @@ kill_and_wait(Pid) ->
 
 %% @private
 %% Polls the RIB cell until `Pred(ReadResult)` or ~5s.
+%% Every RIB write this suite waits on is appended synchronously in the
+%% caller's process (`bondy_registry_partition:add/2` and `remove/2` run the
+%% `bondy_registry_rib` hooks inline; `self_heal/4` applies with a barrier),
+%% only the projection apply is asynchronous. So the read-your-writes
+%% barrier `bondy_db:await/3` makes one read deterministic; a poll would
+%% only hide the applier's lag behind a budget, and reported nothing when
+%% the budget ran out. Returns `{false, Observed}` on a mismatch so the
+%% assertion shows what the cell held.
 await_cell(Table, RealmUri, Key, Pred) ->
-    await_cell(Table, RealmUri, Key, Pred, 500).
-
-await_cell(_, _, _, _, 0) ->
-    false;
-await_cell(Table, RealmUri, Key, Pred, N) ->
-    case Pred(bondy_db:read(Table, RealmUri, Key)) of
-        true ->
-            true;
-        false ->
-            timer:sleep(10),
-            await_cell(Table, RealmUri, Key, Pred, N - 1)
+    ok = bondy_db:await(Table, RealmUri, Key),
+    Observed = bondy_db:read(Table, RealmUri, Key),
+    case Pred(Observed) of
+        true -> true;
+        false -> {false, Observed}
     end.
 
 project(?EOT) ->

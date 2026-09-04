@@ -604,7 +604,10 @@ stale_peer_rejoin_durable_converges(Config) ->
             {ok, {Only2V, _}}, read_on(R2, ?USERS_TABLE, ?REALM, Only2)
         ),
 
-        ok = bondy_ct:stop_node(S2),
+        %% A clean stop: the operator-restart path, where every instance's
+        %% terminate runs (and rewrites its checkpoint) before the node is
+        %% gone. The crash path is the other restart case in this suite.
+        ok = bondy_ct:stop_node(S2, graceful),
 
         %% R1 keeps writing while R2 is gone, then outlives the recency window
         %% and compacts — truncating durable history R2 never saw.
@@ -839,8 +842,8 @@ runtime_atom_cell_read_after_restart_measured(Config) ->
         %%
         %% Each mechanism alone failed this case ~1 run in 3 (2026-09-04);
         %% with both closed, 8/8.
-        ok = bondy_ct:stop_node(S1),
-        ok = bondy_ct:stop_node(S2),
+        ok = bondy_ct:stop_node(S1, halt),
+        ok = bondy_ct:stop_node(S2, halt),
         S2b = bondy_ct:restart_node(
             S2, 2, [{[partisan, peer_port], 18198}], Config
         ),
