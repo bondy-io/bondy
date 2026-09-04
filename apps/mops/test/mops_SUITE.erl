@@ -39,10 +39,10 @@ groups() ->
 % mops:eval(<<"{{fullname}}">>, #{<<"fullname">> => <<"{{name}}">>, <<"name">> => <<"Alejandro">>, <<"surname">> => <<"Ramallo">>}).
 
 simple_1_test(_) ->
-   3 = mops:eval(<<"{{foo}}">>, #{<<"foo">> => 3}).
+    3 = mops:eval(<<"{{foo}}">>, #{<<"foo">> => 3}).
 
 simple_2_0_test(_) ->
-   <<"3">> = mops:eval(<<"\"{{foo}}\"">>, #{<<"foo">> => 3}).
+    <<"3">> = mops:eval(<<"\"{{foo}}\"">>, #{<<"foo">> => 3}).
 
 simple_2_1_test(_) ->
     <<"\"3\"">> = mops:eval(<<"\"{{foo}}\"">>, #{<<"foo">> => "3"}).
@@ -51,29 +51,36 @@ simple_2_2_test(_) ->
     <<"3">> = mops:eval(<<"\"{{foo}}\"">>, #{<<"foo">> => <<"3">>}).
 
 simple_3_test(_) ->
-   <<"The number is 3">> = mops:eval(<<"\"The number is {{foo}}\"">>, #{<<"foo">> => 3}).
+    <<"The number is 3">> = mops:eval(<<"\"The number is {{foo}}\"">>, #{
+        <<"foo">> => 3
+    }).
 
 simple_4_test(_) ->
-    try mops:eval(<<"The number is {{foo}}">>, #{<<"foo">> => 3})
+    try
+        mops:eval(<<"The number is {{foo}}">>, #{<<"foo">> => 3})
     catch
         error:{badarg, _} -> ok;
         _ -> error(wrong_result)
     end.
 
 simple_5_test(_) ->
-   <<"3 3">> = mops:eval(<<"\"{{foo}} {{foo}}\"">>, #{<<"foo">> => 3}).
+    <<"3 3">> = mops:eval(<<"\"{{foo}} {{foo}}\"">>, #{<<"foo">> => 3}).
 
 simple_future_1_test(_) ->
     Proxy = mops:proxy(),
     {Proxy, F} = mops:eval(
-        <<"\"The number is {{foo}}\"">>, #{<<"foo">> => Proxy}),
+        <<"\"The number is {{foo}}\"">>, #{<<"foo">> => Proxy}
+    ),
     true = is_function(F, 1),
     <<"The number is 3">> = F(#{<<"foo">> => 3}).
 
 simple_future_2_test(_) ->
     Proxy = mops:proxy(),
     {Proxy, F} = mops:eval(
-        <<"\"The number is {{foo}} or {{bar}}\"">>, #{<<"foo">> => Proxy, <<"bar">> => Proxy}),
+        <<"\"The number is {{foo}} or {{bar}}\"">>, #{
+            <<"foo">> => Proxy, <<"bar">> => Proxy
+        }
+    ),
     true = is_function(F, 1),
     {Proxy, F2} = F(#{<<"foo">> => 3, <<"bar">> => Proxy}),
     <<"The number is 3 or 4">> = F2(#{<<"bar">> => 4}).
@@ -104,7 +111,6 @@ future_to_integer_2_test(_) ->
     ?assert(is_function(F, 1)),
     ?assertEqual(3, F(#{<<"foo">> => #{<<"bar">> => 3}})).
 
-
 value_to_float_1_test(_) ->
     N = 42.0,
     Expr = <<"{{foo |> float}}">>,
@@ -122,28 +128,36 @@ value_to_float_1_test(_) ->
         mops:eval(Expr, #{<<"foo">> => <<"bar">>})
     ).
 
-
 value_to_integer_to_float_1_test(_) ->
     42.0 = mops:eval(
-        <<"{{foo |> integer |> float}}">>, #{<<"foo">> => <<"42">>}),
+        <<"{{foo |> integer |> float}}">>, #{<<"foo">> => <<"42">>}
+    ),
 
     42.0 = mops:eval(
-    <<"{{foo |> integer |> float}}">>, #{foo => <<"42">>}).
+        <<"{{foo |> integer |> float}}">>, #{foo => <<"42">>}
+    ).
 
 value_to_integer_to_float_2_test(_) ->
-   42.0 = mops:eval(
-       <<"{{foo |> integer |> float}}">>, #{<<"foo">> => <<"42">>}).
+    42.0 = mops:eval(
+        <<"{{foo |> integer |> float}}">>, #{<<"foo">> => <<"42">>}
+    ).
 
 value_to_integer_to_float_3_test(_) ->
     42.0 = mops:eval(
-        <<"{{foo |> integer |> float}}">>, #{<<"foo">> => <<"42.4">>}).
+        <<"{{foo |> integer |> float}}">>, #{<<"foo">> => <<"42.4">>}
+    ).
 
 pipe_5_test(_) ->
-    <<"Hello!">> = mops:eval(<<"{{foo |> base64:encode |> base64:decode}}">>, #{<<"foo">> => <<"Hello!">>}).
+    <<"Hello!">> = mops:eval(
+        <<"{{foo |> base64:encode |> base64:decode}}">>, #{
+            <<"foo">> => <<"Hello!">>
+        }
+    ).
 
 pipe_6_test(_) ->
-    <<0,1>> = mops:eval(<<"{{foo |> base64:encode |> base64:decode}}">>, #{<<"foo">> => <<0,1>>}).
-
+    <<0, 1>> = mops:eval(<<"{{foo |> base64:encode |> base64:decode}}">>, #{
+        <<"foo">> => <<0, 1>>
+    }).
 
 recursive_1_test(_) ->
     Ctxt = #{
@@ -197,7 +211,6 @@ funny_2_test(_) ->
     },
     200 = mops:eval(<<"{{defaults.foobar.value}}">>, Ctxt).
 
-
 with_1_test(_) ->
     Ctxt = #{
         <<"foo">> => #{
@@ -209,8 +222,8 @@ with_1_test(_) ->
         }
     },
     [<<"x">>] = maps:keys(
-        mops:eval(<<"{{foo.bar |> with([x])}}">>, Ctxt)).
-
+        mops:eval(<<"{{foo.bar |> with([x])}}">>, Ctxt)
+    ).
 
 without_1_test(_) ->
     Ctxt = #{
@@ -223,7 +236,8 @@ without_1_test(_) ->
         }
     },
     [<<"x">>] = maps:keys(
-        mops:eval(<<"{{foo.bar |> without([_y,z])}}">>, Ctxt)).
+        mops:eval(<<"{{foo.bar |> without([_y,z])}}">>, Ctxt)
+    ).
 
 without_2_test(_) ->
     Ctxt = #{
@@ -248,14 +262,13 @@ without_3_test(_) ->
     Res = mops:eval(<<"{{foo.bar |> without([a,b,c])}}">>, Ctxt),
     0 = maps:size(Res).
 
-
 lists_1_test(_) ->
     Ctxt = #{<<"foo">> => [1, 2, 3]},
     1 = mops:eval(<<"{{foo |> head}}">>, Ctxt).
 
 lists_2_test(_) ->
     Ctxt = #{<<"foo">> => [1, 2, 3]},
-    [2,3] = mops:eval(<<"{{foo |> tail}}">>, Ctxt).
+    [2, 3] = mops:eval(<<"{{foo |> tail}}">>, Ctxt).
 
 lists_3_test(_) ->
     Ctxt = #{<<"foo">> => [1, 2, 3]},
@@ -273,7 +286,6 @@ lists_6_test(_) ->
     Ctxt = #{<<"foo">> => [1, 2, 3]},
     3 = mops:eval(<<"{{foo |> nth(3)}}">>, Ctxt).
 
-
 lists_random_test(_) ->
     L = [1, 2, 3],
     Ctxt = #{<<"foo">> => L},
@@ -286,11 +298,9 @@ maps_get_1_test(_) ->
     Ctxt = #{<<"foo">> => #{<<"bar">> => 1, <<"key">> => <<"bar">>}},
     1 = mops:eval(<<"{{foo |> get({{foo.key}})}}">>, Ctxt).
 
-
 maps_get_2_test(_) ->
     Ctxt = #{<<"foo">> => #{<<"key">> => <<"bar">>}},
     <<"1">> = mops:eval(<<"{{foo |> get({{foo.key}}, 1)}}">>, Ctxt).
-
 
 maps_get_string_1_test(_) ->
     Ctxt = #{<<"foo">> => #{<<"bar">> => 1}},
@@ -312,7 +322,6 @@ maps_get_string_5_test(_) ->
     Ctxt = #{<<"foo">> => #{<<"a">> => 100}},
     <<>> = mops:eval(<<"{{foo |> get(bar, '' )}}">>, Ctxt).
 
-
 merge_left_1_test(_) ->
     Ctxt = #{
         <<"foo">> => #{<<"a">> => 1},
@@ -326,8 +335,6 @@ merge_left_2_test(_) ->
         <<"bar">> => #{<<"a">> => 10}
     },
     #{<<"a">> := 10} = mops:eval(<<"{{foo |> merge(_,{{bar}})}}">>, Ctxt).
-
-
 
 merge_right_test(_) ->
     Ctxt = #{
@@ -399,7 +406,6 @@ subexpression_1_test(_) ->
 %%     Expr = <<"{{ x |> put(c, {{x.b |> integer}}) }}">>,
 %%     ?assertEqual(Expected, mops:eval(Expr, Ctxt)).
 
-
 map_test(_) ->
     Ctxt = #{
         <<"defaults">> => #{
@@ -407,22 +413,25 @@ map_test(_) ->
         },
         <<"action">> => #{
             <<"result">> => #{
-                <<"arguments">> => [#{
-                    <<"content-type">> => <<"image/png">>
-                }]
+                <<"arguments">> => [
+                    #{
+                        <<"content-type">> => <<"image/png">>
+                    }
+                ]
             }
         },
         <<"variables">> => #{
-            <<"content-type">> => <<"{{action.result.arguments |> head |> get(content-type)}}">>
+            <<"content-type">> =>
+                <<"{{action.result.arguments |> head |> get(content-type)}}">>
         }
     },
-    Expr = <<"{{ defaults.headers |> put(content-type, {{variables.content-type}}) }}">>,
+    Expr =
+        <<"{{ defaults.headers |> put(content-type, {{variables.content-type}}) }}">>,
 
     #{
         <<"a">> := 1,
         <<"content-type">> := <<"image/png">>
     } = mops:eval(Expr, Ctxt).
-
 
 %% merge_right_3_test(_) ->
 %%     Ctxt0 = #{

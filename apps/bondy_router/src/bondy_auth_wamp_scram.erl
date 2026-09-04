@@ -236,7 +236,6 @@ do_authenticate(ClientProof, Ctxt, State) ->
     case byte_size(ClientProof) =:= byte_size(ClientSignature) of
         false ->
             {error, authentication_failed, State};
-
         true ->
             RecClientKey = bondy_password_scram:recovered_client_key(
                 ClientProof, ClientSignature
@@ -259,7 +258,6 @@ do_authenticate(ClientProof, Ctxt, State) ->
                             <<"v=", (base64:encode(ServerSignature))/binary>>
                     },
                     {ok, AuthExtra, State};
-
                 false ->
                     {error, authentication_failed, State}
             end

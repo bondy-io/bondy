@@ -216,7 +216,6 @@ matters for a secret.
 
 compare(A, B) when is_binary(A), is_binary(B), byte_size(A) =:= byte_size(B) ->
     crypto:hash_equals(A, B);
-
 compare(A, B) when is_binary(A), is_binary(B) ->
     false.
 

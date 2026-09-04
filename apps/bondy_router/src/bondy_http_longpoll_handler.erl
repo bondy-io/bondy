@@ -138,14 +138,12 @@ do_handle_open_body(Req0, State) ->
     case read_body(Req0, State) of
         {error, too_large, ReqTL} ->
             {ok, ReqTL, State};
-
         {ok, Body, Req1} ->
             do_handle_open_body(Body, Req1, State)
     end.
 
 %% @private
 do_handle_open_body(Body, Req1, State) ->
-
     try json:decode(Body) of
         Decoded ->
             Protocols = maps:get(<<"protocols">>, Decoded, []),
@@ -293,9 +291,10 @@ do_handle_send_body(Req0, State) ->
                     case read_body(Req0, State) of
                         {error, too_large, ReqTL} ->
                             {ok, ReqTL, State};
-
                         {ok, Body, Req1} ->
-                            do_handle_send_message(Body, Req1, Pid, TransportId, State)
+                            do_handle_send_message(
+                                Body, Req1, Pid, TransportId, State
+                            )
                     end
             end
     end.
@@ -308,7 +307,6 @@ do_handle_send_message(Body, Req1, Pid, TransportId, State) ->
         ok ->
             Req2 = cowboy_req:reply(?HTTP_ACCEPTED, #{}, <<>>, Req1),
             {ok, Req2, State};
-
         {error, Reason} ->
             ?LOG_WARNING(#{
                 description => "Error handling client message",
@@ -526,7 +524,6 @@ read_body(Req0, State) ->
     case cowboy_req:read_body(Req0, #{length => MaxBytes}) of
         {ok, Body, Req} when byte_size(Body) =< MaxBytes ->
             {ok, Body, Req};
-
         {_, _, Req} ->
             {error, too_large,
                 reply_error(

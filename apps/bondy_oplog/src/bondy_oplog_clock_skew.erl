@@ -125,7 +125,6 @@ check(Hlc, WallMs) when is_integer(Hlc), Hlc >= 0, is_integer(WallMs) ->
             %% its own; it does not drag this replica's clock anywhere.
             ok
     end;
-
 check(_, _) ->
     %% Total by design. This runs on the remote-event ingress path and its
     %% entire purpose is to observe, so an input it cannot interpret must

@@ -140,6 +140,5 @@ authenticate(Signature, _, _, #{signature := Expected} = State) when
         false ->
             {error, bad_signature, State}
     end;
-
 authenticate(_, _, _, State) ->
     {error, bad_signature, State}.
