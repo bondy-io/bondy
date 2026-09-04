@@ -1441,8 +1441,13 @@ what cost us the evidence on Fly s25. Query after any
 
 ```erlang
 bondy_oplog_instance:gc_aborts().
-bondy_oplog_instance:gc_aborts(<<"registry/4">>).
+bondy_oplog_instance:gc_aborts(<<"registry-4">>).
 ```
+
+An instance id is the `-`-separated form `bondy_db` mints
+(`DbName-Shard` under the `per_shard` topology, `DbName-EntityType-Shard`
+otherwise); it can never contain `/`, which
+`bondy_oplog_path:validate_instance_id/1` refuses at admission.
 """.
 -spec gc_aborts() -> [map()].
 

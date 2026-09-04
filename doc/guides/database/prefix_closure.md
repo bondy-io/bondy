@@ -131,3 +131,11 @@ cannot represent a hole and cannot report one either: the loss is silent.
 
 The one cost of enforcement is that a permanently missing operation becomes a
 catalogue rebootstrap instead of a silent gap — a repair, in place of a loss.
+
+## See also
+
+- [Understanding convergence in bondy_db](convergence.md) — the sync round, the
+  watermark door, the compaction witness rule, and how the gap verdict escalates
+  to that rebootstrap.
+- [Deletion and reclamation](deletion_and_reclamation.md) — the other decision
+  causal stability licenses.

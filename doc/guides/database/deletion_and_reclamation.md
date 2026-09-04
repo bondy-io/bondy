@@ -272,6 +272,9 @@ id belonged to which node.
 
 - [Reclamation configuration reference](../configuration/reclamation_options.md)
   — every option, default, and telemetry event.
+- [Understanding convergence in bondy_db](convergence.md) — the witness rule
+  compaction uses, and why reclamation deliberately stays root-only where
+  compaction now also accepts a peer's recorded frontier.
 - The generated module reference for `bondy_db` (`delete/3`),
   `bondy_oplog_crdt` (the `removal_op/0` and `stabilize/2` callbacks) and
   `bondy_oplog_origin` (origin identity).
