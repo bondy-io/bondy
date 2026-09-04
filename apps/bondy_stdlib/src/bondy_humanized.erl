@@ -66,7 +66,6 @@ join([H | T], Conjunction, Acc) ->
     join(T, Conjunction, [H, $\s, $, | Acc]).
 
 %% @private
-%% Converts any term to binary and wraps it in single quotes
 quote(Term) ->
     [$', Term, $'].
 

@@ -15,89 +15,40 @@
 %% WHAT THIS LOCKS
 %% =============================================================================
 %%
-%% `bondy_registry_rib:check/1' is the RIB consistency gate: per
-%% `(Type, Policy, Uri)' it compares the node set derivable from the ground
-%% truth (this node's members table plus its stub store) with the node set
+%% `bondy_registry_rib:check/1' compares the node set derivable from ground
+%% truth (this node's members table plus its stub store) against the one
 %% derivable from the RIB summary cells in its local projection. `[]' is the
-%% precondition for routing on summaries, and `bondy_registry:rib_check/0'
-%% gauges the total as `bondy_registry_rib_divergences'.
+%% precondition for routing on summaries.
 %%
-%% THE INVARIANT UNDER TEST: a node that rejoins with an EMPTY local
-%% projection, inside an otherwise QUIET cluster, converges back to
-%% `check/1 == []'.
+%% THE INVARIANT: a node that rejoins with an EMPTY local projection, inside
+%% an otherwise QUIET cluster, converges back to `check/1 == []'.
 %%
-%% TWO TRAPS THIS CASE HAD TO BE HARDENED AGAINST, both MEASURED 2026-08-22.
+%% TRAP — `check/1 == []' IS VACUOUSLY TRUE ON AN EMPTY PROJECTION. With no
+%% cells and no stubs nothing can disagree, so a wait on it returns at once
+%% and the case passes having asserted nothing. Measured: an early version
+%% passed 3/3 with the node wiped, while the companion case proved no merge
+%% event had fired at all. Every assertion here therefore waits for cells to
+%% be INSTALLED first (`wait_rib_cells/2').
 %%
-%% 1. `check/1 == []' IS VACUOUSLY TRUE ON AN EMPTY PROJECTION. With no cells
-%%    and no stubs there is nothing that can disagree, so the wait returns
-%%    immediately and the case passes having asserted nothing. That is exactly
-%%    what happened: an early version passed in 7.4s, and passed 3/3 runs
-%%    after the node was wiped — while the companion case proved no merge
-%%    event had fired at all. The case therefore waits for the bootstrap to
-%%    actually INSTALL cells (`wait_rib_cells/2`) BEFORE asserting, so a green
-%%    result means the stub view was rebuilt, not that nothing arrived yet.
+%% TRAP — DO NOT FORCE A SYNC in the post-restart wait. Triggering the sync
+%% scheduler would MANUFACTURE the merge events whose absence is the
+%% hypothesis, turning a real defect into a green test. The settle loop polls
+%% only and lets the cluster run its ordinary AAE cadence.
 %%
-%% 2. A plain restart used to race realm loading as well: `rebuild/1` drove
-%%    off `bondy_realm:list/0`, and on a plain restart `main` survives, so
-%%    realms load from disk asynchronously and the rebuild could fold over
-%%    nothing. That is fixed at the source — `rebuild/1` now folds the TABLE
-%%    (`bondy_db:fold_all/4`) and needs no realm list — so
-%%    `rib_consistent_after_plain_restart/1` asserts it directly.
+%% Both RIB tables are `durability => ephemeral', so a restart empties the
+%% projection completely and the cells are re-acquired from the peer. Both
+%% repair paths — the stub store and `self_heal/4' — are driven by AAE merge
+%% events alone, and the catalogue-snapshot bootstrap a fresh replica takes
+%% emits none. That is the defect this suite exists to falsify. It is not
+%% RIB-specific: the same install path serves every `publish => true' table,
+%% but the RIB is where it bites, because its reaction BUILDS the only copy
+%% of the stub view rather than invalidating a cache. See
+%% `publish_hook_fires_for_bootstrap_installed_cells/1'.
 %%
-%% Why it is in doubt (the reason this suite exists). BOTH repair paths are
-%% driven by AAE MERGE EVENTS and nothing else:
-%%
-%%   - the stub store is plain in-memory ETS whose only writers are
-%%     `bondy_registry_rib:on_remote_set/3' and `on_remote_clear/2';
-%%   - `self_heal/4' — which corrects a restarted node's OWN resurrected
-%%     cells back to the true local count — is reachable only from those
-%%     same two reactions.
-%%
-%% There is NO durable projection here to fall back on: BOTH RIB tables are
-%% declared `durability => ephemeral' (`bondy_namespace_catalog', `db =>
-%% registry'), so a restart empties the RIB projection COMPLETELY — cells and
-%% stubs alike. The cells are not retained locally; they are RE-ACQUIRED from
-%% the peer, which still holds its own cells and the restarted node's
-%% pre-restart cells.
-%%
-%% The gap is in HOW they come back. A replica whose local projection is empty
-%% is a fresh `pre_bootstrap' replica and takes the CATALOGUE-SNAPSHOT
-%% BOOTSTRAP (`bondy_oplog_applier:install_catalogue_cells/3' ->
-%% `do_install_catalogue_batch/3' -> `install_one_cell/8' ->
-%% `install_cell_unchecked/9'), which writes cell FRAMES straight into the
-%% projection and never calls `bondy_oplog_core:publish_merge/5'. Merge
-%% events come from exactly one place —
-%% `bondy_oplog_cell_apply:publish_merges/2', the op-based path. So the
-%% reactor never fires and neither repair path runs. It persists because the
-%% bootstrap is one-shot: only a later LIVE change to a cell emits an event.
-%%
-%% Observed 2026-08-21 on a local 2-node dev cluster: `bondy2' restarted at
-%% 18:23 and `bondy_registry_rib_divergences' went 0 -> 2 and stayed 2 across
-%% ~8 sweeps (~40 min) until the node was stopped; `bondy1' stayed 0
-%% throughout, and both nodes reported `connected_peers = 1' the whole time.
-%% That is an observation, not a proof of mechanism — this suite is the
-%% falsifying experiment.
-%%
-%% DELIBERATELY NOT FORCING A SYNC in the post-restart wait. `wait_until_eq/4'
-%% in the AAE suites calls `bondy_oplog_sync_scheduler:trigger/0' each round;
-%% doing that here could MANUFACTURE the merge events whose absence is the
-%% whole hypothesis, turning a real defect into a green test. The settle loop
-%% below polls only, and lets the cluster run its ordinary AAE cadence.
-%%
-%% NOT RIB-SPECIFIC IN PRINCIPLE — see `publish_hook_fires_for_bootstrap_
-%% installed_cells/1' below. The catalogue declares `publish => true' on eight
-%% DURABLE `main' tables (realm, user, group, group_members, group_grant,
-%% user_grant, source, api_gateway) as well as these two ephemeral ones, and
-%% the same install path serves all of them. The RIB is simply where it BITES:
-%% its reaction is CONSTRUCTIVE (it builds the only copy of the stub view),
-%% whereas the durable tables' reactions are invalidations, which a
-%% freshly-bootstrapped node has nothing to invalidate.
-%%
-%% ON FAILURE this reports the divergence terms verbatim. Each is
-%% `{{Type, Policy, Uri}, #{full_entries := E, rib := A}}', and `A' names the
-%% mechanism: the PEER's nodestring means the stub store was never rebuilt;
-%% THIS node's nodestring means `self_heal/4' never ran on its own
-%% resurrected cells. Both are possible in the same run.
+%% ON FAILURE the divergence terms are reported verbatim as
+%% `{{Type, Policy, Uri}, #{full_entries := E, rib := A}}'; `A' names the
+%% mechanism — the PEER's nodestring means the stub store was never rebuilt,
+%% THIS node's means `self_heal/4' never ran on its own resurrected cells.
 
 -define(REALM, <<"com.bondy.rib_restart">>).
 -define(PROC_1, <<"com.bondy.rib_restart.proc.one">>).
@@ -325,71 +276,39 @@ rib_consistent_after_plain_restart(Config) ->
 %% The UNIVERSAL form of the same defect, covering the DURABLE class too.
 %%
 %% `rib_consistent_after_node_rebuild/1' above shows the consequence on an
-%% EPHEMERAL table. This one asserts the CAUSE directly, and does so for a
-%% durable `publish => true' table (`bondy_realm', `db => main') alongside an
-%% ephemeral one (`bondy_registration_rib') — so a fix has to be universal to
-%% turn it green, and a RIB-only patch will not.
+%% EPHEMERAL table. This asserts the CAUSE directly, and does so for a durable
+%% `publish => true' table (`bondy_realm', `db => main') alongside an ephemeral
+%% one (`bondy_registration_rib') — so a RIB-only patch cannot turn it green.
 %%
 %% It asserts the OBLIGATION (`publish => true' means subscribers get told),
 %% never a particular message — see `probe_loop/2'.
 %%
 %% The node is WIPED, not merely restarted: a plain restart keeps the durable
 %% data directory, so `main' is intact and only the ephemeral registry
-%% instance bootstraps. Deleting the data dir (a rebuilt/replaced node, or
-%% disk loss) makes it a fresh `pre_bootstrap' replica for BOTH classes.
+%% instance bootstraps. Deleting the data dir makes it a fresh `pre_bootstrap'
+%% replica for BOTH classes.
 %%
 %% The probe subscribes BETWEEN start and rejoin. That window is what makes
 %% the hook observable at all: the snapshot bootstrap runs at SYNC time, not
-%% boot time, so a subscriber installed after the join would miss the events
-%% it is trying to count — and would report a false negative.
+%% boot time, so a subscriber installed after the join would report a false
+%% negative. For the same reason the test first proves the bootstrap really
+%% installed the cells — without that, "no merge events" is vacuously true on
+%% a node that simply received nothing.
 %%
-%% Both halves of the assertion are load-bearing: the test first proves the
-%% bootstrap really did install the cells (the realm exists, the RIB cells are
-%% present). Without that, "no merge events" would be vacuously true on a node
-%% that simply received nothing.
+%% WHY IT CANNOT DEMAND A DELIVERY PATH. The path is timing-dependent (the
+%% same scenario delivers a cell by snapshot bootstrap in some runs and
+%% op-based merge in others), and attach is a race the testcase cannot win —
+%% the survivor auto-dials the restarted node during its boot, before erpc can
+%% attach anything, and events delivered before the subscribe do not replay.
+%% So each half passes on BASELINE OR NOTIFICATION, which is the contract a
+%% `publish => true' subscriber actually has: whatever landed before you
+%% attached is in the projection and yours to reconcile, whatever lands after
+%% must be announced by either path. `bondy_aae_reactor' survives the same
+%% race the same way.
 %%
-%% WHAT THE ASSERTION DEMANDS, AND WHY (RE-MEASURED 2026-08-25, n=9).
-%% This case used to demand `ephemeral_via_bootstrap` specifically, on a
-%% 2026-08-22 measurement (n=3) that the wiped registry instance "reliably"
-%% took the snapshot-bootstrap path. 2026-08-25 falsified that premise and
-%% then the two premises behind its first two repairs:
-%%
-%% 1. PATH IS TIMING-DEPENDENT. The same scenario delivered the registration
-%%    cell via the snapshot path in some runs (`#{merge => 0,
-%%    bootstrap => 1}`) and op-based in others (`#{merge => 1,
-%%    bootstrap => 0}`, after regular sync sessions first failed with
-%%    `frontier_gap` and gap recovery caught up). Demanding a path asserts
-%%    the race, not the contract.
-%%
-%% 2. ATTACH IS A RACE THE TESTCASE CANNOT WIN. The survivor auto-dials the
-%%    restarted node the moment its Partisan listener binds — during boot,
-%%    before erpc can attach anything — and shards sync independently. A
-%%    traced failing run showed it directly: the registration shard's cells
-%%    present with ZERO post-attach publishes on its namespace, while the
-%%    subscription shard announced (`publish_bootstrap`) after attach, and
-%%    the durable tables merged after attach. A 90s settle does not help:
-%%    events delivered before the subscribe do not replay.
-%%
-%% So the assertion states the contract a `publish => true` subscriber
-%% actually has — the RULE the 2026-08-22 fix itself established ("a
-%% one-shot notification needs a reconcile-on-attach"): whatever landed
-%% before you attached is visible in the projection and yours to reconcile;
-%% whatever lands after must be announced, by either path. The probe
-%% subscribes, the testcase then reads its attach baseline, and each half
-%% passes on baseline OR notification. `bondy_aae_reactor` survives the
-%% same race the same way (`ensure_subscribed/1` → `bootstrap_reaction`),
-%% which is why the consequence cases above stay green in every variant.
-%%
-%% The install-path mutation guard — delete `maybe_publish_bootstrap/4` and
-%% something must fail — lives in `bondy_oplog_applier_bootstrap_test`,
-%% which drives `install_catalogue_batch/2` end-to-end into a live
-%% subscriber and needs no race to be won. This case still fails on that
-%% deletion whenever the install lands post-attach (empty baseline, no
-%% event). The guard is table-agnostic by construction:
-%% `maybe_publish_bootstrap/4` has no per-table logic (it reads
-%% `publish_ns` off the ctx), and a traced run showed `security_groups`
-%% reaching that emission point, skipped only because that batch installed
-%% 0 cells.
+%% The install-path mutation guard — delete `maybe_publish_bootstrap/4' and
+%% something must fail — lives in `bondy_oplog_applier_bootstrap_test', which
+%% needs no race to be won.
 %% -----------------------------------------------------------------------------
 publish_hook_fires_for_bootstrap_installed_cells(Config) ->
     N2Env = [{[partisan, peer_port], ?B2_PEER_PORT}],

@@ -4,8 +4,7 @@
 %% =============================================================================
 
 %% Property tests for `bondy_oplog_crdt_commutative`: the sanctioned,
-%% dependency-free replacement for the deprecated `bondy_oplog_crdt_fold`
-%% bridge.
+%% dependency-free way to define an ops-based CRDT.
 %%
 %% The headline property the whole operation-based design rests on:
 %% `interpret_cog/3` is a deterministic function of the event SET — any

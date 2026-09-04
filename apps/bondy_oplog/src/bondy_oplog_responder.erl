@@ -165,9 +165,8 @@ dispatch(InstanceId, get_root) when is_binary(InstanceId) ->
             %% round with nothing to pull, which the frontier-gap check
             %% then judges against our honest applied frontier. During a
             %% dangling window that manufactured a false standing-gap
-            %% verdict on every such round (zero-pull "complete" rounds
-            %% 1-3 fresh events behind, observed live in the compaction
-            %% cluster suite). Distinguish the two: a live root that the
+            %% verdict on every such round. Distinguish the two: a live
+            %% root that the
             %% guard refuses is answered as an ERROR — the session fails
             %% benignly and retries next round — while a genuinely empty
             %% tree (`root_hash/1` = `undefined`: fully compacted or never
@@ -204,35 +203,25 @@ dispatch(InstanceId, get_frontier) when is_binary(InstanceId) ->
             %% per-origin max Seq identify the applied prefix), and it is
             %% compaction-invariant.
             %%
-            %% INSTALLED-CONSISTENCY BARRIER (unlike `get_root`, which stays
+            %% INSTALLED-CONSISTENCY BARRIER (unlike `get_root', which stays
             %% lock-free): the answered frontier is the initiator's evidence
-            %% base for the frontier-GAP check — "everything this frontier
-            %% counts is either in the tree my round completes against, or
-            %% was compacted from it". Local events advance the applied VV
-            %% at their projection write, which the drain performs BEFORE
-            %% their MST install, so a lock-free read can count events the
-            %% current tree cannot yet ship — turning ordinary install lag
-            %% into false `frontier_gap` verdicts (observed as spurious
-            %% rebootstraps under sustained load).
+            %% base for the frontier-GAP check, so everything it counts must
+            %% already be in the tree the round completes against. The VV
+            %% advances at the projection write, which the drain performs
+            %% BEFORE the MST install, so a lock-free read counts events the
+            %% tree cannot yet ship — ordinary install lag read as a gap.
             %%
-            %% The ORDER here is load-bearing: snapshot the VV FIRST, then
-            %% drain, then answer the SNAPSHOT. Every event the snapshot
-            %% counts had its projection write done at snapshot time, and a
-            %% projection write only happens while the pipeline processes
-            %% an already-appended overlay entry — so the event is in the
-            %% overlay before the drain starts and is installed by the time
-            %% we answer; the session fetches the frontier BEFORE the root,
-            %% so the round's tree is same-or-newer still. Draining first
-            %% and reading after leaves a window in which events applied
-            %% mid-call are counted but not yet installed when the round
-            %% grabs its root — under sustained writes that answered
-            %% off-by-one as a standing gap on nearly every round
-            %% (forensics: 43 gaps/25s across the cluster, ~85% the peer's
-            %% own newest event, deficit almost always exactly 1). On drain
-            %% timeout answer an error — the initiator's
-            %% `request_peer_frontier` degrades to `#{}`, which skips both
-            %% the adoption and the gap check for that round (conservative
-            %% in the safe direction).
+            %% THE ORDER IS LOAD-BEARING: snapshot the VV FIRST, then drain,
+            %% then answer the SNAPSHOT. Every event the snapshot counts had
+            %% its projection write done at snapshot time, so it is already
+            %% in the overlay when the drain starts and installed by the time
+            %% we answer. Draining first and reading after leaves a window in
+            %% which events applied mid-call are counted but not yet
+            %% installed when the round grabs its root — a standing
+            %% off-by-one gap on nearly every round under sustained writes.
+            %%
+            %% On drain timeout answer an error: the initiator degrades to
+            %% `#{}', skipping both adoption and the gap check for the round.
             Frontier = bondy_oplog_instance:frontier(InstanceId),
             case bondy_oplog_instance:await_apply(InstanceId) of
                 ok ->

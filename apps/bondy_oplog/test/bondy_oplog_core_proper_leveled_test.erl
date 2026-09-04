@@ -1,32 +1,20 @@
 %% =============================================================================
-%% D9 empirical verification — runs `bondy_oplog_core_proper_test`'s flagship
-%% properties against the leveled-backed projection adapter, with the
-%% ETS cache held constant. Three properties are exercised:
+%% Runs `bondy_oplog_core_proper_test`'s flagship properties against the
+%% leveled-backed projection adapter, with the ETS cache held constant:
 %%
-%%   - prop_read_returns_latest_fold_leveled/0   (D1 — read consistency)
-%%   - prop_range_monotonicity_leveled/0         (D4 — range scans)
-%%   - prop_overlay_projection_merge_leveled/0   (D7 — projection + overlay)
+%%   - prop_read_returns_latest_fold_leveled/0   (read consistency)
+%%   - prop_range_monotonicity_leveled/0         (range scans)
+%%   - prop_overlay_projection_merge_leveled/0   (projection + overlay)
 %%
-%% These exercise the read path, the range path, and the projection-write
-%% + overlay-merge path respectively. Together they cover every adapter
-%% callback the substrate uses on the hot path:
-%%
-%%   - `open/4`     (every property's setup)
-%%   - `put_batch/2` (materialise → projection write)
-%%   - `get/2`      (substrate's read pipeline)
-%%   - `range/4`    (substrate's range pipeline)
-%%   - `close/1`    (teardown)
-%%
-%% `delete/2` and `info/1` are exercised in the adapter-level eunit suite
+%% Between them they touch every adapter callback the substrate uses on the
+%% hot path. `delete/2` and `info/1` are exercised in the adapter-level suite
 %% (`bondy_db_projection_leveled_test`), not here.
 %%
-%% Each property creates a fresh namespace + a per-shard leveled Bookie
-%% in a tempdir, runs the property, and tears the Bookie down. A property
-%% running `?NUMTESTS` cases starts and stops `?NUMTESTS` Bookies — that
-%% is intentional: every property case must be hermetic.
-%%
-%% Numtests is lower than the ETS suite (30 vs 50) because leveled IO is
-%% slower; the goal is D9 *empirical* verification, not stress.
+%% Each property creates a fresh namespace + a per-shard leveled Bookie in a
+%% tempdir and tears it down after: a property running `?NUMTESTS` cases
+%% starts and stops `?NUMTESTS` Bookies, intentionally, because every case
+%% must be hermetic. Numtests is lower than the ETS suite (30 vs 50) because
+%% leveled IO is slower — the goal is empirical verification, not stress.
 %% =============================================================================
 
 -module(bondy_oplog_core_proper_leveled_test).

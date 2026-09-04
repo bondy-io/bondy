@@ -39,7 +39,7 @@ setup() ->
         bondy_oplog_peer_source_static, #{peers => []}
     ),
     %% Disable backoff: these tests assert routing decisions on
-    %% rapid-fire triggers. Backoff (PR-D6) is exercised by its own
+    %% rapid-fire triggers. Backoff is exercised by its own
     %% dedicated suite.
     ok = bondy_oplog_config:set_bootstrap_retry_base_ms(0),
     ok = bondy_oplog_config:set_bootstrap_retry_max_ms(0),

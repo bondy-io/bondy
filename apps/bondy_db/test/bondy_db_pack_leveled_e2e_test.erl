@@ -98,8 +98,7 @@ setup(Topology) ->
             %% Single-process e2e test: each shard's instance is a
             %% genesis peer with no cluster to bootstrap from. Without
             %% `seed: true` the applier would refuse to drain the WAL
-            %% per the bootstrap-lifecycle gate
-            %% (`_design/catalogue_expansion_plan.md` §2).
+            %% per the bootstrap-lifecycle gate.
             seed => true
         }
     }),
@@ -146,7 +145,7 @@ put_read_round_trip({_Topo, Db, _Sup, _LDir, _PDir}) ->
     ok = bondy_db:close_table(T).
 
 oldstate_cache_default_on_for_leveled({_Topo, Db, _Sup, _LDir, _PDir}) ->
-    %% A3 — a leveled (durable) `bondy_db` table must get the applier's
+    %% A leveled (durable) `bondy_db` table must get the applier's
     %% OldValue frame-cache ON by DEFAULT, with no `oldstate_cache` opt set
     %% anywhere. Proven by the `[bondy_oplog, applier, oldstate_cache]`
     %% telemetry, which the applier emits per OldValue resolve ONLY when the
@@ -346,8 +345,7 @@ head_path_telemetry_reports_native({Topology, Db, _Sup, _LDir, _PDir}) ->
     %% `head/3` natively, so a read served from the projection must
     %% emit `path => head` and `head_path => native`. ETS test
     %% adapters lack `head/3` and fall back; this assertion guards
-    %% against silent regressions on the leveled path
-    %% (`_design/catalogue_expansion_plan.md` §3.10 deferred item).
+    %% against silent regressions on the leveled path.
     {ok, T} = bondy_db:open_table(Db, users, #{}),
     Realm = <<"r1">>,
     Key = <<"head-path-key">>,

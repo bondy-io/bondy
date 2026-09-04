@@ -1,6 +1,6 @@
 %% =============================================================================
 %% EUnit suite for `bondy_mst_pack_index` — the pure `.idx` codec
-%% plus its bloom helper `bondy_mst_pack_pack_bloom`. Covers:
+%% plus its bloom helper `bondy_mst_pack_bloom`. Covers:
 %%
 %% 1. Build / open round-trip on small and medium hash sets.
 %% 2. Fanout-bounded binary search agrees with a naive linear scan

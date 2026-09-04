@@ -954,8 +954,10 @@ drop_retired(Partial) ->
 %% Retries until it wins, with no attempt budget and no unguarded fallback.
 %% A budget needs somewhere to go when it runs out, and the only destination
 %% is a plain read-modify-write, which loses exactly the update the CAS
-%% exists to protect — observed: `concurrent_merges_lose_no_origin/0` lost
-%% origins through a 16-attempt budget's fallback and loses none without one.
+%% exists to protect. That the retry loop is what prevents the loss is
+%% pinned by `bondy_oplog_frontier_reap_test`'s
+%% `a_stale_frontier_compare_loses_no_origin/0`, which injects the
+%% interleaving the loop otherwise hides.
 %% Retrying is safe because `Fun` is re-applied to the value just read, and
 %% the loop makes system-wide progress because a failed swap means another
 %% writer committed.

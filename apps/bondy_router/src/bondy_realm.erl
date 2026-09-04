@@ -340,8 +340,7 @@ connected to any realm.
     }
 }).
 
-%% The realm-scope rate-limit budgets (design:
-%% `_plans/2026-08-29-rate-limit-scopes-design.md`). Only the classes a
+%% The realm-scope rate-limit budgets. Only the classes a
 %% realm-addressed request reaches (`auth`, `http`, `message`) — the
 %% `connection`/`handshake` classes fire before any realm is named. Each
 %% class block carries up to two budget KINDS: `per_caller` (a bucket per
@@ -650,7 +649,7 @@ connected to any realm.
         % ?WAMP_SCRAM_AUTH,
         ?WAMP_CRA_AUTH,
         ?PASSWORD_AUTH
-        %% D-2: ?WAMP_ANON_AUTH removed — the master realm is the administrative
+        %% ?WAMP_ANON_AUTH removed — the master realm is the administrative
         %% control plane and must not accept anonymous connections.
     ],
     is_prototype => false,
@@ -661,7 +660,7 @@ connected to any realm.
     security_enabled => true,
     users => [
         #{
-            %% D-1: no hardcoded password. The admin password is injected at
+            %% No hardcoded password. The admin password is injected at
             %% first-boot creation (see add_master_realm/0 /
             %% resolve_master_admin_password/0) from
             %% `security.admin_user.password`, or a random one is generated and
@@ -683,7 +682,7 @@ connected to any realm.
         }
     ],
     grants => [
-        %% D-2: the administrators group is granted wamp.* on the Bondy admin
+        %% The administrators group is granted wamp.* on the Bondy admin
         %% namespaces ONLY (`bondy.*` and `wamp.*`), not on all URIs (`<<"">>`).
         %% The anonymous role holds no capability on the master realm: there
         %% is deliberately no anonymous grant mirroring this one. The
@@ -726,7 +725,7 @@ connected to any realm.
         }
     ],
     sources => [
-        %% D-1: master-realm credential auth defaults to LOOPBACK ONLY. The
+        %% Master-realm credential auth defaults to LOOPBACK ONLY. The
         %% master realm is the administrative control plane; remote admin access
         %% is an explicit operator decision — add a source for your admin network
         %% (e.g. an RFC1918 CIDR) rather than exposing it to 0.0.0.0/0.
@@ -785,7 +784,7 @@ connected to any realm.
                 >>
             }
         }
-        %% D-2: the anonymous loopback source has been REMOVED — the master realm
+        %% The anonymous loopback source has been REMOVED — the master realm
         %% no longer accepts anonymous connections.
     ]
 }).
@@ -2005,7 +2004,7 @@ add_master_realm() ->
     do_create(Data, #{declarative => true}).
 
 %% @private
-%% The master-realm 'admin' user ships WITHOUT a password (D-1: no hardcoded
+%% The master-realm 'admin' user ships WITHOUT a password (no hardcoded
 %% default credential). Resolve it at first-boot creation: prefer the
 %% operator-configured `security.admin_user.password`; otherwise generate a
 %% random one and log it ONCE at notice level so the operator can capture it.
@@ -2087,7 +2086,7 @@ harden_master_realm() ->
     ok.
 
 %% @private
-%% Remediate a legacy (pre-hardening) master realm (D-2): remove the anonymous
+%% Remediate a legacy (pre-hardening) master realm: remove the anonymous
 %% authmethod and revoke the anonymous wamp.* grant. Removing the authmethod alone
 %% already blocks anonymous sessions; the grant revoke is defence in depth and is
 %% guarded so an RBAC quirk (e.g. anonymous role handling) cannot fail the whole

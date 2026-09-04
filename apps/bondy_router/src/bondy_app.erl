@@ -362,28 +362,18 @@ partisan_peer_ip() ->
 %% Brings up everything above the storage substrate, in one of two shapes
 %% depending on whether the durable `main` DB opened.
 %%
-%% `failed` is the degraded boot. `bondy_namespace_catalog:open_main_into/1`
-%% deliberately keeps the catalogue alive on a main-DB open failure so an
-%% operator can inspect the node, and `bondy_admin_ready_http_handler` already
-%% answers 503 for as long as `main_status/0` is `failed`. Terminating the
-%% application here would take that whole diagnostic surface down with it —
-%% which is what used to happen: `configure_services/0` raises
-%% `bondy_realm_table_unavailable` on its first `bondy_realm:get/1`, escaping
-%% `start/2` and killing the VM.
-%%
-%% The degraded path therefore starts exactly what serves the liveness and
-%% readiness probes, and nothing else. That is the rule for where a new boot
-%% step belongs — NOT "does it touch durable tables", which is not true of
-%% every step skipped here: `init_registry_indices/0` rebuilds from the
+%% `failed` is the degraded boot: it starts exactly what serves the liveness
+%% and readiness probes, and nothing else. That is the RULE for where a new
+%% boot step belongs — NOT "does it touch durable tables", which is not true
+%% of every step skipped here: `init_registry_indices/0` rebuilds from the
 %% registry tables, which are provisioned independently of `main` and can be
-%% healthy while it is not. A node serving no traffic simply has no use for
-%% them.
+%% healthy while it is not. A node serving no traffic has no use for them.
 %%
-%% So the degraded path starts the early listeners and stops. Those serve
-%% `/ping` and `/ready`, and `bondy_config:get(status)` is left at
-%% `initialising` because only `start_normal_listeners/0` promotes it to
-%% `ready` — so the readiness probe reports NOT READY on both of its
-%% conditions, and no client listener ever opens.
+%% Terminating the application instead would take down the whole diagnostic
+%% surface the degraded boot exists to preserve. `bondy_config:get(status)`
+%% is left at `initialising` because only `start_normal_listeners/0` promotes
+%% it to `ready`, so the readiness probe reports NOT READY and no client
+%% listener ever opens.
 start_services(failed) ->
     ?LOG_ERROR(#{
         description =>
@@ -458,7 +448,7 @@ configure_services() ->
             %% admin realm if it does not exist.
             _ = bondy_realm:get(?MASTER_REALM_URI),
             %% Idempotent one-shot hardening for installs provisioned before
-            %% the master-realm hardening (D-1/D-2). No-op on fresh installs.
+            %% the master-realm hardening. No-op on fresh installs.
             ok = bondy_realm:harden_master_realm(),
             ok = bondy_realm:apply_config(),
             ok = bondy_http_gateway:apply_config();

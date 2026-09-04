@@ -3,8 +3,8 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %% Regression tests for `bondy_mst_pack_idx_rebuild` and its hook in
-%% `bondy_mst_pack_store:open_sealed_view/3`. Covers the rebuild
-%% trigger set from `_design/latest/MST_PAGE_STORE_DESIGN.md` §10.3:
+%% `bondy_mst_pack_store:open_sealed_views/3`. Covers the rebuild
+%% trigger set:
 %%
 %%   - missing `.idx` (enoent)
 %%   - truncated `.idx` header / trailer / body sections

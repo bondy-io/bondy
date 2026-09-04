@@ -621,11 +621,9 @@ handle(CRDT0, #gossip{} = Gossip) ->
             %% of consistency model
             maybe_merge(CRDT0, Peer, PeerRoot);
         false ->
-            %% We insert the broadcasted change and get the new root
             Tree1 = bondy_mst:put(Tree0, Key, Value),
             CRDT1 = CRDT0#?MODULE{tree = Tree1},
             NewRoot = bondy_mst:root(Tree1),
-            %% We will only do a full merge in case model is causal
             Model = CRDT0#?MODULE.consistency_model,
 
             case Root =/= NewRoot of
@@ -635,7 +633,6 @@ handle(CRDT0, #gossip{} = Gossip) ->
 
                     case NewRoot =/= PeerRoot of
                         true ->
-                            %% We have missing data
                             maybe_merge(CRDT3, Peer, PeerRoot);
                         false ->
                             ?LOG_DEBUG(#{
@@ -648,13 +645,11 @@ handle(CRDT0, #gossip{} = Gossip) ->
                             CRDT3
                     end;
                 true when Model == eventual ->
-                    %% We skip a full merge
                     cancel_merges(CRDT1, NewRoot);
                 false when Model == causal ->
                     %% We have missing data, so we try do a full merge
                     maybe_merge(CRDT1, Peer, PeerRoot);
                 false when Model == eventual ->
-                    %% We skip a full merge
                     CRDT1
             end
     end;

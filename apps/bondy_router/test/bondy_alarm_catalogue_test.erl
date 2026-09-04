@@ -189,7 +189,7 @@ runbook_tasks_are_catalogued() ->
         ]) >= 2
     ).
 
-%% `bondy_docs`' alarm reference states that `realm_uri` is "present on
+%% The alarm reference in the docs site states that `realm_uri` is "present on
 %% `class = realm` alarms; names the affected tenant". Nothing checked it, and
 %% one of the three realm-class entries did not deliver it: the MCP name
 %% collision raised through the bare OTP 2-tuple, so a consumer following that

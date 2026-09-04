@@ -139,6 +139,35 @@ instances are unaffected.
   Subscribers that need commit-coherent batching can coalesce
   consumer-side; the substrate's `commit_every` parameter is not the
   right knob for subscriber delivery cadence.
+
+## Causal-stability invariants
+
+Every reclamation feature is answerable to these; `ensure_remote_caught_up/1`
+is where I1 is enforced.
+
+**I1 (prepare-after-deliver).** Every operation on a cell `c` is prepared
+against a state that reflects the effect of every event on `c` DELIVERED at
+this replica before the prepare. "Delivered" means: locally originated and
+WAL-drained (the drain writes the projection BEFORE the MST install, so local
+events satisfy I1 by construction), or peer-merged by `integrate_peer_root`
+(whose handler completion is the remote delivery point).
+
+**I2 (containment stability).** The reclamation frontier `StableHlc`
+(`bondy_oplog_instance:stability_point/1`) certifies, by per-key containment
+proofs against every confirmed peer root, that every replica holds every event
+with HLC =< `StableHlc`.
+
+**Theorem (causal stability without causal broadcast).** Given I1 and I2, any
+event generated anywhere after `StableHlc` was certified carries a causal
+context dominating every dot with HLC =< `StableHlc` on its cell. Hence any
+state transformation derived solely from events at or below the frontier — a
+`stabilize/2` `discard`, a `{keep, Reduced}` metadata reduction, an
+order-independent accumulator fold — is invisible to every event that can
+still arrive. Proof sketch: by I2 the generating replica held (and by I1 had
+applied, before preparing) every such event for the cell; the prepared context
+is `context_of/1` over that state, which contains their dots. This recovers
+TCSB-grade causal stability (Baquero, Almeida & Shoker, arXiv:1710.04469
+§7.2) in an anti-entropy architecture with no causal broadcast layer.
 """).
 
 -record(state, {
@@ -153,9 +182,9 @@ instances are unaffected.
     %% when the reader returns `end_of_log`.
     uncommitted :: non_neg_integer(),
     commit_every :: pos_integer(),
-    %% A2 — coalesce consecutive WAL frames into one applier batch until
-    %% at least this many events have accumulated (soft cap; a frame is
-    %% never split). `1` = the pre-A2 one-frame-per-apply behaviour. See
+    %% Coalesce consecutive WAL frames into one applier batch until at
+    %% least this many events have accumulated; a soft cap, since a frame
+    %% is never split. See `collect_frames/2` and
     %% `?DEFAULT_APPLY_BATCH_MAX_EVENTS`.
     apply_batch_max_events :: pos_integer(),
     %% Milliseconds between polling ticks when the reader returns
@@ -163,7 +192,7 @@ instances are unaffected.
     %% durable position so a future revision could long-poll instead.
     poll_interval_ms :: pos_integer(),
     %% Validator module + snapshot of validator state for signature
-    %% re-verification (S1) in the applier process. Fetched once from
+    %% re-verification in the applier process. Fetched once from
     %% the instance at `init/1`. `verify_event/2` is read-only on
     %% state (the only state mutation happens in `sign_event/2` which
     %% the instance owns), so the snapshot remains valid for the
@@ -241,7 +270,7 @@ instances are unaffected.
     %% under stress, and ultimately a `gen_server:call` timeout on
     %% `drain_install_queue` during commit).
     %%
-    %% NOTE (A2): the cap bounds the *number* of in-flight casts, not
+    %% NOTE: the cap bounds the *number* of in-flight casts, not
     %% their size. Each `install_local_batch` cast now carries up to
     %% `apply_batch_max_events` events (the coalescing soft cap), so the
     %% worst-case instance-side backlog is
@@ -356,16 +385,16 @@ instances are unaffected.
     instance_id := instance_id(),
     wal_dir := file:filename_all(),
     commit_every => pos_integer(),
-    %% A2 — coarser applier batching (soft event-count cap per applier
+    %% Coarser applier batching (soft event-count cap per applier
     %% batch). Default `?DEFAULT_APPLY_BATCH_MAX_EVENTS`. `1` disables the
-    %% coalescing (pre-A2 behaviour).
+    %% coalescing.
     apply_batch_max_events => pos_integer(),
-    %% A3 — OldValue frame-cache. When `true`, the applier keeps a
+    %% OldValue frame-cache. When `true`, the applier keeps a
     %% private, write-through cache of the last durable cell frame per
     %% `{Bucket, Key}`, so `compute_one_cell/11`'s OldValue read can
     %% skip the projection `get/3` (the dominant per-event cost on the
     %% durable stack) on a hit. Default `false` (behaviour byte-identical
-    %% to pre-A3). `oldstate_cache_max` bounds the entry count; when
+    %% unchanged). `oldstate_cache_max` bounds the entry count; when
     %% exceeded the cache is cleared (coarse evict — it is rebuildable
     %% from the projection, so a clear only costs re-warm misses).
     oldstate_cache => boolean(),
@@ -465,19 +494,19 @@ instances are unaffected.
 -export([terminate/2]).
 
 -define(DEFAULT_COMMIT_EVERY, 64).
-%% A2 — coarser applier batching. The drain loop coalesces consecutive
+%% Coarser applier batching. The drain loop coalesces consecutive
 %% WAL frames into a single applier batch until the accumulated event
 %% count reaches this threshold (or the reader hits `end_of_log`), so the
 %% two co-dominant per-batch storage costs — the pack-store spine rebuild
 %% (`install_local_batch` → `bondy_mst:put_batch/2`) and the leveled
 %% projection `put_batch` — amortise over many more events. It is a soft
 %% cap: a frame is never split, so a batch may exceed it by at most the
-%% last frame's size. Set to `1` to reproduce the pre-A2
+%% last frame's size. Set to `1` to disable
 %% one-frame-per-apply behaviour exactly. Engages only when a WAL backlog
 %% already exists — when caught up only one frame is available before
 %% `end_of_log`, so steady-state apply latency is unchanged.
 -define(DEFAULT_APPLY_BATCH_MAX_EVENTS, 256).
-%% A3 — default OldValue frame-cache entry cap. Bounds memory; when
+%% Default OldValue frame-cache entry cap. Bounds memory; when
 %% exceeded the cache is cleared (it is rebuildable from the projection).
 -define(DEFAULT_OLDSTATE_CACHE_MAX, 100_000).
 %% The applier long-polls the WAL via `await_durable/3` on
@@ -635,7 +664,7 @@ advance_replayed_root(ApplierPid, NewRoot) when is_pid(ApplierPid) ->
     %% compaction overlaps a commit — a hard deadlock that freezes the whole
     %% pipeline under sustained writes (instance stops installing, applier
     %% stops applying, the MST stops being bounded). Re-anchoring is a
-    %% non-critical perf hint (`replay_diff_pairs/2` safely falls back to a
+    %% non-critical perf hint (`diff_pairs/3` safely falls back to a
     %% full `to_list/1` over the now-bounded tree if it is momentarily stale),
     %% so fire-and-forget is correct.
     gen_server:cast(ApplierPid, {advance_replayed_root, NewRoot}).
@@ -1300,7 +1329,7 @@ resolve_cell_apply_ctx(Opts) ->
                             bondy_oplog_core_registry:entry_primary_cell_scope(
                                 Entry
                             ),
-                        %% A3 — applier-private OldValue frame-cache (or
+                        %% Applier-private OldValue frame-cache (or
                         %% `undefined` when disabled). Created here in the
                         %% applier's init/1, so the ETS table is owned by
                         %% the applier process and dies with it (the cache
@@ -2028,13 +2057,10 @@ check_drain_stall(Now, #state{drain_progress_at = At} = State) ->
                     "if anti-entropy reports the node converged."
                 >>,
             ?LOG_WARNING(Info#{description => Desc}),
-            %% `Info` goes in `details`, NOT as the description: its keys are
-            %% what `bondy_alarm_catalogue` declares as this alarm's
-            %% `detail_keys`, checked by
-            %% `bondy_alarm_catalogue_test:declared_detail_keys_are_delivered`.
-            %% `alarm_handler:set_alarm/1` passes the 3-tuple through unchanged
-            %% (sasl-4.4 `alarm_handler.erl:103`), so `bondy_oplog` keeps its
-            %% OTP-only call and gains no dependency on `bondy_router`.
+            %% `Info` goes in `details`, NOT the description: its keys are this
+            %% alarm's declared `detail_keys`. The 3-tuple is how an app
+            %% outside `bondy_router` reaches those fields. See
+            %% `bondy_alarm_handler:set_alarm/2`.
             alarm_handler:set_alarm(
                 {
                     {bondy_oplog_drain_stalled, State#state.instance_id},
@@ -2131,12 +2157,8 @@ lifecycle_live(#state{lifecycle = H}) ->
 drain_loop_step(
     #state{iter = Iter, apply_batch_max_events = Max} = State0
 ) ->
-    %% A2 — coalesce several WAL frames into one applier batch so the
-    %% pack-store spine rebuild and the leveled `put_batch` amortise over
-    %% many events. `collect_frames/2` reads frames until the event count
-    %% reaches `Max` (`more`) or the reader drains (`eol`); when caught up
-    %% it returns a single frame and is behaviourally identical to the
-    %% pre-A2 path.
+    %% `collect_frames/2` reads frames until the event count reaches `Max`
+    %% (`more`) or the reader drains (`eol`).
     case collect_frames(Iter, Max) of
         {frames, Batch, {NextSeg, NextOff}, NewIter, More} ->
             %% Actively processing frames: if no commit has advanced past
@@ -2180,27 +2202,19 @@ drain_loop_step(
     end.
 
 %% @private
-%% A2 — coalesce consecutive WAL frames into a single applier batch.
-%% Reads frames via the reader's `next/1` until the accumulated event
-%% count reaches `Max` (a soft cap — a frame is never split, so the batch
-%% may exceed `Max` by at most the last frame's size) or the reader
-%% signals `end_of_log`. Applying many frames as one batch amortises the
-%% two co-dominant per-batch storage costs (the pack-store spine rebuild
-%% and the leveled projection `put_batch`) over many more events.
+%% Coalesce consecutive WAL frames into a single applier batch: read via the
+%% reader's `next/1` until the accumulated event count reaches `Max` or the
+%% reader signals `end_of_log`. `Max` is a soft cap — a frame is never split,
+%% so a batch may exceed it by the last frame's size. Batching amortises the
+%% two co-dominant per-batch storage costs (the pack-store spine rebuild and
+%% the leveled projection `put_batch`) over many more events.
 %%
-%% When the WAL is caught up — the steady state — only one frame is
-%% available before `end_of_log`, so this collapses to exactly the old
-%% one-frame-per-apply behaviour: coalescing engages only when a backlog
-%% already exists, which is precisely when throughput matters and when a
-%% little extra per-event apply latency is irrelevant. `Max = 1`
-%% reproduces the pre-A2 behaviour verbatim (the first frame already
-%% satisfies `N >= 1`).
+%% Coalescing engages only under a backlog: when the WAL is caught up one
+%% frame is available before `end_of_log`, so a batch is one frame.
 %%
-%% A reader error mid-collect discards the (not-yet-applied) accumulated
-%% frames and surfaces the error: their offset was never bumped, so they
-%% are re-read from the last committed position after the supervisor
-%% restart — at-least-once, identical to the pre-A2 stop-and-reconcile
-%% behaviour.
+%% A reader error mid-collect discards the accumulated frames and surfaces the
+%% error. Their offset was never bumped, so they are re-read from the last
+%% committed position after the supervisor restart — at-least-once.
 %%
 %% Returns:
 %%   `{frames, Batch, {Seg, Off}, NewIter, more | eol}` — ≥1 frame read;
@@ -2403,7 +2417,7 @@ partition_by_op(Events) ->
 %% try/catch so a misbehaving fold module cannot wedge the applier —
 %% an exception is logged and the state is preserved unchanged
 %% (the applier continues to drain the WAL but the projection
-%% deviates from the WAL; F9 will track recovery semantics).
+%% deviates from the WAL; recovery semantics are not tracked here).
 apply_fold_batch(#state{fold_module = undefined} = State, _Verified) ->
     State;
 apply_fold_batch(State, []) ->
@@ -2477,38 +2491,33 @@ stamp_ctx_guard(
 %% @private
 %% Full secondary-index rebuild.
 %%
-%% Re-materialises every secondary index from the CURRENT projection value
-%% of each live cell. It does NOT replay the cell's historical events.
+%% Re-materialises every secondary index from the CURRENT projection value of
+%% each live cell. It does NOT replay the cell's historical events.
 %%
-%% Why read the projection instead of re-folding the MST: the live
-%% projection is already the converged value (the live drain folded it
-%% forward; any peer events were folded in by `do_replay_cell_events/1`).
-%% Re-applying a cell's historical events on top of that advanced state is
-%% only idempotent for a context-free (tier_0) CRDT. A context-carrying
-%% (tier_2) CRDT re-mints each replayed event's dot and, because the
-%% advanced cell holds newer dots the historical event never observed, the
-%% per-event intermediate states transiently re-introduce superseded dots
-%% as spurious MV-leaf siblings. The PRIMARY projection reconverges (a
-%% complete causal suffix re-collapses them — see `commit_now/1`), but the
-%% index captures a per-event term-diff and would latch one of those
-%% divergent intermediates. Reading the single converged projection value
-%% sidesteps the hazard and is correct for tier_0 too — and is cheaper:
-%% one read + one term-diff per distinct cell, vs one kernel re-apply per
-%% event.
+%% Why read the projection instead of re-folding the MST: the live projection
+%% is already the converged value. Re-applying a cell's historical events on
+%% top of that advanced state is only idempotent for a context-free (tier_0)
+%% CRDT. A context-carrying (tier_2) CRDT re-mints each replayed event's dot
+%% and, because the advanced cell holds newer dots the historical event never
+%% observed, the per-event intermediate states transiently re-introduce
+%% superseded dots as spurious MV-leaf siblings. The PRIMARY projection
+%% reconverges (a complete causal suffix re-collapses them — see
+%% `commit_now/1`), but the index captures a per-event term-diff and would
+%% latch one of those divergent intermediates. Reading the single converged
+%% value sidesteps the hazard, is correct for tier_0 too, and is cheaper: one
+%% read + one term-diff per distinct cell, vs one kernel re-apply per event.
 %%
 %% Cell directory: read from the PROJECTION, not the MST. The MST is a
 %% truncatable recent-events structure — compaction drops events `<=` the
-%% watermark (`bondy_oplog_instance:truncate_below_or_equal/2`), and a
-%% no-checkpoint crash loses its in-memory tail — so its cell set is
-%% generally INCOMPLETE relative to the durable projection. Deriving the
-%% directory from `distinct_cell_keys(MST)` would silently miss every
-%% already-compacted (or crash-lost) cell, leaving a half-built index that
-%% is nonetheless marked trusted. The projection is the durable, complete
-%% materialised state, so for a durable table the rebuild enumerates the
-%% primary's own cells there (`Adapter:cell_keys(Handle, Scope)`, the
-%% topology-chosen `cell_keys_scope()`) and reads each value from it. The
-%% MST walk remains the fallback for an adapter that cannot enumerate (the
-%% ephemeral ETS projection — see `primary_cell_directory/4`).
+%% watermark and a no-checkpoint crash loses its in-memory tail — so its cell
+%% set is generally INCOMPLETE relative to the durable projection. Deriving
+%% the directory from `distinct_cell_keys(MST)` would silently miss every
+%% already-compacted (or crash-lost) cell, leaving a half-built index that is
+%% nonetheless marked trusted. So for a durable table the rebuild enumerates
+%% the primary's own cells in the projection and reads each value from there.
+%% The MST walk remains the fallback for an adapter that cannot enumerate —
+%% the ephemeral ETS projection; see
+%% `bondy_oplog_cell_utils:primary_cell_directory/4`.
 do_rebuild_indexes(#state{cell_apply_ctx = undefined} = State) ->
     State;
 do_rebuild_indexes(#state{cell_apply_ctx = Ctx, instance_id = Id} = State) ->
@@ -2526,60 +2535,29 @@ do_replay_cell_events(State0) ->
     State.
 
 %% @private
-%% THE PREPARE FENCE — the enforcement point of invariant I1, on which
-%% the soundness of the whole causal-stabilization story rests. Stated
-%% for the record (this is the normative statement; every reclamation
-%% feature is answerable to it):
+%% THE PREPARE FENCE — the enforcement point of invariant I1, stated in this
+%% module's docs under "Causal-stability invariants".
 %%
-%%   I1 (prepare-after-deliver). Every operation on a cell `c` is
-%%   prepared against a state that reflects the effect of every event
-%%   on `c` DELIVERED at this replica before the prepare. "Delivered"
-%%   means: locally originated and WAL-drained (the drain writes the
-%%   projection BEFORE the MST install, so local events satisfy I1 by
-%%   construction), or peer-merged by `integrate_peer_root` (whose
-%%   handler completion is the remote delivery point).
+%% Without this fence I1 fails on applier-backed instances for REMOTE events:
+%% `integrate_peer_root` advances the MST and casts `replay_cell_events`, but
+%% that cast and a client's `cell_context` call come from different senders,
+%% so the context read can be served from a projection lagging the replica's
+%% own delivered set — minting an op whose context under-approximates its
+%% causal past. That is the fatal direction: lost causality. (The
+%% read-and-stamp non-atomicity noted at the `{cell_context, _, _}` handler
+%% errs the other way, toward FALSE concurrency — extra siblings the CRDT
+%% resolves — and is therefore acceptable.)
 %%
-%%   I2 (containment stability). The reclamation frontier `StableHlc`
-%%   (`bondy_oplog_instance:stability_point/1`) certifies, by per-key
-%%   containment proofs against every confirmed peer root, that every
-%%   replica holds every event with HLC =< `StableHlc`.
-%%
-%%   Theorem (causal stability without causal broadcast). Given I1 and
-%%   I2, any event generated anywhere after `StableHlc` was certified
-%%   carries a causal context dominating every dot with HLC =<
-%%   `StableHlc` on its cell. Hence any state transformation derived
-%%   solely from events at or below the frontier — a `stabilize/2`
-%%   `discard`, a `{keep, Reduced}` metadata reduction, an
-%%   order-independent accumulator fold — is invisible to every event
-%%   that can still arrive. Proof sketch: by I2 the generating replica
-%%   held (and by I1 had applied, before preparing) every such event
-%%   for the cell; the prepared context is `context_of/1` over that
-%%   state, which contains their dots. This recovers TCSB-grade causal
-%%   stability (Baquero, Almeida & Shoker, arXiv:1710.04469 §7.2) in an
-%%   anti-entropy architecture with no causal broadcast layer.
-%%
-%% Without this fence I1 fails on applier-backed instances for REMOTE
-%% events: `integrate_peer_root` advances the MST and casts
-%% `replay_cell_events`, but that cast and a client's `cell_context`
-%% call come from different senders, so the context read can be served
-%% from a projection lagging the replica's own delivered set — minting
-%% an op whose context under-approximates its causal past (the fatal
-%% direction: lost causality; contrast the read-and-stamp
-%% non-atomicity noted at the `{cell_context, _, _}` handler, which
-%% errs only toward FALSE concurrency — extra siblings the CRDT
-%% resolves — and is therefore acceptable).
-%%
-%% Mechanism: one shared atomics generation, bumped by the instance at
-%% each `integrate_peer_root` completion (the delivery point; see the
-%% bump-site note there for why that site is exhaustive). A context
-%% read compares it against the generation this projection last
-%% replayed to: equal in the steady state (one atomic read, no
-%% instance round-trip), and on a gap it runs the same idempotent
-%% `replay_pairs`-anchored catch-up the cast handler runs, advancing
-%% the recorded generation ONLY on success — a failed catch-up must
-%% keep the fence armed. The generation is sampled BEFORE the replay:
-%% a bump landing mid-replay may or may not be covered by the root the
-%% replay read, so it must re-arm the fence (conservative, never
+%% Mechanism: one shared atomics generation, bumped by the instance at each
+%% `integrate_peer_root` completion (the delivery point; see the bump-site
+%% note there for why that site is exhaustive). A context read compares it
+%% against the generation this projection last replayed to: equal in the
+%% steady state (one atomic read, no instance round-trip), and on a gap it
+%% runs the same idempotent `replay_pairs`-anchored catch-up the cast handler
+%% runs, advancing the recorded generation ONLY on success — a failed
+%% catch-up must keep the fence armed. The generation is sampled BEFORE the
+%% replay: a bump landing mid-replay may or may not be covered by the root
+%% the replay read, so it must re-arm the fence (conservative, never
 %% unsound).
 ensure_remote_caught_up(State0) ->
     State = resolve_remote_gen_ref(State0),
@@ -2784,7 +2762,7 @@ install_catalogue_group(Id, Ctx, Bucket, Cells, Acc0) ->
         Acc0,
         Cells
     ),
-    %% A3 — the install path (`install_cell_unchecked/9`) writes the
+    %% The install path (`install_cell_unchecked/9`) writes the
     %% projection WITHOUT write-through (it installs a frame directly,
     %% with no fold result to cache). A catalogue bootstrap can run on a
     %% LIVE instance (a live re-bootstrap), so any installed key may
@@ -2869,7 +2847,7 @@ install_one_cell(
             Existing = read_existing_for_install(
                 Adapter, Handle, Bucket, Key
             ),
-            %% A3 — track the maximum decoded cell HLC across the batch. The
+            %% Track the maximum decoded cell HLC across the batch. The
             %% sync session folds it across batches and the instance absorbs
             %% it into the local clock at finalize
             %% (`finalize_catalogue_bootstrap/5`); without that absorb a
@@ -3411,7 +3389,7 @@ validate_substrate_opts(Opts) ->
     end.
 
 %% @private
-%% A2 coalescing threshold must be a positive integer (`1` = disabled).
+%% The coalescing threshold must be a positive integer (`1` = disabled).
 validate_apply_batch_max_events(Opts) ->
     case
         maps:get(apply_batch_max_events, Opts, ?DEFAULT_APPLY_BATCH_MAX_EVENTS)
@@ -3423,7 +3401,7 @@ validate_apply_batch_max_events(Opts) ->
     end.
 
 %% @private
-%% A3 — `oldstate_cache` is a boolean flag (default false);
+%% `oldstate_cache` is a boolean flag (default false);
 %% `oldstate_cache_max` is a positive integer entry cap.
 validate_oldstate_cache_opts(Opts) ->
     case maps:get(oldstate_cache, Opts, false) of

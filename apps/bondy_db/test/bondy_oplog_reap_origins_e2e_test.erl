@@ -154,7 +154,7 @@ tier0_reap_noop() ->
     ok = bondy_db:close(Db).
 
 %% =============================================================================
-%% Multiplexed applier (A6) — the reap must not be gated by the FOUNDING
+%% Multiplexed applier — the reap must not be gated by the FOUNDING
 %% table's kernel
 %% =============================================================================
 
@@ -189,7 +189,7 @@ mux_reap_reaches_non_founding_tables() ->
     ok = bondy_db:close(DbB).
 
 %% =============================================================================
-%% Compacted cells (D-9) — the reap directory must come from the projection
+%% Compacted cells — the reap directory must come from the projection
 %% =============================================================================
 
 %% On a durable (leveled) topology the MST is truncatable: after compaction
@@ -299,7 +299,7 @@ complement_reaps_unclaimed_origins() ->
     ok = bondy_db:close(DbA).
 
 %% One unreachable member aborts the whole pass — a sample of the membership
-%% licenses nothing (A4). The dead origin survives the aborted pass and is
+%% licenses nothing. The dead origin survives the aborted pass and is
 %% reaped by the next successful one.
 complement_fails_closed_on_unreachable() ->
     {DbA, _Oa} = open_db(complf_a, ?MV),

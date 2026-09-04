@@ -81,12 +81,7 @@
     re = element(2, re:compile("^\\s+|\\s+$", "")) :: any()
 }).
 
-%% -record('$mops_proxy', {
-%%     value :: any()
-%% }).
-
 -type state() :: #state{}.
-%% -type proxy()       ::  #'$mops_proxy'{}.
 -type context() :: map().
 
 -export([eval/2]).
@@ -290,21 +285,12 @@ eval_expr(<<>>, #state{is_ground = false, is_string = true} = St) ->
     Fold = fun DoFold(FAcc, FCtxt) ->
         Map = fun
             ({'$mops_proxy', F}, {Flag, Acc}) when is_function(F, 1) ->
-                %% DoEval(F, {Flag, Acc});
                 case F(FCtxt) of
                     {'$mops_proxy', _} = Res ->
                         {true, [Res | Acc]};
                     Res ->
                         {Flag, [term_to_iolist(Res) | Acc]}
                 end;
-            %% DoEval(F, {Flag, Acc}) when is_function(F, 1) ->
-            %%     case F(FCtxt) of
-            %%         {'$mops_proxy', _} = Res ->
-            %%             {true, [Res|Acc]};
-            %%         Res ->
-            %%             {Flag, [term_to_iolist(Res)|Acc]}
-            %%     end;
-
             (Val, {Flag, Acc}) ->
                 {Flag, [term_to_iolist(Val) | Acc]}
         end,
@@ -331,7 +317,6 @@ eval_expr(Bin0, #state{acc = [], is_string = false} = St0) when
             Bin0;
         {Pos, 2} ->
             %% Maybe a mop expression as we found the left moustache
-            %% Bin1 = maybe_trim(Bin0),
             St1 = St0#state{is_open = true},
             Len = byte_size(Bin1),
             %% We first find out if this is a string (quoted) expression
@@ -398,8 +383,6 @@ eval_expr(Bin, #state{is_open = false, is_string = true} = St) when
 %% Accumulates the evaluation in the case of strings (quoted) expressions.
 %% @end
 %% -----------------------------------------------------------------------------
-%% acc(#state{acc = []} = St, Val) ->
-%%     acc(St#state{acc= [?DOUBLE_QUOTES]}, Val);
 
 acc(St, <<>>) ->
     St;
@@ -732,16 +715,6 @@ apply_custom_op(<<"merge(", Rest/binary>> = Op, Expr1, Ctxt) ->
                 error({invalid_expression, Op})
         end,
     case Args of
-        %% {{'$mops_proxy', LT}, {'$mops_proxy', RT}}
-        %% when is_map(LT) andalso is_map(RT) ->
-        %%     {'$mops_proxy', maps:merge(LT, RT)};
-
-        %% {{'$mops_proxy', LT}, R} when is_map(LT) andalso is_map(R) ->
-        %%     {'$mops_proxy', maps:merge(LT, R)};
-
-        %% {L, {'$mops_proxy', RT}} when is_map(L) andalso is_map(RT) ->
-        %%     {'$mops_proxy', maps:merge(L, RT)};
-
         {{'$mops_proxy', _} = L, {'$mops_proxy', _} = R} ->
             {'$mops_proxy', fun(X) ->
                 maybe_merge(maybe_eval(L, X), maybe_eval(R, X))
@@ -807,10 +780,6 @@ apply_custom_op(Op, Val, _) ->
     error({invalid_expression, [Op, Val]}).
 
 %% @private
-%% maybe_merge({'$mops_proxy', L}, {'$mops_proxy', R})
-%% when is_map(L) andalso is_map(R) ->
-%%     {'$mops_proxy', maps:merge(L, R)};
-
 maybe_merge({'$mops_proxy', _} = L, {'$mops_proxy', _} = R) ->
     {'$mops_proxy', fun(X) ->
         maybe_merge(maybe_eval(L, X), maybe_eval(R, X))

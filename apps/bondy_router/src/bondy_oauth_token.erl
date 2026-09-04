@@ -65,9 +65,6 @@ realm.
 ).
 %% TODO not supported yet
 
-%% -define(CODE_GRANT_TTL,
-%%     bondy_config:get([oauth2, code_grant_duration])
-%% ).
 -define(CLIENT_CREDENTIALS_GRANT_TTL,
     bondy_config:get([oauth2, client_credentials_grant_duration])
 ).
@@ -224,10 +221,6 @@ issue(GrantType, AuthCtxt, Opts0) when ?IS_GRANT_TYPE(GrantType) ->
         Now = ?NOW,
 
         ClientId = maps:get(client_id, Opts, all),
-        %% %% Throw exception if client is requesting a token issued to itself
-        %% AuthId =/= ClientId
-        %%     orelse GrantType == client_credentials
-        %%     orelse throw(invalid_request),
 
         AuthRealm = bondy_realm:fetch(AuthRealmUri),
         Kid = bondy_realm:get_random_kid(AuthRealm),
@@ -732,9 +725,6 @@ get_access_expires_in(client_credentials) ->
     ?CLIENT_CREDENTIALS_GRANT_TTL;
 get_access_expires_in(password) ->
     ?PASSWORD_TOKEN_TTL;
-%% get_access_expires_in(application_code) ->
-%%     refresh;
-
 get_access_expires_in(Grant) ->
     throw({oauth2_unsupported_grant_type, Grant}).
 

@@ -215,7 +215,6 @@ retry_loop(Fun, Attempt, _Reason, #{max_retries := MaxRetries} = State0) when
             retry_loop(Fun, Attempt + 1, Reason, State)
     end),
 
-    %% Ensure we return a result.
     resulto:flatten(resulto:ok(Result));
 retry_loop(_, _, Reason, _) ->
     {error, Reason}.

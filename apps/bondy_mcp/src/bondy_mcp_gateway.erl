@@ -572,18 +572,9 @@ reconcile_alarms(RealmUri, Collisions, #state{alarms = Alarms} = State) ->
                 realm => RealmUri,
                 name => Name
             }),
-            %% The 3-tuple, for `realm_uri`. `bondy_alarm_catalogue` declares
-            %% this alarm `class => realm`, and the alarm reference states
-            %% that a realm-class alarm names its affected tenant in
-            %% `realm_uri` — this clause did not, so a consumer following that
-            %% rule got nothing and had to parse element 2 of the id instead,
-            %% which is the re-implementation the runbook join exists to
-            %% spare it.
-            %%
-            %% `alarm_handler:set_alarm/1` passes any term through to
-            %% `bondy_alarm_handler:handle_event/2`, which accepts the
-            %% `{Id, Description, Opts}` shape — so this stays an OTP call and
-            %% `bondy_mcp` gains no dependency on `bondy_router`.
+            %% A realm-class alarm carries its tenant in `realm_uri`; the
+            %% 3-tuple is how an app outside `bondy_router` reaches that
+            %% field. See `bondy_alarm_handler:set_alarm/2`.
             alarm_handler:set_alarm(
                 {
                     Id,

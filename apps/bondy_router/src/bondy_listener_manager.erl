@@ -307,29 +307,23 @@ admin_local_spec() ->
     %% direction, because `bondy_listener_ranch:maybe_unlink_socket/1` deletes
     %% whatever it finds before binding — so the node that boots second takes
     %% the path from the node that boots first, which goes on serving an
-    %% unlinked inode nothing can reach. `bondy_ct:node_env/2` records that as a
-    %% directly measured `econnrefused` in
-    %% `bondy_admin_listener_SUITE:admin_local_socket_is_bound_and_serves`, and
-    %% works around it with a per-peer directory.
+    %% unlinked inode nothing can reach. Measured as an `econnrefused` in
+    %% `bondy_admin_listener_SUITE:admin_local_socket_is_bound_and_serves`,
+    %% which `bondy_ct:node_env/2` works around with a per-peer directory.
     %%
     %% What blocks it is boot order, not effort. Any node identity comes from
-    %% `partisan_config:get(name)`, which `partisan_config:init/0` sets in
-    %% `maybe_set_node_name/0`. Partisan is `{partisan, load}` in the release and
-    %% `bondy_app:start/2` starts it only AFTER `bondy_config:init/1` returns —
-    %% deliberately, because `init/1` spends its whole body editing Partisan's
-    %% application environment by hand, and `partisan_config:init/0` is what
-    %% caches that. This function runs inside `bondy_listener_manager:init/0`,
-    %% which `bondy_config:init/1` calls partway through, so there is no node
-    %% name yet. Reading `bondy_config:node_hash/0` here would not just yield a
-    %% wrong path: `nodestring/0` and `node_hash/0` CACHE, so it would pin a
+    %% Partisan, which `bondy_app:start/2` starts only AFTER
+    %% `bondy_config:init/1` returns — deliberately, because `init/1` spends
+    %% its whole body editing Partisan's application environment by hand. This
+    %% function runs inside `init/1`, so there is no node name yet. Worse,
+    %% `nodestring/0` and `node_hash/0` CACHE, so reading one here would pin a
     %% wrong node identity into session ids for the lifetime of the node.
     %%
-    %% Closing it therefore means resolving the path where the identity exists —
-    %% `bondy_listener_manager:start/1`, since `bondy_app` starts Partisan long
-    %% before `start_early_listeners/0` — which also means republishing the
-    %% `[admin_local, path]` block that `bondy_config:splat_listener_blocks/1`
-    %% has already emitted from the value below. That is a change to the
-    %% write-once inventory, not a rename, and is not made here.
+    %% Closing it means resolving the path where the identity exists
+    %% (`start/1`, which runs long after Partisan is up) and republishing the
+    %% `[admin_local, path]` block `bondy_config:splat_listener_blocks/1` has
+    %% already emitted from the value below — a change to the write-once
+    %% inventory, not made here.
     #{
         transport => uds,
         protocol => http,

@@ -96,7 +96,8 @@ prop_replica_pair() ->
 %% PROPER STATEM CALLBACKS
 %% =============================================================================
 
-%% A and B are bound to PropEr symbolic vars; `run_commands/3` resolves
+%% A and B are bound to PropEr symbolic vars; `proper_statem:run_commands/3`
+%% resolves
 %% them at execution time from the Env list. Commands carry these
 %% vars verbatim — the model never sees the real binaries.
 initial_state() ->

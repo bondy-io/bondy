@@ -221,9 +221,8 @@ An implementation of the `app_config` behaviour.
 %% Ranch options for a listener that declares no transport tuning. A listener is
 %% fully specified by its inventory entry — transport, protocol and a bind
 %% target — so an option block is optional, and the `listeners.$name.*` mappings
-%% carry no defaults of their own. Both values are the ones `bondy_wamp_uds` had
-%% for the same reason before every listener shared one driver: 10 acceptors and
-%% no connection ceiling, rather than ranch's own default of 1024.
+%% carry no defaults of their own. 10 acceptors and no connection ceiling,
+%% rather than ranch's own default of 1024.
 %%
 %% This is the ONLY place either value is written. `bondy_listener_ranch` reads
 %% both without a default, so neither is restated there.

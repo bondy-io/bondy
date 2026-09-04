@@ -412,7 +412,7 @@ overlay_fence_blocks_reduction(T) ->
     ?assertMatch({ok, {#{count := 3}, _}}, bondy_db:read(T, ?REALM, K)).
 
 %% -----------------------------------------------------------------------------
-%% Kernel fidelity on a multiplexed applier (A6)
+%% Kernel fidelity on a multiplexed applier
 %% -----------------------------------------------------------------------------
 %%
 %% `shared_shards` + `shard_count => 1` puts BOTH tables on one applier AND one
@@ -600,7 +600,7 @@ sweep_batched_loop(Pid, StableHlc, Max, Cursor, AccStats, Calls) ->
 
 %% Cells the sweeper visits. NOTE this is not a projection-row count: the ETS
 %% projection used by the memory topology does not export `cell_keys/2`, so
-%% `primary_cell_directory/4` falls back to walking the MST. The count is
+%% `bondy_oplog_cell_utils:primary_cell_directory/4` falls back to walking the MST. The count is
 %% therefore stable across a projection delete, which is why the reclamation
 %% assertions read `discarded` from the sweep rather than differencing this.
 cell_count(T) ->

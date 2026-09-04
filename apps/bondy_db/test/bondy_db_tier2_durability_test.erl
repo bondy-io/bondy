@@ -3,42 +3,25 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 
-%% Durable stop/restart end-to-end tests for the tier_2 CRDTs
+%% Durable stop/restart tests for the tier_2 CRDTs
 %% (`bondy_oplog_crdt_mv_register`, `bondy_oplog_crdt_aw_map`).
 %%
-%% A tier_2 type's convergence rests on a substrate precondition
-%% (documented in both modules' "Convergence preconditions"): an origin's
-%% observed causal context for a cell never regresses between its
-%% successive writes. Across a process restart that holds only if recovery
-%% rebuilds the cell's causal context (the DVV / version vector, which
-%% lives in the projection's `StateBytes`) from durable state BEFORE the
-%% origin stamps another write. If it does not, a post-restart same-origin
-%% write re-mints a used dot and the value SILENTLY forks into a spurious
-%% sibling.
+%% Both types converge only if an origin's observed causal context for a
+%% cell never regresses between its successive writes (each module's
+%% "Convergence preconditions" states it). Across a restart that holds only
+%% if recovery rebuilds the context from durable state BEFORE the origin
+%% stamps another write; otherwise that write re-mints a used dot and the
+%% value SILENTLY forks into a sibling.
 %%
-%% These tests pin that across a real graceful stop/restart on the durable
-%% stack (leveled projection + pack-store MST + WAL, all rooted under a
-%% `storage_path` that also auto-persists the origin — PR-J4/J6):
+%% Each test therefore ends by asserting a post-restart same-origin write
+%% DOMINATES — one value, not an `[old, new]` sibling pair. `mv_register`
+%% covers the per-cell context; `aw_map` additionally covers the per-origin
+%% Seq, since its observed-remove needs the new dot fresh AND the old dot
+%% observed.
 %%
-%%   1. write a value, read it back;
-%%   2. close the table + DB, stop every oplog instance, stop the leveled
-%%      supervisor (every Bookie under it) — a clean shutdown, on-disk
-%%      state survives;
-%%   3. reopen a FRESH leveled supervisor over the SAME directories +
-%%      `storage_path` (the same-`storage_path` reopen recovers the same
-%%      origin, WAL and MST) — the PR-D blocker was a reopen-same-`Sup`
-%%      leveled `noproc`; a fresh `Sup` over the same dir is the fix;
-%%   4. assert the prior value survived (the DVV round-tripped through
-%%      durable recovery), and
-%%   5. assert a post-restart same-origin write DOMINATES — a single
-%%      value, NOT a `[old, new]` sibling pair. That dominance is the
-%%      precondition-#2 proof: recovery rebuilt the context so the origin's
-%%      next dot strictly succeeds the pre-restart one.
-%%
-%% `mv_register` proves the per-cell-context recovery path; `aw_map`
-%% additionally proves the global per-origin Seq (the dot axis) recovers
-%% (PR-J1/J2), since its observed-remove depends on the new dot being
-%% fresh AND the old dot being observed.
+%% FIXTURE TRAP: step 3 must reopen under a FRESH leveled supervisor over
+%% the same directories and `storage_path`. Reopening under the same `Sup`
+%% fails with a leveled `noproc`.
 
 -module(bondy_db_tier2_durability_test).
 

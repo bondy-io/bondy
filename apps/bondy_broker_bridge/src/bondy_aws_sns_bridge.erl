@@ -57,7 +57,6 @@ init(Config) ->
     }),
 
     %% TODO: check the proper configuration (using default at the moment)
-    %% {lhttpc, [{pool_size, 1000},{connection_timeout, 300000}]}
     application:set_env([{erlcloud, Config}]),
 
     try application:ensure_all_started(erlcloud) of

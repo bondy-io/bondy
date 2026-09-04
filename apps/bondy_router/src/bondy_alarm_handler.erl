@@ -230,6 +230,14 @@ Unrecognised `severity`, `class` or `affects_ready` values fall back to
 `major` / `node` / `false` rather than failing: a producer reporting a problem
 must never be turned into a second problem. `severity` does NOT decide
 readiness — `affects_ready` is a separate per-alarm declaration.
+
+A `realm`-class alarm MUST carry its affected tenant in `realm_uri`, so a
+consumer can attribute it without parsing the alarm id.
+
+An app that must not depend on `bondy_router` raises the same alarm through
+OTP's `alarm_handler:set_alarm/1` with a `{Id, Description, Opts}` 3-tuple:
+OTP passes the term through unchanged and `handle_event/2` below accepts that
+shape. This is the only supported way to reach these fields from outside.
 """.
 -spec set_alarm({id(), term()}, map()) -> ok.
 

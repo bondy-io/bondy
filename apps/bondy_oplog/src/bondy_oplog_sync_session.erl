@@ -459,7 +459,7 @@ do_bootstrap_snapshot(Instance, Peer, Opts, Transport, TransportOpts, WasLive) -
                 )
             of
                 {ok, Installed, Skipped, MaxInstalledHlc} ->
-                    %% A3 — `MaxInstalledHlc` is absorbed into the local clock
+                    %% `MaxInstalledHlc` is absorbed into the local clock
                     %% at finalize, BEFORE the instance can be marked live.
                     %% The session-start `Watermark` alone would under-absorb:
                     %% it is a lower bound for what the live scan ships.

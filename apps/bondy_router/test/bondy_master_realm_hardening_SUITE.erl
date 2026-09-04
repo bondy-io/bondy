@@ -32,7 +32,7 @@ end_per_suite(Config) ->
     {save_config, Config}.
 
 %% -----------------------------------------------------------------------------
-%% D-2: the master realm must not accept anonymous authentication
+%% The master realm must not accept anonymous authentication
 %% -----------------------------------------------------------------------------
 
 no_anonymous_authmethod(_Config) ->
@@ -40,7 +40,7 @@ no_anonymous_authmethod(_Config) ->
     ?assertNot(lists:member(?WAMP_ANON_AUTH, Methods)).
 
 %% -----------------------------------------------------------------------------
-%% D-2: the administrators grant must be scoped to `bondy.` and `wamp.`, not to
+%% The administrators grant must be scoped to `bondy.` and `wamp.`, not to
 %% the empty prefix (which matches every URI).
 %% -----------------------------------------------------------------------------
 
@@ -64,7 +64,7 @@ admin_grant_is_scoped(_Config) ->
     ).
 
 %% -----------------------------------------------------------------------------
-%% D-1/D-2: the boot migration remediates a legacy master realm and is idempotent
+%% The boot migration remediates a legacy master realm and is idempotent
 %% -----------------------------------------------------------------------------
 
 migration_removes_legacy_anon_and_is_idempotent(_Config) ->

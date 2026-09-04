@@ -142,11 +142,6 @@ align(Str, Size) when is_binary(Str) ->
     align(unicode:characters_to_list(Str, utf8), Size);
 align(Str, Size) when is_atom(Str) ->
     align(atom_to_list(Str), Size);
-%align(Str, Size) when is_list(Str), length(Str) > Size ->
-%Truncated = lists:sublist(Str, Size),
-%Truncated ++ " |";
-%align(Str, Size) when is_list(Str), length(Str) =:= Size ->
-%Str ++ " |";
 align(Str, Size) when is_list(Str) ->
     string:centre(Str, Size) ++ "|";
 align(Term, Size) ->
@@ -163,10 +158,6 @@ vertical_border(Spec) ->
         ],
         $+
     ]).
-
-%-spec spaces(non_neg_integer()) -> string().
-%spaces(Length) ->
-%char_seq(Length, $\s).
 
 -spec char_seq(non_neg_integer(), char()) -> string().
 char_seq(Length, Char) ->

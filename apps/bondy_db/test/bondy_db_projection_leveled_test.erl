@@ -357,7 +357,7 @@ clear_is_entity_scoped({Pid, _Dir}) ->
         ]
     end.
 
-%% `cell_keys/2` is the rebuild's cell directory (D-9). It must return EXACTLY
+%% `cell_keys/2` is the rebuild's cell directory. It must return EXACTLY
 %% the primary cells of the given entity type, across both shared-backend bucket
 %% layouts, while excluding index buckets, the reserved marker/flag buckets, and
 %% every other table's cells co-located in the same Bookie.

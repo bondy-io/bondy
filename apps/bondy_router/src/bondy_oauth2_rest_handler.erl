@@ -652,26 +652,8 @@ token_response(Token, Req0) ->
 
 %% @private
 on_login(_RealmUri, _Username, _Meta) ->
-    % bondy_event_manager:notify(
-    %     {[bondy, user, logged_in], RealmUri, Username, Meta}).
     ok.
 
 set_resp_headers(Headers, Req0) ->
     Req1 = cowboy_req:set_resp_headers(Headers, Req0),
     bondy_http_utils:set_all_headers(Req1).
-
-%% reply(HTTPCode, Enc, Response, Req0) ->
-%%     %% We add the content-type since we are bypassing Cowboy by replying
-%%     %% ourselves
-%%     MimeType = case Enc of
-%%         msgpack ->
-%%             <<"application/msgpack; charset=utf-8">>;
-%%         json ->
-%%             <<"application/json; charset=utf-8">>;
-%%         undefined ->
-%%             <<"application/json; charset=utf-8">>;
-%%         Bin ->
-%%             Bin
-%%     end,
-%%     Req1 = cowboy_req:set_resp_header(<<"content-type">>, MimeType, Req0),
-%%     cowboy_req:reply(HTTPCode, prepare_request(Enc, Response, Req1)).

@@ -135,7 +135,7 @@ untrusted_restart_rebuilds(Dirs) ->
     %% rebuilt contents here: the rebuild re-derives from the primary via
     %% `reindex_from_projection`, whose cell directory for this durable table is
     %% the projection (`cell_keys/2`, the complete durable directory — see
-    %% `bondy_oplog_applier:primary_cell_directory/3`). Its completeness depends
+    %% `bondy_oplog_cell_utils:primary_cell_directory/4`). Its completeness depends
     %% on the primary's own durable recovery / tail-replay — a separate concern
     %% from the marker-driven decision, and exercised by the rebuild suites
     %% (lag / writer / tier2). The trusted path (and its full data survival) is
@@ -151,7 +151,7 @@ untrusted_restart_rebuilds(Dirs) ->
         close(T1, Db1, Sup1)
     end.
 
-%% F1-minimal, Test A — a GRACEFUL restart with a tail that was written but not
+%% Test A — a GRACEFUL restart with a tail that was written but not
 %% explicitly flushed must stay on the cheap TRUST path (no O(table) rebuild)
 %% AND keep the tail. This pins flush-on-close: `close_table/1` `flush_sync`s the
 %% writer and stamps the clean-shutdown flag, so the durable index is
@@ -195,12 +195,12 @@ graceful_tail_restart_trusts(Dirs) ->
         close(T1, Db1, Sup1)
     end.
 
-%% F1-minimal, Test B — the original (C) data-loss scenario, now correctly
+%% Test B — the original data-loss scenario, now correctly
 %% recovered. A write durable in the PRIMARY whose index dispatch is lost on a
 %% CRASH (in-flight coalesce buffer gone, no clean close) must still be present
 %% after reopen — via a REBUILD (the shard is not trusted, because no
 %% clean-shutdown flag was written). The fix turns the silent under-count into a
-%% rebuild; rebuilding is the accepted F1-minimal cost on the crash path.
+%% rebuild; rebuilding is the accepted cost on the crash path.
 %%
 %% Construction: u3 is durable in the primary; `reset/1` drops its buffered index
 %% op (the crash's effect on the in-memory buffer); `crash/2` tears the processes
@@ -283,7 +283,7 @@ write(T, Key, Value) ->
 %% supervisor. The on-disk leveled/pack/WAL state survives.
 close(Table, Db, Sup) ->
     %% NOTE: `close_table/1` takes the TABLE handle (from `open_table/3`), not
-    %% the DB handle — it is what runs the F1-minimal flush-on-close
+    %% the DB handle — it is what runs the flush-on-close
     %% (`flush_and_mark_clean`) that stamps each index shard's clean-shutdown
     %% flag. Passing `Db` here (as an earlier version did) silently no-ops under
     %% `catch` and leaves every shard dirty → a needless rebuild on reopen.
@@ -307,7 +307,7 @@ close(Table, Db, Sup) ->
     ok.
 
 %% Simulate a crash: tear down the running processes WITHOUT `close_table/1`, so
-%% the F1-minimal flush-on-close (`flush_and_mark_clean`) never runs and no
+%% the flush-on-close (`flush_and_mark_clean`) never runs and no
 %% clean-shutdown flag is written — exactly a power-loss / kill. The on-disk
 %% leveled/pack/WAL survive, so the primary's durable state (including u3) is
 %% recovered on the next open, but the index is left without its tail or a clean

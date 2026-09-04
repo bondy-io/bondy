@@ -117,7 +117,7 @@ immutable records and safe to pass across processes.
     %% Per-slice mutable bit buffer represented as a list of
     %% byte-sized integers (length = slice_byte_len). Slices are
     %% stored in slice-0..slice-(k-1) order. Mutations go through
-    %% `set_bit/3` which rewrites a single byte.
+    %% `array_set_bit/2` which rewrites a single byte.
     slices :: [array:array(byte())]
 }).
 

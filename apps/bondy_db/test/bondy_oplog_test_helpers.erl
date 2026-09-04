@@ -4,8 +4,7 @@
 %% Centralises the boilerplate for fabricating projection cell frames
 %% (V2 wire format with optional value column) and projecting fold
 %% states to the user-facing values that the substrate now returns from
-%% `bondy_oplog_core:read/3..5` (`_design/catalogue_expansion_plan.md`
-%% §3.6).
+%% `bondy_oplog_core:read/3..5`.
 %% =============================================================================
 
 -module(bondy_oplog_test_helpers).
@@ -15,7 +14,7 @@
 -export([value_of/2]).
 
 %% Build a V2 cell frame for the given fold state. Equivalent to what
-%% the applier writes via `bondy_oplog_applier:apply_one_cell/11` —
+%% the applier writes through `bondy_oplog_cell_apply` —
 %% state bytes + `term_to_binary(to_value(State))` value bytes.
 %%
 %% Callers that want to inject an explicit HLC distinct from the

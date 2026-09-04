@@ -63,7 +63,6 @@ The following is the C++ implementation in
 %% }
 %%
 jump_consistent_hash(Key, N, _, J0) when J0 < N ->
-    %% B1 = J0,
     NewKey = (Key * ?MAGIC + 1) band ?MASK,
     J1 = trunc((J0 + 1) * ((1 bsl 31) / ((NewKey bsr 33) + 1))),
     jump_consistent_hash(NewKey, N, J0, J1);

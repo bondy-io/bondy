@@ -1347,11 +1347,6 @@ add_subscription_test(Type, RealmUri, Uri, Opts, Ctxt) ->
 
     %% {Matches, _} = bondy_registry:match(Type, RealmUri, Uri),
 
-    %% ?assert(
-    %%     lists:member(Entry, Matches),
-    %%     {Entry, Matches}
-    %% ),
-
     ?assertEqual(
         {error, {already_exists, Entry}},
         bondy_registry:add(Type, RealmUri, Uri, Opts, Ref),

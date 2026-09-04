@@ -1376,7 +1376,7 @@ disp(#data{dispatch = D}) -> D.
 store_dispatch(D, Data) -> Data#data{dispatch = D}.
 
 %% @private Interpret a dispatch step: apply its effects (an event spawn may
-%% recurse to drain the FIFO, mirroring the pre-A2 `next_event/4` recursion) and
+%% recurse to drain the FIFO) and
 %% store the resulting dispatch state back into the statem data.
 run_dispatch({D, Effects}, Data) ->
     {D1, Data1} = lists:foldl(fun apply_effect/2, {D, Data}, Effects),

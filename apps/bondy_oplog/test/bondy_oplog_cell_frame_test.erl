@@ -1,6 +1,5 @@
 %% =============================================================================
-%% Tests for the projection cell value frame codec
-%% (`_design/catalogue_expansion_plan.md` §3.3).
+%% Tests for the projection cell value frame codec.
 %%
 %% Pins the V2 encode/decode round-trip, the wire format
 %% (`<<2:8, HasValueColumn:1, _Reserved:7, HlcLen:16, HlcBin,

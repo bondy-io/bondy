@@ -48,16 +48,6 @@ options/details maps are invalid.
     | wamp_invocation()
     | wamp_cancel().
 
-%% -type payload_opts()    ::  [payload_opt()]
-%%                             | #{
-%%                                 args => list(),
-%%                                 kwargs => map(),
-%%                                 partial => {encoding(), binary()}
-%%                             }.
-%% -type payload_opt()     ::  {args, list()}
-%%                             | {kwargs, map()}
-%%                             | {partial, {encoding(), binary()}}.
-
 -type partial() :: {encoding(), binary()}.
 
 -export_type([t/0]).
@@ -533,15 +523,6 @@ unregister(ReqId, RegId) ->
         request_id = bondy_wamp_utils:validate_id(ReqId),
         registration_id = bondy_wamp_utils:validate_id(RegId)
     }.
-
-% -spec registration_revocation(id(), id()) -> wamp_unregister() | no_return().
-
-% registration_revocation(RegId, Reason) when is_binary(Reason) ->
-%     Id = bondy_wamp_utils:validate_id(RegId),
-%     #unregister2{
-%         request_id = 0,
-%         details = #{registration => Id, reason => Reason}
-%     }.
 
 -spec unregistered(id()) -> wamp_unregistered() | no_return().
 

@@ -455,7 +455,7 @@ open_table_provision(
     AggregateRoot = maps:get(aggregate_root, Merged, identity),
     DbName = maps:get(name, Db),
     NS = namespace_atom(DbName, EntityType),
-    %% A3 — default the applier's OldValue frame-cache ON for durable
+    %% Default the applier's OldValue frame-cache ON for durable
     %% (leveled) projections and OFF for ephemeral (ets) ones. The cache
     %% elides the projection journal read on the per-cell write path: for
     %% leveled that read hits the on-disk journal — the dominant per-shard
@@ -2115,7 +2115,7 @@ every term. For a **durable table** (any leveled topology) the cell directory
 is the complete durable projection (`cell_keys/2`, scoped per the topology —
 `{entity, ET}` for `shared_shards`/`single_bookie`, `all_primary` for
 `per_entity`); only the ephemeral ETS adapter falls back to the MST — see
-`bondy_oplog_applier:primary_cell_directory/4`. Synchronous — returns once the
+`bondy_oplog_cell_utils:primary_cell_directory/4`. Synchronous — returns once the
 index has been re-materialised and its shards freshened, so a `max_lag` read
 issued after this passes. `{error, {unknown_index, IndexName}}` for an unknown
 index.
@@ -2536,7 +2536,7 @@ provision_shard(
                         %% bucket is realm-keyed (`per_entity`). Lets the rebuild
                         %% derive the complete cell directory from the durable
                         %% projection (`cell_keys/2`) rather than the truncatable
-                        %% MST — see `bondy_oplog_applier:primary_cell_directory/4`.
+                        %% MST — see `bondy_oplog_cell_utils:primary_cell_directory/4`.
                         primary_cell_scope =>
                             Topology:primary_cell_scope(TableState),
                         %% Per-table routing config persisted so a multiplexed
@@ -2717,7 +2717,7 @@ release_cache(Topology, TableState, CacheHandle) ->
 %% `max_install_in_flight`, etc.) is forwarded verbatim.
 
 %% @private
-%% A3 — context-sensitive default for the applier's OldValue frame-cache:
+%% Context-sensitive default for the applier's OldValue frame-cache:
 %% ON for durable (leveled) projections, OFF for ephemeral (ets). A
 %% caller-supplied value under `oplog_instance_opts.applier.oldstate_cache`
 %% is preserved (it always wins). See the call site in
@@ -3456,8 +3456,8 @@ index_descriptors(Specs, DefaultShardCount, Topology) ->
 %% that declares secondary indexes relies on its projection adapter exporting
 %% `cell_keys/2` to enumerate the COMPLETE cell directory (under the topology's
 %% `cell_keys_scope()`) — without it the rebuild would silently fall back to the
-%% truncatable MST and miss every compacted cell (D-9; see
-%% `bondy_oplog_applier:primary_cell_directory/4`). The leveled adapter always
+%% truncatable MST and miss every compacted cell (see
+%% `bondy_oplog_cell_utils:primary_cell_directory/4`). The leveled adapter always
 %% exports it, so this never fires in the current design; it pins the contract
 %% so a future durable adapter — or a deletion of `cell_keys/2` from the leveled
 %% adapter — fails loudly at open instead of silently degrading to the MST.
@@ -3502,7 +3502,7 @@ cold_start_indexes(NS, InstanceIds, IndexMap) ->
     %% any rebuild observe a fully-replayed primary. Without this a `rebuild_sync`
     %% derives its cell directory (the durable projection via `cell_keys/2` for a
     %% durable table, else the MST for the ephemeral ETS adapter — see
-    %% `bondy_oplog_applier:primary_cell_directory/4`) while the tail is still
+    %% `bondy_oplog_cell_utils:primary_cell_directory/4`) while the tail is still
     %% being applied, yielding an empty or partial index. Best-effort: a missing
     %% applier just leaves the prior (racy) behaviour, never blocks open.
     ok = await_primary_shards(InstanceIds),
@@ -3700,7 +3700,6 @@ shard_lag(NS, IndexName, Shard) ->
     end.
 
 %% @private
-%% Max of two lag values where `infinity` dominates any integer.
 max_lag(infinity, _) -> infinity;
 max_lag(_, infinity) -> infinity;
 max_lag(A, B) when is_integer(A), is_integer(B) -> erlang:max(A, B).
@@ -3749,7 +3748,6 @@ primary_scan(Table, Realm, RowsFun) ->
     end.
 
 %% @private
-%% The distinct, deduplicated index terms a value contributes.
 cell_terms(Spec, Value) ->
     lists:usort(bondy_oplog_index_spec:terms(Spec, Value)).
 
@@ -3896,7 +3894,6 @@ index_rows(Topology, Realm, Rows) ->
     ).
 
 %% @private
-%% Map an already-chosen shard index to its oplog instance_id.
 instance_for_shard(#{instance_ids := Ids}, Shard) ->
     maps:get(Shard, Ids).
 

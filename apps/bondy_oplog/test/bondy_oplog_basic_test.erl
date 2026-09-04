@@ -1,9 +1,5 @@
 %% Smoke tests for the foundation primitives that survive the
 %% course-correction reshape: origin, HLC, event keys.
-%%
-%% Event-log tests have been deleted with the event_log module per
-%% `_design/_implementation_plan.md` §1.2. Realm-MST tests live in
-%% `bondy_replication_realm_mst_test`.
 
 -module(bondy_oplog_basic_test).
 

@@ -151,10 +151,6 @@ init(Req, St0) ->
 
     %TODO
     Session = undefined,
-    % SessionId = 1,
-    % Ctxt0 = bondy_context:set_peer(
-    %     bondy_context:new(), cowboy_req:peer(Req)),
-    % Ctxt1 = bondy_context:set_session_id(SessionId, Ctxt0),
     St1 = St0#{
         authid => undefined,
         body_evaluated => false,
@@ -765,14 +761,6 @@ init_context(Req) ->
     },
     maps:put(<<"request">>, M, #{}).
 
-%% is_multipart_form_body(Req) ->
-%%     case cowboy_req:parse_header(<<"content-type">>, Req) of
-%%         {<<"multipart">>, <<"form-data">>, _} ->
-%%             true;
-%%         _ ->
-%%             false
-%%     end.
-
 parse_token(Req) ->
     case cowboy_req:parse_header(<<"authorization">>, Req) of
         {bearer, Token} ->
@@ -1136,7 +1124,6 @@ from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) when
     {error, FinalCode, Response1, St1};
 from_http_response(StatusCode0, RespHeaders, RespBody, Spec, St0) ->
     Ctxt0 = maps:get(api_context, St0),
-    % HeadersMap = maps:with(?HEADERS, maps:from_list(RespHeaders)),
     Result0 = #{
         <<"status_code">> => StatusCode0,
         <<"body">> => RespBody,

@@ -10,40 +10,32 @@
 %% `{sync,From,To}`) is simulated with realistic **causal-delivery**
 %% semantics: each origin keeps its own materialised state and the ordered
 %% list of events it has delivered; a mint stamps the origin's currently
-%% observed context (`context_of/1`) and delivers to itself; a sync
-%% delivers, in key order, exactly the events the source has seen that the
-%% target has not (a causal-order anti-entropy round). The generated
-%% contexts are therefore well-formed partial causal observations, not
-%% arbitrary noise.
+%% observed context (`context_of/1`) and delivers to itself; a sync delivers,
+%% in key order, exactly the events the source has seen that the target has
+%% not. The generated contexts are therefore well-formed partial causal
+%% observations, not arbitrary noise.
 %%
-%% The headline property `prop_per_replica_eager_equals_group` asserts
-%% the eager-equals-group invariant in its realistic form: each
-%% replica's incremental eager state — built by applying `apply_op/4` in
-%% (causal) delivery order — equals the canonical key-sorted
-%% `interpret_cog/2` over exactly the events that replica delivered. The
-%% delivery order is a causal linearization that generally differs from
-%% the key-sorted order (a sync can interleave a peer's lower-HLC event
-%% after the replica's own higher-HLC event), so this genuinely exercises
-%% eager-vs-group rather than re-sorting an already-sorted log.
+%% `prop_per_replica_eager_equals_group` asserts the eager-equals-group
+%% invariant in its realistic form: each replica's incremental eager state —
+%% `apply_op/4` in causal delivery order — equals the canonical key-sorted
+%% `interpret_cog/2` over exactly the events that replica delivered. Delivery
+%% order is a causal linearization that generally differs from key-sorted
+%% order, so this genuinely exercises eager-vs-group rather than re-sorting
+%% an already-sorted log.
 %%
-%% The generator also mints `{apply, O, K, N}` — a nested `pn_counter`
-%% sub-op on a key drawn from a set disjoint from the flat-put keys, so a
-%% type-consistency `{badarg, _}` (mixing a flat put and a nested apply
-%% on the same key is a caller error, see `bondy_oplog_crdt_nested_core`)
-%% is never generated. This exercises the same
-%% `bondy_oplog_crdt_nested_core` engine `bondy_oplog_crdt_aw_set` uses,
-%% so the properties below prove convergence for nested keys too.
+%% Nested `{apply, O, K, N}` sub-ops are minted on a key set DISJOINT from
+%% the flat-put keys: mixing a flat put and a nested apply on one key is a
+%% caller error (`bondy_oplog_crdt_nested_core`), so a `{badarg, _}` is never
+%% generated. That exercises the same engine `bondy_oplog_crdt_aw_set` uses.
 %%
-%% `prop_nested_counter_oracle` is a **separate**, focused property (its
-%% own apply-only generator, no put/rmv) that checks *semantic*
-%% correctness against an independent oracle, not just internal
-%% consistency: the other properties above only prove replicas agree
-%% with each other, which is satisfied even if every replica agrees on a
-%% *wrong* value. This distinction is not academic — it is exactly how a
-%% real bug (`bondy_oplog_crdt_nested_core:put_nested/7` incorrectly
-%% pruning a writer's own prior nested sub-op, silently dropping
-%% sequential same-origin `pn_counter` increments) shipped past every
-%% property above and was only caught by manual reproduction.
+%% `prop_nested_counter_oracle` is a SEPARATE property (its own apply-only
+%% generator) checking semantic correctness against an independent oracle.
+%% The properties above only prove replicas agree with each other, which is
+%% satisfied even if every replica agrees on a WRONG value. Not academic:
+%% that is exactly how `bondy_oplog_crdt_nested_core:put_nested/7` pruning a
+%% writer's own prior nested sub-op — silently dropping sequential
+%% same-origin `pn_counter` increments — shipped past every property above
+%% and was caught only by manual reproduction.
 
 -module(bondy_oplog_crdt_aw_map_proper_test).
 

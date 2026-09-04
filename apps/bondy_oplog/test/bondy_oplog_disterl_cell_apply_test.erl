@@ -1,38 +1,15 @@
 %% =============================================================================
 %% Multi-node convergence test for the cell_apply projection path.
 %%
-%% Drives a 3-node cluster (test controller + 2 peer nodes via
-%% `peer:start_link/1`) through the same wiring as the Jepsen
-%% harness, but in-process:
+%% Drives a 3-node cluster (test controller + 2 `peer:start_link/1` nodes)
+%% through the same wiring as the Jepsen harness, but in-process: append
+%% `cell_apply` events on different nodes, drive pairwise
+%% `bondy_oplog:sync/3` over the disterl transport, and assert every node's
+%% substrate projection converges.
 %%
-%%   - Each node has the same `(NS, primary, 0)` shard registered in
-%%     `bondy_oplog_core_registry` with a local cache + projection
-%%     adapter.
-%%   - Each node runs the same instance ID with a unique
-%%     `bondy_oplog_origin` and `cell_apply_target` pointing at the
-%%     local shard entry.
-%%   - Tests append `cell_apply` events on different nodes, then drive
-%%     pairwise `bondy_oplog:sync/3` calls over the disterl transport
-%%     and assert every node's substrate projection converges to the
-%%     same state.
-%%
-%% This is regression coverage for the three substrate fixes documented
-%% in `project_substrate_fixes_jepsen_orset_2026_05_20.md`:
-%%
-%%   1. `bondy_oplog_applier:replay_cell_events/1` is fired by
-%%      `integrate_peer_root/2` so peer-authored events reach the
-%%      projection on remote nodes.
-%%   2. `bondy_mst_ets_store` runs with `public` ETS access so the
-%%      sync session's `concurrent_writes` fast-path can `ets:insert/2`
-%%      pages directly from the session process.
-%%   3. The cell_apply path's cache invalidation keeps the per-shard
-%%      read cache coherent after a projection write.
-%%
-%% Plus the diff-based watermark added in
-%% `project_replay_watermark_2026_05_20.md`: every test ends with at
-%% least one `replay_cell_events` cycle, so a regression in the
-%% `bondy_mst:diff_to_list/2`-driven path surfaces here without a
-%% Docker + Jepsen round-trip.
+%% Every test ends with at least one `replay_cell_events` cycle, so a
+%% regression in the `bondy_mst:diff_to_list/2`-driven watermark path
+%% surfaces here rather than in a Docker + Jepsen round-trip.
 %% =============================================================================
 
 -module(bondy_oplog_disterl_cell_apply_test).

@@ -423,10 +423,8 @@ maybe_create_socket_dir(Path) ->
 %% rather than assumed: a socket set to 0000 refuses its own owner with
 %% `{error, eacces}`, and the same socket at 0600 accepts it.
 %%
-%% A failure to narrow it fails the listener start. Continuing would leave the
-%% Admin API reachable by every local uid, which is the condition this exists to
-%% prevent, and a silently unprotected control socket is worse than a node that
-%% refuses to start.
+%% A failure to narrow it fails the listener start: a silently unprotected
+%% control socket is worse than a node that refuses to start.
 maybe_protect_socket(#{name := admin_local, bind := {path, Path}}) ->
     case file:change_mode(Path, 8#600) of
         ok ->

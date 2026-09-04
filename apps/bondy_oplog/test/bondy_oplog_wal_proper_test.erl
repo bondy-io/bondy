@@ -1,69 +1,13 @@
 %% =============================================================================
-%% PropEr properties for the bondy_oplog_wal stack.
-%%
-%% This file is the single home for WAL property tests. Each property
-%% carries the P-number it implements from `_design/WAL_DESIGN.md` §16.
+%% PropEr properties for the bondy_oplog_wal stack — the single home for them.
+%% Each property's own section states the P-number it implements, where it has
+%% one.
 %%
 %% Run with:
 %%   rebar3 as test eunit --module=bondy_oplog_wal_proper_test
 %% or:
 %%   proper:quickcheck(bondy_oplog_wal_proper_test:prop_xxx(),
 %%                     [{numtests, 1000}]).
-%%
-%% Property index (P_BatchAtomicity, P_WalFull, P1..P15 land here as
-%% the implementation lands the behaviour each verifies):
-%%
-%%   Frame layer:
-%%     - prop_frame_roundtrip/0          (P1 framing slice)
-%%     - prop_frame_bit_flip_detection/0 (P3 framing slice)
-%%     - prop_codec_roundtrip/0          (body codec round-trip)
-%%     - prop_codec_encrypt_roundtrip/0  (body codec encrypt round-trip)
-%%     - prop_codec_ciphertext_bit_flip_detection/0
-%%                                       (AES-GCM authenticity)
-%%
-%%   Single-event writer:
-%%     - prop_wal_single_event_roundtrip/0  (P1 single-event slice)
-%%     - prop_wal_hlc_monotonicity/0        (P2 single-event slice)
-%%
-%%   Reader / iterator:
-%%     - prop_wal_roundtrip/0            (P1 end-to-end via reader)
-%%
-%%   Sparse index `.qidx`:
-%%     - prop_index_consistency/0        (P6)
-%%
-%%   Recovery:
-%%     - prop_truncation_safety/0        (P5)
-%%     - prop_manifest_atomicity/0       (P7)
-%%     - prop_consumer_offset_clamping/0 (P10)
-%%
-%%   Batched fsync + durability:
-%%     - prop_await_durable_correctness/0
-%%
-%%   Atomic batch frames:
-%%     - prop_batch_atomicity/0          (P_BatchAtomicity)
-%%
-%%   Retention:
-%%     - prop_retention_safety/0         (P9)
-%%
-%%   Backpressure:
-%%     - prop_wal_full/0                 (P_WalFull)
-%%
-%%   Magic / rotation / partial-write recovery:
-%%     - prop_bit_flip_magic/0           (P4)
-%%     - prop_rotation_atomicity/0       (P8 — in-process orphan slice)
-%%     - prop_partial_write/0            (P13 — recovery + resume)
-%%
-%%   Concurrency:
-%%     - prop_concurrent_reader_safety/0 (P11)
-%%
-%%   Fault injection (via `bondy_mst_io` meck seam):
-%%     - prop_failed_fsync/0             (P14 — per_write + reopen invariant)
-%%     - prop_failed_fsync_batched/0     (P14 — batched-mode variant)
-%%     - prop_rename_failure/0           (P15)
-%%
-%%   Stateful:
-%%     - prop_multiproc_convergence/0    (P12)
-%%
 %% =============================================================================
 
 -module(bondy_oplog_wal_proper_test).

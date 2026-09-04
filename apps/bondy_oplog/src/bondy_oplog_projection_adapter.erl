@@ -206,7 +206,7 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 %% already-compacted (or crash-lost) cell (the MST is truncated below the
 %% compaction watermark), leaving a half-built index marked trusted. A durable
 %% adapter (leveled) MUST export it; an ephemeral one (ETS) omits it and
-%% `bondy_oplog_applier:primary_cell_directory/4` falls back to the MST walk,
+%% `bondy_oplog_cell_utils:primary_cell_directory/4` falls back to the MST walk,
 %% correct only for the ephemeral/peer-synced path (e.g. the registry). Probe
 %% with `cell_keys_exported/1`.
 -callback cell_keys(handle(), Scope :: cell_keys_scope()) ->
@@ -222,7 +222,7 @@ See `bondy_oplog_cache_adapter` for the orthogonal read-cache surface.
 Whether `Adapter` implements the optional `cell_keys/2` callback.
 
 This is the single decision point for the durable-index rebuild's cell
-directory source (`bondy_oplog_applier:primary_cell_directory/3`): an adapter
+directory source (`bondy_oplog_cell_utils:primary_cell_directory/4`): an adapter
 that exports `cell_keys/2` enumerates the authoritative, complete projection
 directory; one that does not falls back to the truncatable MST walk — correct
 only for the ephemeral/peer-synced path. `bondy_db` asserts the same predicate

@@ -16,13 +16,11 @@ first_last_after_prefix_delete_test() ->
     }),
     Keys = lists:seq(1, 20),
     Tree1 = lists:foldl(fun(K, T) -> bondy_mst:put(T, K) end, Tree0, Keys),
-    %% Delete the first 10 keys.
     Tree2 = lists:foldl(
         fun(K, T) -> bondy_mst:delete(T, K) end,
         Tree1,
         lists:seq(1, 10)
     ),
-    %% First and last must work and return the remaining bounds.
     ?assertEqual({11, true}, bondy_mst:first(Tree2)),
     ?assertEqual({20, true}, bondy_mst:last(Tree2)).
 
@@ -37,7 +35,6 @@ first_last_after_suffix_delete_test() ->
         Tree0,
         lists:seq(1, 20)
     ),
-    %% Delete the last 10 keys.
     Tree2 = lists:foldl(
         fun(K, T) -> bondy_mst:delete(T, K) end,
         Tree1,

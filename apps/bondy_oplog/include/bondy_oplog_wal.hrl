@@ -4,7 +4,6 @@
 %% =============================================================================
 %%
 %% Constants and record definitions shared by the bondy_oplog_wal modules.
-%% See `_design/WAL_DESIGN.md`.
 %% -----------------------------------------------------------------------------
 
 -ifndef(BONDY_OPLOG_WAL_HRL).
@@ -150,7 +149,7 @@
 ).
 
 %% Default index interval in bytes — the writer emits one index entry per
-%% ~64 KB of frames written. See `_design/WAL_DESIGN.md` §7.
+%% ~64 KB of frames written.
 -define(BONDY_OPLOG_WAL_IDX_DEFAULT_INTERVAL_BYTES, (64 * 1024)).
 
 %% -----------------------------------------------------------------------------

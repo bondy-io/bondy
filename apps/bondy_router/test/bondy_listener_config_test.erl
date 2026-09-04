@@ -783,7 +783,7 @@ websocket_dynamic_buffer_is_not_overridable_test() ->
 
 admin_listener_defaults_to_loopback_test() ->
     %% Today's admin listeners default their bind address to loopback (schema
-    %% comment "D-1: default to loopback"). That default moves here.
+    %% comment "default to loopback"). That default moves here.
     Inventory = [
         {admin, #{
             transport => tcp,

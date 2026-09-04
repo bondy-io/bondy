@@ -201,12 +201,6 @@ end#{
     password_opts => bondy_password:opts()
 }.
 
-% -type alias()    ::  #{
-%     type                :=  ?ALIAS_TYPE,
-%     alias               :=  username(),
-%     username            :=  username()
-% }.
-
 -type external() :: #{
     type := ?USER_TYPE,
     version := binary(),
@@ -310,11 +304,6 @@ end#{
 -export([update/3]).
 -export([update/4]).
 -export([username/1]).
-
-%% TODO new API
-%% -export([add_authorized_key/2]).
-%% -export([remove_authorized_key/2]).
-%% -export([is_authorized_key/2]).
 
 %% =============================================================================
 %% API

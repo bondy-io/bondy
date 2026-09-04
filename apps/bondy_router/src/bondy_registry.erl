@@ -1255,7 +1255,7 @@ do_remove_all({[{_EntryKey, Entry} | T], Cont}, SessionId, Fun, Opts, Acc) ->
     case SessionId =:= Session orelse SessionId == '_' of
         true ->
             %% Delete the entry from the bondy_db store and its in-memory
-            %% indices (cross-node convergence rides AAE, design D-3).
+            %% indices (cross-node convergence rides AAE).
             ok = bondy_registry_partition:remove(
                 pick_partition(RealmUri), Entry, Opts
             ),

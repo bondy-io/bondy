@@ -1,30 +1,8 @@
 %% =============================================================================
-%% Durability tests for `bondy_oplog_wal` (fsync modes, durable
-%% position, and `await_durable/3`).
-%%
-%% Tests cover:
-%%
-%% 1. `fsync_mode = per_write` — durable ≡ head at all times;
-%%    `await_durable/3` returns immediately for any reachable position.
-%%
-%% 2. `fsync_mode = batched` — appends defer fsync, accumulating
-%%    `pending_fsync_bytes`. Durability is reached when either
-%%    `batched_fsync_bytes` is exceeded (size trigger) or
-%%    `batched_fsync_interval` ms elapse with pending bytes (time
-%%    trigger). `await_durable/3` blocks until the next fsync covers
-%%    the position; returns `{error, timeout}` on deadline; returns
-%%    `ok` if the position is already durable.
-%%
-%% 3. Rotation always datasyncs the just-sealed segment, advancing
-%%    durable to that segment's last frame end and (after new-segment
-%%    creation) onto the new segment's header boundary. Waiters at any
-%%    position in the old segment are woken on rotation.
-%%
-%% 4. `sync/1` is the user-facing barrier: forces fsync regardless of
-%%    mode, advances durable, and wakes covered waiters.
-%%
-%% 5. Bad opts (`fsync_mode = foo`, negative interval, zero bytes) are
-%%    refused at init.
+%% Durability tests for `bondy_oplog_wal`: fsync modes, durable position,
+%% `await_durable/3`, the rotation and `sync/1` barriers, and opt validation.
+%% The contract under test is stated in that module's docs; each test name
+%% says which case it covers.
 %% =============================================================================
 
 -module(bondy_oplog_wal_durability_test).

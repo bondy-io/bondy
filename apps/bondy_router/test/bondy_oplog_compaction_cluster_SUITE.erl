@@ -4,41 +4,32 @@
 %% =============================================================================
 
 %% Regression-lock for registry op-log history reclamation AT DEFAULTS:
-%% peer-confirmed compaction (the same mechanism durable databases use)
-%% keeps the ephemeral `registry` DB's history bounded on a real cluster
-%% under sustained write load and drains it once writes stop, at no cost
-%% to cross-node RIB correctness. Would have caught the
-%% `bondy_oplog_gc_scheduler` head-of-line starvation (idle `main/*`
-%% shards monopolising the tick's max_concurrency slots so `registry/*`
-%% shards were NEVER compacted on clustered nodes) — the actual mechanism
-%% behind the fleet-scale OOM.
+%% peer-confirmed compaction (the same mechanism durable databases use) keeps
+%% the ephemeral `registry` DB's history bounded on a real cluster under
+%% sustained write load and drains it once writes stop, at no cost to
+%% cross-node RIB correctness. Would have caught the
+%% `bondy_oplog_gc_scheduler` head-of-line starvation — idle `main/*` shards
+%% monopolising the tick's max_concurrency slots so `registry/*` shards were
+%% NEVER compacted on clustered nodes — the mechanism behind the fleet-scale
+%% OOM.
 %%
 %% A 3-node real Partisan cluster (`bondy_ct:start_cluster/2` — full bondy
-%% releases, real AAE), NOT frozen (`bondy_ct:freeze_gc/1` is deliberately
-%% never called — the point is the real `bondy_oplog_gc_scheduler` and
-%% `bondy_oplog_sync_scheduler` ticking on their normal cadences). Drives
-%% sustained writes through the REAL `bondy_registry`/`bondy_db` APIs
-%% against the cluster's own provisioned `main` + `registry` shards (16 +
-%% 16, production shard count, no synthetic instances), samples every
-%% running instance's `bondy_oplog:size/1` through the write and settle
-%% windows, and asserts (a) no `registry/*` shard's history ever exceeds
-%% the propagation ceiling, (b) every `registry/*` shard drains to
-%% quiescent by its last post-settle sample, (c)
-%% `bondy_registry_rib:check/1` reports zero divergence on every node.
+%% releases, real AAE), NOT frozen: `bondy_ct:freeze_gc/1` is deliberately
+%% never called, because the point is the real `bondy_oplog_gc_scheduler` and
+%% `bondy_oplog_sync_scheduler` ticking on their normal cadences. Drives
+%% sustained writes through the REAL `bondy_registry`/`bondy_db` APIs against
+%% the cluster's own provisioned `main` + `registry` shards (16 + 16,
+%% production shard count, no synthetic instances), samples every running
+%% instance's `bondy_oplog:size/1` through the write and settle windows, and
+%% asserts (a) no `registry/*` shard's history ever exceeds the propagation
+%% ceiling, (b) every `registry/*` shard drains to quiescent by its last
+%% post-settle sample, (c) `bondy_registry_rib:check/1` reports zero
+%% divergence on every node.
 %%
-%% History: this suite began as the DIAGNOSTIC that established the
-%% fleet-scale OOM's mechanism — its earlier two-scenario form (default vs
-%% raised `aae_max_concurrency`) plus a Fly A/B (HEAD vs pre-migration
-%% `5fe220e6`) refuted the concurrency-cap hypothesis. The A/B's
-%% "capacity fact of stability-driven compaction" conclusion was later
-%% found CONFOUNDED by the scheduler starvation above (compaction never
-%% ran at all on clustered nodes in any of those experiments). An interim
-%% `mst_retention`-always-on iteration of this suite then surfaced the
-%% replace-mode install clobber on live re-bootstraps — which is why
-%% retention is now an opt-in overload backstop, off by default, and this
-%% suite locks the DEFAULT behaviour. The per-peer dispatch histogram and
-%% recovery-chain telemetry capture are retained as
-%% diagnostics-on-failure.
+%% `mst_retention` is an opt-in overload backstop, off by default, and this
+%% suite locks the DEFAULT behaviour: an always-on iteration of it surfaced a
+%% replace-mode install clobber on live re-bootstraps. The per-peer dispatch
+%% histogram and recovery-chain telemetry capture are diagnostics-on-failure.
 
 -module(bondy_oplog_compaction_cluster_SUITE).
 

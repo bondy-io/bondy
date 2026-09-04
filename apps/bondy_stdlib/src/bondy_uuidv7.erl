@@ -128,13 +128,11 @@ format(<<A:32, B:16, C:16, D:16, E:48>> = Bin, Opts) when is_map(Opts) ->
 parse(String) when is_list(String) ->
     parse(list_to_binary(String));
 parse(Bin) when is_binary(Bin) ->
-    %% Remove hyphens and convert to uppercase
     CleanUuid = binary:replace(Bin, <<"-">>, <<>>, [global]),
 
     case byte_size(CleanUuid) of
         32 ->
             try
-                %% Convert hex string to binary
                 <<A:64, B:64>> = hex_utils:hexstr_to_bin(CleanUuid),
                 <<A:64, B:64>>
             catch

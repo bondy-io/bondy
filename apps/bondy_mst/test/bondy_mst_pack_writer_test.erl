@@ -1,34 +1,12 @@
 %% =============================================================================
 %% EUnit + PropEr suite for `bondy_mst_pack_writer` and
-%% `bondy_mst_pack_reader`. Covers:
+%% `bondy_mst_pack_reader` — writer lifecycle, seal lifecycle, orphan and
+%% tmp-artefact cleanup on reopen, and reader resolution across sealed packs.
+%% Each test name states its case.
 %%
-%% 1. Writer lifecycle:
-%%    - open in an empty dir produces a fresh manifest + creates
-%%      incoming.pack with just the header.
-%%    - append round-trip: hash returned matches sha256(page),
-%%      pending_lookup recovers offset, incoming_offset advances.
-%%    - append is idempotent for a hash already in pending.
-%%    - close/reopen preserves the pending map by scanning
-%%      incoming.pack.
-%% 2. Seal lifecycle:
-%%    - seal on empty pending is a no-op.
-%%    - seal materialises pack-NNNN.pack + pack-NNNN.idx and
-%%      removes incoming.pack.
-%%    - manifest reflects the new pack and incoming_pack=absent.
-%%    - next_pack_id advances.
-%%    - subsequent appends start a fresh incoming.pack.
-%% 3. Reader:
-%%    - open after seal sees every sealed pack.
-%%    - get/2 returns the original page bytes for every appended
-%%      hash; not_found for an arbitrary hash.
-%%    - get/2 across multiple sealed packs short-circuits on the
-%%      newest pack first.
-%%    - list/1 enumerates every appended hash.
-%%    - has/2 mirrors get/2's true/false answer.
-%% 4. End-to-end PropEr:
-%%    - For any sequence of N appends (with possible dedup hits),
-%%      sealing + opening a reader resolves every distinct hash
-%%      back to its original page.
+%% The end-to-end property: for any sequence of N appends (dedup hits
+%% included), sealing and opening a reader resolves every distinct hash back
+%% to its original page.
 %% =============================================================================
 
 -module(bondy_mst_pack_writer_test).

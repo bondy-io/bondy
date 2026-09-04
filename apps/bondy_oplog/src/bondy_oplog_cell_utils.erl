@@ -438,7 +438,7 @@ finish_reap_member(Id, Guard, MCtx, Reaped) ->
                 end,
                 Reaped
             ),
-            %% A3 — write-through the rewritten frames into the OldValue
+            %% Write-through the rewritten frames into the OldValue
             %% cache (no-op when disabled), so a hit returns the reaped state.
             bondy_oplog_cell_apply:oldstate_cache_put_entries(
                 OldStateCache, Entries
@@ -729,7 +729,7 @@ apply_stabilize(
             case overlay_clear(Overlay, Bucket, Key) of
                 true ->
                     ok = Adapter:delete(Handle, Bucket, Key),
-                    %% The point-read cache and the A3 OldValue cache both
+                    %% The point-read cache and the OldValue cache both
                     %% mirror the projection; a reclaimed cell left in either
                     %% would serve the pre-reclaim value (visible for a fold
                     %% whose empty value is real data, e.g. a flag's `false`)
@@ -789,7 +789,7 @@ apply_stabilize(
 %% @private
 %% Persist one reduced cell frame, mirroring `finish_reap_member/4`'s
 %% write path for a single cell: put, invalidate the point-read cache,
-%% write-through the A3 OldValue cache so the next apply folds onto the
+%% write-through the OldValue cache so the next apply folds onto the
 %% reduced state instead of resurrecting the unreduced one from cache. A
 %% failed write leaves the cell as-is (`skipped`) — the unreduced state is
 %% still correct, only larger — and a later pass retries.
@@ -837,7 +837,7 @@ write_reduced_cell(
 %% `unavailable` when the shard IS registered but its registry entry cannot be
 %% read right now — the fence must then FAIL CLOSED (skip the cell), because a
 %% transient registry failure says nothing about what is pending in the
-%% overlay (A5).
+%% overlay.
 overlay_tab(Ctx) ->
     case maps:get(shard_key, Ctx, undefined) of
         undefined ->

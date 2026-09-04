@@ -141,7 +141,6 @@ callback_mode() ->
     [state_functions, state_enter].
 
 init(Config0) ->
-    % erlang:process_flag(sensitive, true),
     #{
         transport := Transport,
         endpoint := Endpoint,
@@ -457,7 +456,6 @@ active(internal, {goodbye, SessionId, ?WAMP_CLOSE_REALM, Details}, State) ->
     {stop, shutdown};
 active(internal, {goodbye, _SessionId, Reason, Details}, _State) ->
     %% The remote router is kicking us out for another reason.
-    % RealmUri = session_realm(SessionId, State),
 
     %% We currently support a single session, so we stop
     %% We will be restarted
@@ -1230,15 +1228,6 @@ setup_proxing(SessionId, State0) ->
     %% on the remote cluster
     subscribe_topics(Session, State2).
 
-% %% @private
-% leave_session(Id, #state{} = State) ->
-%     Sessions0 = State#state.sessions,
-%     {#{realm_uri := Uri}, Sessions} = maps:take(Id, Sessions0),
-%     State#state{
-%         sessions = Sessions,
-%         sessions_by_realm = maps:remove(Uri, State#state.sessions_by_realm)
-%     }.
-
 %% @private
 has_session(SessionId, #state{sessions = Sessions}) ->
     maps:is_key(SessionId, Sessions).
@@ -1271,8 +1260,6 @@ security model; the server replies with a stream of `{aae_data, _, {cell, ...}}'
 bondy_db cells that `handle_aae_data/2' merges locally.
 """.
 init_aae_sync(#{id := SessionId}, State) ->
-    % Ref = make_ref(),
-    % State = update_session(sync_ref, Ref, SessionId, State0),
     Msg = {aae_sync, SessionId, #{}},
     case send_message(Msg, State) of
         ok ->
@@ -1474,18 +1461,6 @@ proxy_entry(#{id := SessionId}, State, Entry) ->
 %% @private
 send_session_message(SessionId, Msg, State) ->
     send_message({session_message, SessionId, Msg}, State).
-
-% new_request_id(Type, RealmUri, State) ->
-%     Tab = State#state.tab,
-%     Pos = case Type of
-%         subscribe -> #session_data.subscribe_req_id;
-%         unsubscribe -> #session_data.unsubscribe_req_id;
-%         publish -> #session_data.publish_req_id;
-%         register -> #session_data.register_req_id;
-%         unregister -> #session_data.unregister_req_id;
-%         call -> #session_data.call_req_id
-%     end,
-%     ets:update_counter(Tab, RealmUri, {Pos, 1}).
 
 forward_remote_message(Msg, To, Opts, SessionId, State) ->
     #{realm_uri := RealmUri, ref := MyRef} = session(SessionId, State),

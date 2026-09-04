@@ -104,56 +104,6 @@ format(Map = #{msg := {Format, Terms}}, UsrConfig) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
-% apply_defaults(Map) ->
-%     maps:merge(
-%       #{term_depth => undefined,
-%         unknown_metakey => log,
-%         map_depth => -1,
-%         time_offset => 0,
-%         time_designator => $T,
-%         colored => true,
-%         colored_debug =>     "\e[0;38m",
-%         colored_info =>      "\e[1;37m",
-%         colored_notice =>    "\e[1;36m",
-%         colored_warning =>   "\e[1;33m",
-%         colored_error =>     "\e[1;31m",
-%         colored_critical =>  "\e[1;35m",
-%         colored_alert =>     "\e[1;45m",
-%         colored_emergency => "\e[1;41;1m",
-%         template => [
-%             colored_start,
-%             "when=", time,
-%             " level=", level,
-%             {pid, [" pid=", pid], ""},
-%             " at=", mfa, ":", line,
-%             {
-%                 {msg, description},
-%                 [" description=", description],
-%                 ""
-%             },
-%             colored_end,
-%             {
-%                 {msg, reason},
-%                 [" reason=", reason],
-%                 ""
-%             },
-%             {id, [" id=", id], ""},
-%             {span_id, [" span_id=", span_id], ""},
-%             {trace_id, [" trace_id=", trace_id], ""},
-%             {node, [" node=", node], ""},
-%             {router_vsn, [" router_vsn=", router_vsn], ""},
-%             {realm, [" realm=", realm], ""},
-%             {session_id, [" session_id=", session_id], ""},
-%             {protocol, [" protocol=", protocol], ""},
-%             {transport, [" transport=", transport], ""},
-%             {peername, [" peername=", peername], ""},
-%             " ",
-%             msg,
-%             "\n"
-%         ]
-%        },
-%       Map
-%     ).
 
 -spec format_log(template(), Config, Msg, Meta) -> unicode:chardata() when
     Config :: logger:formatter_config(),

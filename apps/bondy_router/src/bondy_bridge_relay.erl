@@ -620,8 +620,6 @@ end#{
 
 -export_type([t/0]).
 
-% -export([fetch/1]).
-% -export([update/1]).
 -export([add/1]).
 -export([exists/1]).
 -export([forward/2]).

@@ -31,45 +31,24 @@
 %% removed — store layer; `tombstoned`/`transient` ⇒ the miss came from the
 %% walk), so a failure names the layer rather than merely detecting the fault.
 %%
-%% STATUS (2026-08-06): this harness REPRODUCES the field signature locally
-%% (`servable => false`, pages `absent` from a LIVE own root, matching s16) at
-%% ~45% of runs, and it is what IDENTIFIED THE ROOT CAUSE:
+%% THE DEFECT THIS LOCKS: `put_batch/2` published a root referencing pages it
+%% never copied into the receiver's store, because it built the donor tree on
+%% a volatile map store and discarded it after the merge. Fixed in
+%% `bondy_mst:copy_subtree/3'; the reasoning lives there.
 %%
-%%   `bondy_mst:put_batch/2` publishes a root referencing pages it never
-%%   copied into the receiver's store. It builds the donor tree on a VOLATILE
-%%   map store and discards it right after `merge/3`, so whatever merge failed
-%%   to copy is lost permanently. Caught by `verify_published_root/2`:
-%%   52 reports tagged `op: put_batch`, 0 tagged `op: merge` (the peer-
-%%   integrate merge shares the receiver's store, so an uncopied reference
-%%   still resolves there).
-%%
-%% Everything else was EXONERATED with evidence, not argument: the collector
-%% (154 collections/run, zero aborts and zero `swept_live` under
-%% `bondy_mst.verify_gc`), bloom false negatives, mark-vs-oracle traversal
-%% divergence, and concurrency itself — the ablation campaign showed the page
-%% injector and peer-root pinning make NO difference to the rate, so a single
-%% writer suffices. The loss self-heals whenever a later batch rebuilds
-%% content-identical pages, which is why it read as transient for so long.
-%%
-%% METHOD NOTE, load-bearing: the fault is a race, so a SINGLE run proves
-%% nothing in either direction — an earlier round of single-run ablations had
-%% to be retracted. `campaign/2` runs the matrix N times per cell and reports
-%% FAILURE RATES; use it for every ablation. Beware also that the instrument
-%% can suppress the phenomenon: recording swept hashes in `persistent_term`
-%% (a global scan per collection) dropped the rate from ~45% to 7%.
-%%
-%% FIXED 2026-08-06 in `bondy_mst:copy_subtree/3` (see there). A/B on this
-%% harness, 16 runs each: buggy 4/16 fired with 20 `op: put_batch` reports,
-%% fixed 0/16 with none, and the module's own `split: page missing` warning
-%% went from firing to silent.
+%% METHOD, load-bearing: the fault is a RACE, so a single run proves nothing
+%% in either direction. `campaign/2' runs the matrix N times per cell and
+%% reports FAILURE RATES — use it for every ablation, never a single run.
+%% Beware also that the instrument can suppress the phenomenon: recording
+%% swept hashes in `persistent_term' (a global scan per collection) dropped
+%% the reproduction rate from ~45% to 7%.
 %%
 %% THIS MODULE IS THE REGRESSION LOCK. Four attempts to reproduce the fault at
-%% the pure `bondy_mst` level FAILED — uniform-random keys, hash-ordered keys,
-%% append-heavy monotonic keys, and much larger receivers all stayed green with
-%% the fix reverted — so a `bondy_mst`-only test would have been vacuous
-%% coverage and was deleted rather than shipped. Until someone finds the
-%% minimal shape, this harness is the only thing that catches this class. Do
-%% not weaken its oracle, and re-run it via `campaign/2` (never a single run)
+%% the pure `bondy_mst' level failed — uniform-random, hash-ordered and
+%% append-monotonic keys, and much larger receivers, all stayed green with the
+%% fix reverted — so a `bondy_mst'-only test would have been vacuous coverage.
+%% Until someone finds the minimal shape, this harness is the only thing that
+%% catches this class. Do not weaken its oracle, and re-run it via `campaign/2'
 %% when touching merge, split, truncate or the collector.
 %% =============================================================================
 

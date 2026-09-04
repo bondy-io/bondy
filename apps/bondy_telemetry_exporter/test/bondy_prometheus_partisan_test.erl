@@ -4,8 +4,8 @@
 %% =============================================================================
 %% Unit tests for the Partisan inter-node telemetry sink in `bondy_prometheus`
 %% (`handle_partisan_event/4`). Each test drives one Partisan event through the
-%% handler with a synthetic measurements/metadata pair — exactly the shapes in
-%% Partisan's `doc_extras/telemetry.md` — and asserts the corresponding
+%% handler with a synthetic measurements/metadata pair — exactly the shapes
+%% Partisan documents — and asserts the corresponding
 %% `bondy_metrics` family moved, without needing a live Partisan cluster.
 -module(bondy_prometheus_partisan_test).
 

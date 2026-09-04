@@ -2,8 +2,7 @@
 %% SPDX-FileCopyrightText: 2023 - 2026 Leapsight
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
-%% Regression tests for the pack-store telemetry events specified by
-%% `_design/latest/MST_PAGE_STORE_DESIGN.md` §13. Covers the four
+%% Regression tests for the pack-store telemetry events. Covers the four
 %% currently-implemented events:
 %%
 %%   [bondy_mst, page_store, put]            — every successful put

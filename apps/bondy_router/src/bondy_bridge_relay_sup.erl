@@ -25,9 +25,6 @@ bridge relay client supervisor and the `bondy_bridge_relay_manager`.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-%% add_sink_sup(Name, Config) ->
-%%     {error, not_implemented}.
-
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================

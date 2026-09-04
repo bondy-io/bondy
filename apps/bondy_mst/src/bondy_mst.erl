@@ -498,7 +498,6 @@ Returns the value associated with key `Key`.
 -spec get(T :: t(), Key :: key()) -> Value :: any().
 
 get(#?MODULE{} = T, Key) ->
-    %% Call do get as root might be undefined
     do_get(T, Key, root(T)).
 
 ?DOC("""
@@ -2123,7 +2122,6 @@ merge_aux_rec(
     end.
 
 %% @private
-%% Iterates over the MST and applies a function to each element.
 do_fold(_, _, AccIn, _, undefined) ->
     AccIn;
 do_fold(Store, Fun, AccIn, Opts, Root) ->
@@ -2144,7 +2142,6 @@ do_fold(Store, Fun, AccIn, Opts, Root) ->
     end.
 
 %% @private
-%% Iterates over the MST and applies a function to each element.
 do_fold_pages(_, _, Acc, _, undefined) ->
     Acc;
 do_fold_pages(Store, Fun, AccIn, Opts, Root) ->
@@ -2462,11 +2459,9 @@ delete_at(T, Key, KeyLevel, Store0, Hash) when is_binary(Hash) ->
             %% Key should be at a higher level, doesn't exist here
             not_found;
         PageLevel == KeyLevel ->
-            %% Delete from this level
             Store1 = bondy_mst_store:free(Store0, Hash, Page),
             delete_from_level(T, Key, Page, Store1);
         PageLevel > KeyLevel ->
-            %% Descend into subtrees to find the key
             Store1 = bondy_mst_store:free(Store0, Hash, Page),
             delete_below_level(T, Key, KeyLevel, Page, Store1)
     end;
@@ -2474,7 +2469,6 @@ delete_at(_, _, _, _, undefined) ->
     not_found.
 
 %% @private
-%% Delete key from this level (key's calculated level matches page level)
 delete_from_level(T, Key, Page, Store0) ->
     Level = bondy_mst_page:level(Page),
     Low = bondy_mst_page:low(Page),
@@ -2496,17 +2490,13 @@ delete_from_list(T, Key, _Level, Low, [{K, _V, R}], Store0) ->
 delete_from_list(T, Key, Level, Low, [{K, V, R} | Rest], Store0) ->
     case compare(T, Key, K) of
         eq ->
-            %% First entry matches, merge Low with R
             {NewLow, Store1} = merge_subtrees(T, Store0, Low, R),
-            %% Create page with merged low and remaining entries
             NewPage = bondy_mst_page:new(Level, NewLow, Rest),
             bondy_mst_store:put(Store1, NewPage);
         lt ->
             %% Key should be before first entry, doesn't exist
             not_found;
         gt ->
-            %% Continue searching in rest of list, accumulating entries before
-            %% the match
             delete_in_list_tail(
                 T, Key, Level, Low, [{K, V, R}], Rest, Store0
             )
@@ -2519,12 +2509,8 @@ delete_from_list(_, _, _, _, [], _) ->
 delete_in_list_tail(T, Key, Level, Low, Before, [{K, _V, R}], Store0) ->
     case compare(T, Key, K) of
         eq ->
-            %% Found it as last entry
-            %% Get the R from the previous entry
             {_, _, PrevR} = lists:last(Before),
-            %% Merge PrevR with R
             {MergedR, Store1} = merge_subtrees(T, Store0, PrevR, R),
-            %% Update the last entry in Before to point to MergedR
             BeforeInit = lists:droplast(Before),
             {PrevK, PrevV, _} = lists:last(Before),
             NewList = BeforeInit ++ [{PrevK, PrevV, MergedR}],
@@ -2538,12 +2524,8 @@ delete_in_list_tail(T, Key, Level, Low, Before, [{K, _V, R}], Store0) ->
 delete_in_list_tail(T, Key, Level, Low, Before, [{K, V, R} | Rest], Store0) ->
     case compare(T, Key, K) of
         eq ->
-            %% Found it in middle
-            %% Get the R from the previous entry
             {_, _, PrevR} = lists:last(Before),
-            %% Merge PrevR with R
             {MergedR, Store1} = merge_subtrees(T, Store0, PrevR, R),
-            %% Update the last entry in Before to point to MergedR
             BeforeInit = lists:droplast(Before),
             {PrevK, PrevV, _} = lists:last(Before),
             NewList = BeforeInit ++ [{PrevK, PrevV, MergedR} | Rest],

@@ -27,17 +27,6 @@ all() ->
 groups() ->
     [{main, [parallel], common:tests(?MODULE)}].
 
-% Bin = <<"\"{{foo}}\"">>.
-% Len = byte_size(Bin).
-%
-% mops:eval(<<"\"Hello {{foo}}, {{foo}}\"">>, #{<<"foo">> => 3}).
-% mops:eval(<<"\"Hello {{foo |> float |> integer}}, {{foo |> integer}}\"">>, #{<<"foo">> => 3}).
-% [_, Fun, _]=mops:eval(<<"\"{{foo.bar.a |> integer}}\"">>, #{<<"foo">> => fun(X) -> X end}).
-% Fun(#{<<"foo">> => #{<<"bar">> => #{<<"a">> => 3.0}}}).
-% mops:eval(<<"{{fullname}}>>, #{<<"fullname">> => <<"\"{{name}} {{surname}}\"">>, <<"name">> => <<"Alejandro">>, <<"surname">> => <<"Ramallo">>}).
-% mops:eval(<<"{{fullname}}">>, #{<<"fullname">> => <<"{{name}}">>, <<"name">> => <<"Alejandro">>, <<"surname">> => <<"Ramallo">>}).
-% mops:eval(<<"{{fullname}}">>, #{<<"fullname">> => <<"{{name}}">>, <<"name">> => <<"Alejandro">>, <<"surname">> => <<"Ramallo">>}).
-
 simple_1_test(_) ->
     3 = mops:eval(<<"{{foo}}">>, #{<<"foo">> => 3}).
 
@@ -399,13 +388,6 @@ subexpression_1_test(_) ->
     Expr = <<"\" {{x.a}} and {{x.b |> integer}} \"">>,
     ?assertEqual(<<" 0 and 1 ">>, mops:eval(Expr, Ctxt)).
 
-%% not supported yet
-%% subexpression_2_test(_) ->
-%%     Ctxt = #{<<"x">> => #{<<"a">> => 0, <<"b">> => 1}},
-%%     Expected = #{<<"x">> => #{<<"a">> => 0, <<"b">> => 1, <<"c">> => 1}},
-%%     Expr = <<"{{ x |> put(c, {{x.b |> integer}}) }}">>,
-%%     ?assertEqual(Expected, mops:eval(Expr, Ctxt)).
-
 map_test(_) ->
     Ctxt = #{
         <<"defaults">> => #{
@@ -432,24 +414,3 @@ map_test(_) ->
         <<"a">> := 1,
         <<"content-type">> := <<"image/png">>
     } = mops:eval(Expr, Ctxt).
-
-%% merge_right_3_test(_) ->
-%%     Ctxt0 = #{
-%%         <<"wamp_error_override">> => #{
-%%             <<"code">> => <<"{{action.error.error_uri}}">>,
-%%             <<"message">> => <<"{{action.error.arguments |> head}}">>
-%%         },
-%%         <<"action">> => '$mops_proxy',
-%%         <<"wamp_error_body">> => <<"{{action.error.arguments_kw |> merge({{wamp_error_override}})}}">>
-%%     },
-%%     Ctxt1 = #{
-%%         <<"action">> => #{
-%%             <<"error">> => #{
-%%                 <<"error_uri">> => <<"com.foo">>,
-%%                 <<"arguments">> => [<<"foobar">>],
-%%                 <<"arguments_kw">> =>#{}
-%%             }
-%%         }
-%%     },
-%%     Map = mops:eval(<<"{{wamp_error_body}}">>, Ctxt0),
-%%     #{<<"code">> := <<"com.foo">>, <<"message">> := <<"foobar">>} = mops:eval(Map, Ctxt1).

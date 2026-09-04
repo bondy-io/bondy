@@ -150,7 +150,7 @@ readings.
 %% It was per-NODE for the history walk until 2026-09-01, so a walk over n
 %% unreachable peers took 5n seconds and reported nothing about them. What is
 %% pinned on one node is that an unreachable peer is NAMED —
-%% `bondy_alarm_api_SUITE:an_unreachable_node_is_named_not_counted_empty`.
+%% `bondy_alarm_api_SUITE:every_page_reports_the_nodes_it_did_not_reach`.
 %% That the budget is SHARED rather than spent afresh per node needs two nodes
 %% and a forced deadline to observe, and is not covered yet.
 -define(FANOUT_TIMEOUT, 5000).

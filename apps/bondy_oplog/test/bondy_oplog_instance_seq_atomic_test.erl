@@ -5,11 +5,11 @@
 %% Regression tests for the local-Seq atomic recovery on the three
 %% paths that install events into a fresh / post-crash MST:
 %%
-%%   1. WAL-replay fast batch — `install_fast_events/2` (PR-J1).
+%%   1. WAL-replay fast batch — `install_fast_events/2`.
 %%   2. WAL-replay slow batch — `install_local_safe/4` via the slow
-%%      branch of `install_local_batch/2` (PR-J2).
+%%      branch of `install_local_batch/2`.
 %%   3. Peer loopback — `do_append_remote/2` when a peer ships our
-%%      own events back (PR-J2).
+%%      own events back.
 %%
 %% On kill+restart, `bondy_oplog_instance:init/1` opens an empty
 %% (ETS-backed) MST and seeds the SeqRef atomic from

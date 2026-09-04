@@ -9,8 +9,6 @@ Handles the packing/unpacking and encoding/decoding of WAMP messages.
 """.
 -include("bondy_wamp.hrl").
 
-%% -export([frame/2]).
-%% -export([unframe/2]).
 -export([pack/1]).
 -export([unpack/1]).
 -export([encode/2]).
@@ -34,10 +32,6 @@ is_encoding(erl) -> true;
 is_encoding(json) -> true;
 is_encoding(cbor) -> true;
 is_encoding(msgpack) -> true;
-%% is_encoding(bert_batched) -> true;
-%% is_encoding(erl_batched) -> true;
-%% is_encoding(json_batched) -> true;
-%% is_encoding(msgpack_batched) -> true;
 is_encoding(_) -> false.
 
 -spec decode_message_name(subprotocol(), Data :: binary()) ->
@@ -361,15 +355,6 @@ unpack([?EVENT, SubsId, PubId, Details, Args, KWArgs]) ->
         Args,
         KWArgs
     );
-% unpack([?EVENT_RECEIVED, PubId, Details, Payload]) ->
-%     bondy_wamp_message:event_received(
-%         SubsId,
-%         PubId,
-%         Details,
-%         Args,
-%         KWArgs
-%     );
-
 unpack([?CALL, ReqId, Options, ProcedureUri]) ->
     bondy_wamp_message:call(
         ReqId,

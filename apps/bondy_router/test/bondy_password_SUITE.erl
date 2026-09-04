@@ -191,12 +191,4 @@ new_scram_options_argon2id13(_) ->
         bondy_password:new(?P1, Opts)
     ),
 
-    %% A = bondy_password:new(?P1, Opts),
-    %% ?assertMatch(
-    %%     #{protocol := scram, params := #{kdf := argon2id13}},
-    %%     A
-    %% ),
-    %% ?assertEqual(true, bondy_password:verify_string(?P1, A)),
-    %% ?assertEqual(false, bondy_password:verify_string(?P2, A)),
-
     ok.

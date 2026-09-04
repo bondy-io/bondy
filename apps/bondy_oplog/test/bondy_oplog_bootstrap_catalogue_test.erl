@@ -118,7 +118,7 @@ gap_within(Local, Peer, Phantom, N) ->
             gap_within(Local, Peer, Phantom, N - 1)
     end.
 
-%% A3 — the catalogue install writes peer cells carrying remote HLCs straight
+%% The catalogue install writes peer cells carrying remote HLCs straight
 %% into the projection. The bootstrapped replica's clock must absorb them, or
 %% its next locally minted event can carry an HLC BELOW a stability point
 %% computed from the very cells it installed — the resurrection hazard

@@ -3,8 +3,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% =============================================================================
 %% Regression tests for `bondy_mst_pack_recovery` and its hook in
-%% `bondy_mst_pack_store:open/2`. Covers the four trigger conditions
-%% from `_design/latest/MST_PAGE_STORE_DESIGN.md` §10:
+%% `bondy_mst_pack_store:open/2`. Covers the four trigger conditions:
 %%
 %%   1. Manifest `incoming_pack = absent`, file present  (orphan)
 %%   2. Manifest `incoming_pack = present`, file missing (lost)

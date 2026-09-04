@@ -1660,16 +1660,3 @@ split_key(Bin) ->
         nomatch ->
             error({badarg, Bin})
     end.
-
-% on_grant(RealmUri, RoleType, Rolename) ->
-%     ok = bondy_event_manager:notify(
-%         {rbac_policy_granted, RealmUri, RoleType, Rolename}
-%     ),
-%     ok.
-
-
-% on_revoke(RealmUri, RoleType, Rolename) ->
-%     ok = bondy_event_manager:notify(
-%         {rbac_policy_revoked, RealmUri, RoleType, Rolename}
-%     ),
-%     ok.

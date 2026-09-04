@@ -1,30 +1,24 @@
 %% =============================================================================
-%% A2 — coarser applier batching (frame coalescing) tests for
-%% `bondy_oplog_applier`.
+%% Frame-coalescing tests for `bondy_oplog_applier`.
 %%
-%% The applier drains the WAL and applies frames to the projection + MST.
-%% Under `per_write`/single appends each WAL frame holds one event, so the
-%% pre-A2 applier paid one pack-store spine rebuild + one leveled
-%% `put_batch` per event. A2 coalesces consecutive frames into a single
-%% applier batch until `apply_batch_max_events` events have accumulated,
-%% amortising both per-batch costs.
+%% The applier coalesces consecutive WAL frames into one batch until
+%% `apply_batch_max_events` events have accumulated, amortising the
+%% pack-store spine rebuild and the leveled `put_batch` over many events.
 %%
 %% The observable is the `[bondy_oplog, applier, applied]` telemetry event,
 %% which fires once per applier batch carrying that batch's event `count`.
-%% A backlog is created deterministically (no scheduler races) by
-%% suspending the applier with `sys:suspend/1`, appending N single-event
-%% frames into the WAL (the applier cannot drain while suspended), then
-%% `sys:resume/1` + an explicit `drain` kick. The number of `applied`
-%% events fired for the same N appends is the falsifying signal:
+%% A backlog is created deterministically (no scheduler races) by suspending
+%% the applier with `sys:suspend/1`, appending N single-event frames into the
+%% WAL, then `sys:resume/1` + an explicit `drain` kick. The number of
+%% `applied` events fired for the same N appends is the falsifying signal:
 %%
 %%   - apply_batch_max_events large : N frames -> 1 batch.
 %%   - apply_batch_max_events = 1    : N frames -> N batches (the control).
 %%   - apply_batch_max_events = K    : N frames -> ceil(N/K) batches.
 %%
 %% Same workload; the only difference is the knob. A separate test proves
-%% the coalescing engages ONLY under backlog: when the applier is caught
-%% up, single appends still apply one frame at a time regardless of the
-%% knob (no steady-state latency regression).
+%% coalescing engages ONLY under backlog: when the applier is caught up,
+%% single appends still apply one frame at a time regardless of the knob.
 %% =============================================================================
 
 -module(bondy_oplog_applier_batching_test).

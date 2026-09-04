@@ -292,7 +292,6 @@ end#{
         default => <<"produce_sync">>,
         allow_null => false,
         allow_undefined => false,
-        %% datatype => {in, [<<"produce">>, <<"produce_sync">>]}
         datatype => {in, [<<"produce_sync">>]}
     },
     <<"topic">> => #{
@@ -416,8 +415,6 @@ apply_action(Action) ->
 
         Result =
             case ActionType of
-                %% <<"produce">> ->
-                %%     brod:produce(Client, Topic, Part, Key, Data);
                 <<"produce_sync">> ->
                     brod:produce_sync(Client, Topic, Part, Key, Data)
             end,

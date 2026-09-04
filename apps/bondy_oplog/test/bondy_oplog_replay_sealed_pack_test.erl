@@ -132,7 +132,7 @@ run_cell_directory(Dir) ->
 run_in(Pid, Fun) ->
     Self = self(),
     Ref = make_ref(),
-    %% `replace_state/2` returns the (unchanged) state, not `ok`.
+    %% `sys:replace_state/2` returns the (unchanged) state, not `ok`.
     _ = sys:replace_state(Pid, fun(S) ->
         Self !
             {Ref,

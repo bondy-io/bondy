@@ -14,12 +14,6 @@ all() ->
         {group, set_with_ets_store, []},
         {group, set_of_awsets_with_local_store, []},
         {group, set_of_awsets_with_ets_store, []}
-        %% ,
-        %% {group, set_with_leveled_store, []},
-        %% {group, set_with_rocksdb_store, []},
-
-        %% {group, set_of_awsets_with_leveled_store, []},
-        %% {group, set_of_awsets_with_rocksdb_store, []}
     ].
 
 set_test_cases() ->
@@ -41,11 +35,9 @@ groups() ->
     [
         {set_with_local_store, [], set_test_cases()},
         {set_with_ets_store, [], set_test_cases()},
-        %% {set_with_rocksdb_store, [], set_test_cases()},
         {set_with_leveled_store, [], set_test_cases()},
         {set_of_awsets_with_local_store, [], set_of_awsets_test_cases()},
         {set_of_awsets_with_ets_store, [], set_of_awsets_test_cases()},
-        %% {set_of_awsets_with_rocksdb_store, [], set_of_awsets_test_cases()},
         {set_of_awsets_with_leveled_store, [], set_of_awsets_test_cases()}
     ].
 
@@ -105,24 +97,17 @@ init_per_group(set_of_awsets_with_rocksdb_store, Config) ->
 end_per_group(_, _Config) ->
     ok.
 
-%% Setup and teardown functions
-
-%% Called once before any test cases are run
 init_per_suite(Config) ->
-    %% You can add any setup you need here
     Config.
 
-%% Called once after all test cases have been run
 end_per_suite(_Config) ->
     ok.
 
-%% Called before each test case
 init_per_testcase(TestCase, Config) ->
     GroveOpts0 = ?config(grove_opts, Config),
     GroveOpts = GroveOpts0#{store_opts => #{name => atom_to_binary(TestCase)}},
     lists:keyreplace(grove_opts, 1, Config, {grove_opts, GroveOpts}).
 
-%% Called after each test case
 end_per_testcase(_TestCase, _Config) ->
     _ = [
         try
@@ -143,12 +128,10 @@ set_online_sync(Config) ->
     N2 = 20,
     N3 = 30,
 
-    %% We start 3 replicas
     GroveOpts = ?config(grove_opts, Config),
     {ok, Peers} = bondy_mst_test_crdt_server:start_all(GroveOpts),
     [Peer1, Peer2, Peer3] = Peers,
 
-    %% We validate they are alive
     ?assert(
         lists:all(
             fun(Peer) ->
@@ -159,14 +142,12 @@ set_online_sync(Config) ->
         )
     ),
 
-    %% We add data to replica at Peer1
     _ = [
         gen_server:call(Peer1, {put, X}, ?TIMEOUT_XXL)
      || X <- suffled_seq(1, N1)
     ],
     timer:sleep(5000),
 
-    %% Post condition: the 3 replicas have the same pages
     E1 = ?ISET([{1, N1}]),
     ?assertEqual(
         E1,
@@ -184,7 +165,6 @@ set_online_sync(Config) ->
         "Peer3 should have all the elements via replication"
     ),
 
-    %% We concurrently write into replicas at peers 2 and 3
     _ = spawn(fun() ->
         _ = [
             gen_server:call(Peer2, {put, X}, ?TIMEOUT_XXL)
@@ -201,7 +181,6 @@ set_online_sync(Config) ->
 
     timer:sleep(5000),
 
-    %% Post condition: the 3 replicas have the same pages
     E2 = ?ISET([{1, N3}]),
     ?assertEqual(
         E2,
@@ -219,7 +198,6 @@ set_online_sync(Config) ->
         "Peer3 should have all the elements via replication"
     ),
 
-    %% We concurrently write into all replicas
     _ = spawn(fun() ->
         _ = [
             gen_server:call(Peer1, {put, X}, ?TIMEOUT_XXL)
@@ -269,12 +247,10 @@ set_online_sync(Config) ->
         gen_server:call(Peer3, root, ?TIMEOUT_XXL)
     ),
 
-    %%  GC
     ok = gen_server:call(Peer1, gc, ?TIMEOUT_XXL),
     ok = gen_server:call(Peer2, gc, ?TIMEOUT_XXL),
     ok = gen_server:call(Peer3, gc, ?TIMEOUT_XXL),
 
-    %% Check pages after GC
     GetContent = fun(Page) ->
         {
             bondy_mst_page:level(Page),
@@ -314,7 +290,6 @@ set_online_sync(Config) ->
         {"All garbage should've been collected in Peer3", Peer3Pages}
     ),
 
-    %% Check list of pages
     Fun = fun({_Hash, Page}, Acc) -> [Page | Acc] end,
     Opts = #{root => NewRoot},
     ?assertEqual(
@@ -383,10 +358,8 @@ set_anti_entropy_fwd(Config) ->
     GroveOpts = ?config(grove_opts, Config),
     [Peer1 | RestPeers] = bondy_mst_test_crdt_server:peers(),
 
-    %% We start Peer1 first
     {ok, [Peer1]} = bondy_mst_test_crdt_server:start(GroveOpts, [Peer1]),
 
-    %% And put some values
     L = [
         #{id => X, pid => self(), timestamp => erlang:monotonic_time()}
      || X <- lists:seq(1, 1000)
@@ -400,18 +373,15 @@ set_anti_entropy_fwd(Config) ->
     L1 = [K || {K, true} <- gen_server:call(Peer1, list, ?TIMEOUT_XXL)],
     ?assertEqual(L, L1),
 
-    %% We start the other peers
     {ok, [Peer2, Peer3]} = bondy_mst_test_crdt_server:start(
         GroveOpts, RestPeers
     ),
 
-    %% Trigger sync Peer1 -> [Peer2, Peer3]
     ok = gen_server:call(Peer1, {trigger, Peer2}, ?TIMEOUT_XXL),
     ok = gen_server:call(Peer1, {trigger, Peer3}, ?TIMEOUT_XXL),
 
     timer:sleep(5000),
 
-    %% Now Peer2 and Peer3 should have synced the data
     L2 = [K || {K, true} <- gen_server:call(Peer2, list, ?TIMEOUT_XXL)],
     L3 = [K || {K, true} <- gen_server:call(Peer3, list, ?TIMEOUT_XXL)],
 
@@ -423,10 +393,8 @@ set_bidirectional_sync(Config) ->
     GroveOpts = ?config(grove_opts, Config),
     [Peer1, Peer2, Peer3] = bondy_mst_test_crdt_server:peers(),
 
-    %% We start Peer2 first
     {ok, [Peer2]} = bondy_mst_test_crdt_server:start(GroveOpts, [Peer2]),
 
-    %% And put some values
     L = lists:seq(1, 1000),
     _ = [
         gen_server:call(Peer2, {put, X}, ?TIMEOUT_XXL)
@@ -435,19 +403,15 @@ set_bidirectional_sync(Config) ->
     L2 = [K || {K, true} <- gen_server:call(Peer2, list, ?TIMEOUT_XXL)],
     ?assertEqual(L, L2),
 
-    %% We start Peer1 and trigger sync Peer1 -> Peer2
     {ok, [Peer1]} = bondy_mst_test_crdt_server:start(GroveOpts, [Peer1]),
     ok = gen_server:call(Peer1, {trigger, Peer2}, ?TIMEOUT_XXL),
     timer:sleep(5000),
-    %% Now Peer1 should have synced the data
     L1 = [K || {K, true} <- gen_server:call(Peer1, list, ?TIMEOUT_XXL)],
     ?assertEqual(L, L1),
 
-    %% We start Peer3 and trigger sync Peer2 -> Peer3
     {ok, [Peer3]} = bondy_mst_test_crdt_server:start(GroveOpts, [Peer3]),
     ok = gen_server:call(Peer2, {trigger, Peer3}, ?TIMEOUT_XXL),
     timer:sleep(5000),
-    %% Now Peer3 should have synced the data
     L3 = [K || {K, true} <- gen_server:call(Peer3, list, ?TIMEOUT_XXL)],
     ?assertEqual(L, L3),
 
@@ -544,12 +508,10 @@ set_of_awsets_anti_entropy_fwd(Config) ->
     %% Restore module, any put or merge will broadcast to all peers
     meck:unload(bondy_mst_test_crdt_server),
 
-    %% Trigger sync Peer1 -> Peer2
     ok = gen_server:call(Peer1, {trigger, Peer2}),
 
     timer:sleep(5000),
 
-    %% Now Peer1 and Peer2 should have synced the data
     ?assertEqual(
         L3,
         gen_server:call(Peer1, list, ?TIMEOUT_XXL),
@@ -561,7 +523,6 @@ set_of_awsets_anti_entropy_fwd(Config) ->
         "Merged values"
     ),
 
-    %% Trigger sync Peer2 -> Peer1
     ok = gen_server:call(Peer2, {trigger, Peer1}),
     timer:sleep(5000),
     %% Idempotency
@@ -581,8 +542,6 @@ set_of_awsets_anti_entropy_fwd(Config) ->
 %% =============================================================================
 %% PRIVATE VALIDATIONS
 %% =============================================================================
-
-%% no_dangling_garbage(T) ->
 
 %% =============================================================================
 %% PRIVATE UTILS

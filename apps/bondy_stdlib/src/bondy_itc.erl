@@ -149,15 +149,12 @@ norm_event({N, E1, E2}) ->
 min_event(N) when is_integer(N) -> N;
 min_event({N, _E1, _E2}) -> N.
 
-%% Get maximum value in an event tree
 max_event(N) when is_integer(N) -> N;
 max_event({N, E1, E2}) -> N + max(max_event(E1), max_event(E2)).
 
-%% Lift an event tree by an offset
 lift_event(N, Offset) when is_integer(N) -> N + Offset;
 lift_event({N, E1, E2}, Offset) -> {N + Offset, E1, E2}.
 
-%% Join two event trees
 join_event(N1, N2) when is_integer(N1), is_integer(N2) ->
     max(N1, N2);
 join_event(N1, {N2, L2, R2}) when is_integer(N1) ->
@@ -319,15 +316,12 @@ decode_event(<<1:1, Rest/bitstring>>) ->
 decode_event(<<0:1, Type:2, Rest/bitstring>>) ->
     case Type of
         0 ->
-            %% {0, 0, Er}
             {Er, Rest1} = decode_event(Rest),
             {{0, 0, Er}, Rest1};
         1 ->
-            %% {0, El, 0}
             {El, Rest1} = decode_event(Rest),
             {{0, El, 0}, Rest1};
         2 ->
-            %% {0, El, Er}
             {El, Rest1} = decode_event(Rest),
             {Er, Rest2} = decode_event(Rest1),
             {{0, El, Er}, Rest2};
@@ -339,11 +333,9 @@ decode_event(<<0:1, Type:2, Rest/bitstring>>) ->
 decode_event_extended(<<0:1, SubType:1, Rest/bitstring>>) ->
     {N, Rest1} = decode_event(Rest),
     case SubType of
-        %% {N, 0, Er}
         0 ->
             {Er, Rest2} = decode_event(Rest1),
             {{N, 0, Er}, Rest2};
-        %% {N, El, 0}
         1 ->
             {El, Rest2} = decode_event(Rest1),
             {{N, El, 0}, Rest2}

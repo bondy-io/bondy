@@ -129,39 +129,24 @@ rather than a silently bound phantom listener.
 %% `websocket.deflate.level' on `deflate_opts.level'. The rendered path is what
 %% a consumer reads, so the rendered path is what belongs here.
 %%
-%% Values are the ones the deleted `wamp.{websocket,sse,longpoll}.*' mappings
-%% carried, in the form cuttlefish converted them to (`20s' as 20000, `4MB' as
-%% 4194304). They were read out of the generated
-%% `bondy_router.wamp_{websocket,sse,longpoll}' blocks rather than transcribed
-%% from the `{default, ...}' terms, so no duration or bytesize is off by a unit,
-%% and while both existed a suite case asserted the two agreed key for key.
-%%
-%% This is now the ONLY statement of what a carrier setting defaults to. It is
-%% not rendered into a release's `etc/bondy.conf' the way a non-fuzzy schema
-%% default is, so an operator reading a generated conf sees no carrier default
-%% at all; `doc/guides/configuration/listeners.md' carries the table for them.
+%% This is the ONLY statement of what a carrier setting defaults to. It is not
+%% rendered into a release's `etc/bondy.conf' the way a non-fuzzy schema default
+%% is, so an operator reading a generated conf sees no carrier default at all;
+%% `doc/guides/configuration/listeners.md' carries the table for them.
 %%
 %% ONE table rather than a path list beside a value map: the paths
 %% `resolve_carrier_config/3' reads are DERIVED from this map by `leaf_paths/1',
 %% so a carrier key with no default cannot be expressed and the two cannot
-%% drift. What it cannot express is a setting whose value is itself a map —
-%% `leaf_paths/1' descends into a map and would treat its members as separate
-%% keys. No carrier setting has one; a LIST-valued setting is fine, since only
-%% maps are descended.
+%% drift. What it cannot express is a MAP-valued setting — `leaf_paths/1'
+%% descends into a map and would treat its members as separate keys. No carrier
+%% setting has one; a LIST-valued setting is fine.
 %%
-%% Only the carriers that HAVE settings appear. `carrier_defaults/1'
-%% answers `#{}' for any other, so a row of `api_gateway => #{}' would state
-%% what its own absence already states, and would read as a carrier whose
-%% settings had been forgotten. Which carriers those are is not a list to keep
-%% in step with `service_spec/1' either: across that table, the carriers with
-%% settings are exactly the ones whose services name a `protocol', because a
-%% protocol is what has framing, timeouts and a keepalive to configure.
-%% `api_gateway', `admin_api', `admin' and `metrics' all carry
-%% `protocol => undefined' — they are route sets on a listener's HTTP, not
-%% connection styles — and have nothing to default. An EXTENSION's carrier
-%% (`external_services/0') is outside that correspondence: it can name a
-%% protocol and still answer `#{}' here, which is correct, since the schema
-%% declares no `listeners.$name.<carrier>.*' mapping for it either.
+%% Only the carriers that HAVE settings appear; `carrier_defaults/1' answers
+%% `#{}' for any other. Those are exactly the carriers whose services name a
+%% `protocol', because a protocol is what has framing, timeouts and a keepalive
+%% to configure. An EXTENSION's carrier (`external_services/0') may name one
+%% and still answer `#{}', since the schema declares no
+%% `listeners.$name.<carrier>.*' mapping for it either.
 %%
 %% `wamp.websocket.buffer.{min,max}' are deliberately ABSENT. Since Cowboy
 %% 2.13 a WebSocket connection inherits the listener's `dynamic_buffer' and
@@ -219,7 +204,7 @@ rather than a silently bound phantom listener.
         %% admits any localhost origin; explicit origins may be listed
         %% alongside or instead; the atom `any` disables the check.
         %% Requests without an `Origin` header are always served — see
-        %% `bondy_mcp_http_handler:check_origin/2`.
+        %% `bondy_mcp_http_headers:check_origin/2`.
         allowed_origins => [local],
         public_base_uri => undefined,
         max_body_size => 4194304,
@@ -652,23 +637,15 @@ protocol_option_defaults(_Unknown) ->
 %% read the same key names and mean the same thing by them, so this is one rule
 %% expressed once, not two that happen to agree.
 %%
-%% `wamp.{tcp,tls}.ping.enabled' defaulted to `on', `ping.timeout' to `10s' and
-%% `wamp.tcp.ping.max_attempts' to `2'; `bridge.listener.{tcp,tls}.ping.*'
-%% carried the same four, `idle_timeout' included. The one value that differed by
-%% transport was `max_attempts': `wamp.tls' defaulted to `3' where `wamp.tcp' and
-%% both bridge listeners defaulted to `2', and nothing explained the split. It is
-%% 3 for every listener here — the transport does not change how many unanswered
-%% probes mean a dead peer, and the same 3 is the default for a WebSocket
-%% connection (`wamp.websocket.ping.max_attempts', the block a listener's
-%% `websocket.ping.*' falls back to), so one number covers every protocol.
+%% `max_attempts' is 3 for every listener: the transport does not change how
+%% many unanswered probes mean a dead peer, and 3 is what a WebSocket
+%% connection already defaults to.
 %%
-%% The 20s probe interval is `wamp.tcp.ping.idle_timeout''s own default and the
-%% interval every WebSocket connection is already probed at. It must be shorter
-%% than the 8h reap deadline: taken from `idle_timeout' instead, as
-%% `bondy_wamp_tcp_connection_handler:maybe_enable_ping/2' used to, both timers
-%% come due together and the connection is closed at the moment it would have
-%% been probed — a keepalive that can neither hold a NAT binding open nor notice
-%% a dead peer any sooner than the reap already does.
+%% The probe interval must be strictly shorter than the reap deadline. Taking
+%% it from `idle_timeout' instead makes both timers come due together, so the
+%% connection is closed at the moment it would have been probed — a keepalive
+%% that can neither hold a NAT binding open nor notice a dead peer any sooner
+%% than the reap already does.
 stream_keepalive_defaults() ->
     #{
         idle_timeout => 28800000,
@@ -1072,9 +1049,8 @@ assert_carrier_ping(Name, Carrier, Config) ->
 %% consequence: an ENABLED block missing a sibling kills the first connection
 %% rather than failing the boot.
 %%
-%% ONE list for both protocols: since the raw-socket handler stopped taking its
-%% probe interval from the listener's own `idle_timeout', the two read the same
-%% three keys and mean the same thing by them.
+%% ONE list for both protocols: the two read the same three keys and mean the
+%% same thing by them.
 %%
 %% `option_defaults/2' supplies all four keys, so an inventory that reached here
 %% through `bondy_listener_manager:init/0' cannot fail this check. It stays

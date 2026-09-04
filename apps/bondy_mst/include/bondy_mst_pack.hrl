@@ -4,8 +4,7 @@
 %% =============================================================================
 %%
 %% Shared definitions for the MST page-store packfile backend
-%% (`bondy_mst_pack_*` modules). See `_design/latest/MST_PAGE_STORE_DESIGN.md`
-%% §3 (pack file format) and §4 (index file format).
+%% (`bondy_mst_pack_*` modules).
 %%
 %% Contents:
 %%

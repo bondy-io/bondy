@@ -64,9 +64,7 @@ start_worker(PoolName, WorkerName) ->
 init([]) ->
     SupFlags = #{
         strategy => one_for_one,
-        % max restarts
         intensity => 5,
-        % seconds
         period => 10,
         auto_shutdown => never
     },

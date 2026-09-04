@@ -7,7 +7,7 @@
 %% through the handler with the shapes `bondy_registry_ptrie:do_write/3`
 %% emits and asserts the corresponding `bondy_metrics` counter moved —
 %% these counters are the evidence hook for the registry partition-grain
-%% decision (`_design/REGISTRY_PARTITION_GRAIN.md`).
+%% decision.
 -module(bondy_prometheus_ptrie_cas_test).
 
 -include_lib("eunit/include/eunit.hrl").

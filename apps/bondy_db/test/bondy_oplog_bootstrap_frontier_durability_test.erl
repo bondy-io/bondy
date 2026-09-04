@@ -7,23 +7,17 @@
 %%
 %% A fresh replica installs the peer's projection snapshot, then adopts the
 %% peer's applied-frontier version vector — which includes the peer's
-%% COMPACTED-prefix maxima. Those maxima can be reconstructed from NO local
-%% durable source on this replica: they are not in its MST (the peer compacted
-%% them away before page-sync, so they never transfer), and not in a WAL-tail
-%% replay (the bootstrap installed a projection snapshot, not events through the
-%% WAL). The adoption puts them in the in-memory registry only.
+%% COMPACTED-prefix maxima. Those maxima are reconstructable from NO local
+%% durable source: not from this replica's MST (the peer compacted them away
+%% before page-sync, so they never transfer) and not from a WAL-tail replay
+%% (the bootstrap installed a snapshot, not events through the WAL). Adoption
+%% puts them in the in-memory registry only, so an unclean restart that finds
+%% them absent from the checkpoint loses them, and the convergence oracle then
+%% reports DIVERGED forever despite the replica holding all the data.
 %%
-%% Before the fix, that frontier reached the durable checkpoint solely at the
-%% next clean `terminate/2`. An UNCLEAN restart (kill/crash) therefore lost the
-%% compacted-prefix maxima, and the convergence oracle reported DIVERGED forever
-%% despite the replica holding all the data. The fix persists the adopted
-%% frontier into the checkpoint AT bootstrap.
-%%
-%% This test drives the full durable stack (`bondy_db` facade → per-shard
-%% `bondy_oplog` instance → leveled projection + pack-store MST) and asserts the
-%% adopted frontier is in the durable checkpoint IMMEDIATELY after bootstrap —
-%% before any clean stop — so `restore_frontier/2` recovers it on any restart.
-%% The restore half is covered by `bondy_oplog_frontier_recovery_test`.
+%% This asserts the adopted frontier is in the durable checkpoint IMMEDIATELY
+%% after bootstrap — before any clean stop. The restore half is covered by
+%% `bondy_oplog_frontier_recovery_test`.
 %% =============================================================================
 -module(bondy_oplog_bootstrap_frontier_durability_test).
 

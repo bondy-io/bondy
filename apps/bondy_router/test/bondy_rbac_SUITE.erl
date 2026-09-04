@@ -178,10 +178,6 @@ test_1(Config) ->
             }
         }
     },
-    % dbg:tracer(), dbg:p(all,c),
-    % dbg:tpl(bondy_rbac, 'acc_grants', x),
-    % dbg:tpl(bondy_rbac, 'role_groups', x),
-    % dbg:tpl(bondy_rbac, 'acc_grants_find', x),
     U1Ctxt = #{
         realm_uri => RealmUri,
         security_enabled => true,

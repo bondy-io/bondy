@@ -1,5 +1,5 @@
 %% =============================================================================
-%% A4 — instance-side install coalescing tests for `bondy_oplog_instance`.
+%% Instance-side install coalescing tests for `bondy_oplog_instance`.
 %%
 %% When the applier outruns the instance, several `install_local_batch`
 %% casts queue in the instance's mailbox while it is mid-`put_batch`. A4

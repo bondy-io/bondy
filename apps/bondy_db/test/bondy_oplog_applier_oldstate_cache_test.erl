@@ -1,5 +1,5 @@
 %% =============================================================================
-%% A3 — applier OldValue frame-cache tests for `bondy_oplog_applier`.
+%% Applier OldValue frame-cache tests for `bondy_oplog_applier`.
 %%
 %% On the durable stack the applier's per-event OldValue read
 %% (`compute_one_cell/11` → projection `get/3`) is the single largest

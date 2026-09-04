@@ -1170,9 +1170,9 @@ maybe_ephemeral_opts(#{db := main, durability := durable}, Opts) ->
     %% instance and the rest register their cell-apply buckets as they open. A
     %% founding instance that drained at init — before its siblings registered —
     %% would skip (and, since the MST install is unconditional, LOSE) every
-    %% not-yet-registered table's WAL-tail cells on restart. `provision/1`
-    %% releases the gate via `bondy_db:start_draining/1` AFTER all main tables
-    %% are open. See `bondy_db:start_draining/1` and the applier `drain_gate`.
+    %% not-yet-registered table's WAL-tail cells on restart.
+    %% `open_main_into/1` releases the gate via `bondy_db:start_draining/1`
+    %% AFTER all main tables are open. See the applier `drain_gate`.
     Opts#{
         oplog_instance_opts => #{
             backend => bondy_mst_pack_store,

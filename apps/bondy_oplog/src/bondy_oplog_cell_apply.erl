@@ -43,7 +43,7 @@ behaviour is byte-identical.
     cache_handle => term(),
     %% Per-shard high-water HLC mark. Advanced via
     %% `bondy_oplog_high_water:advance/2` after every successful
-    %% projection write in `apply_one_cell/11`. `undefined` when the
+    %% projection write; see `advance_high_water/2`. `undefined` when the
     %% shard's registry entry has no ref (defensive only; new registrations
     %% always allocate).
     high_water_ref => bondy_oplog_high_water:ref() | undefined,
@@ -108,7 +108,7 @@ by `sec_idx/1`.
 -export([advance_high_water/2]).
 
 -ifdef(TEST).
-%% A3 — exported for the bounded-eviction / hit-miss unit test.
+%% Exported for the bounded-eviction / hit-miss unit test.
 -export([oldstate_cache_get/3]).
 -endif.
 
@@ -218,7 +218,7 @@ apply_cell_batch(Ctx, Id, Events) ->
                         end,
                         LocalWrites
                     ),
-                    %% A3 — write-through the now-durable frames into the
+                    %% Write-through the now-durable frames into the
                     %% applier's OldValue cache (no-op when disabled).
                     oldstate_cache_put_entries(OldStateCache, Entries),
                     case MaxHlc of
@@ -285,10 +285,10 @@ compute_one_cell(
     try
         ReadT0 = erlang:monotonic_time(microsecond),
         %% OldValue read precedence: in-batch shadow (`LocalWrites`) →
-        %% A3 frame-cache → projection `get/3`. A cache hit returns
+        %% Frame-cache → projection `get/3`. A cache hit returns
         %% byte-identical `{OldState, OldValueOpt}` to a projection read
         %% (the cache is a write-through mirror of the durable frame), so
-        %% the kernel result is unchanged — A3 only removes the read I/O.
+        %% the kernel result is unchanged — the cache only removes the read I/O.
         {OldState, OldValueOpt} =
             case maps:get({Bucket, Key}, LocalWrites, undefined) of
                 undefined ->
@@ -356,7 +356,7 @@ compute_one_cell(
     end.
 
 %% @private
-%% A3 — resolve OldValue from the frame-cache (hit) or the projection
+%% Resolve OldValue from the frame-cache (hit) or the projection
 %% (miss). Emits a `[bondy_oplog, applier, oldstate_cache]` hit/miss
 %% event only when the cache is enabled (zero overhead when off).
 read_old_value(
@@ -381,7 +381,7 @@ read_old_value(
 
 %% @private
 %% Decode a stored cell frame into `{OldState, OldValueOpt}` — the exact shape
-%% `compute_one_cell/12` consumes. Shared by the in-batch shadow, the A3
+%% `compute_one_cell/12` consumes. Shared by the in-batch shadow, the
 %% cache-hit, and the projection-read paths so all three are byte-for-byte
 %% equivalent.
 decode_old_frame(Kernel, Frame) ->
@@ -393,9 +393,9 @@ decode_old_frame(Kernel, Frame) ->
     }.
 
 %% @private
-%% A3 OldValue frame-cache constructor. `{Tab, Max}` when enabled,
+%% OldValue frame-cache constructor. `{Tab, Max}` when enabled,
 %% `undefined` when disabled (every cache op below is then a no-op and
-%% behaviour is byte-identical to pre-A3). The table is `private` — only
+%% behaviour is unchanged). The table is `private` — only
 %% the owning applier process reads or writes it.
 oldstate_cache_new(false, _Max) ->
     undefined;
@@ -695,7 +695,8 @@ secondary_saturation_drop(NS, IName, SecShard, Entry, NumOps) ->
 %% Index dispatch respects the back-pressure cap (`Bypass = false`): a
 %% peer-event replay that overflows a writer is dropped and self-heals via
 %% a marked rebuild. The full-rebuild path no longer routes through here —
-%% it re-indexes from the converged projection (`reindex_from_projection/3`).
+%% it re-indexes from the converged projection
+%% (`bondy_oplog_cell_utils:reindex/3`).
 apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
     #{adapter := Adapter, handle := Handle, kernel := Kernel} = Ctx,
     CrdtOpts = maps:get(crdt_opts, Ctx, #{}),
@@ -795,7 +796,7 @@ apply_cell_pairs(Ctx, Id, Pairs, LocalOrigin) ->
                             end,
                             LocalWrites
                         ),
-                        %% A3 — write-through the peer/replay frames too,
+                        %% Write-through the peer/replay frames too,
                         %% so a subsequent local read sees the durable
                         %% value (no-op when disabled).
                         oldstate_cache_put_entries(OldStateCache, Entries),

@@ -616,7 +616,6 @@ forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
     true == bondy_ref:is_local(Callee) orelse
         error({forwarding_error, callback_no_local}),
 
-    %% Fails with no_realm exception if not present
     RealmUri = ?GET_REALM_URI(Opts),
     CalleeType = bondy_ref:type(Callee),
 
@@ -665,7 +664,6 @@ forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
             %% A pid- or name-target callee. `internal` covers non-callback
             %% refs admitted by register/4 (a callback target is handled by
             %% the first clause); they receive INVOCATION like any client.
-            %% We now turn the CALL into an INVOCATION.
             {To, SendOpts} = bondy:prepare_send(Callee, Opts),
 
             %% Internal refs may carry no session; fall back to a global
@@ -748,7 +746,6 @@ forward(#cancel{} = M, _Addressed, #{from := Caller} = Opts) ->
     %% take it so any late response is discarded; `skip` sends no INTERRUPT.
     %% The INTERRUPT is only sent to a callee that announced call_canceling.
 
-    %% Fails with no_realm exception if not present
     RealmUri = ?GET_REALM_URI(Opts),
 
     CallId = M#cancel.request_id,
@@ -801,7 +798,6 @@ forward(#result{} = M, Caller, #{from := _Callee} = Opts) ->
     %% A remote Callee is returning a RESULT to CALL done on behalf of a
     %% local Caller.
 
-    %% Fails with no_realm exception if not present
     RealmUri = ?GET_REALM_URI(Opts),
 
     CallId = M#result.request_id,
@@ -869,7 +865,6 @@ forward(#error{request_type = ?CALL} = M, Caller, Opts) ->
     %% A remote callee is returning an ERROR to an CALL done
     %% on behalf of a local Caller.
 
-    %% Fails with no_realm exception if not present
     RealmUri = ?GET_REALM_URI(Opts),
 
     CallId = M#error.request_id,
@@ -910,7 +905,6 @@ forward(#error{request_type = ?CANCEL} = M, Caller, Opts) ->
     %% We send the error back to the local Caller, keeping the promise to be
     %% able to match the still pending YIELD message,
 
-    %% Fails with no_realm exception if not present
     RealmUri = ?GET_REALM_URI(Opts),
 
     CallId = M#error.request_id,
@@ -932,33 +926,15 @@ forward(#error{request_type = ?CANCEL} = M, Caller, Opts) ->
 %% PRIVATE
 %% =============================================================================
 
-% maybe_reassign_invocation(
-%     #invocation{} = Msg, To, #{realm_uri := RealmUri} = Opts) ->
-%     %% TODO https://www.notion.so/leapsight/Call-Re-Routing-c18901c7aaea4ef7896b993d4e5d307f
-
-%     %% We need to find another local callee to satisfy the original call,
-%     %% if it exists, then it is easy. But the reply might need to include the %% original Callee ref.
-%     %% If there are no local callees then we need to return either
-%     %% wamp.error.unavailable or wamp.error.no_eligible_callee and let the
-%     %% origin router re-route.
-
-%     Error = no_eligible_callee(
-%         invocation, Msg#invocation.registration_id
-%     ),
-%     bondy:send(RealmUri, To, Error, Opts).
-
 %% @private
 -doc "We handle messages from our local clients.".
 -spec do_forward(M :: wamp_message(), Ctxt :: map()) -> ok | no_return().
 
 do_forward(#register{} = M, Ctxt) ->
-    %% A local Callee
     handle_register(M, Ctxt);
 do_forward(#unregister{} = M, Ctxt) ->
-    %% A local Callee
     handle_unregister(M, Ctxt);
 do_forward(#call{procedure_uri = Uri} = M0, Ctxt) ->
-    %% A local Caller.
     ok = bondy_rbac:authorize(<<"wamp.call">>, Uri, Ctxt),
 
     %% Honour CALL.Options.receive_progress only when both the dealer and
@@ -966,8 +942,6 @@ do_forward(#call{procedure_uri = Uri} = M0, Ctxt) ->
     %% no downstream path can act on it.
     M = maybe_strip_receive_progress(M0, Ctxt),
 
-    %% We need to determined whether the procedure is implemented by a static
-    %% callback.
     case Uri of
         <<"bondy.", _/binary>> ->
             apply_static_callback(M, Ctxt, bondy_wamp_api);
@@ -1010,7 +984,6 @@ do_forward(#cancel{} = M, Ctxt0) ->
         M, Ctxt0, cancel_mode(maps:get(mode, M#cancel.options, skip))
     );
 do_forward(#yield{} = M, Ctxt0) ->
-    %% A local Callee is replying to an INVOCATION message.
     %% We match the YIELD with the original INVOCATION using the request_id,
     %% and with that retrieve the CALL request_id to find the Caller.
 
@@ -1047,7 +1020,6 @@ do_forward(#yield{} = M, Ctxt0) ->
 do_forward(#error{request_type = Type} = M, Ctxt0) when
     Type == ?INVOCATION orelse Type == ?INTERRUPT
 ->
-    %% A local Callee is replying to a previous INVOCATION | INTERRUPT.
     %% We match the ERROR with the original INVOCATION
     %% using the request_id, and with that match the CALL request_id
     %% to find the Caller.
@@ -1062,8 +1034,6 @@ do_forward(#error{request_type = Type} = M, Ctxt0) when
         InvocationId
     ),
 
-    %% We determine the operation and response error type depending on
-    %% incoming type
     {NewType, Result} =
         case Type of
             ?INVOCATION ->
@@ -1078,9 +1048,7 @@ do_forward(#error{request_type = Type} = M, Ctxt0) when
         {ok, Promise} ->
             _ = (NewType == ?CALL andalso notify_call_latency(Promise, error)),
             CallId = bondy_rpc_promise:call_id(Promise),
-            %% Caller can be local or remote.
             Caller = bondy_rpc_promise:caller(Promise),
-            %% Via might be undefined.
             Via = bondy_rpc_promise:via(Promise),
             SendOpts0 = #{from => Callee, via => Via},
             {To, SendOpts} = bondy:prepare_send(Caller, SendOpts0),
@@ -1134,8 +1102,6 @@ apply_static_callback(#call{} = M0, Ctxt, Mod) ->
                 reason => Reason,
                 stacktrace => Stacktrace
             }),
-            %% We catch any exception from handle/3 and turn it
-            %% into a WAMP Error
             Error = bondy_wamp_api_utils:maybe_error({error, Reason}, M0),
             bondy:send(RealmUri, Caller, Error)
     end.
@@ -1257,7 +1223,6 @@ handle_cancel_remote(M, Ctxt, Mode, CallKey, Promise) ->
     Caller = bondy_context:ref(Ctxt),
     CallId = M#cancel.request_id,
 
-    %% If not authorized this fails with an exception
     Uri = bondy_rpc_promise:procedure_uri(Promise),
     ok = bondy_rbac:authorize(<<"wamp.cancel">>, Uri, Ctxt),
 
@@ -1293,14 +1258,12 @@ handle_cancel_local(#cancel{} = M, Ctxt0, kill) ->
     Opts = M#cancel.options,
 
     Fun = fun(Promise, Ctxt1) ->
-        %% If not authoried this will fail with an exception
         Uri = bondy_rpc_promise:procedure_uri(Promise),
         ok = bondy_rbac:authorize(<<"wamp.cancel">>, Uri, Ctxt1),
 
         InvocationId = bondy_rpc_promise:invocation_id(Promise),
         Callee = bondy_rpc_promise:callee(Promise),
 
-        %% Via might be undefined
         Via = bondy_rpc_promise:via(Promise),
         SendOpts0 = #{from => Caller, via => Via},
         {To, SendOpts} = bondy:prepare_send(Callee, SendOpts0),
@@ -1326,7 +1289,6 @@ handle_cancel_local(#cancel{} = M, Ctxt0, killnowait) ->
     Opts = M#cancel.options,
 
     Fun = fun(Promise, Ctxt1) ->
-        %% If not authoried this will fail with an exception
         Uri = bondy_rpc_promise:procedure_uri(Promise),
         ok = bondy_rbac:authorize(<<"wamp.cancel">>, Uri, Ctxt1),
 
@@ -1362,7 +1324,6 @@ handle_cancel_local(#cancel{} = M, Ctxt0, skip) ->
     Caller = bondy_context:ref(Ctxt0),
 
     Fun = fun(Promise, Ctxt1) ->
-        %% If not authoried this will fail with an exception
         Uri = bondy_rpc_promise:procedure_uri(Promise),
         ok = bondy_rbac:authorize(<<"wamp.cancel">>, Uri, Ctxt1),
 
@@ -1473,7 +1434,6 @@ handle_unregister(#unregister{} = M, Ctxt) ->
             throw(not_found);
         {ok, Entry} ->
             Uri = bondy_registry_entry:uri(Entry),
-            %% We authorize first
             ok = bondy_rbac:authorize(<<"wamp.unregister">>, Uri, Ctxt),
             unregister(Uri, M, Ctxt)
     end.
@@ -1520,8 +1480,6 @@ take_invocations(CallId, M, Fun, Ctxt) when is_function(Fun, 2) ->
     case bondy_rpc_promise:take(Key) of
         {ok, Promise} ->
             {ok, Ctxt1} = Fun(Promise, Ctxt),
-            %% We iterate until there are no more pending invocation for the
-            %% call_request_id == CallId
             take_invocations(CallId, M, Fun, Ctxt1);
         error ->
             %% Promises for this call were either interrupted by us,
@@ -2075,7 +2033,6 @@ handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
                 CBArgs = bondy_registry_entry:callback_args(Entry),
                 Response = apply_dynamic_callback(Msg, Callee, CBArgs),
 
-                %% We reply to Caller
                 bondy:send(RealmUri, Caller, Response, #{from => Callee}),
 
                 %% We return no message as we already replied
@@ -2101,7 +2058,6 @@ handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
                 Call = prepare_call(Msg1, Uri, Entry, Ctxt),
                 {ok, Call, Ctxt};
             _ ->
-                %% A local Callee. We create an invocation.
                 Invocation = call_to_invocation(Msg, Uri, Entry, Ctxt),
                 {ok, Invocation, Ctxt}
         end
@@ -2235,7 +2191,6 @@ handle_call_matched(Msg, ProcUri, Fun, Opts, Ctxt, CallId, RealmUri) ->
 ) -> ok.
 
 do_call(CallId, ProcUri, UserFun, Opts, Ctxt0, Entry) ->
-    %% We invoke the provided fun which returns a command.
     case UserFun(Entry, Ctxt0) of
         {ok, _} ->
             %% UserFun sent a response sequentially, no need
@@ -2377,11 +2332,8 @@ choose([H | T], CallOpts, LastGroup, Acc, Cont) ->
 
     case LastGroup == undefined orelse LastGroup == Group of
         true ->
-            %% We accummulate until we find no more matches for Group
             choose(T, CallOpts, Group, [H | Acc], Cont);
         false ->
-            %% All entries in Acc belong to same group, we reverse to restore
-            %% the original order
             L = lists:reverse(Acc),
             LBOpts = lb_opts(Invoke, CallOpts),
 
@@ -2389,7 +2341,6 @@ choose([H | T], CallOpts, LastGroup, Acc, Cont) ->
                 {ok, _} = OK ->
                     OK;
                 {error, noproc} ->
-                    %% We continue w/next group, we reset Acc
                     choose(T, CallOpts, Group, [H], Cont);
                 Error ->
                     Error
@@ -3229,39 +3180,6 @@ send_no_eligible_callee(Promise) ->
     {To, SendOpts} = bondy:prepare_send(Caller, SendOpts0),
     _ = bondy:send(RealmUri, To, Error, SendOpts),
     ok.
-
-%% %% @private
-%% revoke(_Entry) ->
-%%     If the Callee does not support registration_revocation, the Dealer may
-%%     still revoke a registration to support administrative functionality. In
-%%     this case, the Dealer MUST NOT send an UNREGISTERED message to the
-%%     Callee. The Callee MAY use the registration meta event
-%%     wamp.registration.on_unregister to determine whether a session is
-%%     removed from a registration.
-%%     ok.
-
-%% %% @private
-%% no_eligible_callee(call, CallId) ->
-%%     Desc = <<"A call was forwarded through the router cluster for a callee that is no longer available.">>,
-%%     no_eligible_callee(?CALL, CallId, Desc);
-
-%% no_eligible_callee(invocation, CallId) ->
-%%     Desc = <<"An invocation was forwarded through the router cluster to a callee that is no longer available.">>,
-%%     no_eligible_callee(?INVOCATION, CallId, Desc).
-
-%% %% @private
-%% no_eligible_callee(Type, Id, Desc) ->
-%%     Msg = <<
-%%         "There are no elibible callees for the procedure."
-%%     >>,
-%%     bondy_wamp_message:error(
-%%         Type,
-%%         Id,
-%%         #{},
-%%         ?WAMP_NO_ELIGIBLE_CALLE,
-%%         [Msg],
-%%         #{message => Msg, description => Desc}
-%%     ).
 
 %% @private
 %% `call_cancelled' is kept as Args[0]: it is a token clients match on, not

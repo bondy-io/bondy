@@ -46,12 +46,6 @@ and CIDR matching is containment rather than equality.
 -include("bondy_security.hrl").
 
 -define(ASSIGNMENT_VALIDATOR, #{
-    % <<"roles">> => #{
-    %     alias => roles,
-    % 	key => roles,
-    %     required => true,
-    %     validator => fun bondy_data_validators:rolenames/1
-    % },
     <<"usernames">> => #{
         alias => usernames,
         key => usernames,
@@ -460,7 +454,6 @@ do_add(RealmUri, Usernames, #{type := source} = Source, Opts) ->
 
     _ = lists:foreach(
         fun(Username) ->
-            %% prev we added {Authmethod, Meta} instead of Source
             Authmethod = maps:get(authmethod, Source),
             Key = {Username, Masked, Authmethod},
             _ = store(RealmUri, Key, Source, Opts),
@@ -650,42 +643,3 @@ sort_sources(Sources) ->
         end,
         Sources1
     ).
-
-%% group users sharing the same CIDR/Source/Options
-% group_sources(Sources) ->
-%     D = lists:foldl(fun({User, CIDR, Source, Options}, Acc) ->
-%                 dict:append({CIDR, Source, Options}, User, Acc)
-%         end, dict:new(), Sources),
-%     R1 = [{Users, CIDR, Source, Options} || {{CIDR, Source, Options}, Users} <-
-%                                        dict:to_list(D)],
-%     %% Split any entries where the user list contains (but is not
-%     %% exclusively) 'all' so that 'all' has its own entry. We could
-%     %% actually elide any user sources that overlap with an 'all'
-%     %% source, but that may be more confusing because deleting the all
-%     %% source would then 'resurrect' the user sources.
-%     R2 = lists:foldl(fun({Users, CIDR, Source, Options}=E, Acc) ->
-%                     case Users =/= [all] andalso lists:member(all, Users) of
-%                         true ->
-%                             [{[all], CIDR, Source, Options},
-%                              {Users -- [all], CIDR, Source, Options}|Acc];
-%                         false ->
-%                             [E|Acc]
-%                     end
-%             end, [], R1),
-%     %% sort the result by the same criteria that sort_sources uses
-%     R3 = lists:sort(fun({UserA, _, _, _}, {UserB, _, _, _}) ->
-%                     case {UserA, UserB} of
-%                         {[all], [all]} ->
-%                             true;
-%                         {[all], _} ->
-%                             %% anything is greater than 'all'
-%                             true;
-%                         {_, [all]} ->
-%                             false;
-%                         {_, _} ->
-%                             true
-%                     end
-%             end, R2),
-%     lists:sort(fun({_, {_, MaskA}, _, _}, {_, {_, MaskB}, _, _}) ->
-%                 MaskA > MaskB
-%         end, R3).

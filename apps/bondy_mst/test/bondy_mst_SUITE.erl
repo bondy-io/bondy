@@ -13,8 +13,6 @@ all() ->
     [
         {group, local_store, []},
         {group, ets_store, []}
-        %% {group, rocksdb_store, []},
-        %% {group, leveled_store, []}
     ].
 
 groups() ->
@@ -42,12 +40,6 @@ groups() ->
             delete_all_test,
             delete_and_read_test
         ]},
-        %% {rocksdb_store, [], [
-        %%     small_test,
-        %%     first_last_test,
-        %%     persistent_test,
-        %%     large_test
-        %% ]},
         {leveled_store, [], [
             commutative_test,
             small_test,
@@ -77,20 +69,15 @@ end_per_group(_, _Config) ->
 
 %% Setup and teardown functions
 
-%% Called once before any test cases are run
 init_per_suite(Config) ->
-    %% You can add any setup you need here
     Config.
 
-%% Called once after all test cases have been run
 end_per_suite(_Config) ->
     ok.
 
-%% Called before each test case
 init_per_testcase(_TestCase, Config) ->
     Config.
 
-%% Called after each test case
 end_per_testcase(_TestCase, _Config) ->
     ok.
 
@@ -118,7 +105,6 @@ commutative_test(Config) ->
 small_test(Config) ->
     Mod = ?config(store, Config),
 
-    %% Test for basic MST operations
     A = lists:foldl(
         fun(N, Acc) -> bondy_mst:put(Acc, N) end,
         bondy_mst:new(#{
@@ -206,7 +192,6 @@ small_test(Config) ->
 large_test(Config) ->
     Mod = ?config(store, Config),
 
-    %% Test for large MST operations
     ShuffledA = list_shuffle(lists:seq(1, 1000)),
     ShuffledB = list_shuffle(lists:seq(550, 1500)),
     A = lists:foldl(
@@ -270,7 +255,6 @@ large_test(Config) ->
 first_last_test(Config) ->
     Mod = ?config(store, Config),
 
-    %% Test for basic MST operations
     A = lists:foldl(
         fun(N, Acc) -> bondy_mst:put(Acc, N) end,
         bondy_mst:new(#{
@@ -324,7 +308,6 @@ persistent_test(Config) ->
 delete_simple_test(Config) ->
     Mod = ?config(store, Config),
 
-    %% Create a tree with some elements
     T0 = bondy_mst:new(#{
         store => Mod,
         store_opts => #{name => <<"delete_simple_test">>}
@@ -336,34 +319,28 @@ delete_simple_test(Config) ->
         [1, 2, 3, 4, 5]
     ),
 
-    %% Verify all elements are present
     ?assertEqual(
         [{1, true}, {2, true}, {3, true}, {4, true}, {5, true}],
         bondy_mst:to_list(T1)
     ),
 
-    %% Delete element 3
     T2 = bondy_mst:delete(T1, 3),
     List2 = bondy_mst:to_list(T2),
     ?assertEqual([{1, true}, {2, true}, {4, true}, {5, true}], List2),
 
-    %% Verify we can still get other elements
     ?assertEqual(true, bondy_mst:get(T2, 1)),
     ?assertEqual(true, bondy_mst:get(T2, 5)),
     ?assertEqual(undefined, bondy_mst:get(T2, 3)),
 
-    %% Delete first element
     T3 = bondy_mst:delete(T2, 1),
     ?assertEqual([{2, true}, {4, true}, {5, true}], bondy_mst:to_list(T3)),
 
-    %% Delete last element
     T4 = bondy_mst:delete(T3, 5),
     ?assertEqual([{2, true}, {4, true}], bondy_mst:to_list(T4)).
 
 delete_multiple_test(Config) ->
     Mod = ?config(store, Config),
 
-    %% Create a tree with elements 1-20
     T0 = bondy_mst:new(#{
         store => Mod,
         store_opts => #{name => <<"delete_multiple_test">>}
@@ -375,7 +352,6 @@ delete_multiple_test(Config) ->
         lists:seq(1, 20)
     ),
 
-    %% Delete multiple elements
     ToDelete = [2, 5, 8, 11, 14, 17, 20],
     T2 = lists:foldl(
         fun(N, Acc) -> bondy_mst:delete(Acc, N) end,
@@ -383,27 +359,23 @@ delete_multiple_test(Config) ->
         ToDelete
     ),
 
-    %% Verify deleted elements are gone
     lists:foreach(
         fun(N) -> ?assertEqual(undefined, bondy_mst:get(T2, N)) end,
         ToDelete
     ),
 
-    %% Verify remaining elements are still there
     Remaining = lists:seq(1, 20) -- ToDelete,
     lists:foreach(
         fun(N) -> ?assertEqual(true, bondy_mst:get(T2, N)) end,
         Remaining
     ),
 
-    %% Verify the list is correct
     Expected = [{N, true} || N <- Remaining],
     ?assertEqual(Expected, bondy_mst:to_list(T2)).
 
 delete_not_found_test(Config) ->
     Mod = ?config(store, Config),
 
-    %% Create a tree with some elements
     T0 = bondy_mst:new(#{
         store => Mod,
         store_opts => #{name => <<"delete_not_found_test">>}
@@ -415,13 +387,10 @@ delete_not_found_test(Config) ->
         [1, 2, 3, 4, 5]
     ),
 
-    %% Delete non-existent element
     T2 = bondy_mst:delete(T1, 10),
 
-    %% Tree should be unchanged
     ?assertEqual(bondy_mst:to_list(T1), bondy_mst:to_list(T2)),
 
-    %% Delete from empty tree
     T3 = bondy_mst:new(#{
         store => Mod,
         store_opts => #{name => <<"delete_not_found_test_empty">>}
@@ -433,7 +402,6 @@ delete_not_found_test(Config) ->
 delete_all_test(Config) ->
     Mod = ?config(store, Config),
 
-    %% Create a tree with elements
     T0 = bondy_mst:new(#{
         store => Mod,
         store_opts => #{name => <<"delete_all_test">>}
@@ -446,18 +414,15 @@ delete_all_test(Config) ->
         Elements
     ),
 
-    %% Delete all elements one by one
     T2 = lists:foldl(
         fun(N, Acc) -> bondy_mst:delete(Acc, N) end,
         T1,
         Elements
     ),
 
-    %% Tree should be empty
     ?assertEqual([], bondy_mst:to_list(T2)),
     ?assertEqual(undefined, bondy_mst:root(T2)),
 
-    %% Try deleting in reverse order
     T3 = lists:foldl(
         fun(N, Acc) -> bondy_mst:put(Acc, N) end,
         T0,
@@ -476,7 +441,6 @@ delete_all_test(Config) ->
 delete_and_read_test(Config) ->
     Mod = ?config(store, Config),
 
-    %% Create a tree with elements
     T0 = bondy_mst:new(#{
         store => Mod,
         store_opts => #{name => <<"delete_and_read_test">>}
@@ -488,11 +452,9 @@ delete_and_read_test(Config) ->
         [1, 2, 3, 4, 5]
     ),
 
-    %% Delete element 3
     T2 = bondy_mst:delete(T1, 3),
     ?assertEqual(undefined, bondy_mst:get(T2, 3)),
 
-    %% Re-add element 3
     T3 = bondy_mst:put(T2, 3),
     ?assertEqual(true, bondy_mst:get(T3, 3)),
     ?assertEqual(
@@ -500,7 +462,6 @@ delete_and_read_test(Config) ->
         bondy_mst:to_list(T3)
     ),
 
-    %% Delete multiple and re-add in different order
     T4 = bondy_mst:delete(T3, 2),
     T5 = bondy_mst:delete(T4, 4),
     ?assertEqual([{1, true}, {3, true}, {5, true}], bondy_mst:to_list(T5)),

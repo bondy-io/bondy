@@ -1239,7 +1239,6 @@ post_init(Config, Realm, Version, Headers) ->
 do_post_init(Port, Realm, Version, Headers) ->
     do_post_hs(Port, Realm, Headers, init_body(Version)).
 
-%% Initialize and return the minted session id.
 initialize(Config, Realm, Headers) ->
     {200, RespHeaders, #{<<"result">> := _}} = post_init(
         Config, Realm, ?LATEST, Headers

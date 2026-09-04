@@ -191,9 +191,9 @@ ping_keepalive_survives_idle(_) ->
 %% as a socket swap on the *same* connection process (its Erlang port changes),
 %% the same definitive signal the malformed-frame test uses.
 %%
-%% Before A2 Stage 1 fixed B8 the give-up path was dead — the keepalive could
-%% never trigger a reconnect on a silent link — and this test would hang at
-%% `established` forever (caught by the wait_until ceiling).
+%% With the give-up path dead — the keepalive unable to trigger a reconnect on
+%% a silent link — this test hangs at `established` until the wait_until
+%% ceiling fires.
 ping_failure_triggers_reconnect(_) ->
     Server = start_silent_server(),
     Port = silent_server_port(Server),

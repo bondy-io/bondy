@@ -1913,8 +1913,6 @@ parse_ptrie_key_uri(RealmUri, PtrieKey, Policy) ->
 %% records, applies Opts-driven filters (invoke for registrations;
 %% node/eligible/exclude for subscriptions), and separates local from
 %% remote subscription entries.
-%%
-%% This replaces `art_match_result/3`. Same return shape.
 ptrie_match_result(_Store, _Type, _Opts, ?EOT) ->
     ?EOT;
 ptrie_match_result(_Store, subscription, _Opts, []) ->

@@ -190,7 +190,7 @@ provisions_all() ->
             end,
             MainNames
         ),
-        %% The RIB summary tables (D-7) are provisioned in the ephemeral
+        %% The RIB summary tables are provisioned in the ephemeral
         %% `registry` DB.
         ?assertMatch(
             #{entity_type := bondy_registration_rib, db_name := registry},

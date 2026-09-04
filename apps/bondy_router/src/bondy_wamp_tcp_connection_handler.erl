@@ -752,11 +752,6 @@ error_number(maximum_message_length_unacceptable) -> ?RAW_ERROR(2);
 error_number(use_of_reserved_bits) -> ?RAW_ERROR(3);
 error_number(maximum_connection_count_reached) -> ?RAW_ERROR(4).
 
-%% error_reason(1) -> serializer_unsupported;
-%% error_reason(2) -> maximum_message_length_unacceptable;
-%% error_reason(3) -> use_of_reserved_bits;
-%% error_reason(4) -> maximum_connection_count_reached.
-
 %% @private
 socket_opened(_St) ->
     bondy_telemetry:socket_open(wamp, raw).

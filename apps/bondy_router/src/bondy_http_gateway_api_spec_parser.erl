@@ -176,11 +176,6 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
         required => true,
         allow_null => false,
         datatype => map
-        % , validator => fun(M) ->
-        %     R = maps:map(
-        %         fun(_, Ver) -> maps_utils:validate(Ver, ?API_VERSION) end, M),
-        %     {ok, R}
-        % end
     }
 }).
 
@@ -714,18 +709,8 @@ derived from the error catalogue (e.g. `bondy.error.not_found` → 404,
         validator => fun
             (#{<<"type">> := <<"wamp_call">>} = V) ->
                 {ok, maps_utils:validate(V, ?WAMP_RPC_ACTION_SPEC)};
-            %% (#{<<"type">> := <<"wamp_register">>} = V) ->
-            %%     {ok, maps_utils:validate(V, ?WAMP_RPC_ACTION_SPEC)};
-            %% (#{<<"type">> := <<"wamp_unregister">>} = V) ->
-            %%     {ok, maps_utils:validate(V, ?WAMP_RPC_ACTION_SPEC)};
-
             (#{<<"type">> := <<"wamp_publish">>} = V) ->
                 {ok, maps_utils:validate(V, ?WAMP_PUBSUB_ACTION_SPEC)};
-            %% (#{<<"type">> := <<"wamp_subscribe">>} = V) ->
-            %%     {ok, maps_utils:validate(V, ?WAMP_PUBSUB_ACTION_SPEC)};
-            %% (#{<<"type">> := <<"wamp_unsubscribe">>} = V) ->
-            %%     {ok, maps_utils:validate(V, ?WAMP_PUBSUB_ACTION_SPEC)};
-
             (#{<<"type">> := <<"static">>} = V) ->
                 {ok, maps_utils:validate(V, ?STATIC_ACTION_SPEC)};
             (#{<<"type">> := <<"forward">>} = V) ->
@@ -1176,7 +1161,8 @@ listener environment.
 dispatch_table(API, RulesToAdd) when is_map(API) ->
     dispatch_table([API], RulesToAdd);
 dispatch_table(L, RulesToAdd) when is_list(L), is_list(RulesToAdd) ->
-    %% Rebuild path (`bondy_http_gateway:load_dispatch_tables/0` / `parse_specs/2`),
+    %% Rebuild path (`bondy_http_gateway:load_dispatch_tables/0` calls
+    %% `dispatch_table/2`), which
     %% which runs on every anti-entropy change: LENIENT — a spec can be replicated
     %% via AAE before the realm it targets, so skip routes whose realm does not
     %% exist and rebuild later (the api_gateway reactor / realm lifecycle
@@ -1357,12 +1343,7 @@ parse_path(P0, Ctxt0) ->
     P1 = maps:merge(?DEFAULT_PATH, P0),
     %% We merge path's variables and defaults into context
     {P2, Ctxt1} = merge_eval_vars(P1, eval_vars(Ctxt0)),
-    %% Ctxt1 = eval(Ctxt0),
-    %% P11 = eval(P1, Ctxt1),
-    %% {P2, Ctxt2} = merge(P11, Ctxt1),
 
-    %% We apply defaults and evaluate before validating
-    %% Ctxt2 = eval_vars(P2, Ctxt1),
     Ctxt2 = Ctxt1,
     P3 = validate(?DEFAULTS_KEY, P2, ?PATH_DEFAULTS),
 
@@ -1430,12 +1411,6 @@ parse_path_elements([], Path, _) ->
 %% @private
 parse_request_method(Method, Spec, Ctxt) when is_binary(Spec) ->
     parse_request_method(Method, mops_eval(Spec, Ctxt), Ctxt);
-%% parse_request_method(<<"options">>, Spec, Ctxt) ->
-%%     #{<<"response">> := Resp} = Spec,
-%%     Spec#{
-%%         <<"response">> => parse_response(Resp, Ctxt)
-%%     };
-
 parse_request_method(Method, Spec0, Ctxt) ->
     Spec1 = maps:merge(?DEFAULT_REQ, Spec0),
     #{

@@ -137,7 +137,7 @@ cell_apply_does_not_feed_per_instance_fold() ->
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"k1">>, {set, 1, <<"v1">>}}),
     _ = bondy_oplog:append(Id, {cell_apply, ?B, <<"k2">>, {set, 2, <<"v2">>}}),
     _ = barrier(Id),
-    %% lww_register's `initial_value/0` is `undefined`.
+    %% lww_register's `init/0` is `undefined`.
     ?assertEqual({ok, undefined}, bondy_oplog:projection(Id)),
     teardown_instance(Id, NS, Cache, Proj).
 
