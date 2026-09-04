@@ -804,14 +804,28 @@ runtime_atom_cell_read_after_restart_measured(Config) ->
         ),
 
         %% Compact the reader so the probe event leaves the durable log.
+        %% Compaction needs the writer to have confirmed the reader's
+        %% root, which a fixed sleep does not guarantee; so the PREMISE is
+        %% waited for: the reader's main-DB instances hold no live event.
         _ = [
             erpc:call(N, application, set_env, [
                 bondy_oplog, peer_timeout_ms, 2000
             ])
          || N <- [W, R0]
         ],
-        timer:sleep(3000),
-        _ = erpc:call(R0, ?MODULE, do_compact_all, []),
+        ok = wait_until(
+            fun() ->
+                _ =
+                    try
+                        erpc:call(W, bondy_oplog_sync_scheduler, trigger, [])
+                    catch
+                        _:_ -> ok
+                    end,
+                _ = erpc:call(R0, ?MODULE, do_compact_all, []),
+                erpc:call(R0, ?MODULE, do_main_live_events, []) =:= 0
+            end,
+            ?CONVERGE_MS
+        ),
 
         ok = bondy_ct:stop_node(S2),
         S2b = bondy_ct:restart_node(
@@ -1747,6 +1761,14 @@ log(LogEvent, #{config := #{to := To, budget := Counter}}) ->
 %% @private
 %% Runs a compaction cycle on every oplog instance of this node, so durable
 %% truncation actually happens instead of waiting on the scheduler's cadence.
+%% Live (uncompacted) events across the node's main-DB instances.
+do_main_live_events() ->
+    Main = bondy_namespace_catalog:main_db_name(),
+    lists:sum([
+        bondy_oplog:size(I)
+     || I <- bondy_oplog:list_instances(), bondy_oplog:db_of(I) =:= Main
+    ]).
+
 do_compact_all() ->
     _ = [
         try

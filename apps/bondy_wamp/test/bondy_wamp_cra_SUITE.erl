@@ -226,6 +226,9 @@ verify_string_wrong(_) ->
 compare_constant_time(_) ->
     ?assert(bondy_wamp_cra:compare(<<"abc">>, <<"abc">>)),
     ?assertNot(bondy_wamp_cra:compare(<<"abc">>, <<"abd">>)),
-    %% crypto:hash_equals/2 requires equal-length inputs; unequal lengths raise
-    %% badarg (preserved from the legacy bondy_password_cra:compare/2).
-    ?assertError(badarg, bondy_wamp_cra:compare(<<"abc">>, <<"abcd">>)).
+    %% crypto:hash_equals/2 raises badarg on unequal lengths; compare/2 must
+    %% therefore answer `false` itself, or a wire-supplied secret of the
+    %% wrong length crashes the caller instead of failing authentication.
+    ?assertNot(bondy_wamp_cra:compare(<<"abc">>, <<"abcd">>)),
+    ?assertNot(bondy_wamp_cra:compare(<<"abcd">>, <<"abc">>)),
+    ?assertNot(bondy_wamp_cra:compare(<<>>, <<"a">>)).

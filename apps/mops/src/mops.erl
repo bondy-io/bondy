@@ -546,19 +546,29 @@ safe_maps_get(K, Map) when is_binary(K) ->
     safe_maps_get(K, Map, '$error').
 
 
+%% Looks K up as a binary and, failing that, as an existing atom. Both
+%% misses take the same clause: whether the atom exists in the VM depends on
+%% unrelated code, so the outcome of a miss must not.
 safe_maps_get(K, Map, Default) when is_binary(K) ->
     case maps:find(K, Map) of
         {ok, Value} ->
             Value;
         error ->
-            try
-                maps:get(binary_to_existing_atom(K), Map)
-            catch
-                error:badarg when Default =/= '$error' ->
-                    Default;
-                error:badarg ->
-                    error({badkey, K})
-            end
+            safe_maps_get_atom(K, Map, Default)
+    end.
+
+
+safe_maps_get_atom(K, Map, Default) ->
+    Found =
+        try binary_to_existing_atom(K) of
+            Atom -> maps:find(Atom, Map)
+        catch
+            error:badarg -> error
+        end,
+    case Found of
+        {ok, Value} -> Value;
+        error when Default =/= '$error' -> Default;
+        error -> error({badkey, K})
     end.
 
 %% @private

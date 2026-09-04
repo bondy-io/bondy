@@ -169,7 +169,10 @@ assert_wamp_rawsocket_handshake(Port) ->
     ok = gen_tcp:send(Sock, <<16#7F, 15:4, 1:4, 0:8, 0:8>>),
     Result = gen_tcp:recv(Sock, 4, 5000),
     ok = gen_tcp:close(Sock),
-    ?assertEqual({ok, <<16#7F, 15:4, 1:4, 0:8, 0:8>>}, Result).
+    %% The client asks for 16 MiB (code 15); the reply carries the node's
+    %% harmonised 4 MiB ceiling (code 13, `RAW_MAX_LEN_CODE` in
+    %% `bondy_wamp_tcp_connection_handler`), not an echo of the request.
+    ?assertEqual({ok, <<16#7F, 13:4, 1:4, 0:8, 0:8>>}, Result).
 
 %% `/ping` comes from the `admin` service and replies 204 with no
 %% authentication (`bondy_admin_ping_http_handler:init/2`). Mirrors
