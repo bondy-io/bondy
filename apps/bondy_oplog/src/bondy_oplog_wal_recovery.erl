@@ -73,6 +73,9 @@ frame boundary.
     first_hlc := bondy_oplog_hlc:hlc() | undefined,
     last_hlc := bondy_oplog_hlc:hlc() | undefined,
     append_count := non_neg_integer(),
+    %% The largest own-origin seq in the retained WAL: the manifest's
+    %% record for the sealed segments, maxed with the head-segment scan.
+    max_seq := non_neg_integer(),
     idx_acc := bondy_oplog_wal_idx:accumulator(),
     consumer_offset := bondy_oplog_wal_state:consumer_offset(),
     truncated_bytes := non_neg_integer(),
@@ -290,6 +293,10 @@ build_result(Manifest, HeadInfo, CO, CleanedOrphans) ->
         first_hlc => maps:get(first_hlc, HeadInfo),
         last_hlc => maps:get(last_hlc, HeadInfo),
         append_count => maps:get(frame_count, HeadInfo),
+        max_seq => max(
+            bondy_oplog_wal_manifest:max_seq(Manifest),
+            maps:get(max_seq, HeadInfo)
+        ),
         idx_acc => maps:get(idx_acc, HeadInfo),
         consumer_offset => CO,
         truncated_bytes => maps:get(truncated_bytes, HeadInfo),
@@ -565,8 +572,8 @@ scan_loop_for_index(Fd, Off, Acc, BodyEnc) ->
                         )
                     of
                         {ok, Body} ->
-                            case decode_first_last_hlc(Body) of
-                                {ok, FirstHlc, LastHlc} ->
+                            case decode_frame_bounds(Body) of
+                                {ok, FirstHlc, LastHlc, _MaxSeq} ->
                                     Acc1 =
                                         bondy_oplog_wal_idx:note_indexed_frame(
                                             Acc, FirstHlc, LastHlc, Off
@@ -625,6 +632,7 @@ scan_loop_for_index(Fd, Off, Acc, BodyEnc) ->
     idx_interval :: pos_integer(),
     first_hlc :: bondy_oplog_hlc:hlc() | undefined,
     last_hlc :: bondy_oplog_hlc:hlc() | undefined,
+    max_seq = 0 :: non_neg_integer(),
     frame_count = 0 :: non_neg_integer(),
     skipped_frames = 0 :: non_neg_integer(),
     skipped_bytes = 0 :: non_neg_integer(),
@@ -752,6 +760,7 @@ head_result(Fd, SegId, LastValid, TruncatedBytes, S) ->
         last_valid_offset => LastValid,
         first_hlc => S#head_scan.first_hlc,
         last_hlc => S#head_scan.last_hlc,
+        max_seq => S#head_scan.max_seq,
         frame_count => S#head_scan.frame_count,
         frames_skipped => S#head_scan.skipped_frames,
         bytes_skipped => S#head_scan.skipped_bytes,
@@ -795,9 +804,9 @@ scan_with_header(Fd, Off, FrameLen, S) ->
 
 %% @private
 absorb_frame(Fd, Off, FrameLen, Body, S) ->
-    case decode_first_last_hlc(Body) of
-        {ok, FirstHlc, LastHlc} ->
-            S1 = accept_frame(Off, FrameLen, FirstHlc, LastHlc, S),
+    case decode_frame_bounds(Body) of
+        {ok, FirstHlc, LastHlc, MaxSeq} ->
+            S1 = accept_frame(Off, FrameLen, FirstHlc, LastHlc, MaxSeq, S),
             scan_head_loop(Fd, Off + FrameLen, S1);
         {error, Reason} ->
             %% CRC-clean but body isn't a well-formed batch list. Strict
@@ -807,7 +816,7 @@ absorb_frame(Fd, Off, FrameLen, Body, S) ->
     end.
 
 %% @private
-accept_frame(Off, FrameLen, FirstHlc, LastHlc, S) ->
+accept_frame(Off, FrameLen, FirstHlc, LastHlc, MaxSeq, S) ->
     IdxAcc = bondy_oplog_wal_idx:note_frame(
         S#head_scan.idx_acc, FirstHlc, LastHlc, Off, FrameLen
     ),
@@ -821,6 +830,7 @@ accept_frame(Off, FrameLen, FirstHlc, LastHlc, S) ->
     S#head_scan{
         first_hlc = pick_first_hlc(S#head_scan.first_hlc, FirstHlc),
         last_hlc = LastHlc,
+        max_seq = max(S#head_scan.max_seq, MaxSeq),
         frame_count = S#head_scan.frame_count + 1,
         idx_acc = IdxAcc,
         accepted_rev = AcceptedRev
@@ -1337,12 +1347,16 @@ read_and_decode_frame_body(Fd, Off, FrameLen, BodyEnc) ->
     end.
 
 %% @private
-%% Decodes the first and last events' HLCs out of an already-CRC-
-%% verified body. Used by both the head-scan path (to populate
-%% `head_scan.first_hlc` / `last_hlc`) and the sealed-segment index
-%% rebuild path (`scan_loop_for_index/4`). The decoded events are not
-%% retained — only the two HLCs survive — so the cost is bounded by
-%% the term-decode itself.
+%% Decodes the first and last events' HLCs and the batch's largest seq
+%% out of an already-CRC-verified body. Used by both the head-scan path
+%% (to populate `head_scan.first_hlc` / `last_hlc` / `max_seq`) and the
+%% sealed-segment index rebuild path (`scan_loop_for_index/4`, which
+%% ignores the seq — the manifest already records it for sealed
+%% segments). The decoded events are not retained — only the two HLCs
+%% and one integer survive — so the cost is bounded by the term-decode
+%% itself. Every event in this WAL carries the writer's own origin
+%% (the segment header is verified against it), so the batch maximum
+%% is the own-origin maximum.
 %%
 %% Deliberately NOT `[safe]`. The threat it nominally covered — atom-table
 %% exhaustion via a crafted term — needs an attacker who can write this
@@ -1354,7 +1368,7 @@ read_and_decode_frame_body(Fd, Off, FrameLen, BodyEnc) ->
 %% it as TRUNCATION — silently discarding every frame after it. Peer-shipped
 %% bytes are decoded under `[safe]` at the wire boundary (`C-2`), where the
 %% control actually applies.
-decode_first_last_hlc(Body) ->
+decode_frame_bounds(Body) ->
     try binary_to_term(Body) of
         [_ | _] = Events ->
             try
@@ -1364,7 +1378,11 @@ decode_first_last_hlc(Body) ->
                 LastHlc = bondy_oplog_event:key_hlc(
                     bondy_oplog_event:key(lists:last(Events))
                 ),
-                {ok, FirstHlc, LastHlc}
+                MaxSeq = lists:max([
+                    bondy_oplog_event:key_seq(bondy_oplog_event:key(E))
+                 || E <- Events
+                ]),
+                {ok, FirstHlc, LastHlc, MaxSeq}
             catch
                 _:R -> {error, {bad_event, R}}
             end;

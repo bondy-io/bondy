@@ -197,7 +197,14 @@ grant and backup administration off a listener that declares only
 admin_api_routes(Listener) ->
     Scheme = scheme(maps:get(transport, Listener)),
     Spec = bondy_http_gateway_api_spec_parser:parse(admin_spec()),
-    ok = maybe_init_groups(maps:get(~"realm_uri", Spec)),
+    %% Reads the store only to compile — `dispatch_table/2` consults the
+    %% realm table to drop routes whose realm is absent — and writes nothing.
+    %% The admin API's RBAC groups used to be provisioned from here, which
+    %% made building the EARLY `admin` listener's table a durable write; they
+    %% are provisioned by `apply_config/0` on the durable boot path instead
+    %% (`do_apply_config/0`). On a degraded boot this carrier is not asked
+    %% for routes at all (`bondy_http_services:specification_routes/3`).
+    %%
     %% No base routes: the service route sets in `bondy_http_services' supply
     %% those, and each is mounted by naming its own service.
     Tables = bondy_http_gateway_api_spec_parser:dispatch_table([Spec], []),
@@ -497,6 +504,14 @@ note_spec_change(
 -spec do_apply_config() -> ok | no_return().
 
 do_apply_config() ->
+    %% The built-in admin API's declarative half: the two RBAC groups its
+    %% spec authorises against, ensured on its realm on every boot that takes
+    %% the durable path (`bondy_app:configure_services/0` calls
+    %% `apply_config/0` before any listener starts). A durable write, so it
+    %% belongs here and NOT in `admin_api_routes/1`, which the early
+    %% listeners build on a degraded boot as well.
+    AdminSpec = bondy_http_gateway_api_spec_parser:parse(admin_spec()),
+    ok = init_groups(maps:get(~"realm_uri", AdminSpec)),
     case bondy_config:get([api_gateway, config_file], undefined) of
         undefined -> ok;
         FName -> do_apply_config(FName)
@@ -556,7 +571,7 @@ load_spec(Map, Opts) when is_map(Map) ->
     case validate_spec(Map) of
         {ok, #{~"id" := Id} = Spec} ->
             %% We store the source specification, see add/2 for an explanation
-            ok = maybe_init_groups(maps:get(~"realm_uri", Spec)),
+            ok = init_groups(maps:get(~"realm_uri", Spec)),
             store_spec(Id, Map, Opts);
         {error, Reason} ->
             ?LOG_ERROR(#{
@@ -741,31 +756,11 @@ scheme(tls) -> ~"https";
 scheme(_) -> ~"http".
 
 %% @private
-%% `dispatch_table/2` returns `[{'_', Routes}]` groups; a carrier contributes a
-%% flat route list, so unwrap.
-maybe_init_groups(RealmUri) ->
-    %% A durable provisioning write. On a degraded boot (`main` failed to
-    %% open) it must be skipped rather than raise: this runs from
-    %% `admin_api_routes/1` while the EARLY listeners build their dispatch
-    %% tables, and those listeners are exactly the ones that must come up to
-    %% serve `/ready` and `/metrics` on a degraded node (see
-    %% `bondy_degraded_boot_SUITE`). On the runtime `load_spec/2` path the
-    %% subsequent durable store write fails with its own error anyway.
-    case bondy_namespace_catalog:main_status() of
-        open ->
-            init_groups(RealmUri);
-        Status ->
-            ?LOG_WARNING(#{
-                description =>
-                    "Skipping API Gateway group provisioning; the durable "
-                    "main database is not open.",
-                main_status => Status,
-                realm_uri => RealmUri
-            }),
-            ok
-    end.
-
-%% @private
+%% Ensures the two RBAC groups every gateway spec's authorisation refers to
+%% exist on `RealmUri`. Idempotent (lookup, then add). Writes the durable
+%% store, so every caller is on a path where `main` is open: `do_apply_config/0`
+%% (boot, durable path) and `load_spec/2` (a runtime spec load, which writes
+%% the spec itself right after).
 init_groups(RealmUri) ->
     Gs = [
         #{

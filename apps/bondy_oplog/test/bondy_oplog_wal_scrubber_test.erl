@@ -45,11 +45,17 @@ setup() ->
 %% a row to update. Without this the scrubber's registry lookup
 %% returns `undefined` and the run is a no-op. The instance gen_server
 %% would populate these fields in a full subtree start; the scrubber
-%% only reads `wal_pid`, so the other slots can carry sentinel values.
+%% only reads `wal_pid`, so the other slots can carry sentinel values —
+%% except `instance_pid`, which the WAL writer CALLS at its own `init/1`
+%% (`bondy_oplog_instance:seed_seq/2`, before it publishes `wal_pid`). The
+%% test process cannot stand in for it: it is blocked in `start_link/2`
+%% while the writer initialises, so the call would deadlock until the
+%% `proc_lib` timeout. The stub is therefore a process that answers every
+%% `gen_server:call` with `ok`.
 register_stub(InstanceId) ->
     bondy_oplog_registry:register(#{
         instance_id => InstanceId,
-        instance_pid => self(),
+        instance_pid => spawn(fun instance_stub/0),
         origin => origin(),
         mst => undefined,
         watermark => undefined,
@@ -84,16 +90,34 @@ cleanup(_) ->
 %% `list/0` and `down/0` partition the rows between them — `list/0` takes the
 %% live and the `undefined`, `down/0` takes the dead — so together they see
 %% every row whatever state its pid is in, and this needs no assumption about
-%% when the test processes died.
+%% when the test processes died. The stub instance process (see
+%% `register_stub/1`) is killed with its row.
 drop_stub_rows() ->
     Ids = bondy_oplog_registry:list() ++ bondy_oplog_registry:down(),
     lists:foreach(
-        fun(Id) -> ok = bondy_oplog_registry:unregister(Id) end,
+        fun(Id) ->
+            _ =
+                case bondy_oplog_registry:instance_pid(Id) of
+                    Pid when is_pid(Pid) -> exit(Pid, kill);
+                    _ -> ok
+                end,
+            ok = bondy_oplog_registry:unregister(Id)
+        end,
         [Id || Id <- Ids, is_stub_id(Id)]
     ).
 
 is_stub_id(<<"scrubber-test-", _/binary>>) -> true;
 is_stub_id(_) -> false.
+
+%% The stand-in for the instance gen_server: acknowledges every call.
+instance_stub() ->
+    receive
+        {'$gen_call', From, _} ->
+            gen_server:reply(From, ok),
+            instance_stub();
+        _ ->
+            instance_stub()
+    end.
 
 scrubber_test_() ->
     {setup, fun setup/0, fun cleanup/1, [

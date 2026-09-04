@@ -320,6 +320,14 @@ wal_dir_for_this_db() ->
     filename:join(["/tmp", "bondy_oplog_wal", os:getpid(), atom_to_list(?DB)]).
 
 rmrf(Dir) ->
+    %% An instance id names ONE directory (`<Db>-<Shard>`), so a DB's
+    %% instances are SIBLINGS rather than children of `<Db>/`. Removing `Dir`
+    %% alone therefore leaves their WAL behind, and the next case in the
+    %% module reads the previous case's rows.
+    _ = [
+        file:del_dir_r(P)
+     || P <- filelib:wildcard(unicode:characters_to_list(Dir) ++ "-*")
+    ],
     case file:del_dir_r(Dir) of
         ok -> ok;
         {error, enoent} -> ok;

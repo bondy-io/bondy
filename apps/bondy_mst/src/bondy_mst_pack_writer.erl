@@ -938,6 +938,11 @@ load_or_create_manifest(Dir, InstanceId, HashAlgo) ->
                 {error, _} = E -> E
             end;
         {error, _} = E ->
+            %% Already classified as `{unreadable, Path, Reason}` by
+            %% `bondy_mst_pack_manifest:read/1`. An unreadable manifest must
+            %% NOT fall through to the `enoent` branch above and be replaced
+            %% with a fresh one: the directory may still hold sealed packs
+            %% that the replacement would orphan.
             E
     end.
 

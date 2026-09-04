@@ -264,6 +264,16 @@ open(Algo, _Opts) ->
 %% `{pack_store_open, _}` directly. Telemetry for the recovery event
 %% (design §13) is emitted from here so it carries the caller's
 %% instance_id even when the writer was unable to materialise one.
+%%
+%% A manifest error — `{manifest, {unreadable, Path, Reason}}` — is
+%% deliberately NOT routed into `bondy_mst_pack_recovery`, and routing it
+%% there would not help: `recover/3` opens with
+%% `bondy_mst_pack_manifest:read/1`, the very call that just failed, so it
+%% returns the same error one frame deeper. Recovery reconciles the
+%% `incoming.pack` file against a manifest it can read; it cannot
+%% reconstruct one. An unreadable manifest is an operator-visible fault by
+%% design — the alternative, silently starting from a fresh manifest, would
+%% orphan every sealed pack in the directory.
 open_writer(Dir, InstanceId, WriterOpts, Cfg) ->
     case bondy_mst_pack_writer:open(Dir, WriterOpts) of
         {ok, W} ->

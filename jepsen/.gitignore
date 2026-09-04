@@ -5,6 +5,9 @@
 jepsen.bondymst/target/
 jepsen.bondymst/.cpcache/
 jepsen.bondymst/bondy_mst_jepsen_release-*.tar.gz
+jepsen.bondy/target/
+jepsen.bondy/.cpcache/
+jepsen.bondy/bondy-*.tar.gz
 
 # Leiningen / nREPL transient state.
 .lein-failures
@@ -18,6 +21,7 @@ pom.xml.asc
 # `latest/` and `current/` point inside this tree; ignoring the parent
 # covers them.
 jepsen.bondymst/store/
+jepsen.bondy/store/
 
 # Locally-captured run artefacts (logs, history.edn, latency graphs).
 # Useful when working on a problem; not source. If a specific run

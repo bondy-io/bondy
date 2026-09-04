@@ -25,6 +25,10 @@ network listeners, and tearing them down gracefully on stop.
 
 -ifdef(TEST).
 -export([peer_plane_gate/1]).
+%% The degraded-boot branch cannot be reached through `start/2` without a
+%% real storage substrate and a poisoned data directory; exposing the
+%% dispatch lets the branch be pinned directly.
+-export([start_services/1]).
 -endif.
 
 %% =============================================================================
@@ -52,18 +56,25 @@ balancer and a dashboard cannot disagree about the same node.
 
 Three independent conditions, each read from exactly one source:
 
-1. **Boot finished.** `start/2` sets the status once the listeners are up.
-   Necessary but not sufficient — it is set unconditionally.
+1. **Boot finished.** `start_normal_listeners/0` sets the status to `ready`
+   once the client listeners are up. On a degraded boot
+   (`start_services(failed)`) that step never runs, so the status stays
+   `initialising`.
 2. **The durable `main` DB opened.** Read from
-   `bondy_namespace_catalog:main_status/0`, NOT from the alarm that mirrors it.
-   The status is `persistent_term`-backed and survives an
-   `alarm_handler` crash; the alarm does not, because
-   `bondy_event_handler_watcher` re-installs the handler with `[]` and
-   `bondy_alarm_handler:init/1` then starts empty. Only `failed` disqualifies:
-   `idle` means there was nothing to provision, a legitimate configuration.
+   `bondy_namespace_catalog:main_status/0`, NOT from the alarm that mirrors
+   it: the status is `persistent_term`-backed and survives an
+   `alarm_handler` crash, the alarm set does not (`bondy_event_handler_watcher`
+   re-installs the handler with `[]` and `bondy_alarm_handler:init/1` then
+   starts empty). Only `failed` disqualifies; `idle` means there was nothing
+   to provision, a legitimate configuration.
 3. **No alarm asks for the node to be drained.** Any active alarm carrying
    `affects_ready => true`. This is a per-alarm declaration and not a severity
    threshold — see `bondy_alarm_handler`.
+
+A degraded boot fails the first two conditions; the second is what keeps the
+answer right should boot ever be allowed to complete on a failed store.
+Pinned end-to-end by `bondy_degraded_boot_SUITE` (a poisoned `main`
+directory and a healthy control node).
 """.
 -spec is_ready() -> boolean().
 
@@ -148,44 +159,7 @@ start(_Type, Args) ->
                 ok ?= bondy_sysmon_handler:add_handler(),
                 ok ?= bondy_router_worker:start_pool(),
                 ok ?= setup_event_handlers(),
-                ok ?= configure_services(),
-                ok ?= init_registry_indices(),
-                ok ?= setup_wamp_subscriptions(),
-                ok ?= start_early_listeners(),
-                %% Started BEFORE the normal-phase listeners bind: a listener
-                %% declaring the `mcp' service must not accept a request
-                %% while the application that answers it is down. And not in
-                %% the early phase either — an MCP endpoint has nothing to
-                %% say before the router is ready.
-                {ok, _} = application:ensure_all_started(bondy_mcp, permanent),
-                %% Finally we allow clients to connect
-                ok ?= start_normal_listeners(),
-                {ok, _} = application:ensure_all_started(
-                    bondy_http_connector, permanent
-                ),
-                %% Realm inheritance is a router concept and bondy_mail sits
-                %% below the router in the dependency graph, so it is told
-                %% which module resolves a realm's prototype rather than
-                %% calling into one directly.
-                ok = application:set_env(
-                    bondy_mail, realm_module, bondy_realm
-                ),
-                ok = application:set_env(
-                    bondy_mail, master_realm_uri, ?MASTER_REALM_URI
-                ),
-                %% Dormant unless a `mail.relay.*` is configured: it starts,
-                %% supervises nothing, and the bondy.mail.* procedures report
-                %% that mail is not configured.
-                {ok, _} = application:ensure_all_started(
-                    bondy_mail, permanent
-                ),
-                %% Started here as well as by the release boot script, so that
-                %% it also runs under CT and `rebar3 shell`. Every bridge
-                %% defaults to disabled, so this starts a manager with no
-                %% subscribers unless one is configured.
-                {ok, _} = application:ensure_all_started(
-                    bondy_broker_bridge, permanent
-                ),
+                ok ?= start_services(bondy_namespace_catalog:main_status()),
                 {ok, Pid}
             else
                 {error, _} = Error ->
@@ -385,6 +359,83 @@ partisan_peer_ip() ->
     application:get_env(partisan, peer_ip, undefined).
 
 %% @private
+%% Brings up everything above the storage substrate, in one of two shapes
+%% depending on whether the durable `main` DB opened.
+%%
+%% `failed` is the degraded boot. `bondy_namespace_catalog:open_main_into/1`
+%% deliberately keeps the catalogue alive on a main-DB open failure so an
+%% operator can inspect the node, and `bondy_admin_ready_http_handler` already
+%% answers 503 for as long as `main_status/0` is `failed`. Terminating the
+%% application here would take that whole diagnostic surface down with it —
+%% which is what used to happen: `configure_services/0` raises
+%% `bondy_realm_table_unavailable` on its first `bondy_realm:get/1`, escaping
+%% `start/2` and killing the VM.
+%%
+%% The degraded path therefore starts exactly what serves the liveness and
+%% readiness probes, and nothing else. That is the rule for where a new boot
+%% step belongs — NOT "does it touch durable tables", which is not true of
+%% every step skipped here: `init_registry_indices/0` rebuilds from the
+%% registry tables, which are provisioned independently of `main` and can be
+%% healthy while it is not. A node serving no traffic simply has no use for
+%% them.
+%%
+%% So the degraded path starts the early listeners and stops. Those serve
+%% `/ping` and `/ready`, and `bondy_config:get(status)` is left at
+%% `initialising` because only `start_normal_listeners/0` promotes it to
+%% `ready` — so the readiness probe reports NOT READY on both of its
+%% conditions, and no client listener ever opens.
+start_services(failed) ->
+    ?LOG_ERROR(#{
+        description =>
+            "The durable main store is unavailable, so the node is booting "
+            "in a degraded state: no realms are configured and no client "
+            "listeners are started. Only the early-phase listeners come up, "
+            "so the node stays inspectable and reports NOT READY. Resolve "
+            "the main-store failure and restart.",
+        main_status => failed
+    }),
+    start_early_listeners();
+start_services(_) ->
+    maybe
+        ok ?= configure_services(),
+        ok ?= init_registry_indices(),
+        ok ?= setup_wamp_subscriptions(),
+        ok ?= start_early_listeners(),
+        %% Started BEFORE the normal-phase listeners bind: a listener
+        %% declaring the `mcp' service must not accept a request while the
+        %% application that answers it is down. And not in the early phase
+        %% either — an MCP endpoint has nothing to say before the router is
+        %% ready, and a degraded boot (`start_services(failed)`) never gets
+        %% here.
+        {ok, _} = application:ensure_all_started(bondy_mcp, permanent),
+        %% Finally we allow clients to connect
+        ok ?= start_normal_listeners(),
+        {ok, _} = application:ensure_all_started(
+            bondy_http_connector, permanent
+        ),
+        %% Realm inheritance is a router concept and bondy_mail sits
+        %% below the router in the dependency graph, so it is told
+        %% which module resolves a realm's prototype rather than
+        %% calling into one directly.
+        ok = application:set_env(bondy_mail, realm_module, bondy_realm),
+        ok = application:set_env(
+            bondy_mail, master_realm_uri, ?MASTER_REALM_URI
+        ),
+        %% Dormant unless a `mail.relay.*` is configured: it starts,
+        %% supervises nothing, and the bondy.mail.* procedures report
+        %% that mail is not configured.
+        {ok, _} = application:ensure_all_started(bondy_mail, permanent),
+        %% Started here as well as by the release boot script, so that
+        %% it also runs under CT and `rebar3 shell`. Every bridge
+        %% defaults to disabled, so this starts a manager with no
+        %% subscribers unless one is configured.
+        {ok, _} = application:ensure_all_started(
+            bondy_broker_bridge, permanent
+        ),
+        ok
+    end.
+
+%% @private
 configure_services() ->
     ok = bondy_message_id:init(),
 
@@ -487,10 +538,12 @@ setup_event_handlers() ->
     ),
 
     %% We replace the default OTP alarm handler with ours. The old handler's
-    %% terminate arg must be `swap` — that is the clause that returns
-    %% `{alarm_handler, Alarms}` for the new handler's init to adopt
-    %% (sasl/alarm_handler.erl); `normal` made it return `ok`, silently
-    %% dropping every alarm raised before this point in the boot.
+    %% terminate argument must be `swap`: that is the clause of
+    %% `sasl/src/alarm_handler.erl:terminate/2` that returns
+    %% `{alarm_handler, Alarms}` for the new handler's `init/1` to adopt.
+    %% `normal` returns `ok`, silently dropping every alarm raised before
+    %% this point in the boot — `bondy_db_main_unavailable` among them, which
+    %% the namespace catalogue raises from its own `init/1` under `bondy_sup`.
     _ = bondy_event_manager:swap_watched_handler(
         alarm_handler, {alarm_handler, swap}, {bondy_alarm_handler, []}
     ),
@@ -503,7 +556,7 @@ setup_event_handlers() ->
     %% Metrics no longer ride the gen_event bus: bondy_prometheus (in
     %% bondy_telemetry_exporter, whose start runs its setup) declares
     %% families, attaches telemetry sinks and registers the Prometheus
-    %% collectors. Started HERE — like bondy_mcp below, also by the
+    %% collectors. Started HERE — like bondy_mcp in `start_services/1`, also by the
     %% release boot script so it runs under CT and `rebar3 shell` too —
     %% because the sinks must attach before any listener binds: the
     %% socket/session gauges pair open/close deltas, so an open missed

@@ -84,6 +84,13 @@ init(InstanceId, Opts) when is_binary(InstanceId), is_map(Opts) ->
         error ->
             {error, {missing_option, path}};
         {ok, BaseDir} ->
+            %% An instance id is ONE component — `/` is refused at
+            %% admission (`bondy_oplog_path:validate_instance_id/1`) — so
+            %% this composes correctly with the `dirname(InstanceDir)` the
+            %% caller passes as `path`. While ids nested, that pair produced
+            %% a DOUBLED segment: `.../main/realm/main/realm/7/`. The pair is
+            %% driven end-to-end by `bondy_oplog_path_test:
+            %% checkpoint_dir_lands_inside_the_instance_dir_test_/0`.
             Dir = filename:join(BaseDir, InstanceId),
             File = filename:join(Dir, "checkpoint.etf"),
             ok = filelib:ensure_dir(File),

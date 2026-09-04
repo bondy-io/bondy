@@ -126,6 +126,79 @@ reopen_with_different_instance_id_test() ->
         )
     end).
 
+%% An unreadable manifest is reported with the path of the offending file.
+%% Before this was classified, the raise carried only the bare I/O reason —
+%% `{manifest, {4, file_io_server, invalid_unicode}}` — which names neither
+%% the instance nor the file, and that is the whole of what an operator sees
+%% when a node fails to boot on it.
+reopen_with_unreadable_manifest_names_the_file_test() ->
+    with_tmp_dir(fun(Dir) ->
+        S = open_store(Dir),
+        ok = bondy_mst_store:close(S),
+        Path = bondy_mst_pack_manifest:path(Dir),
+        %% A byte that `file:consult/1` rejects as invalid UTF-8 — the exact
+        %% shape the `~p` encoder used to write for a printable-latin1 root.
+        ok = file:write_file(
+            Path, <<"{manifest_version, 1}.\n{x, \"", 233, "\"}.\n">>
+        ),
+        ?assertError(
+            {pack_store_open, {manifest, {unreadable, Path, _}}},
+            bondy_mst_store:open(bondy_mst_pack_store, sha256, opts(Dir))
+        )
+    end).
+
+%% A missing manifest is NOT the same case: it is a fresh instance and must
+%% open cleanly. This pins the `enoent` branch that the classification above
+%% must not swallow.
+reopen_with_missing_manifest_starts_fresh_test() ->
+    with_tmp_dir(fun(Dir) ->
+        S = open_store(Dir),
+        ok = bondy_mst_store:close(S),
+        ok = file:delete(bondy_mst_pack_manifest:path(Dir)),
+        S2 = open_store(Dir),
+        ok = bondy_mst_store:close(S2)
+    end).
+
+%% The claim that justifies NOT routing a manifest error into recovery:
+%% `bondy_mst_pack_recovery:recover/3` opens by reading the manifest, so on an
+%% unreadable one it returns the same error rather than repairing anything.
+%% If this ever stops being true, the routing decision in
+%% `bondy_mst_pack_store:open_writer/4` should be revisited.
+%%
+%% It also pins the SECOND of the three doors into
+%% `bondy_mst_pack_manifest:read/1`. Classifying at one caller left this one
+%% (reachable from `bondy_mst_pack_store:recover_and_retry/4`) still emitting
+%% the bare reason for an identical file and cause.
+recovery_cannot_repair_an_unreadable_manifest_test() ->
+    with_tmp_dir(fun(Dir) ->
+        S = open_store(Dir),
+        ok = bondy_mst_store:close(S),
+        Path = bondy_mst_pack_manifest:path(Dir),
+        ok = file:write_file(
+            Path, <<"{manifest_version, 1}.\n{x, \"", 233, "\"}.\n">>
+        ),
+        ?assertMatch(
+            {error, {manifest, {unreadable, Path, _}}},
+            bondy_mst_pack_recovery:recover(Dir, <<"pack-store-test">>, sha256)
+        )
+    end).
+
+%% The third door. It has no `src` caller today, which is exactly why it would
+%% have drifted unnoticed.
+reader_reports_an_unreadable_manifest_with_its_path_test() ->
+    with_tmp_dir(fun(Dir) ->
+        S = open_store(Dir),
+        ok = bondy_mst_store:close(S),
+        Path = bondy_mst_pack_manifest:path(Dir),
+        ok = file:write_file(
+            Path, <<"{manifest_version, 1}.\n{x, \"", 233, "\"}.\n">>
+        ),
+        ?assertMatch(
+            {error, {manifest, {unreadable, Path, _}}},
+            bondy_mst_pack_reader:open(Dir)
+        )
+    end).
+
 %% =============================================================================
 %% put / get / has
 %% =============================================================================

@@ -134,6 +134,7 @@ A catalogue entry: the fixed attributes of an error type.
 -export([catalogue/1]).
 -export([format/1]).
 -export([format_error/2]).
+-export([format_term/1]).
 -export([from_exception/3]).
 -export([from_term/1]).
 -export([internal/1]).
@@ -142,6 +143,7 @@ A catalogue entry: the fixed attributes of an error type.
 -export([new/1]).
 -export([new/2]).
 -export([sanitise/1]).
+-export([to_binary/1]).
 -export([to_log_map/1]).
 -export([to_map/1]).
 -export([type_of_uri/1]).
@@ -933,7 +935,7 @@ to_causes(_) ->
     [].
 
 %% =============================================================================
-%% PRIVATE: RENDERING
+%% RENDERING
 %% =============================================================================
 
 %% @private
@@ -978,10 +980,28 @@ substitute(Key, Details) ->
         error -> <<"%{", Key/binary, "}">>
     end.
 
-%% @private
-%% Renders any term as text. The `t' modifier and unicode:characters_to_binary/1
-%% are both required: `~p' of a term holding characters above U+00FF yields a
-%% list iolist_to_binary/1 cannot accept.
+-doc """
+Renders any term as a single line of text that is safe to put in an error
+message destined for JSON.
+
+Three things make it safe, and all three are required:
+
+- `~0tp` keeps the rendering on one line and unicode-aware. Plain `~p` wraps
+  wide terms across lines, which then appear as newlines inside a JSON string.
+- `unicode:characters_to_binary/1` re-encodes the codepoints as UTF-8. Without
+  it, `~p` renders a binary whose bytes form a printable latin-1 run as
+  `<<"...">>` with those bytes verbatim, and `json:encode/1` raises
+  `invalid_byte` on the result. The `~0w` fallback covers a term holding
+  characters above U+00FF, which yields a list `iolist_to_binary/1` cannot
+  accept.
+- The result is truncated, so an unbounded term (an upstream response body,
+  say) cannot be amplified into an arbitrarily large error payload.
+
+Prefer this over calling `io_lib:format/2` at the call site: it is the single
+place that knows all three constraints.
+""".
+-spec format_term(Term :: any()) -> binary().
+
 format_term(Term) ->
     Chars = io_lib:format("~0tp", [Term]),
     case unicode:characters_to_binary(Chars) of
@@ -1011,9 +1031,25 @@ trim_to_character_boundary(Bin) ->
 is_utf8(Bin) ->
     is_binary(unicode:characters_to_binary(Bin, utf8, utf8)).
 
-%% @private
-%% A binary that is not valid UTF-8 has no JSON string representation, so it is
-%% rendered rather than passed through.
+-doc """
+Converts `Term` to a binary that is valid UTF-8, and therefore placeable in
+a JSON string.
+
+A binary or char list that is not valid UTF-8 has no JSON string
+representation, so it is RENDERED (via `format_term/1`) rather than passed
+through — `json:encode/1` raises `invalid_byte` on such a binary, and an
+error path that raises while reporting an error loses the diagnostic
+entirely. Atoms, integers and floats convert directly; every other term
+is rendered.
+
+The UTF-8 gate is pinned by `bondy_error_test:to_map_scalars_are_utf8_test/0`
+(both the binary and the char-list clause) and by
+`bondy_gateway_error_utf8_test:non_utf8_expression/0`, which drives the HTTP
+gateway's real error path with a non-UTF-8 expression and asserts the body
+still encodes.
+""".
+-spec to_binary(Term :: term()) -> binary().
+
 to_binary(Term) when is_binary(Term) ->
     case is_utf8(Term) of
         true -> Term;

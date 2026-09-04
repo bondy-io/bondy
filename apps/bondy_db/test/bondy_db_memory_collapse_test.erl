@@ -86,11 +86,11 @@ one_instance_per_shard({_Db, Users, Groups}) ->
     ?assertEqual(Expected, Instances),
     ?assertEqual(
         [],
-        [I || I <- Instances, binary:match(I, <<"/users/">>) =/= nomatch]
+        [I || I <- Instances, binary:match(I, <<"-users-">>) =/= nomatch]
     ),
     ?assertEqual(
         [],
-        [I || I <- Instances, binary:match(I, <<"/groups/">>) =/= nomatch]
+        [I || I <- Instances, binary:match(I, <<"-groups-">>) =/= nomatch]
     ).
 
 %% An identical `(Realm, Key)` written to both tables holds independent state —
@@ -147,7 +147,7 @@ put_cell(Table, Realm, Key, Value) ->
     ok = bondy_db:apply(Table, Realm, Key, {set, bondy_db:tick(Table), Value}).
 
 db_instances() ->
-    Prefix = <<(atom_to_binary(?DB, utf8))/binary, "/">>,
+    Prefix = <<(atom_to_binary(?DB, utf8))/binary, "-">>,
     [
         I
      || I <- bondy_oplog:list_instances(),
@@ -156,7 +156,7 @@ db_instances() ->
 
 instance_id(Shard) ->
     iolist_to_binary([
-        atom_to_binary(?DB, utf8), $/, integer_to_binary(Shard)
+        atom_to_binary(?DB, utf8), $-, integer_to_binary(Shard)
     ]).
 
 key(I) ->

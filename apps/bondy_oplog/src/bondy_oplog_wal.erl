@@ -105,6 +105,14 @@ stateful-PropEr fault-injection harness are still to land.
     first_hlc :: bondy_oplog_hlc:hlc() | undefined,
     last_hlc :: bondy_oplog_hlc:hlc() | undefined,
     append_count :: non_neg_integer(),
+    %% The largest own-origin seq appended to this WAL, ever. Recovered on
+    %% open as `max(manifest max_seq, head-segment scan)` and persisted into
+    %% the manifest at every rotation, so the retained WAL's maximum is known
+    %% the moment the writer is open — before any reader has replayed a
+    %% frame. `init/1` hands it to the instance (`seed_seq/2`) BEFORE
+    %% publishing this pid: no writer can reserve a seq against a counter
+    %% that has not absorbed it.
+    max_seq :: non_neg_integer(),
     %% In-memory shadow of the on-disk manifest. Updated in place on
     %% rotation; flushed atomically via `bondy_oplog_wal_manifest:write/2`
     %% (tmp + datasync + rename + dir-fsync) so on-disk and in-memory
@@ -613,6 +621,7 @@ Current shape:
     first_hlc              => hlc() | undefined,
     last_hlc               => hlc() | undefined,
     append_count           => non_neg_integer(),
+    max_seq                => non_neg_integer(),
     fsync_mode             => per_write | batched,
     batched_fsync_interval => pos_integer(),
     batched_fsync_bytes    => pos_integer(),
@@ -820,6 +829,15 @@ init({InstanceId, Opts}) ->
                 undefined -> ok;
                 _ -> emit_recovery_telemetry(State, Duration, RecoveryResult)
             end,
+            %% The retained WAL's own-origin maximum reaches the instance's
+            %% seq counter BEFORE this pid is published. Every minter
+            %% resolves the WAL through the registry before it reserves a
+            %% seq, so the bump happens-before any reservation; the applier's
+            %% replay then has nothing left to seed, only to install
+            %% (`proofs/tla/SeqSeed_CkptEarlyMint.cfg` is the window this
+            %% closes). A WAL opened with no instance behind it (the library
+            %% API) has no counter to seed.
+            ok = seed_instance_seq(InstanceId, State#state.max_seq),
             ok = bondy_oplog_registry:set_wal_pid(InstanceId, self()),
             {ok, arm_retention_timer(State)};
         {error, Reason} ->
@@ -1280,6 +1298,7 @@ open_after_opts_validated(InstanceId, Origin, Opts) ->
                 retention = Retention,
                 segment_id = 0,
                 current_offset = ?SEG_HEADER_BYTES,
+                max_seq = 0,
                 append_count = 0,
                 idx_interval_bytes = IdxInterval,
                 idx_acc = bondy_oplog_wal_idx:new(IdxInterval),
@@ -1380,8 +1399,24 @@ open_or_recover(
     end.
 
 %% @private
+%% An instance id names ONE directory component: every instance passed
+%% `bondy_oplog_path:validate_instance_id/1` at admission
+%% (`bondy_oplog_instance_dyn_sup:start_instance/2`), which refuses `/`, so
+%% this join cannot turn the id into path structure. That check is what
+%% covers this call — `BaseDir` here is an explicit `wal_dir` or the `/tmp`
+%% default as often as it is a storage path, and only the latter goes
+%% through `bondy_oplog_path:storage_path/3`.
 per_instance_dir(BaseDir, InstanceId) ->
     filename:join(BaseDir, InstanceId).
+
+%% @private
+seed_instance_seq(_InstanceId, 0) ->
+    ok;
+seed_instance_seq(InstanceId, MaxSeq) ->
+    case bondy_oplog_registry:instance_pid(InstanceId) of
+        undefined -> ok;
+        Pid -> bondy_oplog_instance:seed_seq(Pid, MaxSeq)
+    end.
 
 %% @private
 %% Builds a `#state{}` from the recovery result and publishes the head
@@ -1397,6 +1432,7 @@ install_recovery(State0, Result) ->
         first_hlc := FirstHlc,
         last_hlc := LastHlc,
         append_count := N,
+        max_seq := MaxSeq,
         idx_acc := IdxAcc
     } = Result,
     HeadRef = atomics:new(2, [{signed, false}]),
@@ -1418,6 +1454,7 @@ install_recovery(State0, Result) ->
         first_hlc = FirstHlc,
         last_hlc = LastHlc,
         append_count = N,
+        max_seq = MaxSeq,
         manifest = Manifest,
         head_pos_ref = HeadRef,
         idx_acc = IdxAcc,
@@ -1725,7 +1762,9 @@ do_append_batch(State0, Events) ->
 %% `{ok, Entries, State, FrameLen}` (durability deferred to the caller),
 %% or `{wal_full, _}` / `{fatal, _, _}` / `{error, _}`.
 do_write_batch(#state{max_batch_bytes = MaxBatch} = State0, Events) ->
-    Hlcs = [bondy_oplog_event:key_hlc(bondy_oplog_event:key(E)) || E <- Events],
+    Keys = [bondy_oplog_event:key(E) || E <- Events],
+    Hlcs = [bondy_oplog_event:key_hlc(K) || K <- Keys],
+    BatchMaxSeq = lists:max([bondy_oplog_event:key_seq(K) || K <- Keys]),
     case is_strictly_increasing(Hlcs) of
         false ->
             {error, {invalid_batch, hlc_not_monotonic}};
@@ -1761,7 +1800,8 @@ do_write_batch(#state{max_batch_bytes = MaxBatch} = State0, Events) ->
                                         EncodedBody,
                                         Flags,
                                         FrameLen,
-                                        Hlcs
+                                        Hlcs,
+                                        BatchMaxSeq
                                     );
                                 {fatal, _, _} = Fatal ->
                                     Fatal;
@@ -1999,10 +2039,14 @@ open_next_segment(
 %% atomically rewrite the on-disk file. On success the new manifest is
 %% returned so the caller can install it in state.
 commit_rotation(
-    #state{manifest = M0, dir = Dir}, NewSegId, PrevSegmentFirstHlc
+    #state{manifest = M0, dir = Dir} = State, NewSegId, PrevSegmentFirstHlc
 ) ->
-    M1 = bondy_oplog_wal_manifest:with_current_segment(
-        M0, NewSegId, PrevSegmentFirstHlc
+    M1 = bondy_oplog_wal_manifest:with_max_seq(
+        bondy_oplog_wal_manifest:with_current_segment(
+            M0, NewSegId, PrevSegmentFirstHlc
+        ),
+        %% The segment being sealed holds nothing above this.
+        State#state.max_seq
     ),
     case bondy_oplog_wal_manifest:write(Dir, M1) of
         ok -> {ok, M1};
@@ -2035,7 +2079,8 @@ write_batch_frame(
     Body,
     Flags,
     FrameLen,
-    Hlcs
+    Hlcs,
+    BatchMaxSeq
 ) ->
     Frame = bondy_oplog_wal_frame:encode(Body, [{flags, Flags}]),
     case prim_file:write(Fd, Frame) of
@@ -2055,6 +2100,7 @@ write_batch_frame(
                 first_hlc = pick_first_hlc(State0#state.first_hlc, FirstHlc),
                 last_hlc = LastHlc,
                 append_count = State0#state.append_count + length(Hlcs),
+                max_seq = max(State0#state.max_seq, BatchMaxSeq),
                 idx_acc = Acc1,
                 bytes_total = State0#state.bytes_total + FrameLen,
                 last_append_at_ms = erlang:monotonic_time(millisecond)
@@ -2617,6 +2663,7 @@ build_info(#state{} = State) ->
         first_hlc => State#state.first_hlc,
         last_hlc => State#state.last_hlc,
         append_count => State#state.append_count,
+        max_seq => State#state.max_seq,
         fsync_mode => State#state.fsync_mode,
         batched_fsync_interval => State#state.batched_fsync_interval,
         batched_fsync_bytes => State#state.batched_fsync_bytes,

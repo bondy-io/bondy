@@ -3,13 +3,20 @@
 # NET_ADMIN so iptables-based partition nemeses work, and the control
 # container runs the Clojure / lein driver.
 
+# Nodes run the SAME Debian release as deployment/Dockerfile's runner stage
+# (`debian:trixie-slim`): the Bondy release jepsen.bondy installs carries an
+# erts built on the `erlang:29.x` image, whose binaries need trixie's glibc
+# (2.41) — on bookworm (2.36) `bin/validate-config` fails to load with
+# "GLIBC_2.38 not found". The bondy_mst shim (built on `erlang:27`, bookworm)
+# runs on trixie unchanged, glibc being backward compatible.
 x-node-common: &node-common
   networks:
     - jepsen
-  image: debian:bookworm
+  image: debian:trixie
   tty: true
   volumes:
     - ../jepsen.bondymst:/root/jepsen.bondymst
+    - ../jepsen.bondy:/root/jepsen.bondy
     - ./shared:/root/shared
   cap_add:
     - NET_ADMIN
@@ -24,6 +31,7 @@ services:
     tty: true
     volumes:
       - ../jepsen.bondymst:/root/jepsen.bondymst
+      - ../jepsen.bondy:/root/jepsen.bondy
       - ./shared:/root/shared
   n1:
     <<: *node-common

@@ -71,6 +71,43 @@ new_and_read_back_test() ->
         )
     end).
 
+%% The encoder writes a `file:consult/1` file, which is decoded as UTF-8.
+%% `instance_id` is any binary and `retention` any proplist, so both can put
+%% characters in 160..255 (or above) into the rendering; a byte-per-character
+%% conversion of that rendering (`iolist_to_binary/1`) writes bytes that are
+%% not valid UTF-8 and `read/1` then fails with `invalid_unicode` — the
+%% class that crash-looped production on 2026-09-02 through the MST manifest.
+%% Each case goes through the real write/read pair, not an in-memory parse.
+write_read_survives_high_bytes_test_() ->
+    Cases = [
+        {"instance id of printable latin-1 bytes",
+            list_to_binary(lists:seq(160, 191)), []},
+        {"instance id with one high byte", <<"inst-", 233>>, []},
+        {"instance id that is valid multi-byte UTF-8", <<"inst-é"/utf8>>, []},
+        {"retention value with a latin-1 atom", instance_id(), [
+            {policy, 'café'}
+        ]},
+        {"retention value with a wide atom", instance_id(), [{policy, '日本'}]},
+        {"retention value with a high-byte binary", instance_id(), [
+            {tag, <<200, 210, 220>>}
+        ]}
+    ],
+    [
+        {Label, fun() ->
+            with_dir(fun(Dir) ->
+                M0 = bondy_oplog_wal_manifest:new(Id, 0, Retention),
+                ?assertEqual(ok, bondy_oplog_wal_manifest:write(Dir, M0)),
+                {ok, M1} = bondy_oplog_wal_manifest:read(Dir),
+                %% byte-for-byte, not merely readable
+                ?assertEqual(Id, bondy_oplog_wal_manifest:instance_id(M1)),
+                ?assertEqual(
+                    Retention, bondy_oplog_wal_manifest:retention(M1)
+                )
+            end)
+        end}
+     || {Label, Id, Retention} <- Cases
+    ].
+
 rotation_updates_live_segments_test() ->
     with_dir(fun(Dir) ->
         M0 = bondy_oplog_wal_manifest:new(instance_id(), 0, []),

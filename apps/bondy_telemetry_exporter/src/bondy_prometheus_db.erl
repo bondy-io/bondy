@@ -1172,8 +1172,7 @@ alarms() ->
 node_ready() ->
     try bondy_app:is_ready() of
         true -> [{[], 1}];
-        false -> [{[], 0}];
-        _ -> []
+        false -> [{[], 0}]
     catch
         _:_ -> []
     end.

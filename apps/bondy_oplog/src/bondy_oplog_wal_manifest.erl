@@ -28,6 +28,7 @@ per line, for human debuggability:
 {deleted_through, 39}.
 {retention, [...]}.
 {scrubber_alerts, [{40, bad_crc}]}.
+{max_seq, 18342}.
 {schema_version, 1}.
 {created_at, 1715520000000}.
 {last_rotated_at, 1715522400000}.
@@ -59,6 +60,13 @@ a partial mix.
     deleted_through :: non_neg_integer(),
     retention = [] :: [{atom(), term()}],
     scrubber_alerts = [] :: [scrubber_alert()],
+    %% The largest own-origin seq ever appended to a SEALED segment.
+    %% Rewritten at every rotation (which is also when a segment seals),
+    %% so on open `max(max_seq, head-segment scan)` is the largest seq in
+    %% the retained WAL — the instance seeds its seq counter from it
+    %% before the writer publishes its pid. Absent in manifests written
+    %% before the field existed; read as 0.
+    max_seq = 0 :: non_neg_integer(),
     schema_version = 1 :: pos_integer(),
     created_at :: non_neg_integer(),
     last_rotated_at :: non_neg_integer()
@@ -82,6 +90,7 @@ a partial mix.
 -export([deleted_through/1]).
 -export([retention/1]).
 -export([scrubber_alerts/1]).
+-export([max_seq/1]).
 -export([created_at/1]).
 -export([last_rotated_at/1]).
 -export([with_current_segment/3]).
@@ -89,6 +98,7 @@ a partial mix.
 -export([with_deleted_through/2]).
 -export([with_retention/2]).
 -export([with_scrubber_alert/3]).
+-export([with_max_seq/2]).
 -export([without_scrubber_alert/2]).
 
 %% =============================================================================
@@ -208,6 +218,14 @@ pairs. Empty list when no segment is quarantined.
 -spec scrubber_alerts(t()) -> [scrubber_alert()].
 scrubber_alerts(#?MODULE{scrubber_alerts = A}) -> A.
 
+?DOC("""
+Returns the largest own-origin seq recorded for the sealed segments; `0`
+when none was recorded (fresh WAL, or a manifest written before the field
+existed).
+""").
+-spec max_seq(t()) -> non_neg_integer().
+max_seq(#?MODULE{max_seq = S}) -> S.
+
 ?DOC("Returns the manifest creation timestamp (ms since epoch).").
 -spec created_at(t()) -> non_neg_integer().
 created_at(#?MODULE{created_at = T}) -> T.
@@ -286,6 +304,16 @@ without_scrubber_alert(#?MODULE{scrubber_alerts = A} = M, SegmentId) when
 ->
     M#?MODULE{scrubber_alerts = lists:keydelete(SegmentId, 1, A)}.
 
+?DOC("""
+Records the largest own-origin seq appended so far. Monotone: a value
+below the recorded one is ignored.
+""").
+-spec with_max_seq(t(), non_neg_integer()) -> t().
+with_max_seq(#?MODULE{max_seq = Old} = M, Seq) when
+    is_integer(Seq), Seq >= 0
+->
+    M#?MODULE{max_seq = max(Old, Seq)}.
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
@@ -314,6 +342,8 @@ parse_terms(Terms) ->
         Retention = maps:get(retention, Map, []),
         ScrubberAlerts = maps:get(scrubber_alerts, Map, []),
         validate_scrubber_alerts(ScrubberAlerts),
+        MaxSeq = maps:get(max_seq, Map, 0),
+        validate_max_seq(MaxSeq),
         SchemaVersion = maps:get(schema_version, Map, 1),
         CreatedAt = maps:get(created_at, Map, 0),
         LastRotatedAt = maps:get(last_rotated_at, Map, CreatedAt),
@@ -325,6 +355,7 @@ parse_terms(Terms) ->
             deleted_through = DeletedThrough,
             retention = Retention,
             scrubber_alerts = ScrubberAlerts,
+            max_seq = MaxSeq,
             schema_version = SchemaVersion,
             created_at = CreatedAt,
             last_rotated_at = LastRotatedAt
@@ -379,6 +410,12 @@ validate_scrubber_alerts(V) ->
     throw({invalid, {invalid_scrubber_alerts, V}}).
 
 %% @private
+validate_max_seq(S) when is_integer(S), S >= 0 ->
+    ok;
+validate_max_seq(V) ->
+    throw({invalid, {invalid_max_seq, V}}).
+
+%% @private
 update_first_hlc(Live, SegmentId, FirstHlc) ->
     [
         case S of
@@ -403,31 +440,30 @@ format(#?MODULE{
     deleted_through = DeletedThrough,
     retention = Retention,
     scrubber_alerts = ScrubberAlerts,
+    max_seq = MaxSeq,
     schema_version = SchemaVersion,
     created_at = CreatedAt,
     last_rotated_at = LastRotatedAt
 }) ->
-    iolist_to_binary([
-        format_term({manifest_version, MV}),
-        format_term({instance_id, InstanceId}),
-        format_term({current_segment, CurrentSegment}),
-        format_term({live_segments, LiveSegments}),
-        format_term({deleted_through, DeletedThrough}),
-        format_term({retention, Retention}),
-        format_term({scrubber_alerts, ScrubberAlerts}),
-        format_term({schema_version, SchemaVersion}),
-        format_term({created_at, CreatedAt}),
-        format_term({last_rotated_at, LastRotatedAt})
+    %% `bondy_consult:encode/1` owns the byte encoding: one term per line,
+    %% UTF-8. `instance_id` is a caller-supplied binary and `retention` a
+    %% caller-supplied term, so both can carry bytes or characters that an
+    %% `iolist_to_binary/1` of the rendering would write as invalid UTF-8
+    %% and `file:consult/1` would then refuse. Pinned through disk by
+    %% `bondy_oplog_wal_manifest_test:write_read_survives_high_bytes_test_`.
+    bondy_consult:encode([
+        {manifest_version, MV},
+        {instance_id, InstanceId},
+        {current_segment, CurrentSegment},
+        {live_segments, LiveSegments},
+        {deleted_through, DeletedThrough},
+        {retention, Retention},
+        {scrubber_alerts, ScrubberAlerts},
+        {max_seq, MaxSeq},
+        {schema_version, SchemaVersion},
+        {created_at, CreatedAt},
+        {last_rotated_at, LastRotatedAt}
     ]).
-
-%% @private
-%% `~tw` writes the term as a single-line, deterministic, unicode-safe
-%% representation that round-trips cleanly through `file:consult/1`. We
-%% deliberately avoid `~p`'s pretty-printer — at max_live_segments the
-%% live_segments list wraps onto many lines, which complicates diffing
-%% manifests across versions.
-format_term(T) ->
-    io_lib:format("~tw.~n", [T]).
 
 %% @private
 write_and_sync(TmpPath, Bin) ->

@@ -119,6 +119,10 @@ mapping; an API spec's `status_codes` map overrides it. Examples:
 -ifdef(TEST).
 %% G-1: exposed for unit-testing the per-scheme fail-closed authorization logic.
 -export([is_authorized/3]).
+%% Exposed so the error body it builds can be driven directly: reaching it
+%% through a real request needs a live listener, a parsed API spec and a
+%% failing action.
+-export([mops_eval/3]).
 -endif.
 
 %% =============================================================================
@@ -1303,12 +1307,19 @@ mops_eval(Expr, Ctxt, Opts) ->
             throw(
                 bondy_error:to_map(
                     bondy_error:new(invalid_expression, #{
+                        %% Same message, built the same way, as
+                        %% `bondy_http_gateway_api_spec_parser:mops_eval/2`:
+                        %% each untrusted fragment is made UTF-8 on its own
+                        %% so the frame stays readable. `to_map/1` gates the
+                        %% assembled message again on its way out; that gate
+                        %% is what keeps a bad message OUT of the body, this
+                        %% is what keeps a good one readable.
                         message => iolist_to_binary([
                             <<"There was an error evaluating the MOPS ">>,
                             <<"expression '">>,
-                            Expr,
+                            bondy_error:to_binary(Expr),
                             "' with value '",
-                            io_lib:format("~p", [Term]),
+                            bondy_error:format_term(Term),
                             "'"
                         ]),
                         details => #{expression => Expr}

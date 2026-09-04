@@ -277,9 +277,7 @@ wal_base_dir(InstanceId, Opts) ->
                     Base = bondy_oplog_path:instance_dir(
                         InstanceId, BaseDir, Opts
                     ),
-                    filename:join(
-                        unicode:characters_to_binary(Base), <<"wal">>
-                    );
+                    bondy_oplog_path:wal_dir(Base);
                 error ->
                     %% Default tmp dir is namespaced by OS pid so a
                     %% fresh BEAM run does not inherit segments from
@@ -367,9 +365,7 @@ origin_persist_path(InstanceId, Opts) ->
     case maps:find(storage_path, Opts) of
         {ok, BaseDir} ->
             Base = bondy_oplog_path:instance_dir(InstanceId, BaseDir, Opts),
-            filename:join(
-                unicode:characters_to_binary(Base), <<"origin">>
-            );
+            bondy_oplog_path:origin_dir(Base);
         error ->
             undefined
     end.

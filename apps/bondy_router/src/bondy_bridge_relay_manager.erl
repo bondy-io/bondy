@@ -69,7 +69,6 @@ Bridges created through the API will only start on the receiving node.
 -export([code_change/3]).
 -export([handle_call/3]).
 -export([handle_cast/2]).
--export([handle_continue/2]).
 
 %% =============================================================================
 %% API
@@ -160,12 +159,26 @@ disable_bridge(Name) ->
     gen_server:call(?MODULE, {disable_bridge, Name}, timer:seconds(30)).
 
 -doc """
-Adds a bridge to the manager and optionally starts it.
+Boot-time entry point, called once by `bondy_app` on the durable boot path
+(`start_normal_listeners/0`), after the `main` store is known to be open.
 
-Options:
+Loads the bridges to manage — the `bridges` section of `bondy.conf` merged
+over the permanent bridges this node persisted through the API, the former
+overriding the latter — and then starts every enabled one.
 
-- `autostart :: boolean()` - if true and the add operation succeeded
-  the bridge will be immediately started.
+The load reads and writes the durable `bondy_bridge_relay` table, which is
+why it lives here and NOT in `init/1`: the manager is a `bondy_sup` child
+that comes up on every boot, including a degraded one where `main` failed
+to open (`bondy_namespace_catalog:open_main_into/1`). Reading the table
+then raises `bridge_relay_table_unavailable`, and a raise from `init/1` or
+its continuation crash-loops this manager into
+`reached_max_restart_intensity`, taking `bondy_sup` — and the node the
+catalogue deliberately left standing — down with it. On a degraded boot
+`bondy_app:start_services/1` never calls this, so the manager holds no
+bridges and touches no table. Exercised end-to-end by
+`bondy_degraded_boot_SUITE`.
+
+Replaces the manager's bridge set; it is not additive across calls.
 """.
 -spec start_bridges() -> ok.
 
@@ -195,75 +208,8 @@ stop_bridges() ->
 %% =============================================================================
 
 init([]) ->
-    Config = bondy_config:get(bridges, #{}),
-    {ok, #state{}, {continue, {add_bridges, Config}}}.
-
-handle_continue({add_bridges, Config}, State0) ->
-    try
-        {noreply, add_bridges(Config, State0)}
-    catch
-        error:bridge_relay_table_unavailable ->
-            %% The durable main DB failed to open, so the catalogue stood up
-            %% degraded (see `bondy_namespace_catalog:open_main_into/1`). A
-            %% raise here would crash-loop this manager into
-            %% `reached_max_restart_intensity` and take bondy_bridge_relay_sup
-            %% — and with it bondy_sup — down, bricking the very node the
-            %% catalogue deliberately left standing for inspection. Exercised
-            %% by `bondy_degraded_boot_SUITE`.
-            ?LOG_ERROR(#{
-                description =>
-                    "Skipping bridge-relay configuration; the durable "
-                    "store is unavailable. No bridges will run on this "
-                    "node until it is restarted with a working main "
-                    "database."
-            }),
-            {noreply, State0}
-    end.
-
-%% @private
-add_bridges(Config, State0) ->
-    %% Initialize all Bridges which have been configured via bondy.conf file
-    %% This is a map where the bridge name is the key and the value has an
-    %% almost valid structure but we calidate it again to set some defaults.
-    Transient = maps:fold(
-        fun(Name, Data, Acc) ->
-            %% The call to new can fail with a validation exception
-            Bridge = bondy_bridge_relay:new(Data#{name => Name}),
-            maps:put(Name, Bridge, Acc)
-        end,
-        #{},
-        Config
-    ),
-
-    %% We read all the known bridges previously created by the user using     %% bondy_bridge_relay_wamp_api and defined as permanent (and thus
-    %% peristed in the database).
-    AllPermanent = bondy_bridge_relay:list(),
-
-    %% We will only consider the bridges defined for this node as we do not
-    %% want to run a bridge per node in the cluster!
-    %% This is to be replaced by a leader election capability in the future
-    %% which will determine which node runs which bridge.
-    %% So at the moment we assume the edge router (bridge relay client) is
-    %% running in single node.
-    MyNodeStr = bondy_config:nodestring(),
-
-    Permanent = maps:from_list([
-        {Name, B}
-     || #{name := Name, nodestring := NodeStr} = B <- AllPermanent,
-        NodeStr =:= MyNodeStr
-    ]),
-
-    %% bondy.conf defined bridges override the previous permanent bridges
-    CommonKeys = maps:keys(maps:intersect(Permanent, Transient)),
-
-    %% We delete the previous definitions on store as bondy.conf bridges
-    %% override those in the store.
-    _ = [bondy_bridge_relay:remove(K) || K <- CommonKeys],
-
-    %% We merge overriding the common keys
-    Bridges = maps:merge(Permanent, Transient),
-
-    State0#state{bridges = Bridges}.
+    %% No store access here — see `start_bridges/0`.
+    {ok, #state{}}.
 
 handle_call({add_bridge, Data, Opts}, _From, State0) ->
     {Reply, State} = do_add_bridge(Data, Opts, State0),
@@ -290,7 +236,7 @@ handle_call({remove_bridge, Name}, _From, State0) ->
     {Reply, State} = do_remove_bridge(Name, State0),
     {reply, Reply, State};
 handle_call(start_bridges, _From, State0) ->
-    State = start_all(State0),
+    State = start_all(load_bridges(State0)),
     {reply, ok, State};
 handle_call({start_bridge, Name}, _From, State0) ->
     case maps:find(Name, State0#state.bridges) of
@@ -452,6 +398,57 @@ maybe_delete_from_store(#{restart := permanent, name := Name}) ->
     bondy_bridge_relay:remove(Name);
 maybe_delete_from_store(_) ->
     ok.
+
+%% @private
+%% The bridge set this node manages: `bondy.conf` bridges merged over the
+%% permanent bridges persisted for this node, the former overriding the
+%% latter (an overridden permanent bridge is removed from the store). Reads
+%% and writes the durable table — only reachable through `start_bridges/0`.
+load_bridges(State0) ->
+    Config = bondy_config:get(bridges, #{}),
+    %% Initialize all Bridges which have been configured via bondy.conf file
+    %% This is a map where the bridge name is the key and the value has an
+    %% almost valid structure but we calidate it again to set some defaults.
+    Transient = maps:fold(
+        fun(Name, Data, Acc) ->
+            %% The call to new can fail with a validation exception
+            Bridge = bondy_bridge_relay:new(Data#{name => Name}),
+            maps:put(Name, Bridge, Acc)
+        end,
+        #{},
+        Config
+    ),
+
+    %% We read all the known bridges previously created by the user using
+    %% bondy_bridge_relay_wamp_api and defined as permanent (and thus
+    %% persisted in the database).
+    AllPermanent = bondy_bridge_relay:list(),
+
+    %% We will only consider the bridges defined for this node as we do not
+    %% want to run a bridge per node in the cluster!
+    %% This is to be replaced by a leader election capability in the future
+    %% which will determine which node runs which bridge.
+    %% So at the moment we assume the edge router (bridge relay client) is
+    %% running in single node.
+    MyNodeStr = bondy_config:nodestring(),
+
+    Permanent = maps:from_list([
+        {Name, B}
+     || #{name := Name, nodestring := NodeStr} = B <- AllPermanent,
+        NodeStr =:= MyNodeStr
+    ]),
+
+    %% bondy.conf defined bridges override the previous permanent bridges
+    CommonKeys = maps:keys(maps:intersect(Permanent, Transient)),
+
+    %% We delete the previous definitions on store as bondy.conf bridges
+    %% override those in the store.
+    _ = [bondy_bridge_relay:remove(K) || K <- CommonKeys],
+
+    %% We merge overriding the common keys
+    Bridges = maps:merge(Permanent, Transient),
+
+    State0#state{bridges = Bridges}.
 
 start_all(State) ->
     maps:fold(

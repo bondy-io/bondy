@@ -77,9 +77,76 @@ encode_produces_consultable_terms_test() ->
     M = sample(),
     Bin = bondy_mst_pack_manifest:encode(M),
     %% Round-trip via consult-string semantics.
-    {ok, Terms} = string_to_terms(binary_to_list(Bin)),
+    {ok, Terms} = bin_to_terms(Bin),
     {ok, M2} = bondy_mst_pack_manifest:decode(Terms),
     ?assertEqual(M, M2).
+
+%% `current_root` is a raw sha256: any of its 32 bytes may land in
+%% 160..255. If the encoder renders such a binary as a printable latin-1
+%% string (`~p` does; `~tw` does not) the bytes go to disk verbatim and
+%% `file:consult/1` -- which decodes UTF-8 -- rejects the file with
+%% `{Line, file_io_server, invalid_unicode}`, which brings down every
+%% replica of the shard. Each root below is a falsifier for that defect:
+%% every one of them fails under `~p` and survives under `~tw`.
+%%
+%% This is the case `prop_encode_decode_roundtrip` cannot be relied on to
+%% reach: uniformly random 32-byte roots trip it only ~0.04% of the time
+%% (measured 21/50000), so at `numtests` 50 it would essentially never
+%% fire. These roots make it deterministic.
+high_byte_roots() ->
+    [
+        %% a full 32 bytes drawn from the latin-1 printable high range
+        list_to_binary(lists:seq(160, 191)),
+        list_to_binary(lists:seq(224, 255)),
+        %% one high byte embedded in an otherwise ASCII root
+        <<"0123456789abcdef0123456789abcde", 233>>,
+        <<233, "0123456789abcdef0123456789abcde">>,
+        %% a valid UTF-8 two-byte sequence: not a read failure but a
+        %% silent value change under `~p` (consult folds it to one
+        %% codepoint), so it pins byte-fidelity, not just readability
+        <<"0123456789abcdef0123456789abc", 195, 169, "f">>,
+        %% NBSP, the low edge of the printable high range
+        <<160:8, 0:248>>
+    ].
+
+encode_survives_high_byte_roots_test_() ->
+    [
+        {
+            lists:flatten(io_lib:format("root ~w", [Root])),
+            fun() ->
+                M = bondy_mst_pack_manifest:with_current_root(sample(), Root),
+                Bin = bondy_mst_pack_manifest:encode(M),
+                ?assertMatch({ok, _}, bin_to_terms(Bin)),
+                {ok, Terms} = bin_to_terms(Bin),
+                {ok, M2} = bondy_mst_pack_manifest:decode(Terms),
+                %% byte-for-byte, not merely readable
+                ?assertEqual(Root, bondy_mst_pack_manifest:current_root(M2)),
+                ?assertEqual(M, M2)
+            end
+        }
+     || Root <- high_byte_roots()
+    ].
+
+%% The same defect, exercised through the real on-disk write/read pair
+%% rather than the pure codec.
+write_read_survives_high_byte_root_test_() ->
+    [
+        {
+            lists:flatten(io_lib:format("disk root ~w", [Root])),
+            fun() ->
+                with_tmp_dir(fun(Dir) ->
+                    M = bondy_mst_pack_manifest:with_current_root(
+                        sample(), Root
+                    ),
+                    ?assertEqual(ok, bondy_mst_pack_manifest:write(Dir, M)),
+                    ?assertEqual(
+                        {ok, M}, bondy_mst_pack_manifest:read(Dir)
+                    )
+                end)
+            end
+        }
+     || Root <- high_byte_roots()
+    ].
 
 decode_rejects_missing_required_field_test() ->
     Terms = [
@@ -197,6 +264,42 @@ write_then_read_round_trip_test() ->
         ?assertEqual(M1, M2)
     end).
 
+%% A manifest that exists but cannot be used is reported with its path.
+%% `read/1` is the single door every caller goes through
+%% (`bondy_mst_pack_writer`, `bondy_mst_pack_recovery`,
+%% `bondy_mst_pack_reader`), so classifying here is what stops the three of
+%% them reporting the same condition three different ways — the raise an
+%% operator sees is otherwise a bare `{4, file_io_server, invalid_unicode}`
+%% naming neither the instance nor the file.
+read_unreadable_file_names_the_path_test() ->
+    with_tmp_dir(fun(Dir) ->
+        Path = bondy_mst_pack_manifest:path(Dir),
+        %% invalid UTF-8: exactly what the `~p` encoder used to write
+        ok = file:write_file(
+            Path, <<"{manifest_version, 1}.\n{x, \"", 233, "\"}.\n">>
+        ),
+        ?assertMatch(
+            {error, {unreadable, Path, _}},
+            bondy_mst_pack_manifest:read(Dir)
+        )
+    end).
+
+%% A file that consults cleanly but fails `decode/1` is equally unusable and
+%% must be classified the same way, not leak a bare parse error.
+read_undecodable_file_names_the_path_test() ->
+    with_tmp_dir(fun(Dir) ->
+        Path = bondy_mst_pack_manifest:path(Dir),
+        ok = file:write_file(Path, <<"{manifest_version, 1}.\n">>),
+        ?assertMatch(
+            {error, {unreadable, Path, _}},
+            bondy_mst_pack_manifest:read(Dir)
+        )
+    end).
+
+%% The control that keeps the classification from swallowing the one error
+%% callers branch on: `enoent` means a FRESH instance, and
+%% `bondy_mst_pack_writer:load_or_create_manifest/3` creates a manifest on it.
+%% Wrapping it would turn every first open into a hard failure.
 read_missing_file_returns_error_test() ->
     with_tmp_dir(fun(Dir) ->
         ?assertMatch({error, enoent}, bondy_mst_pack_manifest:read(Dir))
@@ -265,7 +368,7 @@ prop_encode_decode_roundtrip() ->
         manifest_gen(),
         begin
             Bin = bondy_mst_pack_manifest:encode(M),
-            {ok, Terms} = string_to_terms(binary_to_list(Bin)),
+            {ok, Terms} = bin_to_terms(Bin),
             case bondy_mst_pack_manifest:decode(Terms) of
                 {ok, M} ->
                     true;
@@ -283,6 +386,16 @@ manifest_gen() ->
             ?LET(N, choose(1, 16), binary(N)),
             oneof([
                 undefined,
+                %% Roots drawn only from the latin-1 printable high range.
+                %% Uniform `binary(32)` reaches this region ~0.04% of the
+                %% time, so without this branch the property is blind to
+                %% the encoder defect that `encode_survives_high_byte_
+                %% roots_test_` pins.
+                ?LET(
+                    Bytes,
+                    vector(?HASH_LEN, choose(160, 255)),
+                    list_to_binary(Bytes)
+                ),
                 ?LET(B, binary(?HASH_LEN), B)
             ]),
             ?LET(
@@ -345,25 +458,22 @@ base_terms() ->
 override_terms(Terms, Key, Value) ->
     lists:keystore(Key, 1, Terms, {Key, Value}).
 
-%% @private  Parse a manifest binary back into terms via the same path
-%%           `file:consult/1` would use, without going through disk.
-string_to_terms(Str) ->
-    case erl_scan:string(Str) of
-        {ok, Tokens, _} ->
-            split_and_parse(Tokens, [], []);
-        {error, _, _} = E ->
-            E
+%% @private  Parse an encoded manifest back into terms through the real
+%%           production path: bytes on disk, read by `file:consult/1`.
+%%
+%%           This MUST go through disk. A previous version of this helper
+%%           used `binary_to_list/1` + `erl_scan:string/1`, which applies
+%%           latin-1 semantics and therefore accepted byte sequences that
+%%           `file:consult/1` -- which decodes UTF-8 -- rejects with
+%%           `{Line, file_io_server, invalid_unicode}`. That divergence hid
+%%           a `~p` encoder defect that bricked every replica of a shard in
+%%           production (see `format_term/1` in the module under test).
+bin_to_terms(Bin) ->
+    Dir = mktemp_dir(),
+    try
+        Path = filename:join(Dir, "encoded.terms"),
+        ok = file:write_file(Path, Bin),
+        file:consult(Path)
+    after
+        rmrf(Dir)
     end.
-
-split_and_parse([], [], Acc) ->
-    {ok, lists:reverse(Acc)};
-split_and_parse([{dot, _} = D | Rest], Buf, Acc) ->
-    Form = lists:reverse([D | Buf]),
-    case erl_parse:parse_term(Form) of
-        {ok, T} -> split_and_parse(Rest, [], [T | Acc]);
-        {error, _} = E -> E
-    end;
-split_and_parse([Tok | Rest], Buf, Acc) ->
-    split_and_parse(Rest, [Tok | Buf], Acc);
-split_and_parse([], _Buf, _Acc) ->
-    {error, unterminated}.

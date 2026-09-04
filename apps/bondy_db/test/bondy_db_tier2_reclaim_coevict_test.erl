@@ -207,7 +207,7 @@ instance_of(_T) ->
     [InstanceId | _] = [
         I
      || I <- bondy_oplog:list_instances(),
-        binary:match(I, <<"t2reclaim_db/">>) =/= nomatch
+        binary:match(I, <<"t2reclaim_db-">>) =/= nomatch
     ],
     InstanceId.
 

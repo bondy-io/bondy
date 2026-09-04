@@ -105,11 +105,11 @@ one_instance_per_shard({_Db, Users, Groups, _Sup, _Dir}) ->
     %% No per-table (entity-type-bearing) instance id leaked through.
     ?assertEqual(
         [],
-        [I || I <- Instances, binary:match(I, <<"/users/">>) =/= nomatch]
+        [I || I <- Instances, binary:match(I, <<"-users-">>) =/= nomatch]
     ),
     ?assertEqual(
         [],
-        [I || I <- Instances, binary:match(I, <<"/groups/">>) =/= nomatch]
+        [I || I <- Instances, binary:match(I, <<"-groups-">>) =/= nomatch]
     ).
 
 %% An identical `(Realm, Key)` written to both tables holds independent state —
@@ -206,7 +206,7 @@ put_cell(Table, Realm, Key, Value) ->
     ok = bondy_db:apply(Table, Realm, Key, {set, bondy_db:tick(Table), Value}).
 
 db_instances() ->
-    Prefix = <<(atom_to_binary(?DB, utf8))/binary, "/">>,
+    Prefix = <<(atom_to_binary(?DB, utf8))/binary, "-">>,
     [
         I
      || I <- bondy_oplog:list_instances(),
@@ -215,7 +215,7 @@ db_instances() ->
 
 instance_id(Shard) ->
     iolist_to_binary([
-        atom_to_binary(?DB, utf8), $/, integer_to_binary(Shard)
+        atom_to_binary(?DB, utf8), $-, integer_to_binary(Shard)
     ]).
 
 key(I) ->
@@ -236,6 +236,14 @@ wal_dir() ->
     ]).
 
 rmrf(Dir) ->
+    %% An instance id names ONE directory (`<Db>-<Shard>`), so a DB's
+    %% instances are SIBLINGS rather than children of `<Db>/`. Removing `Dir`
+    %% alone therefore leaves their WAL behind, and the next case in the
+    %% module reads the previous case's rows.
+    _ = [
+        file:del_dir_r(P)
+     || P <- filelib:wildcard(unicode:characters_to_list(Dir) ++ "-*")
+    ],
     case file:del_dir_r(Dir) of
         ok -> ok;
         {error, enoent} -> ok;

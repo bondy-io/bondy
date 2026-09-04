@@ -29,9 +29,9 @@ section of this library's README for full references.
 ## API surface
 
 Lifecycle primitives are intentionally minimal: `start_instance/1,2`,
-`stop_instance/1,2`, `list_instances/0`, `discover_instances/1`. The
-library does not impose lifecycle policy — *when* and *how often* to
-call these is the consumer's choice. Lazy loading, LRU eviction,
+`stop_instance/1,2` and `list_instances/0`. The library does not impose
+lifecycle policy — *when* and *how often* to call these is the
+consumer's choice. Lazy loading, LRU eviction,
 cold-tier offload, and per-tenant policies belong to the consumer.
 
 Per-instance event operations pass through to
@@ -72,8 +72,6 @@ Per-instance event operations pass through to
 -export([stop_instance/1]).
 -export([stop_instance/2]).
 -export([list_instances/0]).
--export([discover_instances/1]).
--export([discover_instances/2]).
 
 %% Per-instance API (pass-through to bondy_oplog_instance)
 -export([append/2]).
@@ -228,31 +226,12 @@ round trips that made all N instances runnable at the same instant.
 
 A row exists from instance start until its `terminate/2`, so the set is
 the same one the tree reports, minus instances that have started but not
-yet registered. Sweeps pick those up on their next pass; boot-time
-enumeration uses `discover_instances/1,2` instead.
+yet registered. Sweeps pick those up on their next pass.
 """).
 -spec list_instances() -> [instance_id()].
 
 list_instances() ->
     bondy_oplog_registry:list().
-
-?DOC("""
-Discovers instances on disk under `BaseDir`, using the sharded path
-layout (the library default). Suitable for boot-time enumeration.
-""").
--spec discover_instances(BaseDir :: binary()) -> [instance_id()].
-
-discover_instances(BaseDir) ->
-    discover_instances(BaseDir, sharded).
-
--spec discover_instances(
-    BaseDir :: binary(), Layout :: bondy_oplog_path:layout()
-) -> [instance_id()].
-
-discover_instances(BaseDir, Layout) when
-    is_binary(BaseDir), is_atom(Layout)
-->
-    bondy_oplog_path:discover(BaseDir, Layout).
 
 %% =============================================================================
 %% PER-INSTANCE API
@@ -465,19 +444,30 @@ projection(InstanceId) when is_binary(InstanceId) ->
     end.
 
 -doc """
-The `bondy_db` DB name an oplog instance belongs to, derived from its id
-(`<<"main/6">>` -> `main`). Returns `undefined` when the DB segment is not a
-known atom.
+The `bondy_db` DB an oplog instance belongs to, or `undefined` when the
+instance is not running on this node, or was started outside `bondy_db`
+(the library API and the test suites start instances that belong to no DB).
+
+Answered from the instance's registry row, where the provisioning path
+recorded it at start — the instance id is NOT parsed. An instance id is an
+opaque name: recovering the DB from it would make this module depend on how
+`bondy_db` composes ids, and `bondy_db` is the layer ABOVE this one.
+
+What this feeds, and which way it fails: `db_of/1` selects the keying
+topology fingerprint (`topology_fingerprint/1`) that
+`bondy_oplog_sync_session` compares with a peer's before pulling. A
+mismatch refuses the pull loudly. `undefined` on either side is treated as
+compatible and the check is SKIPPED — so a `bondy_db` instance whose `db`
+opt were omitted would fail open, not closed. What keeps that from
+happening is that `bondy_db` builds instance opts in one place
+(`open_table_provision`) and starts instances in one place, and
+`bondy_db_instance_id_test` asserts `db_of/1` answers the DB for every
+instance a provisioned DB starts.
 """.
 -spec db_of(instance_id()) -> atom() | undefined.
 
 db_of(InstanceId) when is_binary(InstanceId) ->
-    [Db | _] = binary:split(InstanceId, <<"/">>),
-    try
-        binary_to_existing_atom(Db, utf8)
-    catch
-        error:badarg -> undefined
-    end.
+    bondy_oplog_registry:db(InstanceId).
 
 -doc """
 Record this node's frozen keying-topology fingerprint for `Db` (computed

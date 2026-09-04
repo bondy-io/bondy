@@ -871,11 +871,11 @@ do_open_main(Specs) ->
         ok ->
             do_open_main_reconciled(Specs, Dir);
         {error, Reason} ->
-            %% A raise here would crash this init and take bondy_sup — and
+            %% A raise here crashes this `init/1` and takes `bondy_sup` — and
             %% the node — down with it, so an unusable main directory must
             %% flow into `open_main_into/1`'s degrade branch like any other
-            %% open failure (bondy_degraded_boot_SUITE boots a node with a
-            %% file squatting on this path).
+            %% open failure. `bondy_degraded_boot_SUITE` boots a node with a
+            %% regular file squatting on this path.
             {error, {ensure_path, Dir, Reason}}
     end.
 
