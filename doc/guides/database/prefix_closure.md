@@ -64,12 +64,13 @@ non-contiguous remainder. The run folds; the remainder is **held**:
   operations re-present on the next replay. Re-folding is idempotent; a
   gap that fills in the meantime folds through on the next pass.
 
-Holding applies only where a re-presentation path exists. The compaction
-catch-up folds operations that are about to be truncated out of the tree,
-and a full projection re-derivation has no cursor at all; on those paths a
-hold would be a silent drop, so they fold as before and rely on the detector
-below. A replica's own operations are never held: the local write-ahead log
-delivers them in sequence order already.
+Holding applies only where a re-presentation path exists. A full
+projection re-derivation has no cursor at all; on that path a hold would be
+a silent drop, so it folds as before and relies on the detector below.
+Compaction is not a fold path: it truncates only operations the applied
+frontier already witnesses, and holds its truncation point below anything
+still un-applied. A replica's own operations are never held: the local
+write-ahead log delivers them in sequence order already.
 
 ## The repair chain
 

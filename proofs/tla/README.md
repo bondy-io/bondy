@@ -806,3 +806,141 @@ Not modelled: `fsync_mode` other than `per_write` (the applier can then read
 frames before they are durable; the model's `Append` makes ack and
 durability one step), concurrent minters (WAL order = seq order here), and
 the seq-range CAS rollback in `release_seq_range/3`.
+
+## `ConfirmedCompaction.tla` — what a completed round lets a replica truncate
+
+```
+for c in Root2 RootVV2 Root2_AsyncSweep RootVV2_AsyncSweep RootVV2_AsyncSweep_NoCap \
+         Root2_Live Root2_Live_NoSweep RootVV2_Live Root3 RootVV3; do
+  java -cp tla2tools.jar tlc2.TLC -workers 4 -config ConfirmedCompaction_$c.cfg ConfirmedCompaction.tla
+done
+```
+
+Compaction truncates the largest local key every local key at or below
+which is present in EVERY recorded peer root (`compute_frontier_for/2`). A
+round of `r` pulling from `p` records `p`'s advertised root against `p`
+(`maybe_record/6`) and confirms it back so `p` records the same root against
+`r` (`maybe_confirm_root/7`). The 2026-09-04 re-grounding of the compaction
+ping-pong (a compacted node re-pulls the whole uncompacted prefix from a peer
+every round, and the peer can only truncate while its recorded root for us
+still holds the keys) asked whether the ROOT is the right witness. It is
+not: a root is a statement about the peer's TREE, and the tree loses exactly
+what the peer compacted. This module models the previously shipped rule
+(`Rule = "root"`) and the rule now built (`Rule = "rootvv"`: root OR the
+peer's recorded applied VV — `peer_state` stores it; `compute_frontier_for/2`
+reads it since 2026-09-04), with keys in HLC order (`Skew` bounds how far
+a mint may run past what its replica has seen), the watermark door, the ETS
+page GC (`Sweep = "all"`: a recorded root differing from the current tree
+becomes unreadable at every truncation, which is what `peer_first_hole/2`'s
+catch clause reports), inline or applier-backed folds (`AsyncApply`), and the
+compaction sites' handling of never-applied events (`CapAtUnapplied`). Rows
+exist for every member from the start (the post-first-round state). No
+recency filter, no `mst_retention`, no rebootstrap: the claim is that with
+every member live, confirmed compaction needs none of them.
+
+Properties: `NoLoss` (an event a member has not applied is in some tree),
+`PrefixClosed`, `NoHeld` (nothing at or below a watermark is held un-applied
+— true in this scope, so the missing never-applied guard at the compaction
+sites has nothing to guard until the recency filter is in play), `NoDrop` (a
+truncation never removes an un-applied event), `RoundConfirmsApplied` (after
+a completed round against `p`, everything `p` had applied is confirmed) and
+`Convergence` (`<>[]` all trees empty and everything applied everywhere,
+under WEAK fairness of every scheduled activity). Two replicas, `MaxSeq = 2`,
+`Skew = 1` unless stated.
+
+| Configuration | Result |
+| --- | --- |
+| `_Root2` — shipped rule, fused, pack backend | `RoundConfirmsApplied` violated in 6 steps (below) |
+| `_Root2_AsyncSweep` — shipped rule, applier-backed, ETS GC | same, 6 steps; safety clean to that depth |
+| `_RootVV2` — rule under proof, fused, pack backend | exhaustive clean: 43,019 distinct states, depth 14 |
+| `_RootVV2_AsyncSweep` — rule under proof, applier-backed, ETS GC, cap ON | exhaustive clean: 284,781 distinct states, depth 20 |
+| `_RootVV2_AsyncSweep_NoCap` — as above, compaction sites as shipped | **`NoDrop` violated in 7 steps** (below) — independent of the rule |
+| `_Root2_Live` — shipped rule, ETS GC, `Skew = 0`, weak fairness | `Convergence` violated: a two-round lasso (below) |
+| `_Root2_Live_NoSweep` — shipped rule, no GC, weak fairness | clean: 4,227 distinct states — at quiescence the pack backend converges |
+| `_RootVV2_Live` — rule under proof, applier-backed, ETS GC, cap ON, weak fairness | clean: 26,366 distinct states, depth 20 — weak fairness suffices |
+| `_Root3` — shipped rule, 3 replicas, `MaxSeq = 1`, `Skew = 0` | `NoLoss` violated in 5 steps (below) |
+| `_RootVV3` — rule under proof, 3 replicas, `MaxSeq = 1`, `Skew = 0` | exhaustive clean: 2,550,058 distinct states, depth 23 |
+
+**The root witness does not survive the peer's compaction** (`_Root2`):
+
+```
+Mint(1)    (1,1)            Mint(1)  (1,2)          Mint(2)  (2,1) at hlc 1
+Sync(2,1)  r2 holds all three; confirm: root[1][2] = {(1,1),(1,2)}
+Compact(2) r2's peer root lacks (2,1), whose key sorts between (1,1) and
+           (1,2): frontier (1,1), truncated
+Sync(1,2)  r1 records r2's root {(1,2),(2,1)} — (1,1), which r2 APPLIED
+           and r1 still holds, is no longer certified by anything r1 has
+```
+
+`r1` now cannot truncate (1,1) until `r2` pulls again and confirms `r1`'s
+root back — a window `r2`'s next pull closes again by re-recording the
+suffix. Every `r1` pull in between re-ships the pages under (1,1). Under the
+VV rule the same round records `vv[1][2] = [1 |-> 2, 2 |-> 1]`, which
+certifies (1,1) whatever `r2`'s tree looks like.
+
+**The shipped rule needs strong fairness on the ETS backend** (`_Root2_Live`):
+after `r2` compacts everything and `r1` writes two more events, the lasso is
+`Sync(2,1)` — `r2` pulls, its door drops the compacted keys, the page GC
+unreads the root it just recorded; the confirm hands `r1` a usable full
+root — then `Sync(1,2)` — `r1` re-records `r2`'s suffix root, `r2`'s confirm
+gives `r2` a usable root. Each replica's compaction is possible in exactly
+one of the two states, so neither is continuously possible and weak
+fairness forces nothing. Compaction happens only if the tick lands in the
+right phase, and the traffic runs until it does. Without the page GC the
+same interleaving converges (`_Root2_Live_NoSweep`): at quiescence the pack
+backend's defect is the re-shipment and the intermittent window, not a
+stall.
+
+**The compaction sites drop a held event** (`_RootVV2_AsyncSweep_NoCap`,
+independent of the rule):
+
+```
+Mint(1) (1,1), (1,2) at hlc 1, 2    Mint(2) (2,1) at hlc 1
+Sync(2,1)   r2 pulls; applier-backed, nothing folded yet
+Compact(1)  r1 truncates everything r2 confirmed: watermark (1,2)
+Sync(1,2)   r1 pulls (2,1): key below the watermark, never applied at r1 —
+            the door HOLDS it (watermark_door/3), as designed
+Compact(1)  the frontier is at the watermark, so the watermark catch-up
+            runs: begin_async_catch_up/3 folds the range (wm, wm] — empty —
+            and finalize truncates at or below wm, DROPPING (2,1) un-folded
+```
+
+The same happens on the frontier path: the catch-up folds `(wm, F]`, a held
+event at or below `wm` is outside the range and inside the truncation.
+Reachable in production whenever the compaction tick beats the applier's
+`replay_cell_events` cast to a just-delivered below-watermark event
+(a busy applier; a durable instance's WAL drain). Fix under `CapAtUnapplied`,
+built 2026-09-04 as `capped_truncation_point/2`: a truncation point is
+capped strictly below the first local key this replica has not applied —
+the door's own hold, applied at the catalogue truncation site (retired
+origins exempt: the applier declines them by design, which the model does
+not represent). Under `AsyncApply` that also makes the catch-up fold
+vacuous: nothing un-applied is ever below the point, so the async catch-up
+(its token, watchdog and `pending_compaction` bookkeeping) had nothing left
+to do — removed the same day, together with the applier's
+`catch_up_apply/3` (a non-holding fold path that could raise the VV past a
+contiguity gap; the model's exact-prefix VV assumed it away).
+
+**A rootless row constrains nothing** (`_Root3`): `r1` mints, `r2` pulls it,
+`r1` and `r2` compact it between themselves — `r3`'s rows at both carry no
+root (its tree was empty at every round) and `bondy_oplog_compaction:
+compact/1` dropped rootless rows by design ("that peer, if it ever needs the
+truncated prefix, takes the bootstrap path"). `r3` never applied the event
+and no tree holds it: the frontier-gap check on `r3`'s next round is the
+only way back. Under the VV rule (built) a row with a zero VV holds
+compaction until that peer's first round records what it applied — the
+bootstrap fallback is no longer the plan for a live member.
+
+`../isabelle/Confirmed_Compaction.thy` proves `NoLoss` and `NoDrop` for the
+rule under proof with the cap, for any number of replicas and events, over
+a model that drops the key order (any confirmed, applied subset may be
+truncated; the door drops any applied subset, own events only if truncated
+before — the one place key order enters, as a hypothesis this module
+discharges).
+
+Not modelled: the recency filter and `mst_retention` (both truncate past an
+unconfirmed member by design), the join path (`Bootstrap`), the frontier-gap
+check and catalogue rebootstrap (the repair for what this module shows must
+not be needed), origin retirement reaping a VV entry (a reaped entry
+certifies nothing — conservative), and page transfer (a round is atomic; the
+re-shipment cost is stated, not counted).

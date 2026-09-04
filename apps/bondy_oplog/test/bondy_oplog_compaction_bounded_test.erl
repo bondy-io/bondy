@@ -131,10 +131,10 @@ watermark_reanchored_on_truncated_root_test_() ->
         {timeout, 30, fun watermark_reanchored_on_truncated_root/0}}.
 
 %% Regression for the compaction "runaway under sustained writes" that the
-%% durable Fly bench surfaced: `ensure_projection_caught_up` advances the
-%% applier's replay cursor (`last_replayed_root`) to the PRE-truncate root,
-%% then the truncate frees that root's pages. Unless the cursor is re-anchored
-%% on the post-truncate (live) root, the NEXT cycle's catch-up
+%% durable Fly bench surfaced: the applier's replay cursor
+%% (`last_replayed_root`) sits on the PRE-truncate root, then the truncate
+%% frees that root's pages. Unless the cursor is re-anchored on the
+%% post-truncate (live) root, the NEXT replay's
 %% `diff_to_list/2` raises (root gone) and falls back to a full `to_list/1` of
 %% the whole tree — an O(N)-per-cycle synchronous fold that starves the applier
 %% and stalls writes. This pins the invariant: after a partial-truncate
@@ -190,36 +190,6 @@ watermark_reanchored_on_truncated_root() ->
     end.
 
 %% -----------------------------------------------------------------------------
-
-%% White-box: the catch-up fold keeps ONLY remote-origin events. Local-origin
-%% events are already in the projection (the applier's WAL-drain path wrote
-%% them before their MST install), so re-applying them every compaction cycle
-%% is the redundant work that starves the applier under sustained writes; the
-%% filter drops them. Remote (peer-merged) events bypass the WAL path and MUST
-%% be kept so the truncate does not drop an un-folded value. Non-event keys are
-%% kept defensively.
-remote_pairs_keeps_only_remote_origin_test() ->
-    Own = <<"own_origin_aaaaa">>,
-    Remote = <<"remote_origin_bb">>,
-    KOwn1 = bondy_oplog_event:key(10, Own, 1),
-    KRem = bondy_oplog_event:key(20, Remote, 1),
-    KOwn2 = bondy_oplog_event:key(30, Own, 2),
-    Pairs = [
-        {KOwn1, va},
-        {KRem, vb},
-        {KOwn2, vc},
-        {<<"not-an-event-key">>, vd}
-    ],
-    %% Remote-origin event + non-event-key kept; both local-origin dropped.
-    ?assertEqual(
-        [{KRem, vb}, {<<"not-an-event-key">>, vd}],
-        bondy_oplog_instance:remote_pairs(Pairs, Own)
-    ),
-    %% A local-only diff filters to empty → the catch-up is a no-op.
-    ?assertEqual(
-        [],
-        bondy_oplog_instance:remote_pairs([{KOwn1, va}, {KOwn2, vc}], Own)
-    ).
 
 %% =============================================================================
 %% Helpers

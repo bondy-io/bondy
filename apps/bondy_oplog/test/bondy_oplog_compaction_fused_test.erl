@@ -61,6 +61,13 @@ compaction_fused_test_() ->
         {timeout, 30, fun fused_catalogue_bootstrap_roundtrip/0},
         {timeout, 30, fun watermark_door_folds_unapplied_peer_event_fused/0},
         {timeout, 30, fun watermark_door_holds_unapplied_peer_event_applier/0},
+        {timeout, 30,
+            fun compaction_holds_doored_event_until_applied_watermark_path/0},
+        {timeout, 30,
+            fun compaction_holds_doored_event_until_applied_frontier_path/0},
+        {timeout, 30, fun compaction_truncates_held_event_of_retired_origin/0},
+        {timeout, 30, fun peer_compaction_does_not_stall_ours/0},
+        {timeout, 30, fun rootless_live_peer_holds_compaction/0},
         {timeout, 30, fun live_door_accepts_unapplied_remote_event_fused/0},
         {timeout, 30, fun live_door_accepts_unapplied_remote_event_applier/0},
         {timeout, 30, fun live_filter_drops_already_applied_remote_event/0},
@@ -538,7 +545,7 @@ watermark_door_folds_unapplied_peer_event_fused() ->
 %% single writer), so the door HOLDS the never-applied event below the
 %% watermark — truncating only the prefix strictly below it — and the
 %% applier's normal replay applies it; the next compaction cycle then
-%% truncates the (now applied) held prefix via the async catch-up gate.
+%% truncates the (now applied) held prefix.
 watermark_door_holds_unapplied_peer_event_applier() ->
     A = start_applier_instance(),
     B = start_applier_instance(),
@@ -584,6 +591,263 @@ watermark_door_holds_unapplied_peer_event_applier() ->
 
     teardown(A),
     teardown(B).
+
+%% THE COMPACTION CAP, watermark catch-up path (the trace
+%% `proofs/tla/ConfirmedCompaction_RootVV2_AsyncSweep_NoCap.cfg` refutes
+%% with `NoDrop`): the door holds A's never-applied event below B's
+%% watermark, and a compaction tick lands BEFORE the applier's replay
+%% has folded it. Without the cap `finalize_catalogue_compaction/3`
+%% truncated at or below the watermark unguarded (the async catch-up of
+%% the time folded only `(watermark, frontier]`, i.e. nothing here) and
+%% the op was gone from both the tree and the projection. The tick must be a
+%% `no_change`; the event must reach the projection once the applier
+%% runs; the next tick then truncates it.
+%%
+%% The applier is `sys:suspend`ed so the replay cannot race the tick;
+%% the pages are pulled by hand because the sync session's settle
+%% barrier would block on the suspended applier. Exercises the cap's
+%% `undefined` (nothing may go) branch; the partial branch (a held key
+%% with applied tree keys below it) is the door's own held branch and is
+%% not constructed here.
+compaction_holds_doored_event_until_applied_watermark_path() ->
+    A = start_applier_instance(),
+    B = start_applier_instance(),
+    BNs = ns_of(B),
+
+    KA = bondy_oplog:append(A, {cell_apply, ?B, <<"doored">>, {inc, 5}}),
+    ok = bondy_oplog_instance:await_apply(A),
+    W = compact_above(B, KA),
+    ?assertEqual(0, bondy_oplog:size(B)),
+
+    ApplierPid = bondy_oplog_registry:applier_pid(B),
+    ok = sys:suspend(ApplierPid),
+    ok = pull_root(B, A),
+    %% Held: below the watermark, not applied.
+    ?assertEqual(1, bondy_oplog:size(B)),
+    AOrigin = bondy_oplog_instance:origin(A),
+    ?assertEqual(0, maps:get(AOrigin, bondy_oplog_registry:frontier(B), 0)),
+
+    %% The tick beats the replay. Frontier = the held key =< W, so this
+    %% is the watermark catch-up path: it must hold, not truncate.
+    ?assertEqual(
+        {ok, no_change},
+        bondy_oplog_instance:compact(B, [bondy_oplog_instance:root_hash(B)])
+    ),
+    ?assertEqual(1, bondy_oplog:size(B)),
+    ?assertEqual(W, bondy_oplog:current_watermark(B)),
+
+    ok = sys:resume(ApplierPid),
+    ok = bondy_oplog_applier:barrier(ApplierPid),
+    ?assertNotEqual(
+        undefined, bondy_oplog_core:read(BNs, primary, <<"doored">>)
+    ),
+    ?assertEqual(1, maps:get(AOrigin, bondy_oplog_registry:frontier(B), 0)),
+
+    %% Applied now: the next tick truncates the held key.
+    ?assertMatch(
+        {ok, {compacted, _, _}},
+        bondy_oplog_instance:compact(B, [bondy_oplog_instance:root_hash(B)])
+    ),
+    ?assertEqual(0, bondy_oplog:size(B)),
+    ?assertNotEqual(
+        undefined, bondy_oplog_core:read(BNs, primary, <<"doored">>)
+    ),
+
+    teardown(A),
+    teardown(B).
+
+%% As above on the peer-confirmed FRONTIER path: B also holds an applied
+%% own event ABOVE its watermark, so the confirmed frontier advances past
+%% the watermark and the tick reaches `finalize_catalogue_compaction/3`
+%% with a frontier above the held key. The cap must still hold the whole
+%% tree: the held key is
+%% the tree's smallest, so nothing may go, including the applied own
+%% event above it (truncation is a prefix).
+compaction_holds_doored_event_until_applied_frontier_path() ->
+    A = start_applier_instance(),
+    B = start_applier_instance(),
+    BNs = ns_of(B),
+
+    KA = bondy_oplog:append(A, {cell_apply, ?B, <<"doored">>, {inc, 5}}),
+    ok = bondy_oplog_instance:await_apply(A),
+    W = compact_above(B, KA),
+    %% An applied own event above the watermark: the frontier candidate.
+    _ = bondy_oplog:append(B, {cell_apply, ?B, <<"own">>, {inc, 1}}),
+    ok = bondy_oplog_instance:await_apply(B),
+    ?assertEqual(1, bondy_oplog:size(B)),
+
+    ApplierPid = bondy_oplog_registry:applier_pid(B),
+    ok = sys:suspend(ApplierPid),
+    ok = pull_root(B, A),
+    ?assertEqual(2, bondy_oplog:size(B)),
+
+    ?assertEqual(
+        {ok, no_change},
+        bondy_oplog_instance:compact(B, [bondy_oplog_instance:root_hash(B)])
+    ),
+    ?assertEqual(2, bondy_oplog:size(B)),
+    ?assertEqual(W, bondy_oplog:current_watermark(B)),
+
+    ok = sys:resume(ApplierPid),
+    ok = bondy_oplog_applier:barrier(ApplierPid),
+    ?assertNotEqual(
+        undefined, bondy_oplog_core:read(BNs, primary, <<"doored">>)
+    ),
+    ?assertMatch(
+        {ok, {compacted, _, 2}},
+        bondy_oplog_instance:compact(B, [bondy_oplog_instance:root_hash(B)])
+    ),
+    ?assertEqual(0, bondy_oplog:size(B)),
+    ?assert(bondy_oplog:current_watermark(B) > W),
+
+    teardown(A),
+    teardown(B).
+
+%% The cap's retired-origin exemption. A held event whose origin is
+%% RETIRED after the hold is dropped by the applier's replay
+%% (`bondy_oplog_cell_apply:drop_retired/2`) and never raises the VV, so
+%% "never applied" is permanent by design, not lag: the cap must let the
+%% tick truncate it (and the door's next pass discard it), not hold the
+%% tree forever. Retirement needs a `retirement_path`; the bans server is
+%% restarted around the test so the retired set does not leak into the
+%% rest of this VM.
+compaction_truncates_held_event_of_retired_origin() ->
+    Dir = filename:join(
+        "/tmp", "bondy_oplog_compaction_fused_retire_" ++ os:getpid()
+    ),
+    _ = file:del_dir_r(Dir),
+    ok = application:set_env(
+        bondy_oplog, retirement_path, filename:join(Dir, "retired")
+    ),
+    ok = restart_bans(),
+    try
+        A = start_applier_instance(),
+        B = start_applier_instance(),
+        BNs = ns_of(B),
+
+        KA = bondy_oplog:append(A, {cell_apply, ?B, <<"doored">>, {inc, 5}}),
+        ok = bondy_oplog_instance:await_apply(A),
+        _ = compact_above(B, KA),
+
+        ApplierPid = bondy_oplog_registry:applier_pid(B),
+        ok = sys:suspend(ApplierPid),
+        ok = pull_root(B, A),
+        ?assertEqual(1, bondy_oplog:size(B)),
+
+        %% Retired while held: the replay drops it, the VV stays at 0.
+        AOrigin = bondy_oplog_instance:origin(A),
+        ok = bondy_oplog_origin_bans:retire(AOrigin, decommissioned),
+        ok = sys:resume(ApplierPid),
+        ok = bondy_oplog_applier:barrier(ApplierPid),
+        ?assertEqual(
+            undefined, bondy_oplog_core:read(BNs, primary, <<"doored">>)
+        ),
+        ?assertEqual(0, maps:get(AOrigin, bondy_oplog_registry:frontier(B), 0)),
+
+        %% Not "never applied" any more — nothing will ever fold it.
+        ?assertMatch(
+            {ok, {compacted, _, 1}},
+            bondy_oplog_instance:compact(B, [bondy_oplog_instance:root_hash(B)])
+        ),
+        ?assertEqual(0, bondy_oplog:size(B)),
+
+        teardown(A),
+        teardown(B)
+    after
+        ok = application:unset_env(bondy_oplog, retirement_path),
+        _ = file:del_dir_r(Dir),
+        ok = restart_bans()
+    end.
+
+%% THE APPLIED-VV WITNESS (`proofs/tla/ConfirmedCompaction_Root2.cfg`,
+%% `RoundConfirmsApplied` refuted in 6 steps under the root-only rule).
+%% A compacts e1 once B confirms it; A then mints e2. B's next pull
+%% records A's root, which is {e2}: A's tree lost exactly what A
+%% compacted. Under the root-only rule e1 is a hole and B can never
+%% compact (every later round re-ships e1 to A, whose door drops it
+%% again). A's recorded applied frontier covers e1, so B compacts.
+%% Drives the production entry (`bondy_oplog_compaction:compact/1`), the
+%% one that reads `bondy_oplog_peer_state`.
+peer_compaction_does_not_stall_ours() ->
+    A = start_applier_instance(),
+    B = start_applier_instance(),
+    AOrigin = bondy_oplog_instance:origin(A),
+
+    KA1 = bondy_oplog:append(A, {cell_apply, ?B, <<"e1">>, {inc, 1}}),
+    ok = bondy_oplog_instance:await_apply(A),
+    ?assertMatch({ok, _}, bondy_oplog:sync(B, A)),
+    ok = bondy_oplog_peer_state:sync(),
+    %% B confirmed A's root (the swap), so A compacts e1.
+    ?assertMatch(
+        {ok, {compacted, _, 1}}, bondy_oplog_compaction:compact(A)
+    ),
+    ?assertEqual(0, bondy_oplog:size(A)),
+
+    KA2 = bondy_oplog:append(A, {cell_apply, ?B, <<"e2">>, {inc, 1}}),
+    ok = bondy_oplog_instance:await_apply(A),
+    ?assertMatch({ok, _}, bondy_oplog:sync(B, A)),
+    ok = bondy_oplog_peer_state:sync(),
+    ?assertEqual(2, bondy_oplog:size(B)),
+
+    %% The recorded root is A's post-compaction tree: e2 only.
+    [#{root_hash := RootA, frontier := VVA}] = [
+        S
+     || #{peer := P} = S <- bondy_oplog_peer_state:get_instance_peer_states(
+            B
+        ),
+        P =:= A
+    ],
+    MSTB = bondy_oplog_registry:mst(B),
+    ?assertEqual(undefined, bondy_mst:get(MSTB, KA1, RootA)),
+    ?assertNotEqual(undefined, bondy_mst:get(MSTB, KA2, RootA)),
+    %% ...and the recorded applied frontier covers both.
+    ?assertEqual(2, maps:get(AOrigin, VVA)),
+
+    ok = compact_to_empty(B),
+    ?assertEqual(KA2, bondy_oplog:current_watermark(B)),
+
+    teardown(A),
+    teardown(B).
+
+%% A ROOTLESS ROW CONSTRAINS (`proofs/tla/ConfirmedCompaction_Root3.cfg`,
+%% `NoLoss` refuted in 5 steps under "constrains nothing"). B holds e1
+%% from A and has completed a round against C, whose tree was empty: C's
+%% row has no root and no applied frontier. C is live and has never
+%% received e1, so B must not truncate it — under the shipped rule B
+%% compacted and C could only ever recover e1 by bootstrap. Once C pulls
+%% B (and confirms B's root back), B compacts.
+rootless_live_peer_holds_compaction() ->
+    A = start_applier_instance(),
+    B = start_applier_instance(),
+    C = start_applier_instance(),
+
+    _ = bondy_oplog:append(A, {cell_apply, ?B, <<"e1">>, {inc, 1}}),
+    ok = bondy_oplog_instance:await_apply(A),
+    ?assertMatch({ok, _}, bondy_oplog:sync(B, A)),
+    ?assertMatch({ok, _}, bondy_oplog:sync(B, C)),
+    ok = bondy_oplog_peer_state:sync(),
+    ?assertMatch(
+        [#{root_hash := undefined, frontier := undefined}],
+        [
+            S
+         || #{peer := P} = S <-
+                bondy_oplog_peer_state:get_instance_peer_states(B),
+            P =:= C
+        ]
+    ),
+    ?assertEqual(1, bondy_oplog:size(B)),
+
+    ?assertEqual({ok, no_change}, bondy_oplog_compaction:compact(B)),
+    ?assertEqual(1, bondy_oplog:size(B)),
+
+    ?assertMatch({ok, _}, bondy_oplog:sync(C, B)),
+    ok = bondy_oplog_peer_state:sync(),
+    ?assertEqual(1, bondy_oplog:size(C)),
+    ok = compact_to_empty(B),
+
+    teardown(A),
+    teardown(B),
+    teardown(C).
 
 %% THE LIVE-EVENT WATERMARK DOOR, fused: a never-applied peer event
 %% pushed via `append_remote/2` whose key sorts at or below the local
@@ -638,7 +902,7 @@ live_door_accepts_unapplied_remote_event_fused() ->
 
 %% As above, for an APPLIER-backed instance: the accept installs the
 %% event below the watermark (a hold) and the delivery point fences +
-%% casts the applier replay; the async catch-up gate keeps every later
+%% casts the applier replay; the compaction cap keeps every later
 %% truncation from eating it un-folded.
 live_door_accepts_unapplied_remote_event_applier() ->
     A = start_applier_instance(),
@@ -1230,6 +1494,87 @@ register_shard_with_bucket(NS, InstanceId, Bucket, CrdtModule, CrdtOpts) ->
         cell_apply_bucket => Bucket
     }),
     {Cache, Proj}.
+
+%% Writes two own events on `Local` and self-root-confirm compacts them, so
+%% its watermark lands strictly ABOVE `Key` (an event minted elsewhere
+%% just before). Event keys sort by HLC physical ms first, and two
+%% instances minting within the same ms order by origin — random — so the
+%% ms is forced past `Key`'s before writing; the precondition is asserted
+%% rather than assumed.
+compact_above(Local, Key) ->
+    {KeyMs, _} = bondy_oplog_hlc:decode(bondy_oplog_event:key_hlc(Key)),
+    wait_past_ms(KeyMs),
+    _ = bondy_oplog:append(Local, {cell_apply, ?B, <<"own">>, {inc, 1}}),
+    _ = bondy_oplog:append(Local, {cell_apply, ?B, <<"own">>, {inc, 1}}),
+    ok = bondy_oplog_instance:await_apply(Local),
+    ?assertMatch(
+        {ok, {compacted, _, _}},
+        bondy_oplog_instance:compact(
+            Local, [bondy_oplog_instance:root_hash(Local)]
+        )
+    ),
+    W = bondy_oplog:current_watermark(Local),
+    ?assert(Key < W),
+    W.
+
+wait_past_ms(Ms) ->
+    case os:system_time(millisecond) > Ms of
+        true ->
+            ok;
+        false ->
+            timer:sleep(1),
+            wait_past_ms(Ms)
+    end.
+
+%% Runs the production compaction entry and asserts the tree emptied. A
+%% refusal (`{ok, no_change}`) is the failure this guards. The applier is
+%% settled first so a not-yet-folded remote event cannot make the cap hold
+%% for a reason unrelated to the witness under test.
+compact_to_empty(Id) ->
+    ok = bondy_oplog_applier:barrier(bondy_oplog_registry:applier_pid(Id)),
+    case bondy_oplog_compaction:compact(Id) of
+        {ok, {compacted, _, _}} -> await_size(Id, 0, 0);
+        Other -> erlang:error({compaction_refused, Other})
+    end.
+
+await_size(Id, Size, N) ->
+    case bondy_oplog:size(Id) of
+        Size ->
+            ok;
+        _ when N > 0 ->
+            timer:sleep(10),
+            await_size(Id, Size, N - 1);
+        Other ->
+            erlang:error({size_mismatch, #{expected => Size, got => Other}})
+    end.
+
+%% One page-sync round by hand: pull every page reachable from the peer's
+%% current root, then integrate it. The inline transport's `get_root`
+%% form is not used because it drains the PEER's applier; here the peer
+%% is already settled and it is the LOCAL applier that is suspended.
+pull_root(Local, Peer) ->
+    Root = bondy_oplog_instance:root_hash(Peer),
+    ok = pull_missing(Local, Peer, Root),
+    bondy_oplog_instance:integrate_peer_root(Local, Root).
+
+pull_missing(Local, Peer, Root) ->
+    case bondy_oplog_instance:missing_set(Local, Root) of
+        [] ->
+            ok;
+        Missing ->
+            {ok, Pages} = bondy_oplog_transport_inline:request(
+                Peer, Local, {get_pages, Missing}, #{}
+            ),
+            ok = bondy_oplog_instance:merge_pages(Local, Pages),
+            pull_missing(Local, Peer, Root)
+    end.
+
+restart_bans() ->
+    _ = supervisor:terminate_child(bondy_oplog_sup, bondy_oplog_origin_bans),
+    {ok, _} = supervisor:restart_child(
+        bondy_oplog_sup, bondy_oplog_origin_bans
+    ),
+    ok.
 
 mk_id() ->
     iolist_to_binary([

@@ -105,9 +105,10 @@ Honesty about edges the architecture does not cover:
 - Cross-node reads are eventually consistent; an application needing
   read-your-write across *different* nodes must route the read to the
   writing node or tolerate the lag.
-- The prefix hold cannot cover fold paths with no re-presentation (the
-  compaction catch-up, one-shot re-derivations); those are instrumented,
-  and the detector's telemetry is the tripwire.
+- The prefix hold cannot cover fold paths with no re-presentation
+  (one-shot re-derivations); those are instrumented, and the detector's
+  telemetry is the tripwire. Compaction folds nothing: it truncates only
+  what the applied frontier witnesses.
 - A permanently unfillable sequence (a burned range under a lost
   storage-failure race) converts into a rebootstrap on peers rather than
   a silent gap — a deliberate trade of noise for correctness, measured at

@@ -25,7 +25,9 @@ the last time we heard from the peer at all.
 - Sync sessions write here on successful completion (one root hash per
   `(peer, instance)`).
 - Compaction reads here to compute the stability frontier — the
-  largest event key reachable from every fresh peer's confirmed root.
+  largest event key every fresh peer has confirmed, by its recorded root
+  (received) or its recorded applied frontier (folded, and possibly
+  compacted since).
 
 ## Two readings, for two different safety requirements
 
@@ -77,9 +79,12 @@ process can read it without round-tripping the gen_server.
     root_hash :: binary() | undefined,
     %% The peer's applied-frontier version vector as observed at the start
     %% of the last completed round (`get_frontier`). `undefined` until a
-    %% round supplies one. Consumed by the unservable-own-root self-heal
-    %% (`bondy_oplog_instance`): a rebuild is licensed only when every
-    %% recency-live peer's recorded frontier dominates the local one.
+    %% round supplies one. Two consumers in `bondy_oplog_instance`: the
+    %% compaction frontier (`compute_frontier_for/2` — the witness that
+    %% survives the peer's own compaction, where its root does not) and
+    %% the unservable-own-root self-heal (a rebuild is licensed only when
+    %% every recency-live peer's recorded frontier dominates the local
+    %% one). Both only ever UNDER-claim on a stale value.
     frontier :: #{binary() => non_neg_integer()} | undefined,
     %% ms since UNIX epoch
     last_sync :: integer(),

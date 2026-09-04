@@ -42,11 +42,13 @@ pulling from A — converge both replicas to the same root.
 ```
 
 Step 4 checkpoints the **peer's** root — the one it advertised in step 1, every
-page of which we hold by the time we reach step 4. That is what makes
+page of which we hold by the time we reach step 4 — together with the applied
+frontier the peer reported before the round. That is what makes
 `bondy_oplog_instance:compute_frontier_for/2` a statement about what peers
-hold. Recording our own root would instead measure our sync recency: sync is
-pull-only, so a peer receives our data only when it pulls from us, in a
-different session.
+hold (root) or have folded (frontier — the witness that survives the peer's
+own compaction). Recording our own root would instead measure our sync
+recency: sync is pull-only, so a peer receives our data only when it pulls
+from us, in a different session.
 
 Each round pulls at most `bondy_oplog_config:aae_pages_per_round/0` pages, so a
 session's peak memory is bounded regardless of how divergent the trees are — a
@@ -1033,7 +1035,8 @@ maybe_record({ok, _LocalRoot}, Instance, Peer, true, PeerRoot, Frontier) ->
     %% Checkpoint the PEER's root, not ours.
     %%
     %% `peer_state` feeds `compute_frontier_for/2`, whose contract is "the
-    %% largest local key present in EVERY peer's confirmed root" — a statement
+    %% largest local key confirmed by EVERY peer — present in its recorded
+    %% root, or covered by its recorded applied frontier" — a statement
     %% about what peers hold. Recording our own root instead makes it a
     %% statement about our own sync recency: because sync is pull-only, a peer
     %% receives our data only when *it* pulls from *us*, in a session this one

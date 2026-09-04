@@ -75,13 +75,13 @@ A handful of consequences fall out of this:
 ## What does "stable" mean here?
 
 An event is **stable** when every (fresh, non-stale) peer is known to
-hold it. The library tracks this through per-peer root hashes,
-recorded by sync sessions:
+have received or folded it. The library tracks this through two
+per-peer witnesses, recorded by sync sessions:
 
 ```mermaid
 flowchart TB
     SESS[bondy_oplog_sync_session]
-    PSTATE["bondy_oplog_peer_state<br/>ETS: {peer_id, instance_id} → root_hash"]
+    PSTATE["bondy_oplog_peer_state<br/>ETS: {peer_id, instance_id} → root_hash, frontier"]
     COMP[bondy_oplog_compaction]
 
     SESS -->|on success| PSTATE
@@ -89,20 +89,34 @@ flowchart TB
 ```
 
 `bondy_oplog_peer_state` records, per `(peer, instance)`, the most
-recent root hash observed on a successful sync, plus a `last_seen`
-timestamp. Peers we haven't heard from in `peer_timeout_ms` (default
-30s) are filtered out — silent peers must not pin the watermark
-forever.
+recent root hash observed on a successful sync and the applied
+frontier (per-origin version vector) the peer reported before that
+round, plus a `last_seen` timestamp. Peers we haven't heard from in
+`peer_timeout_ms` (default 30s) are filtered out — silent peers must
+not pin the watermark forever.
+
+The two witnesses answer different questions, and both are needed. The
+root says what the peer's *tree* holds — and a peer's tree loses exactly
+what the peer compacted, so once two replicas both compact, the root
+alone stops confirming the prefix each has already folded: every round
+re-ships it, and on the in-memory backend the page GC that follows each
+truncation unreads the root just recorded, so neither replica compacts
+again. The applied frontier says what the peer has *folded*, and it
+survives the peer's compaction. It is an exact prefix witness because
+the applier folds each origin contiguously (its per-origin maximum
+bounds every seq it applied).
 
 ## Computing the stability frontier
 
 The frontier is the highest event key K such that **every fresh peer
-has every key ≤ K**. The algorithm — `compute_frontier_for/2` in
+confirms every key ≤ K** — the key is present in the peer's recorded
+root, or its `{origin, seq}` is at or below the peer's recorded applied
+frontier. The algorithm — `compute_frontier_for/2` in
 `bondy_oplog_instance.erl` — is:
 
 ```mermaid
 flowchart TB
-    P["For each fresh peer root R:<br/>diff the local MST against R (bondy_mst:diff_to_list/2)<br/>to find the peer's lowest missing key — its 'first hole'"]
+    P["For each fresh peer witness {R, VV}:<br/>diff the local MST against R (bondy_mst:diff_to_list/2),<br/>skip keys VV covers, to find the peer's lowest<br/>unconfirmed key — its 'first hole'"]
     F["Frontier = the highest key below every peer's first hole<br/>· or undefined if no fresh peers"]
 
     P --> F
@@ -111,10 +125,19 @@ flowchart TB
 A few subtle things:
 
 - **Each peer's "first hole"** is found by a structural diff of the
-  local MST against the peer's advertised root. Page content-addressing
+  local MST against the peer's recorded root. Page content-addressing
   makes the diff cheap — shared subtrees are compared by hash, not
   walked — so the historical root's pages need not be materialised as a
-  key set.
+  key set. A key the root lacks is then checked against the recorded
+  applied frontier before it counts as a hole. Without a readable root
+  (none recorded, or its pages already reclaimed) the walk is over the
+  local tree, stopping at the first key the frontier does not cover.
+- **A rootless peer constrains.** A peer whose rounds only ever
+  completed against an empty tree confirms what its applied frontier
+  covers and nothing more; a live peer that has applied none of our
+  events holds compaction until it pulls them. (Treating such a peer as
+  "constrains nothing" would truncate events a live member never
+  received, leaving it only the bootstrap path.)
 - **The frontier is the longest common *prefix*** because keys are
   HLC-ordered. Stability is monotonic in HLC: if a peer has key K,
   it transitively has every key < K.
@@ -154,7 +177,7 @@ both default `0` = disabled):
 
 ```mermaid
 flowchart TB
-    CF["compute_frontier_for(MST, PeerRoots)"]
+    CF["compute_frontier_for(MST, PeerWitnesses)"]
     UD{"frontier past the watermark?"}
     RET{"mst_retention configured ∧ Fused ∧ HasProjection<br/>∧ (size > max_events ∨ oldest > max_age_ms)?"}
     RFRONT["frontier = whole applied tree (size breach)<br/>or newest key older than the age cutoff"]
@@ -264,9 +287,9 @@ sequenceDiagram
 
     Sched->>Worker: spawn (so the scheduler never blocks)
     Worker->>Comp: compact(InstanceId)
-    Comp->>Inst: compact(InstanceId, PeerRoots)  [gen_server:call]
+    Comp->>Inst: compact(InstanceId, PeerWitnesses)  [gen_server:call]
     Note over Inst: runs SYNCHRONOUSLY inside the gen_server
-    Inst->>Inst: compute_frontier_for(MST, PeerRoots)
+    Inst->>Inst: compute_frontier_for(MST, PeerWitnesses)
     alt catalogue (projection-backed) instance
         Note over Inst: fast path — no re-fold.<br/>The projection IS the per-cell<br/>interpret_cog checkpoint,<br/>maintained eagerly on write.
     else bare single-CRDT instance
@@ -1082,8 +1105,16 @@ at defaults, on both `registry/*` and `main/*` shards). The door
 therefore checks every at-or-below-watermark key against the applied
 VV: a fused instance folds never-applied events into the projection
 inline before truncating; an applier-backed instance holds them below
-the watermark for the applier's replay (every later truncation site is
-behind the async catch-up gate, which folds before truncating). The
+the watermark for the applier's replay. The catalogue truncation site
+applies the same rule (`capped_truncation_point/2`): a compaction
+tick caps its truncation point strictly below the first never-applied
+key at or below the frontier, so a held event is never truncated
+un-folded; compaction folds nothing itself — the applier's replay,
+cast at delivery, is the only fold path for remote events, and the
+tick that finds one still un-applied simply holds until the next.
+(Events of a retired origin are exempt from the hold at both sites:
+the applier declines them by design, so nothing will ever fold them.)
+The
 live single-event receive path (`append_remote/2` →
 `do_append_remote/2`) runs the same judgement — the **live-event
 watermark door** (`append_remote_below_watermark/3`): an
@@ -1251,7 +1282,8 @@ Implementation:
 - `bondy_oplog_gc_scheduler.erl` — periodic tick, semaphore cap,
   per-instance worker.
 - `bondy_oplog_instance.erl`:
-    - `compute_frontier_for/2` — frontier as longest common prefix.
+    - `compute_frontier_for/2` — frontier as longest common prefix
+      confirmed by each peer's recorded root or applied frontier.
     - `retention_or_catchup/5` + `retention_frontier/3` +
       `retention_ctx/2` + `validate_retention/2` — [retention-bounded
       truncation](#retention-bounded-truncation-for-ephemeral-catalogue-instances)

@@ -139,6 +139,63 @@ frontier_scenarios_test_() ->
     ].
 
 %% -----------------------------------------------------------------------------
+%% Applied-frontier witnesses: a key is confirmed by the peer's root OR by
+%% its recorded applied VV. The oracle above is root-only, so these are
+%% hand-checked against the rule directly. Event keys `{HLC, Origin, Seq}`
+%% with one HLC per seq keep HLC order and seq order aligned.
+%% -----------------------------------------------------------------------------
+
+ekey(Origin, Seq) ->
+    bondy_oplog_event:key(Seq, Origin, Seq).
+
+vv_witness_scenarios() ->
+    O1 = <<"o1">>,
+    O2 = <<"o2">>,
+    L = [ekey(O1, 1), ekey(O1, 2), ekey(O1, 3), ekey(O2, 4)],
+    [
+        %% {Name, PeerKeysets, Witness(RootIndex | undefined, VV), Local, Expected}
+        %% Rootless: only the VV confirms — o1 up to seq 2.
+        {"rootless_vv", [], {undefined, #{O1 => 2}}, L, ekey(O1, 2)},
+        %% Rootless, no VV: nothing confirmed.
+        {"rootless_no_vv", [], {undefined, undefined}, L, undefined},
+        %% Rootless, VV covering everything.
+        {"rootless_vv_all", [], {undefined, #{O1 => 3, O2 => 4}}, L,
+            ekey(O2, 4)},
+        %% The peer compacted seq 1 (root holds 2..4 only); its VV covers
+        %% it: no hole — the ping-pong case.
+        {"root_lost_prefix_vv_covers",
+            [[ekey(O1, 2), ekey(O1, 3), ekey(O2, 4)]], {1, #{O1 => 3, O2 => 4}},
+            L, ekey(O2, 4)},
+        %% Same root, no VV: seq 1 is a hole (root-only rule).
+        {"root_lost_prefix_no_vv", [[ekey(O1, 2), ekey(O1, 3), ekey(O2, 4)]],
+            {1, undefined}, L, undefined},
+        %% Root holds seq 1 only; VV covers o1 to 3 but not o2: frontier 3.
+        {"root_and_vv_union", [[ekey(O1, 1)]], {1, #{O1 => 3}}, L, ekey(O1, 3)},
+        %% A VV entry below the key's seq confirms nothing extra.
+        {"vv_too_low", [[ekey(O1, 1)]], {1, #{O1 => 1, O2 => 3}}, L,
+            ekey(O1, 1)}
+    ].
+
+vv_witness_test_() ->
+    [
+        {Name, fun() ->
+            {Local, Roots} = setup("vvw_" ++ Name, PeerKeysets, LocalKeys),
+            Root =
+                case RootIdx of
+                    undefined -> undefined;
+                    I -> lists:nth(I, Roots)
+                end,
+            Witness = #{root_hash => Root, frontier => VV},
+            ?assertEqual(
+                Expected,
+                bondy_oplog_instance:compute_frontier_for(Local, [Witness])
+            )
+        end}
+     || {Name, PeerKeysets, {RootIdx, VV}, LocalKeys, Expected} <-
+            vv_witness_scenarios()
+    ].
+
+%% -----------------------------------------------------------------------------
 %% Randomised sweep: new == oracle on many random local/peer configurations
 %% -----------------------------------------------------------------------------
 

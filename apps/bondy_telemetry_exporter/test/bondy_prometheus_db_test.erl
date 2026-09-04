@@ -202,6 +202,19 @@ ae_health_events_are_counted() ->
         prometheus_counter:value(
             bondy_oplog_doored_events_total, [?ID, held]
         )
+    ),
+    ok = telemetry:execute(
+        [bondy_oplog, compaction, held],
+        #{count => 1},
+        #{
+            instance_id => ?ID,
+            frontier => frontier,
+            held => held,
+            truncation_point => undefined
+        }
+    ),
+    ?assertEqual(
+        1, prometheus_counter:value(bondy_oplog_compaction_holds_total, [?ID])
     ).
 
 scheduler_events_are_counted() ->

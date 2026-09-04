@@ -17,3 +17,4 @@ session Bondy_Stabilization = HOL +
     Dot_Exactness
     Dot_Exactness_Gapped
     Seq_Seed
+    Confirmed_Compaction

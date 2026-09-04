@@ -9,11 +9,12 @@
 %%   1. The frontier + `bondy_mst:truncate/2` (the truncate rewrites the left
 %%      spine = the oldest = sealed pages) — fixed by running compaction
 %%      synchronously in the gen_server instead of an async worker.
-%%   2. The catalogue commit's catch-up replay. Folding the MST in the
+%%   2. The catalogue commit's pre-truncate fold. Folding the MST in the
 %%      APPLIER process (a full fold from a stale `last_replayed_root`) is a
-%%      sealed-pack read off-process — closed by computing the catch-up DIFF
-%%      in the instance gen_server (the fd owner) and handing the pairs to the
-%%      applier to apply (`apply_replayed_pairs/3`, which never reads the MST).
+%%      sealed-pack read off-process — closed by not folding at commit at all:
+%%      the commit truncates nothing the applied VV does not witness
+%%      (`capped_truncation_point/2`), and the applier's own replay, cast at
+%%      delivery, is the only fold path.
 %%
 %% Both tests force sealed packs (low `auto_seal_records`) and assert the MST
 %% is truncated to empty in-process.

@@ -176,10 +176,13 @@ survives_restart(Dir) ->
     ?assertEqual(?BATCH, bondy_oplog:size(InstId)),
 
     %% Capture the durable MST identity before stopping.
-    MST0 = bondy_oplog_registry:mst(InstId),
-    Root0 = bondy_mst:root(MST0),
+    %% Root and last key are read through the instance: the pack store's
+    %% sealed-pack fds are bound to the instance process, so a
+    %% `bondy_mst:last/1` from here raises `not_on_controlling_process`
+    %% whenever the tail page is already sealed (it was, intermittently).
+    Root0 = bondy_oplog_instance:root_hash(InstId),
     ?assert(Root0 =/= undefined),
-    {LastKey0, _} = bondy_mst:last(MST0),
+    {ok, LastKey0} = bondy_oplog_instance:latest_key(InstId),
     ok = await_sealed_packs(Dir, 1, 15_000),
 
     %% Stop: `terminate/2` must CLOSE (preserve), not DESTROY (delete).
@@ -225,10 +228,8 @@ survives_restart(Dir) ->
         )
     ),
 
-    MST1 = bondy_oplog_registry:mst(InstId),
-    ?assertEqual(Root0, bondy_mst:root(MST1)),
-    {LastKey1, _} = bondy_mst:last(MST1),
-    ?assertEqual(LastKey0, LastKey1),
+    ?assertEqual(Root0, bondy_oplog_instance:root_hash(InstId)),
+    ?assertEqual({ok, LastKey0}, bondy_oplog_instance:latest_key(InstId)),
     ?assertEqual(?BATCH, bondy_oplog:size(InstId)),
 
     ok = bondy_oplog:stop_instance(InstId),

@@ -478,10 +478,11 @@ round-robins across ALL instances rather than starving everything
 behind the fastest few) calls
 `bondy_oplog_compaction:compact/1` for each instance, which:
 
-1. computes a **stability frontier** from per-peer root hashes
+1. computes a **stability frontier** from per-peer witnesses — the
+   recorded root hash and the recorded applied frontier
    (`bondy_oplog_peer_state` filters out peers older than
    `peer_timeout_ms`, default 30 s). Because the frontier is derived
-   from peer-synced roots — which only ever reflect installed,
+   from peer-synced state — which only ever reflects installed,
    published events — it is always at or below the installed
    watermark, so `compact/1` needs **no** overlay-drain barrier and
    runs safely under sustained write load (fused included).
@@ -501,7 +502,7 @@ behind the fastest few) calls
 
 ```mermaid
 flowchart LR
-    PEERS["bondy_oplog_peer_state<br/>fresh root hashes"]
+    PEERS["bondy_oplog_peer_state<br/>fresh roots + applied frontiers"]
     FRONT["compute_frontier_for"]
     MODE{"catalogue?"}
     FAST["projection already current<br/>(no re-fold)"]

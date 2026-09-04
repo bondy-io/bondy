@@ -415,8 +415,6 @@ instances are unaffected.
 -export([replay_cell_events/1]).
 -export([replay_cell_events_sync/1]).
 -export([last_replayed_root/1]).
--export([apply_replayed_pairs/3]).
--export([catch_up_apply/3]).
 -export([advance_replayed_root/2]).
 -export([rederive_projection_sync/1]).
 -export([rebuild_indexes/1]).
@@ -606,31 +604,12 @@ replay_cell_events_sync(ApplierPid) when is_pid(ApplierPid) ->
 -spec last_replayed_root(pid()) -> bondy_mst:hash() | undefined.
 
 -doc """
-The root the projection has been replayed up to. Read by the instance's
-compaction commit so it can compute the catch-up diff itself (it owns the
-pack store's sealed-pack fds, which this applier — a separate process —
-cannot read). Pairs with `apply_replayed_pairs/3`.
+The root the projection has been replayed up to — the replay cursor
+`do_replay_cell_events/1` diffs the instance's current root against. A
+diagnostic read (tests); nothing in the pipeline calls it.
 """.
 last_replayed_root(ApplierPid) when is_pid(ApplierPid) ->
     gen_server:call(ApplierPid, last_replayed_root, infinity).
-
--spec apply_replayed_pairs(
-    pid(), [{bondy_mst:key(), term()}], bondy_mst:hash() | undefined
-) -> ok.
-
--doc """
-Applies a catch-up batch of `{Key, Value}` MST pairs — computed by the
-caller (the instance gen_server, which owns the sealed-pack fds) via
-`bondy_mst:diff_to_list/2` — into the projection, then advances
-`last_replayed_root` to `NewRoot`. The write half of the catch-up replay;
-unlike `replay_cell_events_sync/1` it does NOT read the MST, so it never
-touches sealed packs. Idempotent (the cell fold is), so re-applying a pair
-already in the projection is safe.
-""".
-apply_replayed_pairs(ApplierPid, Pairs, NewRoot) when is_pid(ApplierPid) ->
-    gen_server:call(
-        ApplierPid, {apply_replayed_pairs, Pairs, NewRoot}, infinity
-    ).
 
 -spec advance_replayed_root(pid(), bondy_mst:hash() | undefined) -> ok.
 
@@ -638,10 +617,10 @@ apply_replayed_pairs(ApplierPid, Pairs, NewRoot) when is_pid(ApplierPid) ->
 Advances `last_replayed_root` to `NewRoot` WITHOUT applying any pairs.
 
 Called by the instance's compaction commit right after it truncates the
-MST: the projection is already current up to the pre-truncate root (the
-catch-up `apply_replayed_pairs/3` ran first), so the post-truncate root is
-a fully-replayed root. Re-anchoring the watermark on it keeps the next
-catch-up diff INCREMENTAL — the pre-truncate root's pages are freed by the
+MST: the projection is current up to the truncation point (the instance
+truncates nothing the applied VV does not witness), so the post-truncate
+root is a fully-replayed root. Re-anchoring the cursor on it keeps the
+next replay diff INCREMENTAL — the pre-truncate root's pages are freed by the
 truncate, so without this the next `diff_to_list/2` raises and falls back
 to a full `to_list/1` of the whole tree on every compaction cycle (an
 O(N)-per-cycle synchronous fold that starves the applier under sustained
@@ -656,38 +635,10 @@ advance_replayed_root(ApplierPid, NewRoot) when is_pid(ApplierPid) ->
     %% compaction overlaps a commit — a hard deadlock that freezes the whole
     %% pipeline under sustained writes (instance stops installing, applier
     %% stops applying, the MST stops being bounded). Re-anchoring is a
-    %% non-critical perf hint (only the cross-node catch-up reads
-    %% `last_replayed_root`, and `replay_diff_pairs/2` safely falls back to a
+    %% non-critical perf hint (`replay_diff_pairs/2` safely falls back to a
     %% full `to_list/1` over the now-bounded tree if it is momentarily stale),
     %% so fire-and-forget is correct.
     gen_server:cast(ApplierPid, {advance_replayed_root, NewRoot}).
-
--spec catch_up_apply(pid(), [{term(), term()}], non_neg_integer()) -> ok.
-
--doc """
-Step 2 of the asynchronous compaction catch-up (the cross-node
-deadlock fix). The instance computes `Pairs` — the remote-origin events
-in the about-to-be-truncated range `(watermark, frontier]`, read from the
-MST it owns — and casts them here. We fold them into the projection
-(`apply_cell_pairs/4`, which reads OldValue from the projection/cache and
-never touches the MST), then cast `{catch_up_done, Token}` back so the
-instance can truncate.
-
-BOTH directions are casts — never calls — so the instance and the applier
-can never wait on each other. The previous synchronous catch-up
-(`last_replayed_root` + `apply_replayed_pairs/3` issued from inside the
-instance's compaction handler) deadlocked against the applier's own
-synchronous `drain_install_queue` call (`commit_now/1`) the moment a
-compaction overlapped a commit boundary while a remote event was pending.
-
-Does NOT advance `last_replayed_root`: the instance's post-truncate
-`advance_replayed_root/2` re-anchors the cursor on the truncated root. A
-no-op (still signals done) when `cell_apply_target` is not configured.
-""".
-catch_up_apply(ApplierPid, Pairs, Token) when
-    is_pid(ApplierPid), is_list(Pairs), is_integer(Token)
-->
-    gen_server:cast(ApplierPid, {catch_up_apply, Pairs, Token}).
 
 -spec rederive_projection_sync(pid()) -> ok.
 
@@ -1606,13 +1557,6 @@ handle_call(replay_cell_events, _From, State) ->
     {reply, ok, do_replay_cell_events(State)};
 handle_call(last_replayed_root, _From, State) ->
     {reply, State#state.last_replayed_root, State};
-handle_call({apply_replayed_pairs, Pairs, NewRoot}, _From, State) ->
-    %% Write half of an instance-driven catch-up replay: the instance
-    %% (the sealed-pack fd owner) computed `Pairs` via the MST diff; we
-    %% only apply them to the projection and advance the replay cursor —
-    %% no MST read here, so the pack backend's sealed packs are never
-    %% touched in this (applier) process. See `apply_replayed_pairs/3`.
-    {reply, ok, do_apply_replayed_pairs(State, Pairs, NewRoot)};
 handle_call(rederive_projection, _From, State) ->
     %% Full projection re-derive: reset the replay watermark so the diff
     %% fold re-applies EVERY event (not just those past the last replayed
@@ -1738,14 +1682,6 @@ handle_cast({advance_replayed_root, NewRoot}, State) ->
     %% applying anything. Cast (not call) to avoid an instance↔applier
     %% deadlock — see `advance_replayed_root/2`.
     {noreply, State#state{last_replayed_root = NewRoot}};
-handle_cast({catch_up_apply, Pairs, Token}, State) ->
-    %% Step 2 of the async compaction catch-up. Fold the instance's
-    %% pre-truncate remote pairs into the projection, then cast the
-    %% instance back so it can truncate. Cast both ways — see
-    %% `catch_up_apply/3`.
-    State1 = do_catch_up_apply(State, Pairs),
-    ok = signal_catch_up_done(State1, Token),
-    {noreply, State1};
 handle_cast({refresh_validator, Reason}, State) ->
     {noreply, do_refresh_validator(Reason, State)};
 handle_cast(replay_cell_events, State) ->
@@ -2584,68 +2520,6 @@ do_rebuild_indexes(#state{cell_apply_ctx = Ctx, instance_id = Id} = State) ->
             bondy_oplog_cell_utils:reindex(Id, Ctx, SecIdx),
             State
     end.
-
-%% @private
-%% Applies a caller-computed catch-up batch and advances the replay
-%% cursor. The instance computes `Pairs` (it owns the sealed-pack fds);
-%% here we only write the projection — `apply_cell_pairs/4` reads OldValue
-%% from the projection/cache, never the MST. With no projection there is
-%% nothing to apply, so we leave the cursor untouched (matching
-%% `do_replay_cell_events/1`).
-do_apply_replayed_pairs(
-    #state{cell_apply_ctx = undefined} = State, _Pairs, _NewRoot
-) ->
-    State;
-do_apply_replayed_pairs(
-    #state{cell_apply_source = Source, instance_id = Id} = State, Pairs, NewRoot
-) ->
-    {_Count, Held} = bondy_oplog_cell_apply:apply_cell_pairs_mux(
-        Source,
-        Id,
-        Pairs,
-        bondy_oplog_registry:origin(Id),
-        #{hold => true}
-    ),
-    %% Prefix-closure hold: keep the cursor when events were held so the
-    %% next replay re-presents them (see `do_replay_cell_events_r/1`).
-    case Held of
-        0 -> State#state{last_replayed_root = NewRoot};
-        _ -> State
-    end.
-
-%% @private
-%% Write half of the async compaction catch-up (`catch_up_apply/3`).
-%% Unlike `do_apply_replayed_pairs/3` it does NOT touch `last_replayed_root`
-%% — the instance's post-truncate `advance_replayed_root/2` re-anchors the
-%% cursor on the truncated root. With no projection there is nothing to
-%% apply; the caller still signals done.
-do_catch_up_apply(#state{cell_apply_ctx = undefined} = State, _Pairs) ->
-    State;
-do_catch_up_apply(
-    #state{cell_apply_source = Source, instance_id = Id} = State, Pairs
-) ->
-    %% Deliberately the non-holding mux: these pairs are about to be
-    %% TRUNCATED out of the MST, and the instance re-anchors the cursor
-    %% on the truncated root — a held event here would never be
-    %% re-presented, turning the hold into a silent drop. The contiguity
-    %% detector still measures any gap that folds through.
-    _ = bondy_oplog_cell_apply:apply_cell_pairs_mux(
-        Source, Id, Pairs, bondy_oplog_registry:origin(Id)
-    ),
-    State.
-
-%% @private
-%% Tell the instance the catch-up apply is done so it can truncate. A
-%% cast (never a call) — the instance must never block on the applier
-%% from inside its compaction commit (the deadlock). A narrow `noproc`
-%% catch covers the benign instance-shutdown race.
-signal_catch_up_done(#state{instance_pid = InstancePid}, Token) ->
-    try
-        gen_server:cast(InstancePid, {catch_up_done, Token})
-    catch
-        _:_ -> ok
-    end,
-    ok.
 
 do_replay_cell_events(State0) ->
     {_, State} = do_replay_cell_events_r(State0),

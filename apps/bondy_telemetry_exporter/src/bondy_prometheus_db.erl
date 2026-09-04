@@ -244,6 +244,7 @@ events() ->
         [bondy_oplog, instance, overlay, backpressure_drop],
         [bondy_oplog, instance, write_latency],
         [bondy_oplog, compaction, ok],
+        [bondy_oplog, compaction, held],
         [bondy_oplog, reclamation, stalled],
         %% Sync / AAE
         [bondy_oplog, sync, ok],
@@ -390,6 +391,12 @@ declare_metrics() ->
         {bondy_oplog_compactions_total, "MST compactions completed.", [
             instance_id
         ]},
+        {bondy_oplog_compaction_holds_total,
+            "Compaction cycles whose truncation point was capped below a "
+            "never-applied key (the projection has not folded it yet): the "
+            "cycle truncated less than its frontier allowed, or nothing. "
+            "Sustained growth means the applier's replay is not keeping up "
+            "with remote delivery for the instance.", [instance_id]},
         {bondy_oplog_reclamation_stalled_total, "Reclamation attempts stalled.",
             [instance_id, reason]},
         {bondy_oplog_sync_sessions_total, "AAE sync sessions.", [
@@ -834,6 +841,8 @@ do_handle_event([bondy_oplog, compaction, ok], Meas, Meta) ->
         [],
         num(duration_us, Meas)
     );
+do_handle_event([bondy_oplog, compaction, held], _Meas, Meta) ->
+    counter(bondy_oplog_compaction_holds_total, [instance_id(Meta)], 1);
 do_handle_event([bondy_oplog, reclamation, stalled], _Meas, Meta) ->
     counter(
         bondy_oplog_reclamation_stalled_total,

@@ -1404,6 +1404,15 @@
           }
         },
         {
+          "refId": "D",
+          "expr": "sum by (node) (rate(bondy_oplog_compaction_holds_total{node=~\"$node\"}[$__rate_interval]))",
+          "legendFormat": "held {{node}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bondy-prometheus"
+          }
+        },
+        {
           "refId": "B",
           "expr": "sum by (event) (rate(bondy_oplog_gc_scheduler_events_total{node=~\"$node\"}[$__rate_interval]))",
           "legendFormat": "gc {{event}}",

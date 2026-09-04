@@ -475,11 +475,11 @@ do_stale_rejoin([N1, N2, N3] = Nodes) ->
     %%        with the recency window at 1.5s, a node-wide sync round
     %%        followed by a node-wide compact round leaves the live
     %%        peer's entry stale again before the later instances compact;
-    %%      - `bondy_oplog:compact/1` may start an ASYNC projection
-    %%        catch-up ({ok, compaction_pending}) whose eventual
-    %%        truncation replies to nobody — so the observable is the
-    %%        WATERMARK advancing, with the compact polled until pending
-    %%        resolves, never the drop count of one synchronous call.
+    %%      - `bondy_oplog:compact/1` holds (`{ok, no_change}`) while a
+    %%        just-delivered remote event is still un-applied, so the
+    %%        applier is settled before each compact and the observable
+    %%        is the WATERMARK advancing, never the drop count of one
+    %%        synchronous call.
     %% ---------------------------------------------------------------------
     W1Before = erpc:call(N1, ?MODULE, do_stale_watermarks_main, []),
     W2Before = erpc:call(N2, ?MODULE, do_stale_watermarks_main, []),
@@ -1274,40 +1274,28 @@ do_stale_sync_and_compact_main(Peer) ->
                 catch
                     _:_ -> ok
                 end,
+            %% Settle the applier first: `compact/1` holds
+            %% (`{ok, no_change}`) while a just-pulled remote event is
+            %% still un-applied (the compaction cap), and the reply is
+            %% only decisive once the replay has folded it.
+            ok = settle_applier(I),
             {I,
-                stale_compact_resolved(
-                    I,
-                    try
-                        bondy_oplog:compact(I)
-                    catch
-                        C:R -> {'EXIT', {C, R}}
-                    end,
-                    25
-                )}
+                try
+                    bondy_oplog:compact(I)
+                catch
+                    C:R -> {'EXIT', {C, R}}
+                end}
         end
      || I <- bondy_oplog:list_instances(),
         binary:match(I, <<"main-">>) =/= nomatch
     ].
 
 %% @private
-%% `compact/1` may start an async projection catch-up and reply
-%% `{ok, compaction_pending}`; poll until the cycle resolves (the
-%% truncation itself is observed via the watermark, not this reply).
-stale_compact_resolved(_I, Result, 0) ->
-    Result;
-stale_compact_resolved(I, {ok, compaction_pending}, N) ->
-    timer:sleep(200),
-    stale_compact_resolved(
-        I,
-        try
-            bondy_oplog:compact(I)
-        catch
-            C:R -> {'EXIT', {C, R}}
-        end,
-        N - 1
-    );
-stale_compact_resolved(_I, Result, _N) ->
-    Result.
+settle_applier(I) ->
+    case bondy_oplog_registry:applier_pid(I) of
+        Pid when is_pid(Pid) -> bondy_oplog_applier:barrier(Pid);
+        _ -> ok
+    end.
 
 %% @private
 %% Every `main/*` instance's current compaction watermark.

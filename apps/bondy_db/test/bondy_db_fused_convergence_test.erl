@@ -15,8 +15,8 @@
 %% Coverage: distinct-key convergence (inline replay folds peer events),
 %% same-key lww convergence (equal value + equal MST root), read-your-peer's
 %% -write after a one-way merge, and a catalogue compaction taken AFTER a
-%% remote merge (the fused `remote_events_pending = false` + cursor
-%% re-anchor path, which never touches an applier).
+%% remote merge (the fused path folds inline at delivery and re-anchors the
+%% cursor at commit, never touching an applier).
 
 -module(bondy_db_fused_convergence_test).
 
@@ -118,8 +118,8 @@ ryow_after_merge() ->
     ok = bondy_db:close(DbB).
 
 %% After B merges A's remote events, a catalogue compaction on B must run to
-%% completion through the fused path (`remote_events_pending` stays false →
-%% no `begin_async_catch_up`, which would need an applier) and re-anchor the
+%% completion through the fused path (the inline fold at delivery leaves
+%% nothing un-applied for the compaction cap to hold) and re-anchor the
 %% fused replay cursor on the post-truncate root. Reads still resolve for
 %% both the remote and the local keys.
 compaction_under_remote() ->

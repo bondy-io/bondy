@@ -35,6 +35,7 @@ java -cp tla2tools.jar tlc2.TLC -workers 4 -config <cfg> <module>.tla
 | `Dot_Exactness.thy` | Exactness of the compact `Ctx[O] >= S` test **under** per-origin FIFO |
 | `Dot_Exactness_Gapped.thy` | Exactness of a gapped context **without** any FIFO hypothesis, and its join |
 | `Seq_Seed.thy` | Discharges the per-origin half of H1 across restarts: the counter seed `max(checkpoint, tree, WAL)` under watermark-keyed WAL retention keeps dots unique and gap-free |
+| `Confirmed_Compaction.thy` | Compaction by peer confirmation: certifying a peer by its recorded root OR its recorded applied VV, with truncation capped below the first un-applied key, never makes an un-applied event unshippable (`no_loss`) and never drops one (`no_drop`) |
 
 | TLA+ module | Question |
 | --- | --- |
@@ -44,6 +45,7 @@ java -cp tla2tools.jar tlc2.TLC -workers 4 -config <cfg> <module>.tla
 | `OriginWatermarkReap.tla` | Can the meet be recorded as a scalar watermark, with origins born over time? |
 | `OriginRetirementSet.tla` | Does a replicated grow-only retirement set license the reap across rejoins? |
 | `SeqSeed.tla` | Does the per-origin sequence counter survive a restart? Which durable sources must seed it, in what compaction order? |
+| `ConfirmedCompaction.tla` | Is a peer's recorded ROOT the right witness for what it holds? Does confirmed compaction converge, and do the compaction sites honour the watermark door's hold? |
 
 ## Scope
 
@@ -215,6 +217,29 @@ what commit-keyed retention breaks.
 
 What it does not establish: that `init/1` implements the rule. That is the
 falsifier's job.
+
+**`no_loss` / `no_drop`** (`Confirmed_Compaction.thy`) — compaction by
+peer confirmation for any number of members and events. The state machine
+over-approximates `ConfirmedCompaction.tla`: no key order (a truncation
+removes ANY subset of the tree that is applied locally and confirmed by every
+other member; the door drops ANY applied subset, own events only if truncated
+before), any prefix-closed fold, records forgotten at any time. The witness
+under proof: `confirmed r p e` iff `e` is in the root recorded for `p` OR
+`e`'s seq is at or below the VV recorded for `p` at `e`'s origin. The
+inductive invariant's load-bearing conjuncts: ROOT (a recorded root is held —
+in the tree or applied — by the peer it was recorded for, stable because a
+tree loses an event only into the applied set), VV (a recorded entry bounds a
+prefix the peer applied — `vv_of_witness`: the per-origin maximum of a
+finite prefix-closed set is a contiguous bound, which is where the shipped
+prefix hold becomes a precondition), TRUNC (what a replica truncated every
+other member holds) and SHIP (a minted event is in its minter's tree, was
+truncated by its minter, or is held by the member in question). `no_loss`:
+an event a member has not applied is in some member's tree. `no_drop`: no
+step removes an event from a tree without it being applied there.
+
+What it does not establish: liveness (`ConfirmedCompaction_*_Live.cfg`),
+anything under the recency filter or `mst_retention`, and that the code
+implements the rule.
 
 ## Results — TLA+
 
@@ -444,6 +469,32 @@ than prevents, on `[bondy_oplog, retirement, reaped_unconverged]`, because
 refusing to reap over unequal claims is the meet rule and inherits its
 deadlock.
 
+### `ConfirmedCompaction.tla` — the peer root as a compaction witness
+
+Two replicas, `MaxSeq = 2`, keys in HLC order. The shipped rule (a peer is
+certified by its recorded ROOT) violates `RoundConfirmsApplied` in 6 steps —
+a peer that compacted a prefix it applied leaves the next round unable to
+certify it — and on the ETS backend, where every truncation's page GC
+unreads a recorded root that differs from the current tree, violates
+`Convergence` under weak fairness (a two-round lasso in which each replica's
+compaction is possible in exactly one of the two states); without the page
+GC the quiescent case converges. The rule under proof (root OR recorded
+applied VV) is exhaustively clean: 43,019 states fused, 284,781 states
+applier-backed with the ETS GC, and converges under WEAK fairness (26,366 states, ETS GC, applier-backed). At three replicas
+the shipped rule's "a rootless row constrains nothing" loses an event to a
+live member in 5 steps (`NoLoss`); the VV rule is exhaustively clean there (2,550,058 states).
+
+Found on the way, independent of the rule: **the compaction sites drop a
+held event** (`_RootVV2_AsyncSweep_NoCap`, `NoDrop` in 7 steps). The
+watermark door holds a never-applied event that arrives below the
+watermark for the applier's replay, but `begin_async_catch_up/3` folds only
+`(watermark, frontier]` and `finalize_catalogue_compaction/3` truncates at
+or below the frontier with no never-applied guard — a compaction tick that
+beats the applier's `replay_cell_events` cast drops the event un-folded.
+Clean with `CapAtUnapplied`: the truncation point is capped strictly below
+the first un-applied local key (the door's own rule at every truncation
+site), which also makes the async catch-up vacuous.
+
 ## Implementation status: proved vs built
 
 Verified by reading `apps/bondy_oplog/src` at the time of writing.
@@ -458,6 +509,8 @@ Verified by reading `apps/bondy_oplog/src` at the time of writing.
 | `ContigClaim` frontier bound | modelled; **result unrecorded** | **NOT BUILT** |
 | Vector stability | `vector_stable` defined; **not certified by the substrate** | **NOT BUILT** |
 | Cross-origin causal delivery | absence **refutes `Convergence`** (`CellContextReap`) | **NOT BUILT** — no mechanism exists |
+| **Compaction confirmation by root OR applied VV** | **PROVED** (`Confirmed_Compaction.thy`: `no_loss`, `no_drop`); shipped root-only rule **refuted** (`ConfirmedCompaction_Root2*.cfg`) | **BUILT** — `bondy_oplog_compaction:compact/1` passes the peer-state entries; `compute_frontier_for/2` confirms by root or recorded applied VV (`vv_covers/2`), a rootless row constrains; pinned by `bondy_oplog_compaction_fused_test:peer_compaction_does_not_stall_ours` (the `Root2` trace) and `rootless_live_peer_holds_compaction` (the `Root3` trace), rule table in `bondy_oplog_compaction_frontier_test:vv_witness_test_` |
+| **Truncation capped below the first un-applied key** | **PROVED** (same theory, the `compact` rule's `C ⊆ applied`); shipped sites **refuted** (`_RootVV2_AsyncSweep_NoCap.cfg`, `NoDrop`) | **BUILT** — `capped_truncation_point/2` in `finalize_catalogue_compaction/3` (the one catalogue truncation site: frontier and watermark-catch-up paths both pass through it); pinned by `bondy_oplog_compaction_fused_test:compaction_holds_doored_event_until_applied_{watermark,frontier}_path` (the `NoCap` trace: the op reads `undefined` on the shipped code). Retired origins are exempt (`compaction_truncates_held_event_of_retired_origin`) — not in the model. The async catch-up the cap made vacuous is DELETED (instance + applier), so compaction has no fold path at all: `bondy_oplog_catalogue_compaction_test:compaction_makes_no_synchronous_applier_call` pins the only applier call left as the `advance_replayed_root/2` cast |
 | **Counter seed across restarts** | **PROVED** (`Seq_Seed.thy`); shipped rule **refuted** (`SeqSeed_Shipped.cfg`) | **BUILT** 2026-09-03 — `init/1` seeds from the restored frontier; `bondy_oplog_wal` records/recovers `max_seq` and calls `bondy_oplog_instance:seed_seq/2` before `set_wal_pid/2`; `fast_wal_target/1` resolves the WAL before the seq is reserved |
 
 ## The precise grade of the frontier

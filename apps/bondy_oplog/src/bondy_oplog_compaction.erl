@@ -14,9 +14,9 @@
 Per-instance compaction.
 
 This module is a thin orchestrator: it asks
-`bondy_oplog_peer_state` for the current per-peer root
-hashes and delegates the heavy lifting to
-`bondy_oplog_instance:compact/2`, which runs the cycle
+`bondy_oplog_peer_state` for the current per-peer witnesses
+(recorded root and applied frontier) and delegates the heavy lifting
+to `bondy_oplog_instance:compact/2`, which runs the cycle
 (stability frontier → interpret_cog → snapshot → MST truncate →
 watermark advance) atomically inside the instance gen_server.
 
@@ -44,14 +44,16 @@ Runs one compaction cycle for `InstanceId`. Returns:
     | {error, term()}.
 
 compact(InstanceId) when is_binary(InstanceId) ->
-    PeerStates =
-        bondy_oplog_peer_state:get_instance_peer_states(InstanceId),
-    %% A rootless entry (rounds only ever completed against an empty peer
-    %% tree) constrains nothing: same treatment as a peer this table has
-    %% never seen — compaction may proceed and that peer, if it ever needs
-    %% the truncated prefix, takes the bootstrap path.
-    PeerRoots = [
-        R
-     || #{root_hash := R} <- PeerStates, is_binary(R)
-    ],
-    bondy_oplog_instance:compact(InstanceId, PeerRoots).
+    %% Every recency-live entry is a witness, INCLUDING a rootless one
+    %% (rounds only ever completed against an empty peer tree): it
+    %% confirms what its recorded applied frontier covers and nothing
+    %% more, so a live peer that has applied none of our events holds
+    %% compaction until it pulls them. Treating such a row as "constrains
+    %% nothing" truncated events a live member never received
+    %% (`proofs/tla/ConfirmedCompaction_Root3.cfg`, `NoLoss` in 5 steps);
+    %% only a peer this table has never seen — or one past
+    %% `peer_timeout_ms` — is left to the bootstrap path.
+    bondy_oplog_instance:compact(
+        InstanceId,
+        bondy_oplog_peer_state:get_instance_peer_states(InstanceId)
+    ).
